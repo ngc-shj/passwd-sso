@@ -144,7 +144,6 @@ const scripts = [
   { label: "check-dynamic-import-specifiers (src/components/passwords)", cmd: ["node", "scripts/checks/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/components/passwords"] },
   { label: "check-dynamic-import-specifiers (src/components/settings)",  cmd: ["node", "scripts/checks/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/components/settings"] },
   { label: "check-dynamic-import-specifiers (src/components/team)",      cmd: ["node", "scripts/checks/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/components/team"] },
-  { label: "capture-test-counts",                cmd: ["node", "scripts/checks/capture-test-counts.mjs"] },
   { label: "check-codeowners-drift",             cmd: ["node", "scripts/check-codeowners-drift.mjs"] },
   { label: "check-blame-ignore-revs",            cmd: ["node", "scripts/check-blame-ignore-revs.mjs"] },
 ];

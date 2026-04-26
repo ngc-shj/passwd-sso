@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 import { PERMISSIONS_POLICY } from "../lib/security/security-headers";
+import { SESSION_CACHE_MAX } from "../lib/validations/common.server";
+import { SESSION_CACHE_TTL_MS } from "../lib/proxy/auth-gate";
 
 const { mockCheckAccessWithAudit, mockResolveUserTenantId } = vi.hoisted(() => ({
   mockCheckAccessWithAudit: vi.fn().mockResolvedValue({ allowed: true }),
@@ -547,7 +549,6 @@ describe("extractSessionToken", () => {
 });
 
 describe("session cache eviction (setSessionCache)", () => {
-  const SESSION_CACHE_MAX = 500; // must match proxy.ts SESSION_CACHE_MAX
 
   beforeEach(() => {
     _sessionCache.clear();
@@ -693,7 +694,11 @@ describe("proxy — access restriction", () => {
 
     const req = new NextRequest(`${APP_ORIGIN}/api/vault/unlock`, {
       method: "POST",
-      headers: { Cookie: "authjs.session-token=sess-acl-vault" },
+      headers: {
+        Cookie: "authjs.session-token=sess-acl-vault",
+        Origin: APP_ORIGIN,
+        Host: "localhost:3000",
+      },
     } as ConstructorParameters<typeof NextRequest>[1]);
     const res = await proxy(req, dummyOptions);
 
@@ -728,5 +733,226 @@ describe("proxy — access restriction", () => {
     const res = await proxy(req, dummyOptions);
 
     expect(res.status).toBe(403);
+  });
+});
+
+// =============================================================================
+// CSRF gate integration tests (C4 step 6 — 11 cases).
+//
+// These exercise the proxy CSRF gate end-to-end through the orchestrator.
+// They are the regression net for pre1 (audit-emit assertOrigin missing) and
+// the R3 baseline (9 session-mutating routes lacked assertOrigin) — both
+// closed structurally by the gate. Without these tests, a refactor that
+// drops shouldEnforceCsrf or reorders the early-returns would pass the suite.
+// =============================================================================
+
+describe("proxy — CSRF gate", () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("APP_URL", APP_ORIGIN);
+    // getSessionInfo's internal fetch returns a valid session by default,
+    // so requests that pass the CSRF gate proceed to the route handler
+    // (where we stop and just inspect status / pass-through).
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ user: { id: "u1" } }), { status: 200 }),
+    );
+    mockResolveUserTenantId.mockResolvedValue(null);
+    mockCheckAccessWithAudit.mockResolvedValue({ allowed: true });
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it("[1] session POST + mismatched Origin → 403", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
+      method: "POST",
+      headers: {
+        Cookie: "authjs.session-token=sess-csrf-1",
+        Origin: "https://evil.example.com",
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+    expect(res.status).toBe(403);
+  });
+
+  it("[2] session GET + mismatched Origin → pass-through (gate is mutating-only)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
+      method: "GET",
+      headers: {
+        Cookie: "authjs.session-token=sess-csrf-2",
+        Origin: "https://evil.example.com",
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+    // GET reaches session validation (which passes), then default fall-through
+    expect(res.status).toBe(200);
+  });
+
+  it("[3] /api/internal/audit-emit POST + session + mismatched Origin → 403 (pre1 closure)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/internal/audit-emit`, {
+      method: "POST",
+      headers: {
+        Cookie: "authjs.session-token=sess-csrf-3",
+        Origin: "https://evil.example.com",
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+    expect(res.status).toBe(403);
+  });
+
+  it("[4] /api/internal/audit-emit POST + session + matching Origin → pass-through (default branch, route handler authenticates)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/internal/audit-emit`, {
+      method: "POST",
+      headers: {
+        Cookie: "authjs.session-token=sess-csrf-4",
+        Origin: APP_ORIGIN,
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+    // /api/internal/* falls through to api-default — no proxy 401, route handles it
+    expect(res.status).toBe(200);
+  });
+
+  it("[5] extension Bearer POST + chrome-extension:// Origin (no cookie) → pass-through (gate skips: no cookie)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer ext-tok",
+        Origin: "chrome-extension://abc1234567890abcdef1234567890abcdef",
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled(); // bypass branch returns before getSessionInfo
+  });
+
+  it("[6] Bearer + session cookie + mismatched Origin → 403 (gate fires before bypass branch — Round 2 / S3)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer ext-tok",
+        Cookie: "authjs.session-token=sess-csrf-6",
+        Origin: "chrome-extension://abc1234567890abcdef1234567890abcdef",
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+    expect(res.status).toBe(403);
+  });
+
+  it("[7] /api/maintenance/* POST without cookie + ADMIN_API_TOKEN → pass-through (api-default + no cookie → gate skips)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/maintenance/purge-history`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer admin-api-token",
+        // No Origin, no Cookie
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+    expect(res.status).toBe(200);
+  });
+
+  it("[8] /api/csp-report POST + session cookie + null Origin → pass-through (public-receiver short-circuits — Round 2 / F2)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/csp-report`, {
+      method: "POST",
+      headers: {
+        Cookie: "authjs.session-token=sess-csrf-8",
+        // Origin omitted (sandboxed iframe / null Origin)
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+    expect(res.status).toBe(200);
+  });
+
+  it("[9] /api/v1/* POST + API key Bearer + stale cookie + cross-origin → pass-through (api-v1 short-circuits — Round 3 / S4)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/v1/passwords`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer api-key-tok",
+        Cookie: "authjs.session-token=sess-stale-csrf-9",
+        Origin: "https://devtool.example.com",
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+    expect(res.status).toBe(200);
+  });
+
+  it("[10] internal-fetch shape (POST to audit-emit with explicit Origin matching APP_URL + session cookie) → pass-through", async () => {
+    // Simulates the proxy's own self-fetch at proxy.ts:153 with the Origin
+    // header set to selfOrigin. Validates that the C4 step 3 fix works:
+    // the proxy can call its own /api/internal/audit-emit without 403'ing.
+    const req = new NextRequest(`${APP_ORIGIN}/api/internal/audit-emit`, {
+      method: "POST",
+      headers: {
+        Cookie: "authjs.session-token=sess-internal-fetch",
+        Origin: APP_ORIGIN, // explicit, matches APP_URL
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+    expect(res.status).toBe(200);
+  });
+
+  it("[11] internal-fetch counter-test: WITHOUT explicit Origin → 403 (locks T3 fix — proxy MUST set Origin on self-fetch)", async () => {
+    // If a future refactor removes "Origin: selfOrigin" from the internal
+    // fetch (proxy.ts:153), this counter-test catches it: a same-shape
+    // request with no Origin gets 403 from the CSRF gate.
+    const req = new NextRequest(`${APP_ORIGIN}/api/internal/audit-emit`, {
+      method: "POST",
+      headers: {
+        Cookie: "authjs.session-token=sess-internal-fetch-noorigin",
+        // Origin intentionally omitted
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+    expect(res.status).toBe(403);
+  });
+});
+
+// =============================================================================
+// auth-gate TTL expiry test (T2 — covers the cache miss path on stale entry).
+// =============================================================================
+
+describe("auth-gate session cache TTL expiry", () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubEnv("APP_URL", APP_ORIGIN);
+    _sessionCache.clear();
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ user: { id: "u-ttl" } }), { status: 200 }),
+    );
+    mockResolveUserTenantId.mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+  });
+
+  it("re-fetches session from /api/auth/session after SESSION_CACHE_TTL_MS (30s) expires", async () => {
+    const buildReq = () =>
+      new NextRequest(`${APP_ORIGIN}/api/passwords`, {
+        method: "GET",
+        headers: { Cookie: "authjs.session-token=sess-ttl" },
+      } as ConstructorParameters<typeof NextRequest>[1]);
+
+    // First request: populates the cache via fetch
+    await proxy(buildReq(), dummyOptions);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // Second request well within TTL: serves from cache (no new fetch)
+    vi.advanceTimersByTime(SESSION_CACHE_TTL_MS / 6);
+    await proxy(buildReq(), dummyOptions);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // Third request past TTL: cache is stale, fresh fetch fires
+    vi.advanceTimersByTime(SESSION_CACHE_TTL_MS);
+    await proxy(buildReq(), dummyOptions);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 });

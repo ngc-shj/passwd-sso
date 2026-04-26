@@ -6,13 +6,23 @@ import { getLocaleFromPathname, stripLocalePrefix } from "./i18n/locale-utils";
 import { API_PATH } from "./lib/constants";
 import { AUDIT_ACTION } from "./lib/constants/audit/audit";
 import { MS_PER_DAY, MS_PER_MINUTE } from "./lib/constants/time";
-import { PERMISSIONS_POLICY } from "./lib/security/security-headers";
-import { handlePreflight, applyCorsHeaders } from "./lib/http/cors";
-import { isHttps } from "./lib/url-helpers";
+import {
+  applyCorsHeaders,
+  handleApiPreflight,
+  isBearerBypassRoute,
+} from "./lib/proxy/cors-gate";
+import { applySecurityHeaders } from "./lib/proxy/security-headers";
+import {
+  getSessionInfo,
+  setSessionCache,
+  extractSessionToken,
+  hasSessionCookie,
+  sessionCache,
+} from "./lib/proxy/auth-gate";
+import { classifyRoute, ROUTE_POLICY_KIND } from "./lib/proxy/route-policy";
+import { shouldEnforceCsrf, assertSessionCsrf } from "./lib/proxy/csrf-gate";
 import { extractClientIp } from "./lib/auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "./lib/auth/policy/access-restriction";
-import { resolveUserTenantId } from "./lib/tenant-context";
-import { SESSION_CACHE_MAX } from "./lib/validations/common.server";
 
 const intlMiddleware = createIntlMiddleware(routing);
 
@@ -20,8 +30,6 @@ type ProxyOptions = {
   cspHeader: string;
   nonce: string;
 };
-
-const SESSION_CACHE_TTL_MS = 30_000;
 
 // Paths exempt from passkey enforcement to prevent registration loops.
 // Must include the security settings page and all WebAuthn/auth API routes.
@@ -51,25 +59,6 @@ function isPasskeyGracePeriodExpired(
 const PASSKEY_AUDIT_DEDUP_MS = 5 * MS_PER_MINUTE;
 const PASSKEY_AUDIT_MAP_MAX = 1000;
 const passkeyAuditEmitted = new Map<string, number>();
-
-interface SessionInfo {
-  valid: boolean;
-  userId?: string;
-  tenantId?: string;
-  hasPasskey?: boolean;
-  requirePasskey?: boolean;
-  requirePasskeyEnabledAt?: string | null;
-  passkeyGracePeriodDays?: number | null;
-}
-
-// In-process session cache: keyed by the raw session token value (not hashed, to avoid
-// per-request SHA-256 overhead). Known trade-offs:
-//   - Multi-worker gap: each Node.js worker process holds an independent cache instance.
-//     Session revocation on one worker takes up to SESSION_CACHE_TTL_MS (30 s) to propagate
-//     to other workers. For single-process deployments this is not an issue.
-//   - Plaintext keys: the session token is stored as-is in process memory. A heap snapshot
-//     would expose tokens. Future improvement: migrate to a shared Redis cache with hashed keys.
-const sessionCache = new Map<string, { expiresAt: number } & SessionInfo>();
 
 export async function proxy(request: NextRequest, options: ProxyOptions) {
   const { pathname } = request.nextUrl;
@@ -150,10 +139,15 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
             if (oldest !== undefined) passkeyAuditEmitted.delete(oldest);
           }
           passkeyAuditEmitted.set(userId, Date.now());
+          // Internal self-fetch: declare same-origin explicitly. Node
+          // fetch (undici) does not auto-set Origin; without it the new
+          // proxy CSRF gate would 403 this request.
+          const selfOrigin = new URL(request.url).origin;
           void fetch(new URL(`${basePath}${API_PATH.INTERNAL_AUDIT_EMIT}`, request.url), {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
+              "Origin": selfOrigin,
               cookie: request.headers.get("cookie") ?? "",
             },
             body: JSON.stringify({
@@ -178,50 +172,45 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
 
 async function handleApiAuth(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const policy = classifyRoute(pathname);
+  // Bearer-bypass eligibility is a code-path concern (which dispatch
+  // branch the orchestrator takes), not a classification concern. Routes
+  // that accept Bearer as alternative auth are still classified as
+  // api-session-required; we ask cors-gate directly whether the bypass
+  // dispatch is eligible for this specific path.
+  const isBearerRoute = isBearerBypassRoute(pathname);
+  const isExchangeRoute = policy.kind === ROUTE_POLICY_KIND.API_EXTENSION_EXCHANGE;
 
-  // Routes that accept extension token (Bearer) as alternative auth.
-  // Let the route handler validate the token instead of checking session.
-  // IMPROVE(#39): harden allowlist matching — add edge-case tests for child paths
-  const extensionTokenRoutes = [
-    API_PATH.PASSWORDS,
-    API_PATH.VAULT_STATUS,
-    API_PATH.VAULT_UNLOCK_DATA,
-    API_PATH.EXTENSION_TOKEN,         // DELETE (revoke) — validated by route handler
-    API_PATH.EXTENSION_TOKEN_REFRESH, // POST (refresh) — validated by route handler
-    API_PATH.API_KEYS,  // API key management — validated by route handler via authOrToken
-    API_PATH.TENANT_ACCESS_REQUESTS, // SA self-service JIT — validated by route handler via authOrToken
-    API_PATH.VAULT_DELEGATION,       // Delegation check — CLI agent uses Bearer for /check
-  ];
-  const isBearerBypassRoute = (route: string) => {
-    // Extension token endpoints should be exact only.
-    if (
-      route === API_PATH.EXTENSION_TOKEN ||
-      route === API_PATH.EXTENSION_TOKEN_REFRESH
-    ) {
-      return pathname === route;
-    }
-    // Password/vault routes allow child paths.
-    return pathname === route || pathname.startsWith(route + "/");
-  };
-  const isBearerRoute = extensionTokenRoutes.some(isBearerBypassRoute);
-
-  // Handle CORS preflight for API routes.
-  // For extension Bearer routes AND the bridge code exchange endpoint, allow
-  // chrome-extension:// origins so that the extension's fetch (which triggers
-  // a preflight due to Content-Type/Authorization headers) can proceed.
-  const isExtensionExchangeRoute = pathname === API_PATH.EXTENSION_TOKEN_EXCHANGE;
+  // Preflight (handled regardless of policy.kind).
   if (request.method === "OPTIONS") {
-    return handlePreflight(request, {
-      allowExtension: isBearerRoute || isExtensionExchangeRoute,
-    });
+    return handleApiPreflight(request, { isBearerRoute, isExchangeRoute });
   }
 
-  // /api/v1/* — Public REST API. Skip session redirect and assertOrigin.
-  // Route handlers handle all auth via validateApiKeyOnly().
-  if (pathname.startsWith(`${API_PATH.API_ROOT}/v1/`)) {
+  // Non-CSRF early returns. ALL paths outside the cookie-CSRF threat
+  // model MUST short-circuit BEFORE the CSRF gate fires.
+  if (policy.kind === ROUTE_POLICY_KIND.PUBLIC_SHARE) {
+    const res = NextResponse.next();
+    res.headers.set("Cache-Control", "no-store");
+    return res;
+  }
+  if (policy.kind === ROUTE_POLICY_KIND.PUBLIC_RECEIVER) {
+    return NextResponse.next();
+  }
+  if (policy.kind === ROUTE_POLICY_KIND.API_V1) {
     const res = NextResponse.next();
     res.headers.set("Cache-Control", "private, no-store");
     return res;
+  }
+
+  // Baseline CSRF gate: request-attribute-based, path-independent.
+  // Fires whenever a request carries a session cookie AND uses a
+  // mutating method, regardless of route classification. This closes
+  // pre1 (audit-emit) and the R3 baseline gap structurally.
+  const cookieHeader = request.headers.get("cookie") ?? "";
+  const cookiePresent = hasSessionCookie(cookieHeader);
+  if (shouldEnforceCsrf(request, cookiePresent)) {
+    const csrfError = assertSessionCsrf(request);
+    if (csrfError) return applyCorsHeaders(request, csrfError);
   }
 
   const hasBearer = request.headers
@@ -235,10 +224,7 @@ async function handleApiAuth(request: NextRequest) {
   // only clients (extension from chrome-extension:// origin, API key
   // clients, SA / MCP tokens) do not ship the Auth.js session cookie, so
   // the bypass still applies to them.
-  const hasSessionCookie =
-    extractSessionToken(request.headers.get("cookie") ?? "") !== "";
-
-  if (hasBearer && isBearerRoute && !hasSessionCookie) {
+  if (hasBearer && isBearerRoute && !cookiePresent) {
     const res = NextResponse.next();
     res.headers.set("Cache-Control", "private, no-store");
     return applyCorsHeaders(request, res, { allowExtension: true });
@@ -248,48 +234,19 @@ async function handleApiAuth(request: NextRequest) {
   // one-time bridge code. No session, no Bearer. Called by the extension
   // content script (isolated world). The route handler validates the code
   // and atomically consumes it. CORS must allow chrome-extension origins.
-  if (pathname === API_PATH.EXTENSION_TOKEN_EXCHANGE) {
+  if (isExchangeRoute) {
     const res = NextResponse.next();
     res.headers.set("Cache-Control", "private, no-store");
     return applyCorsHeaders(request, res, { allowExtension: true });
   }
 
-  // Public share-link endpoints for unauthenticated share viewers.
-  // These use their own auth (access password / access token).
-  if (
-    pathname === `${API_PATH.SHARE_LINKS}/verify-access` ||
-    /^\/api\/share-links\/[^/]+\/content$/.test(pathname)
-  ) {
-    const res = NextResponse.next();
-    res.headers.set("Cache-Control", "no-store");
-    return res;
-  }
-
-  // Note: /api/scim/v2/* is intentionally NOT listed here — SCIM endpoints
-  // use their own Bearer token auth (validateScimToken) in each route handler.
-  if (
-    pathname.startsWith(API_PATH.PASSWORDS) ||
-    pathname.startsWith(API_PATH.TAGS) ||
-    pathname.startsWith(API_PATH.WATCHTOWER) ||
-    pathname.startsWith(API_PATH.TEAMS) ||
-    pathname.startsWith(API_PATH.AUDIT_LOGS) ||
-    pathname.startsWith(API_PATH.SHARE_LINKS) ||
-    pathname.startsWith(API_PATH.SENDS) ||
-    pathname.startsWith(API_PATH.EMERGENCY_ACCESS) ||
-    pathname.startsWith(API_PATH.SESSIONS) ||
-    pathname.startsWith(API_PATH.NOTIFICATIONS) ||
-    pathname.startsWith(API_PATH.USER_LOCALE) ||
-    pathname.startsWith(API_PATH.USER_MCP_TOKENS) ||
-    pathname.startsWith(API_PATH.USER_AUTH_PROVIDER) ||
-    pathname.startsWith(API_PATH.EXTENSION) ||
-    pathname.startsWith(API_PATH.TENANT) ||
-    pathname.startsWith(API_PATH.API_KEYS) ||
-    pathname.startsWith(API_PATH.TRAVEL_MODE) ||
-    pathname.startsWith(API_PATH.DIRECTORY_SYNC) ||
-    pathname.startsWith(API_PATH.VAULT) ||
-    pathname.startsWith(API_PATH.FOLDERS) ||
-    pathname.startsWith(API_PATH.WEBAUTHN)
-  ) {
+  // Session-required routes. Bearer-bypass-eligible routes that didn't
+  // take the bypass branch above (e.g., session-cookie-only callers to
+  // /api/passwords) flow through here too, since they're classified as
+  // api-session-required by route-policy. Note: /api/scim/v2/* is
+  // intentionally NOT in this classification — SCIM endpoints use their
+  // own Bearer token auth in each route handler.
+  if (policy.kind === ROUTE_POLICY_KIND.API_SESSION_REQUIRED) {
     const session = await getSessionInfo(request);
     if (!session.valid) {
       return applyCorsHeaders(
@@ -301,7 +258,6 @@ async function handleApiAuth(request: NextRequest) {
       );
     }
 
-    // Access restriction check for session-authenticated API routes
     if (session.tenantId) {
       const clientIp = extractClientIp(request);
       const accessResult = await checkAccessRestrictionWithAudit(
@@ -322,164 +278,16 @@ async function handleApiAuth(request: NextRequest) {
     }
   }
 
-  // Default: prevent CDN/proxy from caching authenticated API responses.
-  // Route handlers may override with explicit Cache-Control headers.
+  // Default (api-default): prevent CDN/proxy from caching authenticated
+  // API responses. Route handlers may override with explicit
+  // Cache-Control headers.
   const res = NextResponse.next();
   res.headers.set("Cache-Control", "private, no-store");
   return applyCorsHeaders(request, res);
 }
 
-async function getSessionInfo(request: NextRequest): Promise<SessionInfo> {
-  const cookie = request.headers.get("cookie");
-  if (!cookie) return { valid: false };
-
-  const cacheKey = extractSessionToken(cookie);
-  // If no session token cookie is present, skip cache lookup entirely
-  if (!cacheKey) return { valid: false };
-
-  const cached = sessionCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) {
-    return {
-      valid: cached.valid,
-      userId: cached.userId,
-      tenantId: cached.tenantId,
-      hasPasskey: cached.hasPasskey,
-      requirePasskey: cached.requirePasskey,
-      requirePasskeyEnabledAt: cached.requirePasskeyEnabledAt,
-      passkeyGracePeriodDays: cached.passkeyGracePeriodDays,
-    };
-  }
-  if (cached) sessionCache.delete(cacheKey);
-
-  try {
-    const sessionUrl = new URL(
-      `${request.nextUrl.basePath}${API_PATH.AUTH_SESSION}`,
-      request.url,
-    );
-    const res = await fetch(sessionUrl, {
-      headers: { cookie },
-    });
-    if (!res.ok) {
-      // Non-200 from auth session endpoint is a transient server error,
-      // not a definitive "session invalid" signal — do NOT cache.
-      return { valid: false };
-    }
-    const data = await res.json();
-    const valid = !!data?.user;
-    const userId = data?.user?.id ?? undefined;
-
-    // Resolve tenant ID for access restriction checks
-    let tenantId: string | undefined;
-    if (valid && userId) {
-      try {
-        tenantId = (await resolveUserTenantId(userId)) ?? undefined;
-      } catch {
-        // Non-critical: tenant resolution failure should not block session validation
-      }
-    }
-
-    // Extract passkey enforcement fields from session payload
-    const hasPasskey: boolean = data?.user?.hasPasskey ?? false;
-    const requirePasskey: boolean = data?.user?.requirePasskey ?? false;
-    const requirePasskeyEnabledAt: string | null = data?.user?.requirePasskeyEnabledAt ?? null;
-    const passkeyGracePeriodDays: number | null = data?.user?.passkeyGracePeriodDays ?? null;
-
-    const info: SessionInfo = {
-      valid,
-      userId,
-      tenantId,
-      hasPasskey,
-      requirePasskey,
-      requirePasskeyEnabledAt,
-      passkeyGracePeriodDays,
-    };
-    setSessionCache(cacheKey, info);
-    return info;
-  } catch {
-    return { valid: false };
-  }
-}
-
-function setSessionCache(key: string, info: SessionInfo) {
-  if (sessionCache.size >= SESSION_CACHE_MAX) {
-    const now = Date.now();
-    // First pass: evict all expired entries
-    for (const [k, v] of sessionCache) {
-      if (v.expiresAt <= now) sessionCache.delete(k);
-    }
-    // Second pass: if still at limit, evict the oldest entry (Map preserves insertion order)
-    if (sessionCache.size >= SESSION_CACHE_MAX) {
-      const oldest = sessionCache.keys().next().value;
-      if (oldest !== undefined) sessionCache.delete(oldest);
-    }
-  }
-  sessionCache.set(key, {
-    expiresAt: Date.now() + SESSION_CACHE_TTL_MS,
-    ...info,
-  });
-}
-
-// Extract the session token value directly to use as cache key.
-// This avoids SHA-256 hashing the entire cookie string on every request.
-// Falls back to the full cookie string if neither known token cookie is present.
-function extractSessionToken(cookie: string): string {
-  // Cookie names used by Auth.js (dev and prod variants)
-  const names = ["__Secure-authjs.session-token", "authjs.session-token"];
-  for (const name of names) {
-    const prefix = `${name}=`;
-    const idx = cookie.indexOf(prefix);
-    if (idx !== -1) {
-      const start = idx + prefix.length;
-      const end = cookie.indexOf(";", start);
-      return end === -1 ? cookie.slice(start) : cookie.slice(start, end);
-    }
-  }
-  // No session token cookie found — treat as unauthenticated (empty key)
-  return "";
-}
-
-function applySecurityHeaders(
-  response: NextResponse,
-  { cspHeader, nonce }: ProxyOptions,
-  basePath: string = "",
-): NextResponse {
-  response.headers.set("Content-Security-Policy", cspHeader);
-  const cspReportUrl = `${basePath}${API_PATH.CSP_REPORT}`;
-  response.headers.set(
-    "Report-To",
-    JSON.stringify({
-      group: "csp-endpoint",
-      max_age: 10886400,
-      endpoints: [{ url: cspReportUrl }],
-    })
-  );
-  response.headers.set(
-    "Reporting-Endpoints",
-    `csp-endpoint="${cspReportUrl}"`
-  );
-
-  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-  response.headers.set("X-Content-Type-Options", "nosniff");
-  response.headers.set("X-Frame-Options", "DENY");
-  if (isHttps) {
-    response.headers.set(
-      "Strict-Transport-Security",
-      "max-age=63072000; includeSubDomains; preload"
-    );
-  }
-  response.headers.set("Permissions-Policy", PERMISSIONS_POLICY);
-
-  response.cookies.set("csp-nonce", nonce, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: isHttps,
-    path: `${basePath}/`,
-  });
-
-  return response;
-}
-
-// Exported for testing
+// Test-only shims: re-export from new module locations so existing tests
+// (src/__tests__/proxy.test.ts) continue to import via this path.
 export { applySecurityHeaders as _applySecurityHeaders };
 export { extractSessionToken as _extractSessionToken };
 export { setSessionCache as _setSessionCache };

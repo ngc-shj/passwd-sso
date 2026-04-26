@@ -52,7 +52,6 @@ vi.mock("@/lib/prisma", () => ({
     },
   },
 }));
-vi.mock("@/lib/auth/session/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),

@@ -42,33 +42,17 @@ jobs:
 
       - run: npm ci
 
-      # Seed the test-count baseline from main BEFORE running the verifier.
-      # Without this, on fresh CI runners the baseline is absent, so
-      # capture-test-counts.mjs enters its "first-run — record + pass" branch
-      # every time and never actually compares. We record on a worktree
-      # checked out to main, then copy the baseline into HEAD so the main
-      # verify run can compare.
-      #
-      # Bootstrap case: on the PR that first introduces capture-test-counts.mjs,
-      # main does not yet have the script. We skip seeding and fall back to
-      # the script's first-run behaviour; the gate becomes meaningful from
-      # the next refactor PR onward.
-      - name: Seed test-count baseline from main
+      # Several refactor-phase-verify scripts (verify-move-only-diff,
+      # check-vitest-coverage-include, etc.) compare against main via
+      # `git show main:<path>` and `git diff main...HEAD`. actions/checkout
+      # with fetch-depth: 0 fetches full history of the pushed ref but does
+      # not create a local `main` branch. Explicitly fetch and create it.
+      - name: Ensure main ref is available
         run: |
           set -euo pipefail
-          git worktree add /tmp/main-wt main
-          # PR 2 moved capture-test-counts.mjs to scripts/checks/; keep legacy
-          # path check for main-branch fallback until main merges this refactor.
-          if [ -f /tmp/main-wt/scripts/checks/capture-test-counts.mjs ]; then
-            (cd /tmp/main-wt && npm ci && node scripts/checks/capture-test-counts.mjs --record)
-            cp /tmp/main-wt/.refactor-test-count-baseline .refactor-test-count-baseline
-          elif [ -f /tmp/main-wt/scripts/capture-test-counts.mjs ]; then
-            (cd /tmp/main-wt && npm ci && node scripts/capture-test-counts.mjs --record)
-            cp /tmp/main-wt/.refactor-test-count-baseline .refactor-test-count-baseline
-          else
-            echo "capture-test-counts.mjs not present on main — skipping baseline seed (bootstrap PR)."
+          if ! git rev-parse --verify main >/dev/null 2>&1; then
+            git fetch origin main:main
           fi
-          git worktree remove --force /tmp/main-wt
 
       - name: refactor-phase-verify
         run: node scripts/refactor-phase-verify.mjs --force

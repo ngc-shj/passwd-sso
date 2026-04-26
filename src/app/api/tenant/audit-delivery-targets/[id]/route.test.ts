@@ -11,7 +11,6 @@ const {
   mockRequireTenantPermission,
   mockWithTenantRls,
   mockLogAudit,
-  mockAssertOrigin,
   mockAuditDeliveryTargetFindFirst,
   mockAuditDeliveryTargetUpdate,
 } = vi.hoisted(() => ({
@@ -19,7 +18,6 @@ const {
   mockRequireTenantPermission: vi.fn(),
   mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: unknown, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
-  mockAssertOrigin: vi.fn().mockReturnValue(null),
   mockAuditDeliveryTargetFindFirst: vi.fn(),
   mockAuditDeliveryTargetUpdate: vi.fn(),
 }));
@@ -60,9 +58,6 @@ vi.mock("@/lib/audit/audit", () => ({
     ip: "127.0.0.1",
     userAgent: "test",
   }),
-}));
-vi.mock("@/lib/auth/session/csrf", () => ({
-  assertOrigin: mockAssertOrigin,
 }));
 vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
@@ -111,21 +106,6 @@ describe("PATCH /api/tenant/audit-delivery-targets/[id]", () => {
     const { status } = await parseResponse(res);
 
     expect(status).toBe(403);
-  });
-
-  it("blocks request when CSRF fails", async () => {
-    mockAssertOrigin.mockReturnValueOnce(
-      new Response(JSON.stringify({ error: "INVALID_ORIGIN" }), { status: 403 }),
-    );
-
-    const req = createRequest("PATCH", `http://localhost/api/tenant/audit-delivery-targets/${TARGET_ID}`, {
-      body: { isActive: false },
-    });
-    const res = await PATCH(req, createParams({ id: TARGET_ID }));
-    const { status } = await parseResponse(res);
-
-    expect(status).toBe(403);
-    expect(mockAuth).not.toHaveBeenCalled();
   });
 
   it("returns 404 when target not found", async () => {

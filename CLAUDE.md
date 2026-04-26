@@ -62,6 +62,38 @@ These are non-negotiable. A passing test suite alone is insufficient — the bui
 
 **Stack:** Next.js 16 (App Router) + TypeScript 5.9 + Prisma 7 + PostgreSQL 16 + Auth.js v5 + Tailwind CSS 4 + shadcn/ui
 
+### Proxy / Route Responsibility Boundary
+
+The proxy (`src/proxy.ts` orchestrator + `src/lib/proxy/*` modules) is the
+single ingress for every API request. It owns request-boundary concerns;
+route handlers own application-layer concerns.
+
+| Layer | Responsibility | Does NOT |
+|-------|----------------|----------|
+| `proxy.ts` + `src/lib/proxy/*` | session validation, baseline CSRF for cookie-bearing mutating requests (Origin), CORS preflight, IP access restriction, security headers, route classification | authorization (scope/role/ownership), business logic, Origin checks for cookie-LESS routes |
+| `route.ts` | authorization, input validation (Zod), business logic, route-specific stricter checks (going beyond baseline), **Origin enforcement for pre-auth / no-cookie mutating routes** (proxy gate doesn't apply) | baseline CSRF for cookie-bearing requests (proxy handles), session cookie parsing |
+
+**`src/lib/proxy/*` module layout** (each with a single responsibility):
+
+- `route-policy.ts` — `classifyRoute(pathname): RoutePolicy` pure function. Use `ROUTE_POLICY_KIND` constants in comparisons (typo = compile error).
+- `auth-gate.ts` — session validation + in-process session cache. Exposes `getSessionInfo`, `hasSessionCookie`, `extractSessionToken`.
+- `cors-gate.ts` — Bearer-bypass route detection + preflight wiring.
+- `csrf-gate.ts` — baseline CSRF (Origin) for cookie-bearing mutating requests. **Request-attribute-based, NOT path-classification-based** — fires whenever cookie + mutating method, regardless of route classification. This is what closes the "did this route call assertOrigin?" gap structurally.
+- `security-headers.ts` — CSP / HSTS / X-Frame-Options application.
+
+**SSoT principle**: routes do NOT call `assertOrigin` for baseline CSRF — the proxy CSRF gate handles it for any cookie-bearing mutating request. Routes only call `assertOrigin` (or stricter variants) when they receive cookieless requests outside the proxy gate's threat model.
+
+**KEEP-inline `assertOrigin` exceptions** (3 routes — pre-auth, cookieless):
+- `src/app/api/auth/passkey/options/route.ts` — pre-auth challenge generation
+- `src/app/api/auth/passkey/options/email/route.ts` — same
+- `src/app/api/auth/passkey/verify/route.ts` — pre-auth verification (creates session as output; inbound request has none). WebAuthn `expectedOrigin` provides primary defense; inline assertOrigin is the early-reject defense-in-depth.
+
+**Stricter route-level guard exception**: `src/app/api/vault/admin-reset/route.ts` keeps its post-baseline `if (!getAppOrigin()) return 500` check. The proxy CSRF gate uses Host-header fallback when `APP_URL` is unset; admin-reset intentionally does NOT permit this fallback.
+
+**Internal fetch from proxy → route**: `src/proxy.ts:153` fires `void fetch(...)` to `/api/internal/audit-emit` for passkey enforcement audit emission. The fetch sets `Origin: <self-origin>` explicitly (Node fetch does not auto-set Origin); without it the new CSRF gate would 403 the proxy's own self-call. Add the same pattern if you introduce another internal fetch in the proxy.
+
+**Test mock implication**: existing route tests that mock `@/lib/auth/session/csrf` for routes in the REMOVE list have unused mocks after this refactor — remove them when convenient. Tests that asserted "cross-origin → 403" at the route level have been deleted; the same behavior is now tested in `src/__tests__/proxy.test.ts` at the orchestrator level.
+
 ### Authentication Flow
 
 - Auth.js v5 (beta.30) with database session strategy (not JWT)

@@ -3,18 +3,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const {
   mockAuth,
   mockResolveUserTenantId,
-  mockAssertOrigin,
   mockRevokeDelegationSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockResolveUserTenantId: vi.fn(),
-  mockAssertOrigin: vi.fn(() => null),
   mockRevokeDelegationSession: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/tenant-context", () => ({ resolveUserTenantId: mockResolveUserTenantId }));
-vi.mock("@/lib/auth/session/csrf", () => ({ assertOrigin: mockAssertOrigin }));
 vi.mock("@/lib/auth/access/delegation", () => ({
   revokeDelegationSession: mockRevokeDelegationSession,
 }));
@@ -44,7 +41,6 @@ const params = (id: string) => ({ params: Promise.resolve({ id }) });
 describe("DELETE /api/vault/delegation/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAssertOrigin.mockReturnValue(null);
     mockAuth.mockResolvedValue({ user: { id: USER_ID } });
     mockResolveUserTenantId.mockResolvedValue(TENANT_ID);
     mockRevokeDelegationSession.mockResolvedValue(true);
@@ -97,13 +93,5 @@ describe("DELETE /api/vault/delegation/[id]", () => {
     );
   });
 
-  it("returns CSRF error when origin check fails", async () => {
-    const csrfResponse = new Response(JSON.stringify({ error: "CSRF" }), { status: 403 });
-    mockAssertOrigin.mockReturnValue(csrfResponse);
-    const res = await DELETE(makeDeleteRequest(SESSION_ID), params(SESSION_ID));
-    expect(res.status).toBe(403);
-    const json = await res.json();
-    expect(json.error).toBeDefined();
-  });
-
 });
+

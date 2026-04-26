@@ -25,7 +25,6 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
-vi.mock("@/lib/auth/session/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },

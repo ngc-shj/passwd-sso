@@ -11,7 +11,7 @@ The following files must NOT move out of the repository root:
 - **Build / runtime config**: `package.json`, `package-lock.json`, `tsconfig.json`, `tsconfig.tsbuildinfo`, `next.config.ts`, `next-env.d.ts`, `postcss.config.mjs`, `eslint.config.mjs`, `prisma.config.ts`, `proxy.ts`, `instrumentation-client.ts`, `sentry.client.config.ts`, `sentry.server.config.ts`, `components.json`
 - **Container**: `Dockerfile`, `docker-compose*.yml`, `.dockerignore`
 - **Repo metadata**: `README.md`, `README.ja.md`, `LICENSE`, `SECURITY.md`, `CHANGELOG.md`, `CLAUDE.md`, `CONTRIBUTING.md`
-- **Release / CI**: `release-please*.json`, `.trivyignore`, `.git-blame-ignore-revs`, `.refactor-phase-verify-baseline`, `.refactor-test-count-baseline`, `.nvmrc`, `.gitignore`
+- **Release / CI**: `release-please*.json`, `.trivyignore`, `.git-blame-ignore-revs`, `.refactor-phase-verify-baseline`, `.nvmrc`, `.gitignore`
 - **Env**: `.env.example`, `.env.local` (gitignored)
 
 ### Root-of-`scripts/` fixed

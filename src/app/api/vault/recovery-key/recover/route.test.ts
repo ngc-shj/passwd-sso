@@ -24,9 +24,6 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   hmacVerifier: vi.fn((v: string) => `hmac_${v}`),
   verifyPassphraseVerifier: vi.fn((client: string, stored: string) => client === stored),
 }));
-vi.mock("@/lib/auth/session/csrf", () => ({
-  assertOrigin: vi.fn(() => null),
-}));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),

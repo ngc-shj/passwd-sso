@@ -3,7 +3,6 @@ import type { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { assertOrigin } from "@/lib/auth/session/csrf";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { rateLimited } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
@@ -31,9 +30,6 @@ const resetLimiter = createRateLimiter({
  * Last resort: delete all vault data when passphrase and recovery key are both lost.
  */
 async function handlePOST(request: NextRequest) {
-  const originError = assertOrigin(request);
-  if (originError) return originError;
-
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json(

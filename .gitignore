@@ -109,4 +109,3 @@ docs/temp/
 
 # Refactor orchestration — per-developer stale-branch baseline
 .refactor-phase-verify-baseline
-.refactor-test-count-baseline

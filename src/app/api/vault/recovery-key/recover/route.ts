@@ -5,7 +5,6 @@ import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { hmacVerifier, verifyPassphraseVerifier as verifyHmac } from "@/lib/crypto/crypto-server";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { assertOrigin } from "@/lib/auth/session/csrf";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { rateLimited } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
@@ -56,9 +55,6 @@ const resetLimiter = createRateLimiter({
  * Two-step recovery: verify → reset.
  */
 async function handlePOST(request: NextRequest) {
-  const originError = assertOrigin(request);
-  if (originError) return originError;
-
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json(

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { assertOrigin } from "@/lib/auth/session/csrf";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { createNotification } from "@/lib/notification";
 import { sendEmail } from "@/lib/email";
@@ -27,9 +26,6 @@ async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ userId: string; resetId: string }> },
 ) {
-  const originError = assertOrigin(req);
-  if (originError) return originError;
-
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();

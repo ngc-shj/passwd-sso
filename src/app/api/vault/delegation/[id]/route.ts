@@ -6,7 +6,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
-import { assertOrigin } from "@/lib/auth/session/csrf";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { revokeDelegationSession } from "@/lib/auth/access/delegation";
@@ -19,9 +18,6 @@ async function handleDELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const originError = assertOrigin(request);
-  if (originError) return originError;
-
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();

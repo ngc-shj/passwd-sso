@@ -15,7 +15,6 @@ const {
   mockWithBypassRls,
   mockLogAudit,
   mockExtractClientIp,
-  mockAssertOrigin,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockBridgeCodeCreate: vi.fn(),
@@ -27,7 +26,6 @@ const {
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
   mockExtractClientIp: vi.fn(() => "1.2.3.4"),
-  mockAssertOrigin: vi.fn(() => null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -74,9 +72,6 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: mockExtractClientIp,
 }));
-vi.mock("@/lib/auth/session/csrf", () => ({
-  assertOrigin: mockAssertOrigin,
-}));
 
 import { POST } from "./route";
 
@@ -93,7 +88,6 @@ describe("POST /api/extension/bridge-code", () => {
     mockExtractClientIp.mockReturnValue("1.2.3.4");
     mockWithBypassRls.mockImplementation(async (_p, fn) => fn());
     mockWithUserTenantRls.mockImplementation(async (_u, fn) => fn());
-    mockAssertOrigin.mockReturnValue(null);
     mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockBridgeCodeFindMany.mockResolvedValue([]);
     mockBridgeCodeCreate.mockResolvedValue({});
@@ -115,17 +109,6 @@ describe("POST /api/extension/bridge-code", () => {
     expect(status).toBe(401);
     expect(json.error).toBe("UNAUTHORIZED");
     expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
-  });
-
-  it("returns 403 when origin check fails", async () => {
-    mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    const { NextResponse } = await import("next/server");
-    mockAssertOrigin.mockReturnValueOnce(
-      NextResponse.json({ error: "INVALID_ORIGIN" }, { status: 403 }),
-    );
-    const res = await POST(makeRequest());
-    const { status } = await parseResponse(res);
-    expect(status).toBe(403);
   });
 
   it("returns 429 when rate limited", async () => {

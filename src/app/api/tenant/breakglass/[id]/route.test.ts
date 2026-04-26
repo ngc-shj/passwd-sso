@@ -7,7 +7,6 @@ const {
   mockRequireTenantPermission,
   mockWithTenantRls,
   mockLogAudit,
-  mockAssertOrigin,
   mockGrantFindFirst,
   mockGrantUpdateMany,
   mockDispatchTenantWebhook,
@@ -26,7 +25,6 @@ const {
     mockRequireTenantPermission: vi.fn(),
     mockWithTenantRls: vi.fn(async (_p: unknown, _t: unknown, fn: () => unknown) => fn()),
     mockLogAudit: vi.fn(),
-    mockAssertOrigin: vi.fn().mockReturnValue(null),
     mockGrantFindFirst: vi.fn(),
     mockGrantUpdateMany: vi.fn(),
     mockDispatchTenantWebhook: vi.fn(),
@@ -60,9 +58,6 @@ vi.mock("@/lib/audit/audit", () => ({
     ip: "127.0.0.1",
     userAgent: "test-agent",
   }),
-}));
-vi.mock("@/lib/auth/session/csrf", () => ({
-  assertOrigin: mockAssertOrigin,
 }));
 vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
@@ -114,16 +109,6 @@ describe("DELETE /api/tenant/breakglass/[id]", () => {
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockGrantFindFirst.mockResolvedValue(makeGrant());
     mockGrantUpdateMany.mockResolvedValue({ count: 1 });
-  });
-
-  it("returns 403 when CSRF assertOrigin fails", async () => {
-    mockAssertOrigin.mockReturnValueOnce(
-      new Response(JSON.stringify({ error: "INVALID_ORIGIN" }), { status: 403 }),
-    );
-    const res = await DELETE(makeReq(), createParams({ id: GRANT_ID }));
-    const { status } = await parseResponse(res);
-    expect(status).toBe(403);
-    expect(mockAuth).not.toHaveBeenCalled();
   });
 
   it("returns 401 when unauthenticated", async () => {

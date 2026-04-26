@@ -16,7 +16,6 @@ import {
   encryptServerData,
 } from "@/lib/crypto/crypto-server";
 import { randomBytes } from "node:crypto";
-import { assertOrigin } from "@/lib/auth/session/csrf";
 import { z } from "zod";
 import { TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS } from "@/lib/constants";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -72,9 +71,6 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
 // POST /api/teams/[teamId]/webhooks — Create a webhook
 async function handlePOST(req: NextRequest, { params }: Params) {
-  const originError = assertOrigin(req);
-  if (originError) return originError;
-
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();

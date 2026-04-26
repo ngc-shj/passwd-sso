@@ -8,7 +8,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
-import { assertOrigin } from "@/lib/auth/session/csrf";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId } from "@/lib/tenant-context";
@@ -58,9 +57,6 @@ const createDelegationSchema = z.object({
 });
 
 async function handlePOST(request: NextRequest) {
-  const originError = assertOrigin(request);
-  if (originError) return originError;
-
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
@@ -305,10 +301,7 @@ async function handleGET(_request: NextRequest) {
   });
 }
 
-async function handleDELETE(request: NextRequest) {
-  const originError = assertOrigin(request);
-  if (originError) return originError;
-
+async function handleDELETE() {
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();

@@ -7,7 +7,6 @@ const {
   mockRequireTenantPermission,
   mockWithTenantRls,
   mockLogAudit,
-  mockAssertOrigin,
   mockTenantWebhookFindMany,
   mockTenantWebhookCount,
   mockTenantWebhookCreate,
@@ -19,7 +18,6 @@ const {
   mockRequireTenantPermission: vi.fn(),
   mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: unknown, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
-  mockAssertOrigin: vi.fn().mockReturnValue(null),
   mockTenantWebhookFindMany: vi.fn(),
   mockTenantWebhookCount: vi.fn(),
   mockTenantWebhookCreate: vi.fn(),
@@ -63,9 +61,6 @@ vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
-}));
-vi.mock("@/lib/auth/session/csrf", () => ({
-  assertOrigin: mockAssertOrigin,
 }));
 vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
@@ -319,18 +314,5 @@ describe("POST /api/tenant/webhooks", () => {
     expect(status).toBe(401);
   });
 
-  it("CSRF: assertOrigin blocks request with missing/bad origin", async () => {
-    mockAssertOrigin.mockReturnValueOnce(
-      new Response(JSON.stringify({ error: "INVALID_ORIGIN" }), { status: 403 }),
-    );
-
-    const req = createRequest("POST", "http://localhost/api/tenant/webhooks", {
-      body: { url: "https://example.com/hook", events: ["ADMIN_VAULT_RESET_INITIATE"] },
-    });
-    const res = await POST(req);
-    const { status } = await parseResponse(res);
-
-    expect(status).toBe(403);
-    expect(mockAuth).not.toHaveBeenCalled();
-  });
 });
+

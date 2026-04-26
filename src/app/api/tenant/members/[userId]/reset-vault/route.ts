@@ -2,7 +2,6 @@ import { randomBytes, createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { assertOrigin } from "@/lib/auth/session/csrf";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { createNotification } from "@/lib/notification";
@@ -44,9 +43,6 @@ async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ userId: string }> },
 ) {
-  const originError = assertOrigin(req);
-  if (originError) return originError;
-
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();

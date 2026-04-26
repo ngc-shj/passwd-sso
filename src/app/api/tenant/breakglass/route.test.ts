@@ -7,7 +7,6 @@ const {
   mockRequireTenantPermission,
   mockWithTenantRls,
   mockLogAudit,
-  mockAssertOrigin,
   mockRateLimiterCheck,
   mockGrantFindMany,
   mockGrantFindFirst,
@@ -30,7 +29,6 @@ const {
     mockRequireTenantPermission: vi.fn(),
     mockWithTenantRls: vi.fn(async (_p: unknown, _t: unknown, fn: () => unknown) => fn()),
     mockLogAudit: vi.fn(),
-    mockAssertOrigin: vi.fn().mockReturnValue(null),
     mockRateLimiterCheck: vi.fn(),
     mockGrantFindMany: vi.fn(),
     mockGrantFindFirst: vi.fn(),
@@ -72,9 +70,6 @@ vi.mock("@/lib/audit/audit", () => ({
     ip: "127.0.0.1",
     userAgent: "test-agent",
   }),
-}));
-vi.mock("@/lib/auth/session/csrf", () => ({
-  assertOrigin: mockAssertOrigin,
 }));
 vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
@@ -267,20 +262,6 @@ describe("POST /api/tenant/breakglass", () => {
     mockTenantMemberFindFirst.mockResolvedValue(TARGET_MEMBER);
     mockGrantFindFirst.mockResolvedValue(null); // no duplicate
     mockGrantCreate.mockResolvedValue(createdGrant);
-  });
-
-  it("returns 403 when CSRF assertOrigin fails", async () => {
-    mockAssertOrigin.mockReturnValueOnce(
-      new Response(JSON.stringify({ error: "INVALID_ORIGIN" }), { status: 403 }),
-    );
-    const res = await POST(
-      createRequest("POST", "http://localhost/api/tenant/breakglass", {
-        body: validBody,
-      }),
-    );
-    const { status } = await parseResponse(res);
-    expect(status).toBe(403);
-    expect(mockAuth).not.toHaveBeenCalled();
   });
 
   it("returns 401 when unauthenticated", async () => {

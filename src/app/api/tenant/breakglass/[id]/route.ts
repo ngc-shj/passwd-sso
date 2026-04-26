@@ -6,7 +6,6 @@ import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
-import { assertOrigin } from "@/lib/auth/session/csrf";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import { AUDIT_ACTION, TENANT_ROLE } from "@/lib/constants";
@@ -18,9 +17,6 @@ async function handleDELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const originError = assertOrigin(req);
-  if (originError) return originError;
-
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();

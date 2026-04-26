@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
-import { assertOrigin } from "@/lib/auth/session/csrf";
 import { prisma } from "@/lib/prisma";
 import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
@@ -66,9 +65,6 @@ const rotateKeySchema = z.object({
 
 // POST /api/teams/[teamId]/rotate-key — Rotate team encryption key
 async function handlePOST(req: NextRequest, { params }: Params) {
-  const originError = assertOrigin(req);
-  if (originError) return originError;
-
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();

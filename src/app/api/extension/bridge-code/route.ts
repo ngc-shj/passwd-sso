@@ -14,7 +14,6 @@ import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { rateLimited, unauthorized } from "@/lib/http/api-response";
-import { assertOrigin } from "@/lib/auth/session/csrf";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit/audit";
@@ -35,10 +34,6 @@ const bridgeCodeLimiter = createRateLimiter({
 });
 
 async function handlePOST(req: NextRequest) {
-  // CSRF defense-in-depth — bridge-code is an Auth.js session POST endpoint
-  const originError = assertOrigin(req);
-  if (originError) return originError;
-
   // Auth.js session
   const session = await auth();
   if (!session?.user?.id) {

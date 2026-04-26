@@ -8,7 +8,6 @@ const {
   mockWithTenantRls,
   mockLogAudit,
   mockRateLimiterCheck,
-  mockAssertOrigin,
   mockCreateNotification,
   mockTenantMemberFindFirst,
   mockPersonalLogAccessGrantFindFirst,
@@ -22,7 +21,6 @@ const {
   mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: unknown, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
   mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockAssertOrigin: vi.fn().mockReturnValue(null),
   mockCreateNotification: vi.fn(),
   mockTenantMemberFindFirst: vi.fn(),
   mockPersonalLogAccessGrantFindFirst: vi.fn(),
@@ -73,9 +71,6 @@ vi.mock("@/lib/security/rate-limit", () => ({
 }));
 vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
-}));
-vi.mock("@/lib/auth/session/csrf", () => ({
-  assertOrigin: mockAssertOrigin,
 }));
 vi.mock("@/lib/notification", () => ({
   createNotification: mockCreateNotification,
