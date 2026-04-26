@@ -966,6 +966,10 @@ describe("proxy — passkeyAuditEmitted staleness eviction", () => {
     _passkeyAuditEmitted.clear();
   });
 
+  afterEach(() => {
+    _passkeyAuditEmitted.clear();
+  });
+
   it("returns true on first emit, false within dedup window, true after window", () => {
     const t0 = 1_000_000;
     expect(_recordPasskeyAuditEmit("u1", t0)).toBe(true);

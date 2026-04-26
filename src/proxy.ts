@@ -70,10 +70,19 @@ const passkeyAuditEmitted = new Map<string, number>();
  * by `delete`-then-`set` on every accepted emit so JS Map insertion order
  * (which is what `keys().next()` returns) tracks last-emit recency rather
  * than first-emit time.
+ *
+ * Boundary: `now - lastEmitted === PASSKEY_AUDIT_DEDUP_MS` deduplicates
+ * (the inclusive `<=` window matches "within 5 minutes"). The original
+ * inline form used the exclusive `>` form, which would fire at exactly the
+ * boundary; the 1 ms shift here is intentional and tested at
+ * `proxy.test.ts` `passkeyAuditEmitted staleness eviction` describe block.
  */
 function recordPasskeyAuditEmit(userId: string, now: number): boolean {
   const lastEmitted = passkeyAuditEmitted.get(userId);
-  if (lastEmitted && now - lastEmitted <= PASSKEY_AUDIT_DEDUP_MS) {
+  // Use !== undefined rather than truthy check so a literal-zero timestamp
+  // (theoretically possible if an alternate clock source is ever wired in)
+  // does not bypass dedup as if it were a first emit.
+  if (lastEmitted !== undefined && now - lastEmitted <= PASSKEY_AUDIT_DEDUP_MS) {
     return false;
   }
   // Refresh insertion order so the head is always the staleness candidate.
