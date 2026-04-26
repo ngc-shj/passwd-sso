@@ -1,6 +1,6 @@
 {
   "name": "passwd-sso",
-  "version": "0.4.44",
+  "version": "0.4.45",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack --experimental-https",

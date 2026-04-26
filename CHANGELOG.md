@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.4.45](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.44...passwd-sso-v0.4.45) (2026-04-26)
+
+
+### Features
+
+* **audit-emit:** bound metadata payload size to prevent outbox bloat ([#402](https://github.com/ngc-shj/passwd-sso/issues/402)) ([9091da8](https://github.com/ngc-shj/passwd-sso/commit/9091da8cf8c9e14a6ec7ddafa955fb99ac073793))
+* **audit:** add AUDIT_LOG_PURGE action and dryRun audit emission ([#401](https://github.com/ngc-shj/passwd-sso/issues/401)) ([e07dd7c](https://github.com/ngc-shj/passwd-sso/commit/e07dd7ca065a7553d7079b624d7ed09f14cd9339))
+
+
+### Bug Fixes
+
+* **admin:** align operator validation across maintenance routes ([#400](https://github.com/ngc-shj/passwd-sso/issues/400)) ([de3ea33](https://github.com/ngc-shj/passwd-sso/commit/de3ea334c15acebe58db799fce27fd0131ae08f6))
+
+
+### Code Refactoring
+
+* **proxy:** enforce baseline CSRF at the ingress layer (closes pre1 + R3 baseline) ([#398](https://github.com/ngc-shj/passwd-sso/issues/398)) ([cb6fbec](https://github.com/ngc-shj/passwd-sso/commit/cb6fbecc44789e101f1ed61cc9a23f135b1a9a89))
+
 ## [0.4.44](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.43...passwd-sso-v0.4.44) (2026-04-25)
 
 
