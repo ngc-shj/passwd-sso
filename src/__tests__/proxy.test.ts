@@ -20,17 +20,19 @@ vi.mock("@/lib/tenant-context", () => ({
   resolveUserTenantId: mockResolveUserTenantId,
 }));
 
+import { proxy } from "../proxy";
+import { applySecurityHeaders as _applySecurityHeaders } from "../lib/proxy/security-headers";
 import {
-  proxy,
-  _applySecurityHeaders,
-  _extractSessionToken,
-  _setSessionCache,
-  _sessionCache,
-  _passkeyAuditEmitted,
-  _PASSKEY_AUDIT_MAP_MAX,
-  _PASSKEY_AUDIT_DEDUP_MS,
-  _recordPasskeyAuditEmit,
-} from "../proxy";
+  extractSessionToken as _extractSessionToken,
+  setSessionCache as _setSessionCache,
+  sessionCache as _sessionCache,
+} from "../lib/proxy/auth-gate";
+import {
+  passkeyAuditEmitted as _passkeyAuditEmitted,
+  PASSKEY_AUDIT_MAP_MAX as _PASSKEY_AUDIT_MAP_MAX,
+  PASSKEY_AUDIT_DEDUP_MS as _PASSKEY_AUDIT_DEDUP_MS,
+  recordPasskeyAuditEmit as _recordPasskeyAuditEmit,
+} from "../lib/proxy/page-route";
 
 const dummyOptions = { cspHeader: "default-src 'self'", nonce: "test-nonce" };
 
