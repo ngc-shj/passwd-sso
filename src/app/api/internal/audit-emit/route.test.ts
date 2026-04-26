@@ -130,4 +130,83 @@ describe("POST /api/internal/audit-emit", () => {
       }),
     );
   });
+
+  it("returns 400 when metadata exceeds 20 top-level keys", async () => {
+    const tooManyKeys: Record<string, number> = {};
+    for (let i = 0; i < 21; i++) tooManyKeys[`k${i}`] = i;
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/internal/audit-emit", {
+        body: {
+          action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+          metadata: tooManyKeys,
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("accepts metadata with exactly 20 top-level keys (boundary)", async () => {
+    const exactKeys: Record<string, number> = {};
+    for (let i = 0; i < 20; i++) exactKeys[`k${i}`] = i;
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/internal/audit-emit", {
+        body: {
+          action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+          metadata: exactKeys,
+        },
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("returns 400 when metadata serialized size exceeds 4KB", async () => {
+    // 5KB string in a single value to exceed the 4096-byte cap regardless of
+    // top-level key count.
+    const largePayload = { blob: "a".repeat(5 * 1024) };
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/internal/audit-emit", {
+        body: {
+          action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+          metadata: largePayload,
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("rejects deeply nested payloads via the byte cap", async () => {
+    // Build a deep object whose serialized size easily blows past 4KB.
+    let deep: Record<string, unknown> = { leaf: "x".repeat(100) };
+    for (let i = 0; i < 50; i++) {
+      deep = { nested: deep, padding: "y".repeat(100) };
+    }
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/internal/audit-emit", {
+        body: {
+          action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+          metadata: deep,
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when metadata is not an object", async () => {
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/internal/audit-emit", {
+        body: {
+          action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+          metadata: "not-an-object",
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
 });
