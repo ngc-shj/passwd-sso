@@ -8,10 +8,14 @@ import { AUDIT_ACTION } from "./lib/constants/audit/audit";
 import { MS_PER_DAY, MS_PER_MINUTE } from "./lib/constants/time";
 import { handlePreflight, applyCorsHeaders } from "./lib/http/cors";
 import { applySecurityHeaders } from "./lib/proxy/security-headers";
+import {
+  getSessionInfo,
+  setSessionCache,
+  extractSessionToken,
+  sessionCache,
+} from "./lib/proxy/auth-gate";
 import { extractClientIp } from "./lib/auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "./lib/auth/policy/access-restriction";
-import { resolveUserTenantId } from "./lib/tenant-context";
-import { SESSION_CACHE_MAX } from "./lib/validations/common.server";
 
 const intlMiddleware = createIntlMiddleware(routing);
 
@@ -19,8 +23,6 @@ type ProxyOptions = {
   cspHeader: string;
   nonce: string;
 };
-
-const SESSION_CACHE_TTL_MS = 30_000;
 
 // Paths exempt from passkey enforcement to prevent registration loops.
 // Must include the security settings page and all WebAuthn/auth API routes.
@@ -50,25 +52,6 @@ function isPasskeyGracePeriodExpired(
 const PASSKEY_AUDIT_DEDUP_MS = 5 * MS_PER_MINUTE;
 const PASSKEY_AUDIT_MAP_MAX = 1000;
 const passkeyAuditEmitted = new Map<string, number>();
-
-interface SessionInfo {
-  valid: boolean;
-  userId?: string;
-  tenantId?: string;
-  hasPasskey?: boolean;
-  requirePasskey?: boolean;
-  requirePasskeyEnabledAt?: string | null;
-  passkeyGracePeriodDays?: number | null;
-}
-
-// In-process session cache: keyed by the raw session token value (not hashed, to avoid
-// per-request SHA-256 overhead). Known trade-offs:
-//   - Multi-worker gap: each Node.js worker process holds an independent cache instance.
-//     Session revocation on one worker takes up to SESSION_CACHE_TTL_MS (30 s) to propagate
-//     to other workers. For single-process deployments this is not an issue.
-//   - Plaintext keys: the session token is stored as-is in process memory. A heap snapshot
-//     would expose tokens. Future improvement: migrate to a shared Redis cache with hashed keys.
-const sessionCache = new Map<string, { expiresAt: number } & SessionInfo>();
 
 export async function proxy(request: NextRequest, options: ProxyOptions) {
   const { pathname } = request.nextUrl;
@@ -328,117 +311,8 @@ async function handleApiAuth(request: NextRequest) {
   return applyCorsHeaders(request, res);
 }
 
-async function getSessionInfo(request: NextRequest): Promise<SessionInfo> {
-  const cookie = request.headers.get("cookie");
-  if (!cookie) return { valid: false };
-
-  const cacheKey = extractSessionToken(cookie);
-  // If no session token cookie is present, skip cache lookup entirely
-  if (!cacheKey) return { valid: false };
-
-  const cached = sessionCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) {
-    return {
-      valid: cached.valid,
-      userId: cached.userId,
-      tenantId: cached.tenantId,
-      hasPasskey: cached.hasPasskey,
-      requirePasskey: cached.requirePasskey,
-      requirePasskeyEnabledAt: cached.requirePasskeyEnabledAt,
-      passkeyGracePeriodDays: cached.passkeyGracePeriodDays,
-    };
-  }
-  if (cached) sessionCache.delete(cacheKey);
-
-  try {
-    const sessionUrl = new URL(
-      `${request.nextUrl.basePath}${API_PATH.AUTH_SESSION}`,
-      request.url,
-    );
-    const res = await fetch(sessionUrl, {
-      headers: { cookie },
-    });
-    if (!res.ok) {
-      // Non-200 from auth session endpoint is a transient server error,
-      // not a definitive "session invalid" signal — do NOT cache.
-      return { valid: false };
-    }
-    const data = await res.json();
-    const valid = !!data?.user;
-    const userId = data?.user?.id ?? undefined;
-
-    // Resolve tenant ID for access restriction checks
-    let tenantId: string | undefined;
-    if (valid && userId) {
-      try {
-        tenantId = (await resolveUserTenantId(userId)) ?? undefined;
-      } catch {
-        // Non-critical: tenant resolution failure should not block session validation
-      }
-    }
-
-    // Extract passkey enforcement fields from session payload
-    const hasPasskey: boolean = data?.user?.hasPasskey ?? false;
-    const requirePasskey: boolean = data?.user?.requirePasskey ?? false;
-    const requirePasskeyEnabledAt: string | null = data?.user?.requirePasskeyEnabledAt ?? null;
-    const passkeyGracePeriodDays: number | null = data?.user?.passkeyGracePeriodDays ?? null;
-
-    const info: SessionInfo = {
-      valid,
-      userId,
-      tenantId,
-      hasPasskey,
-      requirePasskey,
-      requirePasskeyEnabledAt,
-      passkeyGracePeriodDays,
-    };
-    setSessionCache(cacheKey, info);
-    return info;
-  } catch {
-    return { valid: false };
-  }
-}
-
-function setSessionCache(key: string, info: SessionInfo) {
-  if (sessionCache.size >= SESSION_CACHE_MAX) {
-    const now = Date.now();
-    // First pass: evict all expired entries
-    for (const [k, v] of sessionCache) {
-      if (v.expiresAt <= now) sessionCache.delete(k);
-    }
-    // Second pass: if still at limit, evict the oldest entry (Map preserves insertion order)
-    if (sessionCache.size >= SESSION_CACHE_MAX) {
-      const oldest = sessionCache.keys().next().value;
-      if (oldest !== undefined) sessionCache.delete(oldest);
-    }
-  }
-  sessionCache.set(key, {
-    expiresAt: Date.now() + SESSION_CACHE_TTL_MS,
-    ...info,
-  });
-}
-
-// Extract the session token value directly to use as cache key.
-// This avoids SHA-256 hashing the entire cookie string on every request.
-// Falls back to the full cookie string if neither known token cookie is present.
-function extractSessionToken(cookie: string): string {
-  // Cookie names used by Auth.js (dev and prod variants)
-  const names = ["__Secure-authjs.session-token", "authjs.session-token"];
-  for (const name of names) {
-    const prefix = `${name}=`;
-    const idx = cookie.indexOf(prefix);
-    if (idx !== -1) {
-      const start = idx + prefix.length;
-      const end = cookie.indexOf(";", start);
-      return end === -1 ? cookie.slice(start) : cookie.slice(start, end);
-    }
-  }
-  // No session token cookie found — treat as unauthenticated (empty key)
-  return "";
-}
-
-// Test-only shim: re-export applySecurityHeaders from its new home so
-// existing tests in src/__tests__/proxy.test.ts continue to import via this path.
+// Test-only shims: re-export from new module locations so existing tests
+// (src/__tests__/proxy.test.ts) continue to import via this path.
 export { applySecurityHeaders as _applySecurityHeaders };
 export { extractSessionToken as _extractSessionToken };
 export { setSessionCache as _setSessionCache };
