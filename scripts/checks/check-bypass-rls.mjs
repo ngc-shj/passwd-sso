@@ -32,7 +32,7 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/auth/access/maintenance-auth.ts", ["tenantMember"]],
   ["src/app/api/extension/bridge-code/route.ts", ["extensionBridgeCode"]],
   ["src/app/api/extension/token/exchange/route.ts", ["extensionBridgeCode"]],
-  ["src/app/api/admin/rotate-master-key/route.ts", ["user", "passwordShare"]],
+  ["src/app/api/admin/rotate-master-key/route.ts", ["passwordShare"]],
   ["src/app/api/maintenance/purge-history/route.ts", ["passwordEntryHistory"]],
   ["src/app/api/teams/route.ts", ["teamMember"]],
   ["src/app/api/teams/pending-key-distributions/route.ts", ["teamMember"]],
@@ -65,7 +65,7 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/maintenance/purge-audit-logs/route.ts", ["tenant", "auditLog"]],
   ["src/app/api/maintenance/audit-outbox-metrics/route.ts", []],
   ["src/app/api/maintenance/audit-outbox-purge-failed/route.ts", []],
-  ["src/app/api/maintenance/audit-chain-verify/route.ts", ["tenantMember"]],
+  ["src/app/api/maintenance/audit-chain-verify/route.ts", []],
   ["src/app/api/user/passkey-status/route.ts", ["webAuthnCredential", "user"]],
   ["src/app/api/share-links/route.ts", ["auditOutbox"]], // logAuditInTx for SHARE_CREATE
   ["src/app/api/share-links/[id]/route.ts", ["auditOutbox"]], // logAuditInTx for SHARE_REVOKE

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextResponse } from "next/server";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 const {
   mockCheckAuth,
@@ -22,20 +23,6 @@ vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: mockExtractRequestMeta,
 }));
-vi.mock("@/lib/constants", async (importOriginal) => {
-  const actual = await importOriginal() as Record<string, unknown>;
-  return {
-    ...actual,
-    AUDIT_ACTION: {
-      ...(actual.AUDIT_ACTION as Record<string, string>),
-      PASSKEY_ENFORCEMENT_BLOCKED: "PASSKEY_ENFORCEMENT_BLOCKED",
-    },
-    AUDIT_SCOPE: {
-      ...(actual.AUDIT_SCOPE as Record<string, string>),
-      TENANT: "TENANT",
-    },
-  };
-});
 
 import { POST } from "./route";
 
@@ -61,7 +48,7 @@ describe("POST /api/internal/audit-emit", () => {
     mockCheckAuth.mockResolvedValue(authFail());
     const res = await POST(
       createRequest("POST", "http://localhost/api/internal/audit-emit", {
-        body: { action: "PASSKEY_ENFORCEMENT_BLOCKED" },
+        body: { action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED },
       }),
     );
     expect(res.status).toBe(401);
@@ -88,7 +75,7 @@ describe("POST /api/internal/audit-emit", () => {
   it("returns 200 and calls logAuditAsync with correct params for PASSKEY_ENFORCEMENT_BLOCKED", async () => {
     const res = await POST(
       createRequest("POST", "http://localhost/api/internal/audit-emit", {
-        body: { action: "PASSKEY_ENFORCEMENT_BLOCKED" },
+        body: { action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED },
       }),
     );
     expect(res.status).toBe(200);
@@ -96,8 +83,8 @@ describe("POST /api/internal/audit-emit", () => {
     expect(json).toEqual({ ok: true });
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        scope: "TENANT",
-        action: "PASSKEY_ENFORCEMENT_BLOCKED",
+        scope: AUDIT_SCOPE.TENANT,
+        action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
         userId: "user-1",
       }),
     );
@@ -107,7 +94,7 @@ describe("POST /api/internal/audit-emit", () => {
     mockRateLimiterCheck.mockResolvedValue({ allowed: false });
     const res = await POST(
       createRequest("POST", "http://localhost/api/internal/audit-emit", {
-        body: { action: "PASSKEY_ENFORCEMENT_BLOCKED" },
+        body: { action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED },
       }),
     );
     expect(res.status).toBe(429);
@@ -117,7 +104,7 @@ describe("POST /api/internal/audit-emit", () => {
     const meta = { redirectedPath: "/dashboard", reason: "no_passkey" };
     const res = await POST(
       createRequest("POST", "http://localhost/api/internal/audit-emit", {
-        body: { action: "PASSKEY_ENFORCEMENT_BLOCKED", metadata: meta },
+        body: { action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED, metadata: meta },
       }),
     );
     expect(res.status).toBe(200);
@@ -133,7 +120,7 @@ describe("POST /api/internal/audit-emit", () => {
   it("uses empty object as metadata when metadata is not provided", async () => {
     const res = await POST(
       createRequest("POST", "http://localhost/api/internal/audit-emit", {
-        body: { action: "PASSKEY_ENFORCEMENT_BLOCKED" },
+        body: { action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED },
       }),
     );
     expect(res.status).toBe(200);

@@ -52,16 +52,6 @@ vi.mock("@/lib/audit/audit", () => ({
   }),
 }));
 
-vi.mock("@/lib/constants", async (importOriginal) => ({
-  ...(await importOriginal()) as Record<string, unknown>,
-  AUDIT_ACTION: {
-    AUTH_LOGIN: "AUTH_LOGIN",
-    SESSION_REVOKE_ALL: "SESSION_REVOKE_ALL",
-    EXTENSION_TOKEN_FAMILY_REVOKED: "EXTENSION_TOKEN_FAMILY_REVOKED",
-  },
-  AUDIT_SCOPE: { PERSONAL: "PERSONAL" },
-}));
-
 vi.mock("@/lib/auth/tokens/extension-token", () => ({
   revokeAllExtensionTokensForUser: vi.fn().mockResolvedValue({ rowsRevoked: 0, familiesRevoked: 0 }),
 }));
