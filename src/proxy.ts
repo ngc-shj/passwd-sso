@@ -9,6 +9,7 @@ import { MS_PER_DAY, MS_PER_MINUTE } from "./lib/constants/time";
 import {
   applyCorsHeaders,
   handleApiPreflight,
+  isBearerBypassRoute,
 } from "./lib/proxy/cors-gate";
 import { applySecurityHeaders } from "./lib/proxy/security-headers";
 import {
@@ -170,8 +171,14 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
 }
 
 async function handleApiAuth(request: NextRequest) {
-  const policy = classifyRoute(request.nextUrl.pathname);
-  const isBearerRoute = policy.kind === ROUTE_POLICY_KIND.API_BEARER_BYPASS;
+  const { pathname } = request.nextUrl;
+  const policy = classifyRoute(pathname);
+  // Bearer-bypass eligibility is a code-path concern (which dispatch
+  // branch the orchestrator takes), not a classification concern. Routes
+  // that accept Bearer as alternative auth are still classified as
+  // api-session-required; we ask cors-gate directly whether the bypass
+  // dispatch is eligible for this specific path.
+  const isBearerRoute = isBearerBypassRoute(pathname);
   const isExchangeRoute = policy.kind === ROUTE_POLICY_KIND.API_EXTENSION_EXCHANGE;
 
   // Preflight (handled regardless of policy.kind).
@@ -233,16 +240,13 @@ async function handleApiAuth(request: NextRequest) {
     return applyCorsHeaders(request, res, { allowExtension: true });
   }
 
-  // Session-required routes + Bearer-bypass routes that didn't take the
-  // Bearer-bypass branch above (e.g., session-cookie-only callers to
-  // /api/passwords). Validate session, then enforce tenant IP
-  // restriction. Note: /api/scim/v2/* is intentionally NOT in this
-  // classification — SCIM endpoints use their own Bearer token auth in
-  // each route handler.
-  if (
-    policy.kind === ROUTE_POLICY_KIND.API_SESSION_REQUIRED ||
-    policy.kind === ROUTE_POLICY_KIND.API_BEARER_BYPASS
-  ) {
+  // Session-required routes. Bearer-bypass-eligible routes that didn't
+  // take the bypass branch above (e.g., session-cookie-only callers to
+  // /api/passwords) flow through here too, since they're classified as
+  // api-session-required by route-policy. Note: /api/scim/v2/* is
+  // intentionally NOT in this classification — SCIM endpoints use their
+  // own Bearer token auth in each route handler.
+  if (policy.kind === ROUTE_POLICY_KIND.API_SESSION_REQUIRED) {
     const session = await getSessionInfo(request);
     if (!session.valid) {
       return applyCorsHeaders(

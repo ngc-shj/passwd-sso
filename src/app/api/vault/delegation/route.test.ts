@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const {
   mockAuth,
   mockResolveUserTenantId,
-  mockAssertOrigin,
   mockRateLimiterCheck,
   mockLogAudit,
   mockWithBypassRls,
@@ -29,7 +28,6 @@ const {
   return {
     mockAuth: vi.fn(),
     mockResolveUserTenantId: vi.fn(),
-    mockAssertOrigin: vi.fn(() => null),
     mockRateLimiterCheck: vi.fn(),
     mockLogAudit: vi.fn(),
     mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
@@ -45,7 +43,6 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/tenant-context", () => ({ resolveUserTenantId: mockResolveUserTenantId }));
-vi.mock("@/lib/auth/session/csrf", () => ({ assertOrigin: mockAssertOrigin }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
@@ -139,7 +136,6 @@ const makeDeleteRequest = () =>
 describe("POST /api/vault/delegation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAssertOrigin.mockReturnValue(null);
     mockAuth.mockResolvedValue({ user: { id: USER_ID } });
     mockResolveUserTenantId.mockResolvedValue(TENANT_ID);
     mockRateLimiterCheck.mockResolvedValue({ allowed: true });
@@ -499,7 +495,6 @@ describe("GET /api/vault/delegation", () => {
 describe("DELETE /api/vault/delegation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAssertOrigin.mockReturnValue(null);
     mockAuth.mockResolvedValue({ user: { id: USER_ID } });
     mockResolveUserTenantId.mockResolvedValue(TENANT_ID);
     mockRevokeAllDelegationSessions.mockResolvedValue(3);

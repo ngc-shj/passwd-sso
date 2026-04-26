@@ -17,13 +17,21 @@ import { isBearerBypassRoute } from "./cors-gate";
 /**
  * RoutePolicy kind constants. Use these instead of string literals so a
  * typo is a compile error, not a silently-unreachable branch.
+ *
+ * Note: there is intentionally no separate "api-bearer-bypass" kind.
+ * Routes that accept extension Bearer as alternative auth (e.g., /api/passwords)
+ * are still fundamentally session-required. The Bearer-bypass is a code-path
+ * concern (which dispatch branch the orchestrator takes), NOT a classification
+ * concern. The orchestrator uses `isBearerBypassRoute(pathname)` from
+ * cors-gate to decide whether the bypass dispatch is eligible for a given
+ * request, while `api-session-required` covers all session-cookie-protected
+ * routes (including bypass-eligible ones).
  */
 export const ROUTE_POLICY_KIND = {
   PREFLIGHT: "preflight",
   PUBLIC_SHARE: "public-share",
   PUBLIC_RECEIVER: "public-receiver",
   API_V1: "api-v1",
-  API_BEARER_BYPASS: "api-bearer-bypass",
   API_EXTENSION_EXCHANGE: "api-extension-exchange",
   API_SESSION_REQUIRED: "api-session-required",
   API_DEFAULT: "api-default",
@@ -37,9 +45,8 @@ export type RoutePolicy =
   | { kind: typeof ROUTE_POLICY_KIND.PUBLIC_SHARE }             // /api/share-links/*/content, /verify-access
   | { kind: typeof ROUTE_POLICY_KIND.PUBLIC_RECEIVER }          // /api/csp-report — public POST receiver
   | { kind: typeof ROUTE_POLICY_KIND.API_V1 }                   // /api/v1/* — Bearer (API key) authenticated
-  | { kind: typeof ROUTE_POLICY_KIND.API_BEARER_BYPASS }        // Routes that accept session OR extension Bearer
   | { kind: typeof ROUTE_POLICY_KIND.API_EXTENSION_EXCHANGE }   // /api/extension/token/exchange — bootstraps Bearer
-  | { kind: typeof ROUTE_POLICY_KIND.API_SESSION_REQUIRED }     // session-cookie-protected API routes
+  | { kind: typeof ROUTE_POLICY_KIND.API_SESSION_REQUIRED }     // session-cookie-protected API routes (incl. Bearer-bypass-eligible)
   | { kind: typeof ROUTE_POLICY_KIND.API_DEFAULT }              // other /api/* — default cache-control only
   | { kind: typeof ROUTE_POLICY_KIND.PAGE };                    // non-API path
 
@@ -108,16 +115,16 @@ export function classifyRoute(pathname: string): RoutePolicy {
     return { kind: ROUTE_POLICY_KIND.API_EXTENSION_EXCHANGE };
   }
 
-  // Routes that accept either a session OR an extension Bearer token.
-  // The proxy lets the route handler decide; CSRF gate fires only when
-  // a session cookie is present.
-  if (isBearerBypassRoute(pathname)) {
-    return { kind: ROUTE_POLICY_KIND.API_BEARER_BYPASS };
-  }
-
-  // Session-required API routes — proxy validates session before
-  // delegating to the route handler.
-  if (SESSION_REQUIRED_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
+  // Session-required API routes. This includes Bearer-bypass-eligible
+  // routes (PASSWORDS, API_KEYS, VAULT_DELEGATION etc.) — they're
+  // fundamentally session-required, with optional Bearer as alternative
+  // auth. The orchestrator uses `isBearerBypassRoute(pathname)` from
+  // cors-gate to decide whether the bypass dispatch is taken for a
+  // given request; the classification stays "api-session-required".
+  if (
+    isBearerBypassRoute(pathname) ||
+    SESSION_REQUIRED_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+  ) {
     return { kind: ROUTE_POLICY_KIND.API_SESSION_REQUIRED };
   }
 
