@@ -26,6 +26,10 @@ import {
   _extractSessionToken,
   _setSessionCache,
   _sessionCache,
+  _passkeyAuditEmitted,
+  _PASSKEY_AUDIT_MAP_MAX,
+  _PASSKEY_AUDIT_DEDUP_MS,
+  _recordPasskeyAuditEmit,
 } from "../proxy";
 
 const dummyOptions = { cspHeader: "default-src 'self'", nonce: "test-nonce" };
@@ -954,5 +958,64 @@ describe("auth-gate session cache TTL expiry", () => {
     vi.advanceTimersByTime(SESSION_CACHE_TTL_MS);
     await proxy(buildReq(), dummyOptions);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("proxy — passkeyAuditEmitted staleness eviction", () => {
+  beforeEach(() => {
+    _passkeyAuditEmitted.clear();
+  });
+
+  it("returns true on first emit, false within dedup window, true after window", () => {
+    const t0 = 1_000_000;
+    expect(_recordPasskeyAuditEmit("u1", t0)).toBe(true);
+    expect(_recordPasskeyAuditEmit("u1", t0 + _PASSKEY_AUDIT_DEDUP_MS)).toBe(false);
+    expect(_recordPasskeyAuditEmit("u1", t0 + _PASSKEY_AUDIT_DEDUP_MS + 1)).toBe(true);
+  });
+
+  it("evicts the user with the oldest lastEmitted timestamp, not the first-inserted", () => {
+    const base = 1_000_000;
+    const dedup = _PASSKEY_AUDIT_DEDUP_MS;
+
+    // Fill the map. u0 is inserted first.
+    for (let i = 0; i < _PASSKEY_AUDIT_MAP_MAX; i++) {
+      const accepted = _recordPasskeyAuditEmit(`u${i}`, base + i);
+      expect(accepted).toBe(true);
+    }
+    expect(_passkeyAuditEmitted.size).toBe(_PASSKEY_AUDIT_MAP_MAX);
+    expect(_passkeyAuditEmitted.has("u0")).toBe(true);
+    expect(_passkeyAuditEmitted.has("u1")).toBe(true);
+
+    // Re-emit u0 well beyond the dedup window. With FIFO eviction this would
+    // not save u0 (its insertion-order position would still be 0). With LRU
+    // eviction (delete-then-set) u0 moves to the tail, so u1 is now the
+    // staleness candidate at the head.
+    const refresh = base + _PASSKEY_AUDIT_MAP_MAX + dedup + 1;
+    expect(_recordPasskeyAuditEmit("u0", refresh)).toBe(true);
+
+    // Add a new user. Map is at capacity, so something must be evicted.
+    expect(_recordPasskeyAuditEmit("u-new", refresh + 1)).toBe(true);
+
+    expect(_passkeyAuditEmitted.size).toBe(_PASSKEY_AUDIT_MAP_MAX);
+    // Staleness eviction picks u1 (oldest lastEmitted), NOT u0.
+    expect(_passkeyAuditEmitted.has("u0")).toBe(true);
+    expect(_passkeyAuditEmitted.has("u1")).toBe(false);
+    expect(_passkeyAuditEmitted.has("u-new")).toBe(true);
+  });
+
+  it("non-monotonic lastEmitted: most recently refreshed user survives eviction", () => {
+    // Insert u0, u1, u2 in order. Then refresh in non-monotonic order: u1, u0.
+    // The eviction order should be u2 (oldest by last-set), then u1, then u0.
+    const t0 = 1_000_000;
+    const dedup = _PASSKEY_AUDIT_DEDUP_MS;
+    _recordPasskeyAuditEmit("u0", t0);
+    _recordPasskeyAuditEmit("u1", t0 + 1);
+    _recordPasskeyAuditEmit("u2", t0 + 2);
+    // Refresh u1 and u0 past the dedup window so the calls are accepted.
+    _recordPasskeyAuditEmit("u1", t0 + dedup + 10);
+    _recordPasskeyAuditEmit("u0", t0 + dedup + 20);
+
+    // First key in iteration order is the staleness candidate.
+    expect(_passkeyAuditEmitted.keys().next().value).toBe("u2");
   });
 });
