@@ -147,7 +147,7 @@ inline review fallbacks during a temporary org usage limit.
 
 ---
 
-## Final Resolution Status
+## Final Resolution Status (Phase 1)
 
 All 4 rounds yielded:
 - **0 Critical**
@@ -172,3 +172,48 @@ F2, F1/S3 (audit constant), F3/dryRun audit, F4 FIFO eviction, S1 audit-emit Zod
 
 - pre2 — 30s session-revocation cache bypass (Redis redesign)
 - pre3 — `operatorId` body field vs token-bound claim (signed-token redesign)
+
+---
+
+## Phase 3 (Code Review) Summary
+
+Three review rounds against the implemented branch (10 commits).
+
+### Round 1 — Initial review (after C1-C6 + lint fix)
+
+- **Major**: T1 — proxy.test.ts had 0 of 11 plan-specified CSRF integration tests.
+- **Minor**: F1 (proxy.ts size > 100 lines target), F2 (mcp/authorize/consent comment), T2 (TTL test missing), T3 (SESSION_CACHE_MAX literal), T4 (11 orphan vi.mock declarations).
+- **Structural concern (raised by user, not by experts)**: orchestrator OR `policy.kind === API_SESSION_REQUIRED || API_BEARER_BYPASS` was a symptom that `api-bearer-bypass` was the wrong primitive. Bypass is a code-path concern, not a classification concern.
+- **Resolution** (commit `1cbf534e`):
+  - Drop `API_BEARER_BYPASS` kind; bypass routes classify as `api-session-required`. orchestrator uses `isBearerBypassRoute(pathname)` directly.
+  - Add 11 CSRF integration tests + auth-gate TTL test to proxy.test.ts.
+  - Replace `SESSION_CACHE_MAX = 500` literal with import.
+  - Sub-agent cleaned 11 orphan vi.mock declarations.
+  - F1 accepted (proxy.ts page-route logic is intentionally retained).
+  - F2 accepted (proxy CSRF gate makes the consent route's `if (!origin)` defense-in-depth, not misleading).
+
+### Round 2 — Verification of Round 1 fixes
+
+- **Minor**: F3 (`classifyRoute` had redundant `isBearerBypassRoute` import — dead code), T5 (TTL test used `30_000` literal), T6 (one orphan vi.mock missed in Round 1: `src/__tests__/api/tenant/breakglass.test.ts`).
+- **Resolution** (commit `fb012ea7`):
+  - F3: drop `isBearerBypassRoute` import from route-policy; module is now pure pathname-only classifier.
+  - T5: import `SESSION_CACHE_TTL_MS`; use `TTL/6` and `TTL` instead of `5_000`/`30_000`.
+  - T6: clean orphan vi.mock + `mockAssertOrigin` from breakglass.test.ts.
+
+### Round 3 — Final verification
+
+- **All experts: No new findings**. Convergence achieved.
+
+### Test count progression
+
+- Pre-branch: 7317 passed, 1 skipped
+- After C1-C6: 7317 (unchanged — only deletions in C5 + 1 fixture update in C4)
+- After Round 1 fixes (`1cbf534e`): 7329 (+12 — 11 CSRF integration tests + 1 TTL test)
+- After Round 2 fixes (`fb012ea7`): 7329 (unchanged)
+
+### Final state
+
+- Lint: pass (0 warnings)
+- Tests: 7329 passed, 1 skipped, 0 failed
+- Build: pass
+- Commits on branch: 11 (Phase 1 plan + C1-C6 + lint fix + Round 1 fix + Round 2 fix)
