@@ -215,3 +215,58 @@ describe("invalidateSessionTimeoutCacheForTenant", () => {
     expect(_internal.cache.get("user-tenant-b")).toBeDefined();
   });
 });
+
+describe("session timeout cache eviction — TTL sweep before FIFO", () => {
+  beforeEach(() => {
+    _internal.clear();
+    mockFindUnique.mockReset();
+  });
+
+  it("evicts expired entries first when the cache fills, preserving fresh entries", async () => {
+    const now = Date.now();
+    // Pre-fill the cache to capacity. Half expired, half fresh, interleaved.
+    for (let i = 0; i < _internal.MAX_SIZE; i++) {
+      _internal.cache.set(`user-${i}`, {
+        idleMinutes: 30,
+        absoluteMinutes: 480,
+        tenantId: `tenant-${i % 5}`,
+        expiresAt: i % 2 === 0 ? now + 60_000 : now - 1,
+      });
+    }
+    expect(_internal.cache.size).toBe(_internal.MAX_SIZE);
+
+    // New user fetch triggers eviction path
+    seedUser({ tenantIdle: 60, tenantAbsolute: 600 });
+    await resolveEffectiveSessionTimeouts("user-new", null);
+
+    expect(_internal.cache.has("user-new")).toBe(true);
+    // After TTL sweep, all expired (odd-indexed) entries are gone; fresh
+    // (even-indexed) entries survive. The fresh head ("user-0") was NOT
+    // evicted as a FIFO casualty.
+    expect(_internal.cache.has("user-0")).toBe(true);
+    expect(_internal.cache.has("user-1")).toBe(false);
+    expect(_internal.cache.has("user-2")).toBe(true);
+    expect(_internal.cache.has("user-3")).toBe(false);
+  });
+
+  it("falls back to FIFO when every entry is fresh", async () => {
+    const now = Date.now();
+    for (let i = 0; i < _internal.MAX_SIZE; i++) {
+      _internal.cache.set(`user-${i}`, {
+        idleMinutes: 30,
+        absoluteMinutes: 480,
+        tenantId: `tenant-${i % 5}`,
+        expiresAt: now + 60_000,
+      });
+    }
+    expect(_internal.cache.size).toBe(_internal.MAX_SIZE);
+
+    seedUser({ tenantIdle: 60, tenantAbsolute: 600 });
+    await resolveEffectiveSessionTimeouts("user-new", null);
+
+    // All fresh → sweep no-op → FIFO evicts head (user-0).
+    expect(_internal.cache.has("user-0")).toBe(false);
+    expect(_internal.cache.has("user-new")).toBe(true);
+    expect(_internal.cache.size).toBe(_internal.MAX_SIZE);
+  });
+});

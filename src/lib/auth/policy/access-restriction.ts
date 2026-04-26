@@ -46,10 +46,20 @@ async function getTenantAccessPolicy(
   }
   if (cached) policyCache.delete(tenantId);
 
-  // Evict oldest entry when cache is full (Map iterates in insertion order)
+  // Cache full: evict expired entries first (TTL sweep), then fall back to
+  // FIFO oldest only if every entry is still fresh. This avoids the bug
+  // where a hot but TTL-fresh entry sits at the head of insertion order
+  // and gets evicted before less-active entries that happened to be
+  // inserted later. Mirrors the pattern in `src/lib/proxy/auth-gate.ts`.
   if (policyCache.size >= POLICY_CACHE_MAX_SIZE) {
-    const oldest = policyCache.keys().next().value;
-    if (oldest !== undefined) policyCache.delete(oldest);
+    const now = Date.now();
+    for (const [k, v] of policyCache) {
+      if (v.expiresAt <= now) policyCache.delete(k);
+    }
+    if (policyCache.size >= POLICY_CACHE_MAX_SIZE) {
+      const oldest = policyCache.keys().next().value;
+      if (oldest !== undefined) policyCache.delete(oldest);
+    }
   }
 
   const tenant = await withBypassRls(prisma, async () =>
@@ -282,3 +292,8 @@ export async function enforceAccessRestriction(
 export function _clearPolicyCache(): void {
   policyCache.clear();
 }
+
+/** @internal Direct access to the policy cache for eviction-behavior tests. */
+export const _policyCache = policyCache;
+/** @internal Cache size cap for eviction-behavior tests. */
+export const _POLICY_CACHE_MAX_SIZE = POLICY_CACHE_MAX_SIZE;

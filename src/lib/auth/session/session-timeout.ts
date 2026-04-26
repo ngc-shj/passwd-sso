@@ -22,6 +22,7 @@ const cache = new Map<string, CacheEntry>();
 export const _internal = {
   cache,
   clear: () => cache.clear(),
+  MAX_SIZE: SESSION_TIMEOUT_CACHE_MAX_SIZE,
 };
 
 export interface ResolvedSessionTimeouts {
@@ -122,9 +123,20 @@ export async function resolveEffectiveSessionTimeouts(
     expiresAt: Date.now() + SESSION_TIMEOUT_CACHE_TTL_MS,
   };
 
+  // Cache full: evict expired entries first (TTL sweep), then fall back to
+  // FIFO oldest only if every entry is still fresh. This avoids the bug
+  // where a hot but TTL-fresh entry sits at the head of insertion order
+  // and gets evicted before less-active entries that happened to be
+  // inserted later. Mirrors the pattern in `src/lib/proxy/auth-gate.ts`.
   if (cache.size >= SESSION_TIMEOUT_CACHE_MAX_SIZE) {
-    const oldest = cache.keys().next().value;
-    if (oldest !== undefined) cache.delete(oldest);
+    const now = Date.now();
+    for (const [k, v] of cache) {
+      if (v.expiresAt <= now) cache.delete(k);
+    }
+    if (cache.size >= SESSION_TIMEOUT_CACHE_MAX_SIZE) {
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
   }
   cache.set(userId, resolved);
 
