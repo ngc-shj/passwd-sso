@@ -171,6 +171,43 @@ describe("PUT /api/tenant/mcp-clients/[id]", () => {
     expect(status).toBe(404);
   });
 
+  it.each([
+    ["http://127.0.0.1:8765/callback"],
+    ["http://localhost:8765/callback"],
+    ["http://[::1]:8765/callback"],
+  ])("accepts loopback redirect URI update: %s", async (uri) => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockMcpClientFindFirst.mockResolvedValue(makeClient());
+    mockMcpClientUpdate.mockResolvedValue(makeClient({ redirectUris: [uri] }));
+
+    const req = createRequest("PUT", "http://localhost/api/tenant/mcp-clients/client-1", {
+      body: { redirectUris: [uri] },
+    });
+    const res = await PUT(req, createParams({ id: "client-1" }));
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(200);
+  });
+
+  it.each([
+    ["http://127.0.0.1/callback"],
+    ["http://localhost/callback"],
+    ["http://[::1]/callback"],
+  ])("rejects loopback redirect URI without port: %s", async (uri) => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockMcpClientFindFirst.mockResolvedValue(makeClient());
+
+    const req = createRequest("PUT", "http://localhost/api/tenant/mcp-clients/client-1", {
+      body: { redirectUris: [uri] },
+    });
+    const res = await PUT(req, createParams({ id: "client-1" }));
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(400);
+  });
+
   it("returns 409 on name conflict (P2002)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);

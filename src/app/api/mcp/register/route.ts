@@ -16,6 +16,7 @@ import {
   MAX_UNCLAIMED_DCR_CLIENTS,
   DCR_RATE_LIMIT_WINDOW_MS,
   DCR_RATE_LIMIT_MAX,
+  LOOPBACK_REDIRECT_RE,
 } from "@/lib/constants/auth/mcp";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -24,11 +25,6 @@ const dcrRateLimiter = createRateLimiter({
   windowMs: DCR_RATE_LIMIT_WINDOW_MS,
   max: DCR_RATE_LIMIT_MAX,
 });
-
-// Loopback redirect URIs: allow both the loopback IP literals and localhost with a port.
-// RFC 8252 §7.3 specifies loopback IP literals (127.0.0.1 / [::1]); §8.3 marks
-// localhost as NOT RECOMMENDED, but real clients (Claude Code) use it.
-const LOOPBACK_REDIRECT_RE = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+\//;
 
 const dcrSchema = z.object({
   client_name: z.string().min(1).max(100),
@@ -48,7 +44,7 @@ const dcrSchema = z.object({
         }),
       {
         message:
-          "redirect_uris must use https:// or http://localhost:<port>/ or http://127.0.0.1:<port>/",
+          "redirect_uris must use https:// or http://(127.0.0.1|localhost|[::1]):<port>/",
       },
     ),
   grant_types: z.array(z.string()).optional(),

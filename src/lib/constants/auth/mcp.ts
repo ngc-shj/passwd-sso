@@ -44,6 +44,23 @@ export const MCP_PROTOCOL_VERSION = "2025-03-26";
 export const MCP_SERVER_NAME = "passwd-sso";
 export const MCP_SERVER_VERSION = "1.0.0";
 
+// Loopback redirect URI regex shared by:
+//   - DCR (`/api/mcp/register`)
+//   - Manual MCP client management (`/api/tenant/mcp-clients`, `/api/tenant/mcp-clients/[id]`)
+//   - Frontend validator (`mcp-client-card.tsx`)
+// The CSP `form-action` directive in `proxy.ts` MUST mirror the host set
+// accepted here (`localhost`, `127.0.0.1`, `[::1]`) — any host accepted by
+// this regex but missing from the CSP causes the consent-form 302 redirect
+// to be CSP-blocked.
+//
+// RFC 8252 §7.3 mandates loopback IP literal support and "MUST allow any
+// port"; §8.3 marks `localhost` as NOT RECOMMENDED but real OAuth clients
+// (Claude Code, Claude Desktop) use it, so we keep it for compatibility.
+//
+// Pre-filter: callers should run `z.string().url()` first so `new URL()`
+// rejects invalid ports (>65535) before this regex sees them.
+export const LOOPBACK_REDIRECT_RE = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+\//;
+
 // DCR (Dynamic Client Registration) constants
 export const MCP_REFRESH_TOKEN_PREFIX = "mcpr_";
 export const MCP_REFRESH_TOKEN_EXPIRY_SEC = 604800; // 7 days
