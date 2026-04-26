@@ -12,7 +12,6 @@
  */
 
 import { API_PATH } from "@/lib/constants";
-import { isBearerBypassRoute } from "./cors-gate";
 
 /**
  * RoutePolicy kind constants. Use these instead of string literals so a
@@ -118,13 +117,14 @@ export function classifyRoute(pathname: string): RoutePolicy {
   // Session-required API routes. This includes Bearer-bypass-eligible
   // routes (PASSWORDS, API_KEYS, VAULT_DELEGATION etc.) — they're
   // fundamentally session-required, with optional Bearer as alternative
-  // auth. The orchestrator uses `isBearerBypassRoute(pathname)` from
-  // cors-gate to decide whether the bypass dispatch is taken for a
-  // given request; the classification stays "api-session-required".
-  if (
-    isBearerBypassRoute(pathname) ||
-    SESSION_REQUIRED_PREFIXES.some((prefix) => pathname.startsWith(prefix))
-  ) {
+  // auth. Every EXTENSION_TOKEN_ROUTES entry (cors-gate.ts) is already
+  // covered by a SESSION_REQUIRED_PREFIXES match, so we don't import
+  // isBearerBypassRoute here — keeping route-policy as a pure pathname
+  // classifier with no dependency on cors-gate. The orchestrator calls
+  // isBearerBypassRoute(pathname) directly to decide whether the
+  // bypass dispatch is taken for a given request; the classification
+  // stays "api-session-required" either way.
+  if (SESSION_REQUIRED_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
     return { kind: ROUTE_POLICY_KIND.API_SESSION_REQUIRED };
   }
 

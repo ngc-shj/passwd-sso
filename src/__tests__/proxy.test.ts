@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 import { PERMISSIONS_POLICY } from "../lib/security/security-headers";
 import { SESSION_CACHE_MAX } from "../lib/validations/common.server";
+import { SESSION_CACHE_TTL_MS } from "../lib/proxy/auth-gate";
 
 const { mockCheckAccessWithAudit, mockResolveUserTenantId } = vi.hoisted(() => ({
   mockCheckAccessWithAudit: vi.fn().mockResolvedValue({ allowed: true }),
@@ -944,13 +945,13 @@ describe("auth-gate session cache TTL expiry", () => {
     await proxy(buildReq(), dummyOptions);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
-    // Second request 5s later: serves from cache (no new fetch)
-    vi.advanceTimersByTime(5_000);
+    // Second request well within TTL: serves from cache (no new fetch)
+    vi.advanceTimersByTime(SESSION_CACHE_TTL_MS / 6);
     await proxy(buildReq(), dummyOptions);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
-    // Third request past 30s TTL: cache is stale, fresh fetch fires
-    vi.advanceTimersByTime(30_000);
+    // Third request past TTL: cache is stale, fresh fetch fires
+    vi.advanceTimersByTime(SESSION_CACHE_TTL_MS);
     await proxy(buildReq(), dummyOptions);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
