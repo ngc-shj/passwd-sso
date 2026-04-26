@@ -14,8 +14,8 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
-import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/http/api-response";
 import { parseQuery } from "@/lib/http/parse-body";
@@ -103,26 +103,9 @@ async function handleGET(req: NextRequest) {
   if (!result.ok) return result.response;
   const { tenantId, operatorId, from, to } = result.data;
 
-  const membership = await withBypassRls(
-    prisma,
-    async () =>
-      prisma.tenantMember.findFirst({
-        where: {
-          userId: operatorId,
-          tenantId,
-          role: { in: [TENANT_ROLE.OWNER, TENANT_ROLE.ADMIN] },
-          deactivatedAt: null,
-        },
-        select: { tenantId: true },
-      }),
-    BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
-  );
-  if (!membership) {
-    return NextResponse.json(
-      { error: "operatorId is not an active tenant admin" },
-      { status: 400 },
-    );
-  }
+  const op = await requireMaintenanceOperator(operatorId, { tenantId });
+  if (!op.ok) return op.response;
+  const membership = op.operator;
 
   // Read the anchor row to get the snapshot upper bound
   const anchors = await withBypassRls(

@@ -8,14 +8,14 @@ const ADMIN_TOKEN = randomBytes(32).toString("hex");
 
 const {
   mockShareUpdateMany,
-  mockUserFindUnique,
+  mockTenantMemberFindFirst,
   mockCheck,
   mockLogAudit,
   mockWithBypassRls,
   mockWithTenantRls,
 } = vi.hoisted(() => ({
   mockShareUpdateMany: vi.fn(),
-  mockUserFindUnique: vi.fn(),
+  mockTenantMemberFindFirst: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockLogAudit: vi.fn(),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
@@ -25,7 +25,7 @@ const {
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { updateMany: mockShareUpdateMany },
-    user: { findUnique: mockUserFindUnique },
+    tenantMember: { findFirst: mockTenantMemberFindFirst },
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -146,8 +146,8 @@ describe("POST /api/admin/rotate-master-key", () => {
     expect(body.error).toContain("does not match");
   });
 
-  it("returns 400 when operatorId does not exist", async () => {
-    mockUserFindUnique.mockResolvedValue(null);
+  it("returns 400 when operatorId has MEMBER role", async () => {
+    mockTenantMemberFindFirst.mockResolvedValue(null);
     const req = createRequest(
       { targetVersion: 2, operatorId: "660e8400-e29b-41d4-a716-446655440099" },
       ADMIN_TOKEN
@@ -155,11 +155,31 @@ describe("POST /api/admin/rotate-master-key", () => {
     const res = await POST(req);
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error).toContain("operatorId");
+    expect(body.error).toContain("active tenant admin");
+
+    // Verify the query filters by admin roles
+    const where = mockTenantMemberFindFirst.mock.calls[0][0].where;
+    expect(where.role).toEqual({ in: ["OWNER", "ADMIN"] });
+  });
+
+  it("returns 400 when operatorId is a deactivated admin", async () => {
+    mockTenantMemberFindFirst.mockResolvedValue(null);
+    const req = createRequest(
+      { targetVersion: 2, operatorId: "660e8400-e29b-41d4-a716-446655440099" },
+      ADMIN_TOKEN
+    );
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("active tenant admin");
+
+    // Verify the query filters out deactivated members
+    const where = mockTenantMemberFindFirst.mock.calls[0][0].where;
+    expect(where.deactivatedAt).toBeNull();
   });
 
   it("returns 200 with targetVersion and revokedShares=0 when no shares to revoke", async () => {
-    mockUserFindUnique.mockResolvedValue({ id: "660e8400-e29b-41d4-a716-446655440001", tenantId: "tenant-1" });
+    mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
 
     const req = createRequest(
       { targetVersion: 2, operatorId: "660e8400-e29b-41d4-a716-446655440001" },
@@ -190,7 +210,7 @@ describe("POST /api/admin/rotate-master-key", () => {
   });
 
   it("revokes old shares when revokeShares is true", async () => {
-    mockUserFindUnique.mockResolvedValue({ id: "660e8400-e29b-41d4-a716-446655440001", tenantId: "tenant-1" });
+    mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
     mockShareUpdateMany.mockResolvedValue({ count: 3 });
 
     const req = createRequest(
@@ -214,7 +234,7 @@ describe("POST /api/admin/rotate-master-key", () => {
   });
 
   it("does not call shareUpdateMany when revokeShares is false", async () => {
-    mockUserFindUnique.mockResolvedValue({ id: "660e8400-e29b-41d4-a716-446655440001", tenantId: "tenant-1" });
+    mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
 
     const req = createRequest(
       { targetVersion: 2, operatorId: "660e8400-e29b-41d4-a716-446655440001", revokeShares: false },
