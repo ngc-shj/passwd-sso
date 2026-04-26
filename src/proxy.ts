@@ -60,6 +60,32 @@ const PASSKEY_AUDIT_DEDUP_MS = 5 * MS_PER_MINUTE;
 const PASSKEY_AUDIT_MAP_MAX = 1000;
 const passkeyAuditEmitted = new Map<string, number>();
 
+/**
+ * Record a passkey-enforcement audit emit for `userId` at `now`. Returns
+ * `true` if the caller should fire the audit, `false` if the user has
+ * already been audited within `PASSKEY_AUDIT_DEDUP_MS`.
+ *
+ * Eviction is staleness-based, not insertion-order: when the dedup map is
+ * full, the user whose `lastEmitted` is oldest is evicted. This is achieved
+ * by `delete`-then-`set` on every accepted emit so JS Map insertion order
+ * (which is what `keys().next()` returns) tracks last-emit recency rather
+ * than first-emit time.
+ */
+function recordPasskeyAuditEmit(userId: string, now: number): boolean {
+  const lastEmitted = passkeyAuditEmitted.get(userId);
+  if (lastEmitted && now - lastEmitted <= PASSKEY_AUDIT_DEDUP_MS) {
+    return false;
+  }
+  // Refresh insertion order so the head is always the staleness candidate.
+  passkeyAuditEmitted.delete(userId);
+  if (passkeyAuditEmitted.size >= PASSKEY_AUDIT_MAP_MAX) {
+    const oldest = passkeyAuditEmitted.keys().next().value;
+    if (oldest !== undefined) passkeyAuditEmitted.delete(oldest);
+  }
+  passkeyAuditEmitted.set(userId, now);
+  return true;
+}
+
 export async function proxy(request: NextRequest, options: ProxyOptions) {
   const { pathname } = request.nextUrl;
 
@@ -131,14 +157,7 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
 
         // Fire-and-forget audit log — deduplicated per user to avoid flood on repeated redirects
         const userId = session.userId ?? "";
-        const lastEmitted = passkeyAuditEmitted.get(userId);
-        if (!lastEmitted || Date.now() - lastEmitted > PASSKEY_AUDIT_DEDUP_MS) {
-          if (passkeyAuditEmitted.size >= PASSKEY_AUDIT_MAP_MAX) {
-            // Evict oldest entry to prevent unbounded growth
-            const oldest = passkeyAuditEmitted.keys().next().value;
-            if (oldest !== undefined) passkeyAuditEmitted.delete(oldest);
-          }
-          passkeyAuditEmitted.set(userId, Date.now());
+        if (recordPasskeyAuditEmit(userId, Date.now())) {
           // Internal self-fetch: declare same-origin explicitly. Node
           // fetch (undici) does not auto-set Origin; without it the new
           // proxy CSRF gate would 403 this request.
@@ -292,6 +311,10 @@ export { applySecurityHeaders as _applySecurityHeaders };
 export { extractSessionToken as _extractSessionToken };
 export { setSessionCache as _setSessionCache };
 export { sessionCache as _sessionCache };
+export { passkeyAuditEmitted as _passkeyAuditEmitted };
+export { PASSKEY_AUDIT_MAP_MAX as _PASSKEY_AUDIT_MAP_MAX };
+export { PASSKEY_AUDIT_DEDUP_MS as _PASSKEY_AUDIT_DEDUP_MS };
+export { recordPasskeyAuditEmit as _recordPasskeyAuditEmit };
 
 function clearAuthSessionCookies(response: NextResponse, basePath: string = ""): void {
   const authSessionCookieNames = [
