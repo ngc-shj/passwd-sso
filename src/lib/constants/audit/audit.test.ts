@@ -23,6 +23,7 @@ describe("mergeActionGroups", () => {
     expect(adminActions).toContain(AUDIT_ACTION.TENANT_ROLE_UPDATE);
     expect(adminActions).toContain(AUDIT_ACTION.ACCESS_DENIED);
     expect(adminActions).toContain(AUDIT_ACTION.HISTORY_PURGE);
+    expect(adminActions).toContain(AUDIT_ACTION.AUDIT_LOG_PURGE);
 
     // Must contain actions from TEAM side
     expect(adminActions).toContain(AUDIT_ACTION.MASTER_KEY_ROTATION);

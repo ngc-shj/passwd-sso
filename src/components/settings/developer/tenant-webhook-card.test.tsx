@@ -162,6 +162,8 @@ describe("TenantWebhookCard (tenant-specific)", () => {
 
     // HISTORY_PURGE is now subscribable (dispatched via logAudit)
     expect(screen.getByText("HISTORY_PURGE")).toBeInTheDocument();
+    // AUDIT_LOG_PURGE — separate action for audit-log retention purge
+    expect(screen.getByText("AUDIT_LOG_PURGE")).toBeInTheDocument();
 
     // MCP Client actions
     expect(screen.getByText("MCP_CLIENT_CREATE")).toBeInTheDocument();

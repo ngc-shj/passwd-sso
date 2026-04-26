@@ -23,6 +23,9 @@ import { MS_PER_DAY } from "@/lib/constants/time";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/http/api-response";
 
+// Rate limiter shares the same key for dryRun and real calls intentionally:
+// preventing probe→exploit racing (an admin cannot dry-run-probe matching
+// counts then immediately delete within the same 60-second window).
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });
 
 const bodySchema = z.object({
@@ -63,6 +66,19 @@ async function handlePOST(req: NextRequest) {
     const matched = await withBypassRls(prisma, async () =>
       prisma.passwordEntryHistory.count({ where: whereClause }),
     BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+    await logAuditAsync({
+      ...tenantAuditBase(req, SYSTEM_ACTOR_ID, membership.tenantId),
+      actorType: ACTOR_TYPE.SYSTEM,
+      action: AUDIT_ACTION.HISTORY_PURGE,
+      metadata: {
+        operatorId,
+        [AUDIT_METADATA_KEY.PURGED_COUNT]: 0,
+        matched,
+        retentionDays,
+        systemWide: true,
+        dryRun: true,
+      },
+    });
     return NextResponse.json({ purged: 0, matched, dryRun: true });
   }
 

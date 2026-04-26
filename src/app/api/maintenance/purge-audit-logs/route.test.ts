@@ -299,7 +299,7 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         scope: "TENANT",
-        action: "HISTORY_PURGE",
+        action: "AUDIT_LOG_PURGE",
         userId: SYSTEM_ACTOR_ID,
         actorType: "SYSTEM",
         tenantId: "tenant-1",
@@ -313,7 +313,7 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     );
   });
 
-  it("does not log audit on dryRun", async () => {
+  it("emits audit log with dryRun: true metadata on dryRun", async () => {
     mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
     mockTenantFindMany.mockResolvedValue([{ id: "tenant-1", auditLogRetentionDays: null }]);
     mockCount.mockResolvedValue(3);
@@ -324,6 +324,20 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     );
     await POST(req);
 
-    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "TENANT",
+        action: "AUDIT_LOG_PURGE",
+        metadata: expect.objectContaining({
+          operatorId: "660e8400-e29b-41d4-a716-446655440010",
+          purgedCount: 0,
+          matched: 3,
+          retentionDays: 365,
+          systemWide: true,
+          dryRun: true,
+          targetTable: "auditLog",
+        }),
+      }),
+    );
   });
 });
