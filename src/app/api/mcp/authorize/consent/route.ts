@@ -10,7 +10,14 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 
 export async function POST(req: NextRequest) {
-  // CSRF protection: Origin header is mandatory for consent (defense-in-depth)
+  // Origin presence guard (early return / defense-in-depth).
+  // Primary CSRF protection happens in the proxy CSRF gate at
+  // src/lib/proxy/csrf-gate.ts, which value-compares Origin against the
+  // app's own origin for every cookie-bearing mutating request. By the time
+  // we reach this handler the value comparison has already passed; this
+  // remaining check is presence-only — a request reaching the route handler
+  // with no Origin header at all is a misconfigured caller and we 403 fast
+  // rather than walking through the consent processing.
   const origin = req.headers.get("origin");
   if (!origin) {
     return errorResponse(API_ERROR.INVALID_ORIGIN, 403);
