@@ -42,5 +42,17 @@ jobs:
 
       - run: npm ci
 
+      # Several refactor-phase-verify scripts (verify-move-only-diff,
+      # check-vitest-coverage-include, etc.) compare against main via
+      # `git show main:<path>` and `git diff main...HEAD`. actions/checkout
+      # with fetch-depth: 0 fetches full history of the pushed ref but does
+      # not create a local `main` branch. Explicitly fetch and create it.
+      - name: Ensure main ref is available
+        run: |
+          set -euo pipefail
+          if ! git rev-parse --verify main >/dev/null 2>&1; then
+            git fetch origin main:main
+          fi
+
       - name: refactor-phase-verify
         run: node scripts/refactor-phase-verify.mjs --force
