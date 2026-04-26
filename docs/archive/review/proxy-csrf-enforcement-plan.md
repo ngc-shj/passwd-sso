@@ -623,6 +623,32 @@ addressed by this plan. Each will land as an independent small PR:
 - `pre3` — operatorId binding — requires per-operator signed token (JWT or
   similar) with operational migration of `ADMIN_API_TOKEN` infrastructure.
 
+## Implementation Checklist
+
+Files to be created (5):
+- `src/lib/proxy/security-headers.ts` (+ test)
+- `src/lib/proxy/auth-gate.ts` (+ test)
+- `src/lib/proxy/cors-gate.ts` (+ test)
+- `src/lib/proxy/route-policy.ts` (+ test)
+- `src/lib/proxy/csrf-gate.ts` (+ test)
+
+Files to be modified (24):
+- `src/proxy.ts` (orchestrator simplification + add Origin to internal fetch)
+- `src/__tests__/proxy.test.ts` (preserve via shims; add C4 step 6 cases)
+- 21 route files (remove inline `assertOrigin` — see C5 enumeration)
+- `CLAUDE.md` (responsibility boundary section)
+
+Reused utilities (must not reimplement):
+- `src/lib/auth/session/csrf.ts:assertOrigin` — Origin comparison
+- `src/lib/http/cors.ts:handlePreflight, applyCorsHeaders` — CORS handling
+- `src/lib/auth/policy/access-restriction.ts:checkAccessRestrictionWithAudit` — IP restriction
+- `src/lib/security/security-headers.ts:PERMISSIONS_POLICY` — header constants
+- `src/lib/url-helpers.ts:getAppOrigin, isHttps` — URL utils
+- `src/lib/tenant-context.ts:resolveUserTenantId` — tenant resolution
+- `src/i18n/locale-utils.ts:getLocaleFromPathname, stripLocalePrefix` — i18n
+- `src/lib/constants/{API_PATH, MS_PER_DAY, MS_PER_MINUTE, AUDIT_ACTION}` — constants
+- `src/lib/validations/common.server.ts:SESSION_CACHE_MAX` — cache size constant
+
 ## User operation scenarios
 
 ### Scenario 1: Browser session-authenticated mutation (preservation)

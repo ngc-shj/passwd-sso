@@ -5,7 +5,6 @@ import { hexHash } from "@/lib/validations/common";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { assertOrigin } from "@/lib/auth/session/csrf";
 import { getAppOrigin } from "@/lib/url-helpers";
 import { logAuditAsync, teamAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import { executeVaultReset } from "@/lib/vault/vault-reset";
@@ -32,10 +31,7 @@ const adminResetSchema = z.object({
 // Execute a vault reset initiated by a team admin.
 // The target user must be authenticated and submit the token + confirmation.
 async function handlePOST(req: NextRequest) {
-  const originError = assertOrigin(req);
-  if (originError) return originError;
-
-  // Intentionally stricter than assertOrigin (which skips when unset for dev
+  // Intentionally stricter than proxy CSRF gate (which skips when unset for dev
   // convenience): admin vault reset must never run without a configured origin.
   const appUrl = getAppOrigin();
   if (!appUrl) {

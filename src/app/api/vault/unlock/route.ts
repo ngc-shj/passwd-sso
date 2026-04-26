@@ -1,7 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createHash, timingSafeEqual } from "crypto";
 import { auth } from "@/auth";
-import { assertOrigin } from "@/lib/auth/session/csrf";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { hmacVerifier } from "@/lib/crypto/crypto-server";
@@ -36,9 +35,6 @@ const unlockLimiter = createRateLimiter({
  * so the client can decrypt the secret key and verify locally.
  */
 async function handlePOST(request: NextRequest) {
-  const originError = assertOrigin(request);
-  if (originError) return originError;
-
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();

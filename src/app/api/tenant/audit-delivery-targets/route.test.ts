@@ -7,7 +7,6 @@ const {
   mockRequireTenantPermission,
   mockWithTenantRls,
   mockLogAudit,
-  mockAssertOrigin,
   mockAuditDeliveryTargetFindMany,
   mockAuditDeliveryTargetCount,
   mockAuditDeliveryTargetCreate,
@@ -19,7 +18,6 @@ const {
   mockRequireTenantPermission: vi.fn(),
   mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: unknown, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
-  mockAssertOrigin: vi.fn().mockReturnValue(null),
   mockAuditDeliveryTargetFindMany: vi.fn(),
   mockAuditDeliveryTargetCount: vi.fn(),
   mockAuditDeliveryTargetCreate: vi.fn(),
@@ -69,9 +67,6 @@ vi.mock("@/lib/audit/audit", () => ({
     ip: "127.0.0.1",
     userAgent: "test",
   }),
-}));
-vi.mock("@/lib/auth/session/csrf", () => ({
-  assertOrigin: mockAssertOrigin,
 }));
 vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
@@ -186,21 +181,6 @@ describe("POST /api/tenant/audit-delivery-targets", () => {
     const { status } = await parseResponse(res);
 
     expect(status).toBe(403);
-  });
-
-  it("blocks request when CSRF fails", async () => {
-    mockAssertOrigin.mockReturnValueOnce(
-      new Response(JSON.stringify({ error: "INVALID_ORIGIN" }), { status: 403 }),
-    );
-
-    const req = createRequest("POST", "http://localhost/api/tenant/audit-delivery-targets", {
-      body: { kind: "WEBHOOK", url: "https://example.com/hook", secret: "s3cr3t" },
-    });
-    const res = await POST(req);
-    const { status } = await parseResponse(res);
-
-    expect(status).toBe(403);
-    expect(mockAuth).not.toHaveBeenCalled();
   });
 
   it("returns 400 when kind is DB (internal only, not allowed)", async () => {

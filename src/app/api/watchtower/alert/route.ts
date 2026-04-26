@@ -3,7 +3,6 @@ import { z } from "zod/v4";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { parseBody } from "@/lib/http/parse-body";
-import { assertOrigin } from "@/lib/auth/session/csrf";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { requireTeamMember } from "@/lib/auth/access/team-auth";
 import { logAuditAsync, personalAuditBase, teamAuditBase } from "@/lib/audit/audit";
@@ -36,9 +35,6 @@ const alertSchema = z.object({
 // POST /api/watchtower/alert
 // Called by the client after auto-monitor detects new breaches.
 async function handlePOST(req: NextRequest) {
-  const originError = assertOrigin(req);
-  if (originError) return originError;
-
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();

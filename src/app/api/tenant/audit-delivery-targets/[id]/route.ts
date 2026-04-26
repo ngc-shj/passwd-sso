@@ -3,7 +3,6 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
-import { assertOrigin } from "@/lib/auth/session/csrf";
 import { parseBody } from "@/lib/http/parse-body";
 import {
   TENANT_PERMISSION,
@@ -22,9 +21,6 @@ const patchSchema = z.object({
 
 // PATCH /api/tenant/audit-delivery-targets/[id] — Toggle isActive for an audit delivery target
 async function handlePATCH(req: NextRequest, { params }: Params) {
-  const originError = assertOrigin(req);
-  if (originError) return originError;
-
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();

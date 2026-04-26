@@ -9,7 +9,6 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { BREAKGLASS_USER_LIST_LIMIT } from "@/lib/validations/common.server";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
-import { assertOrigin } from "@/lib/auth/session/csrf";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { createNotification } from "@/lib/notification";
 import { createBreakglassGrantSchema } from "@/lib/validations";
@@ -28,9 +27,6 @@ const breakglassRateLimiter = createRateLimiter({
 
 // POST /api/tenant/breakglass — Create a break-glass personal log access grant
 async function handlePOST(req: NextRequest) {
-  const originError = assertOrigin(req);
-  if (originError) return originError;
-
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();

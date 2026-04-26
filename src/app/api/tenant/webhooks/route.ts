@@ -3,7 +3,6 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
-import { assertOrigin } from "@/lib/auth/session/csrf";
 import { parseBody } from "@/lib/http/parse-body";
 import {
   TENANT_PERMISSION,
@@ -71,9 +70,6 @@ async function handleGET(_req: NextRequest) {
 
 // POST /api/tenant/webhooks — Create a tenant webhook
 async function handlePOST(req: NextRequest) {
-  const originError = assertOrigin(req);
-  if (originError) return originError;
-
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();

@@ -67,10 +67,6 @@ vi.mock("@/lib/audit/audit", () => ({
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: "test-agent", acceptLanguage: null }),
 }));
 
-vi.mock("@/lib/auth/session/csrf", () => ({
-  assertOrigin: vi.fn().mockReturnValue(null),
-}));
-
 import { POST } from "@/app/api/mcp/authorize/consent/route";
 
 const VALID_SESSION = { user: { id: "user-uuid-123" } };
@@ -141,26 +137,6 @@ describe("POST /api/mcp/authorize/consent", () => {
       "http://localhost/api/mcp/authorize/consent",
       VALID_FORM_FIELDS,
       { origin: "" },
-    );
-    const res = await POST(req as unknown as import("next/server").NextRequest);
-
-    expect(res.status).toBe(403);
-    const json = await res.json();
-    expect(json.error).toBe("INVALID_ORIGIN");
-  });
-
-  it("returns 403 when Origin header does not match host (CSRF check)", async () => {
-    const { assertOrigin } = await import("@/lib/auth/session/csrf");
-    const mockAssertOrigin = vi.mocked(assertOrigin);
-    const { NextResponse } = await import("next/server");
-    mockAssertOrigin.mockReturnValueOnce(
-      NextResponse.json({ error: "INVALID_ORIGIN" }, { status: 403 }),
-    );
-
-    const req = createFormRequest(
-      "http://localhost/api/mcp/authorize/consent",
-      VALID_FORM_FIELDS,
-      { origin: "https://evil.example.com" },
     );
     const res = await POST(req as unknown as import("next/server").NextRequest);
 

@@ -1,7 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { auth } from "@/auth";
-import { assertOrigin } from "@/lib/auth/session/csrf";
 import { hmacVerifier } from "@/lib/crypto/crypto-server";
 import { VERIFIER_VERSION } from "@/lib/crypto/crypto-client";
 import { prisma } from "@/lib/prisma";
@@ -71,9 +70,6 @@ const rotateKeySchema = z.object({
  * interactive transaction. All EA grants with older keyVersion are marked STALE.
  */
 async function handlePOST(request: NextRequest) {
-  const originError = assertOrigin(request);
-  if (originError) return originError;
-
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
