@@ -129,6 +129,30 @@ describe("PUT /api/tenant/mcp-clients/[id]", () => {
       expect.objectContaining({
         action: "MCP_CLIENT_UPDATE",
         tenantId: "tenant-1",
+        // Audit metadata must list the explicit schema fields only (no
+        // wholesale spread of the input body).
+        metadata: { name: "updated-client" },
+      }),
+    );
+  });
+
+  it("audit metadata only includes fields actually changed", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockMcpClientFindFirst.mockResolvedValue(makeClient());
+    mockMcpClientUpdate.mockResolvedValue(makeClient({ isActive: false }));
+
+    const req = createRequest("PUT", "http://localhost/api/tenant/mcp-clients/client-1", {
+      body: { isActive: false },
+    });
+    const res = await PUT(req, createParams({ id: "client-1" }));
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "MCP_CLIENT_UPDATE",
+        metadata: { isActive: false },
       }),
     );
   });

@@ -121,7 +121,14 @@ async function handlePUT(
     action: AUDIT_ACTION.MCP_CLIENT_UPDATE,
     targetType: AUDIT_TARGET_TYPE.MCP_CLIENT,
     targetId: id,
-    metadata: data as Record<string, unknown>,
+    // Spread known schema fields explicitly so future updateSchema
+    // additions do not silently expand the audit payload.
+    metadata: {
+      ...(data.name !== undefined && { name: data.name }),
+      ...(data.redirectUris !== undefined && { redirectUris: data.redirectUris }),
+      ...(data.allowedScopes !== undefined && { allowedScopes: data.allowedScopes }),
+      ...(data.isActive !== undefined && { isActive: data.isActive }),
+    },
   });
 
   return NextResponse.json({ client: updated });
