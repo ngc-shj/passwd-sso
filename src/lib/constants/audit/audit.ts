@@ -63,6 +63,14 @@ export const AUDIT_ACTION = {
   FOLDER_DELETE: "FOLDER_DELETE",
   ENTRY_HISTORY_RESTORE: "ENTRY_HISTORY_RESTORE",
   HISTORY_PURGE: "HISTORY_PURGE",
+  // SIEM orientation: rows logged before this constant was introduced used
+  // HISTORY_PURGE for both entry-history retention purges AND audit-log
+  // retention purges. Forward queries should distinguish:
+  //   HISTORY_PURGE     → password-entry history retention purge
+  //   AUDIT_LOG_PURGE   → audit_logs table retention purge
+  // Pre-merge purge-audit-logs rows can also be disambiguated by
+  // metadata.targetTable === "auditLog" when present.
+  AUDIT_LOG_PURGE: "AUDIT_LOG_PURGE",
   MASTER_KEY_ROTATION: "MASTER_KEY_ROTATION",
   VAULT_KEY_ROTATION: "VAULT_KEY_ROTATION",
   SESSION_REVOKE: "SESSION_REVOKE",
@@ -205,6 +213,7 @@ export const AUDIT_ACTION_VALUES = [
   AUDIT_ACTION.FOLDER_DELETE,
   AUDIT_ACTION.ENTRY_HISTORY_RESTORE,
   AUDIT_ACTION.HISTORY_PURGE,
+  AUDIT_ACTION.AUDIT_LOG_PURGE,
   AUDIT_ACTION.SEND_CREATE,
   AUDIT_ACTION.SEND_REVOKE,
   AUDIT_ACTION.SHARE_ACCESS_VERIFY_SUCCESS,
@@ -518,6 +527,7 @@ export const AUDIT_ACTION_GROUPS_TENANT: Record<string, AuditAction[]> = {
     AUDIT_ACTION.MASTER_KEY_ROTATION,
     AUDIT_ACTION.AUDIT_LOG_DOWNLOAD,
     AUDIT_ACTION.HISTORY_PURGE,
+    AUDIT_ACTION.AUDIT_LOG_PURGE,
     AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
   ],
   [AUDIT_ACTION_GROUP.SCIM]: [

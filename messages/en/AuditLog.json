@@ -64,6 +64,7 @@
   "FOLDER_DELETE": "Deleted folder",
   "ENTRY_HISTORY_RESTORE": "Restored from history",
   "HISTORY_PURGE": "Purged history",
+  "AUDIT_LOG_PURGE": "Purged audit logs",
   "MASTER_KEY_ROTATION": "Master key rotation",
   "VAULT_KEY_ROTATION": "Vault key rotation",
   "SESSION_REVOKE": "Revoked session",

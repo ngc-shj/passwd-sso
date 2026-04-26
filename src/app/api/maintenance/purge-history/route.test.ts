@@ -294,7 +294,7 @@ describe("POST /api/maintenance/purge-history", () => {
     );
   });
 
-  it("does not log audit on dryRun", async () => {
+  it("emits audit log with dryRun: true metadata on dryRun", async () => {
     mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
     mockCount.mockResolvedValue(3);
 
@@ -304,6 +304,19 @@ describe("POST /api/maintenance/purge-history", () => {
     );
     await POST(req);
 
-    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "TENANT",
+        action: "HISTORY_PURGE",
+        metadata: expect.objectContaining({
+          operatorId: "660e8400-e29b-41d4-a716-446655440010",
+          purgedCount: 0,
+          matched: 3,
+          retentionDays: 90,
+          systemWide: true,
+          dryRun: true,
+        }),
+      }),
+    );
   });
 });

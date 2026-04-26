@@ -64,6 +64,7 @@
   "FOLDER_DELETE": "フォルダ削除",
   "ENTRY_HISTORY_RESTORE": "履歴版から復元",
   "HISTORY_PURGE": "履歴の期限削除",
+  "AUDIT_LOG_PURGE": "監査ログの期限削除",
   "MASTER_KEY_ROTATION": "マスターキーローテーション",
   "VAULT_KEY_ROTATION": "保管庫キーローテーション",
   "SESSION_REVOKE": "セッションを取り消し",
