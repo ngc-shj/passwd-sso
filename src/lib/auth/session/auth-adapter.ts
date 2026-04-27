@@ -322,13 +322,21 @@ export function createCustomAdapter(): Adapter {
         currentSessionToken: session.sessionToken,
       });
 
-      // Fire audit + notification outside the RLS transaction context
+      // Fire audit + notification outside the RLS transaction context.
+      // F-4-A: invalidate the cache BEFORE the audit/notification loop so
+      // the evicted sessions stop being served from cache as quickly as
+      // possible (consistent with site 7's cache-promptness rationale).
+      // The cast here re-asserts the declared shape because TypeScript's
+      // control-flow analysis narrows `evictionInfo` to `never` after an
+      // `await`-bearing closure boundary, even though the declaration at
+      // line 245-249 is the load-bearing source of truth.
       if (evictionInfo) {
         const { tenantId, maxSessions, evicted } = evictionInfo as {
           tenantId: string;
           maxSessions: number;
           evicted: { id: string; sessionToken: string; ipAddress: string | null; userAgent: string | null }[];
         };
+        await invalidateCachedSessions(evicted.map((e) => e.sessionToken));
         for (const ev of evicted) {
           await logAuditAsync({
             scope: AUDIT_SCOPE.PERSONAL,
@@ -356,9 +364,6 @@ export function createCustomAdapter(): Adapter {
           body: `${evicted.length} session(s) terminated due to concurrent session limit (max: ${maxSessions}).`,
           metadata: { evictedCount: evicted.length, maxConcurrentSessions: maxSessions },
         });
-
-        // R3: invalidate cache for evicted sessions after $transaction commits.
-        await invalidateCachedSessions(evicted.map((e) => e.sessionToken));
       }
 
       return {

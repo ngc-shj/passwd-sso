@@ -9,6 +9,7 @@ import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
 import { SESSION_ABSOLUTE_TIMEOUT_MAX } from "@/lib/validations/common";
 import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 import { findOrCreateSsoTenant } from "@/lib/tenant/tenant-management";
+import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId, resolveUserTenantIdFromClient } from "@/lib/tenant-context";
 import { getLogger } from "@/lib/logger";
@@ -78,6 +79,10 @@ export async function ensureTenantMembershipForSignIn(
       const isBootstrapTenant = !!existingTenant?.isBootstrap;
       // Allow one-time migration from bootstrap tenant to IdP tenant.
       if (isBootstrapTenant) {
+        // Captured inside the tx for cache invalidation after commit (R3 site
+        // #10 — Session.tenantId is cached in SessionInfo, so the migration
+        // updateMany would otherwise leave stale cache entries up to TTL).
+        let migratedSessionTokens: string[] = [];
         await prisma.$transaction(async (tx) => {
           await assertBootstrapSingleMember(tx, existingTenantId);
 
@@ -105,6 +110,13 @@ export async function ensureTenantMembershipForSignIn(
             where: { userId, tenantId: existingTenantId },
             data: { tenantId: found.id },
           });
+          // Capture sessionTokens before mutating tenantId so the cache
+          // invalidation after $transaction can reach the now-migrated rows.
+          const migratedSessions = await tx.session.findMany({
+            where: { userId, tenantId: existingTenantId },
+            select: { sessionToken: true },
+          });
+          migratedSessionTokens = migratedSessions.map((s) => s.sessionToken);
           await tx.session.updateMany({
             where: { userId, tenantId: existingTenantId },
             data: { tenantId: found.id },
@@ -180,6 +192,13 @@ export async function ensureTenantMembershipForSignIn(
             where: { userId, tenantId: existingTenantId },
           });
         });
+
+        // R3 site #10: Session.tenantId is part of cached SessionInfo;
+        // tombstone the migrated tokens so the proxy stops serving the
+        // stale (pre-migration) tenantId for up to SESSION_CACHE_TTL_MS.
+        if (migratedSessionTokens.length > 0) {
+          await invalidateCachedSessions(migratedSessionTokens);
+        }
 
         // Bootstrap migration complete — skip redundant upsert below
         return found;

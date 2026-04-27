@@ -304,7 +304,7 @@ describe("setCachedSession", () => {
     "writes negative cache for { valid: false } with PX=NEGATIVE_CACHE_TTL_MS, NX (S-Req-6)",
     async () => {
       mockSet.mockResolvedValueOnce("OK");
-      await setCachedSession("tok", fixtureNegativeSession, 30_000);
+      await setCachedSession("tok", fixtureNegativeSession, SESSION_CACHE_TTL_MS);
 
       const expectedKey = `${SESSION_CACHE_KEY_PREFIX}${hashSessionToken("tok")}`;
       expect(mockSet).toHaveBeenCalledTimes(1);
