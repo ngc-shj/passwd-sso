@@ -76,9 +76,9 @@ TB7: Extension Passkey Provider (MAIN world <-> content script <-> Service Worke
 | S3: Attacker replays extension token | TB5 | Token hashed (SHA-256) before DB storage; expiry enforced; single-use refresh | Token window between issue and expiry |
 | S4: Attacker spoofs WebAuthn assertion | TB6 | Origin and RP ID validation; challenge freshness; signature verification | None (WebAuthn protocol provides strong anti-spoofing) |
 | S6: Malicious page spoofs rpId in passkey bridge message | TB7 | SW reads sender URL from Chrome runtime (`sender.tab.url`), not from message payload; `isSenderAuthorizedForRpId` validates rpId is a registrable suffix of page hostname | MAIN world attacker can send arbitrary postMessage payload — rpId payload is untrusted by design |
-| S5: Cross-tenant data access | TB2 | FORCE ROW LEVEL SECURITY on all 52 tenant-scoped tables; tenant context via SET LOCAL | RLS bypass in 76 allowlisted files (CI-guarded) |
+| S5: Cross-tenant data access | TB2 | FORCE ROW LEVEL SECURITY on all 52 tenant-scoped tables; tenant context via SET LOCAL | RLS bypass in 77 allowlisted files (CI-guarded) |
 
-> **RLS enforcement**: The application runtime connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS), ensuring RLS policies are enforced in all environments including development. Migrations run as `passwd_user` (SUPERUSER) which owns the tables. The `app.bypass_rls` GUC is used by 76 allowlisted code paths for cross-tenant operations (CI-guarded by `scripts/checks/check-bypass-rls.mjs`). See [deployment guide](../operations/deployment.md) for production role setup.
+> **RLS enforcement**: The application runtime connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS), ensuring RLS policies are enforced in all environments including development. Migrations run as `passwd_user` (SUPERUSER) which owns the tables. The `app.bypass_rls` GUC is used by 77 allowlisted code paths for cross-tenant operations (CI-guarded by `scripts/checks/check-bypass-rls.mjs`). See [deployment guide](../operations/deployment.md) for production role setup.
 
 ### 3.2 Tampering
 
@@ -114,7 +114,7 @@ TB7: Extension Passkey Provider (MAIN world <-> content script <-> Service Worke
 | Assumption | Detail | Residual risk |
 | --- | --- | --- |
 | XFF parsing position | `X-Forwarded-For` is parsed at a fixed trusted-proxy count (configured at deploy time). If the proxy count is misconfigured, a client-supplied XFF header can spoof the apparent source IP. | Operators must configure `TRUSTED_PROXY_COUNT` to match their reverse-proxy topology exactly. |
-| Origin header presence | The proxy CSRF gate (`src/lib/proxy/csrf-gate.ts`) acts on `Origin` when present on cookie-bearing mutating requests. Absent `Origin` (e.g., direct server-to-server calls without a browser) is handled by the existing Bearer or no-cookie paths, which are outside the CSRF gate's threat model. | Direct curl-style POST with a session cookie and no `Origin` bypasses the Origin check; mitigated by requiring the session cookie itself (HttpOnly, Secure, SameSite=lax). |
+| Origin header presence | The proxy CSRF gate (`src/lib/proxy/csrf-gate.ts` → `src/lib/auth/session/csrf.ts:assertOrigin`) requires the `Origin` header on every cookie-bearing mutating request. A missing `Origin` is rejected with 403 (`if (!origin) return forbidden()`); cookieless / Bearer-only routes are intentionally outside this gate's scope. | A trusted server-to-server caller that deliberately sets `Origin` to the configured `APP_URL` is accepted by design. Three pre-auth, cookieless KEEP-inline `assertOrigin` exceptions remain (`/api/auth/passkey/options`, `/api/auth/passkey/options/email`, `/api/auth/passkey/verify`). |
 | IP-bound rate-limit key derivation | Rate-limit keys are derived from the resolved client IP (after XFF parsing). IPv6 is bucketed at the /64 prefix to prevent subnet-rotation bypass (see D5). | Same as XFF misconfiguration above. |
 
 ### 3.5 Denial of Service

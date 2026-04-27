@@ -19,6 +19,7 @@ This guide describes a production-oriented GCP deployment.
 - `AUTH_URL`
 - `SHARE_MASTER_KEY`
 - `REDIS_URL` (REQUIRED in production — Zod schema enforces this for `NODE_ENV=production`; backs session cache with tombstone-based revocation propagation (PR #407) and shared rate limiting. Use Memorystore for Redis.)
+- `HEALTH_REDIS_REQUIRED=true` (RECOMMENDED in production — fail the readiness probe when Redis is unreachable so the load balancer stops routing traffic to nodes where session-revocation tombstones cannot propagate)
 - `BLOB_BACKEND`
 - `JACKSON_API_KEY` (passed to the Jackson container as `JACKSON_API_KEYS` — note the trailing `S`)
 - `PASSWD_OUTBOX_WORKER_PASSWORD` (sets the `passwd_outbox_worker` DB role password; use `scripts/set-outbox-worker-password.sh` to rotate)
@@ -40,7 +41,7 @@ The audit-outbox-worker is a long-running process that drains `audit_outbox` row
 > - **GKE Deployment**: a dedicated pod running `npx tsx scripts/audit-outbox-worker.ts` continuously.
 > - **Compute Engine VM**: a systemd service or Docker container running the worker.
 
-Required env var: `OUTBOX_WORKER_DATABASE_URL` (least-privilege `passwd_outbox_worker` role).
+Recommended env var: `OUTBOX_WORKER_DATABASE_URL` (least-privilege `passwd_outbox_worker` role). Falls back to `DATABASE_URL` if unset, but running as the least-privilege role is strongly preferred in production.
 
 ## Jackson Deployment
 

@@ -7,8 +7,10 @@ web application and maintains a secure session.
 
 ## Overview
 
-The extension connects to the web app via a short-lived Bearer token
-(15-minute TTL). Token delivery uses a **one-time bridge code exchange**
+The extension connects to the web app via a Bearer token whose lifetime is
+governed by tenant policy (`extensionTokenIdleTimeoutMinutes` /
+`extensionTokenAbsoluteTimeoutMinutes`; defaults: 7d idle / 30d absolute).
+Token delivery uses a **one-time bridge code exchange**
 (introduced in PR #364):
 
 1. The web app's JavaScript obtains a single-use bridge code from
@@ -77,11 +79,11 @@ sequenceDiagram
 |-------|-----------|-----|
 | **Issue (bridge code)** | `POST /api/extension/bridge-code` (requires Auth.js session) | 60 s code TTL |
 | **Code delivery** | `window.postMessage` (MAIN → ISOLATED) | instant |
-| **Code → token exchange** | `POST /api/extension/token/exchange` (no session, atomic single-use consume) | issues 15-min token |
-| **Issue (legacy direct)** | `POST /api/extension/token` (Auth.js session) — **DEPRECATED** | 15 min |
+| **Code → token exchange** | `POST /api/extension/token/exchange` (no session, atomic single-use consume) | issues token with tenant-policy TTL (default 7d idle / 30d absolute) |
+| **Issue (legacy direct)** | `POST /api/extension/token` (Auth.js session) — **DEPRECATED** | tenant-policy TTL |
 | **Storage** | Encrypted with ephemeral AES-256-GCM key in `chrome.storage.session` | until browser close |
-| **Refresh** | `POST /api/extension/token/refresh` (Bearer + session) | 15 min (new token) |
-| **Refresh trigger** | `ALARM_TOKEN_REFRESH` fires 2 min before expiry | — |
+| **Refresh** | `POST /api/extension/token/refresh` (Bearer + session) | tenant-policy TTL (new token) |
+| **Refresh trigger** | `ALARM_TOKEN_REFRESH` fires before idle expiry | — |
 | **Revocation** | `DELETE /api/extension/token` or token expiry | — |
 | **SW restart** | Ephemeral key lost → token unreadable → re-auth required | — |
 
@@ -196,8 +198,8 @@ extension does not yet have.
 |--------------|-------------------------|------------------------|
 | DOM query (`getElementById`) | N/A (bearer in postMessage) | N/A |
 | MutationObserver | N/A | N/A |
-| postMessage listener captures bearer | **Token captured directly (15-min TTL)** | Captures a 60-s single-use code |
-| MAIN-world event listener captures payload | Token (15-min TTL) | Code (60-s TTL, single-use, race with content script) |
+| postMessage listener captures bearer | **Token captured directly (tenant-policy TTL, default 7d idle)** | Captures a 60-s single-use code |
+| MAIN-world event listener captures payload | Token (tenant-policy TTL, default 7d idle) | Code (60-s TTL, single-use, race with content script) |
 | Replay (after legitimate consume) | N/A | Atomic `UPDATE` returns count = 0 → 401 |
 | DevTools / memory forensics | Memory only | Memory only |
 | Cross-tenant escalation via tampered request | N/A | Server-side identity resolution from DB record |

@@ -78,7 +78,7 @@ Host the worker externally on one of:
 
 The worker runs: `npm run worker:audit-outbox` (or `npx tsx scripts/audit-outbox-worker.ts`).
 
-Required env var: `OUTBOX_WORKER_DATABASE_URL` (least-privilege `passwd_outbox_worker` DB role connection string).
+Recommended env var: `OUTBOX_WORKER_DATABASE_URL` (least-privilege `passwd_outbox_worker` DB role connection string). The worker falls back to `DATABASE_URL` if this is unset, but running as the least-privilege role is strongly preferred in production.
 
 ## 4c. Jackson Deployment (Required for SAML SSO)
 

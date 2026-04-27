@@ -211,7 +211,7 @@ The forwarded payload mirrors the database record: `userId` (opaque CUID), `ip`,
 
 In addition to global stdout forwarding, tenants can configure per-tenant audit delivery targets. These route audit events to tenant-specific endpoints (webhooks, SIEM integrations) independently of the global `AUDIT_LOG_FORWARD` setting.
 
-**API:** `GET/POST /api/tenant/audit-delivery-targets` — list and create delivery targets for the authenticated tenant. `PATCH /api/tenant/audit-delivery-targets/[id]` — update an existing target (enable/disable, rotate secret).
+**API:** `GET/POST /api/tenant/audit-delivery-targets` — list and create delivery targets for the authenticated tenant. `PATCH /api/tenant/audit-delivery-targets/[id]` — toggle the `isActive` flag on a delivery target (the only field accepted by the PATCH schema). Secret rotation requires deleting and re-creating the target.
 
 **Admin UI:** accessible from the tenant settings page under the audit log configuration section.
 
