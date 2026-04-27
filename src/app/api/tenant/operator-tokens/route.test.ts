@@ -341,6 +341,7 @@ describe("POST /api/tenant/operator-tokens", () => {
         action: "OPERATOR_TOKEN_CREATE",
         metadata: expect.objectContaining({
           tokenId: "tok-new",
+          tokenSubjectUserId: USER_ID,
           scope: "maintenance",
         }),
       }),
