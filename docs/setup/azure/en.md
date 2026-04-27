@@ -12,13 +12,17 @@ This guide describes a production-oriented Azure deployment.
 
 ## Required app configuration
 
-- `DATABASE_URL`
-- `MIGRATION_DATABASE_URL` (SUPERUSER role — used for `prisma migrate deploy` only)
+- `DATABASE_URL` (app role `passwd_app`)
+- `MIGRATION_DATABASE_URL` (SUPERUSER role `passwd_user` — used for `prisma migrate deploy` only)
+- `OUTBOX_WORKER_DATABASE_URL` (least-privilege role `passwd_outbox_worker` — required for audit-outbox-worker)
 - `AUTH_SECRET`
 - `AUTH_URL`
 - `SHARE_MASTER_KEY`
-- `REDIS_URL`
+- `REDIS_URL` (REQUIRED in production — Zod schema enforces this for `NODE_ENV=production`; backs session cache with tombstone-based revocation propagation (PR #407) and shared rate limiting. Use Azure Cache for Redis.)
+- `HEALTH_REDIS_REQUIRED=true` (RECOMMENDED in production — fail the readiness probe when Redis is unreachable so the load balancer stops routing traffic to nodes where session-revocation tombstones cannot propagate)
 - `BLOB_BACKEND`
+- `JACKSON_API_KEY` (passed to the Jackson container as `JACKSON_API_KEYS` — note the trailing `S`)
+- `PASSWD_OUTBOX_WORKER_PASSWORD` (sets the `passwd_outbox_worker` DB role password; use `scripts/set-outbox-worker-password.sh` to rotate)
 
 If `BLOB_BACKEND=azure`:
 - `AZURE_STORAGE_ACCOUNT`
@@ -30,6 +34,40 @@ If `BLOB_BACKEND=azure`:
 Optional:
 - `BLOB_OBJECT_PREFIX` (object key prefix)
 - `KEY_PROVIDER=azure-kv` (use Azure Key Vault for master key management — see [KMS Setup](../../operations/key-provider-setup.md#azure-key-vault-provider-azure-kv))
+
+## Audit-outbox-worker
+
+The audit-outbox-worker is a long-running process that drains `audit_outbox` rows into `audit_logs`. Without it, audit events silently accumulate as `PENDING`. Deploy it as:
+
+- **Container Apps revision/job**: add a second container or a Container Apps Job using the same Docker image, with `OUTBOX_WORKER_DATABASE_URL` set and command `["npx", "tsx", "scripts/audit-outbox-worker.ts"]`.
+- **AKS sidecar or Deployment**: add a dedicated container/pod running the worker command.
+
+Recommended env var: `OUTBOX_WORKER_DATABASE_URL` (least-privilege `passwd_outbox_worker` role). Falls back to `DATABASE_URL` if unset, but running as the least-privilege role is strongly preferred in production.
+
+## Jackson Deployment
+
+BoxyHQ SAML Jackson must run as a separate service (Docker container or Container App). It is not an npm package.
+
+- Image: `boxyhq/jackson:1.52.2`
+- Expose port 5225 internally; set `JACKSON_URL` in the `app` service to point to this service.
+- Required env vars for Jackson container:
+  - `JACKSON_API_KEYS` (your `JACKSON_API_KEY` value — note the trailing `S` in the Jackson env name)
+  - `DB_ENGINE=sql`, `DB_TYPE=postgres`, `DB_URL` (PostgreSQL)
+  - `NEXTAUTH_URL` and `EXTERNAL_URL` (public or internal URL of Jackson)
+  - `NEXTAUTH_SECRET` (same value as `AUTH_SECRET`)
+  - `NEXTAUTH_ACL=*`
+
+## Admin / Maintenance Scripts
+
+Admin scripts require a per-operator `op_*` token. Mint a token in the application UI at `/admin/tenant/operator-tokens`, then pass it at invocation time:
+
+```bash
+ADMIN_API_TOKEN=op_<your-token> scripts/purge-history.sh
+ADMIN_API_TOKEN=op_<your-token> scripts/purge-audit-logs.sh
+ADMIN_API_TOKEN=op_<your-token> TARGET_VERSION=<int> scripts/rotate-master-key.sh
+```
+
+Do NOT store `ADMIN_API_TOKEN` as a persistent environment variable. Mint tokens on demand and revoke them after use.
 
 ## Blob storage design (attachments)
 

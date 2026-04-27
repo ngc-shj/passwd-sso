@@ -7,7 +7,7 @@ Language policy: English-only (Class B). See [../operations/language-policy.md](
 | [production-readiness.md](production-readiness.md) | Production readiness checklist |
 | [feature-comparison.md](feature-comparison.md) | Comparison with 1Password / Bitwarden |
 | [feature-gap-analysis.md](feature-gap-analysis.md) | Gap analysis and priority |
-| [e2e-guidelines.md](e2e-guidelines.md) | E2E test guidelines |
+| [e2e-guidelines.md](e2e-guidelines.md) | Playwright E2E test guidelines (end-to-end browser testing; not E2E encryption) |
 | [form-architecture-mapping.md](form-architecture-mapping.md) | Form implementation mapping |
 | [webauthn-registration-flow.md](webauthn-registration-flow.md) | WebAuthn registration sequence |
 | [tenant-team-scim-spec.md](tenant-team-scim-spec.md) | SCIM provisioning spec |

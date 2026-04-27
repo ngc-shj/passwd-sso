@@ -19,17 +19,17 @@ This document distinguishes between:
 
 | Responsibility | Team Vault | Personal Vault |
 | --- | --- | --- |
-| New dialog router | `src/components/team/team-new-dialog.tsx` | `src/components/passwords/personal-password-new-dialog.tsx` |
-| Edit data loader | `src/components/team/team-edit-dialog-loader.tsx` | `src/components/passwords/personal-password-edit-dialog-loader.tsx` |
-| Edit dialog router | `src/components/team/team-edit-dialog.tsx` | `src/components/passwords/personal-password-edit-dialog.tsx` |
-| Shared dialog shell | `src/components/team/team-entry-dialog-shell.tsx` | `src/components/passwords/personal-entry-dialog-shell.tsx` |
+| New dialog router | `src/components/team/management/team-new-dialog.tsx` | `src/components/passwords/dialogs/personal-password-new-dialog.tsx` |
+| Edit data loader | `src/components/team/management/team-edit-dialog-loader.tsx` | `src/components/passwords/dialogs/personal-password-edit-dialog-loader.tsx` |
+| Edit dialog router | `src/components/team/management/team-edit-dialog.tsx` | `src/components/passwords/dialogs/personal-password-edit-dialog.tsx` |
+| Shared dialog shell | `src/components/team/forms/team-entry-dialog-shell.tsx` | `src/components/passwords/personal/personal-entry-dialog-shell.tsx` |
 
 ### Dialog Flow Mismatch
 
 - Team and Personal now both use `new-dialog -> shared dialog shell -> entry form`.
 - Team and Personal now both use `edit-dialog-loader -> edit-dialog -> shared dialog shell -> entry form`.
 - Team edit is usually launched from page-level state, while Personal edit is usually launched from card-level state.
-- `src/components/team/team-create-dialog.tsx` is a team creation dialog, not an entry form dialog, and should not be treated as a Team Vault entry-flow counterpart.
+- `src/components/team/management/team-create-dialog.tsx` is a team creation dialog, not an entry form dialog, and should not be treated as a Team Vault entry-flow counterpart.
 
 ### Target Dialog Flow
 
@@ -48,8 +48,8 @@ The target state is to make these boundaries more directly corresponding. At min
 
 | Responsibility | Team Vault | Personal Vault |
 | --- | --- | --- |
-| Login form component | `src/components/team/team-login-form.tsx` | `src/components/passwords/personal-login-form.tsx` |
-| Entry form types | `src/components/team/team-entry-form-types.ts` | `src/components/passwords/personal-login-form-types.ts` |
+| Login form component | `src/components/team/forms/team-login-form.tsx` | `src/components/passwords/personal/personal-login-form.tsx` |
+| Entry form types | `src/components/team/forms/team-entry-form-types.ts` | `src/components/passwords/personal/personal-login-form-types.ts` |
 | Login form model | `src/hooks/use-team-login-form-model.ts` | `src/hooks/use-personal-login-form-model.ts` |
 | Login state | `src/hooks/use-team-login-form-state.ts` | `src/hooks/use-personal-login-form-state.ts` |
 | Login presenter | `src/hooks/team-login-form-presenter.ts` | `src/hooks/personal-login-form-presenter.ts` |
@@ -60,7 +60,7 @@ The target state is to make these boundaries more directly corresponding. At min
 | Login field callbacks | `src/hooks/team-login-fields-callbacks.ts` | `src/hooks/personal-login-fields-callbacks.ts` |
 | Login field text props | `src/hooks/team-login-fields-text-props.ts` | `src/hooks/personal-login-fields-text-props.ts` |
 | Login initial values | `src/hooks/team-login-form-initial-values.ts` | `src/hooks/personal-login-form-initial-values.ts` |
-| Login submit helper | `src/components/team/team-login-submit.ts` | `src/components/passwords/personal-login-submit.ts` |
+| Login submit helper | `src/components/team/forms/team-login-submit.ts` | `src/components/passwords/personal/personal-login-submit.ts` |
 
 ### Login Entry Mismatch
 
@@ -74,18 +74,18 @@ The target state is to make these boundaries more directly corresponding. At min
 | --- | --- | --- |
 | Base form model | `src/hooks/use-team-base-form-model.ts` | `src/hooks/use-personal-base-form-model.ts` |
 | Shared section props | `src/hooks/team-form-sections-props.ts` | `src/hooks/personal-form-sections-props.ts` |
-| Tags and folder section | `src/components/team/team-tags-and-folder-section.tsx` | `src/components/passwords/entry-tags-and-folder-section.tsx` |
+| Tags and folder section | `src/components/team/forms/team-tags-and-folder-section.tsx` | `src/components/passwords/entry/entry-tags-and-folder-section.tsx` |
 
 ### Non-Login Entry Forms
 
 | Team Vault | Personal Vault |
 | --- | --- |
-| `src/components/team/team-secure-note-form.tsx` | `src/components/passwords/personal-secure-note-form.tsx` |
-| `src/components/team/team-credit-card-form.tsx` | `src/components/passwords/personal-credit-card-form.tsx` |
-| `src/components/team/team-identity-form.tsx` | `src/components/passwords/personal-identity-form.tsx` |
-| `src/components/team/team-passkey-form.tsx` | `src/components/passwords/personal-passkey-form.tsx` |
-| `src/components/team/team-bank-account-form.tsx` | `src/components/passwords/personal-bank-account-form.tsx` |
-| `src/components/team/team-software-license-form.tsx` | `src/components/passwords/personal-software-license-form.tsx` |
+| `src/components/team/forms/team-secure-note-form.tsx` | `src/components/passwords/personal/personal-secure-note-form.tsx` |
+| `src/components/team/forms/team-credit-card-form.tsx` | `src/components/passwords/personal/personal-credit-card-form.tsx` |
+| `src/components/team/forms/team-identity-form.tsx` | `src/components/passwords/personal/personal-identity-form.tsx` |
+| `src/components/team/forms/team-passkey-form.tsx` | `src/components/passwords/personal/personal-passkey-form.tsx` |
+| `src/components/team/forms/team-bank-account-form.tsx` | `src/components/passwords/personal/personal-bank-account-form.tsx` |
+| `src/components/team/forms/team-software-license-form.tsx` | `src/components/passwords/personal/personal-software-license-form.tsx` |
 
 ### Non-Login Entry Alignment
 
@@ -117,17 +117,17 @@ The target state is to make these boundaries more directly corresponding. At min
 
 | Stage | Team Vault | Personal Vault |
 | --- | --- | --- |
-| Router | `team-new-dialog` | `personal-password-new-dialog` |
-| Dialog shell | `team-entry-dialog-shell` | `personal-entry-dialog-shell` |
+| Router | `team-new-dialog` (management/) | `personal-password-new-dialog` (dialogs/) |
+| Dialog shell | `team-entry-dialog-shell` (forms/) | `personal-entry-dialog-shell` (personal/) |
 | Entry form | `team-* form` | `personal-* form` |
 
 #### Edit
 
 | Stage | Team Vault | Personal Vault |
 | --- | --- | --- |
-| Loader / first entry point | `team-edit-dialog-loader.tsx` | `personal-password-edit-dialog-loader.tsx` |
-| Router | `team-edit-dialog` | `personal-password-edit-dialog` |
-| Dialog shell | `team-entry-dialog-shell` | `personal-entry-dialog-shell` |
+| Loader / first entry point | `team-edit-dialog-loader.tsx` (management/) | `personal-password-edit-dialog-loader.tsx` (dialogs/) |
+| Router | `team-edit-dialog` (management/) | `personal-password-edit-dialog` (dialogs/) |
+| Dialog shell | `team-entry-dialog-shell` (forms/) | `personal-entry-dialog-shell` (personal/) |
 | Entry form | `team-* form` | `personal-* form` |
 
 #### Structural Difference

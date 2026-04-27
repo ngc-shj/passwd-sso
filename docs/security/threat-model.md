@@ -2,7 +2,7 @@
 
 This document presents a systematic STRIDE-based threat analysis for passwd-sso.
 
-Last updated: 2026-04-04
+Last updated: 2026-04-28
 
 ---
 
@@ -76,9 +76,9 @@ TB7: Extension Passkey Provider (MAIN world <-> content script <-> Service Worke
 | S3: Attacker replays extension token | TB5 | Token hashed (SHA-256) before DB storage; expiry enforced; single-use refresh | Token window between issue and expiry |
 | S4: Attacker spoofs WebAuthn assertion | TB6 | Origin and RP ID validation; challenge freshness; signature verification | None (WebAuthn protocol provides strong anti-spoofing) |
 | S6: Malicious page spoofs rpId in passkey bridge message | TB7 | SW reads sender URL from Chrome runtime (`sender.tab.url`), not from message payload; `isSenderAuthorizedForRpId` validates rpId is a registrable suffix of page hostname | MAIN world attacker can send arbitrary postMessage payload — rpId payload is untrusted by design |
-| S5: Cross-tenant data access | TB2 | FORCE ROW LEVEL SECURITY on all 39 tenant-scoped tables; tenant context via SET LOCAL | RLS bypass in 47 allowlisted files (CI-guarded) |
+| S5: Cross-tenant data access | TB2 | FORCE ROW LEVEL SECURITY on all 52 tenant-scoped tables; tenant context via SET LOCAL | RLS bypass in 77 allowlisted files (CI-guarded) |
 
-> **RLS enforcement**: The application runtime connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS), ensuring RLS policies are enforced in all environments including development. Migrations run as `passwd_user` (SUPERUSER) which owns the tables. The `app.bypass_rls` GUC is used by 47 allowlisted code paths for cross-tenant operations (CI-guarded). See [deployment guide](../operations/deployment.md) for production role setup.
+> **RLS enforcement**: The application runtime connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS), ensuring RLS policies are enforced in all environments including development. Migrations run as `passwd_user` (SUPERUSER) which owns the tables. The `app.bypass_rls` GUC is used by 77 allowlisted code paths for cross-tenant operations (CI-guarded by `scripts/checks/check-bypass-rls.mjs`). See [deployment guide](../operations/deployment.md) for production role setup.
 
 ### 3.2 Tampering
 
@@ -109,6 +109,14 @@ TB7: Extension Passkey Provider (MAIN world <-> content script <-> Service Worke
 | I5: Side-channel timing attack on auth hash | TB1 | Auth hash comparison uses constant-time HMAC verification | PBKDF2/Argon2id timing is inherent (mitigated by rate limiting) |
 | I6: Passphrase verifier reveals passphrase | TB2 | Domain-separated PBKDF2 derivation; server stores HMAC(pepper, verifierHash) | Offline brute force against verifier (mitigated by PBKDF2 cost) |
 
+### 3.4.1 Header Trust
+
+| Assumption | Detail | Residual risk |
+| --- | --- | --- |
+| XFF parsing position | `X-Forwarded-For` is parsed at a fixed trusted-proxy count (configured at deploy time). If the proxy count is misconfigured, a client-supplied XFF header can spoof the apparent source IP. | Operators must configure `TRUSTED_PROXY_COUNT` to match their reverse-proxy topology exactly. |
+| Origin header presence | The proxy CSRF gate (`src/lib/proxy/csrf-gate.ts` → `src/lib/auth/session/csrf.ts:assertOrigin`) requires the `Origin` header on every cookie-bearing mutating request. A missing `Origin` is rejected with 403 (`if (!origin) return forbidden()`); cookieless / Bearer-only routes are intentionally outside this gate's scope. | A trusted server-to-server caller that deliberately sets `Origin` to the configured `APP_URL` is accepted by design. Three pre-auth, cookieless KEEP-inline `assertOrigin` exceptions remain (`/api/auth/passkey/options`, `/api/auth/passkey/options/email`, `/api/auth/passkey/verify`). |
+| IP-bound rate-limit key derivation | Rate-limit keys are derived from the resolved client IP (after XFF parsing). IPv6 is bucketed at the /64 prefix to prevent subnet-rotation bypass (see D5). | Same as XFF misconfiguration above. |
+
 ### 3.5 Denial of Service
 
 | Threat | Component | Mitigation | Residual risk |
@@ -118,6 +126,7 @@ TB7: Extension Passkey Provider (MAIN world <-> content script <-> Service Worke
 | D3: Large attachment upload exhausts storage | TB1 | File size limits enforced server-side; per-user storage quotas | Quota enforcement depends on billing/admin configuration |
 | D4: API abuse via extension token | TB5 | Token scope limits operations; rate limiting applies equally | Token holder can make rapid requests within scope |
 | D5: IPv6 subnet rotation bypasses rate limiting | All IP-based rate limits | Rate limit keys use /64 prefix for IPv6 (treats entire subnet as one entity) | Attacker with /48 or larger allocation |
+| D5a: Bearer-token caller bypasses tenant IP restriction | `/api/v1/*`, `/api/extension/*` | `checkAccessRestrictionWithAudit` in `src/lib/proxy/api-route.ts` enforces tenant `allowedCidrs` on Bearer-authenticated routes as well as session-cookie routes | Restriction only applies when `allowedCidrs` is configured; unconfigured tenants have no IP restriction on any route |
 | D6: DCR endpoint abuse (mass registration) | /api/mcp/register | IP rate limit (20/hr, IPv6 /64), global cap (100 unclaimed), 24h auto-expiry | Distributed registration from many IPs |
 | D7: OAuth consent form CSRF (localhost redirect) | /api/mcp/authorize | CSP `form-action` allows `http://localhost:*` and `http://127.0.0.1:*` in all environments. [RFC 8252 §7.3](https://www.rfc-editor.org/rfc/rfc8252#section-7.3) specifies the loopback IP literal (`127.0.0.1` / `[::1]`) for native app OAuth callbacks and [§8.3](https://www.rfc-editor.org/rfc/rfc8252#section-8.3) explicitly marks `localhost` as NOT RECOMMENDED; the `localhost` form is a pragmatic accommodation for real clients (Claude Code/Desktop) that use it | XSS prerequisite; form-action alone cannot exfiltrate data without script execution |
 

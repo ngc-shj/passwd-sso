@@ -56,10 +56,10 @@ sequenceDiagram
 |-----------|------|
 | Options route | `src/app/api/webauthn/register/options/route.ts` |
 | Verify route | `src/app/api/webauthn/register/verify/route.ts` |
-| Server helpers | `src/lib/webauthn-server.ts` |
-| Client helpers | `src/lib/webauthn-client.ts` |
-| PRF salt derivation | `src/lib/webauthn-server.ts` → `derivePrfSalt()` |
-| PRF key wrapping | `src/lib/webauthn-client.ts` → `wrapSecretKeyWithPrf()` |
+| Server helpers | `src/lib/auth/webauthn/webauthn-server.ts` |
+| Client helpers | `src/lib/auth/webauthn/webauthn-client.ts` |
+| PRF salt derivation | `src/lib/auth/webauthn/webauthn-server.ts` → `derivePrfSalt()` |
+| PRF key wrapping | `src/lib/auth/webauthn/webauthn-client.ts` → `wrapSecretKeyWithPrf()` |
 | Email template | `src/lib/email/templates/passkey-registered.ts` |
 
 ## Data Flow Examples

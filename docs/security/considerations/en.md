@@ -75,7 +75,7 @@ Popup/Content -> Background -> API(ciphertext) -> decrypt in extension runtime
 
 ## 1.3 Cryptographic Parameters (Current Implementation)
 
-### Personal Vault (Web Crypto API / `src/lib/crypto-client.ts`)
+### Personal Vault (Web Crypto API / `src/lib/crypto/crypto-client.ts`)
 
 #### Key derivation flow (from passphrase)
 
@@ -134,7 +134,7 @@ Client(on valid):
 #### AAD (Additional Authenticated Data)
 
 - AES-GCM uses `additionalData` with **AAD** to bind ciphertext to context
-- Implementation: `src/lib/crypto-aad.ts`
+- Implementation: `src/lib/crypto/crypto-aad.ts`
 - Scopes:
   - `PV` (Personal Vault): `userId`, `entryId`
   - `OV` (Org Vault): `orgId`, `entryId`, `vaultType(blob|overview)`
@@ -154,7 +154,7 @@ Client(on valid):
   - key: `VERIFIER_PEPPER_KEY` (required in production, 64 hex chars)
   - non-production fallback derives from `SHARE_MASTER_KEY`
 
-### Share Links / Sends (Server Crypto / `src/lib/crypto-server.ts`)
+### Share Links / Sends (Server Crypto / `src/lib/crypto/crypto-server.ts`)
 
 - Algorithm: `aes-256-gcm` (Node `crypto`)
 - `SHARE_MASTER_KEY`: 64 hex chars (256-bit)
@@ -176,7 +176,7 @@ Client(on valid):
 - Unlock verifies by recomputing and comparing
 - Unlock rate limit: 5 attempts per 5 minutes (`/api/vault/unlock`)
 
-- Extension token TTL: `15 minutes` (`EXTENSION_TOKEN_TTL_MS`)
+- Extension token TTL: tenant-policy controlled via `extensionTokenIdleTimeoutMinutes` (default 7d / 10080 min) and `extensionTokenAbsoluteTimeoutMinutes` (default 30d / 43200 min)
 - Extension refresh buffer: `2 minutes before expiry` (extension background)
 - Default scopes:
   - `passwords:read`
@@ -258,7 +258,7 @@ so there is no immediate break scenario. Still, long-term migration planning is 
 ### 8.2 Implementation Preparation
 
 - Preserve `wrapVersion` style versioning for wrap/key-exchange paths
-- Keep the migration path referenced in `src/lib/crypto-emergency.ts` toward
+- Keep the migration path referenced in `src/lib/crypto/crypto-emergency.ts` toward
   `HYBRID-ECDH-P256-MLKEM768`
 - Ensure API/DB schemas can extend key material/salt/version without breaking compatibility
 - Centralize crypto parameters as constants; avoid scattered ad-hoc values
@@ -383,7 +383,7 @@ so there is no immediate break scenario. Still, long-term migration planning is 
   - Rationale:
     - MV3 Service Worker restarts otherwise drop state too aggressively
     - session scope is cleared on browser close
-    - token is short-lived (15m) with refresh + revoke
+    - token idle TTL governed by `extensionTokenIdleTimeoutMinutes` (default 7d) with refresh + revoke
     - `vaultSecretKey` is an explicit UX/security tradeoff; now mitigated by at-rest encryption
 - `background memory`:
   - `encryptionKey`, `currentToken`, etc.
@@ -407,13 +407,13 @@ so there is no immediate break scenario. Still, long-term migration planning is 
   Browser-managed `CryptoKey` objects are opaque and non-extractable, which prevents
   accidental export but also means the runtime controls when key material is freed.
 - For the web app, `secretKeyRef` (Uint8Array) is explicitly cleared on lock/unload
-  (`vault-context.tsx:143`, `vault-context.tsx:280`), which is the best-effort approach
+  (`src/lib/vault/vault-context.tsx`), which is the best-effort approach
   available in browser environments.
 - For the extension, `token` and `vaultSecretKey` are AES-256-GCM encrypted with an ephemeral
   non-extractable `CryptoKey` before being written to `chrome.storage.session`.
   If the service worker is terminated, the in-memory key is lost and the encrypted blobs
   become permanently unreadable — re-authentication is required. Both fields are also cleared
-  on lock and auto-cleared by Chrome on browser close. The 15-minute auto-lock timer provides
+  on lock and auto-cleared by Chrome on browser close. The `autoLockMinutes` vault auto-lock timer provides
   an additional time-bound control.
 - For detailed technical assessment, see `security-review.md` Section 4 (Crypto Primitives).
 
@@ -426,7 +426,7 @@ so there is no immediate break scenario. Still, long-term migration planning is 
 
 ### 15.2 Key exchange and wrapping method (current)
 
-- Implementation: `src/lib/crypto-emergency.ts`
+- Implementation: `src/lib/crypto/crypto-emergency.ts`
 - Method: `wrapVersion=1` (`ECDH-P256`)
 - Flow:
   1. grantee generates ECDH key pair

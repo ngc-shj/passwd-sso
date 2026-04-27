@@ -18,3 +18,5 @@ Language policy:
 | [cors-policy.md](cors-policy.md) | CORS policy |
 | [license-policy.md](license-policy.md) | Dependency license policy |
 | [security-review.md](security-review.md) | Security review checklist |
+| [policy-enforcement.md](policy-enforcement.md) | Security policy field enforcement matrix (tenant/team) |
+| [vulnerability-triage.md](vulnerability-triage.md) | Vulnerability classification, triage workflow, and escalation path |

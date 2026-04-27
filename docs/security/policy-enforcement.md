@@ -14,11 +14,11 @@ Password content (plaintext) is encrypted client-side before reaching the server
 
 | Field | Enforcement | Layer | Location | Notes |
 |-------|------------|-------|----------|-------|
-| `maxConcurrentSessions` | Blocking | Server | `auth-adapter.ts` `createSession()` | Oldest sessions evicted atomically in Serializable tx |
-| `sessionIdleTimeoutMinutes` | Blocking | Server | `auth-adapter.ts` `updateSession()` via `session-timeout.ts` resolver | Non-nullable. Session deleted when `now - lastActiveAt > value`. See [session-timeout-design.md](session-timeout-design.md) |
-| `sessionAbsoluteTimeoutMinutes` | Blocking | Server | `auth-adapter.ts` `updateSession()` via `session-timeout.ts` resolver | Non-nullable. Session deleted + `SESSION_REVOKE` audit when `now - createdAt > value`, independent of activity ([ASVS 5.0 V7.3.2](https://github.com/OWASP/ASVS/blob/v5.0.0_release/5.0/en/0x16-V7-Session-Management.md#v73-session-timeout)) |
-| `extensionTokenIdleTimeoutMinutes` | Blocking | Server | `extension-token.ts` `issueExtensionToken()` + `token/refresh/route.ts` | Access token `expiresAt = now + value` at issuance and on every refresh |
-| `extensionTokenAbsoluteTimeoutMinutes` | Blocking | Server | `extension-token.ts` + `token/refresh/route.ts` | Family is revoked and refresh rejected with `EXTENSION_TOKEN_FAMILY_EXPIRED` when `now - familyCreatedAt > value` |
+| `maxConcurrentSessions` | Blocking | Server | `src/lib/auth/session/auth-adapter.ts` `createSession()` | Oldest sessions evicted atomically in Serializable tx |
+| `sessionIdleTimeoutMinutes` | Blocking | Server | `src/lib/auth/session/auth-adapter.ts` `updateSession()` via `session-timeout.ts` resolver | Non-nullable. Session deleted when `now - lastActiveAt > value`. See [session-timeout-design.md](session-timeout-design.md) |
+| `sessionAbsoluteTimeoutMinutes` | Blocking | Server | `src/lib/auth/session/auth-adapter.ts` `updateSession()` via `session-timeout.ts` resolver | Non-nullable. Session deleted + `SESSION_REVOKE` audit when `now - createdAt > value`, independent of activity ([ASVS 5.0 V7.3.2](https://github.com/OWASP/ASVS/blob/v5.0.0_release/5.0/en/0x16-V7-Session-Management.md#v73-session-timeout)) |
+| `extensionTokenIdleTimeoutMinutes` | Blocking | Server | `src/lib/auth/tokens/extension-token.ts` `issueExtensionToken()` + `token/refresh/route.ts` | Access token `expiresAt = now + value` at issuance and on every refresh |
+| `extensionTokenAbsoluteTimeoutMinutes` | Blocking | Server | `src/lib/auth/tokens/extension-token.ts` + `token/refresh/route.ts` | Family is revoked and refresh rejected with `EXTENSION_TOKEN_FAMILY_EXPIRED` when `now - familyCreatedAt > value` |
 | `vaultAutoLockMinutes` | Timer | Client | `auto-lock-context.tsx` | Browser inactivity timer; server cannot know vault lock state |
 | `allowedCidrs` | Blocking | Server | `proxy.ts` + `access-restriction.ts` | Middleware (Edge) + route handler (Node.js); 60s cache |
 | `tailscaleEnabled` / `tailscaleTailnet` | Blocking | Server | `access-restriction.ts` | Two-stage: Edge (CGNAT heuristic) + Node.js (WhoIs verify) |
@@ -77,4 +77,4 @@ Password content (plaintext) is encrypted client-side before reaching the server
 | Tenant access policy | 60s | `invalidateTenantPolicyCache(tenantId)` | `access-restriction.ts` |
 | Lockout thresholds | 60s | `invalidateLockoutThresholdCache(tenantId)` | `account-lockout.ts` |
 | Session timeouts (per user) | 60s | `invalidateSessionTimeoutCache(userId)` / `invalidateSessionTimeoutCacheForTenant(tenantId)` | `session-timeout.ts` |
-| Session info (proxy) | 30s | TTL expiry only | `proxy.ts` |
+| Session cache (Redis) | `SESSION_CACHE_TTL_MS` (30 s) | Tombstone-based revocation via `invalidateCachedSession` (TTL `TOMBSTONE_TTL_MS` = 5 s) | `src/lib/auth/session/session-cache.ts` (proxy reads via `src/lib/proxy/auth-gate.ts`) |

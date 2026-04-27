@@ -17,7 +17,7 @@ Audit logs attribute every action to the token's bound subject — `actorType=HU
 Pre-condition: a session-authenticated tenant OWNER or ADMIN. The session must have been created within the last **15 minutes** (the create endpoint enforces a fresh-auth window — re-sign-in if your dashboard session is older).
 
 1. Sign in to the tenant dashboard.
-2. Navigate to **Settings → Operator tokens** (`/dashboard/tenant/operator-tokens`).
+2. Navigate to **Admin → Tenant → Operator tokens** (`/admin/tenant/operator-tokens`).
 3. Click **Create token**.
 4. Enter a label (e.g. `alice laptop, ngc-shj, 2026-04-27`).
 5. Pick an expiry (1–90 days; default 30).
@@ -29,12 +29,30 @@ After closing the modal, the dashboard shows the token's prefix, expiry, and las
 ## Usage
 
 ```bash
+# Always preview a purge with DRY_RUN=true before running it for real.
+ADMIN_API_TOKEN=op_<43-char base64url> DRY_RUN=true scripts/purge-history.sh
+ADMIN_API_TOKEN=op_<43-char base64url> DRY_RUN=true scripts/purge-audit-logs.sh
+
+# Once verified, run without DRY_RUN.
 ADMIN_API_TOKEN=op_<43-char base64url> scripts/purge-history.sh
 ADMIN_API_TOKEN=op_<43-char base64url> scripts/purge-audit-logs.sh
+
+# Master-key rotation (TARGET_VERSION must match SHARE_MASTER_KEY_CURRENT_VERSION).
 ADMIN_API_TOKEN=op_<43-char base64url> TARGET_VERSION=2 scripts/rotate-master-key.sh
 ```
 
 The token's subject is bound at mint time, so no separate `OPERATOR_ID` env var is needed. The server resolves the operator identity from the token.
+
+### Script options
+
+`scripts/purge-history.sh` and `scripts/purge-audit-logs.sh` share the following optional environment variables:
+
+| Variable | Default (purge-history / purge-audit-logs) | Purpose |
+| --- | --- | --- |
+| `RETENTION_DAYS` | `90` / `365` | Number of days to retain. Records older than this are eligible for purge. |
+| `DRY_RUN` | `false` | When `true`, the script reports the matched count without deleting anything. **Always run with `DRY_RUN=true` first.** |
+| `INSECURE` | `false` | When `true`, skip TLS certificate verification. Dev-only — never set in production. |
+| `APP_URL` | (auto-detected from `.env`) | Override the target deployment URL. |
 
 For routes without a dedicated script (`dcr-cleanup`, `audit-outbox-metrics`, `audit-outbox-purge-failed`, `audit-chain-verify`), curl directly:
 

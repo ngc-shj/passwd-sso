@@ -1,5 +1,14 @@
 # Deployment Guide
 
+## Environment Configuration
+
+Before deploying, generate and verify your environment configuration:
+
+- `npm run init:env` — interactive generator that writes `.env` with all required variables (supports dev / ci / production profiles)
+- `npm run check:env-docs` — CI drift check: validates `.env.example` against the Zod schema (`src/lib/env-schema.ts`) and allowlist
+
+Configuration precedence: `.env` (canonical base) → `.env.local` (per-developer override). Production deployments should use `.env` only; `.env.local` is for local tweaks. Do not commit either file.
+
 ## Prerequisites
 
 - AWS CLI v2 configured with appropriate credentials
@@ -73,6 +82,8 @@ docker compose up
 
 This starts `app`, `db`, `jackson`, and `redis` — but **not** the `migrate` service (it uses `profiles: ["migrate"]`).
 
+The full set of six services is: `app`, `db`, `jackson`, `redis`, `migrate`, and `audit-outbox-worker`. The `audit-outbox-worker` service is currently declared only in `docker-compose.override.yml` (the dev override). Production deployments must run the worker separately — either by adding a production-equivalent Compose fragment that references the same image with `npm run worker:audit-outbox` as the command, or by running the worker as a sidecar process on the application host. Without the worker, audit events accumulate in `audit_outbox` with status `PENDING` and are never drained to `audit_logs`.
+
 ## Migration Failure
 
 If `deploy.sh` reports a migration failure:
@@ -117,18 +128,20 @@ When deploying at a sub-path (e.g., `https://example.com/passwd-sso`), set `NEXT
 
 ## Admin Operations
 
+Admin and maintenance scripts are authenticated with per-operator `op_*` bearer tokens. See [admin-tokens.md](admin-tokens.md) for the canonical guide on minting, rotating, and revoking tokens.
+
+To obtain a token: sign in as a tenant OWNER or ADMIN, navigate to **Admin → Tenant → Operator tokens** (`/admin/tenant/operator-tokens`), and create a token. Pass it as the `ADMIN_API_TOKEN` shell variable at invocation time — do not set it in the app environment.
+
 ### Rotate ShareLink Master Key
 
-Rotate the server-side master key used to encrypt ShareLink data. Run after adding a new `SHARE_MASTER_KEY_V<N>` to the environment.
+Rotates the server-side master key used to encrypt ShareLink blobs (share links and sends). This operation **does not** re-encrypt vault data — vault keys are client-derived and the server master key plays no role in vault encryption.
 
 **Prerequisites:**
-- `ADMIN_API_TOKEN` set in the app environment (64-char hex, generate with `openssl rand -hex 32`)
-- New master key version configured: `SHARE_MASTER_KEY_V<N>=<hex64>` and `SHARE_MASTER_KEY_CURRENT_VERSION=<N>`
+- New key version configured in the app environment: `SHARE_MASTER_KEY_V<N>=<hex64>` and `SHARE_MASTER_KEY_CURRENT_VERSION=<N>` (generate a key with `npm run generate:key`)
 - App restarted to load the new environment variables
 
 ```bash
-ADMIN_API_TOKEN=<hex64> \
-OPERATOR_ID=<user-cuid-or-uuid> \
+ADMIN_API_TOKEN=op_<43-char base64url> \
 TARGET_VERSION=<N> \
 APP_URL=https://your-app-url \
 scripts/rotate-master-key.sh
@@ -141,20 +154,23 @@ scripts/rotate-master-key.sh
 
 ### Purge Password History
 
-System-wide purge of password entry history records older than the retention period.
+System-wide purge of password entry history records older than the retention period. See [admin-tokens.md](admin-tokens.md) for full details.
 
 ```bash
-ADMIN_API_TOKEN=<hex64> \
-OPERATOR_ID=<user-cuid-or-uuid> \
+ADMIN_API_TOKEN=op_<43-char base64url> \
 APP_URL=https://your-app-url \
 scripts/purge-history.sh
 ```
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `RETENTION_DAYS` | `90` | Purge history older than this many days |
-| `DRY_RUN` | `false` | Preview without deleting |
-| `INSECURE` | `false` | Skip TLS verification (dev only, **never use in production**) |
+### Purge Audit Logs
+
+System-wide purge of audit log records older than the retention period.
+
+```bash
+ADMIN_API_TOKEN=op_<43-char base64url> \
+APP_URL=https://your-app-url \
+scripts/purge-audit-logs.sh
+```
 
 ### Vault / Team Key Rotation
 
@@ -179,12 +195,13 @@ The deploy script uses these environment variables:
 
 ## Database User Permissions
 
-The application uses two database roles with separated privileges:
+The application uses three database roles with separated privileges:
 
 | Role | Privileges | Purpose |
 |------|-----------|---------|
 | `passwd_user` (or equivalent) | SUPERUSER or DDL-capable | Table owner, migrations (`prisma migrate deploy`) |
 | `passwd_app` (or equivalent) | NOSUPERUSER NOBYPASSRLS | App runtime (Next.js), RLS enforced |
+| `passwd_outbox_worker` (or equivalent) | NOSUPERUSER NOBYPASSRLS; SELECT/UPDATE/DELETE on `audit_outbox`, INSERT on `audit_logs`, SELECT on `tenants` | Audit outbox drain worker (least privilege) |
 
 ```sql
 -- Production: create a non-superuser application role
@@ -201,6 +218,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO pa
 **Environment variables:**
 - `DATABASE_URL` — app runtime connection (non-SUPERUSER role, e.g. `passwd_app`)
 - `MIGRATION_DATABASE_URL` — Prisma CLI connection (SUPERUSER role, e.g. `passwd_user`)
+- `OUTBOX_WORKER_DATABASE_URL` — audit outbox worker connection (least-privilege role, e.g. `passwd_outbox_worker`). Set the worker role password with `scripts/set-outbox-worker-password.sh`.
 
 The Docker Compose dev setup enforces the same role separation: the `app` service connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS) while the `migrate` service connects as `passwd_user` (SUPERUSER). RLS is enforced in all environments.
 

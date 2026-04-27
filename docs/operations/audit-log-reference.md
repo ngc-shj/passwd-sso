@@ -1,6 +1,6 @@
 # Audit Log Reference
 
-This document lists all audit log action types (117 total), their scopes, metadata fields, and UI/export behavior.
+This document lists all audit log action types (150+), their scopes, metadata fields, and UI/export behavior.
 
 ---
 
@@ -32,11 +32,28 @@ Every audit log record contains these base fields:
 
 ### Special userId Values
 
-| Value | Used by | Reason |
-|-------|---------|--------|
-| `"system"` | WEBHOOK_DELIVERY_FAILED, TENANT_WEBHOOK_DELIVERY_FAILED | Fire-and-forget background processing |
-| `"anonymous"` | SHARE_ACCESS_VERIFY_SUCCESS, SHARE_ACCESS_VERIFY_FAILED | No session required for share verification |
-| `"unknown"` | ACCESS_DENIED | Session may not exist when access is denied |
+Audit records use sentinel UUIDs paired with an `actorType` discriminator for non-human actions. The two sentinel values are defined in `src/lib/constants/app.ts`:
+
+| Sentinel UUID | `actorType` | Used by | Reason |
+|---------------|------------|---------|--------|
+| `00000000-0000-4000-8000-000000000000` (`ANONYMOUS_ACTOR_ID`) | `ANONYMOUS` | SHARE_ACCESS_VERIFY_SUCCESS, SHARE_ACCESS_VERIFY_FAILED | No session required for share verification |
+| `00000000-0000-4000-8000-000000000001` (`SYSTEM_ACTOR_ID`) | `SYSTEM` | WEBHOOK_DELIVERY_FAILED, TENANT_WEBHOOK_DELIVERY_FAILED, DIRECTORY_SYNC_STALE_RESET, TEAM_E2E_MIGRATION | Background processing with no user context |
+
+For `ACCESS_DENIED` events, `userId` may fall back to the `ANONYMOUS_ACTOR_ID` sentinel with `actorType=ANONYMOUS` when no session exists at the time of denial.
+
+### ActorType
+
+The `actorType` field classifies the actor on every audit record:
+
+| Value | Actor | Notes |
+|-------|-------|-------|
+| `HUMAN` | Authenticated user (session or operator token) | Default for all user-initiated actions |
+| `SERVICE_ACCOUNT` | Service account via `sa_` Bearer token | `userId` is the SA's representing user UUID |
+| `MCP_AGENT` | MCP client via `mcp_` token | `userId` is the agent's representing user UUID when applicable |
+| `SYSTEM` | Background processing (no user context) | Paired with `SYSTEM_ACTOR_ID` sentinel UUID |
+| `ANONYMOUS` | No session (share access, access denied) | Paired with `ANONYMOUS_ACTOR_ID` sentinel UUID |
+
+SIEM rules that previously matched `userId="system"` or `userId="anonymous"` string literals should migrate to matching on the sentinel UUID + `actorType` tuple.
 
 ---
 
@@ -530,7 +547,7 @@ Changes across two feature branches that standardize audit log output:
 | Component | Path |
 |-----------|------|
 | Constants | `src/lib/constants/audit.ts`, `src/lib/constants/audit-target.ts` |
-| Logging function | `src/lib/audit/audit.ts` |
+| Logging function (`logAuditAsync`) | `src/lib/audit/audit.ts` — `logAudit`/`logAuditBatch` are deprecated; use `logAuditAsync`. Context helpers `personalAuditBase`, `teamAuditBase`, `tenantAuditBase` (#389) are enforced by the `*AuditBase` convention. |
 | Auth adapter (SESSION_EVICTED) | `src/lib/auth/auth-adapter.ts` |
 | Access restriction (ACCESS_DENIED) | `src/lib/access-restriction.ts` |
 | Webhook dispatcher | `src/lib/webhook-dispatcher.ts` |
