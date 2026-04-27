@@ -37,9 +37,20 @@ The HA overlay provides:
 3. ioredis automatically reconnects to the new master
 4. Rate limiting continues uninterrupted
 
+## Why Redis Is Required in Production
+
+Redis serves two critical functions in multi-process deployments:
+
+1. **Session cache with tombstone-based revocation propagation** — the proxy auth gate caches session validity in Redis (`SESSION_CACHE_TTL_MS=30000 ms` positive, `NEGATIVE_CACHE_TTL_MS=5000 ms` negative). When a session is revoked, a tombstone (`TOMBSTONE_TTL_MS=5000 ms`) is written to Redis so that all app nodes honor the revocation within one cache cycle. Without Redis, tombstones do not propagate across processes.
+2. **Shared rate limiting** — rate-limit counters are stored in Redis. Without it, limits apply per-process only and can be bypassed by distributing requests across nodes.
+
+Set `HEALTH_REDIS_REQUIRED=true` to fail the readiness probe (`GET /api/health/ready`) when Redis is unreachable, preventing the load balancer from routing traffic to an impaired node.
+
 ## Fallback
 
-If Redis (including Sentinel) is unavailable, the application falls back to in-memory rate limiting. This is acceptable for development but not recommended for production (rate limits are per-process, not shared).
+Without Redis, session-revocation tombstones are not propagated across processes, increasing the window during which a revoked session may continue to be honored on other nodes. Rate limiting also degrades to per-process state, which can be exploited in a distributed deployment. This fallback behavior is acceptable for single-process development but must not be relied upon in production.
+
+Set `HEALTH_REDIS_REQUIRED=true` to fail readiness probes when Redis is unreachable.
 
 ## Monitoring
 
@@ -90,7 +101,7 @@ Verify Sentinel failover works correctly before relying on HA in production.
 
 - New master elected within 30 seconds
 - Application health check returns `{"status":"healthy",...}` with `redis.status: "pass"` after reconnection
-- No request errors during failover (rate limiting falls back to in-memory)
+- During the brief failover window (typically under 30 seconds), rate limiting may degrade to per-process state; session-revocation tombstones may not propagate. Both recover automatically when ioredis reconnects to the new master.
 
 ## Verification Checklist
 

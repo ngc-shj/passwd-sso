@@ -17,7 +17,7 @@ Audit logs attribute every action to the token's bound subject — `actorType=HU
 Pre-condition: a session-authenticated tenant OWNER or ADMIN. The session must have been created within the last **15 minutes** (the create endpoint enforces a fresh-auth window — re-sign-in if your dashboard session is older).
 
 1. Sign in to the tenant dashboard.
-2. Navigate to **Settings → Operator tokens** (`/dashboard/tenant/operator-tokens`).
+2. Navigate to **Admin → Tenant → Operator tokens** (`/admin/tenant/operator-tokens`).
 3. Click **Create token**.
 4. Enter a label (e.g. `alice laptop, ngc-shj, 2026-04-27`).
 5. Pick an expiry (1–90 days; default 30).

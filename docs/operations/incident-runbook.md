@@ -9,14 +9,26 @@ incidents and service degradation in the passwd-sso application.
 
 ### 1a. Master Key Compromise
 
-The master key (`SHARE_MASTER_KEY`) is used for server-side encryption.
+The share-link master key (`SHARE_MASTER_KEY_V<N>`) is used to encrypt ShareLink and Send blobs. It does **not** encrypt vault data — vault keys are client-derived (PBKDF2 + HKDF in the browser) and are never accessible to the server.
 
-1. Generate a new key: `npm run generate:key`
-2. Update the `SHARE_MASTER_KEY` environment variable in production
-3. Redeploy the application
-4. If vault data integrity is compromised, trigger admin mass vault reset
-   via `POST /api/admin/rotate-master-key`
-5. Notify all affected users to re-setup their vaults
+`POST /api/admin/rotate-master-key` re-encrypts existing share blobs from the old key version to the new key version. It does NOT affect vault entries.
+
+**Procedure:**
+
+1. Generate a new key version: `npm run generate:key`
+2. Add to production environment: `SHARE_MASTER_KEY_V<N>=<hex64>` and set `SHARE_MASTER_KEY_CURRENT_VERSION=<N>`
+3. Restart the application to load the new environment variables
+4. Mint an `op_*` operator token (see [admin-tokens.md](admin-tokens.md))
+5. Run the rotation script:
+   ```bash
+   ADMIN_API_TOKEN=op_<43-char base64url> \
+   TARGET_VERSION=<N> \
+   APP_URL=https://your-app-url \
+   scripts/rotate-master-key.sh
+   ```
+6. Optionally revoke all share links encrypted under the compromised key version by setting `REVOKE_SHARES=true`
+
+**Vault data exposure:** If you suspect vault data has been accessed, the server master key is not relevant — vault keys are client-derived. The correct response is to advise affected users to change their vault passphrase (which rotates their local secret key). Administrators can trigger a vault reset via the tenant admin UI if a user account is fully compromised.
 
 ### 1b. User Passphrase Compromise
 
@@ -57,12 +69,17 @@ Determine which tables/data were exposed:
 | Table | Risk | Action |
 |-------|------|--------|
 | `users` | Passphrase verifiers are HMAC'd, not plaintext | Force all users to change passphrases |
-| `sessions` | Active session tokens exposed | Delete all sessions (mass logout) |
+| `sessions` | Active session tokens exposed | Delete all sessions (mass logout): `DELETE FROM sessions;` |
 | `audit_logs` | Metadata may contain PII (IPs, emails) | Notify affected users |
 | `password_entries` | Encrypted with AES-256-GCM | Safe without secret keys — no action needed |
 | `team_member_keys` | Encrypted team keys per member | Safe without user secret keys |
-| `extension_tokens` | Token hashes (SHA-256, 256-bit entropy tokens) | Revoke all tokens as precaution |
-| `api_keys` | Token hashes (SHA-256, 256-bit entropy tokens) | Revoke all API keys as precaution |
+| `extension_tokens` | Token hashes (SHA-256, 256-bit entropy tokens) | Revoke all tokens: `UPDATE extension_tokens SET revoked_at = NOW();` |
+| `api_keys` | Token hashes (SHA-256, 256-bit entropy tokens) | Revoke all API keys: `UPDATE api_keys SET revoked_at = NOW();` |
+| `service_account_tokens` | Token hashes (SHA-256, 256-bit entropy tokens) | Revoke all SA tokens: `UPDATE service_account_tokens SET revoked_at = NOW();` |
+| `mcp_access_tokens` | Token hashes; short-lived but may be valid | Revoke all MCP tokens: `UPDATE mcp_access_tokens SET revoked_at = NOW(); UPDATE mcp_refresh_tokens SET revoked_at = NOW();` |
+| `operator_tokens` | Token hashes; grant access to admin maintenance routes | Revoke all operator tokens: `UPDATE operator_tokens SET revoked_at = NOW();` — then re-mint via UI |
+| `scim_tokens` | Token hashes; grant SCIM provisioning access | Revoke all SCIM tokens: `UPDATE scim_tokens SET revoked_at = NOW();` |
+| `webauthn_credentials` | Public keys; no plaintext secrets | If private key exposure is suspected (device compromise), delete credentials: `DELETE FROM webauthn_credentials;` — users re-register on next login |
 
 ### 2b. Immediate Actions
 
@@ -85,13 +102,12 @@ Determine which tables/data were exposed:
 
 ### 3a. Redis Down
 
-**Impact:** Rate limiting and session caching degrade. Auth.js falls back to
-database sessions automatically.
+**Impact:** Session validation falls back to direct database lookups (higher PostgreSQL load). Revocation tombstones no longer propagate across app nodes — increasing the window during which a revoked session may still be honored on other nodes. Rate limiting also degrades to in-process state, which can be exploited in a distributed deployment. This is a security-relevant incident in multi-node environments.
 
 **Actions (standalone Redis):**
 1. Check Redis health: `redis-cli ping`
 2. If container issue: `docker restart redis`
-3. If persistent: switch to database-only mode (remove `REDIS_URL`)
+3. If persistent and multi-node: consider taking nodes out of the load balancer rotation until Redis is restored, to prevent session-revocation propagation failures
 4. Monitor database load — may need to scale
 
 **Actions (Sentinel HA):**
@@ -134,6 +150,30 @@ continue working.
 2. Redeploy from latest stable image
 3. If build issue: roll back to previous deployment
 4. Check resource limits (memory, CPU)
+
+### 3e. Audit Outbox Worker Down
+
+**Impact:** Audit events accumulate in the `audit_outbox` table with status `PENDING`. Vault, password, and authentication operations continue normally — the web application is unaffected. However, audit events do not appear in `audit_logs` and are not forwarded to SIEM or delivery targets until the worker is restarted.
+
+**Detect:**
+```bash
+# Check pending row count (requires op_* token)
+curl -H "Authorization: Bearer $ADMIN_API_TOKEN" \
+  "$APP_URL/api/maintenance/audit-outbox-metrics"
+```
+A large or growing `pendingCount` with an old `oldestPendingAge` indicates the worker is not draining.
+
+**Actions:**
+1. Check worker logs: `docker logs audit-outbox-worker` (or equivalent for your deployment)
+2. Restart the worker: `docker restart audit-outbox-worker` or `npm run worker:audit-outbox`
+3. Verify the worker resumes draining: re-check `/api/maintenance/audit-outbox-metrics` — `pendingCount` should decrease
+4. If rows are stuck in `FAILED` state, purge them after investigation:
+   ```bash
+   curl -X POST -H "Authorization: Bearer $ADMIN_API_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"olderThanDays":1}' \
+     "$APP_URL/api/maintenance/audit-outbox-purge-failed"
+   ```
 
 ---
 

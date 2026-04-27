@@ -1,10 +1,29 @@
 # Audit Log Forwarding
 
+## Audit Pipeline
+
+Audit events flow through a durable two-stage pipeline:
+
+```
+Route handler
+  └─ logAuditAsync()
+       └─ INSERT INTO audit_outbox   ← in the same database transaction as the business operation
+            └─ audit-outbox-worker (separate process)
+                 └─ INSERT INTO audit_logs   ← drained in background
+```
+
+1. **Route handler** calls `logAuditAsync()` which writes a row to the `audit_outbox` table in the same database transaction as the business operation. If the transaction rolls back, the audit event is also rolled back — no phantom events.
+2. **audit-outbox-worker** (`npm run worker:audit-outbox`) drains `PENDING` rows from `audit_outbox` into `audit_logs`. The worker must be running for audit events to appear in `audit_logs`. Without it, events accumulate in `audit_outbox` indefinitely.
+
+**Monitoring outbox health:**
+- `GET /api/maintenance/audit-outbox-metrics` (requires `op_*` Bearer token) — returns cross-tenant aggregates (pending count, failed count, oldest pending row age).
+- `POST /api/maintenance/audit-outbox-purge-failed` (requires `op_*` Bearer token) — purges FAILED rows, optionally filtered by `tenantId` and `olderThanDays`.
+
 ## Overview
 
 The application performs dual-write audit logging:
 
-1. **PostgreSQL** — every audit event is written to the `AuditLog` table (always on, regardless of configuration).
+1. **PostgreSQL** — every audit event is written to the `audit_logs` table via the outbox pipeline described above (always on, regardless of configuration).
 2. **Structured JSON to stdout** — when `AUDIT_LOG_FORWARD=true`, each audit event is also emitted as a JSON line to stdout via Pino. Log aggregators (Fluent Bit, Datadog Agent, CloudWatch Logs) capture this stream and forward it to a SIEM or log storage system.
 
 The stdout path is additive. Disabling it does not affect the database path.
@@ -187,3 +206,13 @@ Audit forwarding is wrapped in a try/catch. A failure in the forwarding path (e.
 ### No PII beyond what the DB already stores
 
 The forwarded payload mirrors the database record: `userId` (opaque CUID), `ip`, and `userAgent`. No plaintext passwords, encrypted blobs, or cryptographic material appear in the stream.
+
+## Per-Tenant Delivery Targets
+
+In addition to global stdout forwarding, tenants can configure per-tenant audit delivery targets. These route audit events to tenant-specific endpoints (webhooks, SIEM integrations) independently of the global `AUDIT_LOG_FORWARD` setting.
+
+**API:** `GET/POST /api/tenant/audit-delivery-targets` — list and create delivery targets for the authenticated tenant. `PATCH /api/tenant/audit-delivery-targets/[id]` — update an existing target (enable/disable, rotate secret).
+
+**Admin UI:** accessible from the tenant settings page under the audit log configuration section.
+
+Delivery targets receive the same JSON schema as the stdout forwarding path (see Log Schema above). Each target is delivered independently; a delivery failure for one target does not block others or affect the database write path.
