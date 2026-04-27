@@ -16,6 +16,12 @@ export interface AdminAuth {
   subjectUserId: string;
   tenantId: string;
   tokenId: string;
+  // v1 only mints `MAINTENANCE`-scoped tokens, so route handlers do not
+  // call `hasOperatorTokenScope` today. When a second scope is introduced
+  // (e.g. `read-only`, `rotate-key-only`), every route handler MUST gate
+  // its sensitive operations with an explicit scope check before relying
+  // on this field — otherwise narrower-scope tokens silently get full
+  // maintenance access.
   scopes: readonly OperatorTokenScope[];
 }
 

@@ -1,33 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
-import { randomBytes } from "node:crypto";
-
-const V1_KEY = randomBytes(32).toString("hex");
-const V2_KEY = randomBytes(32).toString("hex");
-import { OPERATOR_TOKEN_PREFIX } from "@/lib/constants/auth/operator-token";
-
-const VALID_OP_TOKEN = `${OPERATOR_TOKEN_PREFIX}${"a".repeat(43)}`;
 
 const {
   mockVerifyAdminToken,
-  mockShareUpdateMany,
+  mockDeleteMany,
   mockRequireMaintenanceOperator,
   mockCheck,
   mockLogAudit,
   mockWithBypassRls,
-  mockGetCurrentMasterKeyVersion,
-  mockGetMasterKeyByVersion,
 } = vi.hoisted(() => ({
   mockVerifyAdminToken: vi.fn(),
-  mockShareUpdateMany: vi.fn(),
+  mockDeleteMany: vi.fn(),
   mockRequireMaintenanceOperator: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockLogAudit: vi.fn(),
   mockWithBypassRls: vi.fn(
     async (_prisma: unknown, fn: () => unknown, _purpose?: unknown) => fn(),
   ),
-  mockGetCurrentMasterKeyVersion: vi.fn(),
-  mockGetMasterKeyByVersion: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/tokens/admin-token", () => ({
@@ -35,7 +24,7 @@ vi.mock("@/lib/auth/tokens/admin-token", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    passwordShare: { updateMany: mockShareUpdateMany },
+    mcpClient: { deleteMany: mockDeleteMany },
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -59,16 +48,15 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
 vi.mock("@/lib/auth/access/maintenance-auth", () => ({
   requireMaintenanceOperator: mockRequireMaintenanceOperator,
 }));
-vi.mock("@/lib/crypto/crypto-server", () => ({
-  getCurrentMasterKeyVersion: mockGetCurrentMasterKeyVersion,
-  getMasterKeyByVersion: mockGetMasterKeyByVersion,
-}));
 
 import { POST } from "./route";
+import { OPERATOR_TOKEN_PREFIX } from "@/lib/constants/auth/operator-token";
 
 const SUBJECT_USER_ID = "660e8400-e29b-41d4-a716-446655440001";
 const TOKEN_ID = "op-token-id-1";
 const TENANT_ID = "tenant-1";
+
+const VALID_OP_TOKEN = `${OPERATOR_TOKEN_PREFIX}${"a".repeat(43)}`;
 
 const VALID_AUTH = {
   subjectUserId: SUBJECT_USER_ID,
@@ -77,7 +65,7 @@ const VALID_AUTH = {
   scopes: ["maintenance"] as const,
 };
 
-function createRequest(body: unknown, token?: string): NextRequest {
+function createRequest(token?: string): NextRequest {
   const headers: Record<string, string> = {
     "content-type": "application/json",
     "x-forwarded-for": "10.0.0.1",
@@ -85,14 +73,14 @@ function createRequest(body: unknown, token?: string): NextRequest {
   if (token) {
     headers.authorization = `Bearer ${token}`;
   }
-  return new NextRequest("http://localhost/api/admin/rotate-master-key", {
+  return new NextRequest("http://localhost/api/maintenance/dcr-cleanup", {
     method: "POST",
     headers,
-    body: JSON.stringify(body),
+    body: JSON.stringify({}),
   });
 }
 
-describe("POST /api/admin/rotate-master-key", () => {
+describe("POST /api/maintenance/dcr-cleanup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCheck.mockResolvedValue({ allowed: true });
@@ -101,21 +89,20 @@ describe("POST /api/admin/rotate-master-key", () => {
       ok: true,
       operator: { tenantId: TENANT_ID, role: "ADMIN" },
     });
-    mockGetCurrentMasterKeyVersion.mockReturnValue(2);
-    mockGetMasterKeyByVersion.mockReturnValue(V2_KEY);
+    mockDeleteMany.mockResolvedValue({ count: 0 });
   });
 
   // ─── Auth ──────────────────────────────────────────────────
 
   it("returns 401 without authorization header", async () => {
-    const req = createRequest({ targetVersion: 2 });
+    const req = createRequest();
     const res = await POST(req);
     expect(res.status).toBe(401);
   });
 
   it("returns 401 when verifyAdminToken returns INVALID", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: false, reason: "INVALID" });
-    const req = createRequest({ targetVersion: 2 }, VALID_OP_TOKEN);
+    const req = createRequest(VALID_OP_TOKEN);
     const res = await POST(req);
     expect(res.status).toBe(401);
   });
@@ -125,7 +112,7 @@ describe("POST /api/admin/rotate-master-key", () => {
   it("returns 429 when rate limited", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
     mockCheck.mockResolvedValue({ allowed: false, retryAfterMs: 30_000 });
-    const req = createRequest({ targetVersion: 2 }, VALID_OP_TOKEN);
+    const req = createRequest(VALID_OP_TOKEN);
     const res = await POST(req);
     expect(res.status).toBe(429);
   });
@@ -133,46 +120,14 @@ describe("POST /api/admin/rotate-master-key", () => {
   it("checks rate limit after auth (401 before 429 for unauthenticated requests)", async () => {
     mockCheck.mockResolvedValue({ allowed: false, retryAfterMs: 30_000 });
 
-    const unauthReq = createRequest({ targetVersion: 2 });
+    const unauthReq = createRequest();
     const unauthRes = await POST(unauthReq);
     expect(unauthRes.status).toBe(401);
 
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    const authReq = createRequest({ targetVersion: 2 }, VALID_OP_TOKEN);
+    const authReq = createRequest(VALID_OP_TOKEN);
     const authRes = await POST(authReq);
     expect(authRes.status).toBe(429);
-  });
-
-  // ─── Body Validation ──────────────────────────────────────
-
-  it("returns 400 for invalid body (non-integer targetVersion)", async () => {
-    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    const req = createRequest({ targetVersion: "abc" }, VALID_OP_TOKEN);
-    const res = await POST(req);
-    expect(res.status).toBe(400);
-  });
-
-  it("returns 400 when targetVersion does not match current master key version", async () => {
-    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    mockGetCurrentMasterKeyVersion.mockReturnValue(2);
-    const req = createRequest({ targetVersion: 3 }, VALID_OP_TOKEN);
-    const res = await POST(req);
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toContain("does not match");
-  });
-
-  it("returns 400 when targetVersion key is not configured", async () => {
-    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    mockGetCurrentMasterKeyVersion.mockReturnValue(2);
-    mockGetMasterKeyByVersion.mockImplementation(() => {
-      throw new Error("Key not found");
-    });
-    const req = createRequest({ targetVersion: 2 }, VALID_OP_TOKEN);
-    const res = await POST(req);
-    expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toContain("not configured");
   });
 
   // ─── Operator Membership Check ────────────────────────────
@@ -187,38 +142,58 @@ describe("POST /api/admin/rotate-master-key", () => {
       ),
     });
 
-    const req = createRequest({ targetVersion: 2 }, VALID_OP_TOKEN);
+    const req = createRequest(VALID_OP_TOKEN);
     const res = await POST(req);
     expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toContain("active tenant admin");
   });
 
   // ─── Success ──────────────────────────────────────────────
 
-  it("returns 200 with targetVersion and revokedShares=0 when no shares to revoke", async () => {
+  it("deletes expired DCR clients and returns deleted count", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
+    mockDeleteMany.mockResolvedValue({ count: 7 });
 
-    const req = createRequest({ targetVersion: 2 }, VALID_OP_TOKEN);
+    const req = createRequest(VALID_OP_TOKEN);
     const res = await POST(req);
     expect(res.status).toBe(200);
 
     const body = await res.json();
-    expect(body.targetVersion).toBe(2);
-    expect(body.revokedShares).toBe(0);
+    expect(body.deleted).toBe(7);
+  });
+
+  it("returns deleted=0 when no expired DCR clients exist", async () => {
+    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
+    mockDeleteMany.mockResolvedValue({ count: 0 });
+
+    const req = createRequest(VALID_OP_TOKEN);
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.deleted).toBe(0);
+  });
+
+  // ─── Audit ────────────────────────────────────────────────
+
+  it("logs audit with HUMAN actorType and token fields on successful cleanup", async () => {
+    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
+    mockDeleteMany.mockResolvedValue({ count: 3 });
+
+    const req = createRequest(VALID_OP_TOKEN);
+    await POST(req);
 
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         scope: "TENANT",
-        tenantId: TENANT_ID,
-        action: "MASTER_KEY_ROTATION",
+        action: "MCP_CLIENT_DCR_CLEANUP",
         userId: SUBJECT_USER_ID,
         actorType: "HUMAN",
+        tenantId: TENANT_ID,
         metadata: expect.objectContaining({
           tokenSubjectUserId: SUBJECT_USER_ID,
           tokenId: TOKEN_ID,
-          targetVersion: 2,
-          revokedShares: 0,
+          purgedCount: 3,
+          systemWide: true,
         }),
       }),
     );
@@ -227,36 +202,5 @@ describe("POST /api/admin/rotate-master-key", () => {
     const metadata = mockLogAudit.mock.calls[0][0].metadata;
     expect(metadata.operatorId).toBeUndefined();
     expect(metadata.authPath).toBeUndefined();
-  });
-
-  it("revokes old shares when revokeShares is true", async () => {
-    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    mockShareUpdateMany.mockResolvedValue({ count: 3 });
-
-    const req = createRequest({ targetVersion: 2, revokeShares: true }, VALID_OP_TOKEN);
-    const res = await POST(req);
-    expect(res.status).toBe(200);
-
-    const body = await res.json();
-    expect(body.revokedShares).toBe(3);
-
-    expect(mockShareUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          masterKeyVersion: { lt: 2 },
-          revokedAt: null,
-        }),
-      }),
-    );
-  });
-
-  it("does not call shareUpdateMany when revokeShares is false", async () => {
-    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-
-    const req = createRequest({ targetVersion: 2, revokeShares: false }, VALID_OP_TOKEN);
-    const res = await POST(req);
-    expect(res.status).toBe(200);
-
-    expect(mockShareUpdateMany).not.toHaveBeenCalled();
   });
 });

@@ -108,6 +108,12 @@ Every operator-token-authenticated action emits:
 
 SIEM hint: rules that previously alerted on `actorType=SYSTEM, userId=SYSTEM_ACTOR_ID` for these routes should now alert on `actorType=HUMAN` paired with the route's audit-action (`MASTER_KEY_ROTATION`, `AUDIT_LOG_PURGE`, etc.).
 
+Note: an earlier draft of this design proposed a `metadata.authPath` field
+distinguishing `legacy_env` from `operator_token` during a parallel-acceptance
+migration window. v1 ships only the operator-token path, so `authPath` is not
+emitted — there is no legacy path to discriminate against. SIEM rules can rely
+on `actorType=HUMAN` + the route-specific action being non-empty.
+
 ## Bootstrap (first deployment)
 
 The very first operator token is minted via the tenant dashboard (Auth.js session auth). There is no env-based break-glass — the dashboard is the only path. Ensure that:

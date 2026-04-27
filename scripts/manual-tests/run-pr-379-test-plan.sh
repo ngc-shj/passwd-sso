@@ -6,7 +6,8 @@ set -euo pipefail
 #  1) Team audit download returns 400 without date params
 #  2) SCIM provisioning with deleted token creator writes SYSTEM actor audit
 #  3) audit-chain-verify returns truncated=true and ok=false for >10k rows
-#  4) rotate-master-key audit uses SYSTEM_ACTOR_ID and metadata.operatorId
+#  4) rotate-master-key audit uses HUMAN actor + metadata.tokenSubjectUserId / tokenId
+#     (post admin-token-redesign: per-operator op_* tokens; ADMIN_API_TOKEN must be op_*)
 
 RED=$'\033[31m'
 GREEN=$'\033[32m'
@@ -265,7 +266,7 @@ SELECT
 FROM generate_series(1, 10050) AS g;
 " >/dev/null
 
-CHAIN_JSON="$(admin_get_json "/api/maintenance/audit-chain-verify?tenantId=$TMP_TENANT_ID&operatorId=$TMP_USER_ID")"
+CHAIN_JSON="$(admin_get_json "/api/maintenance/audit-chain-verify?tenantId=$TMP_TENANT_ID")"
 CHAIN_OK="$(printf "%s" "$CHAIN_JSON" | python3 - <<'PY'
 import json, sys
 print(json.loads(sys.stdin.read()).get("ok"))
@@ -286,16 +287,16 @@ PY
 [ "$CHAIN_OK" = "False" ] && pass "Chain verify returned ok=false." || fail "Expected ok=false, got $CHAIN_OK"
 echo "    reason=$CHAIN_REASON"
 
-# 4) rotate-master-key audit fields
+# 4) rotate-master-key audit fields (post admin-token-redesign)
 echo ""
-echo "4) rotate-master-key audit uses SYSTEM_ACTOR_ID + metadata.operatorId"
+echo "4) rotate-master-key audit uses HUMAN actor + metadata.tokenSubjectUserId / tokenId"
 TARGET_VERSION="${SHARE_MASTER_KEY_CURRENT_VERSION:-1}"
 ROTATE_STATUS="$(curl -sk -o /tmp/pr379_rotate.json -w "%{http_code}" \
   -X POST "$BASE/api/admin/rotate-master-key" \
   -H "Authorization: Bearer $ADMIN_API_TOKEN" \
   -H "Content-Type: application/json" \
   -H "X-Forwarded-Proto: https" \
-  -d "{\"targetVersion\":$TARGET_VERSION,\"operatorId\":\"$OPERATOR_ID\",\"revokeShares\":false}")"
+  -d "{\"targetVersion\":$TARGET_VERSION,\"revokeShares\":false}")"
 
 if [ "$ROTATE_STATUS" != "200" ]; then
   fail "rotate-master-key expected 200, got $ROTATE_STATUS"
@@ -321,16 +322,23 @@ import json, sys
 print(json.loads(sys.stdin.read()).get("actorType",""))
 PY
 )"
-ROTATE_AUDIT_OPERATOR="$(printf "%s" "$ROTATE_PAYLOAD" | python3 - <<'PY'
+ROTATE_AUDIT_TOKEN_SUBJECT="$(printf "%s" "$ROTATE_PAYLOAD" | python3 - <<'PY'
 import json, sys
 d=json.loads(sys.stdin.read())
-print((d.get("metadata") or {}).get("operatorId",""))
+print((d.get("metadata") or {}).get("tokenSubjectUserId",""))
+PY
+)"
+ROTATE_AUDIT_TOKEN_ID="$(printf "%s" "$ROTATE_PAYLOAD" | python3 - <<'PY'
+import json, sys
+d=json.loads(sys.stdin.read())
+print((d.get("metadata") or {}).get("tokenId",""))
 PY
 )"
 
-[ "$ROTATE_AUDIT_USER" = "$SYSTEM_ACTOR_ID" ] && pass "rotate audit userId is SYSTEM_ACTOR_ID." || fail "rotate audit userId mismatch: $ROTATE_AUDIT_USER"
-[ "$ROTATE_AUDIT_ACTOR" = "SYSTEM" ] && pass "rotate audit actorType is SYSTEM." || fail "rotate audit actorType mismatch: $ROTATE_AUDIT_ACTOR"
-[ "$ROTATE_AUDIT_OPERATOR" = "$OPERATOR_ID" ] && pass "rotate audit metadata.operatorId matches operator." || fail "rotate metadata.operatorId mismatch: $ROTATE_AUDIT_OPERATOR"
+[ -n "$ROTATE_AUDIT_USER" ] && pass "rotate audit userId is set (token-bound subject)." || fail "rotate audit userId is empty"
+[ "$ROTATE_AUDIT_ACTOR" = "HUMAN" ] && pass "rotate audit actorType is HUMAN." || fail "rotate audit actorType mismatch: $ROTATE_AUDIT_ACTOR"
+[ -n "$ROTATE_AUDIT_TOKEN_SUBJECT" ] && pass "rotate audit metadata.tokenSubjectUserId is set." || fail "rotate metadata.tokenSubjectUserId is empty"
+[ -n "$ROTATE_AUDIT_TOKEN_ID" ] && pass "rotate audit metadata.tokenId is set." || fail "rotate metadata.tokenId is empty"
 
 echo ""
 echo "=== Result ==="

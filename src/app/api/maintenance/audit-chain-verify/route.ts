@@ -20,7 +20,8 @@ import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseQuery } from "@/lib/http/parse-body";
 import {
   buildChainInput,
@@ -106,7 +107,14 @@ async function handleGET(req: NextRequest) {
   if (!result.ok) return result.response;
   const { tenantId, from, to } = result.data;
 
-  // Operator must be admin in the target tenant being verified
+  // Operator-token boundary: a token is bound to a single tenant. Reject
+  // cross-tenant chain-verify requests; multi-tenant operators must mint
+  // a separate token per tenant they need to verify.
+  if (auth.tenantId !== tenantId) {
+    return errorResponse(API_ERROR.FORBIDDEN, 403);
+  }
+
+  // Operator must be admin in the (token's) target tenant being verified
   const op = await requireMaintenanceOperator(auth.subjectUserId, { tenantId });
   if (!op.ok) return op.response;
   const membership = op.operator;

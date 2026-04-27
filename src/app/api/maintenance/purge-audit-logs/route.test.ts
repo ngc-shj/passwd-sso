@@ -18,7 +18,9 @@ const {
   mockTenantFindMany: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockLogAudit: vi.fn(),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(
+    async (_prisma: unknown, fn: () => unknown, _purpose?: unknown) => fn(),
+  ),
 }));
 
 vi.mock("@/lib/auth/tokens/admin-token", () => ({
@@ -58,7 +60,9 @@ import { MS_PER_DAY } from "@/lib/constants/time";
 const SUBJECT_USER_ID = "660e8400-e29b-41d4-a716-446655440001";
 const TOKEN_ID = "op-token-id-1";
 const TENANT_ID = "tenant-1";
-const VALID_OP_TOKEN = `op_${"a".repeat(43)}`;
+import { OPERATOR_TOKEN_PREFIX } from "@/lib/constants/auth/operator-token";
+
+const VALID_OP_TOKEN = `${OPERATOR_TOKEN_PREFIX}${"a".repeat(43)}`;
 
 const VALID_AUTH = {
   subjectUserId: SUBJECT_USER_ID,

@@ -172,7 +172,7 @@ describe("DELETE /api/tenant/operator-tokens/[id]", () => {
         action: "OPERATOR_TOKEN_REVOKE",
         metadata: expect.objectContaining({
           tokenId: "tok-1",
-          revokedSubjectUserId: USER_ID,
+          tokenSubjectUserId: USER_ID,
         }),
       }),
     );

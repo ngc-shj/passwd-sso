@@ -209,6 +209,7 @@ async function handlePOST(req: NextRequest) {
     targetId: token.id,
     metadata: {
       tokenId: token.id,
+      tokenSubjectUserId: session.user.id,
       scope: token.scope,
       expiresAt: token.expiresAt.toISOString(),
     },

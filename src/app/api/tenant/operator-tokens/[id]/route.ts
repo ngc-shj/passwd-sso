@@ -11,7 +11,6 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import {
   errorResponse,
   handleAuthError,
-  notFound,
   rateLimited,
   unauthorized,
 } from "@/lib/http/api-response";
@@ -24,7 +23,7 @@ type Params = { params: Promise<{ id: string }> };
 // 30/min lets an admin sweep many tokens during incident response without self-DOS.
 const revokeLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
 
-// DELETE /api/tenant/operator-tokens/[id] — revoke a token (idempotent on already-revoked)
+// DELETE /api/tenant/operator-tokens/[id] — revoke a token (returns 409 if already revoked)
 async function handleDELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -60,7 +59,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
 
   // 404 (NOT 403) on cross-tenant lookup miss to avoid token-id enumeration.
   if (!token || token.tenantId !== actor.tenantId) {
-    return notFound();
+    return errorResponse(API_ERROR.OPERATOR_TOKEN_NOT_FOUND, 404);
   }
 
   if (token.revokedAt) {
@@ -81,7 +80,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     targetId: id,
     metadata: {
       tokenId: id,
-      revokedSubjectUserId: token.subjectUserId,
+      tokenSubjectUserId: token.subjectUserId,
     },
   });
 
