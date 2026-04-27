@@ -1,34 +1,25 @@
 /**
- * Session validation + in-process session cache for the proxy layer.
+ * Session validation + Redis-backed session cache for the proxy layer.
  *
- * Extracted from `src/proxy.ts` so the orchestrator stays thin.
- *
- * Cache trade-offs (preserved from previous location):
- *   - Multi-worker gap: each Node.js worker process holds an independent cache instance.
- *     Session revocation on one worker takes up to SESSION_CACHE_TTL_MS (30 s) to propagate
- *     to other workers. For single-process deployments this is not an issue.
- *   - Plaintext keys: the session token is stored as-is in process memory. A heap snapshot
- *     would expose tokens. Future improvement: migrate to a shared Redis cache with hashed keys.
+ * Backed by `@/lib/auth/session/session-cache` (HMAC-keyed Redis cache
+ * with tombstone-based revocation, populate-after-invalidate guard, and
+ * Zod-validated cache values). Per-worker in-process Map removed in the
+ * sessioncache-redesign refactor — see docs/archive/review/sessioncache-
+ * redesign-plan.md.
  */
 
 import type { NextRequest } from "next/server";
 import { API_PATH } from "@/lib/constants";
+import {
+  getCachedSession,
+  setCachedSession,
+  SESSION_CACHE_TTL_MS,
+  type SessionInfo,
+} from "@/lib/auth/session/session-cache";
 import { resolveUserTenantId } from "@/lib/tenant-context";
-import { SESSION_CACHE_MAX } from "@/lib/validations/common.server";
 
-export const SESSION_CACHE_TTL_MS = 30_000;
-
-export interface SessionInfo {
-  valid: boolean;
-  userId?: string;
-  tenantId?: string;
-  hasPasskey?: boolean;
-  requirePasskey?: boolean;
-  requirePasskeyEnabledAt?: string | null;
-  passkeyGracePeriodDays?: number | null;
-}
-
-export const sessionCache = new Map<string, { expiresAt: number } & SessionInfo>();
+export type { SessionInfo } from "@/lib/auth/session/session-cache";
+export { SESSION_CACHE_TTL_MS } from "@/lib/auth/session/session-cache";
 
 /**
  * Extract the Auth.js session token value from the cookie header.
@@ -63,23 +54,13 @@ export async function getSessionInfo(request: NextRequest): Promise<SessionInfo>
   const cookie = request.headers.get("cookie");
   if (!cookie) return { valid: false };
 
-  const cacheKey = extractSessionToken(cookie);
-  if (!cacheKey) return { valid: false };
+  const token = extractSessionToken(cookie);
+  if (!token) return { valid: false };
 
-  const cached = sessionCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) {
-    return {
-      valid: cached.valid,
-      userId: cached.userId,
-      tenantId: cached.tenantId,
-      hasPasskey: cached.hasPasskey,
-      requirePasskey: cached.requirePasskey,
-      requirePasskeyEnabledAt: cached.requirePasskeyEnabledAt,
-      passkeyGracePeriodDays: cached.passkeyGracePeriodDays,
-    };
-  }
-  if (cached) sessionCache.delete(cacheKey);
+  const cached = await getCachedSession(token);
+  if (cached) return cached;
 
+  // Cache miss → fetch /api/auth/session and populate.
   try {
     const sessionUrl = new URL(
       `${request.nextUrl.basePath}${API_PATH.AUTH_SESSION}`,
@@ -87,8 +68,7 @@ export async function getSessionInfo(request: NextRequest): Promise<SessionInfo>
     );
     const res = await fetch(sessionUrl, { headers: { cookie } });
     if (!res.ok) {
-      // Non-200 from auth session endpoint is a transient server error,
-      // not a definitive "session invalid" signal — do NOT cache.
+      // Transient error — return invalid without caching.
       return { valid: false };
     }
     const data = await res.json();
@@ -104,42 +84,31 @@ export async function getSessionInfo(request: NextRequest): Promise<SessionInfo>
       }
     }
 
-    const hasPasskey: boolean = data?.user?.hasPasskey ?? false;
-    const requirePasskey: boolean = data?.user?.requirePasskey ?? false;
-    const requirePasskeyEnabledAt: string | null = data?.user?.requirePasskeyEnabledAt ?? null;
-    const passkeyGracePeriodDays: number | null = data?.user?.passkeyGracePeriodDays ?? null;
-
     const info: SessionInfo = {
       valid,
       userId,
       tenantId,
-      hasPasskey,
-      requirePasskey,
-      requirePasskeyEnabledAt,
-      passkeyGracePeriodDays,
+      hasPasskey: data?.user?.hasPasskey ?? false,
+      requirePasskey: data?.user?.requirePasskey ?? false,
+      requirePasskeyEnabledAt: data?.user?.requirePasskeyEnabledAt ?? null,
+      passkeyGracePeriodDays: data?.user?.passkeyGracePeriodDays ?? null,
     };
-    setSessionCache(cacheKey, info);
+
+    // Derive ttlMs from data.expires (ISO 8601). Clamp downward only;
+    // setCachedSession applies the floor (<1s → no cache) and ceiling
+    // (SESSION_CACHE_TTL_MS) and handles negative-cache routing for
+    // valid:false. We pass SESSION_CACHE_TTL_MS as the upper-bound ceiling
+    // when expires is missing or unparsable.
+    let ttlMs = SESSION_CACHE_TTL_MS;
+    if (typeof data?.expires === "string") {
+      const expiresMs = Date.parse(data.expires);
+      if (Number.isFinite(expiresMs)) {
+        ttlMs = expiresMs - Date.now();
+      }
+    }
+    await setCachedSession(token, info, ttlMs);
     return info;
   } catch {
     return { valid: false };
   }
-}
-
-export function setSessionCache(key: string, info: SessionInfo) {
-  if (sessionCache.size >= SESSION_CACHE_MAX) {
-    const now = Date.now();
-    // First pass: evict all expired entries
-    for (const [k, v] of sessionCache) {
-      if (v.expiresAt <= now) sessionCache.delete(k);
-    }
-    // Second pass: if still at limit, evict the oldest entry (Map preserves insertion order)
-    if (sessionCache.size >= SESSION_CACHE_MAX) {
-      const oldest = sessionCache.keys().next().value;
-      if (oldest !== undefined) sessionCache.delete(oldest);
-    }
-  }
-  sessionCache.set(key, {
-    expiresAt: Date.now() + SESSION_CACHE_TTL_MS,
-    ...info,
-  });
 }

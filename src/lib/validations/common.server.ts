@@ -49,9 +49,6 @@ export const SCIM_PAGE_COUNT_MAX = 200;
 export const SCIM_PAGE_COUNT_DEFAULT = 100;
 
 // ─── Session Cache ──────────────────────────────────────────
-// SESSION_CACHE_MAX kept until the in-process Map in src/lib/proxy/auth-gate.ts
-// is removed by a later batch of the session-cache redesign. Delete then.
-export const SESSION_CACHE_MAX = 500;
 export const SESSION_CACHE_TTL_MS = 30_000;          // 30 s — positive cache ceiling
 export const NEGATIVE_CACHE_TTL_MS = 5_000;          // 5 s — short-TTL negative cache (S-Req-6)
 export const TOMBSTONE_TTL_MS = 5_000;               // 5 s — populate-after-invalidate guard
