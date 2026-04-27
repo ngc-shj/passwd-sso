@@ -10,9 +10,11 @@ const {
   mockLogAudit,
   mockPrismaFindUnique,
   mockPrismaSessionDeleteMany,
+  mockPrismaSessionFindMany,
   mockPrismaSessionCreate,
   mockPrismaTransaction,
   mockWithBypassRls,
+  mockInvalidateCachedSessions,
 } = vi.hoisted(() => ({
   mockAssertOrigin: vi.fn(),
   mockRateLimiterCheck: vi.fn(),
@@ -20,9 +22,11 @@ const {
   mockLogAudit: vi.fn(),
   mockPrismaFindUnique: vi.fn(),
   mockPrismaSessionDeleteMany: vi.fn(),
+  mockPrismaSessionFindMany: vi.fn(),
   mockPrismaSessionCreate: vi.fn(),
   mockPrismaTransaction: vi.fn(),
   mockWithBypassRls: vi.fn(),
+  mockInvalidateCachedSessions: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/auth/session/csrf", () => ({
@@ -62,9 +66,14 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockPrismaTransaction,
     session: {
       deleteMany: mockPrismaSessionDeleteMany,
+      findMany: mockPrismaSessionFindMany,
       create: mockPrismaSessionCreate,
     },
   },
+}));
+
+vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
+  invalidateCachedSessions: mockInvalidateCachedSessions,
 }));
 
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -81,6 +90,10 @@ vi.mock("@/lib/http/with-request-log", () => ({
 }));
 
 import { POST } from "./route";
+import {
+  expectInvalidatedAfterCommit,
+  expectNotInvalidatedOnDbThrow,
+} from "@/__tests__/helpers/session-cache-assertions";
 
 // ── Test data ────────────────────────────────────────────────
 
@@ -124,6 +137,7 @@ describe("POST /api/auth/passkey/verify", () => {
         const tx = {
           session: {
             deleteMany: mockPrismaSessionDeleteMany,
+            findMany: mockPrismaSessionFindMany,
             create: mockPrismaSessionCreate,
           },
         };
@@ -131,6 +145,7 @@ describe("POST /api/auth/passkey/verify", () => {
       },
     );
     mockPrismaSessionDeleteMany.mockResolvedValue({ count: 0 });
+    mockPrismaSessionFindMany.mockResolvedValue([]);
     mockPrismaSessionCreate.mockResolvedValue({
       sessionToken: "tok",
       userId: "user-1",
@@ -405,5 +420,52 @@ describe("POST /api/auth/passkey/verify", () => {
     expect(status).toBe(200);
     expect(json.ok).toBe(true);
     expect(json.prf).toBeUndefined();
+  });
+
+  it("invalidates cache for evicted session tokens after $transaction commits", async () => {
+    mockPrismaSessionFindMany.mockResolvedValue([
+      { sessionToken: "old-tok-1" },
+      { sessionToken: "old-tok-2" },
+    ]);
+    mockPrismaSessionDeleteMany.mockResolvedValue({ count: 2 });
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    await POST(req);
+
+    expectInvalidatedAfterCommit(mockInvalidateCachedSessions, [
+      "old-tok-1",
+      "old-tok-2",
+    ]);
+  });
+
+  it("does not invalidate cache when no prior sessions existed", async () => {
+    mockPrismaSessionFindMany.mockResolvedValue([]);
+    mockPrismaSessionDeleteMany.mockResolvedValue({ count: 0 });
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    await POST(req);
+
+    expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessions);
+  });
+
+  it("does not invalidate cache when $transaction rolls back (sequencing invariant)", async () => {
+    mockPrismaSessionFindMany.mockResolvedValue([
+      { sessionToken: "old-tok-1" },
+    ]);
+    mockPrismaTransaction.mockRejectedValue(new Error("tx rolled back"));
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    await expect(POST(req)).rejects.toThrow("tx rolled back");
+
+    expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessions);
   });
 });

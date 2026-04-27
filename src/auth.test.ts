@@ -40,6 +40,7 @@ const {
       updateMany: vi.fn(),
     },
     session: {
+      findMany: vi.fn(),
       updateMany: vi.fn(),
     },
     extensionToken: {
@@ -121,6 +122,10 @@ vi.mock("@/lib/auth/session/session-meta", () => ({
   sessionMetaStorage: { getStore: mockSessionMetaGetStore },
 }));
 
+vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
+  invalidateCachedSessions: vi.fn(),
+}));
+
 vi.mock("@/lib/prisma", () => ({
   prisma: mockPrisma,
 }));
@@ -188,6 +193,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockPrisma.passwordEntry.updateMany.mockResolvedValue({ count: 0 });
     mockPrisma.tag.updateMany.mockResolvedValue({ count: 0 });
     mockPrisma.folder.updateMany.mockResolvedValue({ count: 0 });
+    mockPrisma.session.findMany.mockResolvedValue([]);
     mockPrisma.session.updateMany.mockResolvedValue({ count: 0 });
     mockPrisma.extensionToken.updateMany.mockResolvedValue({ count: 0 });
     mockPrisma.passwordEntryHistory.updateMany.mockResolvedValue({ count: 0 });

@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMember, mockPrismaAccount, mockPrismaTransaction, mockSessionMetaGetStore, mockTenantClaimStoreGetStore, mockFindOrCreateSsoTenant, mockWithBypassRls, mockTxSession, mockTxTenant, mockLogAudit, mockCreateNotification, mockResolveEffectiveSessionTimeouts } = vi.hoisted(() => ({
+const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMember, mockPrismaAccount, mockPrismaTransaction, mockSessionMetaGetStore, mockTenantClaimStoreGetStore, mockFindOrCreateSsoTenant, mockWithBypassRls, mockTxSession, mockTxTenant, mockLogAudit, mockCreateNotification, mockResolveEffectiveSessionTimeouts, mockInvalidateCachedSessions } = vi.hoisted(() => ({
   mockPrismaSession: {
     create: vi.fn(),
     update: vi.fn(),
     findUnique: vi.fn(),
+    findMany: vi.fn(),
     delete: vi.fn(),
   },
   mockPrismaUser: {
@@ -42,6 +43,7 @@ const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMem
   mockLogAudit: vi.fn(),
   mockCreateNotification: vi.fn(),
   mockResolveEffectiveSessionTimeouts: vi.fn(),
+  mockInvalidateCachedSessions: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -83,8 +85,15 @@ vi.mock("@/lib/auth/policy/new-device-detection", () => ({
 vi.mock("@/lib/auth/session/session-timeout", () => ({
   resolveEffectiveSessionTimeouts: mockResolveEffectiveSessionTimeouts,
 }));
+vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
+  invalidateCachedSessions: mockInvalidateCachedSessions,
+}));
 
 import { createCustomAdapter } from "./auth-adapter";
+import {
+  expectInvalidatedAfterCommit,
+  expectNotInvalidatedOnDbThrow,
+} from "@/__tests__/helpers/session-cache-assertions";
 
 describe("createCustomAdapter", () => {
   const expires = new Date("2025-06-01T00:00:00Z");
@@ -422,8 +431,8 @@ describe("createCustomAdapter", () => {
       mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
       mockTxTenant.findUnique.mockResolvedValue({ maxConcurrentSessions: 2 });
       mockTxSession.findMany.mockResolvedValue([
-        { id: "old-s1", ipAddress: "1.1.1.1", userAgent: "old-1" },
-        { id: "old-s2", ipAddress: "2.2.2.2", userAgent: "old-2" },
+        { id: "old-s1", sessionToken: "old-tok-1", ipAddress: "1.1.1.1", userAgent: "old-1" },
+        { id: "old-s2", sessionToken: "old-tok-2", ipAddress: "2.2.2.2", userAgent: "old-2" },
       ]);
       mockTxSession.deleteMany.mockResolvedValue({ count: 1 });
       mockTxSession.create.mockResolvedValue({
@@ -457,6 +466,9 @@ describe("createCustomAdapter", () => {
           userId: "u-1",
         }),
       );
+
+      // R3: cache invalidation for evicted token
+      expectInvalidatedAfterCommit(mockInvalidateCachedSessions, ["old-tok-1"]);
     });
 
     it("evicts multiple sessions when well over limit", async () => {
@@ -464,9 +476,9 @@ describe("createCustomAdapter", () => {
       mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
       mockTxTenant.findUnique.mockResolvedValue({ maxConcurrentSessions: 2 });
       mockTxSession.findMany.mockResolvedValue([
-        { id: "s1", ipAddress: "1.1.1.1", userAgent: "ua1" },
-        { id: "s2", ipAddress: "2.2.2.2", userAgent: "ua2" },
-        { id: "s3", ipAddress: "3.3.3.3", userAgent: "ua3" },
+        { id: "s1", sessionToken: "tok-s1", ipAddress: "1.1.1.1", userAgent: "ua1" },
+        { id: "s2", sessionToken: "tok-s2", ipAddress: "2.2.2.2", userAgent: "ua2" },
+        { id: "s3", sessionToken: "tok-s3", ipAddress: "3.3.3.3", userAgent: "ua3" },
       ]);
       mockTxSession.deleteMany.mockResolvedValue({ count: 2 });
       mockTxSession.create.mockResolvedValue({
@@ -486,6 +498,12 @@ describe("createCustomAdapter", () => {
       expect(mockTxSession.deleteMany).toHaveBeenCalledWith({
         where: { id: { in: ["s1", "s2"] } },
       });
+
+      // R3: cache invalidation for both evicted tokens
+      expectInvalidatedAfterCommit(mockInvalidateCachedSessions, [
+        "tok-s1",
+        "tok-s2",
+      ]);
     });
 
     it("does not evict when under concurrent limit", async () => {
@@ -493,7 +511,7 @@ describe("createCustomAdapter", () => {
       mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
       mockTxTenant.findUnique.mockResolvedValue({ maxConcurrentSessions: 3 });
       mockTxSession.findMany.mockResolvedValue([
-        { id: "s1", ipAddress: "1.1.1.1", userAgent: "ua1" },
+        { id: "s1", sessionToken: "tok-s1", ipAddress: "1.1.1.1", userAgent: "ua1" },
       ]);
       mockTxSession.create.mockResolvedValue({
         sessionToken: "tok-ok",
@@ -510,6 +528,25 @@ describe("createCustomAdapter", () => {
 
       expect(mockTxSession.deleteMany).not.toHaveBeenCalled();
       expect(mockLogAudit).not.toHaveBeenCalled();
+      // No eviction → no cache invalidation.
+      expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessions);
+    });
+
+    it("does not invalidate cache when $transaction throws (sequencing invariant)", async () => {
+      mockSessionMetaGetStore.mockReturnValue({ ip: "10.0.0.1", userAgent: "x" });
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaTransaction.mockRejectedValue(new Error("tx rolled back"));
+
+      const adapter = createCustomAdapter();
+      await expect(
+        adapter.createSession!({
+          sessionToken: "tok-fail",
+          userId: "u-1",
+          expires,
+        }),
+      ).rejects.toThrow("tx rolled back");
+
+      expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessions);
     });
   });
 
@@ -662,6 +699,9 @@ describe("createCustomAdapter", () => {
       expect(result).toBeNull();
       expect(mockPrismaSession.delete).toHaveBeenCalledWith({ where: { sessionToken: "tok-idle" } });
       expect(mockPrismaSession.update).not.toHaveBeenCalled();
+
+      // R3: cache invalidation after DB delete commits.
+      expectInvalidatedAfterCommit(mockInvalidateCachedSessions, ["tok-idle"]);
     });
 
     it("deletes session when absolute timeout exceeded and emits SESSION_REVOKE audit", async () => {
@@ -694,6 +734,9 @@ describe("createCustomAdapter", () => {
           }),
         }),
       );
+
+      // R3: cache invalidation after DB delete commits.
+      expectInvalidatedAfterCommit(mockInvalidateCachedSessions, ["tok-abs-ex"]);
     });
 
     it("survives when createdAt + absolute is 1s in the future (off-by-one)", async () => {
@@ -933,11 +976,54 @@ describe("createCustomAdapter", () => {
 
   describe("deleteUser", () => {
     it("deletes user with withBypassRls", async () => {
+      mockPrismaSession.findMany.mockResolvedValue([]);
       mockPrismaUser.delete.mockResolvedValue({});
       const adapter = createCustomAdapter();
       await adapter.deleteUser!("u-1");
       expect(mockWithBypassRls).toHaveBeenCalled();
       expect(mockPrismaUser.delete).toHaveBeenCalledWith({ where: { id: "u-1" } });
+    });
+
+    it("invalidates cache for cascaded session tokens after user.delete commits", async () => {
+      mockPrismaSession.findMany.mockResolvedValue([
+        { sessionToken: "tok-x" },
+        { sessionToken: "tok-y" },
+      ]);
+      mockPrismaUser.delete.mockResolvedValue({});
+
+      const adapter = createCustomAdapter();
+      await adapter.deleteUser!("u-1");
+
+      expect(mockPrismaSession.findMany).toHaveBeenCalledWith({
+        where: { userId: "u-1" },
+        select: { sessionToken: true },
+      });
+      expectInvalidatedAfterCommit(mockInvalidateCachedSessions, [
+        "tok-x",
+        "tok-y",
+      ]);
+    });
+
+    it("does not invalidate cache when user has no sessions", async () => {
+      mockPrismaSession.findMany.mockResolvedValue([]);
+      mockPrismaUser.delete.mockResolvedValue({});
+
+      const adapter = createCustomAdapter();
+      await adapter.deleteUser!("u-1");
+
+      expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessions);
+    });
+
+    it("does not invalidate cache when user.delete throws (sequencing invariant)", async () => {
+      mockPrismaSession.findMany.mockResolvedValue([
+        { sessionToken: "tok-x" },
+      ]);
+      mockPrismaUser.delete.mockRejectedValue(new Error("FK violation"));
+
+      const adapter = createCustomAdapter();
+      await expect(adapter.deleteUser!("u-1")).rejects.toThrow("FK violation");
+
+      expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessions);
     });
   });
 
@@ -962,6 +1048,24 @@ describe("createCustomAdapter", () => {
       await adapter.deleteSession!("tok-1");
       expect(mockWithBypassRls).toHaveBeenCalled();
       expect(mockPrismaSession.delete).toHaveBeenCalledWith({ where: { sessionToken: "tok-1" } });
+    });
+
+    it("invalidates cache for the deleted token after DB commits", async () => {
+      mockPrismaSession.delete.mockResolvedValue({});
+      const adapter = createCustomAdapter();
+      await adapter.deleteSession!("tok-1");
+
+      expectInvalidatedAfterCommit(mockInvalidateCachedSessions, ["tok-1"]);
+    });
+
+    it("does not invalidate cache when DB delete throws (sequencing invariant)", async () => {
+      mockPrismaSession.delete.mockRejectedValue(new Error("not found"));
+      const adapter = createCustomAdapter();
+      await expect(adapter.deleteSession!("tok-1")).rejects.toThrow(
+        "not found",
+      );
+
+      expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessions);
     });
   });
 

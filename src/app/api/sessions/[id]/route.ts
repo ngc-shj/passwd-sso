@@ -9,6 +9,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { getSessionToken } from "../helpers";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { rateLimited } from "@/lib/http/api-response";
+import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 
 const revokeLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
@@ -65,6 +66,11 @@ async function handleDELETE(
       { error: API_ERROR.SESSION_NOT_FOUND },
       { status: 404 },
     );
+  }
+
+  // R3: invalidate cache after DB delete commits (S-6 sequencing).
+  if (target?.sessionToken) {
+    await invalidateCachedSessions([target.sessionToken]);
   }
 
   await logAuditAsync({

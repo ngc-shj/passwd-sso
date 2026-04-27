@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaSession, mockRateLimiter, mockLogAudit, mockWithUserTenantRls } =
+const { mockAuth, mockPrismaSession, mockRateLimiter, mockLogAudit, mockWithUserTenantRls, mockInvalidateCachedSessions } =
   vi.hoisted(() => ({
     mockAuth: vi.fn(),
     mockPrismaSession: {
@@ -11,6 +11,7 @@ const { mockAuth, mockPrismaSession, mockRateLimiter, mockLogAudit, mockWithUser
     mockRateLimiter: { check: vi.fn() },
     mockLogAudit: vi.fn(),
     mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockInvalidateCachedSessions: vi.fn().mockResolvedValue(undefined),
   }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -28,6 +29,9 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
+vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
+  invalidateCachedSessions: mockInvalidateCachedSessions,
+}));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
@@ -35,6 +39,10 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { DELETE } from "./route";
+import {
+  expectInvalidatedAfterCommit,
+  expectNotInvalidatedOnDbThrow,
+} from "@/__tests__/helpers/session-cache-assertions";
 
 describe("DELETE /api/sessions/[id]", () => {
   beforeEach(() => {
@@ -130,5 +138,53 @@ describe("DELETE /api/sessions/[id]", () => {
         targetId: "s1",
       }),
     );
+  });
+
+  it("invalidates cache for the deleted session token after DB commits", async () => {
+    mockPrismaSession.findFirst.mockResolvedValue({
+      sessionToken: "other-token",
+    });
+    mockPrismaSession.deleteMany.mockResolvedValue({ count: 1 });
+
+    const req = createRequest(
+      "DELETE",
+      "http://localhost:3000/api/sessions/s1",
+      { headers: { Cookie: "authjs.session-token=my-token" } },
+    );
+    await DELETE(req, createParams({ id: "s1" }));
+
+    expectInvalidatedAfterCommit(mockInvalidateCachedSessions, ["other-token"]);
+  });
+
+  it("does not invalidate cache when delete returns count 0 (sequencing invariant)", async () => {
+    mockPrismaSession.findFirst.mockResolvedValue(null);
+    mockPrismaSession.deleteMany.mockResolvedValue({ count: 0 });
+
+    const req = createRequest(
+      "DELETE",
+      "http://localhost:3000/api/sessions/s1",
+      { headers: { Cookie: "authjs.session-token=my-token" } },
+    );
+    await DELETE(req, createParams({ id: "s1" }));
+
+    expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessions);
+  });
+
+  it("does not invalidate cache when DB delete throws", async () => {
+    mockPrismaSession.findFirst.mockResolvedValue({
+      sessionToken: "other-token",
+    });
+    mockPrismaSession.deleteMany.mockRejectedValue(new Error("db down"));
+
+    const req = createRequest(
+      "DELETE",
+      "http://localhost:3000/api/sessions/s1",
+      { headers: { Cookie: "authjs.session-token=my-token" } },
+    );
+    await expect(DELETE(req, createParams({ id: "s1" }))).rejects.toThrow(
+      "db down",
+    );
+
+    expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessions);
   });
 });

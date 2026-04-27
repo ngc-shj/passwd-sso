@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 import { PERMISSIONS_POLICY } from "../lib/security/security-headers";
-import { SESSION_CACHE_MAX } from "../lib/validations/common.server";
-import { SESSION_CACHE_TTL_MS } from "../lib/proxy/auth-gate";
 
 const { mockCheckAccessWithAudit, mockResolveUserTenantId } = vi.hoisted(() => ({
   mockCheckAccessWithAudit: vi.fn().mockResolvedValue({ allowed: true }),
@@ -19,14 +17,21 @@ vi.mock("@/lib/auth/policy/access-restriction", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   resolveUserTenantId: mockResolveUserTenantId,
 }));
+vi.mock("@/lib/auth/session/session-cache", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/lib/auth/session/session-cache")
+  >("@/lib/auth/session/session-cache");
+  return {
+    ...actual,
+    getCachedSession: vi.fn().mockResolvedValue(null),
+    setCachedSession: vi.fn().mockResolvedValue(undefined),
+    invalidateCachedSession: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 import { proxy } from "../proxy";
 import { applySecurityHeaders as _applySecurityHeaders } from "../lib/proxy/security-headers";
-import {
-  extractSessionToken as _extractSessionToken,
-  setSessionCache as _setSessionCache,
-  sessionCache as _sessionCache,
-} from "../lib/proxy/auth-gate";
+import { extractSessionToken as _extractSessionToken } from "../lib/proxy/auth-gate";
 import {
   passkeyAuditEmitted as _passkeyAuditEmitted,
   PASSKEY_AUDIT_MAP_MAX as _PASSKEY_AUDIT_MAP_MAX,
@@ -554,85 +559,6 @@ describe("extractSessionToken", () => {
   });
 });
 
-describe("session cache eviction (setSessionCache)", () => {
-
-  beforeEach(() => {
-    _sessionCache.clear();
-  });
-
-  afterEach(() => {
-    _sessionCache.clear();
-  });
-
-  it("evicts expired entries first when cache is full", () => {
-    const now = Date.now();
-
-    // Fill cache to SESSION_CACHE_MAX - 1 with already-expired entries
-    for (let i = 0; i < SESSION_CACHE_MAX - 1; i++) {
-      _sessionCache.set(`expired-${i}`, {
-        expiresAt: now - 1000, // already expired
-        valid: true,
-        userId: `user-${i}`,
-      });
-    }
-    // Add one live entry that will be at index SESSION_CACHE_MAX - 1
-    _sessionCache.set("live-entry", {
-      expiresAt: now + 60_000,
-      valid: true,
-      userId: "live-user",
-    });
-
-    expect(_sessionCache.size).toBe(SESSION_CACHE_MAX);
-
-    // Trigger eviction by adding a new entry that pushes size to SESSION_CACHE_MAX + 1
-    _setSessionCache("new-key", { valid: true, userId: "new-user" });
-
-    // Expired entries must be purged; live entry and new entry must survive
-    expect(_sessionCache.has("live-entry")).toBe(true);
-    expect(_sessionCache.has("new-key")).toBe(true);
-    // Expired entries should have been evicted
-    expect(_sessionCache.has("expired-0")).toBe(false);
-  });
-
-  it("evicts the oldest entry when no expired entries exist", () => {
-    const now = Date.now();
-    const futureExpiry = now + 60_000;
-
-    // Fill to exactly SESSION_CACHE_MAX with live entries; insertion order matters
-    for (let i = 0; i < SESSION_CACHE_MAX; i++) {
-      _sessionCache.set(`live-${i}`, { expiresAt: futureExpiry, valid: true });
-    }
-
-    expect(_sessionCache.size).toBe(SESSION_CACHE_MAX);
-
-    // Adding one more: no expired entries exist, so the oldest (live-0) must be evicted
-    _setSessionCache("newest-key", { valid: true, userId: "newest" });
-
-    // The first-inserted key is the oldest and should have been evicted
-    expect(_sessionCache.has("live-0")).toBe(false);
-    // All other entries and the new one should remain
-    expect(_sessionCache.has("live-1")).toBe(true);
-    expect(_sessionCache.has("newest-key")).toBe(true);
-  });
-
-  it("does NOT clear all entries on size limit — only evicts minimally", () => {
-    const now = Date.now();
-
-    // Fill cache with all live entries (no expired ones)
-    for (let i = 0; i < SESSION_CACHE_MAX; i++) {
-      _sessionCache.set(`key-${i}`, { expiresAt: now + 60_000, valid: true });
-    }
-
-    _setSessionCache("trigger-eviction", { valid: false });
-
-    // Cache must NOT have been fully cleared; only 1 entry evicted
-    // so size should be SESSION_CACHE_MAX (500 - 1 evicted + 1 new = 500)
-    expect(_sessionCache.size).toBe(SESSION_CACHE_MAX);
-    // The new entry must exist
-    expect(_sessionCache.has("trigger-eviction")).toBe(true);
-  });
-});
-
 describe("proxy — access restriction", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
@@ -918,48 +844,48 @@ describe("proxy — CSRF gate", () => {
 });
 
 // =============================================================================
-// auth-gate TTL expiry test (T2 — covers the cache miss path on stale entry).
+// auth-gate cache miss path test — Redis TTL expiry surfaces as a cache miss.
 // =============================================================================
 
-describe("auth-gate session cache TTL expiry", () => {
+describe("auth-gate session cache miss path", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    vi.useFakeTimers();
     vi.stubEnv("APP_URL", APP_ORIGIN);
-    _sessionCache.clear();
     fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ user: { id: "u-ttl" } }), { status: 200 }),
+      new Response(JSON.stringify({ user: { id: "u-miss" } }), { status: 200 }),
     );
     mockResolveUserTenantId.mockResolvedValue(null);
   });
 
   afterEach(() => {
     fetchSpy.mockRestore();
-    vi.useRealTimers();
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
-  it("re-fetches session from /api/auth/session after SESSION_CACHE_TTL_MS (30s) expires", async () => {
+  it("re-fetches session from /api/auth/session on Redis cache miss", async () => {
+    // Arrange: getCachedSession returns hit on first call, miss on second.
+    const { getCachedSession } = await import("../lib/auth/session/session-cache");
+    const cacheSpy = vi.mocked(getCachedSession)
+      .mockResolvedValueOnce({ valid: true, userId: "u-miss" })
+      .mockResolvedValue(null);
+
     const buildReq = () =>
       new NextRequest(`${APP_ORIGIN}/api/passwords`, {
         method: "GET",
-        headers: { Cookie: "authjs.session-token=sess-ttl" },
+        headers: { Cookie: "authjs.session-token=sess-miss" },
       } as ConstructorParameters<typeof NextRequest>[1]);
 
-    // First request: populates the cache via fetch
+    // Hit path: cache returns SessionInfo, no upstream fetch.
+    await proxy(buildReq(), dummyOptions);
+    expect(fetchSpy).toHaveBeenCalledTimes(0);
+
+    // Miss path: cache returns null, upstream fetch fires once.
     await proxy(buildReq(), dummyOptions);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
-    // Second request well within TTL: serves from cache (no new fetch)
-    vi.advanceTimersByTime(SESSION_CACHE_TTL_MS / 6);
-    await proxy(buildReq(), dummyOptions);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-
-    // Third request past TTL: cache is stale, fresh fetch fires
-    vi.advanceTimersByTime(SESSION_CACHE_TTL_MS);
-    await proxy(buildReq(), dummyOptions);
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(cacheSpy).toHaveBeenCalledTimes(2);
   });
 });
 
