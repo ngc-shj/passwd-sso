@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.4.45](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.44...passwd-sso-v0.4.45) (2026-04-27)
+
+
+### Features
+
+* **admin-token:** per-operator op_* tokens replace shared ADMIN_API_TOKEN ([#408](https://github.com/ngc-shj/passwd-sso/issues/408)) ([c510abc](https://github.com/ngc-shj/passwd-sso/commit/c510abc25c98325e29d0f980b9586523b4d32fd4))
+* **audit-emit:** bound metadata payload size to prevent outbox bloat ([#402](https://github.com/ngc-shj/passwd-sso/issues/402)) ([9091da8](https://github.com/ngc-shj/passwd-sso/commit/9091da8cf8c9e14a6ec7ddafa955fb99ac073793))
+* **audit:** add AUDIT_LOG_PURGE action and dryRun audit emission ([#401](https://github.com/ngc-shj/passwd-sso/issues/401)) ([e07dd7c](https://github.com/ngc-shj/passwd-sso/commit/e07dd7ca065a7553d7079b624d7ed09f14cd9339))
+
+
+### Bug Fixes
+
+* **admin:** align operator validation across maintenance routes ([#400](https://github.com/ngc-shj/passwd-sso/issues/400)) ([de3ea33](https://github.com/ngc-shj/passwd-sso/commit/de3ea334c15acebe58db799fce27fd0131ae08f6))
+* **cache:** TTL sweep before FIFO fallback in policy and session timeout caches ([#405](https://github.com/ngc-shj/passwd-sso/issues/405)) ([4e73f88](https://github.com/ngc-shj/passwd-sso/commit/4e73f88878aacc3d93188aba38bb2c6916d140a2))
+* **proxy:** use staleness-based eviction for passkey audit dedup map ([#404](https://github.com/ngc-shj/passwd-sso/issues/404)) ([34527fe](https://github.com/ngc-shj/passwd-sso/commit/34527fea36ce5938a2fde6484566787b94cf76f6))
+
+
+### Code Refactoring
+
+* **csp:** unify loopback redirect URI accept set across DCR, manual MCP routes, frontend, and CSP ([#403](https://github.com/ngc-shj/passwd-sso/issues/403)) ([9bd0c23](https://github.com/ngc-shj/passwd-sso/commit/9bd0c23f3ba04f0d7944b3da7493616d169dec04))
+* **proxy:** enforce baseline CSRF at the ingress layer (closes pre1 + R3 baseline) ([#398](https://github.com/ngc-shj/passwd-sso/issues/398)) ([cb6fbec](https://github.com/ngc-shj/passwd-sso/commit/cb6fbecc44789e101f1ed61cc9a23f135b1a9a89))
+* **proxy:** extract page/api route handlers + clarify consent origin check ([#406](https://github.com/ngc-shj/passwd-sso/issues/406)) ([10449b0](https://github.com/ngc-shj/passwd-sso/commit/10449b07bb225d1b5d02f28bf143efeb89de2b7f))
+* **session-cache:** Redis-backed cache with tombstone-based revocation propagation ([#407](https://github.com/ngc-shj/passwd-sso/issues/407)) ([ce79ab6](https://github.com/ngc-shj/passwd-sso/commit/ce79ab635fe72a983d364afb8c1ec829b1f5a3fd))
+
 ## [0.4.44](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.43...passwd-sso-v0.4.44) (2026-04-25)
 
 
