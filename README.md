@@ -73,7 +73,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 
 - **Team Vault** — E2E encrypted sharing (ECDH-P256) with RBAC (Owner/Admin/Member/Viewer)
 - **Team Security Policies** — Sharing/export controls, reprompt requirements, password-policy guidance
-- **Multi-Tenant Isolation** — PostgreSQL FORCE RLS on 39 tables with IdP claim-based tenant resolution
+- **Multi-Tenant Isolation** — PostgreSQL FORCE RLS on 50+ tables with IdP claim-based tenant resolution
 - **SCIM 2.0 Provisioning** — Tenant-scoped user/group sync (RFC 7644)
 - **Directory Sync** — Azure AD, Google Workspace, Okta member sync
 - **Tenant Admin** — Member management, SCIM tokens, admin vault reset, tenant settings
@@ -135,11 +135,15 @@ Next.js App (SSR / API Routes)
   │  ← MCP Gateway: /api/mcp (Streamable HTTP, OAuth 2.1 PKCE)
   │  ← Service Account tokens: sa_ prefix, JIT access workflow
   ▼
-PostgreSQL ← Prisma 7          Redis ← rate limiting
-  │
+PostgreSQL ← Prisma 7          Redis ← rate limiting, session cache
+  │  ← audit_outbox (transactional write)
   ▼
+Audit Outbox Worker (separate process) ← drains audit_outbox → audit_logs
+  │
 SAML Jackson (Docker) ← SAML 2.0 IdP (HENNGE, Okta, Azure AD, etc.)
 ```
+
+**Docker services** — Six containers: `app` (Next.js), `db` (PostgreSQL 16), `jackson` (SAML Jackson), `redis` (Redis 7), `migrate` (one-shot Prisma migration), `audit-outbox-worker` (audit drain worker, dev override only — deploy separately in production).
 
 **Personal vault** — All data is encrypted **client-side** before reaching the server. The server stores only ciphertext.
 
@@ -151,7 +155,7 @@ SAML Jackson (Docker) ← SAML 2.0 IdP (HENNGE, Okta, Azure AD, etc.)
 
 - Node.js 20+
 - Docker & Docker Compose
-- Google Cloud project (for OIDC) and/or a SAML IdP
+- At least one identity provider: Google Cloud project (OIDC), a SAML IdP, or Magic Link / Passkey-only (no external IdP required)
 
 ### 1. Clone and install
 
@@ -249,17 +253,28 @@ Key variables:
 | `OUTBOX_WORKER_DATABASE_URL` | (Optional) Worker DB connection (`passwd_outbox_worker` role). Required for `npm run worker:audit-outbox` |
 | `PASSWD_OUTBOX_WORKER_PASSWORD` | (Optional) Worker DB role password. Used by initdb on first boot; for existing clusters use `scripts/set-outbox-worker-password.sh` |
 | `OUTBOX_BATCH_SIZE`, `OUTBOX_*` | (Optional) Audit outbox worker tuning. See `.env.example` for all options |
-| `ADMIN_API_TOKEN` | (Optional) Bearer token for admin/maintenance endpoints. `openssl rand -hex 32` |
 | `NEXT_DEV_ALLOWED_ORIGINS` | (Optional) Allowed origins for dev server (e.g., Tailscale hostname) |
 | `NEXT_PUBLIC_CHROME_STORE_URL` | (Optional) Chrome Web Store URL for extension distribution |
 | `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_DSN` | (Optional) Sentry DSN for error tracking |
 | `SENTRY_AUTH_TOKEN` | (Optional) Sentry auth token for source map upload |
-| `KEY_PROVIDER` | (Optional) Key provider backend: `env` (default), `aws-sm`, `azure-kv`, or `gcp-sm`. See [KMS Setup](docs/operations/key-provider-setup.md) |
+| `KEY_PROVIDER` | (Optional) Key provider backend: `env` (default), `azure-kv`, or `gcp-sm`. See [KMS Setup](docs/operations/key-provider-setup.md) |
 | `SM_CACHE_TTL_MS` | (Optional) TTL for KMS decrypted key cache in ms (default: 300000 = 5 min) |
 
 </details>
 
 > **Redis is required in production.** In dev/test, omit `REDIS_URL` for in-memory fallback.
+
+### Admin / maintenance scripts
+
+Maintenance scripts (`scripts/purge-history.sh`, `scripts/purge-audit-logs.sh`, `scripts/rotate-master-key.sh`) require a per-operator `op_*` Bearer token — the old shared `ADMIN_API_TOKEN` environment variable is removed. Operators mint tokens at `/<locale>/admin/tenant/operator-tokens` and pass them at script invocation time:
+
+```bash
+ADMIN_API_TOKEN=op_<token> scripts/purge-history.sh
+ADMIN_API_TOKEN=op_<token> scripts/purge-audit-logs.sh
+ADMIN_API_TOKEN=op_<token> TARGET_VERSION=<int> scripts/rotate-master-key.sh
+```
+
+See [Admin Token Setup](docs/operations/admin-tokens.md) for token minting and rotation guidance.
 
 ### 3. Start services
 
@@ -305,7 +320,7 @@ Zero-knowledge architecture — the server stores only ciphertext and cannot dec
 - **Domain separation** — Secret key → HKDF → separate encryption key + auth key
 - **Secret Key** — Account-specific salt for defense against server compromise
 - **AAD binding** — Additional Authenticated Data ties ciphertext to user and entry IDs
-- **Session security** — Database sessions (not JWT), 8-hour timeout, auto-lock after 15 min idle or 5 min tab hidden
+- **Session security** — Database sessions (not JWT), tenant/team-policy-driven absolute timeout (default 30 days, configurable down to 5 minutes per policy), auto-lock after 15 min idle or 5 min tab hidden
 - **Clipboard clear** — Copied passwords auto-clear after 30 seconds
 - **CSRF defense** — JSON body + SameSite cookie + CSP + Origin validation
 
@@ -344,6 +359,9 @@ docs/                     # Documentation (architecture, security, operations, s
 | `npm run init:env` | Interactive .env generator (dev/ci/production) |
 | `npm run generate:env-example` | Regenerate .env.example from Zod schema + sidecar |
 | `npm run check:env-docs` | Drift check: schema ↔ .env.example ↔ allowlist ↔ compose |
+| `npm run worker:audit-outbox` | Run audit outbox drain worker (requires `OUTBOX_WORKER_DATABASE_URL`) |
+| `npm run test:integration` | Run real-DB integration tests (requires running Postgres) |
+| `npm run version:bump` | Suggest next version from git log (interactive) |
 | `npm run generate:icons` | Generate app icons |
 
 <details>
