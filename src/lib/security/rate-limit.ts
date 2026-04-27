@@ -1,18 +1,9 @@
 import { getRedis } from "@/lib/redis";
-import { getLogger } from "@/lib/logger";
 import { RATE_LIMIT_MAP_MAX_SIZE } from "@/lib/validations/common.server";
+import { createThrottledErrorLogger } from "@/lib/logger/throttled";
 
-// Throttled Redis error logger — avoids flooding logs during sustained outages.
-// Uses a fixed message to prevent REDIS_URL credentials from leaking via err.message.
-let lastRedisErrorLog = 0;
-const REDIS_ERROR_LOG_INTERVAL = 30_000;
-
-function logRedisError(): void {
-  const now = Date.now();
-  if (now - lastRedisErrorLog < REDIS_ERROR_LOG_INTERVAL) return;
-  lastRedisErrorLog = now;
-  getLogger().error("rate-limit.redis.fallback");
-}
+// 30_000 ms: matches existing log-flood ceiling for Redis fallback events.
+const logRedisError = createThrottledErrorLogger(30_000, "rate-limit.redis.fallback");
 
 interface RateLimiterOptions {
   /** Time window in milliseconds */
