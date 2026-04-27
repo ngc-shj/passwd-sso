@@ -15,6 +15,7 @@ import { isValidCidr, extractClientIp } from "@/lib/auth/policy/ip-access";
 import { invalidateTenantPolicyCache, wouldIpBeAllowed } from "@/lib/auth/policy/access-restriction";
 import { invalidateLockoutThresholdCache } from "@/lib/auth/policy/account-lockout";
 import { invalidateSessionTimeoutCacheForTenant } from "@/lib/auth/session/session-timeout";
+import { invalidateCachedSessionsBulk } from "@/lib/auth/session/session-cache";
 import {
   pinLengthSchema,
   MAX_CIDRS,
@@ -545,6 +546,7 @@ async function handlePATCH(req: NextRequest) {
   const needsCurrentState =
     (tailscaleEnabled === true && tailscaleTailnet === undefined) ||
     requirePasskey !== undefined ||
+    passkeyGracePeriodDays !== undefined ||
     lockoutThreshold1 !== undefined ||
     lockoutDuration1Minutes !== undefined ||
     lockoutThreshold2 !== undefined ||
@@ -572,6 +574,7 @@ async function handlePATCH(req: NextRequest) {
             tailscaleEnabled: true,
             allowedCidrs: true,
             requirePasskey: true,
+            passkeyGracePeriodDays: true,
             lockoutThreshold1: true,
             lockoutDuration1Minutes: true,
             lockoutThreshold2: true,
@@ -917,6 +920,37 @@ async function handlePATCH(req: NextRequest) {
   invalidateTenantPolicyCache(membership.tenantId);
   invalidateLockoutThresholdCache(membership.tenantId);
   invalidateSessionTimeoutCacheForTenant(membership.tenantId);
+
+  // R3 site #9 (S-Req-7): when requirePasskey or passkeyGracePeriodDays
+  // change, invalidate every active cached session for this tenant so the
+  // proxy stops serving the stale tenant-policy snapshot embedded in
+  // SessionInfo. Synchronous (no fire-and-forget) — operators rely on the
+  // post-PATCH state being authoritative. Bulk-pipelined to bound latency
+  // for enterprise tenants (S-13).
+  const requirePasskeyChanged =
+    updateData.requirePasskey !== undefined &&
+    (currentTenant?.requirePasskey ?? false) !== updateData.requirePasskey;
+  const gracePeriodChanged =
+    updateData.passkeyGracePeriodDays !== undefined &&
+    (currentTenant?.passkeyGracePeriodDays ?? null) !== updateData.passkeyGracePeriodDays;
+
+  if (requirePasskeyChanged || gracePeriodChanged) {
+    const targetSessions = await withBypassRls(prisma, async () =>
+      prisma.session.findMany({
+        where: {
+          tenantId: membership.tenantId,
+          expires: { gt: new Date() },
+        },
+        select: { sessionToken: true },
+      }),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+
+    if (targetSessions.length > 0) {
+      await invalidateCachedSessionsBulk(
+        targetSessions.map((s) => s.sessionToken),
+      );
+    }
+  }
 
   // Audit any team-policy clamping that cascaded from this tenant change.
   for (const c of clampedTeams) {

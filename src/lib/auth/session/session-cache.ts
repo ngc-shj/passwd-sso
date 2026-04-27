@@ -192,3 +192,34 @@ export async function invalidateCachedSession(token: string): Promise<void> {
     logRedisError((err as { code?: string } | undefined)?.code);
   }
 }
+
+/**
+ * Bulk tombstone-write via Redis pipeline (single round-trip).
+ *
+ * Used by tenant policy change (PATCH /api/tenant/policy) to invalidate
+ * thousands of sessions for an enterprise tenant in one network hop —
+ * required so the route latency stays bounded (S-13). Behaviorally
+ * equivalent to calling invalidateCachedSession on each token, but
+ * with constant network cost.
+ */
+export async function invalidateCachedSessionsBulk(
+  tokens: ReadonlyArray<string>,
+): Promise<void> {
+  if (tokens.length === 0) return;
+  const redis = getRedis();
+  if (!redis) return;
+  const pipeline = redis.pipeline();
+  for (const token of tokens) {
+    pipeline.set(
+      cacheKey(token),
+      JSON.stringify({ tombstone: true }),
+      "PX",
+      TOMBSTONE_TTL_MS,
+    );
+  }
+  try {
+    await pipeline.exec();
+  } catch (err) {
+    logRedisError((err as { code?: string } | undefined)?.code);
+  }
+}

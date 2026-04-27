@@ -14,6 +14,7 @@ import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { createNotification } from "@/lib/notification";
 import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
+import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 
 /**
  * Custom Auth.js adapter that extends PrismaAdapter with:
@@ -244,7 +245,7 @@ export function createCustomAdapter(): Adapter {
       let evictionInfo: {
         tenantId: string;
         maxSessions: number;
-        evicted: { id: string; ipAddress: string | null; userAgent: string | null }[];
+        evicted: { id: string; sessionToken: string; ipAddress: string | null; userAgent: string | null }[];
       } | null = null;
 
       const created = await withBypassRls(prisma, async () => {
@@ -267,7 +268,7 @@ export function createCustomAdapter(): Adapter {
                 tenantId,
                 expires: { gt: new Date() },
               },
-              select: { id: true, ipAddress: true, userAgent: true },
+              select: { id: true, sessionToken: true, ipAddress: true, userAgent: true },
               orderBy: { id: "asc" },
             });
 
@@ -326,7 +327,7 @@ export function createCustomAdapter(): Adapter {
         const { tenantId, maxSessions, evicted } = evictionInfo as {
           tenantId: string;
           maxSessions: number;
-          evicted: { id: string; ipAddress: string | null; userAgent: string | null }[];
+          evicted: { id: string; sessionToken: string; ipAddress: string | null; userAgent: string | null }[];
         };
         for (const ev of evicted) {
           await logAuditAsync({
@@ -355,6 +356,9 @@ export function createCustomAdapter(): Adapter {
           body: `${evicted.length} session(s) terminated due to concurrent session limit (max: ${maxSessions}).`,
           metadata: { evictedCount: evicted.length, maxConcurrentSessions: maxSessions },
         });
+
+        // R3: invalidate cache for evicted sessions after $transaction commits.
+        await invalidateCachedSessions(evicted.map((e) => e.sessionToken));
       }
 
       return {
@@ -378,9 +382,22 @@ export function createCustomAdapter(): Adapter {
     },
 
     async deleteUser(userId: string) {
-      await withBypassRls(prisma, async () =>
-        prisma.user.delete({ where: { id: userId } }),
-      BYPASS_PURPOSE.AUTH_FLOW);
+      await withBypassRls(prisma, async () => {
+        // SELECT session tokens BEFORE the cascade-delete fires. After
+        // user.delete commits, the Postgres cascade removes Session rows
+        // (auth-cascade), but does NOT invoke the per-row deleteSession
+        // adapter — so we collect tokens up-front and invalidate manually.
+        const targetSessions = await prisma.session.findMany({
+          where: { userId },
+          select: { sessionToken: true },
+        });
+        await prisma.user.delete({ where: { id: userId } });
+        if (targetSessions.length > 0) {
+          await invalidateCachedSessions(
+            targetSessions.map((s) => s.sessionToken),
+          );
+        }
+      }, BYPASS_PURPOSE.AUTH_FLOW);
     },
 
     async unlinkAccount(providerAccountId: Pick<AdapterAccount, "provider" | "providerAccountId">) {
@@ -400,6 +417,9 @@ export function createCustomAdapter(): Adapter {
       await withBypassRls(prisma, async () =>
         prisma.session.delete({ where: { sessionToken } }),
       BYPASS_PURPOSE.AUTH_FLOW);
+      // R3: invalidation runs only if the delete didn't throw — preserves
+      // the "DB write commits before cache evict" invariant.
+      await invalidateCachedSessions([sessionToken]);
     },
 
     async getAccount(providerAccountId: string, provider: string): Promise<AdapterAccount | null> {
@@ -474,6 +494,7 @@ export function createCustomAdapter(): Adapter {
               where: { sessionToken: session.sessionToken },
             }),
           BYPASS_PURPOSE.AUTH_FLOW);
+          await invalidateCachedSessions([session.sessionToken]);
           return null;
         }
 
@@ -485,6 +506,7 @@ export function createCustomAdapter(): Adapter {
               where: { sessionToken: session.sessionToken },
             }),
           BYPASS_PURPOSE.AUTH_FLOW);
+          await invalidateCachedSessions([session.sessionToken]);
           await logAuditAsync({
             scope: AUDIT_SCOPE.PERSONAL,
             action: AUDIT_ACTION.SESSION_REVOKE,

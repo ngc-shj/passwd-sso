@@ -13,6 +13,7 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isHttps } from "@/lib/url-helpers";
 import { PASSKEY_SESSION_MAX_AGE_SECONDS } from "@/lib/validations/common.server";
 import { revokeAllExtensionTokensForUser } from "@/lib/auth/tokens/extension-token";
+import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 
 export const runtime = "nodejs";
 
@@ -100,8 +101,17 @@ async function handlePOST(req: NextRequest) {
   // Defense-in-depth: atomically delete all existing sessions and create
   // new one. Passkey sign-in requires physical device possession, so this
   // aggressive rotation is acceptable for a password manager.
+  let evictedTokens: string[] = [];
   const evictedCount = await withBypassRls(prisma, async () => {
     const result = await prisma.$transaction(async (tx) => {
+      // SELECT tokens to invalidate before deleteMany — same tx so the read
+      // sees only currently-live sessions (R3 / S-6 sequencing).
+      const existing = await tx.session.findMany({
+        where: { userId: user.id },
+        select: { sessionToken: true },
+      });
+      evictedTokens = existing.map((s) => s.sessionToken);
+
       const deleted = await tx.session.deleteMany({
         where: { userId: user.id },
       });
@@ -123,6 +133,11 @@ async function handlePOST(req: NextRequest) {
     });
     return result;
   }, BYPASS_PURPOSE.AUTH_FLOW);
+
+  // Invalidate cache AFTER $transaction resolves successfully (S-6).
+  if (evictedTokens.length > 0) {
+    await invalidateCachedSessions(evictedTokens);
+  }
 
   // Passkey re-auth invalidates all prior bearer credentials (extension tokens).
   // Maintains the "credential freshness" invariant for AAL3 auth events.

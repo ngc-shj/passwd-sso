@@ -9,10 +9,12 @@ const {
   mockPrismaUserFindUnique,
   mockPrismaTenantUpdate,
   mockPrismaTenantFindUnique,
+  mockPrismaSessionFindMany,
   mockWithBypassRls,
   mockLogAudit,
   mockPolicyLimiterCheck,
   mockInvalidateTenantPolicyCache,
+  mockInvalidateCachedSessionsBulk,
   mockExtractClientIp,
   mockWouldIpBeAllowed,
   TenantAuthError,
@@ -31,10 +33,12 @@ const {
     mockPrismaUserFindUnique: vi.fn(),
     mockPrismaTenantUpdate: vi.fn(),
     mockPrismaTenantFindUnique: vi.fn(),
+    mockPrismaSessionFindMany: vi.fn().mockResolvedValue([]),
     mockWithBypassRls: vi.fn(),
     mockLogAudit: vi.fn(),
     mockPolicyLimiterCheck: vi.fn(),
     mockInvalidateTenantPolicyCache: vi.fn(),
+    mockInvalidateCachedSessionsBulk: vi.fn().mockResolvedValue(undefined),
     mockExtractClientIp: vi.fn(() => "127.0.0.1"),
     mockWouldIpBeAllowed: vi.fn(() => true),
     TenantAuthError: _TenantAuthError,
@@ -62,9 +66,14 @@ vi.mock("@/lib/prisma", () => ({
       update: mockPrismaTenantUpdate,
       findUnique: mockPrismaTenantFindUnique,
     },
+    session: { findMany: mockPrismaSessionFindMany },
     teamPolicy: { findMany: mockTeamPolicyFindMany, updateMany: mockTeamPolicyUpdateMany },
     $transaction: mockTransaction,
   },
+}));
+
+vi.mock("@/lib/auth/session/session-cache", () => ({
+  invalidateCachedSessionsBulk: mockInvalidateCachedSessionsBulk,
 }));
 
 vi.mock("@/lib/auth/session/session-timeout", () => ({
@@ -150,6 +159,10 @@ vi.mock("@/lib/auth/policy/access-restriction", () => ({
 }));
 
 import { GET, PATCH } from "./route";
+import {
+  expectInvalidatedAfterCommit,
+  expectNotInvalidatedOnDbThrow,
+} from "@/__tests__/helpers/session-cache-assertions";
 
 // ── Test data ────────────────────────────────────────────────
 
@@ -230,7 +243,10 @@ describe("PATCH /api/tenant/policy", () => {
       allowedCidrs: [],
       tailscaleEnabled: false,
       tailscaleTailnet: null,
+      requirePasskey: false,
+      passkeyGracePeriodDays: null,
     });
+    mockPrismaSessionFindMany.mockResolvedValue([]);
     mockWithBypassRls.mockImplementation((_p: unknown, fn: () => unknown) => fn());
     // Serializable transaction wrapping cascade-clamp + tenant.update
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
@@ -355,5 +371,116 @@ describe("PATCH /api/tenant/policy", () => {
     const { status } = await parseResponse(await PATCH(req));
 
     expect(status).toBe(200);
+  });
+
+  describe("session cache invalidation (site #9)", () => {
+    it("bulk-invalidates session cache when requirePasskey changes false → true", async () => {
+      mockPrismaTenantFindUnique.mockResolvedValue({
+        allowedCidrs: [],
+        tailscaleEnabled: false,
+        tailscaleTailnet: null,
+        requirePasskey: false,
+        passkeyGracePeriodDays: null,
+      });
+      mockPrismaSessionFindMany.mockResolvedValue([
+        { sessionToken: "tok-1" },
+        { sessionToken: "tok-2" },
+      ]);
+      mockPrismaTenantUpdate.mockResolvedValue({
+        ...BASE_POLICY,
+        requirePasskey: true,
+      });
+
+      const req = createRequest("PATCH", ROUTE_URL, {
+        body: { requirePasskey: true },
+      });
+      const { status } = await parseResponse(await PATCH(req));
+
+      expect(status).toBe(200);
+      expectInvalidatedAfterCommit(mockInvalidateCachedSessionsBulk, [
+        "tok-1",
+        "tok-2",
+      ]);
+    });
+
+    it("bulk-invalidates session cache when passkeyGracePeriodDays changes", async () => {
+      mockPrismaTenantFindUnique.mockResolvedValue({
+        allowedCidrs: [],
+        tailscaleEnabled: false,
+        tailscaleTailnet: null,
+        requirePasskey: true,
+        passkeyGracePeriodDays: 7,
+      });
+      mockPrismaSessionFindMany.mockResolvedValue([
+        { sessionToken: "tok-x" },
+      ]);
+      mockPrismaTenantUpdate.mockResolvedValue({
+        ...BASE_POLICY,
+        passkeyGracePeriodDays: 14,
+      });
+
+      const req = createRequest("PATCH", ROUTE_URL, {
+        body: { passkeyGracePeriodDays: 14 },
+      });
+      const { status } = await parseResponse(await PATCH(req));
+
+      expect(status).toBe(200);
+      expectInvalidatedAfterCommit(mockInvalidateCachedSessionsBulk, ["tok-x"]);
+    });
+
+    it("does not invalidate session cache when requirePasskey is unchanged", async () => {
+      mockPrismaTenantFindUnique.mockResolvedValue({
+        allowedCidrs: [],
+        tailscaleEnabled: false,
+        tailscaleTailnet: null,
+        requirePasskey: true,
+        passkeyGracePeriodDays: 7,
+      });
+      mockPrismaTenantUpdate.mockResolvedValue({
+        ...BASE_POLICY,
+        requirePasskey: true,
+      });
+
+      const req = createRequest("PATCH", ROUTE_URL, {
+        body: { requirePasskey: true },
+      });
+      const { status } = await parseResponse(await PATCH(req));
+
+      expect(status).toBe(200);
+      expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessionsBulk);
+    });
+
+    it("does not invalidate session cache for non-passkey policy changes", async () => {
+      mockPrismaTenantUpdate.mockResolvedValue({
+        ...BASE_POLICY,
+        requireMinPinLength: 6,
+      });
+
+      const req = createRequest("PATCH", ROUTE_URL, {
+        body: { requireMinPinLength: 6 },
+      });
+      const { status } = await parseResponse(await PATCH(req));
+
+      expect(status).toBe(200);
+      expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessionsBulk);
+    });
+
+    it("does not invalidate session cache when policy update transaction throws", async () => {
+      mockPrismaTenantFindUnique.mockResolvedValue({
+        allowedCidrs: [],
+        tailscaleEnabled: false,
+        tailscaleTailnet: null,
+        requirePasskey: false,
+        passkeyGracePeriodDays: null,
+      });
+      mockTransaction.mockRejectedValue(new Error("tx rolled back"));
+
+      const req = createRequest("PATCH", ROUTE_URL, {
+        body: { requirePasskey: true },
+      });
+      await expect(PATCH(req)).rejects.toThrow("tx rolled back");
+
+      expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessionsBulk);
+    });
   });
 });

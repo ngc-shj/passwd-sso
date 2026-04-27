@@ -10,6 +10,7 @@ import { getSessionToken } from "./helpers";
 import { withUserTenantRls, resolveUserTenantId } from "@/lib/tenant-context";
 import { rateLimited } from "@/lib/http/api-response";
 import { revokeAllExtensionTokensForUser } from "@/lib/auth/tokens/extension-token";
+import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 
 const revokeAllLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
 
@@ -96,6 +97,18 @@ async function handleDELETE(request: NextRequest) {
     );
   }
 
+  // SELECT tokens before deleteMany so we can invalidate the cache after
+  // the DB delete commits (R3 / S-6 sequencing).
+  const targets = await withUserTenantRls(session.user.id, async () =>
+    prisma.session.findMany({
+      where: {
+        userId: session.user.id,
+        sessionToken: { not: currentToken },
+      },
+      select: { sessionToken: true },
+    }),
+  );
+
   const result = await withUserTenantRls(session.user.id, async () =>
     prisma.session.deleteMany({
       where: {
@@ -104,6 +117,10 @@ async function handleDELETE(request: NextRequest) {
       },
     }),
   );
+
+  if (targets.length > 0) {
+    await invalidateCachedSessions(targets.map((t) => t.sessionToken));
+  }
 
   // "Sign out everywhere" must also revoke all extension tokens since they
   // are bearer credentials distinct from Auth.js sessions.

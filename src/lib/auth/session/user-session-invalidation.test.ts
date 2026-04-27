@@ -5,11 +5,13 @@ const {
   mockExtensionToken,
   mockApiKey,
   mockWithBypassRls,
+  mockInvalidateCachedSessions,
 } = vi.hoisted(() => ({
-  mockSession: { deleteMany: vi.fn() },
+  mockSession: { deleteMany: vi.fn(), findMany: vi.fn() },
   mockExtensionToken: { updateMany: vi.fn() },
   mockApiKey: { updateMany: vi.fn() },
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockInvalidateCachedSessions: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -22,13 +24,24 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
+vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
+  invalidateCachedSessions: mockInvalidateCachedSessions,
+}));
 
 import { invalidateUserSessions } from "./user-session-invalidation";
+import {
+  expectInvalidatedAfterCommit,
+  expectNotInvalidatedOnDbThrow,
+} from "@/__tests__/helpers/session-cache-assertions";
 
 describe("invalidateUserSessions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSession.deleteMany.mockResolvedValue({ count: 2 });
+    mockSession.findMany.mockResolvedValue([
+      { sessionToken: "tok-a" },
+      { sessionToken: "tok-b" },
+    ]);
     mockExtensionToken.updateMany.mockResolvedValue({ count: 1 });
     mockApiKey.updateMany.mockResolvedValue({ count: 3 });
   });
@@ -76,5 +89,43 @@ describe("invalidateUserSessions", () => {
     await expect(
       invalidateUserSessions("user-1", { tenantId: "tenant-1" }),
     ).rejects.toThrow("db error");
+  });
+
+  it("invalidates cache for all selected session tokens after DB commits", async () => {
+    mockSession.findMany.mockResolvedValue([
+      { sessionToken: "tok-a" },
+      { sessionToken: "tok-b" },
+      { sessionToken: "tok-c" },
+    ]);
+
+    await invalidateUserSessions("user-1", { tenantId: "tenant-1" });
+
+    expectInvalidatedAfterCommit(mockInvalidateCachedSessions, [
+      "tok-a",
+      "tok-b",
+      "tok-c",
+    ]);
+  });
+
+  it("does not invalidate cache when there are no sessions to delete", async () => {
+    mockSession.findMany.mockResolvedValue([]);
+    mockSession.deleteMany.mockResolvedValue({ count: 0 });
+
+    await invalidateUserSessions("user-1", { tenantId: "tenant-1" });
+
+    expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessions);
+  });
+
+  it("does not invalidate cache when DB delete throws (sequencing invariant)", async () => {
+    mockSession.findMany.mockResolvedValue([
+      { sessionToken: "tok-a" },
+    ]);
+    mockSession.deleteMany.mockRejectedValue(new Error("db error"));
+
+    await expect(
+      invalidateUserSessions("user-1", { tenantId: "tenant-1" }),
+    ).rejects.toThrow("db error");
+
+    expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessions);
   });
 });

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 
 /**
  * Invalidate all sessions and tokens for a user.
@@ -14,6 +15,13 @@ export async function invalidateUserSessions(
   const tenantFilter = { tenantId: options.tenantId };
 
   return withBypassRls(prisma, async () => {
+    // SELECT tokens before deleteMany so we can invalidate the cache after
+    // the DB delete commits (R3 / S-6 sequencing).
+    const targetSessions = await prisma.session.findMany({
+      where: { userId, ...tenantFilter },
+      select: { sessionToken: true },
+    });
+
     const [sessionsResult, extensionTokensResult, apiKeysResult] =
       await Promise.all([
         prisma.session.deleteMany({
@@ -28,6 +36,12 @@ export async function invalidateUserSessions(
           data: { revokedAt: new Date() },
         }),
       ]);
+
+    if (targetSessions.length > 0) {
+      await invalidateCachedSessions(
+        targetSessions.map((s) => s.sessionToken),
+      );
+    }
 
     return {
       sessions: sessionsResult.count,
