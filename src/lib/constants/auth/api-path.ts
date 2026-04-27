@@ -56,6 +56,7 @@ export const API_PATH = {
   TENANT_MEMBERS: "/api/tenant/members",
   API_KEYS: "/api/api-keys",
   TENANT_SCIM_TOKENS: "/api/tenant/scim-tokens",
+  TENANT_OPERATOR_TOKENS: "/api/tenant/operator-tokens",
   DIRECTORY_SYNC: "/api/directory-sync",
   TENANT_POLICY: "/api/tenant/policy",
   TENANT_ROLE: "/api/tenant/role",
@@ -159,6 +160,9 @@ export const apiPath = {
   tenantScimTokens: () => API_PATH.TENANT_SCIM_TOKENS,
   tenantScimTokenById: (tokenId: string) =>
     `${API_PATH.TENANT_SCIM_TOKENS}/${tokenId}`,
+  tenantOperatorTokens: () => API_PATH.TENANT_OPERATOR_TOKENS,
+  tenantOperatorTokenById: (id: string) =>
+    `${API_PATH.TENANT_OPERATOR_TOKENS}/${id}`,
   tenantMemberById: (userId: string) =>
     `${API_PATH.TENANT_MEMBERS}/${userId}`,
   tenantMemberResetVault: (userId: string) =>

@@ -109,6 +109,11 @@ function useNavItems(
       icon: <Shield className="h-4 w-4 shrink-0" />,
     },
     {
+      href: "/admin/tenant/operator-tokens",
+      label: t("navOperatorTokens"),
+      icon: <KeyRound className="h-4 w-4 shrink-0" />,
+    },
+    {
       href: "/admin/tenant/provisioning",
       label: t("navProvisioning"),
       icon: <Link2 className="h-4 w-4 shrink-0" />,

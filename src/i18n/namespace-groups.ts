@@ -93,6 +93,7 @@ export const NS_ADMIN_ALL: readonly Namespace[] = [
   "Breakglass",
   "CopyButton",
   "AuditDeliveryTarget",
+  "OperatorToken",
 ];
 
 /**
