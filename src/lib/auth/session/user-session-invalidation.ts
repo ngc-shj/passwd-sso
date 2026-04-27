@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
+import { invalidateCachedSessionsBulk } from "@/lib/auth/session/session-cache";
 
 /**
  * Invalidate all sessions and tokens for a user.
@@ -49,4 +50,33 @@ export async function invalidateUserSessions(
       apiKeys: apiKeysResult.count,
     };
   }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+}
+
+/**
+ * Invalidate the session cache for every active session in a tenant.
+ *
+ * Used by tenant policy changes (e.g., toggling requirePasskey) to ensure
+ * the cached SessionInfo on every worker reflects the new policy within
+ * one cache-cycle (≤ TOMBSTONE_TTL_MS). Pipelined Redis tombstones — single
+ * round-trip for thousands of tokens (S-13).
+ *
+ * Lives here (not in the route handler) so the bypass-rls call inherits
+ * the existing user-session-invalidation.ts allowlist for the `session`
+ * model — the tenant route does NOT need its own session-model bypass.
+ */
+export async function invalidateTenantSessionsCache(
+  tenantId: string,
+): Promise<void> {
+  const targetSessions = await withBypassRls(prisma, () =>
+    prisma.session.findMany({
+      where: { tenantId, expires: { gt: new Date() } },
+      select: { sessionToken: true },
+    }),
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+
+  if (targetSessions.length > 0) {
+    await invalidateCachedSessionsBulk(
+      targetSessions.map((s) => s.sessionToken),
+    );
+  }
 }

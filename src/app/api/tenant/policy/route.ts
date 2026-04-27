@@ -15,7 +15,7 @@ import { isValidCidr, extractClientIp } from "@/lib/auth/policy/ip-access";
 import { invalidateTenantPolicyCache, wouldIpBeAllowed } from "@/lib/auth/policy/access-restriction";
 import { invalidateLockoutThresholdCache } from "@/lib/auth/policy/account-lockout";
 import { invalidateSessionTimeoutCacheForTenant } from "@/lib/auth/session/session-timeout";
-import { invalidateCachedSessionsBulk } from "@/lib/auth/session/session-cache";
+import { invalidateTenantSessionsCache } from "@/lib/auth/session/user-session-invalidation";
 import {
   pinLengthSchema,
   MAX_CIDRS,
@@ -935,21 +935,7 @@ async function handlePATCH(req: NextRequest) {
     (currentTenant?.passkeyGracePeriodDays ?? null) !== updateData.passkeyGracePeriodDays;
 
   if (requirePasskeyChanged || gracePeriodChanged) {
-    const targetSessions = await withBypassRls(prisma, async () =>
-      prisma.session.findMany({
-        where: {
-          tenantId: membership.tenantId,
-          expires: { gt: new Date() },
-        },
-        select: { sessionToken: true },
-      }),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
-
-    if (targetSessions.length > 0) {
-      await invalidateCachedSessionsBulk(
-        targetSessions.map((s) => s.sessionToken),
-      );
-    }
+    await invalidateTenantSessionsCache(membership.tenantId);
   }
 
   // Audit any team-policy clamping that cascaded from this tenant change.
