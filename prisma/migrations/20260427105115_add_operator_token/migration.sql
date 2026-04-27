@@ -51,8 +51,15 @@ ALTER TABLE "operator_tokens" ADD CONSTRAINT "operator_tokens_subject_user_id_fk
 -- AddForeignKey
 ALTER TABLE "operator_tokens" ADD CONSTRAINT "operator_tokens_created_by_user_id_fkey" FOREIGN KEY ("created_by_user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
--- Grant app role access (no DELETE — tokens are tombstoned, not removed)
-GRANT SELECT, INSERT, UPDATE ON TABLE operator_tokens TO passwd_app;
+-- Grant app role access (no DELETE — tokens are tombstoned, not removed).
+-- Guarded with IF EXISTS because passwd_app is created by infra/initdb in dev
+-- and by a post-migration bootstrap step in CI (ci-integration.yml). The
+-- migration must not assume the role pre-exists.
+DO $$ BEGIN
+  IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_app') THEN
+    GRANT SELECT, INSERT, UPDATE ON TABLE operator_tokens TO passwd_app;
+  END IF;
+END $$;
 
 -- Tenant-RLS isolation: rows are visible to a tenant's app session only
 -- (or when app.bypass_rls is 'on' for cross-tenant flows like token validation).

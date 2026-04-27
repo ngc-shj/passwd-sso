@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { randomBytes } from "node:crypto";
 
-const V1_KEY = randomBytes(32).toString("hex");
 const V2_KEY = randomBytes(32).toString("hex");
 import { OPERATOR_TOKEN_PREFIX } from "@/lib/constants/auth/operator-token";
 
