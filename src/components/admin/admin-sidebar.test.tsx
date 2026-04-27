@@ -73,9 +73,9 @@ describe("AdminSidebar — tenant scope", () => {
     );
 
     const links = screen.getAllByRole("link");
-    // Leaf items (members, teams, security) + children under groups (provisioning×2, service-accounts×2, mcp×1, audit-logs×3)
-    // = 3 leaf + 8 children = 11 per sidebar × 2 sidebars = 22
-    expect(links.length).toBe(22);
+    // Leaf items (members, teams, security, operator-tokens) + children under groups (provisioning×2, service-accounts×2, mcp×1, audit-logs×3)
+    // = 4 leaf + 8 children = 12 per sidebar × 2 sidebars = 24
+    expect(links.length).toBe(24);
   });
 
   it("renders correct tenant nav hrefs including children", () => {

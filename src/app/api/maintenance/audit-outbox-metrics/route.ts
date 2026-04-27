@@ -1,12 +1,11 @@
 /**
- * GET /api/maintenance/audit-outbox-metrics?operatorId=<uuid>
+ * GET /api/maintenance/audit-outbox-metrics
  *
  * Returns global (cross-tenant) outbox aggregates for infrastructure operators.
- * Authenticated via ADMIN_API_TOKEN bearer token (not session).
+ * Authenticated via per-operator op_* token (mint via /dashboard/tenant/operator-tokens).
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { verifyAdminToken } from "@/lib/auth/tokens/admin-token";
 import { createRateLimiter } from "@/lib/security/rate-limit";
@@ -14,15 +13,10 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
-import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/http/api-response";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 6 });
-
-const querySchema = z.object({
-  operatorId: z.string().uuid(),
-});
 
 interface MetricsRow {
   pending: bigint;
@@ -34,30 +28,21 @@ interface MetricsRow {
 }
 
 async function handleGET(req: NextRequest) {
-  if (!verifyAdminToken(req)) {
+  const authResult = await verifyAdminToken(req);
+  if (!authResult.ok) {
     return unauthorized();
   }
+  const { auth } = authResult;
 
   const rl = await rateLimiter.check("rl:admin:outbox-metrics");
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }
 
-  const params = querySchema.safeParse({
-    operatorId: req.nextUrl.searchParams.get("operatorId"),
+  const op = await requireMaintenanceOperator(auth.subjectUserId, {
+    tenantId: auth.tenantId,
   });
-  if (!params.success) {
-    return NextResponse.json(
-      { error: "operatorId query parameter (UUID) is required" },
-      { status: 400 },
-    );
-  }
-
-  const { operatorId } = params.data;
-
-  const op = await requireMaintenanceOperator(operatorId);
   if (!op.ok) return op.response;
-  const membership = op.operator;
 
   const rows = await withBypassRls(prisma, async () =>
     prisma.$queryRaw<MetricsRow[]>`
@@ -87,10 +72,15 @@ async function handleGET(req: NextRequest) {
   };
 
   await logAuditAsync({
-    ...tenantAuditBase(req, SYSTEM_ACTOR_ID, membership.tenantId),
-    actorType: ACTOR_TYPE.SYSTEM,
+    ...tenantAuditBase(req, auth.subjectUserId, auth.tenantId),
+    actorType: ACTOR_TYPE.HUMAN,
     action: AUDIT_ACTION.AUDIT_OUTBOX_METRICS_VIEW,
-    metadata: { operatorId, pending: metrics.pending, failed: metrics.failed },
+    metadata: {
+      tokenSubjectUserId: auth.subjectUserId,
+      tokenId: auth.tokenId,
+      pending: metrics.pending,
+      failed: metrics.failed,
+    },
   });
 
   return NextResponse.json(metrics);

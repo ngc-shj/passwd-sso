@@ -165,6 +165,11 @@ export const API_ERROR = {
   API_KEY_INVALID: "API_KEY_INVALID",
   API_KEY_SCOPE_INSUFFICIENT: "API_KEY_SCOPE_INSUFFICIENT",
 
+  // ── Operator Tokens ──────────────────────────────────────
+  OPERATOR_TOKEN_LIMIT_EXCEEDED: "OPERATOR_TOKEN_LIMIT_EXCEEDED",
+  OPERATOR_TOKEN_NOT_FOUND: "OPERATOR_TOKEN_NOT_FOUND",
+  OPERATOR_TOKEN_STALE_SESSION: "OPERATOR_TOKEN_STALE_SESSION",
+
   // ── Service Accounts ──────────────────────────────────────
   SA_LIMIT_EXCEEDED: "SA_LIMIT_EXCEEDED",
   SA_NOT_FOUND: "SA_NOT_FOUND",
@@ -309,6 +314,9 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   API_KEY_ALREADY_REVOKED: "apiKeyAlreadyRevoked",
   API_KEY_INVALID: "apiKeyInvalid",
   API_KEY_SCOPE_INSUFFICIENT: "apiKeyScopeInsufficient",
+  OPERATOR_TOKEN_LIMIT_EXCEEDED: "operatorTokenLimitExceeded",
+  OPERATOR_TOKEN_NOT_FOUND: "operatorTokenNotFound",
+  OPERATOR_TOKEN_STALE_SESSION: "operatorTokenStaleSession",
   SA_LIMIT_EXCEEDED: "saLimitExceeded",
   SA_NOT_FOUND: "saNotFound",
   SA_NAME_CONFLICT: "saNameConflict",

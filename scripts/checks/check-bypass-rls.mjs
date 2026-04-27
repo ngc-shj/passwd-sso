@@ -86,6 +86,12 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/emergency-access/[id]/vault/entries/route.ts", ["emergencyAccessGrant", "passwordEntry"]],
   // Machine Identity: SA token validation + MCP Gateway operate cross-tenant by design
   ["src/lib/auth/tokens/service-account-token.ts", ["serviceAccountToken"]],
+  // Operator-token validator: cross-tenant lookup is required because the
+  // bearer-token caller has no tenant context until the token row resolves it
+  ["src/lib/auth/tokens/operator-token.ts", ["operatorToken"]],
+  // Operator-token issuance: reads Session.createdAt for step-up via session-token cookie
+  // (no tenant context available until session resolves to the actor's tenant)
+  ["src/app/api/tenant/operator-tokens/route.ts", ["session"]],
   ["src/lib/mcp/oauth-server.ts", ["mcpAuthorizationCode", "mcpAccessToken", "mcpRefreshToken"]],
   ["src/app/api/mcp/authorize/route.ts", ["mcpClient", "user"]],
   ["src/app/api/mcp/register/route.ts", ["mcpClient"]],

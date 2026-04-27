@@ -2,9 +2,9 @@
  * POST /api/maintenance/purge-audit-logs
  *
  * System-wide purge of audit log entries older than retentionDays.
- * Authenticated via ADMIN_API_TOKEN bearer token (not session).
+ * Authenticated via per-operator op_* token (mint via /dashboard/tenant/operator-tokens).
  *
- * Body: { operatorId: string, retentionDays?: number, dryRun?: boolean }
+ * Body: { retentionDays?: number, dryRun?: boolean }
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -18,7 +18,6 @@ import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { AUDIT_METADATA_KEY } from "@/lib/constants";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
-import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/http/api-response";
@@ -29,30 +28,14 @@ import { rateLimited, unauthorized } from "@/lib/http/api-response";
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });
 
 const bodySchema = z.object({
-  operatorId: z.string().uuid(),
   retentionDays: z.number().int().min(30).max(3650).default(365),
   dryRun: z.boolean().default(false),
 });
 
-async function handlePOST(req: NextRequest) {
-  if (!verifyAdminToken(req)) {
-    return unauthorized();
-  }
-
-  const rl = await rateLimiter.check("rl:admin:purge-audit-logs");
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
-
-  const result = await parseBody(req, bodySchema);
-  if (!result.ok) return result.response;
-
-  const { operatorId, retentionDays, dryRun } = result.data;
-
-  const op = await requireMaintenanceOperator(operatorId);
-  if (!op.ok) return op.response;
-  const membership = op.operator;
-
+async function purgeAcrossTenants(
+  retentionDays: number,
+  dryRun: boolean,
+): Promise<number> {
   const tenants = await withBypassRls(prisma, async () =>
     prisma.tenant.findMany({
       select: { id: true, auditLogRetentionDays: true },
@@ -67,7 +50,9 @@ async function handlePOST(req: NextRequest) {
       const effectiveRetentionDays = tenantRetention
         ? Math.max(retentionDays, tenantRetention)
         : retentionDays;
-      const tenantCutoff = new Date(Date.now() - effectiveRetentionDays * MS_PER_DAY);
+      const tenantCutoff = new Date(
+        Date.now() - effectiveRetentionDays * MS_PER_DAY,
+      );
 
       if (dryRun) {
         return withBypassRls(prisma, async () =>
@@ -84,17 +69,41 @@ async function handlePOST(req: NextRequest) {
       return result.count;
     }),
   );
-  const totalPurged = perTenantCounts.reduce((a, b) => a + b, 0);
+  return perTenantCounts.reduce((a, b) => a + b, 0);
+}
 
-  // AuditLog.tenantId is non-nullable (String, not String?), so no null-tenant handling needed.
+async function handlePOST(req: NextRequest) {
+  const authResult = await verifyAdminToken(req);
+  if (!authResult.ok) {
+    return unauthorized();
+  }
+  const { auth } = authResult;
+
+  const rl = await rateLimiter.check("rl:admin:purge-audit-logs");
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
+  }
+
+  const result = await parseBody(req, bodySchema);
+  if (!result.ok) return result.response;
+
+  const { retentionDays, dryRun } = result.data;
+
+  const op = await requireMaintenanceOperator(auth.subjectUserId, {
+    tenantId: auth.tenantId,
+  });
+  if (!op.ok) return op.response;
+
+  const totalPurged = await purgeAcrossTenants(retentionDays, dryRun);
+
   if (dryRun) {
-    // dryRun: totalPurged here is the matched count (sum of auditLog.count(...) results), not deleted.
     await logAuditAsync({
-      ...tenantAuditBase(req, SYSTEM_ACTOR_ID, membership.tenantId),
-      actorType: ACTOR_TYPE.SYSTEM,
+      ...tenantAuditBase(req, auth.subjectUserId, auth.tenantId),
+      actorType: ACTOR_TYPE.HUMAN,
       action: AUDIT_ACTION.AUDIT_LOG_PURGE,
       metadata: {
-        operatorId,
+        tokenSubjectUserId: auth.subjectUserId,
+        tokenId: auth.tokenId,
         [AUDIT_METADATA_KEY.PURGED_COUNT]: 0,
         matched: totalPurged,
         retentionDays,
@@ -107,11 +116,12 @@ async function handlePOST(req: NextRequest) {
   }
 
   await logAuditAsync({
-    ...tenantAuditBase(req, SYSTEM_ACTOR_ID, membership.tenantId),
-    actorType: ACTOR_TYPE.SYSTEM,
+    ...tenantAuditBase(req, auth.subjectUserId, auth.tenantId),
+    actorType: ACTOR_TYPE.HUMAN,
     action: AUDIT_ACTION.AUDIT_LOG_PURGE,
     metadata: {
-      operatorId,
+      tokenSubjectUserId: auth.subjectUserId,
+      tokenId: auth.tokenId,
       [AUDIT_METADATA_KEY.PURGED_COUNT]: totalPurged,
       retentionDays,
       targetTable: "auditLog",

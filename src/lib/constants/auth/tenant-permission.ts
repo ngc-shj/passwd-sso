@@ -8,6 +8,7 @@ export const TENANT_PERMISSION = {
   WEBHOOK_MANAGE: "tenant:webhook:manage",
   SERVICE_ACCOUNT_MANAGE: "tenant:serviceAccount:manage",
   AUDIT_DELIVERY_MANAGE: "tenant:auditDelivery:manage",
+  OPERATOR_TOKEN_MANAGE: "tenant:operatorToken:manage",
 } as const;
 
 export type TenantPermissionValue =

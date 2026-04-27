@@ -1,9 +1,13 @@
 /**
- * GET /api/maintenance/audit-chain-verify?tenantId=<uuid>&operatorId=<uuid>&from=<date>&to=<date>
+ * GET /api/maintenance/audit-chain-verify?tenantId=<uuid>&from=<date>&to=<date>
  *
  * Walks the audit hash chain for a tenant and verifies integrity.
  * Detects tampered rows and chain_seq gaps.
- * Authenticated via ADMIN_API_TOKEN bearer token (not session).
+ * Authenticated via per-operator op_* token (mint via /dashboard/tenant/operator-tokens).
+ *
+ * The query `tenantId` is the TARGET tenant being chain-verified. The
+ * operator must be admin in that target tenant (their token's tenant binding
+ * is independent — multi-tenant operators mint a token per tenant).
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -15,9 +19,9 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
-import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseQuery } from "@/lib/http/parse-body";
 import {
   buildChainInput,
@@ -36,7 +40,6 @@ function buildQuerySchema() {
   return z
     .object({
       tenantId: z.string().uuid(),
-      operatorId: z.string().uuid(),
       from: z.coerce
         .date()
         .min(new Date(now.getTime() - FIVE_YEARS_MS), { message: "from is too far in the past" })
@@ -52,7 +55,6 @@ function buildQuerySchema() {
     );
 }
 
-// Prisma $queryRawUnsafe returns bigint as string, bytea as Uint8Array
 interface ChainRowRaw {
   id: string;
   created_at: Date;
@@ -88,9 +90,11 @@ interface SeqBoundRow {
 }
 
 async function handleGET(req: NextRequest) {
-  if (!verifyAdminToken(req)) {
+  const authResult = await verifyAdminToken(req);
+  if (!authResult.ok) {
     return unauthorized();
   }
+  const { auth } = authResult;
 
   const tenantIdParam = req.nextUrl.searchParams.get("tenantId") ?? "global";
   const rl = await rateLimiter.check(`rl:admin:chain-verify:${tenantIdParam}`);
@@ -101,9 +105,17 @@ async function handleGET(req: NextRequest) {
   const querySchema = buildQuerySchema();
   const result = parseQuery(req, querySchema);
   if (!result.ok) return result.response;
-  const { tenantId, operatorId, from, to } = result.data;
+  const { tenantId, from, to } = result.data;
 
-  const op = await requireMaintenanceOperator(operatorId, { tenantId });
+  // Operator-token boundary: a token is bound to a single tenant. Reject
+  // cross-tenant chain-verify requests; multi-tenant operators must mint
+  // a separate token per tenant they need to verify.
+  if (auth.tenantId !== tenantId) {
+    return errorResponse(API_ERROR.FORBIDDEN, 403);
+  }
+
+  // Operator must be admin in the (token's) target tenant being verified
+  const op = await requireMaintenanceOperator(auth.subjectUserId, { tenantId });
   if (!op.ok) return op.response;
   const membership = op.operator;
 
@@ -290,11 +302,12 @@ async function handleGET(req: NextRequest) {
   }
 
   await logAuditAsync({
-    ...tenantAuditBase(req, SYSTEM_ACTOR_ID, membership.tenantId),
-    actorType: ACTOR_TYPE.SYSTEM,
+    ...tenantAuditBase(req, auth.subjectUserId, membership.tenantId),
+    actorType: ACTOR_TYPE.HUMAN,
     action: AUDIT_ACTION.AUDIT_CHAIN_VERIFY,
     metadata: {
-      operatorId,
+      tokenSubjectUserId: auth.subjectUserId,
+      tokenId: auth.tokenId,
       targetTenantId: tenantId,
       ok,
       totalVerified,

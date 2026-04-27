@@ -165,11 +165,13 @@ model User {
   notifications          Notification[]
   breakGlassRequested    PersonalLogAccessGrant[]   @relation("BreakGlassRequester")
   breakGlassTargeted     PersonalLogAccessGrant[]   @relation("BreakGlassTarget")
-  createdServiceAccounts ServiceAccount[]           @relation("serviceAccountCreator")
-  approvedAccessRequests AccessRequest[]
-  createdMcpClients      McpClient[]                @relation("mcpClientCreator")
-  delegationSessions     DelegationSession[]
-  tenant                 Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  createdServiceAccounts    ServiceAccount[]           @relation("serviceAccountCreator")
+  approvedAccessRequests    AccessRequest[]
+  createdMcpClients         McpClient[]                @relation("mcpClientCreator")
+  delegationSessions        DelegationSession[]
+  operatorTokensSubject     OperatorToken[]            @relation("OperatorTokenSubject")
+  operatorTokensCreated     OperatorToken[]            @relation("OperatorTokenCreatedBy")
+  tenant                    Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([tenantId])
   @@map("users")
@@ -474,6 +476,7 @@ model Tenant {
   personalLogAccessGrants    PersonalLogAccessGrant[]
   serviceAccounts            ServiceAccount[]
   serviceAccountTokens       ServiceAccountToken[]
+  operatorTokens             OperatorToken[]
   accessRequests             AccessRequest[]
   mcpClients                 McpClient[]
   mcpAccessTokens            McpAccessToken[]
@@ -930,6 +933,8 @@ enum AuditAction {
   AUDIT_DELIVERY_TARGET_CREATE
   AUDIT_DELIVERY_TARGET_DEACTIVATE
   AUDIT_DELIVERY_TARGET_REACTIVATE
+  OPERATOR_TOKEN_CREATE
+  OPERATOR_TOKEN_REVOKE
 }
 
 enum AuditScope {
@@ -1507,6 +1512,32 @@ model ServiceAccountToken {
   @@index([tenantId])
   @@index([expiresAt])
   @@map("service_account_tokens")
+}
+
+// ─── Operator Token Models ───────────────────────────────────
+
+model OperatorToken {
+  id              String    @id @default(uuid(4)) @db.Uuid
+  tokenHash       String    @unique @map("token_hash") @db.VarChar(64) // SHA-256 hex of plaintext
+  prefix          String    @db.VarChar(8)                              // first 8 chars of plaintext, e.g. "op_xxxxx" — for UI display
+  name            String    @db.VarChar(128)                            // operator-supplied label
+  tenantId        String    @map("tenant_id") @db.Uuid
+  subjectUserId   String    @map("subject_user_id") @db.Uuid            // the user this token authenticates AS
+  createdByUserId String    @map("created_by_user_id") @db.Uuid         // who minted the token
+  scope           String    @db.VarChar(255)                            // CSV; v1 always "maintenance"
+  expiresAt       DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt       DateTime? @map("revoked_at") @db.Timestamptz(3)
+  lastUsedAt      DateTime? @map("last_used_at") @db.Timestamptz(3)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subjectUser User   @relation("OperatorTokenSubject", fields: [subjectUserId], references: [id], onDelete: Cascade)
+  createdBy   User   @relation("OperatorTokenCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, revokedAt])
+  @@index([subjectUserId, revokedAt])
+  @@index([expiresAt])
+  @@map("operator_tokens")
 }
 
 // ─── API Key Models ─────────────────────────────────────────
