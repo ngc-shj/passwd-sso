@@ -149,11 +149,17 @@ export async function setCachedSession(
   const redis = getRedis();
   if (!redis) return;
 
-  const key = cacheKey(token);
+  // Sub-1 s TTL on a positive entry → skip entirely (S-Req-5).
+  // Checked before cacheKey() so a no-cache path costs zero HMAC.
+  if (info.valid && info.userId && ttlMs < 1000) return;
 
-  // Negative cache: short fixed TTL, asymmetric to positive ceiling.
-  if (!info.valid || !info.userId) {
-    try {
+  // cacheKey() throws if the KeyProvider has not yet warmed share-master
+  // (S-5 / S-11 cold-start). Catch here so the call never propagates.
+  try {
+    const key = cacheKey(token);
+
+    if (!info.valid || !info.userId) {
+      // Negative cache: short fixed TTL, asymmetric to positive ceiling.
       await redis.set(
         key,
         JSON.stringify({ valid: false }),
@@ -161,17 +167,10 @@ export async function setCachedSession(
         NEGATIVE_CACHE_TTL_MS,
         "NX",
       );
-    } catch (err) {
-      logRedisError((err as { code?: string } | undefined)?.code);
+      return;
     }
-    return;
-  }
 
-  // Sub-1 s TTL → skip caching entirely (S-Req-5).
-  if (ttlMs < 1000) return;
-  const clamped = Math.min(ttlMs, SESSION_CACHE_TTL_MS);
-
-  try {
+    const clamped = Math.min(ttlMs, SESSION_CACHE_TTL_MS);
     await redis.set(key, JSON.stringify(info), "PX", clamped, "NX");
   } catch (err) {
     logRedisError((err as { code?: string } | undefined)?.code);
