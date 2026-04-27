@@ -582,6 +582,61 @@ Window-of-1-RTT: request A reads cache (hit, valid) at T=0; revoke at T=2ms; req
 
 ---
 
+## Implementation Checklist (Phase 2 Step 2-1)
+
+### Files to create
+
+- [ ] `src/lib/logger/throttled.ts` — `createThrottledErrorLogger(intervalMs, message): (errCode?: string) => void`
+- [ ] `src/lib/logger/throttled.test.ts` — 3 tests (fires once, fires after interval, message bound at construction + TypeScript signature check)
+- [ ] `src/lib/auth/session/session-cache.ts` — Zod schemas, HKDF subkey, hashSessionToken, getCachedSession, setCachedSession, invalidateCachedSession
+- [ ] `src/lib/auth/session/session-cache.test.ts` — full unit-test suite (15+ tests, see Implementation step 9)
+- [ ] `src/lib/auth/session/session-cache-helpers.ts` — `invalidateCachedSessions(tokens)` bulk wrapper
+- [ ] `src/__tests__/db-integration/session-revocation-cache.integration.test.ts` — Scenarios A–K against real Redis + Postgres
+
+### Files to modify
+
+- [ ] `src/lib/validations/common.server.ts` — add `SESSION_CACHE_TTL_MS = 30_000`, `SESSION_CACHE_KEY_PREFIX = "sess:cache:"`, `TOMBSTONE_TTL_MS = 5_000`, `NEGATIVE_CACHE_TTL_MS = 5_000`. **Delete** `SESSION_CACHE_MAX = 500` (dead).
+- [ ] `src/lib/security/rate-limit.ts` — replace inline throttled-error-logger (lines 5-15) with `createThrottledErrorLogger` consumer. Pass error code via try/catch `err?.code` instead of fixed redaction.
+- [ ] `src/lib/proxy/auth-gate.ts` — remove in-process Map + `setSessionCache`; remove `_sessionCache` / `_setSessionCache` test exports; remove `SESSION_CACHE_TTL_MS` const (re-export from session-cache.ts); update `getSessionInfo` to use new module; update doc-comment header.
+- [ ] `src/__tests__/proxy.test.ts` — delete in-process eviction tests (lines 557-633); replace `_sessionCache`/`_setSessionCache` references with `vi.mock("@/lib/auth/session/session-cache", ...)`; rename TTL test (lines 924-963), drop `vi.useFakeTimers`.
+- [ ] **9 deletion sites** (per C3 inventory) — add `invalidateCachedSessions` call after DB commit, with SELECT-tokens-before-delete where needed (sites 2, 3, 4, 8, 9):
+  - [ ] site 1 — `src/app/api/sessions/[id]/route.ts:58`
+  - [ ] site 2 — `src/app/api/sessions/route.ts:100`
+  - [ ] site 3 — `src/app/api/auth/passkey/verify/route.ts:105` (inside $transaction)
+  - [ ] site 4 — `src/lib/auth/session/user-session-invalidation.ts:19`
+  - [ ] site 5 — `src/lib/auth/session/auth-adapter.ts:262-272 + 326-330` (type widening across $transaction boundary)
+  - [ ] site 6 — `src/lib/auth/session/auth-adapter.ts:401` (deleteSession adapter)
+  - [ ] site 7 — `src/lib/auth/session/auth-adapter.ts:471, 484` (idle / absolute timeout)
+  - [ ] site 8 — `src/lib/auth/session/auth-adapter.ts:382` (deleteUser cascade — SELECT before user.delete)
+  - [ ] site 9 — `src/app/api/tenant/policy/route.ts` (PATCH — synchronous, redis.pipeline)
+- [ ] **9 site tests** — assert `invalidateCachedSessions` called AFTER DB commit (positive + negative) using extracted helpers `expectInvalidatedAfterCommit` / `expectNotInvalidatedOnDbThrow`. SCIM/team-member tests: replace `vi.mock("@/lib/auth/session/user-session-invalidation", ...)` with `importOriginal` partial mocks OR add a separate non-mocked unit test.
+
+### Shared utilities to reuse (must NOT reimplement)
+
+- `getMasterKeyByVersion(version)` from `src/lib/crypto/crypto-server.ts:53` — for HKDF input keying material.
+- `getRedis()` from `src/lib/redis.ts:7` — Redis client accessor (returns null when unconfigured).
+- `getLogger()` from `src/lib/logger` — pino logger; use the same access pattern as `rate-limit.ts:14`.
+- `hashToken` from `src/lib/crypto/crypto-server.ts:165` — note this is plain SHA-256; we use a different primitive (HMAC-via-HKDF subkey) for session cache and the rationale is documented in §"Why HMAC and not plain SHA-256".
+- `withBypassRls` / `BYPASS_PURPOSE` from `src/lib/tenant-rls.ts` — for bulk SELECT/DELETE on Session table without RLS friction. Existing pattern at `user-session-invalidation.ts:16`.
+- `crypto.hkdfSync` from `node:crypto` — already used by `crypto-team.ts` (web crypto variant) and `crypto-recovery.ts` (web crypto variant). Server-side `node:crypto` HKDF is new but the primitive is well-known.
+- `createHmac` from `node:crypto` — already used by `webhook-dispatcher.ts:65`.
+
+### Patterns to follow
+
+- **Throttled error logger**: extract from `rate-limit.ts:5-15` to `lib/logger/throttled.ts`; both `rate-limit.ts` and `session-cache.ts` consume.
+- **Redis fail-open with throttled log**: see `rate-limit.ts:42-69` (returns `null` on error → in-memory fallback) and `delegation.ts:124-141` (returns empty Set on Redis unavailable). Match the "best-effort, never throws" contract.
+- **Best-effort write with err-code logging**: catch Redis error → call throttled logger with `err?.code` → no rethrow.
+- **Bulk Redis ops via pipeline**: see `delegation.ts:96-117` (`storeDelegationEntries`) for the existing pipeline pattern; site #9 (tenant policy) uses the same shape for bulk tombstone writes.
+- **Tombstone vs SessionInfo vs NegativeCache shape distinctness**: keys are mutually exclusive (`tombstone`, `valid`, `userId` keys). The read pipeline checks tombstone-first, NegativeCache-second, SessionInfo-third (S-12 ordering).
+
+### Cross-cutting checks (per Step 2-2 review obligations)
+
+- [ ] No new symbol shadows an existing exported one (grep for `SESSION_CACHE_*`, `hashSessionToken`, `getCachedSession`, etc. before adding).
+- [ ] Constants in tests imported from `@/lib/validations/common.server` — no hardcoded `30_000` or `"sess:cache:"`.
+- [ ] All round-trip test fixtures are typed literals (no `as SessionInfo` casts, no spread from production helpers).
+- [ ] `redis.set` calls in setCachedSession/invalidateCachedSession always include `PX` (per-key TTL guarantees memory bound regardless of `maxmemory-policy`).
+- [ ] R3 inverted-perspective sweep before push: `grep -rn "session.delete\|prisma.session.delete\|deleteMany.*Session" src/ prisma/ --include="*.ts" 2>/dev/null` matches the 9-site inventory.
+
 ## Acceptance criteria
 
 A reviewer can mark this complete when:
