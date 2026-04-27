@@ -26,7 +26,7 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 
 - E2E encryption (PBKDF2 600k -> HKDF -> AES-256-GCM)
 - Team vault E2E encryption (ECDH-P256 key distribution)
-- Multi-tenant isolation (FORCE ROW LEVEL SECURITY on 39 tables)
+- Multi-tenant isolation (FORCE ROW LEVEL SECURITY on 50+ tables)
 - Auto-lock (15 min idle / 5 min hidden tab)
 - Concurrent session management (list/revoke, device detection, rate limited)
 - Account lockout (progressive: 5 -> 15 min, 10 -> 1h, 15 -> 24h)
@@ -97,7 +97,7 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 - Directory sync (Azure AD, Google Workspace, Okta user provisioning)
 - Continuous dark-web monitoring (auto-monitor with email + in-app alerts)
 - i18n (ja/en, 1,300+ keys)
-- Audit logs (62 actions, personal + team)
+- Audit logs (150+ actions, personal + team)
 - Import/export (CSV, JSON, password-protected encrypted export)
 - Dark mode / keyboard shortcuts
 - Health checks / structured logs / Terraform IaC
@@ -281,7 +281,7 @@ MAIN world WebAuthn interceptor (`webauthn-interceptor.js`) overrides `navigator
 
 #### ~~P-2 CLI tool~~ — Implemented (2026-03-04)
 
-Node.js CLI package (`cli/`) with `commander`. Crypto adapter ported from Web Crypto API (PBKDF2/HKDF/AES-256-GCM). OAuth 2.1 PKCE login via MCP DCR (`--token` fallback for manual paste). Credentials stored in `$XDG_DATA_HOME/passwd-sso/credentials` (JSON, mode 0o600). XDG Base Directory compliance. Commands: `login`, `unlock`, `list`, `get`, `generate`, `totp`, `export`. Interactive REPL mode after vault unlock. OAuth refresh token rotation with auto-refresh. Clipboard with 30s auto-clear.
+Node.js CLI package (`cli/`) with `commander`. Crypto adapter ported from Web Crypto API (PBKDF2/HKDF/AES-256-GCM). OAuth 2.1 PKCE login via MCP DCR (`--token` fallback for manual paste). Credentials stored in `$XDG_DATA_HOME/passwd-sso/credentials` (JSON, mode 0o600). XDG Base Directory compliance. Commands: `login`, `status`, `unlock`, `list`, `get`, `generate`, `totp`, `export`, `env`, `run`, `api-key`, `agent`, `decrypt`. Interactive REPL mode after vault unlock. OAuth refresh token rotation with auto-refresh. Clipboard with 30s auto-clear.
 
 ---
 
@@ -561,10 +561,10 @@ Feature-category coverage:
 
 - ML-KEM hybrid PQC (emergency access) — rare among competitors
 - Fully self-hosted + SAML 2.0 SSO — uncommon outside Bitwarden
-- Multi-tenant isolation with FORCE ROW LEVEL SECURITY (28 tables)
+- Multi-tenant isolation with FORCE ROW LEVEL SECURITY (50+ tables)
 - SCIM 2.0 provisioning (tenant-scoped, team-level group mapping)
 - Coexistence of team vault + personal E2E vault
-- Strong audit-log surface (62 action types)
+- Strong audit-log surface (150+ action types)
 - Send (temporary text/file sharing) parity with Bitwarden
 - Strong vault management: folder hierarchy + entry history + duplicate detection
 - Full extension feature set: autofill, TOTP, context menu, keyboard shortcuts, login detection & save, passkey provider (WebAuthn interceptor)
@@ -578,7 +578,7 @@ Feature-category coverage:
 **Improvements since previous report (2026-02-20):**
 
 - ~~No SCIM~~ -> implemented (Users + Groups, tenant-scoped tokens, [RFC 7644](https://www.rfc-editor.org/rfc/rfc7644))
-- Multi-tenant model with FORCE ROW LEVEL SECURITY on all 28 tenant-scoped tables
+- Multi-tenant model with FORCE ROW LEVEL SECURITY on all 50+ tenant-scoped tables
 - Org-to-team rename completed (DB, API, UI, i18n)
 - CI guard scripts for RLS bypass allowlist and nested auth detection
 - Extension Group A completed: context menu, keyboard shortcuts, new-login detect & save

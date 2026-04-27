@@ -1,6 +1,6 @@
 # passwd-sso Production-Readiness ToDo
 
-Last updated: 2026-03-18
+Last updated: 2026-04-28
 Baseline: `main` branch
 
 ---
@@ -30,7 +30,7 @@ Baseline: `main` branch
 
 | # | Priority | Item | Status | Notes |
 |---|--------|------|------|------|
-| 2.1 | Required | Environment validation | Done | Startup-time validation of 26 env vars via Zod schema (`src/lib/env.ts` + `instrumentation.ts`). PR #17 |
+| 2.1 | Required | Environment validation | Done | Startup-time validation of 60+ env vars via Zod schema (`src/lib/env-schema.ts` + `instrumentation.ts`). PR #17 |
 | 2.2 | Required | Account lockout | Done | DB-persisted progressive lockout (5->15m, 10->1h, 15->24h) + 24h observation window + audit logs (`VAULT_UNLOCK_FAILED` / `VAULT_LOCKOUT_TRIGGERED`). Works with existing rate limiter. Admin notification currently via audit/ops logs (CloudWatch alarm automation in later phase). PR #24 |
 | 2.3 | Required | Passphrase recovery flow | Done | Recovery key (256-bit, HKDF+AES-256-GCM) restores `secretKey` + sets new passphrase. Vault Reset (full data deletion) as final fallback. Missing-key banner prompt (reappears after 24h). 4 audit events. CSRF (Origin validation) + rate limiting included. PR #25 |
 | 2.4 | Strongly Recommended | Explicit CORS policy | Done | Same-origin-only policy explicitly enforced. OPTIONS preflight 204 + `applyCorsHeaders()` on all API return paths. `Vary: Origin` + case-insensitive dedupe. Extension bypasses CORS via Service Worker + bearer token. Policy documented in `../security/cors-policy.md`. #46, PR #57 |
@@ -91,7 +91,7 @@ Areas already considered at production level.
 - Input validation (486 LOC Zod schemas, 40 API touchpoints)
 - Audit logs (personal + team, filter/export supported)
 - External audit-log forwarding (pino + Fluent Bit sidecar)
-- Environment validation (26 vars, startup-time schema check)
+- Environment validation (60+ vars, startup-time schema check)
 - CI/CD pipeline (4 parallel GitHub Actions jobs, ESLint + Vitest + Next.js build + RLS guard scripts)
 - Structured app logging (pino + withRequestLog + CSP-report sanitization)
 - Health checks (`/api/health/live` liveness + `/api/health/ready` readiness, DB/Redis checks, timeout protection)
@@ -104,7 +104,7 @@ Areas already considered at production level.
 - DB connection pool tuning (env tuning + maxLifetimeSeconds + graceful shutdown + RDS connection alarm)
 - Load testing (k6 6 scenarios, triple-guard seed script, initial SLOs, threshold pass/fail)
 - Dependency license audit (allowlist JSON 17 entries, strict CI enforcement, expiry checks, policy docs)
-- Multi-tenant isolation (FORCE RLS on 39 tables, `withBypassRls` CI allowlist guard, nested auth CI guard)
+- Multi-tenant isolation (FORCE RLS on 50+ tables, `withBypassRls` CI allowlist guard, nested auth CI guard)
 - SCIM 2.0 provisioning (Users + Groups, tenant-scoped tokens, [RFC 7644](https://www.rfc-editor.org/rfc/rfc7644))
 - Production code `console.log`: 0, `TODO/FIXME`: 0
 
@@ -144,3 +144,37 @@ Assuming OSS-first public operation, the following are out of immediate scope:
 
 1. ~~`3.4` Redis high availability~~ ✅
 2. ~~`2.6` Additional documentation on key-material memory handling~~ ✅
+
+---
+
+## Updates since 2026-03-18
+
+### Durable Audit Outbox (#366–#370)
+
+Audit events are now written to an `audit_outbox` table in the same DB transaction as business logic, then drained asynchronously by a dedicated worker process. This decouples audit emission from the HTTP request and prevents data loss on network or downstream failures.
+
+- New table: `audit_outbox` (columns: `id`, `status`, `payload`, `attempts`, `created_at`, etc.)
+- New npm script: `npm run worker:audit-outbox` starts the drain worker
+- New Docker service: `audit-outbox-worker` (least-privilege DB role `passwd_outbox_worker`)
+- New env vars: `OUTBOX_WORKER_DATABASE_URL`, `OUTBOX_BATCH_SIZE`, `OUTBOX_POLL_INTERVAL_MS`, `OUTBOX_PROCESSING_TIMEOUT_MS`, `OUTBOX_MAX_ATTEMPTS`, `OUTBOX_RETENTION_HOURS`
+- Without the worker, events accumulate in `audit_outbox` with status `PENDING`; the web app continues to function normally
+- Integration tests: `npm run test:integration`
+
+### Per-Operator `op_*` Admin Tokens (#408)
+
+The shared `ADMIN_API_TOKEN` environment variable has been replaced by per-operator tokens with the `op_` prefix. Operators mint tokens in the web UI at `/admin/tenant/operator-tokens`. These tokens are used as Bearer credentials for admin maintenance scripts (`scripts/purge-history.sh`, `scripts/purge-audit-logs.sh`, `scripts/rotate-master-key.sh`). The old `ADMIN_API_TOKEN` env var is no longer used by the application.
+
+### Redis-Backed Session Cache (#407)
+
+The in-process session cache has been replaced with a Redis-backed cache that supports tombstone-based revocation propagation across nodes. When a session is revoked, a tombstone is written to Redis and propagated to all app instances without requiring a DB round-trip on each request. This is a required dependency for multi-node deployments; Redis must be healthy for revocation to take effect promptly.
+
+### Env Zod SSOT (#394)
+
+`src/lib/env-schema.ts` is the canonical Zod schema for all application environment variables. Two new npm scripts maintain consistency:
+
+- `npm run init:env` — interactive generator that writes `.env` from the schema (dev/ci/production profiles)
+- `npm run check:env-docs` — drift check validating `.env.example`, `env-schema.ts`, the env allowlist, and `docker-compose` stay in sync
+
+### Proxy Ingress CSRF Gate (#398)
+
+Baseline CSRF enforcement (Origin header check for cookie-bearing mutating requests) has been extracted from per-route `assertOrigin()` calls into a single proxy-layer gate at `src/lib/proxy/csrf-gate.ts`. This fires for any request that carries a session cookie and uses a mutating HTTP method, regardless of route classification. Routes no longer need to call `assertOrigin()` for baseline CSRF; only three pre-auth cookieless routes retain inline `assertOrigin()` calls as defense-in-depth.

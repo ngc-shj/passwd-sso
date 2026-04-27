@@ -149,6 +149,16 @@ ProxyPass        /.well-known/oauth-authorization-server $BACKEND$BASE_PATH/api/
 ProxyPassReverse /.well-known/oauth-authorization-server $BACKEND$BASE_PATH/api/mcp/.well-known/oauth-authorization-server
 ```
 
+**nginx:**
+
+```nginx
+# OAuth discovery — add BEFORE the app location block
+location = /.well-known/oauth-authorization-server {
+    proxy_pass $BACKEND$BASE_PATH/api/mcp/.well-known/oauth-authorization-server;
+    proxy_set_header Host $host;
+}
+```
+
 If the app is served at the domain root (no base path), the discovery endpoint is already accessible at the correct path and no additional proxy rule is needed.
 
 #### Flow
@@ -370,7 +380,7 @@ Tenant Settings → Machine Identity → MCP Clients → **Register MCP Client**
 
 - **Name:** `claude-desktop`
 - **Redirect URIs:** `http://localhost:3000/callback`
-- **Scopes:** `credentials:list`, `credentials:read`
+- **Scopes:** `credentials:list`, `credentials:use`
 
 Save the displayed `clientId` (`mcpc_...`) and `clientSecret`. The secret is shown only once.
 
@@ -399,7 +409,7 @@ https://<your-server>/api/mcp/authorize?\
   client_id=mcpc_<your-client-id>&\
   redirect_uri=http://localhost:3000/callback&\
   response_type=code&\
-  scope=credentials:list%20credentials:read&\
+  scope=credentials:list%20credentials:use&\
   code_challenge=<CODE_CHALLENGE>&\
   code_challenge_method=S256&\
   state=test
@@ -429,7 +439,7 @@ Response:
   "access_token": "mcp_7Ui7VGT...",
   "token_type": "Bearer",
   "expires_in": 3600,
-  "scope": "credentials:list,credentials:read"
+  "scope": "credentials:list,credentials:use"
 }
 ```
 

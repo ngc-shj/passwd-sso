@@ -9,7 +9,7 @@ web application and maintains a secure session.
 
 The extension connects to the web app via a short-lived Bearer token
 (15-minute TTL). Token delivery uses a **one-time bridge code exchange**
-(introduced in `feature/extension-bridge-code-exchange`):
+(introduced in PR #364):
 
 1. The web app's JavaScript obtains a single-use bridge code from
    `POST /api/extension/bridge-code` (requires Auth.js session).
@@ -78,7 +78,7 @@ sequenceDiagram
 | **Issue (bridge code)** | `POST /api/extension/bridge-code` (requires Auth.js session) | 60 s code TTL |
 | **Code delivery** | `window.postMessage` (MAIN → ISOLATED) | instant |
 | **Code → token exchange** | `POST /api/extension/token/exchange` (no session, atomic single-use consume) | issues 15-min token |
-| **Issue (legacy direct)** | `POST /api/extension/token` (Auth.js session) — kept for migration period | 15 min |
+| **Issue (legacy direct)** | `POST /api/extension/token` (Auth.js session) — **DEPRECATED** | 15 min |
 | **Storage** | Encrypted with ephemeral AES-256-GCM key in `chrome.storage.session` | until browser close |
 | **Refresh** | `POST /api/extension/token/refresh` (Bearer + session) | 15 min (new token) |
 | **Refresh trigger** | `ALARM_TOKEN_REFRESH` fires 2 min before expiry | — |
@@ -211,8 +211,8 @@ After the 2026-04 cleanup the postMessage column is no longer reachable from any
 | `src/lib/inject-extension-bridge-code.ts` | Web app: dispatches `postMessage` with bridge code (replaces `inject-extension-token.ts`) |
 | `src/app/api/extension/bridge-code/route.ts` | Web app endpoint: issues a one-time code (Auth.js session required) |
 | `src/app/api/extension/token/exchange/route.ts` | Web app endpoint: atomically consumes a code, returns a token (no session) |
-| `src/lib/extension-token.ts` | Shared `issueExtensionToken()` helper used by legacy POST + new exchange |
-| `src/lib/constants/extension.ts` | Shared constants: `BRIDGE_CODE_MSG_TYPE`, `BRIDGE_CODE_TTL_MS`, `BRIDGE_CODE_MAX_ACTIVE` |
+| `src/lib/auth/tokens/extension-token.ts` | Shared `issueExtensionToken()` helper used by legacy POST + new exchange |
+| `src/lib/constants/integrations/extension.ts` | Shared constants: `BRIDGE_CODE_MSG_TYPE`, `BRIDGE_CODE_TTL_MS`, `BRIDGE_CODE_MAX_ACTIVE` |
 | `extension/src/content/token-bridge.js` | Content script (ISOLATED): receives postMessage, exchanges bridge code, forwards token to background. Plain JS — see project memory `project_extension_parallel_impl.md`. |
 | `extension/src/content/token-bridge-lib.ts` | TypeScript version of content script (for tests only — not registered at runtime) |
 | `extension/src/lib/constants.ts` | Extension constants (mirrors web app constants; cross-repo sync test enforces equality) |

@@ -55,8 +55,8 @@ Add to both `fullBlob` and `overviewBlob`.
 
 | # | File | Description |
 |---|------|-------------|
-| 1 | `src/lib/personal-entry-payload.ts` | `BuildPersonalEntryPayloadInput` + `fullBlob` + `overviewBlob` construction |
-| 2 | `src/lib/team-entry-payload.ts` | `BuildTeamEntryPayloadInput` + `fullBlob` + `overviewBlob` construction |
+| 1 | `src/lib/vault/personal-entry-payload.ts` | `BuildPersonalEntryPayloadInput` + `fullBlob` + `overviewBlob` construction |
+| 2 | `src/lib/team/team-entry-payload.ts` | `BuildTeamEntryPayloadInput` + `fullBlob` + `overviewBlob` construction |
 
 #### Caveat: Personal non-login forms build blobs directly
 
@@ -65,13 +65,13 @@ The personal login form constructs blobs via `buildPersonalEntryPayload()`, but
 Modifying the payload function alone is insufficient — each form's `handleSubmit` blob must also be updated.
 
 ```
-src/components/passwords/personal-secure-note-form.tsx
-src/components/passwords/personal-credit-card-form.tsx
-src/components/passwords/personal-identity-form.tsx
-src/components/passwords/personal-passkey-form.tsx
-src/components/passwords/personal-bank-account-form.tsx
-src/components/passwords/personal-software-license-form.tsx
-src/components/passwords/personal-ssh-key-form.tsx
+src/components/passwords/personal/personal-secure-note-form.tsx
+src/components/passwords/personal/personal-credit-card-form.tsx
+src/components/passwords/personal/personal-identity-form.tsx
+src/components/passwords/personal/personal-passkey-form.tsx
+src/components/passwords/personal/personal-bank-account-form.tsx
+src/components/passwords/personal/personal-software-license-form.tsx
+src/components/passwords/personal/personal-ssh-key-form.tsx
 ```
 
 #### Caveat: Team non-login forms go through `base.submitEntry`
@@ -102,25 +102,25 @@ Snapshot comparison is used for change detection. Add the field to both baseline
 
 | # | File | Description |
 |---|------|-------------|
-| 9 | `src/components/passwords/personal-login-submit.ts` | `SubmitPersonalLoginFormArgs` interface + function body |
-| 10 | `src/components/team/team-login-submit.ts` | `SubmitTeamLoginArgs` interface + function body |
+| 9 | `src/components/passwords/personal/personal-login-submit.ts` | `SubmitPersonalLoginFormArgs` interface + function body |
+| 10 | `src/components/team/forms/team-login-submit.ts` | `SubmitTeamLoginArgs` interface + function body |
 | 11 | `src/hooks/team-login-form-controller.ts` | Login submit handler builder (not needed if common fields are auto-injected via `base.submitEntry`) |
 
 ### 5. Type Definitions
 
 | # | File | Description |
 |---|------|-------------|
-| 12 | `src/components/passwords/personal-login-form-types.ts` | `PersonalLoginFormInitialData` |
-| 13 | `src/components/passwords/personal-password-edit-dialog-types.ts` | `PersonalPasswordEditData` |
-| 14 | `src/components/team/team-entry-form-types.ts` | `TeamEntryFormEditData` |
+| 12 | `src/components/passwords/personal/personal-login-form-types.ts` | `PersonalLoginFormInitialData` |
+| 13 | `src/components/passwords/dialogs/personal-password-edit-dialog-types.ts` | `PersonalPasswordEditData` |
+| 14 | `src/components/team/forms/team-entry-form-types.ts` | `TeamEntryFormEditData` |
 
 ### 6. Edit Dialogs (Data Loading)
 
 | # | File | Description |
 |---|------|-------------|
-| 15 | `src/components/passwords/personal-password-edit-dialog-loader.tsx` | Extract field from decrypted blob (personal) |
-| 16 | `src/components/passwords/personal-password-edit-dialog.tsx` | Pass `initialData` to each form (for all entry types) |
-| 17 | `src/components/team/team-edit-dialog-loader.tsx` | Extract field from decrypted blob (team) |
+| 15 | `src/components/passwords/dialogs/personal-password-edit-dialog-loader.tsx` | Extract field from decrypted blob (personal) |
+| 16 | `src/components/passwords/dialogs/personal-password-edit-dialog.tsx` | Pass `initialData` to each form (for all entry types) |
+| 17 | `src/components/team/management/team-edit-dialog-loader.tsx` | Extract field from decrypted blob (team) |
 
 ### 7. Form Section Props
 
@@ -145,19 +145,19 @@ Snapshot comparison is used for change detection. Add the field to both baseline
 | # | File | Description |
 |---|------|-------------|
 | 26 | `src/lib/export-format-common.ts` | `ExportEntry` interface + `basePasswdSsoMeta` + `passwdSsoCsvPayload` |
-| 27 | `src/components/passwords/password-export.tsx` | Extract field from decrypted blob |
-| 28 | `src/components/team/team-export.tsx` | Same as above (team) |
-| 29 | `src/components/passwords/password-import-types.ts` | `ParsedEntry` interface |
-| 30 | `src/components/passwords/password-import-parsers.ts` | Default values during parsing |
-| 31 | `src/components/passwords/password-import-payload.ts` | Add field during blob construction |
+| 27 | `src/components/passwords/export/password-export.tsx` | Extract field from decrypted blob |
+| 28 | `src/components/team/management/team-export.tsx` | Same as above (team) |
+| 29 | `src/components/passwords/import/password-import-types.ts` | `ParsedEntry` interface |
+| 30 | `src/components/passwords/import/password-import-parsers.ts` | Default values during parsing |
+| 31 | `src/components/passwords/import/password-import-payload.ts` | Add field during blob construction |
 
 ### 10. UI Components (As Needed)
 
 | # | File | Description |
 |---|------|-------------|
 | 32 | `src/components/passwords/entry-*-section.tsx` | New shared UI component |
-| 33 | `src/components/passwords/password-detail-inline.tsx` | Add field to detail view. Sensitive fields need `useState` + `handleReveal*` + `REVEAL_TIMEOUT` toggle |
-| 34 | `src/components/passwords/entry-history-keys.ts` | `DISPLAY_KEYS` (must use **blob field names**, not mapped property names), `SENSITIVE_KEYS` |
+| 33 | `src/components/passwords/detail/password-detail-inline.tsx` | Add field to detail view. Sensitive fields need `useState` + `handleReveal*` + `REVEAL_TIMEOUT` toggle |
+| 34 | `src/components/passwords/entry/entry-history-keys.ts` | `DISPLAY_KEYS` (must use **blob field names**, not mapped property names), `SENSITIVE_KEYS` |
 
 ### 11. Shared Link Display
 
@@ -182,10 +182,10 @@ If the field should be visible in shared links, update the following.
 | 44 | `src/hooks/team-login-form-presenter.test.ts` | Presenter tests |
 | 45 | `src/hooks/use-team-login-form-model.test.ts` | Model tests |
 | 46 | `src/hooks/entry-form-translations.test.ts` | Translation key tests |
-| 47 | `src/components/team/team-login-submit.test.ts` | Submit tests |
-| 48 | `src/components/passwords/personal-login-submit.test.ts` | Submit tests |
-| 46 | `src/components/passwords/password-import-*.test.ts` | Import tests |
-| 47 | `src/lib/personal-entry-payload.test.ts` | Payload tests |
+| 47 | `src/components/team/forms/team-login-submit.test.ts` | Submit tests |
+| 48 | `src/components/passwords/personal/personal-login-submit.test.ts` | Submit tests |
+| 46 | `src/components/passwords/import/password-import-*.test.ts` | Import tests |
+| 47 | `src/lib/vault/personal-entry-payload.test.ts` | Payload tests |
 
 ### Backward Compatibility with Existing Data
 
@@ -214,8 +214,8 @@ Fields the server can read. Fewer changes required than blob-only fields.
 
 | # | File | Description |
 |---|------|-------------|
-| 3 | `src/components/passwords/personal-entry-submit.ts` | `ExecutePersonalEntrySubmitArgs` + API body |
-| 4 | `src/components/team/team-entry-submit.ts` | `ExecuteTeamEntrySubmitArgs` + API body |
+| 3 | `src/components/passwords/personal/personal-entry-submit.ts` | `ExecutePersonalEntrySubmitArgs` + API body |
+| 4 | `src/components/team/forms/team-entry-submit.ts` | `ExecuteTeamEntrySubmitArgs` + API body |
 | 5 | `src/app/api/passwords/route.ts` / `[id]/route.ts` | Server-side handler DB writes |
 | 6 | `src/app/api/teams/[teamId]/passwords/route.ts` etc. | Team-side handlers |
 
@@ -228,8 +228,8 @@ Same as Section A items 2–5, but blob construction is not needed.
 | # | File | Description |
 |---|------|-------------|
 | 7 | `src/lib/export-format-common.ts` | `ExportEntry` + export functions |
-| 8 | `src/components/passwords/password-export.tsx` | Extract from API response (`raw.fieldName`) |
-| 9 | `src/components/passwords/password-import-payload.ts` | Add field to API body |
+| 8 | `src/components/passwords/export/password-export.tsx` | Extract from API response (`raw.fieldName`) |
+| 9 | `src/components/passwords/import/password-import-payload.ts` | Add field to API body |
 
 ### 5. Shared Link Display
 
@@ -260,45 +260,45 @@ In addition to all items from Section A or B, the following are required.
 
 | # | File | Description |
 |---|------|-------------|
-| 3 | `src/components/passwords/personal-*-form.tsx` | New personal form |
-| 4 | `src/components/team/team-*-form.tsx` | New team form |
+| 3 | `src/components/passwords/personal/personal-*-form.tsx` | New personal form |
+| 4 | `src/components/team/forms/team-*-form.tsx` | New team form |
 | 5 | `src/components/entry-fields/*-fields.tsx` | New display component |
 
 ### 3. Dashboard & Sidebar
 
 | # | File | Description |
 |---|------|-------------|
-| 6 | `src/components/passwords/password-dashboard.tsx` | Category filter + dropdown + icon |
+| 6 | `src/components/passwords/detail/password-dashboard.tsx` | Category filter + dropdown + icon |
 | 7 | `src/app/[locale]/dashboard/teams/[teamId]/page.tsx` | Team vault: `activeCategoryLabel` + `ENTRY_TYPE_ICONS` + dropdown |
 | 8 | `src/components/layout/sidebar-sections.tsx` | Sidebar category addition |
-| 9 | `src/components/passwords/password-card.tsx` | Card display logic + primary copy button + dropdown menu |
-| 10 | `src/components/passwords/password-detail-inline.tsx` | Detail view section + sensitive fields need `useState` + `handleReveal*` + `REVEAL_TIMEOUT` toggle |
+| 9 | `src/components/passwords/detail/password-card.tsx` | Card display logic + primary copy button + dropdown menu |
+| 10 | `src/components/passwords/detail/password-detail-inline.tsx` | Detail view section + sensitive fields need `useState` + `handleReveal*` + `REVEAL_TIMEOUT` toggle |
 
 ### 4. Dialog Integration
 
 | # | File | Description |
 |---|------|-------------|
-| 11 | `src/components/passwords/personal-password-new-dialog.tsx` | New entry dialog |
-| 12 | `src/components/passwords/personal-password-edit-dialog.tsx` | Edit entry dialog |
-| 13 | `src/components/team/team-new-dialog.tsx` | Team new entry dialog |
-| 14 | `src/components/team/team-edit-dialog.tsx` | Team edit entry dialog |
+| 11 | `src/components/passwords/dialogs/personal-password-new-dialog.tsx` | New entry dialog |
+| 12 | `src/components/passwords/dialogs/personal-password-edit-dialog.tsx` | Edit entry dialog |
+| 13 | `src/components/team/management/team-new-dialog.tsx` | Team new entry dialog |
+| 14 | `src/components/team/management/team-edit-dialog.tsx` | Team edit entry dialog |
 
 ### 5. Payload Construction
 
 | # | File | Description |
 |---|------|-------------|
-| 15 | `src/lib/team-entry-payload.ts` | Add new `case` to `switch` (fullBlob + overviewData) |
-| 16 | `src/components/team/team-entry-kind.ts` | Entry kind mapping |
+| 15 | `src/lib/team/team-entry-payload.ts` | Add new `case` to `switch` (fullBlob + overviewData) |
+| 16 | `src/components/team/forms/team-entry-kind.ts` | Entry kind mapping |
 
 ### 6. Export / Import
 
 | # | File | Description |
 |---|------|-------------|
 | 17 | `src/lib/export-format-common.ts` | Add new type branch to JSON/CSV export |
-| 18 | `src/components/passwords/password-export.tsx` | Extract type-specific fields from decrypted blob |
-| 19 | `src/components/team/team-export.tsx` | Same as above (team) |
-| 20 | `src/components/passwords/password-import-parsers.ts` | Import parser |
-| 21 | `src/components/passwords/password-import-payload.ts` | Blob builder |
+| 18 | `src/components/passwords/export/password-export.tsx` | Extract type-specific fields from decrypted blob |
+| 19 | `src/components/team/management/team-export.tsx` | Same as above (team) |
+| 20 | `src/components/passwords/import/password-import-parsers.ts` | Import parser |
+| 21 | `src/components/passwords/import/password-import-payload.ts` | Blob builder |
 
 ### 7. Shared Link Display
 
