@@ -2,11 +2,14 @@
 # Rotate the server-side ShareLink master key.
 #
 # Usage:
-#   ADMIN_API_TOKEN=<hex64> OPERATOR_ID=<user-uuid> TARGET_VERSION=<int> scripts/rotate-master-key.sh
+#   ADMIN_API_TOKEN=<op_token> TARGET_VERSION=<int> scripts/rotate-master-key.sh
+#
+# Mint an operator token at /dashboard/tenant/operator-tokens. The token's
+# subject (the user it authenticates as) is bound at issuance time; no
+# separate operatorId env var is needed.
 #
 # Environment variables:
-#   ADMIN_API_TOKEN  (required) Admin bearer token (64-char hex)
-#   OPERATOR_ID      (required) User ID of the admin performing the rotation
+#   ADMIN_API_TOKEN  (required) Per-operator op_* bearer token (op_<43-base64url>)
 #   TARGET_VERSION   (required) Target key version (must match SHARE_MASTER_KEY_CURRENT_VERSION)
 #   APP_URL          (optional) Application URL (default: http://localhost:3000)
 #   REVOKE_SHARES    (optional) Revoke shares encrypted with older versions (default: false)
@@ -20,22 +23,11 @@ set -euo pipefail
 
 APP_URL="${APP_URL:-http://localhost:3000}"
 ADMIN_API_TOKEN="${ADMIN_API_TOKEN:-}"
-OPERATOR_ID="${OPERATOR_ID:-}"
 TARGET_VERSION="${TARGET_VERSION:-}"
 REVOKE_SHARES="${REVOKE_SHARES:-false}"
 
-if [[ -z "$ADMIN_API_TOKEN" ]]; then
-  echo "[ERROR] ADMIN_API_TOKEN is required" >&2
-  exit 1
-fi
-
-if [[ -z "$OPERATOR_ID" ]]; then
-  echo "[ERROR] OPERATOR_ID is required" >&2
-  exit 1
-fi
-
-if ! [[ "$OPERATOR_ID" =~ ^[a-zA-Z0-9_-]{1,128}$ ]]; then
-  echo "[ERROR] OPERATOR_ID must be alphanumeric (CUID or UUID format)" >&2
+if ! [[ "$ADMIN_API_TOKEN" =~ ^op_[A-Za-z0-9_-]{43}$ ]]; then
+  echo "[ERROR] ADMIN_API_TOKEN must be op_<43-base64url> (mint via /dashboard/tenant/operator-tokens)" >&2
   exit 1
 fi
 
@@ -55,7 +47,7 @@ if [[ "$REVOKE_SHARES" != "true" && "$REVOKE_SHARES" != "false" ]]; then
 fi
 
 BODY=$(cat <<EOJSON
-{"targetVersion":${TARGET_VERSION},"operatorId":"${OPERATOR_ID}","revokeShares":${REVOKE_SHARES}}
+{"targetVersion":${TARGET_VERSION},"revokeShares":${REVOKE_SHARES}}
 EOJSON
 )
 

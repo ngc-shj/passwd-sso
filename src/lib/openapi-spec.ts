@@ -122,6 +122,111 @@ export function buildOpenApiSpec(baseUrl: string) {
           },
         },
       },
+      "/api/tenant/operator-tokens": {
+        get: {
+          operationId: "listOperatorTokens",
+          summary: "List operator tokens for the authenticated tenant",
+          tags: ["Operator Tokens"],
+          security: [{ cookieAuth: [] }],
+          responses: {
+            "200": {
+              description: "Array of operator token summaries (no plaintext, no hash)",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/OperatorTokenSummary" },
+                  },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "403": { $ref: "#/components/responses/Forbidden" },
+            "429": { $ref: "#/components/responses/RateLimited" },
+          },
+        },
+        post: {
+          operationId: "createOperatorToken",
+          summary: "Mint a new operator token (step-up: session must be ≤ 15 min old)",
+          description:
+            "Issues a per-operator bearer token for admin/maintenance routes. " +
+            "The token plaintext is returned exactly once; store it securely. " +
+            "Requires the caller's session to have been created within the last 15 minutes. " +
+            "Response includes `Cache-Control: no-store`.",
+          tags: ["Operator Tokens"],
+          security: [{ cookieAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/CreateOperatorTokenInput" },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "Token created. The `plaintext` field is shown exactly once.",
+              headers: {
+                "Cache-Control": {
+                  schema: { type: "string", enum: ["no-store"] },
+                  description: "Prevents caching of the token plaintext",
+                },
+              },
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/OperatorTokenCreated" },
+                },
+              },
+            },
+            "400": { $ref: "#/components/responses/ValidationError" },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "403": {
+              description: "Forbidden — stale session (re-authenticate within 15 min) or insufficient role",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      error: { type: "string", example: "stale_session" },
+                      message: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+            "429": { $ref: "#/components/responses/RateLimited" },
+          },
+        },
+      },
+      "/api/tenant/operator-tokens/{id}": {
+        delete: {
+          operationId: "revokeOperatorToken",
+          summary: "Revoke an operator token",
+          description:
+            "Sets revokedAt on the token; the row is retained for audit purposes. " +
+            "Tenant OWNER/ADMIN can revoke any token in their tenant. " +
+            "Returns 404 (not 403) when the token does not belong to the caller's tenant.",
+          tags: ["Operator Tokens"],
+          security: [{ cookieAuth: [] }],
+          parameters: [
+            { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" }, description: "Operator token ID" },
+          ],
+          responses: {
+            "200": {
+              description: "Revoked",
+              content: {
+                "application/json": {
+                  schema: { type: "object", properties: { success: { type: "boolean" } } },
+                },
+              },
+            },
+            "401": { $ref: "#/components/responses/Unauthorized" },
+            "403": { $ref: "#/components/responses/Forbidden" },
+            "404": { $ref: "#/components/responses/NotFound" },
+            "429": { $ref: "#/components/responses/RateLimited" },
+          },
+        },
+      },
       "/api/v1/vault/status": {
         get: {
           operationId: "getVaultStatus",
@@ -155,6 +260,12 @@ export function buildOpenApiSpec(baseUrl: string) {
           type: "http",
           scheme: "bearer",
           description: "API key (prefixed with `api_`)",
+        },
+        cookieAuth: {
+          type: "apiKey",
+          in: "cookie",
+          name: "authjs.session-token",
+          description: "Auth.js v5 session cookie (tenant OWNER/ADMIN role required for operator-token endpoints)",
         },
       },
       schemas: {
@@ -239,6 +350,56 @@ export function buildOpenApiSpec(baseUrl: string) {
             parentId: { type: ["string", "null"] },
             passwordCount: { type: "integer" },
           },
+        },
+        CreateOperatorTokenInput: {
+          type: "object",
+          required: ["name"],
+          additionalProperties: false,
+          properties: {
+            name: { type: "string", minLength: 1, maxLength: 128, description: "Human-readable label, e.g. 'ngc-shj laptop 2026-04-27'" },
+            expiresInDays: {
+              type: "integer",
+              minimum: 1,
+              maximum: 90,
+              default: 30,
+              description: "Token lifetime in days (default: 30, max: 90)",
+            },
+            scope: {
+              type: "string",
+              enum: ["maintenance"],
+              default: "maintenance",
+              description: "Token scope (v1: only 'maintenance' is accepted)",
+            },
+          },
+        },
+        OperatorTokenSummary: {
+          type: "object",
+          properties: {
+            id: { type: "string", format: "uuid" },
+            prefix: { type: "string", description: "First 8 characters of the plaintext (op_ + 5 chars) for UI disambiguation" },
+            name: { type: "string" },
+            scope: { type: "string" },
+            expiresAt: { type: "string", format: "date-time" },
+            revokedAt: { type: ["string", "null"], format: "date-time" },
+            lastUsedAt: { type: ["string", "null"], format: "date-time" },
+            createdAt: { type: "string", format: "date-time" },
+          },
+        },
+        OperatorTokenCreated: {
+          allOf: [
+            { $ref: "#/components/schemas/OperatorTokenSummary" },
+            {
+              type: "object",
+              required: ["plaintext"],
+              properties: {
+                plaintext: {
+                  type: "string",
+                  pattern: "^op_[A-Za-z0-9_-]{43}$",
+                  description: "Full token value — shown exactly once. Store securely; cannot be retrieved again.",
+                },
+              },
+            },
+          ],
         },
         ErrorResponse: {
           type: "object",

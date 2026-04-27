@@ -2,11 +2,14 @@
 # System-wide password entry history purge.
 #
 # Usage:
-#   ADMIN_API_TOKEN=<hex64> OPERATOR_ID=<user-uuid> scripts/purge-history.sh
+#   ADMIN_API_TOKEN=<op_token> scripts/purge-history.sh
+#
+# Mint an operator token at /dashboard/tenant/operator-tokens. The token's
+# subject (the user it authenticates as) is bound at issuance time; no
+# separate operatorId env var is needed.
 #
 # Environment variables:
-#   ADMIN_API_TOKEN  (required) Admin bearer token (64-char hex)
-#   OPERATOR_ID      (required) User ID of the admin performing the purge
+#   ADMIN_API_TOKEN  (required) Per-operator op_* bearer token (op_<43-base64url>)
 #   APP_URL          (optional) Application URL (default: http://localhost:3000)
 #   RETENTION_DAYS   (optional) Days of history to retain (default: 90)
 #   DRY_RUN          (optional) Set to "true" for a dry run (default: false)
@@ -20,17 +23,11 @@ set -euo pipefail
 
 APP_URL="${APP_URL:-http://localhost:3000}"
 ADMIN_API_TOKEN="${ADMIN_API_TOKEN:-}"
-OPERATOR_ID="${OPERATOR_ID:-}"
 RETENTION_DAYS="${RETENTION_DAYS:-90}"
 DRY_RUN="${DRY_RUN:-false}"
 
-if [[ -z "$ADMIN_API_TOKEN" ]]; then
-  echo "[ERROR] ADMIN_API_TOKEN is required" >&2
-  exit 1
-fi
-
-if ! [[ "$OPERATOR_ID" =~ ^[a-zA-Z0-9_-]{1,128}$ ]]; then
-  echo "[ERROR] OPERATOR_ID must be alphanumeric (CUID or UUID format)" >&2
+if ! [[ "$ADMIN_API_TOKEN" =~ ^op_[A-Za-z0-9_-]{43}$ ]]; then
+  echo "[ERROR] ADMIN_API_TOKEN must be op_<43-base64url> (mint via /dashboard/tenant/operator-tokens)" >&2
   exit 1
 fi
 
@@ -45,7 +42,7 @@ if [[ "$DRY_RUN" != "true" && "$DRY_RUN" != "false" ]]; then
 fi
 
 BODY=$(cat <<EOJSON
-{"operatorId":"${OPERATOR_ID}","retentionDays":${RETENTION_DAYS},"dryRun":${DRY_RUN}}
+{"retentionDays":${RETENTION_DAYS},"dryRun":${DRY_RUN}}
 EOJSON
 )
 

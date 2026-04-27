@@ -1,8 +1,9 @@
 /**
  * Shared authentication helpers for admin maintenance routes.
  *
- * These routes are bearer-token authenticated (ADMIN_API_TOKEN) and require
- * an `operatorId` body/query param identifying an active tenant admin.
+ * These routes are bearer-token authenticated via per-operator op_* tokens.
+ * The token's bound subject userId + tenantId are passed to
+ * requireMaintenanceOperator to confirm OWNER/ADMIN membership at request time.
  */
 
 import { NextResponse } from "next/server";

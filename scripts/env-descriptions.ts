@@ -288,14 +288,6 @@ export const descriptions: Record<
       "Required in production.",
     secret: true,
   },
-  ADMIN_API_TOKEN: {
-    group: "Vault keys",
-    order: 14,
-    description:
-      "256-bit admin bearer token (64-char hex) for key rotation and maintenance endpoints.\n" +
-      "Required in production when SHARE_MASTER_KEY_CURRENT_VERSION >= 2.",
-    secret: true,
-  },
   DIRECTORY_SYNC_MASTER_KEY: {
     group: "Vault keys",
     order: 15,

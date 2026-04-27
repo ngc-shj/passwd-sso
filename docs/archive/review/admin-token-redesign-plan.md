@@ -529,3 +529,179 @@ No open questions remain for v1. Any further design changes should ship as their
 ---
 
 End of plan. Phase 1 review iterates until all expert findings are resolved or accepted-with-justification.
+
+---
+
+## 11. Implementation Checklist (Phase 2 Step 2-1)
+
+### Files to create
+
+- `prisma/migrations/<timestamp>_add_operator_token/migration.sql` (single file, additive)
+- `src/lib/constants/auth/operator-token.ts` (constants module — prefix, scope, throttle, regex, TTL caps, sunset, auto-disabled routes)
+- `src/lib/auth/tokens/operator-token.ts` (validator + `hasAnyActiveOperatorToken` + `parseOperatorTokenScopes`/`hasOperatorTokenScope` + `_resetActiveOperatorTokenCacheForTests`)
+- `src/lib/auth/tokens/operator-token.test.ts` (unit tests)
+- `src/__tests__/helpers/operator-token-fixtures.ts` (`makeOperatorTokenPlaintext`, `makeLegacyAdminTokenHex`)
+- `src/app/api/tenant/operator-tokens/route.ts` (POST + GET)
+- `src/app/api/tenant/operator-tokens/[id]/route.ts` (DELETE)
+- `src/app/api/tenant/operator-tokens/route.test.ts`
+- `src/app/api/tenant/operator-tokens/[id]/route.test.ts`
+- `src/app/[locale]/dashboard/tenant/operator-tokens/page.tsx` (UI page)
+- `src/app/api/maintenance/dcr-cleanup/route.test.ts` (NEW)
+- `src/app/api/maintenance/audit-outbox-metrics/route.test.ts` (NEW)
+- `src/app/api/maintenance/audit-outbox-purge-failed/route.test.ts` (NEW)
+- `src/app/api/maintenance/audit-chain-verify/route.test.ts` (NEW — auth-only, no chain-walk mocks per Round 2 T19)
+- `src/__tests__/db-integration/operator-token-validate.integration.test.ts`
+- `src/__tests__/db-integration/admin-token-routes.integration.test.ts`
+- `src/lib/constants/auth/operator-token.test.ts` (sunset constant regression test)
+- `docs/operations/admin-tokens.md` (operator runbook)
+
+### Files to modify
+
+- `prisma/schema.prisma` (add `OperatorToken` model + add 2 enum values to `AuditAction`)
+- `src/lib/constants/audit/audit.ts` (`AUDIT_ACTION`, `AUDIT_ACTION_VALUES`, `AUDIT_ACTION_GROUPS_TENANT[ADMIN]` additions)
+- `src/lib/auth/tokens/admin-token.ts` (rewrite signature: sync→async, typed result, `op_*` delegation, legacy auto-disable)
+- `src/lib/auth/tokens/admin-token.test.ts` (rewrite for new signature)
+- `src/app/api/admin/rotate-master-key/route.ts` (consume new typed result, dual-path audit, deprecation headers)
+- `src/app/api/admin/rotate-master-key/route.test.ts` (add 3 cases)
+- `src/app/api/maintenance/purge-history/route.ts` (consume new typed result; legacy auto-disabled per §4.6b)
+- `src/app/api/maintenance/purge-history/route.test.ts` (add 3 cases)
+- `src/app/api/maintenance/purge-audit-logs/route.ts` (consume new typed result; legacy auto-disabled per §4.6b)
+- `src/app/api/maintenance/purge-audit-logs/route.test.ts` (add 3 cases)
+- `src/app/api/maintenance/dcr-cleanup/route.ts` (consume new typed result, dual-path audit, deprecation headers)
+- `src/app/api/maintenance/audit-outbox-metrics/route.ts` (same)
+- `src/app/api/maintenance/audit-outbox-purge-failed/route.ts` (same)
+- `src/app/api/maintenance/audit-chain-verify/route.ts` (same)
+- `scripts/purge-history.sh` (regex `op_*` accept; OPERATOR_ID semantics doc note)
+- `scripts/purge-audit-logs.sh` (same)
+- `scripts/rotate-master-key.sh` (same)
+- `messages/en/AuditLog.json` (add 2 keys at top level)
+- `messages/ja/AuditLog.json` (add 2 keys at top level)
+- `src/lib/openapi-spec.ts` (document new tenant operator-tokens endpoints only)
+- `CLAUDE.md` (admin scripts section: operator-token usage example)
+- `.env.example` (deprecate ADMIN_API_TOKEN comment)
+
+### Shared utilities to reuse (NEVER reimplement)
+
+Verified during Phase 1 research:
+
+- `hashToken(token: string): string` — `src/lib/crypto/crypto-server.ts:165-167` (plain SHA-256 hex)
+- `withBypassRls(prisma, fn, BYPASS_PURPOSE.X)` — `src/lib/tenant-rls.ts`
+- `BYPASS_PURPOSE.TOKEN_LIFECYCLE` / `BYPASS_PURPOSE.SYSTEM_MAINTENANCE` — same module
+- `requireMaintenanceOperator(userId, { tenantId? })` — `src/lib/auth/access/maintenance-auth.ts`
+- `createRateLimiter({ windowMs, max })` — `src/lib/security/rate-limit.ts`
+- `parseBody(req, schema)` / `parseQuery(req, schema)` — `src/lib/http/parse-body.ts`
+- `unauthorized()` / `rateLimited(retryAfterMs)` — `src/lib/http/api-response.ts`
+- `withRequestLog(handler)` — `src/lib/http/with-request-log.ts`
+- `logAuditAsync()` / `tenantAuditBase(req, userId, tenantId)` — `src/lib/audit/audit.ts`
+- `ACTOR_TYPE.HUMAN` / `ACTOR_TYPE.SYSTEM` — `src/lib/constants/audit/audit.ts`
+- `SYSTEM_ACTOR_ID` — `src/lib/constants/app.ts`
+- `MS_PER_MINUTE` / `MS_PER_DAY` — `src/lib/constants/time.ts`
+- `parseSaTokenScopes` / `hasSaTokenScope` patterns — `src/lib/auth/tokens/service-account-token.ts` (mirror, do NOT import — different domain)
+- `_resetSubkeyCacheForTests` precedent — `src/lib/auth/session/session-cache.ts:74` (pattern to mirror for `_resetActiveOperatorTokenCacheForTests`)
+- `randomBytes` from `node:crypto`
+
+### Patterns to follow (read these before writing similar code)
+
+- Validator module: `src/lib/auth/tokens/service-account-token.ts` — exact shape mirror for `validateOperatorToken`.
+- Constants module: `src/lib/constants/auth/service-account.ts` — exact shape mirror for `operator-token.ts`.
+- Token CRUD API: `src/app/api/tenant/scim-tokens/route.ts` + `src/app/api/tenant/scim-tokens/[tokenId]/route.ts` — exact shape mirror for `/api/tenant/operator-tokens`.
+- One-time plaintext + `Cache-Control: no-store`: see SCIM tokens implementation.
+- `withTenantRls` IDOR pattern: `src/app/api/tenant/scim-tokens/[tokenId]/route.ts:36-45`.
+- Test mock-factory pattern: `src/app/api/maintenance/purge-history/route.test.ts` — copy structure for the 4 new route tests.
+- `$queryRaw` mock pattern: `src/__tests__/audit-outbox.test.ts:20,67` — for `audit-outbox-metrics` and `audit-outbox-purge-failed` route tests.
+- `Session.findUnique` mock pattern: `src/lib/auth/session/auth-adapter.test.ts:607` — for the step-up test.
+
+### Cross-batch deduplication watch-list
+
+Symbols added in this PR that must be defined ONCE only (sub-agents working in parallel could duplicate):
+
+- `OPERATOR_TOKEN_PREFIX`, `OPERATOR_TOKEN_SCOPE`, `OPERATOR_TOKEN_LAST_USED_THROTTLE_MS`, `OPERATOR_TOKEN_PLAINTEXT_RE`, `OPERATOR_TOKEN_DEFAULT_EXPIRES_DAYS`, `OPERATOR_TOKEN_MAX_EXPIRES_DAYS`, `OPERATOR_TOKEN_MIN_EXPIRES_DAYS`, `OPERATOR_TOKEN_NAME_MAX_LENGTH`, `ADMIN_API_TOKEN_LEGACY_SUNSET`, `OPERATOR_TOKEN_LEGACY_AUTO_DISABLED_ROUTES` — all in `src/lib/constants/auth/operator-token.ts`.
+- `validateOperatorToken`, `hasAnyActiveOperatorToken`, `_resetActiveOperatorTokenCacheForTests`, `parseOperatorTokenScopes`, `hasOperatorTokenScope` — all in `src/lib/auth/tokens/operator-token.ts`.
+- `applyDeprecationHeaders(response)` — exported once from `src/lib/auth/tokens/admin-token.ts` (or constants module — pick one).
+- `makeOperatorTokenPlaintext`, `makeLegacyAdminTokenHex` — `src/__tests__/helpers/operator-token-fixtures.ts`.
+
+### Sunset date (set at impl time per §4.6a)
+
+- `ADMIN_API_TOKEN_LEGACY_SUNSET = "2026-10-27"` (≥6 months from merge — picked as v1 commitment; can be tightened in a future PR; lower bound asserted in regression test).
+
+---
+
+## 12. Phase 2 design pivot — legacy code removed
+
+After Phase 1 review and partial Phase 2 implementation, the user (project lead) directed a scope simplification: **drop the legacy `ADMIN_API_TOKEN` env-based auth path entirely**. The pre3 mitigation no longer needs a Phase A/B/C migration — this PR ships only the new operator-token path. Phase 1's per-route auto-disable, sunset constant, and TOCTOU around legacy fallback are all moot.
+
+### What was removed
+
+- `verifyAdminToken` legacy hex64 path; `AdminAuth` discriminated union → flat `AdminAuth` interface.
+- `applyDeprecationHeaders` helper.
+- `hasAnyActiveOperatorToken` monotonic latch + `_resetActiveOperatorTokenCacheForTests`.
+- Constants: `ADMIN_API_TOKEN_LEGACY_SUNSET`, `OPERATOR_TOKEN_LEGACY_AUTO_DISABLED_ROUTES`.
+- `ADMIN_AUTH_KIND` (single-value discriminator was YAGNI).
+- `ADMIN_API_TOKEN` env var declaration in `env-schema.ts` + `.env.example`.
+- `ADMIN_API_TOKEN` from `scripts/check-env-docs.ts` allowlist + `scripts/env-descriptions.ts`.
+- Body `operatorId` parameter in all 7 routes (token already binds the operator).
+- `OPERATOR_ID` env var requirement in 3 operator scripts.
+
+### What was kept
+
+- `OperatorToken` Prisma model + migration (operator-only path is exactly what the model supports).
+- Token validator (`validateOperatorToken`).
+- All Round 1+2 fixes that pertain to operator-token-only behavior:
+  - F1 schema annotations (`@db.Uuid`, `@db.VarChar`, `@@map("operator_tokens")`)
+  - F4/F17 single-file migration with `IF NOT EXISTS`
+  - F2/T3/T11 i18n path correction (`messages/{locale}/AuditLog.json`)
+  - F3/F16 audit-action group placement (`AUDIT_ACTION_GROUPS_TENANT[ADMIN]` only)
+  - S2 step-up at issuance (`Session.createdAt < 15 min`)
+  - S9 `.strict()` Zod + server-hard-coded `subjectUserId = createdByUserId = session.userId`
+  - S17 IDOR guard on revoke (`withTenantRls` + tenantId equality + 404 on cross-tenant miss)
+  - T15 per-route mock-surface enumeration (still applies to the 4 new test files)
+
+### Bootstrap impact
+
+- The very first operator token is minted via the tenant dashboard (Auth.js session auth). There is no env-based break-glass — the dashboard is the only path.
+- Existing deployments running with `ADMIN_API_TOKEN=...` will break immediately on upgrade. Upgrade path: mint operator tokens *before* deploying this version, switch scripts to `op_*` tokens, then deploy.
+
+### UI deferred to follow-up PR
+
+The `/admin/tenant/operator-tokens` dashboard page is **deferred**. v1 ships the CRUD API only:
+- `POST /api/tenant/operator-tokens` (mint)
+- `GET /api/tenant/operator-tokens` (list)
+- `DELETE /api/tenant/operator-tokens/{id}` (revoke)
+
+Operators issue tokens via curl with their session cookie. The UI page will follow in a separate PR scoped to the dashboard component work alone.
+
+### Updated implementation checklist (v2 — operator-only)
+
+Files in this PR (created or modified):
+- `prisma/schema.prisma` (OperatorToken model + AuditAction enum extensions + new TenantPermission enum entry)
+- `prisma/migrations/20260427105115_add_operator_token/migration.sql`
+- `src/lib/constants/auth/operator-token.ts` (constants, no sunset/auto-disable)
+- `src/lib/constants/auth/tenant-permission.ts` (`OPERATOR_TOKEN_MANAGE` permission)
+- `src/lib/auth/access/tenant-auth.ts` (OPERATOR_TOKEN_MANAGE in OWNER+ADMIN sets)
+- `src/lib/auth/access/maintenance-auth.ts` (comment update)
+- `src/lib/constants/audit/audit.ts` (OPERATOR_TOKEN_CREATE/REVOKE)
+- `src/lib/constants/audit/audit-target.ts` (OPERATOR_TOKEN target)
+- `src/lib/auth/tokens/admin-token.ts` (rewrite — operator-only)
+- `src/lib/auth/tokens/operator-token.ts` (validator + scope helpers)
+- `src/lib/http/api-error-codes.ts` (`OPERATOR_TOKEN_LIMIT_EXCEEDED`, `OPERATOR_TOKEN_NOT_FOUND`, `OPERATOR_TOKEN_STALE_SESSION`)
+- `src/lib/env-schema.ts` (drop `ADMIN_API_TOKEN`)
+- `src/lib/openapi-spec.ts` (operator-tokens endpoints documented)
+- 7 routes: `src/app/api/admin/rotate-master-key/route.ts` + `src/app/api/maintenance/{purge-history, purge-audit-logs, dcr-cleanup, audit-outbox-metrics, audit-outbox-purge-failed, audit-chain-verify}/route.ts`
+- `src/app/api/tenant/operator-tokens/route.ts` (POST + GET)
+- `src/app/api/tenant/operator-tokens/[id]/route.ts` (DELETE)
+- 3 scripts: `scripts/{purge-history, purge-audit-logs, rotate-master-key}.sh`
+- `scripts/check-env-docs.ts` (drop `ADMIN_API_TOKEN`)
+- `scripts/env-descriptions.ts` (drop `ADMIN_API_TOKEN`)
+- `messages/en/AuditLog.json`, `messages/ja/AuditLog.json` (2 keys each)
+- `.env.example` (drop `ADMIN_API_TOKEN`)
+- `CLAUDE.md` (admin-scripts section: only operator-token examples)
+- `docs/operations/admin-tokens.md` (operator-only runbook)
+
+Tests (Phase 2 Step 2-2 batch 6):
+- `src/lib/auth/tokens/operator-token.test.ts` (validator unit tests)
+- `src/lib/auth/tokens/admin-token.test.ts` (rewrite — operator-only)
+- 3 existing route tests: rewrite to use op_* token (drop legacy hex64 cases)
+- 4 new route tests: `dcr-cleanup`, `audit-outbox-metrics`, `audit-outbox-purge-failed`, `audit-chain-verify`
+- `src/app/api/tenant/operator-tokens/route.test.ts` (POST + GET, including step-up + Zod strict)
+- `src/app/api/tenant/operator-tokens/[id]/route.test.ts` (DELETE, including IDOR guard)
+- Integration test (real DB): mint + use + revoke roundtrip via route handler imports.

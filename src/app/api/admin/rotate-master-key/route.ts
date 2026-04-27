@@ -5,11 +5,11 @@
  *
  * Note:
  * - Team vault encryption is E2E-only; server-side team key re-wrap is removed.
- * - This endpoint now validates the target master key version and optionally
+ * - This endpoint validates the target master key version and optionally
  *   revokes old-version PasswordShare rows.
- * Authenticated via ADMIN_API_TOKEN bearer token (not session).
+ * Authenticated via per-operator op_* token (mint via /dashboard/tenant/operator-tokens).
  *
- * Body: { targetVersion: number, operatorId: string, revokeShares?: boolean }
+ * Body: { targetVersion: number, revokeShares?: boolean }
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -26,7 +26,6 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
-import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/http/api-response";
 import { MASTER_KEY_VERSION_MIN, MASTER_KEY_VERSION_MAX } from "@/lib/validations/common.server";
@@ -35,15 +34,16 @@ const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });
 
 const bodySchema = z.object({
   targetVersion: z.number().int().min(MASTER_KEY_VERSION_MIN).max(MASTER_KEY_VERSION_MAX),
-  operatorId: z.string().uuid(),
   revokeShares: z.boolean().default(false),
 });
 
 async function handlePOST(req: NextRequest) {
   // Bearer token auth (checked before rate limit to prevent unauthenticated DoS)
-  if (!verifyAdminToken(req)) {
+  const authResult = await verifyAdminToken(req);
+  if (!authResult.ok) {
     return unauthorized();
   }
+  const { auth } = authResult;
 
   // Rate limit (global fixed key, applied after auth)
   const rl = await rateLimiter.check("rl:admin:rotate");
@@ -55,7 +55,7 @@ async function handlePOST(req: NextRequest) {
   const result = await parseBody(req, bodySchema);
   if (!result.ok) return result.response;
 
-  const { targetVersion, operatorId, revokeShares } = result.data;
+  const { targetVersion, revokeShares } = result.data;
 
   // Verify targetVersion matches current env config (prevent stale requests)
   const currentVersion = getCurrentMasterKeyVersion();
@@ -78,16 +78,16 @@ async function handlePOST(req: NextRequest) {
     );
   }
 
-  // Verify operatorId is an active tenant admin
-  const op = await requireMaintenanceOperator(operatorId);
+  // Re-confirm the operator is still an active OWNER/ADMIN of their bound tenant
+  const op = await requireMaintenanceOperator(auth.subjectUserId, {
+    tenantId: auth.tenantId,
+  });
   if (!op.ok) return op.response;
-  const operator = op.operator;
 
-  // Revoke old-version shares if requested
-  // Revoke shares across ALL tenants (master key is system-wide)
+  // Revoke old-version shares across ALL tenants (master key is system-wide)
   let revokedShares = 0;
   if (revokeShares) {
-    const result = await withBypassRls(prisma, async () =>
+    const shareResult = await withBypassRls(prisma, async () =>
       prisma.passwordShare.updateMany({
         where: {
           masterKeyVersion: { lt: targetVersion },
@@ -97,25 +97,22 @@ async function handlePOST(req: NextRequest) {
         data: { revokedAt: new Date() },
       }),
     BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
-    revokedShares = result.count;
+    revokedShares = shareResult.count;
   }
 
-  // Audit log (async nonblocking; logAudit handles errors internally)
   await logAuditAsync({
-    ...tenantAuditBase(req, SYSTEM_ACTOR_ID, operator.tenantId),
-    actorType: ACTOR_TYPE.SYSTEM,
+    ...tenantAuditBase(req, auth.subjectUserId, auth.tenantId),
+    actorType: ACTOR_TYPE.HUMAN,
     action: AUDIT_ACTION.MASTER_KEY_ROTATION,
     metadata: {
-      operatorId,
+      tokenSubjectUserId: auth.subjectUserId,
+      tokenId: auth.tokenId,
       targetVersion,
       revokedShares,
     },
   });
 
-  return NextResponse.json({
-    targetVersion,
-    revokedShares,
-  });
+  return NextResponse.json({ targetVersion, revokedShares });
 }
 
 export const POST = withRequestLog(handlePOST);

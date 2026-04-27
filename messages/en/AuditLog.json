@@ -66,6 +66,8 @@
   "HISTORY_PURGE": "Purged history",
   "AUDIT_LOG_PURGE": "Purged audit logs",
   "MASTER_KEY_ROTATION": "Master key rotation",
+  "OPERATOR_TOKEN_CREATE": "Operator token created",
+  "OPERATOR_TOKEN_REVOKE": "Operator token revoked",
   "VAULT_KEY_ROTATION": "Vault key rotation",
   "SESSION_REVOKE": "Revoked session",
   "SESSION_REVOKE_ALL": "Revoked all other sessions",

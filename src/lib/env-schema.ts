@@ -105,7 +105,6 @@ export const envObject = z.object({
     .min(1)
     .max(100)
     .default(1),
-  ADMIN_API_TOKEN: hex64.optional(),
 
   // --- Standard ---
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -488,16 +487,6 @@ export const envSchema = envObject.superRefine((data, ctx) => {
         });
       }
     }
-  }
-
-  // Production: ADMIN_API_TOKEN required when key rotation is enabled
-  if (isProd && currentVersion >= 2 && !data.ADMIN_API_TOKEN) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["ADMIN_API_TOKEN"],
-      message:
-        "ADMIN_API_TOKEN is required in production when SHARE_MASTER_KEY_CURRENT_VERSION >= 2",
-    });
   }
 
   // Blob backend and key provider validation is delegated to each

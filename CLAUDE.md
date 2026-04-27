@@ -24,8 +24,11 @@ npm run version:bump -- 0.3.0  # Bump to explicit version
 
 Admin scripts:
 ```bash
-ADMIN_API_TOKEN=<hex64> OPERATOR_ID=<uuid> scripts/purge-history.sh                    # System-wide history purge
-ADMIN_API_TOKEN=<hex64> OPERATOR_ID=<uuid> TARGET_VERSION=<int> scripts/rotate-master-key.sh  # Rotate ShareLink master key
+# Mint an operator token at /dashboard/tenant/operator-tokens, then:
+ADMIN_API_TOKEN=<op_token> scripts/purge-history.sh                                  # System-wide history purge
+ADMIN_API_TOKEN=<op_token> scripts/purge-audit-logs.sh                               # System-wide audit-log purge
+ADMIN_API_TOKEN=<op_token> TARGET_VERSION=<int> scripts/rotate-master-key.sh         # Rotate ShareLink master key
+
 PASSWD_OUTBOX_WORKER_PASSWORD=<pass> MIGRATION_DATABASE_URL=<url> scripts/set-outbox-worker-password.sh  # Set worker DB role password
 ```
 
