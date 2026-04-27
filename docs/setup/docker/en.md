@@ -16,7 +16,7 @@ Any SAML 2.0 compliant IdP can be used via the SAML Jackson bridge.
 | DB | PostgreSQL 16 + Prisma 7 |
 | Encryption | AES-256-GCM (Web Crypto API, client-side) |
 | UI | Tailwind CSS v4 + shadcn/ui + Lucide Icons |
-| Deployment | Docker Compose (app / db / jackson — 3 containers) |
+| Deployment | Docker Compose — 5 base services (`app`, `db`, `jackson`, `redis`, `migrate`) + `audit-outbox-worker` (dev override) |
 
 ## Architecture
 
@@ -25,18 +25,24 @@ Any SAML 2.0 compliant IdP can be used via the SAML Jackson bridge.
 │ Browser  │───▶│  Next.js App │───▶│  Auth.js v5   │───▶│ PostgreSQL │
 │          │◀──│  (port 3000) │◀──│               │    │ (port 5432)│
 └──────────┘    └──────┬───────┘    └───┬───────┬──┘    └────────────┘
-                       │                │       │
-                       │          ┌─────┘       └─────┐
-                       │          ▼                   ▼
-                       │   ┌────────────┐    ┌──────────────┐
-                       │   │  Google    │    │ SAML Jackson │
-                       │   │  OIDC     │    │ (port 5225)  │
-                       │   └────────────┘    └──────┬───────┘
-                       │                            │
-                       │                     ┌──────┴───────┐
+                       │                │       │              │
+                       │          ┌─────┘       └─────┐        │
+                       │          ▼                   ▼        ▼
+                       │   ┌────────────┐    ┌──────────────┐ ┌──────────────────┐
+                       │   │  Google    │    │ SAML Jackson │ │ audit-outbox-    │
+                       │   │  OIDC     │    │ (port 5225)  │ │ worker           │
+                       │   └────────────┘    └──────┬───────┘ │ (audit_outbox   │
+                       │                            │          │  → audit_logs)  │
+                       │                     ┌──────┴───────┐  └──────────────────┘
                        │                     │  SAML 2.0    │
                        │                     │  IdP         │
                        │                     └──────────────┘
+                       │
+                       ├──▶ ┌──────────────────────────┐
+                       │    │  Redis (port 6379)        │
+                       │    │  Session cache + rate     │
+                       │    │  limiting                 │
+                       │    └──────────────────────────┘
                        │
                        ▼
               ┌──────────────────────────┐
@@ -44,6 +50,14 @@ Any SAML 2.0 compliant IdP can be used via the SAML Jackson bridge.
               │  Encrypt/Decrypt (E2E)   │
               └──────────────────────────┘
 ```
+
+Services:
+- `app` — Next.js application (port 3000); connects as `passwd_app` (NOSUPERUSER, RLS enforced)
+- `db` — PostgreSQL 16 (internal network; port 5432 exposed in dev override only)
+- `jackson` — SAML Jackson bridge (internal network; port 5225 exposed in dev override only)
+- `redis` — Redis 7 (internal network; port 6379 exposed in dev override only)
+- `migrate` — one-shot Prisma migration container (profile-gated: `--profile migrate`); connects as `passwd_user` (SUPERUSER)
+- `audit-outbox-worker` — drains `audit_outbox` rows into `audit_logs`; defined in `docker-compose.override.yml` (dev) — production operators must replicate it (see [Production Deployment](#production-deployment))
 
 ### About SAML Jackson
 
@@ -107,13 +121,15 @@ Set the following values:
 | `AUTH_JACKSON_SECRET` | Jackson OIDC Client Secret | From Jackson admin panel |
 | `SAML_PROVIDER_NAME` | SAML IdP display name on sign-in page | e.g., `HENNGE`, `Okta`, `Azure AD` |
 | `SHARE_MASTER_KEY` | Master key for organization vault encryption (256-bit hex) | `openssl rand -hex 32` |
-| `REDIS_URL` | (Optional) Redis URL for shared rate limiting | e.g., `redis://host:6379` |
+| `REDIS_URL` | Redis URL — REQUIRED in production (Zod schema enforces this for `NODE_ENV=production`). Backs the session cache (tombstone-based revocation propagation, PR #407) and shared rate limiting. Single-instance dev may omit it; the app falls back to in-memory caches with a logged warning. Set `HEALTH_REDIS_REQUIRED=true` to fail readiness probes when Redis is unreachable. | e.g., `redis://host:6379` |
+| `JACKSON_API_KEY` | API key for the SAML Jackson container — mapped to `JACKSON_API_KEYS` inside Jackson. Not in the Zod schema (external service credential). | `openssl rand -hex 24` |
+| `PASSWD_OUTBOX_WORKER_PASSWORD` | Password for the `passwd_outbox_worker` DB role (set during `initdb`). Required when running the audit-outbox-worker. Use `scripts/set-outbox-worker-password.sh` to rotate on existing clusters. | `openssl rand -hex 24` |
 | `BLOB_BACKEND` | Attachment storage backend | `db`, `s3`, `azure`, or `gcs` |
 | `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` | Required if `BLOB_BACKEND=s3` | e.g., `ap-northeast-1`, bucket name |
 | `AZURE_STORAGE_ACCOUNT`, `AZURE_BLOB_CONTAINER` | Required if `BLOB_BACKEND=azure` | Azure Storage account / container |
 | `GCS_ATTACHMENTS_BUCKET` | Required if `BLOB_BACKEND=gcs` | GCS bucket name |
 
-> **Redis is optional.** If `REDIS_URL` is not set, the app runs without Redis and rate limiting on vault unlock is disabled. For single-instance deployments, you can safely omit Redis.
+> **Redis is REQUIRED in production.** The Zod schema (`src/lib/env-schema.ts:366-370`) enforces `REDIS_URL` for `NODE_ENV=production`. Redis backs the session cache introduced in PR #407 (tombstone-based revocation propagation across nodes) and shared rate limiting. In single-instance development you may omit `REDIS_URL`; the app falls back to in-memory caches and logs a warning. Set `HEALTH_REDIS_REQUIRED=true` to fail `/api/health/ready` when Redis is unreachable.
 
 ### 3. Start PostgreSQL
 
@@ -226,12 +242,19 @@ Any SAML 2.0 compliant IdP (HENNGE, Okta, Azure AD, OneLogin, etc.) can be used.
 docker compose up -d
 ```
 
-Three containers will start:
+Five base services will start:
 - `app` — Next.js application (port 3000)
 - `db` — PostgreSQL (internal network only)
 - `jackson` — SAML Jackson (internal network only)
+- `redis` — Redis 7 (internal network only)
+- `migrate` — Prisma migration runner (profile-gated; run with `--profile migrate`)
 
-In production, do NOT place `docker-compose.override.yml` (keeps DB/Jackson ports unexposed).
+> **Important: audit-outbox-worker in production.** The `audit-outbox-worker` service is defined in `docker-compose.override.yml` (development only) — it is NOT included when you run `docker compose up -d` without the override file. Without this worker, audit events accumulate as `PENDING` rows in `audit_outbox` and never reach `audit_logs`. Production operators must run the worker via one of these approaches:
+>
+> - **Separate compose fragment**: add an `audit-outbox-worker` service to your production compose config with `OUTBOX_WORKER_DATABASE_URL` pointing to the `passwd_outbox_worker` DB role.
+> - **systemd unit or sidecar**: run `npm run worker:audit-outbox` as a separate process or sidecar with the `OUTBOX_WORKER_DATABASE_URL` environment variable set.
+>
+> In production, do NOT place `docker-compose.override.yml` (that file exposes DB/Jackson/Redis ports to the host and is dev-only).
 
 ### Sub-path Deployment (Reverse Proxy)
 
@@ -305,7 +328,7 @@ npm start
 - **AuthTag**: GCM authentication tag (128-bit). Used for tamper detection
 - **Encrypted Fields**: `encryptedBlob`, `encryptedOverview` (each with its own IV/AuthTag)
 - **Share links / Sends**: Server-side encryption uses `SHARE_MASTER_KEY`. Store this value in a secret manager in production.
-- **Rate limiting**: Use Redis (`REDIS_URL`) for shared limits in production.
+- **Rate limiting**: Redis (`REDIS_URL`) is required in production for shared rate limiting and the Redis-backed session cache (PR #407).
 
 ### API Security
 
@@ -348,10 +371,22 @@ Configured in proxy:
 | `npm run build` | Production build |
 | `npm start` | Start production server |
 | `npm run lint` | Run ESLint |
-| `npm run db:migrate` | Run Prisma migration |
+| `npm run db:migrate` | Run Prisma migration (`migrate dev`) |
+| `npm run db:push` | Push schema without a migration file |
 | `npm run db:seed` | Seed default data |
 | `npm run db:studio` | Open Prisma Studio (DB GUI) |
 | `npm run generate:key` | Generate random 256-bit key |
+| `npm run init:env` | Interactive `.env` generator (dev/ci/production profiles) |
+| `npm run generate:env-example` | Regenerate `.env.example` from Zod schema |
+| `npm run check:env-docs` | Drift check: `.env.example` vs env schema vs allowlist |
+| `npm run docker:up` | `docker compose up` (auto-reads `.env`) |
+| `npm run docker:down` | `docker compose down` |
+| `npm run worker:audit-outbox` | Run the audit-outbox drain worker (requires `OUTBOX_WORKER_DATABASE_URL`) |
+| `npm run test` | Run unit tests (vitest) |
+| `npm run test:integration` | Run real-DB integration tests (requires running Postgres) |
+| `npm run version:bump` | Suggest next version from git log (interactive) |
+
+For the full authoritative list, see `package.json` or `CLAUDE.md`.
 
 ## Prisma 7 Notes
 
@@ -359,14 +394,16 @@ Prisma 7 introduces the following breaking changes:
 
 - `url` removed from `datasource` block in `schema.prisma`. DB URL is managed in `prisma.config.ts`
 - Default engine changed to `client`. Requires `@prisma/adapter-pg` + `pg` packages
-- `dotenv` does not auto-load `.env`/`.env.local` from a non-cwd path. `prisma.config.ts` calls `config({ path: ".env.local" })` then `config({ path: ".env" })` so override semantics match the runtime app — see `src/lib/load-env.ts` for the same pattern.
+- `dotenv` does not auto-load `.env`/`.env.local` from a non-cwd path. `prisma.config.ts` calls `config({ path: ".env.local" })` first, then `config()` (loads `.env`) — `.env` is the canonical file; `.env.local` is the per-developer override (same precedence as the runtime app in `src/lib/load-env.ts`).
 
 ## Directory Structure
 
+High-level overview (see `CLAUDE.md` "Architecture" for authoritative details):
+
 ```
 passwd-sso/
-├── docker-compose.yml          # Production (ports unexposed)
-├── docker-compose.override.yml # Development (ports exposed)
+├── docker-compose.yml          # Base services (app, db, jackson, redis, migrate)
+├── docker-compose.override.yml # Dev overrides (ports + audit-outbox-worker + mailpit)
 ├── Dockerfile                  # Multi-stage build
 ├── .env.example                # Environment variable template
 ├── prisma.config.ts            # Prisma 7 configuration
@@ -375,27 +412,26 @@ passwd-sso/
 │   ├── migrations/             # Migrations
 │   └── seed.ts                 # Seed data
 ├── src/
-│   ├── auth.ts                 # Auth.js config (Prisma Adapter)
-│   ├── auth.config.ts          # Auth.js config (Edge-safe)
-│   ├── proxy.ts               # Route protection (proxy logic)
-│   ├── app/
-│   │   ├── api/
-│   │   │   ├── auth/[...nextauth]/  # Auth endpoint
-│   │   │   ├── categories/          # Category list API
-│   │   │   └── passwords/           # Password CRUD API
-│   │   ├── auth/{signin,error}/     # Auth UI
-│   │   └── dashboard/              # Main UI
-│   ├── components/
-│   │   ├── auth/               # Auth components
-│   │   ├── layout/             # Header, sidebar
-│   │   ├── passwords/          # Password management UI
-│   │   └── ui/                 # shadcn/ui
-│   └── lib/
-│       ├── crypto.ts           # AES-256-GCM encryption
-│       ├── password-generator.ts
-│       ├── prisma.ts           # Prisma client
-│       └── validations.ts      # Zod schemas
+│   ├── auth.ts                 # Auth.js config
+│   ├── proxy.ts               # Next.js proxy pattern (route protection)
+│   ├── app/                    # Next.js App Router pages + API routes
+│   ├── components/             # UI components
+│   └── lib/                    # Shared utilities, crypto, validations
 └── docs/
-    ├── setup/docker/en.md      # This document
-    └── setup/aws/en.md         # AWS deployment guide
+    ├── setup/                  # Platform setup guides (this directory)
+    └── architecture/           # Architecture and design docs
 ```
+
+## Database Role Separation
+
+Three database roles serve distinct purposes:
+
+| Role | Privileges | Used by | Connection string |
+|------|-----------|---------|-------------------|
+| `passwd_user` | SUPERUSER, table owner | `migrate` service; Prisma CLI (`db:migrate`, `db:push`) | `MIGRATION_DATABASE_URL` |
+| `passwd_app` | NOSUPERUSER, NOBYPASSRLS | `app` service (Next.js) | `DATABASE_URL` |
+| `passwd_outbox_worker` | NOSUPERUSER, least privilege (SELECT/UPDATE/DELETE on `audit_outbox`, INSERT on `audit_logs`, SELECT on `tenants`) | `audit-outbox-worker` | `OUTBOX_WORKER_DATABASE_URL` |
+
+The `passwd_app` role has RLS enforced (NOBYPASSRLS), ensuring row-level security policies apply in all queries from the web app.
+
+Set `PASSWD_OUTBOX_WORKER_PASSWORD` during initial setup to configure the `passwd_outbox_worker` role password (applied by `initdb` scripts). To rotate the password on an existing cluster, use `scripts/set-outbox-worker-password.sh`.

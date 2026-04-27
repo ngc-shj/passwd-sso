@@ -13,6 +13,7 @@ This guide describes a production-oriented AWS deployment:
 - `jackson` service (SAML Jackson)
 - `db` as RDS (PostgreSQL)
 - `redis` as ElastiCache (Redis)
+- `audit-outbox-worker` (separate ECS service or sidecar in app task)
 
 ## System Architecture (ASCII)
 
@@ -26,9 +27,15 @@ flowchart TB
     Jackson --> RDS
     App --> Redis["ElastiCache (Redis)"]
 
+    Worker["audit-outbox-worker<br/>ECS/Fargate (separate service)"] --> RDS
+    Worker -.-> |drains audit_outbox<br/>→ audit_logs| RDS
+
     Secrets["Secrets Manager"] -.-> |Task env vars| App
     Secrets -.-> |Task env vars| Jackson
+    Secrets -.-> |Task env vars| Worker
 ```
+
+> **Note**: The `audit-outbox-worker` is a long-running process that drains pending rows from `audit_outbox` into `audit_logs`. Without it, audit events silently accumulate as `PENDING` and never reach `audit_logs`. Deploy it as a dedicated ECS/Fargate service (or a sidecar container in the app task) with `OUTBOX_WORKER_DATABASE_URL` pointing to the `passwd_outbox_worker` DB role.
 
 ## Prerequisites
 
@@ -42,16 +49,19 @@ flowchart TB
 ## Secrets
 
 Store these in Secrets Manager:
-- `DATABASE_URL`
-- `MIGRATION_DATABASE_URL` (SUPERUSER role — used for `prisma migrate deploy` only)
+- `DATABASE_URL` (app role `passwd_app`)
+- `MIGRATION_DATABASE_URL` (SUPERUSER role `passwd_user` — used for `prisma migrate deploy` only)
+- `OUTBOX_WORKER_DATABASE_URL` (least-privilege role `passwd_outbox_worker` — used by audit-outbox-worker)
 - `AUTH_SECRET`
 - `AUTH_GOOGLE_ID`
 - `AUTH_GOOGLE_SECRET`
 - `AUTH_JACKSON_ID`
 - `AUTH_JACKSON_SECRET`
 - `SHARE_MASTER_KEY`
-- `REDIS_URL`
+- `REDIS_URL` (REQUIRED in production — see [Redis](#app-service))
 - `BLOB_BACKEND`
+- `JACKSON_API_KEY` (passed to the Jackson container as `JACKSON_API_KEYS` — note the trailing `S`)
+- `PASSWD_OUTBOX_WORKER_PASSWORD` (sets the `passwd_outbox_worker` DB role password; use `scripts/set-outbox-worker-password.sh` to rotate)
 
 Optional:
 - `GOOGLE_WORKSPACE_DOMAINS`
@@ -93,7 +103,7 @@ Env vars:
 - `AUTH_JACKSON_SECRET`
 - `SAML_PROVIDER_NAME`
 - `SHARE_MASTER_KEY`
-- `REDIS_URL`
+- `REDIS_URL` (REQUIRED in production — Zod schema enforces this for `NODE_ENV=production`; backs session cache with tombstone-based revocation propagation (PR #407) and shared rate limiting)
 - `BLOB_BACKEND`
 - `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` (required if `BLOB_BACKEND=s3`)
 - `AZURE_STORAGE_ACCOUNT`, `AZURE_BLOB_CONTAINER` (required if `BLOB_BACKEND=azure`)
@@ -102,7 +112,7 @@ Env vars:
 ### jackson service
 
 Env vars (example):
-- `JACKSON_API_KEYS`
+- `JACKSON_API_KEYS` (value comes from your `JACKSON_API_KEY` secret — note the env name inside Jackson uses the trailing `S`)
 - `DB_ENGINE=sql`
 - `DB_TYPE=postgres`
 - `DB_URL` (RDS)
@@ -110,6 +120,32 @@ Env vars (example):
 - `EXTERNAL_URL` (public URL of jackson)
 - `NEXTAUTH_SECRET` (same as AUTH_SECRET)
 - `NEXTAUTH_ACL=*`
+
+### audit-outbox-worker service
+
+Run as a dedicated ECS/Fargate service (or sidecar in the app task). Uses the same Docker image as `app`.
+
+Command override: `["npx", "tsx", "scripts/audit-outbox-worker.ts"]`
+
+Required env vars:
+- `OUTBOX_WORKER_DATABASE_URL` (least-privilege `passwd_outbox_worker` role)
+- `DATABASE_URL` (app role — for any shared config reads)
+
+This service is long-running. Without it, `audit_outbox` rows accumulate as `PENDING` and audit logs are never persisted.
+
+## Admin / Maintenance Scripts
+
+Admin scripts (`scripts/purge-history.sh`, `scripts/purge-audit-logs.sh`, `scripts/rotate-master-key.sh`) require a per-operator `op_*` token rather than a shared environment variable.
+
+Mint a token in the application UI at `/admin/tenant/operator-tokens`, then pass it at invocation time:
+
+```bash
+ADMIN_API_TOKEN=op_<your-token> scripts/purge-history.sh
+ADMIN_API_TOKEN=op_<your-token> scripts/purge-audit-logs.sh
+ADMIN_API_TOKEN=op_<your-token> TARGET_VERSION=<int> scripts/rotate-master-key.sh
+```
+
+Do NOT store `ADMIN_API_TOKEN` as a persistent environment variable in ECS task definitions. Mint tokens on demand and revoke them after use.
 
 ## Migrations
 
