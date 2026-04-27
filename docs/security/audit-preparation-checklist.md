@@ -36,6 +36,11 @@
 - [ ] Rate limiting configured on all sensitive endpoints
 - [ ] Session management reviewed (concurrent limits, eviction)
 - [ ] Input validation on all API endpoints (Zod schemas)
+- [ ] Operator (`op_*`) token model reviewed: per-operator tokens minted at `/dashboard/tenant/operator-tokens`; `ADMIN_API_TOKEN` env var is not used by the application itself
+- [ ] Audit log hash chain verified: `audit_logs` rows are tamper-evident via SHA-256 chain (`src/lib/audit/audit-chain.ts`); verification endpoint: `POST /api/maintenance/audit-chain-verify`
+- [ ] Audit outbox durability confirmed: `audit_outbox` written in-tx with business logic; drained by `audit-outbox-worker` (`src/workers/audit-outbox-worker.ts`) with exponential backoff; permanently failed rows dead-lettered as `AUDIT_OUTBOX_DEAD_LETTER`
+- [ ] ActorType enum coverage verified: all 5 values (`HUMAN`, `SERVICE_ACCOUNT`, `MCP_AGENT`, `SYSTEM`, `ANONYMOUS`) are emitted in audit logs as expected
+- [ ] `AUDIT_LOG_PURGE` action reviewed: emitted with `dryRun` flag when the purge maintenance endpoint is called in dry-run mode
 
 ## Engagement Types
 

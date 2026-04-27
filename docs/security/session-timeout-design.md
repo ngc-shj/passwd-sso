@@ -70,7 +70,7 @@ idle     = min(tenant.idle,     ...teams.idle.filter(non-null))
 absolute = min(tenant.absolute, ...teams.absolute.filter(non-null))
 ```
 
-Recomputed on every `auth()` call — not cached beyond the existing 60s team-policy cache. Team membership changes or policy edits propagate within the cache TTL.
+Recomputed on every `auth()` call — the session-timeout resolver itself is recomputed each time; the 60s in-process team-policy cache continues to apply. Session validity itself is cached in Redis (see policy-enforcement.md §Cache Invalidation). Tombstones short-circuit revocation propagation under both the positive cache (`SESSION_CACHE_TTL_MS`) and the tombstone window (`TOMBSTONE_TTL_MS`). Team membership changes or policy edits propagate within the team-policy cache TTL (60s).
 
 ## AAL3 Clamp
 

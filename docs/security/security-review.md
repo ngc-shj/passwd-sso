@@ -16,32 +16,32 @@ Branch baseline: `main` (includes merged fixes from `fix/security-review-proxy-i
 1. Proxy only bypasses Bearer for intended routes  
 Status: `PASS`  
 Evidence:
-- `src/proxy.ts:64` allowlist includes:
+- `src/lib/proxy/api-route.ts` allowlist includes:
   - `API_PATH.PASSWORDS`
   - `API_PATH.VAULT_UNLOCK_DATA`
   - `API_PATH.EXTENSION_TOKEN`
   - `API_PATH.EXTENSION_TOKEN_REFRESH`
-- `src/proxy.ts:73` exact-match restriction for extension token endpoints prevents unintended child-path bypass.
-- `src/__tests__/proxy.test.ts:68` / `src/__tests__/proxy.test.ts:122` verify refresh/revoke bypass and unknown child path non-bypass.
+- Exact-match restriction for extension token endpoints prevents unintended child-path bypass.
+- `src/__tests__/proxy.test.ts` verifies refresh/revoke bypass and unknown child path non-bypass.
 
 2. Protected APIs still require session when not in Bearer allowlist  
 Status: `PASS`  
 Evidence:
-- `src/proxy.ts:89` protected path block includes passwords/tags/orgs/audit/share/emergency/extension.
-- `src/__tests__/proxy.test.ts:77` and `src/__tests__/proxy.test.ts:91` verify non-allowlisted Bearer paths return `401`.
+- `src/lib/proxy/api-route.ts` protected path block includes passwords/tags/orgs/audit/share/emergency/extension.
+- `src/__tests__/proxy.test.ts` verifies non-allowlisted Bearer paths return `401`.
 
 3. Bearer token is validated server-side (not trusted at proxy)  
 Status: `PASS`  
 Evidence:
-- `src/proxy.ts:62` note and behavior: proxy bypass is only pass-through.
-- `src/lib/extension-token.ts:66` validates token hash, revocation, expiry.
+- Proxy bypass is only pass-through; token validation happens at the route handler.
+- `src/lib/auth/tokens/extension-token.ts` validates token hash, revocation, expiry.
 
 4. Scope is enforced for token-based access  
 Status: `PASS`  
 Evidence:
-- `src/lib/auth-or-token.ts:40` enforces `requiredScope` for token path.
-- Password list endpoint requires `passwords:read`: `src/app/api/passwords/route.ts:15`.
-- Vault unlock data endpoint requires `vault:unlock-data`: `src/app/api/vault/unlock/data/route.ts:16`.
+- `src/lib/auth/session/auth-or-token.ts` enforces `requiredScope` for token path.
+- Password list endpoint requires `passwords:read`: `src/app/api/passwords/route.ts`.
+- Vault unlock data endpoint requires `vault:unlock-data`: `src/app/api/vault/unlock/data/route.ts`.
 
 5. Token lifecycle boundaries are explicit  
 Status: `PASS`  
@@ -61,10 +61,9 @@ Evidence:
 - See `docs/architecture/extension-token-bridge.md` for the full threat-model write-up.
 
 ### Notes / residual risk
-- `authOrToken` prioritizes session over token (`src/lib/auth-or-token.ts:30`).  
+- `authOrToken` prioritizes session over token (`src/lib/auth/session/auth-or-token.ts`).  
   This is intentional (session = full app auth), but should remain a documented policy choice.
-- Proxy session cache is process-memory (`src/proxy.ts:17`).  
-  Security impact is low here; test impact was handled by using unique cookies in proxy tests.
+- Proxy session cache is now Redis-backed (`src/lib/auth/session/session-cache.ts`), with tombstone-based revocation propagation. This replaces the earlier in-process cache.
 
 ### Conclusion (Section 1)
 - No blocking issue found in auth/authz boundary after current fixes.
@@ -165,23 +164,18 @@ Evidence:
 1. KDF and key hierarchy are explicit and domain-separated  
 Status: `PASS`  
 Evidence:
-- `src/lib/crypto-client.ts:12` PBKDF2 iterations = `600_000`.
-- `src/lib/crypto-client.ts:15` and `src/lib/crypto-client.ts:16` distinct HKDF info labels.
-- `src/lib/crypto-client.ts:75` and `src/lib/crypto-client.ts:133` separation wrapping/encryption/auth usage.
+- `src/lib/crypto/crypto-client.ts` PBKDF2 iterations = `600_000`; distinct HKDF info labels; separation of wrapping/encryption/auth usage.
 
 2. Entry ciphertext is context-bound with AAD  
 Status: `PASS`  
 Evidence:
-- `src/lib/crypto-aad.ts:98` personal AAD builder.
-- `src/lib/crypto-aad.ts:111` org AAD builder.
-- `src/lib/crypto-aad.ts:124` attachment AAD builder.
+- `src/lib/crypto/crypto-aad.ts` — personal, org, and attachment AAD builders.
 
 3. Secret material is zeroized in key paths  
 Status: `PASS (partial)`  
 Evidence:
-- Web app lock clears `secretKeyRef`: `src/lib/vault-context.tsx:143`.
-- Web app unload cleanup: `src/lib/vault-context.tsx:280`.
-- Extension unlock zeroes temporary secret: `extension/src/background/index.ts:798`.
+- Web app lock clears `secretKeyRef` and unload cleanup: `src/lib/vault/vault-context.tsx`.
+- Extension unlock zeroes temporary secret: `extension/src/background/index.ts`.
 
 ### Notes / residual risk
 - Extension `vaultSecretKey` is held in memory and persisted to `chrome.storage.session` via envelope encryption (AES-256-GCM with a non-extractable ephemeral key; see Section 2 notes).
@@ -260,11 +254,11 @@ Evidence:
 
 ### Checklist and result
 
-1. FORCE RLS applied to all 28 tenant-scoped tables
+1. FORCE RLS applied to all 52 tenant-scoped tables
 Status: `PASS`
 Evidence:
-- Migration applies `ALTER TABLE ... FORCE ROW LEVEL SECURITY` to all 39 tables.
-- `scripts/checks/check-bypass-rls.mjs` CI guard enforces allowlist (25 files) for `withBypassRls` usage.
+- Migration applies `ALTER TABLE ... FORCE ROW LEVEL SECURITY` to all 52 tables.
+- `scripts/checks/check-bypass-rls.mjs` CI guard enforces allowlist (76 files) for `withBypassRls` usage.
 - `scripts/checks/check-team-auth-rls.mjs` CI guard prevents nested team-auth under RLS wrappers.
 
 2. Tenant context is set via session-local variable
@@ -297,7 +291,7 @@ Evidence:
 - `src/lib/auth-adapter.ts` sets `isBootstrap: true` on bootstrap tenant creation.
 
 ### Notes / residual risk
-- `withBypassRls` is used in 25 files (allowlisted in `scripts/checks/check-bypass-rls.mjs`). Each bypasses RLS intentionally for cross-tenant operations (audit writes, tenant resolution, admin key rotation, passkey sign-in, etc.).
+- `withBypassRls` is used in 76 files (allowlisted in `scripts/checks/check-bypass-rls.mjs`). Each bypasses RLS intentionally for cross-tenant operations (audit writes, tenant resolution, admin key rotation, passkey sign-in, etc.).
 - `tenants` table itself has no RLS (intentional: it is the tenant resolution entry point).
 - Bootstrap tenant migration assumes single-user tenants. Multi-user bootstrap tenants are not supported.
 

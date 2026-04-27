@@ -137,6 +137,18 @@ A `TeamMemberKey` version must be retained as long as any
 
 ---
 
+## 7. Admin Script Authentication
+
+Admin and maintenance scripts (`scripts/purge-history.sh`, `scripts/purge-audit-logs.sh`, `scripts/rotate-master-key.sh`) require an operator (`op_*`) token, not the shared `ADMIN_API_TOKEN` environment variable. Operator tokens are minted per-operator at `/dashboard/tenant/operator-tokens` (requires tenant OWNER role). Pass the token as:
+
+```bash
+ADMIN_API_TOKEN=op_<token> scripts/purge-history.sh
+```
+
+The `ADMIN_API_TOKEN` env var name is reused by the scripts as the transport variable for the `op_*` token value; no shared static token exists in the application.
+
+---
+
 ## Summary Table
 
 | Key Material | Retention Policy | Deletion Condition |

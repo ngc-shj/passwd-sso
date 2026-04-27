@@ -75,7 +75,7 @@ Popup/Content -> Background -> API(ciphertext) -> decrypt in extension runtime
 
 ## 1.3 暗号パラメータ（実装値）
 
-### 個人保管庫（Web Crypto API / `src/lib/crypto-client.ts`）
+### 個人保管庫（Web Crypto API / `src/lib/crypto/crypto-client.ts`）
 
 #### 鍵導出フロー（パスフレーズ起点）
 
@@ -134,7 +134,7 @@ Client(valid時):
 #### AAD（Additional Authenticated Data）
 
 - AES-GCM の `additionalData` に **AAD** を設定し、暗号文を文脈へバインドする
-- 実装: `src/lib/crypto-aad.ts`
+- 実装: `src/lib/crypto/crypto-aad.ts`
 - スコープ:
   - `PV`（Personal Vault）: `userId`, `entryId`
   - `OV`（Org Vault）: `orgId`, `entryId`, `vaultType(blob|overview)`
@@ -154,7 +154,7 @@ Client(valid時):
   - 鍵: `VERIFIER_PEPPER_KEY`（本番必須、64 hex）
   - 非本番のみ `SHARE_MASTER_KEY` から導出フォールバック
 
-### 共有リンク / Send（Server Crypto / `src/lib/crypto-server.ts`）
+### 共有リンク / Send（Server Crypto / `src/lib/crypto/crypto-server.ts`）
 
 - アルゴリズム: `aes-256-gcm`（Node `crypto`）
 - `SHARE_MASTER_KEY`: 64 hex（256-bit）
@@ -176,7 +176,7 @@ Client(valid時):
 - unlock 時は同式で再計算して比較
 - unlock レート制限: 5分あたり 5 回（`/api/vault/unlock`）
 
-- 拡張トークン TTL: `15分`（`EXTENSION_TOKEN_TTL_MS`）
+- 拡張トークン TTL: テナントポリシーで制御（`extensionTokenIdleTimeoutMinutes`、既定 7日 / 10080分、および `extensionTokenAbsoluteTimeoutMinutes`、既定 30日 / 43200分）
 - 拡張トークン refresh バッファ: `2分前`（拡張 background）
 - 既定スコープ:
   - `passwords:read`
@@ -258,7 +258,7 @@ Client(valid時):
 ### 8.2 実装レベルでの準備項目
 
 - ラップ/鍵交換系に `wrapVersion` を維持し、v2 以降を追加可能にする
-- `src/lib/crypto-emergency.ts` のコメントどおり、将来の
+- `src/lib/crypto/crypto-emergency.ts` のコメントどおり、将来の
   `HYBRID-ECDH-P256-MLKEM768` への移行経路を確保する
 - API と DB スキーマは「鍵素材」「salt」「version」を後方互換で拡張できる形に保つ
 - 暗号パラメータは定数集中管理し、ランダム分散実装を避ける
@@ -383,7 +383,7 @@ Client(valid時):
   - 理由:
     - MV3 Service Worker 再起動で状態が消えるため、運用可能な UX を維持
     - ブラウザ終了時にクリアされるスコープで限定
-    - token は短命（15分）+ refresh + revoke で被害時間を抑制
+    - token のアイドル TTL は `extensionTokenIdleTimeoutMinutes`（既定 7日）で制御。refresh + revoke により被害時間を抑制
     - `vaultSecretKey` は利便性とセキュリティのトレードオフとして採用（保存時暗号化で緩和済み）
 - `background memory`:
   - `encryptionKey`, `currentToken` など
@@ -406,11 +406,11 @@ Client(valid時):
   ブラウザ管理の `CryptoKey` オブジェクトは不透明かつ非抽出であり、
   意図しないエクスポートを防ぐ一方、鍵素材の解放タイミングはランタイムが制御する。
 - Web アプリでは、`secretKeyRef`（Uint8Array）をロック/アンロード時に明示クリアしており
-  （`vault-context.tsx:143`, `vault-context.tsx:280`）、これがブラウザ環境でのベストエフォート対応となる。
+  （`src/lib/vault/vault-context.tsx`）、これがブラウザ環境でのベストエフォート対応となる。
 - 拡張では `token` および `vaultSecretKey` を非抽出の一時 `CryptoKey` で AES-256-GCM 暗号化
   してから `chrome.storage.session` に保存する。SW プロセスが終了すると鍵が失われ、
   暗号化ブロブは永久に読み取り不能となり再認証が必要となる。ロック時は両フィールドを削除し、
-  ブラウザ終了時は Chrome が自動クリアする。15 分の自動ロックタイマーが時間的な補完制御を提供する。
+  ブラウザ終了時は Chrome が自動クリアする。`autoLockMinutes` vault 自動ロックタイマーが時間的な補完制御を提供する。
 - 詳細な技術評価は `security-review.md` セクション 4（Crypto Primitives）を参照。
 
 ## 15. 鍵の共有機能（Emergency Access）
@@ -422,7 +422,7 @@ Client(valid時):
 
 ### 15.2 鍵交換・ラップ方式（現行）
 
-- 実装: `src/lib/crypto-emergency.ts`
+- 実装: `src/lib/crypto/crypto-emergency.ts`
 - 方式: `wrapVersion=1`（`ECDH-P256`）
 - フロー:
   1. grantee が ECDH 鍵ペアを生成
