@@ -1,7 +1,10 @@
 /**
  * POST /api/maintenance/purge-audit-logs
  *
- * System-wide purge of audit log entries older than retentionDays.
+ * Tenant-scoped purge of audit log entries older than retentionDays.
+ * Operates only on rows belonging to the operator-token's bound tenantId;
+ * a token issued in tenant A cannot erase audit evidence in tenant B.
+ * The tenant's own auditLogRetentionDays floor is still respected.
  * Authenticated via per-operator op_* token (mint via /dashboard/tenant/operator-tokens).
  *
  * Body: { retentionDays?: number, dryRun?: boolean }
@@ -32,44 +35,43 @@ const bodySchema = z.object({
   dryRun: z.boolean().default(false),
 });
 
-async function purgeAcrossTenants(
+async function purgeForTenant(
+  tenantId: string,
   retentionDays: number,
   dryRun: boolean,
 ): Promise<number> {
-  const tenants = await withBypassRls(prisma, async () =>
-    prisma.tenant.findMany({
-      select: { id: true, auditLogRetentionDays: true },
+  const tenant = await withBypassRls(prisma, async () =>
+    prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { auditLogRetentionDays: true },
     }),
   BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+  if (!tenant) {
+    return 0;
+  }
 
-  // Per-tenant purge (parallel): each tenant's floor retention is respected
-  const perTenantCounts = await Promise.all(
-    tenants.map(async (tenant) => {
-      const tenantRetention = tenant.auditLogRetentionDays;
-      // Use the stricter (longer) of the requested vs tenant-configured retention
-      const effectiveRetentionDays = tenantRetention
-        ? Math.max(retentionDays, tenantRetention)
-        : retentionDays;
-      const tenantCutoff = new Date(
-        Date.now() - effectiveRetentionDays * MS_PER_DAY,
-      );
-
-      if (dryRun) {
-        return withBypassRls(prisma, async () =>
-          prisma.auditLog.count({
-            where: { tenantId: tenant.id, createdAt: { lt: tenantCutoff } },
-          }),
-        BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
-      }
-      const result = await withBypassRls(prisma, async () =>
-        prisma.auditLog.deleteMany({
-          where: { tenantId: tenant.id, createdAt: { lt: tenantCutoff } },
-        }),
-      BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
-      return result.count;
-    }),
+  // Use the stricter (longer) of the requested vs tenant-configured retention
+  const tenantRetention = tenant.auditLogRetentionDays;
+  const effectiveRetentionDays = tenantRetention
+    ? Math.max(retentionDays, tenantRetention)
+    : retentionDays;
+  const tenantCutoff = new Date(
+    Date.now() - effectiveRetentionDays * MS_PER_DAY,
   );
-  return perTenantCounts.reduce((a, b) => a + b, 0);
+
+  if (dryRun) {
+    return withBypassRls(prisma, async () =>
+      prisma.auditLog.count({
+        where: { tenantId, createdAt: { lt: tenantCutoff } },
+      }),
+    BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+  }
+  const result = await withBypassRls(prisma, async () =>
+    prisma.auditLog.deleteMany({
+      where: { tenantId, createdAt: { lt: tenantCutoff } },
+    }),
+  BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+  return result.count;
 }
 
 async function handlePOST(req: NextRequest) {
@@ -94,7 +96,10 @@ async function handlePOST(req: NextRequest) {
   });
   if (!op.ok) return op.response;
 
-  const totalPurged = await purgeAcrossTenants(retentionDays, dryRun);
+  // Scope purge to the operator-token's bound tenant. Without this,
+  // a tenant-A admin who mints an op_* token can erase audit evidence
+  // in every other tenant — a cross-tenant anti-forensics vector.
+  const totalPurged = await purgeForTenant(auth.tenantId, retentionDays, dryRun);
 
   if (dryRun) {
     await logAuditAsync({
@@ -108,7 +113,7 @@ async function handlePOST(req: NextRequest) {
         matched: totalPurged,
         retentionDays,
         targetTable: "auditLog",
-        systemWide: true,
+        scopedTenantId: auth.tenantId,
         dryRun: true,
       },
     });
@@ -125,7 +130,7 @@ async function handlePOST(req: NextRequest) {
       [AUDIT_METADATA_KEY.PURGED_COUNT]: totalPurged,
       retentionDays,
       targetTable: "auditLog",
-      systemWide: true,
+      scopedTenantId: auth.tenantId,
     },
   });
 

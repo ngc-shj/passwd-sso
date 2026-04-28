@@ -54,7 +54,7 @@ import { OPERATOR_TOKEN_PREFIX } from "@/lib/constants/auth/operator-token";
 
 const SUBJECT_USER_ID = "660e8400-e29b-41d4-a716-446655440001";
 const TOKEN_ID = "op-token-id-1";
-const TENANT_ID = "tenant-1";
+const TENANT_ID = "550e8400-e29b-41d4-a716-446655440001";
 const FILTER_TENANT_ID = "550e8400-e29b-41d4-a716-446655440002";
 
 const VALID_OP_TOKEN = `${OPERATOR_TOKEN_PREFIX}${"a".repeat(43)}`;
@@ -161,16 +161,28 @@ describe("POST /api/maintenance/audit-outbox-purge-failed", () => {
     expect(body.purged).toBe(0);
   });
 
-  it("accepts body with tenantId filter and returns 200", async () => {
+  it("accepts body.tenantId only when it matches the auth token's tenantId", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
     mockQueryRaw.mockResolvedValue([{ purged: BigInt(4) }]);
 
-    const req = createRequest({ tenantId: FILTER_TENANT_ID }, VALID_OP_TOKEN);
+    const req = createRequest({ tenantId: TENANT_ID }, VALID_OP_TOKEN);
     const res = await POST(req);
     expect(res.status).toBe(200);
 
     const body = await res.json();
     expect(body.purged).toBe(4);
+  });
+
+  it("rejects body.tenantId that does not match the auth token's tenantId with 403", async () => {
+    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
+
+    const req = createRequest({ tenantId: FILTER_TENANT_ID }, VALID_OP_TOKEN);
+    const res = await POST(req);
+    expect(res.status).toBe(403);
+
+    // Cross-tenant attempts must NOT reach the delete query or audit log.
+    expect(mockQueryRaw).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("accepts body with olderThanDays filter and returns 200", async () => {
@@ -185,11 +197,11 @@ describe("POST /api/maintenance/audit-outbox-purge-failed", () => {
     expect(body.purged).toBe(2);
   });
 
-  it("accepts body with both tenantId and olderThanDays filters and returns 200", async () => {
+  it("accepts body with matching tenantId and olderThanDays filters and returns 200", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
     mockQueryRaw.mockResolvedValue([{ purged: BigInt(1) }]);
 
-    const req = createRequest({ tenantId: FILTER_TENANT_ID, olderThanDays: 7 }, VALID_OP_TOKEN);
+    const req = createRequest({ tenantId: TENANT_ID, olderThanDays: 7 }, VALID_OP_TOKEN);
     const res = await POST(req);
     expect(res.status).toBe(200);
 
@@ -203,7 +215,7 @@ describe("POST /api/maintenance/audit-outbox-purge-failed", () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
     mockQueryRaw.mockResolvedValue([{ purged: BigInt(6) }]);
 
-    const req = createRequest({ tenantId: FILTER_TENANT_ID, olderThanDays: 14 }, VALID_OP_TOKEN);
+    const req = createRequest({ tenantId: TENANT_ID, olderThanDays: 14 }, VALID_OP_TOKEN);
     await POST(req);
 
     expect(mockLogAudit).toHaveBeenCalledWith(
@@ -217,19 +229,20 @@ describe("POST /api/maintenance/audit-outbox-purge-failed", () => {
           tokenSubjectUserId: SUBJECT_USER_ID,
           tokenId: TOKEN_ID,
           purgedCount: 6,
-          filterTenantId: FILTER_TENANT_ID,
+          scopedTenantId: TENANT_ID,
           olderThanDays: 14,
         }),
       }),
     );
 
-    // Strict shape: legacy fields must not appear
+    // Strict shape: legacy / mis-implying fields must not appear
     const metadata = mockLogAudit.mock.calls[0][0].metadata;
     expect(metadata.operatorId).toBeUndefined();
     expect(metadata.authPath).toBeUndefined();
+    expect(metadata.filterTenantId).toBeUndefined();
   });
 
-  it("logs audit with null filters when no body filters provided", async () => {
+  it("logs audit with scopedTenantId when no body filters provided", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
     mockQueryRaw.mockResolvedValue([{ purged: BigInt(0) }]);
 
@@ -239,10 +252,36 @@ describe("POST /api/maintenance/audit-outbox-purge-failed", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         metadata: expect.objectContaining({
-          filterTenantId: null,
+          scopedTenantId: TENANT_ID,
           olderThanDays: null,
         }),
       }),
     );
+  });
+
+  // ─── Tenant Isolation ─────────────────────────────────────
+
+  it("a tenant-A operator token cannot purge another tenant's FAILED rows even via empty body", async () => {
+    const TENANT_A = "550e8400-e29b-41d4-a716-44665544000a";
+    mockVerifyAdminToken.mockResolvedValue({
+      ok: true,
+      auth: { ...VALID_AUTH, tenantId: TENANT_A },
+    });
+    mockRequireMaintenanceOperator.mockResolvedValue({
+      ok: true,
+      operator: { tenantId: TENANT_A, role: "ADMIN" },
+    });
+    mockQueryRaw.mockResolvedValue([{ purged: BigInt(0) }]);
+
+    const req = createRequest({}, VALID_OP_TOKEN);
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+
+    // The raw SQL DELETE must be parameterized with TENANT_A as the tenant
+    // filter — never null/all-tenant. Inspect the tagged template values.
+    expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+    const queryArgs = mockQueryRaw.mock.calls[0];
+    // Tagged template: [strings, ...values]
+    expect(queryArgs.slice(1)).toContain(TENANT_A);
   });
 });

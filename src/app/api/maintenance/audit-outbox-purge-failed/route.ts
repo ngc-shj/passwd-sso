@@ -1,11 +1,13 @@
 /**
  * POST /api/maintenance/audit-outbox-purge-failed
  *
- * Operator-driven explicit purge of FAILED outbox rows.
+ * Operator-driven explicit purge of FAILED outbox rows for the operator-token's
+ * bound tenant. Cross-tenant purge is rejected (403); the optional `tenantId`
+ * body field exists only for explicitness and MUST equal the token's tenantId.
  * Authenticated via per-operator op_* token (mint via /dashboard/tenant/operator-tokens).
  *
  * Body: { tenantId?: string, olderThanDays?: number }
- *   tenantId — optional filter (which tenant's failed rows to purge)
+ *   tenantId — optional, must match the operator-token's tenantId when provided
  *   olderThanDays — optional age filter
  */
 
@@ -20,7 +22,8 @@ import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });
 
@@ -46,12 +49,20 @@ async function handlePOST(req: NextRequest) {
 
   const { tenantId: filterTenantId, olderThanDays } = result.data;
 
+  // Operator-token boundary: a token is bound to a single tenant. Reject
+  // cross-tenant purge requests; multi-tenant operators must mint a separate
+  // token per tenant. Body-supplied tenantId is accepted only as an explicit
+  // restatement of auth.tenantId — never as a way to target another tenant.
+  if (filterTenantId !== undefined && filterTenantId !== auth.tenantId) {
+    return errorResponse(API_ERROR.FORBIDDEN, 403);
+  }
+
   const op = await requireMaintenanceOperator(auth.subjectUserId, {
     tenantId: auth.tenantId,
   });
   if (!op.ok) return op.response;
 
-  const tenantFilter = filterTenantId ?? null;
+  const tenantFilter = auth.tenantId;
   const daysFilter = olderThanDays ?? null;
 
   const rows = await withBypassRls(
@@ -61,7 +72,7 @@ async function handlePOST(req: NextRequest) {
         WITH deleted AS (
           DELETE FROM audit_outbox
           WHERE status = 'FAILED'
-            AND (${tenantFilter}::uuid IS NULL OR tenant_id = ${tenantFilter}::uuid)
+            AND tenant_id = ${tenantFilter}::uuid
             AND (${daysFilter}::int IS NULL OR created_at < now() - make_interval(days => ${daysFilter}::int))
           RETURNING id
         ) SELECT COUNT(*) AS purged FROM deleted
@@ -79,7 +90,7 @@ async function handlePOST(req: NextRequest) {
       tokenSubjectUserId: auth.subjectUserId,
       tokenId: auth.tokenId,
       purgedCount: purged,
-      filterTenantId: filterTenantId ?? null,
+      scopedTenantId: auth.tenantId,
       olderThanDays: olderThanDays ?? null,
     },
   });

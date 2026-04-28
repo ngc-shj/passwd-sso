@@ -16,8 +16,8 @@ Route handler
 2. **audit-outbox-worker** (`npm run worker:audit-outbox`) drains `PENDING` rows from `audit_outbox` into `audit_logs`. The worker must be running for audit events to appear in `audit_logs`. Without it, events accumulate in `audit_outbox` indefinitely.
 
 **Monitoring outbox health:**
-- `GET /api/maintenance/audit-outbox-metrics` (requires `op_*` Bearer token) — returns cross-tenant aggregates (pending count, failed count, oldest pending row age).
-- `POST /api/maintenance/audit-outbox-purge-failed` (requires `op_*` Bearer token) — purges FAILED rows, optionally filtered by `tenantId` and `olderThanDays`.
+- `GET /api/maintenance/audit-outbox-metrics` (requires `op_*` Bearer token) — returns aggregates (pending count, failed count, oldest pending row age) scoped to the operator-token's bound tenant. Multi-tenant operators query each tenant separately via its own token.
+- `POST /api/maintenance/audit-outbox-purge-failed` (requires `op_*` Bearer token) — purges FAILED rows for the operator-token's bound tenant. The optional `tenantId` body field, when provided, must match the token's tenantId; cross-tenant attempts return 403. `olderThanDays` is an optional age filter.
 
 ## Overview
 

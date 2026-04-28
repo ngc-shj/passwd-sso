@@ -1,7 +1,9 @@
 /**
  * POST /api/maintenance/purge-history
  *
- * System-wide purge of password entry history older than retentionDays.
+ * Tenant-scoped purge of password entry history older than retentionDays.
+ * Operates only on rows belonging to the operator-token's bound tenantId;
+ * a token issued in tenant A cannot affect tenant B's history.
  * Authenticated via per-operator op_* token (mint via /dashboard/tenant/operator-tokens).
  *
  * Body: { retentionDays?: number, dryRun?: boolean }
@@ -55,7 +57,13 @@ async function handlePOST(req: NextRequest) {
   if (!op.ok) return op.response;
 
   const cutoffDate = new Date(Date.now() - retentionDays * MS_PER_DAY);
-  const whereClause = { changedAt: { lt: cutoffDate } };
+  // Scope deletion to the operator-token's bound tenant. Without this,
+  // a tenant-A admin who mints an op_* token can delete history rows in
+  // every other tenant via the system-wide where clause.
+  const whereClause = {
+    tenantId: auth.tenantId,
+    changedAt: { lt: cutoffDate },
+  };
 
   if (dryRun) {
     const matched = await withBypassRls(prisma, async () =>
@@ -71,7 +79,7 @@ async function handlePOST(req: NextRequest) {
         [AUDIT_METADATA_KEY.PURGED_COUNT]: 0,
         matched,
         retentionDays,
-        systemWide: true,
+        scopedTenantId: auth.tenantId,
         dryRun: true,
       },
     });
@@ -91,7 +99,7 @@ async function handlePOST(req: NextRequest) {
       tokenId: auth.tokenId,
       [AUDIT_METADATA_KEY.PURGED_COUNT]: deleted.count,
       retentionDays,
-      systemWide: true,
+      scopedTenantId: auth.tenantId,
     },
   });
 
