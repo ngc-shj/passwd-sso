@@ -61,6 +61,15 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 export const ANONYMOUS_ACTOR_ID = "00000000-0000-4000-8000-000000000000" as const;
 export const SYSTEM_ACTOR_ID = "00000000-0000-4000-8000-000000000001" as const;
 
+/**
+ * Sentinel tenant id for SYSTEM-scope audit attribution. Used by background
+ * workers (dcr-cleanup-worker, future system-internal sweepers) that operate
+ * on rows with no real tenant owner. The corresponding `tenants` row is
+ * inserted by migration; it has zero `tenant_members` so no logged-in user
+ * can resolve `actor.tenantId` to it. See docs/archive/review/dcr-cleanup-to-worker-plan.md.
+ */
+export const SYSTEM_TENANT_ID = "00000000-0000-4000-8000-000000000002" as const;
+
 /** Set of all sentinel actor IDs, for filter exclusion in human audit log views. */
 export const SENTINEL_ACTOR_IDS: ReadonlySet<string> = new Set([
   ANONYMOUS_ACTOR_ID,

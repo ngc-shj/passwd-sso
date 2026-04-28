@@ -44,6 +44,37 @@ services:
     networks:
       - internal
 
+  dcr-cleanup-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: deps
+    container_name: passwd-sso-dcr-cleanup-worker
+    volumes:
+      - .:/app
+      - /app/node_modules
+    env_file:
+      # See docker-compose.yml app service for the .env vs .env.local note.
+      - .env
+    environment:
+      - DCR_CLEANUP_DATABASE_URL=postgresql://passwd_dcr_cleanup_worker:passwd_dcr_pass@db:5432/passwd_sso
+      - DATABASE_URL=postgresql://passwd_app:passwd_app_pass@db:5432/passwd_sso
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        # migrate is profile-gated (profiles: ["migrate"] in docker-compose.yml).
+        # required: false makes this dependency optional — Compose only waits
+        # for migrate when the migrate profile is active (e.g. via `docker
+        # compose --profile migrate up`). Without it, Compose v2.20+ rejects
+        # the project as "service depends on undefined service: migrate".
+        condition: service_completed_successfully
+        required: false
+    command: ["npx", "tsx", "scripts/dcr-cleanup-worker.ts"]
+    restart: unless-stopped
+    networks:
+      - internal
+
   mailpit:
     image: axllent/mailpit:latest
     ports:

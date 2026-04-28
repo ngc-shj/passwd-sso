@@ -13,7 +13,9 @@ import { randomUUID } from "node:crypto";
 
 // ─── Role connection strings ────────────────────────────────────
 
-function getConnectionString(role: "superuser" | "app" | "worker"): string {
+type TestRole = "superuser" | "app" | "worker" | "dcr-cleanup-worker";
+
+function getConnectionString(role: TestRole): string {
   const base = process.env.DATABASE_URL;
   if (!base) throw new Error("DATABASE_URL is not set");
 
@@ -37,6 +39,14 @@ function getConnectionString(role: "superuser" | "app" | "worker"): string {
           "//passwd_outbox_worker:passwd_outbox_pass@",
         )
       );
+    case "dcr-cleanup-worker":
+      return (
+        process.env.DCR_CLEANUP_DATABASE_URL ??
+        base.replace(
+          /\/\/[^:]+:[^@]+@/,
+          "//passwd_dcr_cleanup_worker:passwd_dcr_pass@",
+        )
+      );
   }
 }
 
@@ -47,7 +57,7 @@ export interface PrismaWithPool {
   pool: pg.Pool;
 }
 
-export function createPrismaForRole(role: "superuser" | "app" | "worker"): PrismaWithPool {
+export function createPrismaForRole(role: TestRole): PrismaWithPool {
   const pool = new pg.Pool({
     connectionString: getConnectionString(role),
     max: 3,
@@ -79,6 +89,8 @@ export interface TestContext {
   app: PrismaWithPool;
   /** Worker role (passwd_outbox_worker) — for privilege enumeration */
   worker: PrismaWithPool;
+  /** DCR-cleanup-worker role (passwd_dcr_cleanup_worker) — for sweeper privilege tests */
+  dcrWorker: PrismaWithPool;
   /** Create a tenant row and return its UUID */
   createTenant: () => Promise<string>;
   /** Create a user row belonging to a tenant and return its UUID */
@@ -93,6 +105,7 @@ export async function createTestContext(): Promise<TestContext> {
   const su = createPrismaForRole("superuser");
   const app = createPrismaForRole("app");
   const worker = createPrismaForRole("worker");
+  const dcrWorker = createPrismaForRole("dcr-cleanup-worker");
 
   // Verify connectivity
   await su.prisma.$executeRaw`SELECT 1`;
@@ -187,10 +200,11 @@ export async function createTestContext(): Promise<TestContext> {
       su.prisma.$disconnect().then(() => su.pool.end()),
       app.prisma.$disconnect().then(() => app.pool.end()),
       worker.prisma.$disconnect().then(() => worker.pool.end()),
+      dcrWorker.prisma.$disconnect().then(() => dcrWorker.pool.end()),
     ]);
   }
 
-  return { su, app, worker, createTenant, createUser, deleteTestData, cleanup };
+  return { su, app, worker, dcrWorker, createTenant, createUser, deleteTestData, cleanup };
 }
 
 // ─── Deferred barrier for concurrency tests ─────────────────────

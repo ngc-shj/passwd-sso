@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Set the passwd_outbox_worker role password in an existing cluster.
+# Set the passwd_dcr_cleanup_worker role password in an existing cluster.
 #
 # Usage:
 #   MIGRATION_DATABASE_URL=<superuser-url> \
-#   scripts/set-outbox-worker-password.sh <<< "$PASSWORD"
+#   scripts/set-dcr-cleanup-worker-password.sh <<< "$PASSWORD"
 #
 #   # k8s example (stdin from secret):
 #   MIGRATION_DATABASE_URL=<superuser-url> \
-#   kubectl exec --stdin ... -- bash scripts/set-outbox-worker-password.sh \
+#   kubectl exec --stdin ... -- bash scripts/set-dcr-cleanup-worker-password.sh \
 #     < <(kubectl get secret ... -o jsonpath='{.data.password}' | base64 -d)
 #
 # Environment variables:
@@ -72,12 +72,12 @@ fi
 PSQL_ARGS=(
   "$MIGRATION_DATABASE_URL"
   -v "new_password=${new_password}"
-  -c "ALTER ROLE passwd_outbox_worker WITH PASSWORD :'new_password';"
+  -c "ALTER ROLE passwd_dcr_cleanup_worker WITH PASSWORD :'new_password';"
 )
 
 if [[ "$DRY_RUN" == "1" ]]; then
   # Print sanitised representation (password redacted).
-  echo "[DRY_RUN] would invoke: psql \"${MIGRATION_DATABASE_URL}\" -v new_password=<REDACTED> -c \"ALTER ROLE passwd_outbox_worker WITH PASSWORD :'new_password';\"" >&2
+  echo "[DRY_RUN] would invoke: psql \"${MIGRATION_DATABASE_URL}\" -v new_password=<REDACTED> -c \"ALTER ROLE passwd_dcr_cleanup_worker WITH PASSWORD :'new_password';\"" >&2
 
   if [[ -n "$PRINT_ARGS_FILE" ]]; then
     # Write actual args (including password) to file for test assertion only.
@@ -88,7 +88,7 @@ if [[ "$DRY_RUN" == "1" ]]; then
 import json, sys
 args = [\"psql\"] + sys.argv[1:]
 print(json.dumps(args))
-" "$MIGRATION_DATABASE_URL" -v "new_password=${new_password}" -c "ALTER ROLE passwd_outbox_worker WITH PASSWORD :'new_password';" > "$PRINT_ARGS_FILE"
+" "$MIGRATION_DATABASE_URL" -v "new_password=${new_password}" -c "ALTER ROLE passwd_dcr_cleanup_worker WITH PASSWORD :'new_password';" > "$PRINT_ARGS_FILE"
     )
   fi
   exit 0
@@ -96,4 +96,4 @@ fi
 
 psql "${PSQL_ARGS[@]}"
 
-echo "[set-outbox-worker-password] OK — password updated for passwd_outbox_worker"
+echo "[set-dcr-cleanup-worker-password] OK — password updated for passwd_dcr_cleanup_worker"

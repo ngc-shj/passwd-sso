@@ -1,7 +1,7 @@
 # Operator Tokens — Runbook
 
 Per-operator bearer tokens authenticate the admin/maintenance routes:
-`/api/admin/rotate-master-key` and `/api/maintenance/{purge-history, purge-audit-logs, dcr-cleanup, audit-outbox-metrics, audit-outbox-purge-failed, audit-chain-verify}`.
+`/api/admin/rotate-master-key` and `/api/maintenance/{purge-history, purge-audit-logs, audit-outbox-metrics, audit-outbox-purge-failed, audit-chain-verify}`.
 
 Each operator mints their own token via the tenant dashboard. The token is bound at issuance time to:
 
@@ -37,6 +37,13 @@ not silently scoped. `audit-outbox-metrics` returns aggregates only for the
 token's own tenant — queue depth and failure counts of other tenants are not
 exposed.
 
+DCR cleanup (`dcr-cleanup`) is now system-internal: it runs as the
+`dcr-cleanup-worker` background process with its own least-privilege DB role and
+emits `SYSTEM`-attributed audit events. It is no longer triggered by an op_*
+token. The deprecated `POST /api/maintenance/dcr-cleanup` endpoint returns
+410 Gone and emits a `MCP_CLIENT_DCR_CLEANUP_DEPRECATED_CALL` audit event to
+surface stale cron jobs; the stub will be removed in the next minor release.
+
 If you operate a deployment that hosts multiple tenants and need to run
 maintenance against more than one, mint a token in each target tenant and run
 the script per-token. There is no single token that can purge across tenants —
@@ -71,12 +78,12 @@ The token's subject is bound at mint time, so no separate `OPERATOR_ID` env var 
 | `INSECURE` | `false` | When `true`, skip TLS certificate verification. Dev-only — never set in production. |
 | `APP_URL` | (auto-detected from `.env`) | Override the target deployment URL. |
 
-For routes without a dedicated script (`dcr-cleanup`, `audit-outbox-metrics`, `audit-outbox-purge-failed`, `audit-chain-verify`), curl directly:
+For routes without a dedicated script (`audit-outbox-metrics`, `audit-outbox-purge-failed`, `audit-chain-verify`), curl directly:
 
 ```bash
-# DCR cleanup (delete expired unclaimed DCR clients)
-curl -X POST -H "Authorization: Bearer $ADMIN_API_TOKEN" \
-  "$APP_URL/api/maintenance/dcr-cleanup"
+# DCR cleanup is now automatic — runs in the dcr-cleanup-worker process.
+# The deprecated POST endpoint returns 410 Gone for one minor version
+# to surface stale cron jobs via audit logs.
 
 # Outbox metrics for the operator-token's tenant
 curl -H "Authorization: Bearer $ADMIN_API_TOKEN" \
