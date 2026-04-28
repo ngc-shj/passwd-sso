@@ -7,6 +7,15 @@ RUN apk add --no-cache libc6-compat
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
+# Generate the Prisma client so docker-compose worker services that use
+# `target: deps` can resolve `.prisma/client/default` at runtime. The builder
+# stage regenerates this for the production image — the duplication is OK
+# because builder copies node_modules from deps then overwrites .prisma/.
+# DATABASE_URL is required by prisma.config.ts but no DB connection is opened.
+ARG DATABASE_URL=postgresql://build:build@localhost:5432/passwd_sso
+COPY prisma ./prisma
+COPY prisma.config.ts ./prisma.config.ts
+RUN DATABASE_URL="$DATABASE_URL" npx prisma generate
 
 # Stage 2: Build the application
 FROM node:20-alpine@sha256:b88333c42c23fbd91596ebd7fd10de239cedab9617de04142dde7315e3bc0afa AS builder

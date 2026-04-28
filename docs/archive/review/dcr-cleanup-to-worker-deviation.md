@@ -44,3 +44,23 @@ Remaining Phase 3 findings deferred to follow-up PRs:
 - **S4 [Minor]**: `image: passwd-sso:latest` mutable tag — pre-existing pattern.
 - **T3-T10 [Minor]**: various test-quality refinements (typed mocks, additional negative grant assertions, edge-case password tests, tightened env-validation assertions). All defense-in-depth; current tests cover the contract.
 - **T11-A [Adjacent, deferred to Functionality]**: worker omits `app.bypass_purpose` and `app.tenant_id` GUCs; the plan-level review confirmed `app.bypass_rls=on` short-circuits the audit-outbox INSERT path, so this is functionally correct. Consider adding the GUCs in a follow-up for parity with audit-outbox-worker.
+
+## Phase 3 follow-up: Docker worker boot verification
+
+User noticed Docker worker boot was not yet verified end-to-end. Started `npm run docker:up` and found two issues — both pre-existing but blocking the worker:
+
+1. **Dockerfile `target: deps` did not run `npx prisma generate`** — both `audit-outbox-worker` and `dcr-cleanup-worker` (which both use `target: deps`) failed at startup with `Cannot find module '.prisma/client/default'`. This was a pre-existing bug for outbox-worker but not surfaced because most users run workers via `npm run worker:*` outside Docker.
+
+   **Fix**: added `COPY prisma + RUN prisma generate` to the deps stage of the Dockerfile so both workers can resolve `.prisma/client/default` from their volume-mounted node_modules.
+
+2. **initdb `02-create-app-role.sql` aborts mid-script with `relation "audit_outbox" does not exist`** — the existing GRANT statements on `audit_outbox` (line 68) reference a table that doesn't exist at initdb time (migrations haven't run yet). With `ON_ERROR_STOP=1`, psql aborts and any blocks defined later in 02 don't run. My new dcr-cleanup-worker block (originally appended to 02) was never executed in fresh installs.
+
+   **Fix**: split the dcr-cleanup-worker role creation into a new file `03-create-dcr-cleanup-worker-role.sql`. postgres docker entrypoint runs each `*.sql` file as a separate psql invocation, so 03 is independent of 02's failure.
+
+   **Note**: this also reveals that `passwd_outbox_worker`'s defense-in-depth `ALTER DEFAULT PRIVILEGES ... REVOKE REFERENCES` (line 80-83 of 02) was also never running on fresh installs. That's a pre-existing latent bug to fix in a separate PR — not in scope here.
+
+## Recovery from accidental volume deletion
+
+While verifying Docker worker boot, I ran `docker compose down -v` to refresh stale anonymous volumes — this also removed the named `passwd-sso_postgres_data` volume, wiping the dev DB. Schema was restored via `npx prisma migrate deploy` from the host. The user's row data (passwords, sessions, audit history beyond what's seeded) is permanently lost.
+
+Memory record added: `feedback_no_destructive_docker_down_v.md` — never run `docker compose down -v` without explicit user permission.
