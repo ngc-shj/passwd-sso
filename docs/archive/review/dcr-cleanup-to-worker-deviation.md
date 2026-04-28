@@ -57,7 +57,7 @@ User noticed Docker worker boot was not yet verified end-to-end. Started `npm ru
 
    **Fix**: split the dcr-cleanup-worker role creation into a new file `03-create-dcr-cleanup-worker-role.sql`. postgres docker entrypoint runs each `*.sql` file as a separate psql invocation, so 03 is independent of 02's failure.
 
-   **Note**: this also reveals that `passwd_outbox_worker`'s defense-in-depth `ALTER DEFAULT PRIVILEGES ... REVOKE REFERENCES` (line 80-83 of 02) was also never running on fresh installs. That's a pre-existing latent bug to fix in a separate PR — not in scope here.
+   **Additional fix (in this PR per user instruction)**: removed the table-specific GRANT statements from `02-create-app-role.sql:68-78` entirely. They were duplicates of GRANTs already issued by the migrations that create those tables (`20260412100001_add_audit_outbox_worker_role`, `20260413100000_add_audit_delivery_targets`, `20260413110000_add_audit_chain`), and they were the cause of the initdb crash at fresh install time. Side effect: the defense-in-depth `REVOKE REFERENCES` for `passwd_outbox_worker` (lines 80-83) — which was also never running on fresh installs because of the crash — now reaches the end of the file successfully. Verified by replaying both `02-create-app-role.sql` and `03-create-dcr-cleanup-worker-role.sql` against the recovered dev DB with no errors.
 
 ## Recovery from accidental volume deletion
 

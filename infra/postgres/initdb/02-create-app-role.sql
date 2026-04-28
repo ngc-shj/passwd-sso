@@ -63,22 +63,18 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM passwd_ou
 DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO passwd_outbox_worker', current_database()); END $$;
 GRANT USAGE ON SCHEMA public TO passwd_outbox_worker;
 
--- Minimum table privileges: claim + deliver + delete SENT/FAILED rows from outbox,
--- insert delivered rows into audit_logs, read tenant for FK validation.
-GRANT SELECT, UPDATE, DELETE ON audit_outbox TO passwd_outbox_worker;
--- SELECT needed for ON CONFLICT (outbox_id) DO NOTHING dedup check
-GRANT SELECT, INSERT ON audit_logs TO passwd_outbox_worker;
--- FK-referenced tables: SELECT needed for referential integrity checks under RLS
-GRANT SELECT ON tenants TO passwd_outbox_worker;
-GRANT SELECT ON users TO passwd_outbox_worker;
-GRANT SELECT ON teams TO passwd_outbox_worker;
-GRANT SELECT ON service_accounts TO passwd_outbox_worker;
--- Phase 3: delivery targets
-GRANT SELECT, UPDATE ON TABLE "audit_delivery_targets" TO passwd_outbox_worker;
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "audit_deliveries" TO passwd_outbox_worker;
-
 -- Prevent SUPERUSER's ALTER DEFAULT PRIVILEGES from implicitly granting
 -- REFERENCES on future tables to the worker role.
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   REVOKE REFERENCES ON TABLES FROM passwd_outbox_worker;
+
+-- Note: table-specific GRANTs (audit_outbox, audit_logs, tenants, users,
+-- teams, service_accounts, audit_delivery_targets, audit_deliveries,
+-- audit_chain_anchors) are issued by the prisma migrations that create
+-- those tables — NOT here. Issuing them in initdb crashes psql with
+-- "relation does not exist" because migrations have not run yet at
+-- initdb time, and ON_ERROR_STOP=1 then aborts the rest of this script.
+-- See migrations/20260412100001_add_audit_outbox_worker_role,
+--     migrations/20260413100000_add_audit_delivery_targets,
+--     migrations/20260413110000_add_audit_chain.
 
