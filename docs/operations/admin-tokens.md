@@ -30,9 +30,12 @@ After closing the modal, the dashboard shows the token's prefix, expiry, and las
 
 Every `op_*` token is bound to the issuer's `tenantId`. The maintenance routes
 (`purge-history`, `purge-audit-logs`, `audit-outbox-purge-failed`,
-`audit-chain-verify`) operate **only** on rows whose `tenant_id` matches the
-token. Cross-tenant attempts (e.g. supplying another tenant's UUID in
-`audit-outbox-purge-failed`'s body) are rejected with 403, not silently scoped.
+`audit-outbox-metrics`, `audit-chain-verify`) operate **only** on rows whose
+`tenant_id` matches the token. Cross-tenant attempts (e.g. supplying another
+tenant's UUID in `audit-outbox-purge-failed`'s body) are rejected with 403,
+not silently scoped. `audit-outbox-metrics` returns aggregates only for the
+token's own tenant — queue depth and failure counts of other tenants are not
+exposed.
 
 If you operate a deployment that hosts multiple tenants and need to run
 maintenance against more than one, mint a token in each target tenant and run
@@ -75,7 +78,7 @@ For routes without a dedicated script (`dcr-cleanup`, `audit-outbox-metrics`, `a
 curl -X POST -H "Authorization: Bearer $ADMIN_API_TOKEN" \
   "$APP_URL/api/maintenance/dcr-cleanup"
 
-# Outbox metrics (cross-tenant aggregates)
+# Outbox metrics for the operator-token's tenant
 curl -H "Authorization: Bearer $ADMIN_API_TOKEN" \
   "$APP_URL/api/maintenance/audit-outbox-metrics"
 

@@ -54,7 +54,7 @@ import { OPERATOR_TOKEN_PREFIX } from "@/lib/constants/auth/operator-token";
 
 const SUBJECT_USER_ID = "660e8400-e29b-41d4-a716-446655440001";
 const TOKEN_ID = "op-token-id-1";
-const TENANT_ID = "tenant-1";
+const TENANT_ID = "550e8400-e29b-41d4-a716-446655440001";
 
 const VALID_OP_TOKEN = `${OPERATOR_TOKEN_PREFIX}${"a".repeat(43)}`;
 
@@ -160,6 +160,22 @@ describe("GET /api/maintenance/audit-outbox-metrics", () => {
     expect(typeof body.asOf).toBe("string");
   });
 
+  it("scopes the SQL aggregate to the operator-token's tenantId", async () => {
+    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
+
+    const req = createRequest(VALID_OP_TOKEN);
+    await GET(req);
+
+    // Tagged template: [strings, ...values]. The only interpolated value is
+    // auth.tenantId, used in the SQL WHERE clause. Without it, every tenant's
+    // queue depth and failure counts leak through this endpoint.
+    expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+    const queryArgs = mockQueryRaw.mock.calls[0];
+    expect(queryArgs.slice(1)).toContain(TENANT_ID);
+    const sqlStrings = queryArgs[0] as string[];
+    expect(sqlStrings.join("")).toMatch(/WHERE\s+tenant_id\s*=/);
+  });
+
   it("returns zeros when query result row is empty", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
     mockQueryRaw.mockResolvedValue([{}]);
@@ -192,6 +208,7 @@ describe("GET /api/maintenance/audit-outbox-metrics", () => {
         metadata: expect.objectContaining({
           tokenSubjectUserId: SUBJECT_USER_ID,
           tokenId: TOKEN_ID,
+          scopedTenantId: TENANT_ID,
           pending: 5,
           failed: 2,
         }),

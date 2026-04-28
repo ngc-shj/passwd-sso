@@ -1,7 +1,10 @@
 /**
  * GET /api/maintenance/audit-outbox-metrics
  *
- * Returns global (cross-tenant) outbox aggregates for infrastructure operators.
+ * Returns outbox aggregates scoped to the operator-token's bound tenantId.
+ * Cross-tenant aggregates are intentionally not exposed: a tenant admin's
+ * token must not reveal queue depth, failure counts, or oldest-pending age
+ * for another tenant. Multi-tenant operators mint a token per tenant.
  * Authenticated via per-operator op_* token (mint via /dashboard/tenant/operator-tokens).
  */
 
@@ -44,6 +47,9 @@ async function handleGET(req: NextRequest) {
   });
   if (!op.ok) return op.response;
 
+  // Scope aggregates to the operator-token's bound tenant. Without the
+  // WHERE filter, queue depth and failure counts of every other tenant
+  // leak through this endpoint.
   const rows = await withBypassRls(prisma, async () =>
     prisma.$queryRaw<MetricsRow[]>`
       SELECT
@@ -57,6 +63,7 @@ async function handleGET(req: NextRequest) {
         COUNT(*) FILTER (WHERE status = 'FAILED' AND attempt_count >= max_attempts)
           AS dead_letter_count
       FROM audit_outbox
+      WHERE tenant_id = ${auth.tenantId}::uuid
     `,
   BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
 
@@ -78,6 +85,7 @@ async function handleGET(req: NextRequest) {
     metadata: {
       tokenSubjectUserId: auth.subjectUserId,
       tokenId: auth.tokenId,
+      scopedTenantId: auth.tenantId,
       pending: metrics.pending,
       failed: metrics.failed,
     },
