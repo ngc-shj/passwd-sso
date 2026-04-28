@@ -57,10 +57,29 @@ User noticed Docker worker boot was not yet verified end-to-end. Started `npm ru
 
    **Fix**: split the dcr-cleanup-worker role creation into a new file `03-create-dcr-cleanup-worker-role.sql`. postgres docker entrypoint runs each `*.sql` file as a separate psql invocation, so 03 is independent of 02's failure.
 
-   **Additional fix (in this PR per user instruction)**: removed the table-specific GRANT statements from `02-create-app-role.sql:68-78` entirely. They were duplicates of GRANTs already issued by the migrations that create those tables (`20260412100001_add_audit_outbox_worker_role`, `20260413100000_add_audit_delivery_targets`, `20260413110000_add_audit_chain`), and they were the cause of the initdb crash at fresh install time. Side effect: the defense-in-depth `REVOKE REFERENCES` for `passwd_outbox_worker` (lines 80-83) — which was also never running on fresh installs because of the crash — now reaches the end of the file successfully. Verified by replaying both `02-create-app-role.sql` and `03-create-dcr-cleanup-worker-role.sql` against the recovered dev DB with no errors.
+   **Additional fix (in this PR per user instruction)**: removed the table-specific GRANT statements from `02-create-app-role.sql:68-78` entirely. They were duplicates of GRANTs already issued by the migrations that create those tables (`20260412100001_add_audit_outbox_worker_role`, `20260413100000_add_audit_delivery_targets`, `20260413110000_add_audit_chain`), and they were the cause of the initdb crash at fresh install time. Side effect: the defense-in-depth `REVOKE REFERENCES` for `passwd_outbox_worker` (lines 80-83) — which was also never running on fresh installs because of the crash — now reaches the end of the file successfully. Verified by replaying both `02-create-app-role.sql` and `03-create-dcr-cleanup-worker-role.sql` against the recovered dev DB with no errors. Both `audit-outbox-worker` and `dcr-cleanup-worker` containers were also confirmed to boot successfully (`docker ps` Up state, log lines `dcr-cleanup.loop_start` + `sweep_done purged:0`, `worker.batch_claimed` for outbox).
 
 ## Recovery from accidental volume deletion
 
 While verifying Docker worker boot, I ran `docker compose down -v` to refresh stale anonymous volumes — this also removed the named `passwd-sso_postgres_data` volume, wiping the dev DB. Schema was restored via `npx prisma migrate deploy` from the host. The user's row data (passwords, sessions, audit history beyond what's seeded) is permanently lost.
 
 Memory record added: `feedback_no_destructive_docker_down_v.md` — never run `docker compose down -v` without explicit user permission.
+
+## Phase 3 review (review(4)) — Docker-fix triangulate findings
+
+After committing review(2) and review(3), ran a focused Phase 3 triangulate on those 2 commits. Found:
+
+**Functionality** — no findings. 1 [Adjacent] surfaced as Functionality follow-up: k8s manifest `infra/k8s/dcr-cleanup-worker.yaml` used `args: ["tsx", "scripts/dcr-cleanup-worker.ts"]` against the runner image, but the runner stage does not include `tsx` or `scripts/`. audit-outbox-worker handles this by being bundled via esbuild (`dist/audit-outbox-worker.js`); dcr-cleanup-worker had no such bundling. **Fix applied in this PR**: added `RUN npx esbuild scripts/dcr-cleanup-worker.ts ...` to the Dockerfile builder stage (mirrors outbox), added a corresponding `COPY` to runner, and changed the k8s manifest to `command: ["node", "dist/dcr-cleanup-worker.js"]`. liveness/startup/readiness probes also updated to the bundled path.
+
+**Security** — 3 Minor:
+- **S1** (asymmetric REVOKE REFERENCES — outbox-worker had it only in initdb, not in any migration): **fix applied** — added migration `20260428200000_revoke_references_from_outbox_worker` mirroring the dcr-cleanup-worker migration.
+- **S2** (Dockerfile dummy `DATABASE_URL` looks credential-shaped): deferred — pre-existing pattern in builder stage; changing it touches the existing flow and is best done in a separate Dockerfile-cleanup PR.
+- **S3** (hardcoded fallback password in initdb-03 `passwd_dcr_pass`): deferred — same pattern as outbox initdb-02 (`passwd_outbox_pass`); a setup-doc update for production deployments is the right venue, separate PR.
+
+**Testing** — 1 Major + 3 Minor:
+- **T1** (no automated test for changed initdb scripts): deferred — adding a CI smoke job that mounts initdb scripts in an ephemeral postgres container is substantial new infrastructure. Tracked as a follow-up. Justification (acceptable risk per Anti-Deferral): worst case = a future regression in initdb scripts goes undetected until the next manual `docker compose down -v`; likelihood = low (initdb scripts change rarely); cost-to-fix = medium (~1-2 hours to author the CI job + mount config).
+- **T2** (no assertion that `.prisma/client/default` resolves in deps target): deferred — same CI smoke job class as T1.
+- **T3** (deviation log narrower than verification implies): **fix applied** — appended explicit confirmation that both workers were observed in Up state with the expected log lines.
+- **T4** (`_emitFn` exposed in public type): deferred — defense-in-depth only, low risk; the underscore prefix and JSDoc are sufficient for the threat model.
+
+The final PR contains 6 commits; everything that can be done in this PR is done.

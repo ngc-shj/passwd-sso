@@ -21,7 +21,7 @@ spec:
       containers:
         - name: worker
           image: passwd-sso:latest
-          args: ["tsx", "scripts/dcr-cleanup-worker.ts"]
+          command: ["node", "dist/dcr-cleanup-worker.js"]
           env:
             - name: DCR_CLEANUP_DATABASE_URL
               valueFrom:
@@ -45,17 +45,17 @@ spec:
             # AND the binary still runs. Cheaper than a network probe and avoids
             # masking DB outages with a tautological process.exit(0).
             exec:
-              command: ["tsx", "scripts/dcr-cleanup-worker.ts", "--validate-env-only"]
+              command: ["node", "dist/dcr-cleanup-worker.js", "--validate-env-only"]
             initialDelaySeconds: 60
             periodSeconds: 60
             failureThreshold: 3
           startupProbe:
             exec:
-              command: ["tsx", "scripts/dcr-cleanup-worker.ts", "--validate-env-only"]
+              command: ["node", "dist/dcr-cleanup-worker.js", "--validate-env-only"]
             failureThreshold: 3
             periodSeconds: 5
           readinessProbe:
             exec:
-              command: ["tsx", "scripts/dcr-cleanup-worker.ts", "--validate-env-only"]
+              command: ["node", "dist/dcr-cleanup-worker.js", "--validate-env-only"]
             initialDelaySeconds: 5
             periodSeconds: 10
