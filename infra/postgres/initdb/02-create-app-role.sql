@@ -100,3 +100,9 @@ SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_dcr_cl
     CREATE ROLE passwd_dcr_cleanup_worker WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD 'passwd_dcr_pass';
   \endif
 \endif
+
+-- Prevent SUPERUSER's ALTER DEFAULT PRIVILEGES from implicitly granting
+-- REFERENCES on future tables to the dcr-cleanup-worker role (mirrors
+-- the outbox-worker REVOKE block above).
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  REVOKE REFERENCES ON TABLES FROM passwd_dcr_cleanup_worker;

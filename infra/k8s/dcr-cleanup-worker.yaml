@@ -41,13 +41,17 @@ spec:
               cpu: 200m
               memory: 256Mi
           livenessProbe:
+            # Re-validate env on each liveness check — verifies env still parses
+            # AND the binary still runs. Cheaper than a network probe and avoids
+            # masking DB outages with a tautological process.exit(0).
             exec:
-              command: ["node", "-e", "process.exit(0)"]
-            initialDelaySeconds: 10
-            periodSeconds: 30
+              command: ["tsx", "scripts/dcr-cleanup-worker.ts", "--validate-env-only"]
+            initialDelaySeconds: 60
+            periodSeconds: 60
+            failureThreshold: 3
           startupProbe:
             exec:
-              command: ["node", "-e", "process.exit(0)"]
+              command: ["tsx", "scripts/dcr-cleanup-worker.ts", "--validate-env-only"]
             failureThreshold: 3
             periodSeconds: 5
           readinessProbe:

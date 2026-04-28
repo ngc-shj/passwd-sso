@@ -15,6 +15,8 @@ on:
       - 'src/lib/tenant-rls.ts'
       - 'src/lib/tenant-context.ts'
       - 'src/lib/tenant/**'
+      - 'src/workers/**'
+      - 'src/__tests__/db-integration/**'
       - 'prisma/schema.prisma'
       - 'prisma/migrations/**'
 
@@ -102,6 +104,9 @@ jobs:
 
           -- passwd_outbox_worker: created by migration without password; set it now.
           ALTER ROLE passwd_outbox_worker WITH LOGIN PASSWORD 'passwd_outbox_pass';
+
+          -- passwd_dcr_cleanup_worker: created by migration without password; set it now.
+          ALTER ROLE passwd_dcr_cleanup_worker WITH LOGIN PASSWORD 'passwd_dcr_pass';
 
           -- passwd_app: not created by any migration (lives in initdb only).
           -- Replicate the role + grants the integration tests rely on.
