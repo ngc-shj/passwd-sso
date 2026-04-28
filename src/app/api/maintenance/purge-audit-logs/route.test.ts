@@ -6,7 +6,7 @@ const {
   mockDeleteMany,
   mockCount,
   mockRequireMaintenanceOperator,
-  mockTenantFindMany,
+  mockTenantFindUnique,
   mockCheck,
   mockLogAudit,
   mockWithBypassRls,
@@ -15,7 +15,7 @@ const {
   mockDeleteMany: vi.fn(),
   mockCount: vi.fn(),
   mockRequireMaintenanceOperator: vi.fn(),
-  mockTenantFindMany: vi.fn(),
+  mockTenantFindUnique: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockLogAudit: vi.fn(),
   mockWithBypassRls: vi.fn(
@@ -29,7 +29,7 @@ vi.mock("@/lib/auth/tokens/admin-token", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     auditLog: { deleteMany: mockDeleteMany, count: mockCount },
-    tenant: { findMany: mockTenantFindMany },
+    tenant: { findUnique: mockTenantFindUnique },
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -95,7 +95,7 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
       ok: true,
       operator: { tenantId: TENANT_ID, role: "ADMIN" },
     });
-    mockTenantFindMany.mockResolvedValue([{ id: TENANT_ID, auditLogRetentionDays: null }]);
+    mockTenantFindUnique.mockResolvedValue({ auditLogRetentionDays: null });
     mockDeleteMany.mockResolvedValue({ count: 0 });
     mockCount.mockResolvedValue(0);
   });
@@ -157,27 +157,43 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
 
   // ─── Purge Success ────────────────────────────────────────
 
-  it("purges audit log entries per-tenant and returns total count", async () => {
+  it("purges audit log entries for the operator's tenant only and returns count", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    mockTenantFindMany.mockResolvedValue([
-      { id: "tenant-1", auditLogRetentionDays: null },
-      { id: "tenant-2", auditLogRetentionDays: null },
-    ]);
-    mockDeleteMany
-      .mockResolvedValueOnce({ count: 20 })
-      .mockResolvedValueOnce({ count: 10 });
+    mockTenantFindUnique.mockResolvedValue({ auditLogRetentionDays: null });
+    mockDeleteMany.mockResolvedValueOnce({ count: 20 });
 
     const req = createRequest({}, VALID_OP_TOKEN);
     const res = await POST(req);
     expect(res.status).toBe(200);
 
     const body = await res.json();
-    expect(body.purged).toBe(30);
+    expect(body.purged).toBe(20);
+
+    // Tenant lookup must use the auth token's tenantId (not findMany).
+    expect(mockTenantFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: TENANT_ID } }),
+    );
+    // The single deleteMany must include tenantId = auth.tenantId.
+    expect(mockDeleteMany).toHaveBeenCalledTimes(1);
+    expect(mockDeleteMany.mock.calls[0][0].where.tenantId).toBe(TENANT_ID);
+  });
+
+  it("returns 0 when the bound tenant no longer exists", async () => {
+    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
+    mockTenantFindUnique.mockResolvedValue(null);
+
+    const req = createRequest({}, VALID_OP_TOKEN);
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.purged).toBe(0);
+    expect(mockDeleteMany).not.toHaveBeenCalled();
   });
 
   it("uses default retentionDays of 365", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    mockTenantFindMany.mockResolvedValue([{ id: TENANT_ID, auditLogRetentionDays: null }]);
+    mockTenantFindUnique.mockResolvedValue({ auditLogRetentionDays: null });
     mockDeleteMany.mockResolvedValue({ count: 0 });
 
     const req = createRequest({}, VALID_OP_TOKEN);
@@ -190,7 +206,7 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
 
   it("respects tenant-level retention floor: uses max(requested, tenantRetention)", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    mockTenantFindMany.mockResolvedValue([{ id: TENANT_ID, auditLogRetentionDays: 730 }]);
+    mockTenantFindUnique.mockResolvedValue({ auditLogRetentionDays: 730 });
     mockDeleteMany.mockResolvedValue({ count: 0 });
 
     const req = createRequest({ retentionDays: 365 }, VALID_OP_TOKEN);
@@ -203,7 +219,7 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
 
   it("uses requested retentionDays when it exceeds tenant retention", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    mockTenantFindMany.mockResolvedValue([{ id: TENANT_ID, auditLogRetentionDays: 90 }]);
+    mockTenantFindUnique.mockResolvedValue({ auditLogRetentionDays: 90 });
     mockDeleteMany.mockResolvedValue({ count: 0 });
 
     const req = createRequest({ retentionDays: 730 }, VALID_OP_TOKEN);
@@ -218,7 +234,7 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
 
   it("returns matched count without deleting when dryRun is true", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    mockTenantFindMany.mockResolvedValue([{ id: TENANT_ID, auditLogRetentionDays: null }]);
+    mockTenantFindUnique.mockResolvedValue({ auditLogRetentionDays: null });
     mockCount.mockResolvedValueOnce(8);
 
     const req = createRequest({ dryRun: true }, VALID_OP_TOKEN);
@@ -232,11 +248,12 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
 
     expect(mockDeleteMany).not.toHaveBeenCalled();
     expect(mockCount).toHaveBeenCalledTimes(1);
+    expect(mockCount.mock.calls[0][0].where.tenantId).toBe(TENANT_ID);
   });
 
   it("dry run respects tenant retention floor for count", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    mockTenantFindMany.mockResolvedValue([{ id: TENANT_ID, auditLogRetentionDays: 730 }]);
+    mockTenantFindUnique.mockResolvedValue({ auditLogRetentionDays: 730 });
     mockCount.mockResolvedValueOnce(5);
 
     const req = createRequest({ retentionDays: 365, dryRun: true }, VALID_OP_TOKEN);
@@ -251,7 +268,7 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
 
   it("logs audit with HUMAN actorType and token fields on successful purge", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    mockTenantFindMany.mockResolvedValue([{ id: TENANT_ID, auditLogRetentionDays: null }]);
+    mockTenantFindUnique.mockResolvedValue({ auditLogRetentionDays: null });
     mockDeleteMany.mockResolvedValueOnce({ count: 5 });
 
     const req = createRequest({}, VALID_OP_TOKEN);
@@ -270,20 +287,21 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
           purgedCount: 5,
           retentionDays: 365,
           targetTable: "auditLog",
-          systemWide: true,
+          scopedTenantId: TENANT_ID,
         }),
       }),
     );
 
-    // Strict shape: legacy fields must not appear
+    // Strict shape: legacy / mis-implying fields must not appear
     const metadata = mockLogAudit.mock.calls[0][0].metadata;
     expect(metadata.operatorId).toBeUndefined();
     expect(metadata.authPath).toBeUndefined();
+    expect(metadata.systemWide).toBeUndefined();
   });
 
   it("emits audit with dryRun metadata on dryRun", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    mockTenantFindMany.mockResolvedValue([{ id: TENANT_ID, auditLogRetentionDays: null }]);
+    mockTenantFindUnique.mockResolvedValue({ auditLogRetentionDays: null });
     mockCount.mockResolvedValue(3);
 
     const req = createRequest({ dryRun: true }, VALID_OP_TOKEN);
@@ -300,7 +318,7 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
           purgedCount: 0,
           matched: 3,
           retentionDays: 365,
-          systemWide: true,
+          scopedTenantId: TENANT_ID,
           dryRun: true,
           targetTable: "auditLog",
         }),
@@ -310,5 +328,33 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     const metadata = mockLogAudit.mock.calls[0][0].metadata;
     expect(metadata.operatorId).toBeUndefined();
     expect(metadata.authPath).toBeUndefined();
+    expect(metadata.systemWide).toBeUndefined();
+  });
+
+  // ─── Tenant Isolation ─────────────────────────────────────
+
+  it("a tenant-A operator token cannot delete tenant-B audit logs", async () => {
+    const TENANT_A = "550e8400-e29b-41d4-a716-44665544000a";
+    mockVerifyAdminToken.mockResolvedValue({
+      ok: true,
+      auth: { ...VALID_AUTH, tenantId: TENANT_A },
+    });
+    mockRequireMaintenanceOperator.mockResolvedValue({
+      ok: true,
+      operator: { tenantId: TENANT_A, role: "ADMIN" },
+    });
+    mockTenantFindUnique.mockResolvedValue({ auditLogRetentionDays: null });
+    mockDeleteMany.mockResolvedValueOnce({ count: 0 });
+
+    const req = createRequest({}, VALID_OP_TOKEN);
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+
+    // Tenant lookup must use auth.tenantId; deleteMany must be filtered to it.
+    expect(mockTenantFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: TENANT_A } }),
+    );
+    expect(mockDeleteMany).toHaveBeenCalledTimes(1);
+    expect(mockDeleteMany.mock.calls[0][0].where.tenantId).toBe(TENANT_A);
   });
 });

@@ -26,6 +26,20 @@ Pre-condition: a session-authenticated tenant OWNER or ADMIN. The session must h
 
 After closing the modal, the dashboard shows the token's prefix, expiry, and last-used time — but never the plaintext again. If you lose the plaintext, mint a new token and revoke the old one.
 
+## Scope: tenant-bound, not system-wide
+
+Every `op_*` token is bound to the issuer's `tenantId`. The maintenance routes
+(`purge-history`, `purge-audit-logs`, `audit-outbox-purge-failed`,
+`audit-chain-verify`) operate **only** on rows whose `tenant_id` matches the
+token. Cross-tenant attempts (e.g. supplying another tenant's UUID in
+`audit-outbox-purge-failed`'s body) are rejected with 403, not silently scoped.
+
+If you operate a deployment that hosts multiple tenants and need to run
+maintenance against more than one, mint a token in each target tenant and run
+the script per-token. There is no single token that can purge across tenants —
+this is intentional, to ensure a leaked token cannot be used as a cross-tenant
+anti-forensics or data-destruction vector.
+
 ## Usage
 
 ```bash
@@ -65,10 +79,11 @@ curl -X POST -H "Authorization: Bearer $ADMIN_API_TOKEN" \
 curl -H "Authorization: Bearer $ADMIN_API_TOKEN" \
   "$APP_URL/api/maintenance/audit-outbox-metrics"
 
-# Outbox purge of FAILED rows (optionally filter by tenant or age)
+# Outbox purge of FAILED rows for the operator-token's tenant (optional age filter)
+# tenantId, when provided, must equal the token's bound tenantId — cross-tenant attempts return 403.
 curl -X POST -H "Authorization: Bearer $ADMIN_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"tenantId":"<uuid>","olderThanDays":7}' \
+  -d '{"olderThanDays":7}' \
   "$APP_URL/api/maintenance/audit-outbox-purge-failed"
 
 # Audit chain verify

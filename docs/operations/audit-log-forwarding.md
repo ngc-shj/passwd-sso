@@ -17,7 +17,7 @@ Route handler
 
 **Monitoring outbox health:**
 - `GET /api/maintenance/audit-outbox-metrics` (requires `op_*` Bearer token) — returns cross-tenant aggregates (pending count, failed count, oldest pending row age).
-- `POST /api/maintenance/audit-outbox-purge-failed` (requires `op_*` Bearer token) — purges FAILED rows, optionally filtered by `tenantId` and `olderThanDays`.
+- `POST /api/maintenance/audit-outbox-purge-failed` (requires `op_*` Bearer token) — purges FAILED rows for the operator-token's bound tenant. The optional `tenantId` body field, when provided, must match the token's tenantId; cross-tenant attempts return 403. `olderThanDays` is an optional age filter.
 
 ## Overview
 
