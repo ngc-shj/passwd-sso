@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dcr-cleanup-worker
+  labels:
+    app: passwd-sso
+    component: dcr-cleanup-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: passwd-sso
+      component: dcr-cleanup-worker
+  template:
+    metadata:
+      labels:
+        app: passwd-sso
+        component: dcr-cleanup-worker
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: worker
+          image: passwd-sso:latest
+          args: ["tsx", "scripts/dcr-cleanup-worker.ts"]
+          env:
+            - name: DCR_CLEANUP_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: dcr-cleanup-worker-db
+                  key: dcr-cleanup-database-url
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: passwd-sso-secrets
+                  key: database-url
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          livenessProbe:
+            exec:
+              command: ["node", "-e", "process.exit(0)"]
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          startupProbe:
+            exec:
+              command: ["node", "-e", "process.exit(0)"]
+            failureThreshold: 3
+            periodSeconds: 5
+          readinessProbe:
+            exec:
+              command: ["tsx", "scripts/dcr-cleanup-worker.ts", "--validate-env-only"]
+            initialDelaySeconds: 5
+            periodSeconds: 10

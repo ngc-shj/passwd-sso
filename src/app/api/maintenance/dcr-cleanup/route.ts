@@ -1,20 +1,22 @@
 /**
  * POST /api/maintenance/dcr-cleanup
  *
- * Delete expired unclaimed DCR clients (isDcr=true, tenantId=null, dcrExpiresAt < now).
- * Authenticated via per-operator op_* token (mint via /dashboard/tenant/operator-tokens).
+ * DEPRECATED — returns 410 Gone for one minor version.
  *
- * Body: {} (empty — token carries the operator identity)
+ * DCR cleanup is now automatic: the `dcr-cleanup-worker` process runs periodic
+ * sweeps and emits SYSTEM-attributed audit events. This endpoint stub authenticates
+ * the caller so that stale cron jobs are surfaced via a MCP_CLIENT_DCR_CLEANUP_DEPRECATED_CALL
+ * audit event in the caller's tenant audit log, giving operators time to remove their jobs
+ * before the stub is deleted in the next minor release.
+ *
+ * Replacement: `npm run worker:dcr-cleanup` (dev) or the `dcr-cleanup-worker` Docker service.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { verifyAdminToken } from "@/lib/auth/tokens/admin-token";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
-import { AUDIT_METADATA_KEY } from "@/lib/constants";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/http/api-response";
@@ -38,33 +40,22 @@ async function handlePOST(req: NextRequest) {
   });
   if (!op.ok) return op.response;
 
-  // Delete expired unclaimed DCR clients
-  const deleted = await withBypassRls(
-    prisma,
-    async () =>
-      prisma.mcpClient.deleteMany({
-        where: {
-          isDcr: true,
-          tenantId: null,
-          dcrExpiresAt: { lt: new Date() },
-        },
-      }),
-    BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
-  );
-
   await logAuditAsync({
     ...tenantAuditBase(req, auth.subjectUserId, auth.tenantId),
     actorType: ACTOR_TYPE.HUMAN,
-    action: AUDIT_ACTION.MCP_CLIENT_DCR_CLEANUP,
+    action: AUDIT_ACTION.MCP_CLIENT_DCR_CLEANUP_DEPRECATED_CALL,
     metadata: {
       tokenSubjectUserId: auth.subjectUserId,
       tokenId: auth.tokenId,
-      [AUDIT_METADATA_KEY.PURGED_COUNT]: deleted.count,
-      systemWide: true,
+      deprecated: true,
+      replacement: "worker:dcr-cleanup",
     },
   });
 
-  return NextResponse.json({ deleted: deleted.count });
+  return NextResponse.json(
+    { error: "endpoint_removed", replacement: "worker:dcr-cleanup" },
+    { status: 410 },
+  );
 }
 
 export const POST = withRequestLog(handlePOST);

@@ -113,6 +113,25 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
   },
   {
     type: "literal",
+    key: "PASSWD_DCR_CLEANUP_WORKER_PASSWORD",
+    justification:
+      "Consumed only by the one-shot provisioning script that sets the passwd_dcr_cleanup_worker DB role password. " +
+      "Not read by any running process.",
+    consumers: [
+      "scripts/set-dcr-cleanup-worker-password.sh",
+      "infra/postgres/initdb",
+    ],
+    reviewedAt: "2026-04-28",
+    includeInExample: true,
+    requiredForConsumer: true,
+    description:
+      "Password for the passwd_dcr_cleanup_worker least-privilege DB role.\n" +
+      "Consumed by infra/postgres/initdb on first boot AND by\n" +
+      "scripts/set-dcr-cleanup-worker-password.sh for existing clusters.",
+    secret: true,
+  },
+  {
+    type: "literal",
     key: "NEXT_RUNTIME",
     justification:
       "Provided by the Next.js framework at runtime; user configuration has no effect. " +

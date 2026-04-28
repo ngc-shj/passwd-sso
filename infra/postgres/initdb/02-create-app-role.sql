@@ -81,3 +81,22 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "audit_deliveries" TO passwd_outbo
 -- REFERENCES on future tables to the worker role.
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   REVOKE REFERENCES ON TABLES FROM passwd_outbox_worker;
+
+-- Create dedicated DCR cleanup worker role
+-- Password is read from PASSWD_DCR_CLEANUP_WORKER_PASSWORD env var.
+-- Mirrors the audit-outbox-worker role pattern above; grants are also applied
+-- by the prisma migration that creates the role for existing clusters.
+
+\getenv passwd_dcr_cleanup_worker_password PASSWD_DCR_CLEANUP_WORKER_PASSWORD
+
+SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_dcr_cleanup_worker')
+  THEN 'true' ELSE 'false' END AS should_create_dcr_worker \gset
+
+\if :should_create_dcr_worker
+  \if :{?passwd_dcr_cleanup_worker_password}
+    CREATE ROLE passwd_dcr_cleanup_worker WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD :'passwd_dcr_cleanup_worker_password';
+  \else
+    -- Fallback for local dev when PASSWD_DCR_CLEANUP_WORKER_PASSWORD is not set
+    CREATE ROLE passwd_dcr_cleanup_worker WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD 'passwd_dcr_pass';
+  \endif
+\endif

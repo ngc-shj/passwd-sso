@@ -15,6 +15,7 @@ export const GROUPS = [
   "Health",
   "Redis",
   "Outbox worker",
+  "DCR cleanup worker",
   "Key provider",
   "DB pool",
   "Reverse proxy",
@@ -98,6 +99,15 @@ export const descriptions: Record<
       "Least privilege: SELECT/UPDATE/DELETE on audit_outbox, INSERT on audit_logs.\n" +
       "Optional — falls back to DATABASE_URL if unset.",
     example: "postgresql://passwd_outbox_worker:pass@localhost:5432/passwd_sso",
+  },
+  DCR_CLEANUP_DATABASE_URL: {
+    group: "Database",
+    order: 4,
+    description:
+      "PostgreSQL connection URL for the DCR cleanup worker role (passwd_dcr_cleanup_worker).\n" +
+      "Least privilege: SELECT/DELETE on mcp_clients, SELECT/INSERT on audit_outbox.\n" +
+      "Optional — falls back to DATABASE_URL if unset.",
+    example: "postgresql://passwd_dcr_cleanup_worker:pass@localhost:5432/passwd_sso",
   },
 
   // ── Auth ─────────────────────────────────────────────────────────────────
@@ -735,6 +745,33 @@ export const descriptions: Record<
       "Path to the Tailscale local API Unix socket. Optional.\n" +
       "Default: /var/run/tailscale/tailscaled.sock",
     example: "/var/run/tailscale/tailscaled.sock",
+  },
+
+  // ── DCR cleanup worker ────────────────────────────────────────────────────────
+
+  DCR_CLEANUP_INTERVAL_MS: {
+    group: "DCR cleanup worker",
+    order: 1,
+    description:
+      "Interval between DCR cleanup sweeps in milliseconds. Default: 3600000 (1 hour).\n" +
+      "Minimum: 60000 (1 minute). Maximum: 86400000 (24 hours).",
+    example: "3600000",
+  },
+  DCR_CLEANUP_BATCH_SIZE: {
+    group: "DCR cleanup worker",
+    order: 2,
+    description:
+      "Maximum number of expired DCR client rows deleted per sweep. Default: 1000.\n" +
+      "Valid range: 1–10000.",
+    example: "1000",
+  },
+  DCR_CLEANUP_EMIT_HEARTBEAT_AUDIT: {
+    group: "DCR cleanup worker",
+    order: 3,
+    description:
+      "When true, emit an audit row on every sweep even when purgedCount=0. Default: false.\n" +
+      "Useful for liveness verification in audit pipelines; increases audit_outbox volume.",
+    example: "false",
   },
 
   // ── Operational ───────────────────────────────────────────────────────────

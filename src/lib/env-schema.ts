@@ -62,6 +62,37 @@ export const envObject = z.object({
     )
     .optional(),
 
+  // --- DCR cleanup worker ---
+  // Dedicated DB URL for the dcr-cleanup worker role; falls back to DATABASE_URL.
+  DCR_CLEANUP_DATABASE_URL: z
+    .string()
+    .transform((s) => s.trim())
+    .pipe(
+      z.string().refine(
+        (s) => {
+          try {
+            new URL(s);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        { message: "DCR_CLEANUP_DATABASE_URL must be a valid URL" },
+      ),
+    )
+    .optional(),
+  DCR_CLEANUP_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .max(86_400_000)
+    .default(3_600_000),
+  DCR_CLEANUP_BATCH_SIZE: z.coerce.number().int().min(1).max(10_000).default(1000),
+  DCR_CLEANUP_EMIT_HEARTBEAT_AUDIT: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+
   // --- Critical (always required) ---
   DATABASE_URL: nonEmpty,
   // SUPERUSER URL for Prisma CLI (migrate, studio). Optional — falls back to DATABASE_URL.

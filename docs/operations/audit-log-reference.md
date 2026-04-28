@@ -363,7 +363,8 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `MCP_CLIENT_DELETE` | TENANT | McpClient | `{ name }` | name |
 | `MCP_CLIENT_DCR_REGISTER` | TENANT | McpClient | `{ clientName, ip }` | clientName |
 | `MCP_CLIENT_DCR_CLAIM` | TENANT | McpClient | `{ clientId, tenantId }` | clientId |
-| `MCP_CLIENT_DCR_CLEANUP` | TENANT | — | `{ deleted }` | deleted count |
+| `MCP_CLIENT_DCR_CLEANUP` | TENANT | — | `{ purgedCount, triggeredBy, sweepIntervalMs }` | purgedCount |
+| `MCP_CLIENT_DCR_CLEANUP_DEPRECATED_CALL` | TENANT | — | `{ tokenSubjectUserId, tokenId, deprecated, replacement }` | — (deprecation notice) |
 | `MCP_CONSENT_GRANT` | TENANT | McpClient | `{ clientId, scopes }` | scopes |
 | `MCP_CONSENT_DENY` | TENANT | McpClient | `{ clientId }` | — |
 | `MCP_REFRESH_TOKEN_ROTATE` | TENANT | McpAccessToken | `{ clientId }` | — |

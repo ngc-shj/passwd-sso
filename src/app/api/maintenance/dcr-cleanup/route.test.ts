@@ -3,29 +3,18 @@ import { NextRequest } from "next/server";
 
 const {
   mockVerifyAdminToken,
-  mockDeleteMany,
   mockRequireMaintenanceOperator,
   mockCheck,
   mockLogAudit,
-  mockWithBypassRls,
 } = vi.hoisted(() => ({
   mockVerifyAdminToken: vi.fn(),
-  mockDeleteMany: vi.fn(),
   mockRequireMaintenanceOperator: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockLogAudit: vi.fn(),
-  mockWithBypassRls: vi.fn(
-    async (_prisma: unknown, fn: () => unknown, _purpose?: unknown) => fn(),
-  ),
 }));
 
 vi.mock("@/lib/auth/tokens/admin-token", () => ({
   verifyAdminToken: mockVerifyAdminToken,
-}));
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
-    mcpClient: { deleteMany: mockDeleteMany },
-  },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
@@ -41,15 +30,12 @@ vi.mock("@/lib/audit/audit", () => ({
     acceptLanguage: null,
   }),
 }));
-vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
-  ...(await importOriginal()) as Record<string, unknown>,
-  withBypassRls: mockWithBypassRls,
-}));
 vi.mock("@/lib/auth/access/maintenance-auth", () => ({
   requireMaintenanceOperator: mockRequireMaintenanceOperator,
 }));
 
 import { POST } from "./route";
+import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { OPERATOR_TOKEN_PREFIX } from "@/lib/constants/auth/operator-token";
 
 const SUBJECT_USER_ID = "660e8400-e29b-41d4-a716-446655440001";
@@ -80,7 +66,7 @@ function createRequest(token?: string): NextRequest {
   });
 }
 
-describe("POST /api/maintenance/dcr-cleanup", () => {
+describe("POST /api/maintenance/dcr-cleanup (410 deprecation stub)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCheck.mockResolvedValue({ allowed: true });
@@ -89,7 +75,6 @@ describe("POST /api/maintenance/dcr-cleanup", () => {
       ok: true,
       operator: { tenantId: TENANT_ID, role: "ADMIN" },
     });
-    mockDeleteMany.mockResolvedValue({ count: 0 });
   });
 
   // ─── Auth ──────────────────────────────────────────────────
@@ -147,60 +132,52 @@ describe("POST /api/maintenance/dcr-cleanup", () => {
     expect(res.status).toBe(400);
   });
 
-  // ─── Success ──────────────────────────────────────────────
+  // ─── 410 Gone ────────────────────────────────────────────
 
-  it("deletes expired DCR clients and returns deleted count", async () => {
+  it("returns 410 with deprecation body for authenticated admin callers", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    mockDeleteMany.mockResolvedValue({ count: 7 });
 
     const req = createRequest(VALID_OP_TOKEN);
     const res = await POST(req);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(410);
 
     const body = await res.json();
-    expect(body.deleted).toBe(7);
-  });
-
-  it("returns deleted=0 when no expired DCR clients exist", async () => {
-    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    mockDeleteMany.mockResolvedValue({ count: 0 });
-
-    const req = createRequest(VALID_OP_TOKEN);
-    const res = await POST(req);
-    expect(res.status).toBe(200);
-
-    const body = await res.json();
-    expect(body.deleted).toBe(0);
+    expect(body).toEqual({
+      error: "endpoint_removed",
+      replacement: "worker:dcr-cleanup",
+    });
   });
 
   // ─── Audit ────────────────────────────────────────────────
 
-  it("logs audit with HUMAN actorType and token fields on successful cleanup", async () => {
+  it("emits MCP_CLIENT_DCR_CLEANUP_DEPRECATED_CALL audit with strict shape", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    mockDeleteMany.mockResolvedValue({ count: 3 });
 
     const req = createRequest(VALID_OP_TOKEN);
     await POST(req);
 
+    expect(mockLogAudit).toHaveBeenCalledOnce();
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         scope: "TENANT",
-        action: "MCP_CLIENT_DCR_CLEANUP",
+        action: AUDIT_ACTION.MCP_CLIENT_DCR_CLEANUP_DEPRECATED_CALL,
         userId: SUBJECT_USER_ID,
         actorType: "HUMAN",
         tenantId: TENANT_ID,
         metadata: expect.objectContaining({
           tokenSubjectUserId: SUBJECT_USER_ID,
           tokenId: TOKEN_ID,
-          purgedCount: 3,
-          systemWide: true,
+          deprecated: true,
+          replacement: "worker:dcr-cleanup",
         }),
       }),
     );
 
-    // Strict shape: legacy fields must not appear
+    // Strict negative shape: legacy worker-emit fields must not appear
     const metadata = mockLogAudit.mock.calls[0][0].metadata;
-    expect(metadata.operatorId).toBeUndefined();
-    expect(metadata.authPath).toBeUndefined();
+    expect(metadata.purgedCount).toBeUndefined();
+    expect(metadata.triggeredBy).toBeUndefined();
+    expect(metadata.sweepIntervalMs).toBeUndefined();
+    expect(metadata.systemWide).toBeUndefined();
   });
 });

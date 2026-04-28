@@ -97,7 +97,7 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/mcp/register/route.ts", ["mcpClient"]],
   ["src/app/api/mcp/authorize/consent/route.ts", ["mcpClient", "user"]],
   ["src/app/[locale]/mcp/authorize/page.tsx", ["mcpClient", "user"]],
-  ["src/app/api/maintenance/dcr-cleanup/route.ts", ["mcpClient"]],
+  ["src/app/api/maintenance/dcr-cleanup/route.ts", []],
   // JIT access requests: SA self-service path uses bypass for SA lookup; approve reads tenant policy
   ["src/app/api/tenant/access-requests/route.ts", ["serviceAccount", "accessRequest"]],
   ["src/app/api/tenant/access-requests/[id]/approve/route.ts", ["tenant"]],
