@@ -603,6 +603,85 @@ Expected:
 - If validation is bypassed (test seam), verify returns false (fail-closed) rather than 500.
 - Audit emits a missing-pepper-version event so operator sees the gap.
 
+## Implementation Checklist
+
+Generated from Step 2-1 impact analysis. Every item is a concrete file:line.
+
+### Files to modify (production code)
+
+- [ ] `src/lib/crypto/verifier-version.ts` — NEW server-only module (VERIFIER_VERSION + getCurrentVerifierVersion)
+- [ ] `src/lib/crypto/crypto-client.ts:20` — DELETE the `export const VERIFIER_VERSION = 1` line; ADD comment pointing to verifier-version.ts
+- [ ] `src/lib/crypto/crypto-server.ts:233-291` — modify `hmacVerifier`, `verifyPassphraseVerifier`, `hashAccessPassword`, `verifyAccessPassword`; export `VerifyResult` type
+- [ ] `src/lib/key-provider/env-provider.ts:21-32` — `getKeySync` switch arm for verifier-pepper to forward `version`
+- [ ] `src/lib/key-provider/env-provider.ts:46,72-90` — `validateKeys()` production-unconditional + V2..V100 probe; `getVerifierPepper(version: number)` reads `VERIFIER_PEPPER_KEY_V<n>` for n≥2
+- [ ] `src/lib/key-provider/base-cloud-provider.ts:97-109` — change `verifier-pepper` push to versioned (`{ name, version: VERIFIER_VERSION }`)
+- [ ] `src/lib/key-provider/base-cloud-provider.ts:118-123` — V1 backward-compat shim in `resolveSecretName`
+- [ ] `prisma/schema.prisma:101` — `passphraseVerifierVersion` already present (default 1)
+- [ ] `prisma/schema.prisma:108-109` — ADD `recoveryVerifierVersion Int @default(1) @map("recovery_verifier_version")` to User
+- [ ] `prisma/schema.prisma:730-779` — ADD `accessPasswordHashVersion Int @default(1) @map("access_password_hash_version")` to PasswordShare
+- [ ] `prisma/schema.prisma:800-942` — ADD 4 audit enum values (`VERIFIER_PEPPER_ROTATE_BEGIN`, `_COMPLETE`, `_ROLLBACK`, `VERIFIER_PEPPER_MISSING`)
+- [ ] NEW Prisma migration via `npx prisma migrate dev --create-only --name verifier_pepper_dual_version`
+- [ ] `src/lib/constants/audit/audit.ts:17,166` — ADD 4 actions to `AUDIT_ACTION` constant
+- [ ] `src/lib/constants/audit/audit.ts:174` — ADD 4 actions to `AUDIT_ACTION_VALUES` array
+- [ ] `src/lib/constants/audit/audit.ts:524-617` — ADD 4 actions to `AUDIT_ACTION_GROUPS_TENANT[ADMIN]`
+- [ ] `src/lib/audit/audit-logger.ts:22-41` — ADD `"storedVersion"` to `METADATA_BLOCKLIST`
+- [ ] `src/lib/vault/vault-reset.ts:81` — change hardcoded `1` to `VERIFIER_VERSION`; add `recoveryVerifierVersion: VERIFIER_VERSION` write
+- [ ] `src/app/api/vault/setup/route.ts` — already writes `passphraseVerifierVersion: VERIFIER_VERSION` (line 135); change import to `verifier-version.ts`
+- [ ] `src/app/api/vault/unlock/route.ts` — add `passphraseVerifierVersion: true` AND `tenantId: true` to SELECT; extend backfill block; change VERIFIER_VERSION import
+- [ ] `src/app/api/vault/change-passphrase/route.ts` — REMOVE 409 gate (line 79-81); pass storedVersion; add `tenantId: true` to SELECT; write current version; change import
+- [ ] `src/app/api/vault/rotate-key/route.ts:255-256` — change VERIFIER_VERSION import
+- [ ] `src/app/api/vault/recovery-key/generate/route.ts` — REMOVE 409 gate (line 86-91); pass storedVersion; write `recoveryVerifierVersion: VERIFIER_VERSION`; add `tenantId: true`; change import
+- [ ] `src/app/api/vault/recovery-key/recover/route.ts` — TWO call sites (handleVerify + handleReset): both SELECTs need `recoveryVerifierVersion: true` AND `tenantId: true`; both calls pass stored version; handleReset writes both versions; handleVerify signature gets `request: NextRequest`; ADD VERIFIER_VERSION import (NEW)
+- [ ] `src/app/api/travel-mode/disable/route.ts` — add `passphraseVerifierVersion: true` AND `tenantId: true` to SELECT; pass storedVersion
+- [ ] `src/app/api/share-links/verify-access/route.ts` — add `accessPasswordHashVersion: true` to SELECT; pass storedVersion; emit `VERIFIER_PEPPER_MISSING` audit on miss using existing `tenantAuditBase` pattern
+- [ ] `src/app/api/sends/route.ts` — destructure `{ hash, version }` from `hashAccessPassword`; write `accessPasswordHashVersion`
+- [ ] `src/app/api/sends/file/route.ts` — same destructure pattern
+- [ ] `src/app/api/share-links/route.ts` — same destructure pattern
+- [ ] `src/components/vault/change-passphrase-dialog.tsx:80` — DELETE `VERIFIER_VERSION_UNSUPPORTED` UI branch
+- [ ] `src/lib/http/api-error-codes.ts:34,216` — DELETE `VERIFIER_VERSION_UNSUPPORTED` enum entry + i18n key
+- [ ] `messages/en.json` / `messages/ja.json` — DELETE `verifierVersionUnsupported` i18n strings; ADD 4 new audit-action labels in `messages/{en,ja}/AuditLog.json`
+- [ ] `src/lib/env-schema.ts:123-132` — ADD `VERIFIER_PEPPER_KEY_V2..V10` Zod fields
+- [ ] `scripts/env-allowlist.ts` — ADD V11..V100 regex
+- [ ] `.env.example` — ADD `VERIFIER_PEPPER_KEY_V2=` placeholder
+
+### Tests to update / create
+
+- [ ] `src/lib/crypto/crypto-server.test.ts` — UPDATE existing 2-arg → 3-arg + boolean → VerifyResult conversion (precise reason per test); ADD new tests for V2 round-trip + MISSING_PEPPER_VERSION + WRONG_PASSPHRASE
+- [ ] `src/lib/crypto/verifier-version.test.ts` — NEW file: `getCurrentVerifierVersion` test seam coverage including production NODE_ENV negative case
+- [ ] `src/lib/key-provider/env-provider.test.ts` — AUDIT existing `validateKeys` tests for VERIFIER_PEPPER_KEY stub; ADD 4 new tests for V2 validation behavior
+- [ ] NEW `src/__tests__/db-integration/pepper-dual-version.integration.test.ts` — full dual-version end-to-end with `_resetKeyProvider()` between phases
+- [ ] `src/app/api/vault/change-passphrase/route.test.ts` — DELETE `vi.mock("@/lib/crypto/crypto-client")`, ADD `vi.mock("@/lib/crypto/verifier-version")`; 3-arg mock returning VerifyResult; sentinel-value forwarding test (mock 999, assert 999); DELETE `VERIFIER_VERSION_UNSUPPORTED` 409 test
+- [ ] `src/app/api/vault/recovery-key/generate/route.test.ts` — same DELETE+ADD mock; sentinel-value test; DELETE 409 test; add `recoveryVerifierVersion` to mock and assertion
+- [ ] `src/app/api/vault/recovery-key/recover/route.test.ts` — UPDATE `vi.mock` factory at line 25 (3-arg returning VerifyResult); add `recoveryVerifierVersion: 1` AND `tenantId` to mock; NEW test for handleVerify MISSING_PEPPER_VERSION audit emit
+- [ ] `src/app/api/travel-mode/travel-mode.test.ts` — UPDATE `vi.fn` (line 18) AND `mockImplementation` (line 187-189); UPDATE `mockReturnValue(false)` (lines 245, 293) → VerifyResult shape; add `passphraseVerifierVersion: 1` + `tenantId` to mock
+- [ ] `src/app/api/vault/unlock/route.test.ts` — add `passphraseVerifierVersion: 1` + `tenantId` to ALL 16 mock returns; ADD 2 new tests for re-HMAC condition
+- [ ] `src/app/api/share-links/verify-access/route.test.ts` — type 3-arg mock; UPDATE `mockReturnValue(true/false)` to VerifyResult shape; add `accessPasswordHashVersion: 1` to `makeShare()`
+- [ ] `src/__tests__/api/sends/route.test.ts` — UPDATE `hashAccessPassword` mock to return object; add `accessPasswordHashVersion: 1` assertion
+- [ ] `src/__tests__/api/share-links/route.test.ts` — same updates
+- [ ] `src/__tests__/api/sends/file.test.ts` — ADD `hashAccessPassword` to crypto-server mock factory; ADD test for `requirePassword: true` path
+
+### Shared utilities to reuse (no reimplementation)
+
+- [ ] `tenantAuditBase(req, userId, tenantId)` from `src/lib/audit/audit.ts:377`
+- [ ] `personalAuditBase(req, userId)` from `src/lib/audit/audit.ts:367`
+- [ ] `_resetKeyProvider()` from `src/lib/key-provider/index.ts:72` (test seam)
+- [ ] `getKeyProviderSync()` from `src/lib/key-provider/index.ts:58`
+- [ ] `resolveSecretName(name, version?)` from `src/lib/key-provider/base-cloud-provider.ts:118`
+- [ ] `sanitizeMetadata(metadata)` + `METADATA_BLOCKLIST` from `src/lib/audit/audit-logger.ts:22-41`
+- [ ] `logAuditAsync` from `src/lib/audit/audit.ts`
+- [ ] `withUserTenantRls` from `src/lib/tenant-context.ts`
+- [ ] `errorResponse`, `unauthorized`, `rateLimited` from `src/lib/http/api-response.ts`
+- [ ] `parseBody` from `src/lib/http/parse-body.ts`
+- [ ] `withRequestLog` from `src/lib/http/with-request-log.ts`
+
+### Patterns to follow consistently
+
+- All verify call sites use `const r = verifyXxx(...); if (!r.ok) { ... }` discriminated-union pattern (no boolean comparisons)
+- All `VERIFIER_PEPPER_MISSING` audit emits use `tenantAuditBase` (TENANT scope), NOT `personalAuditBase`
+- All write sites use default `version` argument (defaults to current `getCurrentVerifierVersion()`)
+- All read sites pass `storedVersion` explicitly from DB row
+- Test mocks use 3-arg signature returning VerifyResult shape, never boolean
+
 ## Adjacent considerations
 
 - **R12 audit-action group coverage**: search `audit-actions.ts` or similar for `AUDIT_ACTION_GROUPS` arrays; ensure the three new actions are registered. Also check `messages/{en,ja}.json` for action label keys.

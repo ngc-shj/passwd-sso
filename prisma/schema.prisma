@@ -106,6 +106,7 @@ model User {
   recoverySecretKeyAuthTag   String?   @map("recovery_secret_key_auth_tag") @db.VarChar(32)
   recoveryHkdfSalt           String?   @map("recovery_hkdf_salt") @db.VarChar(64)
   recoveryVerifierHmac       String?   @map("recovery_verifier_hmac") @db.VarChar(64)
+  recoveryVerifierVersion    Int       @default(1) @map("recovery_verifier_version")
   recoveryKeySetAt           DateTime? @map("recovery_key_set_at") @db.Timestamptz(3)
 
   // User preference
@@ -763,7 +764,8 @@ model PasswordShare {
   permissions String[] @default([])
 
   // Optional access password protection (HMAC-peppered SHA-256 hash)
-  accessPasswordHash String? @map("access_password_hash") @db.VarChar(128)
+  accessPasswordHash        String? @map("access_password_hash") @db.VarChar(128)
+  accessPasswordHashVersion Int     @default(1) @map("access_password_hash_version")
 
   createdBy         User               @relation(fields: [createdById], references: [id], onDelete: Cascade)
   tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -848,6 +850,10 @@ enum AuditAction {
   HISTORY_PURGE
   AUDIT_LOG_PURGE
   MASTER_KEY_ROTATION
+  VERIFIER_PEPPER_ROTATE_BEGIN
+  VERIFIER_PEPPER_ROTATE_COMPLETE
+  VERIFIER_PEPPER_ROTATE_ROLLBACK
+  VERIFIER_PEPPER_MISSING
   VAULT_KEY_ROTATION
   SESSION_REVOKE
   SESSION_REVOKE_ALL

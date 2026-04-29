@@ -43,7 +43,7 @@ async function main() {
   const tokenPlain = randomBytes(32).toString("hex");
   const tokenHash = hashToken(tokenPlain);
   const accessPw = "test-password-12345";
-  const accessPwHash = hashAccessPassword(accessPw);
+  const { hash: accessPwHash, version: accessPwHashVersion } = hashAccessPassword(accessPw);
 
   const enc = encryptShareData(JSON.stringify({ note: "audit-test" }));
   const share = await withBypassRls(prisma, () =>
@@ -51,6 +51,7 @@ async function main() {
       data: {
         tokenHash,
         accessPasswordHash: accessPwHash,
+        accessPasswordHashVersion: accessPwHashVersion,
         tenantId: entry.tenantId,
         createdById: entry.userId,
         passwordEntryId: entry.id,

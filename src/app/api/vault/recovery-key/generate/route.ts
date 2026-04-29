@@ -5,11 +5,11 @@ import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { hmacVerifier, verifyPassphraseVerifier } from "@/lib/crypto/crypto-server";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { VERIFIER_VERSION } from "@/lib/crypto/crypto-client";
+import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { rateLimited } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
+import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
@@ -65,6 +65,7 @@ async function handlePOST(request: NextRequest) {
         passphraseVerifierVersion: true,
         recoveryKeySetAt: true,
         keyVersion: true,
+        tenantId: true,
       },
     }),
   );
@@ -83,20 +84,20 @@ async function handlePOST(request: NextRequest) {
     );
   }
 
-  if (user.passphraseVerifierVersion !== VERIFIER_VERSION) {
-    return NextResponse.json(
-      { error: API_ERROR.VERIFIER_VERSION_UNSUPPORTED },
-      { status: 409 },
-    );
-  }
-
-  // Verify current passphrase via verifier (anti-session-hijacking)
-  if (
-    !verifyPassphraseVerifier(
-      data.currentVerifierHash,
-      user.passphraseVerifierHmac,
-    )
-  ) {
+  // Verify current passphrase via verifier (dual-version: verifies against stored pepper version)
+  const verifyResult = verifyPassphraseVerifier(
+    data.currentVerifierHash,
+    user.passphraseVerifierHmac,
+    user.passphraseVerifierVersion,
+  );
+  if (!verifyResult.ok) {
+    if (verifyResult.reason === "MISSING_PEPPER_VERSION") {
+      await logAuditAsync({
+        ...tenantAuditBase(request, session.user.id, user.tenantId),
+        action: AUDIT_ACTION.VERIFIER_PEPPER_MISSING,
+        metadata: { storedVersion: user.passphraseVerifierVersion },
+      });
+    }
     return NextResponse.json(
       { error: API_ERROR.INVALID_PASSPHRASE },
       { status: 401 },
@@ -113,6 +114,7 @@ async function handlePOST(request: NextRequest) {
         recoverySecretKeyAuthTag: data.secretKeyAuthTag,
         recoveryHkdfSalt: data.hkdfSalt,
         recoveryVerifierHmac: hmacVerifier(data.verifierHash),
+        recoveryVerifierVersion: VERIFIER_VERSION,
         recoveryKeySetAt: new Date(),
       },
     }),

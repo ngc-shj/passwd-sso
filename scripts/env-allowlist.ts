@@ -205,4 +205,19 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
     ],
     reviewedAt: "2026-04-24",
   },
+  {
+    type: "regex",
+    // V11..V100: variadic verifier pepper slots not modeled as explicit Zod fields.
+    // V2..V10 are explicit in env-schema.ts; V11+ use this allowlist entry.
+    pattern: "^VERIFIER_PEPPER_KEY_V(1[1-9]|[2-9]\\d|100)$",
+    justification:
+      "Variadic verifier pepper slots for versions 11..100. V2..V10 are modeled as explicit Zod fields; " +
+      "V11+ remain accessed via process.env[...] as a documented exception, " +
+      "matching the SHARE_MASTER_KEY_V* precedent.",
+    consumers: [
+      "src/lib/env-schema.ts",
+      "src/lib/key-provider/env-provider.ts",
+    ],
+    reviewedAt: "2026-04-29",
+  },
 ];

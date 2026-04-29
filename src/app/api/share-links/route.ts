@@ -9,6 +9,7 @@ import {
   generateAccessPassword,
   hashAccessPassword,
 } from "@/lib/crypto/crypto-server";
+import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { assertPolicyAllowsSharing, assertPolicySharePassword, PolicyViolationError } from "@/lib/team/team-policy";
 import { logAuditInTx, personalAuditBase, teamAuditBase } from "@/lib/audit/audit";
@@ -149,9 +150,12 @@ async function handlePOST(req: NextRequest) {
   // Generate access password if requested
   let accessPassword: string | undefined;
   let accessPasswordHash: string | null = null;
+  let accessPasswordHashVersion: number = VERIFIER_VERSION;
   if (requirePassword) {
     accessPassword = generateAccessPassword();
-    accessPasswordHash = hashAccessPassword(accessPassword);
+    const r = hashAccessPassword(accessPassword);
+    accessPasswordHash = r.hash;
+    accessPasswordHashVersion = r.version;
   }
 
   // Generate token
@@ -177,6 +181,7 @@ async function handlePOST(req: NextRequest) {
         teamPasswordEntryId: teamPasswordEntryId ?? null,
         permissions: permissions ?? [],
         accessPasswordHash,
+        accessPasswordHashVersion,
       },
     }),
   );

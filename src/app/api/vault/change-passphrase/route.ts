@@ -4,9 +4,11 @@ import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { hmacVerifier, verifyPassphraseVerifier } from "@/lib/crypto/crypto-server";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { VERIFIER_VERSION } from "@/lib/crypto/crypto-client";
+import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
+import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
@@ -62,6 +64,7 @@ async function handlePOST(request: NextRequest) {
         vaultSetupAt: true,
         passphraseVerifierHmac: true,
         passphraseVerifierVersion: true,
+        tenantId: true,
       },
     }),
   );
@@ -75,18 +78,20 @@ async function handlePOST(request: NextRequest) {
     return errorResponse(API_ERROR.VERIFIER_NOT_SET, 409);
   }
 
-  // Version check — reject if KDF version doesn't match
-  if (user.passphraseVerifierVersion !== VERIFIER_VERSION) {
-    return errorResponse(API_ERROR.VERIFIER_VERSION_UNSUPPORTED, 409);
-  }
-
-  // Verify current passphrase via verifier
-  if (
-    !verifyPassphraseVerifier(
-      data.currentVerifierHash,
-      user.passphraseVerifierHmac
-    )
-  ) {
+  // Verify current passphrase via verifier (dual-version: verifies against stored pepper version)
+  const verifyResult = verifyPassphraseVerifier(
+    data.currentVerifierHash,
+    user.passphraseVerifierHmac,
+    user.passphraseVerifierVersion,
+  );
+  if (!verifyResult.ok) {
+    if (verifyResult.reason === "MISSING_PEPPER_VERSION") {
+      await logAuditAsync({
+        ...tenantAuditBase(request, session.user.id, user.tenantId),
+        action: AUDIT_ACTION.VERIFIER_PEPPER_MISSING,
+        metadata: { storedVersion: user.passphraseVerifierVersion },
+      });
+    }
     return errorResponse(API_ERROR.INVALID_PASSPHRASE, 401);
   }
 
@@ -100,6 +105,7 @@ async function handlePOST(request: NextRequest) {
         secretKeyIv: data.secretKeyIv,
         secretKeyAuthTag: data.secretKeyAuthTag,
         passphraseVerifierHmac: hmacVerifier(data.newVerifierHash),
+        passphraseVerifierVersion: VERIFIER_VERSION,
       },
     }),
   );

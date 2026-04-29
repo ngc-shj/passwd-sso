@@ -17,10 +17,11 @@ vi.mock("@/lib/security/rate-limit", () => ({
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hmacVerifier: vi.fn((v: string) => v),
-  verifyPassphraseVerifier: vi.fn((client: string, stored: string) => client === stored),
+  verifyPassphraseVerifier: vi.fn((client: string, stored: string, _storedVersion: number) => ({ ok: client === stored })),
 }));
-vi.mock("@/lib/crypto/crypto-client", () => ({
+vi.mock("@/lib/crypto/verifier-version", () => ({
   VERIFIER_VERSION: 1,
+  getCurrentVerifierVersion: () => 1,
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
@@ -46,6 +47,7 @@ const userWithVault = {
   vaultSetupAt: new Date(),
   passphraseVerifierHmac: "a".repeat(64),
   passphraseVerifierVersion: 1,
+  tenantId: "test-tenant-id",
 };
 
 describe("POST /api/vault/change-passphrase", () => {
@@ -116,15 +118,20 @@ describe("POST /api/vault/change-passphrase", () => {
     expect(json.error).toBe("VERIFIER_NOT_SET");
   });
 
-  it("returns 409 when verifier version does not match", async () => {
+  it("forwards user.passphraseVerifierVersion (read from DB) to verifyPassphraseVerifier", async () => {
+    const { verifyPassphraseVerifier } = await import("@/lib/crypto/crypto-server");
+    const mockVerify = vi.mocked(verifyPassphraseVerifier);
     mockPrismaUser.findUnique.mockResolvedValue({
       ...userWithVault,
       passphraseVerifierVersion: 999,
+      tenantId: "test-tenant-id",
     });
-    const res = await POST(createRequest("POST", "http://localhost/api/vault/change-passphrase", { body: validBody }));
-    expect(res.status).toBe(409);
-    const json = await res.json();
-    expect(json.error).toBe("VERIFIER_VERSION_UNSUPPORTED");
+    await POST(createRequest("POST", "http://localhost/api/vault/change-passphrase", { body: validBody }));
+    expect(mockVerify).toHaveBeenCalledWith(
+      validBody.currentVerifierHash,
+      userWithVault.passphraseVerifierHmac,
+      999,
+    );
   });
 
   it("returns 401 when current passphrase is wrong", async () => {

@@ -18,10 +18,11 @@ vi.mock("@/lib/security/rate-limit", () => ({
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hmacVerifier: vi.fn((v: string) => `hmac_${v}`),
-  verifyPassphraseVerifier: vi.fn((client: string, stored: string) => client === stored),
+  verifyPassphraseVerifier: vi.fn((client: string, stored: string, _storedVersion: number) => ({ ok: client === stored })),
 }));
-vi.mock("@/lib/crypto/crypto-client", () => ({
+vi.mock("@/lib/crypto/verifier-version", () => ({
   VERIFIER_VERSION: 1,
+  getCurrentVerifierVersion: () => 1,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -52,7 +53,9 @@ const userWithVault = {
   vaultSetupAt: new Date(),
   passphraseVerifierHmac: "a".repeat(64),
   passphraseVerifierVersion: 1,
+  recoveryVerifierVersion: 1,
   recoveryKeySetAt: null,
+  tenantId: "test-tenant-id",
 };
 
 const URL = "http://localhost/api/vault/recovery-key/generate";
@@ -105,15 +108,19 @@ describe("POST /api/vault/recovery-key/generate", () => {
     expect(json.error).toBe("VERIFIER_NOT_SET");
   });
 
-  it("returns 409 when verifier version is unsupported", async () => {
+  it("forwards user.passphraseVerifierVersion (read from DB) to verifyPassphraseVerifier", async () => {
+    const { verifyPassphraseVerifier } = await import("@/lib/crypto/crypto-server");
+    const mockVerify = vi.mocked(verifyPassphraseVerifier);
     mockPrismaUser.findUnique.mockResolvedValue({
       ...userWithVault,
       passphraseVerifierVersion: 999,
     });
-    const res = await POST(createRequest("POST", URL, { body: validBody }));
-    expect(res.status).toBe(409);
-    const json = await res.json();
-    expect(json.error).toBe("VERIFIER_VERSION_UNSUPPORTED");
+    await POST(createRequest("POST", URL, { body: validBody }));
+    expect(mockVerify).toHaveBeenCalledWith(
+      validBody.currentVerifierHash,
+      userWithVault.passphraseVerifierHmac,
+      999,
+    );
   });
 
   it("returns 401 when passphrase verification fails", async () => {
@@ -142,6 +149,7 @@ describe("POST /api/vault/recovery-key/generate", () => {
           recoverySecretKeyAuthTag: validBody.secretKeyAuthTag,
           recoveryHkdfSalt: validBody.hkdfSalt,
           recoveryVerifierHmac: `hmac_${validBody.verifierHash}`,
+          recoveryVerifierVersion: 1,
         }),
       }),
     );

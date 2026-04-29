@@ -1,4 +1,4 @@
-import { describe, it, expect, afterAll, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, afterAll, afterEach, beforeEach, vi } from "vitest";
 import {
   encryptServerData,
   decryptServerData,
@@ -454,53 +454,72 @@ describe("crypto-server", () => {
   describe("verifyPassphraseVerifier", () => {
     const verifierHash = "a".repeat(64);
 
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
     it("returns true for matching verifier", () => {
       const stored = hmacVerifier(verifierHash);
-      expect(verifyPassphraseVerifier(verifierHash, stored)).toBe(true);
+      expect(verifyPassphraseVerifier(verifierHash, stored, 1)).toEqual({ ok: true });
     });
 
     it("returns true with uppercase client input (normalizes)", () => {
       const stored = hmacVerifier(verifierHash);
-      expect(verifyPassphraseVerifier("A".repeat(64), stored)).toBe(true);
+      expect(verifyPassphraseVerifier("A".repeat(64), stored, 1)).toEqual({ ok: true });
     });
 
     it("returns false for non-matching verifier", () => {
       const stored = hmacVerifier(verifierHash);
-      expect(verifyPassphraseVerifier("b".repeat(64), stored)).toBe(false);
+      expect(verifyPassphraseVerifier("b".repeat(64), stored, 1)).toEqual({ ok: false, reason: "WRONG_PASSPHRASE" });
     });
 
     it("returns false for invalid client verifier (non-hex)", () => {
       const stored = hmacVerifier(verifierHash);
-      expect(verifyPassphraseVerifier("not-hex", stored)).toBe(false);
+      expect(verifyPassphraseVerifier("not-hex", stored, 1)).toEqual({ ok: false, reason: "WRONG_PASSPHRASE" });
     });
 
     it("returns false for invalid client verifier (too short)", () => {
       const stored = hmacVerifier(verifierHash);
-      expect(verifyPassphraseVerifier("aa", stored)).toBe(false);
+      expect(verifyPassphraseVerifier("aa", stored, 1)).toEqual({ ok: false, reason: "WRONG_PASSPHRASE" });
     });
 
     it("returns false for invalid stored HMAC (non-hex)", () => {
-      expect(verifyPassphraseVerifier(verifierHash, "corrupted-data")).toBe(false);
+      expect(verifyPassphraseVerifier(verifierHash, "corrupted-data", 1)).toEqual({ ok: false, reason: "WRONG_PASSPHRASE" });
     });
 
     it("returns false for invalid stored HMAC (wrong length)", () => {
-      expect(verifyPassphraseVerifier(verifierHash, "ab".repeat(16))).toBe(false);
+      expect(verifyPassphraseVerifier(verifierHash, "ab".repeat(16), 1)).toEqual({ ok: false, reason: "WRONG_PASSPHRASE" });
     });
 
     it("returns false (not throws) on pepper failure", () => {
-      const savedPepper = process.env.VERIFIER_PEPPER_KEY;
-      const savedEnv = process.env.NODE_ENV;
-      delete process.env.VERIFIER_PEPPER_KEY;
-      (process.env as Record<string, string | undefined>).NODE_ENV = "production";
+      vi.stubEnv("VERIFIER_PEPPER_KEY", "");
+      vi.stubEnv("NODE_ENV", "production");
 
       // In production without pepper, hmacVerifier would throw,
-      // but verifyPassphraseVerifier catches and returns false
-      expect(verifyPassphraseVerifier(verifierHash, "a".repeat(64))).toBe(false);
+      // but verifyPassphraseVerifier catches and returns MISSING_PEPPER_VERSION
+      expect(verifyPassphraseVerifier(verifierHash, "a".repeat(64), 1)).toEqual({ ok: false, reason: "MISSING_PEPPER_VERSION" });
+    });
 
-      (process.env as Record<string, string | undefined>).NODE_ENV = savedEnv;
-      if (savedPepper) {
-        process.env.VERIFIER_PEPPER_KEY = savedPepper;
-      }
+    it("returns { ok: true } for matching V1 stored verifier", () => {
+      const stored = hmacVerifier(verifierHash, 1);
+      expect(verifyPassphraseVerifier(verifierHash, stored, 1)).toEqual({ ok: true });
+    });
+
+    it("returns { ok: false, reason: 'WRONG_PASSPHRASE' } for mismatch", () => {
+      const stored = hmacVerifier(verifierHash, 1);
+      expect(verifyPassphraseVerifier("b".repeat(64), stored, 1)).toEqual({ ok: false, reason: "WRONG_PASSPHRASE" });
+    });
+
+    it("returns { ok: false, reason: 'MISSING_PEPPER_VERSION' } when V2 pepper not configured", () => {
+      vi.stubEnv("VERIFIER_PEPPER_KEY_V2", "");
+      expect(verifyPassphraseVerifier(verifierHash, "a".repeat(64), 2)).toEqual({ ok: false, reason: "MISSING_PEPPER_VERSION" });
+    });
+
+    it("hmacVerifier round-trip with V2 pepper stub", () => {
+      const v2Pepper = "b".repeat(64);
+      vi.stubEnv("VERIFIER_PEPPER_KEY_V2", v2Pepper);
+      const hmacV2 = hmacVerifier(verifierHash, 2);
+      expect(verifyPassphraseVerifier(verifierHash, hmacV2, 2)).toEqual({ ok: true });
     });
   });
 
@@ -519,29 +538,60 @@ describe("crypto-server", () => {
   });
 
   describe("hashAccessPassword / verifyAccessPassword", () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
     it("verify returns true for correct password", () => {
       const pw = generateAccessPassword();
-      const hash = hashAccessPassword(pw);
-      expect(verifyAccessPassword(pw, hash)).toBe(true);
+      const { hash } = hashAccessPassword(pw);
+      expect(verifyAccessPassword(pw, hash, 1)).toEqual({ ok: true });
     });
 
     it("verify returns false for wrong password", () => {
       const pw = generateAccessPassword();
-      const hash = hashAccessPassword(pw);
-      expect(verifyAccessPassword("wrong-password", hash)).toBe(false);
+      const { hash } = hashAccessPassword(pw);
+      expect(verifyAccessPassword("wrong-password", hash, 1)).toEqual({ ok: false, reason: "WRONG_PASSPHRASE" });
     });
 
     it("hash is deterministic for same password", () => {
       const pw = "test-password-123";
-      const h1 = hashAccessPassword(pw);
-      const h2 = hashAccessPassword(pw);
+      const { hash: h1 } = hashAccessPassword(pw);
+      const { hash: h2 } = hashAccessPassword(pw);
       expect(h1).toBe(h2);
     });
 
     it("different passwords produce different hashes", () => {
-      const h1 = hashAccessPassword("password-a");
-      const h2 = hashAccessPassword("password-b");
+      const { hash: h1 } = hashAccessPassword("password-a");
+      const { hash: h2 } = hashAccessPassword("password-b");
       expect(h1).not.toBe(h2);
+    });
+
+    it("hashAccessPassword returns { hash, version } object", () => {
+      const pw = generateAccessPassword();
+      const result = hashAccessPassword(pw);
+      expect(result).toHaveProperty("hash");
+      expect(result).toHaveProperty("version");
+      expect(typeof result.hash).toBe("string");
+      expect(typeof result.version).toBe("number");
+    });
+
+    it("returns { ok: true } for matching V1 stored access password", () => {
+      const pw = generateAccessPassword();
+      const { hash } = hashAccessPassword(pw, 1);
+      expect(verifyAccessPassword(pw, hash, 1)).toEqual({ ok: true });
+    });
+
+    it("returns { ok: false, reason: 'WRONG_PASSPHRASE' } for mismatch", () => {
+      const pw = generateAccessPassword();
+      const { hash } = hashAccessPassword(pw, 1);
+      expect(verifyAccessPassword("different-password", hash, 1)).toEqual({ ok: false, reason: "WRONG_PASSPHRASE" });
+    });
+
+    it("returns { ok: false, reason: 'MISSING_PEPPER_VERSION' } when V2 pepper not configured for access password", () => {
+      vi.stubEnv("VERIFIER_PEPPER_KEY_V2", "");
+      const pw = generateAccessPassword();
+      expect(verifyAccessPassword(pw, "a".repeat(64), 2)).toEqual({ ok: false, reason: "MISSING_PEPPER_VERSION" });
     });
   });
 });

@@ -17,7 +17,7 @@ const HKDF_AUTH_INFO = "passwd-sso-auth-v1";
 const VERIFICATION_PLAINTEXT = "passwd-sso-vault-verification-v1";
 
 // ─── Passphrase Verifier constants (tied to VERIFIER_VERSION) ───
-export const VERIFIER_VERSION = 1;
+// VERIFIER_VERSION lives in @/lib/crypto/verifier-version (server-only); intentionally NOT exported from this client module.
 const VERIFIER_PBKDF2_HASH = "SHA-256";
 const VERIFIER_PBKDF2_ITERATIONS = 600_000;
 const VERIFIER_PBKDF2_BITS = 256; // 32 bytes output

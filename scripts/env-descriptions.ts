@@ -298,6 +298,62 @@ export const descriptions: Record<
       "Required in production.",
     secret: true,
   },
+  VERIFIER_PEPPER_KEY_V2: {
+    group: "Vault keys",
+    order: 13.2,
+    description:
+      "Version-2 verifier pepper key (64-char hex).\n" +
+      "Set when rotating to pepper version 2 (Mode A non-disruptive rotation).",
+    secret: true,
+  },
+  VERIFIER_PEPPER_KEY_V3: {
+    group: "Vault keys",
+    order: 13.3,
+    description: "Version-3 verifier pepper key (64-char hex).",
+    secret: true,
+  },
+  VERIFIER_PEPPER_KEY_V4: {
+    group: "Vault keys",
+    order: 13.4,
+    description: "Version-4 verifier pepper key (64-char hex).",
+    secret: true,
+  },
+  VERIFIER_PEPPER_KEY_V5: {
+    group: "Vault keys",
+    order: 13.5,
+    description: "Version-5 verifier pepper key (64-char hex).",
+    secret: true,
+  },
+  VERIFIER_PEPPER_KEY_V6: {
+    group: "Vault keys",
+    order: 13.6,
+    description: "Version-6 verifier pepper key (64-char hex).",
+    secret: true,
+  },
+  VERIFIER_PEPPER_KEY_V7: {
+    group: "Vault keys",
+    order: 13.7,
+    description: "Version-7 verifier pepper key (64-char hex).",
+    secret: true,
+  },
+  VERIFIER_PEPPER_KEY_V8: {
+    group: "Vault keys",
+    order: 13.8,
+    description: "Version-8 verifier pepper key (64-char hex).",
+    secret: true,
+  },
+  VERIFIER_PEPPER_KEY_V9: {
+    group: "Vault keys",
+    order: 13.9,
+    description: "Version-9 verifier pepper key (64-char hex).",
+    secret: true,
+  },
+  VERIFIER_PEPPER_KEY_V10: {
+    group: "Vault keys",
+    order: 14,
+    description: "Version-10 verifier pepper key (64-char hex).",
+    secret: true,
+  },
   DIRECTORY_SYNC_MASTER_KEY: {
     group: "Vault keys",
     order: 15,

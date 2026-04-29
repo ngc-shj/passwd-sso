@@ -39,7 +39,6 @@
   "passphraseChanged": "Passphrase changed successfully.",
   "changePassphraseFailed": "Failed to change passphrase.",
   "verifierNotSetHint": "Please lock and unlock your vault once before changing your passphrase.",
-  "verifierVersionUnsupported": "Please update the app to change your passphrase.",
   "recoverPassphrase": "Forgot passphrase?",
   "resetVault": "Reset vault",
   "sessionExpired": "Session Expired",

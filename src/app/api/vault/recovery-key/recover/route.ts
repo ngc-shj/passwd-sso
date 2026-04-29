@@ -5,10 +5,11 @@ import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { hmacVerifier, verifyPassphraseVerifier as verifyHmac } from "@/lib/crypto/crypto-server";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { rateLimited } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
+import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
@@ -72,7 +73,7 @@ async function handlePOST(request: NextRequest) {
   if (result.data.step === "verify") {
     const rl = await verifyLimiter.check(`rl:recovery_verify:${userId}`);
     if (!rl.allowed) return rateLimited(rl.retryAfterMs);
-    return handleVerify(result.data, userId);
+    return handleVerify(result.data, userId, request);
   } else {
     const rl = await resetLimiter.check(`rl:recovery_reset:${userId}`);
     if (!rl.allowed) return rateLimited(rl.retryAfterMs);
@@ -85,18 +86,20 @@ async function handlePOST(request: NextRequest) {
   }
 }
 
-async function handleVerify(data: z.infer<typeof verifySchema>, userId: string) {
+async function handleVerify(data: z.infer<typeof verifySchema>, userId: string, request: NextRequest) {
   const user = await withUserTenantRls(userId, async () =>
     prisma.user.findUnique({
       where: { id: userId },
       select: {
         recoveryVerifierHmac: true,
+        recoveryVerifierVersion: true,
         recoveryEncryptedSecretKey: true,
         recoverySecretKeyIv: true,
         recoverySecretKeyAuthTag: true,
         recoveryHkdfSalt: true,
         accountSalt: true,
         keyVersion: true,
+        tenantId: true,
       },
     }),
   );
@@ -108,8 +111,16 @@ async function handleVerify(data: z.infer<typeof verifySchema>, userId: string) 
     );
   }
 
-  // Verify recovery key via HMAC comparison
-  if (!verifyHmac(data.verifierHash, user.recoveryVerifierHmac)) {
+  // Verify recovery key via HMAC comparison (dual-version: verifies against stored pepper version)
+  const verifyResult = verifyHmac(data.verifierHash, user.recoveryVerifierHmac, user.recoveryVerifierVersion);
+  if (!verifyResult.ok) {
+    if (verifyResult.reason === "MISSING_PEPPER_VERSION") {
+      await logAuditAsync({
+        ...tenantAuditBase(request, userId, user.tenantId),
+        action: AUDIT_ACTION.VERIFIER_PEPPER_MISSING,
+        metadata: { storedVersion: user.recoveryVerifierVersion },
+      });
+    }
     return NextResponse.json(
       { error: API_ERROR.INVALID_RECOVERY_KEY },
       { status: 401 },
@@ -135,7 +146,9 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
       where: { id: userId },
       select: {
         recoveryVerifierHmac: true,
+        recoveryVerifierVersion: true,
         keyVersion: true,
+        tenantId: true,
       },
     }),
   );
@@ -147,7 +160,16 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
     );
   }
 
-  if (!verifyHmac(data.verifierHash, user.recoveryVerifierHmac)) {
+  // Verify recovery key (dual-version: verifies against stored pepper version)
+  const verifyResult = verifyHmac(data.verifierHash, user.recoveryVerifierHmac, user.recoveryVerifierVersion);
+  if (!verifyResult.ok) {
+    if (verifyResult.reason === "MISSING_PEPPER_VERSION") {
+      await logAuditAsync({
+        ...tenantAuditBase(request, userId, user.tenantId),
+        action: AUDIT_ACTION.VERIFIER_PEPPER_MISSING,
+        metadata: { storedVersion: user.recoveryVerifierVersion },
+      });
+    }
     return NextResponse.json(
       { error: API_ERROR.INVALID_RECOVERY_KEY },
       { status: 401 },
@@ -165,12 +187,14 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
         secretKeyAuthTag: data.secretKeyAuthTag,
         accountSalt: data.accountSalt,
         passphraseVerifierHmac: hmacVerifier(data.newVerifierHash),
+        passphraseVerifierVersion: VERIFIER_VERSION,
         // Re-wrapped recovery key data
         recoveryEncryptedSecretKey: data.recoveryEncryptedSecretKey,
         recoverySecretKeyIv: data.recoverySecretKeyIv,
         recoverySecretKeyAuthTag: data.recoverySecretKeyAuthTag,
         recoveryHkdfSalt: data.recoveryHkdfSalt,
         recoveryVerifierHmac: hmacVerifier(data.recoveryVerifierHash),
+        recoveryVerifierVersion: VERIFIER_VERSION,
         recoveryKeySetAt: new Date(),
         // Reset lockout
         failedUnlockAttempts: 0,

@@ -7,6 +7,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 
 export interface VaultResetResult {
   deletedEntries: number;
@@ -78,13 +79,14 @@ export async function executeVaultReset(
           masterPasswordServerSalt: null,
           keyVersion: 0,
           passphraseVerifierHmac: null,
-          passphraseVerifierVersion: 1,
+          passphraseVerifierVersion: VERIFIER_VERSION,
           // Recovery key fields
           recoveryEncryptedSecretKey: null,
           recoverySecretKeyIv: null,
           recoverySecretKeyAuthTag: null,
           recoveryHkdfSalt: null,
           recoveryVerifierHmac: null,
+          recoveryVerifierVersion: VERIFIER_VERSION,
           recoveryKeySetAt: null,
           // Lockout fields
           failedUnlockAttempts: 0,

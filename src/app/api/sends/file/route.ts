@@ -15,6 +15,7 @@ import {
   generateAccessPassword,
   hashAccessPassword,
 } from "@/lib/crypto/crypto-server";
+import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
@@ -132,9 +133,12 @@ async function handlePOST(req: NextRequest) {
   // Generate access password if requested
   let accessPassword: string | undefined;
   let accessPasswordHash: string | null = null;
+  let accessPasswordHashVersion: number = VERIFIER_VERSION;
   if (meta.requirePassword) {
     accessPassword = generateAccessPassword();
-    accessPasswordHash = hashAccessPassword(accessPassword);
+    const r = hashAccessPassword(accessPassword);
+    accessPasswordHash = r.hash;
+    accessPasswordHashVersion = r.version;
   }
 
   // Encrypt metadata with master key
@@ -171,6 +175,7 @@ async function handlePOST(req: NextRequest) {
         expiresAt,
         maxViews: meta.maxViews ?? null,
         accessPasswordHash,
+        accessPasswordHashVersion,
         createdById: session.user.id,
         tenantId: actor.tenantId,
       },

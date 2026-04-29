@@ -22,12 +22,13 @@ vi.mock("@/lib/security/rate-limit", () => ({
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hmacVerifier: vi.fn((v: string) => `hmac_${v}`),
-  verifyPassphraseVerifier: vi.fn((client: string, stored: string) => client === stored),
+  verifyPassphraseVerifier: vi.fn((client: string, stored: string, _storedVersion: number) => ({ ok: client === stored })),
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
+  tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
@@ -44,12 +45,14 @@ const URL = "http://localhost/api/vault/recovery-key/recover";
 
 const userWithRecovery = {
   recoveryVerifierHmac: "a".repeat(64),
+  recoveryVerifierVersion: 1,
   recoveryEncryptedSecretKey: "enc-data",
   recoverySecretKeyIv: "b".repeat(24),
   recoverySecretKeyAuthTag: "c".repeat(32),
   recoveryHkdfSalt: "d".repeat(64),
   accountSalt: "e".repeat(64),
   keyVersion: 1,
+  tenantId: "test-tenant-id",
 };
 
 const resetBody = {
@@ -119,6 +122,23 @@ describe("POST /api/vault/recovery-key/recover", () => {
       expect(json.error).toBe("INVALID_RECOVERY_KEY");
     });
 
+    it("emits VERIFIER_PEPPER_MISSING audit and returns 401 when pepper version is missing", async () => {
+      const { verifyPassphraseVerifier } = await import("@/lib/crypto/crypto-server");
+      vi.mocked(verifyPassphraseVerifier).mockReturnValueOnce({ ok: false, reason: "MISSING_PEPPER_VERSION" });
+
+      const res = await POST(createRequest("POST", URL, {
+        body: { step: "verify", verifierHash: "a".repeat(64) },
+      }));
+      expect(res.status).toBe(401);
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "VERIFIER_PEPPER_MISSING",
+          scope: "TENANT",
+          tenantId: "test-tenant-id",
+        }),
+      );
+    });
+
     it("returns 404 when recovery key not set", async () => {
       mockPrismaUser.findUnique.mockResolvedValue({
         ...userWithRecovery,
@@ -171,7 +191,9 @@ describe("POST /api/vault/recovery-key/recover", () => {
             encryptedSecretKey: resetBody.encryptedSecretKey,
             accountSalt: resetBody.accountSalt,
             passphraseVerifierHmac: `hmac_${resetBody.newVerifierHash}`,
+            passphraseVerifierVersion: 1,
             recoveryEncryptedSecretKey: resetBody.recoveryEncryptedSecretKey,
+            recoveryVerifierVersion: 1,
             failedUnlockAttempts: 0,
             lastFailedUnlockAt: null,
             accountLockedUntil: null,

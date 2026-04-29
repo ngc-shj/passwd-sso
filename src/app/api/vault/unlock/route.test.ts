@@ -110,6 +110,7 @@ describe("POST /api/vault/unlock", () => {
       vaultSetupAt: new Date(),
       masterPasswordServerHash: SERVER_HASH,
       masterPasswordServerSalt: SERVER_SALT,
+      passphraseVerifierVersion: 1,
     });
     const wrongHash = "f".repeat(64);
     const res = await POST(makeUnlockRequest(wrongHash));
@@ -128,6 +129,7 @@ describe("POST /api/vault/unlock", () => {
       secretKeyAuthTag: "tag",
       accountSalt: "salt",
       keyVersion: 1,
+      passphraseVerifierVersion: 1,
     });
 
     const res = await POST(makeUnlockRequest());
@@ -148,6 +150,7 @@ describe("POST /api/vault/unlock", () => {
       secretKeyAuthTag: "tag",
       accountSalt: "salt",
       keyVersion: 1,
+      passphraseVerifierVersion: 1,
     });
     mockPrismaVaultKey.findUnique.mockResolvedValue({
       verificationCiphertext: "v-cipher",
@@ -182,6 +185,7 @@ describe("POST /api/vault/unlock", () => {
       secretKeyAuthTag: "tag",
       accountSalt: "salt",
       keyVersion: 1,
+      passphraseVerifierVersion: 1,
     });
 
     const res = await POST(makeUnlockRequest());
@@ -222,6 +226,7 @@ describe("POST /api/vault/unlock", () => {
       vaultSetupAt: new Date(),
       masterPasswordServerHash: SERVER_HASH,
       masterPasswordServerSalt: SERVER_SALT,
+      passphraseVerifierVersion: 1,
     });
 
     const res = await POST(makeUnlockRequest("f".repeat(64)));
@@ -236,6 +241,7 @@ describe("POST /api/vault/unlock", () => {
       vaultSetupAt: new Date(),
       masterPasswordServerHash: SERVER_HASH,
       masterPasswordServerSalt: SERVER_SALT,
+      passphraseVerifierVersion: 1,
     });
 
     const res = await POST(makeUnlockRequest("f".repeat(64)));
@@ -250,6 +256,7 @@ describe("POST /api/vault/unlock", () => {
       vaultSetupAt: new Date(),
       masterPasswordServerHash: SERVER_HASH,
       masterPasswordServerSalt: SERVER_SALT,
+      passphraseVerifierVersion: 1,
     });
 
     const res = await POST(makeUnlockRequest("f".repeat(64)));
@@ -271,6 +278,7 @@ describe("POST /api/vault/unlock", () => {
       secretKeyAuthTag: "tag",
       accountSalt: "salt",
       keyVersion: 1,
+      passphraseVerifierVersion: 1,
     });
 
     const res = await POST(makeUnlockRequest());
@@ -289,10 +297,63 @@ describe("POST /api/vault/unlock", () => {
       secretKeyAuthTag: "tag",
       accountSalt: "salt",
       keyVersion: 1,
+      passphraseVerifierVersion: 1,
     });
 
     const res = await POST(makeUnlockRequest());
     expect(res.status).toBe(200);
     expect(mockResetLockout).toHaveBeenCalled();
+  });
+
+  // ── Opportunistic re-HMAC (verifier version upgrade) ──────────────────────
+
+  it("does NOT call updateMany when passphraseVerifierVersion already equals VERIFIER_VERSION", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({
+      vaultSetupAt: new Date(),
+      masterPasswordServerHash: SERVER_HASH,
+      masterPasswordServerSalt: SERVER_SALT,
+      encryptedSecretKey: "enc-key",
+      secretKeyIv: "iv",
+      secretKeyAuthTag: "tag",
+      accountSalt: "salt",
+      keyVersion: 1,
+      passphraseVerifierVersion: 1,
+      passphraseVerifierHmac: "a".repeat(64),
+    });
+
+    const req = createRequest("POST", "http://localhost:3000/api/vault/unlock", {
+      body: { authHash: AUTH_HASH, verifierHash: "a".repeat(64) },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    expect(mockPrismaUser.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("calls updateMany with passphraseVerifierVersion=VERIFIER_VERSION when stored version differs", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({
+      vaultSetupAt: new Date(),
+      masterPasswordServerHash: SERVER_HASH,
+      masterPasswordServerSalt: SERVER_SALT,
+      encryptedSecretKey: "enc-key",
+      secretKeyIv: "iv",
+      secretKeyAuthTag: "tag",
+      accountSalt: "salt",
+      keyVersion: 1,
+      passphraseVerifierVersion: 0,
+      passphraseVerifierHmac: "a".repeat(64),
+    });
+
+    const req = createRequest("POST", "http://localhost:3000/api/vault/unlock", {
+      body: { authHash: AUTH_HASH, verifierHash: "a".repeat(64) },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    expect(mockPrismaUser.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          passphraseVerifierVersion: 1,
+        }),
+      }),
+    );
   });
 });

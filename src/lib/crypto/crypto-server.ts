@@ -20,6 +20,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { getKeyProviderSync } from "@/lib/key-provider";
+import { getCurrentVerifierVersion } from "@/lib/crypto/verifier-version";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12; // 96 bits, recommended for GCM
@@ -30,6 +31,10 @@ export interface ServerEncryptedData {
   iv: string; // hex (24 chars)
   authTag: string; // hex (32 chars)
 }
+
+export type VerifyResult =
+  | { ok: true }
+  | { ok: false; reason: "WRONG_PASSPHRASE" | "MISSING_PEPPER_VERSION" };
 
 // ─── Master Key (Versioned) ──────────────────────────────────────
 
@@ -218,16 +223,22 @@ export function generateAccessPassword(): string {
  * 256-bit random token (randomBytes(32)), not a user-chosen password.
  * A slow KDF (bcrypt/argon2) is unnecessary for high-entropy secrets.
  */
-export function hashAccessPassword(password: string): string {
-  const digest = createHash("sha256").update(password).digest("hex");  return hmacVerifier(digest);
+export function hashAccessPassword(
+  password: string,
+  version: number = getCurrentVerifierVersion()
+): { hash: string; version: number } {
+  const digest = createHash("sha256").update(password).digest("hex");
+  return { hash: hmacVerifier(digest, version), version };
 }
 
 /** Verify an access password against stored hash. Timing-safe. */
 export function verifyAccessPassword(
   password: string,
-  storedHash: string
-): boolean {
-  const digest = createHash("sha256").update(password).digest("hex");  return verifyPassphraseVerifier(digest, storedHash);
+  storedHash: string,
+  storedVersion: number
+): VerifyResult {
+  const digest = createHash("sha256").update(password).digest("hex");
+  return verifyPassphraseVerifier(digest, storedHash, storedVersion);
 }
 
 // ─── Passphrase Verifier (HMAC pepper) ──────────────────────────
@@ -235,14 +246,14 @@ export function verifyAccessPassword(
 const VERIFIER_HEX_RE = /^[0-9a-f]{64}$/;
 
 /**
- * Get the verifier pepper key.
+ * Get the verifier pepper key for a specific version.
  *
- * - Prefers VERIFIER_PEPPER_KEY env var (64-char hex = 256-bit).
- * - In production, VERIFIER_PEPPER_KEY is **required** (throws on missing).
- * - In dev/test, falls back to SHA-256("verifier-pepper:" || SHARE_MASTER_KEY).
+ * - V1: reads VERIFIER_PEPPER_KEY; falls back to derived key in dev/test.
+ * - V2+: reads VERIFIER_PEPPER_KEY_V{version}; no dev fallback.
+ * - In production, missing pepper throws.
  */
-function getVerifierPepper(): Buffer {
-  return getKeyProviderSync().getKeySync("verifier-pepper");
+function getVerifierPepper(version: number = 1): Buffer {
+  return getKeyProviderSync().getKeySync("verifier-pepper", version);
 }
 
 /**
@@ -252,12 +263,15 @@ function getVerifierPepper(): Buffer {
  * Input is normalized to lowercase and validated as 64-char hex.
  * Throws on invalid input (caller should validate before saving).
  */
-export function hmacVerifier(verifierHashHex: string): string {
+export function hmacVerifier(
+  verifierHashHex: string,
+  version: number = getCurrentVerifierVersion()
+): string {
   const normalized = verifierHashHex.toLowerCase();
   if (!VERIFIER_HEX_RE.test(normalized)) {
     throw new Error("verifierHash must be a 64-char lowercase hex string");
   }
-  const pepper = getVerifierPepper();
+  const pepper = getVerifierPepper(version);
   return createHmac("sha256", pepper).update(normalized).digest("hex");
 }
 
@@ -265,27 +279,50 @@ export function hmacVerifier(verifierHashHex: string): string {
  * Verify a client-provided verifier hash against the stored HMAC.
  * Uses timingSafeEqual to prevent timing attacks.
  *
- * Returns false (instead of throwing) if stored value is corrupted,
- * to avoid 500 errors in production.
+ * Returns VerifyResult instead of boolean:
+ * - { ok: true } on match
+ * - { ok: false, reason: "WRONG_PASSPHRASE" } on mismatch or corrupted input
+ * - { ok: false, reason: "MISSING_PEPPER_VERSION" } if pepper for storedVersion is not configured
  */
 export function verifyPassphraseVerifier(
   clientVerifierHash: string,
-  storedHmacHex: string
-): boolean {
+  storedHmacHex: string,
+  storedVersion: number
+): VerifyResult {
   try {
     const normalized = clientVerifierHash.toLowerCase();
-    if (!VERIFIER_HEX_RE.test(normalized)) return false;
+    if (!VERIFIER_HEX_RE.test(normalized)) return { ok: false, reason: "WRONG_PASSPHRASE" };
 
-    const computed = hmacVerifier(normalized);
     const storedNormalized = storedHmacHex.toLowerCase();
-    if (!VERIFIER_HEX_RE.test(storedNormalized)) return false;
+    if (!VERIFIER_HEX_RE.test(storedNormalized)) return { ok: false, reason: "WRONG_PASSPHRASE" };
+
+    let computed: string;
+    try {
+      computed = hmacVerifier(normalized, storedVersion);
+    } catch (pepperErr) {
+      // Pepper for storedVersion is not configured — fail with a distinct reason
+      // so callers can emit the appropriate audit event.
+      if (
+        pepperErr instanceof Error &&
+        pepperErr.message.includes("not found or invalid") ||
+        pepperErr instanceof Error &&
+        pepperErr.message.includes("required") ||
+        pepperErr instanceof Error &&
+        pepperErr.message.includes("no fallback")
+      ) {
+        return { ok: false, reason: "MISSING_PEPPER_VERSION" };
+      }
+      return { ok: false, reason: "MISSING_PEPPER_VERSION" };
+    }
 
     const a = Buffer.from(computed, "hex");
     const b = Buffer.from(storedNormalized, "hex");
-    if (a.length !== b.length) return false;
-    return timingSafeEqual(a, b);
+    if (a.length !== b.length) return { ok: false, reason: "WRONG_PASSPHRASE" };
+    return timingSafeEqual(a, b)
+      ? { ok: true }
+      : { ok: false, reason: "WRONG_PASSPHRASE" };
   } catch {
-    // Corrupted stored value or pepper issue — fail closed
-    return false;
+    // Corrupted stored value — fail closed as wrong passphrase
+    return { ok: false, reason: "WRONG_PASSPHRASE" };
   }
 }
