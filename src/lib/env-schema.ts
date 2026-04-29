@@ -142,6 +142,17 @@ export const envObject = z.object({
 
   // --- Production-required (validated in superRefine) ---
   VERIFIER_PEPPER_KEY: hex64.optional(),
+  // V2..V10 modeled explicitly. V11..V100 fall through to process.env[...] via
+  // allowlist regex in scripts/env-allowlist.ts (same pattern as SHARE_MASTER_KEY_V*).
+  VERIFIER_PEPPER_KEY_V2: hex64.optional(),
+  VERIFIER_PEPPER_KEY_V3: hex64.optional(),
+  VERIFIER_PEPPER_KEY_V4: hex64.optional(),
+  VERIFIER_PEPPER_KEY_V5: hex64.optional(),
+  VERIFIER_PEPPER_KEY_V6: hex64.optional(),
+  VERIFIER_PEPPER_KEY_V7: hex64.optional(),
+  VERIFIER_PEPPER_KEY_V8: hex64.optional(),
+  VERIFIER_PEPPER_KEY_V9: hex64.optional(),
+  VERIFIER_PEPPER_KEY_V10: hex64.optional(),
   REDIS_URL: nonEmpty.optional(),
 
   // --- Application URL ---

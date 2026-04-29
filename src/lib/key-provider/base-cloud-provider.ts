@@ -8,6 +8,7 @@
 
 import type { KeyName, KeyProvider } from "./types";
 import { HEX64_RE } from "@/lib/validations/common";
+import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 
 export { HEX64_RE };
 
@@ -96,10 +97,11 @@ export abstract class BaseCloudKeyProvider implements KeyProvider {
 
     const keysToValidate: Array<{ name: KeyName; version?: number }> = [
       { name: "share-master", version: currentVersion },
+      { name: "verifier-pepper", version: VERIFIER_VERSION },
     ];
 
-    // Validate all other key types (not just those with custom secret names)
-    const otherKeys: KeyName[] = ["verifier-pepper", "directory-sync", "webauthn-prf"];
+    // Validate other key types without versioning
+    const otherKeys: KeyName[] = ["directory-sync", "webauthn-prf"];
     for (const name of otherKeys) {
       keysToValidate.push({ name });
     }
@@ -119,7 +121,14 @@ export abstract class BaseCloudKeyProvider implements KeyProvider {
     const envVar = this.secretNameEnvMap[name];
     const customName = process.env[envVar];
     const baseName = customName || this.defaultSecretNames[name];
-    return version != null ? `${baseName}-v${version}` : baseName;
+
+    // V1 backward-compat: verifier-pepper was historically unversioned in cloud deployments.
+    // share-master has always been versioned (bumped via SHARE_MASTER_KEY_CURRENT_VERSION), so it does NOT take this fallback.
+    // WARNING: this shim is BY-NAME, not by a generic flag. If a new KeyName is added that
+    // historically had no versioned suffix in cloud deployments, ADD ANOTHER EXCEPTION HERE.
+    // Do NOT generalize into a flag without auditing every existing cloud deployment's secret naming.
+    const isVerifierPepperV1 = name === "verifier-pepper" && version === 1;
+    return version != null && !isVerifierPepperV1 ? `${baseName}-v${version}` : baseName;
   }
 
   protected validateHex64(value: string, secretName: string): Buffer {

@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { auth } from "@/auth";
 import { hmacVerifier } from "@/lib/crypto/crypto-server";
-import { VERIFIER_VERSION } from "@/lib/crypto/crypto-client";
+import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { prisma } from "@/lib/prisma";
 import { markGrantsStaleForOwner } from "@/lib/emergency-access/emergency-access-server";
 import { revokeAllDelegationSessions } from "@/lib/auth/access/delegation";

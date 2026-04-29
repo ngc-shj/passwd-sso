@@ -36,6 +36,8 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
     authTag: "g".repeat(32),
     masterKeyVersion: 1,
   }),
+  generateAccessPassword: () => "test-access-password-base64url-43ch",
+  hashAccessPassword: () => ({ hash: "hashed-pw", version: 1 }),
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
@@ -350,6 +352,29 @@ describe("POST /api/sends/file", () => {
       expect.objectContaining({
         action: "SEND_CREATE",
         metadata: expect.objectContaining({ sendType: "FILE" }),
+      })
+    );
+  });
+
+  it("writes accessPasswordHashVersion when requirePassword is true", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    const expiresAt = new Date(Date.now() + 86400_000);
+    mockCreate.mockResolvedValue({ id: "share-pw", expiresAt });
+
+    const fd = createFormData();
+    fd.append("requirePassword", "true");
+
+    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const res = await POST(req as never);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(201);
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          accessPasswordHash: "hashed-pw",
+          accessPasswordHashVersion: 1,
+        }),
       })
     );
   });

@@ -77,8 +77,6 @@ export function ChangePassphraseDialog({
 
       if (errorCode === "VERIFIER_NOT_SET") {
         setError(t("verifierNotSetHint"));
-      } else if (errorCode === "VERIFIER_VERSION_UNSUPPORTED") {
-        setError(t("verifierVersionUnsupported"));
       } else if (errorCode === "INVALID_PASSPHRASE") {
         setError(tApi("invalidPassphrase"));
       } else if (errorCode === "RATE_LIMIT_EXCEEDED") {

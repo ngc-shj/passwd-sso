@@ -39,7 +39,6 @@
   "passphraseChanged": "パスフレーズを変更しました。",
   "changePassphraseFailed": "パスフレーズの変更に失敗しました。",
   "verifierNotSetHint": "パスフレーズを変更するには、一度保管庫をロックしてアンロックしてください。",
-  "verifierVersionUnsupported": "パスフレーズを変更するには、アプリを更新してください。",
   "recoverPassphrase": "パスフレーズを忘れた場合",
   "resetVault": "保管庫をリセット",
   "sessionExpired": "セッションが期限切れです",

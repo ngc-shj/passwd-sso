@@ -33,7 +33,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
     masterKeyVersion: 1,
   }),
   generateAccessPassword: () => "test-access-password-base64url-43ch",
-  hashAccessPassword: () => "hashed-access-password",
+  hashAccessPassword: () => ({ hash: "hashed-access-password", version: 1 }),
 }));
 vi.mock("@/lib/auth/access/team-auth", () => ({
   requireTeamPermission: vi.fn(),
@@ -440,6 +440,7 @@ describe("POST /api/share-links", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           accessPasswordHash: "hashed-access-password",
+          accessPasswordHashVersion: 1,
         }),
       })
     );

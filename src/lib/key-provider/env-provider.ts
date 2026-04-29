@@ -10,6 +10,7 @@
 import { createHash } from "node:crypto";
 import type { KeyName, KeyProvider } from "./types";
 import { HEX64_RE } from "./base-cloud-provider";
+import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 
 export class EnvKeyProvider implements KeyProvider {
   readonly name = "env";
@@ -23,7 +24,7 @@ export class EnvKeyProvider implements KeyProvider {
       case "share-master":
         return this.getShareMasterKey(version ?? 1);
       case "verifier-pepper":
-        return this.getVerifierPepper();
+        return this.getVerifierPepper(version ?? 1);
       case "directory-sync":
         return this.getDirectorySyncKey();
       case "webauthn-prf":
@@ -40,10 +41,19 @@ export class EnvKeyProvider implements KeyProvider {
     // Always validate the share master key (required in all environments)
     this.getShareMasterKey(version);
 
-    // Validate optional keys only when their env vars are configured.
-    // Production enforcement for missing keys happens at call time in each getter,
-    // not here — this avoids blocking startup when only a subset of features is used.
-    if (process.env.VERIFIER_PEPPER_KEY) this.getVerifierPepper();
+    // In production, always validate verifier-pepper unconditionally (required for auth).
+    // In dev/test, only validate when env var is configured.
+    if (process.env.NODE_ENV === "production") {
+      this.getVerifierPepper(VERIFIER_VERSION);
+      // Also validate any additional pepper versions that are configured (n=2..100).
+      for (let n = 2; n <= 100; n++) {
+        if (process.env[`VERIFIER_PEPPER_KEY_V${n}`]) {
+          this.getVerifierPepper(n);
+        }
+      }
+    } else {
+      if (process.env.VERIFIER_PEPPER_KEY) this.getVerifierPepper(1);
+    }
     if (process.env.DIRECTORY_SYNC_MASTER_KEY) this.getDirectorySyncKey();
     if (process.env.WEBAUTHN_PRF_SECRET) this.getPrfSecret();
   }
@@ -69,15 +79,23 @@ export class EnvKeyProvider implements KeyProvider {
     return Buffer.from(hex, "hex");
   }
 
-  private getVerifierPepper(): Buffer {
-    const pepperHex = process.env.VERIFIER_PEPPER_KEY?.trim();
+  private getVerifierPepper(version: number): Buffer {
+    const envName = version === 1 ? "VERIFIER_PEPPER_KEY" : `VERIFIER_PEPPER_KEY_V${version}`;
+    const pepperHex = process.env[envName]?.trim();
+
     if (pepperHex) {
       if (!HEX64_RE.test(pepperHex)) {
-        throw new Error("VERIFIER_PEPPER_KEY must be a 64-char hex string (256 bits)");
+        throw new Error(`${envName} must be a 64-char hex string (256 bits)`);
       }
       return Buffer.from(pepperHex, "hex");
     }
 
+    if (version >= 2) {
+      // V2+ has no dev fallback — must be explicitly configured.
+      throw new Error(`${envName} is required (no fallback for verifier pepper version ${version})`);
+    }
+
+    // V1 only: check bare VERIFIER_PEPPER_KEY as fallback (already checked above, same env name for V1)
     if (process.env.NODE_ENV === "production") {
       throw new Error("VERIFIER_PEPPER_KEY is required in production");
     }

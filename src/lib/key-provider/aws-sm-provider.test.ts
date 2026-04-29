@@ -180,6 +180,40 @@ describe("AwsSmKeyProvider", () => {
       const cmd = mockSend.mock.calls[0][0];
       expect(cmd.input).toEqual({ SecretId: "passwd-sso/directory-sync-key" });
     });
+
+    // ── V1 backward-compat shim ───────────────────────────────────
+    // verifier-pepper v1 must NOT get a -v1 suffix (cloud deployments historically
+    // stored it unversioned). All other keys and versions append -v<n>.
+
+    it("resolves verifier-pepper v1 without version suffix (backward-compat shim)", async () => {
+      mockSend.mockResolvedValue({ SecretString: PLAINTEXT_HEX });
+
+      const provider = makeProvider();
+      await provider.getKey("verifier-pepper", 1);
+
+      const cmd = mockSend.mock.calls[0][0];
+      expect(cmd.input).toEqual({ SecretId: "passwd-sso/verifier-pepper-key" });
+    });
+
+    it("resolves verifier-pepper v2 with -v2 suffix", async () => {
+      mockSend.mockResolvedValue({ SecretString: PLAINTEXT_HEX });
+
+      const provider = makeProvider();
+      await provider.getKey("verifier-pepper", 2);
+
+      const cmd = mockSend.mock.calls[0][0];
+      expect(cmd.input).toEqual({ SecretId: "passwd-sso/verifier-pepper-key-v2" });
+    });
+
+    it("resolves share-master v1 with -v1 suffix (shim does NOT apply to other keys)", async () => {
+      mockSend.mockResolvedValue({ SecretString: PLAINTEXT_HEX });
+
+      const provider = makeProvider();
+      await provider.getKey("share-master", 1);
+
+      const cmd = mockSend.mock.calls[0][0];
+      expect(cmd.input).toEqual({ SecretId: "passwd-sso/share-master-key-v1" });
+    });
   });
 
   // ── hex validation ────────────────────────────────────────────

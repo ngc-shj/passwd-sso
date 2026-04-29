@@ -236,5 +236,37 @@ describe("EnvKeyProvider", () => {
         "SHARE_MASTER_KEY_CURRENT_VERSION must be a positive integer"
       );
     });
+
+    it("does NOT throw when only VERIFIER_PEPPER_KEY is set (V1 only — no V2 configured)", async () => {
+      vi.stubEnv("SHARE_MASTER_KEY_V1", VALID_HEX);
+      vi.stubEnv("VERIFIER_PEPPER_KEY", VALID_HEX_B);
+      vi.stubEnv("VERIFIER_PEPPER_KEY_V2", "");
+      await expect(provider.validateKeys()).resolves.toBeUndefined();
+    });
+
+    it("throws when VERIFIER_PEPPER_KEY_V2 is configured but invalid (non-hex)", async () => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("SHARE_MASTER_KEY_V1", VALID_HEX);
+      vi.stubEnv("VERIFIER_PEPPER_KEY", VALID_HEX_B);
+      vi.stubEnv("VERIFIER_PEPPER_KEY_V2", "not-valid-hex");
+      await expect(provider.validateKeys()).rejects.toThrow();
+    });
+
+    it("resolves when VERIFIER_PEPPER_KEY_V2 is configured and valid", async () => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("SHARE_MASTER_KEY_V1", VALID_HEX);
+      vi.stubEnv("VERIFIER_PEPPER_KEY", VALID_HEX_B);
+      vi.stubEnv("VERIFIER_PEPPER_KEY_V2", VALID_HEX_C);
+      await expect(provider.validateKeys()).resolves.toBeUndefined();
+    });
+
+    it("throws in production when VERIFIER_PEPPER_KEY is unset", async () => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("SHARE_MASTER_KEY_V1", VALID_HEX);
+      vi.stubEnv("VERIFIER_PEPPER_KEY", "");
+      await expect(provider.validateKeys()).rejects.toThrow(
+        "VERIFIER_PEPPER_KEY is required in production"
+      );
+    });
   });
 });

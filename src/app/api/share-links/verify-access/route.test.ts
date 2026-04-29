@@ -81,6 +81,7 @@ function makeShare(overrides: Record<string, unknown> = {}) {
     id: "share-1",
     tenantId: "tenant-1",
     accessPasswordHash: "hashed-password",
+    accessPasswordHashVersion: 1,
     expiresAt: futureDate,
     revokedAt: null,
     maxViews: null,
@@ -95,7 +96,7 @@ describe("POST /api/share-links/verify-access", () => {
     mockIpCheck.mockResolvedValue({ allowed: true });
     mockTokenCheck.mockResolvedValue({ allowed: true });
     mockPasswordShareFindUnique.mockResolvedValue(makeShare());
-    mockVerifyAccessPassword.mockReturnValue(true);
+    mockVerifyAccessPassword.mockReturnValue({ ok: true });
     mockCreateShareAccessToken.mockReturnValue("access-token-xyz");
   });
 
@@ -218,7 +219,7 @@ describe("POST /api/share-links/verify-access", () => {
   });
 
   it("returns 403 and logs failed attempt when password is wrong", async () => {
-    mockVerifyAccessPassword.mockReturnValue(false);
+    mockVerifyAccessPassword.mockReturnValue({ ok: false, reason: "WRONG_PASSPHRASE" });
     const res = await POST(
       createRequest("POST", "http://localhost/api/share-links/verify-access", {
         body: validBody,
@@ -250,6 +251,11 @@ describe("POST /api/share-links/verify-access", () => {
     expect(status).toBe(200);
     expect(json.accessToken).toBe("access-token-xyz");
     expect(mockCreateShareAccessToken).toHaveBeenCalledWith("share-1");
+    expect(mockVerifyAccessPassword).toHaveBeenCalledWith(
+      validBody.password,
+      "hashed-password",
+      1,
+    );
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "SHARE_ACCESS_VERIFY_SUCCESS",
@@ -286,5 +292,27 @@ describe("POST /api/share-links/verify-access", () => {
     );
     const { status } = await parseResponse(res);
     expect(status).toBe(200);
+  });
+
+  it("emits VERIFIER_PEPPER_MISSING audit and returns 403 when pepper version is missing", async () => {
+    mockVerifyAccessPassword.mockReturnValue({ ok: false, reason: "MISSING_PEPPER_VERSION" });
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/share-links/verify-access", {
+        body: validBody,
+      }),
+    );
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "VERIFIER_PEPPER_MISSING",
+        tenantId: "tenant-1",
+        userId: ANONYMOUS_ACTOR_ID,
+        actorType: "ANONYMOUS",
+        scope: "TENANT",
+      }),
+    );
   });
 });

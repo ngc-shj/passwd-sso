@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { hmacVerifier } from "@/lib/crypto/crypto-server";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { VERIFIER_VERSION } from "@/lib/crypto/crypto-client";
+import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { checkLockout, recordFailure, resetLockout } from "@/lib/auth/policy/account-lockout";
@@ -71,6 +71,9 @@ async function handlePOST(request: NextRequest) {
         secretKeyAuthTag: true,
         accountSalt: true,
         keyVersion: true,
+        passphraseVerifierHmac: true,
+        passphraseVerifierVersion: true,
+        tenantId: true,
       },
     }),
   );
@@ -116,15 +119,15 @@ async function handlePOST(request: NextRequest) {
   }
   await unlockLimiter.clear(rateKey);
 
-  // Backfill passphrase verifier for existing users (transparent migration)
+  // Backfill/upgrade passphrase verifier: on null or stale pepper version
   const verifierHash = result.data.verifierHash;
-  if (verifierHash) {
+  if (verifierHash && (
+    user.passphraseVerifierHmac === null ||
+    user.passphraseVerifierVersion !== VERIFIER_VERSION
+  )) {
     await withUserTenantRls(session.user.id, async () =>
       prisma.user.updateMany({
-        where: {
-          id: session.user.id,
-          passphraseVerifierHmac: null,
-        },
+        where: { id: session.user.id },
         data: {
           passphraseVerifierHmac: hmacVerifier(verifierHash),
           passphraseVerifierVersion: VERIFIER_VERSION,

@@ -77,6 +77,7 @@ describe("METADATA_BLOCKLIST", () => {
       "password", "passphrase", "secret", "secretKey",
       "encryptedBlob", "encryptedOverview", "encryptedData",
       "token", "accessToken", "refreshToken", "idToken",
+      "storedVersion",
     ];
     for (const key of expected) {
       expect(METADATA_BLOCKLIST.has(key)).toBe(true);
@@ -86,5 +87,21 @@ describe("METADATA_BLOCKLIST", () => {
   it("does not contain non-sensitive fields", () => {
     expect(METADATA_BLOCKLIST.has("username")).toBe(false);
     expect(METADATA_BLOCKLIST.has("email")).toBe(false);
+  });
+
+  it("strips storedVersion but keeps non-sensitive fields", () => {
+    const output = collectOutput((l) =>
+      l.info({
+        audit: {
+          metadata: {
+            storedVersion: 2,
+            shareId: "x",
+          },
+        },
+      }, "blocklist test")
+    );
+    const line = JSON.parse(output);
+    expect(line.audit.metadata.storedVersion).toBe("[REDACTED]");
+    expect(line.audit.metadata.shareId).toBe("x");
   });
 });

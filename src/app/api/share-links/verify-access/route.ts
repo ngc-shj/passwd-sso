@@ -45,6 +45,7 @@ async function handlePOST(req: NextRequest) {
         id: true,
         tenantId: true,
         accessPasswordHash: true,
+        accessPasswordHashVersion: true,
         expiresAt: true,
         revokedAt: true,
         maxViews: true,
@@ -69,7 +70,19 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
-  if (!verifyAccessPassword(password, share.accessPasswordHash)) {
+  const verifyResult = verifyAccessPassword(password, share.accessPasswordHash, share.accessPasswordHashVersion);
+  if (!verifyResult.ok) {
+    if (verifyResult.reason === "MISSING_PEPPER_VERSION") {
+      await logAuditAsync({
+        ...tenantAuditBase(req, ANONYMOUS_ACTOR_ID, share.tenantId),
+        actorType: ACTOR_TYPE.ANONYMOUS,
+        action: AUDIT_ACTION.VERIFIER_PEPPER_MISSING,
+        targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
+        targetId: share.id,
+        metadata: { storedVersion: share.accessPasswordHashVersion },
+      });
+    }
+
     await logAuditAsync({
       ...tenantAuditBase(req, ANONYMOUS_ACTOR_ID, share.tenantId),
       actorType: ACTOR_TYPE.ANONYMOUS,

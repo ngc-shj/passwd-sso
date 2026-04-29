@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import type { VerifyResult } from "@/lib/crypto/crypto-server";
 
 const {
   mockAuth,
@@ -15,7 +16,7 @@ const {
   mockCheckLockout: vi.fn(),
   mockRecordFailure: vi.fn(),
   mockLogAudit: vi.fn(),
-  mockVerifyPassphraseVerifier: vi.fn((client: string, stored: string) => client === stored),
+  mockVerifyPassphraseVerifier: vi.fn((client: string, stored: string, _storedVersion: number): VerifyResult => client === stored ? { ok: true } : { ok: false, reason: "WRONG_PASSPHRASE" }),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
@@ -31,6 +32,7 @@ vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
+  tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
   verifyPassphraseVerifier: mockVerifyPassphraseVerifier,
@@ -180,12 +182,15 @@ describe("POST /api/travel-mode/disable", () => {
     mockRecordFailure.mockResolvedValue({ locked: false, lockedUntil: null, attempts: 1 });
     mockPrismaUser.findUnique.mockResolvedValue({
       passphraseVerifierHmac: VALID_VERIFIER_HASH,
+      passphraseVerifierVersion: 1,
       travelModeActive: true,
+      tenantId: "test-tenant-id",
     });
     mockPrismaUser.update.mockResolvedValue({});
     // By default verifier matches: client === stored
     mockVerifyPassphraseVerifier.mockImplementation(
-      (client: string, stored: string) => client === stored,
+      (client: string, stored: string, _storedVersion: number) =>
+        client === stored ? { ok: true } : { ok: false, reason: "WRONG_PASSPHRASE" },
     );
   });
 
@@ -231,7 +236,9 @@ describe("POST /api/travel-mode/disable", () => {
   it("returns 400 when vault not setup (no verifier)", async () => {
     mockPrismaUser.findUnique.mockResolvedValue({
       passphraseVerifierHmac: null,
+      passphraseVerifierVersion: 1,
       travelModeActive: true,
+      tenantId: "test-tenant-id",
     });
 
     const res = await DisablePOST(makeDisableRequest());
@@ -242,7 +249,7 @@ describe("POST /api/travel-mode/disable", () => {
   });
 
   it("returns 401 for wrong passphrase", async () => {
-    mockVerifyPassphraseVerifier.mockReturnValue(false);
+    mockVerifyPassphraseVerifier.mockReturnValue({ ok: false, reason: "WRONG_PASSPHRASE" });
 
     const res = await DisablePOST(makeDisableRequest({ verifierHash: "b".repeat(64) }));
     const json = await res.json();
@@ -254,7 +261,9 @@ describe("POST /api/travel-mode/disable", () => {
   it("returns { active: false } when already not in travel mode (no-op)", async () => {
     mockPrismaUser.findUnique.mockResolvedValue({
       passphraseVerifierHmac: VALID_VERIFIER_HASH,
+      passphraseVerifierVersion: 1,
       travelModeActive: false,
+      tenantId: "test-tenant-id",
     });
 
     const res = await DisablePOST(makeDisableRequest());
@@ -290,7 +299,7 @@ describe("POST /api/travel-mode/disable", () => {
   });
 
   it("records failure on wrong passphrase", async () => {
-    mockVerifyPassphraseVerifier.mockReturnValue(false);
+    mockVerifyPassphraseVerifier.mockReturnValue({ ok: false, reason: "WRONG_PASSPHRASE" });
 
     await DisablePOST(makeDisableRequest({ verifierHash: "f".repeat(64) }));
 
@@ -299,6 +308,24 @@ describe("POST /api/travel-mode/disable", () => {
       expect.objectContaining({
         action: "TRAVEL_MODE_DISABLE_FAILED",
         userId: "user-1",
+      }),
+    );
+  });
+
+  it("emits VERIFIER_PEPPER_MISSING audit and returns 401 when pepper version is missing", async () => {
+    mockVerifyPassphraseVerifier.mockReturnValue({ ok: false, reason: "MISSING_PEPPER_VERSION" });
+
+    const res = await DisablePOST(makeDisableRequest());
+    const json = await res.json();
+
+    expect(res.status).toBe(401);
+    expect(json.error).toBe("INVALID_PASSPHRASE");
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "VERIFIER_PEPPER_MISSING",
+        scope: "TENANT",
+        userId: "user-1",
+        tenantId: "test-tenant-id",
       }),
     );
   });

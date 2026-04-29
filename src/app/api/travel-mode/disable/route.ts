@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { AUDIT_ACTION } from "@/lib/constants";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
+import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import { verifyPassphraseVerifier } from "@/lib/crypto/crypto-server";
 import { checkLockout, recordFailure } from "@/lib/auth/policy/account-lockout";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -46,7 +46,9 @@ async function handlePOST(request: NextRequest) {
       where: { id: session.user.id },
       select: {
         passphraseVerifierHmac: true,
+        passphraseVerifierVersion: true,
         travelModeActive: true,
+        tenantId: true,
       },
     }),
   );
@@ -67,12 +69,21 @@ async function handlePOST(request: NextRequest) {
     );
   }
 
-  const valid = verifyPassphraseVerifier(
+  const verifyResult = verifyPassphraseVerifier(
     result.data.verifierHash,
     user.passphraseVerifierHmac,
+    user.passphraseVerifierVersion,
   );
 
-  if (!valid) {
+  if (!verifyResult.ok) {
+    if (verifyResult.reason === "MISSING_PEPPER_VERSION") {
+      await logAuditAsync({
+        ...tenantAuditBase(request, session.user.id, user.tenantId),
+        action: AUDIT_ACTION.VERIFIER_PEPPER_MISSING,
+        metadata: { storedVersion: user.passphraseVerifierVersion },
+      });
+    }
+
     await recordFailure(session.user.id, request);
 
     await logAuditAsync({
