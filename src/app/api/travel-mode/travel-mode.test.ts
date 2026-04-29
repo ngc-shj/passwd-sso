@@ -32,6 +32,7 @@ vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
+  tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
   verifyPassphraseVerifier: mockVerifyPassphraseVerifier,
@@ -307,6 +308,23 @@ describe("POST /api/travel-mode/disable", () => {
       expect.objectContaining({
         action: "TRAVEL_MODE_DISABLE_FAILED",
         userId: "user-1",
+      }),
+    );
+  });
+
+  it("emits VERIFIER_PEPPER_MISSING audit and returns 401 when pepper version is missing", async () => {
+    mockVerifyPassphraseVerifier.mockReturnValue({ ok: false, reason: "MISSING_PEPPER_VERSION" });
+
+    const res = await DisablePOST(makeDisableRequest());
+    const json = await res.json();
+
+    expect(res.status).toBe(401);
+    expect(json.error).toBe("INVALID_PASSPHRASE");
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "VERIFIER_PEPPER_MISSING",
+        userId: "user-1",
+        tenantId: "test-tenant-id",
       }),
     );
   });

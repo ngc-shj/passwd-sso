@@ -134,7 +134,7 @@ describe("executeVaultReset", () => {
     );
   });
 
-  it("resets exactly 23 vault/recovery/lockout/ECDH fields on User", async () => {
+  it("resets exactly 24 vault/recovery/lockout/ECDH fields on User", async () => {
     await executeVaultReset("user-1");
     const updateData = mockPrismaUser.update.mock.calls[0][0].data;
     expect(Object.keys(updateData)).toHaveLength(24);

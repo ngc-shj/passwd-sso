@@ -17,7 +17,7 @@ vi.mock("@/lib/security/rate-limit", () => ({
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hmacVerifier: vi.fn((v: string) => v),
-  verifyPassphraseVerifier: vi.fn((client: string, stored: string, _storedVersion: number) => ({ ok: client === stored })),
+  verifyPassphraseVerifier: vi.fn((client: string, stored: string, _v: number) => client === stored ? ({ ok: true } as const) : ({ ok: false, reason: "WRONG_PASSPHRASE" } as const)),
 }));
 vi.mock("@/lib/crypto/verifier-version", () => ({
   VERIFIER_VERSION: 1,

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createHash } from "crypto";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 
 const {
   mockAuth,
@@ -351,7 +352,8 @@ describe("POST /api/vault/unlock", () => {
     expect(mockPrismaUser.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          passphraseVerifierVersion: 1,
+          passphraseVerifierVersion: VERIFIER_VERSION,
+          passphraseVerifierHmac: "a".repeat(64),
         }),
       }),
     );

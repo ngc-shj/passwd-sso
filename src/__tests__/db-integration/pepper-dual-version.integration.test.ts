@@ -217,6 +217,8 @@ describe("pepper-dual-version integration", () => {
   });
 
   // ─── test 3: MISSING_PEPPER_VERSION when V2 pepper not configured ──
+  // missing V2 pepper for V2-stored user returns MISSING_PEPPER_VERSION at the crypto layer
+  // (route audit emission is verified by unit tests in route.test.ts files)
 
   it("returns MISSING_PEPPER_VERSION when V2-stored verifier is verified without the V2 pepper key", async () => {
     // Phase 1: create a user stored under V2 (simulates a deployed V2 environment)

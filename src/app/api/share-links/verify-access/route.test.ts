@@ -293,4 +293,26 @@ describe("POST /api/share-links/verify-access", () => {
     const { status } = await parseResponse(res);
     expect(status).toBe(200);
   });
+
+  it("emits VERIFIER_PEPPER_MISSING audit and returns 403 when pepper version is missing", async () => {
+    mockVerifyAccessPassword.mockReturnValue({ ok: false, reason: "MISSING_PEPPER_VERSION" });
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/share-links/verify-access", {
+        body: validBody,
+      }),
+    );
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "VERIFIER_PEPPER_MISSING",
+        tenantId: "tenant-1",
+        userId: ANONYMOUS_ACTOR_ID,
+        actorType: "ANONYMOUS",
+        scope: "TENANT",
+      }),
+    );
+  });
 });

@@ -299,19 +299,11 @@ export function verifyPassphraseVerifier(
     let computed: string;
     try {
       computed = hmacVerifier(normalized, storedVersion);
-    } catch (pepperErr) {
-      // Pepper for storedVersion is not configured — fail with a distinct reason
-      // so callers can emit the appropriate audit event.
-      if (
-        pepperErr instanceof Error &&
-        pepperErr.message.includes("not found or invalid") ||
-        pepperErr instanceof Error &&
-        pepperErr.message.includes("required") ||
-        pepperErr instanceof Error &&
-        pepperErr.message.includes("no fallback")
-      ) {
-        return { ok: false, reason: "MISSING_PEPPER_VERSION" };
-      }
+    } catch {
+      // Any error from getVerifierPepper(storedVersion) means the pepper for that
+      // version is not configured (env var missing, KMS fetch failure, invalid hex,
+      // etc.). All such errors classify as MISSING_PEPPER_VERSION — the route
+      // emits a VERIFIER_PEPPER_MISSING audit and returns generic 401 to the user.
       return { ok: false, reason: "MISSING_PEPPER_VERSION" };
     }
 

@@ -73,6 +73,7 @@ async function handlePOST(request: NextRequest) {
         keyVersion: true,
         passphraseVerifierHmac: true,
         passphraseVerifierVersion: true,
+        tenantId: true,
       },
     }),
   );
