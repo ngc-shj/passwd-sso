@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { canTransition } from "@/lib/emergency-access/emergency-access-state";
+import { fromStatusesFor } from "@/lib/emergency-access/emergency-access-state";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyAccessApprovedEmail } from "@/lib/email/templates/emergency-access";
@@ -28,7 +28,7 @@ async function handlePOST(
   const grant = await withUserTenantRls(session.user.id, async () =>
     prisma.emergencyAccessGrant.findUnique({
       where: { id },
-      select: { ownerId: true, status: true, granteeId: true },
+      select: { ownerId: true, granteeId: true },
     }),
   );
 
@@ -36,19 +36,26 @@ async function handlePOST(
     return notFound();
   }
 
-  if (!canTransition(grant.status, EA_STATUS.ACTIVATED)) {
-    return errorResponse(API_ERROR.INVALID_STATUS, 400);
-  }
-
-  await withUserTenantRls(session.user.id, async () =>
-    prisma.emergencyAccessGrant.update({
-      where: { id },
+  // Atomic compare-and-swap on status: blocks concurrent transitions out of the
+  // permitted from-set even if a parallel revoke/request/etc. lands between
+  // the read above and this write.
+  const updated = await withUserTenantRls(session.user.id, async () =>
+    prisma.emergencyAccessGrant.updateMany({
+      where: {
+        id,
+        ownerId: session.user.id,
+        status: { in: fromStatusesFor(EA_STATUS.ACTIVATED) },
+      },
       data: {
         status: EA_STATUS.ACTIVATED,
         activatedAt: new Date(),
       },
     }),
   );
+
+  if (updated.count === 0) {
+    return errorResponse(API_ERROR.INVALID_STATUS, 400);
+  }
 
   await logAuditAsync({
     ...personalAuditBase(req, session.user.id),
