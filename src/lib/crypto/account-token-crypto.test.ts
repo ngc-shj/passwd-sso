@@ -99,5 +99,37 @@ describe("account-token-crypto", () => {
       expect(out.access_token).toBe("legacy-at");
       expect(out.id_token).toBeNull();
     });
+
+    it("decryptAccountTokenTriple without onFieldError throws on corrupt input", () => {
+      expect(() =>
+        decryptAccountTokenTriple(
+          { refresh_token: "psoenc1:0:zzzz", access_token: null, id_token: null },
+          aad,
+        ),
+      ).toThrow();
+    });
+
+    it("decryptAccountTokenTriple with onFieldError continues past a corrupt field", () => {
+      const good = encryptAccountToken("good-token", aad);
+      const errors: { field: string; err: unknown }[] = [];
+      const out = decryptAccountTokenTriple(
+        {
+          refresh_token: "psoenc1:0:zzzz",
+          access_token: good,
+          id_token: null,
+        },
+        aad,
+        {
+          onFieldError: (field, err) => {
+            errors.push({ field, err });
+          },
+        },
+      );
+      expect(out.refresh_token).toBeNull();
+      expect(out.access_token).toBe("good-token");
+      expect(out.id_token).toBeNull();
+      expect(errors).toHaveLength(1);
+      expect(errors[0].field).toBe("refresh_token");
+    });
   });
 });

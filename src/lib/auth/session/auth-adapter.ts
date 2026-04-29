@@ -17,7 +17,7 @@ import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-time
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import {
   encryptAccountTokenTriple,
-  decryptAccountToken,
+  decryptAccountTokenTriple,
 } from "@/lib/crypto/account-token-crypto";
 import logger from "@/lib/logger";
 
@@ -466,40 +466,44 @@ export function createCustomAdapter(): Adapter {
       if (!account) return null;
 
       // Decrypt the at-rest envelope. Legacy plaintext rows pass through
-      // unchanged via the sentinel check in decryptAccountToken. We log
-      // (without exposing token material) and skip individual fields that
-      // fail to decrypt rather than rejecting the whole account, so a
-      // corrupt ciphertext does not lock a user out of their session.
-      const aad = {
-        provider: account.provider,
-        providerAccountId: account.providerAccountId,
-      };
-      const decryptOrLog = (
-        field: "refresh_token" | "access_token" | "id_token",
-        value: string | null,
-      ): string | undefined => {
-        try {
-          return decryptAccountToken(value, aad) ?? undefined;
-        } catch (err) {
-          logger.warn(
-            { provider: account.provider, providerAccountId: account.providerAccountId, field, err: err instanceof Error ? err.message : String(err) },
-            "account token decryption failed",
-          );
-          return undefined;
-        }
-      };
+      // unchanged via the sentinel check inside the triple helper. The triple
+      // fetches the master key once per encryption-version observed across
+      // the three fields (typically one fetch). Per-field errors are logged
+      // (without exposing token material) and that field is left null —
+      // a corrupt ciphertext does not lock a user out of their session.
+      const decrypted = decryptAccountTokenTriple(
+        {
+          refresh_token: account.refresh_token,
+          access_token: account.access_token,
+          id_token: account.id_token,
+        },
+        { provider: account.provider, providerAccountId: account.providerAccountId },
+        {
+          onFieldError: (field, err) => {
+            logger.warn(
+              {
+                provider: account.provider,
+                providerAccountId: account.providerAccountId,
+                field,
+                err: err instanceof Error ? err.message : String(err),
+              },
+              "account token decryption failed",
+            );
+          },
+        },
+      );
 
       return {
         userId: account.userId,
         type: account.type as AdapterAccount["type"],
         provider: account.provider,
         providerAccountId: account.providerAccountId,
-        refresh_token: decryptOrLog("refresh_token", account.refresh_token),
-        access_token: decryptOrLog("access_token", account.access_token),
+        refresh_token: decrypted.refresh_token ?? undefined,
+        access_token: decrypted.access_token ?? undefined,
         expires_at: account.expires_at ?? undefined,
         token_type: (account.token_type ?? undefined) as Lowercase<string> | undefined,
         scope: account.scope ?? undefined,
-        id_token: decryptOrLog("id_token", account.id_token),
+        id_token: decrypted.id_token ?? undefined,
         session_state: account.session_state ?? undefined,
       };
     },
