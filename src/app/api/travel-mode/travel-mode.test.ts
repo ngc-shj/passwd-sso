@@ -323,6 +323,7 @@ describe("POST /api/travel-mode/disable", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "VERIFIER_PEPPER_MISSING",
+        scope: "TENANT",
         userId: "user-1",
         tenantId: "test-tenant-id",
       }),

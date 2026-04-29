@@ -185,3 +185,25 @@ Local LLM seed analysis returned 4 candidate findings; all were verified inline 
 ### T10 Minor — REJECTED
 - Claim: redaction test asserts `"[REDACTED]"` placeholder but METADATA_BLOCKLIST removes the key entirely.
 - Verification: `audit-logger.ts:71-72` configures pino with `censor: "[REDACTED]"` for log output. The new test exercises the pino path (collectOutput captures pino lines), so `[REDACTED]` is the correct expectation. The `sanitizeMetadata` removal-path is for the `audit_outbox` payload, which is a different code path.
+
+## Round 3 Findings (committed in 8a48a... — see git log)
+
+Three sub-agents launched (Functionality / Security / Testing). Security expert returned "No findings" — confirms F1/S1 fix is timing-safe and propagation is coherent.
+
+### F6/T11 Major — `recovery-key/generate/route.test.ts:21` mock returns incomplete VerifyResult
+- Action: Updated mock factory to return `{ ok: true }` on match and `{ ok: false, reason: "WRONG_PASSPHRASE" as const }` on mismatch — parallel to F3 fix in change-passphrase + recover.
+- Modified file: `src/app/api/vault/recovery-key/generate/route.test.ts`
+- Detection gap analysis: F3 was applied to 2 of 3 test files in R1 because `recovery-key/generate` test was overlooked in the per-file enumeration.
+
+### F7/T12 Major — change-passphrase + recovery-key/generate VERIFIER_PEPPER_MISSING audit emission untested
+- Action: Added `mockLogAudit` (via `vi.hoisted`) + `tenantAuditBase` to audit mock factory in both files. Added new test cases asserting MISSING_PEPPER_VERSION → 401 INVALID_PASSPHRASE + audit emission with `scope: "TENANT"` + correct tenantId.
+- Modified files: `src/app/api/vault/change-passphrase/route.test.ts`, `src/app/api/vault/recovery-key/generate/route.test.ts`
+- Verified: `recovery-key/recover/route.test.ts:125-140` already had the equivalent test from R1 fixes.
+
+### T13 Minor RT3 — `recovery-key/generate/route.test.ts:152` hardcoded `1`
+- Action: Imported `VERIFIER_VERSION` from `@/lib/crypto/verifier-version` (already mocked) and replaced literal in assertion.
+- Modified file: `src/app/api/vault/recovery-key/generate/route.test.ts`
+
+### T14 Minor — travel-mode VERIFIER_PEPPER_MISSING test missing explicit `scope: "TENANT"`
+- Action: Added `scope: "TENANT"` to the `expect.objectContaining({...})` audit assertion in the R1-added test, parallel to the verify-access test.
+- Modified file: `src/app/api/travel-mode/travel-mode.test.ts`

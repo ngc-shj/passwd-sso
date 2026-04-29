@@ -18,7 +18,9 @@ vi.mock("@/lib/security/rate-limit", () => ({
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hmacVerifier: vi.fn((v: string) => `hmac_${v}`),
-  verifyPassphraseVerifier: vi.fn((client: string, stored: string, _storedVersion: number) => ({ ok: client === stored })),
+  verifyPassphraseVerifier: vi.fn((client: string, stored: string, _storedVersion: number) =>
+    client === stored ? ({ ok: true } as const) : ({ ok: false, reason: "WRONG_PASSPHRASE" } as const)
+  ),
 }));
 vi.mock("@/lib/crypto/verifier-version", () => ({
   VERIFIER_VERSION: 1,
@@ -28,6 +30,7 @@ vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
+  tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
@@ -38,6 +41,7 @@ vi.mock("@/lib/logger", () => ({
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
+import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { POST } from "./route";
 
 const validBody = {
@@ -149,7 +153,7 @@ describe("POST /api/vault/recovery-key/generate", () => {
           recoverySecretKeyAuthTag: validBody.secretKeyAuthTag,
           recoveryHkdfSalt: validBody.hkdfSalt,
           recoveryVerifierHmac: `hmac_${validBody.verifierHash}`,
-          recoveryVerifierVersion: 1,
+          recoveryVerifierVersion: VERIFIER_VERSION,
         }),
       }),
     );
@@ -174,6 +178,25 @@ describe("POST /api/vault/recovery-key/generate", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "RECOVERY_KEY_REGENERATED",
+      }),
+    );
+  });
+
+  it("emits VERIFIER_PEPPER_MISSING audit and returns 401 when pepper version is missing", async () => {
+    const { verifyPassphraseVerifier } = await import("@/lib/crypto/crypto-server");
+    vi.mocked(verifyPassphraseVerifier).mockReturnValueOnce({ ok: false, reason: "MISSING_PEPPER_VERSION" });
+
+    const res = await POST(createRequest("POST", URL, { body: validBody }));
+    const json = await res.json();
+
+    expect(res.status).toBe(401);
+    expect(json.error).toBe("INVALID_PASSPHRASE");
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "VERIFIER_PEPPER_MISSING",
+        scope: "TENANT",
+        userId: "user-1",
+        tenantId: "test-tenant-id",
       }),
     );
   });

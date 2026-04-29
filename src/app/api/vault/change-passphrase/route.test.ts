@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaUser, mockRateLimiter, mockWithUserTenantRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaUser, mockRateLimiter, mockLogAudit, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
   mockRateLimiter: { check: vi.fn() },
+  mockLogAudit: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
@@ -22,6 +23,12 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 vi.mock("@/lib/crypto/verifier-version", () => ({
   VERIFIER_VERSION: 1,
   getCurrentVerifierVersion: () => 1,
+}));
+vi.mock("@/lib/audit/audit", () => ({
+  logAuditAsync: mockLogAudit,
+  extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
+  personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
+  tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
@@ -160,6 +167,25 @@ describe("POST /api/vault/change-passphrase", () => {
           secretKeyAuthTag: validBody.secretKeyAuthTag,
         }),
       })
+    );
+  });
+
+  it("emits VERIFIER_PEPPER_MISSING audit and returns 401 when pepper version is missing", async () => {
+    const { verifyPassphraseVerifier } = await import("@/lib/crypto/crypto-server");
+    vi.mocked(verifyPassphraseVerifier).mockReturnValueOnce({ ok: false, reason: "MISSING_PEPPER_VERSION" });
+
+    const res = await POST(createRequest("POST", "http://localhost/api/vault/change-passphrase", { body: validBody }));
+    const json = await res.json();
+
+    expect(res.status).toBe(401);
+    expect(json.error).toBe("INVALID_PASSPHRASE");
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "VERIFIER_PEPPER_MISSING",
+        scope: "TENANT",
+        userId: "user-1",
+        tenantId: "test-tenant-id",
+      }),
     );
   });
 });
