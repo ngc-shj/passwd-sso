@@ -1,17 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaGrant, mockPrismaKeyPair, mockPrismaUser, mockTransaction, mockSendEmail, mockWithBypassRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaGrant, mockPrismaUser, mockTransaction, mockTxGrantUpdateMany, mockTxKeyPairCreate, mockSendEmail, mockWithBypassRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaGrant: {
     findUnique: vi.fn(),
-    update: vi.fn(),
-  },
-  mockPrismaKeyPair: {
-    create: vi.fn(),
   },
   mockPrismaUser: { findUnique: vi.fn() },
   mockTransaction: vi.fn(),
+  mockTxGrantUpdateMany: vi.fn(),
+  mockTxKeyPairCreate: vi.fn(),
   mockSendEmail: vi.fn(),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
@@ -20,7 +18,6 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     emergencyAccessGrant: mockPrismaGrant,
-    emergencyAccessKeyPair: mockPrismaKeyPair,
     user: mockPrismaUser,
     $transaction: mockTransaction,
   },
@@ -60,6 +57,7 @@ const validGrant = {
   granteeEmail: "grantee@test.com",
   status: EA_STATUS.PENDING,
   tokenExpiresAt: new Date("2099-01-01"),
+  tokenHash: "hashed-valid-token",
 };
 
 describe("POST /api/emergency-access/accept", () => {
@@ -67,7 +65,14 @@ describe("POST /api/emergency-access/accept", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "grantee-1", email: "grantee@test.com" } });
     mockPrismaGrant.findUnique.mockResolvedValue(validGrant);
-    mockTransaction.mockResolvedValue([{}, {}]);
+    mockTxGrantUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxKeyPairCreate.mockResolvedValue({});
+    mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
+      cb({
+        emergencyAccessGrant: { updateMany: mockTxGrantUpdateMany },
+        emergencyAccessKeyPair: { create: mockTxKeyPairCreate },
+      }),
+    );
     mockPrismaUser.findUnique.mockResolvedValue({ email: "owner@test.com", name: "Owner Name" });
   });
 
@@ -96,12 +101,13 @@ describe("POST /api/emergency-access/accept", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 410 when invitation not PENDING", async () => {
-    mockPrismaGrant.findUnique.mockResolvedValue({ ...validGrant, status: EA_STATUS.ACCEPTED });
+  it("returns 410 when CAS finds no still-PENDING row (invitation already used)", async () => {
+    mockTxGrantUpdateMany.mockResolvedValue({ count: 0 });
     const res = await POST(createRequest("POST", "http://localhost/api/emergency-access/accept", {
       body: validBody,
     }));
     expect(res.status).toBe(410);
+    expect(mockTxKeyPairCreate).not.toHaveBeenCalled();
   });
 
   it("returns 410 when invitation expired", async () => {
@@ -139,6 +145,17 @@ describe("POST /api/emergency-access/accept", () => {
     expect(res.status).toBe(200);
     expect(json.status).toBe(EA_STATUS.ACCEPTED);
     expect(mockTransaction).toHaveBeenCalledTimes(1);
+    expect(mockTxGrantUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "grant-1",
+          tokenHash: "hashed-valid-token",
+          status: { in: expect.arrayContaining([EA_STATUS.PENDING]) },
+        }),
+        data: expect.objectContaining({ status: EA_STATUS.ACCEPTED }),
+      }),
+    );
+    expect(mockTxKeyPairCreate).toHaveBeenCalled();
     // Sends accepted email to owner
     expect(mockSendEmail).toHaveBeenCalledWith(
       expect.objectContaining({

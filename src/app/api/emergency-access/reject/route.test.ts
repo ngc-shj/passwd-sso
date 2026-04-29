@@ -5,7 +5,7 @@ const { mockAuth, mockPrismaGrant, mockPrismaUser, mockSendEmail, mockWithBypass
   mockAuth: vi.fn(),
   mockPrismaGrant: {
     findUnique: vi.fn(),
-    update: vi.fn(),
+    updateMany: vi.fn(),
   },
   mockPrismaUser: { findUnique: vi.fn() },
   mockSendEmail: vi.fn(),
@@ -36,6 +36,7 @@ const validGrant = {
   id: "grant-1",
   ownerId: "owner-1",
   granteeEmail: "grantee@test.com",
+  tokenHash: "hashed-tok",
   status: EA_STATUS.PENDING,
 };
 
@@ -44,7 +45,7 @@ describe("POST /api/emergency-access/reject", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "grantee-1", email: "grantee@test.com" } });
     mockPrismaGrant.findUnique.mockResolvedValue(validGrant);
-    mockPrismaGrant.update.mockResolvedValue({});
+    mockPrismaGrant.updateMany.mockResolvedValue({ count: 1 });
     mockPrismaUser.findUnique.mockResolvedValue({ email: "owner@test.com", name: "Owner Name" });
   });
 
@@ -83,8 +84,8 @@ describe("POST /api/emergency-access/reject", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 410 when invitation not PENDING", async () => {
-    mockPrismaGrant.findUnique.mockResolvedValue({ ...validGrant, status: EA_STATUS.ACCEPTED });
+  it("returns 410 when CAS finds no still-PENDING row (e.g. invitation already used)", async () => {
+    mockPrismaGrant.updateMany.mockResolvedValue({ count: 0 });
     const res = await POST(createRequest("POST", "http://localhost/api/emergency-access/reject", {
       body: { token: "tok" },
     }));
@@ -115,10 +116,16 @@ describe("POST /api/emergency-access/reject", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.status).toBe(EA_STATUS.REJECTED);
-    expect(mockPrismaGrant.update).toHaveBeenCalledWith({
-      where: { id: "grant-1" },
-      data: { status: EA_STATUS.REJECTED },
-    });
+    expect(mockPrismaGrant.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "grant-1",
+          tokenHash: "hashed-tok",
+          status: { in: expect.arrayContaining([EA_STATUS.PENDING]) },
+        }),
+        data: { status: EA_STATUS.REJECTED },
+      })
+    );
     // Sends declined email to owner
     expect(mockSendEmail).toHaveBeenCalledWith(
       expect.objectContaining({

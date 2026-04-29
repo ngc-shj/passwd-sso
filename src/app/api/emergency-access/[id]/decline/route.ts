@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { fromStatusesFor } from "@/lib/emergency-access/emergency-access-state";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyGrantDeclinedEmail } from "@/lib/email/templates/emergency-access";
@@ -26,7 +27,7 @@ async function handlePOST(
   const grant = await withBypassRls(prisma, async () =>
     prisma.emergencyAccessGrant.findUnique({
       where: { id },
-      select: { status: true, granteeEmail: true, ownerId: true },
+      select: { granteeEmail: true, ownerId: true },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
@@ -34,20 +35,25 @@ async function handlePOST(
     return notFound();
   }
 
-  if (grant.status !== EA_STATUS.PENDING) {
-    return errorResponse(API_ERROR.GRANT_NOT_PENDING, 400);
-  }
-
   if (grant.granteeEmail.toLowerCase() !== session.user.email.toLowerCase()) {
     return errorResponse(API_ERROR.NOT_AUTHORIZED_FOR_GRANT, 403);
   }
 
-  await withBypassRls(prisma, async () =>
-    prisma.emergencyAccessGrant.update({
-      where: { id },
+  // Atomic compare-and-swap: only transitions a still-PENDING row.
+  const updated = await withBypassRls(prisma, async () =>
+    prisma.emergencyAccessGrant.updateMany({
+      where: {
+        id,
+        granteeEmail: grant.granteeEmail,
+        status: { in: fromStatusesFor(EA_STATUS.REJECTED) },
+      },
       data: { status: EA_STATUS.REJECTED },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+
+  if (updated.count === 0) {
+    return errorResponse(API_ERROR.GRANT_NOT_PENDING, 400);
+  }
 
   await logAuditAsync({
     ...personalAuditBase(req, session.user.id),

@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { rejectEmergencyGrantSchema } from "@/lib/validations";
 import { hashToken } from "@/lib/crypto/crypto-server";
+import { fromStatusesFor } from "@/lib/emergency-access/emergency-access-state";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyGrantDeclinedEmail } from "@/lib/email/templates/emergency-access";
@@ -36,20 +37,25 @@ async function handlePOST(req: NextRequest) {
     return notFound();
   }
 
-  if (grant.status !== EA_STATUS.PENDING) {
-    return errorResponse(API_ERROR.INVITATION_ALREADY_USED, 410);
-  }
-
   if (grant.granteeEmail.toLowerCase() !== session.user.email.toLowerCase()) {
     return errorResponse(API_ERROR.INVITATION_WRONG_EMAIL, 403);
   }
 
-  await withBypassRls(prisma, async () =>
-    prisma.emergencyAccessGrant.update({
-      where: { id: grant.id },
+  // Atomic compare-and-swap: only transitions a still-PENDING row.
+  const updated = await withBypassRls(prisma, async () =>
+    prisma.emergencyAccessGrant.updateMany({
+      where: {
+        id: grant.id,
+        tokenHash: grant.tokenHash,
+        status: { in: fromStatusesFor(EA_STATUS.REJECTED) },
+      },
       data: { status: EA_STATUS.REJECTED },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+
+  if (updated.count === 0) {
+    return errorResponse(API_ERROR.INVITATION_ALREADY_USED, 410);
+  }
 
   await logAuditAsync({
     ...personalAuditBase(req, session.user.id),

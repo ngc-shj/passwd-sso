@@ -3,7 +3,7 @@ import { createRequest, createParams } from "@/__tests__/helpers/request-builder
 
 const { mockAuth, mockPrismaGrant, mockPrismaUser, mockSendEmail, mockWithBypassRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockPrismaGrant: { findUnique: vi.fn(), update: vi.fn() },
+  mockPrismaGrant: { findUnique: vi.fn(), updateMany: vi.fn() },
   mockPrismaUser: { findUnique: vi.fn() },
   mockSendEmail: vi.fn(),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
@@ -38,7 +38,7 @@ describe("POST /api/emergency-access/[id]/decline", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "grantee-1", email: "grantee@example.com" } });
     mockPrismaGrant.findUnique.mockResolvedValue(pendingGrant);
-    mockPrismaGrant.update.mockResolvedValue({});
+    mockPrismaGrant.updateMany.mockResolvedValue({ count: 1 });
     mockPrismaUser.findUnique.mockResolvedValue({ email: "owner@test.com", name: "Owner Name" });
   });
 
@@ -69,8 +69,8 @@ describe("POST /api/emergency-access/[id]/decline", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 400 when grant is not pending", async () => {
-    mockPrismaGrant.findUnique.mockResolvedValue({ ...pendingGrant, status: EA_STATUS.ACCEPTED });
+  it("returns 400 when CAS finds no still-PENDING row (e.g. concurrent accept)", async () => {
+    mockPrismaGrant.updateMany.mockResolvedValue({ count: 0 });
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/decline"),
       createParams({ id: "grant-1" })
@@ -97,9 +97,13 @@ describe("POST /api/emergency-access/[id]/decline", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.status).toBe(EA_STATUS.REJECTED);
-    expect(mockPrismaGrant.update).toHaveBeenCalledWith(
+    expect(mockPrismaGrant.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "grant-1" },
+        where: expect.objectContaining({
+          id: "grant-1",
+          granteeEmail: pendingGrant.granteeEmail,
+          status: { in: expect.arrayContaining([EA_STATUS.PENDING]) },
+        }),
         data: { status: EA_STATUS.REJECTED },
       })
     );
