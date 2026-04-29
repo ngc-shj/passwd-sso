@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaGrant, mockPrismaUser, mockTransaction, mockRateLimiter, mockSendEmail, mockWithBypassRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaGrant, mockPrismaUser, mockTransaction, mockTxGrantUpdateMany, mockTxKeyPairCreate, mockRateLimiter, mockSendEmail, mockWithBypassRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockPrismaGrant: { findUnique: vi.fn(), update: vi.fn() },
+  mockPrismaGrant: { findUnique: vi.fn() },
   mockPrismaUser: { findUnique: vi.fn() },
   mockTransaction: vi.fn(),
+  mockTxGrantUpdateMany: vi.fn(),
+  mockTxKeyPairCreate: vi.fn(),
   mockRateLimiter: { check: vi.fn() },
   mockSendEmail: vi.fn(),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
@@ -15,7 +17,6 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     emergencyAccessGrant: mockPrismaGrant,
-    emergencyAccessKeyPair: { create: vi.fn() },
     user: mockPrismaUser,
     $transaction: mockTransaction,
   },
@@ -59,7 +60,14 @@ describe("POST /api/emergency-access/[id]/accept", () => {
     mockAuth.mockResolvedValue({ user: { id: "grantee-1", email: "grantee@example.com" } });
     mockRateLimiter.check.mockResolvedValue({ allowed: true });
     mockPrismaGrant.findUnique.mockResolvedValue(pendingGrant);
-    mockTransaction.mockResolvedValue([{}, {}]);
+    mockTxGrantUpdateMany.mockResolvedValue({ count: 1 });
+    mockTxKeyPairCreate.mockResolvedValue({});
+    mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
+      cb({
+        emergencyAccessGrant: { updateMany: mockTxGrantUpdateMany },
+        emergencyAccessKeyPair: { create: mockTxKeyPairCreate },
+      }),
+    );
     mockPrismaUser.findUnique.mockResolvedValue({ email: "owner@test.com", name: "Owner Name" });
   });
 
@@ -99,8 +107,8 @@ describe("POST /api/emergency-access/[id]/accept", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 400 when grant is not pending", async () => {
-    mockPrismaGrant.findUnique.mockResolvedValue({ ...pendingGrant, status: EA_STATUS.ACCEPTED });
+  it("returns 400 when CAS finds no still-PENDING row (e.g. concurrent decline)", async () => {
+    mockTxGrantUpdateMany.mockResolvedValue({ count: 0 });
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/accept", { body: validBody }),
       createParams({ id: "grant-1" })
@@ -108,6 +116,8 @@ describe("POST /api/emergency-access/[id]/accept", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe("GRANT_NOT_PENDING");
+    // Key pair must NOT be created when the CAS misses.
+    expect(mockTxKeyPairCreate).not.toHaveBeenCalled();
   });
 
   it("returns 403 when email does not match", async () => {
@@ -172,6 +182,17 @@ describe("POST /api/emergency-access/[id]/accept", () => {
     const json = await res.json();
     expect(json.status).toBe(EA_STATUS.ACCEPTED);
     expect(mockTransaction).toHaveBeenCalledTimes(1);
+    expect(mockTxGrantUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "grant-1",
+          granteeEmail: pendingGrant.granteeEmail,
+          status: { in: expect.arrayContaining([EA_STATUS.PENDING]) },
+        }),
+        data: expect.objectContaining({ status: EA_STATUS.ACCEPTED }),
+      }),
+    );
+    expect(mockTxKeyPairCreate).toHaveBeenCalled();
     // Sends accepted email to owner
     expect(mockSendEmail).toHaveBeenCalledWith(
       expect.objectContaining({

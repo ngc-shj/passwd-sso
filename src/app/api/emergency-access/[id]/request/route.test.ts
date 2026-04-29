@@ -5,7 +5,7 @@ const { mockAuth, mockPrismaGrant, mockPrismaUser, mockSendEmail, mockWithBypass
   mockAuth: vi.fn(),
   mockPrismaGrant: {
     findUnique: vi.fn(),
-    update: vi.fn(),
+    updateMany: vi.fn(),
   },
   mockPrismaUser: { findUnique: vi.fn() },
   mockSendEmail: vi.fn(),
@@ -40,10 +40,9 @@ describe("POST /api/emergency-access/[id]/request", () => {
       id: "grant-1",
       ownerId: "owner-1",
       granteeId: "grantee-1",
-      status: EA_STATUS.IDLE,
       waitDays: 7,
     });
-    mockPrismaGrant.update.mockResolvedValue({});
+    mockPrismaGrant.updateMany.mockResolvedValue({ count: 1 });
     mockPrismaUser.findUnique.mockImplementation(({ where }: { where: { id: string } }) => {
       if (where.id === "owner-1") return Promise.resolve({ email: "owner@test.com", name: "Owner Name" });
       if (where.id === "grantee-1") return Promise.resolve({ email: "grantee@test.com", name: "Grantee Name" });
@@ -69,13 +68,8 @@ describe("POST /api/emergency-access/[id]/request", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 400 when status not IDLE", async () => {
-    mockPrismaGrant.findUnique.mockResolvedValue({
-      id: "grant-1",
-      granteeId: "grantee-1",
-      status: EA_STATUS.PENDING,
-      waitDays: 7,
-    });
+  it("returns 400 when status CAS finds no eligible row (e.g. grant in PENDING)", async () => {
+    mockPrismaGrant.updateMany.mockResolvedValue({ count: 0 });
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/request"),
       createParams({ id: "grant-1" })
@@ -92,9 +86,13 @@ describe("POST /api/emergency-access/[id]/request", () => {
     expect(res.status).toBe(200);
     expect(json.status).toBe(EA_STATUS.REQUESTED);
     expect(json.waitExpiresAt).toBeTruthy();
-    expect(mockPrismaGrant.update).toHaveBeenCalledWith(
+    expect(mockPrismaGrant.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "grant-1" },
+        where: expect.objectContaining({
+          id: "grant-1",
+          granteeId: "grantee-1",
+          status: { in: expect.arrayContaining([EA_STATUS.IDLE]) },
+        }),
         data: expect.objectContaining({ status: EA_STATUS.REQUESTED }),
       })
     );
@@ -107,13 +105,10 @@ describe("POST /api/emergency-access/[id]/request", () => {
     );
   });
 
-  it("returns 400 when grant is STALE", async () => {
-    mockPrismaGrant.findUnique.mockResolvedValue({
-      id: "grant-1",
-      granteeId: "grantee-1",
-      status: EA_STATUS.STALE,
-      waitDays: 7,
-    });
+  it("returns 400 when grant status is not in REQUESTED's permitted from-set (e.g. STALE)", async () => {
+    // updateMany filters by status: { in: fromStatusesFor(REQUESTED) } = [IDLE]
+    // STALE is not in that set, so the row does not match and count is 0.
+    mockPrismaGrant.updateMany.mockResolvedValue({ count: 0 });
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/request"),
       createParams({ id: "grant-1" })

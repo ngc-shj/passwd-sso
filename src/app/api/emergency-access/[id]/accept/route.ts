@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { acceptEmergencyGrantByIdSchema } from "@/lib/validations";
+import { fromStatusesFor } from "@/lib/emergency-access/emergency-access-state";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyGrantAcceptedEmail } from "@/lib/email/templates/emergency-access";
@@ -44,11 +45,8 @@ async function handlePOST(
     return notFound();
   }
 
-  if (grant.status !== EA_STATUS.PENDING) {
-    return errorResponse(API_ERROR.GRANT_NOT_PENDING, 400);
-  }
-
-  // Enforce invitation expiry regardless of auth method (session or token)
+  // Enforce invitation expiry regardless of auth method (session or token).
+  // tokenExpiresAt is immutable post-creation, so checking it pre-CAS is safe.
   if (grant.tokenExpiresAt && grant.tokenExpiresAt < new Date()) {
     return errorResponse(API_ERROR.INVITATION_EXPIRED, 410);
   }
@@ -65,17 +63,28 @@ async function handlePOST(
   if (!result.ok) return result.response;
   const { granteePublicKey, encryptedPrivateKey } = result.data;
 
-  await withBypassRls(prisma, async () =>
-    prisma.$transaction([
-      prisma.emergencyAccessGrant.update({
-        where: { id },
+  // Atomic compare-and-swap: only transitions a still-PENDING row, and only
+  // creates the escrow key pair if the transition actually fired. Wrapping
+  // both writes in $transaction ensures the key pair never exists for a
+  // grant whose status was already moved by a concurrent request.
+  const txResult = await withBypassRls(prisma, async () =>
+    prisma.$transaction(async (tx) => {
+      const updated = await tx.emergencyAccessGrant.updateMany({
+        where: {
+          id,
+          granteeEmail: grant.granteeEmail,
+          status: { in: fromStatusesFor(EA_STATUS.ACCEPTED) },
+        },
         data: {
           status: EA_STATUS.ACCEPTED,
           granteeId: session.user.id,
           granteePublicKey,
         },
-      }),
-      prisma.emergencyAccessKeyPair.create({
+      });
+      if (updated.count === 0) {
+        return { ok: false as const };
+      }
+      await tx.emergencyAccessKeyPair.create({
         data: {
           grantId: id,
           tenantId: grant.tenantId,
@@ -83,9 +92,14 @@ async function handlePOST(
           privateKeyIv: encryptedPrivateKey.iv,
           privateKeyAuthTag: encryptedPrivateKey.authTag,
         },
-      }),
-    ]),
+      });
+      return { ok: true as const };
+    }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+
+  if (!txResult.ok) {
+    return errorResponse(API_ERROR.GRANT_NOT_PENDING, 400);
+  }
 
   await logAuditAsync({
     ...personalAuditBase(req, session.user.id),

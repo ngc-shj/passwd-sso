@@ -592,6 +592,51 @@ describe("createCustomAdapter", () => {
       ).rejects.toThrow("USER_NOT_FOUND");
       expect(mockPrismaAccount.create).not.toHaveBeenCalled();
     });
+
+    it("encrypts refresh_token, access_token, and id_token before persisting", async () => {
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaAccount.create.mockResolvedValue({ id: "acc-1" });
+
+      const adapter = createCustomAdapter();
+      await adapter.linkAccount!({
+        userId: "u-1",
+        type: "oidc",
+        provider: "google",
+        providerAccountId: "google-2",
+        refresh_token: "rt-plain",
+        access_token: "at-plain",
+        id_token: "idt-plain",
+        token_type: "bearer",
+      });
+
+      const callArgs = mockPrismaAccount.create.mock.calls[0][0];
+      // Ciphertext does not contain the plaintext anywhere.
+      expect(callArgs.data.refresh_token).toMatch(/^psoenc1:/);
+      expect(callArgs.data.refresh_token).not.toContain("rt-plain");
+      expect(callArgs.data.access_token).toMatch(/^psoenc1:/);
+      expect(callArgs.data.access_token).not.toContain("at-plain");
+      expect(callArgs.data.id_token).toMatch(/^psoenc1:/);
+      expect(callArgs.data.id_token).not.toContain("idt-plain");
+    });
+
+    it("leaves null/undefined token fields null after encryption", async () => {
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaAccount.create.mockResolvedValue({ id: "acc-1" });
+
+      const adapter = createCustomAdapter();
+      await adapter.linkAccount!({
+        userId: "u-1",
+        type: "oidc",
+        provider: "google",
+        providerAccountId: "google-3",
+        // No tokens supplied
+      });
+
+      const callArgs = mockPrismaAccount.create.mock.calls[0][0];
+      expect(callArgs.data.refresh_token).toBeNull();
+      expect(callArgs.data.access_token).toBeNull();
+      expect(callArgs.data.id_token).toBeNull();
+    });
   });
 
   describe("updateSession", () => {
@@ -1105,6 +1150,65 @@ describe("createCustomAdapter", () => {
       mockPrismaAccount.findFirst.mockResolvedValue(null);
       const adapter = createCustomAdapter();
       expect(await adapter.getAccount!("missing", "google")).toBeNull();
+    });
+
+    it("decrypts encrypted tokens to plaintext (round-trip with linkAccount)", async () => {
+      // Use linkAccount to produce the ciphertext, then mock findFirst to
+      // return that ciphertext and verify getAccount decrypts it.
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaAccount.create.mockResolvedValue({ id: "acc-1" });
+      const adapter = createCustomAdapter();
+      await adapter.linkAccount!({
+        userId: "u-1",
+        type: "oidc",
+        provider: "google",
+        providerAccountId: "g-roundtrip",
+        refresh_token: "rt-roundtrip",
+        access_token: "at-roundtrip",
+        id_token: "idt-roundtrip",
+      });
+      const writeData = mockPrismaAccount.create.mock.calls[0][0].data;
+
+      mockPrismaAccount.findFirst.mockResolvedValue({
+        userId: "u-1",
+        type: "oidc",
+        provider: "google",
+        providerAccountId: "g-roundtrip",
+        refresh_token: writeData.refresh_token,
+        access_token: writeData.access_token,
+        expires_at: 1234,
+        token_type: "bearer",
+        scope: "openid",
+        id_token: writeData.id_token,
+        session_state: "ss",
+      });
+
+      const account = await adapter.getAccount!("g-roundtrip", "google");
+      expect(account?.refresh_token).toBe("rt-roundtrip");
+      expect(account?.access_token).toBe("at-roundtrip");
+      expect(account?.id_token).toBe("idt-roundtrip");
+    });
+
+    it("returns undefined for fields whose ciphertext is corrupted, without throwing", async () => {
+      mockPrismaAccount.findFirst.mockResolvedValue({
+        userId: "u-1",
+        type: "oidc",
+        provider: "google",
+        providerAccountId: "g-corrupt",
+        // Sentinel-prefixed but garbage afterwards — decryption must throw and
+        // the adapter must catch it per field.
+        refresh_token: "psoenc1:0:zzzzzzzzzzzz",
+        access_token: null,
+        expires_at: null,
+        token_type: null,
+        scope: null,
+        id_token: null,
+        session_state: null,
+      });
+      const adapter = createCustomAdapter();
+      const account = await adapter.getAccount!("g-corrupt", "google");
+      expect(account).not.toBeNull();
+      expect(account?.refresh_token).toBeUndefined();
     });
   });
 });

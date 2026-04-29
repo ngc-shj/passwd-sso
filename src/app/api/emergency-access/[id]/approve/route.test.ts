@@ -5,7 +5,7 @@ const { mockAuth, mockPrismaGrant, mockPrismaUser, mockSendEmail, mockWithUserTe
   mockAuth: vi.fn(),
   mockPrismaGrant: {
     findUnique: vi.fn(),
-    update: vi.fn(),
+    updateMany: vi.fn(),
   },
   mockPrismaUser: { findUnique: vi.fn() },
   mockSendEmail: vi.fn(),
@@ -47,7 +47,7 @@ describe("POST /api/emergency-access/[id]/approve", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "owner-1" } });
     mockPrismaGrant.findUnique.mockResolvedValue(requestedGrant);
-    mockPrismaGrant.update.mockResolvedValue({});
+    mockPrismaGrant.updateMany.mockResolvedValue({ count: 1 });
     mockPrismaUser.findUnique.mockResolvedValue({ email: "grantee@test.com", name: "Grantee Name" });
   });
 
@@ -78,17 +78,10 @@ describe("POST /api/emergency-access/[id]/approve", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 400 when grant is not REQUESTED", async () => {
-    mockPrismaGrant.findUnique.mockResolvedValue({ ...requestedGrant, status: EA_STATUS.IDLE });
-    const res = await POST(
-      createRequest("POST", "http://localhost/api/emergency-access/grant-1/approve"),
-      createParams({ id: "grant-1" })
-    );
-    expect(res.status).toBe(400);
-  });
-
-  it("returns 400 when grant is PENDING", async () => {
-    mockPrismaGrant.findUnique.mockResolvedValue({ ...requestedGrant, status: EA_STATUS.PENDING });
+  it("returns 400 when status CAS finds no eligible row (e.g. concurrent revoke)", async () => {
+    // Simulates the race: findUnique sees REQUESTED, but by the time the CAS
+    // updateMany runs, the row's status has moved out of the permitted from-set.
+    mockPrismaGrant.updateMany.mockResolvedValue({ count: 0 });
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/approve"),
       createParams({ id: "grant-1" })
@@ -115,8 +108,12 @@ describe("POST /api/emergency-access/[id]/approve", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.status).toBe(EA_STATUS.ACTIVATED);
-    expect(mockPrismaGrant.update).toHaveBeenCalledWith({
-      where: { id: "grant-1" },
+    expect(mockPrismaGrant.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "grant-1",
+        ownerId: "owner-1",
+        status: { in: expect.arrayContaining([EA_STATUS.REQUESTED]) },
+      },
       data: {
         status: EA_STATUS.ACTIVATED,
         activatedAt: expect.any(Date),

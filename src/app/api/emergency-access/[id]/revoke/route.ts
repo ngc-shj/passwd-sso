@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { revokeEmergencyGrantSchema } from "@/lib/validations";
-import { canTransition } from "@/lib/emergency-access/emergency-access-state";
+import { fromStatusesFor } from "@/lib/emergency-access/emergency-access-state";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyAccessRevokedEmail } from "@/lib/email/templates/emergency-access";
@@ -30,7 +30,7 @@ async function handlePOST(
   const grant = await withUserTenantRls(session.user.id, async () =>
     prisma.emergencyAccessGrant.findUnique({
       where: { id },
-      select: { ownerId: true, status: true, granteeId: true },
+      select: { ownerId: true, granteeId: true },
     }),
   );
 
@@ -43,14 +43,14 @@ async function handlePOST(
   const { permanent } = result.data;
 
   if (permanent) {
-    // Full revoke
-    if (!canTransition(grant.status, EA_STATUS.REVOKED)) {
-      return errorResponse(API_ERROR.INVALID_STATUS, 400);
-    }
-
-    await withUserTenantRls(session.user.id, async () =>
-      prisma.emergencyAccessGrant.update({
-        where: { id },
+    // Full revoke — atomic compare-and-swap on status.
+    const updated = await withUserTenantRls(session.user.id, async () =>
+      prisma.emergencyAccessGrant.updateMany({
+        where: {
+          id,
+          ownerId: session.user.id,
+          status: { in: fromStatusesFor(EA_STATUS.REVOKED) },
+        },
         data: {
           status: EA_STATUS.REVOKED,
           revokedAt: new Date(),
@@ -63,6 +63,10 @@ async function handlePOST(
         },
       }),
     );
+
+    if (updated.count === 0) {
+      return errorResponse(API_ERROR.INVALID_STATUS, 400);
+    }
 
     await logAuditAsync({
       ...personalAuditBase(req, session.user.id),
@@ -90,14 +94,14 @@ async function handlePOST(
 
     return NextResponse.json({ status: EA_STATUS.REVOKED });
   } else {
-    // Reject request only (revert to IDLE)
-    if (!canTransition(grant.status, EA_STATUS.IDLE)) {
-      return errorResponse(API_ERROR.INVALID_STATUS, 400);
-    }
-
-    await withUserTenantRls(session.user.id, async () =>
-      prisma.emergencyAccessGrant.update({
-        where: { id },
+    // Reject request only (revert to IDLE) — atomic compare-and-swap on status.
+    const updated = await withUserTenantRls(session.user.id, async () =>
+      prisma.emergencyAccessGrant.updateMany({
+        where: {
+          id,
+          ownerId: session.user.id,
+          status: { in: fromStatusesFor(EA_STATUS.IDLE) },
+        },
         data: {
           status: EA_STATUS.IDLE,
           requestedAt: null,
@@ -105,6 +109,10 @@ async function handlePOST(
         },
       }),
     );
+
+    if (updated.count === 0) {
+      return errorResponse(API_ERROR.INVALID_STATUS, 400);
+    }
 
     await logAuditAsync({
       ...personalAuditBase(req, session.user.id),

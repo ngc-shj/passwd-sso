@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { canTransition } from "@/lib/emergency-access/emergency-access-state";
+import { fromStatusesFor } from "@/lib/emergency-access/emergency-access-state";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyAccessRequestedEmail } from "@/lib/email/templates/emergency-access";
@@ -36,7 +36,7 @@ async function handlePOST(
   const grant = await withBypassRls(prisma, async () =>
     prisma.emergencyAccessGrant.findUnique({
       where: { id },
-      select: { granteeId: true, status: true, ownerId: true, waitDays: true },
+      select: { granteeId: true, ownerId: true, waitDays: true },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
@@ -44,16 +44,18 @@ async function handlePOST(
     return notFound();
   }
 
-  if (!canTransition(grant.status, EA_STATUS.REQUESTED)) {
-    return errorResponse(API_ERROR.INVALID_STATUS, 400);
-  }
-
   const now = new Date();
   const waitExpiresAt = new Date(now.getTime() + grant.waitDays * MS_PER_DAY);
 
-  await withBypassRls(prisma, async () =>
-    prisma.emergencyAccessGrant.update({
-      where: { id },
+  // Atomic compare-and-swap on status: prevents concurrent transitions that
+  // would otherwise race past the optimistic canTransition check.
+  const updated = await withBypassRls(prisma, async () =>
+    prisma.emergencyAccessGrant.updateMany({
+      where: {
+        id,
+        granteeId: session.user.id,
+        status: { in: fromStatusesFor(EA_STATUS.REQUESTED) },
+      },
       data: {
         status: EA_STATUS.REQUESTED,
         requestedAt: now,
@@ -61,6 +63,10 @@ async function handlePOST(
       },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+
+  if (updated.count === 0) {
+    return errorResponse(API_ERROR.INVALID_STATUS, 400);
+  }
 
   await logAuditAsync({
     ...personalAuditBase(req, session.user.id),

@@ -30,6 +30,8 @@ ADMIN_API_TOKEN=<op_token> scripts/purge-audit-logs.sh                          
 ADMIN_API_TOKEN=<op_token> TARGET_VERSION=<int> scripts/rotate-master-key.sh         # Rotate ShareLink master key
 
 PASSWD_OUTBOX_WORKER_PASSWORD=<pass> MIGRATION_DATABASE_URL=<url> scripts/set-outbox-worker-password.sh  # Set worker DB role password
+
+MIGRATION_DATABASE_URL=<privileged-url> npm run migrate:account-tokens               # Encrypt legacy plaintext OAuth tokens (idempotent; --dry-run available)
 ```
 
 Audit outbox worker (separate process):
@@ -101,6 +103,7 @@ route handlers own application-layer concerns.
 ### Authentication Flow
 
 - Auth.js v5 (beta.30) with database session strategy (not JWT)
+- Identity model: global User keyed by email, one active tenant per user (`User.tenantId`), multi-tenant access via `TenantMember`. See `docs/archive/review/email-uniqueness-design.md` for the ADR.
 - Providers: Google OIDC + SAML 2.0 via BoxyHQ SAML Jackson (Docker container, NOT npm) + Passkey (WebAuthn) + Magic Link (email)
 - Jackson exposes an OIDC interface; Auth.js connects as a standard OIDC provider
 - Passkey sign-in: discoverable (passwordless) + email-based (non-discoverable security keys)

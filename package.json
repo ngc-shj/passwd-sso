@@ -39,6 +39,7 @@
     "version:bump": "bash scripts/bump-version.sh",
     "worker:audit-outbox": "tsx scripts/audit-outbox-worker.ts",
     "worker:dcr-cleanup": "tsx scripts/dcr-cleanup-worker.ts",
+    "migrate:account-tokens": "tsx scripts/migrate-account-tokens-to-encrypted.ts",
     "generate:env-example": "tsx scripts/generate-env-example.ts",
     "check:env-docs": "tsx scripts/check-env-docs.ts",
     "init:env": "tsx scripts/init-env.ts",

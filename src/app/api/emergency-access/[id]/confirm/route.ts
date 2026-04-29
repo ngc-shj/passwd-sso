@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { confirmEmergencyGrantSchema } from "@/lib/validations";
-import { canTransition } from "@/lib/emergency-access/emergency-access-state";
+import { fromStatusesFor } from "@/lib/emergency-access/emergency-access-state";
 import { SUPPORTED_KEY_ALGORITHMS } from "@/lib/crypto/crypto-emergency";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
@@ -34,10 +34,6 @@ async function handlePOST(
     return notFound();
   }
 
-  if (!canTransition(grant.status, EA_STATUS.IDLE)) {
-    return errorResponse(API_ERROR.INVALID_STATUS, 400);
-  }
-
   // Fetch owner's current keyVersion from DB (server-authoritative)
   const owner = await withUserTenantRls(session.user.id, async () =>
     prisma.user.findUnique({
@@ -63,9 +59,15 @@ async function handlePOST(
   // Use server-fetched keyVersion, ignore client-sent value
   const serverKeyVersion = owner.keyVersion;
 
-  await withUserTenantRls(session.user.id, async () =>
-    prisma.emergencyAccessGrant.update({
-      where: { id },
+  // Atomic compare-and-swap on status: prevents racing a concurrent revoke
+  // that would otherwise let stale escrow data overwrite a REVOKED grant.
+  const updated = await withUserTenantRls(session.user.id, async () =>
+    prisma.emergencyAccessGrant.updateMany({
+      where: {
+        id,
+        ownerId: session.user.id,
+        status: { in: fromStatusesFor(EA_STATUS.IDLE) },
+      },
       data: {
         status: EA_STATUS.IDLE,
         ownerEphemeralPublicKey,
@@ -78,6 +80,10 @@ async function handlePOST(
       },
     }),
   );
+
+  if (updated.count === 0) {
+    return errorResponse(API_ERROR.INVALID_STATUS, 400);
+  }
 
   await logAuditAsync({
     ...personalAuditBase(req, session.user.id),

@@ -5,7 +5,7 @@ const { mockAuth, mockPrismaGrant, mockPrismaUser, mockWithUserTenantRls } = vi.
   mockAuth: vi.fn(),
   mockPrismaGrant: {
     findUnique: vi.fn(),
-    update: vi.fn(),
+    updateMany: vi.fn(),
   },
   mockPrismaUser: {
     findUnique: vi.fn(),
@@ -57,7 +57,7 @@ describe("POST /api/emergency-access/[id]/confirm", () => {
       status: EA_STATUS.ACCEPTED,
       keyAlgorithm: "ECDH-P256",
     });
-    mockPrismaGrant.update.mockResolvedValue({});
+    mockPrismaGrant.updateMany.mockResolvedValue({ count: 1 });
     mockPrismaUser.findUnique.mockResolvedValue({ keyVersion: 3 });
   });
 
@@ -89,13 +89,8 @@ describe("POST /api/emergency-access/[id]/confirm", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 400 when status is not ACCEPTED", async () => {
-    mockPrismaGrant.findUnique.mockResolvedValue({
-      id: "grant-1",
-      ownerId: "owner-1",
-      status: EA_STATUS.IDLE,
-      keyAlgorithm: "ECDH-P256",
-    });
+  it("returns 400 when CAS finds no eligible row (e.g. concurrent revoke moved status out of permitted from-set)", async () => {
+    mockPrismaGrant.updateMany.mockResolvedValue({ count: 0 });
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/confirm", { body: validBody }),
       createParams({ id: "grant-1" })
@@ -150,8 +145,12 @@ describe("POST /api/emergency-access/[id]/confirm", () => {
     expect(res.status).toBe(200);
     expect(json.status).toBe(EA_STATUS.IDLE);
     expect(json.keyVersion).toBe(3);
-    expect(mockPrismaGrant.update).toHaveBeenCalledWith({
-      where: { id: "grant-1" },
+    expect(mockPrismaGrant.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: "grant-1",
+        ownerId: "owner-1",
+        status: { in: expect.any(Array) },
+      }),
       data: expect.objectContaining({
         status: EA_STATUS.IDLE,
         keyVersion: 3,
@@ -171,7 +170,7 @@ describe("POST /api/emergency-access/[id]/confirm", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.keyVersion).toBe(5);
-    expect(mockPrismaGrant.update).toHaveBeenCalledWith(
+    expect(mockPrismaGrant.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ keyVersion: 5 }),
       }),

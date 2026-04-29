@@ -5,7 +5,7 @@ const { mockAuth, mockPrismaGrant, mockPrismaUser, mockSendEmail, mockWithUserTe
   mockAuth: vi.fn(),
   mockPrismaGrant: {
     findUnique: vi.fn(),
-    update: vi.fn(),
+    updateMany: vi.fn(),
   },
   mockPrismaUser: { findUnique: vi.fn() },
   mockSendEmail: vi.fn(),
@@ -41,9 +41,8 @@ describe("POST /api/emergency-access/[id]/revoke", () => {
       id: "grant-1",
       ownerId: "owner-1",
       granteeId: "grantee-1",
-      status: EA_STATUS.IDLE,
     });
-    mockPrismaGrant.update.mockResolvedValue({});
+    mockPrismaGrant.updateMany.mockResolvedValue({ count: 1 });
     mockPrismaUser.findUnique.mockResolvedValue({ email: "grantee@test.com", name: "Grantee Name" });
   });
 
@@ -92,8 +91,13 @@ describe("POST /api/emergency-access/[id]/revoke", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.status).toBe(EA_STATUS.REVOKED);
-    expect(mockPrismaGrant.update).toHaveBeenCalledWith(
+    expect(mockPrismaGrant.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: expect.objectContaining({
+          id: "grant-1",
+          ownerId: "owner-1",
+          status: { in: expect.any(Array) },
+        }),
         data: expect.objectContaining({
           status: EA_STATUS.REVOKED,
           encryptedSecretKey: null,
@@ -112,11 +116,6 @@ describe("POST /api/emergency-access/[id]/revoke", () => {
   });
 
   it("rejects request (non-permanent, back to IDLE)", async () => {
-    mockPrismaGrant.findUnique.mockResolvedValue({
-      id: "grant-1",
-      ownerId: "owner-1",
-      status: EA_STATUS.REQUESTED,
-    });
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/revoke", {
         body: { permanent: false },
@@ -128,12 +127,8 @@ describe("POST /api/emergency-access/[id]/revoke", () => {
     expect(json.status).toBe(EA_STATUS.IDLE);
   });
 
-  it("returns 400 when already revoked", async () => {
-    mockPrismaGrant.findUnique.mockResolvedValue({
-      id: "grant-1",
-      ownerId: "owner-1",
-      status: EA_STATUS.REVOKED,
-    });
+  it("returns 400 when CAS finds no eligible row (e.g. already REVOKED)", async () => {
+    mockPrismaGrant.updateMany.mockResolvedValue({ count: 0 });
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/revoke", {
         body: { permanent: true },
@@ -144,12 +139,7 @@ describe("POST /api/emergency-access/[id]/revoke", () => {
   });
 
   it("revokes STALE grant", async () => {
-    mockPrismaGrant.findUnique.mockResolvedValue({
-      id: "grant-1",
-      ownerId: "owner-1",
-      granteeId: "grantee-1",
-      status: EA_STATUS.STALE,
-    });
+    // STALE is in fromStatusesFor(REVOKED), so updateMany returns count: 1.
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/revoke", {
         body: { permanent: true },

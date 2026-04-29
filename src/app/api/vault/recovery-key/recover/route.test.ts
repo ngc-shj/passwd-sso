@@ -205,5 +205,49 @@ describe("POST /api/vault/recovery-key/recover", () => {
       }));
       expect(res.status).toBe(400);
     });
+
+    it("rejects replay of a used recovery key after the recovery verifier has rotated", async () => {
+      // First reset: succeeds. The recoveryVerifierHmac in the row is "a"*64
+      // and the request's verifierHash is "a"*64, so verifyHmac (mocked as
+      // strict equality) returns true and the row update fires.
+      const firstRes = await POST(createRequest("POST", URL, { body: resetBody }));
+      expect(firstRes.status).toBe(200);
+
+      // Simulate the post-rotation DB state: the recoveryVerifierHmac in the
+      // row is now hmac_<resetBody.recoveryVerifierHash>, since the legitimate
+      // reset rotated the recovery key atomically with the passphrase change.
+      mockPrismaUser.findUnique.mockResolvedValue({
+        ...userWithRecovery,
+        recoveryVerifierHmac: `hmac_${resetBody.recoveryVerifierHash}`,
+      });
+
+      // Replay the same request body: the attacker presents the OLD
+      // verifierHash ("a"*64), but the stored verifier has rotated, so the
+      // strict-equality mock returns false → INVALID_RECOVERY_KEY.
+      const replayRes = await POST(createRequest("POST", URL, { body: resetBody }));
+      expect(replayRes.status).toBe(401);
+      const replayJson = await replayRes.json();
+      expect(replayJson.error).toBe("INVALID_RECOVERY_KEY");
+    });
+
+    it("rejects replay even within the rate-limit window", async () => {
+      // Force the rate limiter to allow both attempts so this test isolates
+      // the verifier-rotation rejection path from rate-limit rejection.
+      mockResetCheck.mockResolvedValue({ allowed: true });
+
+      const firstRes = await POST(createRequest("POST", URL, { body: resetBody }));
+      expect(firstRes.status).toBe(200);
+
+      // Post-rotation state with rotated stored verifier.
+      mockPrismaUser.findUnique.mockResolvedValue({
+        ...userWithRecovery,
+        recoveryVerifierHmac: `hmac_${resetBody.recoveryVerifierHash}`,
+      });
+
+      const replayRes = await POST(createRequest("POST", URL, { body: resetBody }));
+      expect(replayRes.status).toBe(401);
+      // The DB write must NOT have happened on replay.
+      expect(mockPrismaUser.update).toHaveBeenCalledTimes(1);
+    });
   });
 });
