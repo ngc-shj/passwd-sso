@@ -250,3 +250,17 @@ Three sub-agents launched. Security: No findings ✓ (timing-safe, propagation c
 - Action: Added parallel test in the `step=reset` describe block — mocks `verifyPassphraseVerifier` to return `MISSING_PEPPER_VERSION`, asserts 401 + audit emission with `tenantAuditBase` shape (action, scope: TENANT, tenantId).
 - Modified file: `src/app/api/vault/recovery-key/recover/route.test.ts`
 - Coverage gap analysis: R1 audit-emission tests covered only travel-mode and verify-access. R3 added change-passphrase and recovery-key/generate. R4 closes the last route's reset branch — now ALL 6 emit sites have explicit tests.
+
+### Round 5 Findings
+
+Three sub-agents launched. Security: No findings ✓ (R3+R4+R5 = 3 consecutive clean rounds). Functionality + Testing surfaced 2 unique findings (Minor only — same RT3 / R21 cleanup class as T8/T13/T7).
+
+#### F9/T15 Minor RT3 — `recover/route.test.ts:194,196` hardcoded `1` in success-test assertions
+- T8 fixed unlock test, T13 fixed generate test; the parallel assertion in recover test (step=reset success path) was overlooked.
+- Action: Imported `VERIFIER_VERSION` from `@/lib/crypto/verifier-version` and replaced both literals (`passphraseVerifierVersion: 1` → `VERIFIER_VERSION`, `recoveryVerifierVersion: 1` → `VERIFIER_VERSION`). Mock-data literals at line 48 (`recoveryVerifierVersion: 1` in `userWithRecovery` fixture) intentionally kept as `1` — represents a V1-stored user.
+- Modified file: `src/app/api/vault/recovery-key/recover/route.test.ts`
+
+#### T16 Minor R21 — integration test file-level docblock claims audit emission
+- T7 in R1 fixed the inline body comment but missed the file-level docblock at line 9 making the same claim.
+- Action: Updated bullet 3 to "fails verification with MISSING_PEPPER_VERSION at the crypto layer ... Route audit emission ... covered by unit tests in route.test.ts files."
+- Modified file: `src/__tests__/db-integration/pepper-dual-version.integration.test.ts`

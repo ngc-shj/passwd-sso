@@ -40,6 +40,7 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { POST } from "./route";
+import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 
 const URL = "http://localhost/api/vault/recovery-key/recover";
 
@@ -191,9 +192,9 @@ describe("POST /api/vault/recovery-key/recover", () => {
             encryptedSecretKey: resetBody.encryptedSecretKey,
             accountSalt: resetBody.accountSalt,
             passphraseVerifierHmac: `hmac_${resetBody.newVerifierHash}`,
-            passphraseVerifierVersion: 1,
+            passphraseVerifierVersion: VERIFIER_VERSION,
             recoveryEncryptedSecretKey: resetBody.recoveryEncryptedSecretKey,
-            recoveryVerifierVersion: 1,
+            recoveryVerifierVersion: VERIFIER_VERSION,
             failedUnlockAttempts: 0,
             lastFailedUnlockAt: null,
             accountLockedUntil: null,

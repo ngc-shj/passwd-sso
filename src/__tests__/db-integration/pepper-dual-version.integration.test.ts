@@ -6,8 +6,10 @@
  *    migrated to V2 when they next unlock under a V2 key environment.
  * 2. Share access password verification succeeds after a VERIFIER_VERSION bump
  *    (backward compat: V1-stored hash verified via V1 pepper key).
- * 3. A V2-stored user returning 401 + emitting VERIFIER_PEPPER_MISSING when the
- *    V2 pepper key is not configured (misconfigured rollout protection).
+ * 3. A V2-stored user fails verification with MISSING_PEPPER_VERSION at the
+ *    crypto layer when the V2 pepper key is not configured (misconfigured
+ *    rollout protection). Route audit emission (VERIFIER_PEPPER_MISSING) is
+ *    covered by unit tests in route.test.ts files.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
