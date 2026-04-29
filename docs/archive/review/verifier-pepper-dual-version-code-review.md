@@ -207,3 +207,46 @@ Three sub-agents launched (Functionality / Security / Testing). Security expert 
 ### T14 Minor — travel-mode VERIFIER_PEPPER_MISSING test missing explicit `scope: "TENANT"`
 - Action: Added `scope: "TENANT"` to the `expect.objectContaining({...})` audit assertion in the R1-added test, parallel to the verify-access test.
 - Modified file: `src/app/api/travel-mode/travel-mode.test.ts`
+
+## Round 4 Review
+
+### Seed Finding Disposition
+Seed unavailable — no dispositions to record.
+
+### Round 4 Verification
+
+#### Audit assertion pattern check (F7/T12 new tests)
+
+**change-passphrase** (line 182-189):
+- Uses `expect.objectContaining({ action: "VERIFIER_PEPPER_MISSING", scope: "TENANT", userId: "user-1", tenantId: "test-tenant-id" })`.
+- `tenantAuditBase` mock in `vi.hoisted` returns `{ scope: "TENANT", userId, tenantId }` — identical to travel-mode/recover mocks. Pattern is consistent.
+- No false-positive risk: the route emits `logAuditAsync` only on `MISSING_PEPPER_VERSION` path; success path has no `logAuditAsync` call. Mock cleared in `beforeEach`. `mockReturnValueOnce` ensures override does not leak to other tests.
+
+**recovery-key/generate** (line 194-201):
+- Same assertion shape and mock pattern as change-passphrase.
+- No false-positive risk: route short-circuits before success-path `logAuditAsync` (RECOVERY_KEY_CREATED/REGENERATED) when `verifyResult.ok` is false.
+
+#### mockLogAudit hoisting check (change-passphrase)
+`mockLogAudit` added to existing `vi.hoisted` destructure (line 4). `vi.mock("@/lib/audit/audit")` factory references `mockLogAudit` at line 28. Existing tests all call `vi.clearAllMocks()` in `beforeEach` — no interference with pre-existing tests confirmed by 11/11 passing tests.
+
+#### R19 sweep
+All new `objectContaining` assertions include the behaviorally significant fields (`action`, `scope`, `userId`, `tenantId`). `metadata: { storedVersion: ... }` is intentionally omitted in all four VERIFIER_PEPPER_MISSING tests across the branch — consistent omission, not a regression. T4 (blocklist test) covers redaction of `storedVersion`.
+
+#### RT1 / RT2 / RT3 / R21 status
+- **RT1**: PASS — `travel-mode` imports `VerifyResult` type; `change-passphrase` and `recovery-key/generate` use `as const` (structurally equivalent, no regression from R3).
+- **RT2**: PASS — all findings remain testable; new tests would fail if the audit-emit branch were removed.
+- **RT3**: PASS — T8 and T13 fixed all version-literal assertions; no new hardcoded version literals introduced in R3.
+- **R21**: PASS — integration test comment updated in T7; no new integration test scope changes.
+
+#### Test run
+39 tests across 3 files: all pass (`npx vitest run` confirmed).
+
+### Round 4 Findings
+
+Three sub-agents launched. Security: No findings ✓ (timing-safe, propagation coherent). Testing: No findings ✓ (R3 fixes verified pattern-consistent). Functionality: 1 Major.
+
+#### F8 Major — `recover/route.ts` step=reset VERIFIER_PEPPER_MISSING audit emission untested
+- The route has TWO independent VERIFIER_PEPPER_MISSING emit paths: `handleVerify` (line 117, step=verify) and `handleReset` (line 166, step=reset). R1 added a test for the verify branch but the structurally identical reset branch was missed.
+- Action: Added parallel test in the `step=reset` describe block — mocks `verifyPassphraseVerifier` to return `MISSING_PEPPER_VERSION`, asserts 401 + audit emission with `tenantAuditBase` shape (action, scope: TENANT, tenantId).
+- Modified file: `src/app/api/vault/recovery-key/recover/route.test.ts`
+- Coverage gap analysis: R1 audit-emission tests covered only travel-mode and verify-access. R3 added change-passphrase and recovery-key/generate. R4 closes the last route's reset branch — now ALL 6 emit sites have explicit tests.

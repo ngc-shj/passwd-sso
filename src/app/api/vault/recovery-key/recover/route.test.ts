@@ -221,6 +221,21 @@ describe("POST /api/vault/recovery-key/recover", () => {
       expect(res.status).toBe(401);
     });
 
+    it("emits VERIFIER_PEPPER_MISSING audit and returns 401 when pepper version is missing", async () => {
+      const { verifyPassphraseVerifier } = await import("@/lib/crypto/crypto-server");
+      vi.mocked(verifyPassphraseVerifier).mockReturnValueOnce({ ok: false, reason: "MISSING_PEPPER_VERSION" });
+
+      const res = await POST(createRequest("POST", URL, { body: resetBody }));
+      expect(res.status).toBe(401);
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "VERIFIER_PEPPER_MISSING",
+          scope: "TENANT",
+          tenantId: "test-tenant-id",
+        }),
+      );
+    });
+
     it("returns 400 on missing fields", async () => {
       const res = await POST(createRequest("POST", URL, {
         body: { step: "reset", verifierHash: "a".repeat(64) },
