@@ -61,8 +61,13 @@ async function main(): Promise<void> {
 
   try {
     while (true) {
+      // The Prisma schema maps Account.providerAccountId to the
+      // provider_account_id column (snake_case in DB), so the raw query
+      // must reference the column name and alias it back to the camelCase
+      // shape the rest of the script reads as.
       const batch: RawAccount[] = await prisma.$queryRawUnsafe<RawAccount[]>(
-        `SELECT id, provider, "providerAccountId", refresh_token, access_token, id_token
+        `SELECT id, provider, provider_account_id AS "providerAccountId",
+                refresh_token, access_token, id_token
          FROM accounts
          ${cursorId ? "WHERE id > $1::uuid" : ""}
          ORDER BY id ASC
