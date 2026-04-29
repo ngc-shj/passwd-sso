@@ -101,6 +101,7 @@ route handlers own application-layer concerns.
 ### Authentication Flow
 
 - Auth.js v5 (beta.30) with database session strategy (not JWT)
+- Identity model: global User keyed by email, one active tenant per user (`User.tenantId`), multi-tenant access via `TenantMember`. See `docs/archive/review/email-uniqueness-design.md` for the ADR.
 - Providers: Google OIDC + SAML 2.0 via BoxyHQ SAML Jackson (Docker container, NOT npm) + Passkey (WebAuthn) + Magic Link (email)
 - Jackson exposes an OIDC interface; Auth.js connects as a standard OIDC provider
 - Passkey sign-in: discoverable (passwordless) + email-based (non-discoverable security keys)

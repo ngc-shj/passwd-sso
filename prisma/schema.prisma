@@ -68,6 +68,9 @@ model User {
   id            String    @id @default(uuid(4)) @db.Uuid
   tenantId      String    @map("tenant_id") @db.Uuid
   name          String?
+  // Identity model: global User keyed by email, with one active tenant
+  // (User.tenantId) and multi-tenant access via TenantMember.
+  // See docs/archive/review/email-uniqueness-design.md for the rationale.
   email         String?   @unique
   emailVerified DateTime? @map("email_verified") @db.Timestamptz(3)
   image         String?
