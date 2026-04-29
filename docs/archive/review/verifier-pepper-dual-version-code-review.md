@@ -116,4 +116,72 @@ R21: PASS (verifier-version.test.ts covers all 6 cases; integration test uses _r
 
 ## Resolution Status
 
-(To be populated after fixes are applied.)
+### F1/S1 Minor — Dead if-condition in `verifyPassphraseVerifier` catch
+- Action: Collapsed to single `} catch { return { ok: false, reason: "MISSING_PEPPER_VERSION" }; }` with rationale comment.
+- Modified file: `src/lib/crypto/crypto-server.ts:303-310`
+
+### F2 Minor — `tenantId` missing from unlock SELECT
+- Action: Added `tenantId: true` to the existing `findUnique` select.
+- Modified file: `src/app/api/vault/unlock/route.ts`
+
+### F3 Minor — Default route-test mock returns incomplete VerifyResult shape
+- Action: Updated factory to return `{ ok: true }` on match and `{ ok: false, reason: "WRONG_PASSPHRASE" as const }` on mismatch.
+- Modified files: `src/app/api/vault/change-passphrase/route.test.ts`, `src/app/api/vault/recovery-key/recover/route.test.ts`
+
+### T1 Major — V1 backward-compat shim untested in cloud providers
+- Action: Added 3 tests for `resolveSecretName`: `(verifier-pepper, 1) → bare`, `(verifier-pepper, 2) → -v2`, `(share-master, 1) → -v1` (no shim leak).
+- Modified file: `src/lib/key-provider/aws-sm-provider.test.ts`
+
+### T2 Major — travel-mode/disable VERIFIER_PEPPER_MISSING audit emission untested
+- Action: Added test mocking `verifyPassphraseVerifier` to return MISSING_PEPPER_VERSION; asserts `logAuditAsync` called with `action: "VERIFIER_PEPPER_MISSING"` and tenant-base shape.
+- Modified file: `src/app/api/travel-mode/travel-mode.test.ts`
+
+### T3 Major — share-links/verify-access VERIFIER_PEPPER_MISSING audit emission untested
+- Action: Added equivalent test for `verifyAccessPassword` returning MISSING_PEPPER_VERSION; asserts audit emission with `tenantAuditBase` + `ANONYMOUS_ACTOR_ID` pattern.
+- Modified file: `src/app/api/share-links/verify-access/route.test.ts`
+
+### T4 Major — METADATA_BLOCKLIST `storedVersion` entry untested
+- Action: Added `"storedVersion"` to expected blocklist enumeration; added behavioral test asserting pino redacts it to `[REDACTED]` while keeping non-sensitive fields.
+- Modified file: `src/lib/audit/audit-logger.test.ts`
+
+### T5 Minor — vault-reset description "23" mismatched assertion 24
+- Action: Updated test description to "resets exactly 24 vault/recovery/lockout/ECDH fields on User".
+- Modified file: `src/lib/vault/vault-reset.test.ts`
+
+### T6 Minor — opportunistic re-HMAC test didn't assert HMAC value
+- Action: Extended `objectContaining` assertion to include `passphraseVerifierHmac: "a".repeat(64)` (mocked hmacVerifier return).
+- Modified file: `src/app/api/vault/unlock/route.test.ts`
+
+### T7 Major — integration test scenario 3 misleading audit comment
+- Action: Replaced comment with "route audit emission is verified by unit tests in route.test.ts files" — body unchanged (verifies crypto-layer fail-closed).
+- Modified file: `src/__tests__/db-integration/pepper-dual-version.integration.test.ts`
+
+### T8 Minor RT3 — hardcoded `1` in unlock test assertion
+- Action: Imported `VERIFIER_VERSION` from `@/lib/crypto/verifier-version` and replaced literal in assertions.
+- Modified file: `src/app/api/vault/unlock/route.test.ts`
+
+### Pre-existing E2E selector script bug (CLAUDE.md "Fix ALL errors")
+- Action: GNU BRE interprets `\+` as the "one or more" extension, so `grep -v '^\+\+\+'` silently matched every `+`-prefixed line and yielded an empty `added_exports`, producing false-positive deleted-export warnings. Switched to `grep -vE '^\+\+\+'` (ERE = literal `+`) and `grep -vE '^---'` (anchored) for the `---` filter.
+- Modified file: `scripts/checks/check-e2e-selectors.sh`
+
+## Round 2 Findings
+
+Local LLM seed analysis returned 4 candidate findings; all were verified inline (no sub-agent dispatch needed).
+
+### F4 Major — REJECTED
+- Claim: catch block treats any error as MISSING_PEPPER_VERSION, masking unrelated failures.
+- Verification: This was the intentional design — comment in catch block documents that all errors from `getVerifierPepper(version)` (env missing, KMS fetch failure, invalid hex) are operationally indistinguishable to operator and user. The F1 fix collapsed dead code; behavior was unchanged from prior implementation.
+- Anti-Deferral check: Acceptable risk — Worst case: operator sees `VERIFIER_PEPPER_MISSING` for a transient KMS network blip rather than a config gap. Likelihood: low (KMS is high-availability). Cost to fix: medium (would require introspecting error type without violating crypto-layer audit-emission decoupling).
+
+### F5 Minor — ACCEPTED
+- Claim: `grep -vF '---'` (substring match) too broad; should anchor to `^---`.
+- Action: Fixed the regex to anchored ERE patterns (`^---` and `^\+\+\+`).
+- Modified file: `scripts/checks/check-e2e-selectors.sh`
+
+### T9 Major — REJECTED
+- Claim: aws-sm-provider.test.ts new tests reuse `mockSend` without reset.
+- Verification: `beforeEach(() => { vi.clearAllMocks(); })` exists at lines 20-22. Mock reset is in place.
+
+### T10 Minor — REJECTED
+- Claim: redaction test asserts `"[REDACTED]"` placeholder but METADATA_BLOCKLIST removes the key entirely.
+- Verification: `audit-logger.ts:71-72` configures pino with `censor: "[REDACTED]"` for log output. The new test exercises the pino path (collectOutput captures pino lines), so `[REDACTED]` is the correct expectation. The `sanitizeMetadata` removal-path is for the `audit_outbox` payload, which is a different code path.

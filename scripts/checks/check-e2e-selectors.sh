@@ -148,18 +148,19 @@ printf "${BOLD}▸ Checking deleted exports/components referenced in E2E${RESET}
 # stray tokens like `{`, `}`, `from` into the identifier list.
 removed_exports=$(git diff "${BASE}...HEAD" -- 'src/**/*.tsx' 'src/**/*.ts' \
   | grep -E '^\-.*export (function|class|const|interface|type) ' \
-  | grep -vF -- '---' \
+  | grep -vE '^---' \
   | grep -oE 'export (function|class|const|interface|type) [A-Za-z0-9_]+' \
   | awk '{print $NF}' \
   | sort -u || true)
 
 # Check if added lines re-introduce the same export (renamed, not deleted)
-# NOTE: use -F (fixed-string) for the +++/--- header filter — in GNU grep BRE,
-# `\+` is the "one or more" extension (not a literal +), so `grep -v '^\+\+\+'`
-# silently matches every +-prefixed line and yields an empty result.
+# NOTE: anchor the +++/--- header filter with -E '^\+\+\+' — bare BRE `^\+\+\+`
+# is interpreted by GNU grep as the "one or more" extension and silently matches
+# every +-prefixed line, yielding an empty result and false-positive deleted-export
+# warnings.
 added_exports=$(git diff "${BASE}...HEAD" -- 'src/**/*.tsx' 'src/**/*.ts' \
   | grep -E '^\+.*export (function|class|const|interface|type) ' \
-  | grep -vF -- '+++' \
+  | grep -vE '^\+\+\+' \
   | grep -oE 'export (function|class|const|interface|type) [A-Za-z0-9_]+' \
   | awk '{print $NF}' \
   | sort -u || true)
