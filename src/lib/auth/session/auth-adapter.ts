@@ -15,6 +15,11 @@ import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { createNotification } from "@/lib/notification";
 import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
+import {
+  encryptAccountTokenTriple,
+  decryptAccountToken,
+} from "@/lib/crypto/account-token-crypto";
+import logger from "@/lib/logger";
 
 /**
  * Custom Auth.js adapter that extends PrismaAdapter with:
@@ -213,6 +218,18 @@ export function createCustomAdapter(): Adapter {
       await withBypassRls(prisma, async () => {
         const tenantId = await resolveTenantIdForUser(account.userId);
 
+        // Envelope-encrypt the OAuth provider tokens at rest. AAD binds the
+        // ciphertext to (provider, providerAccountId) so a leaked DB row's
+        // tokens cannot be substituted across accounts.
+        const encrypted = encryptAccountTokenTriple(
+          {
+            refresh_token: account.refresh_token,
+            access_token: account.access_token,
+            id_token: account.id_token,
+          },
+          { provider: account.provider, providerAccountId: account.providerAccountId },
+        );
+
         await prisma.account.create({
           data: {
             userId: account.userId,
@@ -220,12 +237,12 @@ export function createCustomAdapter(): Adapter {
             type: account.type,
             provider: account.provider,
             providerAccountId: account.providerAccountId,
-            refresh_token: account.refresh_token,
-            access_token: account.access_token,
+            refresh_token: encrypted.refresh_token,
+            access_token: encrypted.access_token,
             expires_at: account.expires_at,
             token_type: account.token_type,
             scope: account.scope,
-            id_token: account.id_token,
+            id_token: encrypted.id_token,
             session_state: account.session_state
               ? String(account.session_state)
               : null,
@@ -447,17 +464,42 @@ export function createCustomAdapter(): Adapter {
         }),
       BYPASS_PURPOSE.AUTH_FLOW);
       if (!account) return null;
+
+      // Decrypt the at-rest envelope. Legacy plaintext rows pass through
+      // unchanged via the sentinel check in decryptAccountToken. We log
+      // (without exposing token material) and skip individual fields that
+      // fail to decrypt rather than rejecting the whole account, so a
+      // corrupt ciphertext does not lock a user out of their session.
+      const aad = {
+        provider: account.provider,
+        providerAccountId: account.providerAccountId,
+      };
+      const decryptOrLog = (
+        field: "refresh_token" | "access_token" | "id_token",
+        value: string | null,
+      ): string | undefined => {
+        try {
+          return decryptAccountToken(value, aad) ?? undefined;
+        } catch (err) {
+          logger.warn(
+            { provider: account.provider, providerAccountId: account.providerAccountId, field, err: err instanceof Error ? err.message : String(err) },
+            "account token decryption failed",
+          );
+          return undefined;
+        }
+      };
+
       return {
         userId: account.userId,
         type: account.type as AdapterAccount["type"],
         provider: account.provider,
         providerAccountId: account.providerAccountId,
-        refresh_token: account.refresh_token ?? undefined,
-        access_token: account.access_token ?? undefined,
+        refresh_token: decryptOrLog("refresh_token", account.refresh_token),
+        access_token: decryptOrLog("access_token", account.access_token),
         expires_at: account.expires_at ?? undefined,
         token_type: (account.token_type ?? undefined) as Lowercase<string> | undefined,
         scope: account.scope ?? undefined,
-        id_token: account.id_token ?? undefined,
+        id_token: decryptOrLog("id_token", account.id_token),
         session_state: account.session_state ?? undefined,
       };
     },

@@ -30,6 +30,8 @@ ADMIN_API_TOKEN=<op_token> scripts/purge-audit-logs.sh                          
 ADMIN_API_TOKEN=<op_token> TARGET_VERSION=<int> scripts/rotate-master-key.sh         # Rotate ShareLink master key
 
 PASSWD_OUTBOX_WORKER_PASSWORD=<pass> MIGRATION_DATABASE_URL=<url> scripts/set-outbox-worker-password.sh  # Set worker DB role password
+
+MIGRATION_DATABASE_URL=<privileged-url> npm run migrate:account-tokens               # Encrypt legacy plaintext OAuth tokens (idempotent; --dry-run available)
 ```
 
 Audit outbox worker (separate process):
