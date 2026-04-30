@@ -25,7 +25,7 @@ import {
   File,
 } from "lucide-react";
 import { toast } from "sonner";
-import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { toastApiError } from "@/lib/http/toast-api-error";
 import { useTeamVault } from "@/lib/team/team-vault-context";
 import {
   encryptBinary,
@@ -154,8 +154,7 @@ export function TeamAttachmentSection({
       );
 
       if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        toast.error(tApi(apiErrorToI18nKey(err?.error)));
+        await toastApiError(res, tApi);
         return;
       }
 
