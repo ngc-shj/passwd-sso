@@ -219,8 +219,6 @@ model ExtensionToken {
 enum ExtensionTokenClientKind {
   BROWSER_EXTENSION
   IOS_APP
-
-  @@map("extension_token_client_kind")
 }
 
 model ExtensionBridgeCode {
