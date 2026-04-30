@@ -23,6 +23,7 @@ import { textEncode } from "@/lib/crypto/crypto-utils";
 import { jwkThumbprint, computeAth } from "@/lib/auth/dpop/verify";
 import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
 import { _resetJtiCacheForTests } from "@/lib/auth/dpop/jti-cache";
+import { ROLLBACK_REJECTION_KIND } from "@/app/api/mobile/cache-rollback-report/route";
 
 // Set APP_URL before importing the route so canonicalHtu() resolves.
 process.env.APP_URL = process.env.APP_URL ?? "https://app.example.test";
@@ -178,7 +179,7 @@ describe("POST /api/mobile/cache-rollback-report — audit emission (T43)", () =
       observedCounter: 41,
       headerIssuedAt: 1_743_800_000,
       lastSuccessfulRefreshAt: 1_743_799_000,
-      rejectionKind: "counter_mismatch",
+      rejectionKind: ROLLBACK_REJECTION_KIND.COUNTER_MISMATCH,
     };
 
     const req = await buildRequest({ accessToken, kp, body });
@@ -194,7 +195,7 @@ describe("POST /api/mobile/cache-rollback-report — audit emission (T43)", () =
     expect(payload.targetId).toBe(tokenId);
     expect(payload.metadata).toMatchObject({
       deviceId: "device-uuid-counter",
-      rejectionKind: "counter_mismatch",
+      rejectionKind: ROLLBACK_REJECTION_KIND.COUNTER_MISMATCH,
       expectedCounter: 42,
       observedCounter: 41,
     });
@@ -211,7 +212,7 @@ describe("POST /api/mobile/cache-rollback-report — audit emission (T43)", () =
       observedCounter: 0,
       headerIssuedAt: 1_743_800_000,
       lastSuccessfulRefreshAt: 1_743_800_000,
-      rejectionKind: "flag_forged",
+      rejectionKind: ROLLBACK_REJECTION_KIND.FLAG_FORGED,
     };
 
     const req = await buildRequest({ accessToken, kp, body });
@@ -223,7 +224,7 @@ describe("POST /api/mobile/cache-rollback-report — audit emission (T43)", () =
     expect(rows[0].payload.action).toBe("MOBILE_CACHE_FLAG_FORGED");
     expect(rows[0].payload.metadata).toMatchObject({
       deviceId: "device-uuid-flag",
-      rejectionKind: "flag_forged",
+      rejectionKind: ROLLBACK_REJECTION_KIND.FLAG_FORGED,
     });
   });
 });

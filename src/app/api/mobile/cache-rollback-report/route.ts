@@ -12,7 +12,7 @@
  * token); `cnf.jkt` MUST match the row's stored thumbprint.
  *
  * Audit:
- *   - `rejectionKind === "flag_forged"` → MOBILE_CACHE_FLAG_FORGED.
+ *   - `rejectionKind === ROLLBACK_REJECTION_KIND.FLAG_FORGED` → MOBILE_CACHE_FLAG_FORGED.
  *   - All other rejection kinds        → MOBILE_CACHE_ROLLBACK_REJECTED.
  *
  * Rate limit: per-(tenantId, deviceId) 5 req / 24 h (per S34) — the legitimate
@@ -42,17 +42,33 @@ const reportLimiter = createRateLimiter({
   max: 5,
 });
 
-const REJECTION_KIND = [
-  "counter_mismatch",
-  "header_stale",
-  "aad_mismatch",
-  "authtag_invalid",
-  "header_clock_skew",
-  "header_missing",
-  "entry_count_mismatch",
-  "header_invalid",
-  "flag_forged",
-] as const;
+/**
+ * AutoFill-extension-detected reasons for rejecting a cached entries
+ * blob. Exposed as a const-object so call sites and tests reference
+ * symbols rather than copy-pasted string literals (matches the
+ * AUDIT_ACTION / DPOP_VERIFY_ERROR pattern). The string values are the
+ * stable wire format the iOS client sends in the request body and the
+ * audit pipeline persists in metadata.
+ */
+export const ROLLBACK_REJECTION_KIND = {
+  COUNTER_MISMATCH: "counter_mismatch",
+  HEADER_STALE: "header_stale",
+  AAD_MISMATCH: "aad_mismatch",
+  AUTHTAG_INVALID: "authtag_invalid",
+  HEADER_CLOCK_SKEW: "header_clock_skew",
+  HEADER_MISSING: "header_missing",
+  ENTRY_COUNT_MISMATCH: "entry_count_mismatch",
+  HEADER_INVALID: "header_invalid",
+  FLAG_FORGED: "flag_forged",
+} as const;
+
+export type RollbackRejectionKind =
+  (typeof ROLLBACK_REJECTION_KIND)[keyof typeof ROLLBACK_REJECTION_KIND];
+
+const REJECTION_KIND_VALUES = Object.values(ROLLBACK_REJECTION_KIND) as [
+  RollbackRejectionKind,
+  ...RollbackRejectionKind[],
+];
 
 const ReportRequestSchema = z
   .object({
@@ -61,7 +77,7 @@ const ReportRequestSchema = z
     observedCounter: z.number().int().nonnegative(),
     headerIssuedAt: z.number().int().nonnegative(),
     lastSuccessfulRefreshAt: z.number().int().nonnegative(),
-    rejectionKind: z.enum(REJECTION_KIND),
+    rejectionKind: z.enum(REJECTION_KIND_VALUES),
   })
   .strict();
 
@@ -93,7 +109,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
 
   // 4. Audit emit. flag_forged is its own action so SIEM can filter it.
   const action =
-    data.rejectionKind === "flag_forged"
+    data.rejectionKind === ROLLBACK_REJECTION_KIND.FLAG_FORGED
       ? AUDIT_ACTION.MOBILE_CACHE_FLAG_FORGED
       : AUDIT_ACTION.MOBILE_CACHE_ROLLBACK_REJECTED;
   await logAuditAsync({

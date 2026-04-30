@@ -37,7 +37,7 @@ vi.mock("@/lib/audit/audit", () => ({
   }),
 }));
 
-import { POST } from "./route";
+import { POST, ROLLBACK_REJECTION_KIND } from "./route";
 
 const USER_ID = "11111111-1111-1111-1111-111111111111";
 const TENANT_ID = "22222222-2222-2222-2222-222222222222";
@@ -49,7 +49,7 @@ const VALID_BODY = {
   observedCounter: 41,
   headerIssuedAt: 1_743_800_000,
   lastSuccessfulRefreshAt: 1_743_799_000,
-  rejectionKind: "counter_mismatch" as const,
+  rejectionKind: ROLLBACK_REJECTION_KIND.COUNTER_MISMATCH,
 };
 
 function makeReq(body: unknown = VALID_BODY) {
@@ -98,39 +98,36 @@ describe("POST /api/mobile/cache-rollback-report", () => {
         targetId: TOKEN_ID,
         metadata: expect.objectContaining({
           deviceId: "device-uuid-1",
-          rejectionKind: "counter_mismatch",
+          rejectionKind: ROLLBACK_REJECTION_KIND.COUNTER_MISMATCH,
         }),
       }),
     );
   });
 
   it("emits MOBILE_CACHE_FLAG_FORGED when rejectionKind=flag_forged", async () => {
-    const res = await POST(makeReq({ ...VALID_BODY, rejectionKind: "flag_forged" }));
+    const res = await POST(
+      makeReq({ ...VALID_BODY, rejectionKind: ROLLBACK_REJECTION_KIND.FLAG_FORGED }),
+    );
     const { status } = await parseResponse(res);
     expect(status).toBe(200);
     expect(mockLogAuditAsync).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "MOBILE_CACHE_FLAG_FORGED",
-        metadata: expect.objectContaining({ rejectionKind: "flag_forged" }),
+        metadata: expect.objectContaining({
+          rejectionKind: ROLLBACK_REJECTION_KIND.FLAG_FORGED,
+        }),
       }),
     );
   });
 
-  it.each([
-    "counter_mismatch",
-    "header_stale",
-    "aad_mismatch",
-    "authtag_invalid",
-    "header_clock_skew",
-    "header_missing",
-    "entry_count_mismatch",
-    "header_invalid",
-    "flag_forged",
-  ])("accepts rejectionKind=%s as a valid enum value", async (kind) => {
-    const res = await POST(makeReq({ ...VALID_BODY, rejectionKind: kind }));
-    const { status } = await parseResponse(res);
-    expect(status).toBe(200);
-  });
+  it.each(Object.values(ROLLBACK_REJECTION_KIND))(
+    "accepts rejectionKind=%s as a valid enum value",
+    async (kind) => {
+      const res = await POST(makeReq({ ...VALID_BODY, rejectionKind: kind }));
+      const { status } = await parseResponse(res);
+      expect(status).toBe(200);
+    },
+  );
 
   it("returns 400 on an unknown rejectionKind", async () => {
     const res = await POST(makeReq({ ...VALID_BODY, rejectionKind: "totally_made_up" }));
