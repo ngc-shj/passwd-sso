@@ -67,6 +67,7 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { POST } from "./route";
+import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
 
 const URL = "http://localhost/api/vault/reset";
 
@@ -84,7 +85,7 @@ describe("POST /api/vault/reset", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(createRequest("POST", URL, {
-      body: { confirmation: "DELETE MY VAULT" },
+      body: { confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(401);
   });
@@ -92,7 +93,7 @@ describe("POST /api/vault/reset", () => {
   it("returns 429 when rate limited", async () => {
     mockRateLimiter.check.mockResolvedValue({ allowed: false });
     const res = await POST(createRequest("POST", URL, {
-      body: { confirmation: "DELETE MY VAULT" },
+      body: { confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(429);
   });
@@ -108,7 +109,7 @@ describe("POST /api/vault/reset", () => {
 
   it("deletes all vault data and logs audit on success", async () => {
     const res = await POST(createRequest("POST", URL, {
-      body: { confirmation: "DELETE MY VAULT" },
+      body: { confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(200);
     const json = await res.json();
@@ -137,14 +138,14 @@ describe("POST /api/vault/reset", () => {
   it("returns 500 when executeVaultReset throws", async () => {
     mockExecuteVaultReset.mockRejectedValue(new Error("DB failure"));
     await expect(
-      POST(createRequest("POST", URL, { body: { confirmation: "DELETE MY VAULT" } })),
+      POST(createRequest("POST", URL, { body: { confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT } })),
     ).rejects.toThrow("DB failure");
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("delegates full vault wipe to executeVaultReset with correct userId", async () => {
     const res = await POST(createRequest("POST", URL, {
-      body: { confirmation: "DELETE MY VAULT" },
+      body: { confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(200);
 

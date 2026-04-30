@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   encryptAccountToken,
   decryptAccountToken,
@@ -6,6 +6,7 @@ import {
   decryptAccountTokenTriple,
   isEncryptedAccountToken,
 } from "./account-token-crypto";
+import legacyFixture from "@/__tests__/fixtures/account-token-legacy-ciphertext.json";
 
 const aad = { provider: "google", providerAccountId: "alice@example.com" };
 
@@ -130,6 +131,37 @@ describe("account-token-crypto", () => {
       expect(out.id_token).toBeNull();
       expect(errors).toHaveLength(1);
       expect(errors[0].field).toBe("refresh_token");
+    });
+  });
+
+  // S10 fix: catches AAD-byte drift between pre-refactor (inline AAD construction
+  // in account-token-crypto.ts) and post-refactor (caller-built AAD passed into
+  // shared envelope helper). The fixture is a known plaintext encrypted under a
+  // deterministic test master key in the on-disk envelope format. Regenerate via
+  // `npx tsx scripts/regenerate-account-token-legacy-fixture.ts`.
+  describe("legacy ciphertext regression (S10 fix)", () => {
+    it("decrypts a fixture ciphertext produced under pre-refactor code", async () => {
+      const cryptoServer = await import("@/lib/crypto/crypto-server");
+      const fixtureKey = Buffer.from(legacyFixture.masterKeyHex, "hex");
+      const spy = vi
+        .spyOn(cryptoServer, "getMasterKeyByVersion")
+        .mockImplementation((version: number) => {
+          if (version !== legacyFixture.masterKeyVersion) {
+            throw new Error(
+              `unexpected key version ${version}, fixture is v${legacyFixture.masterKeyVersion}`,
+            );
+          }
+          return fixtureKey;
+        });
+      try {
+        const recovered = decryptAccountToken(legacyFixture.ciphertext, {
+          provider: legacyFixture.provider,
+          providerAccountId: legacyFixture.providerAccountId,
+        });
+        expect(recovered).toBe(legacyFixture.plaintext);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });

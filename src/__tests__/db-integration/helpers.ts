@@ -221,3 +221,31 @@ export class Deferred<T = void> {
     });
   }
 }
+
+// ─── Statistical concurrency primitive ──────────────────────────
+
+/**
+ * Run two operations in parallel against distinct Prisma clients
+ * (= distinct pg.Pool connections), pre-warming both connections so the
+ * race window is as tight as `Promise.all` allows.
+ *
+ * The pg_advisory_lock barrier pattern was considered (plan §11.2 option
+ * (b)) but option (a) — the statistical loop — is what callers should
+ * wrap this in: 50 iterations is sufficient to flush ordering
+ * nondeterminism on a connection-pooled real DB without adding a new
+ * concurrency primitive to the repo (no existing precedent).
+ */
+export async function raceTwoClients<A, B>(
+  clientA: PrismaClient,
+  clientB: PrismaClient,
+  opA: (c: PrismaClient) => Promise<A>,
+  opB: (c: PrismaClient) => Promise<B>,
+): Promise<[A, B]> {
+  // Pre-warm both pooled connections so neither path pays a connection-
+  // setup cost during the race.
+  await Promise.all([
+    clientA.$executeRawUnsafe(`SELECT 1`),
+    clientB.$executeRawUnsafe(`SELECT 1`),
+  ]);
+  return Promise.all([opA(clientA), opB(clientB)]) as Promise<[A, B]>;
+}

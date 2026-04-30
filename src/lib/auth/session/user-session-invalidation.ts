@@ -4,16 +4,40 @@ import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpe
 import { invalidateCachedSessionsBulk } from "@/lib/auth/session/session-cache";
 
 /**
+ * Options for {@link invalidateUserSessions}.
+ *
+ * Discriminated union — `tenantId` and `allTenants: true` are mutually
+ * exclusive at compile time (F18 + F20). Pass `tenantId` for the standard
+ * tenant-scoped invalidation (team removal, SCIM deletion). Pass
+ * `allTenants: true` only for cross-tenant flows like admin vault reset,
+ * where the target user's Session rows in OTHER tenants are still
+ * authentication artifacts that survive the wipe (F3+S2).
+ */
+export type InvalidateUserSessionsOptions =
+  | { tenantId: string; allTenants?: undefined; reason?: string }
+  | { allTenants: true; tenantId?: undefined; reason?: string };
+
+/**
  * Invalidate all sessions and tokens for a user.
- * Called on: team member removal, SCIM user deletion/deactivation.
+ * Called on: team member removal, SCIM user deletion/deactivation,
+ * and admin vault reset (cross-tenant via `allTenants: true`).
  *
  * Uses withBypassRls() scoped to the target userId WHERE clause.
  */
 export async function invalidateUserSessions(
   userId: string,
-  options: { tenantId: string; reason?: string },
+  options: InvalidateUserSessionsOptions,
 ): Promise<{ sessions: number; extensionTokens: number; apiKeys: number }> {
-  const tenantFilter = { tenantId: options.tenantId };
+  // Defense-in-depth: discriminated union prevents this at compile time,
+  // but a runtime cast (`as any`) could still leak both options through.
+  if (options.tenantId && options.allTenants) {
+    throw new Error(
+      "invalidateUserSessions: tenantId and allTenants are mutually exclusive",
+    );
+  }
+
+  const allTenants = "allTenants" in options && options.allTenants === true;
+  const tenantFilter = allTenants ? {} : { tenantId: options.tenantId };
 
   return withBypassRls(prisma, async () => {
     // SELECT tokens before deleteMany so we can invalidate the cache after

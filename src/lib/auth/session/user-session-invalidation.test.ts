@@ -28,7 +28,10 @@ vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
   invalidateCachedSessions: mockInvalidateCachedSessions,
 }));
 
-import { invalidateUserSessions } from "./user-session-invalidation";
+import {
+  invalidateUserSessions,
+  type InvalidateUserSessionsOptions,
+} from "./user-session-invalidation";
 import {
   expectInvalidatedAfterCommit,
   expectNotInvalidatedOnDbThrow,
@@ -127,5 +130,62 @@ describe("invalidateUserSessions", () => {
     ).rejects.toThrow("db error");
 
     expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessions);
+  });
+
+  it("invalidates across all tenants when allTenants: true", async () => {
+    // Sessions belong to two different tenants for the same user.
+    mockSession.findMany.mockResolvedValue([
+      { sessionToken: "tok-tenant-a" },
+      { sessionToken: "tok-tenant-b" },
+    ]);
+    mockSession.deleteMany.mockResolvedValue({ count: 2 });
+
+    const result = await invalidateUserSessions("user-1", { allTenants: true });
+
+    // No tenant filter on any sub-query.
+    expect(mockSession.findMany).toHaveBeenCalledWith({
+      where: { userId: "user-1" },
+      select: { sessionToken: true },
+    });
+    expect(mockSession.deleteMany).toHaveBeenCalledWith({
+      where: { userId: "user-1" },
+    });
+    expect(mockExtensionToken.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(mockApiKey.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+
+    // All cross-tenant tokens are tombstoned.
+    expectInvalidatedAfterCommit(mockInvalidateCachedSessions, [
+      "tok-tenant-a",
+      "tok-tenant-b",
+    ]);
+
+    expect(result).toEqual({ sessions: 2, extensionTokens: 1, apiKeys: 3 });
+  });
+
+  it("throws when both tenantId and allTenants are passed (defense-in-depth)", async () => {
+    // Cast bypasses the discriminated union — simulates an `as any` leak.
+    await expect(
+      invalidateUserSessions("user-1", {
+        tenantId: "tenant-1",
+        allTenants: true,
+      } as unknown as InvalidateUserSessionsOptions),
+    ).rejects.toThrow(/mutually exclusive/);
+  });
+
+  it("rejects { tenantId, allTenants: true } at compile time", () => {
+    // The @ts-expect-error directive itself is the assertion: if the type
+    // system permits both options simultaneously, `tsc --noEmit` fails.
+    // The function is defined but never invoked — the directive runs at
+    // type-check time only, so runtime behavior is unaffected (F20 fix).
+    const _typeCheckOnly = () =>
+      // @ts-expect-error mutually exclusive: tenantId and allTenants cannot both be set
+      invalidateUserSessions("user-1", { tenantId: "x", allTenants: true });
+    expect(typeof _typeCheckOnly).toBe("function");
   });
 });

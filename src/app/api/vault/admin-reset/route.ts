@@ -15,12 +15,14 @@ import { forbidden, notFound, unauthorized, rateLimited } from "@/lib/http/api-r
 import { parseBody } from "@/lib/http/parse-body";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
+import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
 
 export const runtime = "nodejs";
 
 const vaultAdminResetLimiter = createRateLimiter({ windowMs: 15 * MS_PER_MINUTE, max: 3 });
 
-const CONFIRMATION_TOKEN = "DELETE MY VAULT";
+const CONFIRMATION_TOKEN = VAULT_CONFIRMATION_PHRASE.DELETE_VAULT;
 
 const adminResetSchema = z.object({
   token: hexHash,
@@ -96,18 +98,30 @@ async function handlePOST(req: NextRequest) {
     );
   }
 
+  // Dual-approval gate: a row that has not been approved by a second admin
+  // is not consumable by the target user (FR1, FR2). Defense-in-depth — the
+  // CAS WHERE below also requires `approvedAt: { not: null }`.
+  if (resetRecord.approvedAt === null) {
+    return NextResponse.json(
+      { error: API_ERROR.VAULT_RESET_NOT_APPROVED },
+      { status: 409 },
+    );
+  }
+
   // TOCTOU prevention: atomically mark the token as executed BEFORE deleting
   // vault data. This ensures a concurrent revoke cannot succeed after data
-  // deletion has already started.
+  // deletion has already started. NULL `encryptedToken` so the at-rest
+  // ciphertext cannot be replayed even with elevated DB access.
   const atomicResult = await withBypassRls(prisma, async () =>
     prisma.adminVaultReset.updateMany({
       where: {
         id: resetRecord.id,
+        approvedAt: { not: null },
         executedAt: null,
         revokedAt: null,
         expiresAt: { gt: new Date() },
       },
-      data: { executedAt: new Date() },
+      data: { executedAt: new Date(), encryptedToken: null },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
@@ -121,6 +135,17 @@ async function handlePOST(req: NextRequest) {
   // Token secured — now execute the irreversible vault reset
   const { deletedEntries, deletedAttachments } =
     await executeVaultReset(session.user.id);
+
+  // Invalidate every authentication artifact for the target across ALL
+  // tenants (FR7 + F3+S2). The target may hold Session rows in tenants
+  // other than the initiating one; those are stale-by-policy after a
+  // vault reset and must not survive. session.user.id is the target by
+  // construction (the route-level forbidden() guard above ensures
+  // resetRecord.targetUserId === session.user.id).
+  const invalidationResult = await invalidateUserSessions(session.user.id, {
+    allTenants: true,
+    reason: "admin_vault_reset",
+  });
 
   // Audit log — use TENANT scope for tenant-level resets (teamId is null).
   // tenantId is preserved on TEAM emit so the JSON log line + downstream
@@ -137,6 +162,10 @@ async function handlePOST(req: NextRequest) {
       deletedEntries,
       deletedAttachments,
       initiatedById: resetRecord.initiatedById,
+      approvedById: resetRecord.approvedById,
+      invalidatedSessions: invalidationResult.sessions,
+      invalidatedExtensionTokens: invalidationResult.extensionTokens,
+      invalidatedApiKeys: invalidationResult.apiKeys,
     },
   });
 

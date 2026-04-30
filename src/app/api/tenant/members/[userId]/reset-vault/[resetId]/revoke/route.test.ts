@@ -4,6 +4,7 @@ import { createRequest, createParams } from "@/__tests__/helpers/request-builder
 const {
   mockAuth,
   mockPrismaAdminVaultResetUpdateMany,
+  mockPrismaAdminVaultResetFindUnique,
   mockPrismaTenantMemberFindFirst,
   mockLogAudit,
   mockCreateNotification,
@@ -27,6 +28,7 @@ const {
   return {
     mockAuth: vi.fn(),
     mockPrismaAdminVaultResetUpdateMany: vi.fn(),
+    mockPrismaAdminVaultResetFindUnique: vi.fn(),
     mockPrismaTenantMemberFindFirst: vi.fn(),
     mockLogAudit: vi.fn(),
     mockCreateNotification: vi.fn(),
@@ -46,6 +48,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     adminVaultReset: {
       updateMany: mockPrismaAdminVaultResetUpdateMany,
+      findUnique: mockPrismaAdminVaultResetFindUnique,
     },
     tenantMember: {
       findFirst: mockPrismaTenantMemberFindFirst,
@@ -107,11 +110,20 @@ const TARGET_MEMBER = {
   },
 };
 
+// Default findUnique mock — row exists in scope, was approved (so target
+// notification fires by default).
+const APPROVED_FIND_UNIQUE = {
+  approvedAt: new Date("2024-01-01T00:00:00Z"),
+  tenantId: TENANT_ID,
+  targetUserId: TARGET_USER_ID,
+};
+
 describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/revoke", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: ACTOR_USER_ID, name: "Admin User", email: "admin@example.com" } });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockPrismaAdminVaultResetFindUnique.mockResolvedValue(APPROVED_FIND_UNIQUE);
     mockPrismaAdminVaultResetUpdateMany.mockResolvedValue({ count: 1 });
     mockPrismaTenantMemberFindFirst.mockResolvedValue(TARGET_MEMBER);
     mockResolveUserLocale.mockReturnValue("en");
@@ -176,7 +188,7 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/revoke", () =>
     const json = await res.json();
     expect(json.ok).toBe(true);
 
-    // updateMany called with correct conditions
+    // updateMany called with correct conditions and NULLs encryptedToken
     expect(mockPrismaAdminVaultResetUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -188,6 +200,7 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/revoke", () =>
         }),
         data: expect.objectContaining({
           revokedAt: expect.any(Date),
+          encryptedToken: null,
         }),
       }),
     );
@@ -232,6 +245,51 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/revoke", () =>
     );
   });
 
+  it("does NOT notify target when revoking a pending_approval reset (F2 + FR8)", async () => {
+    // Row not yet approved.
+    mockPrismaAdminVaultResetFindUnique.mockResolvedValue({
+      ...APPROVED_FIND_UNIQUE,
+      approvedAt: null,
+    });
+    const res = await POST(
+      createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault/${RESET_ID}/revoke`),
+      createParams({ userId: TARGET_USER_ID, resetId: RESET_ID }),
+    );
+    expect(res.status).toBe(200);
+    // Audit fires unconditionally
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "ADMIN_VAULT_RESET_REVOKE" }),
+    );
+    // Notification + email gated on approvedAt != null
+    expect(mockCreateNotification).not.toHaveBeenCalled();
+    expect(mockSendEmail).not.toHaveBeenCalled();
+    expect(mockAdminVaultResetRevokedEmail).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when row is not in scope (different tenant or target user)", async () => {
+    mockPrismaAdminVaultResetFindUnique.mockResolvedValue({
+      approvedAt: null,
+      tenantId: "other-tenant",
+      targetUserId: TARGET_USER_ID,
+    });
+    const res = await POST(
+      createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault/${RESET_ID}/revoke`),
+      createParams({ userId: TARGET_USER_ID, resetId: RESET_ID }),
+    );
+    expect(res.status).toBe(409);
+    expect(mockPrismaAdminVaultResetUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when row does not exist", async () => {
+    mockPrismaAdminVaultResetFindUnique.mockResolvedValue(null);
+    const res = await POST(
+      createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault/${RESET_ID}/revoke`),
+      createParams({ userId: TARGET_USER_ID, resetId: RESET_ID }),
+    );
+    expect(res.status).toBe(409);
+    expect(mockPrismaAdminVaultResetUpdateMany).not.toHaveBeenCalled();
+  });
+
   it("calls requireTenantPermission with MEMBER_VAULT_RESET permission", async () => {
     await POST(
       createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault/${RESET_ID}/revoke`),
@@ -271,6 +329,11 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/revoke", () =>
   it("passes resetId and userId in the updateMany where clause", async () => {
     const DIFFERENT_RESET_ID = "reset-999";
     const DIFFERENT_USER_ID = "other-user";
+    // findUnique scope must match the path params for the route to proceed.
+    mockPrismaAdminVaultResetFindUnique.mockResolvedValue({
+      ...APPROVED_FIND_UNIQUE,
+      targetUserId: DIFFERENT_USER_ID,
+    });
     mockPrismaAdminVaultResetUpdateMany.mockResolvedValue({ count: 1 });
     mockPrismaTenantMemberFindFirst.mockResolvedValue(TARGET_MEMBER);
 

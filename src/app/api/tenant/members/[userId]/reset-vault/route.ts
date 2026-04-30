@@ -1,4 +1,4 @@
-import { randomBytes, createHash } from "node:crypto";
+import { randomBytes, createHash, randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
@@ -6,8 +6,7 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { createNotification } from "@/lib/notification";
 import { sendEmail } from "@/lib/email";
-import { adminVaultResetEmail } from "@/lib/email/templates/admin-vault-reset";
-import { serverAppUrl } from "@/lib/url-helpers";
+import { adminVaultResetPendingEmail } from "@/lib/email/templates/admin-vault-reset-pending";
 import { resolveUserLocale } from "@/lib/locale";
 import {
   requireTenantPermission,
@@ -22,6 +21,8 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { forbidden, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { MAX_PENDING_RESETS, VAULT_RESET_HISTORY_LIMIT } from "@/lib/validations/common.server";
 import { MS_PER_DAY } from "@/lib/constants/time";
+import { encryptResetToken } from "@/lib/vault/admin-reset-token-crypto";
+import { deriveResetStatus } from "@/lib/vault/admin-reset-status";
 
 export const runtime = "nodejs";
 
@@ -39,6 +40,10 @@ const targetResetLimiter = createRateLimiter({
 
 // POST /api/tenant/members/[userId]/reset-vault
 // Initiate a vault reset for a tenant member. Tenant OWNER/ADMIN only.
+// The reset is created in PENDING_APPROVAL state — a second admin (different
+// from the initiator) must approve via the /approve endpoint before the
+// target user can execute it. The target user is NOT notified at initiate
+// (FR8) — notification + email arrive only after approval lands.
 async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ userId: string }> },
@@ -89,6 +94,14 @@ async function handlePOST(
     return forbidden();
   }
 
+  // Capture target email at initiate (FR12) — bound into the encrypted token's
+  // AAD so a later email-change race during the approval window is detected
+  // at decrypt time. User.email is required at signup; defensive guard.
+  const targetEmailAtInitiate = targetMember.user.email;
+  if (!targetEmailAtInitiate) {
+    return notFound();
+  }
+
   // Rate limits
   const [adminResult, targetResult] = await Promise.all([
     adminResetLimiter.check(`rl:admin-reset:admin:${session.user.id}`),
@@ -116,54 +129,90 @@ async function handlePOST(
     return rateLimited();
   }
 
-  // Generate token
+  // Pre-allocate the reset id so it can be bound into the encrypted token's
+  // AAD before insert.
+  const id = randomUUID();
   const token = randomBytes(32).toString("hex");
   const tokenHash = createHash("sha256").update(token).digest("hex");
   const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS);
 
-  // Create the reset record (teamId: null for tenant-level resets)
+  const encryptedToken = encryptResetToken(token, {
+    tenantId: actor.tenantId,
+    resetId: id,
+    targetEmailAtInitiate,
+  });
+
   const resetRecord = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.adminVaultReset.create({
       data: {
+        id,
         tenantId: actor.tenantId,
         teamId: null,
         targetUserId,
         initiatedById: session.user.id,
         tokenHash,
+        encryptedToken,
+        targetEmailAtInitiate,
         expiresAt,
       },
     }),
   );
 
-  // Audit log
+  // Audit log — keep `expiresAt` so the audit row is self-contained for
+  // compliance queries (F23). State (`pending_approval`) is implicit in
+  // `approvedAt = null` so no redundant flag here.
   await logAuditAsync({
     ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.ADMIN_VAULT_RESET_INITIATE,
     targetType: "User",
     targetId: targetUserId,
-    metadata: { resetId: resetRecord.id },
+    metadata: { resetId: resetRecord.id, expiresAt: expiresAt.toISOString() },
   });
 
-  // In-app notification to target user
-  const locale = resolveUserLocale(targetMember.user.locale);
-  createNotification({
-    userId: targetUserId,
-    tenantId: actor.tenantId,
-    type: NOTIFICATION_TYPE.ADMIN_VAULT_RESET,
-    title: notificationTitle("ADMIN_VAULT_RESET", locale),
-    body: notificationBody("ADMIN_VAULT_RESET", locale),
-  });
+  // Notify OTHER eligible admins (FR8 + S6).
+  // Recipient set: same-tenant admins who could approve — i.e., a different
+  // user, currently active, with role strictly above the target's role.
+  const otherAdmins = await withTenantRls(prisma, actor.tenantId, async () =>
+    prisma.tenantMember.findMany({
+      where: {
+        tenantId: actor.tenantId,
+        userId: { not: session.user.id },
+        role: { in: ["OWNER", "ADMIN"] },
+        deactivatedAt: null,
+      },
+      include: {
+        user: { select: { id: true, email: true, name: true, locale: true } },
+      },
+    }),
+  );
 
-  // Email notification to target user
-  if (targetMember.user.email) {
-    const resetUrl = `${serverAppUrl(`/${locale}/vault-reset/admin`)}#token=${token}`;
-    const adminName = session.user.name ?? session.user.email ?? "";
-    const { subject, html, text } = adminVaultResetEmail(
-      locale,
-      adminName,
-      resetUrl,
-    );
-    void sendEmail({ to: targetMember.user.email, subject, html, text });
+  const eligibleApprovers = otherAdmins.filter((m) =>
+    isTenantRoleAbove(m.role, targetMember.role),
+  );
+
+  const initiatorName = session.user.name ?? session.user.email ?? "";
+  for (const approver of eligibleApprovers) {
+    const locale = resolveUserLocale(approver.user.locale);
+    createNotification({
+      userId: approver.userId,
+      tenantId: actor.tenantId,
+      type: NOTIFICATION_TYPE.ADMIN_VAULT_RESET_PENDING_APPROVAL,
+      title: notificationTitle("ADMIN_VAULT_RESET_PENDING_APPROVAL", locale),
+      body: notificationBody(
+        "ADMIN_VAULT_RESET_PENDING_APPROVAL",
+        locale,
+        targetEmailAtInitiate,
+      ),
+    });
+
+    if (approver.user.email) {
+      const { subject, html, text } = adminVaultResetPendingEmail(
+        locale,
+        initiatorName,
+        targetEmailAtInitiate,
+      );
+      void sendEmail({ to: approver.user.email, subject, html, text });
+    }
   }
 
   return NextResponse.json({ ok: true });
@@ -201,7 +250,8 @@ async function handleGET(
         tenantId: actor.tenantId,
       },
       include: {
-        initiatedBy: { select: { name: true, email: true } },
+        initiatedBy: { select: { id: true, name: true, email: true } },
+        approvedBy: { select: { id: true, name: true, email: true } },
       },
       orderBy: { createdAt: "desc" },
       take: VAULT_RESET_HISTORY_LIMIT,
@@ -209,26 +259,26 @@ async function handleGET(
   );
 
   const now = new Date();
-  const result = resets.map((r) => {
-    let status: "pending" | "executed" | "revoked" | "expired";
-    if (r.executedAt) status = "executed";
-    else if (r.revokedAt) status = "revoked";
-    else if (r.expiresAt < now) status = "expired";
-    else status = "pending";
-
-    return {
-      id: r.id,
-      status,
-      createdAt: r.createdAt,
-      expiresAt: r.expiresAt,
-      executedAt: r.executedAt,
-      revokedAt: r.revokedAt,
-      initiatedBy: {
-        name: r.initiatedBy.name,
-        email: r.initiatedBy.email,
-      },
-    };
-  });
+  const result = resets.map((r) => ({
+    id: r.id,
+    status: deriveResetStatus(r, now),
+    createdAt: r.createdAt,
+    expiresAt: r.expiresAt,
+    approvedAt: r.approvedAt,
+    executedAt: r.executedAt,
+    revokedAt: r.revokedAt,
+    initiatedBy: {
+      id: r.initiatedBy.id,
+      name: r.initiatedBy.name,
+      email: r.initiatedBy.email,
+    },
+    approvedBy: r.approvedBy
+      ? { id: r.approvedBy.id, name: r.approvedBy.name, email: r.approvedBy.email }
+      : null,
+    // Backfilled rows (very old data) may have null targetEmailAtInitiate;
+    // empty string is the safe display value.
+    targetEmailAtInitiate: r.targetEmailAtInitiate ?? "",
+  }));
 
   return NextResponse.json(result);
 }

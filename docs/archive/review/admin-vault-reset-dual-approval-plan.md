@@ -505,3 +505,96 @@ Tenant has OWNER (Alice), ADMIN-A (Bob), ADMIN-B (Carol), MEMBER (Dave).
 1. Bob initiates. `targetEmailAtInitiate` snapshot stored.
 2. Dave changes their account email (legitimate or attacker-controlled).
 3. Carol attempts approve. Email-snapshot guard fires; 409 `RESET_TARGET_EMAIL_CHANGED`. Bob must re-initiate with a fresh snapshot.
+
+## Implementation Checklist
+
+Step 2-1 impact analysis: every file confirmed via `grep -rn "ADMIN_VAULT_RESET\|admin_vault_reset\|adminVaultReset" src/ messages/`.
+
+### Files to modify (28+)
+
+**Schema / migration (2 files + 1-2 SQL files)**:
+- `prisma/schema.prisma` — `AdminVaultReset` model: add `encryptedToken`, `approvedAt`, `approvedById`, `targetEmailAtInitiate`; add inverse relation `User.adminVaultResetsAsApprover`; add new index. Add `ADMIN_VAULT_RESET_PENDING_APPROVAL` to `NotificationType` enum.
+- `prisma/migrations/<timestamp>_admin_vault_reset_dual_approval/migration.sql` — column adds + index + RLS unchanged (existing policy covers new columns).
+- `prisma/migrations/<timestamp+1s>_notification_type_pending_approval/migration.sql` — non-transactional `ALTER TYPE`.
+- `prisma/migrations/<timestamp+2s>_admin_vault_reset_backfill/migration.sql` — auto-revoke + targetEmail + SYSTEM-actor audit.
+
+**Constants (5 files)**:
+- `src/lib/constants/audit/audit.ts` — add `ADMIN_VAULT_RESET_APPROVE` to `AUDIT_ACTION` (line 101-103) AND to all 4 group arrays (lines 255-257, 369-371, 512-513, 534-536).
+- `src/lib/constants/audit/audit.test.ts` — add positive exhaustive group-membership test (T4).
+- `src/lib/constants/audit/notification.ts` — add `ADMIN_VAULT_RESET_PENDING_APPROVAL` to `NOTIFICATION_TYPE`.
+- `src/lib/http/api-error-codes.ts` — add `VAULT_RESET_NOT_APPROVED`, `RESET_NOT_APPROVABLE`, `RESET_TARGET_EMAIL_CHANGED` constants + `apiErrorToI18nKey` mapping.
+- `src/lib/constants/time.ts` (or equivalent) — add `EXECUTE_TTL_MS = 60 * MS_PER_MINUTE` with JSDoc citing S3 mitigation.
+- `src/lib/constants/vault.ts` (NEW) — export `VAULT_CONFIRMATION_PHRASE = { DELETE_VAULT, APPROVE }`.
+
+**Crypto helpers (2 new + 1 refactor)**:
+- `src/lib/crypto/envelope.ts` (NEW) — extract from `account-token-crypto.ts`; AAD-agnostic.
+- `src/lib/crypto/account-token-crypto.ts` (refactor) — call into `envelope.ts`; AAD bytes BYTE-FOR-BYTE identical to legacy (S10 fix).
+- `src/lib/vault/admin-reset-token-crypto.ts` (NEW) — call into `envelope.ts` with caller-built AAD.
+- `src/lib/vault/admin-reset-status.ts` (NEW) — `deriveResetStatus`, `ResetStatus` type, `STATUS_KEY_MAP`.
+
+**Endpoint changes (1 new + 3 modified)**:
+- `src/app/api/tenant/members/[userId]/reset-vault/[resetId]/approve/route.ts` (NEW).
+- `src/app/api/tenant/members/[userId]/reset-vault/route.ts` (initiate: encrypt token, snapshot email, notify other admins).
+- `src/app/api/tenant/members/[userId]/reset-vault/[resetId]/revoke/route.ts` (revoke: NULL encryptedToken, gate notification on approvedAt!=null).
+- `src/app/api/vault/admin-reset/route.ts` (execute: VAULT_RESET_NOT_APPROVED gate, invalidateUserSessions allTenants).
+
+**Session helper (1 file)**:
+- `src/lib/auth/session/user-session-invalidation.ts` — discriminated union options; new `allTenants:true` branch.
+
+**Notifications + email (3 files)**:
+- `src/lib/notification/notification-messages.ts` — add `ADMIN_VAULT_RESET_PENDING_APPROVAL` title/body en/ja.
+- `src/lib/email/templates/admin-vault-reset-pending.ts` (NEW) — sent to other admins.
+- `src/lib/email/templates/admin-vault-reset.ts` (modify) — repurpose for post-approval target-user email.
+
+**UI (3 files)**:
+- `src/components/settings/security/tenant-reset-history-dialog.tsx` — render 5 statuses via `STATUS_KEY_MAP`, add Approve button + R26 disabled cue.
+- `src/components/settings/account/tenant-members-card.tsx` — verify pendingResets count covers new approved rows (likely no change needed per F10).
+- `src/components/settings/developer/tenant-webhook-card.tsx` (test only — assert APPROVE in event picker).
+
+**i18n (4 locale files)**:
+- `messages/{en,ja}/AuditLog.json` — `ADMIN_VAULT_RESET_APPROVE` label.
+- `messages/{en,ja}/TenantAdmin.json` — `statusPendingApproval`, `statusApproved`; keep `statusPending` with TODO.
+- `messages/{en,ja}/Notifications.json` — `type_ADMIN_VAULT_RESET_PENDING_APPROVAL`.
+- `messages/{en,ja}/ApiErrors.json` — `VAULT_RESET_NOT_APPROVED`, `RESET_NOT_APPROVABLE`, `RESET_TARGET_EMAIL_CHANGED`.
+
+**Tests (10+ files)**:
+- Update `src/lib/notification/notification-messages.test.ts` — extend exhaustive coverage.
+- Update `src/lib/constants/audit/audit.test.ts` — positive coverage.
+- Update `src/app/api/vault/admin-reset/route.test.ts` — VAULT_RESET_NOT_APPROVED branch + invalidateUserSessions args + audit metadata mapping.
+- Update `src/app/api/tenant/members/[userId]/reset-vault/route.test.ts` — initiate emits to other admins, encryptedToken stored, recipient-set tests.
+- Update `src/app/api/tenant/members/[userId]/reset-vault/[resetId]/revoke/route.test.ts` — NULL encryptedToken + notification gate.
+- NEW `src/app/api/tenant/members/[userId]/reset-vault/[resetId]/approve/route.test.ts` — full auth + CAS branches + AAD-binding mocked test.
+- NEW `src/lib/vault/admin-reset-status.test.ts` — every transition.
+- NEW `src/lib/vault/admin-reset-token-crypto.test.ts` — 7 round-trip cases.
+- Update `src/lib/crypto/account-token-crypto.test.ts` — legacy fixture regression.
+- NEW `src/__tests__/fixtures/account-token-legacy-ciphertext.json` + `scripts/regenerate-account-token-legacy-fixture.ts`.
+- Update `src/lib/auth/session/user-session-invalidation.test.ts` — discriminated-union compile + runtime tests.
+- NEW `src/__tests__/db-integration/admin-vault-reset-dual-approval.integration.test.ts` — true-concurrency CAS race.
+- NEW `src/__tests__/db-integration/admin-vault-reset-migration.integration.test.ts` — backfill regression (auto-revoke).
+- NEW `src/__tests__/db-integration/admin-vault-reset-cross-tenant-sessions.integration.test.ts` — FR7 multi-tenant.
+- Update webhook card tests — assert APPROVE presence/absence.
+- NEW `src/components/settings/security/tenant-reset-history-dialog.test.tsx` — 5 states × 2 roles.
+
+**Manual test (1 file)**:
+- NEW `docs/archive/review/admin-vault-reset-dual-approval-manual-test.md` — Tier-2 R35 artifact.
+
+**Refactor scope (T12 / N5 — ~23 occurrences)**:
+- `git grep -n 'DELETE MY VAULT'` — replace literal with `VAULT_CONFIRMATION_PHRASE.DELETE_VAULT`.
+
+### Shared utilities to reuse (from inventory)
+
+- `createRateLimiter` from `src/lib/security/rate-limit.ts` (for approve route + per-target limiter).
+- `invalidateUserSessions` from `src/lib/auth/session/user-session-invalidation.ts` (extend, do not duplicate).
+- `requireTenantPermission, isTenantRoleAbove` from `src/lib/auth/access/tenant-auth.ts`.
+- `withTenantRls, withBypassRls, BYPASS_PURPOSE` from `src/lib/tenant-rls.ts`.
+- `logAuditAsync, tenantAuditBase, ACTOR_TYPE` from `src/lib/audit/audit.ts` (`ACTOR_TYPE.SYSTEM` confirmed at line 23 — use directly, do NOT add a new value).
+- `parseBody, forbidden, notFound, unauthorized, rateLimited` from `src/lib/http/`.
+- `withRequestLog` wrapper.
+- Existing `psoenc1:<keyVersion>:<base64url>` envelope (extract to shared `envelope.ts`).
+
+### Patterns to preserve
+
+- All state transitions on `AdminVaultReset` use CAS (`updateMany` with full from-state in WHERE).
+- Audit emission uses `logAuditAsync` (NOT raw `prisma.auditLog.create`).
+- New API errors follow existing `API_ERROR.X` enum + i18n key naming.
+- Integration tests use `pg.Pool` + `PrismaClient({ adapter })` from `helpers.ts:57-68`.

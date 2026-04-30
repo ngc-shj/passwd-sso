@@ -231,3 +231,55 @@ describe("audit constants", () => {
     expect(TEAM_WEBHOOK_EVENT_GROUPS[AUDIT_ACTION_GROUP.MAINTENANCE]).toBeUndefined();
   });
 });
+
+// T4 fix: positive exhaustive checks for ADMIN_VAULT_RESET_* group membership.
+// One `it` per group array — catches drop-thru when future enum additions
+// silently bypass a group on the assumption "the next one was added too".
+describe("ADMIN_VAULT_RESET_* group membership (T4)", () => {
+  const ALL_FOUR = [
+    AUDIT_ACTION.ADMIN_VAULT_RESET_INITIATE,
+    AUDIT_ACTION.ADMIN_VAULT_RESET_APPROVE,
+    AUDIT_ACTION.ADMIN_VAULT_RESET_EXECUTE,
+    AUDIT_ACTION.ADMIN_VAULT_RESET_REVOKE,
+  ] as const;
+
+  it("INITIATE/APPROVE/EXECUTE/REVOKE are all in AUDIT_ACTION_VALUES", () => {
+    const values = new Set<string>(AUDIT_ACTION_VALUES);
+    for (const action of ALL_FOUR) {
+      expect(values.has(action)).toBe(true);
+    }
+  });
+
+  it("INITIATE/APPROVE/EXECUTE/REVOKE are all in AUDIT_ACTION_GROUPS_PERSONAL[AUTH]", () => {
+    const personalAuth = new Set(
+      AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.AUTH],
+    );
+    for (const action of ALL_FOUR) {
+      expect(personalAuth.has(action)).toBe(true);
+    }
+  });
+
+  it("INITIATE/APPROVE/EXECUTE/REVOKE are all in AUDIT_ACTION_GROUPS_TENANT[ADMIN]", () => {
+    const tenantAdmin = new Set(
+      AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.ADMIN],
+    );
+    for (const action of ALL_FOUR) {
+      expect(tenantAdmin.has(action)).toBe(true);
+    }
+  });
+
+  // TEAM.ADMIN intentionally excludes REVOKE: that group is the team-admin
+  // audit feed, and the team admin only needs the consequential gates
+  // (INITIATE/APPROVE/EXECUTE). REVOKE is a tenant-admin-only operational
+  // action — surfaced via the TENANT.ADMIN group instead. APPROVE is
+  // included because it is the gate that unlocks execution.
+  it("INITIATE/APPROVE/EXECUTE are in AUDIT_ACTION_GROUPS_TEAM[ADMIN] but REVOKE is not", () => {
+    const teamAdmin = new Set(
+      AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.ADMIN],
+    );
+    expect(teamAdmin.has(AUDIT_ACTION.ADMIN_VAULT_RESET_INITIATE)).toBe(true);
+    expect(teamAdmin.has(AUDIT_ACTION.ADMIN_VAULT_RESET_APPROVE)).toBe(true);
+    expect(teamAdmin.has(AUDIT_ACTION.ADMIN_VAULT_RESET_EXECUTE)).toBe(true);
+    expect(teamAdmin.has(AUDIT_ACTION.ADMIN_VAULT_RESET_REVOKE)).toBe(false);
+  });
+});

@@ -138,6 +138,7 @@
   "SCIM_GROUP_UPDATE": "SCIM グループメンバーシップを更新",
   "WATCHTOWER_ALERT_SENT": "Watchtower 漏洩アラートを送信",
   "ADMIN_VAULT_RESET_INITIATE": "管理者による保管庫リセットを開始",
+  "ADMIN_VAULT_RESET_APPROVE": "管理者による保管庫リセットを承認",
   "ADMIN_VAULT_RESET_EXECUTE": "管理者による保管庫リセットを実行",
   "ADMIN_VAULT_RESET_REVOKE": "管理者による保管庫リセットを取り消し",
   "API_KEY_CREATE": "API キーを作成",

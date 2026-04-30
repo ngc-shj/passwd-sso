@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { API_PATH } from "@/lib/constants";
+import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
 import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { AlertTriangle, Loader2, ShieldAlert } from "lucide-react";
 import { fetchApi, withBasePath } from "@/lib/url-helpers";
 
-const CONFIRMATION_TOKEN = "DELETE MY VAULT";
+const CONFIRMATION_TOKEN = VAULT_CONFIRMATION_PHRASE.DELETE_VAULT;
 
 export default function AdminVaultResetPage() {
   const locale = useLocale();
