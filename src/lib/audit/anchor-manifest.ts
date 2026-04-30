@@ -73,7 +73,9 @@ export class InvalidTenantIdFormatError extends Error {
 
 export class InvalidKidError extends Error {
   constructor(kid: unknown) {
-    super(`Invalid kid format; expected ${AUDIT_ANCHOR_KID_PREFIX}<8-32 char>`);
+    super(
+      `Invalid kid format: got ${JSON.stringify(kid)}; expected ${AUDIT_ANCHOR_KID_PREFIX}<8-32 chars [a-zA-Z0-9_-]>`,
+    );
     this.name = "InvalidKidError";
   }
 }

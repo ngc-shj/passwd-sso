@@ -13,10 +13,9 @@ import {
   InvalidTenantIdFormatError,
   InvalidKidError,
   ManifestSchemaValidationError,
-  type AnchorRow,
   type BuildManifestInput,
 } from "@/lib/audit/anchor-manifest";
-import { AUDIT_ANCHOR_TYP, AUDIT_ANCHOR_KID_PREFIX } from "@/lib/constants/audit/audit";
+import { AUDIT_ANCHOR_KID_PREFIX } from "@/lib/constants/audit/audit";
 
 // Known test fixtures
 const KNOWN_UUID = "550e8400-e29b-41d4-a716-446655440000";

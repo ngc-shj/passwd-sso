@@ -7,9 +7,6 @@ import {
   AUDIT_SCOPE,
   AUDIT_ACTION,
   ACTOR_TYPE,
-  AUDIT_ANCHOR_CADENCE_MS,
-  AUDIT_ANCHOR_PUBLISH_OFFSET_MS,
-  AUDIT_ANCHOR_PAUSE_CAP_FACTOR,
 } from "@/lib/constants/audit/audit";
 import { SYSTEM_ACTOR_ID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";

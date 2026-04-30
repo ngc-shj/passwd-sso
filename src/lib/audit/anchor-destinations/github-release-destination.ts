@@ -99,7 +99,10 @@ export class GitHubReleaseDestination implements AnchorDestination {
         Accept: "application/vnd.github+json",
         "Content-Type": contentType,
       },
-      body: artifactBytes,
+      // Convert Buffer (whose .buffer is ArrayBufferLike, not ArrayBuffer per
+      // current TS lib.dom narrowing) to a freshly-allocated ArrayBuffer-backed
+      // Uint8Array so fetch BodyInit type matches.
+      body: new Uint8Array(artifactBytes),
     });
 
     if (!uploadRes.ok) {

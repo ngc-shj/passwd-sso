@@ -4,10 +4,7 @@ import { existsSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolve } from "node:path";
-import { createRequire } from "node:module";
 import { generateKeyPairSync, createPrivateKey, sign as nodeSign } from "node:crypto";
-
-const require = createRequire(import.meta.url);
 
 // cli/src/__tests__/integration/ → cli/dist/
 const distEntry = resolve(import.meta.dirname, "../../../dist/index.js");

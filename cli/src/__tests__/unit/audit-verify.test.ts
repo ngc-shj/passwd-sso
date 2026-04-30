@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { writeFileSync, unlinkSync, chmodSync, mkdtempSync } from "node:fs";
+import { writeFileSync, chmodSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateKeyPairSync, createHmac, createPrivateKey, sign as nodeSign } from "node:crypto";
+import { createPrivateKey, sign as nodeSign } from "node:crypto";
 
 // --- Helpers for building a minimal signed JWS ---
 
@@ -152,8 +152,7 @@ describe("auditVerifyCommand", () => {
       const jwsPath = join(tmpDir, "manifest.jws");
       writeFileSync(jwsPath, jws);
 
-      const { publicKey } = generateKeyPairSync("ed25519");
-      // We need the MATCHING public key — re-derive from signing
+      // Re-derive the matching public key from the signing seed
       const signingPriv = createPrivateKey({
         key: Buffer.concat([ED25519_PKCS8_PREFIX, privateKeySeed]),
         format: "der",

@@ -16,6 +16,7 @@ export const GROUPS = [
   "Redis",
   "Outbox worker",
   "DCR cleanup worker",
+  "Audit anchor publisher",
   "Key provider",
   "DB pool",
   "Reverse proxy",
@@ -828,6 +829,110 @@ export const descriptions: Record<
       "When true, emit an audit row on every sweep even when purgedCount=0. Default: false.\n" +
       "Useful for liveness verification in audit pipelines; increases audit_outbox volume.",
     example: "false",
+  },
+
+  // ── Audit anchor publisher ───────────────────────────────────────────────
+
+  DEPLOYMENT_ID: {
+    group: "Audit anchor publisher",
+    order: 1,
+    description:
+      "Stable UUID identifying this deployment. NEVER rotate after first deploy —\n" +
+      "changing this invalidates all existing audit-anchor manifests' deploymentId\n" +
+      "claim and causes verifiers to flag as cross-deployment replay.\n" +
+      "Stored in system_settings on first publisher boot; subsequent boots\n" +
+      "fail-closed if env var diverges from stored value.",
+    example: "550e8400-e29b-41d4-a716-446655440000",
+  },
+  AUDIT_ANCHOR_SIGNING_KEY: {
+    group: "Audit anchor publisher",
+    order: 2,
+    description:
+      "Ed25519 signing seed for audit-anchor manifests (32-byte hex = 64 chars).\n" +
+      "Generate via: npm run generate:audit-anchor-signing-key\n" +
+      "Required when AUDIT_ANCHOR_PUBLISHER_ENABLED=true.",
+    secret: true,
+  },
+  AUDIT_ANCHOR_TAG_SECRET: {
+    group: "Audit anchor publisher",
+    order: 3,
+    description:
+      "HMAC-SHA256 secret for tenantTag derivation (32-byte hex = 64 chars).\n" +
+      "Distributed to tenant administrators via dashboard kit + MFA challenge\n" +
+      "so customers can compute their own tenantTag from their tenant UUID.\n" +
+      "Generate via: npm run generate:audit-anchor-tag-secret\n" +
+      "Required when AUDIT_ANCHOR_PUBLISHER_ENABLED=true.",
+    secret: true,
+  },
+  AUDIT_ANCHOR_PUBLISHER_ENABLED: {
+    group: "Audit anchor publisher",
+    order: 4,
+    description:
+      "Master switch for the audit-anchor publisher worker. Default: false.\n" +
+      "When true, the worker boots and publishes daily manifests; when false,\n" +
+      "the worker process is a no-op (signing/tag keys not validated).",
+    example: "false",
+  },
+  AUDIT_ANCHOR_PUBLISHER_DATABASE_URL: {
+    group: "Audit anchor publisher",
+    order: 5,
+    description:
+      "PostgreSQL connection URL for the audit-anchor publisher role\n" +
+      "(passwd_anchor_publisher). Least privilege: SELECT on audit_chain_anchors\n" +
+      "+ tenants, UPDATE on (publish_paused_until, last_published_at) only,\n" +
+      "INSERT on audit_outbox, SELECT/INSERT/UPDATE on system_settings.\n" +
+      "Optional — falls back to DATABASE_URL if unset.",
+    example: "postgresql://passwd_anchor_publisher:pass@localhost:5432/passwd_sso",
+  },
+  AUDIT_ANCHOR_PUBLIC_KEY_ARCHIVE_URL: {
+    group: "Audit anchor publisher",
+    order: 6,
+    description:
+      "URL prefix the CLI uses to fetch the public signing key by kid.\n" +
+      "Format: <base>/<kid>.pub. Operator-trusted (env var, not user input).\n" +
+      "kid format is regex-validated to prevent path traversal.",
+    example: "https://audit-anchors.example.com/public-keys",
+  },
+  AUDIT_ANCHOR_DESTINATION_S3_BUCKET: {
+    group: "Audit anchor publisher",
+    order: 7,
+    description:
+      "S3 bucket name for primary manifest publication (Object Lock COMPLIANCE\n" +
+      "mode + 7-year retention applied per upload).",
+    example: "passwd-sso-audit-anchors",
+  },
+  AUDIT_ANCHOR_DESTINATION_S3_PREFIX: {
+    group: "Audit anchor publisher",
+    order: 8,
+    description:
+      "S3 key prefix under which manifests are stored.\n" +
+      "Final key: <prefix>/<date>.kid-<kid>.jws",
+    example: "audit-anchors",
+  },
+  AUDIT_ANCHOR_DESTINATION_GH_REPO: {
+    group: "Audit anchor publisher",
+    order: 9,
+    description:
+      "GitHub repository for secondary mirror publication (owner/repo format).\n" +
+      "Manifests are uploaded as release assets tagged audit-anchor-<date>.",
+    example: "passwd-sso/audit-anchors",
+  },
+  AUDIT_ANCHOR_DESTINATION_GH_TOKEN: {
+    group: "Audit anchor publisher",
+    order: 10,
+    description:
+      "GitHub personal access token (or fine-grained token) with releases:write\n" +
+      "permission on AUDIT_ANCHOR_DESTINATION_GH_REPO. Required when\n" +
+      "AUDIT_ANCHOR_DESTINATION_GH_REPO is set.",
+    secret: true,
+  },
+  AUDIT_ANCHOR_DESTINATION_FS_PATH: {
+    group: "Audit anchor publisher",
+    order: 11,
+    description:
+      "Local filesystem path for self-hosted operators without AWS/GitHub.\n" +
+      "Operator's responsibility to mirror to their own immutable store.",
+    example: "/var/audit-anchors",
   },
 
   // ── Operational ───────────────────────────────────────────────────────────
