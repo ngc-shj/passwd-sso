@@ -4,45 +4,22 @@ import {
   isHostMatch,
   sortByUrlMatch,
 } from "../../lib/url-matching";
+import urlMatchCases from "../../../test/fixtures/url-match-cases.json";
 
 describe("extractHost", () => {
-  it("extracts hostname from full URL", () => {
-    expect(extractHost("https://mail.google.com/inbox")).toBe("mail.google.com");
-  });
-
-  it("returns null for invalid URL", () => {
-    expect(extractHost("not-a-url")).toBeNull();
-  });
-
-  it("returns null for non-http(s) scheme", () => {
-    expect(extractHost("edge://extensions")).toBeNull();
-  });
-
-  it("handles localhost with port", () => {
-    expect(extractHost("http://localhost:3000/")).toBe("localhost");
-  });
+  for (const c of urlMatchCases.extractHost) {
+    it(c.name, () => {
+      expect(extractHost(c.url)).toBe(c.expected);
+    });
+  }
 });
 
 describe("isHostMatch", () => {
-  it("matches exact hostname", () => {
-    expect(isHostMatch("example.com", "example.com")).toBe(true);
-  });
-
-  it("matches with www prefix normalization", () => {
-    expect(isHostMatch("example.com", "www.example.com")).toBe(true);
-  });
-
-  it("matches subdomain", () => {
-    expect(isHostMatch("google.com", "mail.google.com")).toBe(true);
-  });
-
-  it("does not match unrelated domains", () => {
-    expect(isHostMatch("example.com", "google.com")).toBe(false);
-  });
-
-  it("does not match partial suffix", () => {
-    expect(isHostMatch("example.com", "notexample.com")).toBe(false);
-  });
+  for (const c of urlMatchCases.isHostMatch) {
+    it(c.name, () => {
+      expect(isHostMatch(c.stored, c.current)).toBe(c.expected);
+    });
+  }
 });
 
 describe("sortByUrlMatch", () => {
