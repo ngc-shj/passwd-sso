@@ -106,7 +106,7 @@ describe("POST /api/mobile/cache-rollback-report — audit emission (T43)", () =
            client_kind, device_pubkey, cnf_jkt
          ) VALUES (
            $1::uuid, $2::uuid, $3::uuid, $4, $5, $6, now(), $7::uuid, now(),
-           'IOS_APP'::"extension_token_client_kind", $8, $9
+           'IOS_APP'::"ExtensionTokenClientKind", $8, $9
          )`,
         id,
         userId,
