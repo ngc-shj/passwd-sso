@@ -481,3 +481,94 @@ These are the operator-facing scenarios that this ADR's recommended option must 
 - RFC 8032 — Edwards-curve Digital Signature Algorithm (EdDSA / Ed25519). **Citation status**: high-level reference only; no section claims made.
 - RFC 7515 — JSON Web Signature (JWS). **Citation status**: high-level reference only; the `alg: EdDSA` requirement comes from RFC 8037, which the implementation PR must cite precisely.
 - RFC 6962 — Certificate Transparency (mentioned for Alt 5E only; no claims requiring section-level verification).
+
+---
+
+## Implementation Checklist (Phase 2 — generated from Step 2-1 impact analysis on 2026-05-01)
+
+### Files to modify
+
+**Schema / migrations**:
+- `prisma/schema.prisma` — extend `model AuditChainAnchor` with `epoch INT?`, `publishPausedUntil TIMESTAMPTZ?`, `lastPublishedAt TIMESTAMPTZ?`. Add new `model SystemSetting` (PascalCase singular per project convention). Add 4 enum values to `AuditAction`.
+- `prisma/migrations/<ts>_audit_anchor_publisher_phase2/migration.sql` (new) — Migration A (additive: 3 columns + new table + 4 enum values + RLS on system_settings + grants).
+- Migration B (epoch NOT NULL flip) — deferred, separate migration after backfill.
+
+**Constants / env / RLS**:
+- `src/lib/constants/audit/audit.ts:17-170` — add 4 `AUDIT_ANCHOR_*` actions.
+- `src/lib/constants/audit/audit.ts:178-327` — add to `AUDIT_ACTION_VALUES`.
+- `src/lib/constants/audit/audit.ts:326-352` — add `MAINTENANCE` to `AUDIT_ACTION_GROUP` if not present, register actions there.
+- `src/lib/constants/audit/audit.ts:722-730` — keep new actions OUT of `OUTBOX_BYPASS_AUDIT_ACTIONS`.
+- `src/lib/constants/audit/audit.ts:753-765` — add 4 new actions to `WEBHOOK_DISPATCH_SUPPRESS`.
+- New constants: `AUDIT_ANCHOR_CADENCE_MS`, `AUDIT_ANCHOR_PUBLISH_OFFSET_MS`, `AUDIT_ANCHOR_RETENTION_YEARS`, `AUDIT_ANCHOR_MANIFEST_VERSION`, `AUDIT_ANCHOR_TYP`, `AUDIT_ANCHOR_PAUSE_CAP_FACTOR`, `AUDIT_ANCHOR_TAG_DOMAIN`, `AUDIT_ANCHOR_KID_PREFIX`.
+- `src/lib/env-schema.ts:44-95` — add `DEPLOYMENT_ID`, `AUDIT_ANCHOR_SIGNING_KEY`, `AUDIT_ANCHOR_TAG_SECRET`, `AUDIT_ANCHOR_PUBLISHER_ENABLED`, `AUDIT_ANCHOR_PUBLIC_KEY_ARCHIVE_URL`, `AUDIT_ANCHOR_DESTINATION_*`.
+- `src/lib/tenant-rls.ts:5-12` — extend `BYPASS_PURPOSE` with `AUDIT_ANCHOR_PUBLISH`.
+
+**KeyProvider** (4 providers):
+- `src/lib/key-provider/types.ts:8` — extend `KeyName`: `"audit-anchor-signing"`, `"audit-anchor-tag-secret"`.
+- `src/lib/key-provider/env-provider.ts:22-33` — extend `getKeySync` switch.
+- `src/lib/key-provider/env-provider.ts:35-59` — extend `validateKeys`.
+- `src/lib/key-provider/aws-sm-provider.ts` — `validateKeys` extension.
+- `src/lib/key-provider/gcp-sm-provider.ts` — same.
+- `src/lib/key-provider/azure-kv-provider.ts` — same.
+
+**i18n**:
+- `messages/en/AuditLog.json` — 4 new entries.
+- `messages/ja/AuditLog.json` — 4 new entries.
+
+**New code**:
+- `src/lib/audit/anchor-manifest.ts` — manifest library. **REUSE `jcsCanonical` from `src/lib/audit/audit-chain.ts:9-30` (R1)**.
+- `src/lib/audit/anchor-destinations/destination.ts` — interface.
+- `src/lib/audit/anchor-destinations/s3-destination.ts` — REUSE pattern from `src/lib/blob-store/s3-blob-store.ts:54-63`.
+- `src/lib/audit/anchor-destinations/github-release-destination.ts`.
+- `src/lib/audit/anchor-destinations/filesystem-destination.ts`.
+- `src/workers/audit-anchor-publisher.ts` — REUSE pattern from `src/workers/dcr-cleanup-worker.ts`.
+- `scripts/audit-anchor-publisher.ts` — entrypoint with `pick`-list.
+- `cli/src/commands/audit-verify.ts` — register at `cli/src/index.ts:47+`.
+
+**Existing modifications**:
+- `src/workers/audit-outbox-worker.ts:204-309` — honor `publish_paused_until` per-tenant skip.
+
+**CI / scripts**:
+- `infra/postgres/initdb/02-create-app-role.sql:8-79` — add `passwd_anchor_publisher` role.
+- `.github/workflows/ci-integration.yml:96-124` — bootstrap step for `passwd_anchor_publisher`.
+- `scripts/checks/check-bypass-rls.mjs:22+` — `ALLOWED_USAGE` entry: `["src/workers/audit-anchor-publisher.ts", ["auditChainAnchor", "tenant", "systemSetting"]]`.
+- `scripts/generate-audit-anchor-signing-key.sh` (new — pattern from `scripts/set-outbox-worker-password.sh`).
+- `scripts/generate-audit-anchor-tag-secret.sh` (new).
+- `scripts/set-audit-anchor-publisher-password.sh` (new).
+
+**Tests**:
+- `src/__tests__/audit-bypass-coverage.test.ts:35-40` — extend sweep to `AUDIT_ANCHOR_*`.
+- `src/__tests__/audit-i18n-coverage.test.ts` — auto-picks up via `AUDIT_ACTION_VALUES`.
+- New: `src/__tests__/audit-chain.unit.test.ts` extensions; `src/lib/audit/anchor-manifest.unit.test.ts`; `src/__tests__/db-integration/audit-anchor-*.integration.test.ts` (5+ files); `cli/src/__tests__/{unit,integration}/audit-verify.test.ts`.
+
+**Docs** (placeholders OK in this phase):
+- `docs/security/audit-anchor-verification.md`.
+- `docs/operations/audit-anchor-rotation-runbook.md`.
+- `docs/archive/review/audit-anchor-publisher-impl-manual-test.md` (R35 Tier-2).
+
+### Reuse-mandatory utilities (R1, R17 obligations)
+
+| Helper | Location | Why |
+|---|---|---|
+| `jcsCanonical` | `src/lib/audit/audit-chain.ts:9-30` | Manifest canonicalization byte-identical to chain |
+| `buildChainInput` / `computeEventHash` | `src/lib/audit/audit-chain.ts:53-91` | Existing chain primitives |
+| `withBypassRls` | `src/lib/tenant-rls.ts:40-52` | Cross-tenant anchor + system_settings access |
+| `enqueueAuditInTx` / `logAuditAsync` | `src/lib/audit/audit-outbox.ts:20-59`, `src/lib/audit/audit.ts:77-97` | Publisher emit path |
+| `encryptWithKey` / `decryptWithKey` envelope | `src/lib/crypto/account-token-crypto.ts:1-90` | Future signing-key wrap (KMS migration / advanced custody) |
+| S3 PUT | `src/lib/blob-store/s3-blob-store.ts:54-63` | Destination uploader |
+| `KeyProvider` interface | `src/lib/key-provider/types.ts:10-26` | Extend, do not duplicate |
+| Worker / cron pattern | `src/workers/dcr-cleanup-worker.ts:16-200+` | Publisher worker shape |
+| Subprocess test pattern | `cli/src/__tests__/integration/version.test.ts:1-26` | CLI integration test |
+
+### Batch order
+
+| # | Batch | Steps in plan | Notes |
+|---|---|---|---|
+| 1 | Schema foundation | 1 (schema A), 2/2a (DB role + RLS bypass purpose), 14 partial (initdb + ci-integration role bootstrap) | Establishes DB layer that all other batches depend on |
+| 2 | Constants + env + KeyProvider | 4 (KeyProvider 4 providers), 8 (constants + env) | No runtime code yet, sets up symbols batches 3-7 use |
+| 3 | Manifest library | 6 | Pure code, depends on Batch 2 constants |
+| 4 | Destination layer + Publisher worker | 7, 9 | Depends on Batches 2-3 |
+| 5 | CLI subcommand | 10 | Depends on Batches 2-3 |
+| 6 | Outbox-worker patch | 3 | Depends on Batch 1 schema |
+| 7 | Generation scripts + CI bootstrap finalization + ALLOWED_USAGE | 5, 14 (remainder) | Glue |
+| 8 | Docs (placeholders OK) | 11, 12, 13 | Independent |
