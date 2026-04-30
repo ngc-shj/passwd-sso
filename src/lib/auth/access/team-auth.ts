@@ -65,21 +65,11 @@ export function hasTeamPermission(
   return ROLE_PERMISSIONS[role]?.has(permission) ?? false;
 }
 
-/** Role hierarchy for comparison (higher = more privileged). */
-const ROLE_LEVEL: Record<TeamRole, number> = {
-  [TEAM_ROLE.OWNER]: 4,
-  [TEAM_ROLE.ADMIN]: 3,
-  [TEAM_ROLE.MEMBER]: 2,
-  [TEAM_ROLE.VIEWER]: 1,
-};
+// Back-compat re-export — see team-role-hierarchy.ts for the pure module.
+export { isRoleAbove } from "@/lib/auth/access/team-role-hierarchy";
 
 // Re-export isTeamAdminRole from constants for backward compatibility
 export { isTeamAdminRole } from "@/lib/constants";
-
-/** Check if actorRole is strictly higher than targetRole. */
-export function isRoleAbove(actorRole: TeamRole, targetRole: TeamRole): boolean {
-  return ROLE_LEVEL[actorRole] > ROLE_LEVEL[targetRole];
-}
 
 /**
  * Get the membership record for a user in a team.

@@ -35,7 +35,8 @@ import {
   type ApproveEligibility,
 } from "@/lib/vault/admin-reset-eligibility";
 import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
-import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { toastApiError } from "@/lib/http/toast-api-error";
 
 interface ResetActor {
   id: string;
@@ -175,12 +176,8 @@ export function TenantResetHistoryDialog({
         closeApproveDialog();
         await fetchHistory();
       } else if (res.status === 403) {
-        // Surface specific reason when server returns it
-        // (e.g. FORBIDDEN_INSUFFICIENT_ROLE — actor's role is not strictly
-        // above the target's). Falls back to the generic message for plain
-        // FORBIDDEN.
-        const body = await res.json().catch(() => ({}));
-        toast.error(tApi(apiErrorToI18nKey(body.error ?? API_ERROR.FORBIDDEN)));
+        // Surface specific reason (e.g. FORBIDDEN_INSUFFICIENT_ROLE).
+        await toastApiError(res, tApi, API_ERROR.FORBIDDEN);
       } else {
         toast.error(t("approveFailed"));
       }
