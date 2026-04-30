@@ -379,7 +379,26 @@ export const envObject = z.object({
   AUDIT_ANCHOR_DESTINATION_S3_BUCKET: z.string().optional(),
   AUDIT_ANCHOR_DESTINATION_S3_PREFIX: z.string().optional(),
   AUDIT_ANCHOR_DESTINATION_GH_REPO: z.string().optional(),
+  AUDIT_ANCHOR_DESTINATION_GH_TOKEN: z.string().optional(),
   AUDIT_ANCHOR_DESTINATION_FS_PATH: z.string().optional(),
+  // Dedicated DB URL for the anchor publisher worker role; falls back to DATABASE_URL.
+  AUDIT_ANCHOR_PUBLISHER_DATABASE_URL: z
+    .string()
+    .transform((s) => s.trim())
+    .pipe(
+      z.string().refine(
+        (s) => {
+          try {
+            new URL(s);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        { message: "AUDIT_ANCHOR_PUBLISHER_DATABASE_URL must be a valid URL" },
+      ),
+    )
+    .optional(),
 });
 
 // envSchema — envObject with cross-field superRefine rules. Refined schemas
