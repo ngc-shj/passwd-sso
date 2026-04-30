@@ -110,6 +110,8 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/user/mcp-tokens/[id]/route.ts", ["mcpAccessToken", "mcpRefreshToken", "delegationSession", "auditLog"]],
   // Auth provider check: userId-scoped Account query for passkey sign-in capability
   ["src/app/api/user/auth-provider/route.ts", ["account"]],
+  // Audit anchor publisher: cross-tenant manifest generation reads all tenants + chain state
+  ["src/workers/audit-anchor-publisher.ts", ["auditChainAnchor", "tenant", "systemSetting"]],
 ]);
 
 // Regex to match prisma model access: prisma.modelName.method(...) or tx.modelName.method(...)

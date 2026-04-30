@@ -39,6 +39,14 @@ describe("audit bypass coverage", () => {
     expect(missing).toEqual([]);
   });
 
+  it("every AUDIT_ANCHOR_* action is in WEBHOOK_DISPATCH_SUPPRESS", () => {
+    const anchorActions = AUDIT_ACTION_VALUES.filter(a => a.startsWith("AUDIT_ANCHOR_"));
+    expect(anchorActions.length).toBeGreaterThan(0);  // sanity
+    for (const action of anchorActions) {
+      expect(WEBHOOK_DISPATCH_SUPPRESS).toContain(action);
+    }
+  });
+
   it("OUTBOX_BYPASS_AUDIT_ACTIONS contains exactly the expected 7 actions", () => {
     const expected = new Set([
       // Phase 1: webhook delivery failures

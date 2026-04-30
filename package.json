@@ -18,6 +18,8 @@
     "db:studio": "prisma studio",
     "generate:icons": "bash scripts/generate-icons.sh",
     "generate:key": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
+    "generate:audit-anchor-signing-key": "bash scripts/generate-audit-anchor-signing-key.sh",
+    "generate:audit-anchor-tag-secret": "bash scripts/generate-audit-anchor-tag-secret.sh",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

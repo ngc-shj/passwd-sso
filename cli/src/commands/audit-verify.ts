@@ -270,7 +270,7 @@ function validateTenantIdCanonical(tenantId: string): void {
   }
 }
 
-function computeTenantTag(tenantId: string, tagSecret: Buffer): string {
+export function computeTenantTag(tenantId: string, tagSecret: Buffer): string {
   validateTenantIdCanonical(tenantId);
   const input = Buffer.concat([
     Buffer.from(AUDIT_ANCHOR_TAG_DOMAIN, "utf-8"),
