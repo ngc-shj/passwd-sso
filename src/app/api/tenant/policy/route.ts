@@ -81,6 +81,7 @@ async function handleGET(_req: NextRequest) {
         extensionTokenIdleTimeoutMinutes: true,
         extensionTokenAbsoluteTimeoutMinutes: true,
         vaultAutoLockMinutes: true,
+        allowAppSideAutofill: true,
         allowedCidrs: true,
         tailscaleEnabled: true,
         tailscaleTailnet: true,
@@ -118,6 +119,7 @@ async function handleGET(_req: NextRequest) {
     extensionTokenIdleTimeoutMinutes: user?.tenant?.extensionTokenIdleTimeoutMinutes ?? 10080,
     extensionTokenAbsoluteTimeoutMinutes: user?.tenant?.extensionTokenAbsoluteTimeoutMinutes ?? 43200,
     vaultAutoLockMinutes: user?.tenant?.vaultAutoLockMinutes ?? null,
+    allowAppSideAutofill: user?.tenant?.allowAppSideAutofill ?? false,
     allowedCidrs: user?.tenant?.allowedCidrs ?? [],
     tailscaleEnabled: user?.tenant?.tailscaleEnabled ?? false,
     tailscaleTailnet: user?.tenant?.tailscaleTailnet ?? null,
@@ -179,6 +181,7 @@ async function handlePATCH(req: NextRequest) {
     extensionTokenIdleTimeoutMinutes,
     extensionTokenAbsoluteTimeoutMinutes,
     vaultAutoLockMinutes,
+    allowAppSideAutofill,
     allowedCidrs,
     tailscaleEnabled,
     tailscaleTailnet,
@@ -229,6 +232,14 @@ async function handlePATCH(req: NextRequest) {
     ) {
       return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
     }
+  }
+
+  // Validate allowAppSideAutofill: boolean (default false). Per-tenant opt-in
+  // for the iOS host-app surfacing saved credentials to the system AutoFill
+  // provider; default-deny protects against AutoFill phishing in apps that
+  // do not publish AASA. (S24 of ios-autofill-mvp plan.)
+  if (allowAppSideAutofill !== undefined && typeof allowAppSideAutofill !== "boolean") {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
   // Validate sessionIdleTimeoutMinutes: now non-nullable per design. null is rejected.
@@ -733,6 +744,9 @@ async function handlePATCH(req: NextRequest) {
   if (vaultAutoLockMinutes !== undefined) {
     updateData.vaultAutoLockMinutes = vaultAutoLockMinutes ?? null;
   }
+  if (allowAppSideAutofill !== undefined) {
+    updateData.allowAppSideAutofill = allowAppSideAutofill;
+  }
   if (allowedCidrs !== undefined) {
     updateData.allowedCidrs = allowedCidrs ?? [];
   }
@@ -885,6 +899,7 @@ async function handlePATCH(req: NextRequest) {
           extensionTokenIdleTimeoutMinutes: true,
           extensionTokenAbsoluteTimeoutMinutes: true,
           vaultAutoLockMinutes: true,
+          allowAppSideAutofill: true,
           allowedCidrs: true,
           tailscaleEnabled: true,
           tailscaleTailnet: true,
@@ -962,6 +977,7 @@ async function handlePATCH(req: NextRequest) {
       extensionTokenIdleTimeoutMinutes: updated.extensionTokenIdleTimeoutMinutes,
       extensionTokenAbsoluteTimeoutMinutes: updated.extensionTokenAbsoluteTimeoutMinutes,
       vaultAutoLockMinutes: updated.vaultAutoLockMinutes,
+      allowAppSideAutofill: updated.allowAppSideAutofill,
       allowedCidrs: updated.allowedCidrs,
       tailscaleEnabled: updated.tailscaleEnabled,
       tailscaleTailnet: updated.tailscaleTailnet,
@@ -998,6 +1014,7 @@ async function handlePATCH(req: NextRequest) {
     extensionTokenIdleTimeoutMinutes: updated.extensionTokenIdleTimeoutMinutes,
     extensionTokenAbsoluteTimeoutMinutes: updated.extensionTokenAbsoluteTimeoutMinutes,
     vaultAutoLockMinutes: updated.vaultAutoLockMinutes,
+    allowAppSideAutofill: updated.allowAppSideAutofill,
     allowedCidrs: updated.allowedCidrs,
     tailscaleEnabled: updated.tailscaleEnabled,
     tailscaleTailnet: updated.tailscaleTailnet,
