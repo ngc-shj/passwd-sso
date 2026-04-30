@@ -1,0 +1,29 @@
+[
+  {
+    "algorithm": "SHA1",
+    "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+    "secretComment": "RFC 6238 test secret '12345678901234567890' as Base32",
+    "T_seconds": 59,
+    "digits": 8,
+    "period": 30,
+    "expected": "94287082"
+  },
+  {
+    "algorithm": "SHA256",
+    "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZA",
+    "secretComment": "RFC 6238 test secret '12345678901234567890123456789012' as Base32",
+    "T_seconds": 59,
+    "digits": 8,
+    "period": 30,
+    "expected": "46119246"
+  },
+  {
+    "algorithm": "SHA512",
+    "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNA",
+    "secretComment": "RFC 6238 64-byte test secret as Base32",
+    "T_seconds": 59,
+    "digits": 8,
+    "period": 30,
+    "expected": "90693936"
+  }
+]
