@@ -146,6 +146,7 @@ model User {
   // Extension tokens
   extensionTokens      ExtensionToken[]
   extensionBridgeCodes ExtensionBridgeCode[]
+  mobileBridgeCodes    MobileBridgeCode[]
 
   // Admin vault resets
   adminVaultResetsAsTarget    AdminVaultReset[] @relation("adminVaultResetTarget")
@@ -240,6 +241,33 @@ model ExtensionBridgeCode {
   @@index([userId, usedAt])
   @@index([expiresAt])
   @@map("extension_bridge_codes")
+}
+
+/// iOS AutoFill MVP — bridge code carrying PKCE/state/device-pubkey state from
+/// `/api/mobile/authorize` to `/api/mobile/token`. Distinct from ExtensionBridgeCode
+/// because the iOS flow binds additional cryptographic material (PKCE challenge,
+/// Secure-Enclave device pubkey) that the browser-extension flow does not carry.
+model MobileBridgeCode {
+  id            String    @id @default(uuid(4)) @db.Uuid
+  codeHash      String    @unique @map("code_hash") @db.VarChar(64)
+  userId        String    @map("user_id") @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  state         String    @db.VarChar(64)
+  codeChallenge String    @map("code_challenge") @db.VarChar(64)
+  devicePubkey  String    @map("device_pubkey") @db.Text
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(3)
+  usedAt        DateTime? @map("used_at") @db.Timestamptz(3)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  ip            String?   @db.VarChar(64)
+  userAgent     String?   @map("user_agent") @db.VarChar(512)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@index([tenantId])
+  @@index([expiresAt])
+  @@map("mobile_bridge_codes")
 }
 
 model ScimToken {
@@ -459,6 +487,7 @@ model Tenant {
   sessions                   Session[]
   extensionTokens            ExtensionToken[]
   extensionBridgeCodes       ExtensionBridgeCode[]
+  mobileBridgeCodes          MobileBridgeCode[]
   tags                       Tag[]
   vaultKeys                  VaultKey[]
   passwordEntries            PasswordEntry[]
