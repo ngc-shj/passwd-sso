@@ -108,6 +108,9 @@ jobs:
           -- passwd_dcr_cleanup_worker: created by migration without password; set it now.
           ALTER ROLE passwd_dcr_cleanup_worker WITH LOGIN PASSWORD 'passwd_dcr_pass';
 
+          -- passwd_anchor_publisher: created by migration without password; set it now.
+          ALTER ROLE passwd_anchor_publisher WITH LOGIN PASSWORD 'passwd_anchor_publisher_pass';
+
           -- passwd_app: not created by any migration (lives in initdb only).
           -- Replicate the role + grants the integration tests rely on.
           DO $$ BEGIN
