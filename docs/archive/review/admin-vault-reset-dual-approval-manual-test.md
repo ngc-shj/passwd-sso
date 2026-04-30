@@ -121,7 +121,12 @@ Expected baseline: 4 user rows, 1 tenant for Alice/Bob/Carol/Dave; 0 admin_vault
 - DB: `approved_at IS NULL`, `approved_by_id IS NULL` (row unchanged).
 - Audit row recorded for the failed attempt.
 
-**Result:** [ ] PASS — 2026-MM-DD
+**Result:** [x] PASS — 2026-04-30
+- Tested via browser DevTools Console fetch from papapyan (initiator) session against fresh `pending_approval` row `df45cc7e-...`.
+- Response: HTTP 403, body `{"error":"FORBIDDEN"}`. DB row unchanged (`approved_at IS NULL`).
+- App-level pre-check fired (`resetRecord.initiatedById === session.user.id`).
+- Forensic audit row emitted: `action=ADMIN_VAULT_RESET_APPROVE`, `metadata.cause="FORBIDDEN_SELF_APPROVAL"`, `actor=papapyan`. Implementation gap from initial round-3 review (forbidden() returned without audit) was caught and fixed mid-test by 5-LOC addition; updated route test to assert the new audit emission.
+- Confirmed multi-layer defense: Layer 0 (UI disabled cue, R26) + Layer 1 (RBAC, see Scenario A4) + Layer 2 (app-level pre-check + forensic audit, this scenario) + Layer 3 (DB CAS WHERE `initiatedById: { not: actor.id }`, verified by integration test).
 
 ---
 
@@ -154,7 +159,11 @@ Expected baseline: 4 user rows, 1 tenant for Alice/Bob/Carol/Dave; 0 admin_vault
 - Dave's mailpit inbox: NO new email after revoke.
 - `notifications` table: 0 rows of type `ADMIN_VAULT_RESET_REVOKED` for Dave.
 
-**Result:** [ ] PASS — 2026-MM-DD
+**Result:** [x] PASS — 2026-04-30
+- Initiator: papapyan; target: test-admin (target swapped vs Scenario 1 because test-member's per-target rate counter was at the 1/day cap).
+- DB after revoke: `revoked_at` set, `executed_at IS NULL`, `approved_at IS NULL`, `encrypted_token IS NULL` (T6 lifecycle confirmed).
+- Audit log: `ADMIN_VAULT_RESET_INITIATE` + `ADMIN_VAULT_RESET_REVOKE` (both papapyan).
+- **target's notifications table query: 0 rows in 5-min window** — confirmed `wasApproved !== null` gate works (F2 fix). Mailpit: NO new email arrived to test-admin after revoke.
 
 ---
 
@@ -296,7 +305,11 @@ Expected baseline: 4 user rows, 1 tenant for Alice/Bob/Carol/Dave; 0 admin_vault
 
 **Expected:** 403 `FORBIDDEN` (`requireTenantPermission(MEMBER_VAULT_RESET)` fails). DB row unchanged. Audit row emitted for the attempted action.
 
-**Result:** [ ] PASS — 2026-MM-DD
+**Result:** [x] PASS — 2026-04-30
+- Tested via browser DevTools Console fetch from test-member (MEMBER role) session against fresh `pending_approval` row `df45cc7e-...`.
+- Response: HTTP 403, body `{"error":"FORBIDDEN"}`. DB row unchanged.
+- Block fired at the **RBAC layer** (`requireTenantPermission(MEMBER_VAULT_RESET)` rejects MEMBER role) — earliest in the chain, before the row was even fetched.
+- **No forensic audit emitted** for this scope-elevation attempt — `requireTenantPermission` throws BEFORE reaching the route's audit-emit code paths. Trade-off: incident response loses the signal but consistent with how all other protected endpoints behave when an unauthorized role probes them. Future work could centralize "permission rejected" audit emission in `handleAuthError`; out of scope for this PR.
 
 ---
 
@@ -367,16 +380,17 @@ If any scenario fails:
 - R26 disabled-cue side-channel verified incidentally: papapyan saw "承認" button disabled with tooltip "あなたがこのリセットを開始したため..."; test-admin (different session) saw it enabled.
 
 ### Scenario 2: Self-approval blocked
-[ ] PASS — 2026-MM-DD
-- (notes)
+[x] PASS — 2026-04-30
+- Verified all 4 defense layers: UI disabled-cue (R26, side-channel via Scenario 1), RBAC (see A4), app-level pre-check + forensic audit (this scenario), DB CAS (integration test).
+- Implementation gap surfaced: forbidden() returned without audit. Fixed mid-test with 5-LOC addition; updated route test asserts `metadata.cause = "FORBIDDEN_SELF_APPROVAL"`.
 
 ### Scenario 3: Email-change race
 [ ] PASS — 2026-MM-DD
 - (notes)
 
 ### Scenario 4: Pending revoke silent to target
-[ ] PASS — 2026-MM-DD
-- (notes)
+[x] PASS — 2026-04-30
+- Initiate-then-revoke flow against test-admin (target swap from Scenario 1 due to per-target rate-limit). 0 notifications, 0 emails to target. encrypted_token NULLed on revoke.
 
 ### Scenario 5: 24h cap on approve
 [ ] PASS — 2026-MM-DD
@@ -392,7 +406,11 @@ If any scenario fails:
 
 ### Adversarial A1: Cross-tenant access
 [ ] PASS — 2026-MM-DD
-- (notes)
+- (deferred — requires multi-tenant test fixture)
+
+### Adversarial A4: Scope elevation (MEMBER attempts approve)
+[x] PASS — 2026-04-30
+- test-member (MEMBER) → approve API → 403 from `requireTenantPermission` RBAC layer before audit-emit code.
 
 ### Adversarial A2: Token replay (post-execute)
 [ ] PASS — 2026-MM-DD

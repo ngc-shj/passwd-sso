@@ -215,6 +215,17 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/approve", () =
     const res = await POST(buildReq(), buildParams());
     expect(res.status).toBe(403);
     expect(mockPrismaAdminVaultResetUpdateMany).not.toHaveBeenCalled();
+    // Forensic audit row emitted with FORBIDDEN_SELF_APPROVAL cause for
+    // incident-response visibility (suspicious-behavior signal).
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "ADMIN_VAULT_RESET_APPROVE",
+        targetId: TARGET_USER_ID,
+        metadata: expect.objectContaining({
+          cause: "FORBIDDEN_SELF_APPROVAL",
+        }),
+      }),
+    );
   });
 
   it("returns 404 when target member is not found in tenant", async () => {

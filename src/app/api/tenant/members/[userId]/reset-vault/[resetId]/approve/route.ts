@@ -88,7 +88,16 @@ async function handlePOST(
 
   // App-level self-approval pre-check (advisory UX). The CAS WHERE clause
   // below is the load-bearing guard against TOCTOU on auth().user.id.
+  // Emit an audit row for forensic visibility — failed self-approval is a
+  // suspicious-behavior signal worth recording for incident response.
   if (resetRecord.initiatedById === session.user.id) {
+    await logAuditAsync({
+      ...tenantAuditBase(req, session.user.id, actor.tenantId),
+      action: AUDIT_ACTION.ADMIN_VAULT_RESET_APPROVE,
+      targetType: "User",
+      targetId: targetUserId,
+      metadata: { resetId, cause: "FORBIDDEN_SELF_APPROVAL" },
+    });
     return forbidden();
   }
 
