@@ -5,7 +5,7 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 const {
   mockAuth, mockLogAudit, mockExecuteVaultReset,
   mockAdminVaultResetFindUnique, mockAdminVaultResetUpdateMany,
-  mockRateLimitCheck,
+  mockRateLimitCheck, mockInvalidateUserSessions,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockLogAudit: vi.fn(),
@@ -13,6 +13,7 @@ const {
   mockAdminVaultResetFindUnique: vi.fn(),
   mockAdminVaultResetUpdateMany: vi.fn(),
   mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
+  mockInvalidateUserSessions: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -42,6 +43,9 @@ vi.mock("@/lib/security/rate-limit", () => ({
     clear: vi.fn(),
   })),
 }));
+vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
+  invalidateUserSessions: mockInvalidateUserSessions,
+}));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
@@ -49,6 +53,7 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { POST } from "./route";
+import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
 
 const URL = "http://localhost/api/vault/admin-reset";
 const TOKEN = "a".repeat(64);
@@ -60,8 +65,10 @@ const RESET_RECORD = {
   teamId: "team-1",
   targetUserId: "user-1",
   initiatedById: "admin-1",
+  approvedById: "approver-1",
   tokenHash: TOKEN_HASH,
   expiresAt: new Date(Date.now() + 3600_000),
+  approvedAt: new Date(Date.now() - 60_000),
   executedAt: null,
   revokedAt: null,
 };
@@ -75,6 +82,14 @@ describe("POST /api/vault/admin-reset", () => {
     mockExecuteVaultReset.mockResolvedValue({ deletedEntries: 3, deletedAttachments: 1 });
     mockAdminVaultResetUpdateMany.mockResolvedValue({ count: 1 });
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
+    mockInvalidateUserSessions.mockResolvedValue({
+      sessions: 2,
+      extensionTokens: 1,
+      apiKeys: 0,
+      mcpAccessTokens: 4,
+      mcpRefreshTokens: 5,
+      delegationSessions: 6,
+    });
   });
 
   afterEach(() => {
@@ -85,7 +100,7 @@ describe("POST /api/vault/admin-reset", () => {
     delete process.env.APP_URL;
     delete process.env.AUTH_URL;
     const res = await POST(createRequest("POST", URL, {
-      body: { token: TOKEN, confirmation: "DELETE MY VAULT" },
+      body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(500);
     const json = await res.json();
@@ -95,7 +110,7 @@ describe("POST /api/vault/admin-reset", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(createRequest("POST", URL, {
-      body: { token: TOKEN, confirmation: "DELETE MY VAULT" },
+      body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(401);
   });
@@ -119,7 +134,7 @@ describe("POST /api/vault/admin-reset", () => {
   it("returns 404 when token not found", async () => {
     mockAdminVaultResetFindUnique.mockResolvedValue(null);
     const res = await POST(createRequest("POST", URL, {
-      body: { token: TOKEN, confirmation: "DELETE MY VAULT" },
+      body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(404);
   });
@@ -127,7 +142,7 @@ describe("POST /api/vault/admin-reset", () => {
   it("returns 403 when token belongs to a different user", async () => {
     mockAuth.mockResolvedValue({ user: { id: "other-user" } });
     const res = await POST(createRequest("POST", URL, {
-      body: { token: TOKEN, confirmation: "DELETE MY VAULT" },
+      body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(403);
   });
@@ -138,7 +153,7 @@ describe("POST /api/vault/admin-reset", () => {
       expiresAt: new Date(Date.now() - 1000),
     });
     const res = await POST(createRequest("POST", URL, {
-      body: { token: TOKEN, confirmation: "DELETE MY VAULT" },
+      body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(410);
     const json = await res.json();
@@ -151,7 +166,7 @@ describe("POST /api/vault/admin-reset", () => {
       executedAt: new Date(),
     });
     const res = await POST(createRequest("POST", URL, {
-      body: { token: TOKEN, confirmation: "DELETE MY VAULT" },
+      body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(410);
     const json = await res.json();
@@ -164,7 +179,7 @@ describe("POST /api/vault/admin-reset", () => {
       revokedAt: new Date(),
     });
     const res = await POST(createRequest("POST", URL, {
-      body: { token: TOKEN, confirmation: "DELETE MY VAULT" },
+      body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(410);
     const json = await res.json();
@@ -174,7 +189,7 @@ describe("POST /api/vault/admin-reset", () => {
   it("returns 410 when atomic update fails (TOCTOU: concurrent revoke) without executing vault reset", async () => {
     mockAdminVaultResetUpdateMany.mockResolvedValue({ count: 0 });
     const res = await POST(createRequest("POST", URL, {
-      body: { token: TOKEN, confirmation: "DELETE MY VAULT" },
+      body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(410);
     const json = await res.json();
@@ -185,7 +200,7 @@ describe("POST /api/vault/admin-reset", () => {
 
   it("marks token via updateMany BEFORE executing vault reset, and logs audit on success", async () => {
     const res = await POST(createRequest("POST", URL, {
-      body: { token: TOKEN, confirmation: "DELETE MY VAULT" },
+      body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(200);
     const json = await res.json();
@@ -197,16 +212,22 @@ describe("POST /api/vault/admin-reset", () => {
     // Vault reset executed
     expect(mockExecuteVaultReset).toHaveBeenCalledWith("user-1");
 
-    // Token marked as executed via atomic updateMany (TOCTOU prevention)
+    // Token marked as executed via atomic updateMany (TOCTOU prevention).
+    // Defense-in-depth `approvedAt: { not: null }` is on the WHERE clause
+    // and `encryptedToken: null` lands in `data`.
     expect(mockAdminVaultResetUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           id: "reset-1",
+          approvedAt: { not: null },
           executedAt: null,
           revokedAt: null,
           expiresAt: { gt: expect.any(Date) },
         }),
-        data: expect.objectContaining({ executedAt: expect.any(Date) }),
+        data: expect.objectContaining({
+          executedAt: expect.any(Date),
+          encryptedToken: null,
+        }),
       }),
     );
 
@@ -215,7 +236,14 @@ describe("POST /api/vault/admin-reset", () => {
     const resetOrder = mockExecuteVaultReset.mock.invocationCallOrder[0];
     expect(updateOrder).toBeLessThan(resetOrder);
 
-    // Audit log with TEAM scope (teamId is not null)
+    // Cross-tenant session invalidation
+    expect(mockInvalidateUserSessions).toHaveBeenCalledWith("user-1", {
+      allTenants: true,
+      reason: "admin_vault_reset",
+    });
+
+    // Audit log with TEAM scope (teamId is not null) — invalidation counts
+    // are mapped to audit metadata (T5).
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         scope: "TEAM",
@@ -227,9 +255,32 @@ describe("POST /api/vault/admin-reset", () => {
           deletedEntries: 3,
           deletedAttachments: 1,
           initiatedById: "admin-1",
+          approvedById: "approver-1",
+          invalidatedSessions: 2,
+          invalidatedExtensionTokens: 1,
+          invalidatedApiKeys: 0,
+          invalidatedMcpAccessTokens: 4,
+          invalidatedMcpRefreshTokens: 5,
+          invalidatedDelegationSessions: 6,
         }),
       }),
     );
+  });
+
+  it("returns 409 VAULT_RESET_NOT_APPROVED when row has not been approved", async () => {
+    mockAdminVaultResetFindUnique.mockResolvedValue({
+      ...RESET_RECORD,
+      approvedAt: null,
+    });
+    const res = await POST(createRequest("POST", URL, {
+      body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
+    }));
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toBe("VAULT_RESET_NOT_APPROVED");
+    expect(mockExecuteVaultReset).not.toHaveBeenCalled();
+    expect(mockAdminVaultResetUpdateMany).not.toHaveBeenCalled();
+    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
   });
 
   it("uses TENANT scope when teamId is null", async () => {
@@ -238,7 +289,7 @@ describe("POST /api/vault/admin-reset", () => {
       teamId: null,
     });
     const res = await POST(createRequest("POST", URL, {
-      body: { token: TOKEN, confirmation: "DELETE MY VAULT" },
+      body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(200);
 
@@ -265,21 +316,21 @@ describe("POST /api/vault/admin-reset", () => {
   it("accepts uppercase hex token (hexHash is case-insensitive)", async () => {
     // hexHash uses /^[0-9a-f]+$/i, so uppercase is valid
     const res = await POST(createRequest("POST", URL, {
-      body: { token: "A".repeat(64), confirmation: "DELETE MY VAULT" },
+      body: { token: "A".repeat(64), confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(200);
   });
 
   it("returns 400 for token shorter than 64 chars", async () => {
     const res = await POST(createRequest("POST", URL, {
-      body: { token: "a".repeat(63), confirmation: "DELETE MY VAULT" },
+      body: { token: "a".repeat(63), confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(400);
   });
 
   it("returns 400 for token with non-hex characters", async () => {
     const res = await POST(createRequest("POST", URL, {
-      body: { token: "g".repeat(64), confirmation: "DELETE MY VAULT" },
+      body: { token: "g".repeat(64), confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(400);
   });
@@ -287,7 +338,7 @@ describe("POST /api/vault/admin-reset", () => {
   it("returns 429 when rate limited", async () => {
     mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 30_000 });
     const res = await POST(createRequest("POST", URL, {
-      body: { token: TOKEN, confirmation: "DELETE MY VAULT" },
+      body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(429);
     expect(res.headers.get("Retry-After")).toBe("30");

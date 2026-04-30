@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { API_PATH, apiPath } from "@/lib/constants";
-import { showSidebarCrudError } from "@/hooks/sidebar/sidebar-crud-error";
+import { toastApiError } from "@/lib/http/toast-api-error";
 import { fetchApi } from "@/lib/url-helpers";
 import type { SidebarFolderItem, SidebarTeamFolderGroup } from "@/hooks/sidebar/use-sidebar-data";
 
@@ -67,7 +67,7 @@ export function useSidebarFolderCrud({
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      await showSidebarCrudError(res, tErrors);
+      await toastApiError(res, tErrors);
       throw new Error("API error");
     }
     refreshData();
@@ -80,7 +80,7 @@ export function useSidebarFolderCrud({
       : apiPath.folderById(deletingFolder.id);
     const res = await fetchApi(url, { method: "DELETE" });
     if (!res.ok) {
-      await showSidebarCrudError(res, tErrors);
+      await toastApiError(res, tErrors);
       setDeletingFolder(null);
       return;
     }

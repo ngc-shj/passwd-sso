@@ -24,7 +24,7 @@ import {
   File,
 } from "lucide-react";
 import { toast } from "sonner";
-import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { toastApiError } from "@/lib/http/toast-api-error";
 import { useVault } from "@/lib/vault/vault-context";
 import {
   encryptBinary,
@@ -152,8 +152,7 @@ export function AttachmentSection({
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        toast.error(tApi(apiErrorToI18nKey(err?.error)));
+        await toastApiError(res, tApi);
         return;
       }
 

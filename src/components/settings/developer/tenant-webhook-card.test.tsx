@@ -135,6 +135,7 @@ describe("TenantWebhookCard (tenant-specific)", () => {
 
     // Admin actions
     expect(screen.getByText("ADMIN_VAULT_RESET_INITIATE")).toBeInTheDocument();
+    expect(screen.getByText("ADMIN_VAULT_RESET_APPROVE")).toBeInTheDocument();
     expect(screen.getByText("ADMIN_VAULT_RESET_EXECUTE")).toBeInTheDocument();
     expect(screen.getByText("ADMIN_VAULT_RESET_REVOKE")).toBeInTheDocument();
     expect(screen.getByText("TENANT_ROLE_UPDATE")).toBeInTheDocument();

@@ -9,7 +9,7 @@ import { Plus, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/ui/dynamic-styles";
-import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { toastApiError } from "@/lib/http/toast-api-error";
 import { apiPath } from "@/lib/constants";
 import { buildTagPathMap } from "@/lib/format/tag-tree";
 import { fetchApi } from "@/lib/url-helpers";
@@ -110,8 +110,7 @@ export function TeamTagInput({ teamId, selectedTags, onChange }: TeamTagInputPro
         setAllTags((prev) => [...prev, newTag]);
         addTag(newTag);
       } else {
-        const err = await res.json().catch(() => null);
-        toast.error(tApi(apiErrorToI18nKey(err?.error)));
+        await toastApiError(res, tApi);
       }
     } catch {
       toast.error(t("createFailed"));

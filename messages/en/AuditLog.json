@@ -138,6 +138,7 @@
   "SCIM_GROUP_UPDATE": "SCIM group membership updated",
   "WATCHTOWER_ALERT_SENT": "Watchtower breach alert sent",
   "ADMIN_VAULT_RESET_INITIATE": "Admin vault reset initiated",
+  "ADMIN_VAULT_RESET_APPROVE": "Admin vault reset approved",
   "ADMIN_VAULT_RESET_EXECUTE": "Admin vault reset executed",
   "ADMIN_VAULT_RESET_REVOKE": "Admin vault reset revoked",
   "API_KEY_CREATE": "API key created",

@@ -40,6 +40,18 @@ const MESSAGES = {
       body: "A tenant admin has cancelled the vault reset.",
     },
   },
+  ADMIN_VAULT_RESET_PENDING_APPROVAL: {
+    ja: {
+      title: "保管庫リセット承認待ち",
+      body: (targetEmail: string) =>
+        `管理者が ${targetEmail} の保管庫リセットを開始しました。実行には別の管理者の承認が必要です。`,
+    },
+    en: {
+      title: "Vault reset awaiting approval",
+      body: (targetEmail: string) =>
+        `An admin has initiated a vault reset for ${targetEmail}. A second admin must approve before it can be executed.`,
+    },
+  },
   WATCHTOWER_ALERT: {
     ja: {
       title: "Watchtower アラート",

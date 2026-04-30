@@ -20,6 +20,7 @@
   "type_POLICY_UPDATE": "ポリシー更新",
   "type_ADMIN_VAULT_RESET": "管理者による保管庫リセット",
   "type_ADMIN_VAULT_RESET_REVOKED": "保管庫リセットの取り消し",
+  "type_ADMIN_VAULT_RESET_PENDING_APPROVAL": "保管庫リセット承認待ち",
   "type_SESSION_EVICTED": "セッション強制終了",
   "body_SESSION_EVICTED": "同時接続制限（最大 {max}）により、{count}件のセッションが強制終了されました。"
 }

@@ -7,6 +7,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { rateLimited } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { executeVaultReset } from "@/lib/vault/vault-reset";
@@ -14,7 +15,7 @@ import { z } from "zod/v4";
 
 export const runtime = "nodejs";
 
-const CONFIRMATION_TOKEN = "DELETE MY VAULT";
+const CONFIRMATION_TOKEN = VAULT_CONFIRMATION_PHRASE.DELETE_VAULT;
 
 const resetSchema = z.object({
   confirmation: z.string(),
