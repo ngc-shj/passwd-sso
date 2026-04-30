@@ -60,11 +60,7 @@ export function hasTenantPermission(
   return ROLE_PERMISSIONS[role]?.has(permission) ?? false;
 }
 
-// Re-export role-hierarchy primitives from the pure module so existing
-// callers continue to work via `from "@/lib/auth/access/tenant-auth"`
-// while client-only consumers can import directly from
-// `@/lib/auth/access/tenant-role-hierarchy` to avoid pulling server-only
-// dependencies (prisma/pg) into their bundle.
+// Back-compat re-export — see tenant-role-hierarchy.ts for the pure module.
 export { isTenantRoleAbove } from "@/lib/auth/access/tenant-role-hierarchy";
 
 // Re-export isTenantAdminRole from constants for backward compatibility

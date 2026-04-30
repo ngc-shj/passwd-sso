@@ -45,7 +45,13 @@ const {
     mockResolveUserLocale: vi.fn(),
     mockRequireTenantPermission: vi.fn(),
     mockIsTenantRoleAbove: vi.fn(),
-    mockWithTenantRls: vi.fn((_p: unknown, _t: unknown, fn: () => unknown) => fn()),
+    // The route uses both signatures: `withTenantRls(prisma, tenantId, () => ...)`
+    // for single-call paths and `withTenantRls(prisma, tenantId, async (tx) => ...)`
+    // for the GET handler's combined fetch. Pass the mocked prisma as `tx` so
+    // either form resolves correctly under test.
+    mockWithTenantRls: vi.fn(
+      (p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(p),
+    ),
     mockNotificationTitle: vi.fn(),
     mockNotificationBody: vi.fn(),
     mockEncryptResetToken: vi.fn(),

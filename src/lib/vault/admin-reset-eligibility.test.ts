@@ -28,9 +28,6 @@ describe("computeApproveEligibility", () => {
   });
 
   it("returns 'insufficient_role' when actor is the target (covers target-self)", () => {
-    // Target-self maps here because a user cannot be strictly above their
-    // own role. This is the path the dialog UX relies on for hiding the
-    // Approve button on the target's view.
     expect(
       computeApproveEligibility({
         actorId: A,
@@ -53,9 +50,6 @@ describe("computeApproveEligibility", () => {
   });
 
   it("initiator wins over insufficient_role when both apply", () => {
-    // Edge: actor is the initiator AND has equal role to target.
-    // Initiator check fires first per the function order — the message the
-    // dialog shows is the more specific "you initiated this" tooltip.
     expect(
       computeApproveEligibility({
         actorId: A,

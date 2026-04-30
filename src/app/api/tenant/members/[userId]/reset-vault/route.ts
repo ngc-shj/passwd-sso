@@ -248,49 +248,46 @@ async function handleGET(
     return handleAuthError(err);
   }
 
-  // Fetch the target's role alongside the reset rows so we can pre-compute
-  // approveEligibility per row server-side. Single query — target.role is
-  // constant across all rows under this targetUserId path param.
-  const [resets, targetMember] = await Promise.all([
-    withTenantRls(prisma, actor.tenantId, async () =>
-      prisma.adminVaultReset.findMany({
-        where: {
-          targetUserId,
-          tenantId: actor.tenantId,
-        },
-        include: {
-          initiatedBy: { select: { id: true, name: true, email: true } },
-          approvedBy: { select: { id: true, name: true, email: true } },
-        },
-        orderBy: { createdAt: "desc" },
-        take: VAULT_RESET_HISTORY_LIMIT,
-      }),
-    ),
-    withTenantRls(prisma, actor.tenantId, async () =>
-      prisma.tenantMember.findFirst({
-        where: {
-          tenantId: actor.tenantId,
-          userId: targetUserId,
-          deactivatedAt: null,
-        },
-        select: { role: true },
-      }),
-    ),
-  ]);
+  // Fetch reset rows + target's role under a single RLS transaction so the
+  // queries pipeline on one connection (vs. opening two separate tenants).
+  const { resets, targetMember } = await withTenantRls(
+    prisma,
+    actor.tenantId,
+    async (tx) => {
+      const [resets, targetMember] = await Promise.all([
+        tx.adminVaultReset.findMany({
+          where: { targetUserId, tenantId: actor.tenantId },
+          include: {
+            initiatedBy: { select: { id: true, name: true, email: true } },
+            approvedBy: { select: { id: true, name: true, email: true } },
+          },
+          orderBy: { createdAt: "desc" },
+          take: VAULT_RESET_HISTORY_LIMIT,
+        }),
+        tx.tenantMember.findFirst({
+          where: {
+            tenantId: actor.tenantId,
+            userId: targetUserId,
+            deactivatedAt: null,
+          },
+          select: { role: true },
+        }),
+      ]);
+      return { resets, targetMember };
+    },
+  );
 
+  // Deactivated/missing target → no admin can be strictly above them, so
+  // every row's eligibility collapses to insufficient_role (UI hides the
+  // button rather than surfacing an action the server would reject).
+  const targetRole = targetMember?.role;
   const now = new Date();
   const result = resets.map((r) => {
-    // Pre-compute eligibility so the dialog renders the Approve button
-    // (or its disabled-with-tooltip variant) without re-implementing the
-    // role-hierarchy logic on the client. If the target member is no
-    // longer in the tenant (deactivated), eligibility is "insufficient_role"
-    // — the UI hides the button rather than letting the user attempt an
-    // action that the server would reject.
-    const approveEligibility: ApproveEligibility = targetMember
+    const approveEligibility: ApproveEligibility = targetRole
       ? computeApproveEligibility({
           actorId: session.user.id,
           actorRole: actor.role,
-          targetRole: targetMember.role,
+          targetRole,
           initiatedById: r.initiatedById,
         })
       : APPROVE_ELIGIBILITY.INSUFFICIENT_ROLE;

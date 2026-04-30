@@ -29,7 +29,6 @@ import {
   RESET_STATUS,
   STATUS_KEY_MAP,
   type ResetStatus,
-  type StatusI18nKey,
 } from "@/lib/vault/admin-reset-status";
 import {
   APPROVE_ELIGIBILITY,
@@ -223,15 +222,9 @@ export function TenantResetHistoryDialog({
           <div className="max-h-80 space-y-3 overflow-y-auto">
             {records.map((r) => {
               const status = r.status;
-              // Eligibility is precomputed server-side. Three outcomes:
-              //   - "eligible" → Approve button enabled
-              //   - "initiator" → Approve button disabled with tooltip
-              //     ("you initiated this reset...") — gives a clear UX hint
-              //   - "insufficient_role" → button hidden entirely (covers
-              //     target-self AND peer-admin cases). Surfacing a button
-              //     the server would 403 is bad UX, hence hide.
               const isInitiator =
                 r.approveEligibility === APPROVE_ELIGIBILITY.INITIATOR;
+              // Hide (vs. disable) for INSUFFICIENT_ROLE — server would 403 anyway.
               const showApprove =
                 status === RESET_STATUS.PENDING_APPROVAL &&
                 r.approveEligibility !==
@@ -245,7 +238,7 @@ export function TenantResetHistoryDialog({
                   <div className="space-y-1 text-sm">
                     <div className="flex items-center gap-2">
                       <Badge variant={STATUS_VARIANT[status]}>
-                        {t(STATUS_KEY_MAP[status] satisfies StatusI18nKey)}
+                        {t(STATUS_KEY_MAP[status])}
                       </Badge>
                       <span className="text-xs text-muted-foreground">
                         {formatDateTime(r.createdAt, locale)}

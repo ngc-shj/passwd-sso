@@ -23,6 +23,7 @@ import {
 } from "@/lib/notification/notification-messages";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import {
+  errorResponse,
   forbidden,
   handleAuthError,
   notFound,
@@ -87,10 +88,6 @@ async function handlePOST(
   );
   if (!resetRecord) return notFound();
 
-  // Resolve target member up-front so the eligibility classifier can use
-  // both initiator id and target role in one place. Single query — keeps
-  // the GET /reset-vault eligibility precompute and this enforcement path
-  // in lockstep via the shared computeApproveEligibility helper.
   const targetMember = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.tenantMember.findFirst({
       where: {
@@ -105,10 +102,9 @@ async function handlePOST(
   );
   if (!targetMember) return notFound();
 
-  // Eligibility classification — same helper the GET history endpoint uses
-  // to render the Approve button. The CAS WHERE clause below is the
-  // load-bearing guard against TOCTOU on auth().user.id; this layer is
-  // the early-reject + forensic-audit + UX-error surface.
+  // CAS WHERE below is the load-bearing TOCTOU guard; this layer is the
+  // early-reject + forensic-audit + UX-error surface, sharing the helper
+  // with GET so the rendered button never disagrees with the enforcement.
   const eligibility = computeApproveEligibility({
     actorId: session.user.id,
     actorRole: actor.role,
@@ -116,8 +112,7 @@ async function handlePOST(
     initiatedById: resetRecord.initiatedById,
   });
   if (eligibility === APPROVE_ELIGIBILITY.INITIATOR) {
-    // Forensic audit for failed self-approval — suspicious-behavior signal
-    // worth recording for incident response (FR4 layer 2).
+    // Forensic audit on failed self-approval — suspicious-behavior signal.
     await logAuditAsync({
       ...tenantAuditBase(req, session.user.id, actor.tenantId),
       action: AUDIT_ACTION.ADMIN_VAULT_RESET_APPROVE,
@@ -128,14 +123,7 @@ async function handlePOST(
     return forbidden();
   }
   if (eligibility === APPROVE_ELIGIBILITY.INSUFFICIENT_ROLE) {
-    // Distinct error code so the dialog renders a meaningful message
-    // (e.g., "your role is insufficient — a higher-level admin must
-    // approve") instead of generic FORBIDDEN. Covers target-self and
-    // peer-admin attempts.
-    return NextResponse.json(
-      { error: API_ERROR.FORBIDDEN_INSUFFICIENT_ROLE },
-      { status: 403 },
-    );
+    return errorResponse(API_ERROR.FORBIDDEN_INSUFFICIENT_ROLE, 403);
   }
 
   // Email-snapshot guard (FR12 / S9). If the target's email changed since
