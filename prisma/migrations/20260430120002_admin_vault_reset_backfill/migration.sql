@@ -27,6 +27,9 @@ UPDATE "admin_vault_resets" r
 
 -- 3. Emit SYSTEM-actor audit rows for the auto-revoked legacy rows
 --    (only rows we just touched — distinguished by revoked_at = created_at).
+--    user_id uses the SYSTEM_ACTOR_ID sentinel from src/lib/constants/app.ts
+--    (paired with actor_type = 'SYSTEM' per the AuditLog schema comment).
+--    The original initiator is preserved in metadata.initiatedById.
 INSERT INTO "audit_logs" (
   "id", "tenant_id", "scope", "actor_type", "user_id", "action",
   "target_type", "target_id", "metadata", "created_at"
@@ -36,7 +39,7 @@ SELECT
   r."tenant_id",
   'TENANT',
   'SYSTEM',
-  r."initiated_by_id",
+  '00000000-0000-4000-8000-000000000001'::uuid,  -- SYSTEM_ACTOR_ID sentinel
   'ADMIN_VAULT_RESET_REVOKE',
   'User',
   r."target_user_id",

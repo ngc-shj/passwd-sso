@@ -198,7 +198,8 @@ describe("admin-vault-reset dual-approval CAS race (real DB)", () => {
     // Sanity: both clients won at least once across 50 iterations.
     // (If one client always wins, the race is suspect — likely the same
     // pool, or one client is starved by connection setup.)
-    expect(winnerCount + loserCount).toBe(ITERATIONS);
+    expect(winnerCount).toBeGreaterThan(0);
+    expect(loserCount).toBeGreaterThan(0);
   });
 
   // ─── N3: self-approval blocked at DB CAS level ───────────────

@@ -616,24 +616,29 @@ describe("GET /api/tenant/members/[userId]/reset-vault", () => {
     expect(json).toHaveLength(0);
   });
 
-  it("returns correct shape with all required fields (including new approval fields)", async () => {
+  it("returns exact response shape (R19 — strict equality blocks accidental field leaks like tokenHash/encryptedToken)", async () => {
     const res = await GET(
       createRequest("GET", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
       createParams({ userId: TARGET_USER_ID }),
     );
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json[0]).toHaveProperty("id");
-    expect(json[0]).toHaveProperty("status");
-    expect(json[0]).toHaveProperty("createdAt");
-    expect(json[0]).toHaveProperty("expiresAt");
-    expect(json[0]).toHaveProperty("approvedAt");
-    expect(json[0]).toHaveProperty("executedAt");
-    expect(json[0]).toHaveProperty("revokedAt");
-    expect(json[0]).toHaveProperty("initiatedBy");
-    expect(json[0]).toHaveProperty("approvedBy");
-    expect(json[0]).toHaveProperty("targetEmailAtInitiate");
-    expect(json[0].initiatedBy).toHaveProperty("name");
-    expect(json[0].initiatedBy).toHaveProperty("email");
+    // Strict key-set assertion catches new fields leaking into the response
+    // (especially sensitive ones like tokenHash, encryptedToken).
+    expect(Object.keys(json[0]).sort()).toEqual(
+      [
+        "approvedAt",
+        "approvedBy",
+        "createdAt",
+        "executedAt",
+        "expiresAt",
+        "id",
+        "initiatedBy",
+        "revokedAt",
+        "status",
+        "targetEmailAtInitiate",
+      ].sort(),
+    );
+    expect(Object.keys(json[0].initiatedBy).sort()).toEqual(["email", "id", "name"].sort());
   });
 });
