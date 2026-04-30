@@ -5,7 +5,13 @@
  * Keys are identified by logical name and optional version.
  */
 
-export type KeyName = "share-master" | "verifier-pepper" | "directory-sync" | "webauthn-prf";
+export type KeyName =
+  | "share-master"
+  | "verifier-pepper"
+  | "directory-sync"
+  | "webauthn-prf"
+  | "audit-anchor-signing"
+  | "audit-anchor-tag-secret";
 
 export interface KeyProvider {
   /** Fetch a key by name. For versioned keys (share-master), pass version. */

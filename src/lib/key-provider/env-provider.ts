@@ -29,6 +29,10 @@ export class EnvKeyProvider implements KeyProvider {
         return this.getDirectorySyncKey();
       case "webauthn-prf":
         return this.getPrfSecret();
+      case "audit-anchor-signing":
+        return this.getAuditAnchorSigningKey();
+      case "audit-anchor-tag-secret":
+        return this.getAuditAnchorTagSecret();
     }
   }
 
@@ -56,6 +60,10 @@ export class EnvKeyProvider implements KeyProvider {
     }
     if (process.env.DIRECTORY_SYNC_MASTER_KEY) this.getDirectorySyncKey();
     if (process.env.WEBAUTHN_PRF_SECRET) this.getPrfSecret();
+    if (process.env.AUDIT_ANCHOR_PUBLISHER_ENABLED === "true") {
+      this.getAuditAnchorSigningKey();
+      this.getAuditAnchorTagSecret();
+    }
   }
 
   private getShareMasterKey(version: number): Buffer {
@@ -127,6 +135,26 @@ export class EnvKeyProvider implements KeyProvider {
     if (!hex || !HEX64_RE.test(hex)) {
       throw new Error(
         "WEBAUTHN_PRF_SECRET must be a 64-character hex string (32 bytes)"
+      );
+    }
+    return Buffer.from(hex, "hex");
+  }
+
+  private getAuditAnchorSigningKey(): Buffer {
+    const hex = process.env.AUDIT_ANCHOR_SIGNING_KEY?.trim();
+    if (!hex || !HEX64_RE.test(hex)) {
+      throw new Error(
+        "AUDIT_ANCHOR_SIGNING_KEY must be a 64-character hex string (32 bytes)"
+      );
+    }
+    return Buffer.from(hex, "hex");
+  }
+
+  private getAuditAnchorTagSecret(): Buffer {
+    const hex = process.env.AUDIT_ANCHOR_TAG_SECRET?.trim();
+    if (!hex || !HEX64_RE.test(hex)) {
+      throw new Error(
+        "AUDIT_ANCHOR_TAG_SECRET must be a 64-character hex string (32 bytes)"
       );
     }
     return Buffer.from(hex, "hex");
