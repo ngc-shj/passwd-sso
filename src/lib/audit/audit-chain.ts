@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
  * Handles: objects, arrays, strings, numbers, booleans, null.
  * Does not handle: BigInt, undefined, symbols, functions (throws).
  */
-function jcsCanonical(value: unknown): string {
+export function jcsCanonical(value: unknown): string {
   if (value === null) return "null";
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "number") {
