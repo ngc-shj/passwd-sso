@@ -91,7 +91,14 @@ Expected baseline: 4 user rows, 1 tenant for Alice/Bob/Carol/Dave; 0 admin_vault
   - `sessions WHERE user_id = '<dave-id>'`: 0 rows.
 - Step 9 → other browsers: any subsequent request returns 401 (session cookie present but row deleted; tombstone in cache); page redirects to `/<locale>/auth/signin` within `TOMBSTONE_TTL_MS`.
 
-**Result:** [ ] PASS — 2026-MM-DD
+**Result:** [x] PASS — 2026-04-30
+- Tenant: `papapyan@gmail.com` — papapyan (OWNER) acting as initiator (Bob role); test-admin@example.test as approver (Carol role); test-member@example.test as target (Dave role).
+- Verified DB row state at each step: `approved_at`, `approved_by_id`, `executed_at`, `encrypted_token` lifecycle all transitioned as expected.
+- `expires_at` cap (S12) confirmed: at approve time, `expires_at - approved_at = 3600s` (= 60 min EXECUTE_TTL_MS, smaller side of `min(createdAt+24h, now+60min)`).
+- FR8 silent-target verified: in-app notifications table showed `ADMIN_VAULT_RESET_PENDING_APPROVAL` to test-admin only at initiate time; `ADMIN_VAULT_RESET` to test-member only AFTER approve.
+- Audit chain (3 rows): INITIATE (papapyan, metadata.expiresAt) → APPROVE (test-admin, metadata.newExpiresAt) → EXECUTE (test-member, metadata.{invalidatedSessions: 1, invalidatedExtensionTokens: 0, invalidatedApiKeys: 0, invalidatedMcpAccessTokens: 0, invalidatedMcpRefreshTokens: 0, invalidatedDelegationSessions: 0, deletedEntries: 2}).
+- Vault wipe: `password_entries` 2 → 0; `vault_keys` 1 → 0; user vault columns (`vault_setup_at`, `encrypted_secret_key`, `master_password_server_hash`, `recovery_encrypted_secret_key`) all NULL post-execute.
+- FR7 session invalidation: target's session row deleted; browser auto-redirected to sign-in.
 
 ---
 
@@ -353,8 +360,11 @@ If any scenario fails:
 ## Test execution log
 
 ### Scenario 1: Happy path
-[ ] PASS — 2026-MM-DD
-- (notes)
+[x] PASS — 2026-04-30
+- Executed in tenant `papapyan@gmail.com`. Roles mapped: papapyan (OWNER, initiator) / test-admin@example.test (ADMIN, approver) / test-member@example.test (MEMBER, target).
+- Pre-flight: dev DB had stale rate-limit counters (1 admin + 1 target counter at 3) requiring Redis cleanup before re-running. Future cleanup hint: `redis-cli DEL rl:admin-reset:admin:<id> rl:admin-reset:target:<id>`.
+- All 9 verification queries returned expected values; full evidence captured in the Scenario 1 Result block above.
+- R26 disabled-cue side-channel verified incidentally: papapyan saw "承認" button disabled with tooltip "あなたがこのリセットを開始したため..."; test-admin (different session) saw it enabled.
 
 ### Scenario 2: Self-approval blocked
 [ ] PASS — 2026-MM-DD
