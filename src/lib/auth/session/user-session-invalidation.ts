@@ -18,16 +18,42 @@ export type InvalidateUserSessionsOptions =
   | { allTenants: true; tenantId?: undefined; reason?: string };
 
 /**
+ * Result of {@link invalidateUserSessions}. Counts revoked artifacts per
+ * model so callers can record them in audit metadata.
+ */
+export type InvalidateUserSessionsResult = {
+  sessions: number;
+  extensionTokens: number;
+  apiKeys: number;
+  mcpAccessTokens: number;
+  mcpRefreshTokens: number;
+  delegationSessions: number;
+};
+
+/**
  * Invalidate all sessions and tokens for a user.
  * Called on: team member removal, SCIM user deletion/deactivation,
  * and admin vault reset (cross-tenant via `allTenants: true`).
+ *
+ * Covers every user-bound auth artifact:
+ *   - Session (DB row delete + cache tombstone)
+ *   - ExtensionToken / ApiKey (revokedAt set)
+ *   - McpAccessToken / McpRefreshToken / DelegationSession (revokedAt set)
+ *
+ * Why MCP tokens are included: a user who minted `mcp_*` tokens for AI
+ * agents holds tokens that authenticate AS that user with credentials:list /
+ * credentials:use scope. After a vault reset (or member removal) these
+ * tokens must die — otherwise an attacker holding the token could re-attack
+ * the freshly-set-up vault. WebAuthnCredential is intentionally NOT
+ * revoked — it is the user's re-authentication path back into a fresh
+ * vault setup.
  *
  * Uses withBypassRls() scoped to the target userId WHERE clause.
  */
 export async function invalidateUserSessions(
   userId: string,
   options: InvalidateUserSessionsOptions,
-): Promise<{ sessions: number; extensionTokens: number; apiKeys: number }> {
+): Promise<InvalidateUserSessionsResult> {
   // Defense-in-depth: discriminated union prevents this at compile time,
   // but a runtime cast (`as any`) could still leak both options through.
   if (options.tenantId && options.allTenants) {
@@ -38,6 +64,7 @@ export async function invalidateUserSessions(
 
   const allTenants = "allTenants" in options && options.allTenants === true;
   const tenantFilter = allTenants ? {} : { tenantId: options.tenantId };
+  const now = new Date();
 
   return withBypassRls(prisma, async () => {
     // SELECT tokens before deleteMany so we can invalidate the cache after
@@ -47,20 +74,38 @@ export async function invalidateUserSessions(
       select: { sessionToken: true },
     });
 
-    const [sessionsResult, extensionTokensResult, apiKeysResult] =
-      await Promise.all([
-        prisma.session.deleteMany({
-          where: { userId, ...tenantFilter },
-        }),
-        prisma.extensionToken.updateMany({
-          where: { userId, revokedAt: null, ...tenantFilter },
-          data: { revokedAt: new Date() },
-        }),
-        prisma.apiKey.updateMany({
-          where: { userId, revokedAt: null, ...tenantFilter },
-          data: { revokedAt: new Date() },
-        }),
-      ]);
+    const [
+      sessionsResult,
+      extensionTokensResult,
+      apiKeysResult,
+      mcpAccessTokensResult,
+      mcpRefreshTokensResult,
+      delegationSessionsResult,
+    ] = await Promise.all([
+      prisma.session.deleteMany({
+        where: { userId, ...tenantFilter },
+      }),
+      prisma.extensionToken.updateMany({
+        where: { userId, revokedAt: null, ...tenantFilter },
+        data: { revokedAt: now },
+      }),
+      prisma.apiKey.updateMany({
+        where: { userId, revokedAt: null, ...tenantFilter },
+        data: { revokedAt: now },
+      }),
+      prisma.mcpAccessToken.updateMany({
+        where: { userId, revokedAt: null, ...tenantFilter },
+        data: { revokedAt: now },
+      }),
+      prisma.mcpRefreshToken.updateMany({
+        where: { userId, revokedAt: null, ...tenantFilter },
+        data: { revokedAt: now },
+      }),
+      prisma.delegationSession.updateMany({
+        where: { userId, revokedAt: null, ...tenantFilter },
+        data: { revokedAt: now },
+      }),
+    ]);
 
     if (targetSessions.length > 0) {
       await invalidateCachedSessions(
@@ -72,6 +117,9 @@ export async function invalidateUserSessions(
       sessions: sessionsResult.count,
       extensionTokens: extensionTokensResult.count,
       apiKeys: apiKeysResult.count,
+      mcpAccessTokens: mcpAccessTokensResult.count,
+      mcpRefreshTokens: mcpRefreshTokensResult.count,
+      delegationSessions: delegationSessionsResult.count,
     };
   }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 }

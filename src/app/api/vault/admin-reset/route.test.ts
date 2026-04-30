@@ -86,6 +86,9 @@ describe("POST /api/vault/admin-reset", () => {
       sessions: 2,
       extensionTokens: 1,
       apiKeys: 0,
+      mcpAccessTokens: 4,
+      mcpRefreshTokens: 5,
+      delegationSessions: 6,
     });
   });
 
@@ -256,6 +259,9 @@ describe("POST /api/vault/admin-reset", () => {
           invalidatedSessions: 2,
           invalidatedExtensionTokens: 1,
           invalidatedApiKeys: 0,
+          invalidatedMcpAccessTokens: 4,
+          invalidatedMcpRefreshTokens: 5,
+          invalidatedDelegationSessions: 6,
         }),
       }),
     );

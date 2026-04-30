@@ -84,10 +84,27 @@ describe.skipIf(!redisAvailable)(
         await redis.del(tombstoneKey(token));
       }
 
-      // FK-safe — sessions/extensionTokens/apiKeys ref users; clear before
-      // user delete via deleteTestData.
+      // FK-safe — sessions/extensionTokens/apiKeys/mcp tokens/delegation
+      // sessions ref users; clear before user delete via deleteTestData.
+      // delegation_sessions FKs into mcp_access_tokens, so clear it first.
       await ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
+        await tx.$executeRawUnsafe(
+          `DELETE FROM delegation_sessions WHERE user_id = $1::uuid`,
+          userId,
+        );
+        await tx.$executeRawUnsafe(
+          `DELETE FROM mcp_refresh_tokens WHERE user_id = $1::uuid`,
+          userId,
+        );
+        await tx.$executeRawUnsafe(
+          `DELETE FROM mcp_access_tokens WHERE user_id = $1::uuid`,
+          userId,
+        );
+        await tx.$executeRawUnsafe(
+          `DELETE FROM mcp_clients WHERE created_by_id = $1::uuid`,
+          userId,
+        );
         await tx.$executeRawUnsafe(
           `DELETE FROM sessions WHERE user_id = $1::uuid`,
           userId,
@@ -179,15 +196,105 @@ describe.skipIf(!redisAvailable)(
       return id;
     }
 
+    /** Inserts a McpClient + McpAccessToken + McpRefreshToken + DelegationSession,
+     *  all bound to the test user under the given tenant. Returns the four ids. */
+    async function insertMcpStack(tenantId: string): Promise<{
+      mcpClientId: string;
+      mcpAccessTokenId: string;
+      mcpRefreshTokenId: string;
+      delegationSessionId: string;
+    }> {
+      const mcpClientId = randomUUID();
+      const mcpAccessTokenId = randomUUID();
+      const mcpRefreshTokenId = randomUUID();
+      const delegationSessionId = randomUUID();
+      const accessTokenHash = (mcpAccessTokenId + mcpAccessTokenId)
+        .replace(/-/g, "")
+        .slice(0, 64);
+      const refreshTokenHash = (mcpRefreshTokenId + mcpRefreshTokenId)
+        .replace(/-/g, "")
+        .slice(0, 64);
+      const familyId = randomUUID();
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.$executeRawUnsafe(
+          `INSERT INTO mcp_clients (
+             id, tenant_id, client_id, client_secret_hash, name,
+             redirect_uris, allowed_scopes, is_active, created_by_id,
+             created_at, updated_at
+           ) VALUES (
+             $1::uuid, $2::uuid, $3, $4, $5,
+             ARRAY['http://localhost/cb']::text[], 'passwords:read', true, $6::uuid,
+             now(), now()
+           )`,
+          mcpClientId,
+          tenantId,
+          `cli-${mcpClientId.slice(0, 16)}`,
+          accessTokenHash,
+          `test-mcp-client-${mcpClientId.slice(0, 8)}`,
+          userId,
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO mcp_access_tokens (
+             id, token_hash, client_id, tenant_id, user_id, scope,
+             expires_at, created_at
+           ) VALUES (
+             $1::uuid, $2, $3::uuid, $4::uuid, $5::uuid, 'passwords:read',
+             now() + interval '1 day', now()
+           )`,
+          mcpAccessTokenId,
+          accessTokenHash,
+          mcpClientId,
+          tenantId,
+          userId,
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO mcp_refresh_tokens (
+             id, token_hash, family_id, access_token_id, client_id,
+             tenant_id, user_id, scope, expires_at, created_at
+           ) VALUES (
+             $1::uuid, $2, $3::uuid, $4::uuid, $5::uuid,
+             $6::uuid, $7::uuid, 'passwords:read',
+             now() + interval '7 days', now()
+           )`,
+          mcpRefreshTokenId,
+          refreshTokenHash,
+          familyId,
+          mcpAccessTokenId,
+          mcpClientId,
+          tenantId,
+          userId,
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO delegation_sessions (
+             id, tenant_id, user_id, mcp_token_id, entry_ids, expires_at, created_at
+           ) VALUES (
+             $1::uuid, $2::uuid, $3::uuid, $4::uuid,
+             ARRAY[]::text[], now() + interval '1 hour', now()
+           )`,
+          delegationSessionId,
+          tenantId,
+          userId,
+          mcpAccessTokenId,
+        );
+      });
+      return { mcpClientId, mcpAccessTokenId, mcpRefreshTokenId, delegationSessionId };
+    }
+
     it(
-      "invalidateUserSessions(allTenants: true) deletes sessions across all tenants and revokes tokens",
+      "invalidateUserSessions(allTenants: true) deletes sessions across all tenants and revokes tokens (incl. MCP + delegation)",
       async () => {
-        // Setup: 2 sessions in T1, 1 in T2; ext token in T1; api key in T2.
+        // Setup: 2 sessions in T1, 1 in T2; ext token in T1; api key in T2;
+        // MCP stack (client + access token + refresh token + delegation
+        // session) in T1; another delegation+access in T2 to verify
+        // cross-tenant coverage of MCP artifacts.
         const sessA1 = await insertSession(tenantA);
         const sessA2 = await insertSession(tenantA);
         const sessB1 = await insertSession(tenantB);
         const extTokenId = await insertExtensionToken(tenantA);
         const apiKeyId = await insertApiKey(tenantB);
+        const mcpA = await insertMcpStack(tenantA);
+        const mcpB = await insertMcpStack(tenantB);
 
         // Sanity check pre-state.
         const sessionsBefore = await ctx.su.prisma.$transaction(async (tx) => {
@@ -205,10 +312,13 @@ describe.skipIf(!redisAvailable)(
           reason: "admin_vault_reset",
         });
 
-        // Helper return shape (T5).
+        // Helper return shape (T5) — now includes MCP + delegation counts.
         expect(result.sessions).toBe(3);
         expect(result.extensionTokens).toBe(1);
         expect(result.apiKeys).toBe(1);
+        expect(result.mcpAccessTokens).toBe(2);
+        expect(result.mcpRefreshTokens).toBe(2);
+        expect(result.delegationSessions).toBe(2);
 
         // All 3 Session rows deleted.
         const sessionsAfter = await ctx.su.prisma.$transaction(async (tx) => {
@@ -238,6 +348,38 @@ describe.skipIf(!redisAvailable)(
         });
         expect(ak.revokedAt).not.toBeNull();
         expect(ak.tenantId).toBe(tenantB);
+
+        // MCP access/refresh tokens + delegation sessions revoked in BOTH
+        // tenants (allTenants: true must cover MCP artifacts too — the
+        // user-facing risk that motivated this PR's round-2 review).
+        for (const m of [mcpA, mcpB]) {
+          const accessRow = await ctx.su.prisma.$transaction(async (tx) => {
+            await setBypassRlsGucs(tx);
+            return tx.mcpAccessToken.findUniqueOrThrow({
+              where: { id: m.mcpAccessTokenId },
+              select: { revokedAt: true },
+            });
+          });
+          expect(accessRow.revokedAt).not.toBeNull();
+
+          const refreshRow = await ctx.su.prisma.$transaction(async (tx) => {
+            await setBypassRlsGucs(tx);
+            return tx.mcpRefreshToken.findUniqueOrThrow({
+              where: { id: m.mcpRefreshTokenId },
+              select: { revokedAt: true },
+            });
+          });
+          expect(refreshRow.revokedAt).not.toBeNull();
+
+          const delegationRow = await ctx.su.prisma.$transaction(async (tx) => {
+            await setBypassRlsGucs(tx);
+            return tx.delegationSession.findUniqueOrThrow({
+              where: { id: m.delegationSessionId },
+              select: { revokedAt: true },
+            });
+          });
+          expect(delegationRow.revokedAt).not.toBeNull();
+        }
 
         // Cache tombstones present for all 3 session tokens.
         for (const token of [sessA1, sessA2, sessB1]) {

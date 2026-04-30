@@ -4,12 +4,18 @@ const {
   mockSession,
   mockExtensionToken,
   mockApiKey,
+  mockMcpAccessToken,
+  mockMcpRefreshToken,
+  mockDelegationSession,
   mockWithBypassRls,
   mockInvalidateCachedSessions,
 } = vi.hoisted(() => ({
   mockSession: { deleteMany: vi.fn(), findMany: vi.fn() },
   mockExtensionToken: { updateMany: vi.fn() },
   mockApiKey: { updateMany: vi.fn() },
+  mockMcpAccessToken: { updateMany: vi.fn() },
+  mockMcpRefreshToken: { updateMany: vi.fn() },
+  mockDelegationSession: { updateMany: vi.fn() },
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
   mockInvalidateCachedSessions: vi.fn().mockResolvedValue(undefined),
 }));
@@ -19,6 +25,9 @@ vi.mock("@/lib/prisma", () => ({
     session: mockSession,
     extensionToken: mockExtensionToken,
     apiKey: mockApiKey,
+    mcpAccessToken: mockMcpAccessToken,
+    mcpRefreshToken: mockMcpRefreshToken,
+    delegationSession: mockDelegationSession,
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -47,9 +56,12 @@ describe("invalidateUserSessions", () => {
     ]);
     mockExtensionToken.updateMany.mockResolvedValue({ count: 1 });
     mockApiKey.updateMany.mockResolvedValue({ count: 3 });
+    mockMcpAccessToken.updateMany.mockResolvedValue({ count: 4 });
+    mockMcpRefreshToken.updateMany.mockResolvedValue({ count: 5 });
+    mockDelegationSession.updateMany.mockResolvedValue({ count: 6 });
   });
 
-  it("deletes sessions, revokes extension tokens and API keys", async () => {
+  it("deletes sessions, revokes extension tokens, API keys, MCP access/refresh tokens, and delegation sessions", async () => {
     const result = await invalidateUserSessions("user-1", { tenantId: "tenant-1" });
 
     expect(mockSession.deleteMany).toHaveBeenCalledWith({
@@ -63,7 +75,26 @@ describe("invalidateUserSessions", () => {
       where: { userId: "user-1", revokedAt: null, tenantId: "tenant-1" },
       data: { revokedAt: expect.any(Date) },
     });
-    expect(result).toEqual({ sessions: 2, extensionTokens: 1, apiKeys: 3 });
+    expect(mockMcpAccessToken.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", revokedAt: null, tenantId: "tenant-1" },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(mockMcpRefreshToken.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", revokedAt: null, tenantId: "tenant-1" },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(mockDelegationSession.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", revokedAt: null, tenantId: "tenant-1" },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(result).toEqual({
+      sessions: 2,
+      extensionTokens: 1,
+      apiKeys: 3,
+      mcpAccessTokens: 4,
+      mcpRefreshTokens: 5,
+      delegationSessions: 6,
+    });
   });
 
   it("uses withBypassRls", async () => {
@@ -77,14 +108,18 @@ describe("invalidateUserSessions", () => {
     expect(mockSession.deleteMany).toHaveBeenCalledWith({
       where: { userId: "user-1", tenantId: "tenant-2" },
     });
-    expect(mockExtensionToken.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", revokedAt: null, tenantId: "tenant-2" },
-      data: { revokedAt: expect.any(Date) },
-    });
-    expect(mockApiKey.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", revokedAt: null, tenantId: "tenant-2" },
-      data: { revokedAt: expect.any(Date) },
-    });
+    for (const m of [
+      mockExtensionToken,
+      mockApiKey,
+      mockMcpAccessToken,
+      mockMcpRefreshToken,
+      mockDelegationSession,
+    ]) {
+      expect(m.updateMany).toHaveBeenCalledWith({
+        where: { userId: "user-1", revokedAt: null, tenantId: "tenant-2" },
+        data: { revokedAt: expect.any(Date) },
+      });
+    }
   });
 
   it("propagates error when a database operation fails", async () => {
@@ -150,14 +185,18 @@ describe("invalidateUserSessions", () => {
     expect(mockSession.deleteMany).toHaveBeenCalledWith({
       where: { userId: "user-1" },
     });
-    expect(mockExtensionToken.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", revokedAt: null },
-      data: { revokedAt: expect.any(Date) },
-    });
-    expect(mockApiKey.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", revokedAt: null },
-      data: { revokedAt: expect.any(Date) },
-    });
+    for (const m of [
+      mockExtensionToken,
+      mockApiKey,
+      mockMcpAccessToken,
+      mockMcpRefreshToken,
+      mockDelegationSession,
+    ]) {
+      expect(m.updateMany).toHaveBeenCalledWith({
+        where: { userId: "user-1", revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+    }
 
     // All cross-tenant tokens are tombstoned.
     expectInvalidatedAfterCommit(mockInvalidateCachedSessions, [
@@ -165,7 +204,14 @@ describe("invalidateUserSessions", () => {
       "tok-tenant-b",
     ]);
 
-    expect(result).toEqual({ sessions: 2, extensionTokens: 1, apiKeys: 3 });
+    expect(result).toEqual({
+      sessions: 2,
+      extensionTokens: 1,
+      apiKeys: 3,
+      mcpAccessTokens: 4,
+      mcpRefreshTokens: 5,
+      delegationSessions: 6,
+    });
   });
 
   it("throws when both tenantId and allTenants are passed (defense-in-depth)", async () => {

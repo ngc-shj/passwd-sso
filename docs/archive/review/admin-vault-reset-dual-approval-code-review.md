@@ -120,3 +120,41 @@ R1-R35 + RT1-RT3 all checked or N/A — see /tmp/tri-BrZuvL/test-findings.txt. S
 
 ### T-F Minor: admin-reset-token-crypto key-version mismatch — Accepted as optional
 - Action: No code change; reviewer marked optional.
+
+---
+
+## Round 2 — User-reported scope extension (post-implementation review)
+
+### U1 Major: invalidateUserSessions did not cover MCP tokens / delegation sessions (FR7 gap)
+- Reported by: user, in post-implementation review
+- File: `src/lib/auth/session/user-session-invalidation.ts`
+- Problem: helper covered `Session`, `ExtensionToken`, `ApiKey` but NOT `McpAccessToken`, `McpRefreshToken`, `DelegationSession` — all three are user-bound (`userId` field, `revokedAt` field) and survive admin vault reset. A user holding `mcp_*` tokens for AI agents would retain `credentials:list` / `credentials:use` scope against the (now empty) vault; after a fresh setup, the attacker could re-attack the new vault.
+- Impact: FR7 ("every authentication artifact for the target user is revoked") not fully satisfied for MCP-issuing users.
+- Fix:
+  - `invalidateUserSessions` extended with `McpAccessToken`, `McpRefreshToken`, `DelegationSession` `updateMany` calls (set `revokedAt: now`).
+  - Return type extended with `mcpAccessTokens`, `mcpRefreshTokens`, `delegationSessions` counts.
+  - `invalidateUserSessionsResult` exported as a named type.
+  - Execute endpoint audit metadata extended with `invalidatedMcpAccessTokens`, `invalidatedMcpRefreshTokens`, `invalidatedDelegationSessions`.
+  - Unit test extended for the new counts; cross-tenant integration test extended to seed an `McpClient` + `McpAccessToken` + `McpRefreshToken` + `DelegationSession` in BOTH tenants and assert all are revoked.
+  - Note: `WebAuthnCredential` is intentionally NOT revoked — it is the user's re-authentication path back into a fresh vault setup.
+- Modified files:
+  - `src/lib/auth/session/user-session-invalidation.ts` (3 new updateMany calls + extended return type)
+  - `src/lib/auth/session/user-session-invalidation.test.ts` (mocks + assertions for 3 new models)
+  - `src/app/api/vault/admin-reset/route.ts` (audit metadata mapping)
+  - `src/app/api/vault/admin-reset/route.test.ts` (mock return + audit assertion)
+  - `src/__tests__/db-integration/admin-vault-reset-cross-tenant-sessions.integration.test.ts` (insertMcpStack helper + cross-tenant assertion)
+
+### U2 Minor: Integration test setup loaded only `.env.local`
+- File: `src/__tests__/db-integration/setup.ts`
+- Problem: setup loaded `.env.local` exclusively; project convention (per CLAUDE.md and `src/lib/load-env.ts`) is `.env` canonical + `.env.local` per-developer override. Recent migration moved canonical config to `.env`, so integration tests fail with `DATABASE_URL not set` for developers without `.env.local`.
+- Fix: load `.env` first, then `.env.local` with `override: true`.
+- Modified file: `src/__tests__/db-integration/setup.ts:6-8`
+
+### Out of scope (deferred to follow-up PRs)
+
+User-reported items that touch PR #413 territory (`account-token-crypto.ts`):
+- **#1 OAuth AAD `tenantId` / `userId` binding**: would tighten DB-row to ciphertext binding for OAuth tokens. Requires AAD migration of existing ciphertexts (production data) — separate plan.
+- **#2 Decryption failure → audit event**: `getAccount()` currently logs and falls back to null on decrypt failure; converting to an audit event needs threat-model decision (auto-revoke account? rate-limit incident response?) — separate plan.
+
+TODO marker: `TODO(oauth-token-aad-tighten): tenantId/userId binding for account-token-crypto AAD`
+TODO marker: `TODO(oauth-token-decrypt-audit): convert getAccount decrypt failures to audit events`

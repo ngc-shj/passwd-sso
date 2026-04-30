@@ -166,6 +166,9 @@ async function handlePOST(req: NextRequest) {
       invalidatedSessions: invalidationResult.sessions,
       invalidatedExtensionTokens: invalidationResult.extensionTokens,
       invalidatedApiKeys: invalidationResult.apiKeys,
+      invalidatedMcpAccessTokens: invalidationResult.mcpAccessTokens,
+      invalidatedMcpRefreshTokens: invalidationResult.mcpRefreshTokens,
+      invalidatedDelegationSessions: invalidationResult.delegationSessions,
     },
   });
 
