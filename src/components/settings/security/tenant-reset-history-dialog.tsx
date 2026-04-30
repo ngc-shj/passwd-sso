@@ -23,20 +23,20 @@ import {
 import { Loader2, History, X, Check } from "lucide-react";
 import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
-import { API_PATH, apiPath } from "@/lib/constants";
+import { apiPath } from "@/lib/constants";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import {
+  RESET_STATUS,
   STATUS_KEY_MAP,
   type ResetStatus,
+  type StatusI18nKey,
 } from "@/lib/vault/admin-reset-status";
+import {
+  APPROVE_ELIGIBILITY,
+  type ApproveEligibility,
+} from "@/lib/vault/admin-reset-eligibility";
 import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
-
-type StatusKey =
-  | "statusPendingApproval"
-  | "statusApproved"
-  | "statusExecuted"
-  | "statusRevoked"
-  | "statusExpired";
+import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 
 interface ResetActor {
   id: string;
@@ -55,6 +55,7 @@ interface ResetRecord {
   initiatedBy: ResetActor;
   approvedBy: ResetActor | null;
   targetEmailAtInitiate: string;
+  approveEligibility: ApproveEligibility;
 }
 
 interface TenantResetHistoryDialogProps {
@@ -68,11 +69,11 @@ const STATUS_VARIANT: Record<
   ResetStatus,
   "default" | "secondary" | "destructive" | "outline"
 > = {
-  pending_approval: "default",
-  approved: "default",
-  executed: "destructive",
-  revoked: "secondary",
-  expired: "outline",
+  [RESET_STATUS.PENDING_APPROVAL]: "default",
+  [RESET_STATUS.APPROVED]: "default",
+  [RESET_STATUS.EXECUTED]: "destructive",
+  [RESET_STATUS.REVOKED]: "secondary",
+  [RESET_STATUS.EXPIRED]: "outline",
 };
 
 const APPROVE_PHRASE = VAULT_CONFIRMATION_PHRASE.APPROVE;
@@ -84,12 +85,12 @@ export function TenantResetHistoryDialog({
   onRevoke,
 }: TenantResetHistoryDialogProps) {
   const t = useTranslations("TenantAdmin");
+  const tApi = useTranslations("ApiErrors");
   const locale = useLocale();
   const [open, setOpen] = useState(false);
   const [records, setRecords] = useState<ResetRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [approveTarget, setApproveTarget] = useState<ResetRecord | null>(null);
   const [approveInput, setApproveInput] = useState("");
   const [approveError, setApproveError] = useState<string | null>(null);
@@ -113,10 +114,6 @@ export function TenantResetHistoryDialog({
   useEffect(() => {
     if (!open) return;
     fetchHistory();
-    fetchApi(API_PATH.AUTH_SESSION)
-      .then((r) => r.json())
-      .then((d) => setCurrentUserId(d?.user?.id ?? null))
-      .catch(() => {});
   }, [open, fetchHistory]);
 
   const handleRevoke = async (resetId: string) => {
@@ -178,6 +175,13 @@ export function TenantResetHistoryDialog({
         toast.error(t("approveConflict"));
         closeApproveDialog();
         await fetchHistory();
+      } else if (res.status === 403) {
+        // Surface specific reason when server returns it
+        // (e.g. FORBIDDEN_INSUFFICIENT_ROLE — actor's role is not strictly
+        // above the target's). Falls back to the generic message for plain
+        // FORBIDDEN.
+        const body = await res.json().catch(() => ({}));
+        toast.error(tApi(apiErrorToI18nKey(body.error ?? API_ERROR.FORBIDDEN)));
       } else {
         toast.error(t("approveFailed"));
       }
@@ -219,10 +223,19 @@ export function TenantResetHistoryDialog({
           <div className="max-h-80 space-y-3 overflow-y-auto">
             {records.map((r) => {
               const status = r.status;
+              // Eligibility is precomputed server-side. Three outcomes:
+              //   - "eligible" → Approve button enabled
+              //   - "initiator" → Approve button disabled with tooltip
+              //     ("you initiated this reset...") — gives a clear UX hint
+              //   - "insufficient_role" → button hidden entirely (covers
+              //     target-self AND peer-admin cases). Surfacing a button
+              //     the server would 403 is bad UX, hence hide.
               const isInitiator =
-                currentUserId !== null &&
-                currentUserId === r.initiatedBy.id;
-              const showApprove = status === "pending_approval";
+                r.approveEligibility === APPROVE_ELIGIBILITY.INITIATOR;
+              const showApprove =
+                status === RESET_STATUS.PENDING_APPROVAL &&
+                r.approveEligibility !==
+                  APPROVE_ELIGIBILITY.INSUFFICIENT_ROLE;
 
               return (
                 <div
@@ -232,7 +245,7 @@ export function TenantResetHistoryDialog({
                   <div className="space-y-1 text-sm">
                     <div className="flex items-center gap-2">
                       <Badge variant={STATUS_VARIANT[status]}>
-                        {t(STATUS_KEY_MAP[status] as StatusKey)}
+                        {t(STATUS_KEY_MAP[status] satisfies StatusI18nKey)}
                       </Badge>
                       <span className="text-xs text-muted-foreground">
                         {formatDateTime(r.createdAt, locale)}
@@ -266,8 +279,8 @@ export function TenantResetHistoryDialog({
                         onClick={() => openApproveDialog(r)}
                       />
                     )}
-                    {(status === "pending_approval" ||
-                      status === "approved") && (
+                    {(status === RESET_STATUS.PENDING_APPROVAL ||
+                      status === RESET_STATUS.APPROVED) && (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -338,7 +351,7 @@ export function TenantResetHistoryDialog({
             <Button
               variant="default"
               onClick={handleApproveSubmit}
-              disabled={approving}
+              disabled={approving || approveInput !== APPROVE_PHRASE}
             >
               {approving ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />

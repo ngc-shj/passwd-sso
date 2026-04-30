@@ -89,6 +89,12 @@ vi.mock("@/lib/auth/access/tenant-auth", () => ({
   isTenantRoleAbove: mockIsTenantRoleAbove,
   TenantAuthError,
 }));
+// admin-reset-eligibility imports isTenantRoleAbove from the pure
+// hierarchy module (to avoid pulling pg into client bundles). Mock both
+// paths against the same vi.fn() so role-hierarchy stubs apply uniformly.
+vi.mock("@/lib/auth/access/tenant-role-hierarchy", () => ({
+  isTenantRoleAbove: mockIsTenantRoleAbove,
+}));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
   withBypassRls: vi.fn((_p: unknown, fn: () => unknown) => fn()),
@@ -627,6 +633,7 @@ describe("GET /api/tenant/members/[userId]/reset-vault", () => {
     // (especially sensitive ones like tokenHash, encryptedToken).
     expect(Object.keys(json[0]).sort()).toEqual(
       [
+        "approveEligibility",
         "approvedAt",
         "approvedBy",
         "createdAt",

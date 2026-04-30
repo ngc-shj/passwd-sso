@@ -23,6 +23,11 @@ import { MAX_PENDING_RESETS, VAULT_RESET_HISTORY_LIMIT } from "@/lib/validations
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { encryptResetToken } from "@/lib/vault/admin-reset-token-crypto";
 import { deriveResetStatus } from "@/lib/vault/admin-reset-status";
+import {
+  APPROVE_ELIGIBILITY,
+  computeApproveEligibility,
+  type ApproveEligibility,
+} from "@/lib/vault/admin-reset-eligibility";
 
 export const runtime = "nodejs";
 
@@ -243,42 +248,75 @@ async function handleGET(
     return handleAuthError(err);
   }
 
-  const resets = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.adminVaultReset.findMany({
-      where: {
-        targetUserId,
-        tenantId: actor.tenantId,
-      },
-      include: {
-        initiatedBy: { select: { id: true, name: true, email: true } },
-        approvedBy: { select: { id: true, name: true, email: true } },
-      },
-      orderBy: { createdAt: "desc" },
-      take: VAULT_RESET_HISTORY_LIMIT,
-    }),
-  );
+  // Fetch the target's role alongside the reset rows so we can pre-compute
+  // approveEligibility per row server-side. Single query — target.role is
+  // constant across all rows under this targetUserId path param.
+  const [resets, targetMember] = await Promise.all([
+    withTenantRls(prisma, actor.tenantId, async () =>
+      prisma.adminVaultReset.findMany({
+        where: {
+          targetUserId,
+          tenantId: actor.tenantId,
+        },
+        include: {
+          initiatedBy: { select: { id: true, name: true, email: true } },
+          approvedBy: { select: { id: true, name: true, email: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: VAULT_RESET_HISTORY_LIMIT,
+      }),
+    ),
+    withTenantRls(prisma, actor.tenantId, async () =>
+      prisma.tenantMember.findFirst({
+        where: {
+          tenantId: actor.tenantId,
+          userId: targetUserId,
+          deactivatedAt: null,
+        },
+        select: { role: true },
+      }),
+    ),
+  ]);
 
   const now = new Date();
-  const result = resets.map((r) => ({
-    id: r.id,
-    status: deriveResetStatus(r, now),
-    createdAt: r.createdAt,
-    expiresAt: r.expiresAt,
-    approvedAt: r.approvedAt,
-    executedAt: r.executedAt,
-    revokedAt: r.revokedAt,
-    initiatedBy: {
-      id: r.initiatedBy.id,
-      name: r.initiatedBy.name,
-      email: r.initiatedBy.email,
-    },
-    approvedBy: r.approvedBy
-      ? { id: r.approvedBy.id, name: r.approvedBy.name, email: r.approvedBy.email }
-      : null,
-    // Backfilled rows (very old data) may have null targetEmailAtInitiate;
-    // empty string is the safe display value.
-    targetEmailAtInitiate: r.targetEmailAtInitiate ?? "",
-  }));
+  const result = resets.map((r) => {
+    // Pre-compute eligibility so the dialog renders the Approve button
+    // (or its disabled-with-tooltip variant) without re-implementing the
+    // role-hierarchy logic on the client. If the target member is no
+    // longer in the tenant (deactivated), eligibility is "insufficient_role"
+    // — the UI hides the button rather than letting the user attempt an
+    // action that the server would reject.
+    const approveEligibility: ApproveEligibility = targetMember
+      ? computeApproveEligibility({
+          actorId: session.user.id,
+          actorRole: actor.role,
+          targetRole: targetMember.role,
+          initiatedById: r.initiatedById,
+        })
+      : APPROVE_ELIGIBILITY.INSUFFICIENT_ROLE;
+
+    return {
+      id: r.id,
+      status: deriveResetStatus(r, now),
+      createdAt: r.createdAt,
+      expiresAt: r.expiresAt,
+      approvedAt: r.approvedAt,
+      executedAt: r.executedAt,
+      revokedAt: r.revokedAt,
+      initiatedBy: {
+        id: r.initiatedBy.id,
+        name: r.initiatedBy.name,
+        email: r.initiatedBy.email,
+      },
+      approvedBy: r.approvedBy
+        ? { id: r.approvedBy.id, name: r.approvedBy.name, email: r.approvedBy.email }
+        : null,
+      // Backfilled rows (very old data) may have null targetEmailAtInitiate;
+      // empty string is the safe display value.
+      targetEmailAtInitiate: r.targetEmailAtInitiate ?? "",
+      approveEligibility,
+    };
+  });
 
   return NextResponse.json(result);
 }

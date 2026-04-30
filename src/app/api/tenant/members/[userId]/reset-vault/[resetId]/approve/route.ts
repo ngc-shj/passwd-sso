@@ -9,10 +9,11 @@ import { sendEmail } from "@/lib/email";
 import { adminVaultResetEmail } from "@/lib/email/templates/admin-vault-reset";
 import { serverAppUrl } from "@/lib/url-helpers";
 import { resolveUserLocale } from "@/lib/locale";
+import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import {
-  requireTenantPermission,
-  isTenantRoleAbove,
-} from "@/lib/auth/access/tenant-auth";
+  APPROVE_ELIGIBILITY,
+  computeApproveEligibility,
+} from "@/lib/vault/admin-reset-eligibility";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/audit/notification";
@@ -86,23 +87,10 @@ async function handlePOST(
   );
   if (!resetRecord) return notFound();
 
-  // App-level self-approval pre-check (advisory UX). The CAS WHERE clause
-  // below is the load-bearing guard against TOCTOU on auth().user.id.
-  // Emit an audit row for forensic visibility — failed self-approval is a
-  // suspicious-behavior signal worth recording for incident response.
-  if (resetRecord.initiatedById === session.user.id) {
-    await logAuditAsync({
-      ...tenantAuditBase(req, session.user.id, actor.tenantId),
-      action: AUDIT_ACTION.ADMIN_VAULT_RESET_APPROVE,
-      targetType: "User",
-      targetId: targetUserId,
-      metadata: { resetId, cause: "FORBIDDEN_SELF_APPROVAL" },
-    });
-    return forbidden();
-  }
-
-  // Resolve target member for role hierarchy check + email-snapshot guard +
-  // post-approval notification.
+  // Resolve target member up-front so the eligibility classifier can use
+  // both initiator id and target role in one place. Single query — keeps
+  // the GET /reset-vault eligibility precompute and this enforcement path
+  // in lockstep via the shared computeApproveEligibility helper.
   const targetMember = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.tenantMember.findFirst({
       where: {
@@ -117,8 +105,38 @@ async function handlePOST(
   );
   if (!targetMember) return notFound();
 
-  // Role hierarchy: actor must be strictly above target (mirrors initiate).
-  if (!isTenantRoleAbove(actor.role, targetMember.role)) return forbidden();
+  // Eligibility classification — same helper the GET history endpoint uses
+  // to render the Approve button. The CAS WHERE clause below is the
+  // load-bearing guard against TOCTOU on auth().user.id; this layer is
+  // the early-reject + forensic-audit + UX-error surface.
+  const eligibility = computeApproveEligibility({
+    actorId: session.user.id,
+    actorRole: actor.role,
+    targetRole: targetMember.role,
+    initiatedById: resetRecord.initiatedById,
+  });
+  if (eligibility === APPROVE_ELIGIBILITY.INITIATOR) {
+    // Forensic audit for failed self-approval — suspicious-behavior signal
+    // worth recording for incident response (FR4 layer 2).
+    await logAuditAsync({
+      ...tenantAuditBase(req, session.user.id, actor.tenantId),
+      action: AUDIT_ACTION.ADMIN_VAULT_RESET_APPROVE,
+      targetType: "User",
+      targetId: targetUserId,
+      metadata: { resetId, cause: "FORBIDDEN_SELF_APPROVAL" },
+    });
+    return forbidden();
+  }
+  if (eligibility === APPROVE_ELIGIBILITY.INSUFFICIENT_ROLE) {
+    // Distinct error code so the dialog renders a meaningful message
+    // (e.g., "your role is insufficient — a higher-level admin must
+    // approve") instead of generic FORBIDDEN. Covers target-self and
+    // peer-admin attempts.
+    return NextResponse.json(
+      { error: API_ERROR.FORBIDDEN_INSUFFICIENT_ROLE },
+      { status: 403 },
+    );
+  }
 
   // Email-snapshot guard (FR12 / S9). If the target's email changed since
   // initiate, refuse approval before AAD-bound decrypt — the AAD would also

@@ -60,20 +60,12 @@ export function hasTenantPermission(
   return ROLE_PERMISSIONS[role]?.has(permission) ?? false;
 }
 
-/** Role hierarchy (10-stride for extensibility). */
-const ROLE_LEVEL: Record<TenantRole, number> = {
-  OWNER: 30,
-  ADMIN: 20,
-  MEMBER: 10,
-};
-
-/** Check if actorRole is strictly higher than targetRole. */
-export function isTenantRoleAbove(
-  actorRole: TenantRole,
-  targetRole: TenantRole,
-): boolean {
-  return ROLE_LEVEL[actorRole] > ROLE_LEVEL[targetRole];
-}
+// Re-export role-hierarchy primitives from the pure module so existing
+// callers continue to work via `from "@/lib/auth/access/tenant-auth"`
+// while client-only consumers can import directly from
+// `@/lib/auth/access/tenant-role-hierarchy` to avoid pulling server-only
+// dependencies (prisma/pg) into their bundle.
+export { isTenantRoleAbove } from "@/lib/auth/access/tenant-role-hierarchy";
 
 // Re-export isTenantAdminRole from constants for backward compatibility
 export { isTenantAdminRole } from "@/lib/constants";

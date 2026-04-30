@@ -42,6 +42,7 @@ export const API_ERROR = {
   VAULT_RESET_NOT_APPROVED: "VAULT_RESET_NOT_APPROVED",
   RESET_NOT_APPROVABLE: "RESET_NOT_APPROVABLE",
   RESET_TARGET_EMAIL_CHANGED: "RESET_TARGET_EMAIL_CHANGED",
+  FORBIDDEN_INSUFFICIENT_ROLE: "FORBIDDEN_INSUFFICIENT_ROLE",
   INVALID_ORIGIN: "INVALID_ORIGIN",
 
   // ── Tags ──────────────────────────────────────────────────
@@ -303,6 +304,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   VAULT_RESET_NOT_APPROVED: "vaultResetNotApproved",
   RESET_NOT_APPROVABLE: "resetNotApprovable",
   RESET_TARGET_EMAIL_CHANGED: "resetTargetEmailChanged",
+  FORBIDDEN_INSUFFICIENT_ROLE: "forbiddenInsufficientRole",
   INVALID_ORIGIN: "invalidOrigin",
   SCIM_TOKEN_INVALID: "scimTokenInvalid",
   SCIM_TOKEN_EXPIRED: "scimTokenExpired",

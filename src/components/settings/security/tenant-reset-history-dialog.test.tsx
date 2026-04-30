@@ -159,6 +159,7 @@ interface ResetRow {
   initiatedBy: ResetActor;
   approvedBy: ResetActor | null;
   targetEmailAtInitiate: string;
+  approveEligibility: "eligible" | "initiator" | "insufficient_role";
 }
 
 const NOW = "2026-04-30T12:00:00.000Z";
@@ -176,18 +177,13 @@ function makeRow(overrides: Partial<ResetRow>): ResetRow {
     initiatedBy: { id: INITIATOR_ID, name: "Other Admin", email: "other@x" },
     approvedBy: null,
     targetEmailAtInitiate: "target@example.com",
+    approveEligibility: "eligible",
     ...overrides,
   };
 }
 
-function setupFetchMocks(rows: ResetRow[], userId: string = CURRENT_USER_ID) {
+function setupFetchMocks(rows: ResetRow[]) {
   mockFetch.mockImplementation((url: string) => {
-    if (url.includes("/api/auth/session")) {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ user: { id: userId } }),
-      });
-    }
     if (url.endsWith("/reset-vault")) {
       return Promise.resolve({
         ok: true,
@@ -201,8 +197,8 @@ function setupFetchMocks(rows: ResetRow[], userId: string = CURRENT_USER_ID) {
   });
 }
 
-async function renderAndOpen(rows: ResetRow[], userId = CURRENT_USER_ID) {
-  setupFetchMocks(rows, userId);
+async function renderAndOpen(rows: ResetRow[]) {
+  setupFetchMocks(rows);
   render(
     <TenantResetHistoryDialog
       userId={TARGET_USER_ID}
@@ -246,11 +242,10 @@ describe("TenantResetHistoryDialog", () => {
   });
 
   describe("Approve button visibility", () => {
-    it("is visible AND enabled when status is pending_approval and current user is not the initiator", async () => {
-      await renderAndOpen(
-        [makeRow({ status: "pending_approval" })],
-        CURRENT_USER_ID,
-      );
+    it("is visible AND enabled when server says approveEligibility=eligible", async () => {
+      await renderAndOpen([
+        makeRow({ status: "pending_approval", approveEligibility: "eligible" }),
+      ]);
       const approveButton = screen
         .getAllByRole("button")
         .find((b) => b.textContent?.includes("approveButton"));
@@ -258,20 +253,14 @@ describe("TenantResetHistoryDialog", () => {
       expect(approveButton).not.toBeDisabled();
     });
 
-    it("is visible AND disabled-with-tooltip when current user IS the initiator", async () => {
-      await renderAndOpen(
-        [
-          makeRow({
-            status: "pending_approval",
-            initiatedBy: {
-              id: CURRENT_USER_ID,
-              name: "Me",
-              email: "me@x",
-            },
-          }),
-        ],
-        CURRENT_USER_ID,
-      );
+    it("is visible AND disabled-with-tooltip when server says approveEligibility=initiator", async () => {
+      await renderAndOpen([
+        makeRow({
+          status: "pending_approval",
+          approveEligibility: "initiator",
+          initiatedBy: { id: CURRENT_USER_ID, name: "Me", email: "me@x" },
+        }),
+      ]);
       const approveButton = screen
         .getAllByRole("button")
         .find((b) => b.textContent?.includes("approveButton"));
@@ -298,6 +287,23 @@ describe("TenantResetHistoryDialog", () => {
         expect(approveButton).toBeUndefined();
       });
     }
+
+    it("is NOT rendered when server says approveEligibility=insufficient_role", async () => {
+      // Covers BOTH target-self (viewer === target) and peer-admin
+      // (e.g., ADMIN viewing another ADMIN's reset). The server hides the
+      // distinction; the UI just hides the button rather than surfacing an
+      // action that would reject.
+      await renderAndOpen([
+        makeRow({
+          status: "pending_approval",
+          approveEligibility: "insufficient_role",
+        }),
+      ]);
+      const approveButton = screen
+        .queryAllByRole("button")
+        .find((b) => b.textContent?.includes("approveButton"));
+      expect(approveButton).toBeUndefined();
+    });
   });
 
   describe("approve confirmation flow", () => {
@@ -313,28 +319,27 @@ describe("TenantResetHistoryDialog", () => {
 
       // Dialog now open — locate the confirm input
       const input = screen.getByPlaceholderText("APPROVE");
-      // Submit with wrong phrase: should NOT call the approve endpoint
-      fireEvent.change(input, { target: { value: "approve" } });
       const submitButtons = screen
         .getAllByRole("button")
         .filter((b) => b.textContent?.includes("approveButton"));
       // The footer submit is the last "approveButton" rendered (the dialog's submit)
       const submitButton = submitButtons[submitButtons.length - 1];
-      fireEvent.click(submitButton);
 
-      await waitFor(() => {
-        expect(
-          screen.getByText("approveConfirmationMismatch"),
-        ).toBeInTheDocument();
-      });
-      // No approve fetch yet
+      // Empty input: submit button is disabled (gate the click before it fires).
+      expect(submitButton).toBeDisabled();
+
+      // Wrong phrase: still disabled, so no fetch happens even on click.
+      fireEvent.change(input, { target: { value: "approve" } });
+      expect(submitButton).toBeDisabled();
+      fireEvent.click(submitButton);
       const approveCalls = mockFetch.mock.calls.filter((c) =>
         String(c[0]).includes("/approve"),
       );
       expect(approveCalls.length).toBe(0);
 
-      // Now type the correct phrase and submit
+      // Now type the correct phrase: button becomes enabled, click fires fetch.
       fireEvent.change(input, { target: { value: "APPROVE" } });
+      expect(submitButton).not.toBeDisabled();
       fireEvent.click(submitButton);
 
       await waitFor(() => {

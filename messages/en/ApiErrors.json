@@ -71,6 +71,7 @@
   "vaultResetNotApproved": "Reset has not been approved yet.",
   "resetNotApprovable": "Reset cannot be approved at this time.",
   "resetTargetEmailChanged": "Target user's email has changed since the reset was initiated.",
+  "forbiddenInsufficientRole": "Your role is insufficient to approve this reset. A higher-level administrator must approve it.",
   "invalidOrigin": "Request origin is not allowed.",
   "sendTextTooLarge": "Text content is too large.",
   "sendFileTooLarge": "File is too large (max 10 MB).",

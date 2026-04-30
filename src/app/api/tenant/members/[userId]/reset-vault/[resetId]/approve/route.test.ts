@@ -80,8 +80,14 @@ vi.mock("@/lib/url-helpers", () => ({ serverAppUrl: mockServerAppUrl }));
 vi.mock("@/lib/locale", () => ({ resolveUserLocale: mockResolveUserLocale }));
 vi.mock("@/lib/auth/access/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
-  isTenantRoleAbove: mockIsTenantRoleAbove,
   TenantAuthError,
+}));
+// isTenantRoleAbove is now imported via the pure tenant-role-hierarchy
+// module (so client bundles don't drag in pg/prisma). The approve route
+// reaches it transitively via admin-reset-eligibility — mock it at the
+// pure module to control the role-hierarchy branch.
+vi.mock("@/lib/auth/access/tenant-role-hierarchy", () => ({
+  isTenantRoleAbove: mockIsTenantRoleAbove,
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
@@ -234,10 +240,12 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/approve", () =
     expect(res.status).toBe(404);
   });
 
-  it("returns 403 when actor's role is not above target's", async () => {
+  it("returns 403 FORBIDDEN_INSUFFICIENT_ROLE when actor's role is not above target's", async () => {
     mockIsTenantRoleAbove.mockReturnValue(false);
     const res = await POST(buildReq(), buildParams());
     expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toBe("FORBIDDEN_INSUFFICIENT_ROLE");
     expect(mockPrismaAdminVaultResetUpdateMany).not.toHaveBeenCalled();
   });
 
