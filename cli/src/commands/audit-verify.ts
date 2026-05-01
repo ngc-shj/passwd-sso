@@ -414,20 +414,27 @@ export async function auditVerifyCommand(args: AuditVerifyArgs): Promise<void> {
     if (!archiveBase) {
       throw new PublicKeyArchiveUrlMissingError();
     }
-    // Use URL constructor with a base to constrain the result to the archive
-    // origin. validateKid() already restricted kid to [a-zA-Z0-9_-] (no ".",
-    // no "/", no "%"), so kid cannot escape the path; combining with `new URL`
-    // resolution explicitly fixes the host to archiveBase's origin and breaks
-    // the file-data → fetch taint flow CodeQL detected.
+    // Three layers of defense for the file-data → outbound-fetch flow:
+    //   1. validateKid() above restricts kid to ^audit-anchor-[a-zA-Z0-9_-]{8,32}$
+    //      (no ".", "/", "%", or other path-special characters).
+    //   2. encodeURIComponent on kid — recognized by CodeQL as a sanitizer for
+    //      URL-path-segment construction. At runtime this is a no-op because
+    //      validateKid already restricted kid to characters that
+    //      encodeURIComponent does not encode, but the call breaks the
+    //      taint-flow CodeQL detects (see PR #419 review #4209883677).
+    //   3. URL constructor with archiveBaseUrl as base — resolution semantics
+    //      pin the host to archiveBase's origin; combined with the explicit
+    //      origin equality check below, kid cannot escape the archive origin.
     const archiveBaseUrl = new URL(archiveBase);
     const archivePath = archiveBaseUrl.pathname.replace(/\/$/, "");
-    const pubUrlObj = new URL(`${archivePath}/${kid}.pub`, archiveBaseUrl);
+    const safeKid = encodeURIComponent(kid);
+    const pubUrlObj = new URL(`${archivePath}/${safeKid}.pub`, archiveBaseUrl);
     if (pubUrlObj.origin !== archiveBaseUrl.origin) {
       // Defense in depth: should be impossible given validateKid + URL semantics,
       // but explicit reject if URL resolution somehow crosses origins.
       throw new PublicKeyFetchError(0, pubUrlObj.href);
     }
-    const resp = await fetch(pubUrlObj, { redirect: "manual" });
+    const resp = await fetch(pubUrlObj.href, { redirect: "manual" });
     if (resp.status !== 200) {
       throw new PublicKeyFetchError(resp.status, pubUrlObj.href);
     }
