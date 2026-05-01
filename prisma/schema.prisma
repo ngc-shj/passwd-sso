@@ -989,6 +989,10 @@ enum AuditAction {
   AUDIT_DELIVERY_TARGET_CREATE
   AUDIT_DELIVERY_TARGET_DEACTIVATE
   AUDIT_DELIVERY_TARGET_REACTIVATE
+  AUDIT_ANCHOR_PUBLISHED
+  AUDIT_ANCHOR_PUBLISH_FAILED
+  AUDIT_ANCHOR_PUBLISH_PAUSED
+  AUDIT_ANCHOR_KEY_ROTATED
   OPERATOR_TOKEN_CREATE
   OPERATOR_TOKEN_REVOKE
   MOBILE_TOKEN_ISSUED
@@ -1070,10 +1074,13 @@ model AuditLog {
 }
 
 model AuditChainAnchor {
-  tenantId  String   @id @map("tenant_id") @db.Uuid
-  chainSeq  BigInt   @default(0) @map("chain_seq")
-  prevHash  Bytes    @default(dbgenerated("'\\x00'::bytea")) @map("prev_hash")
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  tenantId           String    @id @map("tenant_id") @db.Uuid
+  chainSeq           BigInt    @default(0) @map("chain_seq")
+  prevHash           Bytes     @default(dbgenerated("'\\x00'::bytea")) @map("prev_hash")
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  epoch              Int?      @default(1) @map("epoch")
+  publishPausedUntil DateTime? @map("publish_paused_until") @db.Timestamptz(3)
+  lastPublishedAt    DateTime? @map("last_published_at") @db.Timestamptz(3)
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
@@ -1870,4 +1877,14 @@ model DelegationSession {
   @@index([mcpTokenId, revokedAt])
   @@index([tenantId])
   @@map("delegation_sessions")
+}
+
+// ─── System Settings ────────────────────────────────────────
+
+model SystemSetting {
+  key       String   @id @db.Text
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("system_settings")
 }

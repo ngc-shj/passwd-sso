@@ -9,10 +9,12 @@
  *
  * Env vars:
  *   AWS_REGION                     — AWS region (required)
- *   AWS_SM_SECRET_SHARE_MASTER     — secret name/ARN (default: "passwd-sso/share-master-key")
- *   AWS_SM_SECRET_VERIFIER_PEPPER  — secret name/ARN for verifier pepper
- *   AWS_SM_SECRET_DIRECTORY_SYNC   — secret name/ARN for directory sync key
- *   AWS_SM_SECRET_WEBAUTHN_PRF     — secret name/ARN for WebAuthn PRF secret
+ *   AWS_SM_SECRET_SHARE_MASTER          — secret name/ARN (default: "passwd-sso/share-master-key")
+ *   AWS_SM_SECRET_VERIFIER_PEPPER       — secret name/ARN for verifier pepper
+ *   AWS_SM_SECRET_DIRECTORY_SYNC        — secret name/ARN for directory sync key
+ *   AWS_SM_SECRET_WEBAUTHN_PRF          — secret name/ARN for WebAuthn PRF secret
+ *   AWS_SM_SECRET_AUDIT_ANCHOR_SIGNING      — secret name/ARN for audit anchor signing key
+ *   AWS_SM_SECRET_AUDIT_ANCHOR_TAG_SECRET   — secret name/ARN for audit anchor tag secret
  */
 
 import type { KeyName } from "./types";
@@ -69,6 +71,8 @@ export class AwsSmKeyProvider extends BaseCloudKeyProvider {
     "verifier-pepper": "AWS_SM_SECRET_VERIFIER_PEPPER",
     "directory-sync": "AWS_SM_SECRET_DIRECTORY_SYNC",
     "webauthn-prf": "AWS_SM_SECRET_WEBAUTHN_PRF",
+    "audit-anchor-signing": "AWS_SM_SECRET_AUDIT_ANCHOR_SIGNING",
+    "audit-anchor-tag-secret": "AWS_SM_SECRET_AUDIT_ANCHOR_TAG_SECRET",
   };
 
   protected readonly defaultSecretNames: Record<KeyName, string> = {
@@ -76,6 +80,8 @@ export class AwsSmKeyProvider extends BaseCloudKeyProvider {
     "verifier-pepper": "passwd-sso/verifier-pepper-key",
     "directory-sync": "passwd-sso/directory-sync-key",
     "webauthn-prf": "passwd-sso/webauthn-prf-secret",
+    "audit-anchor-signing": "passwd-sso/audit-anchor-signing-key",
+    "audit-anchor-tag-secret": "passwd-sso/audit-anchor-tag-secret",
   };
 
   constructor(config: AwsSmConfig) {

@@ -106,6 +106,16 @@ export abstract class BaseCloudKeyProvider implements KeyProvider {
       keysToValidate.push({ name });
     }
 
+    // Audit-anchor publisher keys — gated on AUDIT_ANCHOR_PUBLISHER_ENABLED so
+    // deployments not running the publisher do not require these secrets to
+    // exist in the cloud SM. When the publisher IS enabled, missing keys must
+    // fail-closed at boot rather than at first cron tick (24h silent window).
+    // Mirrors EnvKeyProvider.validateKeys gating pattern (closes plan S2 / R3-S2).
+    if (process.env.AUDIT_ANCHOR_PUBLISHER_ENABLED === "true") {
+      keysToValidate.push({ name: "audit-anchor-signing" });
+      keysToValidate.push({ name: "audit-anchor-tag-secret" });
+    }
+
     await Promise.all(
       keysToValidate.map(({ name, version }) => this.getKey(name, version))
     );

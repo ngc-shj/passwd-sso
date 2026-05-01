@@ -189,12 +189,16 @@ export async function checkChainEnabled(
   return result;
 }
 
+/**
+ * Returns true when the row was delivered and the chain advanced,
+ * false when the row was skipped because publish_paused_until is active.
+ */
 export async function deliverRowWithChain(
   prisma: PrismaClient,
   row: AuditOutboxRow,
   payload: AuditOutboxPayload,
-): Promise<void> {
-  await prisma.$transaction(async (tx) => {
+): Promise<boolean> {
+  const delivered = await prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
 
     // P4-S2 fix: prevent indefinite lock wait
@@ -208,18 +212,51 @@ export async function deliverRowWithChain(
       row.tenant_id,
     );
 
-    // Lock the anchor row for this tenant
+    // Lock the anchor row for this tenant.
+    // Also read publish_paused_until to implement plan F2/S9/R3-N5:
+    // chain advancement is gated on the publisher's fail-closed pause flag.
+    // When the publisher encounters an error, it sets publish_paused_until to
+    // now() + pause_duration so that outbox rows are not chained into a
+    // potentially inconsistent anchor state. See audit-anchor-publisher.ts
+    // Step 5 (nonPausedAnchors filter) for where the pause is set.
+    //
+    // NOTE (liveness): paused rows are left PENDING and re-claimed on the
+    // next poll cycle. We deliberately do NOT filter them out of claimBatch
+    // (option a from the plan) to keep the claim query simple. The natural
+    // batch size + OUTBOX_POLL_INTERVAL_MS cadence bounds the re-check rate.
+    // This only matters during a sustained publisher pause (rare in practice).
     const anchors = await tx.$queryRawUnsafe<{
       chain_seq: bigint;
       prev_hash: Buffer;
+      publish_paused_until: Date | null;
     }[]>(
-      `SELECT chain_seq, prev_hash FROM audit_chain_anchors WHERE tenant_id = $1::uuid FOR UPDATE`,
+      `SELECT chain_seq, prev_hash, publish_paused_until FROM audit_chain_anchors WHERE tenant_id = $1::uuid FOR UPDATE`,
       row.tenant_id,
     );
 
     const anchor = anchors[0];
     if (!anchor) {
       throw new Error(`Anchor row missing after upsert for tenant ${row.tenant_id}`);
+    }
+
+    // If publish_paused_until is set and in the future, skip chain advancement.
+    // The outbox row remains PENDING (reset below) so the next poll will retry.
+    // Do NOT emit an audit event here — the publisher already emits
+    // AUDIT_ANCHOR_PUBLISH_PAUSED per cron tick and we must not double-emit.
+    if (anchor.publish_paused_until && anchor.publish_paused_until > new Date()) {
+      getLogger().debug(
+        { outboxId: row.id, tenantId: row.tenant_id, publishPausedUntil: anchor.publish_paused_until },
+        "worker.chain_advancement_skipped_paused",
+      );
+      // Reset the row to PENDING so it is retried after the pause expires.
+      await tx.$executeRawUnsafe(
+        `UPDATE audit_outbox
+         SET status = 'PENDING',
+             processing_started_at = NULL
+         WHERE id = $1`,
+        row.id,
+      );
+      return false;
     }
 
     const newSeq = anchor.chain_seq + BigInt(1);
@@ -317,7 +354,9 @@ export async function deliverRowWithChain(
        WHERE id = $1`,
       row.id,
     );
+    return true;
   });
+  return delivered ?? false;
 }
 
 /**
@@ -1009,10 +1048,18 @@ export function createWorker(config: WorkerConfig) {
 
       try {
         const chainEnabled = await getChainEnabled(row.tenant_id);
+        let rowDelivered: boolean;
         if (chainEnabled) {
-          await deliverRowWithChain(workerPrisma, row, payload);
+          rowDelivered = await deliverRowWithChain(workerPrisma, row, payload);
         } else {
           await deliverRow(workerPrisma, row, payload);
+          rowDelivered = true;
+        }
+        if (!rowDelivered) {
+          // Row was skipped because the tenant's anchor has publish_paused_until
+          // active. The row is already reset to PENDING inside deliverRowWithChain.
+          // Skip webhook dispatch and fan-out — they will run after the pause lifts.
+          continue;
         }
         log.info(
           { outboxId: row.id, action: payload.action, tenantId: row.tenant_id },

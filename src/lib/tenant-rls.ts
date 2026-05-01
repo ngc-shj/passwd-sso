@@ -9,6 +9,7 @@ export const BYPASS_PURPOSE = {
   AUDIT_WRITE: "audit_write",
   WEBHOOK_DISPATCH: "webhook_dispatch",
   TOKEN_LIFECYCLE: "token_lifecycle",
+  AUDIT_ANCHOR_PUBLISH: "audit-anchor-publish",
 } as const;
 
 export type BypassPurpose = (typeof BYPASS_PURPOSE)[keyof typeof BYPASS_PURPOSE];

@@ -23,6 +23,18 @@ import { runCommand } from "./commands/run.js";
 import { apiKeyListCommand, apiKeyCreateCommand, apiKeyRevokeCommand } from "./commands/api-key.js";
 import { agentCommand } from "./commands/agent.js";
 import { decryptCommand } from "./commands/decrypt.js";
+import {
+  auditVerifyCommand,
+  InvalidAlgorithmError,
+  InvalidTypError,
+  InvalidSignatureError,
+  ManifestSchemaValidationError,
+  InvalidTenantIdFormatError,
+  TenantNotInManifestError,
+  ChainBreakError,
+  ChainSeqRegressionError,
+  InvalidTagSecretLengthError,
+} from "./commands/audit-verify.js";
 import { isUnlocked, lockVault } from "./lib/vault-state.js";
 import { clearPendingClipboard } from "./lib/clipboard.js";
 import { setInsecure, clearTokenCache, startBackgroundRefresh, stopBackgroundRefresh } from "./lib/api-client.js";
@@ -144,6 +156,43 @@ program
   .option("--field <field>", "Field to decrypt (default: password, ignored with --json)")
   .option("--json", "Output all decrypted fields as JSON (ignores --field)")
   .action((id: string, opts) => decryptCommand(id, { field: opts.field, mcpClient: opts.mcpClient, json: opts.json }));
+
+program
+  .command("audit-verify")
+  .description("Verify an audit anchor manifest JWS (signature + optional tenant coverage)")
+  .requiredOption("-m, --manifest <path-or-url>", "Path to JWS file or URL")
+  .option("-p, --public-key <path>", "Path to .pub file (hex Ed25519); auto-fetched via kid if absent")
+  .option("--my-tenant-id <uuid>", "Your tenant UUID for chain-coverage check")
+  .option("--tag-secret-file <path>", "Path to file containing hex tag secret (recommended; must be mode 0600)")
+  .option("--tag-secret <hex>", "Hex tag secret on the CLI (discouraged — recorded in shell history)")
+  .option("--prior-manifest <path>", "Prior manifest JWS file for regression check")
+  .option("--archive-url <url>", "Override AUDIT_ANCHOR_PUBLIC_KEY_ARCHIVE_URL for public key fetch")
+  .action(async (opts) => {
+    try {
+      await auditVerifyCommand({
+        manifest: opts.manifest,
+        publicKey: opts.publicKey,
+        myTenantId: opts.myTenantId,
+        tagSecret: opts.tagSecret,
+        tagSecretFile: opts.tagSecretFile,
+        priorManifest: opts.priorManifest,
+        archiveUrl: opts.archiveUrl,
+      });
+    } catch (err) {
+      const msg = (err instanceof Error ? err.message : String(err)) + "\n";
+      process.stderr.write(msg);
+      if (err instanceof InvalidAlgorithmError) process.exit(10);
+      else if (err instanceof InvalidTypError) process.exit(11);
+      else if (err instanceof InvalidSignatureError) process.exit(12);
+      else if (err instanceof ManifestSchemaValidationError) process.exit(13);
+      else if (err instanceof InvalidTenantIdFormatError) process.exit(14);
+      else if (err instanceof TenantNotInManifestError) process.exit(15);
+      else if (err instanceof ChainBreakError) process.exit(16);
+      else if (err instanceof ChainSeqRegressionError) process.exit(17);
+      else if (err instanceof InvalidTagSecretLengthError) process.exit(18);
+      else process.exit(1);
+    }
+  });
 
 program.parse();
 
