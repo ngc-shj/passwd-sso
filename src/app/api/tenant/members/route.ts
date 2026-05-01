@@ -50,6 +50,7 @@ async function handleGET(req: NextRequest) {
         },
         orderBy: { createdAt: "asc" },
       }),
+      // Includes pending_approval AND approved (not yet executed) per dual-approval plan
       prisma.adminVaultReset.groupBy({
         by: ["targetUserId"],
         where: {

@@ -5,6 +5,7 @@ const KEYS = [
   "NEW_DEVICE_LOGIN",
   "ADMIN_VAULT_RESET",
   "ADMIN_VAULT_RESET_REVOKED",
+  "ADMIN_VAULT_RESET_PENDING_APPROVAL",
   "WATCHTOWER_ALERT",
   "VAULT_LOCKOUT",
 ] as const;
@@ -46,6 +47,28 @@ describe("notificationBody", () => {
     const result = notificationBody("ADMIN_VAULT_RESET_REVOKED", "ja");
     expect(typeof result).toBe("string");
     expect(result.length).toBeGreaterThan(0);
+  });
+
+  it("returns a non-empty string for ADMIN_VAULT_RESET_PENDING_APPROVAL (en)", () => {
+    const result = notificationBody(
+      "ADMIN_VAULT_RESET_PENDING_APPROVAL",
+      "en",
+      "alice@example.com",
+    );
+    expect(typeof result).toBe("string");
+    expect(result.length).toBeGreaterThan(0);
+    expect(result).toContain("alice@example.com");
+  });
+
+  it("returns a non-empty string for ADMIN_VAULT_RESET_PENDING_APPROVAL (ja)", () => {
+    const result = notificationBody(
+      "ADMIN_VAULT_RESET_PENDING_APPROVAL",
+      "ja",
+      "alice@example.com",
+    );
+    expect(typeof result).toBe("string");
+    expect(result.length).toBeGreaterThan(0);
+    expect(result).toContain("alice@example.com");
   });
 
   it("returns a non-empty string for NEW_DEVICE_LOGIN (en)", () => {

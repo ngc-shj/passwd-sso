@@ -60,6 +60,18 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/auth/session/session-timeout.ts", ["user"]],
   // Extension token refresh: cross-tenant token lookup + family-absolute check
   ["src/app/api/extension/token/refresh/route.ts", ["tenant"]],
+  // iOS auth: token row updates (lastUsedIp/UA, replay-detection family revoke)
+  // happen across tenant boundary because the bearer token's tenantId is
+  // resolved from the row, not the request session.
+  ["src/lib/auth/tokens/mobile-token.ts", ["extensionToken", "tenant"]],
+  // iOS authorize: bridge-code creation atomically counts active bridge codes
+  // per user across tenants (parity with extension/bridge-code/route.ts).
+  ["src/app/api/mobile/authorize/route.ts", ["mobileBridgeCode"]],
+  // iOS token exchange: bridge-code single-use consumption requires bypass
+  // because the row predates the issued session (parity with extension exchange).
+  ["src/app/api/mobile/token/route.ts", ["mobileBridgeCode"]],
+  // iOS token refresh: cross-tenant token row read for family-absolute check.
+  ["src/app/api/mobile/token/refresh/route.ts", ["tenant", "extensionToken"]],
   // Team policy route: pre-write tenant cap check (cross-tenant read of tenant row)
   ["src/app/api/teams/[teamId]/policy/route.ts", ["team"]],
   ["src/app/api/maintenance/purge-audit-logs/route.ts", ["tenant", "auditLog"]],

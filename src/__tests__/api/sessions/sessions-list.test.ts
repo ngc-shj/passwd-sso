@@ -4,12 +4,13 @@ import { createRequest, parseResponse } from "../../helpers/request-builder";
 
 const {
   mockAuth, mockSessionFindUnique, mockSessionFindMany,
-  mockUserFindUnique, mockWithUserTenantRls,
+  mockUserFindUnique, mockExtensionTokenFindMany, mockWithUserTenantRls,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockSessionFindUnique: vi.fn(),
   mockSessionFindMany: vi.fn(),
   mockUserFindUnique: vi.fn(),
+  mockExtensionTokenFindMany: vi.fn().mockResolvedValue([]),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
@@ -21,6 +22,7 @@ vi.mock("@/lib/prisma", () => ({
       findMany: mockSessionFindMany,
     },
     user: { findUnique: mockUserFindUnique },
+    extensionToken: { findMany: mockExtensionTokenFindMany },
   },
 }));
 vi.mock("@/lib/tenant-context", () => ({

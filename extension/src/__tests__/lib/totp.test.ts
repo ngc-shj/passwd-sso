@@ -1,52 +1,29 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { generateTOTPCode } from "../../lib/totp";
+import rfc6238Vectors from "../../../test/fixtures/totp-rfc6238-vectors.json";
 
-// RFC 6238 test secret: "12345678901234567890" as Base32
-const RFC_SECRET_SHA1 = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
-// RFC 6238 test secret for SHA256: "12345678901234567890123456789012" as Base32
-const RFC_SECRET_SHA256 =
-  "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZA";
-// RFC 6238 test secret for SHA512: 64 bytes as Base32
-const RFC_SECRET_SHA512 =
-  "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQGEZDGNA";
+// SHA1 secret used by behaviour tests below; pulled from the shared fixture
+// so iOS XCTest can consume the same vectors via Bundle resource loading.
+const RFC_SECRET_SHA1 = rfc6238Vectors.find((v) => v.algorithm === "SHA1")!
+  .secret;
 
 describe("generateTOTPCode", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("generates correct SHA1 code at RFC 6238 test time T=59", () => {
-    vi.spyOn(Date, "now").mockReturnValue(59_000);
-    const code = generateTOTPCode({
-      secret: RFC_SECRET_SHA1,
-      algorithm: "SHA1",
-      digits: 8,
-      period: 30,
+  for (const v of rfc6238Vectors) {
+    it(`generates correct ${v.algorithm} code at RFC 6238 test time T=${v.T_seconds}`, () => {
+      vi.spyOn(Date, "now").mockReturnValue(v.T_seconds * 1000);
+      const code = generateTOTPCode({
+        secret: v.secret,
+        algorithm: v.algorithm,
+        digits: v.digits,
+        period: v.period,
+      });
+      expect(code).toBe(v.expected);
     });
-    expect(code).toBe("94287082");
-  });
-
-  it("generates correct SHA256 code at RFC 6238 test time T=59", () => {
-    vi.spyOn(Date, "now").mockReturnValue(59_000);
-    const code = generateTOTPCode({
-      secret: RFC_SECRET_SHA256,
-      algorithm: "SHA256",
-      digits: 8,
-      period: 30,
-    });
-    expect(code).toBe("46119246");
-  });
-
-  it("generates correct SHA512 code at RFC 6238 test time T=59", () => {
-    vi.spyOn(Date, "now").mockReturnValue(59_000);
-    const code = generateTOTPCode({
-      secret: RFC_SECRET_SHA512,
-      algorithm: "SHA512",
-      digits: 8,
-      period: 30,
-    });
-    expect(code).toBe("90693936");
-  });
+  }
 
   it("defaults to SHA1, 6 digits, 30s period", () => {
     vi.spyOn(Date, "now").mockReturnValue(59_000);

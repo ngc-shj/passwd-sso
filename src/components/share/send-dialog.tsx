@@ -36,7 +36,7 @@ import {
   Info,
 } from "lucide-react";
 import { toast } from "sonner";
-import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { toastApiError } from "@/lib/http/toast-api-error";
 import { API_PATH } from "@/lib/constants";
 import { SEND_MAX_FILE_SIZE, SEND_MAX_TEXT_LENGTH, MAX_VIEWS_MIN, MAX_VIEWS_MAX, SEND_NAME_MAX_LENGTH } from "@/lib/validations";
 import { formatFileSize } from "@/lib/format/format-file-size";
@@ -112,8 +112,7 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        toast.error(tApi(apiErrorToI18nKey(err?.error)));
+        await toastApiError(res, tApi);
         return;
       }
 
@@ -150,8 +149,7 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        toast.error(tApi(apiErrorToI18nKey(err?.error)));
+        await toastApiError(res, tApi);
         return;
       }
 

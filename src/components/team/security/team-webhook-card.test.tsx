@@ -124,5 +124,6 @@ describe("TeamWebhookCard (team-specific)", () => {
     expect(screen.queryByText("SCIM_USER_CREATE")).not.toBeInTheDocument();
     expect(screen.queryByText("MASTER_KEY_ROTATION")).not.toBeInTheDocument();
     expect(screen.queryByText("ADMIN_VAULT_RESET_INITIATE")).not.toBeInTheDocument();
+    expect(screen.queryByText("ADMIN_VAULT_RESET_APPROVE")).not.toBeInTheDocument();
   });
 });

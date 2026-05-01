@@ -148,7 +148,7 @@ describe("getTenantMembership", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockWithBypassRls.mockImplementation(
-      (_prisma: unknown, fn: () => unknown) => fn(),
+      async (_prisma: unknown, fn: () => unknown) => fn(),
     );
   });
 
@@ -197,7 +197,7 @@ describe("requireTenantMember", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockWithBypassRls.mockImplementation(
-      (_prisma: unknown, fn: () => unknown) => fn(),
+      async (_prisma: unknown, fn: () => unknown) => fn(),
     );
   });
 
@@ -256,7 +256,7 @@ describe("requireTenantPermission", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockWithBypassRls.mockImplementation(
-      (_prisma: unknown, fn: () => unknown) => fn(),
+      async (_prisma: unknown, fn: () => unknown) => fn(),
     );
   });
 
@@ -386,7 +386,7 @@ describe("requireTenantPermission", () => {
 
 describe("TenantAuthError", () => {
   it("has name 'TenantAuthError'", () => {
-    const err = new TenantAuthError("test message", 403);
+    const err = new TenantAuthError(API_ERROR.FORBIDDEN, 403);
     expect(err.name).toBe("TenantAuthError");
   });
 
@@ -401,7 +401,7 @@ describe("TenantAuthError", () => {
   });
 
   it("is an instance of Error", () => {
-    const err = new TenantAuthError("msg", 500);
+    const err = new TenantAuthError(API_ERROR.INTERNAL_ERROR, 500);
     expect(err).toBeInstanceOf(Error);
   });
 });

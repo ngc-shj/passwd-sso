@@ -60,20 +60,8 @@ export function hasTenantPermission(
   return ROLE_PERMISSIONS[role]?.has(permission) ?? false;
 }
 
-/** Role hierarchy (10-stride for extensibility). */
-const ROLE_LEVEL: Record<TenantRole, number> = {
-  OWNER: 30,
-  ADMIN: 20,
-  MEMBER: 10,
-};
-
-/** Check if actorRole is strictly higher than targetRole. */
-export function isTenantRoleAbove(
-  actorRole: TenantRole,
-  targetRole: TenantRole,
-): boolean {
-  return ROLE_LEVEL[actorRole] > ROLE_LEVEL[targetRole];
-}
+// Back-compat re-export — see tenant-role-hierarchy.ts for the pure module.
+export { isTenantRoleAbove } from "@/lib/auth/access/tenant-role-hierarchy";
 
 // Re-export isTenantAdminRole from constants for backward compatibility
 export { isTenantAdminRole } from "@/lib/constants";

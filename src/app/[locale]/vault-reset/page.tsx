@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { API_PATH } from "@/lib/constants";
+import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +13,7 @@ import { Link } from "@/i18n/navigation";
 import { ArrowLeft, Loader2, AlertTriangle } from "lucide-react";
 import { fetchApi, withBasePath } from "@/lib/url-helpers";
 
-const CONFIRMATION_TOKEN = "DELETE MY VAULT";
+const CONFIRMATION_TOKEN = VAULT_CONFIRMATION_PHRASE.DELETE_VAULT;
 
 export default function VaultResetPage() {
   const locale = useLocale();

@@ -1,0 +1,56 @@
+{
+  "extractHost": [
+    {
+      "name": "extracts hostname from full URL",
+      "url": "https://mail.google.com/inbox",
+      "expected": "mail.google.com"
+    },
+    {
+      "name": "returns null for invalid URL",
+      "url": "not-a-url",
+      "expected": null
+    },
+    {
+      "name": "returns null for non-http(s) scheme",
+      "url": "edge://extensions",
+      "expected": null
+    },
+    {
+      "name": "handles localhost with port",
+      "url": "http://localhost:3000/",
+      "expected": "localhost"
+    }
+  ],
+  "isHostMatch": [
+    {
+      "name": "matches exact hostname",
+      "stored": "example.com",
+      "current": "example.com",
+      "expected": true
+    },
+    {
+      "name": "matches with www prefix normalization",
+      "stored": "example.com",
+      "current": "www.example.com",
+      "expected": true
+    },
+    {
+      "name": "matches subdomain",
+      "stored": "google.com",
+      "current": "mail.google.com",
+      "expected": true
+    },
+    {
+      "name": "does not match unrelated domains",
+      "stored": "example.com",
+      "current": "google.com",
+      "expected": false
+    },
+    {
+      "name": "does not match partial suffix",
+      "stored": "example.com",
+      "current": "notexample.com",
+      "expected": false
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaSession, mockPrismaUser, mockRateLimiter, mockLogAudit, mockWithUserTenantRls, mockInvalidateCachedSessions } =
+const { mockAuth, mockPrismaSession, mockPrismaUser, mockPrismaExtensionToken, mockRateLimiter, mockLogAudit, mockWithUserTenantRls, mockInvalidateCachedSessions } =
   vi.hoisted(() => ({
     mockAuth: vi.fn(),
     mockPrismaSession: {
@@ -12,6 +12,9 @@ const { mockAuth, mockPrismaSession, mockPrismaUser, mockRateLimiter, mockLogAud
     mockPrismaUser: {
       findUnique: vi.fn(),
     },
+    mockPrismaExtensionToken: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     mockRateLimiter: { check: vi.fn() },
     mockLogAudit: vi.fn(),
     mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
@@ -20,7 +23,7 @@ const { mockAuth, mockPrismaSession, mockPrismaUser, mockRateLimiter, mockLogAud
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { session: mockPrismaSession, user: mockPrismaUser },
+  prisma: { session: mockPrismaSession, user: mockPrismaUser, extensionToken: mockPrismaExtensionToken },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => mockRateLimiter,
@@ -58,6 +61,7 @@ describe("GET /api/sessions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
+    mockPrismaExtensionToken.findMany.mockResolvedValue([]);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -133,6 +137,49 @@ describe("GET /api/sessions", () => {
     expect(json.sessions).toEqual([]);
     expect(json.sessionCount).toBe(0);
     expect(json.maxConcurrentSessions).toBeNull();
+    expect(json.extensionTokens).toEqual([]);
+  });
+
+  it("surfaces extension tokens with clientKind / lastUsedIp / lastUsedUserAgent", async () => {
+    mockPrismaSession.findMany.mockResolvedValue([]);
+    mockPrismaUser.findUnique.mockResolvedValue({ tenant: null });
+    mockPrismaExtensionToken.findMany.mockResolvedValue([
+      {
+        id: "tok-ios-1",
+        createdAt: now,
+        lastUsedAt: now,
+        expiresAt: new Date("2099-01-01"),
+        clientKind: "IOS_APP",
+        lastUsedIp: "203.0.113.7",
+        lastUsedUserAgent: "passwd-sso-ios/1.0 iOS/18.0",
+      },
+      {
+        id: "tok-ext-1",
+        createdAt: now,
+        lastUsedAt: null,
+        expiresAt: new Date("2099-01-01"),
+        clientKind: "BROWSER_EXTENSION",
+        lastUsedIp: null,
+        lastUsedUserAgent: null,
+      },
+    ]);
+    const req = createRequest("GET", "http://localhost:3000/api/sessions");
+    const res = await GET(req);
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.extensionTokens).toHaveLength(2);
+    expect(json.extensionTokens[0]).toMatchObject({
+      id: "tok-ios-1",
+      clientKind: "IOS_APP",
+      lastUsedIp: "203.0.113.7",
+      lastUsedUserAgent: "passwd-sso-ios/1.0 iOS/18.0",
+    });
+    expect(json.extensionTokens[1]).toMatchObject({
+      id: "tok-ext-1",
+      clientKind: "BROWSER_EXTENSION",
+      lastUsedIp: null,
+      lastUsedUserAgent: null,
+    });
   });
 });
 
