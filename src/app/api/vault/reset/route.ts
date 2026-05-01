@@ -11,6 +11,7 @@ import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { executeVaultReset } from "@/lib/vault/vault-reset";
+import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
 import { z } from "zod/v4";
 
 export const runtime = "nodejs";
@@ -60,12 +61,29 @@ async function handlePOST(request: NextRequest) {
   const { deletedEntries, deletedAttachments } =
     await executeVaultReset(userId);
 
+  // Mirror admin-reset semantics: a self-reset wipes the vault, but the
+  // existing Session / ExtensionToken / ApiKey / McpAccessToken /
+  // McpRefreshToken / DelegationSession rows still authenticate AS this
+  // user. Surviving them across a vault reset would let an attacker who
+  // captured any of those credentials replay against the freshly-set-up
+  // vault. Invalidate across all tenants to match admin-reset behavior.
+  const invalidationResult = await invalidateUserSessions(userId, {
+    allTenants: true,
+    reason: "self_vault_reset",
+  });
+
   await logAuditAsync({
     ...personalAuditBase(request, userId),
     action: AUDIT_ACTION.VAULT_RESET_EXECUTED,
     metadata: {
       deletedEntries,
       deletedAttachments,
+      invalidatedSessions: invalidationResult.sessions,
+      invalidatedExtensionTokens: invalidationResult.extensionTokens,
+      invalidatedApiKeys: invalidationResult.apiKeys,
+      invalidatedMcpAccessTokens: invalidationResult.mcpAccessTokens,
+      invalidatedMcpRefreshTokens: invalidationResult.mcpRefreshTokens,
+      invalidatedDelegationSessions: invalidationResult.delegationSessions,
     },
   });
 

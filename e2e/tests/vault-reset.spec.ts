@@ -49,10 +49,12 @@ test.describe("Vault Reset", () => {
     });
     await resetButton.click();
 
-    // Should redirect to dashboard with setup form (vault cleared)
-    await page.waitForURL(/\/dashboard/, { timeout: 10_000 });
-
-    // Setup form should be visible (vault is now in SETUP_REQUIRED state)
-    await expect(page.locator("#passphrase")).toBeVisible({ timeout: 10_000 });
+    // Self-reset invalidates the user's session/tokens server-side, so the
+    // browser must be bounced to signin (callbackUrl carries them back to
+    // /dashboard after re-auth, where the SETUP_REQUIRED state shows the
+    // setup form). Verifying the signin redirect proves invalidation took
+    // effect — a stronger check than the prior /dashboard assertion.
+    await page.waitForURL(/\/auth\/signin/, { timeout: 10_000 });
+    expect(page.url()).toMatch(/callbackUrl=/);
   });
 });
