@@ -45,12 +45,23 @@ describe("account-token-crypto", () => {
     expect(decryptAccountToken(undefined, aad)).toBeNull();
   });
 
-  it("treats legacy plaintext (no sentinel) as a passthrough", () => {
-    // Backward-compat: rows that pre-date encryption are returned verbatim
-    // until the data migration script rewrites them.
-    expect(decryptAccountToken("legacy-plaintext-token", aad)).toBe(
-      "legacy-plaintext-token",
-    );
+  it("throws on stored values without the psoenc1 sentinel (no plaintext fallback)", () => {
+    // S2 fix: a plaintext fallback would let a DB-write attacker bypass the
+    // AAD bind by writing any value without the sentinel. Reject instead.
+    expect(() =>
+      decryptAccountToken("legacy-plaintext-token", aad),
+    ).toThrow();
+  });
+
+  it("buildAad rejects fields containing the ':' delimiter", () => {
+    // S1 fix: prevent (provider="saml", providerAccountId="acme:sub") from
+    // colliding with (provider="saml:acme", providerAccountId="sub").
+    expect(() =>
+      encryptAccountToken("p", { ...aad, provider: "saml:acme" }),
+    ).toThrow(/reserved delimiter/);
+    expect(() =>
+      encryptAccountToken("p", { ...aad, providerAccountId: "with:colon" }),
+    ).toThrow(/reserved delimiter/);
   });
 
   it("rejects ciphertext when the AAD context does not match", () => {
@@ -117,15 +128,26 @@ describe("account-token-crypto", () => {
       expect(out.id_token).toBeNull();
     });
 
-    it("decrypts encrypted fields and passes legacy plaintext through", () => {
+    it("decrypts encrypted fields; classifies non-sentinel values as CORRUPT", () => {
+      // S2 fix: no plaintext fallback. A legacy plaintext value goes through
+      // parseEnvelope and is classified CORRUPT by the triple helper.
       const encrypted = encryptAccountToken("rt-plain", aad);
+      const errors: { field: string; kind: string }[] = [];
       const out = decryptAccountTokenTriple(
         { refresh_token: encrypted, access_token: "legacy-at", id_token: null },
         aad,
+        {
+          onFieldError: (field, _err, kind) => {
+            errors.push({ field, kind });
+          },
+        },
       );
       expect(out.refresh_token).toBe("rt-plain");
-      expect(out.access_token).toBe("legacy-at");
+      expect(out.access_token).toBeNull();
       expect(out.id_token).toBeNull();
+      expect(errors).toEqual([
+        { field: "access_token", kind: DECRYPT_FAILURE_KIND.CORRUPT },
+      ]);
     });
 
     it("decryptAccountTokenTriple without onFieldError throws on corrupt input", () => {

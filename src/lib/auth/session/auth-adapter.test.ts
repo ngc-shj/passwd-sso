@@ -1115,9 +1115,13 @@ describe("createCustomAdapter", () => {
   });
 
   describe("getAccount", () => {
-    it("returns account when found", async () => {
+    it("returns account when found; non-sentinel token values become undefined (no plaintext fallback)", async () => {
+      // F2: include id/tenantId in mock to match the real Prisma SELECT.
+      // S2: plaintext fallback removed — non-sentinel token strings classify
+      // as CORRUPT and the field is returned as undefined (no audit fires).
       mockPrismaAccount.findFirst.mockResolvedValue({
-        userId: "u-1", type: "oidc", provider: "google", providerAccountId: "g-1",
+        id: "acc-1", userId: "u-1", tenantId: "tenant-1",
+        type: "oidc", provider: "google", providerAccountId: "g-1",
         refresh_token: "rt", access_token: "at", expires_at: 1234, token_type: "bearer",
         scope: "openid", id_token: "idt", session_state: "ss",
       });
@@ -1126,14 +1130,20 @@ describe("createCustomAdapter", () => {
       expect(mockWithBypassRls).toHaveBeenCalled();
       expect(account).toEqual({
         userId: "u-1", type: "oidc", provider: "google", providerAccountId: "g-1",
-        refresh_token: "rt", access_token: "at", expires_at: 1234, token_type: "bearer",
-        scope: "openid", id_token: "idt", session_state: "ss",
+        refresh_token: undefined, access_token: undefined, expires_at: 1234,
+        token_type: "bearer", scope: "openid", id_token: undefined, session_state: "ss",
       });
+      // CORRUPT classification — no audit emission.
+      expect(mockLogAudit).not.toHaveBeenCalledWith(
+        expect.objectContaining({ action: "OAUTH_ACCOUNT_TOKEN_DECRYPT_FAILURE" }),
+      );
     });
 
     it("converts null optional fields to undefined", async () => {
+      // F2: include id/tenantId in mock.
       mockPrismaAccount.findFirst.mockResolvedValue({
-        userId: "u-1", type: "oidc", provider: "google", providerAccountId: "g-1",
+        id: "acc-1", userId: "u-1", tenantId: "tenant-1",
+        type: "oidc", provider: "google", providerAccountId: "g-1",
         refresh_token: null, access_token: null, expires_at: null, token_type: null,
         scope: null, id_token: null, session_state: null,
       });
@@ -1255,10 +1265,11 @@ describe("createCustomAdapter", () => {
     });
 
     it("emits audit (TAMPERED) when stored ciphertext's AAD does not match the row's identity", async () => {
-      // Phase 2 scope: AAD bytes today are `provider:providerAccountId`.
-      // Forge a TAMPERED scenario by encrypting under one (provider, providerAccountId)
-      // pair via linkAccount, then returning that ciphertext from findFirst
-      // for a DIFFERENT pair so getAccount's AAD will not match.
+      // AAD binds (userId, provider, providerAccountId). Forge a TAMPERED
+      // scenario by encrypting under one tuple via linkAccount, then returning
+      // that ciphertext from findFirst for a row whose tuple differs. Both
+      // userId and providerAccountId differ here, so the AAD bind fails on
+      // multiple fields — any single-field mismatch would also fail.
       mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
       mockPrismaAccount.create.mockResolvedValue({ id: "acc-source" });
       const adapter = createCustomAdapter();
@@ -1272,14 +1283,15 @@ describe("createCustomAdapter", () => {
       const sourceCipher = mockPrismaAccount.create.mock.calls[0][0].data
         .refresh_token as string;
 
-      // Now serve that ciphertext from a DIFFERENT (providerAccountId) row.
+      // Serve that ciphertext from a row whose (userId, providerAccountId)
+      // tuple differs from the encrypt-time AAD.
       mockPrismaAccount.findFirst.mockResolvedValue({
         id: "acc-tampered",
         userId: "u-attacker",
         tenantId: "tenant-1",
         type: "oidc",
         provider: "google",
-        providerAccountId: "g-tampered", // ← AAD will be "google:g-tampered" — mismatch
+        providerAccountId: "g-tampered", // ← AAD differs on userId+providerAccountId — GCM auth fails
         refresh_token: sourceCipher,
         access_token: null,
         expires_at: null,
@@ -1317,14 +1329,16 @@ describe("createCustomAdapter", () => {
     });
 
     it("preserves successfully-decrypted siblings when one field is TAMPERED", async () => {
-      // refresh_token from one (provider,id) pair; id_token freshly encrypted
-      // for the new pair. getAccount should return id_token plaintext and
-      // refresh_token undefined.
+      // refresh_token encrypted under one (userId, provider, providerAccountId)
+      // tuple; id_token freshly encrypted for the read-time tuple. getAccount
+      // should return id_token plaintext and refresh_token undefined; exactly
+      // one TAMPERED audit event must fire (T3 assertion below).
       mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
       mockPrismaAccount.create.mockResolvedValue({ id: "acc-1" });
       const adapter = createCustomAdapter();
 
-      // Encrypt under (google, g-source) for the tampered field
+      // Encrypt refresh_token under (u-victim, google, g-source) — the tuple
+      // we will then mismatch at read time.
       await adapter.linkAccount!({
         userId: "u-victim",
         type: "oidc",
@@ -1335,7 +1349,8 @@ describe("createCustomAdapter", () => {
       const sourceCipher = mockPrismaAccount.create.mock.calls[0][0].data
         .refresh_token as string;
 
-      // Encrypt under (google, g-target) for the valid field
+      // Encrypt id_token under (u-victim, google, g-target) — matches the
+      // read-time tuple, so this field decrypts cleanly.
       mockPrismaAccount.create.mockClear();
       await adapter.linkAccount!({
         userId: "u-victim",
@@ -1353,8 +1368,8 @@ describe("createCustomAdapter", () => {
         tenantId: "tenant-1",
         type: "oidc",
         provider: "google",
-        providerAccountId: "g-target", // AAD "google:g-target"
-        refresh_token: sourceCipher, // encrypted under "google:g-source" ⇒ TAMPERED
+        providerAccountId: "g-target", // read-time AAD = u-victim:google:g-target
+        refresh_token: sourceCipher, // bound to (u-victim, google, g-source) ⇒ TAMPERED
         access_token: null,
         expires_at: null,
         token_type: null,
@@ -1366,6 +1381,66 @@ describe("createCustomAdapter", () => {
       const account = await adapter.getAccount!("g-target", "google");
       expect(account?.refresh_token).toBeUndefined();
       expect(account?.id_token).toBe("idt-target");
+      // T3: exactly ONE TAMPERED audit emission — for refresh_token.
+      const tamperEvents = mockLogAudit.mock.calls.filter(
+        (c) => c[0].action === "OAUTH_ACCOUNT_TOKEN_DECRYPT_FAILURE",
+      );
+      expect(tamperEvents).toHaveLength(1);
+      expect(tamperEvents[0][0].metadata.field).toBe("refresh_token");
+    });
+
+    it("does NOT emit audit on KEY_UNAVAILABLE classification", async () => {
+      // T2: distinct from CORRUPT — exercise the path where parseEnvelope
+      // succeeds but getMasterKeyByVersion throws (key version not loaded).
+      // Use a fresh round-trip ciphertext, then make findFirst return it
+      // while spying getMasterKeyByVersion to throw on a non-current version.
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaAccount.create.mockResolvedValue({ id: "acc-keymiss" });
+      const adapter = createCustomAdapter();
+      await adapter.linkAccount!({
+        userId: "u-1",
+        type: "oidc",
+        provider: "google",
+        providerAccountId: "g-keymiss",
+        refresh_token: "rt-keymiss",
+      });
+      const cipher = mockPrismaAccount.create.mock.calls[0][0].data
+        .refresh_token as string;
+
+      const cryptoServer = await import("@/lib/crypto/crypto-server");
+      const spy = vi
+        .spyOn(cryptoServer, "getMasterKeyByVersion")
+        .mockImplementation(() => {
+          throw new Error("key version not loaded");
+        });
+      try {
+        mockPrismaAccount.findFirst.mockResolvedValue({
+          id: "acc-keymiss",
+          userId: "u-1",
+          tenantId: "tenant-1",
+          type: "oidc",
+          provider: "google",
+          providerAccountId: "g-keymiss",
+          refresh_token: cipher,
+          access_token: null,
+          expires_at: null,
+          token_type: null,
+          scope: null,
+          id_token: null,
+          session_state: null,
+        });
+        const account = await adapter.getAccount!("g-keymiss", "google");
+        // Field returned undefined (regression bar).
+        expect(account?.refresh_token).toBeUndefined();
+        // KEY_UNAVAILABLE classification — operationally benign, NO audit.
+        expect(mockLogAudit).not.toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: "OAUTH_ACCOUNT_TOKEN_DECRYPT_FAILURE",
+          }),
+        );
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });

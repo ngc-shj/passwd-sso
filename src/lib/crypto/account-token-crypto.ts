@@ -6,10 +6,6 @@
 // Storage format:
 //   `psoenc1:<keyVersion>:<base64url(iv || authTag || ciphertext)>`
 //
-// Legacy plaintext rows (rows that pre-date this encryption) are detected by
-// the absence of the `psoenc1:` sentinel and returned verbatim by
-// `decryptAccountToken`, so the change is backward-compatible at read time.
-//
 // AAD binding:
 //   AES-256-GCM AAD = `<userId>:<provider>:<providerAccountId>`. This binds
 //   the ciphertext to the local identity that owns the credential, not just
@@ -20,12 +16,30 @@
 //   already makes cross-tenant ciphertext substitution structurally impossible,
 //   so adding `tenantId` would inflate AAD bytes for no security gain.
 //
+//   `buildAad` rejects any field containing `":"` to prevent delimiter
+//   collision (e.g., `(provider="saml", providerAccountId="acme:sub")` would
+//   otherwise produce identical AAD bytes to `(provider="saml:acme",
+//   providerAccountId="sub")`). Cheaper than a full encoding scheme; turns
+//   a silent collision into an explicit error at write time.
+//
 //   The envelope ops (parse / encrypt / decrypt) live in
-//   `src/lib/crypto/envelope.ts`. NOTE: the project is in pre-production /
-//   dev phase. Existing dev rows encrypted under the prior AAD shape will
-//   fail decryption on next read → the user re-OAuths and the row is
-//   rewritten under the new AAD. Once production users exist, any further
-//   AAD shape change requires a re-encryption migration script.
+//   `src/lib/crypto/envelope.ts`.
+//
+// No plaintext fallback:
+//   Stored values without the `psoenc1:` sentinel are treated as CORRUPT
+//   (decrypt throws, classified as CORRUPT in `decryptAccountTokenTriple`).
+//   A previous version of this module returned plaintext verbatim for
+//   backward-compatibility with pre-encryption rows; that fallback was
+//   removed because a DB-write attacker could write any plaintext value to
+//   bypass the AAD bind entirely. The migration script
+//   `scripts/migrate-account-tokens-to-encrypted.ts` reads raw SQL and uses
+//   `encryptAccountToken` directly, so it is not affected by this removal.
+//
+//   NOTE: the project is in pre-production / dev phase. Existing dev rows
+//   encrypted under the prior AAD shape will fail decryption on next read →
+//   the user re-OAuths and the row is rewritten under the new AAD. Once
+//   production users exist, any further AAD shape change requires a
+//   re-encryption migration script.
 
 import {
   encryptWithKey,
@@ -45,6 +59,19 @@ export type AccountTokenAad = {
 };
 
 function buildAad(aad: AccountTokenAad): Buffer {
+  // Reject `:` in any field to prevent delimiter-collision aliasing:
+  //   ("saml", "acme:sub")  →  AAD = "u1:saml:acme:sub"
+  //   ("saml:acme", "sub")  →  AAD = "u1:saml:acme:sub"
+  // are otherwise indistinguishable bytes.
+  if (
+    aad.userId.includes(":") ||
+    aad.provider.includes(":") ||
+    aad.providerAccountId.includes(":")
+  ) {
+    throw new Error(
+      "AccountTokenAad field contains reserved delimiter ':'",
+    );
+  }
   return Buffer.from(
     `${aad.userId}:${aad.provider}:${aad.providerAccountId}`,
     "utf8",
@@ -68,11 +95,8 @@ export function decryptAccountToken(
   aad: AccountTokenAad,
 ): string | null {
   if (stored == null) return null;
-  if (!isEncryptedAccountToken(stored)) {
-    // Legacy plaintext row — pass through. Keeps the adapter
-    // backward-compatible until the data migration completes.
-    return stored;
-  }
+  // No plaintext fallback — any non-sentinel value falls through to
+  // `parseEnvelope` and throws. See module header for rationale.
   const env = parseEnvelope(stored);
   return decryptWithKey(env, getMasterKeyByVersion(env.version), buildAad(aad));
 }
@@ -163,10 +187,8 @@ export function decryptAccountTokenTriple(
   for (const field of TRIPLE_FIELDS) {
     const value = stored[field];
     if (value == null) continue;
-    if (!isEncryptedAccountToken(value)) {
-      out[field] = value;
-      continue;
-    }
+    // No plaintext fallback — any non-sentinel value is classified CORRUPT
+    // (envelope parse fails). See module header for rationale.
     let kind: DecryptFailureKind = DECRYPT_FAILURE_KIND.CORRUPT;
     try {
       const env = parseEnvelope(value);
