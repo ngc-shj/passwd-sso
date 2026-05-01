@@ -2,12 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { writeFileSync, chmodSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createPrivateKey, sign as nodeSign } from "node:crypto";
+import { createPrivateKey, generateKeyPairSync, sign as nodeSign } from "node:crypto";
+import { AUDIT_ANCHOR_KID_PREFIX, AUDIT_ANCHOR_TYP } from "../../constants/audit-anchor.js";
 
 // --- Helpers for building a minimal signed JWS ---
 
-const AUDIT_ANCHOR_KID_PREFIX = "audit-anchor-";
-const AUDIT_ANCHOR_TYP = "passwd-sso.audit-anchor.v1";
 const ED25519_PKCS8_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 
@@ -89,6 +88,7 @@ const {
   InsecureTagSecretFileError,
   InvalidKidError,
   InvalidTenantIdFormatError,
+  InvalidTagSecretLengthError,
 } = await import("../../commands/audit-verify.js");
 
 // --- Tests ---
@@ -381,6 +381,38 @@ describe("auditVerifyCommand", () => {
 
       stdoutSpy.mockRestore();
       stderrSpy.mockRestore();
+    });
+  });
+
+  describe("InvalidTagSecretLengthError for short tag secret (closes F1)", () => {
+    it("throws InvalidTagSecretLengthError when tag secret hex is 30 chars (15 bytes)", async () => {
+      const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+      const privateKeySeed = (privateKey.export({ type: "pkcs8", format: "der" }) as Buffer).subarray(
+        ED25519_PKCS8_PREFIX.length,
+      );
+      const pubDer = publicKey.export({ type: "spki", format: "der" }) as Buffer;
+      const pubHex = pubDer.subarray(ED25519_SPKI_PREFIX.length).toString("hex");
+
+      const kid = `${AUDIT_ANCHOR_KID_PREFIX}shortkey1`;
+      const manifest = buildMinimalManifest();
+      const jws = signManifest(manifest, privateKeySeed, kid);
+
+      const jwsPath = join(tmpDir, "short-secret.jws");
+      const pubPath = join(tmpDir, "short-secret.pub");
+      writeFileSync(jwsPath, jws);
+      writeFileSync(pubPath, pubHex);
+
+      // 30 hex chars = 15 bytes — too short (must be 64 hex chars = 32 bytes)
+      const shortTagHex = "a".repeat(30);
+
+      await expect(
+        auditVerifyCommand({
+          manifest: jwsPath,
+          publicKey: pubPath,
+          myTenantId: "550e8400-e29b-41d4-a716-446655440000",
+          tagSecret: shortTagHex,
+        }),
+      ).rejects.toThrow(InvalidTagSecretLengthError);
     });
   });
 

@@ -8,11 +8,10 @@
 import { readFileSync, statSync } from "node:fs";
 import { createHash, createHmac, createPublicKey, verify as nodeVerify } from "node:crypto";
 import { z } from "zod";
+import { AUDIT_ANCHOR_KID_PREFIX, AUDIT_ANCHOR_TYP } from "../constants/audit-anchor.js";
 
-// --- Constants (mirrors src/lib/constants/audit/audit.ts) ---
+// --- Constants ---
 
-const AUDIT_ANCHOR_KID_PREFIX = "audit-anchor-";
-const AUDIT_ANCHOR_TYP = "passwd-sso.audit-anchor.v1";
 const AUDIT_ANCHOR_TAG_DOMAIN = "audit-anchor-tag-v1";
 
 // --- Typed errors ---
@@ -106,6 +105,15 @@ export class TagSecretRequiredError extends Error {
   }
 }
 
+export class InvalidTagSecretLengthError extends Error {
+  readonly actualBytes: number;
+  constructor(actualBytes: number) {
+    super(`Tag secret must be exactly 32 bytes (64 hex chars); got ${actualBytes} bytes`);
+    this.name = "InvalidTagSecretLengthError";
+    this.actualBytes = actualBytes;
+  }
+}
+
 export class PublicKeyArchiveUrlMissingError extends Error {
   constructor() {
     super(
@@ -153,7 +161,7 @@ type Manifest = {
 const tenantEntrySchema = z.object({
   tenantTag: z.string().regex(/^[0-9a-f]{64}$/),
   chainSeq: z.string().regex(/^(0|[1-9][0-9]*)$/),
-  prevHash: z.string().regex(/^[0-9a-f]+$/),
+  prevHash: z.string().regex(/^([0-9a-f]{64}|[0-9a-f]{2})$/),
   epoch: z.number().int().min(1),
 });
 
@@ -403,6 +411,7 @@ export async function auditVerifyCommand(args: AuditVerifyArgs): Promise<void> {
     }
 
     const tagSecretBuf = Buffer.from(tagSecretHex, "hex");
+    if (tagSecretBuf.length !== 32) throw new InvalidTagSecretLengthError(tagSecretBuf.length);
     const tag = computeTenantTag(args.myTenantId, tagSecretBuf);
     const entry = manifest.tenants.find((t) => t.tenantTag === tag);
 
@@ -416,6 +425,12 @@ export async function auditVerifyCommand(args: AuditVerifyArgs): Promise<void> {
 
   // Optional prior-manifest regression check
   if (args.priorManifest) {
+    if (manifest.previousManifest === null) {
+      process.stderr.write(
+        "WARN: current manifest claims genesis (no previousManifest) but --prior-manifest was supplied; chain link cannot be verified\n",
+      );
+    }
+
     const priorJws = readFileSync(args.priorManifest, "utf-8").trim();
 
     // Verify prior manifest signature too

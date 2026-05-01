@@ -2,6 +2,8 @@
 import { loadEnv } from "@/lib/load-env";
 loadEnv();
 
+import { createPrivateKey, createPublicKey } from "node:crypto";
+
 // Import from env-schema (side-effect-free) — not @/lib/env, which would run
 // parseEnv() on the full schema at module load and fail the worker boot when
 // non-worker vars (auth providers, WebAuthn, etc.) are absent.
@@ -96,10 +98,25 @@ if (!workerEnv.AUDIT_ANCHOR_TAG_SECRET) {
   process.exit(1);
 }
 
-// Derive signing key kid from first 8 chars of hex key
+// Derive signing key kid from PUBLIC key (not private seed) — closes plan S1
+// (private-seed prefix would otherwise leak in every published JWS header).
+// Process: seed → PKCS#8 PrivateKey → PublicKey → SPKI export → strip 12-byte
+// SubjectPublicKeyInfo prefix → 32-byte raw public key → first 8 bytes hex.
+const ED25519_PKCS8_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
+const ED25519_SPKI_PREFIX_LEN = 12;
 const signingKeyHex = workerEnv.AUDIT_ANCHOR_SIGNING_KEY;
-const signingKeyKid = `audit-anchor-${signingKeyHex.slice(0, 8)}`;
 const signingKey = Buffer.from(signingKeyHex, "hex").subarray(0, 32);
+const _privateKeyObj = createPrivateKey({
+  key: Buffer.concat([ED25519_PKCS8_PREFIX, signingKey]),
+  format: "der",
+  type: "pkcs8",
+});
+const _publicKeySpki = createPublicKey(_privateKeyObj).export({
+  format: "der",
+  type: "spki",
+}) as Buffer;
+const _publicKeyRaw = _publicKeySpki.subarray(ED25519_SPKI_PREFIX_LEN);
+const signingKeyKid = `audit-anchor-${_publicKeyRaw.subarray(0, 8).toString("hex")}`;
 const tagSecret = Buffer.from(workerEnv.AUDIT_ANCHOR_TAG_SECRET, "hex").subarray(0, 32);
 
 // Build destinations

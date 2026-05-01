@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { z } from "zod/v4";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
@@ -36,6 +37,7 @@ export class DeploymentIdMismatchError extends Error {
 export type CadenceOutcome =
   | { kind: "published"; manifestSha256: string; destinations: string[]; tenantsCount: number }
   | { kind: "lock_held"; reason: "LOCK_HELD_BY_OTHER_INSTANCE" }
+  | { kind: "skipped_no_tenants"; reason: "NO_CHAIN_ENABLED_TENANTS" }
   | { kind: "skipped_paused"; reason: "PUBLISH_PAUSED_ACTIVE" }
   | { kind: "failed"; reason: string };
 
@@ -136,6 +138,13 @@ export class AuditAnchorPublisher {
     let artifactKey = "";
     let artifactBytes = Buffer.alloc(0);
     let primaryUri = "";
+    // Captured for the post-rollback pause-persistence step (closes Phase 3 R1
+    // newly-discovered FR6 bug): when upload throws inside the publish tx, the
+    // tx rolls back and any in-tx UPDATE to publish_paused_until is lost.
+    // We capture the pause context here, throw to roll back the publish, then
+    // run a SEPARATE tx in the catch block to persist publishPausedUntil.
+    let maxAnchorUpdatedAt = 0;
+    let uploadFailedReason: string | null = null;
 
     try {
       const outcome = await this.prisma.$transaction(async (tx) => {
@@ -201,7 +210,7 @@ export class AuditAnchorPublisher {
         });
 
         if (tenants.length === 0) {
-          return { kind: "skipped_paused" as const, reason: "PUBLISH_PAUSED_ACTIVE" as const };
+          return { kind: "skipped_no_tenants" as const, reason: "NO_CHAIN_ENABLED_TENANTS" as const };
         }
 
         const tenantIds = tenants.map((t) => t.id);
@@ -245,8 +254,12 @@ export class AuditAnchorPublisher {
         const prevManifestRow = await tx.systemSetting.findUnique({
           where: { key: "audit_anchor_previous_manifest" },
         });
+        const prevManifestSchema = z.object({
+          uri: z.string().url(),
+          sha256: z.string().regex(/^[0-9a-f]{64}$/),
+        });
         const previousManifest = prevManifestRow
-          ? (JSON.parse(prevManifestRow.value) as { uri: string; sha256: string })
+          ? prevManifestSchema.parse(JSON.parse(prevManifestRow.value))
           : null;
 
         // Step 8: Build + sign manifest
@@ -267,8 +280,19 @@ export class AuditAnchorPublisher {
         artifactBytes = Buffer.from(jws, "utf-8");
 
         tenantsInManifest = nonPausedAnchors.map((a) => a.tenantId);
+        // Capture the latest anchor.updatedAt outside the tx so the post-rollback
+        // pause-persist step (catch block) can compute the same cap formula
+        // without re-querying. Closes plan F3 + Phase 3 R1 FR6 bug.
+        maxAnchorUpdatedAt = nonPausedAnchors.reduce(
+          (latest, a) => Math.max(latest, a.updatedAt.getTime()),
+          0,
+        );
 
         // Step 9: Upload to all destinations (inside tx per plan Round 5 pattern)
+        // NOTE: in-tx UPDATE to publish_paused_until is ROLLED BACK on throw, so
+        // we only capture the failure reason here and persist the pause window
+        // in a separate tx in the catch block (see Phase 3 R1 newly-discovered
+        // FR6 bug fix at the catch-handler below).
         for (const dest of config.destinations) {
           try {
             await dest.upload({
@@ -280,20 +304,8 @@ export class AuditAnchorPublisher {
             const reason = `${dest.name}_UPLOAD_FAILED`;
             const errMsg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
             log.error({ destination: dest.name, err: errMsg }, "audit-anchor-publisher.upload_failed");
-
-            // Set pause window on affected tenants
-            const pauseUntil = new Date(
-              Math.min(
-                now.getTime() + config.cadenceMs,
-                Math.max(now.getTime(), now.getTime()) + config.pauseCapFactor * config.cadenceMs,
-              ),
-            );
-            await tx.auditChainAnchor.updateMany({
-              where: { tenantId: { in: tenantsInManifest } },
-              data: { publishPausedUntil: pauseUntil },
-            });
-
-            throw new Error(`${reason}: ${errMsg}`);
+            uploadFailedReason = `${reason}: ${errMsg}`;
+            throw new Error(uploadFailedReason);
           }
         }
 
@@ -346,6 +358,40 @@ export class AuditAnchorPublisher {
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       log.error({ reason }, "audit-anchor-publisher.cadence_failed");
+
+      // Persist publishPausedUntil in a SEPARATE tx — the publish tx rolled
+      // back on throw, so any in-tx pause UPDATE is lost. This closes the
+      // FR6 fail-closed gap discovered in Phase 3 R1 fix-batch-C testing.
+      // Only fires when upload failed AND we have tenants to pause.
+      if (uploadFailedReason && tenantsInManifest.length > 0) {
+        try {
+          await this.prisma.$transaction(async (tx2) => {
+            await tx2.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+            await tx2.$executeRaw`SELECT set_config('app.bypass_purpose', ${BYPASS_PURPOSE.AUDIT_ANCHOR_PUBLISH}, true)`;
+            await tx2.$executeRaw`SELECT set_config('app.tenant_id', ${SYSTEM_TENANT_ID}, true)`;
+            // Pause cap formula (closes plan F3): LEAST(now + 1× cadence,
+            // GREATEST(anchor.updatedAt, now) + N× cadence).
+            const pauseUntil = new Date(
+              Math.min(
+                now.getTime() + config.cadenceMs,
+                Math.max(maxAnchorUpdatedAt, now.getTime()) + config.pauseCapFactor * config.cadenceMs,
+              ),
+            );
+            await tx2.auditChainAnchor.updateMany({
+              where: { tenantId: { in: tenantsInManifest } },
+              data: { publishPausedUntil: pauseUntil },
+            });
+          });
+        } catch (pauseErr) {
+          // Pause persistence failure is observability-only — the publisher
+          // already failed, and the next cron tick's safety net will detect
+          // the missing prior cadence. Do not mask the original error.
+          log.error(
+            { err: pauseErr instanceof Error ? pauseErr.message : String(pauseErr) },
+            "audit-anchor-publisher.pause_persist_failed",
+          );
+        }
+      }
 
       await logAuditAsync({
         scope: AUDIT_SCOPE.TENANT,

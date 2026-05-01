@@ -203,6 +203,24 @@ describe("buildManifest", () => {
       ),
     ).toThrow(ManifestSchemaValidationError);
   });
+
+  it("rejects prevHash of invalid length (not 32-byte hash or 1-byte genesis) via schema validation", () => {
+    // 15 bytes = 30 hex chars — neither 64-char SHA-256 nor 2-char genesis
+    expect(() =>
+      buildManifest(
+        makeMinimalInput({
+          tenants: [
+            {
+              tenantId: KNOWN_UUID,
+              chainSeq: 1n,
+              prevHash: Buffer.alloc(15, 0xab),
+              epoch: 1,
+            },
+          ],
+        }),
+      ),
+    ).toThrow(ManifestSchemaValidationError);
+  });
 });
 
 describe("canonicalize", () => {
@@ -339,6 +357,28 @@ describe("verify — algorithm rejection", () => {
       .replace(/\//g, "_")
       .replace(/=/g, "");
     const tampered = `${newHeaderB64}.${payloadB64}.${sigB64}`;
+    expect(() => verify(tampered, publicKeyRaw)).toThrow(InvalidAlgorithmError);
+  });
+
+  it('rejects alg: "ES256"', () => {
+    const { publicKeyRaw, privateKeyRaw } = makeEd25519Keypair();
+    const jws = sign(
+      canonicalize(buildManifest(makeMinimalInput())),
+      privateKeyRaw,
+      VALID_KID,
+    );
+    const tampered = tamperHeader(jws, { alg: "ES256" });
+    expect(() => verify(tampered, publicKeyRaw)).toThrow(InvalidAlgorithmError);
+  });
+
+  it("rejects alg: null", () => {
+    const { publicKeyRaw, privateKeyRaw } = makeEd25519Keypair();
+    const jws = sign(
+      canonicalize(buildManifest(makeMinimalInput())),
+      privateKeyRaw,
+      VALID_KID,
+    );
+    const tampered = tamperHeader(jws, { alg: null });
     expect(() => verify(tampered, publicKeyRaw)).toThrow(InvalidAlgorithmError);
   });
 

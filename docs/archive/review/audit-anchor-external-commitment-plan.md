@@ -403,7 +403,7 @@ The existing `src/__tests__/audit-bypass-coverage.test.ts` enforces `AUDIT_OUTBO
 - Clock skew across publisher invocations (1×, 2×, 5× cadence offset); concurrent publisher invocations (covered by F5 test).
 
 ### R32 boot test (closes T11 — clock-independent regex)
-On fresh `docker compose up` of the publisher service, the declared ready-signal pattern: regex `audit-anchor-publisher: cadence=24h, next_publish=[0-9T:.Z\-]+, key=[a-zA-Z0-9_-]+`. Assert: log line matches the regex within 30s of container start; the `key=` value is non-empty (catches the empty-fallback case where the env var was missing but a default-empty was used). For multi-stage Dockerfiles, repeat for both the `target: deps` (dev) and `target: runtime` (prod) image targets.
+On fresh `docker compose up` of the publisher service, the publisher emits a structured-JSON boot log. Assert within 30s of container start that the parsed log line satisfies: `parsed.msg === "audit-anchor-publisher: cadence=24h"` AND `parsed.next_publish` matches `/^[0-9T:.Z-]+$/` AND `parsed.key` matches `/^audit-anchor-[a-zA-Z0-9_-]+$/`. The `key` field being non-empty catches the empty-fallback case where the env var was missing but a default-empty was used. For multi-stage Dockerfiles, repeat for both the `target: deps` (dev) and `target: runtime` (prod) image targets.
 
 ## Considerations & constraints
 

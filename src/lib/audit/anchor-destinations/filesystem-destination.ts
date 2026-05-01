@@ -21,6 +21,8 @@ export class FilesystemDestination implements AnchorDestination {
     contentType: string;
   }): Promise<void> {
     await fs.mkdir(this.basePath, { recursive: true });
-    await fs.writeFile(path.join(this.basePath, args.artifactKey), args.artifactBytes);
+    // Explicit mode 0o644: world-readable audit artifacts are intentional;
+    // operator may restrict further via mount options if more restrictive permissions are needed.
+    await fs.writeFile(path.join(this.basePath, args.artifactKey), args.artifactBytes, { mode: 0o644 });
   }
 }

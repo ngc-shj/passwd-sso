@@ -92,7 +92,7 @@ export class ManifestSchemaValidationError extends Error {
 const tenantEntrySchema = z.object({
   tenantTag: z.string().regex(/^[0-9a-f]{64}$/),
   chainSeq: z.string().regex(/^(0|[1-9][0-9]*)$/),
-  prevHash: z.string().regex(/^[0-9a-f]+$/),
+  prevHash: z.string().regex(/^([0-9a-f]{64}|[0-9a-f]{2})$/),
   epoch: z.number().int().min(1),
 });
 

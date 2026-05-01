@@ -33,6 +33,7 @@ import {
   TenantNotInManifestError,
   ChainBreakError,
   ChainSeqRegressionError,
+  InvalidTagSecretLengthError,
 } from "./commands/audit-verify.js";
 import { isUnlocked, lockVault } from "./lib/vault-state.js";
 import { clearPendingClipboard } from "./lib/clipboard.js";
@@ -188,6 +189,7 @@ program
       else if (err instanceof TenantNotInManifestError) process.exit(15);
       else if (err instanceof ChainBreakError) process.exit(16);
       else if (err instanceof ChainSeqRegressionError) process.exit(17);
+      else if (err instanceof InvalidTagSecretLengthError) process.exit(18);
       else process.exit(1);
     }
   });

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolve } from "node:path";
 import { generateKeyPairSync, createPrivateKey, sign as nodeSign } from "node:crypto";
+import { AUDIT_ANCHOR_KID_PREFIX, AUDIT_ANCHOR_TYP } from "../../constants/audit-anchor.js";
 
 // cli/src/__tests__/integration/ → cli/dist/
 const distEntry = resolve(import.meta.dirname, "../../../dist/index.js");
@@ -12,8 +13,6 @@ const distExists = existsSync(distEntry);
 
 // --- Helpers (duplicated from unit test; CLI is standalone) ---
 
-const AUDIT_ANCHOR_KID_PREFIX = "audit-anchor-";
-const AUDIT_ANCHOR_TYP = "passwd-sso.audit-anchor.v1";
 const ED25519_PKCS8_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 
