@@ -9,20 +9,23 @@
 // Legacy plaintext rows (rows that pre-date this encryption) are detected by
 // the absence of the `psoenc1:` sentinel and returned verbatim by
 // `decryptAccountToken`, so the change is backward-compatible at read time.
-// The data migration script in `scripts/migrate-account-tokens-to-encrypted.ts`
-// rewrites legacy rows to the encrypted form.
 //
 // AAD binding:
-//   AES-256-GCM AAD is set to `<provider>:<providerAccountId>`. This binds the
-//   ciphertext to the account row so a stolen ciphertext cannot be swapped
-//   between accounts (defense-in-depth — it is not the primary access control,
-//   but it prevents an attacker who can write to the DB from substituting
-//   another account's encrypted token).
+//   AES-256-GCM AAD = `<userId>:<provider>:<providerAccountId>`. This binds
+//   the ciphertext to the local identity that owns the credential, not just
+//   to the provider-side account ID. A DB-write attacker who pivots
+//   `accounts.user_id` to redirect a long-lived refresh_token can no longer
+//   keep the ciphertext valid — GCM auth fails on the next read. `tenantId`
+//   is intentionally NOT part of AAD: `@@unique([provider, providerAccountId])`
+//   already makes cross-tenant ciphertext substitution structurally impossible,
+//   so adding `tenantId` would inflate AAD bytes for no security gain.
 //
 //   The envelope ops (parse / encrypt / decrypt) live in
-//   `src/lib/crypto/envelope.ts`. AAD bytes here MUST remain byte-for-byte
-//   identical to pre-refactor — AES-GCM authenticates AAD verbatim and changing
-//   the bytes would break decryption of all existing ciphertexts in production.
+//   `src/lib/crypto/envelope.ts`. NOTE: the project is in pre-production /
+//   dev phase. Existing dev rows encrypted under the prior AAD shape will
+//   fail decryption on next read → the user re-OAuths and the row is
+//   rewritten under the new AAD. Once production users exist, any further
+//   AAD shape change requires a re-encryption migration script.
 
 import {
   encryptWithKey,
@@ -36,12 +39,16 @@ import {
 } from "@/lib/crypto/crypto-server";
 
 export type AccountTokenAad = {
+  userId: string;
   provider: string;
   providerAccountId: string;
 };
 
 function buildAad(aad: AccountTokenAad): Buffer {
-  return Buffer.from(`${aad.provider}:${aad.providerAccountId}`, "utf8");
+  return Buffer.from(
+    `${aad.userId}:${aad.provider}:${aad.providerAccountId}`,
+    "utf8",
+  );
 }
 
 export function isEncryptedAccountToken(stored: string): boolean {

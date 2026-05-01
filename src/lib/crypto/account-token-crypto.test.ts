@@ -9,7 +9,11 @@ import {
 } from "./account-token-crypto";
 import legacyFixture from "@/__tests__/fixtures/account-token-legacy-ciphertext.json";
 
-const aad = { provider: "google", providerAccountId: "alice@example.com" };
+const aad = {
+  userId: "11111111-1111-1111-1111-111111111111",
+  provider: "google",
+  providerAccountId: "alice@example.com",
+};
 
 describe("account-token-crypto", () => {
   it("round-trips a plaintext through encrypt → decrypt", () => {
@@ -51,12 +55,34 @@ describe("account-token-crypto", () => {
 
   it("rejects ciphertext when the AAD context does not match", () => {
     const ct = encryptAccountToken("secret", aad);
+    // Different providerAccountId
     expect(() =>
-      decryptAccountToken(ct, { provider: "google", providerAccountId: "different@example.com" }),
+      decryptAccountToken(ct, { ...aad, providerAccountId: "different@example.com" }),
     ).toThrow();
+    // Different provider
+    expect(() => decryptAccountToken(ct, { ...aad, provider: "github" })).toThrow();
+    // Different userId — the userId binding is the key new defense
+    // (closes Vector A: DB-write attacker pivots accounts.user_id).
     expect(() =>
-      decryptAccountToken(ct, { provider: "github", providerAccountId: aad.providerAccountId }),
+      decryptAccountToken(ct, {
+        ...aad,
+        userId: "22222222-2222-2222-2222-222222222222",
+      }),
     ).toThrow();
+  });
+
+  it("encrypted ciphertext for one userId is undecryptable as another userId (cross-user pivot resistance)", () => {
+    const ctForAlice = encryptAccountToken("alice-token", aad);
+    const bobAad = { ...aad, userId: "22222222-2222-2222-2222-222222222222" };
+    expect(() => decryptAccountToken(ctForAlice, bobAad)).toThrow();
+    // And decrypting with Alice's AAD still works.
+    expect(decryptAccountToken(ctForAlice, aad)).toBe("alice-token");
+  });
+
+  it("encrypted ciphertext for one (provider, providerAccountId) pair is undecryptable as another (cross-row pivot resistance)", () => {
+    const ctForAlice = encryptAccountToken("alice-token", aad);
+    const otherAad = { ...aad, providerAccountId: "carol@example.com" };
+    expect(() => decryptAccountToken(ctForAlice, otherAad)).toThrow();
   });
 
   it("rejects malformed ciphertext", () => {
@@ -138,7 +164,7 @@ describe("account-token-crypto", () => {
 
     it("decryptAccountTokenTriple classifies AAD mismatch as TAMPERED", () => {
       const ct = encryptAccountToken("secret", aad);
-      const wrongAad = { ...aad, providerAccountId: "different@example.com" };
+      const wrongAad = { ...aad, userId: "22222222-2222-2222-2222-222222222222" };
       const errors: { field: string; kind: string }[] = [];
       const out = decryptAccountTokenTriple(
         { refresh_token: ct, access_token: null, id_token: null },
@@ -156,13 +182,14 @@ describe("account-token-crypto", () => {
     });
   });
 
-  // S10 fix: catches AAD-byte drift between pre-refactor (inline AAD construction
-  // in account-token-crypto.ts) and post-refactor (caller-built AAD passed into
-  // shared envelope helper). The fixture is a known plaintext encrypted under a
-  // deterministic test master key in the on-disk envelope format. Regenerate via
+  // AAD-byte drift detection. The fixture is a known plaintext encrypted
+  // under a deterministic test master key in the on-disk envelope format,
+  // using the AAD shape `userId:provider:providerAccountId`. If `buildAad`
+  // ever changes shape without regenerating the fixture, this test fails —
+  // forcing intentional reconciliation. Regenerate via
   // `npx tsx scripts/regenerate-account-token-legacy-fixture.ts`.
-  describe("legacy ciphertext regression (S10 fix)", () => {
-    it("decrypts a fixture ciphertext produced under pre-refactor code", async () => {
+  describe("AAD-byte drift regression", () => {
+    it("decrypts a fixture ciphertext using the current AAD shape", async () => {
       const cryptoServer = await import("@/lib/crypto/crypto-server");
       const fixtureKey = Buffer.from(legacyFixture.masterKeyHex, "hex");
       const spy = vi
@@ -177,6 +204,7 @@ describe("account-token-crypto", () => {
         });
       try {
         const recovered = decryptAccountToken(legacyFixture.ciphertext, {
+          userId: legacyFixture.userId,
           provider: legacyFixture.provider,
           providerAccountId: legacyFixture.providerAccountId,
         });

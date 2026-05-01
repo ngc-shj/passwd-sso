@@ -1255,6 +1255,7 @@ describe("createCustomAdapter", () => {
     });
 
     it("emits audit (TAMPERED) when stored ciphertext's AAD does not match the row's identity", async () => {
+      // Phase 2 scope: AAD bytes today are `provider:providerAccountId`.
       // Forge a TAMPERED scenario by encrypting under one (provider, providerAccountId)
       // pair via linkAccount, then returning that ciphertext from findFirst
       // for a DIFFERENT pair so getAccount's AAD will not match.
@@ -1278,7 +1279,7 @@ describe("createCustomAdapter", () => {
         tenantId: "tenant-1",
         type: "oidc",
         provider: "google",
-        providerAccountId: "g-tampered", // ← AAD will not match — GCM auth fails
+        providerAccountId: "g-tampered", // ← AAD will be "google:g-tampered" — mismatch
         refresh_token: sourceCipher,
         access_token: null,
         expires_at: null,
@@ -1316,13 +1317,14 @@ describe("createCustomAdapter", () => {
     });
 
     it("preserves successfully-decrypted siblings when one field is TAMPERED", async () => {
-      // refresh_token encrypted under one (provider,id) pair; id_token freshly
-      // encrypted for the new pair. getAccount should return id_token plaintext
-      // and refresh_token undefined.
+      // refresh_token from one (provider,id) pair; id_token freshly encrypted
+      // for the new pair. getAccount should return id_token plaintext and
+      // refresh_token undefined.
       mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
       mockPrismaAccount.create.mockResolvedValue({ id: "acc-1" });
       const adapter = createCustomAdapter();
 
+      // Encrypt under (google, g-source) for the tampered field
       await adapter.linkAccount!({
         userId: "u-victim",
         type: "oidc",
@@ -1333,6 +1335,7 @@ describe("createCustomAdapter", () => {
       const sourceCipher = mockPrismaAccount.create.mock.calls[0][0].data
         .refresh_token as string;
 
+      // Encrypt under (google, g-target) for the valid field
       mockPrismaAccount.create.mockClear();
       await adapter.linkAccount!({
         userId: "u-victim",
@@ -1350,13 +1353,13 @@ describe("createCustomAdapter", () => {
         tenantId: "tenant-1",
         type: "oidc",
         provider: "google",
-        providerAccountId: "g-target",
-        refresh_token: sourceCipher, // bound to (google, g-source) — TAMPERED
+        providerAccountId: "g-target", // AAD "google:g-target"
+        refresh_token: sourceCipher, // encrypted under "google:g-source" ⇒ TAMPERED
         access_token: null,
         expires_at: null,
         token_type: null,
         scope: null,
-        id_token: targetIdToken, // bound to (google, g-target) — valid
+        id_token: targetIdToken,
         session_state: null,
       });
 

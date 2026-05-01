@@ -1,8 +1,9 @@
 {
   "masterKeyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
   "masterKeyVersion": 0,
+  "userId": "00000000-0000-0000-0000-000000000001",
   "provider": "google",
   "providerAccountId": "test-provider-account-id",
   "plaintext": "test_refresh_token_value",
-  "ciphertext": "psoenc1:0:43q9yuzl3W67Trqoj07udP4JSBIET-wlDgQ_2cugOlMiODgFfa6B6KjsRLFJsnmiJUqlrw"
+  "ciphertext": "psoenc1:0:l89a5ho1D6INGzlSDQRhf4B8IuXBEitJxRx1WHLu0dC3x89a8EASS4snrXwHp18soH-ilw"
 }

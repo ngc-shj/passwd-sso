@@ -220,15 +220,20 @@ export function createCustomAdapter(): Adapter {
         const tenantId = await resolveTenantIdForUser(account.userId);
 
         // Envelope-encrypt the OAuth provider tokens at rest. AAD binds the
-        // ciphertext to (provider, providerAccountId) so a leaked DB row's
-        // tokens cannot be substituted across accounts.
+        // ciphertext to (userId, provider, providerAccountId) so a DB-write
+        // attacker who pivots `accounts.user_id` to redirect tokens to a
+        // different identity invalidates the GCM tag on next read.
         const encrypted = encryptAccountTokenTriple(
           {
             refresh_token: account.refresh_token,
             access_token: account.access_token,
             id_token: account.id_token,
           },
-          { provider: account.provider, providerAccountId: account.providerAccountId },
+          {
+            userId: account.userId,
+            provider: account.provider,
+            providerAccountId: account.providerAccountId,
+          },
         );
 
         await prisma.account.create({
@@ -487,7 +492,11 @@ export function createCustomAdapter(): Adapter {
           access_token: account.access_token,
           id_token: account.id_token,
         },
-        { provider: account.provider, providerAccountId: account.providerAccountId },
+        {
+          userId: account.userId,
+          provider: account.provider,
+          providerAccountId: account.providerAccountId,
+        },
         {
           onFieldError: (field, err, kind) => {
             const errClass = err instanceof Error ? err.constructor.name : "unknown";
