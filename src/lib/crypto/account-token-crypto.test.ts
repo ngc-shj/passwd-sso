@@ -5,10 +5,15 @@ import {
   encryptAccountTokenTriple,
   decryptAccountTokenTriple,
   isEncryptedAccountToken,
+  DECRYPT_FAILURE_KIND,
 } from "./account-token-crypto";
 import legacyFixture from "@/__tests__/fixtures/account-token-legacy-ciphertext.json";
 
-const aad = { provider: "google", providerAccountId: "alice@example.com" };
+const aad = {
+  userId: "11111111-1111-1111-1111-111111111111",
+  provider: "google",
+  providerAccountId: "alice@example.com",
+};
 
 describe("account-token-crypto", () => {
   it("round-trips a plaintext through encrypt → decrypt", () => {
@@ -40,22 +45,60 @@ describe("account-token-crypto", () => {
     expect(decryptAccountToken(undefined, aad)).toBeNull();
   });
 
-  it("treats legacy plaintext (no sentinel) as a passthrough", () => {
-    // Backward-compat: rows that pre-date encryption are returned verbatim
-    // until the data migration script rewrites them.
-    expect(decryptAccountToken("legacy-plaintext-token", aad)).toBe(
-      "legacy-plaintext-token",
-    );
+  it("throws on stored values without the psoenc1 sentinel (no plaintext fallback)", () => {
+    // S2 fix: a plaintext fallback would let a DB-write attacker bypass the
+    // AAD bind by writing any value without the sentinel. Reject instead.
+    expect(() =>
+      decryptAccountToken("legacy-plaintext-token", aad),
+    ).toThrow();
+  });
+
+  it("buildAad rejects fields containing the ':' delimiter", () => {
+    // S1 fix: prevent (provider="saml", providerAccountId="acme:sub") from
+    // colliding with (provider="saml:acme", providerAccountId="sub").
+    expect(() =>
+      encryptAccountToken("p", { ...aad, provider: "saml:acme" }),
+    ).toThrow(/reserved delimiter/);
+    expect(() =>
+      encryptAccountToken("p", { ...aad, providerAccountId: "with:colon" }),
+    ).toThrow(/reserved delimiter/);
+    // userId is UUID-sourced in production (no colons), but the guard runs
+    // for defense-in-depth — verify it fires.
+    expect(() =>
+      encryptAccountToken("p", { ...aad, userId: "user:evil" }),
+    ).toThrow(/reserved delimiter/);
   });
 
   it("rejects ciphertext when the AAD context does not match", () => {
     const ct = encryptAccountToken("secret", aad);
+    // Different providerAccountId
     expect(() =>
-      decryptAccountToken(ct, { provider: "google", providerAccountId: "different@example.com" }),
+      decryptAccountToken(ct, { ...aad, providerAccountId: "different@example.com" }),
     ).toThrow();
+    // Different provider
+    expect(() => decryptAccountToken(ct, { ...aad, provider: "github" })).toThrow();
+    // Different userId — the userId binding is the key new defense
+    // (closes Vector A: DB-write attacker pivots accounts.user_id).
     expect(() =>
-      decryptAccountToken(ct, { provider: "github", providerAccountId: aad.providerAccountId }),
+      decryptAccountToken(ct, {
+        ...aad,
+        userId: "22222222-2222-2222-2222-222222222222",
+      }),
     ).toThrow();
+  });
+
+  it("encrypted ciphertext for one userId is undecryptable as another userId (cross-user pivot resistance)", () => {
+    const ctForAlice = encryptAccountToken("alice-token", aad);
+    const bobAad = { ...aad, userId: "22222222-2222-2222-2222-222222222222" };
+    expect(() => decryptAccountToken(ctForAlice, bobAad)).toThrow();
+    // And decrypting with Alice's AAD still works.
+    expect(decryptAccountToken(ctForAlice, aad)).toBe("alice-token");
+  });
+
+  it("encrypted ciphertext for one (provider, providerAccountId) pair is undecryptable as another (cross-row pivot resistance)", () => {
+    const ctForAlice = encryptAccountToken("alice-token", aad);
+    const otherAad = { ...aad, providerAccountId: "carol@example.com" };
+    expect(() => decryptAccountToken(ctForAlice, otherAad)).toThrow();
   });
 
   it("rejects malformed ciphertext", () => {
@@ -90,15 +133,26 @@ describe("account-token-crypto", () => {
       expect(out.id_token).toBeNull();
     });
 
-    it("decrypts encrypted fields and passes legacy plaintext through", () => {
+    it("decrypts encrypted fields; classifies non-sentinel values as CORRUPT", () => {
+      // S2 fix: no plaintext fallback. A legacy plaintext value goes through
+      // parseEnvelope and is classified CORRUPT by the triple helper.
       const encrypted = encryptAccountToken("rt-plain", aad);
+      const errors: { field: string; kind: string }[] = [];
       const out = decryptAccountTokenTriple(
         { refresh_token: encrypted, access_token: "legacy-at", id_token: null },
         aad,
+        {
+          onFieldError: (field, _err, kind) => {
+            errors.push({ field, kind });
+          },
+        },
       );
       expect(out.refresh_token).toBe("rt-plain");
-      expect(out.access_token).toBe("legacy-at");
+      expect(out.access_token).toBeNull();
       expect(out.id_token).toBeNull();
+      expect(errors).toEqual([
+        { field: "access_token", kind: DECRYPT_FAILURE_KIND.CORRUPT },
+      ]);
     });
 
     it("decryptAccountTokenTriple without onFieldError throws on corrupt input", () => {
@@ -112,7 +166,7 @@ describe("account-token-crypto", () => {
 
     it("decryptAccountTokenTriple with onFieldError continues past a corrupt field", () => {
       const good = encryptAccountToken("good-token", aad);
-      const errors: { field: string; err: unknown }[] = [];
+      const errors: { field: string; err: unknown; kind: string }[] = [];
       const out = decryptAccountTokenTriple(
         {
           refresh_token: "psoenc1:0:zzzz",
@@ -121,8 +175,8 @@ describe("account-token-crypto", () => {
         },
         aad,
         {
-          onFieldError: (field, err) => {
-            errors.push({ field, err });
+          onFieldError: (field, err, kind) => {
+            errors.push({ field, err, kind });
           },
         },
       );
@@ -131,16 +185,38 @@ describe("account-token-crypto", () => {
       expect(out.id_token).toBeNull();
       expect(errors).toHaveLength(1);
       expect(errors[0].field).toBe("refresh_token");
+      // Malformed envelope → CORRUPT classification (operationally benign).
+      expect(errors[0].kind).toBe(DECRYPT_FAILURE_KIND.CORRUPT);
+    });
+
+    it("decryptAccountTokenTriple classifies AAD mismatch as TAMPERED", () => {
+      const ct = encryptAccountToken("secret", aad);
+      const wrongAad = { ...aad, userId: "22222222-2222-2222-2222-222222222222" };
+      const errors: { field: string; kind: string }[] = [];
+      const out = decryptAccountTokenTriple(
+        { refresh_token: ct, access_token: null, id_token: null },
+        wrongAad,
+        {
+          onFieldError: (field, _err, kind) => {
+            errors.push({ field, kind });
+          },
+        },
+      );
+      expect(out.refresh_token).toBeNull();
+      expect(errors).toEqual([
+        { field: "refresh_token", kind: DECRYPT_FAILURE_KIND.TAMPERED },
+      ]);
     });
   });
 
-  // S10 fix: catches AAD-byte drift between pre-refactor (inline AAD construction
-  // in account-token-crypto.ts) and post-refactor (caller-built AAD passed into
-  // shared envelope helper). The fixture is a known plaintext encrypted under a
-  // deterministic test master key in the on-disk envelope format. Regenerate via
+  // AAD-byte drift detection. The fixture is a known plaintext encrypted
+  // under a deterministic test master key in the on-disk envelope format,
+  // using the AAD shape `userId:provider:providerAccountId`. If `buildAad`
+  // ever changes shape without regenerating the fixture, this test fails —
+  // forcing intentional reconciliation. Regenerate via
   // `npx tsx scripts/regenerate-account-token-legacy-fixture.ts`.
-  describe("legacy ciphertext regression (S10 fix)", () => {
-    it("decrypts a fixture ciphertext produced under pre-refactor code", async () => {
+  describe("AAD-byte drift regression", () => {
+    it("decrypts a fixture ciphertext using the current AAD shape", async () => {
       const cryptoServer = await import("@/lib/crypto/crypto-server");
       const fixtureKey = Buffer.from(legacyFixture.masterKeyHex, "hex");
       const spy = vi
@@ -155,6 +231,7 @@ describe("account-token-crypto", () => {
         });
       try {
         const recovered = decryptAccountToken(legacyFixture.ciphertext, {
+          userId: legacyFixture.userId,
           provider: legacyFixture.provider,
           providerAccountId: legacyFixture.providerAccountId,
         });

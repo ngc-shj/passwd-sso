@@ -1,17 +1,17 @@
-// Regenerate the legacy account-token ciphertext fixture used by the
-// `decryptAccountToken` regression test in
-// `src/lib/crypto/account-token-crypto.test.ts`.
+// Regenerate the account-token ciphertext fixture used by the regression
+// test in `src/lib/crypto/account-token-crypto.test.ts`.
 //
 // The fixture captures a known plaintext / AAD pair encrypted under a
 // deterministic test master key in the on-disk envelope format
-// (`psoenc1:0:<base64url(iv||tag||ct)>`). The test then asserts that the
-// post-refactor `decryptAccountToken()` recovers the original plaintext —
-// catching any AAD-byte drift introduced by extracting envelope ops into
-// `src/lib/crypto/envelope.ts` (S10 fix).
+// (`psoenc1:0:<base64url(iv||tag||ct)>`). The test then asserts that
+// `decryptAccountToken()` recovers the original plaintext — catching any
+// AAD-byte drift introduced by helper-module refactors.
 //
-// IMPORTANT: this script intentionally builds AAD inline using the LEGACY
-// expression `${provider}:${providerAccountId}` so the fixture is a faithful
-// snapshot of pre-refactor ciphertext, independent of any helper module.
+// IMPORTANT: this script intentionally builds AAD inline so the fixture is
+// a faithful snapshot of the on-disk format, independent of the helper
+// module under test. AAD shape MUST be kept in sync with `buildAad` in
+// `src/lib/crypto/account-token-crypto.ts`. Current shape:
+//   `${userId}:${provider}:${providerAccountId}`
 //
 // Run: `npx tsx scripts/regenerate-account-token-legacy-fixture.ts`
 
@@ -32,6 +32,7 @@ const fixture = {
     "1011121314151617" +
     "18191a1b1c1d1e1f",
   masterKeyVersion: 0,
+  userId: "00000000-0000-0000-0000-000000000001",
   provider: "google",
   providerAccountId: "test-provider-account-id",
   plaintext: "test_refresh_token_value",
@@ -43,7 +44,7 @@ if (key.length !== 32) {
 }
 
 const aad = Buffer.from(
-  `${fixture.provider}:${fixture.providerAccountId}`,
+  `${fixture.userId}:${fixture.provider}:${fixture.providerAccountId}`,
   "utf8",
 );
 

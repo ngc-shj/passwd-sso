@@ -224,6 +224,7 @@
   "EXTENSION_BRIDGE_CODE_ISSUE": "Extension bridge code issued",
   "EXTENSION_TOKEN_EXCHANGE_SUCCESS": "Extension token exchange successful",
   "EXTENSION_TOKEN_EXCHANGE_FAILURE": "Extension token exchange failed",
+  "OAUTH_ACCOUNT_TOKEN_DECRYPT_FAILURE": "OAuth account token tampering detected",
   "MOBILE_TOKEN_ISSUED": "Mobile token issued",
   "MOBILE_TOKEN_REFRESHED": "Mobile token refreshed",
   "MOBILE_TOKEN_REVOKED": "Mobile token revoked",

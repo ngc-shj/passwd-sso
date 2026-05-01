@@ -28,6 +28,7 @@ import {
 
 type RawAccount = {
   id: string;
+  userId: string;
   provider: string;
   providerAccountId: string;
   refresh_token: string | null;
@@ -66,7 +67,8 @@ async function main(): Promise<void> {
       // must reference the column name and alias it back to the camelCase
       // shape the rest of the script reads as.
       const batch: RawAccount[] = await prisma.$queryRawUnsafe<RawAccount[]>(
-        `SELECT id, provider, provider_account_id AS "providerAccountId",
+        `SELECT id, user_id AS "userId", provider,
+                provider_account_id AS "providerAccountId",
                 refresh_token, access_token, id_token
          FROM accounts
          ${cursorId ? "WHERE id > $1::uuid" : ""}
@@ -79,6 +81,7 @@ async function main(): Promise<void> {
       for (const row of batch) {
         scanned += 1;
         const aad = {
+          userId: row.userId,
           provider: row.provider,
           providerAccountId: row.providerAccountId,
         };

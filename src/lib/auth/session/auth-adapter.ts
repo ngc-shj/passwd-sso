@@ -18,6 +18,7 @@ import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpe
 import {
   encryptAccountTokenTriple,
   decryptAccountTokenTriple,
+  DECRYPT_FAILURE_KIND,
 } from "@/lib/crypto/account-token-crypto";
 import logger from "@/lib/logger";
 
@@ -219,15 +220,20 @@ export function createCustomAdapter(): Adapter {
         const tenantId = await resolveTenantIdForUser(account.userId);
 
         // Envelope-encrypt the OAuth provider tokens at rest. AAD binds the
-        // ciphertext to (provider, providerAccountId) so a leaked DB row's
-        // tokens cannot be substituted across accounts.
+        // ciphertext to (userId, provider, providerAccountId) so a DB-write
+        // attacker who pivots `accounts.user_id` to redirect tokens to a
+        // different identity invalidates the GCM tag on next read.
         const encrypted = encryptAccountTokenTriple(
           {
             refresh_token: account.refresh_token,
             access_token: account.access_token,
             id_token: account.id_token,
           },
-          { provider: account.provider, providerAccountId: account.providerAccountId },
+          {
+            userId: account.userId,
+            provider: account.provider,
+            providerAccountId: account.providerAccountId,
+          },
         );
 
         await prisma.account.create({
@@ -445,11 +451,16 @@ export function createCustomAdapter(): Adapter {
     },
 
     async getAccount(providerAccountId: string, provider: string): Promise<AdapterAccount | null> {
+      type FieldName = "refresh_token" | "access_token" | "id_token";
+      const tamperFindings: Array<{ field: FieldName; errClass: string }> = [];
+
       const account = await withBypassRls(prisma, async () =>
         prisma.account.findFirst({
           where: { providerAccountId, provider },
           select: {
+            id: true,
             userId: true,
+            tenantId: true,
             type: true,
             provider: true,
             providerAccountId: true,
@@ -465,33 +476,68 @@ export function createCustomAdapter(): Adapter {
       BYPASS_PURPOSE.AUTH_FLOW);
       if (!account) return null;
 
-      // Decrypt the at-rest envelope. Legacy plaintext rows pass through
-      // unchanged via the sentinel check inside the triple helper. The triple
-      // fetches the master key once per encryption-version observed across
-      // the three fields (typically one fetch). Per-field errors are logged
-      // (without exposing token material) and that field is left null —
-      // a corrupt ciphertext does not lock a user out of their session.
+      // Decrypt the at-rest envelope. Stored values without the `psoenc1:`
+      // sentinel throw at parseEnvelope and classify as CORRUPT — no
+      // plaintext fallback (see the module header in account-token-crypto.ts
+      // for why). Per-field failures are classified by the triple helper:
+      //   TAMPERED        — GCM auth-tag fail, the only adversarial signal.
+      //   KEY_UNAVAILABLE — master key version not loaded (operational).
+      //   CORRUPT         — envelope parse error (storage/encoding).
+      // Only TAMPERED is captured here for an audit emission outside the
+      // withBypassRls block (logAuditAsync uses withBypassRls internally
+      // — nesting AsyncLocalStorage contexts is unsafe; capture-inside,
+      // emit-outside mirrors the createSession eviction-info pattern).
       const decrypted = decryptAccountTokenTriple(
         {
           refresh_token: account.refresh_token,
           access_token: account.access_token,
           id_token: account.id_token,
         },
-        { provider: account.provider, providerAccountId: account.providerAccountId },
         {
-          onFieldError: (field, err) => {
+          userId: account.userId,
+          provider: account.provider,
+          providerAccountId: account.providerAccountId,
+        },
+        {
+          onFieldError: (field, err, kind) => {
+            const errClass = err instanceof Error ? err.constructor.name : "unknown";
+            // Sanitize: never forward err.message verbatim — crypto-library
+            // error strings can leak internal state. errClass is bounded.
             logger.warn(
               {
                 provider: account.provider,
                 providerAccountId: account.providerAccountId,
                 field,
-                err: err instanceof Error ? err.message : String(err),
+                kind,
+                errClass,
               },
               "account token decryption failed",
             );
+            if (kind === DECRYPT_FAILURE_KIND.TAMPERED) {
+              tamperFindings.push({ field: field as FieldName, errClass });
+            }
           },
         },
       );
+
+      // Emit audit AFTER withBypassRls block returns. Fire-and-forget via
+      // logAuditAsync — never await; matches createSession (line ~358).
+      for (const finding of tamperFindings) {
+        void logAuditAsync({
+          scope: AUDIT_SCOPE.PERSONAL,
+          action: AUDIT_ACTION.OAUTH_ACCOUNT_TOKEN_DECRYPT_FAILURE,
+          userId: account.userId,
+          tenantId: account.tenantId,
+          targetId: account.id,
+          metadata: {
+            provider: account.provider,
+            providerAccountId: account.providerAccountId,
+            field: finding.field,
+            kind: DECRYPT_FAILURE_KIND.TAMPERED,
+            errClass: finding.errClass,
+          },
+        });
+      }
 
       return {
         userId: account.userId,

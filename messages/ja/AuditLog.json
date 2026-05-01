@@ -224,6 +224,7 @@
   "EXTENSION_BRIDGE_CODE_ISSUE": "拡張機能ブリッジコードを発行",
   "EXTENSION_TOKEN_EXCHANGE_SUCCESS": "拡張機能トークン交換に成功",
   "EXTENSION_TOKEN_EXCHANGE_FAILURE": "拡張機能トークン交換に失敗",
+  "OAUTH_ACCOUNT_TOKEN_DECRYPT_FAILURE": "OAuthアカウントトークンの改ざんを検出",
   "MOBILE_TOKEN_ISSUED": "モバイルトークンを発行",
   "MOBILE_TOKEN_REFRESHED": "モバイルトークンを更新",
   "MOBILE_TOKEN_REVOKED": "モバイルトークンを失効",
