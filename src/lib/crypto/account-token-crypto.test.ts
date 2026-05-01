@@ -5,6 +5,7 @@ import {
   encryptAccountTokenTriple,
   decryptAccountTokenTriple,
   isEncryptedAccountToken,
+  DECRYPT_FAILURE_KIND,
 } from "./account-token-crypto";
 import legacyFixture from "@/__tests__/fixtures/account-token-legacy-ciphertext.json";
 
@@ -112,7 +113,7 @@ describe("account-token-crypto", () => {
 
     it("decryptAccountTokenTriple with onFieldError continues past a corrupt field", () => {
       const good = encryptAccountToken("good-token", aad);
-      const errors: { field: string; err: unknown }[] = [];
+      const errors: { field: string; err: unknown; kind: string }[] = [];
       const out = decryptAccountTokenTriple(
         {
           refresh_token: "psoenc1:0:zzzz",
@@ -121,8 +122,8 @@ describe("account-token-crypto", () => {
         },
         aad,
         {
-          onFieldError: (field, err) => {
-            errors.push({ field, err });
+          onFieldError: (field, err, kind) => {
+            errors.push({ field, err, kind });
           },
         },
       );
@@ -131,6 +132,27 @@ describe("account-token-crypto", () => {
       expect(out.id_token).toBeNull();
       expect(errors).toHaveLength(1);
       expect(errors[0].field).toBe("refresh_token");
+      // Malformed envelope → CORRUPT classification (operationally benign).
+      expect(errors[0].kind).toBe(DECRYPT_FAILURE_KIND.CORRUPT);
+    });
+
+    it("decryptAccountTokenTriple classifies AAD mismatch as TAMPERED", () => {
+      const ct = encryptAccountToken("secret", aad);
+      const wrongAad = { ...aad, providerAccountId: "different@example.com" };
+      const errors: { field: string; kind: string }[] = [];
+      const out = decryptAccountTokenTriple(
+        { refresh_token: ct, access_token: null, id_token: null },
+        wrongAad,
+        {
+          onFieldError: (field, _err, kind) => {
+            errors.push({ field, kind });
+          },
+        },
+      );
+      expect(out.refresh_token).toBeNull();
+      expect(errors).toEqual([
+        { field: "refresh_token", kind: DECRYPT_FAILURE_KIND.TAMPERED },
+      ]);
     });
   });
 

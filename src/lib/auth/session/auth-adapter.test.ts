@@ -1191,7 +1191,9 @@ describe("createCustomAdapter", () => {
 
     it("returns undefined for fields whose ciphertext is corrupted, without throwing", async () => {
       mockPrismaAccount.findFirst.mockResolvedValue({
+        id: "acc-corrupt",
         userId: "u-1",
+        tenantId: "tenant-1",
         type: "oidc",
         provider: "google",
         providerAccountId: "g-corrupt",
@@ -1209,6 +1211,158 @@ describe("createCustomAdapter", () => {
       const account = await adapter.getAccount!("g-corrupt", "google");
       expect(account).not.toBeNull();
       expect(account?.refresh_token).toBeUndefined();
+      // CORRUPT classification — operationally benign, NO audit emission.
+      expect(mockLogAudit).not.toHaveBeenCalledWith(
+        expect.objectContaining({ action: "OAUTH_ACCOUNT_TOKEN_DECRYPT_FAILURE" }),
+      );
+    });
+
+    it("does NOT emit audit on successful decrypt", async () => {
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaAccount.create.mockResolvedValue({ id: "acc-ok" });
+      const adapter = createCustomAdapter();
+      await adapter.linkAccount!({
+        userId: "u-1",
+        type: "oidc",
+        provider: "google",
+        providerAccountId: "g-ok",
+        refresh_token: "rt-ok",
+        access_token: "at-ok",
+        id_token: "idt-ok",
+      });
+      const writeData = mockPrismaAccount.create.mock.calls[0][0].data;
+
+      mockPrismaAccount.findFirst.mockResolvedValue({
+        id: "acc-ok",
+        userId: "u-1",
+        tenantId: "tenant-1",
+        type: "oidc",
+        provider: "google",
+        providerAccountId: "g-ok",
+        refresh_token: writeData.refresh_token,
+        access_token: writeData.access_token,
+        expires_at: 1234,
+        token_type: "bearer",
+        scope: "openid",
+        id_token: writeData.id_token,
+        session_state: "ss",
+      });
+
+      await adapter.getAccount!("g-ok", "google");
+      expect(mockLogAudit).not.toHaveBeenCalledWith(
+        expect.objectContaining({ action: "OAUTH_ACCOUNT_TOKEN_DECRYPT_FAILURE" }),
+      );
+    });
+
+    it("emits audit (TAMPERED) when stored ciphertext's AAD does not match the row's identity", async () => {
+      // Forge a TAMPERED scenario by encrypting under one (provider, providerAccountId)
+      // pair via linkAccount, then returning that ciphertext from findFirst
+      // for a DIFFERENT pair so getAccount's AAD will not match.
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaAccount.create.mockResolvedValue({ id: "acc-source" });
+      const adapter = createCustomAdapter();
+      await adapter.linkAccount!({
+        userId: "u-victim",
+        type: "oidc",
+        provider: "google",
+        providerAccountId: "g-source",
+        refresh_token: "rt-victim",
+      });
+      const sourceCipher = mockPrismaAccount.create.mock.calls[0][0].data
+        .refresh_token as string;
+
+      // Now serve that ciphertext from a DIFFERENT (providerAccountId) row.
+      mockPrismaAccount.findFirst.mockResolvedValue({
+        id: "acc-tampered",
+        userId: "u-attacker",
+        tenantId: "tenant-1",
+        type: "oidc",
+        provider: "google",
+        providerAccountId: "g-tampered", // ← AAD will not match — GCM auth fails
+        refresh_token: sourceCipher,
+        access_token: null,
+        expires_at: null,
+        token_type: null,
+        scope: null,
+        id_token: null,
+        session_state: null,
+      });
+
+      const account = await adapter.getAccount!("g-tampered", "google");
+      // Decrypt fails → field returned as undefined (regression bar).
+      expect(account?.refresh_token).toBeUndefined();
+      // TAMPERED audit emitted with full metadata.
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope: "PERSONAL",
+          action: "OAUTH_ACCOUNT_TOKEN_DECRYPT_FAILURE",
+          userId: "u-attacker",
+          tenantId: "tenant-1",
+          targetId: "acc-tampered",
+          metadata: expect.objectContaining({
+            provider: "google",
+            providerAccountId: "g-tampered",
+            field: "refresh_token",
+            kind: "TAMPERED",
+          }),
+        }),
+      );
+      // err.message must NOT appear verbatim in logged metadata — only errClass.
+      const auditCall = mockLogAudit.mock.calls.find(
+        (c) => c[0].action === "OAUTH_ACCOUNT_TOKEN_DECRYPT_FAILURE",
+      );
+      expect(auditCall?.[0].metadata).not.toHaveProperty("err");
+      expect(auditCall?.[0].metadata).toHaveProperty("errClass");
+    });
+
+    it("preserves successfully-decrypted siblings when one field is TAMPERED", async () => {
+      // refresh_token encrypted under one (provider,id) pair; id_token freshly
+      // encrypted for the new pair. getAccount should return id_token plaintext
+      // and refresh_token undefined.
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaAccount.create.mockResolvedValue({ id: "acc-1" });
+      const adapter = createCustomAdapter();
+
+      await adapter.linkAccount!({
+        userId: "u-victim",
+        type: "oidc",
+        provider: "google",
+        providerAccountId: "g-source",
+        refresh_token: "rt-source",
+      });
+      const sourceCipher = mockPrismaAccount.create.mock.calls[0][0].data
+        .refresh_token as string;
+
+      mockPrismaAccount.create.mockClear();
+      await adapter.linkAccount!({
+        userId: "u-victim",
+        type: "oidc",
+        provider: "google",
+        providerAccountId: "g-target",
+        id_token: "idt-target",
+      });
+      const targetIdToken = mockPrismaAccount.create.mock.calls[0][0].data
+        .id_token as string;
+
+      mockPrismaAccount.findFirst.mockResolvedValue({
+        id: "acc-mixed",
+        userId: "u-victim",
+        tenantId: "tenant-1",
+        type: "oidc",
+        provider: "google",
+        providerAccountId: "g-target",
+        refresh_token: sourceCipher, // bound to (google, g-source) — TAMPERED
+        access_token: null,
+        expires_at: null,
+        token_type: null,
+        scope: null,
+        id_token: targetIdToken, // bound to (google, g-target) — valid
+        session_state: null,
+      });
+
+      const account = await adapter.getAccount!("g-target", "google");
+      expect(account?.refresh_token).toBeUndefined();
+      expect(account?.id_token).toBe("idt-target");
     });
   });
 });

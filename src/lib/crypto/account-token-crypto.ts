@@ -112,14 +112,30 @@ export function encryptAccountTokenTriple(
   return out;
 }
 
+// Failure mode classification. The single adversarial signal is `TAMPERED`
+// — an AES-GCM auth-tag failure given a structurally valid envelope and a
+// loadable key, which means the AAD or the ciphertext was altered after
+// encryption. The other two are operational/benign and should NOT be elevated
+// to security audit events.
+export const DECRYPT_FAILURE_KIND = {
+  CORRUPT: "CORRUPT",                 // envelope parse or shape error
+  KEY_UNAVAILABLE: "KEY_UNAVAILABLE", // master key for the recorded version not loaded
+  TAMPERED: "TAMPERED",               // GCM auth-tag failure — AAD/ciphertext mismatch
+} as const;
+export type DecryptFailureKind =
+  (typeof DECRYPT_FAILURE_KIND)[keyof typeof DECRYPT_FAILURE_KIND];
+
 export type DecryptTripleOptions = {
   // Per-field error handler. When provided, an error decrypting one field
   // does NOT abort the other fields — the failed field is left as null and
-  // the handler is invoked with the field name and the error. When omitted,
+  // the handler is invoked with the field name, the error, and a classified
+  // `kind` so callers can route security-relevant TAMPERED failures
+  // separately from benign CORRUPT/KEY_UNAVAILABLE failures. When omitted,
   // the first error propagates (matching `decryptAccountToken`).
   onFieldError?: (
     field: (typeof TRIPLE_FIELDS)[number],
     err: unknown,
+    kind: DecryptFailureKind,
   ) => void;
 };
 
@@ -144,17 +160,20 @@ export function decryptAccountTokenTriple(
       out[field] = value;
       continue;
     }
+    let kind: DecryptFailureKind = DECRYPT_FAILURE_KIND.CORRUPT;
     try {
       const env = parseEnvelope(value);
       let key = keyCache.get(env.version);
       if (!key) {
+        kind = DECRYPT_FAILURE_KIND.KEY_UNAVAILABLE;
         key = getMasterKeyByVersion(env.version);
         keyCache.set(env.version, key);
       }
+      kind = DECRYPT_FAILURE_KIND.TAMPERED;
       out[field] = decryptWithKey(env, key, aadBytes);
     } catch (err) {
       if (options?.onFieldError) {
-        options.onFieldError(field, err);
+        options.onFieldError(field, err, kind);
       } else {
         throw err;
       }
