@@ -5,7 +5,7 @@
  * and optionally checks chain-sequence regression against a prior manifest.
  */
 
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, openSync, fstatSync, readSync, closeSync } from "node:fs";
 import { createHash, createHmac, createPublicKey, verify as nodeVerify } from "node:crypto";
 import { z } from "zod";
 import { AUDIT_ANCHOR_KID_PREFIX, AUDIT_ANCHOR_TYP } from "../constants/audit-anchor.js";
@@ -345,12 +345,36 @@ export async function auditVerifyCommand(args: AuditVerifyArgs): Promise<void> {
   let tagSecretHex: string | undefined;
 
   if (args.tagSecretFile) {
-    const st = statSync(args.tagSecretFile);
-    // Check no group/world bits (& 0o077 must be 0)
-    if ((st.mode & 0o077) !== 0) {
-      throw new InsecureTagSecretFileError(args.tagSecretFile);
+    // Open the file ONCE and use fstat + read on the same fd to prevent the
+    // TOCTOU race that CodeQL flagged: a separate statSync/readFileSync pair
+    // could see different inodes if an attacker swaps the file between calls.
+    // Same-fd ensures the mode bits we check belong to the bytes we read.
+    const fd = openSync(args.tagSecretFile, "r");
+    try {
+      const st = fstatSync(fd);
+      // Check no group/world bits (& 0o077 must be 0)
+      if ((st.mode & 0o077) !== 0) {
+        throw new InsecureTagSecretFileError(args.tagSecretFile);
+      }
+      // 64 hex chars + optional newline + a few bytes of slack — refuse anything
+      // larger to bound an attacker's ability to hand us a giant file.
+      const MAX_SECRET_BYTES = 128;
+      if (st.size > MAX_SECRET_BYTES) {
+        throw new InsecureTagSecretFileError(
+          `${args.tagSecretFile} (file too large: ${st.size} bytes; expected <= ${MAX_SECRET_BYTES})`,
+        );
+      }
+      const buf = Buffer.alloc(st.size);
+      let read = 0;
+      while (read < st.size) {
+        const n = readSync(fd, buf, read, st.size - read, read);
+        if (n === 0) break;
+        read += n;
+      }
+      tagSecretHex = buf.subarray(0, read).toString("utf-8").trim();
+    } finally {
+      closeSync(fd);
     }
-    tagSecretHex = readFileSync(args.tagSecretFile, "utf-8").trim();
   } else if (process.stdin.isTTY === false) {
     // Read from stdin pipe (up to 64 hex chars + newline)
     tagSecretHex = await readStdin(64);
@@ -390,10 +414,22 @@ export async function auditVerifyCommand(args: AuditVerifyArgs): Promise<void> {
     if (!archiveBase) {
       throw new PublicKeyArchiveUrlMissingError();
     }
-    const pubUrl = `${archiveBase.replace(/\/$/, "")}/${kid}.pub`;
-    const resp = await fetch(pubUrl, { redirect: "manual" });
+    // Use URL constructor with a base to constrain the result to the archive
+    // origin. validateKid() already restricted kid to [a-zA-Z0-9_-] (no ".",
+    // no "/", no "%"), so kid cannot escape the path; combining with `new URL`
+    // resolution explicitly fixes the host to archiveBase's origin and breaks
+    // the file-data → fetch taint flow CodeQL detected.
+    const archiveBaseUrl = new URL(archiveBase);
+    const archivePath = archiveBaseUrl.pathname.replace(/\/$/, "");
+    const pubUrlObj = new URL(`${archivePath}/${kid}.pub`, archiveBaseUrl);
+    if (pubUrlObj.origin !== archiveBaseUrl.origin) {
+      // Defense in depth: should be impossible given validateKid + URL semantics,
+      // but explicit reject if URL resolution somehow crosses origins.
+      throw new PublicKeyFetchError(0, pubUrlObj.href);
+    }
+    const resp = await fetch(pubUrlObj, { redirect: "manual" });
     if (resp.status !== 200) {
-      throw new PublicKeyFetchError(resp.status, pubUrl);
+      throw new PublicKeyFetchError(resp.status, pubUrlObj.href);
     }
     const raw = (await resp.text()).trim();
     publicKeyBytes = Buffer.from(raw, "hex");
