@@ -159,21 +159,11 @@ describe("AuditAnchorPublisher — FR6 fail-closed", () => {
     // The reason must reference the upload failure
     expect(outcome.reason).toContain("filesystem_UPLOAD_FAILED");
 
-    // IMPLEMENTATION NOTE / KNOWN GAP (T2-FR6):
-    // The publisher currently sets publish_paused_until inside the same database
-    // transaction as the upload attempt. When the upload throws, the transaction
-    // rolls back, so the pause-window UPDATE is also rolled back.
-    // This means publish_paused_until is NOT durably written on upload failure,
-    // which is the FR6 fail-closed invariant gap.
-    //
-    // Expected behavior per plan: publish_paused_until should be set in a
-    // separate follow-up transaction AFTER the upload fails (outside the main tx).
-    // This test documents the current actual behavior (pause NOT set) and the
-    // discrepancy with the plan. Fixing requires refactoring the publisher's
-    // error-handling path to separate the pause-setting from the main tx.
-    //
-    // TODO (FR6 hardening): set publish_paused_until in a separate Prisma tx
-    //   after the main transaction rolls back due to upload failure.
+    // FR6 fail-closed invariant: publish_paused_until is set in a SEPARATE tx
+    // after the publish tx rolls back due to upload failure. The publish tx's
+    // own pause UPDATE would be rolled back; the catch-block separate tx in
+    // `runCadence` (`audit-anchor-publisher.ts`) persists the pause durably.
+    // This test asserts the durably-persisted pause is observable post-rollback.
     const anchors = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       return tx.$queryRawUnsafe<{ publish_paused_until: Date | null }[]>(
@@ -183,8 +173,8 @@ describe("AuditAnchorPublisher — FR6 fail-closed", () => {
     });
 
     expect(anchors).toHaveLength(1);
-    // Current behavior: pause NOT set due to tx rollback (see gap note above)
-    // When FR6 hardening is implemented, change to: expect(anchors[0]!.publish_paused_until).not.toBeNull()
-    expect(anchors[0]!.publish_paused_until).toBeNull();
+    // FR6 closes Phase 3 R1 newly-discovered bug: pause MUST be durably set
+    // even when the publish tx rolls back on upload throw (closes R2-F1).
+    expect(anchors[0]!.publish_paused_until).not.toBeNull();
   });
 });

@@ -140,6 +140,7 @@ describe("GitHubReleaseDestination — fake server integration", () => {
   let server: http.Server;
   let port: number;
   let dest: GitHubReleaseDestination;
+  let realFetch: typeof global.fetch;
 
   beforeAll(async () => {
     state = {
@@ -156,28 +157,33 @@ describe("GitHubReleaseDestination — fake server integration", () => {
     // Patch the destination to use our fake server instead of api.github.com.
     // GitHubReleaseDestination hard-codes https://api.github.com — we monkey-patch
     // the global fetch to redirect to our local server for test isolation.
-    const originalFetch = global.fetch;
+    realFetch = global.fetch;
     global.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       const rewritten = url
         .replace("https://api.github.com", `http://127.0.0.1:${port}`)
         .replace("https://uploads.github.com", `http://127.0.0.1:${port}`);
-      return originalFetch(rewritten, init);
+      return realFetch(rewritten, init);
     };
   });
 
   afterAll(async () => {
+    // Restore global.fetch BEFORE stopping the server (closes RT2-1).
+    // Order matters: any in-flight fetch must complete via the local server
+    // before we redirect back to the real fetch.
+    global.fetch = realFetch;
     await stopServer(server);
-    // Restore global fetch (vitest runs in a clean module context so this is belt-and-suspenders)
-    // The real implementation is restored when the module unloads.
   });
 
   afterEach(() => {
-    // Reset call counters between tests but keep existing tags (so test 2 can
-    // simulate a duplicate from test 1's create).
+    // Reset call counters AND existing tags between tests — closes RT2-4.
+    // Each test must seed its own pre-existing tags explicitly to avoid
+    // ordering dependencies (vitest may run with --sequence.shuffle).
     state.createCallCount = 0;
     state.getByTagCallCount = 0;
     state.uploadCallCount = 0;
+    state.existingTags.clear();
+    state.uploadedAssets.clear();
   });
 
   it("Test 1: create-or-get release flow — POST creates new release, asset upload succeeds", async () => {
@@ -262,33 +268,23 @@ describe("GitHubReleaseDestination — fake server integration", () => {
       token: "fake-token",
     });
 
-    const tag1 = "audit-anchor-2026-04-30";
-    const tag2 = "audit-anchor-2026-04-29";
-    // Ensure these tags don't exist so both creates succeed
-    state.existingTags.delete(tag1);
-    state.existingTags.delete(tag2);
-
     const key1 = "2026-04-30.kid-audit-anchor-original.jws";
     const key2 = "2026-04-29.kid-audit-anchor-tampered.jws";
 
+    // afterEach clears existingTags, so both creates start fresh.
     await dest.upload({ artifactBytes: artifactBytes1, artifactKey: key1, contentType: "application/jose" });
     await dest.upload({ artifactBytes: artifactBytes2, artifactKey: key2, contentType: "application/jose" });
 
-    // Retrieve what was "uploaded" to the fake server
-    const stored1 = state.uploadedAssets.get(key1);
-    const stored2 = state.uploadedAssets.get(key2);
+    // Both uploads landed at distinct paths on the fake server.
+    expect(state.uploadedAssets.get(key1)).toBeDefined();
+    expect(state.uploadedAssets.get(key2)).toBeDefined();
+    expect(state.uploadedAssets.size).toBe(2);
 
-    // The fake server stores the body as a string (text upload); do a digest check
-    // on the sha256 values we computed above — the divergence is detectable.
-    const storedSha1 = createHash("sha256").update(artifactBytes1).digest("hex");
-    const storedSha2 = createHash("sha256").update(artifactBytes2).digest("hex");
-    expect(storedSha1).not.toBe(storedSha2);
-
-    // Artifacts were uploaded (fake server received them)
-    expect(stored1).toBeDefined();
-    expect(stored2).toBeDefined();
-
-    // Divergence is detected: sha256 of the two uploads differ
-    expect(sha256_1).not.toBe(sha256_2);
+    // Phase 3 R2 RT2-2 acknowledged limitation: the fake server collects body
+    // as a UTF-8 string, so byte-level content equality of binary JWS artifacts
+    // cannot be verified here. The input-side SHA-256 difference (line 263)
+    // proves divergence at the source. Full DESTINATION_DIVERGENCE detection
+    // (server-A receives X, server-B receives Y, verifier compares) belongs at
+    // the verifier layer and is tracked as continuing work in the deviation log.
   });
 });

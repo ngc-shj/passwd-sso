@@ -377,8 +377,21 @@ export class AuditAnchorPublisher {
                 Math.max(maxAnchorUpdatedAt, now.getTime()) + config.pauseCapFactor * config.cadenceMs,
               ),
             );
+            // R2-S1: guard against the race where ANOTHER publisher instance
+            // succeeded its publish between our publish-tx rollback and this
+            // pause-persist tx commit. The success path sets
+            // `lastPublishedAt = now` and clears `publishPausedUntil = NULL`.
+            // We must NOT overwrite that NULL with our stale pauseUntil.
+            // The `lastPublishedAt: { lt: now }` clause ensures the pause is
+            // only written when no concurrent success has updated past `now`.
             await tx2.auditChainAnchor.updateMany({
-              where: { tenantId: { in: tenantsInManifest } },
+              where: {
+                tenantId: { in: tenantsInManifest },
+                OR: [
+                  { lastPublishedAt: null },
+                  { lastPublishedAt: { lt: now } },
+                ],
+              },
               data: { publishPausedUntil: pauseUntil },
             });
           });

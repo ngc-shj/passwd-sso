@@ -205,6 +205,11 @@ describe("S3Destination — MinIO integration", () => {
       });
 
       expect(capturedInput).not.toBeNull();
+      // R2 RT2-3: assert exact Key concatenation so prefix-handling regressions
+      // (e.g., empty prefix or double slash) are caught.
+      expect(capturedInput!["Bucket"]).toBe(MINIO_BUCKET);
+      expect(capturedInput!["Key"]).toBe("anchors/2026-05-02.kid-audit-anchor-abc.jws");
+      expect(capturedInput!["ContentType"]).toBe("application/jose");
       expect(capturedInput!["ObjectLockMode"]).toBe("COMPLIANCE");
       expect(capturedInput!["ObjectLockRetainUntilDate"]).toBeInstanceOf(Date);
 
