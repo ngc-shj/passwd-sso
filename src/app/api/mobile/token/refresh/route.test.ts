@@ -62,7 +62,8 @@ vi.mock("@/lib/auth/dpop/jti-cache", () => ({
   getJtiCache: () => ({ hasOrRecord: vi.fn().mockResolvedValue(false) }),
 }));
 
-vi.mock("@/lib/auth/dpop/nonce", () => ({
+vi.mock("@/lib/auth/dpop/nonce", async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
   getDpopNonceService: mockGetDpopNonceService,
 }));
 

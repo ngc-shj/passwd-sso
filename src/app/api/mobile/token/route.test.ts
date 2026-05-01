@@ -4,8 +4,7 @@ import { createRequest, parseResponse } from "@/__tests__/helpers/request-builde
 // ─── Hoisted mocks ───────────────────────────────────────────
 
 const {
-  mockMobileBridgeCodeUpdateMany,
-  mockMobileBridgeCodeFindUnique,
+  mockMobileBridgeCodeUpdate,
   mockWithBypassRls,
   mockCheck,
   mockIssueIosToken,
@@ -17,8 +16,7 @@ const {
   mockWarn,
   mockError,
 } = vi.hoisted(() => ({
-  mockMobileBridgeCodeUpdateMany: vi.fn(),
-  mockMobileBridgeCodeFindUnique: vi.fn(),
+  mockMobileBridgeCodeUpdate: vi.fn(),
   mockWithBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockIssueIosToken: vi.fn(),
@@ -38,8 +36,7 @@ const {
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     mobileBridgeCode: {
-      updateMany: mockMobileBridgeCodeUpdateMany,
-      findUnique: mockMobileBridgeCodeFindUnique,
+      update: mockMobileBridgeCodeUpdate,
     },
   },
 }));
@@ -77,7 +74,8 @@ vi.mock("@/lib/auth/dpop/jti-cache", () => ({
   getJtiCache: () => ({ hasOrRecord: vi.fn().mockResolvedValue(false) }),
 }));
 
-vi.mock("@/lib/auth/dpop/nonce", () => ({
+vi.mock("@/lib/auth/dpop/nonce", async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
   getDpopNonceService: mockGetDpopNonceService,
 }));
 
@@ -151,8 +149,7 @@ describe("POST /api/mobile/token", () => {
     mockCheck.mockResolvedValue({ allowed: true });
     mockExtractClientIp.mockReturnValue("1.2.3.4");
     mockWithBypassRls.mockImplementation(async (_p: unknown, fn: () => unknown) => fn());
-    mockMobileBridgeCodeUpdateMany.mockResolvedValue({ count: 1 });
-    mockMobileBridgeCodeFindUnique.mockResolvedValue({
+    mockMobileBridgeCodeUpdate.mockResolvedValue({
       userId: USER_ID,
       tenantId: TENANT_ID,
       state: "state-value",
@@ -202,7 +199,7 @@ describe("POST /api/mobile/token", () => {
   });
 
   it("returns 400 when the bridge code is unknown or already used", async () => {
-    mockMobileBridgeCodeUpdateMany.mockResolvedValueOnce({ count: 0 });
+    mockMobileBridgeCodeUpdate.mockRejectedValueOnce({ code: "P2025" });
     const res = await POST(makeReq());
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -211,9 +208,15 @@ describe("POST /api/mobile/token", () => {
   });
 
   it("rejects a replayed bridge code (1st 200, 2nd 400)", async () => {
-    mockMobileBridgeCodeUpdateMany
-      .mockResolvedValueOnce({ count: 1 })
-      .mockResolvedValueOnce({ count: 0 });
+    mockMobileBridgeCodeUpdate
+      .mockResolvedValueOnce({
+        userId: USER_ID,
+        tenantId: TENANT_ID,
+        state: "state-value",
+        codeChallenge: "challenge-value",
+        devicePubkey: VALID_DEVICE_PUBKEY,
+      })
+      .mockRejectedValueOnce({ code: "P2025" });
     const first = await POST(makeReq());
     const second = await POST(makeReq());
     expect(first.status).toBe(200);
@@ -230,7 +233,7 @@ describe("POST /api/mobile/token", () => {
   });
 
   it("returns 400 when device_pubkey does not match the stored value", async () => {
-    mockMobileBridgeCodeFindUnique.mockResolvedValueOnce({
+    mockMobileBridgeCodeUpdate.mockResolvedValueOnce({
       userId: USER_ID,
       tenantId: TENANT_ID,
       state: "s",

@@ -122,11 +122,10 @@ export async function validateExtensionToken(
 
   // ── iOS-host-app dispatch ──────────────────────────────────
   // For IOS_APP rows, additionally require a DPoP proof bound to the
-  // row's stored cnfJkt. Lazy-imported to avoid a module-init cycle
-  // (mobile-token.ts re-exports parseScopes from this file).
+  // row's stored cnfJkt. Lazy-imported to avoid a module-init cycle:
+  // mobile-token.ts imports parseScopes / revokeExtensionTokenFamily
+  // from this file.
   if (token.clientKind === "IOS_APP") {
-    // Lazy-imported to avoid module-init cycle (mobile-token re-exports
-    // parseScopes / revokeExtensionTokenFamily from this file).
     const [{ validateIosTokenDpop }, { canonicalHtu }] = await Promise.all([
       import("./mobile-token"),
       import("@/lib/auth/dpop/htu-canonical"),

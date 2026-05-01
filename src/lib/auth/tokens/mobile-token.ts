@@ -9,7 +9,6 @@ import {
   AUDIT_ACTION,
   AUDIT_TARGET_TYPE,
   EXTENSION_TOKEN_MAX_ACTIVE,
-  type ExtensionTokenScope,
 } from "@/lib/constants";
 import { IOS_TOKEN_DEFAULT_SCOPES } from "@/lib/constants/auth/extension-token";
 import {
@@ -19,6 +18,7 @@ import {
   type DpopVerifyError,
 } from "@/lib/auth/dpop/verify";
 import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
+import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import {
   revokeExtensionTokenFamily,
   parseScopes,
@@ -259,7 +259,7 @@ export async function validateIosTokenDpop(
   }
 
   // Best-effort `lastUsedIp` / `lastUsedUserAgent` update. Fire-and-forget.
-  const ip = extractIpFromRequest(req);
+  const ip = extractClientIp(req);
   const userAgent = req.headers.get("user-agent")?.slice(0, 512) ?? null;
   void withBypassRls(prisma, async () =>
     prisma.extensionToken.update({
@@ -278,7 +278,7 @@ export async function validateIosTokenDpop(
       tokenId: row.id,
       userId: row.userId,
       tenantId: row.tenantId,
-      scopes: parseScopes(row.scope) as ExtensionTokenScope[],
+      scopes: parseScopes(row.scope),
       expiresAt: row.expiresAt,
       familyId: row.familyId,
       familyCreatedAt: row.familyCreatedAt,
@@ -305,6 +305,10 @@ interface RotationRecord {
 }
 
 const rotationCache = new Map<string, RotationRecord>();
+// Hard cap so a misbehaving client looping on refresh cannot grow the
+// Map without bound; entries naturally TTL out via REFRESH_REPLAY_GRACE_MS
+// in the lazy sweep on each insert. Mirrors `IN_MEMORY_MAX` in jti-cache.
+const ROTATION_CACHE_MAX = 10_000;
 
 /** Test-only: clear the in-process rotation cache. */
 export function _resetRotationCacheForTests(): void {
@@ -345,10 +349,7 @@ export type RefreshIosTokenResult =
   | { ok: true; replayed?: boolean; token: IssuedIosToken }
   | {
       ok: false;
-      error:
-        | "REFRESH_TOKEN_REVOKED"
-        | "REFRESH_TOKEN_FAMILY_EXPIRED"
-        | "REFRESH_REPLAY_DETECTED";
+      error: "REFRESH_TOKEN_FAMILY_EXPIRED" | "REFRESH_REPLAY_DETECTED";
     };
 
 /**
@@ -430,17 +431,23 @@ export async function refreshIosToken(
     cnfJkt,
     familyId: oldRow.familyId,
     familyCreatedAt: oldRow.familyCreatedAt,
-    ip: extractIpFromRequest(req),
+    ip: extractClientIp(req),
     userAgent: req.headers.get("user-agent"),
   });
 
   // Cache for the legitimate retry-after-network-failure window.
   rotationCache.set(cacheKey, { bodyHash, issuedAt: now, token: issued });
-  // Bound the cache: lazily evict expired entries on each insert.
+  // Bound the cache: lazily evict expired entries on each insert; if still
+  // over the hard cap (e.g. a misbehaving client flooding refresh), drop
+  // the entire Map. Worst-case effect: a legitimate retry within the grace
+  // window receives a fresh rejection, which is the safe failure mode.
   for (const [k, v] of rotationCache) {
     if (now - v.issuedAt > REFRESH_REPLAY_GRACE_MS) {
       rotationCache.delete(k);
     }
+  }
+  if (rotationCache.size > ROTATION_CACHE_MAX) {
+    rotationCache.clear();
   }
 
   await logAuditAsync({
@@ -493,36 +500,6 @@ async function emitReplayDetected(params: EmitReplayParams): Promise<void> {
       ...(typeof clockSkewMs === "number" ? { clockSkewMs } : {}),
     },
   });
-}
-
-/**
- * Public wrapper for routes that detect replay outside this module
- * (e.g. access-token replay caught by a generic check). The dispatch
- * code in `extension-token.ts` calls this when a revoked IOS_APP access
- * token is presented.
- */
-export async function emitMobileReplayDetected(
-  params: EmitReplayParams,
-): Promise<void> {
-  await emitReplayDetected(params);
-}
-
-// ─── Helpers ─────────────────────────────────────────────────
-
-/**
- * Best-effort IP extraction. Mirrors the rules used by `extractClientIp`
- * in @/lib/auth/policy/ip-access but kept inline to avoid pulling that
- * module's tenant-policy imports into this hot path.
- */
-function extractIpFromRequest(req: NextRequest): string | null {
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) {
-    const first = xff.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  const real = req.headers.get("x-real-ip");
-  if (real) return real;
-  return null;
 }
 
 // Re-export for tests / callers that want to assert on the symbol set.

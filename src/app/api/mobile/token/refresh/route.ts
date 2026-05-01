@@ -201,8 +201,6 @@ async function handlePOST(req: NextRequest): Promise<Response> {
         return errorResponse(API_ERROR.MOBILE_REFRESH_REPLAY_DETECTED, 401);
       case "REFRESH_TOKEN_FAMILY_EXPIRED":
         return errorResponse(API_ERROR.MOBILE_REFRESH_FAMILY_EXPIRED, 401);
-      case "REFRESH_TOKEN_REVOKED":
-        return errorResponse(API_ERROR.MOBILE_REFRESH_TOKEN_REVOKED, 401);
     }
   }
 
@@ -219,10 +217,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     },
     {
       status: 200,
-      headers: {
-        "DPoP-Nonce": nonce,
-        "Cache-Control": "no-store",
-      },
+      headers: { "DPoP-Nonce": nonce, "Cache-Control": "no-store" },
     },
   );
 }

@@ -97,8 +97,10 @@ function devicePubkeyFingerprint(devicePubkey: string): string {
 
 async function handlePOST(req: NextRequest): Promise<Response> {
   // 1. Rate limit BEFORE DB lookup. Keyed by client IP.
-  const ip = extractClientIp(req) ?? "unknown";
-  const rl = await tokenLimiter.check(`rl:mobile_token:${rateLimitKeyFromIp(ip)}`);
+  const clientIp = extractClientIp(req);
+  const rl = await tokenLimiter.check(
+    `rl:mobile_token:${rateLimitKeyFromIp(clientIp ?? "unknown")}`,
+  );
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }
@@ -111,7 +113,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       {
         event: "mobile_token_failure",
         reason: "invalid_request",
-        ip,
+        ip: clientIp,
       },
       "mobile token failed: malformed body",
     );
@@ -120,62 +122,52 @@ async function handlePOST(req: NextRequest): Promise<Response> {
   const { code, code_verifier: codeVerifier, device_pubkey: devicePubkey } =
     parsed.data;
 
-  // 3. Atomically consume the bridge code.
+  // 3. Atomically consume the bridge code AND read the stored bindings in a
+  // single round-trip. Prisma's `update` raises P2025 when the predicate
+  // matches no row, which we map to "code unknown / expired / already used".
   const codeHash = hashToken(code);
   const now = new Date();
-  const consumeResult = await withBypassRls(
+  const stored = await withBypassRls(
     prisma,
     async () =>
-      prisma.mobileBridgeCode.updateMany({
-        where: {
-          codeHash,
-          usedAt: null,
-          expiresAt: { gt: now },
-        },
-        data: { usedAt: now },
-      }),
+      prisma.mobileBridgeCode
+        .update({
+          where: { codeHash, usedAt: null, expiresAt: { gt: now } },
+          data: { usedAt: now },
+          select: {
+            userId: true,
+            tenantId: true,
+            state: true,
+            codeChallenge: true,
+            devicePubkey: true,
+          },
+        })
+        .catch((err: unknown) => {
+          if (
+            err &&
+            typeof err === "object" &&
+            "code" in err &&
+            err.code === "P2025"
+          ) {
+            return null;
+          }
+          throw err;
+        }),
     BYPASS_PURPOSE.TOKEN_LIFECYCLE,
   );
-  if (consumeResult.count === 0) {
+  if (!stored) {
     getLogger().warn(
       {
         event: "mobile_token_failure",
         reason: "bridge_code_invalid",
-        ip,
+        ip: clientIp,
       },
       "mobile token failed: bridge code unknown, expired, or already consumed",
     );
     return errorResponse(API_ERROR.MOBILE_BRIDGE_CODE_INVALID, 400);
   }
 
-  // 4. Load the consumed row to recover stored bindings.
-  const stored = await withBypassRls(
-    prisma,
-    async () =>
-      prisma.mobileBridgeCode.findUnique({
-        where: { codeHash },
-        select: {
-          userId: true,
-          tenantId: true,
-          state: true,
-          codeChallenge: true,
-          devicePubkey: true,
-        },
-      }),
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
-  );
-  if (!stored) {
-    getLogger().error(
-      {
-        event: "mobile_token_invariant_violation",
-        codeHash,
-      },
-      "consumed mobile bridge code missing after successful update",
-    );
-    return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
-  }
-
-  // 5. Verify device_pubkey binding (constant-time).
+  // 4. Verify device_pubkey binding (constant-time).
   if (!safeStringEqual(stored.devicePubkey, devicePubkey)) {
     getLogger().warn(
       {
@@ -188,7 +180,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     return errorResponse(API_ERROR.MOBILE_DEVICE_PUBKEY_MISMATCH, 400);
   }
 
-  // 6. PKCE: stored.codeChallenge must equal base64url(SHA-256(code_verifier)).
+  // 5. PKCE: stored.codeChallenge must equal base64url(SHA-256(code_verifier)).
   if (!verifyPkceS256(stored.codeChallenge, codeVerifier)) {
     getLogger().warn(
       {
@@ -201,7 +193,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     return errorResponse(API_ERROR.MOBILE_PKCE_MISMATCH, 400);
   }
 
-  // 7. Verify DPoP proof. No `ath` at this step (no access token yet); the
+  // 6. Verify DPoP proof. No `ath` at this step (no access token yet); the
   // proof's JWK thumbprint MUST equal the fingerprint of the registered key.
   const expectedCnfJkt = devicePubkeyFingerprint(devicePubkey);
   const dpopHeader = req.headers.get("dpop");
@@ -225,7 +217,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     return errorResponse(API_ERROR.MOBILE_DPOP_INVALID, 401);
   }
 
-  // 8. Issue the token pair. cnfJkt is the verifier-computed thumbprint of
+  // 7. Issue the token pair. cnfJkt is the verifier-computed thumbprint of
   // the proof's own JWK — same value as `expectedCnfJkt` post-verify.
   let issued: Awaited<ReturnType<typeof issueIosToken>>;
   try {
@@ -234,7 +226,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       tenantId: stored.tenantId,
       devicePubkey,
       cnfJkt: dpopResult.jkt,
-      ip: extractClientIp(req),
+      ip: clientIp,
       userAgent: req.headers.get("user-agent"),
     });
   } catch (err) {
@@ -257,11 +249,11 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     targetId: issued.tokenId,
     metadata: {
       familyId: issued.familyId,
-      cnfJkt: issued.tokenId ? dpopResult.jkt : undefined,
+      cnfJkt: dpopResult.jkt,
     },
   });
 
-  // 9. Stamp DPoP-Nonce on the response (RFC 9449 §8 — clients MUST echo on
+  // 8. Stamp DPoP-Nonce on the response (RFC 9449 §8 — clients MUST echo on
   // subsequent calls). Best-effort rotation tick.
   const nonceService = getDpopNonceService();
   void nonceService.rotateIfDue().catch(() => {});
@@ -276,10 +268,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     },
     {
       status: 200,
-      headers: {
-        "DPoP-Nonce": nonce,
-        "Cache-Control": "no-store",
-      },
+      headers: { "DPoP-Nonce": nonce, "Cache-Control": "no-store" },
     },
   );
 }

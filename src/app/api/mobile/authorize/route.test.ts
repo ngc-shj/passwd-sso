@@ -5,17 +5,18 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const {
   mockAuth,
-  mockUserFindUnique,
   mockMobileBridgeCodeCreate,
   mockWithBypassRls,
   mockWithUserTenantRls,
   mockGetAppOrigin,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockUserFindUnique: vi.fn(),
   mockMobileBridgeCodeCreate: vi.fn(),
   mockWithBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
-  mockWithUserTenantRls: vi.fn(async (_u: string, fn: () => unknown) => fn()),
+  mockWithUserTenantRls: vi.fn(
+    async (_u: string, fn: (tenantId: string) => unknown) =>
+      fn("22222222-2222-2222-2222-222222222222"),
+  ),
   mockGetAppOrigin: vi.fn(() => "https://example.test"),
 }));
 
@@ -23,7 +24,6 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    user: { findUnique: mockUserFindUnique },
     mobileBridgeCode: { create: mockMobileBridgeCodeCreate },
   },
 }));
@@ -73,9 +73,11 @@ describe("GET /api/mobile/authorize", () => {
     vi.clearAllMocks();
     mockGetAppOrigin.mockReturnValue("https://example.test");
     mockAuth.mockResolvedValue({ user: { id: "11111111-1111-1111-1111-111111111111" } });
-    mockUserFindUnique.mockResolvedValue({ tenantId: "22222222-2222-2222-2222-222222222222" });
     mockWithBypassRls.mockImplementation(async (_p: unknown, fn: () => unknown) => fn());
-    mockWithUserTenantRls.mockImplementation(async (_u: string, fn: () => unknown) => fn());
+    mockWithUserTenantRls.mockImplementation(
+      async (_u: string, fn: (tenantId: string) => unknown) =>
+        fn("22222222-2222-2222-2222-222222222222"),
+    );
     mockMobileBridgeCodeCreate.mockResolvedValue({ id: "00000000-0000-4000-8000-000000000003" });
   });
 
@@ -156,10 +158,11 @@ describe("GET /api/mobile/authorize", () => {
     expect(loc).not.toContain("attacker.example");
   });
 
-  it("returns 401 when the user record is missing (defensive)", async () => {
-    mockUserFindUnique.mockResolvedValue(null);
-    const res = await GET(createRequest("GET", buildUrl(VALID)));
-    expect(res.status).toBe(401);
+  it("propagates a tenant-resolution failure as a 500 (no row written)", async () => {
+    mockWithUserTenantRls.mockRejectedValueOnce(new Error("TENANT_NOT_RESOLVED"));
+    await expect(GET(createRequest("GET", buildUrl(VALID)))).rejects.toThrow(
+      "TENANT_NOT_RESOLVED",
+    );
     expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
   });
 });

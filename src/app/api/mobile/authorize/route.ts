@@ -75,42 +75,34 @@ async function handleGET(req: NextRequest): Promise<Response> {
   const { state, code_challenge: codeChallenge, device_pubkey: devicePubkey } =
     parsed.data;
 
-  // 3. Resolve the user's tenant. Required for the bridge-code row's RLS column.
+  // 3. Resolve the user's tenant via the RLS wrapper's tenantId callback —
+  // saves a redundant SELECT on the users table.
   const userId = session.user.id;
-  const userRecord = await withUserTenantRls(userId, async () =>
-    prisma.user.findUnique({
-      where: { id: userId },
-      select: { tenantId: true },
-    }),
-  );
-  if (!userRecord) {
-    return unauthorized();
-  }
-
-  // 4. Persist the bridge code under bypass-RLS (cross-tenant lookup later).
   const code = generateShareToken();
   const codeHash = hashToken(code);
   const now = new Date();
   const expiresAt = new Date(now.getTime() + BRIDGE_CODE_TTL_MS);
   const meta = extractRequestMeta(req);
 
-  await withBypassRls(
-    prisma,
-    async () =>
-      prisma.mobileBridgeCode.create({
-        data: {
-          codeHash,
-          userId,
-          tenantId: userRecord.tenantId,
-          state,
-          codeChallenge,
-          devicePubkey,
-          expiresAt,
-          ip: meta.ip,
-          userAgent: meta.userAgent,
-        },
-      }),
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+  await withUserTenantRls(userId, async (tenantId) =>
+    withBypassRls(
+      prisma,
+      async () =>
+        prisma.mobileBridgeCode.create({
+          data: {
+            codeHash,
+            userId,
+            tenantId,
+            state,
+            codeChallenge,
+            devicePubkey,
+            expiresAt,
+            ip: meta.ip,
+            userAgent: meta.userAgent,
+          },
+        }),
+      BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+    ),
   );
 
   // 5. Compute canonical redirect target — never honour a client-supplied
