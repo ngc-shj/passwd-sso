@@ -51,8 +51,12 @@ export default function VaultResetPage() {
         return;
       }
 
-      // Full reload to re-initialize VaultProvider (client-side nav keeps stale state)
-      window.location.href = withBasePath(`/${locale}/dashboard`);
+      // Self-reset invalidates the user's sessions/tokens server-side, so
+      // navigate to signin. callbackUrl carries the user back to /dashboard
+      // after re-auth, where the SETUP_REQUIRED state shows the setup form.
+      const callbackUrl = withBasePath(`/${locale}/dashboard`);
+      const signinUrl = `${withBasePath(`/${locale}/auth/signin`)}?callbackUrl=${encodeURIComponent(callbackUrl)}`;
+      window.location.href = signinUrl;
     } catch {
       setError(tApi("unknownError"));
     } finally {
