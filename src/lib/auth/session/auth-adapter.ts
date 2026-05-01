@@ -476,9 +476,10 @@ export function createCustomAdapter(): Adapter {
       BYPASS_PURPOSE.AUTH_FLOW);
       if (!account) return null;
 
-      // Decrypt the at-rest envelope. Legacy plaintext rows pass through
-      // unchanged via the sentinel check inside the triple helper. Per-field
-      // failures are classified by the triple helper:
+      // Decrypt the at-rest envelope. Stored values without the `psoenc1:`
+      // sentinel throw at parseEnvelope and classify as CORRUPT — no
+      // plaintext fallback (see the module header in account-token-crypto.ts
+      // for why). Per-field failures are classified by the triple helper:
       //   TAMPERED        — GCM auth-tag fail, the only adversarial signal.
       //   KEY_UNAVAILABLE — master key version not loaded (operational).
       //   CORRUPT         — envelope parse error (storage/encoding).

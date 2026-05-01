@@ -95,4 +95,58 @@ None.
 - R19 (exact-shape assertions): pass (uses `expect.objectContaining`).
 
 ## Resolution Status
-[Updated after fixes]
+
+### Round 1 fixes (commit 71733509)
+
+- **S2 [Critical]** — Resolved. Removed plaintext fallback in `decryptAccountToken{,Triple}`. Non-sentinel values now classify as CORRUPT (no audit, field returned undefined). Module header documents removal.
+- **S1 [Minor]** — Resolved. `buildAad` rejects `:` in any of `userId` / `provider` / `providerAccountId`. Static error message — no offending value echoed.
+- **F1 / T1 [Minor]** — Resolved. Stale Phase-2-only AAD comments updated.
+- **F2 [Minor]** — Resolved (partial — see Round 2 finding F-new-2). Two early `getAccount` test fixtures got `id`/`tenantId`.
+- **T2 [Minor]** — Resolved. New test exercises KEY_UNAVAILABLE classification path with `vi.spyOn(getMasterKeyByVersion)`; verifies no audit emit and `try/finally spy.mockRestore()`.
+- **T3 [Minor]** — Resolved. Sibling-preservation test asserts exactly one OAUTH audit event with metadata.field === "refresh_token".
+
+## Round 2 Findings
+
+### F-new-1 / N1 [Minor] Stale comment in auth-adapter.ts contradicts S2 fix
+- File: `src/lib/auth/session/auth-adapter.ts:479-484`
+- Evidence: Comment block reads `"Legacy plaintext rows pass through unchanged via the sentinel check inside the triple helper."` This is the pre-S2 behavior. Post-fix, plaintext rows classify as CORRUPT and the field returns undefined.
+- Fix: Replace the comment to describe the post-fix behavior.
+
+### F-new-2 [Minor] R19 fixture incompleteness — round-trip test missing id/tenantId
+- File: `src/lib/auth/session/auth-adapter.test.ts` round-trip test (line ~1181)
+- Evidence: Five `getAccount` fixtures got `id`/`tenantId` in Round 1 (corrupt, success-undefined-fields, TAMPERED, sibling, KEY_UNAVAILABLE). The round-trip test fixture was missed.
+- Impact: Test passes (no-tamper path doesn't read those fields), but fixture doesn't reflect real Prisma SELECT shape.
+- Fix: Add `id` and `tenantId` to the round-trip test fixture.
+
+### T-new-1 [Minor] userId colon-guard branch untested
+- File: `src/lib/crypto/account-token-crypto.test.ts`
+- Evidence: "buildAad rejects fields containing the ':' delimiter" test exercises `provider` and `providerAccountId`, not `userId`.
+- Impact: No production risk (userId is UUID-sourced); defense-in-depth test gap only.
+- Fix: Add a third `expect(...).toThrow(/reserved delimiter/)` for userId.
+
+### T-new-2 [Minor] No regression test for linkAccount propagating buildAad throw
+- File: `src/lib/auth/session/auth-adapter.test.ts`
+- Evidence: No test verifies that `linkAccount` with a `:`-containing provider propagates the `buildAad` error.
+- Impact: Behavior is correct (throw propagates naturally), but no regression guard.
+- Fix: Add a test that calls `linkAccount` with a `:`-containing provider and asserts `rejects.toThrow(/reserved delimiter/)`.
+
+### N2 [Informational, no fix] SAML NameID URN format may contain colons
+- Note: BoxyHQ SAML Jackson exposes an OIDC interface; the `providerAccountId` is the OIDC `sub` claim, not the raw SAML NameID. Standard OIDC `sub` is alphanumeric or email. URN-format SAML NameIDs are the format identifier, not typical subject values. Risk is theoretical for this deployment.
+- If a real deployment hits this, two paths: (a) percent-encode fields before AAD construction, or (b) document SAML subjects must be colon-free. Defer to that point.
+
+### S2 secondary [Informational, no action] CORRUPT vs TAMPERED audit asymmetry
+- A DB-write attacker who writes plaintext (no `psoenc1:` sentinel) classifies as CORRUPT → no audit emit. The attacker gains nothing (field returns undefined → user re-OAuths) but their action is silent in the audit log.
+- Acceptable trade-off: auditing all CORRUPT events would create alert fatigue from genuine storage corruption. Operational signal (forced re-OAuth) is the out-of-band detection.
+
+## Round 2 Resolution Status
+
+- **F-new-1 / N1 [Minor]** — Resolved. Comment in `auth-adapter.ts:479-484` updated to describe post-fix behavior (non-sentinel → CORRUPT, no plaintext fallback).
+- **F-new-2 [Minor]** — Resolved. Round-trip test fixture got `id: "acc-roundtrip"` and `tenantId: "tenant-1"`.
+- **T-new-1 [Minor]** — Resolved. Added third assertion in colon-guard test exercising `userId` branch.
+- **T-new-2 [Minor]** — Resolved. New test "propagates buildAad delimiter rejection to caller" verifies linkAccount surfaces the validation throw and skips the DB write.
+- **N2 [Informational]** — Deferred. SAML URN-format subjects deemed unlikely in practice (OIDC `sub` from Jackson is alphanumeric/email). Re-address if a real deployment hits this.
+- **S2 secondary [Informational]** — Accepted as design trade-off (auditing all CORRUPT events would create alert fatigue from genuine storage corruption).
+
+## Round 2 Termination
+
+All Round 1 findings verified. Round 2 surfaced 4 Minor follow-ups (all fixed) + 2 Informational (no fix). No Critical or Major findings in Round 2. Loop terminating per Step 3-8.

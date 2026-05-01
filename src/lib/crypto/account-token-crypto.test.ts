@@ -62,6 +62,11 @@ describe("account-token-crypto", () => {
     expect(() =>
       encryptAccountToken("p", { ...aad, providerAccountId: "with:colon" }),
     ).toThrow(/reserved delimiter/);
+    // userId is UUID-sourced in production (no colons), but the guard runs
+    // for defense-in-depth — verify it fires.
+    expect(() =>
+      encryptAccountToken("p", { ...aad, userId: "user:evil" }),
+    ).toThrow(/reserved delimiter/);
   });
 
   it("rejects ciphertext when the AAD context does not match", () => {

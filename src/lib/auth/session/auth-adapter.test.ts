@@ -637,6 +637,25 @@ describe("createCustomAdapter", () => {
       expect(callArgs.data.access_token).toBeNull();
       expect(callArgs.data.id_token).toBeNull();
     });
+
+    it("propagates buildAad delimiter rejection to caller", async () => {
+      // T-new-2 regression guard: a colon in provider/providerAccountId
+      // throws synchronously inside encryptAccountTokenTriple → linkAccount.
+      // Auth.js sees a generic crypto error and fails the OAuth callback.
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      const adapter = createCustomAdapter();
+      await expect(
+        adapter.linkAccount!({
+          userId: "u-1",
+          type: "oidc",
+          provider: "saml:malicious",
+          providerAccountId: "g-1",
+          refresh_token: "rt",
+        }),
+      ).rejects.toThrow(/reserved delimiter/);
+      // No row written when validation fails.
+      expect(mockPrismaAccount.create).not.toHaveBeenCalled();
+    });
   });
 
   describe("updateSession", () => {
@@ -1180,7 +1199,9 @@ describe("createCustomAdapter", () => {
       const writeData = mockPrismaAccount.create.mock.calls[0][0].data;
 
       mockPrismaAccount.findFirst.mockResolvedValue({
+        id: "acc-roundtrip",
         userId: "u-1",
+        tenantId: "tenant-1",
         type: "oidc",
         provider: "google",
         providerAccountId: "g-roundtrip",
