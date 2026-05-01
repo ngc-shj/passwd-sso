@@ -26,7 +26,7 @@ async function handleGET(request: NextRequest) {
   const currentToken = getSessionToken(request);
 
   // Parallelize independent queries
-  const [sessions, tenant, currentSessionId] = await withUserTenantRls(
+  const [sessions, tenant, currentSessionId, extensionTokens] = await withUserTenantRls(
     session.user.id,
     () =>
       Promise.all([
@@ -56,6 +56,28 @@ async function handleGET(request: NextRequest) {
               })
               .then((r) => r?.id ?? null)
           : Promise.resolve(null),
+        // iOS AutoFill MVP: surface non-cookie token sessions (browser
+        // extensions + iOS apps) alongside Auth.js sessions so users can
+        // identify and revoke a specific device. clientKind distinguishes
+        // BROWSER_EXTENSION from IOS_APP; lastUsedIp/UA are populated by
+        // the iOS DPoP path (browser rows leave them NULL).
+        prisma.extensionToken.findMany({
+          where: {
+            userId: session.user.id,
+            revokedAt: null,
+            expiresAt: { gt: new Date() },
+          },
+          select: {
+            id: true,
+            createdAt: true,
+            lastUsedAt: true,
+            expiresAt: true,
+            clientKind: true,
+            lastUsedIp: true,
+            lastUsedUserAgent: true,
+          },
+          orderBy: { createdAt: "desc" },
+        }),
       ]),
   );
 
@@ -68,10 +90,21 @@ async function handleGET(request: NextRequest) {
     isCurrent: s.id === currentSessionId,
   }));
 
+  const tokenItems = extensionTokens.map((t) => ({
+    id: t.id,
+    createdAt: t.createdAt.toISOString(),
+    lastUsedAt: t.lastUsedAt ? t.lastUsedAt.toISOString() : null,
+    expiresAt: t.expiresAt.toISOString(),
+    clientKind: t.clientKind,
+    lastUsedIp: t.lastUsedIp,
+    lastUsedUserAgent: t.lastUsedUserAgent,
+  }));
+
   return NextResponse.json({
     sessions: items,
     sessionCount: items.length,
     maxConcurrentSessions: tenant?.tenant?.maxConcurrentSessions ?? null,
+    extensionTokens: tokenItems,
   });
 }
 

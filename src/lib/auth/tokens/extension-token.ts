@@ -12,7 +12,6 @@ import {
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
-
 // ─── Types ───────────────────────────────────────────────────
 
 export interface ValidatedExtensionToken {
@@ -71,6 +70,16 @@ export function hasScope(
 /**
  * Validate an extension token from the Authorization header.
  * Returns a discriminated union so callers can map errors to HTTP status/codes.
+ *
+ * Dispatch:
+ *  - `clientKind === 'BROWSER_EXTENSION'` (default for legacy rows): the
+ *    classic path — bearer-only validation + `lastUsedAt` bump.
+ *  - `clientKind === 'IOS_APP'`: defers to `validateIosTokenDpop` from
+ *    `mobile-token.ts`, which additionally requires a valid DPoP proof
+ *    bound to the row's `cnfJkt`. iOS rows also have `lastUsedIp` /
+ *    `lastUsedUserAgent` updated on each call (browser rows leave those
+ *    columns NULL).
+ *
  * On success, updates `lastUsedAt` (best-effort, non-blocking).
  */
 export async function validateExtensionToken(
@@ -95,6 +104,8 @@ export async function validateExtensionToken(
         revokedAt: true,
         familyId: true,
         familyCreatedAt: true,
+        clientKind: true,
+        cnfJkt: true,
       },
     }),
   BYPASS_PURPOSE.TOKEN_LIFECYCLE);
@@ -109,7 +120,43 @@ export async function validateExtensionToken(
     return { ok: false, error: "EXTENSION_TOKEN_EXPIRED" };
   }
 
-  // Best-effort lastUsedAt update (non-blocking)
+  // ── iOS-host-app dispatch ──────────────────────────────────
+  // For IOS_APP rows, additionally require a DPoP proof bound to the
+  // row's stored cnfJkt. Lazy-imported to avoid a module-init cycle:
+  // mobile-token.ts imports parseScopes / revokeExtensionTokenFamily
+  // from this file.
+  if (token.clientKind === "IOS_APP") {
+    const [{ validateIosTokenDpop }, { canonicalHtu }] = await Promise.all([
+      import("./mobile-token"),
+      import("@/lib/auth/dpop/htu-canonical"),
+    ]);
+    const route = new URL(req.url).pathname;
+    const dpopResult = await validateIosTokenDpop({
+      req,
+      expectedHtm: req.method,
+      expectedHtu: canonicalHtu({ route }),
+      accessToken: plaintext,
+      row: {
+        id: token.id,
+        userId: token.userId,
+        tenantId: token.tenantId,
+        cnfJkt: token.cnfJkt,
+        scope: token.scope,
+        expiresAt: token.expiresAt,
+        familyId: token.familyId,
+        familyCreatedAt: token.familyCreatedAt,
+      },
+    });
+    if (dpopResult.ok) return { ok: true, data: dpopResult.data };
+    // Map iOS DPoP failures to the existing INVALID error so legacy callers
+    // (which look up API_ERROR[result.error]) keep type-checking. Routes
+    // that need granular DPoP error reporting call validateIosTokenDpop
+    // directly with the row + access token.
+    return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
+  }
+
+  // ── BROWSER_EXTENSION (default): unchanged ─────────────────
+  // Best-effort lastUsedAt update (non-blocking).
   void withBypassRls(prisma, async () =>
     prisma.extensionToken.update({
       where: { id: token.id },

@@ -146,6 +146,7 @@ model User {
   // Extension tokens
   extensionTokens      ExtensionToken[]
   extensionBridgeCodes ExtensionBridgeCode[]
+  mobileBridgeCodes    MobileBridgeCode[]
 
   // Admin vault resets
   adminVaultResetsAsTarget    AdminVaultReset[] @relation("adminVaultResetTarget")
@@ -183,19 +184,27 @@ model User {
 }
 
 model ExtensionToken {
-  id              String    @id @default(uuid(4)) @db.Uuid
-  userId          String    @map("user_id") @db.Uuid
-  tenantId        String    @map("tenant_id") @db.Uuid
-  tokenHash       String    @unique @map("token_hash") @db.VarChar(64)
-  scope           String    @db.VarChar(255)
-  expiresAt       DateTime  @map("expires_at") @db.Timestamptz(3)
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  revokedAt       DateTime? @map("revoked_at") @db.Timestamptz(3)
-  lastUsedAt      DateTime? @map("last_used_at") @db.Timestamptz(3)
+  id              String                   @id @default(uuid(4)) @db.Uuid
+  userId          String                   @map("user_id") @db.Uuid
+  tenantId        String                   @map("tenant_id") @db.Uuid
+  tokenHash       String                   @unique @map("token_hash") @db.VarChar(64)
+  scope           String                   @db.VarChar(255)
+  expiresAt       DateTime                 @map("expires_at") @db.Timestamptz(3)
+  createdAt       DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  revokedAt       DateTime?                @map("revoked_at") @db.Timestamptz(3)
+  lastUsedAt      DateTime?                @map("last_used_at") @db.Timestamptz(3)
   /// Refresh-token family identifier. Rows with the same familyId share an absolute lifetime.
-  familyId        String    @map("family_id") @db.Uuid
+  familyId        String                   @map("family_id") @db.Uuid
   /// Timestamp when the family was first issued. Used to enforce the absolute cap across refreshes.
-  familyCreatedAt DateTime  @default(now()) @map("family_created_at") @db.Timestamptz(3)
+  familyCreatedAt DateTime                 @default(now()) @map("family_created_at") @db.Timestamptz(3)
+  /// Distinguishes browser-extension tokens from iOS-app tokens. Default keeps existing rows backward-compatible.
+  clientKind      ExtensionTokenClientKind @default(BROWSER_EXTENSION) @map("client_kind")
+  /// Base64url-encoded SubjectPublicKeyInfo (DER) of the device public key — populated for IOS_APP tokens.
+  devicePubkey    String?                  @map("device_pubkey") @db.Text
+  /// DPoP key SHA-256 thumbprint (RFC 7638), base64url-encoded — populated for IOS_APP tokens.
+  cnfJkt          String?                  @map("cnf_jkt") @db.VarChar(64)
+  lastUsedIp      String?                  @map("last_used_ip") @db.VarChar(64)
+  lastUsedUserAgent String?                @map("last_used_user_agent") @db.Text
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -205,6 +214,11 @@ model ExtensionToken {
   @@index([expiresAt])
   @@index([familyId, revokedAt])
   @@map("extension_tokens")
+}
+
+enum ExtensionTokenClientKind {
+  BROWSER_EXTENSION
+  IOS_APP
 }
 
 model ExtensionBridgeCode {
@@ -225,6 +239,33 @@ model ExtensionBridgeCode {
   @@index([userId, usedAt])
   @@index([expiresAt])
   @@map("extension_bridge_codes")
+}
+
+/// iOS AutoFill MVP — bridge code carrying PKCE/state/device-pubkey state from
+/// `/api/mobile/authorize` to `/api/mobile/token`. Distinct from ExtensionBridgeCode
+/// because the iOS flow binds additional cryptographic material (PKCE challenge,
+/// Secure-Enclave device pubkey) that the browser-extension flow does not carry.
+model MobileBridgeCode {
+  id            String    @id @default(uuid(4)) @db.Uuid
+  codeHash      String    @unique @map("code_hash") @db.VarChar(64)
+  userId        String    @map("user_id") @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  state         String    @db.VarChar(64)
+  codeChallenge String    @map("code_challenge") @db.VarChar(64)
+  devicePubkey  String    @map("device_pubkey") @db.Text
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(3)
+  usedAt        DateTime? @map("used_at") @db.Timestamptz(3)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  ip            String?   @db.VarChar(64)
+  userAgent     String?   @map("user_agent") @db.VarChar(512)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@index([tenantId])
+  @@index([expiresAt])
+  @@map("mobile_bridge_codes")
 }
 
 model ScimToken {
@@ -430,6 +471,8 @@ model Tenant {
   extensionTokenIdleTimeoutMinutes     Int      @default(10080) @map("extension_token_idle_timeout_minutes")
   extensionTokenAbsoluteTimeoutMinutes Int      @default(43200) @map("extension_token_absolute_timeout_minutes")
   vaultAutoLockMinutes                 Int?     @map("vault_auto_lock_minutes")
+  /// iOS AutoFill MVP: when true, allows the host iOS app to surface saved credentials to the system AutoFill provider.
+  allowAppSideAutofill                 Boolean  @default(false) @map("allow_app_side_autofill")
   allowedCidrs                         String[] @default([]) @map("allowed_cidrs")
   tailscaleEnabled                     Boolean  @default(false) @map("tailscale_enabled")
   tailscaleTailnet                     String?  @map("tailscale_tailnet") @db.VarChar(255)
@@ -442,6 +485,7 @@ model Tenant {
   sessions                   Session[]
   extensionTokens            ExtensionToken[]
   extensionBridgeCodes       ExtensionBridgeCode[]
+  mobileBridgeCodes          MobileBridgeCode[]
   tags                       Tag[]
   vaultKeys                  VaultKey[]
   passwordEntries            PasswordEntry[]
@@ -947,6 +991,12 @@ enum AuditAction {
   AUDIT_DELIVERY_TARGET_REACTIVATE
   OPERATOR_TOKEN_CREATE
   OPERATOR_TOKEN_REVOKE
+  MOBILE_TOKEN_ISSUED
+  MOBILE_TOKEN_REFRESHED
+  MOBILE_TOKEN_REVOKED
+  MOBILE_TOKEN_REPLAY_DETECTED
+  MOBILE_CACHE_ROLLBACK_REJECTED
+  MOBILE_CACHE_FLAG_FORGED
 }
 
 enum AuditScope {
