@@ -17,6 +17,7 @@ export default function PassphrasePage() {
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const vaultUnlocked = vaultStatus === VAULT_STATUS.UNLOCKED;
+  const vaultLocked = vaultStatus === VAULT_STATUS.LOCKED;
 
   return (
     <>
@@ -35,7 +36,7 @@ export default function PassphrasePage() {
             <Lock className="h-4 w-4 mr-2" />
             {tVault("changePassphraseButton")}
           </Button>
-          {!vaultUnlocked && (
+          {vaultLocked && (
             <p className="mt-2 text-xs text-muted-foreground flex items-center gap-1">
               <Lock className="h-3 w-3" />
               {tSettings("vaultLockedPlaceholder.description")}
