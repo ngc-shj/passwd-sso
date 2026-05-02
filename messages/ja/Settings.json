@@ -1,0 +1,30 @@
+{
+  "rootTitle": "個人の設定",
+  "section": {
+    "account": "アカウント",
+    "auth": "本人認証",
+    "devices": "デバイスとセッション",
+    "vault": "保管庫",
+    "sharing": "共有と委任",
+    "developer": "開発者"
+  },
+  "subTab": {
+    "profile": "プロフィール",
+    "notifications": "通知",
+    "passphrase": "パスフレーズ",
+    "recoveryKey": "回復キー",
+    "passkey": "パスキー",
+    "activeDevices": "アクティブデバイス",
+    "keyRotation": "キーローテーション",
+    "delegation": "委任セッション",
+    "travelMode": "トラベルモード",
+    "emergencyAccess": "緊急アクセス",
+    "cliToken": "CLI トークン",
+    "apiKey": "API キー",
+    "mcpConnections": "MCP 接続"
+  },
+  "vaultLockedPlaceholder": {
+    "title": "保管庫がロックされています",
+    "description": "この操作には保管庫の解錠が必要です。ヘッダーから保管庫を解錠してください。"
+  }
+}

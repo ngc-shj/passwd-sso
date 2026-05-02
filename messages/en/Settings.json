@@ -1,0 +1,30 @@
+{
+  "rootTitle": "Personal settings",
+  "section": {
+    "account": "Account",
+    "auth": "Sign-in",
+    "devices": "Devices & sessions",
+    "vault": "Vault",
+    "sharing": "Sharing & delegation",
+    "developer": "Developer"
+  },
+  "subTab": {
+    "profile": "Profile",
+    "notifications": "Notifications",
+    "passphrase": "Passphrase",
+    "recoveryKey": "Recovery key",
+    "passkey": "Passkeys",
+    "activeDevices": "Active devices",
+    "keyRotation": "Key rotation",
+    "delegation": "Delegation sessions",
+    "travelMode": "Travel mode",
+    "emergencyAccess": "Emergency access",
+    "cliToken": "CLI token",
+    "apiKey": "API keys",
+    "mcpConnections": "MCP connections"
+  },
+  "vaultLockedPlaceholder": {
+    "title": "Vault is locked",
+    "description": "This page requires an unlocked vault. Unlock the vault from the header."
+  }
+}
