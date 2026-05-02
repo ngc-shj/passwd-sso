@@ -3,6 +3,12 @@ import { injectSession } from "../helpers/auth";
 import { getAuthState } from "../helpers/fixtures";
 import { VaultLockPage } from "../page-objects/vault-lock.page";
 
+// e2e-selectors:expected-deleted-routes
+// This file intentionally references DELETED admin URLs in OLD_URLS_404 to
+// verify they return 404 — a regression guard against accidental redirect
+// re-introduction. The marker above tells scripts/checks/check-e2e-selectors.sh
+// to skip the "deleted route still referenced" warning for this file.
+
 // ── Navigation table: input URL → expected final URL ─────────────────────────
 
 const TENANT_NAV: Array<{ input: string; expected: string }> = [
