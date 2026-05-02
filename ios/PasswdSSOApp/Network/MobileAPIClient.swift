@@ -12,6 +12,8 @@ public struct VaultUnlockData: Sendable, Codable, Equatable {
   public let keyVersion: Int
   public let kdfType: String
   public let kdfIterations: Int
+  /// User ID bound to the vault; used as AAD input for personal entries (aadVersion >= 1).
+  public let userId: String
 
   enum CodingKeys: String, CodingKey {
     case accountSalt
@@ -21,6 +23,7 @@ public struct VaultUnlockData: Sendable, Codable, Equatable {
     case keyVersion
     case kdfType
     case kdfIterations
+    case userId
   }
 }
 
@@ -227,6 +230,48 @@ public actor MobileAPIClient {
     switch http.statusCode {
     case 200:
       return try JSONDecoder().decode(VaultUnlockData.self, from: data)
+    case 401:
+      throw MobileAPIError.serverError(status: 401)
+    default:
+      throw MobileAPIError.serverError(status: http.statusCode)
+    }
+  }
+
+  /// Fetch encrypted team entries (flat response format) for a given team.
+  /// Requires a valid access token (DPoP-signed).
+  public func fetchTeamEntries(teamId: String) async throws -> [TeamEncryptedEntry] {
+    let endpointPath = "/api/teams/\(teamId)/passwords?include=blob"
+    guard let (accessToken, _) = try tokenStore.loadAccess() else {
+      throw MobileAPIError.serverError(status: 401)
+    }
+    guard let endpointURL = URL(string: endpointPath, relativeTo: serverURL) else {
+      throw MobileAPIError.serverError(status: 400)
+    }
+    let htu = canonicalHTU(url: endpointURL)
+    let ath = sha256Base64URL(accessToken)
+    let localJWK = jwk
+    let localSigner = signer
+    let nonce = try? tokenStore.loadNonce()
+    let proof = try await buildDPoPProof(
+      htm: "GET",
+      htu: htu,
+      jwk: localJWK,
+      ath: ath,
+      nonce: nonce,
+      signer: localSigner
+    )
+    var request = URLRequest(url: endpointURL)
+    request.httpMethod = "GET"
+    request.setValue("DPoP \(accessToken)", forHTTPHeaderField: "Authorization")
+    request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
+    let (data, response) = try await performHTTP(request)
+    let http = response as! HTTPURLResponse
+    if let newNonce = http.value(forHTTPHeaderField: "DPoP-Nonce") {
+      try? tokenStore.saveNonce(newNonce)
+    }
+    switch http.statusCode {
+    case 200:
+      return try JSONDecoder().decode([TeamEncryptedEntry].self, from: data)
     case 401:
       throw MobileAPIError.serverError(status: 401)
     default:

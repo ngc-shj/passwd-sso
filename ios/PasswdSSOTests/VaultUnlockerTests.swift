@@ -28,7 +28,8 @@ private func makeVaultUnlockData(
     secretKeyAuthTag: tag.base64EncodedString(),
     keyVersion: 1,
     kdfType: "PBKDF2-SHA256",
-    kdfIterations: iterations
+    kdfIterations: iterations,
+    userId: "test-user-42"
   )
   return (data, secretKey)
 }
@@ -67,7 +68,7 @@ private actor StubVaultUnlocker {
     self.wrappedKeyStore = wrappedKeyStore
   }
 
-  func unlock(passphrase: String) async throws -> SymmetricKey {
+  func unlock(passphrase: String) async throws -> UnlockResult {
     let unlockData: VaultUnlockData
     do {
       unlockData = try await stubClient.fetchVaultUnlockData()
@@ -120,7 +121,7 @@ private actor StubVaultUnlocker {
       issuedAt: Date()
     )
     try wrappedKeyStore.saveVaultKey(wrapped)
-    return vaultKey
+    return UnlockResult(vaultKey: vaultKey, userId: unlockData.userId)
   }
 }
 
@@ -163,13 +164,14 @@ final class VaultUnlockerTests: XCTestCase {
       wrappedKeyStore: wks
     )
 
-    let vaultKey = try await unlocker.unlock(passphrase: passphrase)
-    let vaultKeyBytes = vaultKey.withUnsafeBytes { Data($0) }
+    let result = try await unlocker.unlock(passphrase: passphrase)
+    let vaultKeyBytes = result.vaultKey.withUnsafeBytes { Data($0) }
 
     // Verify vault_key = HKDF(secretKey, info="passwd-sso-enc-v1")
     let expectedVaultKey = try deriveEncryptionKey(secretKey: secretKey)
     let expectedBytes = expectedVaultKey.withUnsafeBytes { Data($0) }
     XCTAssertEqual(vaultKeyBytes, expectedBytes)
+    XCTAssertEqual(result.userId, "test-user-42")
   }
 
   func testUnlockHappyPathWritesWrappedVaultKey() async throws {
@@ -191,7 +193,8 @@ final class VaultUnlockerTests: XCTestCase {
       wrappedKeyStore: wks
     )
 
-    _ = try await unlocker.unlock(passphrase: passphrase)
+    let result = try await unlocker.unlock(passphrase: passphrase)
+    XCTAssertEqual(result.userId, "test-user-42")
 
     // Wrapped vault key should be saved
     let wrappedVK = try wks.loadVaultKey()
@@ -221,7 +224,7 @@ final class VaultUnlockerTests: XCTestCase {
     _ = try await unlocker.unlock(passphrase: passphrase)
 
     // Bridge key blob should exist in keychain
-    XCTAssertNotNil(keychain.store["blob"])
+    XCTAssertNotNil(keychain.store["blob"], "Bridge key blob must be written to keychain")
     XCTAssertEqual(keychain.store["blob"]?.count, 56)
   }
 

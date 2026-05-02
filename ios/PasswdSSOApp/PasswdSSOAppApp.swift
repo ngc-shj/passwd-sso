@@ -9,6 +9,7 @@ struct PasswdSSOAppApp: App {
   @State private var activeCoordinator: AuthCoordinator?
   @State private var activeSyncService: HostSyncService?
   @State private var currentVaultKey: SymmetricKey?
+  @State private var currentUserId: String?
 
   @Environment(\.scenePhase) private var scenePhase
 
@@ -29,8 +30,9 @@ struct PasswdSSOAppApp: App {
         if newPhase == .active {
           Task {
             guard let syncService = activeSyncService,
-                  let vaultKey = currentVaultKey else { return }
-            _ = try? await syncService.runSync(vaultKey: vaultKey)
+                  let vaultKey = currentVaultKey,
+                  let userId = currentUserId else { return }
+            _ = try? await syncService.runSync(vaultKey: vaultKey, userId: userId)
           }
         }
       }

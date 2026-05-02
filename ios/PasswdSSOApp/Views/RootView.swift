@@ -87,10 +87,10 @@ struct RootView: View {
       wrappedKeyStore: wks
     )
 
-    return VaultUnlockView(unlocker: unlocker) { vaultKey in
+    return VaultUnlockView(unlocker: unlocker) { result in
       Task { @MainActor in
         await handleVaultUnlocked(
-          vaultKey: vaultKey,
+          unlockResult: result,
           serverConfig: serverConfig,
           apiClient: apiClient,
           bridgeKeyStore: bks,
@@ -102,12 +102,13 @@ struct RootView: View {
 
   @MainActor
   private func handleVaultUnlocked(
-    vaultKey: SymmetricKey,
+    unlockResult: UnlockResult,
     serverConfig: ServerConfig,
     apiClient: MobileAPIClient,
     bridgeKeyStore: BridgeKeyStore,
     wrappedKeyStore: any WrappedKeyStore
   ) async {
+    let vaultKey = unlockResult.vaultKey
     currentVaultKey = vaultKey
 
     // Perform initial sync
@@ -122,7 +123,10 @@ struct RootView: View {
     self.hostSyncService = syncService
 
     // Run initial sync and load cache
-    let report = try? await syncService.runSync(vaultKey: vaultKey)
+    let report = try? await syncService.runSync(
+      vaultKey: vaultKey,
+      userId: unlockResult.userId
+    )
 
     // Build auto-lock service
     let tokenStore = HostTokenStore()
@@ -152,7 +156,8 @@ struct RootView: View {
           cacheIssuedAt: Date(),
           lastSuccessfulRefreshAt: Date(),
           entryCount: 0,
-          hostInstallUUID: Data(repeating: 0, count: 16)
+          hostInstallUUID: Data(repeating: 0, count: 16),
+          userId: unlockResult.userId
         ),
         entries: "[]".data(using: .utf8)!
       )

@@ -6,7 +6,7 @@ import SwiftUI
 /// Passphrase entry screen that drives VaultUnlocker.
 struct VaultUnlockView: View {
   let unlocker: VaultUnlocker
-  let onUnlocked: @MainActor (SymmetricKey) -> Void
+  let onUnlocked: @MainActor (UnlockResult) -> Void
 
   @State private var passphrase: String = ""
   @State private var isLoading: Bool = false
@@ -53,10 +53,10 @@ struct VaultUnlockView: View {
     isLoading = true
     errorMessage = nil
     do {
-      let key = try await unlocker.unlock(passphrase: passphrase)
+      let result = try await unlocker.unlock(passphrase: passphrase)
       passphrase = ""
       await MainActor.run {
-        onUnlocked(key)
+        onUnlocked(result)
       }
     } catch VaultUnlockError.invalidPassphrase {
       errorMessage = "Incorrect passphrase. Please try again."

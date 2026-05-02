@@ -5,8 +5,8 @@ import XCTest
 
 // MARK: - Helpers for EntryFetcherTests
 
-private func makeEncryptedEntryJSON(id: String, teamId: String? = nil) -> String {
-  let teamPart = teamId.map { #","teamId":"\#($0)""# } ?? ""
+/// Personal entry response — nested EncryptedData objects.
+private func makePersonalEntryJSON(id: String) -> String {
   return """
   {
     "id": "\(id)",
@@ -24,14 +24,44 @@ private func makeEncryptedEntryJSON(id: String, teamId: String? = nil) -> String
     "aadVersion": 1,
     "entryType": "LOGIN",
     "isFavorite": false,
-    "isArchived": false\(teamPart)
+    "isArchived": false
   }
   """
 }
 
-private func makeEntriesResponseData(ids: [String], teamId: String? = nil) -> Data {
-  let items = ids.map { makeEncryptedEntryJSON(id: $0, teamId: teamId) }
+/// Team entry response — flat ciphertext/iv/authTag fields.
+private func makeTeamEntryJSON(id: String) -> String {
+  return """
+  {
+    "id": "\(id)",
+    "encryptedOverview": "aabbcc",
+    "overviewIv": "aabbccddeeff00112233445566778899",
+    "overviewAuthTag": "00112233445566778899aabbccddeeff",
+    "encryptedBlob": "ddeeff",
+    "blobIv": "aabbccddeeff001122334455667788aa",
+    "blobAuthTag": "00112233445566778899aabbccddeeff",
+    "aadVersion": 1,
+    "teamKeyVersion": 1,
+    "itemKeyVersion": 0,
+    "isFavorite": false,
+    "isArchived": false
+  }
+  """
+}
+
+private func makePersonalEntriesResponseData(ids: [String]) -> Data {
+  let items = ids.map { makePersonalEntryJSON(id: $0) }
   return "[\(items.joined(separator: ","))]".data(using: .utf8)!
+}
+
+private func makeTeamEntriesResponseData(ids: [String]) -> Data {
+  let items = ids.map { makeTeamEntryJSON(id: $0) }
+  return "[\(items.joined(separator: ","))]".data(using: .utf8)!
+}
+
+// Keep backward-compat alias used by fetchPersonal tests
+private func makeEntriesResponseData(ids: [String]) -> Data {
+  makePersonalEntriesResponseData(ids: ids)
 }
 
 private func makeServerURL() -> URL {
@@ -73,7 +103,7 @@ final class EntryFetcherTests: XCTestCase {
       keychain: tokenKeychain
     )
 
-    let responseData = makeEntriesResponseData(ids: ["e1", "e2", "e3"])
+    let responseData = makePersonalEntriesResponseData(ids: ["e1", "e2", "e3"])
 
     MockURLProtocol.requestHandler = { request in
       // Verify Authorization header
@@ -120,7 +150,7 @@ final class EntryFetcherTests: XCTestCase {
     )
 
     let expectedTeamId = "team-abc"
-    let responseData = makeEntriesResponseData(ids: ["te1"], teamId: expectedTeamId)
+    let responseData = makeTeamEntriesResponseData(ids: ["te1"])
 
     MockURLProtocol.requestHandler = { request in
       // Verify the URL contains the team ID
@@ -147,11 +177,13 @@ final class EntryFetcherTests: XCTestCase {
       urlSession: makeMockSession()
     )
     let fetcher = EntryFetcher(apiClient: apiClient)
-    let entries = try await fetcher.fetchTeam(teamId: expectedTeamId)
+    let entries = try await fetcher.fetchTeamAsCacheEntries(teamId: expectedTeamId)
 
     XCTAssertEqual(entries.count, 1)
     XCTAssertEqual(entries[0].id, "te1")
     XCTAssertEqual(entries[0].teamId, expectedTeamId)
+    XCTAssertEqual(entries[0].itemKeyVersion, 0)
+    XCTAssertEqual(entries[0].teamKeyVersion, 1)
   }
 
   // MARK: - 401 propagates as error

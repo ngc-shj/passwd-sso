@@ -9,6 +9,13 @@ public enum VaultUnlockError: Error, Equatable {
   case cryptoFailed
 }
 
+/// Result of a successful vault unlock; carries the in-memory vault key and the
+/// userId needed for AAD construction on personal entries (aadVersion >= 1).
+public struct UnlockResult: Sendable, Equatable {
+  public let vaultKey: SymmetricKey
+  public let userId: String
+}
+
 /// Orchestrates the vault unlock flow:
 ///   1. Fetch /api/vault/unlock/data with the host's access token.
 ///   2. Derive wrapping key from passphrase + accountSalt + kdfIterations.
@@ -32,8 +39,9 @@ public actor VaultUnlocker {
     self.wrappedKeyStore = wrappedKeyStore
   }
 
-  /// Perform the unlock flow. Returns the in-memory vault_key on success.
-  public func unlock(passphrase: String) async throws -> SymmetricKey {
+  /// Perform the unlock flow. Returns vault_key + userId on success.
+  /// The vault_key is never persisted; caller must zero it after use.
+  public func unlock(passphrase: String) async throws -> UnlockResult {
     // Step 1: fetch vault unlock data
     let unlockData: VaultUnlockData
     do {
@@ -110,7 +118,7 @@ public actor VaultUnlocker {
     )
     try wrappedKeyStore.saveVaultKey(wrapped)
 
-    // Step 7: return in-memory vault_key
-    return vaultKey
+    // Step 7: return in-memory vault_key + userId
+    return UnlockResult(vaultKey: vaultKey, userId: unlockData.userId)
   }
 }

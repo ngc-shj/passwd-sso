@@ -16,14 +16,16 @@ final class EntryCacheFileTests: XCTestCase {
     issuedAt: Date? = nil,
     refreshAt: Date? = nil,
     entryCount: UInt32 = 0,
-    uuid: Data? = nil
+    uuid: Data? = nil,
+    userId: String = "test-user-id"
   ) -> CacheHeader {
     CacheHeader(
       cacheVersionCounter: counter ?? self.counter,
       cacheIssuedAt: issuedAt ?? Date(),
       lastSuccessfulRefreshAt: refreshAt ?? Date(),
       entryCount: entryCount,
-      hostInstallUUID: uuid ?? hostInstallUUID
+      hostInstallUUID: uuid ?? hostInstallUUID,
+      userId: userId
     )
   }
 
@@ -368,6 +370,98 @@ final class EntryCacheFileTests: XCTestCase {
         XCTAssertEqual(kind, .headerMissing)
       } else {
         XCTFail("Expected .headerMissing (not using .tmp), got \(error)")
+      }
+    }
+  }
+
+  // MARK: - userId round-trip
+
+  func testHeaderUserIdRoundTrip() throws {
+    let url = tmpURL()
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let header = makeHeader(entryCount: 0, userId: "user-42")
+    let data = CacheData(header: header, entries: makeEntriesJSON(count: 0))
+    try writeCacheFile(data: data, vaultKey: vaultKey, hostInstallUUID: hostInstallUUID, path: url)
+
+    let read = try readCacheFile(
+      path: url,
+      vaultKey: vaultKey,
+      expectedHostInstallUUID: hostInstallUUID,
+      expectedCounter: counter
+    )
+    XCTAssertEqual(read.header.userId, "user-42")
+  }
+
+  func testHeaderMissingUserIdRejectsAsHeaderInvalid() throws {
+    // Build a header JSON that omits "userId" and inject it into an encrypted blob,
+    // then verify the reader rejects with .headerInvalid.
+    let url = tmpURL()
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    // Build a valid file first, then patch the encrypted header bytes to remove userId.
+    // Easier: build the JSON manually, encrypt, and assemble a file from scratch.
+    let headerJSON = """
+      {
+        "cacheVersionCounter": \(counter),
+        "cacheIssuedAt": \(Int(Date().timeIntervalSince1970)),
+        "lastSuccessfulRefreshAt": \(Int(Date().timeIntervalSince1970)),
+        "entryCount": 0,
+        "hostInstallUUID": "\(hexEncode(hostInstallUUID))"
+      }
+      """.data(using: .utf8)!
+
+    // Build header AAD matching what writeCacheFile uses
+    var aad = Data(capacity: 32)
+    aad.append(contentsOf: Array("CACHEHDR".utf8))
+    let counterBE = counter.bigEndian
+    withUnsafeBytes(of: counterBE) { aad.append(contentsOf: $0) }
+    aad.append(hostInstallUUID)
+
+    let (hdrCipher, hdrIV, hdrTag) = try encryptAESGCM(
+      plaintext: headerJSON, key: vaultKey, aad: aad
+    )
+    var encryptedHeader = Data()
+    encryptedHeader.append(hdrIV)
+    encryptedHeader.append(hdrCipher)
+    encryptedHeader.append(hdrTag)
+
+    // Entries blob (empty array)
+    let entriesJSON = makeEntriesJSON(count: 0)
+    let (entCipher, entIV, entTag) = try encryptAESGCM(plaintext: entriesJSON, key: vaultKey)
+    var encryptedEntries = Data()
+    encryptedEntries.append(entIV)
+    encryptedEntries.append(entCipher)
+    encryptedEntries.append(entTag)
+
+    // Assemble file
+    var fileData = Data()
+    fileData.append(contentsOf: [0x50, 0x53, 0x53, 0x56])  // "PSSV"
+    fileData.append(0x01)  // version
+    fileData.append(contentsOf: [0x00, 0x00, 0x00])  // reserved
+
+    func appendBE32(_ d: inout Data, _ v: UInt32) {
+      let be = v.bigEndian; withUnsafeBytes(of: be) { d.append(contentsOf: $0) }
+    }
+    appendBE32(&fileData, UInt32(encryptedHeader.count))
+    fileData.append(encryptedHeader)
+    appendBE32(&fileData, UInt32(encryptedEntries.count))
+    fileData.append(encryptedEntries)
+
+    try fileData.write(to: url)
+
+    XCTAssertThrowsError(
+      try readCacheFile(
+        path: url,
+        vaultKey: vaultKey,
+        expectedHostInstallUUID: hostInstallUUID,
+        expectedCounter: counter
+      )
+    ) { error in
+      if case EntryCacheError.rejection(let kind) = error {
+        XCTAssertEqual(kind, .headerInvalid, "Missing userId should produce headerInvalid")
+      } else {
+        XCTFail("Expected rejection(.headerInvalid), got \(error)")
       }
     }
   }

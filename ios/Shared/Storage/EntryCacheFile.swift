@@ -9,19 +9,23 @@ public struct CacheHeader: Codable, Sendable, Equatable {
   public let lastSuccessfulRefreshAt: Date
   public let entryCount: UInt32
   public let hostInstallUUID: Data  // 16 bytes
+  /// userId from the vault unlock response — used as AAD input for personal entries.
+  public let userId: String
 
   public init(
     cacheVersionCounter: UInt64,
     cacheIssuedAt: Date,
     lastSuccessfulRefreshAt: Date,
     entryCount: UInt32,
-    hostInstallUUID: Data
+    hostInstallUUID: Data,
+    userId: String
   ) {
     self.cacheVersionCounter = cacheVersionCounter
     self.cacheIssuedAt = cacheIssuedAt
     self.lastSuccessfulRefreshAt = lastSuccessfulRefreshAt
     self.entryCount = entryCount
     self.hostInstallUUID = hostInstallUUID
+    self.userId = userId
   }
 }
 
@@ -240,6 +244,7 @@ private func encodeCacheHeaderJSON(_ header: CacheHeader) throws -> Data {
     "lastSuccessfulRefreshAt": Int(header.lastSuccessfulRefreshAt.timeIntervalSince1970),
     "entryCount": header.entryCount,
     "hostInstallUUID": hexEncode(header.hostInstallUUID),
+    "userId": header.userId,
   ]
   return try JSONSerialization.data(withJSONObject: dict)
 }
@@ -289,7 +294,8 @@ private func parseHeaderJSON(_ data: Data) throws -> CacheHeader {
     let issuedAtInt = obj["cacheIssuedAt"] as? Int,
     let refreshAtInt = obj["lastSuccessfulRefreshAt"] as? Int,
     let entryCountAny = obj["entryCount"],
-    let uuidHex = obj["hostInstallUUID"] as? String
+    let uuidHex = obj["hostInstallUUID"] as? String,
+    let userId = obj["userId"] as? String
   else {
     throw EntryCacheError.rejection(.headerInvalid)
   }
@@ -315,7 +321,8 @@ private func parseHeaderJSON(_ data: Data) throws -> CacheHeader {
     cacheIssuedAt: Date(timeIntervalSince1970: TimeInterval(issuedAtInt)),
     lastSuccessfulRefreshAt: Date(timeIntervalSince1970: TimeInterval(refreshAtInt)),
     entryCount: entryCount,
-    hostInstallUUID: uuidData
+    hostInstallUUID: uuidData,
+    userId: userId
   )
 }
 

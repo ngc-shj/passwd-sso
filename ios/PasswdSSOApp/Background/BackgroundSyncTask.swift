@@ -12,9 +12,10 @@ public enum BackgroundSyncTask {
   /// Register on app launch. Must be called before the app finishes launching.
   public static func register(
     syncService: HostSyncService,
-    vaultKey: @Sendable @escaping () -> SymmetricKey?
+    vaultKey: @Sendable @escaping () -> SymmetricKey?,
+    userId: @Sendable @escaping () -> String?
   ) {
-    let runner = BackgroundSyncRunner(syncService: syncService, vaultKey: vaultKey)
+    let runner = BackgroundSyncRunner(syncService: syncService, vaultKey: vaultKey, userId: userId)
     BGTaskScheduler.shared.register(
       forTaskWithIdentifier: identifier,
       using: nil,
@@ -38,10 +39,16 @@ public enum BackgroundSyncTask {
 final class BackgroundSyncRunner: @unchecked Sendable {
   private let syncService: HostSyncService
   private let vaultKey: @Sendable () -> SymmetricKey?
+  private let userId: @Sendable () -> String?
 
-  init(syncService: HostSyncService, vaultKey: @Sendable @escaping () -> SymmetricKey?) {
+  init(
+    syncService: HostSyncService,
+    vaultKey: @Sendable @escaping () -> SymmetricKey?,
+    userId: @Sendable @escaping () -> String?
+  ) {
     self.syncService = syncService
     self.vaultKey = vaultKey
+    self.userId = userId
   }
 
   func run(task bgTask: BGTask) {
@@ -49,23 +56,25 @@ final class BackgroundSyncRunner: @unchecked Sendable {
     let box = TaskBox(task: bgTask)
     let service = syncService
     let keyProvider = vaultKey
+    let userIdProvider = userId
     Task {
-      await runAsync(box: box, service: service, keyProvider: keyProvider)
+      await runAsync(box: box, service: service, keyProvider: keyProvider, userIdProvider: userIdProvider)
     }
   }
 
   private func runAsync(
     box: TaskBox,
     service: HostSyncService,
-    keyProvider: @Sendable () -> SymmetricKey?
+    keyProvider: @Sendable () -> SymmetricKey?,
+    userIdProvider: @Sendable () -> String?
   ) async {
-    guard let key = keyProvider() else {
+    guard let key = keyProvider(), let uid = userIdProvider() else {
       box.task.setTaskCompleted(success: false)
       BackgroundSyncTask.scheduleNext()
       return
     }
     do {
-      _ = try await service.runSync(vaultKey: key)
+      _ = try await service.runSync(vaultKey: key, userId: uid)
       box.task.setTaskCompleted(success: true)
     } catch {
       box.task.setTaskCompleted(success: false)

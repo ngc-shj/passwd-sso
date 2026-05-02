@@ -178,19 +178,22 @@ private actor StubHostSyncService {
   private let cacheURL: URL
   private let vaultKey: SymmetricKey
   private let entries: [EncryptedEntry]
+  private let userId: String
 
   init(
     bridgeKeyStore: BridgeKeyStore,
     wrappedKeyStore: any WrappedKeyStore,
     cacheURL: URL,
     vaultKey: SymmetricKey,
-    entries: [EncryptedEntry]
+    entries: [EncryptedEntry],
+    userId: String = "stub-user-id"
   ) {
     self.bridgeKeyStore = bridgeKeyStore
     self.wrappedKeyStore = wrappedKeyStore
     self.cacheURL = cacheURL
     self.vaultKey = vaultKey
     self.entries = entries
+    self.userId = userId
   }
 
   func runSync() async throws -> SyncReport {
@@ -198,15 +201,28 @@ private actor StubHostSyncService {
     let blob = try bridgeKeyStore.readDirect()
     let newCounter = blob.cacheVersionCounter &+ 1
 
+    // Convert EncryptedEntry → CacheEntry (personal, aadVersion from entry)
+    let cacheEntries: [CacheEntry] = entries.map { entry in
+      CacheEntry(
+        id: entry.id,
+        teamId: nil,
+        aadVersion: entry.aadVersion,
+        keyVersion: entry.keyVersion,
+        encryptedBlob: entry.encryptedBlob,
+        encryptedOverview: entry.encryptedOverview
+      )
+    }
+
     let encoder = JSONEncoder()
-    let entriesJSON = try encoder.encode(entries)
+    let entriesJSON = try encoder.encode(cacheEntries)
 
     let header = CacheHeader(
       cacheVersionCounter: newCounter,
       cacheIssuedAt: now,
       lastSuccessfulRefreshAt: now,
-      entryCount: UInt32(entries.count),
-      hostInstallUUID: blob.hostInstallUUID
+      entryCount: UInt32(cacheEntries.count),
+      hostInstallUUID: blob.hostInstallUUID,
+      userId: userId
     )
     let cacheData = CacheData(header: header, entries: entriesJSON)
 
@@ -223,7 +239,7 @@ private actor StubHostSyncService {
     let bytesWritten = (attrs?[.size] as? Int) ?? entriesJSON.count
 
     return SyncReport(
-      entriesFetched: entries.count,
+      entriesFetched: cacheEntries.count,
       cacheBytesWritten: bytesWritten,
       lastSuccessfulRefreshAt: now
     )

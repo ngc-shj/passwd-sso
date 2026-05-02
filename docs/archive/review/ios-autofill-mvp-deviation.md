@@ -79,3 +79,71 @@
 10. **Test files for `PasswdSSOApp` types require `@testable import PasswdSSOApp`.** `AutoLockServiceTests`, `VaultUnlockerTests`, `HostSyncServiceTests`, `StaleBlobRecoveryServiceTests`, and `EntryFetcherTests` originally only imported `Shared`. These test files reference types defined in the `PasswdSSOApp` module (`AutoLockService`, `VaultUnlockError`, `VaultUnlockData`, `MobileAPIClient`, `EntryFetcher`, `StaleBlobRecoveryService`). Added `@testable import PasswdSSOApp` to each. The `BUNDLE_LOADER` / `TEST_HOST` linker setup already links the test binary against `PasswdSSOApp`; the import was the only missing piece.
 
 **No deviations** from: AES-256-GCM cache encryption (header AAD = "CACHEHDR" || counter BE-8 || hostInstallUUID 16; entries blob unprotected by AAD), HKDF cache key derivation (info="passwd-sso-cache-v1"), atomic write (.tmp → replaceItemAt), write ordering (cache first, counter update second), bridge-key blob layout (bridge_key 32 || counter 8 BE || uuid 16 = 56 bytes), side-channel controls (isSecureTextEntry, capturedDidChangeNotification overlay, localOnly pasteboard + 60s expiry), BGTaskScheduler identifier "com.passwd-sso.cache-sync" with 15-min earliestBeginDate, PBKDF2 + AES-GCM vault unlock flow, and stale-blob forward recovery logic.
+
+## Steps 8-9 (AutoFill extension password + TOTP) — 2026-05-02
+
+**Deviations from plan**:
+
+1. **`SyncEncryptedEntry` renamed to `CacheEntry` in `CredentialResolver.swift`.** The plan's brief specified a wire model called `SyncEncryptedEntry` for entries in the App Group cache. However, `Shared/Sync/BackgroundSyncCoordinator.swift` (Step 5) already defines a `SyncEncryptedEntry` with a different shape (String blobs, not `EncryptedData` hex-coded blobs). Reusing the name would have caused a "invalid redeclaration" compile error. The new model is named `CacheEntry` to reflect its purpose (App Group cache entries with hex-encoded AES-GCM blobs). No change to the on-disk format.
+
+2. **`resolveCandidates(for:)` takes `[ServiceIdentifier]` instead of `[ASCredentialServiceIdentifier]`.** `ASCredentialServiceIdentifier` is a non-Sendable Objective-C class. Swift 6 strict concurrency rejects passing it across an actor boundary (the `CredentialResolver` is an actor). A new `ServiceIdentifier: Sendable` struct is introduced in `Shared/AutoFill/CredentialResolver.swift` to carry the same data (identifier string + isURL flag) across the boundary. The extension converts inbound `ASCredentialServiceIdentifier` values to `ServiceIdentifier` before the actor hop. Tests use `ServiceIdentifier` directly (no import of AuthenticationServices needed in tests).
+
+3. **`.app` IdentifierType guarded by `@available(iOS 26.2, *)`** in `CredentialPickerView.swift`. The plan's app-side AutoFill confirmation uses `ASCredentialServiceIdentifier.IdentifierType.app` to detect app-bundle-ID requests. This enum case was introduced in iOS 26.2 (not yet in the iOS 17.0 deployment target baseline). The implementation wraps it in `if #available(iOS 26.2, *) { ... }` so the extension compiles cleanly on iOS 17 while the app-side confirmation UI activates automatically when running on iOS 26.2+.
+
+4. **`ASOneTimeCodeCredential` and `completeOneTimeCodeRequest(using:)` guarded by `@available(iOS 18.0, *)`** in `CredentialProviderViewController.swift`. The plan refers to iOS 17+ One-Time-Codes path, but `ASOneTimeCodeCredential` and the async `completeOneTimeCodeRequest` are iOS 18+. `prepareOneTimeCodeCredentialList(for:)` itself is iOS 17+. The implementation routes into the `#available(iOS 18.0, *)` block for credential delivery; on iOS 17.x the code reaches `cancel(with: nil)`. In practice TOTP AutoFill requires iOS 18+ anyway; the iOS 17 path is a safe fallback. The deployment target (iOS 17.0) is unchanged.
+
+5. **`hasTOTP: Bool` added to `VaultEntrySummary` with default `false`** (out-of-scope model change, brief-authorized). The plan briefly explicitly authorizes "add `hasTOTP: Bool` to `VaultEntrySummary` if not already present." The field was absent; added with default `false` so all existing callsites are unaffected and no existing test breaks.
+
+6. **`RollbackFlagWriter` / `RollbackFlagVerifier` placed in `Shared/AutoFill/` (brief says `Shared/`).** The brief specifies `ios/Shared/AutoFill/RollbackFlagWriter.swift`. Placing it under `Shared/AutoFill/` (a new subdirectory) matches the brief. XcodeGen's `path: Shared` glob recurses into subdirectories automatically; no `project.yml` change was needed.
+
+7. **`buildCacheFile` test helper uses `CacheEntry` (the renamed type) for the entries JSON.** The test builds the encrypted entries array with `[CacheEntry]` and `JSONEncoder().encode(entries)` to produce the JSON that `readCacheFile` / `CredentialResolver` will later decode. This is consistent with how `HostSyncService` will actually write the file.
+
+**No deviations** from: single bridge_key Keychain read per fill (T42 verified in `resolveCandidates_singleKeychainRead`), vault_key zeroed before actor method returns (verified structurally in `decryptEntryDetail_zeroesVaultKeyAfterReturn`), extension never writes to pasteboard (no UIPasteboard calls in extension code), extension makes no network calls (no URLSession / URLRequest in extension target), rollback flag HMAC key derivation via HKDF(vaultKey, info="rollback-flag-mac", salt=zero32), atomic flag write (.tmp → replaceItemAt), team-key staleness threshold of 15 minutes, URL host matching parity with browser extension.
+
+### Post-handoff fix (orchestrator) — AAD propagation — 2026-05-02
+
+Step 8-9 shipped without wiring AAD into the resolver's decrypt path. Against
+real server data, AES-GCM authentication would fail for every entry because the
+server always emits AAD-bound ciphertext for entries with `aadVersion >= 1`
+(personal) or any team entry (always AAD). Fixed by:
+
+1. **`CacheHeader.userId`** — added `userId: String` to `CacheHeader` and the
+   encrypted-header JSON, so the AutoFill extension reads the user ID from the
+   cache file without needing a network call or Keychain lookup. The header AAD
+   (`"CACHEHDR" || counter BE-8 || hostInstallUUID 16`) is unchanged — `userId`
+   lives inside the encrypted plaintext, authenticated by the GCM tag.
+
+2. **`CacheEntry` extended** — added `aadVersion`, `keyVersion`, `teamKeyVersion`,
+   `itemKeyVersion`, and `encryptedItemKey` fields so every entry carries the
+   data needed to reconstruct its AAD at decrypt time.
+
+3. **`CredentialResolver` AAD wiring** — `decryptSummary` and `decryptDetail` now
+   accept `userId` (from `cacheData.header.userId`) and build the correct AAD:
+   personal entries use `buildPersonalEntryAAD(userId, entryId)` when
+   `aadVersion >= 1`; team entries always use
+   `buildTeamEntryAAD(teamId, entryId, vaultType, itemKeyVersion)`.
+
+4. **ItemKey unwrapping** — `resolveTeamEntryKey` decrypts `encryptedItemKey`
+   with `buildItemKeyWrapAAD(teamId, entryId, teamKeyVersion)` when
+   `itemKeyVersion >= 1`, yielding the per-entry key used for blob/overview
+   decryption. When `itemKeyVersion == 0` the teamKey is used directly.
+
+5. **`VaultUnlocker.unlock`** — return type changed from `SymmetricKey` to
+   `UnlockResult { vaultKey, userId }`. The `userId` flows from the
+   `/api/vault/unlock/data` server response into `HostSyncService.runSync` and
+   ultimately into the cache header.
+
+6. **`EntryFetcher` team path** — `fetchTeamAsCacheEntries` decodes the flat
+   server response format (`TeamEncryptedEntry`) and converts it to `CacheEntry`
+   with `teamKeyVersion`/`itemKeyVersion`/`encryptedItemKey` populated.
+   `HostSyncService` converts personal `EncryptedEntry` → `CacheEntry` inline.
+
+7. **Tests** — all fixture construction updated to use `aadVersion: 0` for
+   no-AAD entries and new AAD-bound helpers (`makePersonalCacheEntry`,
+   `makeTeamCacheEntry`) for AAD-bound fixtures. 6 new resolver tests and 2
+   new cache-file tests added. Total unit test count: 154 → 162 (+8).
+
+**Cross-verification**: `buildPersonalEntryAAD(userId: "u-1", entryId: "e-1")`
+produces `505601020003752d310003652d31` (hex), byte-identical to the Node.js
+reference output from `crypto-aad.ts`. AAD parity already covered by
+`AADParityTests.swift` (Step 5).

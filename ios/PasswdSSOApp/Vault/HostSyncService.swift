@@ -29,7 +29,10 @@ public actor HostSyncService {
 
   /// Performs the full host sync.
   /// Per plan §"Write ordering": cache file is written first; blob counter updated after.
-  public func runSync(vaultKey: SymmetricKey) async throws -> SyncReport {
+  /// - Parameters:
+  ///   - vaultKey: Vault encryption key (never persisted).
+  ///   - userId: User ID from the unlock response; stored in the cache header for AAD construction.
+  public func runSync(vaultKey: SymmetricKey, userId: String) async throws -> SyncReport {
     let now = Date()
 
     // Read current blob to get counter and UUID
@@ -42,16 +45,30 @@ public actor HostSyncService {
     let personal = try await personalEntries
     let teams = (try? await teamMemberships) ?? []
 
+    // Convert personal entries to CacheEntry (with aadVersion/keyVersion propagated)
+    var allCacheEntries: [CacheEntry] = personal.map { entry in
+      CacheEntry(
+        id: entry.id,
+        teamId: nil,
+        aadVersion: entry.aadVersion,
+        keyVersion: entry.keyVersion,
+        teamKeyVersion: nil,
+        itemKeyVersion: nil,
+        encryptedItemKey: nil,
+        encryptedBlob: entry.encryptedBlob,
+        encryptedOverview: entry.encryptedOverview
+      )
+    }
+
     // Fetch team entries sequentially to avoid overwhelming the server
-    var allEntries: [EncryptedEntry] = personal
     for team in teams {
-      let teamEntries = try await entryFetcher.fetchTeam(teamId: team.id)
-      allEntries.append(contentsOf: teamEntries)
+      let teamCacheEntries = try await entryFetcher.fetchTeamAsCacheEntries(teamId: team.id)
+      allCacheEntries.append(contentsOf: teamCacheEntries)
     }
 
     // Encode all entries as JSON
     let encoder = JSONEncoder()
-    let entriesJSON = try encoder.encode(allEntries)
+    let entriesJSON = try encoder.encode(allCacheEntries)
 
     // Build cache header with counter N+1
     let newCounter = blob.cacheVersionCounter &+ 1
@@ -62,8 +79,9 @@ public actor HostSyncService {
       cacheVersionCounter: newCounter,
       cacheIssuedAt: now,
       lastSuccessfulRefreshAt: now,
-      entryCount: UInt32(allEntries.count),
-      hostInstallUUID: blob.hostInstallUUID
+      entryCount: UInt32(allCacheEntries.count),
+      hostInstallUUID: blob.hostInstallUUID,
+      userId: userId
     )
     let cacheData = CacheData(header: header, entries: entriesJSON)
 
@@ -83,7 +101,7 @@ public actor HostSyncService {
     let bytesWritten = (cacheAttributes?[.size] as? Int) ?? entriesJSON.count
 
     return SyncReport(
-      entriesFetched: allEntries.count,
+      entriesFetched: allCacheEntries.count,
       cacheBytesWritten: bytesWritten,
       lastSuccessfulRefreshAt: now
     )

@@ -44,7 +44,8 @@ final class StaleBlobRecoveryServiceTests: XCTestCase {
       cacheIssuedAt: Date(),
       lastSuccessfulRefreshAt: Date(),
       entryCount: 0,
-      hostInstallUUID: uuid
+      hostInstallUUID: uuid,
+      userId: "test-user-id"
     )
     let data = CacheData(header: header, entries: "[]".data(using: .utf8)!)
     try writeCacheFile(data: data, vaultKey: vaultKey, hostInstallUUID: uuid, path: cacheURL)

@@ -10,6 +10,8 @@ public struct VaultEntrySummary: Codable, Sendable, Equatable, Identifiable {
   public let tags: [String]
   public let teamId: String?
   public let lastAccessedAt: Date?
+  /// True when the entry has a TOTP secret (used to filter the TOTP AutoFill picker).
+  public let hasTOTP: Bool
 
   public init(
     id: String,
@@ -19,7 +21,8 @@ public struct VaultEntrySummary: Codable, Sendable, Equatable, Identifiable {
     additionalUrlHosts: [String] = [],
     tags: [String] = [],
     teamId: String? = nil,
-    lastAccessedAt: Date? = nil
+    lastAccessedAt: Date? = nil,
+    hasTOTP: Bool = false
   ) {
     self.id = id
     self.title = title
@@ -29,5 +32,6 @@ public struct VaultEntrySummary: Codable, Sendable, Equatable, Identifiable {
     self.tags = tags
     self.teamId = teamId
     self.lastAccessedAt = lastAccessedAt
+    self.hasTOTP = hasTOTP
   }
 }
