@@ -1,5 +1,6 @@
 {
   "title": "Admin Console",
+  "openMenu": "Open menu",
   "backToVault": "Back to vault",
   "scopeTenant": "Tenant",
   "scopeLabel": "Management scope",

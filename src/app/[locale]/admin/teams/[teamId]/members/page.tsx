@@ -186,8 +186,14 @@ export default function TeamMembersPage({
           icon={Users}
           title={t("memberListTitle")}
           description={t("memberListDescription")}
-          action={isAdmin ? (
-            <div className="flex items-center gap-2">
+        />
+        <CardContent className="space-y-4">
+          {isAdmin && (
+            // Action buttons wrap onto multiple lines on narrow viewports so
+            // the description above never gets squeezed into a vertical
+            // single-character column on mobile (shadcn CardAction's grid
+            // would otherwise force buttons onto the right column).
+            <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" onClick={() => setAddDialogOpen(true)}>
                 <UserPlus className="h-4 w-4 mr-2" />
                 {tAdmin("memberAddButton")}
@@ -201,9 +207,7 @@ export default function TeamMembersPage({
                 </Button>
               )}
             </div>
-          ) : undefined}
-        />
-        <CardContent className="space-y-4">
+          )}
           {members.length > 0 && (
             <div className="relative">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -276,17 +280,18 @@ export default function TeamMembersPage({
         </CardContent>
       </Card>
 
-      {invitations.length > 0 && (
-        <Card>
-          <CardContent className="pt-6">
-            <TeamPendingInvitationsList
-              invitations={invitations}
-              teamId={teamId}
-              onCancel={fetchAll}
-            />
-          </CardContent>
-        </Card>
-      )}
+      {/* Always render the pending-invitations card. The component itself
+          shows an empty-state message when there are no invitations (per
+          round-1 finding F3 — avoids layout shift after first invite). */}
+      <Card>
+        <CardContent className="pt-6">
+          <TeamPendingInvitationsList
+            invitations={invitations}
+            teamId={teamId}
+            onCancel={fetchAll}
+          />
+        </CardContent>
+      </Card>
 
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
         <DialogContent className="max-w-lg">

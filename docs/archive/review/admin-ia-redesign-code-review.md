@@ -177,3 +177,54 @@ None — all findings include Evidence + concrete Fix.
 | `npx vitest run` (focused on touched tests) | ✅ 197 passed |
 | `npm run lint` | ✅ Clean |
 | `npx next build` | ✅ Compiled successfully |
+
+---
+
+# Round 2 — verification + UX issue from user screenshot
+
+Date: 2026-05-02
+
+## Findings discovered in round 2
+
+### V1 [Major]: F3 fix incomplete — parent page guard still wraps PendingInvitationsList in `length > 0` Card
+- File: `src/app/[locale]/admin/teams/[teamId]/members/page.tsx:283`
+- Evidence: round-1 F3 fix landed only on the component (returns empty state when invitations list is empty); the parent page still wrapped the entire Card in `{invitations.length > 0 && (<Card>...)}`. So the new empty-state branch was unreachable; layout shift after first invite still occurred.
+- Fix: Removed the parent `length > 0` guard. The PendingInvitationsList card is always rendered; component renders header + empty-state copy when list is empty.
+
+### V2 [Major]: Mobile hamburger button has no accessible name
+- File: `src/components/admin/admin-header.tsx:18-25`
+- Evidence: shadcn `Button size="icon"` containing only a lucide `<Menu>` icon, no `aria-label` / sr-only text. The new round-1 @mobile E2E test queries via `getByRole("button", { name: /menu|メニュー/i })` — would not match. Also a real a11y bug regardless of the test.
+- Fix: Added `aria-label={t("openMenu")}` and new i18n keys `AdminConsole.openMenu` (ja: メニューを開く / en: Open menu).
+
+### V3 [Major]: Mobile description column squeeze
+(NEW finding from user screenshot.)
+- File: `src/app/[locale]/admin/teams/[teamId]/members/page.tsx:185-205` (used `SectionCardHeader.action` with 2 buttons)
+- Evidence: User's mobile screenshot showed the "チームメンバーとロールを表示・管理します。" description rendered character-by-character vertically. Cause: shadcn `CardHeader` switches to `grid-cols-[1fr_auto]` when an action slot is present; on a 390px-wide viewport, two side-by-side buttons (メンバーを追加 + オーナー権限を移譲) consume ~280px of `auto`, leaving only ~110px for the title+description `1fr` column. Japanese text breaks at character boundaries.
+- Fix: Removed the `action` prop from SectionCardHeader; moved the two buttons into a `flex flex-wrap items-center gap-2` row at the top of CardContent. Buttons now wrap onto a second line on narrow viewports; description always gets full width above.
+
+## Verification of round-1 fixes (round 2 sub-agent)
+
+| Round-1 ID | Status |
+|---|---|
+| F1=T1 (sentinel regex) | ✅ verified |
+| F2 (service-accounts layout title) | ✅ verified |
+| F3 (PendingInvitationsList empty state) | ⚠️ partial → V1 (parent guard); fixed |
+| F4=T3 (countLeafLinks wired in) | ✅ verified |
+| F5=T2/T5 (mobile test rewrite) | ⚠️ partial → V2 (hamburger aria-label); fixed |
+| T4 (terminology lock) | ✅ verified |
+| T15 (vault-locked redirect E2E) | ✅ verified |
+
+## Resolution Status (round 2)
+
+### V1, V2, V3 — Resolved
+All three resolved as described above. Files modified:
+- `src/app/[locale]/admin/teams/[teamId]/members/page.tsx` (V1 + V3)
+- `src/components/admin/admin-header.tsx` (V2)
+- `messages/{ja,en}/AdminConsole.json` (V2 — new `openMenu` keys)
+
+## Verification Gate (round 2 fixes)
+
+| Gate | Result |
+|---|---|
+| `npx vitest run` (focused) | ✅ 77 passed |
+| `npm run lint` | ✅ Clean |

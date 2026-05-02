@@ -1,5 +1,6 @@
 {
   "title": "管理コンソール",
+  "openMenu": "メニューを開く",
   "backToVault": "保管庫に戻る",
   "scopeTenant": "テナント",
   "scopeLabel": "管理スコープ",
