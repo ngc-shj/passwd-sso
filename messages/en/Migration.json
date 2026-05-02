@@ -16,10 +16,5 @@
         "lock": "Lock the vault from the new header icon button — one click"
       }
     }
-  },
-  "movedNotice": {
-    "title": "This page moved",
-    "body": "This page moved to \"{section}\". Please update your bookmarks.",
-    "dismiss": "Dismiss"
   }
 }

@@ -11,7 +11,7 @@ import { Lock } from "lucide-react";
 
 export default function RecoveryKeyPage() {
   const t = useTranslations("Settings");
-  const { vaultStatus } = useVault();
+  const { status: vaultStatus } = useVault();
   const [dialogOpen, setDialogOpen] = useState(false);
 
   if (vaultStatus !== VAULT_STATUS.UNLOCKED) {
