@@ -8,11 +8,15 @@ import { getAppOrigin } from "@/lib/url-helpers";
  *   without query and fragment parts.
  *
  * Canonicalization rules pinned by this implementation:
- *  - scheme: lowercase
- *  - host:   lowercase
- *  - port:   stripped if it is the scheme default (80/443)
- *  - path:   exactly the route as configured (proxy rewrites must NOT
- *            reach this layer — server records its canonical URL once)
+ *  - scheme:    lowercase
+ *  - host:      lowercase
+ *  - port:      stripped if it is the scheme default (80/443)
+ *  - basePath:  preserved from APP_URL/AUTH_URL pathname (so basePath-mounted
+ *               deployments like `https://example.com/passwd-sso` produce
+ *               `https://example.com/passwd-sso/api/...` matching the URL the
+ *               client actually called)
+ *  - path:      exactly the route as configured (proxy rewrites must NOT
+ *               reach this layer — server records its canonical URL once)
  *  - query, fragment: removed
  *
  * The host is read from APP_URL/AUTH_URL at call time so that proxy
@@ -32,8 +36,14 @@ export function canonicalHtu(args: { route: string }): string {
     (scheme === "https:" && (port === "" || port === "443"));
   const authority = isDefaultPort ? host : `${host}:${port}`;
 
+  // Preserve basePath from APP_URL pathname. For non-basePath deployments
+  // the pathname is "" or "/" — both strip to "" so the legacy URL shape
+  // `<scheme>//<authority><route>` is produced unchanged.
+  let basePath = url.pathname;
+  if (basePath.endsWith("/")) basePath = basePath.slice(0, -1);
+
   const path = normalizePath(args.route);
-  return `${scheme}//${authority}${path}`;
+  return `${scheme}//${authority}${basePath}${path}`;
 }
 
 function normalizePath(route: string): string {
