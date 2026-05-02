@@ -45,13 +45,10 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
       ],
     },
     {
-      // Devices section — active sessions (personal-scoped)
+      // Devices section — flat (single feature: active sessions)
       href: "/dashboard/settings/devices",
       label: t("section.devices"),
       icon: Monitor,
-      children: [
-        { href: "/dashboard/settings/devices", label: t("subTab.activeDevices"), icon: Monitor },
-      ],
     },
     {
       // Vault section — key rotation, delegation sessions, travel mode (personal-scoped)
@@ -65,13 +62,10 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
       ],
     },
     {
-      // Sharing section — emergency access configuration (personal-scoped)
-      href: "/dashboard/settings/sharing",
+      // Sharing section — flat (single feature: emergency access)
+      href: "/dashboard/settings/sharing/emergency-access",
       label: t("section.sharing"),
       icon: HeartPulse,
-      children: [
-        { href: "/dashboard/settings/sharing/emergency-access", label: t("subTab.emergencyAccess"), icon: HeartPulse },
-      ],
     },
     {
       // Developer section — programmatic access (personal-scoped)

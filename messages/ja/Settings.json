@@ -3,9 +3,9 @@
   "section": {
     "account": "アカウント",
     "auth": "本人認証",
-    "devices": "デバイスとセッション",
+    "devices": "デバイス",
     "vault": "保管庫",
-    "sharing": "共有と委任",
+    "sharing": "共有・委任",
     "developer": "開発者"
   },
   "subTab": {

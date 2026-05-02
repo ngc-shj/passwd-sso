@@ -3,9 +3,9 @@
   "section": {
     "account": "Account",
     "auth": "Sign-in",
-    "devices": "Devices & sessions",
+    "devices": "Devices",
     "vault": "Vault",
-    "sharing": "Sharing & delegation",
+    "sharing": "Sharing",
     "developer": "Developer"
   },
   "subTab": {
