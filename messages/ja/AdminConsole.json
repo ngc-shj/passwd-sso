@@ -48,15 +48,13 @@
   "sectionTeams": "チーム",
   "sectionTeamsDesc": "組織のチームを管理します。",
 
-  "sectionMachineIdentity": "マシンID",
-  "sectionMachineIdentityDesc": "サービスアカウント、MCPクライアント、運用者トークンの管理。",
+  "sectionMachineIdentityServiceAccounts": "サービスアカウント",
+  "sectionMachineIdentityServiceAccountsDesc": "サービスアカウントとそれが要求する JIT アクセスリクエストの管理。",
   "sectionMachineIdentityMcpClients": "MCP クライアント",
   "sectionMachineIdentityMcpClientsDesc": "AIエージェントが MCP ゲートウェイ経由で接続するためのクライアント登録。",
   "sectionMachineIdentityOperatorTokens": "運用者トークン",
   "sectionMachineIdentityOperatorTokensDesc": "admin/maintenance 系ルートに対するオペレータごとの Bearer トークン。",
 
-  "sectionPolicies": "ポリシー",
-  "sectionPoliciesDesc": "認証・マシンID・データ保存・アクセス制御の各ポリシー設定。",
   "sectionPolicyAuthentication": "認証ポリシー",
   "sectionPolicyAuthenticationDesc": "パスワード、セッション、パスキー、ロックアウトの認証ポリシー。",
   "sectionPolicyMachineIdentity": "マシンID ポリシー",

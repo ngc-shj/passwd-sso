@@ -41,14 +41,15 @@ export function TeamPendingInvitationsList({ invitations, teamId, onCancel }: Pr
     }
   };
 
-  if (invitations.length === 0) return null;
-
   return (
     <section className="space-y-4">
       <h3 className="flex items-center gap-2 text-sm font-medium">
         <LinkIcon className="h-4 w-4 text-muted-foreground" />
         {t("pendingInvitations")}
       </h3>
+      {invitations.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{t("noInvitations")}</p>
+      ) : (
       <div className="space-y-2">
         {invitations.map((inv) => (
           <div
@@ -76,6 +77,7 @@ export function TeamPendingInvitationsList({ invitations, teamId, onCancel }: Pr
           </div>
         ))}
       </div>
+      )}
     </section>
   );
 }

@@ -61,48 +61,49 @@ export function countLeafLinks(items: NavItem[]): number {
   );
 }
 
-function useNavItems(
-  pathname: string,
-  t: ReturnType<typeof useTranslations>
-): NavItem[] {
-  const teamMatch = pathname.match(/\/admin\/teams\/([^/]+)/);
-  if (teamMatch) {
-    const teamId = teamMatch[1];
-    return [
-      {
-        href: `/admin/teams/${teamId}/general`,
-        label: t("navGeneral"),
-        icon: <Settings2 className="h-4 w-4 shrink-0" />,
-      },
-      {
-        href: `/admin/teams/${teamId}/members`,
-        label: t("navMembers"),
-        icon: <Users className="h-4 w-4 shrink-0" />,
-      },
-      {
-        href: `/admin/teams/${teamId}/policy`,
-        label: t("navTeamPolicy"),
-        icon: <ListChecks className="h-4 w-4 shrink-0" />,
-      },
-      {
-        href: `/admin/teams/${teamId}/key-rotation`,
-        label: t("navTeamKeyRotation"),
-        icon: <KeyRound className="h-4 w-4 shrink-0" />,
-      },
-      {
-        href: `/admin/teams/${teamId}/webhooks`,
-        label: t("navTeamWebhooks"),
-        icon: <Webhook className="h-4 w-4 shrink-0" />,
-      },
-      {
-        href: `/admin/teams/${teamId}/audit-logs`,
-        label: t("navAuditLogs"),
-        icon: <ScrollText className="h-4 w-4 shrink-0" />,
-      },
-    ];
-  }
+type TFn = ReturnType<typeof useTranslations>;
 
-  // Tenant scope (default)
+/**
+ * Pure navItem factories. Extracted from `useNavItems` so tests can derive
+ * the expected link count via `countLeafLinks(...)` rather than hard-coding
+ * literals (round-1 finding F4/T3 — RT3).
+ */
+export function getTeamNavItems(t: TFn, teamId: string): NavItem[] {
+  return [
+    {
+      href: `/admin/teams/${teamId}/general`,
+      label: t("navGeneral"),
+      icon: <Settings2 className="h-4 w-4 shrink-0" />,
+    },
+    {
+      href: `/admin/teams/${teamId}/members`,
+      label: t("navMembers"),
+      icon: <Users className="h-4 w-4 shrink-0" />,
+    },
+    {
+      href: `/admin/teams/${teamId}/policy`,
+      label: t("navTeamPolicy"),
+      icon: <ListChecks className="h-4 w-4 shrink-0" />,
+    },
+    {
+      href: `/admin/teams/${teamId}/key-rotation`,
+      label: t("navTeamKeyRotation"),
+      icon: <KeyRound className="h-4 w-4 shrink-0" />,
+    },
+    {
+      href: `/admin/teams/${teamId}/webhooks`,
+      label: t("navTeamWebhooks"),
+      icon: <Webhook className="h-4 w-4 shrink-0" />,
+    },
+    {
+      href: `/admin/teams/${teamId}/audit-logs`,
+      label: t("navAuditLogs"),
+      icon: <ScrollText className="h-4 w-4 shrink-0" />,
+    },
+  ];
+}
+
+export function getTenantNavItems(t: TFn): NavItem[] {
   return [
     {
       href: "/admin/tenant/members",
@@ -156,6 +157,12 @@ function useNavItems(
       icon: <ShieldAlert className="h-4 w-4 shrink-0" />,
     },
   ];
+}
+
+function useNavItems(pathname: string, t: TFn): NavItem[] {
+  const teamMatch = pathname.match(/\/admin\/teams\/([^/]+)/);
+  if (teamMatch) return getTeamNavItems(t, teamMatch[1]);
+  return getTenantNavItems(t);
 }
 
 function SidebarNav({

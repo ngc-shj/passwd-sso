@@ -186,51 +186,55 @@ test.describe("Admin IA — team nav", () => {
   });
 });
 
-// ── Mobile sidebar test ───────────────────────────────────────────────────────
+// ── Mobile sidebar smoke test ────────────────────────────────────────────────
+// The admin sidebar groups are statically expanded (group headers are <div>,
+// not collapsible buttons), so there's no "tap to expand" interaction to test.
+// Instead, verify on a mobile viewport: (1) the hamburger trigger opens a
+// sheet containing the sidebar, (2) sidebar links are tap-targetable, (3)
+// tapping a deeply-nested child navigates correctly with the sheet closing.
 
-test("@mobile admin sidebar group expansion", async ({ page }) => {
+test("@mobile admin sidebar sheet opens and child link navigates", async ({ page }) => {
   const { tenantAdmin } = getAuthState();
   const context = page.context();
   await injectSession(context, tenantAdmin.sessionToken);
 
-  // Set mobile viewport
   await page.setViewportSize({ width: 390, height: 844 });
-
-  await page.goto("/ja/dashboard");
-  const lockPage = new VaultLockPage(page);
-  const passphraseVisible = await lockPage.passphraseInput.isVisible({ timeout: 5_000 }).catch(() => false);
-  if (passphraseVisible) {
-    await lockPage.unlockAndWait(tenantAdmin.passphrase!);
-  }
-
   await page.goto("/ja/admin/tenant/members");
-  await page.waitForLoadState("networkidle");
 
-  // Open hamburger menu if present (mobile view)
+  // The mobile menu trigger is the only menu-labeled button in the admin
+  // header. A failure here is a real regression — let it throw, no `.catch`
+  // fallback (round-1 finding T5 — fallbacks mask failures).
   const hamburger = page.getByRole("button", { name: /menu|メニュー/i }).first();
-  const isHamburgerVisible = await hamburger.isVisible({ timeout: 3_000 }).catch(() => false);
-  if (isHamburgerVisible) {
-    await hamburger.click();
-  }
+  await hamburger.click();
 
-  // Tap the "Policies" group item in the sidebar
-  const policiesLink = page.getByRole("button", { name: /ポリシー|Policies/i }).first();
-  const isPoliciesVisible = await policiesLink.isVisible({ timeout: 5_000 }).catch(() => false);
+  // Sidebar sheet opens — its policy/authentication child link is now visible.
+  // Use `link` role with strict name matching to avoid matching aria-label
+  // collisions (per memory feedback_e2e_aria_label_phantom_match).
+  const authPolicyLink = page
+    .locator('a[href*="/admin/tenant/policies/authentication"]')
+    .first();
+  await expect(authPolicyLink).toBeVisible({ timeout: 5_000 });
+  await authPolicyLink.click();
 
-  if (isPoliciesVisible) {
-    await policiesLink.click();
-    // Tap first child — Authentication Policy
-    const authLink = page.getByRole("link", { name: /認証ポリシー|Authentication policy/i }).first();
-    const isAuthVisible = await authLink.isVisible({ timeout: 5_000 }).catch(() => false);
-    if (isAuthVisible) {
-      await authLink.click();
-      await page.waitForLoadState("networkidle");
-      await expect(page).toHaveURL(/\/policies\/authentication/, { timeout: 10_000 });
-    }
-  } else {
-    // On desktop viewport fallback — just navigate directly
-    await page.goto("/ja/admin/tenant/policies/authentication/password");
-    await page.waitForLoadState("networkidle");
-    await expect(page).toHaveURL(/\/policies\/authentication\/password/, { timeout: 10_000 });
-  }
+  // After tap: sheet closes, page navigates, redirect cascades to default leaf.
+  await expect(page).toHaveURL(/\/admin\/tenant\/policies\/authentication\/password$/);
+});
+
+// ── Vault-locked redirect cascade ────────────────────────────────────────────
+// Verify that admin redirect-only pages (group landings) work even when the
+// vault is locked. Admin pages do NOT have a top-level VaultGate; vault-locked
+// cards self-gate. Round-1 finding T15.
+
+test("vault-locked: group-landing redirect still cascades to leaf", async ({ page }) => {
+  const { tenantAdmin } = getAuthState();
+  const context = page.context();
+  await injectSession(context, tenantAdmin.sessionToken);
+
+  // Do NOT unlock the vault. Navigate directly to a group landing URL.
+  await page.goto("/ja/admin/tenant/policies");
+
+  // The redirect cascade should complete: /policies → /policies/authentication
+  // → /policies/authentication/password. The leaf renders (vault-locked
+  // cards self-gate; the page itself loads).
+  await expect(page).toHaveURL(/\/admin\/tenant\/policies\/authentication\/password$/);
 });

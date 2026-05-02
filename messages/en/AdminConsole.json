@@ -48,15 +48,13 @@
   "sectionTeams": "Teams",
   "sectionTeamsDesc": "Manage organization teams.",
 
-  "sectionMachineIdentity": "Machine identity",
-  "sectionMachineIdentityDesc": "Manage service accounts, MCP clients, and operator tokens.",
+  "sectionMachineIdentityServiceAccounts": "Service accounts",
+  "sectionMachineIdentityServiceAccountsDesc": "Manage service accounts and the JIT access requests they raise.",
   "sectionMachineIdentityMcpClients": "MCP clients",
   "sectionMachineIdentityMcpClientsDesc": "Client registrations for AI agents to connect via the MCP gateway.",
   "sectionMachineIdentityOperatorTokens": "Operator tokens",
   "sectionMachineIdentityOperatorTokensDesc": "Per-operator bearer tokens for admin/maintenance routes.",
 
-  "sectionPolicies": "Policies",
-  "sectionPoliciesDesc": "Configure authentication, machine-identity, data retention, and access control policies.",
   "sectionPolicyAuthentication": "Authentication policy",
   "sectionPolicyAuthenticationDesc": "Password, session, passkey, and lockout authentication policies.",
   "sectionPolicyMachineIdentity": "Machine identity policy",

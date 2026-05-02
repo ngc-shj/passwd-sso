@@ -39,28 +39,21 @@ function collectSrcFiles(dir: string): string[] {
   return results;
 }
 
-const NEW_KEY_PREFIXES = [
-  "navMachineIdentity",
-  "navPolicy",
-  "navIntegration",
-  "navBreakglass",
-  "navTeamPolicy",
-  "navTeamKeyRotation",
-  "navTeamWebhooks",
-  "subTab",
-  "sectionMachineIdentity",
-  "sectionPolicy",
-  "sectionIntegration",
-  "sectionBreakglass",
-  "teamSectionPolicy",
-  "teamSectionKeyRotation",
-  "teamSectionWebhooks",
-  "memberAddButton",
-  "memberTransferOwnershipLink",
+// Regex patterns capture both singular and plural forms (e.g. `sectionPolicy*`
+// AND `sectionPolicies*`) — broader than `startsWith` to prevent the
+// "Polic vs Policies" prefix gap that caused two dead keys to slip through
+// in the initial implementation (round-1 finding F1/T1).
+const NEW_KEY_PATTERNS: RegExp[] = [
+  /^nav(MachineIdentity|Polic|Integration|Breakglass)/,
+  /^navTeam(Policy|KeyRotation|Webhooks)$/,
+  /^subTab/,
+  /^section(MachineIdentity|Polic|Integration|Breakglass)/,
+  /^teamSection(Policy|KeyRotation|Webhooks)(Desc)?$/,
+  /^(memberAddButton|memberTransferOwnershipLink)$/,
 ];
 
 function isNewKey(key: string): boolean {
-  return NEW_KEY_PREFIXES.some((prefix) => key.startsWith(prefix));
+  return NEW_KEY_PATTERNS.some((pat) => pat.test(key));
 }
 
 describe("admin-ia i18n forward coverage", () => {
@@ -88,6 +81,30 @@ describe("admin-ia i18n forward coverage", () => {
         hit,
         `Key "${key}" is declared in AdminConsole.json but has no consumer in src/ (excluding test files)`,
       ).toBe(true);
+    });
+  }
+});
+
+// ── Terminology lock (round-1 finding F5; round-1 code-review T4) ────────────
+// Pin specific Japanese values to prevent silent translation drift. Without
+// this, a future PR could change `運用者トークン` → `オペレータートークン` and
+// only the manual review (the same review that caught the original drift)
+// would catch it.
+describe("admin-ia ja terminology lock", () => {
+  const ja = readAdminConsole("ja");
+  const expectedTerminology: Record<string, string> = {
+    // "operator tokens" — kanji form mandatory; matches OperatorToken.json,
+    // AuditLog.json, and other 8+ existing references in the codebase.
+    navMachineIdentityOperatorTokens: "運用者トークン",
+    sectionMachineIdentityOperatorTokens: "運用者トークン",
+    // "vault" never appears in AdminConsole.json today, but in case a future
+    // key adds it, the same convention applies (per project memory:
+    // feedback_ja_vault_translation — must be `保管庫`, never カタカナ).
+  };
+
+  for (const [key, expected] of Object.entries(expectedTerminology)) {
+    it(`"${key}" uses canonical Japanese form "${expected}"`, () => {
+      expect(ja[key]).toBe(expected);
     });
   }
 });

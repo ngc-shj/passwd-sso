@@ -74,11 +74,14 @@ describe("TeamPendingInvitationsList", () => {
     vi.clearAllMocks();
   });
 
-  it("renders nothing when invitations list is empty", () => {
-    const { container } = render(
+  it("renders the empty state when invitations list is empty", () => {
+    // Per round-1 code-review F3: render header always; show empty-state
+    // copy when there are no invitations (avoids layout shift after first
+    // invite is sent).
+    render(
       <TeamPendingInvitationsList invitations={[]} teamId="team-1" onCancel={vi.fn()} />,
     );
-    expect(container.firstChild).toBeNull();
+    expect(screen.getByText("noInvitations")).toBeInTheDocument();
   });
 
   it("calls fetchApi DELETE and onCancel when cancel button is clicked", async () => {

@@ -27,8 +27,8 @@ export default function TenantMachineIdentityServiceAccountsLayout({
   return (
     <SectionLayout
       icon={Bot}
-      title={t("sectionMachineIdentity")}
-      description={t("sectionMachineIdentityDesc")}
+      title={t("sectionMachineIdentityServiceAccounts")}
+      description={t("sectionMachineIdentityServiceAccountsDesc")}
       navItems={navItems}
     >
       {children}

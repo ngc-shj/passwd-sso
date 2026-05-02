@@ -53,7 +53,12 @@ vi.mock("@/components/ui/button", () => ({
       : <button data-variant={variant} {...rest}>{children}</button>,
 }));
 
-import { AdminSidebar, countLeafLinks } from "./admin-sidebar";
+import { AdminSidebar, countLeafLinks, getTenantNavItems, getTeamNavItems } from "./admin-sidebar";
+
+// Mock t function used by getTenantNavItems / getTeamNavItems for derived counts.
+const tMock = ((key: string) => key) as unknown as Parameters<typeof getTenantNavItems>[0];
+const expectedTenantLinks = countLeafLinks(getTenantNavItems(tMock));
+const expectedTeamLinks = countLeafLinks(getTeamNavItems(tMock, "team-1"));
 
 const adminTeams = [
   { team: { id: "team-1", name: "Team Alpha", slug: "team-alpha" } },
@@ -87,14 +92,11 @@ describe("AdminSidebar — tenant scope", () => {
       />
     );
 
-    // New tenant IA: 4 leaves (members, teams, audit-logs, breakglass)
-    // + machine-identity group with 3 children
-    // + policies group with 4 children
-    // + integrations group with 3 children
-    // = 4 + 3 + 4 + 3 = 14 links per sidebar (group headers render as <div>, not <a>)
-    // × 2 sidebars (desktop + mobile sheet) = 28
+    // Link count derived from the navItem source-of-truth via `countLeafLinks`.
+    // Group headers render as <div> (not <a>) so only leaf items contribute.
+    // × 2 sidebars (desktop + mobile sheet).
     const links = screen.getAllByRole("link");
-    expect(links.length).toBe(28);
+    expect(links.length).toBe(expectedTenantLinks * 2);
   });
 
   it("renders correct tenant nav hrefs including children", () => {
@@ -230,10 +232,9 @@ describe("AdminSidebar — team scope", () => {
       />
     );
 
-    // New team IA: 6 leaves (general, members, policy, key-rotation, webhooks, audit-logs)
-    // × 2 sidebars (desktop + mobile sheet) = 12
+    // Link count derived from the navItem source-of-truth via `countLeafLinks`.
     const links = screen.getAllByRole("link");
-    expect(links.length).toBe(12);
+    expect(links.length).toBe(expectedTeamLinks * 2);
   });
 
   it("renders correct team nav hrefs for team-1", () => {
