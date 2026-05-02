@@ -130,6 +130,9 @@ targets:
     platform: iOS
     sources:
       - path: PasswdSSOTests
+      - path: ../extension/test/fixtures
+        buildPhase: resources
+        type: folder
     info:
       path: PasswdSSOTests/Info.plist
       properties:
