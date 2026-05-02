@@ -254,34 +254,35 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
                   return rest;
                 });
               }}
-              className="max-w-[200px]"
             />
             {fieldErrors.minPasswordLength && (
               <p className="text-sm text-destructive">{fieldErrors.minPasswordLength}</p>
             )}
           </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            <SwitchField
-              label={t("requireUppercase")}
-              checked={policy.requireUppercase}
-              onChange={(v) => setPolicy((p) => ({ ...p, requireUppercase: v }))}
-            />
-            <SwitchField
-              label={t("requireLowercase")}
-              checked={policy.requireLowercase}
-              onChange={(v) => setPolicy((p) => ({ ...p, requireLowercase: v }))}
-            />
-            <SwitchField
-              label={t("requireNumbers")}
-              checked={policy.requireNumbers}
-              onChange={(v) => setPolicy((p) => ({ ...p, requireNumbers: v }))}
-            />
-            <SwitchField
-              label={t("requireSymbols")}
-              checked={policy.requireSymbols}
-              onChange={(v) => setPolicy((p) => ({ ...p, requireSymbols: v }))}
-            />
-          </div>
+          <SwitchField
+            id="team-require-uppercase"
+            label={t("requireUppercase")}
+            checked={policy.requireUppercase}
+            onChange={(v) => setPolicy((p) => ({ ...p, requireUppercase: v }))}
+          />
+          <SwitchField
+            id="team-require-lowercase"
+            label={t("requireLowercase")}
+            checked={policy.requireLowercase}
+            onChange={(v) => setPolicy((p) => ({ ...p, requireLowercase: v }))}
+          />
+          <SwitchField
+            id="team-require-numbers"
+            label={t("requireNumbers")}
+            checked={policy.requireNumbers}
+            onChange={(v) => setPolicy((p) => ({ ...p, requireNumbers: v }))}
+          />
+          <SwitchField
+            id="team-require-symbols"
+            label={t("requireSymbols")}
+            checked={policy.requireSymbols}
+            onChange={(v) => setPolicy((p) => ({ ...p, requireSymbols: v }))}
+          />
         </div>
         )}
 
@@ -355,7 +356,6 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
                 },
               )}
               placeholder={t("sessionIdleTimeoutHelp", { min: SESSION_IDLE_TIMEOUT_MIN, max: SESSION_IDLE_TIMEOUT_MAX })}
-              className="max-w-[200px]"
             />
             <p className="text-xs text-muted-foreground">{t("sessionIdleTimeoutHelp", { min: SESSION_IDLE_TIMEOUT_MIN, max: SESSION_IDLE_TIMEOUT_MAX })}</p>
             {fieldErrors.sessionIdleTimeoutMinutes && (
@@ -385,7 +385,6 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
                 },
               )}
               placeholder={t("sessionAbsoluteTimeoutHelp", { min: SESSION_ABSOLUTE_TIMEOUT_MIN, max: SESSION_ABSOLUTE_TIMEOUT_MAX })}
-              className="max-w-[200px]"
             />
             <p className="text-xs text-muted-foreground">{t("sessionAbsoluteTimeoutHelp", { min: SESSION_ABSOLUTE_TIMEOUT_MIN, max: SESSION_ABSOLUTE_TIMEOUT_MAX })}</p>
             {fieldErrors.sessionAbsoluteTimeoutMinutes && (
@@ -422,7 +421,6 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
                 const value = Number.isNaN(parsed) ? 0 : Math.max(0, Math.min(PASSWORD_HISTORY_COUNT_MAX, parsed));
                 setPolicy((p) => ({ ...p, passwordHistoryCount: value }));
               }}
-              className="max-w-[200px]"
             />
             <p className="text-xs text-muted-foreground">{t("passwordHistoryCountHelp")}</p>
           </div>
@@ -471,18 +469,23 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
 }
 
 function SwitchField({
+  id,
   label,
   checked,
   onChange,
 }: {
+  id?: string;
   label: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
 }) {
+  // Match tenant policy card layout: flat row, no border, Label + Switch
+  // with `justify-between`. Keeps the visual style consistent across
+  // tenant and team policy pages (round-3 user feedback).
   return (
-    <div className="flex items-center justify-between gap-2 border rounded-md p-3">
-      <Label className="cursor-pointer">{label}</Label>
-      <Switch checked={checked} onCheckedChange={onChange} />
+    <div className="flex items-center justify-between">
+      <Label htmlFor={id} className="cursor-pointer">{label}</Label>
+      <Switch id={id} checked={checked} onCheckedChange={onChange} />
     </div>
   );
 }
