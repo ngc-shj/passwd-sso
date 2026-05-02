@@ -13,7 +13,7 @@ interface NavItem {
 interface SectionLayoutProps {
   icon: LucideIcon;
   title: string;
-  description: string;
+  description?: string;
   navItems?: NavItem[];
   children: React.ReactNode;
   headerExtra?: React.ReactNode;
@@ -44,7 +44,9 @@ export function SectionLayout({
               <Icon className="h-6 w-6 shrink-0" />
               <div className="min-w-0">
                 <h1 className="text-2xl font-bold">{title}</h1>
-                <p className="text-sm text-muted-foreground">{description}</p>
+                {description && (
+                  <p className="text-sm text-muted-foreground">{description}</p>
+                )}
               </div>
             </div>
             {headerExtra}

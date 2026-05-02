@@ -117,11 +117,11 @@ export class SidebarNavPage {
   }
 
   /**
-   * Collapsible trigger for the Security section.
-   * t("security") = "Security" / "セキュリティ"
+   * Collapsible trigger for the Insights section (formerly "Security").
+   * Visible label: t("insightsGroup") = "Insights" / "インサイト".
    */
-  get securitySectionHeader() {
-    return this.page.locator("nav").getByRole("button", { name: /^Security$|^セキュリティ$/i });
+  get insightsSectionHeader() {
+    return this.page.locator("nav").getByRole("button", { name: /^Insights$|^インサイト$/i });
   }
 
   /** Expand the Tools section if it is currently collapsed. */
@@ -135,10 +135,10 @@ export class SidebarNavPage {
     }
   }
 
-  /** Expand the Security section if it is currently collapsed. */
-  async expandSecuritySection(): Promise<void> {
+  /** Expand the Insights section if it is currently collapsed. */
+  async expandInsightsSection(): Promise<void> {
     // Wait for the section header to appear (nav finishes loading after unlock)
-    const header = this.securitySectionHeader;
+    const header = this.insightsSectionHeader;
     await header.waitFor({ timeout: 10_000 });
     const expanded = await header.getAttribute("aria-expanded", { timeout: 5_000 });
     if (expanded !== "true") {
@@ -156,8 +156,10 @@ export class SidebarNavPage {
   ): Promise<void> {
     if (view === "export" || view === "import") {
       await this.expandToolsSection();
-    } else if (view === "watchtower" || view === "emergencyAccess" || view === "auditLog") {
-      await this.expandSecuritySection();
+    } else if (view === "watchtower" || view === "auditLog") {
+      // emergencyAccess was promoted to a top-level sidebar item in the IA
+      // redesign; only watchtower + auditLog remain inside Insights.
+      await this.expandInsightsSection();
     }
 
     const linkMap = {

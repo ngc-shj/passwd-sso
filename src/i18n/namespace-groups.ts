@@ -65,6 +65,7 @@ export const NS_DASHBOARD_CORE: readonly Namespace[] = [
   "DirectorySync",
   "Breakglass",
   "MachineIdentity",
+  "Settings",
 ];
 
 /** Union of all dashboard namespaces (must be a superset of NS_GLOBAL). */

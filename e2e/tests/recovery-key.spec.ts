@@ -3,36 +3,46 @@ import { injectSession } from "../helpers/auth";
 import { getAuthState } from "../helpers/fixtures";
 import { VaultLockPage } from "../page-objects/vault-lock.page";
 
+const RECOVERY_KEY_LABEL = /回復キー|Recovery Key/i;
+
 test.describe("Recovery Key", () => {
-  test("generate recovery key from header menu", async ({ context, page }) => {
+  test("generate recovery key from settings page", async ({ context, page }) => {
     const { vaultReady } = getAuthState();
     await injectSession(context, vaultReady.sessionToken);
-    await page.goto("/ja/dashboard");
+    // Navigate directly to the settings page. The full `page.goto` re-mounts
+    // VaultProvider, so the lock screen renders first; unlock there so the
+    // page-level button (gated on UNLOCKED) becomes clickable.
+    await page.goto("/ja/dashboard/settings/auth/recovery-key");
 
-    // Unlock vault first
     const lockPage = new VaultLockPage(page);
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
     await lockPage.unlockAndWait(vaultReady.passphrase!);
 
-    // Open user menu and click Recovery Key
-    const userMenuButton = page.locator("header").getByRole("button").last();
-    await userMenuButton.click();
+    // The VaultActionCard renders a <button> labelled "回復キー" / "Recovery
+    // Key" that opens the RecoveryKeyDialog. Use a `<button>` tag selector
+    // + visible-text filter so the dashboard-shell's RecoveryKeyBanner close
+    // button (aria-label="回復キーバナーを閉じる", X icon only — no visible text)
+    // is not a candidate. `getByRole("button", { name: ... })` would otherwise
+    // match its aria-label and `.first()` would pick the banner button (DOM
+    // order: banner before page content) instead of the VaultActionCard
+    // trigger, causing the dialog to never open.
+    const trigger = page.locator('button:not([disabled])').filter({ hasText: RECOVERY_KEY_LABEL });
+    await expect(trigger).toBeVisible({ timeout: 5_000 });
+    await trigger.click();
 
-    const recoveryKeyItem = page.getByRole("menuitem", {
-      name: /Recovery Key|回復キー/i,
-    });
-    await recoveryKeyItem.click();
+    // Wait for the dialog to mount (Radix portal) before querying its inputs.
+    await page.locator("[role='dialog']").waitFor({ timeout: 10_000 });
 
-    // Recovery Key dialog should open — enter passphrase
     const passphraseInput = page.locator("#rk-passphrase");
     await expect(passphraseInput).toBeVisible({ timeout: 5_000 });
     await passphraseInput.fill(vaultReady.passphrase!);
 
-    // Click generate (button text = t("recoveryKey"))
-    const generateButton = page.getByRole("button", {
-      name: /Recovery Key|回復キー/i,
-    });
-    await generateButton.click();
+    // Click the in-dialog generate button (same label).  Scope to the
+    // dialog so we don't re-click the page-level trigger.
+    await page
+      .locator("[role='dialog']")
+      .getByRole("button", { name: RECOVERY_KEY_LABEL })
+      .click();
 
     // Should display Base32 recovery key (XXXX-XXXX-... format)
     const keyDisplay = page.locator("code");

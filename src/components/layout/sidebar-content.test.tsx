@@ -8,6 +8,17 @@ vi.mock("@/components/ui/separator", () => ({
   Separator: () => <hr />,
 }));
 
+vi.mock("@/i18n/navigation", () => ({
+  Link: ({ children, href, onClick }: { children: React.ReactNode; href: string; onClick?: () => void }) => (
+    <a href={href} onClick={onClick}>{children}</a>
+  ),
+}));
+
+vi.mock("@/components/ui/button", () => ({
+  Button: ({ children, asChild, ...rest }: React.ComponentProps<"button"> & { asChild?: boolean }) =>
+    asChild ? <>{children}</> : <button {...rest}>{children}</button>,
+}));
+
 vi.mock("@/components/layout/vault-selector", () => ({
   VaultSelector: ({ onValueChange }: { onValueChange: (v: string) => void }) => (
     <button onClick={() => onValueChange("team-1")}>vault-selector</button>
@@ -15,7 +26,7 @@ vi.mock("@/components/layout/vault-selector", () => ({
 }));
 
 vi.mock("@/components/layout/sidebar-section-security", () => ({
-  SecuritySection: () => <div>security</div>,
+  InsightsSection: () => <div>insights</div>,
   SettingsNavSection: () => <div>settings-nav</div>,
   ToolsSection: () => <div>tools</div>,
 }));
@@ -107,18 +118,18 @@ describe("SidebarContent", () => {
     expect(screen.queryByText("settings-nav")).not.toBeNull();
   });
 
-  it("does not render SecuritySection for team Viewer", () => {
+  it("does not render InsightsSection for team Viewer", () => {
     const props = baseProps({ vaultContext: { type: "team", teamId: "team-1", teamRole: "VIEWER" } });
     render(<SidebarContent {...props} />);
 
-    expect(screen.queryByText("security")).toBeNull();
+    expect(screen.queryByText("insights")).toBeNull();
   });
 
-  it("renders SecuritySection for team non-Viewer", () => {
+  it("renders InsightsSection for team non-Viewer", () => {
     const props = baseProps({ vaultContext: { type: "team", teamId: "team-1", teamRole: "OWNER" } });
     render(<SidebarContent {...props} />);
 
-    expect(screen.getByText("security")).toBeInTheDocument();
+    expect(screen.getByText("insights")).toBeInTheDocument();
   });
 
   it("renders SettingsNavSection for personal vault", () => {
@@ -126,6 +137,20 @@ describe("SidebarContent", () => {
     render(<SidebarContent {...props} />);
 
     expect(screen.getByText("settings-nav")).toBeInTheDocument();
+  });
+
+  it("renders emergency access link at top level for personal vault", () => {
+    const props = baseProps({ vaultContext: { type: "personal" } });
+    render(<SidebarContent {...props} />);
+
+    expect(screen.getByRole("link", { name: "emergencyAccess" })).toHaveAttribute("href", "/dashboard/emergency-access");
+  });
+
+  it("does not render emergency access top-level link for team vault", () => {
+    const props = baseProps({ vaultContext: { type: "team", teamId: "team-1", teamRole: "MEMBER" } });
+    render(<SidebarContent {...props} />);
+
+    expect(screen.queryByRole("link", { name: "emergencyAccess" })).toBeNull();
   });
 
 });

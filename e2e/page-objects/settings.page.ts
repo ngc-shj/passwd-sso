@@ -6,22 +6,22 @@ export class SettingsPage {
   // --- Route-based navigation ---
 
   async gotoSessions(): Promise<void> {
-    await this.page.goto("/ja/dashboard/settings/security/sessions");
+    await this.page.goto("/ja/dashboard/settings/devices");
     await this.page.waitForLoadState("networkidle");
   }
 
   async gotoPasskey(): Promise<void> {
-    await this.page.goto("/ja/dashboard/settings/security/passkey");
+    await this.page.goto("/ja/dashboard/settings/auth/passkey");
     await this.page.waitForLoadState("networkidle");
   }
 
   async gotoTravelMode(): Promise<void> {
-    await this.page.goto("/ja/dashboard/settings/security/travel-mode");
+    await this.page.goto("/ja/dashboard/settings/vault/travel-mode");
     await this.page.waitForLoadState("networkidle");
   }
 
   async gotoKeyRotation(): Promise<void> {
-    await this.page.goto("/ja/dashboard/settings/security/key-rotation");
+    await this.page.goto("/ja/dashboard/settings/vault/key-rotation");
     await this.page.waitForLoadState("networkidle");
   }
 
@@ -36,7 +36,7 @@ export class SettingsPage {
   }
 
   async gotoDelegation(): Promise<void> {
-    await this.page.goto("/ja/dashboard/settings/developer/delegation");
+    await this.page.goto("/ja/dashboard/settings/vault/delegation");
     await this.page.waitForLoadState("networkidle");
   }
 

@@ -3,13 +3,15 @@ import { injectSession } from "../helpers/auth";
 import { getAuthState } from "../helpers/fixtures";
 import { VaultLockPage } from "../page-objects/vault-lock.page";
 
+const LOCK_BUTTON_LABEL = /保管庫をロック|Lock Vault/i;
+
 test.describe("Vault Lock and Relock", () => {
   test.beforeEach(async ({ context }) => {
     const { vaultReady } = getAuthState();
     await injectSession(context, vaultReady.sessionToken);
   });
 
-  test("manual lock via header menu", async ({ page }) => {
+  test("manual lock via header LockVaultButton", async ({ page }) => {
     const { vaultReady } = getAuthState();
     await page.goto("/ja/dashboard");
 
@@ -18,14 +20,9 @@ test.describe("Vault Lock and Relock", () => {
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
     await lockPage.unlockAndWait(vaultReady.passphrase!);
 
-    // Open user menu and click Lock
-    const userMenuButton = page.locator("header").getByRole("button").last();
-    await userMenuButton.click();
-
-    const lockMenuItem = page.getByRole("menuitem", {
-      name: /Lock Vault|保管庫をロック/i,
-    });
-    await lockMenuItem.click();
+    // Click the header LockVaultButton (replaced the old dropdown menuitem
+    // in the personal-security IA redesign).
+    await page.locator("header").getByRole("button", { name: LOCK_BUTTON_LABEL }).click();
 
     // Should show lock screen again
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
@@ -40,12 +37,8 @@ test.describe("Vault Lock and Relock", () => {
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
     await lockPage.unlockAndWait(vaultReady.passphrase!);
 
-    // Lock
-    const userMenuButton = page.locator("header").getByRole("button").last();
-    await userMenuButton.click();
-    await page
-      .getByRole("menuitem", { name: /Lock Vault|保管庫をロック/i })
-      .click();
+    // Lock via header icon button
+    await page.locator("header").getByRole("button", { name: LOCK_BUTTON_LABEL }).click();
 
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
 

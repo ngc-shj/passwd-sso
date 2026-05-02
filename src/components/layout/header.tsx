@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
-import { Building2, Globe, Lock, Menu, Plane, Puzzle, RefreshCw, ShieldCheck } from "lucide-react";
+import { Building2, Globe, Lock, Menu, Plane, Puzzle } from "lucide-react";
 import { AppIcon } from "@/components/ui/app-icon";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,12 +18,11 @@ import { SignOutButton } from "@/components/auth/signout-button";
 import { LanguageSwitcher } from "./language-switcher";
 import { ThemeToggle } from "./theme-toggle";
 import { NotificationBell } from "@/components/notifications/notification-bell";
-import { useVault } from "@/lib/vault/vault-context";
-import { APP_NAME, VAULT_STATUS } from "@/lib/constants";
-import { ChangePassphraseDialog } from "@/components/vault/change-passphrase-dialog";
-import { RecoveryKeyDialog } from "@/components/vault/recovery-key-dialog";
+import { LockVaultButton } from "@/components/layout/lock-vault-button";
+import { APP_NAME } from "@/lib/constants";
 import { useActiveVault } from "@/lib/vault/active-vault-context";
 import { useTravelMode } from "@/hooks/use-travel-mode";
+import { Link } from "@/i18n/navigation";
 
 const CHROME_STORE_URL = process.env.NEXT_PUBLIC_CHROME_STORE_URL ?? "";
 const isValidStoreUrl = (url: string) =>
@@ -36,14 +35,10 @@ interface HeaderProps {
 
 export function Header({ onMenuToggle }: HeaderProps) {
   const { data: session } = useSession();
-  const { status: vaultStatus, lock } = useVault();
-  const t = useTranslations("Vault");
   const tDash = useTranslations("Dashboard");
   const activeVault = useActiveVault();
   const { active: travelModeActive } = useTravelMode();
   const [mounted, setMounted] = useState(false);
-  const [changePassOpen, setChangePassOpen] = useState(false);
-  const [recoveryKeyOpen, setRecoveryKeyOpen] = useState(false);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -109,6 +104,7 @@ export function Header({ onMenuToggle }: HeaderProps) {
 
         {mounted && <ThemeToggle />}
         {mounted && <LanguageSwitcher />}
+        {mounted && <LockVaultButton />}
         {mounted && <NotificationBell />}
 
         {mounted ? (
@@ -125,23 +121,12 @@ export function Header({ onMenuToggle }: HeaderProps) {
               <DropdownMenuItem className="text-xs text-muted-foreground" disabled>
                 {session?.user?.email}
               </DropdownMenuItem>
-              {vaultStatus === VAULT_STATUS.UNLOCKED && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => setChangePassOpen(true)}>
-                    <RefreshCw className="h-4 w-4" />
-                    {t("changePassphrase")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setRecoveryKeyOpen(true)}>
-                    <ShieldCheck className="h-4 w-4" />
-                    {t("recoveryKey")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={lock}>
-                    <Lock className="h-4 w-4" />
-                    {t("lockVault")}
-                  </DropdownMenuItem>
-                </>
-              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link href="/dashboard/settings/account/profile">
+                  {tDash("settings")}
+                </Link>
+              </DropdownMenuItem>
               {CHROME_STORE_URL && isValidStoreUrl(CHROME_STORE_URL) && (
                 <>
                   <DropdownMenuSeparator />
@@ -169,14 +154,6 @@ export function Header({ onMenuToggle }: HeaderProps) {
           </Button>
         )}
       </div>
-      <ChangePassphraseDialog
-        open={changePassOpen}
-        onOpenChange={setChangePassOpen}
-      />
-      <RecoveryKeyDialog
-        open={recoveryKeyOpen}
-        onOpenChange={setRecoveryKeyOpen}
-      />
     </header>
   );
 }

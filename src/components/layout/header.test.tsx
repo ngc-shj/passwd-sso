@@ -4,8 +4,8 @@
  *
  * Covers:
  *   - APP_NAME is displayed in the header
- *   - Vault UNLOCKED → shows Recovery Key / Change Passphrase / Lock menu items
- *   - Vault not UNLOCKED → hides vault-specific menu items
+ *   - LockVaultButton is rendered
+ *   - Personal settings link appears in the dropdown
  *   - User name/email are displayed
  */
 
@@ -15,10 +15,8 @@ import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 // ── Hoisted mocks ──────────────────────────────────────────
-const { mockUseSession, mockUseVault, mockLock } = vi.hoisted(() => ({
+const { mockUseSession } = vi.hoisted(() => ({
   mockUseSession: vi.fn(),
-  mockUseVault: vi.fn(),
-  mockLock: vi.fn(),
 }));
 
 vi.mock("next-intl", () => ({
@@ -28,10 +26,6 @@ vi.mock("next-intl", () => ({
 
 vi.mock("next-auth/react", () => ({
   useSession: mockUseSession,
-}));
-
-vi.mock("@/lib/vault/vault-context", () => ({
-  useVault: mockUseVault,
 }));
 
 // Mock heavy child components to simplify rendering
@@ -46,17 +40,19 @@ vi.mock("@/components/auth/signout-button", () => ({
 vi.mock("./language-switcher", () => ({
   LanguageSwitcher: () => <div data-testid="language-switcher" />,
 }));
-vi.mock("@/components/vault/change-passphrase-dialog", () => ({
-  ChangePassphraseDialog: () => null,
-}));
-vi.mock("@/components/vault/recovery-key-dialog", () => ({
-  RecoveryKeyDialog: () => null,
+vi.mock("@/components/layout/lock-vault-button", () => ({
+  LockVaultButton: () => <button data-testid="lock-vault-button">lockVault</button>,
 }));
 vi.mock("@/components/notifications/notification-bell", () => ({
   NotificationBell: () => <div data-testid="notification-bell" />,
 }));
 vi.mock("./theme-toggle", () => ({
   ThemeToggle: () => <div data-testid="theme-toggle" />,
+}));
+vi.mock("@/i18n/navigation", () => ({
+  Link: ({ href, children }: { href: string; children: React.ReactNode }) => (
+    <a href={href}>{children}</a>
+  ),
 }));
 
 vi.mock("@/hooks/use-travel-mode", () => ({
@@ -81,7 +77,6 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
 }));
 
 import { Header } from "./header";
-import { VAULT_STATUS } from "@/lib/constants";
 
 // ── Helpers ────────────────────────────────────────────────
 const defaultSession = {
@@ -98,10 +93,6 @@ describe("Header", () => {
 
   beforeEach(() => {
     mockUseSession.mockReturnValue(defaultSession);
-    mockUseVault.mockReturnValue({
-      status: VAULT_STATUS.LOCKED,
-      lock: mockLock,
-    });
   });
 
   it("displays APP_NAME", () => {
@@ -118,43 +109,17 @@ describe("Header", () => {
     expect(screen.getByText("test@example.com")).toBeInTheDocument();
   });
 
-  it("shows vault menu items when vault is UNLOCKED", () => {
-    mockUseVault.mockReturnValue({
-      status: VAULT_STATUS.UNLOCKED,
-      lock: mockLock,
-    });
-
+  it("renders LockVaultButton", () => {
     render(<Header onMenuToggle={onMenuToggle} />);
 
-    expect(screen.getByText("changePassphrase")).toBeInTheDocument();
-    expect(screen.getByText("recoveryKey")).toBeInTheDocument();
-    expect(screen.getByText("lockVault")).toBeInTheDocument();
+    expect(screen.getByTestId("lock-vault-button")).toBeInTheDocument();
   });
 
-  it("hides vault menu items when vault is LOCKED", () => {
-    mockUseVault.mockReturnValue({
-      status: VAULT_STATUS.LOCKED,
-      lock: mockLock,
-    });
-
+  it("shows personal settings link in the dropdown", () => {
     render(<Header onMenuToggle={onMenuToggle} />);
 
-    expect(screen.queryByText("changePassphrase")).not.toBeInTheDocument();
-    expect(screen.queryByText("recoveryKey")).not.toBeInTheDocument();
-    expect(screen.queryByText("lockVault")).not.toBeInTheDocument();
-  });
-
-  it("hides vault menu items when vault is SETUP_REQUIRED", () => {
-    mockUseVault.mockReturnValue({
-      status: VAULT_STATUS.SETUP_REQUIRED,
-      lock: mockLock,
-    });
-
-    render(<Header onMenuToggle={onMenuToggle} />);
-
-    expect(screen.queryByText("changePassphrase")).not.toBeInTheDocument();
-    expect(screen.queryByText("recoveryKey")).not.toBeInTheDocument();
-    expect(screen.queryByText("lockVault")).not.toBeInTheDocument();
+    // tDash("settings") returns "settings" via the mock translator
+    expect(screen.getByText("settings")).toBeInTheDocument();
   });
 
   it("always shows sign out button regardless of vault status", () => {

@@ -14,8 +14,20 @@ function getSessionCookieName(): string {
 }
 
 /**
+ * Resolve the cookie target URL from the test base URL.
+ *
+ * WebKit (mobile-ios project) rejects cookies set via domain/path with
+ * `domain: "localhost"`, which Chromium accepts. Using the `url` form lets
+ * Playwright derive cookie attributes (domain, path, secure, sameSite) in
+ * a browser-agnostic way.
+ */
+function getCookieUrl(): string {
+  return process.env.E2E_BASE_URL ?? "http://localhost:3000";
+}
+
+/**
  * Inject a session cookie into the browser context.
- * Handles cookie name and secure attribute based on environment.
+ * Uses the `url` form so cookie attributes are browser-agnostic.
  */
 export async function injectSession(
   context: BrowserContext,
@@ -25,8 +37,8 @@ export async function injectSession(
     {
       name: getSessionCookieName(),
       value: sessionToken,
-      domain: "localhost",
-      path: "/",
+      url: getCookieUrl(),
+      sameSite: "Lax",
       ...(isHttps && { secure: true }),
     },
   ]);

@@ -2,6 +2,6 @@
 
 import { SessionsCard } from "@/components/sessions/sessions-card";
 
-export default function SessionsPage() {
+export default function DevicesPage() {
   return <SessionsCard />;
 }

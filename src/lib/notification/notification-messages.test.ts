@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { LOCALES } from "@/i18n/locales";
 import { notificationTitle, notificationBody } from "./notification-messages";
 
 const KEYS = [
@@ -9,8 +10,6 @@ const KEYS = [
   "WATCHTOWER_ALERT",
   "VAULT_LOCKOUT",
 ] as const;
-
-const LOCALES = ["en", "ja"] as const;
 
 describe("notificationTitle", () => {
   for (const key of KEYS) {
