@@ -19,9 +19,13 @@ test.describe("Recovery Key", () => {
     await lockPage.unlockAndWait(vaultReady.passphrase!);
 
     // The VaultActionCard renders a <button> labelled "回復キー" / "Recovery
-    // Key" that opens the RecoveryKeyDialog. Use the native <button> tag
-    // selector + text filter so the SectionNav links (rendered as <a> via
-    // <Button asChild>) are not candidates.
+    // Key" that opens the RecoveryKeyDialog. Use a `<button>` tag selector
+    // + visible-text filter so the dashboard-shell's RecoveryKeyBanner close
+    // button (aria-label="回復キーバナーを閉じる", X icon only — no visible text)
+    // is not a candidate. `getByRole("button", { name: ... })` would otherwise
+    // match its aria-label and `.first()` would pick the banner button (DOM
+    // order: banner before page content) instead of the VaultActionCard
+    // trigger, causing the dialog to never open.
     const trigger = page.locator('button:not([disabled])').filter({ hasText: RECOVERY_KEY_LABEL });
     await expect(trigger).toBeVisible({ timeout: 5_000 });
     await trigger.click();
