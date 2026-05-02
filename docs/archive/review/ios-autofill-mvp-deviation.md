@@ -187,3 +187,19 @@ reference output from `crypto-aad.ts`. AAD parity already covered by
 **Test count delta**: 167 unit + 1 UI = 168 (before Step 11) → 182 unit + 1 UI = 183 (after Step 11). New tests: 4 in `RollbackFlagDrainTests.swift`, 4 in `AuthCoordinatorTests.swift`, 1 in `MobileAPIClientTests.swift` (`testPostCacheRollbackReport_requestShape`), 6 in `HostSyncServiceTests.swift` (pre-existing file extended to cover new `runSync` report fields).
 
 **No deviations** from: App Switcher snapshot protection via `.inactive` phase, `.privacySensitive()` on password/TOTP/notes fields, rollback flag HMAC protocol (HKDF info `"rollback-flag-mac"`, salt zero-32, constant-time comparison via CryptoKit), `flag_forged` rejectionKind on HMAC failure, drain-before-sync ordering (drain runs first in `.active` handler), stable `deviceId` via App Group `UserDefaults` generate-once UUID, Secure Enclave P-256 key from `AuthCoordinator.getOrCreateDPoPKey()`, DPoP `ath` claim in `postCacheRollbackReport`, delete-on-200 / keep-on-error flag lifecycle.
+
+## Step 12 (CI iOS job) — 2026-05-02
+
+**Deviations from plan**: none.
+
+Added `ios-ci` job to `.github/workflows/ci.yml`:
+
+- New `ios` filter in the `changes` job: `ios/**` and `extension/test/fixtures/**` (so fixture changes also re-run the iOS suite, satisfying T15)
+- New `ios-ci` job on `macos-latest` that:
+  - Installs XcodeGen via Homebrew
+  - Asserts the 9 Backward-Compatibility Regression Contract paths exist (per plan §"Backward-Compatibility Regression Contract" / T15) — fails the build with a clear `::error::` message if any moved or were deleted
+  - Regenerates the Xcode project from `project.yml` and lists schemes
+  - Boots the first available iPhone 15/16/17 simulator (UDID-based destination is the reliable form on Xcode 26.x; documented in `ios/README.md`)
+  - Runs `xcodebuild test` against the booted simulator
+
+Trigger condition: `ios == 'true' || ci == 'true'`. The dorny/paths-filter pattern keeps macOS runner cost bounded to PRs that actually touch iOS or fixtures.
