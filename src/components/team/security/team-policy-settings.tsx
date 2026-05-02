@@ -97,11 +97,26 @@ export function validatePolicy(
   return errs;
 }
 
+export type TeamPolicySection =
+  | "password"
+  | "session"
+  | "sharing"
+  | "access-restriction";
+
 interface TeamPolicySettingsProps {
   teamId: string;
+  /**
+   * Optional section filter. When set, only the named section's fields are
+   * rendered. When omitted, all sections render (backward-compat path used
+   * by any non-IA consumer). The component still loads the FULL policy and
+   * the save button writes the FULL policy regardless of which section is
+   * shown — so user edits on a section save through the same unified PUT
+   * endpoint as before.
+   */
+  section?: TeamPolicySection;
 }
 
-export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
+export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps) {
   const t = useTranslations("TeamPolicy");
   const tCommon = useTranslations("Common");
   const [policy, setPolicy] = useState<PolicyData>(DEFAULT_POLICY);
@@ -196,11 +211,20 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
     );
   }
 
+  const showAll = !section;
+  const showPassword = showAll || section === "password";
+  const showSharing = showAll || section === "sharing";
+  const showSession = showAll || section === "session";
+  const showAccessRestriction = showAll || section === "access-restriction";
+
   return (
     <Card>
-      <SectionCardHeader icon={ListChecks} title={t("title")} description={t("description")} />
-      <CardContent className="space-y-4">
-        {/* Password Requirements */}
+      {showAll && (
+        <SectionCardHeader icon={ListChecks} title={t("title")} description={t("description")} />
+      )}
+      <CardContent className={showAll ? "space-y-4" : "space-y-4 pt-6"}>
+        {showPassword && (
+        /* Password Requirements */
         <div className="space-y-3">
           <h3 className="text-sm font-medium text-muted-foreground">{t("passwordRequirements")}</h3>
           <div className="space-y-2">
@@ -248,10 +272,12 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
             />
           </div>
         </div>
+        )}
 
-        <Separator />
+        {showAll && <Separator />}
 
-        {/* Access Control */}
+        {showSharing && (
+        /* Access Control */
         <div className="space-y-3">
           <h3 className="text-sm font-medium text-muted-foreground">{t("accessControl")}</h3>
           <SwitchField
@@ -290,10 +316,12 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
             )}
           </div>
         </div>
+        )}
 
-        <Separator />
+        {showAll && <Separator />}
 
-        {/* Advanced */}
+        {showSession && (
+        /* Advanced */
         <div className="space-y-3">
           <h3 className="text-sm font-medium text-muted-foreground">{t("advanced")}</h3>
           <div className="space-y-2">
@@ -363,10 +391,12 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
             }
           />
         </div>
+        )}
 
-        <Separator />
+        {showAll && <Separator />}
 
-        {/* Password Reuse Prevention */}
+        {showPassword && (
+        /* Password Reuse Prevention */
         <div className="space-y-3">
           <h3 className="text-sm font-medium text-muted-foreground">{t("passwordReusePrevention")}</h3>
           <div className="space-y-2">
@@ -386,10 +416,12 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
             <p className="text-xs text-muted-foreground">{t("passwordHistoryCountHelp")}</p>
           </div>
         </div>
+        )}
 
-        <Separator />
+        {showAll && <Separator />}
 
-        {/* Team IP Restriction */}
+        {showAccessRestriction && (
+        /* Team IP Restriction */
         <div className="space-y-3">
           <h3 className="text-sm font-medium text-muted-foreground">{t("teamIpRestriction")}</h3>
           <SwitchField
@@ -409,6 +441,7 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
             <p className="text-xs text-muted-foreground">{t("teamAllowedCidrsHelp", { max: MAX_CIDRS })}</p>
           </div>
         </div>
+        )}
 
         <div className="flex items-center justify-between pt-1">
           <FormDirtyBadge

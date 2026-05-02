@@ -38,7 +38,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { MemberInfo } from "@/components/member-info";
 import { Link } from "@/i18n/navigation";
-import { Trash2, Users, Search, UserPlus, Crown } from "lucide-react";
+import { Trash2, Users, Search, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
@@ -189,23 +189,11 @@ export default function TeamMembersPage({
         />
         <CardContent className="space-y-4">
           {isAdmin && (
-            // Action buttons wrap onto multiple lines on narrow viewports so
-            // the description above never gets squeezed into a vertical
-            // single-character column on mobile (shadcn CardAction's grid
-            // would otherwise force buttons onto the right column).
-            <div className="flex flex-wrap items-center gap-2">
+            <div>
               <Button size="sm" onClick={() => setAddDialogOpen(true)}>
                 <UserPlus className="h-4 w-4 mr-2" />
                 {tAdmin("memberAddButton")}
               </Button>
-              {isOwner && (
-                <Button variant="outline" size="sm" asChild>
-                  <Link href={`/admin/teams/${teamId}/members/transfer-ownership`}>
-                    <Crown className="h-4 w-4 mr-2" />
-                    {tAdmin("memberTransferOwnershipLink")}
-                  </Link>
-                </Button>
-              )}
             </div>
           )}
           {members.length > 0 && (

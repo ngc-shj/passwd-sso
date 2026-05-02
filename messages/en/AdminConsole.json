@@ -45,6 +45,8 @@
   "subTabDirectorySync": "Directory Sync",
   "subTabMembersList": "List",
   "subTabMembersTransferOwnership": "Transfer ownership",
+  "subTabSharing": "Sharing",
+  "subTabAccessRestriction": "Access control",
 
   "sectionMembers": "Members",
   "sectionMembersDesc": "Manage members and roles.",

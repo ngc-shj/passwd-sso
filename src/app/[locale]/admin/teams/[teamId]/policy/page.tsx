@@ -1,13 +1,12 @@
-"use client";
+import { redirect } from "next/navigation";
+import { getLocale } from "next-intl/server";
 
-import { use } from "react";
-import { TeamPolicySettings } from "@/components/team/security/team-policy-settings";
-
-export default function TeamPolicyPage({
+export default async function TeamPolicyPage({
   params,
 }: {
   params: Promise<{ teamId: string }>;
 }) {
-  const { teamId } = use(params);
-  return <TeamPolicySettings teamId={teamId} />;
+  const { teamId } = await params;
+  const locale = await getLocale();
+  redirect(`/${locale}/admin/teams/${teamId}/policy/password`);
 }
