@@ -15,8 +15,16 @@ describe("audit log page group values", () => {
       ),
       "utf8"
     );
+    const tenantPage = readFileSync(
+      join(
+        process.cwd(),
+        "src/app/[locale]/admin/tenant/audit-logs/page.tsx"
+      ),
+      "utf8"
+    );
 
     expect(personalPage).not.toMatch(/value:\s*"group:[^"]+"/);
     expect(teamPage).not.toMatch(/value:\s*"group:[^"]+"/);
+    expect(tenantPage).not.toMatch(/value:\s*"group:[^"]+"/);
   });
 });

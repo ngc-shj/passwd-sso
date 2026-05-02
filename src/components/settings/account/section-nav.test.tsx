@@ -6,7 +6,7 @@ import "@testing-library/jest-dom/vitest";
 
 const { mockUsePathname } = vi.hoisted(() => ({
   // usePathname returns locale-prefixed paths in production; tests mirror that
-  mockUsePathname: vi.fn(() => "/ja/admin/tenant/security/session-policy"),
+  mockUsePathname: vi.fn(() => "/ja/dashboard/settings/auth/passkey"),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -45,25 +45,25 @@ import { SectionNav } from "./section-nav";
 import { Shield, Globe, Webhook } from "lucide-react";
 
 const navItems = [
-  { href: "/admin/tenant/security/session-policy", label: "Session Policy", icon: Shield },
-  { href: "/admin/tenant/security/sso", label: "SSO", icon: Globe },
-  { href: "/admin/tenant/security/webhooks", label: "Webhooks", icon: Webhook },
+  { href: "/dashboard/settings/auth/passkey", label: "Session Policy", icon: Shield },
+  { href: "/dashboard/settings/auth/recovery-key", label: "SSO", icon: Globe },
+  { href: "/dashboard/settings/devices", label: "Webhooks", icon: Webhook },
 ];
 
 describe("SectionNav", () => {
   it("renders all nav items with correct hrefs", () => {
-    mockUsePathname.mockReturnValue("/ja/admin/tenant/security/session-policy");
+    mockUsePathname.mockReturnValue("/ja/dashboard/settings/auth/passkey");
     render(<SectionNav items={navItems} />);
 
     const links = screen.getAllByRole("link");
     const hrefs = links.map((l) => l.getAttribute("href"));
-    expect(hrefs).toContain("/admin/tenant/security/session-policy");
-    expect(hrefs).toContain("/admin/tenant/security/sso");
-    expect(hrefs).toContain("/admin/tenant/security/webhooks");
+    expect(hrefs).toContain("/dashboard/settings/auth/passkey");
+    expect(hrefs).toContain("/dashboard/settings/auth/recovery-key");
+    expect(hrefs).toContain("/dashboard/settings/devices");
   });
 
   it("renders all nav item labels", () => {
-    mockUsePathname.mockReturnValue("/ja/admin/tenant/security/session-policy");
+    mockUsePathname.mockReturnValue("/ja/dashboard/settings/auth/passkey");
     render(<SectionNav items={navItems} />);
 
     expect(screen.getAllByText("Session Policy").length).toBeGreaterThan(0);
@@ -72,58 +72,58 @@ describe("SectionNav", () => {
   });
 
   it("applies secondary variant to active item (desktop nav)", () => {
-    mockUsePathname.mockReturnValue("/ja/admin/tenant/security/session-policy");
+    mockUsePathname.mockReturnValue("/ja/dashboard/settings/auth/passkey");
     const { container } = render(<SectionNav items={navItems} />);
 
     // Desktop nav is the first nav element
     const desktopNav = container.querySelector("nav");
     expect(desktopNav).not.toBeNull();
     const activeWrapper = desktopNav!.querySelector(
-      'a[href="/admin/tenant/security/session-policy"]'
+      'a[href="/dashboard/settings/auth/passkey"]'
     )?.parentElement;
     expect(activeWrapper).toHaveAttribute("data-variant", "secondary");
   });
 
   it("applies ghost variant to non-active item (desktop nav)", () => {
-    mockUsePathname.mockReturnValue("/ja/admin/tenant/security/session-policy");
+    mockUsePathname.mockReturnValue("/ja/dashboard/settings/auth/passkey");
     const { container } = render(<SectionNav items={navItems} />);
 
     const desktopNav = container.querySelector("nav");
     const inactiveWrapper = desktopNav!.querySelector(
-      'a[href="/admin/tenant/security/webhooks"]'
+      'a[href="/dashboard/settings/devices"]'
     )?.parentElement;
     expect(inactiveWrapper).toHaveAttribute("data-variant", "ghost");
   });
 
-  it("does not mark /admin/tenant/security/webhooks as active when pathname is /admin/tenant/security/session-policy", () => {
-    mockUsePathname.mockReturnValue("/ja/admin/tenant/security/session-policy");
+  it("does not mark /dashboard/settings/devices as active when pathname is /dashboard/settings/auth/passkey", () => {
+    mockUsePathname.mockReturnValue("/ja/dashboard/settings/auth/passkey");
     const { container } = render(<SectionNav items={navItems} />);
 
     const desktopNav = container.querySelector("nav");
     const webhookWrapper = desktopNav!.querySelector(
-      'a[href="/admin/tenant/security/webhooks"]'
+      'a[href="/dashboard/settings/devices"]'
     )?.parentElement;
     expect(webhookWrapper).not.toHaveAttribute("data-variant", "secondary");
   });
 
   it("uses prefix matching: sub-path activates parent nav item", () => {
-    mockUsePathname.mockReturnValue("/ja/admin/tenant/security/session-policy/sub");
+    mockUsePathname.mockReturnValue("/ja/dashboard/settings/auth/passkey/sub");
     const { container } = render(<SectionNav items={navItems} />);
 
     const desktopNav = container.querySelector("nav");
     const activeWrapper = desktopNav!.querySelector(
-      'a[href="/admin/tenant/security/session-policy"]'
+      'a[href="/dashboard/settings/auth/passkey"]'
     )?.parentElement;
     expect(activeWrapper).toHaveAttribute("data-variant", "secondary");
   });
 
   it("does not activate non-matching items under prefix matching", () => {
-    mockUsePathname.mockReturnValue("/ja/admin/tenant/security/session-policy/sub");
+    mockUsePathname.mockReturnValue("/ja/dashboard/settings/auth/passkey/sub");
     const { container } = render(<SectionNav items={navItems} />);
 
     const desktopNav = container.querySelector("nav");
     const ssoWrapper = desktopNav!.querySelector(
-      'a[href="/admin/tenant/security/sso"]'
+      'a[href="/dashboard/settings/auth/recovery-key"]'
     )?.parentElement;
     expect(ssoWrapper).toHaveAttribute("data-variant", "ghost");
   });

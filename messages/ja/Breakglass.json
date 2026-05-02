@@ -1,5 +1,5 @@
 {
-  "title": "Break Glass",
+  "title": "ブレイクグラス",
   "description": "ユーザーの個人監査ログにアクセスします。理由の記入は必須で、すべてのアクセスが記録・通知されます。",
   "requestAccess": "アクセスを申請",
   "targetUser": "対象ユーザー",
@@ -14,7 +14,7 @@
   "grantCreated": "アクセスを許可しました。24時間で期限切れになります。",
   "activeGrants": "有効なアクセス許可",
   "grantHistory": "アクセス許可の履歴",
-  "noGrants": "Break Glass のアクセス許可はありません。",
+  "noGrants": "ブレイクグラスのアクセス許可はありません。",
   "requester": "申請者",
   "target": "対象",
   "createdAt": "作成日時",
@@ -31,7 +31,7 @@
   "grantExpiresAt": "アクセス許可の有効期限: {expiresAt}",
   "encryptedEntry": "[暗号化済み]",
   "backToGrants": "アクセス許可一覧に戻る",
-  "selfAccessError": "自分の Break Glass アクセス許可は作成できません。",
+  "selfAccessError": "自分のブレイクグラス アクセス許可は作成できません。",
   "duplicateGrantError": "このユーザーには既にアクセス許可があります。",
   "targetDeactivated": "対象ユーザーは無効化されています。",
   "grantExpired": "このアクセス許可は期限切れです。",
@@ -40,5 +40,8 @@
   "noActiveGrants": "有効なアクセス許可はありません。",
   "showHistory": "履歴を表示",
   "hideHistory": "履歴を非表示",
-  "rateLimitExceeded": "リクエスト回数の上限に達しました。しばらくしてから再試行してください。"
+  "rateLimitExceeded": "リクエスト回数の上限に達しました。しばらくしてから再試行してください。",
+  "searchMembers": "メンバーを検索...",
+  "noMatchingMembers": "該当するメンバーが見つかりません。",
+  "noMembers": "対象ユーザーがいません。"
 }

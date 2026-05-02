@@ -8,13 +8,12 @@ import { VisuallyHidden } from "radix-ui";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { AdminScopeSelector } from "./admin-scope-selector";
 import {
+  Archive,
   Blocks,
   Bot,
   ChevronDown,
-  Crown,
   Cpu,
-  Database,
-  FolderSync,
+  Handshake,
   KeyRound,
   Link2,
   ListChecks,
@@ -23,8 +22,7 @@ import {
   Settings2,
   Shield,
   ShieldAlert,
-  ShieldCheck,
-  UserPlus,
+  ShieldBan,
   Users,
   UsersRound,
   Webhook,
@@ -50,48 +48,62 @@ interface NavItem {
   children?: NavItem[];
 }
 
-function useNavItems(
-  pathname: string,
-  t: ReturnType<typeof useTranslations>
-): NavItem[] {
-  const teamMatch = pathname.match(/\/admin\/teams\/([^/]+)/);
-  if (teamMatch) {
-    const teamId = teamMatch[1];
-    return [
-      {
-        href: `/admin/teams/${teamId}/general`,
-        label: t("navGeneral"),
-        icon: <Settings2 className="h-4 w-4 shrink-0" />,
-      },
-      {
-        href: `/admin/teams/${teamId}/members`,
-        label: t("navMembers"),
-        icon: <Users className="h-4 w-4 shrink-0" />,
-        children: [
-          { href: `/admin/teams/${teamId}/members/list`, label: t("navMemberList"), icon: <Users className="h-3.5 w-3.5 shrink-0" /> },
-          { href: `/admin/teams/${teamId}/members/add`, label: t("navAddMember"), icon: <UserPlus className="h-3.5 w-3.5 shrink-0" /> },
-          { href: `/admin/teams/${teamId}/members/transfer`, label: t("navTransferOwnership"), icon: <Crown className="h-3.5 w-3.5 shrink-0" /> },
-        ],
-      },
-      {
-        href: `/admin/teams/${teamId}/security`,
-        label: t("navSecurity"),
-        icon: <Shield className="h-4 w-4 shrink-0" />,
-        children: [
-          { href: `/admin/teams/${teamId}/security/policy`, label: t("navPolicy"), icon: <ListChecks className="h-3.5 w-3.5 shrink-0" /> },
-          { href: `/admin/teams/${teamId}/security/key-rotation`, label: t("navKeyRotation"), icon: <KeyRound className="h-3.5 w-3.5 shrink-0" /> },
-          { href: `/admin/teams/${teamId}/security/webhooks`, label: t("navWebhooks"), icon: <Webhook className="h-3.5 w-3.5 shrink-0" /> },
-        ],
-      },
-      {
-        href: `/admin/teams/${teamId}/audit-logs`,
-        label: t("navAuditLogs"),
-        icon: <ScrollText className="h-4 w-4 shrink-0" />,
-      },
-    ];
-  }
+/**
+ * Counts the leaf links a NavItem array would render — group headers (rendered
+ * as `<div>`) are not counted; only items without children, plus children of
+ * groups, contribute. Used by tests to derive expected link counts from the
+ * navItem source rather than hard-coding literals.
+ */
+export function countLeafLinks(items: NavItem[]): number {
+  return items.reduce(
+    (n, item) => n + (item.children?.length ?? 1),
+    0,
+  );
+}
 
-  // Tenant scope (default)
+type TFn = ReturnType<typeof useTranslations>;
+
+/**
+ * Pure navItem factories. Extracted from `useNavItems` so tests can derive
+ * the expected link count via `countLeafLinks(...)` rather than hard-coding
+ * literals.
+ */
+export function getTeamNavItems(t: TFn, teamId: string): NavItem[] {
+  return [
+    {
+      href: `/admin/teams/${teamId}/general`,
+      label: t("navGeneral"),
+      icon: <Settings2 className="h-4 w-4 shrink-0" />,
+    },
+    {
+      href: `/admin/teams/${teamId}/members`,
+      label: t("navMembers"),
+      icon: <Users className="h-4 w-4 shrink-0" />,
+    },
+    {
+      href: `/admin/teams/${teamId}/policy`,
+      label: t("navTeamPolicy"),
+      icon: <ListChecks className="h-4 w-4 shrink-0" />,
+    },
+    {
+      href: `/admin/teams/${teamId}/key-rotation`,
+      label: t("navTeamKeyRotation"),
+      icon: <KeyRound className="h-4 w-4 shrink-0" />,
+    },
+    {
+      href: `/admin/teams/${teamId}/webhooks`,
+      label: t("navTeamWebhooks"),
+      icon: <Webhook className="h-4 w-4 shrink-0" />,
+    },
+    {
+      href: `/admin/teams/${teamId}/audit-logs`,
+      label: t("navAuditLogs"),
+      icon: <ScrollText className="h-4 w-4 shrink-0" />,
+    },
+  ];
+}
+
+export function getTenantNavItems(t: TFn): NavItem[] {
   return [
     {
       href: "/admin/tenant/members",
@@ -104,52 +116,53 @@ function useNavItems(
       icon: <UsersRound className="h-4 w-4 shrink-0" />,
     },
     {
-      href: "/admin/tenant/security",
-      label: t("navSecurity"),
-      icon: <Shield className="h-4 w-4 shrink-0" />,
-    },
-    {
-      href: "/admin/tenant/operator-tokens",
-      label: t("navOperatorTokens"),
-      icon: <KeyRound className="h-4 w-4 shrink-0" />,
-    },
-    {
-      href: "/admin/tenant/provisioning",
-      label: t("navProvisioning"),
-      icon: <Link2 className="h-4 w-4 shrink-0" />,
-      children: [
-        { href: "/admin/tenant/provisioning/scim", label: t("navScim"), icon: <Database className="h-3.5 w-3.5 shrink-0" /> },
-        { href: "/admin/tenant/provisioning/directory-sync", label: t("navDirectorySync"), icon: <FolderSync className="h-3.5 w-3.5 shrink-0" /> },
-      ],
-    },
-    {
-      href: "/admin/tenant/service-accounts",
-      label: t("navServiceAccounts"),
+      href: "/admin/tenant/machine-identity",
+      label: t("navMachineIdentity"),
       icon: <Bot className="h-4 w-4 shrink-0" />,
       children: [
-        { href: "/admin/tenant/service-accounts/accounts", label: t("navSaAccounts"), icon: <Bot className="h-3.5 w-3.5 shrink-0" /> },
-        { href: "/admin/tenant/service-accounts/access-requests", label: t("navAccessRequests"), icon: <ShieldCheck className="h-3.5 w-3.5 shrink-0" /> },
+        { href: "/admin/tenant/machine-identity/service-accounts", label: t("navMachineIdentityServiceAccounts"), icon: <Bot className="h-3.5 w-3.5 shrink-0" /> },
+        { href: "/admin/tenant/machine-identity/mcp-clients", label: t("navMachineIdentityMcpClients"), icon: <Blocks className="h-3.5 w-3.5 shrink-0" /> },
+        { href: "/admin/tenant/machine-identity/operator-tokens", label: t("navMachineIdentityOperatorTokens"), icon: <KeyRound className="h-3.5 w-3.5 shrink-0" /> },
       ],
     },
     {
-      href: "/admin/tenant/mcp",
-      label: t("navMcp"),
-      icon: <Cpu className="h-4 w-4 shrink-0" />,
+      href: "/admin/tenant/policies",
+      label: t("navPolicies"),
+      icon: <ListChecks className="h-4 w-4 shrink-0" />,
       children: [
-        { href: "/admin/tenant/mcp/clients", label: t("navMcpClients"), icon: <Blocks className="h-3.5 w-3.5 shrink-0" /> },
+        { href: "/admin/tenant/policies/authentication", label: t("navPolicyAuthentication"), icon: <Shield className="h-3.5 w-3.5 shrink-0" /> },
+        { href: "/admin/tenant/policies/machine-identity", label: t("navPolicyMachineIdentity"), icon: <Cpu className="h-3.5 w-3.5 shrink-0" /> },
+        { href: "/admin/tenant/policies/retention", label: t("navPolicyRetention"), icon: <Archive className="h-3.5 w-3.5 shrink-0" /> },
+        { href: "/admin/tenant/policies/access-restriction", label: t("navPolicyAccessRestriction"), icon: <ShieldBan className="h-3.5 w-3.5 shrink-0" /> },
+      ],
+    },
+    {
+      href: "/admin/tenant/integrations",
+      label: t("navIntegrations"),
+      icon: <Link2 className="h-4 w-4 shrink-0" />,
+      children: [
+        { href: "/admin/tenant/integrations/provisioning", label: t("navIntegrationProvisioning"), icon: <Handshake className="h-3.5 w-3.5 shrink-0" /> },
+        { href: "/admin/tenant/integrations/webhooks", label: t("navIntegrationWebhooks"), icon: <Webhook className="h-3.5 w-3.5 shrink-0" /> },
+        { href: "/admin/tenant/integrations/audit-delivery", label: t("navIntegrationAuditDelivery"), icon: <Send className="h-3.5 w-3.5 shrink-0" /> },
       ],
     },
     {
       href: "/admin/tenant/audit-logs",
       label: t("navAuditLogs"),
       icon: <ScrollText className="h-4 w-4 shrink-0" />,
-      children: [
-        { href: "/admin/tenant/audit-logs/logs", label: t("navAuditLogsLogs"), icon: <ScrollText className="h-3.5 w-3.5 shrink-0" /> },
-        { href: "/admin/tenant/audit-logs/breakglass", label: t("navAuditLogsBreakglass"), icon: <ShieldAlert className="h-3.5 w-3.5 shrink-0" /> },
-        { href: "/admin/tenant/audit-logs/delivery", label: t("navAuditDelivery"), icon: <Send className="h-3.5 w-3.5 shrink-0" /> },
-      ],
+    },
+    {
+      href: "/admin/tenant/breakglass",
+      label: t("navBreakglass"),
+      icon: <ShieldAlert className="h-4 w-4 shrink-0" />,
     },
   ];
+}
+
+function useNavItems(pathname: string, t: TFn): NavItem[] {
+  const teamMatch = pathname.match(/\/admin\/teams\/([^/]+)/);
+  if (teamMatch) return getTeamNavItems(t, teamMatch[1]);
+  return getTenantNavItems(t);
 }
 
 function SidebarNav({
@@ -191,7 +204,11 @@ function SidebarNav({
                       className="w-full justify-start gap-2 h-8"
                       asChild
                     >
-                      <Link href={child.href} onClick={onNavigate}>
+                      <Link
+                        href={child.href}
+                        onClick={onNavigate}
+                        aria-current={isActive ? "page" : undefined}
+                      >
                         {child.icon}
                         {child.label}
                       </Link>
@@ -212,7 +229,11 @@ function SidebarNav({
             className="w-full justify-start gap-2"
             asChild
           >
-            <Link href={item.href} onClick={onNavigate}>
+            <Link
+              href={item.href}
+              onClick={onNavigate}
+              aria-current={isActive ? "page" : undefined}
+            >
               {item.icon}
               {item.label}
             </Link>

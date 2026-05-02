@@ -1,16 +1,12 @@
-"use client";
+import { redirect } from "next/navigation";
+import { getLocale } from "next-intl/server";
 
-import { use } from "react";
-import { useRouter } from "@/i18n/navigation";
-import { useEffect } from "react";
-
-export default function TeamMembersPage({
+export default async function TeamMembersPage({
   params,
 }: {
   params: Promise<{ teamId: string }>;
 }) {
-  const { teamId } = use(params);
-  const router = useRouter();
-  useEffect(() => { router.replace(`/admin/teams/${teamId}/members/list`); }, [router, teamId]);
-  return null;
+  const { teamId } = await params;
+  const locale = await getLocale();
+  redirect(`/${locale}/admin/teams/${teamId}/members/list`);
 }

@@ -42,5 +42,14 @@
   "passwordHistoryCountRange": "Must be between 0 and 24",
   "teamAllowedCidrsMax": "Maximum {max} CIDR entries allowed",
   "policyPasswordReuse": "This password was used recently",
-  "policyBlocked": "Password does not meet team policy requirements"
+  "policyBlocked": "Password does not meet team policy requirements",
+
+  "sectionPasswordTitle": "Password policy",
+  "sectionPasswordDesc": "Configure password strength requirements and reuse prevention.",
+  "sectionSessionTitle": "Session policy",
+  "sectionSessionDesc": "Configure idle and absolute timeouts and master-password re-prompt.",
+  "sectionSharingTitle": "Sharing policy",
+  "sectionSharingDesc": "Configure whether team members can export data and create share links.",
+  "sectionAccessRestrictionTitle": "Access control",
+  "sectionAccessRestrictionDesc": "Restrict team access by IP or network path."
 }

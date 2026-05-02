@@ -16,5 +16,7 @@
   "rotateKeyVersionConflict": "キーバージョンの競合が発生しました。別のローテーションが進行中の可能性があります。",
   "rotateKeyEntryMismatch": "エントリ数の不一致が発生しました。ページを更新して再試行してください。",
   "rotateKeyVaultRequired": "チームキーをローテーションするには保管庫をアンロックしてください。",
-  "rotateKeyNoMembers": "暗号化キーを持つアクティブなメンバーが見つかりません。"
+  "rotateKeyNoMembers": "暗号化キーを持つアクティブなメンバーが見つかりません。",
+  "rotateKeyTypePrompt": "確認するには「rotate」と入力してください",
+  "rotateKeyTypePlaceholder": "rotate"
 }
