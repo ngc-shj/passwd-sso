@@ -1,18 +1,22 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Bell } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/account/section-card-header";
 
 export default function NotificationsSettingsPage() {
   const t = useTranslations("Settings");
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>{t("subTab.notifications")}</CardTitle>
-      </CardHeader>
+      <SectionCardHeader
+        icon={Bell}
+        title={t("subTab.notifications")}
+        description={t("notifications.description")}
+      />
       <CardContent>
-        {/* Notification preferences UI will be added in a future iteration. */}
+        <p className="text-sm text-muted-foreground">{t("comingSoon")}</p>
       </CardContent>
     </Card>
   );

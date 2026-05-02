@@ -1,18 +1,22 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { UserRound } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/account/section-card-header";
 
 export default function ProfilePage() {
   const t = useTranslations("Settings");
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>{t("subTab.profile")}</CardTitle>
-      </CardHeader>
+      <SectionCardHeader
+        icon={UserRound}
+        title={t("subTab.profile")}
+        description={t("profile.description")}
+      />
       <CardContent>
-        {/* Profile management UI will be added in a future iteration. */}
+        <p className="text-sm text-muted-foreground">{t("comingSoon")}</p>
       </CardContent>
     </Card>
   );

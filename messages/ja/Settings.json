@@ -26,5 +26,16 @@
   "vaultLockedPlaceholder": {
     "title": "保管庫がロックされています",
     "description": "この操作には保管庫の解錠が必要です。ヘッダーから保管庫を解錠してください。"
-  }
+  },
+  "profile": {
+    "description": "アカウントの基本情報を管理します。"
+  },
+  "notifications": {
+    "description": "通知の受信設定を管理します。"
+  },
+  "emergencyAccess": {
+    "description": "緊急時に信頼できる連絡先が保管庫にアクセスできるようにします。詳細管理は緊急アクセスページから行います。",
+    "openButton": "緊急アクセスを管理"
+  },
+  "comingSoon": "この機能は今後のリリースで提供予定です。"
 }

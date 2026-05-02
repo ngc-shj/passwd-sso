@@ -2,53 +2,48 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { Lock } from "lucide-react";
 import { useVault } from "@/lib/vault/vault-context";
 import { VAULT_STATUS } from "@/lib/constants";
 import { ChangePassphraseDialog } from "@/components/vault/change-passphrase-dialog";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/account/section-card-header";
 import { Button } from "@/components/ui/button";
-import { Lock } from "lucide-react";
 
 export default function PassphrasePage() {
-  const t = useTranslations("Settings");
+  const tSettings = useTranslations("Settings");
+  const tVault = useTranslations("Vault");
   const { status: vaultStatus } = useVault();
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  if (vaultStatus !== VAULT_STATUS.UNLOCKED) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Lock className="h-5 w-5" />
-            {t("vaultLockedPlaceholder.title")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            {t("vaultLockedPlaceholder.description")}
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
+  const vaultUnlocked = vaultStatus === VAULT_STATUS.UNLOCKED;
 
   return (
     <>
       <Card>
-        <CardHeader>
-          <CardTitle>{t("subTab.passphrase")}</CardTitle>
-        </CardHeader>
+        <SectionCardHeader
+          icon={Lock}
+          title={tVault("changePassphrase")}
+          description={tVault("changePassphraseDescription")}
+        />
         <CardContent>
-          {/* Button trigger approach: opens ChangePassphraseDialog on demand. */}
-          <Button onClick={() => setDialogOpen(true)}>
-            {t("subTab.passphrase")}
+          <Button
+            size="sm"
+            disabled={!vaultUnlocked}
+            onClick={() => setDialogOpen(true)}
+          >
+            <Lock className="h-4 w-4 mr-2" />
+            {tVault("changePassphraseButton")}
           </Button>
+          {!vaultUnlocked && (
+            <p className="mt-2 text-xs text-muted-foreground flex items-center gap-1">
+              <Lock className="h-3 w-3" />
+              {tSettings("vaultLockedPlaceholder.description")}
+            </p>
+          )}
         </CardContent>
       </Card>
-      <ChangePassphraseDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-      />
+      <ChangePassphraseDialog open={dialogOpen} onOpenChange={setDialogOpen} />
     </>
   );
 }

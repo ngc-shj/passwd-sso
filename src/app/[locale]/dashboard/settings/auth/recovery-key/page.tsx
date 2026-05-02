@@ -2,53 +2,48 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { KeyRound, Lock } from "lucide-react";
 import { useVault } from "@/lib/vault/vault-context";
 import { VAULT_STATUS } from "@/lib/constants";
 import { RecoveryKeyDialog } from "@/components/vault/recovery-key-dialog";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/account/section-card-header";
 import { Button } from "@/components/ui/button";
-import { Lock } from "lucide-react";
 
 export default function RecoveryKeyPage() {
-  const t = useTranslations("Settings");
+  const tSettings = useTranslations("Settings");
+  const tVault = useTranslations("Vault");
   const { status: vaultStatus } = useVault();
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  if (vaultStatus !== VAULT_STATUS.UNLOCKED) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Lock className="h-5 w-5" />
-            {t("vaultLockedPlaceholder.title")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            {t("vaultLockedPlaceholder.description")}
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
+  const vaultUnlocked = vaultStatus === VAULT_STATUS.UNLOCKED;
 
   return (
     <>
       <Card>
-        <CardHeader>
-          <CardTitle>{t("subTab.recoveryKey")}</CardTitle>
-        </CardHeader>
+        <SectionCardHeader
+          icon={KeyRound}
+          title={tVault("recoveryKey")}
+          description={tVault("recoveryKeyDialogDescription")}
+        />
         <CardContent>
-          {/* Button trigger approach: opens RecoveryKeyDialog on demand. */}
-          <Button onClick={() => setDialogOpen(true)}>
-            {t("subTab.recoveryKey")}
+          <Button
+            size="sm"
+            disabled={!vaultUnlocked}
+            onClick={() => setDialogOpen(true)}
+          >
+            <KeyRound className="h-4 w-4 mr-2" />
+            {tVault("recoveryKey")}
           </Button>
+          {!vaultUnlocked && (
+            <p className="mt-2 text-xs text-muted-foreground flex items-center gap-1">
+              <Lock className="h-3 w-3" />
+              {tSettings("vaultLockedPlaceholder.description")}
+            </p>
+          )}
         </CardContent>
       </Card>
-      <RecoveryKeyDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-      />
+      <RecoveryKeyDialog open={dialogOpen} onOpenChange={setDialogOpen} />
     </>
   );
 }
