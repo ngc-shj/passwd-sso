@@ -102,7 +102,7 @@ export function TeamAddFromTenantSection({ teamId, onSuccess }: Props) {
     } finally {
       setAdding(null);
     }
-  }, [teamId, addRole, t, onSuccess]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [teamId, addRole, t, onSuccess]);
 
   return (
     <section className="space-y-4">

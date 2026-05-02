@@ -66,8 +66,6 @@
   "sectionPolicyAccessRestriction": "アクセス制御",
   "sectionPolicyAccessRestrictionDesc": "IP・ネットワーク経路によるテナントアクセス制限。",
 
-  "sectionIntegrations": "連携",
-  "sectionIntegrationsDesc": "プロビジョニング、Webhook、監査ログ配信の設定。",
   "sectionIntegrationProvisioning": "プロビジョニング",
   "sectionIntegrationProvisioningDesc": "SCIM・ディレクトリ同期による外部 IdP との連携。",
   "sectionIntegrationWebhooks": "Webhook",

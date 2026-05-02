@@ -66,8 +66,6 @@
   "sectionPolicyAccessRestriction": "Access control",
   "sectionPolicyAccessRestrictionDesc": "Tenant access restrictions by IP and network path.",
 
-  "sectionIntegrations": "Integrations",
-  "sectionIntegrationsDesc": "Provisioning, webhook, and audit log delivery configuration.",
   "sectionIntegrationProvisioning": "Provisioning",
   "sectionIntegrationProvisioningDesc": "Connect with external IdPs via SCIM and directory sync.",
   "sectionIntegrationWebhooks": "Webhook",

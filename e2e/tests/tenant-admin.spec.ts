@@ -40,7 +40,7 @@ test.describe("Tenant Admin", () => {
   });
 
   test("security section is accessible", async () => {
-    await page.goto("/ja/admin/tenant/security/session-policy");
+    await page.goto("/ja/admin/tenant/policies/authentication/session");
     await page.waitForLoadState("networkidle");
     await expect(
       page.getByRole("heading", { level: 1 })
@@ -48,7 +48,7 @@ test.describe("Tenant Admin", () => {
   });
 
   test("audit logs section is accessible", async () => {
-    await page.goto("/ja/admin/tenant/audit-logs/logs");
+    await page.goto("/ja/admin/tenant/audit-logs");
     await page.waitForLoadState("networkidle");
     await expect(
       page.getByRole("heading", { level: 1 })
