@@ -2094,7 +2094,7 @@ describe("PASSKEY handlers suppress on own app", () => {
   it("returns suppressed for PASSKEY_GET_MATCHES on own app", async () => {
     const res = await sendMessageWithSender(
       { type: "PASSKEY_GET_MATCHES", rpId: "localhost" },
-      { tab: { id: 200, url: "https://localhost:3000/ja/dashboard/settings/security/passkey" } },
+      { tab: { id: 200, url: "https://localhost:3000/ja/dashboard/settings/auth/passkey" } },
     );
     expect(res).toEqual(
       expect.objectContaining({
@@ -2108,7 +2108,7 @@ describe("PASSKEY handlers suppress on own app", () => {
   it("returns suppressed for PASSKEY_CHECK_DUPLICATE on own app", async () => {
     const res = await sendMessageWithSender(
       { type: "PASSKEY_CHECK_DUPLICATE", rpId: "localhost", userName: "user@example.com" },
-      { tab: { id: 201, url: "https://localhost:3000/ja/dashboard/settings/security/passkey" } },
+      { tab: { id: 201, url: "https://localhost:3000/ja/dashboard/settings/auth/passkey" } },
     );
     expect(res).toEqual(
       expect.objectContaining({
@@ -2139,7 +2139,7 @@ describe("PASSKEY handlers suppress on own app", () => {
         excludeCredentialIds: [],
         clientDataJSON: "{}",
       },
-      { tab: { id: 203, url: "https://localhost:3000/ja/dashboard/settings/security/passkey" } },
+      { tab: { id: 203, url: "https://localhost:3000/ja/dashboard/settings/auth/passkey" } },
     );
     expect(res).toEqual(
       expect.objectContaining({
