@@ -53,17 +53,37 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
     let isLocalhost = host == "localhost" || host.hasSuffix(".localhost.localdomain")
 
     guard scheme == "https" || (scheme == "http" && isLocalhost) else { return nil }
-    components.path = ""
+    // Preserve basePath in the path component (e.g. "/passwd-sso") — every
+    // API call from MobileAPIClient appends to baseURL, so a basePath-mounted
+    // deployment requires the path to remain. Trailing slash trimmed for
+    // canonical URL building downstream.
+    if components.path.hasSuffix("/") {
+      components.path = String(components.path.dropLast())
+    }
     components.query = nil
     components.fragment = nil
     return components.url
   }
 
-  /// Probe AASA reachability and /api/health/live.
+  /// Probe AASA reachability (always at root) and /api/health/live (at basePath).
   private func probeServer(_ base: URL) async throws {
-    async let aasaCheck: Void = fetchURL(base.appending(path: "/.well-known/apple-app-site-association", directoryHint: .notDirectory))
-    async let healthCheck: Void = fetchURL(base.appending(path: "/api/health/live", directoryHint: .notDirectory))
+    // AASA file MUST be served at https://<host>/.well-known/...
+    // regardless of basePath (Apple Universal-Link spec).
+    let aasaURL = aasaRootURL(for: base)
+    async let aasaCheck: Void = fetchURL(aasaURL)
+    async let healthCheck: Void = fetchURL(
+      base.appending(path: "/api/health/live", directoryHint: .notDirectory)
+    )
     _ = try await (aasaCheck, healthCheck)
+  }
+
+  /// Strip basePath so the AASA URL points at the root domain.
+  private func aasaRootURL(for base: URL) -> URL {
+    var components = URLComponents(url: base, resolvingAgainstBaseURL: false) ?? URLComponents()
+    components.path = "/.well-known/apple-app-site-association"
+    components.query = nil
+    components.fragment = nil
+    return components.url ?? base
   }
 
   private func fetchURL(_ url: URL) async throws {
