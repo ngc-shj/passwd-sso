@@ -200,16 +200,22 @@ test("@mobile admin sidebar sheet opens and child link navigates", async ({ page
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/ja/admin/tenant/members");
+  await page.waitForLoadState("networkidle");
 
-  // The mobile menu trigger is the only menu-labeled button in the admin
-  // header. A failure here is a real regression — let it throw, no `.catch`
-  // fallback (round-1 finding T5 — fallbacks mask failures).
-  const hamburger = page.getByRole("button", { name: /menu|メニュー/i }).first();
+  // Mobile menu trigger — match by exact aria-label (NOT regex over
+  // accessible name). Per memory feedback_e2e_aria_label_phantom_match,
+  // getByRole({name: regex}) can match unintended chrome (banner close
+  // buttons etc.) since "accessible name" includes aria-label.
+  // Also avoids the Radix Slot ambiguity that bit #423 — see commit
+  // 8f176377 of feat/personal-security-ia-redesign.
+  const hamburger = page.getByLabel("メニューを開く");
+  await expect(hamburger).toBeVisible({ timeout: 10_000 });
   await hamburger.click();
 
   // Sidebar sheet opens — its policy/authentication child link is now visible.
-  // Use `link` role with strict name matching to avoid matching aria-label
-  // collisions (per memory feedback_e2e_aria_label_phantom_match).
+  // Use exact href match instead of role-based to avoid Slot-based ambiguity
+  // (sidebar Buttons render via `<Button asChild><Link>` — getByRole("link")
+  // and getByRole("button") can BOTH match the same element under Slot).
   const authPolicyLink = page
     .locator('a[href*="/admin/tenant/policies/authentication"]')
     .first();
