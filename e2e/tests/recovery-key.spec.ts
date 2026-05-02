@@ -19,13 +19,16 @@ test.describe("Recovery Key", () => {
     await lockPage.unlockAndWait(vaultReady.passphrase!);
 
     // The card has a button labelled "回復キー" / "Recovery Key" that opens
-    // the RecoveryKeyDialog.
-    await page
-      .getByRole("button", { name: RECOVERY_KEY_LABEL })
-      .first()
-      .click();
+    // the RecoveryKeyDialog. Wait for the trigger to be enabled before
+    // clicking — the button is gated on UNLOCKED, which propagates a frame
+    // after the lock screen disappears.
+    const trigger = page.getByRole("button", { name: RECOVERY_KEY_LABEL }).first();
+    await expect(trigger).toBeEnabled({ timeout: 5_000 });
+    await trigger.click();
 
-    // Recovery Key dialog should open — enter passphrase
+    // Wait for the dialog to mount (Radix portal) before querying its inputs.
+    await page.locator("[role='dialog']").waitFor({ timeout: 10_000 });
+
     const passphraseInput = page.locator("#rk-passphrase");
     await expect(passphraseInput).toBeVisible({ timeout: 5_000 });
     await passphraseInput.fill(vaultReady.passphrase!);
