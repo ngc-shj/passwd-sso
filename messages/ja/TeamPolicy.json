@@ -45,11 +45,11 @@
   "policyBlocked": "パスワードがチームのポリシー要件を満たしていません",
 
   "sectionPasswordTitle": "パスワードポリシー",
-  "sectionPasswordDesc": "パスワード強度の要件と再利用防止の設定。",
+  "sectionPasswordDesc": "パスワード強度の要件と再利用防止を設定します。",
   "sectionSessionTitle": "セッションポリシー",
-  "sectionSessionDesc": "アイドル/絶対タイムアウトとマスターパスワード再入力の設定。",
+  "sectionSessionDesc": "アイドル・絶対タイムアウトとマスターパスワード再入力を設定します。",
   "sectionSharingTitle": "共有ポリシー",
-  "sectionSharingDesc": "チームメンバーによるエクスポートと共有リンク作成の許可設定。",
+  "sectionSharingDesc": "チームメンバーによるエクスポートと共有リンク作成の許可を設定します。",
   "sectionAccessRestrictionTitle": "アクセス制御",
-  "sectionAccessRestrictionDesc": "IP・ネットワーク経路によるチームアクセス制限。"
+  "sectionAccessRestrictionDesc": "IP やネットワーク経路でチームへのアクセスを制限します。"
 }

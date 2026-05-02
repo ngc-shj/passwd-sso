@@ -45,11 +45,11 @@
   "policyBlocked": "Password does not meet team policy requirements",
 
   "sectionPasswordTitle": "Password policy",
-  "sectionPasswordDesc": "Password strength requirements and reuse prevention.",
+  "sectionPasswordDesc": "Configure password strength requirements and reuse prevention.",
   "sectionSessionTitle": "Session policy",
-  "sectionSessionDesc": "Idle / absolute timeouts and master-password re-prompt.",
+  "sectionSessionDesc": "Configure idle and absolute timeouts and master-password re-prompt.",
   "sectionSharingTitle": "Sharing policy",
-  "sectionSharingDesc": "Allow team members to export data and create share links.",
+  "sectionSharingDesc": "Configure whether team members can export data and create share links.",
   "sectionAccessRestrictionTitle": "Access control",
-  "sectionAccessRestrictionDesc": "Restrict team access by IP / network path."
+  "sectionAccessRestrictionDesc": "Restrict team access by IP or network path."
 }
