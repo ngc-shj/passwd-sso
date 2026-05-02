@@ -18,12 +18,12 @@ test.describe("Recovery Key", () => {
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
     await lockPage.unlockAndWait(vaultReady.passphrase!);
 
-    // The card has a button labelled "回復キー" / "Recovery Key" that opens
-    // the RecoveryKeyDialog. Wait for the trigger to be enabled before
-    // clicking — the button is gated on UNLOCKED, which propagates a frame
-    // after the lock screen disappears.
-    const trigger = page.getByRole("button", { name: RECOVERY_KEY_LABEL }).first();
-    await expect(trigger).toBeEnabled({ timeout: 5_000 });
+    // The VaultActionCard renders a <button> labelled "回復キー" / "Recovery
+    // Key" that opens the RecoveryKeyDialog. Use the native <button> tag
+    // selector + text filter so the SectionNav links (rendered as <a> via
+    // <Button asChild>) are not candidates.
+    const trigger = page.locator('button:not([disabled])').filter({ hasText: RECOVERY_KEY_LABEL });
+    await expect(trigger).toBeVisible({ timeout: 5_000 });
     await trigger.click();
 
     // Wait for the dialog to mount (Radix portal) before querying its inputs.
