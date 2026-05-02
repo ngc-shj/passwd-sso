@@ -92,5 +92,6 @@
   "teamSectionAuditLogsDesc": "チームのアクティビティとセキュリティイベントを確認します。",
 
   "memberAddButton": "メンバーを追加",
-  "memberTransferOwnershipLink": "オーナー権限を移譲"
+  "memberTransferOwnershipLink": "オーナー権限を移譲",
+  "backToMembers": "メンバーに戻る"
 }

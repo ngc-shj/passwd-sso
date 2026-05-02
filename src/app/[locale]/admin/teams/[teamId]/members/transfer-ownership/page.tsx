@@ -53,6 +53,7 @@ export default function TeamTransferOwnershipPage({
 }) {
   const { teamId } = use(params);
   const t = useTranslations("Team");
+  const tAdmin = useTranslations("AdminConsole");
 
   const [team, setTeam] = useState<TeamInfo | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -143,7 +144,14 @@ export default function TeamTransferOwnershipPage({
   }
 
   return (
-    <Card>
+    <div className="space-y-4">
+      <Link
+        href={`/admin/teams/${teamId}/members`}
+        className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
+      >
+        ← {tAdmin("backToMembers")}
+      </Link>
+      <Card>
       <SectionCardHeader icon={Crown} title={t("transferTitle")} description={t("transferDescription")} />
       <CardContent className="space-y-4">
         {members.length > 1 && (
@@ -205,5 +213,6 @@ export default function TeamTransferOwnershipPage({
         )}
       </CardContent>
     </Card>
+    </div>
   );
 }

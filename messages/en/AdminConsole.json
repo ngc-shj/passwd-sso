@@ -92,5 +92,6 @@
   "teamSectionAuditLogsDesc": "Review team activity and security events.",
 
   "memberAddButton": "Add member",
-  "memberTransferOwnershipLink": "Transfer ownership"
+  "memberTransferOwnershipLink": "Transfer ownership",
+  "backToMembers": "Back to members"
 }
