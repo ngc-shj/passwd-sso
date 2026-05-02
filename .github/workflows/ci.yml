@@ -300,7 +300,9 @@ jobs:
         run: npx prisma migrate deploy
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+        # mobile-ios project uses devices["iPhone 13"] which requires webkit.
+        # mobile-android (Pixel 7) and the desktop chromium project both use chromium.
+        run: npx playwright install --with-deps chromium webkit
 
       - name: Run E2E tests
         run: npm run test:e2e

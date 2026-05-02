@@ -11,10 +11,8 @@ export function LockVaultButton() {
   const t = useTranslations("Vault");
   const { status: vaultStatus, lock } = useVault();
 
-  // The render-time guard below is the sole gate — when status is not
-  // UNLOCKED, the button does not render and `handleClick` cannot run.
-  // No additional in-handler check is needed because `vaultStatus` here is
-  // captured via closure at render time and matches the gate above.
+  // Render-time guard is the sole gate — when status is not UNLOCKED the
+  // button does not render and `handleClick` cannot fire.
   if (vaultStatus !== VAULT_STATUS.UNLOCKED) return null;
 
   function handleClick() {

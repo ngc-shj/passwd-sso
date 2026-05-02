@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { execSync } from "child_process";
 import { describe, it, expect } from "vitest";
+import { MS_PER_DAY } from "@/lib/constants/time";
 import { BANNER_SUNSET_TS } from "./migration-banner-config";
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const MIN_DAYS = 25;
 const MAX_DAYS = 35;
 

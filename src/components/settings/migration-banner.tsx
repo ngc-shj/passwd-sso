@@ -37,18 +37,20 @@ function persistDismissed(): void {
 
 export function MigrationBanner() {
   const t = useTranslations("Migration");
-  const [dismissed, setDismissed] = useState(false);
+  // Lazy init from localStorage so we don't re-read it on every render
+  // (e.g. when the Details dialog opens/closes).
+  const [dismissed, setDismissed] = useState(() => isDismissedInStorage());
+  const [dismissing, setDismissing] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
 
-  const visible = !dismissed && !isSunset() && !isDismissedInStorage();
-
-  if (!visible) return null;
+  if (dismissed || isSunset()) return null;
 
   async function handleDismiss() {
-    // Optimistic UI: hide the banner immediately so the user gets feedback.
-    // localStorage is written ONLY after the audit-emit fetch completes —
-    // a transient failure leaves the banner re-showable on the next session
-    // (retry-on-next-session contract, see plan §"Banner dismiss handler").
+    if (dismissing) return; // prevent rapid double-click duplicate emit
+    setDismissing(true);
+    // Optimistic UI: hide the banner immediately. localStorage is written
+    // only after the audit-emit fetch completes — a transient failure leaves
+    // the banner re-showable on the next session.
     setDismissed(true);
 
     try {
@@ -64,12 +66,9 @@ export function MigrationBanner() {
       if (res.ok) {
         persistDismissed();
       } else {
-        // Retry-eligible 4xx/5xx: surface to user; do not persist so banner
-        // re-shows on next session for another attempt.
         toast.error(t("banner.dismissError"));
       }
     } catch (err: unknown) {
-      // Network error: silent; banner re-appears next session.
       console.warn("[MigrationBanner] audit-emit failed:", err);
     }
   }

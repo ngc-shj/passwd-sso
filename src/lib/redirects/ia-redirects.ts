@@ -6,14 +6,11 @@
 import { LOCALES } from "../../i18n/locales";
 
 /**
- * IA migration redirect map for the personal-security-ia-redesign refactor.
+ * Old-path → new-path redirect table for the personal settings IA.
  *
- * Each entry maps an old (pre-refactor) path to its new location. Paths are
- * locale-prefix-free; the prefix is added by `buildLocaleRedirects()` for
- * every supported locale at config time.
- *
- * Both prod (`next.config.ts`) and tests import this same module so they
- * share the source of truth.
+ * Paths are locale-prefix-free; the prefix is added by `buildLocaleRedirects()`
+ * for every supported locale at config time. Both `next.config.ts` and tests
+ * import this module to share the source of truth.
  */
 export const IA_REDIRECTS = [
   { from: "/dashboard/settings/security", to: "/dashboard/settings/account" },
