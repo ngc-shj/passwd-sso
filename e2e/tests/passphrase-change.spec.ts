@@ -3,12 +3,18 @@ import { injectSession } from "../helpers/auth";
 import { getAuthState } from "../helpers/fixtures";
 import { VaultLockPage } from "../page-objects/vault-lock.page";
 
+const LOCK_BUTTON_LABEL = /保管庫をロック|Lock Vault/i;
+const PASSPHRASE_BUTTON_LABEL = /パスフレーズを変更|Change Passphrase/i;
+
 /**
  * Passphrase Change tests.
  *
  * Uses the dedicated `passphraseChange` user (DESTRUCTIVE).
  * The passphrase is permanently changed, so this test must not be retried
  * without resetting state first.
+ *
+ * After the personal-security IA redesign the entry point is the settings
+ * page `/dashboard/settings/auth/passphrase` (not the header dropdown).
  */
 test.describe.serial("Passphrase Change", () => {
   const NEW_PASSPHRASE = "E2E-NewPassphrase-2025!";
@@ -25,11 +31,10 @@ test.describe.serial("Passphrase Change", () => {
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
     await lockPage.unlockAndWait(passphraseChange.passphrase!);
 
-    await test.step("open Change Passphrase dialog from header menu", async () => {
-      // Open the user avatar dropdown in the header
-      await page.getByRole("button", { name: passphraseChange.name }).click();
+    await test.step("open Change Passphrase dialog from settings page", async () => {
+      await page.goto("/ja/dashboard/settings/auth/passphrase");
       await page
-        .getByRole("menuitem", { name: /Change Passphrase|パスフレーズを変更/i })
+        .getByRole("button", { name: PASSPHRASE_BUTTON_LABEL })
         .click();
 
       await page.locator("[role='dialog']").waitFor({ timeout: 5_000 });
@@ -40,10 +45,12 @@ test.describe.serial("Passphrase Change", () => {
       await page.locator("#cp-new").fill(NEW_PASSPHRASE);
       await page.locator("#cp-confirm").fill(NEW_PASSPHRASE);
 
+      // The submit button shares the same label as the trigger; scope the
+      // selector to the dialog so we don't pick up the trigger button on
+      // the page.
       await page
-        .getByRole("button", {
-          name: /Change Passphrase|パスフレーズを変更/i,
-        })
+        .locator("[role='dialog']")
+        .getByRole("button", { name: PASSPHRASE_BUTTON_LABEL })
         .click();
 
       // Dialog closes on success
@@ -53,10 +60,10 @@ test.describe.serial("Passphrase Change", () => {
       });
     });
 
-    await test.step("lock vault manually", async () => {
-      await page.getByRole("button", { name: passphraseChange.name }).click();
+    await test.step("lock vault via header LockVaultButton", async () => {
       await page
-        .getByRole("menuitem", { name: /Lock Vault|保管庫をロック/i })
+        .locator("header")
+        .getByRole("button", { name: LOCK_BUTTON_LABEL })
         .click();
 
       // Vault lock screen should appear

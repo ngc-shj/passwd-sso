@@ -3,8 +3,10 @@ import { injectSession } from "../helpers/auth";
 import { getAuthState } from "../helpers/fixtures";
 import { VaultLockPage } from "../page-objects/vault-lock.page";
 
+const RECOVERY_KEY_LABEL = /回復キー|Recovery Key/i;
+
 test.describe("Recovery Key", () => {
-  test("generate recovery key from header menu", async ({ context, page }) => {
+  test("generate recovery key from settings page", async ({ context, page }) => {
     const { vaultReady } = getAuthState();
     await injectSession(context, vaultReady.sessionToken);
     await page.goto("/ja/dashboard");
@@ -14,25 +16,28 @@ test.describe("Recovery Key", () => {
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
     await lockPage.unlockAndWait(vaultReady.passphrase!);
 
-    // Open user menu and click Recovery Key
-    const userMenuButton = page.locator("header").getByRole("button").last();
-    await userMenuButton.click();
+    // After the personal-security IA redesign the entry point is the
+    // settings page, not the header dropdown.
+    await page.goto("/ja/dashboard/settings/auth/recovery-key");
 
-    const recoveryKeyItem = page.getByRole("menuitem", {
-      name: /Recovery Key|回復キー/i,
-    });
-    await recoveryKeyItem.click();
+    // The card has a button labelled "回復キー" / "Recovery Key" that opens
+    // the RecoveryKeyDialog.
+    await page
+      .getByRole("button", { name: RECOVERY_KEY_LABEL })
+      .first()
+      .click();
 
     // Recovery Key dialog should open — enter passphrase
     const passphraseInput = page.locator("#rk-passphrase");
     await expect(passphraseInput).toBeVisible({ timeout: 5_000 });
     await passphraseInput.fill(vaultReady.passphrase!);
 
-    // Click generate (button text = t("recoveryKey"))
-    const generateButton = page.getByRole("button", {
-      name: /Recovery Key|回復キー/i,
-    });
-    await generateButton.click();
+    // Click the in-dialog generate button (same label).  Scope to the
+    // dialog so we don't re-click the page-level trigger.
+    await page
+      .locator("[role='dialog']")
+      .getByRole("button", { name: RECOVERY_KEY_LABEL })
+      .click();
 
     // Should display Base32 recovery key (XXXX-XXXX-... format)
     const keyDisplay = page.locator("code");

@@ -75,7 +75,7 @@ test.describe("LockVaultButton (desktop)", () => {
   });
 });
 
-// @mobile — runs only under mobile-ios / mobile-android projects
+// @mobile — runs only under mobile-ios / mobile-android projects.
 test("@mobile: LockVaultButton locks vault in one tap", async ({ page, context }) => {
   const { vaultReady } = getAuthState();
   await injectSession(context, vaultReady.sessionToken);
