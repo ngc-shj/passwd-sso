@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { routing } from "@/i18n/routing";
+import { LOCALES } from "@/i18n/locales";
 import { IA_REDIRECTS, buildLocaleRedirects } from "./ia-redirects";
 
 describe("IA_REDIRECTS constant", () => {
@@ -49,13 +49,13 @@ describe("IA_REDIRECTS constant", () => {
 describe("buildLocaleRedirects()", () => {
   const generated = buildLocaleRedirects();
 
-  it("produces IA_REDIRECTS.length × routing.locales.length entries", () => {
-    expect(generated.length).toBe(IA_REDIRECTS.length * routing.locales.length);
+  it("produces IA_REDIRECTS.length × LOCALES.length entries", () => {
+    expect(generated.length).toBe(IA_REDIRECTS.length * LOCALES.length);
   });
 
   it("emits every (locale, from→to) combination with the expected source/destination shape", () => {
     for (const { from, to } of IA_REDIRECTS) {
-      for (const locale of routing.locales) {
+      for (const locale of LOCALES) {
         const expectedSource = `/${locale}${from}`;
         const expectedDest = `/${locale}${to}`;
         const match = generated.find(

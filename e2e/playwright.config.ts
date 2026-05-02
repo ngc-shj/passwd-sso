@@ -36,6 +36,20 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      // Skip mobile-tagged tests — they run in the dedicated mobile projects
+      grepInvert: /@mobile/,
+    },
+    {
+      name: "mobile-ios",
+      use: { ...devices["iPhone 13"] },
+      // Only run tests tagged @mobile
+      grep: /@mobile/,
+    },
+    {
+      name: "mobile-android",
+      use: { ...devices["Pixel 7"] },
+      // Only run tests tagged @mobile
+      grep: /@mobile/,
     },
   ],
 

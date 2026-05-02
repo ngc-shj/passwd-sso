@@ -1,4 +1,9 @@
-import { routing } from "@/i18n/routing";
+// IMPORTANT: this module is imported by `next.config.ts` at config-load time.
+// Next's TypeScript path-alias resolution does NOT follow transitive imports
+// from compiled config, so use a relative path here. Importing
+// `@/i18n/routing` (which depends on `next-intl`) breaks `next dev` startup.
+// See `src/i18n/locales.ts` for the locales constants.
+import { LOCALES } from "../../i18n/locales";
 
 /**
  * IA migration redirect map for the personal-security-ia-redesign refactor.
@@ -34,7 +39,7 @@ export type LocaleRedirect = {
  */
 export function buildLocaleRedirects(): LocaleRedirect[] {
   return IA_REDIRECTS.flatMap(({ from, to }) =>
-    routing.locales.map((locale) => ({
+    LOCALES.map((locale) => ({
       source: `/${locale}${from}`,
       destination: `/${locale}${to}`,
       permanent: true as const,
