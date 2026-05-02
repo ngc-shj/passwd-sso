@@ -142,8 +142,6 @@ test.describe("Admin IA — team nav", () => {
 
   test("team Members page renders without error", async () => {
     test.skip(!teamId, "No team found in teams list");
-    await page.goto(`/ja/admin/teams/${teamId}/members`);
-    await page.waitForLoadState("networkidle");
     const response = await page.goto(`/ja/admin/teams/${teamId}/members`);
     expect(response?.status()).not.toBe(404);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 10_000 });
@@ -202,12 +200,12 @@ test("@mobile admin sidebar sheet opens and child link navigates", async ({ page
   await page.goto("/ja/admin/tenant/members");
   await page.waitForLoadState("networkidle");
 
-  // Mobile menu trigger — match by exact aria-label (NOT regex over
-  // accessible name). Per memory feedback_e2e_aria_label_phantom_match,
-  // getByRole({name: regex}) can match unintended chrome (banner close
-  // buttons etc.) since "accessible name" includes aria-label.
-  // Also avoids the Radix Slot ambiguity that bit #423 — see commit
-  // 8f176377 of feat/personal-security-ia-redesign.
+  // Mobile menu trigger — match by exact aria-label, NOT regex over
+  // accessible name. `getByRole({name: regex})` can match unintended
+  // chrome (banner close buttons whose aria-label embeds the same word)
+  // and also matches both <button> and any sibling <a> rendered via
+  // shadcn `<Button asChild><Link>` (Slot pattern). getByLabel binds
+  // to the literal aria-label attribute, avoiding both traps.
   const hamburger = page.getByLabel("メニューを開く");
   await expect(hamburger).toBeVisible({ timeout: 10_000 });
   await hamburger.click();

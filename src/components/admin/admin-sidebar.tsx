@@ -66,7 +66,7 @@ type TFn = ReturnType<typeof useTranslations>;
 /**
  * Pure navItem factories. Extracted from `useNavItems` so tests can derive
  * the expected link count via `countLeafLinks(...)` rather than hard-coding
- * literals (round-1 finding F4/T3 — RT3).
+ * literals.
  */
 export function getTeamNavItems(t: TFn, teamId: string): NavItem[] {
   return [

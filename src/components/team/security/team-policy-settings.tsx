@@ -104,16 +104,19 @@ export type TeamPolicySection =
   | "sharing"
   | "access-restriction";
 
+// Section header config — module-scoped so it isn't reallocated per render.
+const SECTION_HEADER: Record<TeamPolicySection, { icon: LucideIcon; titleKey: string; descKey: string }> = {
+  password: { icon: Lock, titleKey: "sectionPasswordTitle", descKey: "sectionPasswordDesc" },
+  session: { icon: Clock, titleKey: "sectionSessionTitle", descKey: "sectionSessionDesc" },
+  sharing: { icon: Share2, titleKey: "sectionSharingTitle", descKey: "sectionSharingDesc" },
+  "access-restriction": { icon: Globe, titleKey: "sectionAccessRestrictionTitle", descKey: "sectionAccessRestrictionDesc" },
+};
+const FALLBACK_HEADER = { icon: ListChecks, titleKey: "title", descKey: "description" } as const;
+
 interface TeamPolicySettingsProps {
   teamId: string;
-  /**
-   * Optional section filter. When set, only the named section's fields are
-   * rendered. When omitted, all sections render (backward-compat path used
-   * by any non-IA consumer). The component still loads the FULL policy and
-   * the save button writes the FULL policy regardless of which section is
-   * shown — so user edits on a section save through the same unified PUT
-   * endpoint as before.
-   */
+  // section filter: controls which fields render. Save always writes the
+  // full policy (single PUT endpoint), regardless of which section is shown.
   section?: TeamPolicySection;
 }
 
@@ -218,13 +221,7 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
   const showSession = showAll || section === "session";
   const showAccessRestriction = showAll || section === "access-restriction";
 
-  const sectionHeader: Record<TeamPolicySection, { icon: LucideIcon; titleKey: string; descKey: string }> = {
-    password: { icon: Lock, titleKey: "sectionPasswordTitle", descKey: "sectionPasswordDesc" },
-    session: { icon: Clock, titleKey: "sectionSessionTitle", descKey: "sectionSessionDesc" },
-    sharing: { icon: Share2, titleKey: "sectionSharingTitle", descKey: "sectionSharingDesc" },
-    "access-restriction": { icon: Globe, titleKey: "sectionAccessRestrictionTitle", descKey: "sectionAccessRestrictionDesc" },
-  };
-  const headerConfig = section ? sectionHeader[section] : { icon: ListChecks, titleKey: "title", descKey: "description" };
+  const headerConfig = section ? SECTION_HEADER[section] : FALLBACK_HEADER;
 
   return (
     <Card>
@@ -479,9 +476,9 @@ function SwitchField({
   checked: boolean;
   onChange: (checked: boolean) => void;
 }) {
-  // Match tenant policy card layout: flat row, no border, Label + Switch
-  // with `justify-between`. Keeps the visual style consistent across
-  // tenant and team policy pages (round-3 user feedback).
+  // Flat row, no border — matches tenant policy card layout for visual
+  // consistency (otherwise team's bordered SwitchField boxes look like
+  // a different concept).
   return (
     <div className="flex items-center justify-between">
       <Label htmlFor={id} className="cursor-pointer">{label}</Label>

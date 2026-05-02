@@ -75,9 +75,8 @@ describe("TeamPendingInvitationsList", () => {
   });
 
   it("renders the empty state when invitations list is empty", () => {
-    // Per round-1 code-review F3: render header always; show empty-state
-    // copy when there are no invitations (avoids layout shift after first
-    // invite is sent).
+    // Header renders always; empty-state copy fills the body when there are
+    // no invitations (so the card position doesn't shift on first invite).
     render(
       <TeamPendingInvitationsList invitations={[]} teamId="team-1" onCancel={vi.fn()} />,
     );

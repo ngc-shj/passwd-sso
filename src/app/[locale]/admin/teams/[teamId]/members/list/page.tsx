@@ -268,9 +268,9 @@ export default function TeamMembersPage({
         </CardContent>
       </Card>
 
-      {/* Always render the pending-invitations card. The component itself
-          shows an empty-state message when there are no invitations (per
-          round-1 finding F3 — avoids layout shift after first invite). */}
+      {/* Always render the pending-invitations card. Empty state is shown
+          inside the component, so the card position is stable (no layout
+          shift when the first invitation appears). */}
       <Card>
         <CardContent className="pt-6">
           <TeamPendingInvitationsList

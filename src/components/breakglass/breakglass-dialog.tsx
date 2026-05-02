@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -20,12 +20,14 @@ import { apiPath, API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { filterMembers } from "@/lib/filter-members";
 import { cn } from "@/lib/utils";
+import { MemberInfo } from "@/components/member-info";
 import { toast } from "sonner";
 
 interface TenantMember {
   userId: string;
   name: string | null;
   email: string | null;
+  image: string | null;
 }
 
 interface BreakGlassDialogProps {
@@ -55,19 +57,18 @@ export function BreakGlassDialog({ onGrantCreated }: BreakGlassDialogProps) {
       });
   }, [open, members.length]);
 
-  // Reset form state when dialog closes
+  // Reset form state + member roster when dialog closes; the next open
+  // re-fetches fresh members in case the tenant roster changed.
   useEffect(() => {
     if (open) return;
     setTargetUserId("");
     setMemberSearch("");
     setReason("");
     setIncidentRef("");
+    setMembers([]);
   }, [open]);
 
-  const filteredMembers = useMemo(
-    () => filterMembers(members, memberSearch),
-    [members, memberSearch],
-  );
+  const filteredMembers = filterMembers(members, memberSearch);
 
   const handleSubmit = async () => {
     if (reason.length < 10) {
@@ -175,21 +176,12 @@ export function BreakGlassDialog({ onGrantCreated }: BreakGlassDialogProps) {
                       aria-selected={isSelected}
                       onClick={() => setTargetUserId(m.userId)}
                       className={cn(
-                        "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors",
+                        "flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors",
                         "hover:bg-accent/40 dark:hover:bg-accent/60",
                         isSelected && "bg-accent/60 dark:bg-accent/80",
                       )}
                     >
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium">
-                          {m.name ?? m.email ?? m.userId}
-                        </div>
-                        {m.name && m.email && (
-                          <div className="truncate text-xs text-muted-foreground">
-                            {m.email}
-                          </div>
-                        )}
-                      </div>
+                      <MemberInfo name={m.name} email={m.email} image={m.image} />
                       {isSelected && (
                         <Check className="h-4 w-4 shrink-0 text-primary" />
                       )}

@@ -40,9 +40,8 @@ function collectSrcFiles(dir: string): string[] {
 }
 
 // Regex patterns capture both singular and plural forms (e.g. `sectionPolicy*`
-// AND `sectionPolicies*`) — broader than `startsWith` to prevent the
-// "Polic vs Policies" prefix gap that caused two dead keys to slip through
-// in the initial implementation (round-1 finding F1/T1).
+// AND `sectionPolicies*`) — broader than `startsWith` to prevent prefix gaps
+// like "Polic vs Policies" that would let dead keys slip past this gate.
 const NEW_KEY_PATTERNS: RegExp[] = [
   /^nav(MachineIdentity|Polic|Integration|Breakglass)/,
   /^navTeam(Policy|KeyRotation|Webhooks)$/,
@@ -85,11 +84,10 @@ describe("admin-ia i18n forward coverage", () => {
   }
 });
 
-// ── Terminology lock (round-1 finding F5; round-1 code-review T4) ────────────
+// ── Terminology lock ─────────────────────────────────────────────────────────
 // Pin specific Japanese values to prevent silent translation drift. Without
-// this, a future PR could change `運用者トークン` → `オペレータートークン` and
-// only the manual review (the same review that caught the original drift)
-// would catch it.
+// this gate, a future PR could change `運用者トークン` → `オペレータートークン`
+// (or similar drift) and only manual review would catch it.
 describe("admin-ia ja terminology lock", () => {
   const ja = readAdminConsole("ja");
   const expectedTerminology: Record<string, string> = {
