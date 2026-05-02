@@ -123,7 +123,10 @@ describe("Options App", () => {
   it("shows server URL in General section", async () => {
     render(<App />);
     await screen.findByText("General"); // wait for load
-    expect(screen.getByDisplayValue("https://example.com")).toBeInTheDocument();
+    // Use findByDisplayValue instead of getByDisplayValue: the input value
+    // populates from getSettings().then(setState), which may not have
+    // committed by the time `findByText("General")` resolves on slower CI runners.
+    expect(await screen.findByDisplayValue("https://example.com")).toBeInTheDocument();
   });
 
   it("shows error on invalid URL", async () => {
