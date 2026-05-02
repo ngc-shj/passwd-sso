@@ -43,6 +43,8 @@
   "subTabSaAccessRequests": "JIT アクセスリクエスト",
   "subTabScim": "SCIM",
   "subTabDirectorySync": "ディレクトリ同期",
+  "subTabMembersList": "一覧",
+  "subTabMembersTransferOwnership": "オーナー権限を移譲",
 
   "sectionMembers": "メンバー",
   "sectionMembersDesc": "メンバーとロールを管理します。",
@@ -91,7 +93,5 @@
   "teamSectionAuditLogs": "監査ログ",
   "teamSectionAuditLogsDesc": "チームのアクティビティとセキュリティイベントを確認します。",
 
-  "memberAddButton": "メンバーを追加",
-  "memberTransferOwnershipLink": "オーナー権限を移譲",
-  "backToMembers": "メンバーに戻る"
+  "memberAddButton": "メンバーを追加"
 }
