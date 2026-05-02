@@ -9,16 +9,14 @@ test.describe("Recovery Key", () => {
   test("generate recovery key from settings page", async ({ context, page }) => {
     const { vaultReady } = getAuthState();
     await injectSession(context, vaultReady.sessionToken);
-    await page.goto("/ja/dashboard");
+    // Navigate directly to the settings page. The full `page.goto` re-mounts
+    // VaultProvider, so the lock screen renders first; unlock there so the
+    // page-level button (gated on UNLOCKED) becomes clickable.
+    await page.goto("/ja/dashboard/settings/auth/recovery-key");
 
-    // Unlock vault first
     const lockPage = new VaultLockPage(page);
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
     await lockPage.unlockAndWait(vaultReady.passphrase!);
-
-    // After the personal-security IA redesign the entry point is the
-    // settings page, not the header dropdown.
-    await page.goto("/ja/dashboard/settings/auth/recovery-key");
 
     // The card has a button labelled "回復キー" / "Recovery Key" that opens
     // the RecoveryKeyDialog.

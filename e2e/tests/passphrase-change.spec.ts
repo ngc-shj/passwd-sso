@@ -25,14 +25,17 @@ test.describe.serial("Passphrase Change", () => {
   }) => {
     const { passphraseChange } = getAuthState();
     await injectSession(context, passphraseChange.sessionToken);
-    await page.goto("/ja/dashboard");
+    // Navigate directly to the settings page. `page.goto` is a full
+    // navigation that re-mounts VaultProvider, so the vault re-locks; the
+    // lock screen renders before the page content. We unlock here so the
+    // page-level button (gated on UNLOCKED) becomes clickable.
+    await page.goto("/ja/dashboard/settings/auth/passphrase");
 
     const lockPage = new VaultLockPage(page);
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
     await lockPage.unlockAndWait(passphraseChange.passphrase!);
 
     await test.step("open Change Passphrase dialog from settings page", async () => {
-      await page.goto("/ja/dashboard/settings/auth/passphrase");
       await page
         .getByRole("button", { name: PASSPHRASE_BUTTON_LABEL })
         .click();
