@@ -40,5 +40,8 @@
   "noActiveGrants": "有効なアクセス許可はありません。",
   "showHistory": "履歴を表示",
   "hideHistory": "履歴を非表示",
-  "rateLimitExceeded": "リクエスト回数の上限に達しました。しばらくしてから再試行してください。"
+  "rateLimitExceeded": "リクエスト回数の上限に達しました。しばらくしてから再試行してください。",
+  "searchMembers": "メンバーを検索...",
+  "noMatchingMembers": "該当するメンバーが見つかりません。",
+  "noMembers": "対象ユーザーがいません。"
 }

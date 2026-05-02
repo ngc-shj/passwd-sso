@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -15,16 +15,11 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { AlertTriangle, Loader2, ShieldAlert } from "lucide-react";
+import { AlertTriangle, Check, Loader2, Search, ShieldAlert } from "lucide-react";
 import { apiPath, API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { filterMembers } from "@/lib/filter-members";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 interface TenantMember {
@@ -43,6 +38,7 @@ export function BreakGlassDialog({ onGrantCreated }: BreakGlassDialogProps) {
   const [open, setOpen] = useState(false);
   const [members, setMembers] = useState<TenantMember[]>([]);
   const [targetUserId, setTargetUserId] = useState("");
+  const [memberSearch, setMemberSearch] = useState("");
   const [reason, setReason] = useState("");
   const [incidentRef, setIncidentRef] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -58,6 +54,20 @@ export function BreakGlassDialog({ onGrantCreated }: BreakGlassDialogProps) {
         }
       });
   }, [open, members.length]);
+
+  // Reset form state when dialog closes
+  useEffect(() => {
+    if (open) return;
+    setTargetUserId("");
+    setMemberSearch("");
+    setReason("");
+    setIncidentRef("");
+  }, [open]);
+
+  const filteredMembers = useMemo(
+    () => filterMembers(members, memberSearch),
+    [members, memberSearch],
+  );
 
   const handleSubmit = async () => {
     if (reason.length < 10) {
@@ -80,9 +90,6 @@ export function BreakGlassDialog({ onGrantCreated }: BreakGlassDialogProps) {
       if (res.ok) {
         toast.success(t("grantCreated"));
         setOpen(false);
-        setTargetUserId("");
-        setReason("");
-        setIncidentRef("");
         onGrantCreated();
         return;
       }
@@ -133,19 +140,64 @@ export function BreakGlassDialog({ onGrantCreated }: BreakGlassDialogProps) {
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="bg-target">{t("targetUser")}</Label>
-            <Select value={targetUserId} onValueChange={setTargetUserId}>
-              <SelectTrigger id="bg-target">
-                <SelectValue placeholder={t("targetUserPlaceholder")} />
-              </SelectTrigger>
-              <SelectContent>
-                {members.map((m) => (
-                  <SelectItem key={m.userId} value={m.userId}>
-                    {m.name ?? m.email ?? m.userId}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Label htmlFor="bg-target-search">{t("targetUser")}</Label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="bg-target-search"
+                placeholder={t("searchMembers")}
+                value={memberSearch}
+                onChange={(e) => setMemberSearch(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <div
+              role="listbox"
+              aria-label={t("targetUser")}
+              className="max-h-48 overflow-y-auto rounded-md border bg-card/80"
+            >
+              {members.length === 0 ? (
+                <p className="p-3 text-center text-sm text-muted-foreground">
+                  {t("noMembers")}
+                </p>
+              ) : filteredMembers.length === 0 ? (
+                <p className="p-3 text-center text-sm text-muted-foreground">
+                  {t("noMatchingMembers")}
+                </p>
+              ) : (
+                filteredMembers.map((m) => {
+                  const isSelected = m.userId === targetUserId;
+                  return (
+                    <button
+                      key={m.userId}
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      onClick={() => setTargetUserId(m.userId)}
+                      className={cn(
+                        "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors",
+                        "hover:bg-accent/40 dark:hover:bg-accent/60",
+                        isSelected && "bg-accent/60 dark:bg-accent/80",
+                      )}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium">
+                          {m.name ?? m.email ?? m.userId}
+                        </div>
+                        {m.name && m.email && (
+                          <div className="truncate text-xs text-muted-foreground">
+                            {m.email}
+                          </div>
+                        )}
+                      </div>
+                      {isSelected && (
+                        <Check className="h-4 w-4 shrink-0 text-primary" />
+                      )}
+                    </button>
+                  );
+                })
+              )}
+            </div>
           </div>
 
           <div className="space-y-1.5">
