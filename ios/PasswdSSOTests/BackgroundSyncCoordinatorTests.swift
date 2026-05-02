@@ -5,7 +5,7 @@ import XCTest
 
 actor MockNetworkClient: NetworkClient {
   enum Behavior: Sendable {
-    case success(entries: [EncryptedEntry])
+    case success(entries: [SyncEncryptedEntry])
     case networkFailure(error: Error)
     case tokenExpired
   }
@@ -27,7 +27,7 @@ actor MockNetworkClient: NetworkClient {
     }
   }
 
-  func fetchEncryptedEntries(session: SessionState) async throws -> [EncryptedEntry] {
+  func fetchEncryptedEntries(session: SessionState) async throws -> [SyncEncryptedEntry] {
     switch behavior {
     case .networkFailure(let error):
       throw error
@@ -45,8 +45,8 @@ final class BackgroundSyncCoordinatorTests: XCTestCase {
 
   func testHappyPathReturnsSyncReport() async throws {
     let entries = [
-      EncryptedEntry(id: "1", encryptedBlob: "blob1", encryptedOverview: "ov1"),
-      EncryptedEntry(id: "2", encryptedBlob: "blob2", encryptedOverview: "ov2"),
+      SyncEncryptedEntry(id: "1", encryptedBlob: "blob1", encryptedOverview: "ov1"),
+      SyncEncryptedEntry(id: "2", encryptedBlob: "blob2", encryptedOverview: "ov2"),
     ]
     let client = MockNetworkClient(behavior: .success(entries: entries))
     let cache = InMemoryCacheWriter()
@@ -108,7 +108,7 @@ final class BackgroundSyncCoordinatorTests: XCTestCase {
 
   func testCacheReceivesEntries() async throws {
     let entries = [
-      EncryptedEntry(id: "x", encryptedBlob: "b", encryptedOverview: "o"),
+      SyncEncryptedEntry(id: "x", encryptedBlob: "b", encryptedOverview: "o"),
     ]
     let client = MockNetworkClient(behavior: .success(entries: entries))
     let cache = InMemoryCacheWriter()

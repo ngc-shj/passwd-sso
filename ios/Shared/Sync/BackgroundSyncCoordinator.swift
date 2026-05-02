@@ -1,7 +1,8 @@
 import Foundation
 
-/// Encrypted entry as returned by the server (opaque — decrypted by host app).
-public struct EncryptedEntry: Sendable, Equatable {
+/// Opaque encrypted entry used by the background sync coordinator stub.
+/// The host-app's real wire type is `EncryptedEntry` in EntryFetcher.swift (Codable, full shape).
+public struct SyncEncryptedEntry: Sendable, Equatable {
   public let id: String
   public let encryptedBlob: String
   public let encryptedOverview: String
@@ -28,22 +29,22 @@ public struct SyncReport: Sendable, Equatable {
 /// Network layer abstraction for testability (per T40).
 public protocol NetworkClient: Sendable {
   func refreshToken(session: SessionState) async throws -> SessionState
-  func fetchEncryptedEntries(session: SessionState) async throws -> [EncryptedEntry]
+  func fetchEncryptedEntries(session: SessionState) async throws -> [SyncEncryptedEntry]
 }
 
 /// Cache write abstraction — real implementation lives in Step 7 (host app).
 public protocol CacheWriter: Sendable {
-  func write(entries: [EncryptedEntry], refreshedAt: Date) async throws -> Int
+  func write(entries: [SyncEncryptedEntry], refreshedAt: Date) async throws -> Int
 }
 
 /// In-memory stub for use in tests and as a placeholder until Step 7.
 public actor InMemoryCacheWriter: CacheWriter {
-  public var lastWritten: [EncryptedEntry] = []
+  public var lastWritten: [SyncEncryptedEntry] = []
   public var lastRefreshedAt: Date?
 
   public init() {}
 
-  public func write(entries: [EncryptedEntry], refreshedAt: Date) async throws -> Int {
+  public func write(entries: [SyncEncryptedEntry], refreshedAt: Date) async throws -> Int {
     lastWritten = entries
     lastRefreshedAt = refreshedAt
     // Rough estimate: 2 KB per entry

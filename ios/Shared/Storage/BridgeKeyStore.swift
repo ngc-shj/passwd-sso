@@ -95,7 +95,7 @@ public final class BridgeKeyStore: Sendable {
 
     // Treat random bytes as a big-endian u64; ensure non-zero.
     // Per plan §"Encrypted-entries cache integrity": counter is big-endian in serialized form.
-    var counter = counterBytes.withUnsafeBytes { UInt64(bigEndian: $0.load(as: UInt64.self)) }
+    var counter = counterBytes.withUnsafeBytes { UInt64(bigEndian: $0.loadUnaligned(as: UInt64.self)) }
     if counter == 0 { counter = 1 }
 
     let blob = Blob(
@@ -150,6 +150,31 @@ public final class BridgeKeyStore: Sendable {
     guard updateStatus == errSecSuccess else {
       throw Error.keychainError(updateStatus)
     }
+  }
+
+  /// Read without biometric — used by host app for recovery and counter updates.
+  /// Does NOT trigger a biometric prompt.
+  public func readDirect() throws -> Blob {
+    var query: [String: Any] = baseQuery()
+    query[kSecReturnData as String] = true
+
+    let (status, data) = keychain.copyMatching(query: query)
+    if status == errSecItemNotFound { throw Error.notFound }
+    guard status == errSecSuccess, let data else {
+      throw Error.keychainError(status)
+    }
+    return try deserialize(data)
+  }
+
+  /// Advance the blob counter to `observed` only if `observed == current + 1`.
+  /// Returns true if the counter was advanced; false if no action was needed.
+  public func recoverForwardCounter(observed: UInt64) throws -> Bool {
+    let current = try readDirect()
+    guard observed == current.cacheVersionCounter + 1 else {
+      return false
+    }
+    try incrementCounter(newCounter: observed)
+    return true
   }
 
   /// Delete — no biometric required for delete (per plan §"App-side auto-lock or logout").
@@ -213,9 +238,8 @@ public final class BridgeKeyStore: Sendable {
   private func deserialize(_ data: Data) throws -> Blob {
     guard data.count == bridgeKeyBlobSize else { throw Error.invalidBlob }
     let bridgeKey = data[0..<32]
-    // Per plan: big-endian u64 counter
-    let counterBE = data[32..<40].withUnsafeBytes { $0.load(as: UInt64.self) }
-    let counter = UInt64(bigEndian: counterBE)
+    // Per plan: big-endian u64 counter; use loadUnaligned to avoid SIGBUS on Data slices.
+    let counter = data[32..<40].withUnsafeBytes { UInt64(bigEndian: $0.loadUnaligned(as: UInt64.self)) }
     let uuid = data[40..<56]
     return Blob(
       bridgeKey: Data(bridgeKey),

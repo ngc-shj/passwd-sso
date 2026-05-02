@@ -5,6 +5,8 @@ import CommonCrypto
 // HKDF info strings — must match crypto-client.ts constants exactly.
 private let hkdfEncInfo = "passwd-sso-enc-v1"
 private let hkdfAuthInfo = "passwd-sso-auth-v1"
+// Cache vault key — used only on iOS device (no server-side equivalent).
+private let hkdfCacheInfo = "passwd-sso-cache-v1"
 private let hkdfZeroSalt = Data(repeating: 0, count: 32)
 
 /// Derive a 256-bit wrapping key from passphrase + salt using PBKDF2-SHA256.
@@ -65,6 +67,19 @@ public func deriveAuthKey(secretKey: Data) throws -> Data {
     outputByteCount: 32
   )
   return derived.withUnsafeBytes { Data($0) }
+}
+
+/// Derive the cache-encryption key from the bridge_key.
+/// HKDF-SHA256(IKM=bridge_key, salt=zero32, info="passwd-sso-cache-v1") → 32 bytes → AES-256 key.
+public func deriveCacheVaultKey(bridgeKey: Data) throws -> SymmetricKey {
+  let inputKey = SymmetricKey(data: bridgeKey)
+  let info = hkdfCacheInfo.data(using: .utf8)!
+  return HKDF<SHA256>.deriveKey(
+    inputKeyMaterial: inputKey,
+    salt: hkdfZeroSalt,
+    info: info,
+    outputByteCount: 32
+  )
 }
 
 public enum KDFError: Error, Equatable {

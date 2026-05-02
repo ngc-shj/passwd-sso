@@ -2,6 +2,28 @@ import CryptoKit
 import Foundation
 import Shared
 
+// MARK: - Vault unlock data (matches /api/vault/unlock/data response)
+
+public struct VaultUnlockData: Sendable, Codable, Equatable {
+  public let accountSalt: String
+  public let encryptedSecretKey: String
+  public let secretKeyIv: String
+  public let secretKeyAuthTag: String
+  public let keyVersion: Int
+  public let kdfType: String
+  public let kdfIterations: Int
+
+  enum CodingKeys: String, CodingKey {
+    case accountSalt
+    case encryptedSecretKey
+    case secretKeyIv
+    case secretKeyAuthTag
+    case keyVersion
+    case kdfType
+    case kdfIterations
+  }
+}
+
 // MARK: - Response types
 
 public struct TokenExchangeResponse: Sendable, Codable, Equatable {
@@ -37,10 +59,10 @@ public enum MobileAPIError: Error, Equatable {
 /// The client owns DPoP proof construction per request and echoes the last
 /// `DPoP-Nonce` header the server issued. Concurrent calls are serialized by `actor`.
 public actor MobileAPIClient {
-  private let serverURL: URL
-  private let signer: DPoPSigner
-  private let jwk: [String: String]
-  private let tokenStore: HostTokenStore
+  let serverURL: URL
+  let signer: DPoPSigner
+  let jwk: [String: String]
+  let tokenStore: HostTokenStore
   private let urlSession: URLSession
 
   public init(
@@ -162,6 +184,103 @@ public actor MobileAPIClient {
     }
   }
 
+  // MARK: - Protected resource API
+
+  /// Fetch vault unlock data from GET /api/vault/unlock/data.
+  /// Requires a valid access token (DPoP-signed).
+  public func fetchVaultUnlockData() async throws -> VaultUnlockData {
+    guard let (accessToken, _) = try tokenStore.loadAccess() else {
+      throw MobileAPIError.serverError(status: 401)
+    }
+
+    let endpoint = serverURL.appending(
+      path: "/api/vault/unlock/data",
+      directoryHint: .notDirectory
+    )
+    let htu = canonicalHTU(url: endpoint)
+    let ath = sha256Base64URL(accessToken)
+
+    let localJWK = jwk
+    let localSigner = signer
+    let nonce = try? tokenStore.loadNonce()
+    let proof = try await buildDPoPProof(
+      htm: "GET",
+      htu: htu,
+      jwk: localJWK,
+      ath: ath,
+      nonce: nonce,
+      signer: localSigner
+    )
+
+    var request = URLRequest(url: endpoint)
+    request.httpMethod = "GET"
+    request.setValue("DPoP \(accessToken)", forHTTPHeaderField: "Authorization")
+    request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
+
+    let (data, response) = try await performHTTP(request)
+    let http = response as! HTTPURLResponse
+
+    if let newNonce = http.value(forHTTPHeaderField: "DPoP-Nonce") {
+      try? tokenStore.saveNonce(newNonce)
+    }
+
+    switch http.statusCode {
+    case 200:
+      return try JSONDecoder().decode(VaultUnlockData.self, from: data)
+    case 401:
+      throw MobileAPIError.serverError(status: 401)
+    default:
+      throw MobileAPIError.serverError(status: http.statusCode)
+    }
+  }
+
+  /// Fetch encrypted entries from a GET endpoint (personal or team).
+  /// Requires a valid access token (DPoP-signed).
+  public func fetchEntries(endpoint endpointPath: String) async throws -> [EncryptedEntry] {
+    guard let (accessToken, _) = try tokenStore.loadAccess() else {
+      throw MobileAPIError.serverError(status: 401)
+    }
+
+    guard let endpointURL = URL(string: endpointPath, relativeTo: serverURL) else {
+      throw MobileAPIError.serverError(status: 400)
+    }
+    let htu = canonicalHTU(url: endpointURL)
+    let ath = sha256Base64URL(accessToken)
+
+    let localJWK = jwk
+    let localSigner = signer
+    let nonce = try? tokenStore.loadNonce()
+    let proof = try await buildDPoPProof(
+      htm: "GET",
+      htu: htu,
+      jwk: localJWK,
+      ath: ath,
+      nonce: nonce,
+      signer: localSigner
+    )
+
+    var request = URLRequest(url: endpointURL)
+    request.httpMethod = "GET"
+    request.setValue("DPoP \(accessToken)", forHTTPHeaderField: "Authorization")
+    request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
+
+    let (data, response) = try await performHTTP(request)
+    let http = response as! HTTPURLResponse
+
+    if let newNonce = http.value(forHTTPHeaderField: "DPoP-Nonce") {
+      try? tokenStore.saveNonce(newNonce)
+    }
+
+    switch http.statusCode {
+    case 200:
+      return try JSONDecoder().decode([EncryptedEntry].self, from: data)
+    case 401:
+      throw MobileAPIError.serverError(status: 401)
+    default:
+      throw MobileAPIError.serverError(status: http.statusCode)
+    }
+  }
+
   // MARK: - Private helpers
 
   /// Perform a token request; on 401 + new nonce, invoke `makeRetry` once.
@@ -193,7 +312,7 @@ public actor MobileAPIClient {
     return try decodeResponse(data, status: http.statusCode)
   }
 
-  private func performHTTP(_ request: URLRequest) async throws -> (Data, URLResponse) {
+  func performHTTP(_ request: URLRequest) async throws -> (Data, URLResponse) {
     do {
       return try await urlSession.data(for: request)
     } catch let urlError as URLError {
@@ -217,7 +336,7 @@ public actor MobileAPIClient {
   }
 
   /// Strip query/fragment for the canonical htu value per RFC 9449 §4.2.
-  private func canonicalHTU(url: URL) -> String {
+  func canonicalHTU(url: URL) -> String {
     var components = URLComponents(url: url, resolvingAgainstBaseURL: false) ?? URLComponents()
     components.query = nil
     components.fragment = nil
@@ -225,7 +344,7 @@ public actor MobileAPIClient {
   }
 
   /// SHA-256(token) → base64url, for the DPoP `ath` claim.
-  private func sha256Base64URL(_ token: String) -> String {
+  func sha256Base64URL(_ token: String) -> String {
     let digest = SHA256.hash(data: Data(token.utf8))
     return base64URLEncode(Data(digest))
   }
