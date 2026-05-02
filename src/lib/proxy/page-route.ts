@@ -19,9 +19,11 @@ export type ProxyOptions = {
 const intlMiddleware = createIntlMiddleware(routing);
 
 // Paths exempt from passkey enforcement to prevent registration loops.
-// Must include the security settings page and all WebAuthn/auth API routes.
+// Narrowly scoped to the passkey registration page itself — vault-sensitive
+// pages (passphrase, recovery key) MUST stay gated so a passkey-pending user
+// cannot bypass MFA by reaching them while enforcement is in flight.
 const PASSKEY_EXEMPT_PREFIXES = [
-  "/dashboard/settings/security",
+  "/dashboard/settings/auth/passkey",
 ];
 
 function isPasskeyExemptPath(pathWithoutLocale: string): boolean {
@@ -160,7 +162,7 @@ export async function handlePageRoute(
     ) {
       if (isPasskeyGracePeriodExpired(session.requirePasskeyEnabledAt, session.passkeyGracePeriodDays)) {
         const securityUrl = request.nextUrl.clone();
-        securityUrl.pathname = `/${locale}/dashboard/settings/security`;
+        securityUrl.pathname = `/${locale}/dashboard/settings/auth/passkey`;
 
         // Fire-and-forget audit log — deduplicated per user to avoid flood on repeated redirects
         const userId = session.userId ?? "";
