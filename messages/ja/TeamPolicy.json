@@ -42,5 +42,14 @@
   "passwordHistoryCountRange": "0〜24の範囲で入力してください",
   "teamAllowedCidrsMax": "CIDRエントリは最大{max}件です",
   "policyPasswordReuse": "このパスワードは最近使用されました",
-  "policyBlocked": "パスワードがチームのポリシー要件を満たしていません"
+  "policyBlocked": "パスワードがチームのポリシー要件を満たしていません",
+
+  "sectionPasswordTitle": "パスワードポリシー",
+  "sectionPasswordDesc": "パスワード強度の要件と再利用防止の設定。",
+  "sectionSessionTitle": "セッションポリシー",
+  "sectionSessionDesc": "アイドル/絶対タイムアウトとマスターパスワード再入力の設定。",
+  "sectionSharingTitle": "共有ポリシー",
+  "sectionSharingDesc": "チームメンバーによるエクスポートと共有リンク作成の許可設定。",
+  "sectionAccessRestrictionTitle": "アクセス制御",
+  "sectionAccessRestrictionDesc": "IP・ネットワーク経路によるチームアクセス制限。"
 }

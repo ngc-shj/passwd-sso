@@ -6,7 +6,8 @@ import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/form/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/account/form-dirty-badge";
 import { toast } from "sonner";
-import { ListChecks, Loader2 } from "lucide-react";
+import { ListChecks, Loader2, Lock, Clock, Share2, Globe } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionCardHeader } from "@/components/settings/account/section-card-header";
@@ -217,12 +218,22 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
   const showSession = showAll || section === "session";
   const showAccessRestriction = showAll || section === "access-restriction";
 
+  const sectionHeader: Record<TeamPolicySection, { icon: LucideIcon; titleKey: string; descKey: string }> = {
+    password: { icon: Lock, titleKey: "sectionPasswordTitle", descKey: "sectionPasswordDesc" },
+    session: { icon: Clock, titleKey: "sectionSessionTitle", descKey: "sectionSessionDesc" },
+    sharing: { icon: Share2, titleKey: "sectionSharingTitle", descKey: "sectionSharingDesc" },
+    "access-restriction": { icon: Globe, titleKey: "sectionAccessRestrictionTitle", descKey: "sectionAccessRestrictionDesc" },
+  };
+  const headerConfig = section ? sectionHeader[section] : { icon: ListChecks, titleKey: "title", descKey: "description" };
+
   return (
     <Card>
-      {showAll && (
-        <SectionCardHeader icon={ListChecks} title={t("title")} description={t("description")} />
-      )}
-      <CardContent className={showAll ? "space-y-4" : "space-y-4 pt-6"}>
+      <SectionCardHeader
+        icon={headerConfig.icon}
+        title={t(headerConfig.titleKey)}
+        description={t(headerConfig.descKey)}
+      />
+      <CardContent className="space-y-4">
         {showPassword && (
         /* Password Requirements */
         <div className="space-y-3">
