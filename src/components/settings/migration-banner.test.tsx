@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import React from "react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { BANNER_DISMISS_KEY, BANNER_SUNSET_TS } from "./migration-banner-config";
 
 vi.mock("next-intl", () => ({
@@ -26,6 +27,16 @@ vi.mock("@/components/ui/dialog", () => ({
   DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
   DialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
+}));
+
+const { mockToastError } = vi.hoisted(() => ({ mockToastError: vi.fn() }));
+vi.mock("sonner", () => ({
+  toast: { error: mockToastError, success: vi.fn(), warning: vi.fn() },
+}));
+
+const { mockFetchApi } = vi.hoisted(() => ({ mockFetchApi: vi.fn() }));
+vi.mock("@/lib/url-helpers", () => ({
+  fetchApi: mockFetchApi,
 }));
 
 // The jsdom environment used by this project provides localStorage as a plain object
@@ -78,55 +89,83 @@ describe("MigrationBanner", () => {
     expect(screen.queryByText("banner.title")).not.toBeInTheDocument();
   });
 
-  it("sets localStorage key and posts audit event on dismiss click", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
-    vi.stubGlobal("fetch", fetchMock);
+  it("posts audit event with AUDIT_ACTION constant + AUDIT_SCOPE.PERSONAL on dismiss", async () => {
+    mockFetchApi.mockResolvedValue({ ok: true });
 
     render(<MigrationBanner />);
 
-    fireEvent.click(screen.getByText("banner.dismiss"));
+    await act(async () => {
+      fireEvent.click(screen.getByText("banner.dismiss"));
+      await vi.runAllTimersAsync();
+    });
 
-    expect(storageMap.get(BANNER_DISMISS_KEY)).toBeDefined();
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(mockFetchApi).toHaveBeenCalledWith(
       "/api/internal/audit-emit",
       expect.objectContaining({
         method: "POST",
         credentials: "same-origin",
         body: JSON.stringify({
-          action: "SETTINGS_IA_MIGRATION_V1_SEEN",
-          scope: "PERSONAL",
+          action: AUDIT_ACTION.SETTINGS_IA_MIGRATION_V1_SEEN,
+          scope: AUDIT_SCOPE.PERSONAL,
         }),
       }),
     );
   });
 
-  it("does not throw when fetch fails on dismiss", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const fetchMock = vi.fn().mockRejectedValue(new Error("network error"));
-    vi.stubGlobal("fetch", fetchMock);
+  it("persists dismiss key to localStorage ONLY after fetch resolves successfully", async () => {
+    mockFetchApi.mockResolvedValue({ ok: true });
 
     render(<MigrationBanner />);
 
-    // Should not throw
+    await act(async () => {
+      fireEvent.click(screen.getByText("banner.dismiss"));
+      await vi.runAllTimersAsync();
+    });
+
+    expect(storageMap.get(BANNER_DISMISS_KEY)).toBeDefined();
+  });
+
+  it("does NOT persist dismiss key when fetch returns a non-OK response (retry-on-next-session)", async () => {
+    mockFetchApi.mockResolvedValue({ ok: false, status: 429 });
+
+    render(<MigrationBanner />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("banner.dismiss"));
+      await vi.runAllTimersAsync();
+    });
+
+    expect(storageMap.has(BANNER_DISMISS_KEY)).toBe(false);
+    expect(mockToastError).toHaveBeenCalledWith("banner.dismissError");
+  });
+
+  it("does not throw and does NOT persist dismiss key when fetch rejects (network error)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mockFetchApi.mockRejectedValue(new Error("network error"));
+
+    render(<MigrationBanner />);
+
     expect(() => {
       fireEvent.click(screen.getByText("banner.dismiss"));
     }).not.toThrow();
 
-    // Allow the rejected promise to settle
-    await vi.runAllTimersAsync();
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
 
+    expect(storageMap.has(BANNER_DISMISS_KEY)).toBe(false);
     warnSpy.mockRestore();
   });
 
-  it("hides banner after dismiss click", () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
-    vi.stubGlobal("fetch", fetchMock);
+  it("hides banner immediately after dismiss click (optimistic UI)", async () => {
+    mockFetchApi.mockResolvedValue({ ok: true });
 
     render(<MigrationBanner />);
     expect(screen.getByText("banner.title")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("banner.dismiss"));
 
+    // Banner is removed from DOM immediately, before fetch resolves.
     expect(screen.queryByText("banner.title")).not.toBeInTheDocument();
   });
 });

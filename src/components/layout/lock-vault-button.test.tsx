@@ -100,18 +100,20 @@ describe("LockVaultButton", () => {
     expect(toast.success).toHaveBeenCalledWith("lockVault");
   });
 
-  it("does not call lock() when vaultStatus changes to non-UNLOCKED before click (race defense)", () => {
-    // Simulate the vault having already locked (race condition): we render with
-    // UNLOCKED but then the status changes to LOCKED in the closure before click.
-    // The component stores vaultStatus in closure; we simulate by re-mocking after render.
+  it("hides the button after vaultStatus transitions from UNLOCKED to LOCKED (auto-lock during session)", () => {
+    // Initial render with UNLOCKED — button visible
+    const { rerender } = render(<LockVaultButton />);
+    expect(screen.getByRole("button", { name: "lockVault" })).toBeInTheDocument();
+
+    // Auto-lock fires: status becomes LOCKED. Re-render to propagate.
     mockUseVault.mockReturnValue({
       status: VAULT_STATUS.LOCKED,
       lock: mockLock,
     });
+    rerender(<LockVaultButton />);
 
-    // Render with locked state — button should not render at all
-    render(<LockVaultButton />);
-
+    // Button is no longer rendered — clicking is impossible (the gate
+    // returns null before any handler is attached).
     expect(screen.queryByRole("button", { name: "lockVault" })).not.toBeInTheDocument();
     expect(mockLock).not.toHaveBeenCalled();
   });

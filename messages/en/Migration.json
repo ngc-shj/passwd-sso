@@ -4,6 +4,7 @@
     "body": "The menu is now organised by purpose. Old URLs redirect to the new pages.",
     "details": "Details",
     "dismiss": "Got it",
+    "dismissError": "Failed to record acknowledgement. Please reload and try again.",
     "modal": {
       "title": "New personal settings layout",
       "description": "We replaced the \"Security\" tab with six purpose-driven sections.",

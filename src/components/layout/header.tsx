@@ -104,8 +104,8 @@ export function Header({ onMenuToggle }: HeaderProps) {
 
         {mounted && <ThemeToggle />}
         {mounted && <LanguageSwitcher />}
-        {mounted && <NotificationBell />}
         {mounted && <LockVaultButton />}
+        {mounted && <NotificationBell />}
 
         {mounted ? (
           <DropdownMenu>

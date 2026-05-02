@@ -11,12 +11,13 @@ export function LockVaultButton() {
   const t = useTranslations("Vault");
   const { status: vaultStatus, lock } = useVault();
 
+  // The render-time guard below is the sole gate — when status is not
+  // UNLOCKED, the button does not render and `handleClick` cannot run.
+  // No additional in-handler check is needed because `vaultStatus` here is
+  // captured via closure at render time and matches the gate above.
   if (vaultStatus !== VAULT_STATUS.UNLOCKED) return null;
 
   function handleClick() {
-    // Race defense: vault may have auto-locked between render and click
-    if (vaultStatus !== VAULT_STATUS.UNLOCKED) return;
-
     lock();
     toast.success(t("lockVault"));
   }

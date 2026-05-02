@@ -209,4 +209,88 @@ describe("POST /api/internal/audit-emit", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  describe("SETTINGS_IA_MIGRATION_V1_SEEN (client-attested action)", () => {
+    it("emits with PERSONAL scope and returns 200", async () => {
+      const res = await POST(
+        createRequest("POST", "http://localhost/api/internal/audit-emit", {
+          body: {
+            action: AUDIT_ACTION.SETTINGS_IA_MIGRATION_V1_SEEN,
+            scope: AUDIT_SCOPE.PERSONAL,
+          },
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope: AUDIT_SCOPE.PERSONAL,
+          action: AUDIT_ACTION.SETTINGS_IA_MIGRATION_V1_SEEN,
+          userId: "user-1",
+        }),
+      );
+    });
+
+    it("rejects TENANT scope with 400 (per-action whitelist)", async () => {
+      const res = await POST(
+        createRequest("POST", "http://localhost/api/internal/audit-emit", {
+          body: {
+            action: AUDIT_ACTION.SETTINGS_IA_MIGRATION_V1_SEEN,
+            scope: AUDIT_SCOPE.TENANT,
+          },
+        }),
+      );
+      expect(res.status).toBe(400);
+      expect(mockLogAudit).not.toHaveBeenCalled();
+    });
+
+    it("rejects any metadata with 400 (CLIENT_ATTESTED_ACTIONS gate)", async () => {
+      const res = await POST(
+        createRequest("POST", "http://localhost/api/internal/audit-emit", {
+          body: {
+            action: AUDIT_ACTION.SETTINGS_IA_MIGRATION_V1_SEEN,
+            scope: AUDIT_SCOPE.PERSONAL,
+            metadata: { anything: "at all" },
+          },
+        }),
+      );
+      expect(res.status).toBe(400);
+      expect(mockLogAudit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("scope backward compatibility", () => {
+    it("PASSKEY_ENFORCEMENT_BLOCKED with no scope defaults to TENANT", async () => {
+      // Existing proxy self-fetch caller does not send `scope` — verify the
+      // schema default keeps the old behavior intact.
+      const res = await POST(
+        createRequest("POST", "http://localhost/api/internal/audit-emit", {
+          body: { action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED },
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope: AUDIT_SCOPE.TENANT,
+        }),
+      );
+    });
+
+    it("PASSKEY_ENFORCEMENT_BLOCKED with explicit PERSONAL scope is accepted (no per-action restriction)", async () => {
+      // Actions not listed in ACTION_ALLOWED_SCOPES accept any scope.
+      const res = await POST(
+        createRequest("POST", "http://localhost/api/internal/audit-emit", {
+          body: {
+            action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+            scope: AUDIT_SCOPE.PERSONAL,
+          },
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope: AUDIT_SCOPE.PERSONAL,
+        }),
+      );
+    });
+  });
 });

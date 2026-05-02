@@ -22,12 +22,16 @@ const intlMiddleware = createIntlMiddleware(routing);
 // Narrowly scoped to the passkey registration page itself — vault-sensitive
 // pages (passphrase, recovery key) MUST stay gated so a passkey-pending user
 // cannot bypass MFA by reaching them while enforcement is in flight.
-const PASSKEY_EXEMPT_PREFIXES = [
+//
+// Exact-match (Set), NOT prefix-match: a future sibling like
+// `/dashboard/settings/auth/passkey-recovery` would otherwise silently
+// inherit the bypass.
+const PASSKEY_EXEMPT_PATHS: ReadonlySet<string> = new Set([
   "/dashboard/settings/auth/passkey",
-];
+]);
 
 function isPasskeyExemptPath(pathWithoutLocale: string): boolean {
-  return PASSKEY_EXEMPT_PREFIXES.some((prefix) => pathWithoutLocale.startsWith(prefix));
+  return PASSKEY_EXEMPT_PATHS.has(pathWithoutLocale);
 }
 
 function isPasskeyGracePeriodExpired(

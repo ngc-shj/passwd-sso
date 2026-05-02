@@ -106,7 +106,10 @@ describe("useSidebarSectionsState", () => {
     expect(next.folders).toBe(true);
   });
 
-  it("auto-opens insights section when isPersonalAuditLog is true", () => {
+  it("auto-opens insights section (storage key: 'security' for backward compat) when isPersonalAuditLog is true", () => {
+    // The visual label was renamed SecuritySection → InsightsSection,
+    // but the persistence key kept its historical name 'security' to
+    // preserve users' collapsed/open preferences across the rename.
     renderHook(() =>
       useSidebarSectionsState({
         ...baseParams(),
