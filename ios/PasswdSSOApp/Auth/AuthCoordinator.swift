@@ -41,8 +41,10 @@ private struct WebAuthParams: Sendable {
 /// in-flight waits for the first to complete or fail.
 public actor AuthCoordinator {
   private let serverConfig: ServerConfig
-  private let tokenStore: HostTokenStore
+  let tokenStore: HostTokenStore
   private let dpopKeyLabel = "com.passwd-sso.dpop.host"
+  /// Set after the first successful call to getOrCreateDPoPKey.
+  private var loadedKey: SecKey?
 
   public init(serverConfig: ServerConfig, tokenStore: HostTokenStore = HostTokenStore()) {
     self.serverConfig = serverConfig
@@ -119,6 +121,20 @@ public actor AuthCoordinator {
       refreshToken: tokenResponse.refreshToken,
       expiresAt: expiresAt
     )
+  }
+
+  /// Returns a `SecureEnclaveDPoPSigner` wrapping the currently loaded SE key.
+  /// Throws `AuthError.keyGenerationFailed` if no key has been loaded yet.
+  public func currentSigner() throws -> SecureEnclaveDPoPSigner {
+    guard let key = loadedKey else { throw AuthError.keyGenerationFailed }
+    return SecureEnclaveDPoPSigner(key: key)
+  }
+
+  /// Returns the JWK dictionary for the currently loaded SE key.
+  /// Throws `AuthError.keyGenerationFailed` if no key has been loaded yet.
+  public func currentJWK() throws -> [String: String] {
+    guard let key = loadedKey else { throw AuthError.keyGenerationFailed }
+    return try exportPublicKeyJWK(key: key)
   }
 
   /// Called by `PasswdSSOAppApp.onOpenURL` when a Universal Link arrives.
@@ -206,10 +222,13 @@ public actor AuthCoordinator {
 
   private func getOrCreateDPoPKey() throws -> SecKey {
     if let existing = try? loadDPoPKey(label: dpopKeyLabel) {
+      loadedKey = existing
       return existing
     }
     do {
-      return try generateDPoPKey(label: dpopKeyLabel)
+      let key = try generateDPoPKey(label: dpopKeyLabel)
+      loadedKey = key
+      return key
     } catch {
       throw AuthError.keyGenerationFailed
     }

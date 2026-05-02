@@ -22,12 +22,13 @@ enum AppState {
 
 struct RootView: View {
   let onCoordinatorReady: (AuthCoordinator) -> Void
+  /// Called when vault is unlocked so the app shell can wire foreground sync + drain.
+  let onVaultReady: (HostSyncService, RollbackFlagDrain, SymmetricKey, String) -> Void
+
   @State private var appState: AppState = .setup
 
   // Shared dependency instances kept alive across state transitions
-  @State private var bridgeKeyStore: BridgeKeyStore?
   @State private var hostSyncService: HostSyncService?
-  @State private var currentVaultKey: SymmetricKey?
 
   var body: some View {
     Group {
@@ -42,10 +43,14 @@ struct RootView: View {
 
       case .signIn(let config, let coordinator):
         SignInView(coordinator: coordinator) { pair in
-          // AuthCoordinator already saved tokens in HostTokenStore during sign-in.
-          // Build a placeholder API client; Step 8 will thread the real DPoP signer.
-          let apiClient = buildAPIClient(serverConfig: config, tokenStore: HostTokenStore())
-          appState = .signedIn(serverConfig: config, tokens: pair, apiClient: apiClient)
+          // Build the real API client using the SE key the coordinator just loaded.
+          Task { @MainActor in
+            let apiClient = await buildRealAPIClient(
+              serverConfig: config,
+              coordinator: coordinator
+            )
+            appState = .signedIn(serverConfig: config, tokens: pair, apiClient: apiClient)
+          }
         }
 
       case .signedIn(let serverConfig, _, let apiClient):
@@ -113,28 +118,33 @@ struct RootView: View {
     wrappedKeyStore: any WrappedKeyStore
   ) async {
     let vaultKey = unlockResult.vaultKey
-    currentVaultKey = vaultKey
 
-    // Perform initial sync
     let fetcher = EntryFetcher(apiClient: apiClient)
+    let cacheURL = (try? AppGroupContainer.cacheFileURL()) ?? URL(fileURLWithPath: "/dev/null")
     let syncService = HostSyncService(
       apiClient: apiClient,
       entryFetcher: fetcher,
       bridgeKeyStore: bridgeKeyStore,
       wrappedKeyStore: wrappedKeyStore,
-      cacheURL: (try? AppGroupContainer.cacheFileURL()) ?? URL(fileURLWithPath: "/dev/null")
+      cacheURL: cacheURL
     )
     self.hostSyncService = syncService
 
-    // Run initial sync and load cache
-    let report = try? await syncService.runSync(
-      vaultKey: vaultKey,
-      userId: unlockResult.userId
+    // Build the rollback-flag drain for this session.
+    let flagDirectory = (try? AppGroupContainer.url().appending(path: "vault", directoryHint: .isDirectory))
+      ?? URL(fileURLWithPath: "/dev/null")
+    let drain = RollbackFlagDrain(
+      apiClient: apiClient,
+      flagDirectory: flagDirectory,
+      deviceId: { DeviceIdentifier.stable() }
     )
 
-    // Build auto-lock service
+    // Drain any flags from previous AutoFill cycles before the first sync.
+    await drain.drainPendingFlags(vaultKey: vaultKey)
+
+    _ = try? await syncService.runSync(vaultKey: vaultKey, userId: unlockResult.userId)
+
     let tokenStore = HostTokenStore()
-    let cacheURL = (try? AppGroupContainer.cacheFileURL()) ?? URL(fileURLWithPath: "/dev/null")
     let autoLockService = AutoLockService(
       bridgeKeyStore: bridgeKeyStore,
       wrappedKeyStore: wrappedKeyStore,
@@ -142,7 +152,6 @@ struct RootView: View {
       cacheURL: cacheURL
     )
 
-    // Load cache data
     let blob = try? bridgeKeyStore.readDirect()
     let cacheData: CacheData
     if let blob, let data = try? readCacheFile(
@@ -153,7 +162,6 @@ struct RootView: View {
     ) {
       cacheData = data
     } else {
-      // Fallback: empty cache
       cacheData = CacheData(
         header: CacheHeader(
           cacheVersionCounter: 0,
@@ -167,7 +175,7 @@ struct RootView: View {
       )
     }
 
-    _ = report  // sync report can be surfaced to UI in a later step
+    onVaultReady(syncService, drain, vaultKey, unlockResult.userId)
 
     autoLockService.startTimer()
     appState = .vaultUnlocked(
@@ -179,7 +187,6 @@ struct RootView: View {
     )
   }
 
-  /// Fallback sync service for the vaultUnlocked state when hostSyncService was not retained.
   private func makeFallbackSyncService(apiClient: MobileAPIClient) -> HostSyncService {
     let bks = BridgeKeyStore(accessGroup: "TEAMID.com.passwd-sso.shared")
     let wks = AppGroupWrappedKeyStore()
@@ -194,14 +201,29 @@ struct RootView: View {
     )
   }
 
-  private func buildAPIClient(serverConfig: ServerConfig, tokenStore: HostTokenStore) -> MobileAPIClient {
-    // Placeholder signer — real DPoP signer is built during AuthCoordinator sign-in.
-    // Step 8 will close the round-trip by threading the signer into MobileAPIClient via the coordinator.
-    let emptySigner = PlaceholderDPoPSigner()
+  /// Build an API client using the real SE signer from the coordinator.
+  /// Falls back to a no-op signer if the key is not available.
+  @MainActor
+  private func buildRealAPIClient(
+    serverConfig: ServerConfig,
+    coordinator: AuthCoordinator
+  ) async -> MobileAPIClient {
+    let signer: any DPoPSigner
+    let jwk: [String: String]
+    let tokenStore: HostTokenStore
+    if let realSigner = try? await coordinator.currentSigner(),
+       let realJWK = try? await coordinator.currentJWK() {
+      signer = realSigner
+      jwk = realJWK
+    } else {
+      signer = NoOpDPoPSigner()
+      jwk = [:]
+    }
+    tokenStore = coordinator.tokenStore
     return MobileAPIClient(
       serverURL: serverConfig.baseURL,
-      signer: emptySigner,
-      jwk: [:],
+      signer: signer,
+      jwk: jwk,
       tokenStore: tokenStore
     )
   }
@@ -213,10 +235,14 @@ private extension ServerConfig {
   var teamId: String { "TEAMID" }
 }
 
-// MARK: - Placeholder DPoP signer for the post-sign-in state
+// MARK: - No-op DPoP signer (replaces PlaceholderDPoPSigner)
 
-private struct PlaceholderDPoPSigner: DPoPSigner, @unchecked Sendable {
+/// Used only when the SE key is not yet available (before sign-in completes).
+/// Any call to sign() will throw, preventing accidental use of unsigned proofs.
+private struct NoOpDPoPSigner: DPoPSigner, @unchecked Sendable {
   func sign(input: Data) async throws -> Data {
-    throw NSError(domain: "PlaceholderSigner", code: -1, userInfo: nil)
+    throw NSError(domain: "NoOpDPoPSigner", code: -1, userInfo: [
+      NSLocalizedDescriptionKey: "DPoP key not loaded — sign in first",
+    ])
   }
 }

@@ -37,6 +37,7 @@ struct TOTPCodeView: View {
         .font(.title2.monospacedDigit())
         .multilineTextAlignment(.center)
         .disabled(true)
+        .privacySensitive()
 
       Button(copyConfirmed ? "Copied!" : "Copy") {
         copyToClipboard()

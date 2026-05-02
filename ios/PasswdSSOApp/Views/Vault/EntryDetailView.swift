@@ -108,6 +108,7 @@ struct EntryDetailView: View {
         Section("Notes") {
           Text(d.notes)
             .font(.caption)
+            .privacySensitive()
         }
       }
 
@@ -150,6 +151,7 @@ struct EntryDetailView: View {
         if isPasswordVisible {
           Text(password)
             .font(.body.monospaced())
+            .privacySensitive()
         } else {
           SecureField("", text: .constant(password))
             .disabled(true)

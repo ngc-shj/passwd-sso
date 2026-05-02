@@ -348,6 +348,55 @@ public actor MobileAPIClient {
     }
   }
 
+  /// POST /api/mobile/cache-rollback-report with DPoP-signed access token.
+  /// On 401 + new DPoP-Nonce, retries once.
+  public func postCacheRollbackReport(_ body: CacheRollbackReportBody) async throws {
+    guard let (accessToken, _) = try tokenStore.loadAccess() else {
+      throw MobileAPIError.serverError(status: 401)
+    }
+
+    let endpoint = serverURL.appending(
+      path: "/api/mobile/cache-rollback-report",
+      directoryHint: .notDirectory
+    )
+    let htu = canonicalHTU(url: endpoint)
+    let ath = sha256Base64URL(accessToken)
+
+    let localJWK = jwk
+    let localSigner = signer
+    let nonce = try? tokenStore.loadNonce()
+    let proof = try await buildDPoPProof(
+      htm: "POST",
+      htu: htu,
+      jwk: localJWK,
+      ath: ath,
+      nonce: nonce,
+      signer: localSigner
+    )
+
+    let bodyData = try JSONEncoder().encode(body)
+    var request = URLRequest(url: endpoint)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("DPoP \(accessToken)", forHTTPHeaderField: "Authorization")
+    request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
+    request.httpBody = bodyData
+
+    try await performVoidHTTP(request) { newNonce in
+      let retryProof = try await buildDPoPProof(
+        htm: "POST",
+        htu: htu,
+        jwk: localJWK,
+        ath: ath,
+        nonce: newNonce,
+        signer: localSigner
+      )
+      var retryRequest = request
+      retryRequest.setValue(retryProof.jws, forHTTPHeaderField: "DPoP")
+      return retryRequest
+    }
+  }
+
   /// Update an existing personal entry via PUT /api/passwords/{entryId}.
   /// Requires a valid access token (DPoP-signed with ath).
   /// On 401 + new DPoP-Nonce, retries once with the fresh nonce.

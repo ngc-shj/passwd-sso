@@ -34,13 +34,13 @@ final class MockURLProtocol: URLProtocol, @unchecked Sendable {
 
 // MARK: - Helpers
 
-private func makeSession() -> URLSession {
+func makeSession() -> URLSession {
   let config = URLSessionConfiguration.ephemeral
   config.protocolClasses = [MockURLProtocol.self]
   return URLSession(configuration: config)
 }
 
-private func tokenResponseJSON(
+func tokenResponseJSON(
   accessToken: String = "acc_test",
   refreshToken: String = "ref_test",
   expiresIn: Int = 86400
@@ -50,12 +50,12 @@ private func tokenResponseJSON(
   """.data(using: .utf8)!
 }
 
-private func httpResponse(status: Int, url: URL, headers: [String: String] = [:]) -> HTTPURLResponse {
+func httpResponse(status: Int, url: URL, headers: [String: String] = [:]) -> HTTPURLResponse {
   HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
 }
 
 /// Read all bytes from an InputStream (URLProtocol replaces httpBody with httpBodyStream).
-private func readStream(_ stream: InputStream?) -> Data? {
+func readStream(_ stream: InputStream?) -> Data? {
   guard let stream else { return nil }
   stream.open()
   defer { stream.close() }
@@ -458,6 +458,79 @@ final class MobileAPIClientTests: XCTestCase {
 
     try await client.updateEntry(entryId: entryId, body: makeUpdateRequest())
     XCTAssertEqual(callCount, 2, "Client should retry exactly once after 401+nonce")
+  }
+
+  // MARK: - postCacheRollbackReport
+
+  func testPostCacheRollbackReport_requestShape() async throws {
+    seedAccessToken()
+
+    var capturedRequest: URLRequest?
+    let reportURL = serverURL.appending(
+      path: "/api/mobile/cache-rollback-report",
+      directoryHint: .notDirectory
+    )
+
+    MockURLProtocol.requestHandler = { request in
+      capturedRequest = request
+      return (Data(), httpResponse(status: 200, url: reportURL))
+    }
+
+    let client = MobileAPIClient(
+      serverURL: serverURL,
+      signer: FakeSigner(),
+      jwk: knownJWK,
+      tokenStore: tokenStore,
+      urlSession: session
+    )
+
+    let body = CacheRollbackReportBody(
+      deviceId: "device-test-001",
+      expectedCounter: 42,
+      observedCounter: 99,
+      headerIssuedAt: "2026-05-02T00:00:00.000Z",
+      lastSuccessfulRefreshAt: nil,
+      rejectionKind: "counter_mismatch"
+    )
+    try await client.postCacheRollbackReport(body)
+
+    let req = try XCTUnwrap(capturedRequest)
+    XCTAssertEqual(req.httpMethod, "POST")
+    XCTAssertTrue(req.url?.path.hasSuffix("/cache-rollback-report") ?? false)
+
+    // DPoP header must be present with ath.
+    XCTAssertNotNil(req.value(forHTTPHeaderField: "DPoP"), "DPoP header must be set")
+
+    // Authorization must use DPoP scheme.
+    let auth = try XCTUnwrap(req.value(forHTTPHeaderField: "Authorization"))
+    XCTAssertTrue(auth.hasPrefix("DPoP "), "Authorization must use DPoP scheme")
+
+    // Body must contain all required fields.
+    let bodyData = try XCTUnwrap(req.httpBody ?? readStream(req.httpBodyStream))
+    let decoded = try JSONDecoder().decode(CacheRollbackReportBody.self, from: bodyData)
+    XCTAssertEqual(decoded.deviceId, "device-test-001")
+    XCTAssertEqual(decoded.expectedCounter, 42)
+    XCTAssertEqual(decoded.observedCounter, 99)
+    XCTAssertEqual(decoded.headerIssuedAt, "2026-05-02T00:00:00.000Z")
+    XCTAssertNil(decoded.lastSuccessfulRefreshAt)
+    XCTAssertEqual(decoded.rejectionKind, "counter_mismatch")
+
+    // DPoP proof must contain ath claim.
+    let dpop = try XCTUnwrap(req.value(forHTTPHeaderField: "DPoP"))
+    let parts = dpop.split(separator: ".")
+    XCTAssertEqual(parts.count, 3, "DPoP must be a 3-part JWS")
+
+    var b64 = String(parts[1])
+    let rem = b64.count % 4
+    if rem != 0 { b64 += String(repeating: "=", count: 4 - rem) }
+    let payloadData = try XCTUnwrap(Data(base64Encoded: b64.replacingOccurrences(of: "-", with: "+")
+      .replacingOccurrences(of: "_", with: "/")))
+    let payload = try JSONDecoder().decode([String: AnyDecodable].self, from: payloadData)
+
+    let expectedAth = await client.sha256Base64URL("acc_update_test")
+    XCTAssertEqual(payload["ath"]?.value as? String, expectedAth,
+                   "DPoP proof must contain ath = SHA-256(access_token)")
+    XCTAssertEqual(payload["htm"]?.value as? String, "POST")
   }
 }
 

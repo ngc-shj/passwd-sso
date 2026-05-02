@@ -7,7 +7,7 @@ import XCTest
 // MARK: - Test helpers for HostSyncService
 
 /// Write a minimal valid 56-byte bridge_key_blob to the mock keychain.
-private func seedBlobInKeychain(_ keychain: MockKeychain, counter: UInt64 = 1) {
+func seedBlobInKeychain(_ keychain: MockKeychain, counter: UInt64 = 1) {
   var blob = Data(repeating: 0x01, count: 32)  // bridge_key
   let counterBE = counter.bigEndian
   withUnsafeBytes(of: counterBE) { blob.append(contentsOf: $0) }
