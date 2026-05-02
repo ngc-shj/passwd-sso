@@ -3,7 +3,6 @@ import { execSync } from "node:child_process";
 import createNextIntlPlugin from "next-intl/plugin";
 import { withSentryConfig } from "@sentry/nextjs";
 import { PERMISSIONS_POLICY } from "./src/lib/security/security-headers";
-import { buildLocaleRedirects } from "./src/lib/redirects/ia-redirects";
 
 // Build metadata for reproducible build tracking
 function getGitSha(): string {
@@ -40,10 +39,6 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_BUILD_SHA: getGitSha(),
     NEXT_PUBLIC_BUILD_TIME: new Date().toISOString(),
-  },
-
-  async redirects() {
-    return buildLocaleRedirects();
   },
 
   // Security headers (static, applied to all routes by Next.js framework layer).

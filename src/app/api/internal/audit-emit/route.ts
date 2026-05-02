@@ -10,28 +10,12 @@ export const runtime = "nodejs";
 
 const auditEmitLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
-// Actions callable via internal fetch (server-to-server proxy emit) or
-// authenticated client fetch (e.g. one-time UI acknowledgements).
+// Actions callable from the proxy via internal fetch.
 // Restricting to a fixed set prevents this endpoint from becoming
 // a generic audit write proxy for arbitrary callers.
 const ALLOWED_ACTIONS = new Set<string>([
   AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
-  AUDIT_ACTION.SETTINGS_IA_MIGRATION_V1_SEEN,
 ]);
-
-// Actions emitted from authenticated client contexts (XSS-reachable). For these,
-// metadata is rejected entirely so the action cannot be turned into an
-// attacker-controlled audit-write primitive. Server-emitted actions (e.g. via
-// the proxy self-fetch path) may still pass metadata.
-const CLIENT_ATTESTED_ACTIONS = new Set<string>([
-  AUDIT_ACTION.SETTINGS_IA_MIGRATION_V1_SEEN,
-]);
-
-// Per-action allowed scopes. Actions not listed here default to TENANT
-// (preserves backward-compatible behavior of previously single-action endpoint).
-const ACTION_ALLOWED_SCOPES: Record<string, ReadonlyArray<keyof typeof AUDIT_SCOPE>> = {
-  [AUDIT_ACTION.SETTINGS_IA_MIGRATION_V1_SEEN]: ["PERSONAL"],
-};
 
 // Bound the metadata payload an authenticated caller may write to the audit
 // outbox. Without these limits, a misbehaving (or compromised) caller can
@@ -59,9 +43,6 @@ const metadataSchema = z
 
 const bodySchema = z.object({
   action: z.string(),
-  // Default TENANT preserves backward compatibility for the original
-  // single-action callers (proxy passkey-enforcement self-fetch).
-  scope: z.enum(["PERSONAL", "TENANT"]).default("TENANT"),
   metadata: metadataSchema.optional(),
 });
 
@@ -88,23 +69,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({}, { status: 400 });
   }
 
-  const { action, scope, metadata } = parsed.data;
+  const { action, metadata } = parsed.data;
 
   if (!ALLOWED_ACTIONS.has(action)) {
-    return NextResponse.json({}, { status: 400 });
-  }
-
-  // Per-action scope whitelist: actions in ACTION_ALLOWED_SCOPES MUST use one
-  // of the listed scopes. Actions not listed accept any scope (legacy default).
-  const allowedScopes = ACTION_ALLOWED_SCOPES[action];
-  if (allowedScopes && !allowedScopes.includes(scope)) {
-    return NextResponse.json({}, { status: 400 });
-  }
-
-  // Per-action metadata rejection: actions emitted from authenticated client
-  // contexts MUST NOT include metadata. Without this, an XSS-reachable
-  // emission becomes an audit-write primitive for attacker-chosen content.
-  if (CLIENT_ATTESTED_ACTIONS.has(action) && metadata !== undefined) {
     return NextResponse.json({}, { status: 400 });
   }
 
@@ -112,7 +79,7 @@ export async function POST(request: NextRequest) {
 
   const meta = extractRequestMeta(request);
   await logAuditAsync({
-    scope: AUDIT_SCOPE[scope],
+    scope: AUDIT_SCOPE.TENANT,
     action: auditAction,
     userId,
     metadata: metadata ?? {},
