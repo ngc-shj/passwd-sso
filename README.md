@@ -89,6 +89,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **SSH Agent** — `passwd-sso agent` proxies vault SSH keys via SSH agent protocol
 - **CI/CD Secrets** — `env` and `run` commands inject vault secrets into environment/subprocess. Set `PSSO_PASSPHRASE` for non-interactive auto-unlock in CI pipelines. **Security note**: `PSSO_PASSPHRASE` is intended for CI/automation only — the passphrase is readable from the process environment (e.g., via /proc on Linux). Do not use in shared or interactive environments; use `passwd-sso unlock` (TTY prompt) instead.
 - **Browser Extension** — Chrome/Edge MV3; autofill, inline suggestions, custom field autofill, multi-URL matching, CC/address fill, new-login detect & save, **passkey provider** (intercepts WebAuthn get/create, offers vault passkeys before platform authenticator)
+- **iOS App + AutoFill Extension** — native iPhone app (iOS 17+) with credential provider extension; password + TOTP fill in Safari and apps with Associated Domains. Source: [`ios/`](./ios/). Self-hosters must publish an `apple-app-site-association` (AASA) file at `https://<server>/.well-known/apple-app-site-association` claiming the `/api/mobile/authorize/redirect` callback path — see [`ios/README.md`](./ios/README.md) for the JSON template
 - **REST API v1** — `/api/v1/*` with OpenAPI 3.1 spec
 - **API Keys** — Scoped keys with SHA-256 hashed tokens and configurable expiration
 
