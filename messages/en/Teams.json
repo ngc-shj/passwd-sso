@@ -16,5 +16,7 @@
   "rotateKeyVersionConflict": "Key version conflict. Another rotation may be in progress.",
   "rotateKeyEntryMismatch": "Entry count mismatch. Please refresh and try again.",
   "rotateKeyVaultRequired": "Your vault must be unlocked to rotate the team key.",
-  "rotateKeyNoMembers": "No active members with encryption keys found."
+  "rotateKeyNoMembers": "No active members with encryption keys found.",
+  "rotateKeyTypePrompt": "Type \"rotate\" to confirm",
+  "rotateKeyTypePlaceholder": "rotate"
 }
