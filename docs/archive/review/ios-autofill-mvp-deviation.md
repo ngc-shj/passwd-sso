@@ -147,3 +147,19 @@ server always emits AAD-bound ciphertext for entries with `aadVersion >= 1`
 produces `505601020003752d310003652d31` (hex), byte-identical to the Node.js
 reference output from `crypto-aad.ts`. AAD parity already covered by
 `AADParityTests.swift` (Step 5).
+
+## Step 10 (host-app manual edit) — 2026-05-02
+
+**Deviations from plan**:
+
+1. **`VaultViewModel.saveEntry` takes `apiClient` and `hostSyncService` as call-site parameters rather than stored properties.** The brief describes adding the method as an extension on `VaultViewModel`, but `VaultViewModel` is `@Observable @MainActor` and was designed as a view-only model with no network dependencies. Storing `MobileAPIClient` and `HostSyncService` on the view-model would require threading them through every `VaultViewModel()` initializer call across the codebase (including in `RootView` and tests), and would create a retained reference to an actor that outlives the vault-locked state. Passing them as parameters at the call site is simpler, matches Swift's "dependency injection at call site" idiom for actors, and avoids storing actor references in an `@Observable` class. Functional behavior is unchanged — the server call and sync happen before the method returns.
+
+2. **`VaultListView` and `RootView` extended to propagate `apiClient` and `hostSyncService` to `EntryDetailView`.** The brief scoped the changes to `EntryDetailView` + `VaultViewModel`, but `VaultListView` is the only callsite that creates `EntryDetailView`, and `RootView` is the only callsite that creates `VaultListView`. Both received two new parameters (`apiClient: MobileAPIClient`, `hostSyncService: HostSyncService`) — no new types or abstractions, just threading. `RootView.AppState.vaultUnlocked` gained `userId: String` and `apiClient: MobileAPIClient` to close a pre-existing gap where `userId` was hardcoded as `"current-user"`.
+
+3. **`allSummaries` changed from `private` to `internal` in `VaultViewModel`.** The `saveEntry` extension needs to read `allSummaries` to detect team entries and write it to update the in-memory list after save. `@testable import` can see `internal` but not `private`. Promoting to `internal` is the minimal change; it remains unexposed from the module's `public` surface.
+
+4. **`EntryFetcher` is a concrete `actor`, not a protocol.** The plan's VaultViewModel test brief described mocking `HostSyncService.runSync`. Since both `HostSyncService` and `EntryFetcher` are concrete actors (not protocols), there is no protocol to substitute. The test instead uses `MockURLProtocol` to stub all HTTP responses, including the sync's `GET /api/passwords` and `GET /api/teams` calls, and verifies `runSync` ran by asserting that those stub fetches were invoked after the PUT succeeded.
+
+5. **`EntryDetailView` now uses the injected `viewModel` (passed from `VaultListView`) rather than creating a fresh `VaultViewModel()` in `loadDetail`.** The brief said to add an Edit button; the existing `loadDetail` created `VaultViewModel()` locally, which is fine for reading but wasteful and inconsistent with the shared viewmodel the save path needs. Changed to call `viewModel.loadDetail(...)` on the injected instance. Behavior is identical for the read path; the save path benefits from operating on the same instance whose `allSummaries` is already populated.
+
+**No deviations** from: AAD format (`buildPersonalEntryAAD(userId, entryId)` for personal entries with `aadVersion >= 1`), "call `runSync` ONLY after server returns 2xx" ordering, team-entry guard (`VaultViewModelError.teamEditNotSupported`), no plaintext on the wire, `SecureField` for password and TOTP secret, no "Show password" toggle, English-literal string for team-entry alert.

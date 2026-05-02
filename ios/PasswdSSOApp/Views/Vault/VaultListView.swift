@@ -12,6 +12,8 @@ struct VaultListView: View {
   let vaultKey: SymmetricKey
   let userId: String
   let autoLockService: AutoLockService
+  let apiClient: MobileAPIClient
+  let hostSyncService: HostSyncService
 
   @State private var isScreenRecording: Bool = false
 
@@ -58,7 +60,10 @@ struct VaultListView: View {
           cacheData: cacheData,
           vaultKey: vaultKey,
           userId: userId,
-          autoLockService: autoLockService
+          autoLockService: autoLockService,
+          viewModel: viewModel,
+          apiClient: apiClient,
+          hostSyncService: hostSyncService
         )
       } label: {
         entryRow(summary)

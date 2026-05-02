@@ -51,8 +51,30 @@ public enum MobileAPIError: Error, Equatable {
   /// DPoP proof was rejected; the associated value is the new nonce to echo on retry.
   case dpopInvalid(newNonce: String?)
   case rateLimited(retryAfter: TimeInterval)
+  case notFound
   case serverError(status: Int)
   case networkError(URLError)
+}
+
+// MARK: - Entry update request
+
+public struct UpdateEntryRequest: Sendable, Codable {
+  public let encryptedBlob: EncryptedData
+  public let encryptedOverview: EncryptedData
+  public let keyVersion: Int
+  public let aadVersion: Int
+
+  public init(
+    encryptedBlob: EncryptedData,
+    encryptedOverview: EncryptedData,
+    keyVersion: Int,
+    aadVersion: Int
+  ) {
+    self.encryptedBlob = encryptedBlob
+    self.encryptedOverview = encryptedOverview
+    self.keyVersion = keyVersion
+    self.aadVersion = aadVersion
+  }
 }
 
 // MARK: - Client
@@ -326,6 +348,56 @@ public actor MobileAPIClient {
     }
   }
 
+  /// Update an existing personal entry via PUT /api/passwords/{entryId}.
+  /// Requires a valid access token (DPoP-signed with ath).
+  /// On 401 + new DPoP-Nonce, retries once with the fresh nonce.
+  public func updateEntry(entryId: String, body: UpdateEntryRequest) async throws {
+    guard let (accessToken, _) = try tokenStore.loadAccess() else {
+      throw MobileAPIError.serverError(status: 401)
+    }
+
+    let endpoint = serverURL.appending(
+      path: "/api/passwords/\(entryId)",
+      directoryHint: .notDirectory
+    )
+    let htu = canonicalHTU(url: endpoint)
+    let ath = sha256Base64URL(accessToken)
+
+    let localJWK = jwk
+    let localSigner = signer
+    let nonce = try? tokenStore.loadNonce()
+    let proof = try await buildDPoPProof(
+      htm: "PUT",
+      htu: htu,
+      jwk: localJWK,
+      ath: ath,
+      nonce: nonce,
+      signer: localSigner
+    )
+
+    let bodyData = try JSONEncoder().encode(body)
+    var request = URLRequest(url: endpoint)
+    request.httpMethod = "PUT"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("DPoP \(accessToken)", forHTTPHeaderField: "Authorization")
+    request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
+    request.httpBody = bodyData
+
+    try await performVoidHTTP(request) { newNonce in
+      let retryProof = try await buildDPoPProof(
+        htm: "PUT",
+        htu: htu,
+        jwk: localJWK,
+        ath: ath,
+        nonce: newNonce,
+        signer: localSigner
+      )
+      var retryRequest = request
+      retryRequest.setValue(retryProof.jws, forHTTPHeaderField: "DPoP")
+      return retryRequest
+    }
+  }
+
   // MARK: - Private helpers
 
   /// Perform a token request; on 401 + new nonce, invoke `makeRetry` once.
@@ -392,5 +464,45 @@ public actor MobileAPIClient {
   func sha256Base64URL(_ token: String) -> String {
     let digest = SHA256.hash(data: Data(token.utf8))
     return base64URLEncode(Data(digest))
+  }
+
+  /// Perform an HTTP request that returns no body; on 401 + new nonce, retry once.
+  /// Throws `MobileAPIError.notFound` for 404, `.serverError(status:)` for other non-2xx.
+  private func performVoidHTTP(
+    _ request: URLRequest,
+    makeRetry: ((String) async throws -> URLRequest)? = nil
+  ) async throws {
+    let (_, response) = try await performHTTP(request)
+    let http = response as! HTTPURLResponse
+
+    if let newNonce = http.value(forHTTPHeaderField: "DPoP-Nonce") {
+      try? tokenStore.saveNonce(newNonce)
+    }
+
+    if http.statusCode == 401,
+       let makeRetry,
+       let newNonce = http.value(forHTTPHeaderField: "DPoP-Nonce") {
+      let retryRequest = try await makeRetry(newNonce)
+      let (_, retryResponse) = try await performHTTP(retryRequest)
+      let retryHTTP = retryResponse as! HTTPURLResponse
+      if let retryNonce = retryHTTP.value(forHTTPHeaderField: "DPoP-Nonce") {
+        try? tokenStore.saveNonce(retryNonce)
+      }
+      try decodeVoidResponse(status: retryHTTP.statusCode)
+      return
+    }
+
+    try decodeVoidResponse(status: http.statusCode)
+  }
+
+  private func decodeVoidResponse(status: Int) throws {
+    switch status {
+    case 200, 204:
+      return
+    case 404:
+      throw MobileAPIError.notFound
+    default:
+      throw MobileAPIError.serverError(status: status)
+    }
   }
 }

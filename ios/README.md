@@ -66,7 +66,7 @@ In scope:
 - TOTP AutoFill
 - personal vault read path
 - team vault read path
-- save/update login where supported
+- manual credential edit (personal entries)
 
 Out of scope for the first slice:
 
@@ -75,6 +75,10 @@ Out of scope for the first slice:
 - audit-log management UI
 - MCP/service-account workflows
 - browser-specific UI patterns
+
+### Manual edit
+
+The browser extension's "save credential after sign-in" flow has no iOS equivalent (no callback into a third-party AutoFill extension after a successful sign-in). Manual edit inside `PasswdSSOApp` replaces it. Team-vault edit is deferred to a future MVP iteration; for now, edit team entries via the web app.
 
 ## Building Locally
 

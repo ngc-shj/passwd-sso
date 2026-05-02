@@ -10,8 +10,10 @@ enum AppState {
   case signedIn(serverConfig: ServerConfig, tokens: TokenPair, apiClient: MobileAPIClient)
   case vaultUnlocked(
     vaultKey: SymmetricKey,
+    userId: String,
     cacheData: CacheData,
-    autoLockService: AutoLockService
+    autoLockService: AutoLockService,
+    apiClient: MobileAPIClient
   )
   case vaultLocked
 }
@@ -49,13 +51,15 @@ struct RootView: View {
       case .signedIn(let serverConfig, _, let apiClient):
         vaultLockedScreen(serverConfig: serverConfig, apiClient: apiClient)
 
-      case .vaultUnlocked(let vaultKey, let cacheData, let autoLockService):
+      case .vaultUnlocked(let vaultKey, let userId, let cacheData, let autoLockService, let apiClient):
         VaultListView(
           viewModel: VaultViewModel(),
           cacheData: cacheData,
           vaultKey: vaultKey,
-          userId: "current-user",
-          autoLockService: autoLockService
+          userId: userId,
+          autoLockService: autoLockService,
+          apiClient: apiClient,
+          hostSyncService: hostSyncService ?? makeFallbackSyncService(apiClient: apiClient)
         )
         .onChange(of: autoLockService.state) { _, newState in
           if newState == .locked {
@@ -168,8 +172,25 @@ struct RootView: View {
     autoLockService.startTimer()
     appState = .vaultUnlocked(
       vaultKey: vaultKey,
+      userId: unlockResult.userId,
       cacheData: cacheData,
-      autoLockService: autoLockService
+      autoLockService: autoLockService,
+      apiClient: apiClient
+    )
+  }
+
+  /// Fallback sync service for the vaultUnlocked state when hostSyncService was not retained.
+  private func makeFallbackSyncService(apiClient: MobileAPIClient) -> HostSyncService {
+    let bks = BridgeKeyStore(accessGroup: "TEAMID.com.passwd-sso.shared")
+    let wks = AppGroupWrappedKeyStore()
+    let fetcher = EntryFetcher(apiClient: apiClient)
+    let cacheURL = (try? AppGroupContainer.cacheFileURL()) ?? URL(fileURLWithPath: "/dev/null")
+    return HostSyncService(
+      apiClient: apiClient,
+      entryFetcher: fetcher,
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      cacheURL: cacheURL
     )
   }
 

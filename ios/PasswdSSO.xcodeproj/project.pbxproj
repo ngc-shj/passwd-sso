@@ -10,6 +10,7 @@
 		0411C3B077EC09539E34D620 /* ServerConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D592E6D1C88CF478A0AC739 /* ServerConfig.swift */; };
 		06F0C988BE4B8925A0DC5C4A /* Shared.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 296B0035C443158058EA4866 /* Shared.framework */; };
 		0A36948197E80ACA5ED17F22 /* DPoPProofBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBF559B979642506D203C806 /* DPoPProofBuilderTests.swift */; };
+		0F7754D416476CE6B1AE0C81 /* EntryEncrypter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 988D60F3AE7755637CFCFDD7 /* EntryEncrypter.swift */; };
 		1600D1BA3846CDCAEA02EF7E /* HostSyncServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD016B2D5D9999A41CCA92F /* HostSyncServiceTests.swift */; };
 		1AB309165A8AB5830B2AE4DD /* VaultEntrySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06E4377840A9A939A6B88D9A /* VaultEntrySummary.swift */; };
 		1ACA702DAFCBA5F5EDD82475 /* BridgeKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0EAAD69A5C2E24912DEB8D1 /* BridgeKeyStore.swift */; };
@@ -60,6 +61,7 @@
 		A49DCEFF5ABDE722BF33C324 /* SPKIEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3FBC66A0BFC38B393757852 /* SPKIEncoder.swift */; };
 		A5FA7118BBC2D9CE7C30901E /* MobileAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D7D6EC824EE87139CFBABE4 /* MobileAPIClient.swift */; };
 		B083185D5D570CC65E2C2624 /* EntryFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B346160EEA436AAF564277 /* EntryFetcher.swift */; };
+		B0974C58F65B8B4CBE7FB084 /* EntryEditForm.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A3E40BD15B72CC7D2465FA1 /* EntryEditForm.swift */; };
 		B51FF4981CF7716A4F01CF18 /* AAD.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00886F462BDA31731FCC1B2A /* AAD.swift */; };
 		B8E8B10956121151C6DF7F9C /* CredentialResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AC8C547AA2FF81B4A670924 /* CredentialResolverTests.swift */; };
 		BB40A1D626FFE3335D4DDAD5 /* VaultViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13E66C8E3793F0F33D64AAB4 /* VaultViewModel.swift */; };
@@ -176,6 +178,7 @@
 		2552C6B9513BA62A3BFFE149 /* PasswdSSOUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswdSSOUITests.swift; sourceTree = "<group>"; };
 		28A274ABCE6A2833F3A66EF5 /* EntryFetcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryFetcherTests.swift; sourceTree = "<group>"; };
 		296B0035C443158058EA4866 /* Shared.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Shared.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		2A3E40BD15B72CC7D2465FA1 /* EntryEditForm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryEditForm.swift; sourceTree = "<group>"; };
 		2C025655D57D0A2807DB8625 /* PasswdSSOAppApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswdSSOAppApp.swift; sourceTree = "<group>"; };
 		2DAD672FE74D0EB78FA99F1C /* AESGCMTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AESGCMTests.swift; sourceTree = "<group>"; };
 		345F9CF0FA1F40F81B8D6074 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -211,6 +214,7 @@
 		920CAD5E7129591C09F8C23C /* CredentialProviderViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialProviderViewController.swift; sourceTree = "<group>"; };
 		92BFAE8E878C252FF7DF4D68 /* URLMatchingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = URLMatchingTests.swift; sourceTree = "<group>"; };
 		9710064A995CE5E0D639202D /* ServerURLSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerURLSetupView.swift; sourceTree = "<group>"; };
+		988D60F3AE7755637CFCFDD7 /* EntryEncrypter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryEncrypter.swift; sourceTree = "<group>"; };
 		9FEC5AE0DBB56D25F0537D3C /* DPoPProofBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DPoPProofBuilder.swift; sourceTree = "<group>"; };
 		A2CB0DAE185BE8F6CC8E6351 /* AuthCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthCoordinator.swift; sourceTree = "<group>"; };
 		A3FBC66A0BFC38B393757852 /* SPKIEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SPKIEncoder.swift; sourceTree = "<group>"; };
@@ -360,6 +364,7 @@
 				0BF5A4657F1990931FD94EBF /* Sync */,
 				D8971D5431C5B996B592DD95 /* TOTP */,
 				89B3CA75A3025FE7F1F6FFA0 /* URLMatching */,
+				92ABE01EDAE4F9652AAA9454 /* Vault */,
 				EC8C70919A0F81107381F27F /* Shared.swift */,
 			);
 			path = Shared;
@@ -424,6 +429,7 @@
 			isa = PBXGroup;
 			children = (
 				FD65567EDF5CDCFB425499EA /* EntryDetailView.swift */,
+				2A3E40BD15B72CC7D2465FA1 /* EntryEditForm.swift */,
 				D235AC82775464BDF11F292F /* TOTPCodeView.swift */,
 				DF803DEFD9DF8AF7683EE422 /* VaultListView.swift */,
 				D415409924052B276B874809 /* VaultUnlockView.swift */,
@@ -438,6 +444,14 @@
 				8F6C27CE52EFE55D86666E7C /* URLMatcher.swift */,
 			);
 			path = URLMatching;
+			sourceTree = "<group>";
+		};
+		92ABE01EDAE4F9652AAA9454 /* Vault */ = {
+			isa = PBXGroup;
+			children = (
+				988D60F3AE7755637CFCFDD7 /* EntryEncrypter.swift */,
+			);
+			path = Vault;
 			sourceTree = "<group>";
 		};
 		968A0B040C79415ECA3D3BAB /* Crypto */ = {
@@ -727,6 +741,7 @@
 				84EB3A5F0E1899E9DC4A7822 /* BackgroundSyncTask.swift in Sources */,
 				D8EA7B209BAE0D68AB7DB5D5 /* ContentView.swift in Sources */,
 				FC74F7D953B2978FE27D3B85 /* EntryDetailView.swift in Sources */,
+				B0974C58F65B8B4CBE7FB084 /* EntryEditForm.swift in Sources */,
 				B083185D5D570CC65E2C2624 /* EntryFetcher.swift in Sources */,
 				92AF55E25B2A1C5F8C2802BC /* HostSyncService.swift in Sources */,
 				A5FA7118BBC2D9CE7C30901E /* MobileAPIClient.swift in Sources */,
@@ -788,6 +803,7 @@
 				65B588E2DB548D9142568179 /* CryptoUtils.swift in Sources */,
 				72BD7556CC6BAD53BD1F093D /* DPoPProofBuilder.swift in Sources */,
 				89EF5EABFE7C000262E67616 /* EntryCacheFile.swift in Sources */,
+				0F7754D416476CE6B1AE0C81 /* EntryEncrypter.swift in Sources */,
 				3582DA3CD5414790F589E168 /* HostTokenStore.swift in Sources */,
 				542B8D1BD03A73706A98778B /* KDF.swift in Sources */,
 				2F1B42C2B8566A94C6155FEE /* LockState.swift in Sources */,

@@ -12,10 +12,15 @@ struct EntryDetailView: View {
   let vaultKey: SymmetricKey
   let userId: String
   let autoLockService: AutoLockService
+  @Bindable var viewModel: VaultViewModel
+  let apiClient: MobileAPIClient
+  let hostSyncService: HostSyncService
 
   @State private var detail: VaultEntryDetail?
   @State private var isPasswordVisible: Bool = false
   @State private var isScreenRecording: Bool = false
+  @State private var isShowingEditForm: Bool = false
+  @State private var showTeamEntryAlert: Bool = false
 
   @Environment(\.dismiss) private var dismiss
 
@@ -39,6 +44,38 @@ struct EntryDetailView: View {
     }
     .navigationTitle(summary.title)
     .navigationBarTitleDisplayMode(.inline)
+    .toolbar {
+      ToolbarItem(placement: .topBarTrailing) {
+        Button("Edit") {
+          if summary.teamId != nil {
+            showTeamEntryAlert = true
+          } else {
+            isShowingEditForm = true
+          }
+        }
+      }
+    }
+    .sheet(isPresented: $isShowingEditForm) {
+      if let detail {
+        EntryEditForm(
+          summary: summary,
+          initialDetail: detail,
+          vaultKey: vaultKey,
+          userId: userId,
+          viewModel: viewModel,
+          apiClient: apiClient,
+          hostSyncService: hostSyncService,
+          onSaved: { loadDetail() }
+        )
+      }
+    }
+    .alert("Team Entry", isPresented: $showTeamEntryAlert) {
+      Button("OK", role: .cancel) {}
+    } message: {
+      Text(
+        "Editing team entries is not yet supported on iPhone. Please use the web app."
+      )
+    }
     .onAppear {
       loadDetail()
       isScreenRecording = UIScreen.main.isCaptured
@@ -143,8 +180,7 @@ struct EntryDetailView: View {
   // MARK: - Private
 
   private func loadDetail() {
-    let vm = VaultViewModel()
-    detail = vm.loadDetail(
+    detail = viewModel.loadDetail(
       for: summary.id,
       cacheData: cacheData,
       vaultKey: vaultKey,

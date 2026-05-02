@@ -2,6 +2,13 @@ import CryptoKit
 import Foundation
 import Shared
 
+// MARK: - VaultViewModel errors
+
+public enum VaultViewModelError: Error, Equatable {
+  /// Editing team entries from the iOS app is not supported in MVP.
+  case teamEditNotSupported
+}
+
 /// Observable view-model for the vault list and detail screens.
 /// Holds decrypted summaries in memory. The vault_key must be held by the caller;
 /// this view-model receives it at unlock time only.
@@ -11,7 +18,7 @@ import Shared
   public var filterFavoritesOnly: Bool = false
   public var filterTeamId: String? = nil  // nil = all, non-nil = specific team
 
-  private var allSummaries: [VaultEntrySummary] = []
+  var allSummaries: [VaultEntrySummary] = []
 
   // MARK: - Filtered results
 
@@ -113,6 +120,64 @@ import Shared
       return try JSONDecoder().decode(VaultEntryDetail.self, from: plaintext)
     } catch {
       return nil
+    }
+  }
+}
+
+// MARK: - Save entry
+
+extension VaultViewModel {
+  /// Save edited entry. Re-encrypts with vault_key + personal AAD; calls API; triggers sync.
+  /// Throws `VaultViewModelError.teamEditNotSupported` for team entries.
+  public func saveEntry(
+    entryId: String,
+    userId: String,
+    detail: EntryPlaintext,
+    overview: OverviewPlaintext,
+    vaultKey: SymmetricKey,
+    apiClient: MobileAPIClient,
+    hostSyncService: HostSyncService,
+    aadVersion: Int = 1,
+    keyVersion: Int = 1
+  ) async throws {
+    // Reject team entries — out of scope for MVP.
+    if let summary = allSummaries.first(where: { $0.id == entryId }),
+       summary.teamId != nil {
+      throw VaultViewModelError.teamEditNotSupported
+    }
+
+    // Re-encrypt with personal AAD.
+    let (blobEnc, overviewEnc) = try encryptPersonalEntry(
+      entryId: entryId,
+      userId: userId,
+      vaultKey: vaultKey,
+      detail: detail,
+      overview: overview
+    )
+
+    // Commit to server.
+    let updateReq = UpdateEntryRequest(
+      encryptedBlob: blobEnc,
+      encryptedOverview: overviewEnc,
+      keyVersion: keyVersion,
+      aadVersion: aadVersion
+    )
+    try await apiClient.updateEntry(entryId: entryId, body: updateReq)
+
+    // Refresh cache after server confirms success.
+    _ = try await hostSyncService.runSync(vaultKey: vaultKey, userId: userId)
+
+    // Update in-memory summaries optimistically.
+    let updatedSummary = VaultEntrySummary(
+      id: entryId,
+      title: overview.title,
+      username: overview.username,
+      urlHost: overview.urlHost ?? "",
+      tags: overview.tags,
+      hasTOTP: detail.totpSecret != nil
+    )
+    if let idx = allSummaries.firstIndex(where: { $0.id == entryId }) {
+      allSummaries[idx] = updatedSummary
     }
   }
 }
