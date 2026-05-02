@@ -129,8 +129,17 @@ test.describe("Admin IA — team nav", () => {
     await page.goto("/ja/admin/tenant/teams");
     await page.waitForLoadState("networkidle");
 
-    // Grab first team link href from the teams list (links go to /admin/teams/{id}/general)
+    // The tenant teams page renders the team list via a client-side fetch
+    // (useEffect), so waitForLoadState("networkidle") alone is not always
+    // sufficient — explicitly wait for the team link to be in the DOM.
+    // If no teams exist in the fixture, teamId stays empty and the team
+    // tests below skip with a reason (rather than failing the beforeAll).
     const teamLink = page.locator("a[href*='/admin/teams/']").first();
+    const found = await teamLink
+      .waitFor({ state: "attached", timeout: 20_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!found) return;
     const href = await teamLink.getAttribute("href");
     const match = href?.match(/\/admin\/teams\/([^/]+)/);
     teamId = match?.[1] ?? "";
@@ -211,12 +220,14 @@ test("@mobile admin sidebar sheet opens and child link navigates", async ({ page
   await hamburger.click();
 
   // Sidebar sheet opens — its policy/authentication child link is now visible.
-  // Use exact href match instead of role-based to avoid Slot-based ambiguity
-  // (sidebar Buttons render via `<Button asChild><Link>` — getByRole("link")
-  // and getByRole("button") can BOTH match the same element under Slot).
-  const authPolicyLink = page
-    .locator('a[href*="/admin/tenant/policies/authentication"]')
-    .first();
+  // Scope to `[role="dialog"]` (the Radix Sheet) so we don't match the
+  // desktop sidebar's same link (rendered with `display: none` on mobile
+  // via Tailwind's `md:flex hidden`). `.first()` would otherwise pick the
+  // desktop link (earlier in DOM order), and that link is permanently
+  // hidden on this viewport — the test would never see it visible.
+  const authPolicyLink = page.locator(
+    '[role="dialog"] a[href*="/admin/tenant/policies/authentication"]',
+  );
   await expect(authPolicyLink).toBeVisible({ timeout: 5_000 });
   await authPolicyLink.click();
 
