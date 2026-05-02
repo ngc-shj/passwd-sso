@@ -8,7 +8,6 @@ import { CollapsibleSectionHeader } from "@/components/layout/sidebar-shared";
 import type { VaultContext } from "@/hooks/vault/use-vault-context";
 import {
   Download,
-  HeartPulse,
   LayoutDashboard,
   ScrollText,
   Shield,
@@ -22,27 +21,27 @@ interface SecurityTeam {
   role: string;
 }
 
-interface SecuritySectionProps {
+interface InsightsSectionProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   t: (key: string) => string;
   vaultContext: VaultContext;
   isWatchtower: boolean;
-  isEmergencyAccess: boolean;
   isPersonalAuditLog: boolean;
   onNavigate: () => void;
 }
 
-export function SecuritySection({
+// aria-label="Security" is the English literal kept for screen-reader landmark search
+// compatibility even though the visible label changed to "インサイト" (insightsGroup).
+export function InsightsSection({
   isOpen,
   onOpenChange,
   t,
   vaultContext,
   isWatchtower,
-  isEmergencyAccess,
   isPersonalAuditLog,
   onNavigate,
-}: SecuritySectionProps) {
+}: InsightsSectionProps) {
   const watchtowerHref =
     vaultContext.type === "team"
       ? `/dashboard/teams/${vaultContext.teamId}/watchtower`
@@ -50,50 +49,44 @@ export function SecuritySection({
   const canAccessWatchtower =
     vaultContext.type !== "team" || vaultContext.teamRole !== TEAM_ROLE.VIEWER;
 
+  // aria-label="Security" is the English literal preserved on this landmark for
+  // screen-reader search compatibility even though the visible label is "インサイト".
   return (
-    <Collapsible open={isOpen} onOpenChange={onOpenChange}>
-      <CollapsibleSectionHeader isOpen={isOpen}>{t("security")}</CollapsibleSectionHeader>
-      <CollapsibleContent>
-        <div className="ml-3 border-l pl-3 space-y-0.5">
-          {canAccessWatchtower && (
-            <Button
-              variant={isWatchtower ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link href={watchtowerHref} onClick={onNavigate}>
-                <Shield className="h-4 w-4" />
-                {t("watchtower")}
-              </Link>
-            </Button>
-          )}
-          {vaultContext.type !== "team" && (
-            <Button
-              variant={isEmergencyAccess ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link href="/dashboard/emergency-access" onClick={onNavigate}>
-                <HeartPulse className="h-4 w-4" />
-                {t("emergencyAccess")}
-              </Link>
-            </Button>
-          )}
-          {vaultContext.type !== "team" && (
-            <Button
-              variant={isPersonalAuditLog ? "secondary" : "ghost"}
-              className="w-full justify-start gap-2"
-              asChild
-            >
-              <Link href="/dashboard/audit-logs" onClick={onNavigate}>
-                <ScrollText className="h-4 w-4" />
-                {t("auditLog")}
-              </Link>
-            </Button>
-          )}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
+    <section aria-label="Security">
+      <Collapsible open={isOpen} onOpenChange={onOpenChange}>
+        <CollapsibleSectionHeader isOpen={isOpen}>
+          {t("insightsGroup")}
+        </CollapsibleSectionHeader>
+        <CollapsibleContent>
+          <div className="ml-3 border-l pl-3 space-y-0.5">
+            {canAccessWatchtower && (
+              <Button
+                variant={isWatchtower ? "secondary" : "ghost"}
+                className="w-full justify-start gap-2"
+                asChild
+              >
+                <Link href={watchtowerHref} onClick={onNavigate}>
+                  <Shield className="h-4 w-4" />
+                  {t("watchtower")}
+                </Link>
+              </Button>
+            )}
+            {vaultContext.type !== "team" && (
+              <Button
+                variant={isPersonalAuditLog ? "secondary" : "ghost"}
+                className="w-full justify-start gap-2"
+                asChild
+              >
+                <Link href="/dashboard/audit-logs" onClick={onNavigate}>
+                  <ScrollText className="h-4 w-4" />
+                  {t("auditLog")}
+                </Link>
+              </Button>
+            )}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </section>
   );
 }
 

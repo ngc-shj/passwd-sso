@@ -106,7 +106,7 @@ describe("useSidebarSectionsState", () => {
     expect(next.folders).toBe(true);
   });
 
-  it("auto-opens security section when isPersonalAuditLog is true", () => {
+  it("auto-opens insights section when isPersonalAuditLog is true", () => {
     renderHook(() =>
       useSidebarSectionsState({
         ...baseParams(),

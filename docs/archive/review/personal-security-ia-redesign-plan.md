@@ -543,3 +543,98 @@ Per R35 (production-deployed component, Tier-1 IA refactor): produce `docs/archi
 | (header) | 保管庫をロック | Lock vault |
 
 The visible label "セキュリティ" is removed from settings tabs but preserved as an `aria-label` for accessibility/search continuity.
+
+## Implementation Checklist (Step 2-1 output)
+
+### Files to create (~20 new)
+
+| Path | Purpose |
+|---|---|
+| `prisma/migrations/<ts>_add_settings_ia_migration_v1_seen/migration.sql` | DB enum addition |
+| `src/lib/redirects/ia-redirects.ts` | IA_REDIRECTS const + buildLocaleRedirects() |
+| `src/lib/redirects/ia-redirects.test.ts` | Constant correctness + generated output test |
+| `src/components/layout/lock-vault-button.tsx` | Header icon button |
+| `src/components/layout/lock-vault-button.test.tsx` | Render gate + idempotency tests |
+| `src/components/settings/migration-banner.tsx` | One-time announcement, localStorage dismiss |
+| `src/components/settings/migration-banner.test.tsx` | Sunset + dismiss + dedup tests |
+| `src/components/settings/migration-banner-config.ts` | `BANNER_SUNSET_TS` injectable constant |
+| `src/components/settings/migration-banner-config.test.ts` | CI freshness assertion (node env, PR-only) |
+| `src/components/settings/moved-page-notice.tsx` | Per-destination sessionStorage notice |
+| `src/components/settings/moved-page-notice.test.tsx` | Click + unmount + new-context tests |
+| `messages/{ja,en}/Settings.json` | New section labels (6 sections) |
+| `messages/{ja,en}/Migration.json` | Banner + notice copy |
+| `src/app/[locale]/dashboard/settings/account/{profile,notifications}/page.tsx` | New |
+| `src/app/[locale]/dashboard/settings/auth/{passphrase,recovery-key,passkey}/page.tsx` | Wrap existing dialogs/cards |
+| `src/app/[locale]/dashboard/settings/devices/page.tsx` | Hosts SessionsCard |
+| `src/app/[locale]/dashboard/settings/vault/{key-rotation,delegation,travel-mode}/page.tsx` | Move existing cards |
+| `src/app/[locale]/dashboard/settings/sharing/emergency-access/page.tsx` | Emergency access config (config-only; recipient flow stays at /dashboard/emergency-access) |
+| `src/app/[locale]/dashboard/settings/developer/mcp-connections/page.tsx` | Hosts McpConnectionsCard |
+| `src/__tests__/db-integration/audit-emit-settings-ia.integration.test.ts` | Real-DB integration test |
+| `e2e/tests/settings-ia-redirects.spec.ts` | Parameterized redirect E2E |
+| `e2e/tests/lock-vault-button.spec.ts` | Header lock button E2E (incl. `@mobile`) |
+| `e2e/tests/migration-banner.spec.ts` | Banner E2E with `page.clock.install()` |
+| `docs/archive/review/personal-security-ia-redesign-manual-test.md` | R35 artifact |
+
+### Files to modify (~15 existing)
+
+| Path | Change | Risk |
+|---|---|---|
+| `prisma/schema.prisma:976` | Add `SETTINGS_IA_MIGRATION_V1_SEEN` to `enum AuditAction` | Schema migration |
+| `src/lib/constants/audit/audit.ts:154,323,588` | Add to `AUDIT_ACTION`, `AUDIT_ACTION_VALUES`, NEW `AUDIT_ACTION_GROUP.SETTINGS`, `AUDIT_ACTION_GROUPS_PERSONAL` | Enum coverage |
+| `src/app/api/internal/audit-emit/route.ts:16,44,82` | `ALLOWED_ACTIONS` extension; `bodySchema` scope field; per-action constraints | API contract |
+| `src/app/api/internal/audit-emit/route.test.ts:57+` | Extend test cases for new action + scope + metadata rejection | Test |
+| `src/lib/proxy/page-route.ts:23,163` | `PASSKEY_EXEMPT_PREFIXES` narrow + redirect target | Critical pre-cond |
+| `messages/{ja,en}/AuditLog.json` | Add action label + new `groupSettings` group label | i18n coverage test |
+| `messages/{ja,en}/Dashboard.json` | Add `insightsGroup` key | i18n |
+| `next.config.ts` | Wire `buildLocaleRedirects()` into `redirects()` | Build artifact |
+| `src/components/layout/header.tsx:23,24,45,46,115-165` | Remove dropdown vault items + dialogs; add LockVaultButton | UI |
+| `src/components/layout/sidebar-section-security.tsx` | Rename export `SecuritySection`→`InsightsSection`; reduce contents to Watchtower + 監査ログ | UI |
+| `src/components/layout/sidebar-content.tsx` | Update import; consume `InsightsSection`; add 緊急アクセス top-level | UI |
+| `src/components/layout/sidebar-content.test.tsx` | Mock + descriptors update | Test |
+| `src/components/layout/sidebar-section-security.test.tsx` | 10+ identifier renames | Test |
+| `src/hooks/sidebar/use-sidebar-navigation-state.test.ts` | Settings URL update | Test |
+| `src/app/[locale]/dashboard/settings/layout.tsx` | 3-tab → 6-section sidebar; `aria-current="page"`; role filter | UI |
+| `src/app/[locale]/dashboard/settings/page.tsx` | Settings index → redirect to /account | UI |
+| `src/components/vault/delegation-revoke-banner.tsx` | Update settings/security URL reference if any | UI |
+| `extension/src/__tests__/background.test.ts:2097,2111,2142` | Test fixture URL update | Test |
+| `e2e/page-objects/settings.page.ts` | URL update | Test |
+| `e2e/playwright.config.ts` | Add `mobile-ios` + `mobile-android` projects with `@mobile` grep filter | CI |
+
+### Existing routes to remove (after redirects in place)
+
+`src/app/[locale]/dashboard/settings/{security,mcp}/` and all sub-paths. Existing pages there migrate to new locations as described above.
+
+### Shared utilities to reuse (NOT reimplement)
+
+| Surface | Source | Notes |
+|---|---|---|
+| Vault lock | `src/lib/vault/vault-context.tsx:1042` `useVault().lock()` | Don't add new lock primitive |
+| Vault status enum | `src/lib/vault/vault-context.tsx` `VAULT_STATUS` | Use the const, never string literals |
+| Travel Mode hook | `src/hooks/use-travel-mode.tsx` | Already SWR-keyed off `/api/travel-mode` |
+| Audit emission | `/api/internal/audit-emit/route.ts` (`logAuditAsync`) | Extend, do NOT create parallel route |
+| Audit action SSoT | `src/lib/constants/audit/audit.ts` (single file) | All audit constants in this one file |
+| Existing dialogs | `src/components/vault/{change-passphrase-dialog,recovery-key-dialog}.tsx` | Wrap as page bodies, do NOT recreate |
+| Banner localStorage pattern | `src/components/vault/recovery-key-banner.tsx:12` `psso:` prefix | Follow same pattern |
+| i18n parity test | `src/i18n/messages-consistency.test.ts` + `audit-i18n-coverage.test.ts` | Auto-covers once registered |
+| Existing test fixtures | `e2e/helpers/fixtures.ts` (`vaultReady`, `tenantAdmin`, etc.) | Use these, don't create new |
+
+### Patterns that MUST be followed across all sites
+
+- Vault-sensitive pages re-check `vaultStatus === UNLOCKED` at mount and render placeholder otherwise.
+- All client `fetch` to `/api/internal/audit-emit` uses `credentials: "same-origin"`, includes `scope: "PERSONAL"`, never includes `metadata` for the new action.
+- Sidebar items declare scope (personal/admin) and filter render by user role.
+- Test mocks for `useVault` import the real `VAULT_STATUS` const, never inline string literals.
+- `aria-label="Security"` literal preserved on the renamed Insights landmark for SR search compat.
+- Locale-aware redirects use `routing.locales` fan-out — never bare paths.
+
+### Implementation batches (proposed)
+
+| # | Name | Steps | Depends on | Estimated files |
+|---|---|---|---|---|
+| 1 | Foundation | DB migration, AUDIT_ACTION + group registration, audit-emit route extension, passkey allowlist | — | 5-7 |
+| 2 | i18n + helpers | Settings/Migration/Dashboard/AuditLog message files, redirect helper | 1 | 7-9 |
+| 3 | UI components | LockVaultButton, MigrationBanner, MovedPageNotice + tests | 2 | 6 |
+| 4 | Page structure | Settings layout rewrite, 12 new pages, dashboard sidebar refactor | 2 | 15+ |
+| 5 | Wiring | Header changes, next.config redirects, banner emission, extension fixtures | 3+4 | 5 |
+| 6 | Tests | Unit/integration/E2E (parameterized redirects, mobile, banner, a11y) | 5 | 6+ |
+| 7 | Final | Manual test plan, release notes; lint+test+build gate | 6 | 2 |
