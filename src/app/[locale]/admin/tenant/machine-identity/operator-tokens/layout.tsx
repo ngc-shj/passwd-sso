@@ -14,8 +14,8 @@ export default function TenantOperatorTokensLayout({
   return (
     <SectionLayout
       icon={KeyRound}
-      title={t("sectionOperatorTokens")}
-      description={t("sectionOperatorTokensDesc")}
+      title={t("sectionMachineIdentityOperatorTokens")}
+      description={t("sectionMachineIdentityOperatorTokensDesc")}
     >
       {children}
     </SectionLayout>
