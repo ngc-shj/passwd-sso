@@ -167,3 +167,13 @@ Seed unavailable — no dispositions to record (Ollama pre-screening was skipped
 | `npm run lint` | ✅ Clean |
 | `npx vitest run` | ✅ 7836 / 7838 passed (2 skipped — CI-only freshness check) |
 | `npx next build` | ✅ Production build succeeded |
+
+## Round 2 — Verification
+
+R2 verification (consolidated functionality / security / testing) confirmed:
+- All 11 R1 fixes verified resolved with correct, complete implementations.
+- S3 Anti-Deferral check format confirmed in this document.
+- No new findings introduced by R1 fixes.
+- Cross-cutting checks (i18n parity, mock isolation, header position) clean.
+
+**Final state**: all in-scope findings resolved. S3 deferred with proper Anti-Deferral routing.
