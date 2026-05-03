@@ -229,10 +229,17 @@ Three new SQL artifacts plus one shell wrapper:
      filter_clause text;
      failures int := 0;
    BEGIN
-     RESET app.tenant_id;  -- no-op-safe: SET LOCAL from Block 3 already discarded at txn boundary
+     -- IMPORTANT: cannot use `RESET app.tenant_id`. Postgres quirk: once a
+     -- custom GUC has been SET in a session, current_setting(name, true)
+     -- returns '' rather than NULL even after RESET / DISCARD ALL. The
+     -- policy's `current_setting('app.tenant_id', true)::uuid` cast then
+     -- raises `invalid input syntax for type uuid: ""` BEFORE the OR-bypass
+     -- clause can short-circuit. Use the nil-UUID instead — it parses
+     -- cleanly, matches no real tenant, and lets bypass drive visibility.
+     SET LOCAL app.tenant_id = '00000000-0000-0000-0000-000000000000';
      SET LOCAL app.bypass_rls = 'on';
-     ASSERT current_setting('app.tenant_id', true) IS NULL OR current_setting('app.tenant_id', true) = '',
-       'pre-Block-4: app.tenant_id must be unset (the RESET above should have ensured this)';
+     ASSERT current_setting('app.tenant_id', true) = '00000000-0000-0000-0000-000000000000',
+       'pre-Block-4: SET LOCAL app.tenant_id (nil sentinel) failed';
      FOR t IN (<discovery query>) LOOP
        expected := CASE t WHEN 'mcp_clients' THEN 3 ELSE 2 END;
        -- filter_clause built from constants only (UUID literals from the seed). NEVER pass user input here.
@@ -737,3 +744,34 @@ If a future change causes `passwd_app` to lose SELECT on `pg_policy`:
 ### Scenario 7: Local re-run
 
 See §Manual test plan above.
+
+## Implementation Checklist
+
+### Files to create
+- `scripts/rls-cross-tenant-tables.manifest` — 53 tenant-scoped tables (alphabetical, current count from live DB)
+- `scripts/rls-cross-tenant-seed.sql` — seed two tenants (`…000A0`, `…000B0`) + 1 row per tenant per table; mcp_clients NULL row
+- `scripts/rls-cross-tenant-coverage.sql` — single DO block, asserts exactly 1 row per tenant per discovered table (as `passwd_user`)
+- `scripts/rls-cross-tenant-verify.sql` — 5 DO blocks with stable `[E-RLS-*]` codes (as `passwd_app`)
+- `scripts/rls-cross-tenant-negative-test.sh` — Case 0 (pre-flight) + 5 cases + accumulator
+
+### Files to modify
+- `.github/workflows/ci.yml` — add 4 steps to the `rls-smoke` job + path filter additions to the `changes` job's `app` filter
+- `scripts/pre-pr.sh` — add a `pg_isready`-gated SQL parse-check entry
+
+### Shared utilities to reuse (none — all rls-smoke files are bespoke SQL)
+- pre-pr.sh `run_step "label" command...` pattern (referenced in implementation step 8)
+- existing role-creation SQL from `.github/workflows/ci.yml:432-446` (re-used unchanged)
+- `psql -v ON_ERROR_STOP=1` invocation pattern (existing rls-smoke style)
+- DO `$$` … `ASSERT` … `$$` PL/pgSQL idiom (existing `rls-smoke-verify.sql` style)
+
+### Empirically-verified preconditions (from local docker stack pre-flight)
+- 53 tenant-scoped tables exist in the live schema (matches plan's expected count)
+- `passwd_app` (NOSUPERUSER, NOBYPASSRLS) **CAN** read `pg_catalog.pg_policy` directly — discovery query returns 53 rows. No `GRANT SELECT ON pg_catalog.pg_policy TO passwd_app` needed in role-creation script (S13 fully resolved).
+- `passwd_user` is SUPERUSER, BYPASSRLS — fits the seed/coverage role
+- `mcp_clients_tenant_isolation` policy USING ≡ WITH CHECK (matches plan claim — F20 resolved)
+- All 53 policies follow `<table>_tenant_isolation` suffix convention; bare-name `tenant_isolation` returns 0 (defensive OR-branch retained)
+
+### Pattern consistency
+- New SQL files mirror `scripts/rls-smoke-seed.sql` / `scripts/rls-smoke-verify.sql` style (header comment, ASSERT idiom, GRANT semantics)
+- Stable error codes `[E-RLS-*]` are a NEW convention introduced by this PR; documented in the verify file header
+- Manifest file is a new artifact; flat text, alphabetical, comment-prefixed maintenance contract
