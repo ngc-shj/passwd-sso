@@ -8,6 +8,12 @@ Tests deferred from PR2's component coverage with rationale.
 |---|---|---|---|---|
 | `src/components/passwords/shared/folder-like.ts` | pure-types | §Skip decision tree (pure types skip rule) | exports `FolderLike` interface only — no runtime code | 2026-05-04 |
 
+## C3 — team/**
+
+| file | rationale | decision-rule | evidence | date |
+|---|---|---|---|---|
+| `src/components/team/forms/team-entry-dialog-shell.tsx` | barrel re-export | §Skip decision tree (barrel re-export rule) | single-line re-export of `EntryDialogShell` from `@/components/passwords/entry/entry-dialog-shell` | 2026-05-04 |
+
 ## C2 — passwords/{personal,dialogs,import,export}
 
 | file | rationale | decision-rule | evidence | date |
