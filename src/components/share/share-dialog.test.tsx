@@ -73,7 +73,6 @@ vi.mock("@/components/ui/switch", () => ({
     onCheckedChange?: (v: boolean) => void;
     disabled?: boolean;
   }) => (
-    // eslint-disable-next-line jsx-a11y/control-has-associated-label
     <input
       type="checkbox"
       role="switch"

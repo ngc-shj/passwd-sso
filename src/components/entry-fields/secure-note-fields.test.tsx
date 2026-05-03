@@ -20,7 +20,6 @@ vi.mock("@/components/passwords/shared/secure-note-markdown", () => ({
 }));
 
 // Stub Tabs so all panels render (Radix gates on active panel only)
-/* eslint-disable jsx-a11y/role-has-required-aria-props, jsx-a11y/role-supports-aria-props */
 vi.mock("@/components/ui/tabs", () => ({
   Tabs: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   TabsList: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -31,7 +30,6 @@ vi.mock("@/components/ui/tabs", () => ({
     <div data-value={value}>{children}</div>
   ),
 }));
-/* eslint-enable jsx-a11y/role-has-required-aria-props, jsx-a11y/role-supports-aria-props */
 
 describe("SecureNoteFields", () => {
   it("renders the textarea with maxLength=SECURE_NOTE_MAX (RT3)", () => {

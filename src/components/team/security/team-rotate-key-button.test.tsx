@@ -12,9 +12,6 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 
-const SENTINEL_NEWTEAMKEY_BYTE = 0xab;
-const SENTINEL_RAW_ITEMKEY_BYTE = 0xcd;
-
 const {
   mockFetch,
   mockToast,

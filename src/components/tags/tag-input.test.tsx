@@ -54,23 +54,26 @@ vi.mock("@/components/ui/button", () => ({
   ),
 }));
 
-vi.mock("@/components/ui/input", () => ({
+vi.mock("@/components/ui/input", () => {
   // forwardRef not strictly required by the component (it accesses .current via
   // useRef inside React); use forwardRef so the ref actually attaches.
-  Input: React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
-    ({ value, onChange, onKeyDown, placeholder, ...rest }, ref) => (
-      <input
-        ref={ref}
-        value={value}
-        onChange={onChange}
-        onKeyDown={onKeyDown}
-        placeholder={placeholder}
-        aria-label="tag-search"
-        {...rest}
-      />
-    ),
-  ),
-}));
+  const Input = React.forwardRef<
+    HTMLInputElement,
+    React.ComponentProps<"input">
+  >(({ value, onChange, onKeyDown, placeholder, ...rest }, ref) => (
+    <input
+      ref={ref}
+      value={value}
+      onChange={onChange}
+      onKeyDown={onKeyDown}
+      placeholder={placeholder}
+      aria-label="tag-search"
+      {...rest}
+    />
+  ));
+  Input.displayName = "InputMock";
+  return { Input };
+});
 
 import { TagInput, type TagData } from "./tag-input";
 

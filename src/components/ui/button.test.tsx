@@ -65,12 +65,13 @@ describe("Button", () => {
   it("renders as a child element when asChild is true", () => {
     render(
       <Button asChild>
-        <a href="/dest">Anchor</a>
+        {/* External URL avoids @next/next/no-html-link-for-pages — test verifies Slot.Root forwarding, not actual nav */}
+        <a href="https://example.com/dest">Anchor</a>
       </Button>,
     );
 
     const link = screen.getByRole("link", { name: "Anchor" });
     expect(link).toHaveAttribute("data-slot", "button");
-    expect(link).toHaveAttribute("href", "/dest");
+    expect(link).toHaveAttribute("href", "https://example.com/dest");
   });
 });

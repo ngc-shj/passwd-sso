@@ -31,7 +31,6 @@ vi.mock("@/components/ui/checkbox", () => ({
     checked?: boolean;
     onCheckedChange?: (v: boolean) => void;
   }) => (
-    // eslint-disable-next-line jsx-a11y/control-has-associated-label
     <input
       type="checkbox"
       aria-label="action"

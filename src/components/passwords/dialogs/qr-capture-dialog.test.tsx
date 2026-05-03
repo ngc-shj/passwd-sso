@@ -115,7 +115,6 @@ function installImageMock(opts: { width: number; height: number; trigger?: "load
 function installCanvasMock() {
   // jsdom canvas getContext returns null by default — stub it.
   HTMLCanvasElement.prototype.getContext = vi.fn(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     () =>
       ({
         drawImage: vi.fn(),

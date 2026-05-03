@@ -27,12 +27,13 @@ describe("Badge", () => {
   it("renders as a child element when asChild is true", () => {
     render(
       <Badge asChild>
-        <a href="/x">Link</a>
+        {/* External URL avoids @next/next/no-html-link-for-pages — test verifies Slot.Root forwarding, not actual nav */}
+        <a href="https://example.com/x">Link</a>
       </Badge>,
     );
 
     const link = screen.getByRole("link", { name: "Link" });
     expect(link).toHaveAttribute("data-slot", "badge");
-    expect(link).toHaveAttribute("href", "/x");
+    expect(link).toHaveAttribute("href", "https://example.com/x");
   });
 });

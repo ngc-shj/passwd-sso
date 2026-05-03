@@ -10,7 +10,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { mockTeamMismatch } from "@/__tests__/helpers/mock-app-navigation";
 
 const { mockFetch, mockToast, encryptBinaryMock, decryptBinaryMock } = vi.hoisted(() => ({

@@ -62,7 +62,12 @@ vi.mock("@/components/ui/dialog", () => {
     open: boolean;
     onOpenChange: (v: boolean) => void;
   }) => {
+    // Test-mock: capture controlled props into a closure-scoped state object so
+    // the Trigger/Content stubs below can read them. Test-only pattern; the
+    // immutability rule is meant for production component state.
+    // eslint-disable-next-line react-hooks/immutability
     dialogState.onOpenChange = onOpenChange;
+    // eslint-disable-next-line react-hooks/immutability
     dialogState.open = open;
     return <div data-testid="dialog-root">{children}</div>;
   };
