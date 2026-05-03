@@ -124,6 +124,12 @@ targets:
     entitlements:
       path: PasswdSSOAutofillExtension/PasswdSSOAutofillExtension.entitlements
       properties:
+        # Apple official AutoFill Credential Provider entitlement — REQUIRED
+        # for iOS to surface this extension in Settings → AutoFill source list.
+        # Without it, pluginkit registers the bundle generically but the
+        # AutoFill subsystem silently excludes it. Per Apple docs:
+        # https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.authentication-services.autofill-credential-provider
+        com.apple.developer.authentication-services.autofill-credential-provider: true
         com.apple.security.application-groups:
           - group.com.passwd-sso.shared
         keychain-access-groups:
