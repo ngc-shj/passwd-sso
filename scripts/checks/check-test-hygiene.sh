@@ -42,55 +42,43 @@ fi
 # Count for the summary line.
 CHANGED_COUNT=$(echo "$CHANGED_LIST" | wc -l | tr -d ' ')
 
-violations=0
-report_violation() {
-  local label="$1"
-  local matches="$2"
-  printf "${RED}✗ %s${RESET}\n" "$label" >&2
-  echo "$matches" >&2
-  echo "" >&2
-  violations=$((violations + 1))
-}
+# Single-pass scan with detail output. The while loop runs in a subshell (pipe
+# right side), so a counter incremented inside it is invisible after the loop.
+# Capture all violations into a single string and decide pass/fail by string
+# emptiness — avoids the subshell-counter pitfall while still emitting per-rule
+# context to stderr.
+VIOLATIONS=$(
+  echo "$CHANGED_LIST" | while IFS= read -r file; do
+    [ -f "$file" ] || continue
 
-# Run each gate against the changed-test-files set only.
-echo "$CHANGED_LIST" | while IFS= read -r file; do
-  [ -f "$file" ] || continue
+    # Gate (a): vi.mock("node:crypto", ...) — would silently disable AES/HKDF
+    if matches=$(grep -nE "vi\.mock\(['\"]node:crypto['\"]" "$file" 2>/dev/null); then
+      printf "%s\n" "${file}: ${matches}"
+      printf "${RED}  ✗ FORBIDDEN: vi.mock('node:crypto', ...) silently disables AES/HKDF; use vi.spyOn(cryptoModule, 'randomBytes') only${RESET}\n" >&2
+    fi
 
-  # Gate (a): vi.mock("node:crypto", ...)
-  if matches=$(grep -nE "vi\.mock\(['\"]node:crypto['\"]" "$file" 2>/dev/null); then
-    report_violation "FORBIDDEN: vi.mock('node:crypto', ...) silently disables AES/HKDF; use vi.spyOn(cryptoModule, 'randomBytes') only" \
-      "$file: $matches"
-  fi
+    # Gate (b): focused/skipped tests
+    if matches=$(grep -nE "\b(it|describe)\.skip\b|\b(fdescribe|fit)\(" "$file" 2>/dev/null); then
+      printf "%s\n" "${file}: ${matches}"
+      printf "${RED}  ✗ FORBIDDEN: skipped/focused tests (it.skip / describe.skip / fdescribe / fit); document deviation in skip-log instead${RESET}\n" >&2
+    fi
 
-  # Gate (b): focused/skipped tests
-  if matches=$(grep -nE "\b(it|describe)\.skip\b|\b(fdescribe|fit)\(" "$file" 2>/dev/null); then
-    report_violation "FORBIDDEN: skipped/focused tests (it.skip / describe.skip / fdescribe / fit); document deviation in skip-log instead" \
-      "$file: $matches"
-  fi
+    # Gate (c): direct process.env mutation (allowlist setup.ts is excluded
+    # via the CHANGED_LIST filter at the top of this script)
+    if matches=$(grep -nE "^[[:space:]]*process\.env\.[A-Z_]+ *=" "$file" 2>/dev/null); then
+      printf "%s\n" "${file}: ${matches}"
+      printf "${RED}  ✗ FORBIDDEN: direct process.env.X = mutation in tests; use vi.stubEnv (afterEach unstubs are wired in setup.ts)${RESET}\n" >&2
+    fi
 
-  # Gate (c): direct process.env mutation
-  if matches=$(grep -nE "^[[:space:]]*process\.env\.[A-Z_]+ *=" "$file" 2>/dev/null); then
-    report_violation "FORBIDDEN: direct process.env.X = mutation in tests; use vi.stubEnv (afterEach unstubs are wired in setup.ts)" \
-      "$file: $matches"
-  fi
+    # Gate (d): @ts-ignore / @ts-nocheck
+    if matches=$(grep -nE "@ts-(ignore|nocheck)" "$file" 2>/dev/null); then
+      printf "%s\n" "${file}: ${matches}"
+      printf "${RED}  ✗ FORBIDDEN: @ts-ignore / @ts-nocheck in tests; fix the type instead (R36)${RESET}\n" >&2
+    fi
+  done
+)
 
-  # Gate (d): @ts-ignore / @ts-nocheck
-  if matches=$(grep -nE "@ts-(ignore|nocheck)" "$file" 2>/dev/null); then
-    report_violation "FORBIDDEN: @ts-ignore / @ts-nocheck in tests; fix the type instead (R36)" \
-      "$file: $matches"
-  fi
-done
-
-# The while loop runs in a subshell (pipe right side); $violations isn't visible here.
-# Re-evaluate by re-running grep across all changed files in aggregate. If any violation
-# was reported above, the subshell exited with errors echoed to stderr; capture by re-scanning.
-AGGREGATE_VIOLATIONS=$(echo "$CHANGED_LIST" | while IFS= read -r file; do
-  [ -f "$file" ] || continue
-  grep -nE "vi\.mock\(['\"]node:crypto['\"]|\b(it|describe)\.skip\b|\b(fdescribe|fit)\(|^[[:space:]]*process\.env\.[A-Z_]+ *=|@ts-(ignore|nocheck)" "$file" 2>/dev/null \
-    | sed "s|^|$file:|"
-done)
-
-if [ -n "$AGGREGATE_VIOLATIONS" ]; then
+if [ -n "$VIOLATIONS" ]; then
   printf "${RED}check-test-hygiene: violations in %d changed test file(s)${RESET}\n" "$CHANGED_COUNT" >&2
   exit 1
 fi
