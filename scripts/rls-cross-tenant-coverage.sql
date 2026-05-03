@@ -47,7 +47,7 @@ BEGIN
   ) LOOP
     -- Defensive identifier-shape guard (system catalog is trusted, but
     -- belt-and-suspenders for the dynamic SQL).
-    ASSERT t ~ '^[a-z_][a-z0-9_]*$', format('table name failed regex: %s', t);
+    ASSERT t ~ '^[a-z_][a-z0-9_]*$', format('table name failed regex: %L', t);
 
     EXECUTE format('SELECT count(*) FROM %I WHERE tenant_id = $1', t)
       INTO n USING tenant_a;

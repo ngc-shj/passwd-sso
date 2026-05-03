@@ -2,7 +2,7 @@
 # rls-cross-tenant-negative-test.sh — gate self-check
 #
 # Runs a Case 0 pre-flight calibration (canonical policy → exit 0) plus
-# 5 distinct failure shapes against an ephemeral throwaway table to verify
+# 7 distinct failure shapes against an ephemeral throwaway table to verify
 # the cross-tenant verify SQL correctly detects each:
 #   0. canonical policy + correct manifest (sanity: harness calibrated)
 #   1. permissive symmetric → [E-RLS-COUNT-A]
@@ -10,10 +10,24 @@
 #   3. NULL USING clause (FOR INSERT-only) → [E-RLS-NULL]
 #   4. dropped bypass clause → [E-RLS-BYPASS]
 #   5. manifest drift (canonical policy + manifest missing throwaway) → [E-RLS-MANIFEST-MISSING]
+#   6. manifest contains a name not in DB → [E-RLS-MANIFEST-EXTRA]
+#   7. column-parity probe (tenant_id column without policy) → [E-RLS-COLPARITY]
+#
+# Codes NOT exercised here (acceptable coverage gaps):
+#   - [E-RLS-COUNT-B]: structurally identical to [E-RLS-COUNT-A] (Block 3 mirrors Block 2).
+#   - [E-RLS-DISCOVER]: requires REVOKE on system catalog which is fragile and rarely portable.
+#   - [E-RLS-ROLE]: requires running the verify as a different role; covered by R21 verification not by this self-check.
 #
 # Each case matches a stable error code (e.g., [E-RLS-NULL]), not freeform
 # prose, so future EXCEPTION message wording changes do not silently break
 # gate self-check coverage.
+#
+# Prerequisite: scripts/rls-cross-tenant-seed.sql must be applied (as
+# passwd_user) before this script runs. Cases 0 and 4 invoke the full verify
+# SQL which expects exactly 1 row per tenant in all 53 manifest tables — if
+# the seed has not been applied, Block 2 fires [E-RLS-COUNT-A] before Cases
+# 0/4 reach their target assertions. CI runs them in order (seed → coverage
+# → verify → negative-test); local debugging must do the same.
 #
 # Mechanism: --variable override (no manifest file mutation). The script
 # builds EXPECTED_TABLES in-process, appending the throwaway table name
@@ -42,9 +56,12 @@ MANIFEST_FILE="$SCRIPT_DIR/rls-cross-tenant-tables.manifest"
 VERIFY_SQL="$SCRIPT_DIR/rls-cross-tenant-verify.sql"
 
 # Trap-based cleanup: idempotent DROP. Fires on EXIT/ERR/INT/TERM (not SIGKILL).
+# Drops BOTH the negative-test policy target AND the colparity probe table
+# created by Case 7. Both DROPs are IF EXISTS so the trap is safe to fire
+# before/after either table has been created.
 cleanup() {
   psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=0 -q \
-    -c "DROP TABLE IF EXISTS rls_negative_test CASCADE;" >/dev/null 2>&1 || true
+    -c "DROP TABLE IF EXISTS rls_negative_test CASCADE; DROP TABLE IF EXISTS rls_colparity_probe CASCADE;" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
@@ -175,6 +192,72 @@ run_negative_case 5 \
   "$CANONICAL_POLICY_SQL" \
   "[E-RLS-MANIFEST-MISSING]" \
   "yes" || total_failures=$((total_failures + 1))
+
+# Case 6: manifest contains a name not in DB → Block 1 [E-RLS-MANIFEST-EXTRA].
+# Reuses canonical policy (so Block 2/3/4 don't pre-empt) and passes a manifest
+# that includes a phantom table name. Custom helper rather than run_negative_case
+# because we need to inject the phantom into expected_tables, not just toggle
+# the throwaway in/out.
+run_case_6_manifest_extra() {
+  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
+    -c "DROP POLICY IF EXISTS rls_negative_test_tenant_isolation ON rls_negative_test;"
+  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
+    -c "$CANONICAL_POLICY_SQL"
+  local expected_tables="${manifest_entries},rls_negative_test,rls_phantom_not_in_db"
+  local out ec
+  out=$(psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 \
+    -v expected_tables="$expected_tables" \
+    -f "$VERIFY_SQL" 2>&1) && ec=0 || ec=$?
+  if (( ec == 0 )); then
+    printf 'FAIL case 6: verify exited 0 against manifest with phantom table — gate is broken\n'
+    return 1
+  fi
+  if ! grep -qF -- "[E-RLS-MANIFEST-EXTRA]" <<<"$out"; then
+    printf 'FAIL case 6: verify failed but expected code [E-RLS-MANIFEST-EXTRA] not found in output:\n%s\n' "$out"
+    return 1
+  fi
+  printf 'PASS case 6 (matched [E-RLS-MANIFEST-EXTRA])\n'
+}
+run_case_6_manifest_extra || total_failures=$((total_failures + 1))
+
+# Case 7: column-parity mismatch — a separate probe table has tenant_id column
+# but NO tenant_isolation policy → Block 1 [E-RLS-COLPARITY] fires before the
+# manifest assertions because COLPARITY runs earlier in Block 1's load-bearing
+# order. Probe is created in this case body and dropped after; the trap also
+# drops it as a safety net.
+run_case_7_colparity() {
+  # Reset to canonical policy so SYM/NULL pass.
+  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
+    -c "DROP POLICY IF EXISTS rls_negative_test_tenant_isolation ON rls_negative_test;"
+  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
+    -c "$CANONICAL_POLICY_SQL"
+  # Create the column-only probe.
+  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q -c "
+    DROP TABLE IF EXISTS rls_colparity_probe CASCADE;
+    CREATE TABLE rls_colparity_probe (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id uuid NOT NULL);
+  "
+  # Manifest includes rls_negative_test but NOT the probe — discovery returns
+  # 53 + 1 = 54 (matches manifest), columns return 53 + 1 (negative_test) +
+  # 1 (probe) = 55. So COLPARITY: column count 55 != discovery count 54.
+  local expected_tables="${manifest_entries},rls_negative_test"
+  local out ec
+  out=$(psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 \
+    -v expected_tables="$expected_tables" \
+    -f "$VERIFY_SQL" 2>&1) && ec=0 || ec=$?
+  # Drop probe regardless (trap also covers).
+  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=0 -q \
+    -c "DROP TABLE IF EXISTS rls_colparity_probe CASCADE;" >/dev/null 2>&1 || true
+  if (( ec == 0 )); then
+    printf 'FAIL case 7: verify exited 0 with extra column-without-policy — gate is broken\n'
+    return 1
+  fi
+  if ! grep -qF -- "[E-RLS-COLPARITY]" <<<"$out"; then
+    printf 'FAIL case 7: verify failed but expected code [E-RLS-COLPARITY] not found in output:\n%s\n' "$out"
+    return 1
+  fi
+  printf 'PASS case 7 (matched [E-RLS-COLPARITY])\n'
+}
+run_case_7_colparity || total_failures=$((total_failures + 1))
 
 if (( total_failures > 0 )); then
   printf '\n%d negative-test cases failed.\n' "$total_failures"
