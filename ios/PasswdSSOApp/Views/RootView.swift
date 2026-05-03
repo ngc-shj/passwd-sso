@@ -64,12 +64,19 @@ struct RootView: View {
         }
 
       case .vaultLocked:
-        // Keep "passwd-sso" text for UITest compatibility
-        VStack(spacing: 16) {
+        // Auto-lock dropped bridge_key from Keychain; vault must be re-unlocked
+        // (in production via passphrase, in DEBUG via fixture reload).
+        // Keep "passwd-sso" text for UITest compatibility.
+        VStack(spacing: 24) {
           Text("passwd-sso")
             .font(.largeTitle.bold())
           Text("Vault locked")
             .foregroundStyle(.secondary)
+          Button("Sign in again") {
+            // Reset to setup so the user can re-enter passphrase (or use DEBUG fixture).
+            appState = .setup
+          }
+          .buttonStyle(.borderedProminent)
         }
         .padding()
       }
