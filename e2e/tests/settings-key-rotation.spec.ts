@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { test, expect } from "@playwright/test";
 import { injectSession } from "../helpers/auth";
 import { getAuthState } from "../helpers/fixtures";
-import { getPool } from "../helpers/db";
+import { getPool, seedSession } from "../helpers/db";
 import { seedAttachment } from "../helpers/password-entry";
 import { VaultLockPage } from "../page-objects/vault-lock.page";
 import { DashboardPage } from "../page-objects/dashboard.page";
@@ -91,6 +91,13 @@ test("Key rotation preserves existing vault entries", async ({
   });
 
   await test.step("verify test entry is still accessible after rotation", async () => {
+    // #433/S-N2: rotation now invalidates ALL user-bound sessions (incl. the
+    // one driving this test). The cookie is still in the browser context but
+    // the DB row was deleted. Re-seed with the same token (UPSERT) so the
+    // post-rotation navigation can authenticate. The cookie value is unchanged
+    // — production users sign in again here; tests just shortcut the re-auth.
+    await seedSession(keyRotation.id, keyRotation.sessionToken);
+
     await page.goto("/ja/dashboard");
 
     // Full page navigation resets React state; re-unlock with the same passphrase
@@ -126,6 +133,12 @@ test("Key rotation requires explicit acknowledge when personal attachments exist
   const { keyRotation } = getAuthState();
   const attachmentId = randomUUID();
   const entryTitle = `Attach-Ack ${Date.now()}`;
+
+  // The previous test ("preserves existing vault entries") rotates this same
+  // user, which now revokes the global-setup session per #433/S-N2. Re-seed
+  // (UPSERT) so this test starts from a valid auth state regardless of prior
+  // test order.
+  await seedSession(keyRotation.id, keyRotation.sessionToken);
 
   await injectSession(context, keyRotation.sessionToken);
   await page.goto("/ja/dashboard");
