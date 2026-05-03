@@ -2,11 +2,18 @@ import { describe, expect, it } from "vitest";
 import { toArrayBuffer, textEncode, hexEncode, hexDecode } from "./crypto-utils";
 
 describe("toArrayBuffer", () => {
-  it("converts Uint8Array to ArrayBuffer", () => {
+  // toArrayBuffer is now a pass-through returning the input Uint8Array as a
+  // BufferSource. SubtleCrypto accepts both Uint8Array and ArrayBuffer per
+  // BufferSource = ArrayBufferView | ArrayBuffer.
+  it("returns a BufferSource that views the same bytes", () => {
     const arr = new Uint8Array([1, 2, 3]);
     const buf = toArrayBuffer(arr);
-    expect(buf).toBeInstanceOf(ArrayBuffer);
-    expect(new Uint8Array(buf)).toEqual(new Uint8Array([1, 2, 3]));
+    expect(ArrayBuffer.isView(buf) || buf instanceof ArrayBuffer).toBe(true);
+    expect(buf.byteLength).toBe(3);
+    // Read back the bytes (works for both Uint8Array and ArrayBuffer return types)
+    const bytes =
+      buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array((buf as ArrayBufferView).buffer, (buf as ArrayBufferView).byteOffset, buf.byteLength);
+    expect(bytes).toEqual(new Uint8Array([1, 2, 3]));
   });
 
   it("handles zero-length Uint8Array", () => {
@@ -15,11 +22,20 @@ describe("toArrayBuffer", () => {
     expect(buf.byteLength).toBe(0);
   });
 
-  it("handles sub-array with offset", () => {
+  it("preserves sub-array bytes (offset+length)", () => {
     const base = new Uint8Array([10, 20, 30, 40, 50]);
     const sub = base.subarray(1, 4);
     const buf = toArrayBuffer(sub);
-    expect(new Uint8Array(buf)).toEqual(new Uint8Array([20, 30, 40]));
+    expect(buf.byteLength).toBe(3);
+    const bytes =
+      buf instanceof ArrayBuffer
+        ? new Uint8Array(buf)
+        : new Uint8Array(
+            (buf as ArrayBufferView).buffer,
+            (buf as ArrayBufferView).byteOffset,
+            buf.byteLength,
+          );
+    expect(bytes).toEqual(new Uint8Array([20, 30, 40]));
   });
 });
 

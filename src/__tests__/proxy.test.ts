@@ -33,10 +33,13 @@ import { proxy } from "../proxy";
 import { applySecurityHeaders as _applySecurityHeaders } from "../lib/proxy/security-headers";
 import { extractSessionToken as _extractSessionToken } from "../lib/proxy/auth-gate";
 import {
-  passkeyAuditEmitted as _passkeyAuditEmitted,
   PASSKEY_AUDIT_MAP_MAX as _PASSKEY_AUDIT_MAP_MAX,
   PASSKEY_AUDIT_DEDUP_MS as _PASSKEY_AUDIT_DEDUP_MS,
   recordPasskeyAuditEmit as _recordPasskeyAuditEmit,
+  _resetPasskeyAuditForTests,
+  _passkeyAuditSizeForTests,
+  _passkeyAuditHasForTests,
+  _passkeyAuditFirstKeyForTests,
 } from "../lib/proxy/page-route";
 
 const dummyOptions = { cspHeader: "default-src 'self'", nonce: "test-nonce" };
@@ -891,11 +894,11 @@ describe("auth-gate session cache miss path", () => {
 
 describe("proxy — passkeyAuditEmitted staleness eviction", () => {
   beforeEach(() => {
-    _passkeyAuditEmitted.clear();
+    _resetPasskeyAuditForTests();
   });
 
   afterEach(() => {
-    _passkeyAuditEmitted.clear();
+    _resetPasskeyAuditForTests();
   });
 
   it("returns true on first emit, false within dedup window, true after window", () => {
@@ -914,9 +917,9 @@ describe("proxy — passkeyAuditEmitted staleness eviction", () => {
       const accepted = _recordPasskeyAuditEmit(`u${i}`, base + i);
       expect(accepted).toBe(true);
     }
-    expect(_passkeyAuditEmitted.size).toBe(_PASSKEY_AUDIT_MAP_MAX);
-    expect(_passkeyAuditEmitted.has("u0")).toBe(true);
-    expect(_passkeyAuditEmitted.has("u1")).toBe(true);
+    expect(_passkeyAuditSizeForTests()).toBe(_PASSKEY_AUDIT_MAP_MAX);
+    expect(_passkeyAuditHasForTests("u0")).toBe(true);
+    expect(_passkeyAuditHasForTests("u1")).toBe(true);
 
     // Re-emit u0 well beyond the dedup window. With FIFO eviction this would
     // not save u0 (its insertion-order position would still be 0). With LRU
@@ -928,11 +931,11 @@ describe("proxy — passkeyAuditEmitted staleness eviction", () => {
     // Add a new user. Map is at capacity, so something must be evicted.
     expect(_recordPasskeyAuditEmit("u-new", refresh + 1)).toBe(true);
 
-    expect(_passkeyAuditEmitted.size).toBe(_PASSKEY_AUDIT_MAP_MAX);
+    expect(_passkeyAuditSizeForTests()).toBe(_PASSKEY_AUDIT_MAP_MAX);
     // Staleness eviction picks u1 (oldest lastEmitted), NOT u0.
-    expect(_passkeyAuditEmitted.has("u0")).toBe(true);
-    expect(_passkeyAuditEmitted.has("u1")).toBe(false);
-    expect(_passkeyAuditEmitted.has("u-new")).toBe(true);
+    expect(_passkeyAuditHasForTests("u0")).toBe(true);
+    expect(_passkeyAuditHasForTests("u1")).toBe(false);
+    expect(_passkeyAuditHasForTests("u-new")).toBe(true);
   });
 
   it("non-monotonic lastEmitted: most recently refreshed user survives eviction", () => {
@@ -948,6 +951,6 @@ describe("proxy — passkeyAuditEmitted staleness eviction", () => {
     _recordPasskeyAuditEmit("u0", t0 + dedup + 20);
 
     // First key in iteration order is the staleness candidate.
-    expect(_passkeyAuditEmitted.keys().next().value).toBe("u2");
+    expect(_passkeyAuditFirstKeyForTests()).toBe("u2");
   });
 });

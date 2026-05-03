@@ -109,3 +109,6 @@ docs/temp/
 
 # Refactor orchestration — per-developer stale-branch baseline
 .refactor-phase-verify-baseline
+
+# Per-batch coverage snapshots (test-gen plan P0)
+.coverage-snapshots/

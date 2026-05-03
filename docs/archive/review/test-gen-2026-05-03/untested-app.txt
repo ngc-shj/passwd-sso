@@ -1,0 +1,2 @@
+src/app/[locale]/mcp/authorize/consent-form.tsx
+src/app/manifest.ts

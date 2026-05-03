@@ -1,0 +1,5 @@
+src/i18n/locales.ts
+src/i18n/navigation.ts
+src/i18n/request.ts
+src/i18n/routing.ts
+src/workers/audit-anchor-publisher.ts

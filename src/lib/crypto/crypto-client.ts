@@ -211,7 +211,7 @@ export async function deriveEncryptionKey(
       name: "HKDF",
       hash: "SHA-256",
       // Zero salt — see docs/security/crypto-domain-ledger.md "HKDF Empty Salt Rationale"
-      salt: new ArrayBuffer(32),
+      salt: new Uint8Array(32),
       info: textEncode(HKDF_ENC_INFO),
     },
     hkdfKey,
@@ -241,7 +241,7 @@ export async function deriveAuthKey(
       name: "HKDF",
       hash: "SHA-256",
       // Zero salt — see docs/security/crypto-domain-ledger.md "HKDF Empty Salt Rationale"
-      salt: new ArrayBuffer(32),
+      salt: new Uint8Array(32),
       info: textEncode(HKDF_AUTH_INFO),
     },
     hkdfKey,

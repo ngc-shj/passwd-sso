@@ -81,7 +81,7 @@ export async function deriveTeamEncryptionKey(
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt: new ArrayBuffer(32), // empty salt — teamKey has sufficient entropy
+      salt: new Uint8Array(32), // empty salt — teamKey has sufficient entropy
       info: textEncode(HKDF_TEAM_ENC_INFO),
     },
     hkdfKey,
@@ -155,7 +155,7 @@ export async function deriveEcdhWrappingKey(
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt: new ArrayBuffer(32),
+      salt: new Uint8Array(32),
       info: textEncode(HKDF_ECDH_WRAP_INFO),
     },
     hkdfKey,
@@ -457,7 +457,7 @@ export async function deriveItemEncryptionKey(
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt: new ArrayBuffer(32),
+      salt: new Uint8Array(32),
       info: textEncode(HKDF_ITEM_ENC_INFO),
     },
     hkdfKey,
