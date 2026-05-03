@@ -51,7 +51,37 @@ function isPasskeyGracePeriodExpired(
 // Deduplicate passkey audit emit — track userId+timestamp, skip if emitted within 5 min
 export const PASSKEY_AUDIT_DEDUP_MS = 5 * MS_PER_MINUTE;
 export const PASSKEY_AUDIT_MAP_MAX = 1000;
-export const passkeyAuditEmitted = new Map<string, number>();
+// Module-private — direct mutation of this Map from outside the module would
+// allow attacker-influenced suppression of passkey-enforcement audit events.
+// Tests use the sanctioned _*ForTests helpers below.
+const passkeyAuditEmitted = new Map<string, number>();
+
+/**
+ * @internal Test-only — clears the passkey-audit dedup map.
+ * Use in `beforeEach` to isolate page-route tests from each other.
+ */
+export function _resetPasskeyAuditForTests(): void {
+  passkeyAuditEmitted.clear();
+}
+
+/** @internal Test-only — size probe for the passkey-audit dedup map. */
+export function _passkeyAuditSizeForTests(): number {
+  return passkeyAuditEmitted.size;
+}
+
+/** @internal Test-only — membership probe for the passkey-audit dedup map. */
+export function _passkeyAuditHasForTests(userId: string): boolean {
+  return passkeyAuditEmitted.has(userId);
+}
+
+/**
+ * @internal Test-only — returns the first (oldest by recency) key in the
+ * passkey-audit dedup map, or undefined if empty. Used to verify staleness
+ * eviction order.
+ */
+export function _passkeyAuditFirstKeyForTests(): string | undefined {
+  return passkeyAuditEmitted.keys().next().value;
+}
 
 /**
  * Record a passkey-enforcement audit emit for `userId` at `now`. Returns
