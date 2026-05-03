@@ -1,0 +1,1305 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		028ADBEDD93783F5080BA973 /* DeviceIdentifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9597EAEFA6081B3BDBA1FAFF /* DeviceIdentifier.swift */; };
+		0411C3B077EC09539E34D620 /* ServerConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D592E6D1C88CF478A0AC739 /* ServerConfig.swift */; };
+		06F0C988BE4B8925A0DC5C4A /* Shared.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 296B0035C443158058EA4866 /* Shared.framework */; };
+		0A36948197E80ACA5ED17F22 /* DPoPProofBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBF559B979642506D203C806 /* DPoPProofBuilderTests.swift */; };
+		0F7754D416476CE6B1AE0C81 /* EntryEncrypter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 988D60F3AE7755637CFCFDD7 /* EntryEncrypter.swift */; };
+		1600D1BA3846CDCAEA02EF7E /* HostSyncServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD016B2D5D9999A41CCA92F /* HostSyncServiceTests.swift */; };
+		1AB309165A8AB5830B2AE4DD /* VaultEntrySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06E4377840A9A939A6B88D9A /* VaultEntrySummary.swift */; };
+		1ACA702DAFCBA5F5EDD82475 /* BridgeKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0EAAD69A5C2E24912DEB8D1 /* BridgeKeyStore.swift */; };
+		1C61EBA902B63AA436EDFED4 /* VaultListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF803DEFD9DF8AF7683EE422 /* VaultListView.swift */; };
+		1FECDEBE12AA76923178DF37 /* VaultViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDC5DA8C56C2D47372666388 /* VaultViewModelTests.swift */; };
+		270E924C1DDE26ACB7454E34 /* RollbackFlagDrainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB996D498008FC6F399B7078 /* RollbackFlagDrainTests.swift */; };
+		27597DEF7D7C04078DDB8212 /* VaultUnlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D415409924052B276B874809 /* VaultUnlockView.swift */; };
+		27B85B5BB2953C5C07D971A7 /* PasswdSSOUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2552C6B9513BA62A3BFFE149 /* PasswdSSOUITests.swift */; };
+		29F6A1C04FE63C84CDE05FB9 /* VaultUnlockerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1700F0FA67A25FFE7775B771 /* VaultUnlockerTests.swift */; };
+		2F1B42C2B8566A94C6155FEE /* LockState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C40C54B860C6D1B296674038 /* LockState.swift */; };
+		347F2D6168FB578E0E7687EC /* ServerURLSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9710064A995CE5E0D639202D /* ServerURLSetupView.swift */; };
+		34E13CBD9ED4C6D8D72D6EFE /* AppGroupContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 720107D734C7B5EBBBFCB91E /* AppGroupContainer.swift */; };
+		3582DA3CD5414790F589E168 /* HostTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00C68B395A2ACE49D3F116CB /* HostTokenStore.swift */; };
+		393E223C042BBEF961AB0EFA /* SecureEnclaveDPoPSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F706FEFB55F6B0111CDFF17B /* SecureEnclaveDPoPSigner.swift */; };
+		3D23FF146F64052F0EC31277 /* WrappedKeyStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C19D6A107E63BFA725F2C0F3 /* WrappedKeyStoreTests.swift */; };
+		4372EB553FD8B0AE2BF33972 /* StaleBlobRecoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B088B96E6D37D767B517A837 /* StaleBlobRecoveryService.swift */; };
+		4C643AAE37D9DA7E0DCC0DAA /* fixtures in Resources */ = {isa = PBXBuildFile; fileRef = 0BDD66BD3FF47585E7183FC8 /* fixtures */; };
+		4FB785329A7B8D8BDF40FC5E /* MobileAPIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFF49A0C20D6BD5D36E24D92 /* MobileAPIClientTests.swift */; };
+		535C62C94E581BE693C1A5B6 /* WrappedKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81279161CAE5152A36AAAC35 /* WrappedKeyStore.swift */; };
+		53BABB8B7A6B12FE9A269D87 /* EntryFetcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28A274ABCE6A2833F3A66EF5 /* EntryFetcherTests.swift */; };
+		5421D67E38D403D16E75A584 /* AESGCMTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DAD672FE74D0EB78FA99F1C /* AESGCMTests.swift */; };
+		542B8D1BD03A73706A98778B /* KDF.swift in Sources */ = {isa = PBXBuildFile; fileRef = C02778E2A8EE7B7A09B671C4 /* KDF.swift */; };
+		5B65C54AB593A685DC452BA4 /* OneTimeCodePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D57AF6A21C048387AB2FC0C5 /* OneTimeCodePickerView.swift */; };
+		60AD9C0835A9502C54C79E90 /* AESGCM.swift in Sources */ = {isa = PBXBuildFile; fileRef = D86EB7DC9441141057919E49 /* AESGCM.swift */; };
+		60C6D1BB9FB84DB9FA966478 /* PasswdSSOAutofillExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4F631B3CA954B4A2A4EC5714 /* PasswdSSOAutofillExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		61C3FD90259F677EA6150C8F /* SharedFrameworkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F6D6429583F4DF936E38A0 /* SharedFrameworkTests.swift */; };
+		61CCB2EB4F4413B770CCABF1 /* VaultUnlocker.swift in Sources */ = {isa = PBXBuildFile; fileRef = C579D0D8BCA69B900181743B /* VaultUnlocker.swift */; };
+		65B588E2DB548D9142568179 /* CryptoUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC38F9BDA78209BF77E16CC7 /* CryptoUtils.swift */; };
+		66734B405C893DA325204500 /* HostTokenStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36DABD88C20A969FBE8AA7BA /* HostTokenStoreTests.swift */; };
+		6790FB758EF3FD2CB70EA152 /* LockStateReducer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5008EABA0367B0BB5E55052F /* LockStateReducer.swift */; };
+		69C540BACD28B65D0DDB74A3 /* PasswdSSOAppApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C025655D57D0A2807DB8625 /* PasswdSSOAppApp.swift */; };
+		6B44D4F2F57D13671BE9B2C3 /* Shared.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 296B0035C443158058EA4866 /* Shared.framework */; };
+		6C09DE06209A534D059F5B02 /* BackgroundSyncCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77C0E5B05F04FC285CE89519 /* BackgroundSyncCoordinatorTests.swift */; };
+		72BD7556CC6BAD53BD1F093D /* DPoPProofBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FEC5AE0DBB56D25F0537D3C /* DPoPProofBuilder.swift */; };
+		765B1E34A07F76D0203E28D3 /* RollbackFlagWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7546B006E2E44B4AB2F80A42 /* RollbackFlagWriter.swift */; };
+		81106935658B44BFA292133A /* AuthCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2CB0DAE185BE8F6CC8E6351 /* AuthCoordinator.swift */; };
+		84EB3A5F0E1899E9DC4A7822 /* BackgroundSyncTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = 692EA0DCA5D3E783869B28F1 /* BackgroundSyncTask.swift */; };
+		857B8B7F838C6E4A1A6BC148 /* BackgroundSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB8D42DAB6AE67B22BFFB262 /* BackgroundSyncCoordinator.swift */; };
+		88B94C8725C6BEA507605D39 /* Shared.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC8C70919A0F81107381F27F /* Shared.swift */; };
+		88F5B89748A0E904EFAE7515 /* AADParityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62893F31F539812D3B5BE334 /* AADParityTests.swift */; };
+		89EF5EABFE7C000262E67616 /* EntryCacheFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AFD6C1D7BB52C3C67DF3BD2 /* EntryCacheFile.swift */; };
+		8BE8F6E7C0F4C6C96943DC74 /* AutoLockServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E865DC09076361C7278C2FC /* AutoLockServiceTests.swift */; };
+		92AF55E25B2A1C5F8C2802BC /* HostSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 544AC22B1D47CCD69051F85B /* HostSyncService.swift */; };
+		9336583B6F1252ACEB331AC4 /* CredentialPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2A5F488711333940497135A /* CredentialPickerView.swift */; };
+		93D09C74C9EDAA9E4767D4C3 /* ServerTrustService.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9E896E2CA0264206A65A0B8 /* ServerTrustService.swift */; };
+		96A710A8F83E4FEB146E39D4 /* EntryEncrypterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 628885DD1B6E8E32503A7DD9 /* EntryEncrypterTests.swift */; };
+		99EB5AFBB9A9C2E9C0818CF6 /* BridgeKeyStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B19DB7B9B5F953AC7FC8CE8E /* BridgeKeyStoreTests.swift */; };
+		9B43CD74FC38538B051314BD /* Shared.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 296B0035C443158058EA4866 /* Shared.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		A3CEA13B7C87135CC54039D6 /* TeamContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8901EA2724A715ACFBEEDBEF /* TeamContext.swift */; };
+		A457C9391F7E1E8164C97A46 /* AutoLockService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00C68DCFC79DBA6600F27E36 /* AutoLockService.swift */; };
+		A49DCEFF5ABDE722BF33C324 /* SPKIEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3FBC66A0BFC38B393757852 /* SPKIEncoder.swift */; };
+		A5FA7118BBC2D9CE7C30901E /* MobileAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D7D6EC824EE87139CFBABE4 /* MobileAPIClient.swift */; };
+		B083185D5D570CC65E2C2624 /* EntryFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B346160EEA436AAF564277 /* EntryFetcher.swift */; };
+		B0974C58F65B8B4CBE7FB084 /* EntryEditForm.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A3E40BD15B72CC7D2465FA1 /* EntryEditForm.swift */; };
+		B324E00C768C3F3B498A0BCA /* AuthCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D844C1C788162BAC9B723269 /* AuthCoordinatorTests.swift */; };
+		B51FF4981CF7716A4F01CF18 /* AAD.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00886F462BDA31731FCC1B2A /* AAD.swift */; };
+		B8E8B10956121151C6DF7F9C /* CredentialResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AC8C547AA2FF81B4A670924 /* CredentialResolverTests.swift */; };
+		BB40A1D626FFE3335D4DDAD5 /* VaultViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13E66C8E3793F0F33D64AAB4 /* VaultViewModel.swift */; };
+		BE01EC8587AC154A545C44F6 /* TOTPGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F014597B4A4ACC5890EAC159 /* TOTPGenerator.swift */; };
+		C10EFCB85CFAF6D893AEE25B /* SessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2113CB60ADE2776FF6176EA2 /* SessionState.swift */; };
+		C145708F7E61F3A78658F1CC /* CredentialProviderViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 920CAD5E7129591C09F8C23C /* CredentialProviderViewController.swift */; };
+		C82DFA0CAE14932406514B06 /* RollbackFlagDrain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 588F0525C544FC2740478510 /* RollbackFlagDrain.swift */; };
+		C9B811D75D4CC8737741AF8E /* LockStateReducerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AFCE015CCAE07263B30B8B4 /* LockStateReducerTests.swift */; };
+		CB194266359903474FE04F9D /* URLMatchingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92BFAE8E878C252FF7DF4D68 /* URLMatchingTests.swift */; };
+		CCC9A05E9E45777A96B84BDF /* Shared.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 296B0035C443158058EA4866 /* Shared.framework */; };
+		CCF7AB22A048CA0D633DC740 /* CredentialResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = D22C90FE49C237E8EB2ABC26 /* CredentialResolver.swift */; };
+		D818CC3D8994859EC9B470F2 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72F670E8B421F3D4CB3734A6 /* RootView.swift */; };
+		D8EA7B209BAE0D68AB7DB5D5 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2BB90663584E9586FF0945C /* ContentView.swift */; };
+		DBFB20A7E48448D3D840FDE7 /* RollbackFlagWriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775C6B815B59EF7FAADB00EB /* RollbackFlagWriterTests.swift */; };
+		E0832EF8431014E47A2A4636 /* ServerTrustServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662E445816ED2184809324A5 /* ServerTrustServiceTests.swift */; };
+		E0E33F33FBEB6BBA6CC22D06 /* KDFTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A24C3EFD4C6BA4ACDA40380 /* KDFTests.swift */; };
+		E1FA345EE6BF6D38163AD937 /* DebugVaultLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FED91E37F4E8005AEF7E9B6 /* DebugVaultLoaderTests.swift */; };
+		E300850EF22C24B05B82D25B /* SecureEnclaveKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120E0D108C572BDFE0A5E79E /* SecureEnclaveKey.swift */; };
+		E425C49CE0F5257C1821EB50 /* VaultEntryDetail.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00236EB9F799A708CF1C4FC /* VaultEntryDetail.swift */; };
+		E61FA83E34E321C09B0D7176 /* TOTPVectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CB624E102C09D08D7B9BB8D /* TOTPVectorTests.swift */; };
+		E6242A08FB6CD768CBCED638 /* StaleBlobRecoveryServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65EFD0AD3F8896F5D18F2967 /* StaleBlobRecoveryServiceTests.swift */; };
+		EEDC524C6F56E4E378F8DB16 /* DebugVaultLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6190750A2E1A027047EDBB4 /* DebugVaultLoader.swift */; };
+		EF9407000E17ADEB5E667D88 /* EntryCacheFileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24CD914CFF8AD6DD6DAB0129 /* EntryCacheFileTests.swift */; };
+		F376E57211FDE0E03F285949 /* LockedFallbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C6E4E71B2DDEE6BBA03CBF4 /* LockedFallbackView.swift */; };
+		F6D4F11AC118415488FB8DCF /* URLMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F6C27CE52EFE55D86666E7C /* URLMatcher.swift */; };
+		FC74F7D953B2978FE27D3B85 /* EntryDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD65567EDF5CDCFB425499EA /* EntryDetailView.swift */; };
+		FD86EB17606A4DC5301497AA /* TOTPCodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D235AC82775464BDF11F292F /* TOTPCodeView.swift */; };
+		FFA7B60616C41F7692F7271C /* SPKIEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 160063572DE97E6E16AE7A3D /* SPKIEncoderTests.swift */; };
+		FFDB363D6F74C9F3DD0E54C3 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4DEECF70DC7351FAF2E7CB7 /* SignInView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		07DCEEEF05F51907590D0A1E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 91CEA9366304934792AE8CA7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2C6807B4DF933E0960205C53;
+			remoteInfo = Shared;
+		};
+		409E1598723B0852198F87DB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 91CEA9366304934792AE8CA7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2C6807B4DF933E0960205C53;
+			remoteInfo = Shared;
+		};
+		589EAA99DE73D7B6BB0F3FF6 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 91CEA9366304934792AE8CA7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2503D778597BD5A5391105AA;
+			remoteInfo = PasswdSSOAutofillExtension;
+		};
+		75C02BD1DA2A8E474A30EA94 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 91CEA9366304934792AE8CA7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 3408C5C581C8391A1AAB6ABA;
+			remoteInfo = PasswdSSOApp;
+		};
+		943DD7C95BBEF3B1F2046610 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 91CEA9366304934792AE8CA7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 3408C5C581C8391A1AAB6ABA;
+			remoteInfo = PasswdSSOApp;
+		};
+		BECEE0F5225BA2F956C9B152 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 91CEA9366304934792AE8CA7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2C6807B4DF933E0960205C53;
+			remoteInfo = Shared;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		381A43F4966366417995F76B /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				9B43CD74FC38538B051314BD /* Shared.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		79A1F39033970C2A5A0E1AEB /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				60C6D1BB9FB84DB9FA966478 /* PasswdSSOAutofillExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		00886F462BDA31731FCC1B2A /* AAD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AAD.swift; sourceTree = "<group>"; };
+		00C68B395A2ACE49D3F116CB /* HostTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostTokenStore.swift; sourceTree = "<group>"; };
+		00C68DCFC79DBA6600F27E36 /* AutoLockService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoLockService.swift; sourceTree = "<group>"; };
+		06E4377840A9A939A6B88D9A /* VaultEntrySummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultEntrySummary.swift; sourceTree = "<group>"; };
+		0BDD66BD3FF47585E7183FC8 /* fixtures */ = {isa = PBXFileReference; lastKnownFileType = folder; name = fixtures; path = ../extension/test/fixtures; sourceTree = SOURCE_ROOT; };
+		0CB624E102C09D08D7B9BB8D /* TOTPVectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TOTPVectorTests.swift; sourceTree = "<group>"; };
+		120E0D108C572BDFE0A5E79E /* SecureEnclaveKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureEnclaveKey.swift; sourceTree = "<group>"; };
+		13E66C8E3793F0F33D64AAB4 /* VaultViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultViewModel.swift; sourceTree = "<group>"; };
+		160063572DE97E6E16AE7A3D /* SPKIEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SPKIEncoderTests.swift; sourceTree = "<group>"; };
+		1682BC8C00C9060F5E4DC11D /* Common.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Common.xcconfig; sourceTree = "<group>"; };
+		1700F0FA67A25FFE7775B771 /* VaultUnlockerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultUnlockerTests.swift; sourceTree = "<group>"; };
+		2113CB60ADE2776FF6176EA2 /* SessionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionState.swift; sourceTree = "<group>"; };
+		24CD914CFF8AD6DD6DAB0129 /* EntryCacheFileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryCacheFileTests.swift; sourceTree = "<group>"; };
+		2552C6B9513BA62A3BFFE149 /* PasswdSSOUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswdSSOUITests.swift; sourceTree = "<group>"; };
+		28A274ABCE6A2833F3A66EF5 /* EntryFetcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryFetcherTests.swift; sourceTree = "<group>"; };
+		296B0035C443158058EA4866 /* Shared.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Shared.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		2A3E40BD15B72CC7D2465FA1 /* EntryEditForm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryEditForm.swift; sourceTree = "<group>"; };
+		2C025655D57D0A2807DB8625 /* PasswdSSOAppApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswdSSOAppApp.swift; sourceTree = "<group>"; };
+		2DAD672FE74D0EB78FA99F1C /* AESGCMTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AESGCMTests.swift; sourceTree = "<group>"; };
+		345F9CF0FA1F40F81B8D6074 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		36DABD88C20A969FBE8AA7BA /* HostTokenStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostTokenStoreTests.swift; sourceTree = "<group>"; };
+		3D7D6EC824EE87139CFBABE4 /* MobileAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileAPIClient.swift; sourceTree = "<group>"; };
+		3E865DC09076361C7278C2FC /* AutoLockServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoLockServiceTests.swift; sourceTree = "<group>"; };
+		3FED91E37F4E8005AEF7E9B6 /* DebugVaultLoaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugVaultLoaderTests.swift; sourceTree = "<group>"; };
+		404B7404ADFE4D340E600931 /* PasswdSSOTests.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PasswdSSOTests.entitlements; sourceTree = "<group>"; };
+		49247874A1D0207489D6F624 /* PasswdSSOApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PasswdSSOApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4A24C3EFD4C6BA4ACDA40380 /* KDFTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KDFTests.swift; sourceTree = "<group>"; };
+		4F631B3CA954B4A2A4EC5714 /* PasswdSSOAutofillExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PasswdSSOAutofillExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		5008EABA0367B0BB5E55052F /* LockStateReducer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockStateReducer.swift; sourceTree = "<group>"; };
+		544AC22B1D47CCD69051F85B /* HostSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostSyncService.swift; sourceTree = "<group>"; };
+		588F0525C544FC2740478510 /* RollbackFlagDrain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RollbackFlagDrain.swift; sourceTree = "<group>"; };
+		5D592E6D1C88CF478A0AC739 /* ServerConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConfig.swift; sourceTree = "<group>"; };
+		628885DD1B6E8E32503A7DD9 /* EntryEncrypterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryEncrypterTests.swift; sourceTree = "<group>"; };
+		62893F31F539812D3B5BE334 /* AADParityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AADParityTests.swift; sourceTree = "<group>"; };
+		65EFD0AD3F8896F5D18F2967 /* StaleBlobRecoveryServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StaleBlobRecoveryServiceTests.swift; sourceTree = "<group>"; };
+		662E445816ED2184809324A5 /* ServerTrustServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerTrustServiceTests.swift; sourceTree = "<group>"; };
+		692EA0DCA5D3E783869B28F1 /* BackgroundSyncTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSyncTask.swift; sourceTree = "<group>"; };
+		6B849351921A9E2E8B78154E /* PasswdSSOUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PasswdSSOUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		720107D734C7B5EBBBFCB91E /* AppGroupContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroupContainer.swift; sourceTree = "<group>"; };
+		72F670E8B421F3D4CB3734A6 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		7546B006E2E44B4AB2F80A42 /* RollbackFlagWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RollbackFlagWriter.swift; sourceTree = "<group>"; };
+		775C6B815B59EF7FAADB00EB /* RollbackFlagWriterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RollbackFlagWriterTests.swift; sourceTree = "<group>"; };
+		77B346160EEA436AAF564277 /* EntryFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryFetcher.swift; sourceTree = "<group>"; };
+		77C0E5B05F04FC285CE89519 /* BackgroundSyncCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSyncCoordinatorTests.swift; sourceTree = "<group>"; };
+		7AFCE015CCAE07263B30B8B4 /* LockStateReducerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockStateReducerTests.swift; sourceTree = "<group>"; };
+		81279161CAE5152A36AAAC35 /* WrappedKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WrappedKeyStore.swift; sourceTree = "<group>"; };
+		8901EA2724A715ACFBEEDBEF /* TeamContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamContext.swift; sourceTree = "<group>"; };
+		8AC8C547AA2FF81B4A670924 /* CredentialResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialResolverTests.swift; sourceTree = "<group>"; };
+		8AFD6C1D7BB52C3C67DF3BD2 /* EntryCacheFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryCacheFile.swift; sourceTree = "<group>"; };
+		8C6E4E71B2DDEE6BBA03CBF4 /* LockedFallbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockedFallbackView.swift; sourceTree = "<group>"; };
+		8F6C27CE52EFE55D86666E7C /* URLMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = URLMatcher.swift; sourceTree = "<group>"; };
+		920CAD5E7129591C09F8C23C /* CredentialProviderViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialProviderViewController.swift; sourceTree = "<group>"; };
+		92BFAE8E878C252FF7DF4D68 /* URLMatchingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = URLMatchingTests.swift; sourceTree = "<group>"; };
+		9597EAEFA6081B3BDBA1FAFF /* DeviceIdentifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentifier.swift; sourceTree = "<group>"; };
+		9710064A995CE5E0D639202D /* ServerURLSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerURLSetupView.swift; sourceTree = "<group>"; };
+		988D60F3AE7755637CFCFDD7 /* EntryEncrypter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryEncrypter.swift; sourceTree = "<group>"; };
+		9FEC5AE0DBB56D25F0537D3C /* DPoPProofBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DPoPProofBuilder.swift; sourceTree = "<group>"; };
+		A2CB0DAE185BE8F6CC8E6351 /* AuthCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthCoordinator.swift; sourceTree = "<group>"; };
+		A3FBC66A0BFC38B393757852 /* SPKIEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SPKIEncoder.swift; sourceTree = "<group>"; };
+		A6190750A2E1A027047EDBB4 /* DebugVaultLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugVaultLoader.swift; sourceTree = "<group>"; };
+		AD0E81B9E8C8455625BADD51 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		B088B96E6D37D767B517A837 /* StaleBlobRecoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StaleBlobRecoveryService.swift; sourceTree = "<group>"; };
+		B19DB7B9B5F953AC7FC8CE8E /* BridgeKeyStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeKeyStoreTests.swift; sourceTree = "<group>"; };
+		B4DEECF70DC7351FAF2E7CB7 /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
+		B67A2748B3B1C69F7543EB64 /* PasswdSSOTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PasswdSSOTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		BB8D42DAB6AE67B22BFFB262 /* BackgroundSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSyncCoordinator.swift; sourceTree = "<group>"; };
+		C02778E2A8EE7B7A09B671C4 /* KDF.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KDF.swift; sourceTree = "<group>"; };
+		C19D6A107E63BFA725F2C0F3 /* WrappedKeyStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WrappedKeyStoreTests.swift; sourceTree = "<group>"; };
+		C1F6D6429583F4DF936E38A0 /* SharedFrameworkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedFrameworkTests.swift; sourceTree = "<group>"; };
+		C40C54B860C6D1B296674038 /* LockState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockState.swift; sourceTree = "<group>"; };
+		C579D0D8BCA69B900181743B /* VaultUnlocker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultUnlocker.swift; sourceTree = "<group>"; };
+		C9E896E2CA0264206A65A0B8 /* ServerTrustService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerTrustService.swift; sourceTree = "<group>"; };
+		CFD016B2D5D9999A41CCA92F /* HostSyncServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostSyncServiceTests.swift; sourceTree = "<group>"; };
+		D22C90FE49C237E8EB2ABC26 /* CredentialResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialResolver.swift; sourceTree = "<group>"; };
+		D235AC82775464BDF11F292F /* TOTPCodeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TOTPCodeView.swift; sourceTree = "<group>"; };
+		D2A5F488711333940497135A /* CredentialPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialPickerView.swift; sourceTree = "<group>"; };
+		D415409924052B276B874809 /* VaultUnlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultUnlockView.swift; sourceTree = "<group>"; };
+		D57AF6A21C048387AB2FC0C5 /* OneTimeCodePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OneTimeCodePickerView.swift; sourceTree = "<group>"; };
+		D844C1C788162BAC9B723269 /* AuthCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthCoordinatorTests.swift; sourceTree = "<group>"; };
+		D86EB7DC9441141057919E49 /* AESGCM.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AESGCM.swift; sourceTree = "<group>"; };
+		DB996D498008FC6F399B7078 /* RollbackFlagDrainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RollbackFlagDrainTests.swift; sourceTree = "<group>"; };
+		DF803DEFD9DF8AF7683EE422 /* VaultListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultListView.swift; sourceTree = "<group>"; };
+		DFF49A0C20D6BD5D36E24D92 /* MobileAPIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileAPIClientTests.swift; sourceTree = "<group>"; };
+		E0EAAD69A5C2E24912DEB8D1 /* BridgeKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeKeyStore.swift; sourceTree = "<group>"; };
+		EBF559B979642506D203C806 /* DPoPProofBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DPoPProofBuilderTests.swift; sourceTree = "<group>"; };
+		EC8C70919A0F81107381F27F /* Shared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shared.swift; sourceTree = "<group>"; };
+		EDC5DA8C56C2D47372666388 /* VaultViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultViewModelTests.swift; sourceTree = "<group>"; };
+		F00236EB9F799A708CF1C4FC /* VaultEntryDetail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultEntryDetail.swift; sourceTree = "<group>"; };
+		F014597B4A4ACC5890EAC159 /* TOTPGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TOTPGenerator.swift; sourceTree = "<group>"; };
+		F2BB90663584E9586FF0945C /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		F706FEFB55F6B0111CDFF17B /* SecureEnclaveDPoPSigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureEnclaveDPoPSigner.swift; sourceTree = "<group>"; };
+		FC38F9BDA78209BF77E16CC7 /* CryptoUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CryptoUtils.swift; sourceTree = "<group>"; };
+		FD65567EDF5CDCFB425499EA /* EntryDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryDetailView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		18877775B72CDF73C90EF066 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				06F0C988BE4B8925A0DC5C4A /* Shared.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1FB3FE043A46F65144EF66EE /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CCC9A05E9E45777A96B84BDF /* Shared.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9EDF36D69A376E1144B228BF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6B44D4F2F57D13671BE9B2C3 /* Shared.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		05BA435F126C68DBC307F646 /* PasswdSSOTests */ = {
+			isa = PBXGroup;
+			children = (
+				62893F31F539812D3B5BE334 /* AADParityTests.swift */,
+				2DAD672FE74D0EB78FA99F1C /* AESGCMTests.swift */,
+				D844C1C788162BAC9B723269 /* AuthCoordinatorTests.swift */,
+				3E865DC09076361C7278C2FC /* AutoLockServiceTests.swift */,
+				77C0E5B05F04FC285CE89519 /* BackgroundSyncCoordinatorTests.swift */,
+				B19DB7B9B5F953AC7FC8CE8E /* BridgeKeyStoreTests.swift */,
+				8AC8C547AA2FF81B4A670924 /* CredentialResolverTests.swift */,
+				3FED91E37F4E8005AEF7E9B6 /* DebugVaultLoaderTests.swift */,
+				EBF559B979642506D203C806 /* DPoPProofBuilderTests.swift */,
+				24CD914CFF8AD6DD6DAB0129 /* EntryCacheFileTests.swift */,
+				628885DD1B6E8E32503A7DD9 /* EntryEncrypterTests.swift */,
+				28A274ABCE6A2833F3A66EF5 /* EntryFetcherTests.swift */,
+				CFD016B2D5D9999A41CCA92F /* HostSyncServiceTests.swift */,
+				36DABD88C20A969FBE8AA7BA /* HostTokenStoreTests.swift */,
+				AD0E81B9E8C8455625BADD51 /* Info.plist */,
+				4A24C3EFD4C6BA4ACDA40380 /* KDFTests.swift */,
+				7AFCE015CCAE07263B30B8B4 /* LockStateReducerTests.swift */,
+				DFF49A0C20D6BD5D36E24D92 /* MobileAPIClientTests.swift */,
+				404B7404ADFE4D340E600931 /* PasswdSSOTests.entitlements */,
+				DB996D498008FC6F399B7078 /* RollbackFlagDrainTests.swift */,
+				775C6B815B59EF7FAADB00EB /* RollbackFlagWriterTests.swift */,
+				662E445816ED2184809324A5 /* ServerTrustServiceTests.swift */,
+				C1F6D6429583F4DF936E38A0 /* SharedFrameworkTests.swift */,
+				160063572DE97E6E16AE7A3D /* SPKIEncoderTests.swift */,
+				65EFD0AD3F8896F5D18F2967 /* StaleBlobRecoveryServiceTests.swift */,
+				0CB624E102C09D08D7B9BB8D /* TOTPVectorTests.swift */,
+				92BFAE8E878C252FF7DF4D68 /* URLMatchingTests.swift */,
+				1700F0FA67A25FFE7775B771 /* VaultUnlockerTests.swift */,
+				EDC5DA8C56C2D47372666388 /* VaultViewModelTests.swift */,
+				C19D6A107E63BFA725F2C0F3 /* WrappedKeyStoreTests.swift */,
+			);
+			path = PasswdSSOTests;
+			sourceTree = "<group>";
+		};
+		0B7F4659738770DB068F6B9A /* Configs */ = {
+			isa = PBXGroup;
+			children = (
+				1682BC8C00C9060F5E4DC11D /* Common.xcconfig */,
+			);
+			path = Configs;
+			sourceTree = "<group>";
+		};
+		0BEF0DC7FF5FAB04041B97EF /* PasswdSSOAutofillExtension */ = {
+			isa = PBXGroup;
+			children = (
+				ACC8A4CFF82B0E0694E7ADFE /* Views */,
+				920CAD5E7129591C09F8C23C /* CredentialProviderViewController.swift */,
+			);
+			path = PasswdSSOAutofillExtension;
+			sourceTree = "<group>";
+		};
+		0BF5A4657F1990931FD94EBF /* Sync */ = {
+			isa = PBXGroup;
+			children = (
+				BB8D42DAB6AE67B22BFFB262 /* BackgroundSyncCoordinator.swift */,
+			);
+			path = Sync;
+			sourceTree = "<group>";
+		};
+		0EFF92CA8C5EFCC54757A77F /* Debug */ = {
+			isa = PBXGroup;
+			children = (
+				A6190750A2E1A027047EDBB4 /* DebugVaultLoader.swift */,
+			);
+			path = Debug;
+			sourceTree = "<group>";
+		};
+		139C9DD1DC8A8A6682950F82 /* AutoFill */ = {
+			isa = PBXGroup;
+			children = (
+				D22C90FE49C237E8EB2ABC26 /* CredentialResolver.swift */,
+				7546B006E2E44B4AB2F80A42 /* RollbackFlagWriter.swift */,
+			);
+			path = AutoFill;
+			sourceTree = "<group>";
+		};
+		141623ED3B330AA288C40D74 /* Lock */ = {
+			isa = PBXGroup;
+			children = (
+				5008EABA0367B0BB5E55052F /* LockStateReducer.swift */,
+			);
+			path = Lock;
+			sourceTree = "<group>";
+		};
+		15B99D96745E9B64E031BD68 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				362743E755F1060166F47588 /* Auth */,
+				139C9DD1DC8A8A6682950F82 /* AutoFill */,
+				968A0B040C79415ECA3D3BAB /* Crypto */,
+				141623ED3B330AA288C40D74 /* Lock */,
+				F7356EF35B04FC0D0B740CC4 /* Models */,
+				FE83BF05E3B7AA1A67A4F909 /* Storage */,
+				0BF5A4657F1990931FD94EBF /* Sync */,
+				D8971D5431C5B996B592DD95 /* TOTP */,
+				89B3CA75A3025FE7F1F6FFA0 /* URLMatching */,
+				92ABE01EDAE4F9652AAA9454 /* Vault */,
+				EC8C70919A0F81107381F27F /* Shared.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		1B77A9A14C989F49C7B23DAD /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				49247874A1D0207489D6F624 /* PasswdSSOApp.app */,
+				4F631B3CA954B4A2A4EC5714 /* PasswdSSOAutofillExtension.appex */,
+				B67A2748B3B1C69F7543EB64 /* PasswdSSOTests.xctest */,
+				6B849351921A9E2E8B78154E /* PasswdSSOUITests.xctest */,
+				296B0035C443158058EA4866 /* Shared.framework */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		1F6A90B63D2D62FA3D634599 /* Network */ = {
+			isa = PBXGroup;
+			children = (
+				3D7D6EC824EE87139CFBABE4 /* MobileAPIClient.swift */,
+			);
+			path = Network;
+			sourceTree = "<group>";
+		};
+		362743E755F1060166F47588 /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				9FEC5AE0DBB56D25F0537D3C /* DPoPProofBuilder.swift */,
+				F706FEFB55F6B0111CDFF17B /* SecureEnclaveDPoPSigner.swift */,
+			);
+			path = Auth;
+			sourceTree = "<group>";
+		};
+		40DA8513346A467E7C406C84 /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				A2CB0DAE185BE8F6CC8E6351 /* AuthCoordinator.swift */,
+				C9E896E2CA0264206A65A0B8 /* ServerTrustService.swift */,
+			);
+			path = Auth;
+			sourceTree = "<group>";
+		};
+		4F9E27C74CFD3D9649231298 /* PasswdSSOUITests */ = {
+			isa = PBXGroup;
+			children = (
+				345F9CF0FA1F40F81B8D6074 /* Info.plist */,
+				2552C6B9513BA62A3BFFE149 /* PasswdSSOUITests.swift */,
+			);
+			path = PasswdSSOUITests;
+			sourceTree = "<group>";
+		};
+		6E7D608EE9E577FB9C40FC7E /* Background */ = {
+			isa = PBXGroup;
+			children = (
+				692EA0DCA5D3E783869B28F1 /* BackgroundSyncTask.swift */,
+			);
+			path = Background;
+			sourceTree = "<group>";
+		};
+		831DA2A399A896ABE739ED44 /* Vault */ = {
+			isa = PBXGroup;
+			children = (
+				FD65567EDF5CDCFB425499EA /* EntryDetailView.swift */,
+				2A3E40BD15B72CC7D2465FA1 /* EntryEditForm.swift */,
+				D235AC82775464BDF11F292F /* TOTPCodeView.swift */,
+				DF803DEFD9DF8AF7683EE422 /* VaultListView.swift */,
+				D415409924052B276B874809 /* VaultUnlockView.swift */,
+				13E66C8E3793F0F33D64AAB4 /* VaultViewModel.swift */,
+			);
+			path = Vault;
+			sourceTree = "<group>";
+		};
+		89B3CA75A3025FE7F1F6FFA0 /* URLMatching */ = {
+			isa = PBXGroup;
+			children = (
+				8F6C27CE52EFE55D86666E7C /* URLMatcher.swift */,
+			);
+			path = URLMatching;
+			sourceTree = "<group>";
+		};
+		92ABE01EDAE4F9652AAA9454 /* Vault */ = {
+			isa = PBXGroup;
+			children = (
+				988D60F3AE7755637CFCFDD7 /* EntryEncrypter.swift */,
+			);
+			path = Vault;
+			sourceTree = "<group>";
+		};
+		968A0B040C79415ECA3D3BAB /* Crypto */ = {
+			isa = PBXGroup;
+			children = (
+				00886F462BDA31731FCC1B2A /* AAD.swift */,
+				D86EB7DC9441141057919E49 /* AESGCM.swift */,
+				FC38F9BDA78209BF77E16CC7 /* CryptoUtils.swift */,
+				C02778E2A8EE7B7A09B671C4 /* KDF.swift */,
+				120E0D108C572BDFE0A5E79E /* SecureEnclaveKey.swift */,
+				A3FBC66A0BFC38B393757852 /* SPKIEncoder.swift */,
+			);
+			path = Crypto;
+			sourceTree = "<group>";
+		};
+		AA31A82EA9B51C3120E55C66 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				831DA2A399A896ABE739ED44 /* Vault */,
+				72F670E8B421F3D4CB3734A6 /* RootView.swift */,
+				9710064A995CE5E0D639202D /* ServerURLSetupView.swift */,
+				B4DEECF70DC7351FAF2E7CB7 /* SignInView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		ACC8A4CFF82B0E0694E7ADFE /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				D2A5F488711333940497135A /* CredentialPickerView.swift */,
+				8C6E4E71B2DDEE6BBA03CBF4 /* LockedFallbackView.swift */,
+				D57AF6A21C048387AB2FC0C5 /* OneTimeCodePickerView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		C87A10A5ED598D69E9F6E73D /* Vault */ = {
+			isa = PBXGroup;
+			children = (
+				00C68DCFC79DBA6600F27E36 /* AutoLockService.swift */,
+				9597EAEFA6081B3BDBA1FAFF /* DeviceIdentifier.swift */,
+				77B346160EEA436AAF564277 /* EntryFetcher.swift */,
+				544AC22B1D47CCD69051F85B /* HostSyncService.swift */,
+				588F0525C544FC2740478510 /* RollbackFlagDrain.swift */,
+				B088B96E6D37D767B517A837 /* StaleBlobRecoveryService.swift */,
+				C579D0D8BCA69B900181743B /* VaultUnlocker.swift */,
+			);
+			path = Vault;
+			sourceTree = "<group>";
+		};
+		D17658650D3487DF394D7E1A /* PasswdSSOApp */ = {
+			isa = PBXGroup;
+			children = (
+				40DA8513346A467E7C406C84 /* Auth */,
+				6E7D608EE9E577FB9C40FC7E /* Background */,
+				0EFF92CA8C5EFCC54757A77F /* Debug */,
+				1F6A90B63D2D62FA3D634599 /* Network */,
+				C87A10A5ED598D69E9F6E73D /* Vault */,
+				AA31A82EA9B51C3120E55C66 /* Views */,
+				F2BB90663584E9586FF0945C /* ContentView.swift */,
+				2C025655D57D0A2807DB8625 /* PasswdSSOAppApp.swift */,
+			);
+			path = PasswdSSOApp;
+			sourceTree = "<group>";
+		};
+		D8971D5431C5B996B592DD95 /* TOTP */ = {
+			isa = PBXGroup;
+			children = (
+				F014597B4A4ACC5890EAC159 /* TOTPGenerator.swift */,
+			);
+			path = TOTP;
+			sourceTree = "<group>";
+		};
+		ED0D03E0C18C296BB2036167 = {
+			isa = PBXGroup;
+			children = (
+				0B7F4659738770DB068F6B9A /* Configs */,
+				D17658650D3487DF394D7E1A /* PasswdSSOApp */,
+				0BEF0DC7FF5FAB04041B97EF /* PasswdSSOAutofillExtension */,
+				05BA435F126C68DBC307F646 /* PasswdSSOTests */,
+				4F9E27C74CFD3D9649231298 /* PasswdSSOUITests */,
+				15B99D96745E9B64E031BD68 /* Shared */,
+				0BDD66BD3FF47585E7183FC8 /* fixtures */,
+				1B77A9A14C989F49C7B23DAD /* Products */,
+			);
+			indentWidth = 2;
+			sourceTree = "<group>";
+			tabWidth = 2;
+			usesTabs = 0;
+		};
+		F7356EF35B04FC0D0B740CC4 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				C40C54B860C6D1B296674038 /* LockState.swift */,
+				5D592E6D1C88CF478A0AC739 /* ServerConfig.swift */,
+				2113CB60ADE2776FF6176EA2 /* SessionState.swift */,
+				8901EA2724A715ACFBEEDBEF /* TeamContext.swift */,
+				F00236EB9F799A708CF1C4FC /* VaultEntryDetail.swift */,
+				06E4377840A9A939A6B88D9A /* VaultEntrySummary.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		FE83BF05E3B7AA1A67A4F909 /* Storage */ = {
+			isa = PBXGroup;
+			children = (
+				720107D734C7B5EBBBFCB91E /* AppGroupContainer.swift */,
+				E0EAAD69A5C2E24912DEB8D1 /* BridgeKeyStore.swift */,
+				8AFD6C1D7BB52C3C67DF3BD2 /* EntryCacheFile.swift */,
+				00C68B395A2ACE49D3F116CB /* HostTokenStore.swift */,
+				81279161CAE5152A36AAAC35 /* WrappedKeyStore.swift */,
+			);
+			path = Storage;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		2503D778597BD5A5391105AA /* PasswdSSOAutofillExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 08947A14CEA8AA265A74474D /* Build configuration list for PBXNativeTarget "PasswdSSOAutofillExtension" */;
+			buildPhases = (
+				E4D0A8D88449CC8408B3D1FB /* Sources */,
+				18877775B72CDF73C90EF066 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				8C09750A717F5D5EF51D9EC4 /* PBXTargetDependency */,
+			);
+			name = PasswdSSOAutofillExtension;
+			packageProductDependencies = (
+			);
+			productName = PasswdSSOAutofillExtension;
+			productReference = 4F631B3CA954B4A2A4EC5714 /* PasswdSSOAutofillExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		2C6807B4DF933E0960205C53 /* Shared */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AB4BC7BB95068E914CE686EE /* Build configuration list for PBXNativeTarget "Shared" */;
+			buildPhases = (
+				9CC525B765CAF4D27ECB5399 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Shared;
+			packageProductDependencies = (
+			);
+			productName = Shared;
+			productReference = 296B0035C443158058EA4866 /* Shared.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+		3408C5C581C8391A1AAB6ABA /* PasswdSSOApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BC7060BFC2AF05E65EBCB57F /* Build configuration list for PBXNativeTarget "PasswdSSOApp" */;
+			buildPhases = (
+				0C8EF8852574160984A60739 /* Sources */,
+				9EDF36D69A376E1144B228BF /* Frameworks */,
+				79A1F39033970C2A5A0E1AEB /* Embed Foundation Extensions */,
+				381A43F4966366417995F76B /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				277A5A61C9C6FD86350BBFF2 /* PBXTargetDependency */,
+				8DECB9DFAE7C7AA9EEE3F6D6 /* PBXTargetDependency */,
+			);
+			name = PasswdSSOApp;
+			packageProductDependencies = (
+			);
+			productName = PasswdSSOApp;
+			productReference = 49247874A1D0207489D6F624 /* PasswdSSOApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+		84BF354B2F15CE0C8F36B493 /* PasswdSSOTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 433AEABC531C8305418662D9 /* Build configuration list for PBXNativeTarget "PasswdSSOTests" */;
+			buildPhases = (
+				1C415FE460EA9AA191B4C267 /* Sources */,
+				10EA5DFAC18B02200E4A098E /* Resources */,
+				1FB3FE043A46F65144EF66EE /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D83B09C31E54A39DE36F7485 /* PBXTargetDependency */,
+				E0CE64FC67758E49A6ACA291 /* PBXTargetDependency */,
+			);
+			name = PasswdSSOTests;
+			packageProductDependencies = (
+			);
+			productName = PasswdSSOTests;
+			productReference = B67A2748B3B1C69F7543EB64 /* PasswdSSOTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		DF33BBB1A677F99934E83F7D /* PasswdSSOUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F2E33134EB506DC4F0D7DDF5 /* Build configuration list for PBXNativeTarget "PasswdSSOUITests" */;
+			buildPhases = (
+				B3AF6499676899A7A6B02385 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				7112E31DE75C2A340E19330F /* PBXTargetDependency */,
+			);
+			name = PasswdSSOUITests;
+			packageProductDependencies = (
+			);
+			productName = PasswdSSOUITests;
+			productReference = 6B849351921A9E2E8B78154E /* PasswdSSOUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		91CEA9366304934792AE8CA7 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					2503D778597BD5A5391105AA = {
+						DevelopmentTeam = 9BL8SUVCSG;
+						ProvisioningStyle = Automatic;
+					};
+					2C6807B4DF933E0960205C53 = {
+						DevelopmentTeam = 9BL8SUVCSG;
+						ProvisioningStyle = Automatic;
+					};
+					3408C5C581C8391A1AAB6ABA = {
+						DevelopmentTeam = 9BL8SUVCSG;
+						ProvisioningStyle = Automatic;
+					};
+					84BF354B2F15CE0C8F36B493 = {
+						DevelopmentTeam = 9BL8SUVCSG;
+						ProvisioningStyle = Automatic;
+					};
+					DF33BBB1A677F99934E83F7D = {
+						DevelopmentTeam = 9BL8SUVCSG;
+						ProvisioningStyle = Automatic;
+						TestTargetID = 3408C5C581C8391A1AAB6ABA;
+					};
+				};
+			};
+			buildConfigurationList = B083F1DF7E108A5534B2185D /* Build configuration list for PBXProject "PasswdSSO" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = ED0D03E0C18C296BB2036167;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 1B77A9A14C989F49C7B23DAD /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				3408C5C581C8391A1AAB6ABA /* PasswdSSOApp */,
+				2503D778597BD5A5391105AA /* PasswdSSOAutofillExtension */,
+				84BF354B2F15CE0C8F36B493 /* PasswdSSOTests */,
+				DF33BBB1A677F99934E83F7D /* PasswdSSOUITests */,
+				2C6807B4DF933E0960205C53 /* Shared */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		10EA5DFAC18B02200E4A098E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4C643AAE37D9DA7E0DCC0DAA /* fixtures in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		0C8EF8852574160984A60739 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				81106935658B44BFA292133A /* AuthCoordinator.swift in Sources */,
+				A457C9391F7E1E8164C97A46 /* AutoLockService.swift in Sources */,
+				84EB3A5F0E1899E9DC4A7822 /* BackgroundSyncTask.swift in Sources */,
+				D8EA7B209BAE0D68AB7DB5D5 /* ContentView.swift in Sources */,
+				EEDC524C6F56E4E378F8DB16 /* DebugVaultLoader.swift in Sources */,
+				028ADBEDD93783F5080BA973 /* DeviceIdentifier.swift in Sources */,
+				FC74F7D953B2978FE27D3B85 /* EntryDetailView.swift in Sources */,
+				B0974C58F65B8B4CBE7FB084 /* EntryEditForm.swift in Sources */,
+				B083185D5D570CC65E2C2624 /* EntryFetcher.swift in Sources */,
+				92AF55E25B2A1C5F8C2802BC /* HostSyncService.swift in Sources */,
+				A5FA7118BBC2D9CE7C30901E /* MobileAPIClient.swift in Sources */,
+				69C540BACD28B65D0DDB74A3 /* PasswdSSOAppApp.swift in Sources */,
+				C82DFA0CAE14932406514B06 /* RollbackFlagDrain.swift in Sources */,
+				D818CC3D8994859EC9B470F2 /* RootView.swift in Sources */,
+				93D09C74C9EDAA9E4767D4C3 /* ServerTrustService.swift in Sources */,
+				347F2D6168FB578E0E7687EC /* ServerURLSetupView.swift in Sources */,
+				FFDB363D6F74C9F3DD0E54C3 /* SignInView.swift in Sources */,
+				4372EB553FD8B0AE2BF33972 /* StaleBlobRecoveryService.swift in Sources */,
+				FD86EB17606A4DC5301497AA /* TOTPCodeView.swift in Sources */,
+				1C61EBA902B63AA436EDFED4 /* VaultListView.swift in Sources */,
+				27597DEF7D7C04078DDB8212 /* VaultUnlockView.swift in Sources */,
+				61CCB2EB4F4413B770CCABF1 /* VaultUnlocker.swift in Sources */,
+				BB40A1D626FFE3335D4DDAD5 /* VaultViewModel.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1C415FE460EA9AA191B4C267 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				88F5B89748A0E904EFAE7515 /* AADParityTests.swift in Sources */,
+				5421D67E38D403D16E75A584 /* AESGCMTests.swift in Sources */,
+				B324E00C768C3F3B498A0BCA /* AuthCoordinatorTests.swift in Sources */,
+				8BE8F6E7C0F4C6C96943DC74 /* AutoLockServiceTests.swift in Sources */,
+				6C09DE06209A534D059F5B02 /* BackgroundSyncCoordinatorTests.swift in Sources */,
+				99EB5AFBB9A9C2E9C0818CF6 /* BridgeKeyStoreTests.swift in Sources */,
+				B8E8B10956121151C6DF7F9C /* CredentialResolverTests.swift in Sources */,
+				0A36948197E80ACA5ED17F22 /* DPoPProofBuilderTests.swift in Sources */,
+				E1FA345EE6BF6D38163AD937 /* DebugVaultLoaderTests.swift in Sources */,
+				EF9407000E17ADEB5E667D88 /* EntryCacheFileTests.swift in Sources */,
+				96A710A8F83E4FEB146E39D4 /* EntryEncrypterTests.swift in Sources */,
+				53BABB8B7A6B12FE9A269D87 /* EntryFetcherTests.swift in Sources */,
+				1600D1BA3846CDCAEA02EF7E /* HostSyncServiceTests.swift in Sources */,
+				66734B405C893DA325204500 /* HostTokenStoreTests.swift in Sources */,
+				E0E33F33FBEB6BBA6CC22D06 /* KDFTests.swift in Sources */,
+				C9B811D75D4CC8737741AF8E /* LockStateReducerTests.swift in Sources */,
+				4FB785329A7B8D8BDF40FC5E /* MobileAPIClientTests.swift in Sources */,
+				270E924C1DDE26ACB7454E34 /* RollbackFlagDrainTests.swift in Sources */,
+				DBFB20A7E48448D3D840FDE7 /* RollbackFlagWriterTests.swift in Sources */,
+				FFA7B60616C41F7692F7271C /* SPKIEncoderTests.swift in Sources */,
+				E0832EF8431014E47A2A4636 /* ServerTrustServiceTests.swift in Sources */,
+				61C3FD90259F677EA6150C8F /* SharedFrameworkTests.swift in Sources */,
+				E6242A08FB6CD768CBCED638 /* StaleBlobRecoveryServiceTests.swift in Sources */,
+				E61FA83E34E321C09B0D7176 /* TOTPVectorTests.swift in Sources */,
+				CB194266359903474FE04F9D /* URLMatchingTests.swift in Sources */,
+				29F6A1C04FE63C84CDE05FB9 /* VaultUnlockerTests.swift in Sources */,
+				1FECDEBE12AA76923178DF37 /* VaultViewModelTests.swift in Sources */,
+				3D23FF146F64052F0EC31277 /* WrappedKeyStoreTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9CC525B765CAF4D27ECB5399 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B51FF4981CF7716A4F01CF18 /* AAD.swift in Sources */,
+				60AD9C0835A9502C54C79E90 /* AESGCM.swift in Sources */,
+				34E13CBD9ED4C6D8D72D6EFE /* AppGroupContainer.swift in Sources */,
+				857B8B7F838C6E4A1A6BC148 /* BackgroundSyncCoordinator.swift in Sources */,
+				1ACA702DAFCBA5F5EDD82475 /* BridgeKeyStore.swift in Sources */,
+				CCF7AB22A048CA0D633DC740 /* CredentialResolver.swift in Sources */,
+				65B588E2DB548D9142568179 /* CryptoUtils.swift in Sources */,
+				72BD7556CC6BAD53BD1F093D /* DPoPProofBuilder.swift in Sources */,
+				89EF5EABFE7C000262E67616 /* EntryCacheFile.swift in Sources */,
+				0F7754D416476CE6B1AE0C81 /* EntryEncrypter.swift in Sources */,
+				3582DA3CD5414790F589E168 /* HostTokenStore.swift in Sources */,
+				542B8D1BD03A73706A98778B /* KDF.swift in Sources */,
+				2F1B42C2B8566A94C6155FEE /* LockState.swift in Sources */,
+				6790FB758EF3FD2CB70EA152 /* LockStateReducer.swift in Sources */,
+				765B1E34A07F76D0203E28D3 /* RollbackFlagWriter.swift in Sources */,
+				A49DCEFF5ABDE722BF33C324 /* SPKIEncoder.swift in Sources */,
+				393E223C042BBEF961AB0EFA /* SecureEnclaveDPoPSigner.swift in Sources */,
+				E300850EF22C24B05B82D25B /* SecureEnclaveKey.swift in Sources */,
+				0411C3B077EC09539E34D620 /* ServerConfig.swift in Sources */,
+				C10EFCB85CFAF6D893AEE25B /* SessionState.swift in Sources */,
+				88B94C8725C6BEA507605D39 /* Shared.swift in Sources */,
+				BE01EC8587AC154A545C44F6 /* TOTPGenerator.swift in Sources */,
+				A3CEA13B7C87135CC54039D6 /* TeamContext.swift in Sources */,
+				F6D4F11AC118415488FB8DCF /* URLMatcher.swift in Sources */,
+				E425C49CE0F5257C1821EB50 /* VaultEntryDetail.swift in Sources */,
+				1AB309165A8AB5830B2AE4DD /* VaultEntrySummary.swift in Sources */,
+				535C62C94E581BE693C1A5B6 /* WrappedKeyStore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B3AF6499676899A7A6B02385 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				27B85B5BB2953C5C07D971A7 /* PasswdSSOUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E4D0A8D88449CC8408B3D1FB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9336583B6F1252ACEB331AC4 /* CredentialPickerView.swift in Sources */,
+				C145708F7E61F3A78658F1CC /* CredentialProviderViewController.swift in Sources */,
+				F376E57211FDE0E03F285949 /* LockedFallbackView.swift in Sources */,
+				5B65C54AB593A685DC452BA4 /* OneTimeCodePickerView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		277A5A61C9C6FD86350BBFF2 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2C6807B4DF933E0960205C53 /* Shared */;
+			targetProxy = 409E1598723B0852198F87DB /* PBXContainerItemProxy */;
+		};
+		7112E31DE75C2A340E19330F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 3408C5C581C8391A1AAB6ABA /* PasswdSSOApp */;
+			targetProxy = 75C02BD1DA2A8E474A30EA94 /* PBXContainerItemProxy */;
+		};
+		8C09750A717F5D5EF51D9EC4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2C6807B4DF933E0960205C53 /* Shared */;
+			targetProxy = 07DCEEEF05F51907590D0A1E /* PBXContainerItemProxy */;
+		};
+		8DECB9DFAE7C7AA9EEE3F6D6 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2503D778597BD5A5391105AA /* PasswdSSOAutofillExtension */;
+			targetProxy = 589EAA99DE73D7B6BB0F3FF6 /* PBXContainerItemProxy */;
+		};
+		D83B09C31E54A39DE36F7485 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2C6807B4DF933E0960205C53 /* Shared */;
+			targetProxy = BECEE0F5225BA2F956C9B152 /* PBXContainerItemProxy */;
+		};
+		E0CE64FC67758E49A6ACA291 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 3408C5C581C8391A1AAB6ABA /* PasswdSSOApp */;
+			targetProxy = 943DD7C95BBEF3B1F2046610 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		0DE264E75E0089989ADB7DC4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = PasswdSSOUITests/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.PasswdSSOUITests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PasswdSSOApp;
+			};
+			name = Debug;
+		};
+		11EDE73C5DBB889818593C3D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = PasswdSSOAutofillExtension/PasswdSSOAutofillExtension.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = PasswdSSOAutofillExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.PasswdSSOAutofillExtension";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		14112134CA4053FB17F06284 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.Shared";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
+		166D5BB0DAAAB95A62F70104 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 1682BC8C00C9060F5E4DC11D /* Common.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 9BL8SUVCSG;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		390336A74B1028070C0B1886 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = PasswdSSOAutofillExtension/PasswdSSOAutofillExtension.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = PasswdSSOAutofillExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.PasswdSSOAutofillExtension";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		54CD26961D2F2B163262DB4A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_ENTITLEMENTS = PasswdSSOTests/PasswdSSOTests.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = PasswdSSOTests/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.PasswdSSOTests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PasswdSSOApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PasswdSSOApp";
+			};
+			name = Debug;
+		};
+		7EF7792F8C179ACCBBF4A071 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = PasswdSSOUITests/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.PasswdSSOUITests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PasswdSSOApp;
+			};
+			name = Release;
+		};
+		BB37EE13AA9C0DCAEF9C7CEA /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 1682BC8C00C9060F5E4DC11D /* Common.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 9BL8SUVCSG;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_TREAT_WARNINGS_AS_ERRORS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		C6C345D69F18BAE9F6FF5A4C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = PasswdSSOApp/PasswdSSOApp.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = PasswdSSOApp/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		D69168167BAE2F89956B981B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = PasswdSSOApp/PasswdSSOApp.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = PasswdSSOApp/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		E8537D1C04FCCFA987538583 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_ENTITLEMENTS = PasswdSSOTests/PasswdSSOTests.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = PasswdSSOTests/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.PasswdSSOTests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PasswdSSOApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PasswdSSOApp";
+			};
+			name = Release;
+		};
+		FC31A1CE26512D17384B8D0A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.Shared";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		08947A14CEA8AA265A74474D /* Build configuration list for PBXNativeTarget "PasswdSSOAutofillExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				390336A74B1028070C0B1886 /* Debug */,
+				11EDE73C5DBB889818593C3D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		433AEABC531C8305418662D9 /* Build configuration list for PBXNativeTarget "PasswdSSOTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				54CD26961D2F2B163262DB4A /* Debug */,
+				E8537D1C04FCCFA987538583 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		AB4BC7BB95068E914CE686EE /* Build configuration list for PBXNativeTarget "Shared" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FC31A1CE26512D17384B8D0A /* Debug */,
+				14112134CA4053FB17F06284 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B083F1DF7E108A5534B2185D /* Build configuration list for PBXProject "PasswdSSO" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				166D5BB0DAAAB95A62F70104 /* Debug */,
+				BB37EE13AA9C0DCAEF9C7CEA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		BC7060BFC2AF05E65EBCB57F /* Build configuration list for PBXNativeTarget "PasswdSSOApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C6C345D69F18BAE9F6FF5A4C /* Debug */,
+				D69168167BAE2F89956B981B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F2E33134EB506DC4F0D7DDF5 /* Build configuration list for PBXNativeTarget "PasswdSSOUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0DE264E75E0089989ADB7DC4 /* Debug */,
+				7EF7792F8C179ACCBBF4A071 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 91CEA9366304934792AE8CA7 /* Project object */;
+}

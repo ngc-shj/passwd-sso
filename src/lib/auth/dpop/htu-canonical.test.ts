@@ -57,6 +57,33 @@ describe("canonicalHtu", () => {
     vi.stubEnv("AUTH_URL", "");
     expect(() => canonicalHtu({ route: "/api/foo" })).toThrow(/APP_URL/);
   });
+
+  // basePath-aware deployments — issue surfaced by the iOS host app, where
+  // the client computes htu from the actual URL it called (which always
+  // includes the basePath prefix, e.g. /passwd-sso). Without these the
+  // server's canonicalHtu would strip the basePath and DPoP verification
+  // would fail with "htu mismatch".
+
+  it("preserves basePath from APP_URL pathname", () => {
+    vi.stubEnv("APP_URL", "https://www.jpng.jp/passwd-sso");
+    expect(canonicalHtu({ route: "/api/mobile/token" })).toBe(
+      "https://www.jpng.jp/passwd-sso/api/mobile/token",
+    );
+  });
+
+  it("preserves basePath even with trailing slash on APP_URL", () => {
+    vi.stubEnv("APP_URL", "https://www.jpng.jp/passwd-sso/");
+    expect(canonicalHtu({ route: "/api/mobile/token" })).toBe(
+      "https://www.jpng.jp/passwd-sso/api/mobile/token",
+    );
+  });
+
+  it("supports multi-segment basePath", () => {
+    vi.stubEnv("APP_URL", "https://example.com/apps/passwd-sso");
+    expect(canonicalHtu({ route: "/api/mobile/token/refresh" })).toBe(
+      "https://example.com/apps/passwd-sso/api/mobile/token/refresh",
+    );
+  });
 });
 
 describe("htuMatches", () => {
@@ -107,5 +134,23 @@ describe("htuMatches", () => {
   it("returns false on malformed input rather than throwing", () => {
     expect(htuMatches("not a url", "https://a.test/x")).toBe(false);
     expect(htuMatches("https://a.test/x", "not a url")).toBe(false);
+  });
+
+  it("matches when basePath is identical on both sides", () => {
+    expect(
+      htuMatches(
+        "https://www.jpng.jp/passwd-sso/api/mobile/token",
+        "https://www.jpng.jp/passwd-sso/api/mobile/token",
+      ),
+    ).toBe(true);
+  });
+
+  it("differs when basePath differs", () => {
+    expect(
+      htuMatches(
+        "https://www.jpng.jp/api/mobile/token",
+        "https://www.jpng.jp/passwd-sso/api/mobile/token",
+      ),
+    ).toBe(false);
   });
 });

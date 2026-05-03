@@ -113,5 +113,11 @@ docs/temp/
 # Refactor orchestration — per-developer stale-branch baseline
 .refactor-phase-verify-baseline
 
-# Per-batch coverage snapshots (test-gen plan P0)
-.coverage-snapshots/
+# iOS / Xcode
+ios/build/
+ios/DerivedData/
+ios/*.xcodeproj/xcuserdata/
+ios/*.xcodeproj/project.xcworkspace/xcuserdata/
+ios/*.xcworkspace/xcuserdata/
+*.xcuserstate
+*.xcuserdatad/

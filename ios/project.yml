@@ -1,0 +1,228 @@
+name: PasswdSSO
+
+options:
+  bundleIdPrefix: com.passwd-sso
+  deploymentTarget:
+    iOS: "17.0"
+  developmentLanguage: en
+  usesTabs: false
+  indentWidth: 2
+  tabWidth: 2
+  generateEmptyDirectories: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: "9BL8SUVCSG"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    GCC_TREAT_WARNINGS_AS_ERRORS: YES
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+    GENERATE_INFOPLIST_FILE: NO
+
+configFiles:
+  Debug: Configs/Common.xcconfig
+  Release: Configs/Common.xcconfig
+
+targets:
+  Shared:
+    type: framework
+    platform: iOS
+    sources:
+      - path: Shared
+        excludes:
+          - "README.md"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.passwd-sso.Shared
+        DEFINES_MODULE: YES
+        SKIP_INSTALL: YES
+        GENERATE_INFOPLIST_FILE: YES
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: "0.1.0"
+
+  PasswdSSOApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: PasswdSSOApp
+        excludes:
+          - "README.md"
+          - "Info.plist"
+          - "PasswdSSOApp.entitlements"
+    info:
+      path: PasswdSSOApp/Info.plist
+      properties:
+        CFBundleDisplayName: passwd-sso
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        UILaunchScreen:
+          UIColorName: ""
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+    entitlements:
+      path: PasswdSSOApp/PasswdSSOApp.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.passwd-sso.shared
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.passwd-sso.shared
+        # com.apple.developer.associated-domains intentionally omitted —
+        # Apple Personal Team doesn't grant this capability, and including
+        # it causes the provisioning system to reject the WHOLE entitlements
+        # file, falling back to adhoc signing (empty entitlements). For paid
+        # Apple Developer Program: re-add `applinks:<your-server>` here so
+        # Universal Link OAuth callback can fire.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.passwd-sso
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: "0.1.0"
+        TARGETED_DEVICE_FAMILY: "1"
+    dependencies:
+      - target: Shared
+        embed: true
+      - target: PasswdSSOAutofillExtension
+        # embed: true puts the .appex into <App>.app/PlugIns/ which is where
+        # iOS scans for credential provider extensions. Without it the
+        # extension is built but not bundled and never appears in
+        # Settings → AutoFill & Passwords.
+        embed: true
+
+  PasswdSSOAutofillExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: PasswdSSOAutofillExtension
+        excludes:
+          - "README.md"
+          - "Info.plist"
+          - "PasswdSSOAutofillExtension.entitlements"
+    info:
+      path: PasswdSSOAutofillExtension/Info.plist
+      properties:
+        CFBundleDisplayName: passwd-sso AutoFill
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.authentication-services-credential-provider-ui
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).CredentialProviderViewController
+          NSExtensionAttributes:
+            # Both keys required so iOS lists this provider for password fills
+            # AND TOTP fills. With only ProvidesOneTimeCodes set, iOS treats
+            # the provider as TOTP-only and hides it from the password
+            # AutoFill picker.
+            ASCredentialProviderExtensionCapabilities:
+              ProvidesPasswords: true
+              ProvidesOneTimeCodes: true
+    entitlements:
+      path: PasswdSSOAutofillExtension/PasswdSSOAutofillExtension.entitlements
+      properties:
+        # Apple official AutoFill Credential Provider entitlement — REQUIRED
+        # for iOS to surface this extension in Settings → AutoFill source list.
+        # Without it, pluginkit registers the bundle generically but the
+        # AutoFill subsystem silently excludes it. Per Apple docs:
+        # https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.authentication-services.autofill-credential-provider
+        com.apple.developer.authentication-services.autofill-credential-provider: true
+        com.apple.security.application-groups:
+          - group.com.passwd-sso.shared
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.passwd-sso.shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.passwd-sso.PasswdSSOAutofillExtension
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: "0.1.0"
+        TARGETED_DEVICE_FAMILY: "1"
+    dependencies:
+      - target: Shared
+        link: true
+        embed: false
+
+  PasswdSSOTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: PasswdSSOTests
+      - path: ../extension/test/fixtures
+        buildPhase: resources
+        type: folder
+    info:
+      path: PasswdSSOTests/Info.plist
+      properties:
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+    entitlements:
+      path: PasswdSSOTests/PasswdSSOTests.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.passwd-sso.shared
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.passwd-sso.shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.passwd-sso.PasswdSSOTests
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/PasswdSSOApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PasswdSSOApp
+        BUNDLE_LOADER: $(TEST_HOST)
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: "0.1.0"
+    dependencies:
+      - target: Shared
+        link: true
+        embed: false
+      - target: PasswdSSOApp
+
+  PasswdSSOUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: PasswdSSOUITests
+    info:
+      path: PasswdSSOUITests/Info.plist
+      properties:
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.passwd-sso.PasswdSSOUITests
+        TEST_TARGET_NAME: PasswdSSOApp
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: "0.1.0"
+    dependencies:
+      - target: PasswdSSOApp
+
+schemes:
+  PasswdSSOApp:
+    build:
+      targets:
+        PasswdSSOApp: all
+        PasswdSSOAutofillExtension: all
+        Shared: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - PasswdSSOTests
+        - PasswdSSOUITests
+    archive:
+      config: Release
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+
+  Shared:
+    build:
+      targets:
+        Shared: all
+    test:
+      config: Debug
+      targets:
+        - PasswdSSOTests
