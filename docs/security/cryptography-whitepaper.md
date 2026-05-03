@@ -201,11 +201,66 @@ Every ciphertext is bound to its context via AAD. This prevents:
 
 ### 6.1 Personal Vault
 
-Passphrase change:
+#### 6.1.a Passphrase change (secretKey unchanged)
+
 1. Derive new wrapping key from new passphrase
 2. Re-wrap existing secret key with new wrapping key
 3. Recompute auth hash and passphrase verifier
 4. Entry data is NOT re-encrypted (secret key unchanged)
+
+#### 6.1.b Vault key rotation (secretKey replaced)
+
+A separate flow that replaces the user's `secretKey` and bumps `keyVersion`:
+
+1. Client generates a fresh `secretKey` and derives the new encryption key.
+2. Client re-encrypts every `PasswordEntry` and `PasswordEntryHistory` row,
+   re-wraps the user's ECDH private key, and submits the bundle to
+   `POST /api/vault/rotate-key`.
+3. Server validates the submitted entry/history sets exactly match the user's
+   current rows, then atomically (under `pg_advisory_xact_lock`) updates all
+   rows + the user wrapping + creates a new `VaultKey` row.
+
+#### 6.1.c Cleared at rotation (consumers of the previous secretKey)
+
+To enforce "remove the previous `secretKey` from the trust boundary", the
+rotation transaction also clears or invalidates every server-side artifact
+that wrapped the previous `secretKey`:
+
+| Consumer | Action |
+|---|---|
+| `User.recovery*` (Recovery Key wrapping) | All wrapping fields cleared. `recoveryKeyInvalidatedAt` set so the regenerate-flow UI distinguishes "lost via rotation" from "never set up". |
+| `EmergencyAccessGrant` (escrow ECDH wrapping) | Status flipped to `STALE` for all grants in `IDLE` / `REQUESTED` / `ACTIVATED`. `ownerEphemeralPublicKey` is nulled — defeats grantee unwrap (`unwrapSecretKeyAsGrantee` requires it to derive the ECDH shared key) while preserving the wrapping ciphertext + `keyVersion` + `wrapVersion` for forensic trail. |
+| `WebAuthnCredential.prfEncryptedSecretKey` | All wrapping fields cleared on every credential. `prfSupported` is intentionally NOT touched — it represents the authenticator's PRF capability, not wrapping presence. The user re-bootstraps via `POST /api/webauthn/credentials/[id]/prf` (separate Redis challenge namespace, advisory lock, keyVersion CAS). |
+| `Session` / `ExtensionToken` / `ApiKey` / `McpAccessToken` / `McpRefreshToken` / `DelegationSession` | All revoked via `invalidateUserSessions`. `cacheTombstoneFailures` count is recorded in the audit metadata so silent Redis outages remain forensically visible. |
+
+#### 6.1.d Known limitation: personal attachments
+
+Personal-entry `Attachment.encryptedData` is encrypted with the previous
+encryption key directly (no per-attachment CEK). The Phase A rotation flow
+does NOT re-encrypt attachment bodies. Instead, the API rejects rotation
+when attachments exist unless the client passes
+`acknowledgeAttachmentDataLoss: true`. Once acknowledged, the orphan rows
+remain in the DB (so a future Phase B recovery design has material to work
+with), but the file bodies are unrecoverable with the new `secretKey`.
+
+Phase B (separate issue) will introduce per-attachment CEK indirection
+mirroring the team `ItemKey` model, so rotation re-wraps the small CEKs
+without touching file bodies.
+
+#### 6.1.e Known limitation: ECDH identity is NOT rotated (cross-domain attack surface)
+
+`User.ecdhPublicKey` is stable across personal vault rotations. An attacker
+who recovers the previous `secretKey` via any of the cleared consumers above
+AND has access to a backup of the previous `User.encryptedEcdhPrivateKey`
+(re-wrapped during rotation but the OLD wrapping persists in backups)
+recovers the user's stable ECDH private key → unwraps every team's
+`TeamMemberKey` row for this user → decrypts team entries.
+
+Personal vault rotation does NOT defend against this cross-domain backup-
+compromise scenario. A future "compromise rotation" mode that also rotates
+`ecdhPublicKey` and reissues every `TeamMemberKey` row for the user is
+tracked separately (Phase B+). For incident-response scenarios, contact
+your tenant admin.
 
 ### 6.2 Team Key Rotation
 
