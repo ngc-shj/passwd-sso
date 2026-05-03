@@ -101,21 +101,25 @@ function main() {
     const nextCnt = countCovered(nextEntry);
     const linesGain = nextCnt.coveredLines - prevCnt.coveredLines;
     const branchGain = nextCnt.coveredBranches - prevCnt.coveredBranches;
-    const ok = linesGain > 0 && branchGain > 0;
+    // Branchless components (e.g., shadcn UI primitives like badge.tsx,
+    // label.tsx, separator.tsx) have zero instrumented branches by design.
+    // Require branchGain > 0 only when the file has at least one branch.
+    const hasBranches = Object.keys(nextEntry["b"] ?? {}).length > 0;
+    const ok = linesGain > 0 && (hasBranches ? branchGain > 0 : true);
     process.stdout.write(
-      `${ok ? "OK" : "FAIL"} ${filePath}: lines ${prevCnt.coveredLines}→${nextCnt.coveredLines} (+${linesGain}), branches ${prevCnt.coveredBranches}→${nextCnt.coveredBranches} (+${branchGain})\n`,
+      `${ok ? "OK" : "FAIL"} ${filePath}: lines ${prevCnt.coveredLines}→${nextCnt.coveredLines} (+${linesGain}), branches ${prevCnt.coveredBranches}→${nextCnt.coveredBranches} (+${branchGain})${hasBranches ? "" : " [branchless]"}\n`,
     );
     if (!ok) failures += 1;
   }
 
   if (failures > 0) {
     process.stderr.write(
-      `\ncoverage-diff: ${failures} of ${targetedFiles.size} targeted file(s) did not strictly gain both lines and branches\n`,
+      `\ncoverage-diff: ${failures} of ${targetedFiles.size} targeted file(s) did not strictly gain coverage\n`,
     );
     process.exit(1);
   }
   process.stdout.write(
-    `\ncoverage-diff: all ${targetedFiles.size} targeted file(s) gained both lines and branches\n`,
+    `\ncoverage-diff: all ${targetedFiles.size} targeted file(s) gained coverage\n`,
   );
 }
 
