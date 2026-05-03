@@ -202,7 +202,23 @@ HMAC key is derived via `HKDF(inputKeyMaterial: vaultKey, info: "rollback-flag-m
 
 The stable `deviceId` in every report is a UUID generated once and stored in App Group `UserDefaults` (`group.com.passwd-sso.shared`) via `DeviceIdentifier.stable()`.
 
+## Verification Status
+
+Build + automated tests pass (188 unit + 1 UI). Several user-facing flows
+(OAuth sign-in, AutoFill credential provider in Safari, side-channel
+overlays, manual edit save) are **not yet verified end-to-end** because
+Apple's Personal Team / Free Apple ID does not provision the
+`com.apple.developer.authentication-services.autofill-credential-provider`
+or `com.apple.developer.associated-domains` capabilities.
+
+The full untested-paths list and the steps to unblock them after paid
+Apple Developer Program enrollment are in
+[../docs/archive/review/ios-autofill-mvp-verification-status.md](../docs/archive/review/ios-autofill-mvp-verification-status.md).
+
 ## References
 
 - Plan: [docs/archive/review/ios-autofill-mvp-plan.md](../docs/archive/review/ios-autofill-mvp-plan.md)
+- Verification Status: [docs/archive/review/ios-autofill-mvp-verification-status.md](../docs/archive/review/ios-autofill-mvp-verification-status.md)
+- Manual Test Plan: [docs/archive/review/ios-autofill-mvp-manual-test.md](../docs/archive/review/ios-autofill-mvp-manual-test.md)
+- Coding Deviations: [docs/archive/review/ios-autofill-mvp-deviation.md](../docs/archive/review/ios-autofill-mvp-deviation.md)
 - Browser extension baseline: [extension/](../extension)
