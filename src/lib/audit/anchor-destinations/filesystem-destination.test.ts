@@ -22,12 +22,12 @@ describe("FilesystemDestination", () => {
   });
 
   it("has name 'filesystem'", () => {
-    const dest = new FilesystemDestination({ basePath: "/tmp/anchors" });
+    const dest = new FilesystemDestination({ basePath: "/var/anchors" });
     expect(dest.name).toBe("filesystem");
   });
 
   it("creates basePath recursively before writing", async () => {
-    const dest = new FilesystemDestination({ basePath: "/tmp/anchors" });
+    const dest = new FilesystemDestination({ basePath: "/var/anchors" });
 
     await dest.upload({
       artifactBytes: Buffer.from("payload"),
@@ -36,11 +36,11 @@ describe("FilesystemDestination", () => {
     });
 
     expect(mockedMkdir).toHaveBeenCalledOnce();
-    expect(mockedMkdir).toHaveBeenCalledWith("/tmp/anchors", { recursive: true });
+    expect(mockedMkdir).toHaveBeenCalledWith("/var/anchors", { recursive: true });
   });
 
   it("writes file to basePath/artifactKey with mode 0o644", async () => {
-    const dest = new FilesystemDestination({ basePath: "/tmp/anchors" });
+    const dest = new FilesystemDestination({ basePath: "/var/anchors" });
     const bytes = Buffer.from("jws-payload");
 
     await dest.upload({
@@ -51,7 +51,7 @@ describe("FilesystemDestination", () => {
 
     expect(mockedWriteFile).toHaveBeenCalledOnce();
     expect(mockedWriteFile).toHaveBeenCalledWith(
-      "/tmp/anchors/artifact.jws",
+      "/var/anchors/artifact.jws",
       bytes,
       { mode: 0o644 },
     );
@@ -68,7 +68,7 @@ describe("FilesystemDestination", () => {
       return undefined;
     });
 
-    const dest = new FilesystemDestination({ basePath: "/tmp/anchors" });
+    const dest = new FilesystemDestination({ basePath: "/var/anchors" });
     await dest.upload({
       artifactBytes: Buffer.from("x"),
       artifactKey: "k.jws",
@@ -98,7 +98,7 @@ describe("FilesystemDestination", () => {
     const err = Object.assign(new Error("disk full"), { code: "ENOSPC" });
     mockedWriteFile.mockRejectedValue(err);
 
-    const dest = new FilesystemDestination({ basePath: "/tmp/anchors" });
+    const dest = new FilesystemDestination({ basePath: "/var/anchors" });
     await expect(
       dest.upload({
         artifactBytes: Buffer.from("x"),
@@ -109,7 +109,7 @@ describe("FilesystemDestination", () => {
   });
 
   it("joins basePath with artifactKey via path.join semantics", async () => {
-    const dest = new FilesystemDestination({ basePath: "/tmp/anchors/" });
+    const dest = new FilesystemDestination({ basePath: "/var/anchors/" });
 
     await dest.upload({
       artifactBytes: Buffer.from("x"),
@@ -119,7 +119,7 @@ describe("FilesystemDestination", () => {
 
     // path.join normalizes the trailing slash + nested key
     expect(mockedWriteFile).toHaveBeenCalledWith(
-      "/tmp/anchors/subdir/key.jws",
+      "/var/anchors/subdir/key.jws",
       expect.any(Buffer),
       { mode: 0o644 },
     );
