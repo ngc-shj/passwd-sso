@@ -177,9 +177,19 @@ export async function setCachedSession(
   }
 }
 
-export async function invalidateCachedSession(token: string): Promise<void> {
+/**
+ * Tombstone-write a single session. Returns `true` when the tombstone is
+ * either written or unnecessary (Redis not configured); returns `false`
+ * ONLY when Redis was reachable-by-config but the SET call errored.
+ *
+ * Callers in security-sensitive flows (vault reset, member removal) MUST
+ * propagate the `false` return into audit metadata so that a silent Redis
+ * outage during an invalidation flow is forensically visible — the throttled
+ * logger alone is insufficient for incident reconstruction.
+ */
+export async function invalidateCachedSession(token: string): Promise<boolean> {
   const redis = getRedis();
-  if (!redis) return;
+  if (!redis) return true;
   try {
     await redis.set(
       cacheKey(token),
@@ -187,8 +197,10 @@ export async function invalidateCachedSession(token: string): Promise<void> {
       "PX",
       TOMBSTONE_TTL_MS,
     );
+    return true;
   } catch (err) {
     logRedisError((err as { code?: string } | undefined)?.code);
+    return false;
   }
 }
 
@@ -200,13 +212,18 @@ export async function invalidateCachedSession(token: string): Promise<void> {
  * required so the route latency stays bounded (S-13). Behaviorally
  * equivalent to calling invalidateCachedSession on each token, but
  * with constant network cost.
+ *
+ * Returns `{ total, failed }`. `total` is the input length. `failed` is
+ * the number of tokens whose tombstone write did not land — currently
+ * either 0 (success / no-Redis) or `total` (pipeline.exec threw),
+ * because pipeline failure is all-or-nothing at the network layer.
  */
 export async function invalidateCachedSessionsBulk(
   tokens: ReadonlyArray<string>,
-): Promise<void> {
-  if (tokens.length === 0) return;
+): Promise<{ total: number; failed: number }> {
+  if (tokens.length === 0) return { total: 0, failed: 0 };
   const redis = getRedis();
-  if (!redis) return;
+  if (!redis) return { total: tokens.length, failed: 0 };
   const pipeline = redis.pipeline();
   for (const token of tokens) {
     pipeline.set(
@@ -218,7 +235,9 @@ export async function invalidateCachedSessionsBulk(
   }
   try {
     await pipeline.exec();
+    return { total: tokens.length, failed: 0 };
   } catch (err) {
     logRedisError((err as { code?: string } | undefined)?.code);
+    return { total: tokens.length, failed: tokens.length };
   }
 }

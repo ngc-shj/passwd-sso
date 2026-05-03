@@ -89,6 +89,7 @@ describe("POST /api/vault/admin-reset", () => {
       mcpAccessTokens: 4,
       mcpRefreshTokens: 5,
       delegationSessions: 6,
+      cacheTombstoneFailures: 0,
     });
   });
 
@@ -262,10 +263,44 @@ describe("POST /api/vault/admin-reset", () => {
           invalidatedMcpAccessTokens: 4,
           invalidatedMcpRefreshTokens: 5,
           invalidatedDelegationSessions: 6,
+          cacheTombstoneFailures: 0,
         }),
       }),
     );
   });
+
+  it(
+    "surfaces Redis tombstone failures into ADMIN_VAULT_RESET_EXECUTE audit " +
+      "metadata so a silent cache outage is forensically visible",
+    async () => {
+      mockInvalidateUserSessions.mockResolvedValue({
+        sessions: 2,
+        extensionTokens: 0,
+        apiKeys: 0,
+        mcpAccessTokens: 0,
+        mcpRefreshTokens: 0,
+        delegationSessions: 0,
+        cacheTombstoneFailures: 2,
+      });
+
+      const res = await POST(
+        createRequest("POST", URL, {
+          body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
+        }),
+      );
+      expect(res.status).toBe(200);
+
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "ADMIN_VAULT_RESET_EXECUTE",
+          metadata: expect.objectContaining({
+            invalidatedSessions: 2,
+            cacheTombstoneFailures: 2,
+          }),
+        }),
+      );
+    },
+  );
 
   it("returns 409 VAULT_RESET_NOT_APPROVED when row has not been approved", async () => {
     mockAdminVaultResetFindUnique.mockResolvedValue({
