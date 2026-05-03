@@ -271,7 +271,7 @@ export async function computeRecoveryVerifierHash(
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt: new ArrayBuffer(32), // empty salt
+      salt: new Uint8Array(32), // empty salt
       info: textEncode(HKDF_RECOVERY_VERIFIER_INFO),
     },
     hkdfKey,

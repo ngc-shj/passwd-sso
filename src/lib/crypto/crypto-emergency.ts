@@ -86,7 +86,7 @@ import { textEncode, toArrayBuffer } from "./crypto-utils";
  * Fixed-order pipe-separated concatenation (not JSON) to guarantee byte-identical
  * AAD between encrypt and decrypt.
  */
-export function buildAAD(ctx: WrapContext): ArrayBuffer {
+export function buildAAD(ctx: WrapContext): BufferSource {
   const aad = [
     ctx.grantId,
     ctx.ownerId,

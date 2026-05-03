@@ -16,7 +16,7 @@
 // Exits 0 on success, 1 on regression / spec violation.
 
 import { readFileSync } from "node:fs";
-import { resolve, sep } from "node:path";
+import { sep } from "node:path";
 
 function loadReport(path) {
   const raw = readFileSync(path, "utf8");
