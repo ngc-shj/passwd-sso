@@ -5,36 +5,13 @@ Items where the implementation followed the plan exactly are NOT recorded.
 
 ## Deferred to follow-up (not implemented in this PR)
 
-### D1. Integration test against real DB
+### ~~D1. Integration test against real DB — RESOLVED~~
 
-- **Plan reference**: Step 14.f (`src/__tests__/db-integration/vault-rotate-key-gaps.integration.test.ts`).
-- **Status**: Deferred.
-- **Why**: PRF rebootstrap unit tests at the route level (Step 14.d/d.b)
-  cover the security invariants of the new endpoints + assertion contract.
-  The rotation-route unit test (Step 14.b) covers the new in-tx clearings.
-  An integration test against the live DB adds confidence on the cross-table
-  atomicity (rotation + EA stale + invalidation counts) but is ~half a day of
-  additional work and adds a dependency on docker DB up + integration CI job
-  path tuning.
-- **Risk**: Cross-table atomicity assertions live only at unit level. If a
-  future refactor moves the EA stale call back outside the tx accidentally,
-  the unit test would catch the call-shape change but a real-DB partial-write
-  scenario could slip through.
-- **Recovery**: file follow-up issue with the seed shape from Step 14.f.
+Now implemented at `src/__tests__/db-integration/vault-rotate-key-gaps.integration.test.ts`. Five real-DB scenarios covering `markGrantsStaleForOwner` (STALE flip + ephemeral pubkey null + forensic-trail retention; ACCEPTED untouched; keyVersion guard; legacy NULL keyVersion eligibility) and `invalidateUserSessions(KEY_ROTATION)` (all 6 user-bound token classes revoked). All 5 pass.
 
-### D2. E2E spec extension + seedAttachment helper
+### ~~D2. E2E spec extension + seedAttachment helper — RESOLVED~~
 
-- **Plan reference**: Step 14.g (extend `e2e/tests/settings-key-rotation.spec.ts`
-  + add `seedAttachment` helper to `e2e/helpers/password-entry.ts`).
-- **Status**: Deferred.
-- **Why**: The dialog UX change is small (one extra acknowledge step gated by
-  `attachmentsAffected > 0`). The unit tests in Batch 5 + the manual test
-  plan cover the user flow. A Playwright spec adds ~1-2 hours of work
-  including the `seedAttachment` helper that does not yet exist
-  (`e2e/helpers/password-entry.ts` has no attachment-seeding API today).
-- **Risk**: Regression in the dialog flow not caught by unit tests (e.g.,
-  mis-wired button disabled state) would only surface in QA / production.
-- **Recovery**: file follow-up issue.
+`seedAttachment` helper added to `e2e/helpers/password-entry.ts` (with companion unit tests locking the aad_version=1 + encryption_mode=0 invariants). New Playwright scenario in `e2e/tests/settings-key-rotation.spec.ts` covers the data-loss acknowledge flow end-to-end (seed attachment → open dialog → submit → assert ack step → click acknowledge → assert orphan row remains in DB).
 
 ### D3. ECDH cross-domain "compromise rotation" mode
 
@@ -83,9 +60,23 @@ Items where the implementation followed the plan exactly are NOT recorded.
 - `rotate-key/data/route.test.ts`: positive assertions on
   `attachmentsAffected` (0 and N).
 
-## Phase 3 review findings deferred to follow-up
+## ~~Phase 3 review findings deferred to follow-up~~ — ALL RESOLVED IN THIS PR
 
-### P3-F1 (Major) — recovery-key banner UX gap
+### ~~P3-F1 (Major) — recovery-key banner UX gap — RESOLVED~~
+
+`recovery-key-banner.tsx` now reads `recoveryKeyInvalidated` from vault context and renders the regenerate-flow wording (new i18n key `recoveryKeyBannerMessageInvalidated` in en/ja).
+
+### ~~P3-F2 (Major) — operator alert banners — RESOLVED~~
+
+Rotation route 200 response carries `rotationEffects` with the invalidation counts + `cacheTombstoneFailures`. The dialog surfaces three new toasts: persistent warning on cacheTombstoneFailures > 0, persistent warning on `invalidationFailed`, 10s info toast naming the count of revoked MCP tokens.
+
+### ~~P3-F3 (Major) — silent PRF re-bootstrap — RESOLVED~~
+
+Implemented as an explicit "Re-enable" affordance (not silent — see commit message `9b37bce3` for rationale): the credentials list exposes `prfWrappingPresent`, the card renders an amber `vaultUnlock` badge + a `Re-enable` button when wrapping is missing, and the button runs the new options + write endpoints with the current secretKey + keyVersion CAS. 9 i18n keys added in en/ja covering the badge tooltip, button label, hint, success/failure toasts, and the stale-keyVersion explanation.
+
+### Original P3-F1/F2/F3 deferral text retained for audit trail
+
+#### P3-F1 (Major) — recovery-key banner UX gap
 - The banner component (`src/components/vault/recovery-key-banner.tsx`) does
   not yet read `recoveryKeyInvalidated` from the vault context; it shows
   the same generic "first-time setup" copy whether the user has never set
@@ -199,19 +190,9 @@ Items where the implementation followed the plan exactly are NOT recorded.
   primitive-level coverage moves to the helper's own unit tests (deferred —
   see below).
 
-### C5. verifyAuthenticationAssertion helper unit test deferred
+### ~~C5. verifyAuthenticationAssertion helper unit test — RESOLVED~~
 
-- **Plan reference**: Step 14.e.b ("Unit — verifyAuthenticationAssertion helper").
-- **Status**: Deferred — file follow-up.
-- **Why**: The helper's behavior is exercised through the route tests for
-  both consumers (sign-in `verify/route.test.ts` and
-  `credentials/[id]/prf/route.test.ts`) AND the ownership / counter CAS
-  invariants are documented in code comments. A dedicated helper unit test
-  would lock in the exact challenge / lookup / CAS sequence but is not
-  blocking for the security invariants of #433.
-- **Risk**: A refactor of the helper (e.g., changing the lookup strategy) is
-  not directly tested at the helper level — would only surface via consumer
-  tests breaking.
+Now implemented at `src/lib/auth/webauthn/verify-authentication-assertion.test.ts` (12 cases covering namespace flexibility, counter CAS rollback safety, credential lookup userId scoping, every failure code path).
 
 ## Tests/contracts changed during implementation (intentional)
 
