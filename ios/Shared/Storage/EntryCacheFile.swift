@@ -91,10 +91,20 @@ public func writeCacheFile(
   encryptedHeader.append(hdrCipher)
   encryptedHeader.append(hdrTag)
 
-  // Encrypt entries
+  // Encrypt entries with AAD bound to (counter, uuid, userId).
+  // Without this binding, an attacker with App Group write access could
+  // splice old `entries` bytes onto a fresh header — both ciphertexts
+  // would decrypt cleanly under the same vault key and `entryCount` is
+  // attacker-controlled. AAD over identity fields blocks the splice.
+  let entriesAAD = try buildCacheEntriesAAD(
+    counter: data.header.cacheVersionCounter,
+    hostInstallUUID: hostInstallUUID,
+    userId: data.header.userId
+  )
   let (entCipher, entIV, entTag) = try encryptAESGCM(
     plaintext: data.entries,
-    key: vaultKey
+    key: vaultKey,
+    aad: entriesAAD
   )
   var encryptedEntries = Data(capacity: 12 + entCipher.count + 16)
   encryptedEntries.append(entIV)
@@ -211,8 +221,17 @@ public func readCacheFile(
     throw EntryCacheError.rejection(.headerStale)
   }
 
-  // Decrypt entries (no AAD on entries blob)
-  let entriesData = try decryptEntriesBlob(Data(encryptedEntriesBlob), vaultKey: vaultKey)
+  // Decrypt entries with AAD reconstructed from the (now-trusted) header.
+  let entriesAAD = try buildCacheEntriesAAD(
+    counter: header.cacheVersionCounter,
+    hostInstallUUID: header.hostInstallUUID,
+    userId: header.userId
+  )
+  let entriesData = try decryptEntriesBlob(
+    Data(encryptedEntriesBlob),
+    vaultKey: vaultKey,
+    aad: entriesAAD
+  )
 
   // Validate entry count
   let entryCount = try countJSONArrayElements(entriesData)
@@ -226,13 +245,38 @@ public func readCacheFile(
 // MARK: - Private helpers
 
 private func buildCacheHeaderAAD(counter: UInt64, hostInstallUUID: Data) throws -> Data {
-  // Per plan §"Encrypted-entries cache integrity":
-  // AAD = "CACHEHDR" (8 ASCII bytes) || counter (BE 8 bytes) || hostInstallUUID (16 raw bytes)
+  // Header AAD layout (byte-identical to host-app and AutoFill ext):
+  //   "CACHEHDR" (8 ASCII) || counter (BE 8) || hostInstallUUID (16 raw)
   var aad = Data(capacity: 32)
   aad.append(contentsOf: Array("CACHEHDR".utf8))
   let counterBE = counter.bigEndian
   withUnsafeBytes(of: counterBE) { aad.append(contentsOf: $0) }
   aad.append(hostInstallUUID)
+  return aad
+}
+
+/// Entries-blob AAD = "CACHEENT" || counter(BE 8) || uuid(16)
+///                  || userIdLen(BE 2) || userId(UTF-8)
+///
+/// Internal (not private) so test targets can call it via
+/// `@testable import Shared` to construct splice-test fixtures.
+internal func buildCacheEntriesAAD(
+  counter: UInt64,
+  hostInstallUUID: Data,
+  userId: String
+) throws -> Data {
+  let userIdBytes = Array(userId.utf8)
+  guard userIdBytes.count <= 0xFFFF else {
+    throw EntryCacheError.rejection(.headerInvalid)
+  }
+  var aad = Data(capacity: 8 + 8 + 16 + 2 + userIdBytes.count)
+  aad.append(contentsOf: Array("CACHEENT".utf8))
+  let counterBE = counter.bigEndian
+  withUnsafeBytes(of: counterBE) { aad.append(contentsOf: $0) }
+  aad.append(hostInstallUUID)
+  let userIdLen = UInt16(userIdBytes.count).bigEndian
+  withUnsafeBytes(of: userIdLen) { aad.append(contentsOf: $0) }
+  aad.append(contentsOf: userIdBytes)
   return aad
 }
 
@@ -326,7 +370,7 @@ private func parseHeaderJSON(_ data: Data) throws -> CacheHeader {
   )
 }
 
-private func decryptEntriesBlob(_ blob: Data, vaultKey: SymmetricKey) throws -> Data {
+private func decryptEntriesBlob(_ blob: Data, vaultKey: SymmetricKey, aad: Data) throws -> Data {
   // Blob = IV(12) || ciphertext || tag(16)
   guard blob.count >= 12 + 16 else {
     throw EntryCacheError.rejection(.headerInvalid)
@@ -336,7 +380,7 @@ private func decryptEntriesBlob(_ blob: Data, vaultKey: SymmetricKey) throws -> 
   let ciphertext = Data(blob[12..<(blob.count - 16)])
 
   do {
-    return try decryptAESGCM(ciphertext: ciphertext, iv: iv, tag: tag, key: vaultKey)
+    return try decryptAESGCM(ciphertext: ciphertext, iv: iv, tag: tag, key: vaultKey, aad: aad)
   } catch {
     throw EntryCacheError.rejection(.authtagInvalid)
   }

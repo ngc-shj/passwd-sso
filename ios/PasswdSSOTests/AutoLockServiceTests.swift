@@ -44,11 +44,13 @@ final class AutoLockServiceTests: XCTestCase {
   }
 
   private func seedKeychain(_ keychain: MockKeychain, counter: UInt64 = 1) {
-    var blob = Data(repeating: 0x01, count: 32)
+    keychain.store["com.passwd-sso.test.bridge-key-v2:blob"] =
+      Data(repeating: 0x01, count: 32)
+    var meta = Data()
     let counterBE = counter.bigEndian
-    withUnsafeBytes(of: counterBE) { blob.append(contentsOf: $0) }
-    blob.append(contentsOf: Data(repeating: 0x02, count: 16))
-    keychain.store["blob"] = blob
+    withUnsafeBytes(of: counterBE) { meta.append(contentsOf: $0) }
+    meta.append(contentsOf: Data(repeating: 0x02, count: 16))
+    keychain.store["com.passwd-sso.test.bridge-meta-v2:blob"] = meta
   }
 
   // MARK: - State after unlock
@@ -91,7 +93,14 @@ final class AutoLockServiceTests: XCTestCase {
     service.startTimer()
     service.lock()
 
-    XCTAssertNil(keychain.store["blob"], "bridge_key_blob should be deleted after lock")
+    XCTAssertNil(
+      keychain.store["com.passwd-sso.test.bridge-key-v2:blob"],
+      "bridge-key-v2 should be deleted after lock"
+    )
+    XCTAssertNil(
+      keychain.store["com.passwd-sso.test.bridge-meta-v2:blob"],
+      "bridge-meta-v2 should be deleted after lock"
+    )
   }
 
   func testLockKeepsWrappedKeyFiles() throws {
@@ -157,8 +166,9 @@ final class AutoLockServiceTests: XCTestCase {
     service.startTimer()
     service.signOut()
 
-    // Bridge key blob should be gone
-    XCTAssertNil(keychain.store["blob"])
+    // V2 bridge-key + bridge-meta items should be gone
+    XCTAssertNil(keychain.store["com.passwd-sso.test.bridge-key-v2:blob"])
+    XCTAssertNil(keychain.store["com.passwd-sso.test.bridge-meta-v2:blob"])
     // Cache file should be gone
     XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
     // Wrapped keys should be gone

@@ -394,6 +394,13 @@ final class EntryCacheFileTests: XCTestCase {
   }
 
   func testHeaderMissingUserIdRejectsAsHeaderInvalid() throws {
+    // NOTE: this test passes because parseHeaderJSON throws .headerInvalid
+    // BEFORE the entries-decrypt step is reached. The entries blob below
+    // is intentionally encrypted WITHOUT entries-AAD (legacy format). If
+    // the read-order in readCacheFile is ever reordered (entries before
+    // header), this test must be rewritten to encrypt the entries blob
+    // with a real entries-AAD; otherwise the rejection would come from
+    // entries-AAD mismatch, not header-JSON validation.
     // Build a header JSON that omits "userId" and inject it into an encrypted blob,
     // then verify the reader rejects with .headerInvalid.
     let url = tmpURL()
@@ -463,6 +470,285 @@ final class EntryCacheFileTests: XCTestCase {
       } else {
         XCTFail("Expected rejection(.headerInvalid), got \(error)")
       }
+    }
+  }
+
+  // MARK: - Entries-blob AAD binding
+
+  /// Helper: parse a written cache file into (encryptedHeaderBlob, encryptedEntriesBlob).
+  /// Mirrors the reader's framing parse to enable splice-style negative tests.
+  private func parseFile(_ data: Data) -> (header: Data, entries: Data)? {
+    guard data.count >= 12 else { return nil }
+    var off = 8
+    let headerLen = Int(UInt32(bigEndian: data[off..<(off + 4)]
+      .withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }))
+    off += 4
+    let header = data[off..<(off + headerLen)]
+    off += headerLen
+    let entriesLen = Int(UInt32(bigEndian: data[off..<(off + 4)]
+      .withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }))
+    off += 4
+    let entries = data[off..<(off + entriesLen)]
+    return (Data(header), Data(entries))
+  }
+
+  /// Reassemble a file from (encryptedHeaderBlob, encryptedEntriesBlob).
+  private func assembleFile(header: Data, entries: Data) -> Data {
+    var out = Data()
+    out.append(contentsOf: [0x50, 0x53, 0x53, 0x56])  // "PSSV"
+    out.append(0x01)
+    out.append(contentsOf: [0x00, 0x00, 0x00])
+
+    func appendBE32(_ d: inout Data, _ v: UInt32) {
+      let be = v.bigEndian
+      withUnsafeBytes(of: be) { d.append(contentsOf: $0) }
+    }
+    appendBE32(&out, UInt32(header.count))
+    out.append(header)
+    appendBE32(&out, UInt32(entries.count))
+    out.append(entries)
+    return out
+  }
+
+  /// Splicing entries from a different counter must fail entries-AAD verification.
+  func testEntriesBlobBindToCounterRejectsCrossFileSwap() throws {
+    let urlA = tmpURL()
+    let urlB = tmpURL()
+    defer {
+      try? FileManager.default.removeItem(at: urlA)
+      try? FileManager.default.removeItem(at: urlB)
+    }
+
+    let headerA = makeHeader(counter: 10, entryCount: 1)
+    try writeCacheFile(
+      data: CacheData(header: headerA, entries: makeEntriesJSON(count: 1)),
+      vaultKey: vaultKey, hostInstallUUID: hostInstallUUID, path: urlA
+    )
+
+    let headerB = makeHeader(counter: 11, entryCount: 1)
+    try writeCacheFile(
+      data: CacheData(header: headerB, entries: makeEntriesJSON(count: 1)),
+      vaultKey: vaultKey, hostInstallUUID: hostInstallUUID, path: urlB
+    )
+
+    let aBytes = try Data(contentsOf: urlA)
+    let bBytes = try Data(contentsOf: urlB)
+    let aParts = parseFile(aBytes)!
+    let bParts = parseFile(bBytes)!
+
+    // Frankenstein: B's header (counter=11) + A's entries (encrypted with counter=10 AAD)
+    let frankenstein = assembleFile(header: bParts.header, entries: aParts.entries)
+    let urlC = tmpURL()
+    defer { try? FileManager.default.removeItem(at: urlC) }
+    try frankenstein.write(to: urlC)
+
+    XCTAssertThrowsError(
+      try readCacheFile(
+        path: urlC,
+        vaultKey: vaultKey,
+        expectedHostInstallUUID: hostInstallUUID,
+        expectedCounter: 11
+      )
+    ) { error in
+      guard case EntryCacheError.rejection(let kind) = error else {
+        XCTFail("Expected rejection, got \(error)")
+        return
+      }
+      XCTAssertEqual(kind, .authtagInvalid,
+                     "Cross-counter splice should fail entries AAD with .authtagInvalid")
+    }
+  }
+
+  /// Splicing entries from a different userId must fail entries-AAD verification.
+  func testEntriesBlobBindToUserIdRejectsCrossUserSwap() throws {
+    let urlA = tmpURL()
+    let urlB = tmpURL()
+    defer {
+      try? FileManager.default.removeItem(at: urlA)
+      try? FileManager.default.removeItem(at: urlB)
+    }
+
+    let headerA = makeHeader(entryCount: 1, userId: "user-A")
+    try writeCacheFile(
+      data: CacheData(header: headerA, entries: makeEntriesJSON(count: 1)),
+      vaultKey: vaultKey, hostInstallUUID: hostInstallUUID, path: urlA
+    )
+
+    let headerB = makeHeader(entryCount: 1, userId: "user-B")
+    try writeCacheFile(
+      data: CacheData(header: headerB, entries: makeEntriesJSON(count: 1)),
+      vaultKey: vaultKey, hostInstallUUID: hostInstallUUID, path: urlB
+    )
+
+    let aBytes = try Data(contentsOf: urlA)
+    let bBytes = try Data(contentsOf: urlB)
+    let aParts = parseFile(aBytes)!
+    let bParts = parseFile(bBytes)!
+
+    // Frankenstein: B's header (userId=user-B) + A's entries (encrypted with userId=user-A AAD)
+    let frankenstein = assembleFile(header: bParts.header, entries: aParts.entries)
+    let urlC = tmpURL()
+    defer { try? FileManager.default.removeItem(at: urlC) }
+    try frankenstein.write(to: urlC)
+
+    XCTAssertThrowsError(
+      try readCacheFile(
+        path: urlC,
+        vaultKey: vaultKey,
+        expectedHostInstallUUID: hostInstallUUID,
+        expectedCounter: counter
+      )
+    ) { error in
+      guard case EntryCacheError.rejection(let kind) = error else {
+        XCTFail("Expected rejection, got \(error)")
+        return
+      }
+      XCTAssertEqual(kind, .authtagInvalid,
+                     "Cross-userId splice should fail entries AAD with .authtagInvalid")
+    }
+  }
+
+  /// Negative control — confirms the splice tests above detect AAD mismatch
+  /// (not some other corruption). Two writes with IDENTICAL (counter, uuid, userId)
+  /// produce entries blobs that share the same AAD; splicing succeeds.
+  func testEntriesBlobAADNegativeControl() throws {
+    let urlA = tmpURL()
+    let urlB = tmpURL()
+    defer {
+      try? FileManager.default.removeItem(at: urlA)
+      try? FileManager.default.removeItem(at: urlB)
+    }
+
+    // Identical context — only entries content differs.
+    let header = makeHeader(entryCount: 1)
+    try writeCacheFile(
+      data: CacheData(header: header, entries: makeEntriesJSON(count: 1)),
+      vaultKey: vaultKey, hostInstallUUID: hostInstallUUID, path: urlA
+    )
+    try writeCacheFile(
+      data: CacheData(header: header, entries: makeEntriesJSON(count: 1)),
+      vaultKey: vaultKey, hostInstallUUID: hostInstallUUID, path: urlB
+    )
+
+    let aBytes = try Data(contentsOf: urlA)
+    let bBytes = try Data(contentsOf: urlB)
+    let aParts = parseFile(aBytes)!
+    let bParts = parseFile(bBytes)!
+
+    // Splice B-header + A-entries; both share AAD context, so this MUST succeed.
+    let spliced = assembleFile(header: bParts.header, entries: aParts.entries)
+    let urlC = tmpURL()
+    defer { try? FileManager.default.removeItem(at: urlC) }
+    try spliced.write(to: urlC)
+
+    let read = try readCacheFile(
+      path: urlC,
+      vaultKey: vaultKey,
+      expectedHostInstallUUID: hostInstallUUID,
+      expectedCounter: counter
+    )
+    XCTAssertEqual(read.header.entryCount, 1)
+  }
+
+  /// Verify the AAD builder produces deterministic, format-stable bytes.
+  func testCacheEntriesAADFormat() throws {
+    let aad = try buildCacheEntriesAAD(
+      counter: 0x0102_0304_0506_0708,
+      hostInstallUUID: Data(repeating: 0xAA, count: 16),
+      userId: "u"
+    )
+    // Layout: "CACHEENT"(8) || counter(BE 8) || uuid(16) || userIdLen(BE 2) || userId
+    XCTAssertEqual(aad.count, 8 + 8 + 16 + 2 + 1)
+    XCTAssertEqual(Array(aad[0..<8]), Array("CACHEENT".utf8))
+    XCTAssertEqual(Array(aad[8..<16]), [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08])
+    XCTAssertEqual(Array(aad[16..<32]), Array(repeating: UInt8(0xAA), count: 16))
+    XCTAssertEqual(Array(aad[32..<34]), [0x00, 0x01])  // BE 1
+    XCTAssertEqual(aad[34], UInt8(ascii: "u"))
+  }
+
+  /// userIdLen crosses the byte boundary at 256 — verify BE 2-byte encoding
+  /// is `[0x01, 0x00]`, not truncated to `[0x00]` or reversed.
+  func testCacheEntriesAADFormatLongUserId() throws {
+    let userId = String(repeating: "a", count: 256)
+    let aad = try buildCacheEntriesAAD(
+      counter: 0,
+      hostInstallUUID: Data(repeating: 0, count: 16),
+      userId: userId
+    )
+    XCTAssertEqual(aad.count, 8 + 8 + 16 + 2 + 256)
+    XCTAssertEqual(Array(aad[32..<34]), [0x01, 0x00],
+                   "userIdLen=256 must encode as BE [0x01, 0x00]")
+  }
+
+  /// Maximum userId length (UInt16 max) must be accepted.
+  func testCacheEntriesAADFormatMaxUserId() throws {
+    let userId = String(repeating: "a", count: 0xFFFF)
+    let aad = try buildCacheEntriesAAD(
+      counter: 0,
+      hostInstallUUID: Data(repeating: 0, count: 16),
+      userId: userId
+    )
+    XCTAssertEqual(aad.count, 8 + 8 + 16 + 2 + 0xFFFF)
+    XCTAssertEqual(Array(aad[32..<34]), [0xFF, 0xFF])
+  }
+
+  /// Multibyte UTF-8 userId (Japanese, emoji): userIdLen in the AAD is the
+  /// BYTE count, not the character count. A regression that swaps `count`
+  /// for `unicodeScalars.count` would mismatch encode-vs-decode AAD and
+  /// surface as authtagInvalid, but only on non-ASCII userIds.
+  func testRoundTripWithMultibyteUTF8UserId() throws {
+    let url = tmpURL()
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let userId = "ユーザー🔑42"  // 4 chars, 16 bytes (12 for kana + 4 for emoji)
+    let header = makeHeader(entryCount: 0, userId: userId)
+    let data = CacheData(header: header, entries: makeEntriesJSON(count: 0))
+    try writeCacheFile(data: data, vaultKey: vaultKey, hostInstallUUID: hostInstallUUID, path: url)
+
+    let read = try readCacheFile(
+      path: url,
+      vaultKey: vaultKey,
+      expectedHostInstallUUID: hostInstallUUID,
+      expectedCounter: counter
+    )
+    XCTAssertEqual(read.header.userId, userId)
+  }
+
+  /// Encrypt-then-decrypt round-trip with a 256-byte userId — proves the
+  /// AAD-on-encrypt and AAD-on-decrypt paths are byte-identical at the
+  /// 1-byte → 2-byte UInt16 boundary, not just at the build level.
+  func testRoundTripWithUserIdAtByteBoundary() throws {
+    let url = tmpURL()
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let longUserId = String(repeating: "a", count: 256)
+    let header = makeHeader(entryCount: 0, userId: longUserId)
+    let data = CacheData(header: header, entries: makeEntriesJSON(count: 0))
+    try writeCacheFile(data: data, vaultKey: vaultKey, hostInstallUUID: hostInstallUUID, path: url)
+
+    let read = try readCacheFile(
+      path: url,
+      vaultKey: vaultKey,
+      expectedHostInstallUUID: hostInstallUUID,
+      expectedCounter: counter
+    )
+    XCTAssertEqual(read.header.userId.count, 256)
+    XCTAssertEqual(read.header.userId, longUserId)
+  }
+
+  /// userId one byte over UInt16 max must be rejected with .headerInvalid.
+  func testCacheEntriesAADFormatOversizeUserIdRejected() throws {
+    let userId = String(repeating: "a", count: 0x10000)
+    XCTAssertThrowsError(try buildCacheEntriesAAD(
+      counter: 0,
+      hostInstallUUID: Data(repeating: 0, count: 16),
+      userId: userId
+    )) { error in
+      guard case EntryCacheError.rejection(let kind) = error else {
+        XCTFail("Expected rejection, got \(error)")
+        return
+      }
+      XCTAssertEqual(kind, .headerInvalid)
     }
   }
 

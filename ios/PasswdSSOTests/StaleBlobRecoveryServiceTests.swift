@@ -26,11 +26,13 @@ final class StaleBlobRecoveryServiceTests: XCTestCase {
 
   private func makeKeychain(counter: UInt64, uuid: Data = Data(repeating: 0xAB, count: 16)) -> MockKeychain {
     let keychain = MockKeychain()
-    var blob = Data(repeating: 0x01, count: 32)  // bridge_key
+    // V2 split: bridge-key-v2 (32 bytes) + bridge-meta-v2 (8-byte BE counter || 16-byte uuid).
+    keychain.store["com.passwd-sso.test.bridge-key-v2:blob"] = Data(repeating: 0x01, count: 32)
+    var meta = Data()
     let counterBE = counter.bigEndian
-    withUnsafeBytes(of: counterBE) { blob.append(contentsOf: $0) }
-    blob.append(uuid)
-    keychain.store["blob"] = blob
+    withUnsafeBytes(of: counterBE) { meta.append(contentsOf: $0) }
+    meta.append(uuid)
+    keychain.store["com.passwd-sso.test.bridge-meta-v2:blob"] = meta
     return keychain
   }
 

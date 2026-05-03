@@ -8,12 +8,43 @@ import Shared
 public struct PinSet: Sendable, Equatable, Codable {
   /// SHA-256 of the raw AASA file bytes.
   public let aasaSHA256: Data
-  /// SHA-256 of the server leaf certificate SubjectPublicKeyInfo bytes.
-  public let tlsSPKISHA256: Data
 
-  public init(aasaSHA256: Data, tlsSPKISHA256: Data) {
+  /// SHA-256 of the leaf certificate's public key in
+  /// `SecKeyCopyExternalRepresentation` form (uncompressed EC point or
+  /// PKCS#1 RSAPublicKey, NOT SPKI DER). Stable per server identity but
+  /// not interchangeable with `openssl dgst -sha256` over
+  /// `-pubkey -outform DER`.
+  public let tlsLeafKeySHA256: Data
+
+  public init(aasaSHA256: Data, tlsLeafKeySHA256: Data) {
     self.aasaSHA256 = aasaSHA256
-    self.tlsSPKISHA256 = tlsSPKISHA256
+    self.tlsLeafKeySHA256 = tlsLeafKeySHA256
+  }
+
+  // Custom Codable to accept the legacy `tlsSPKISHA256` JSON key, kept
+  // for forward-compat with older Keychain blobs. New writes encode only
+  // the renamed key. Reads via `currentPin()` re-encode on the way out
+  // so the legacy JSON gets upgraded after the first round-trip.
+  private enum CodingKeys: String, CodingKey {
+    case aasaSHA256
+    case tlsLeafKeySHA256
+    case tlsSPKISHA256  // legacy alias, decoder-only
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    self.aasaSHA256 = try c.decode(Data.self, forKey: .aasaSHA256)
+    if let v = try c.decodeIfPresent(Data.self, forKey: .tlsLeafKeySHA256) {
+      self.tlsLeafKeySHA256 = v
+    } else {
+      self.tlsLeafKeySHA256 = try c.decode(Data.self, forKey: .tlsSPKISHA256)
+    }
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(aasaSHA256, forKey: .aasaSHA256)
+    try c.encode(tlsLeafKeySHA256, forKey: .tlsLeafKeySHA256)
   }
 }
 
@@ -54,7 +85,22 @@ public actor ServerTrustService {
     guard status == errSecSuccess, let data else {
       throw ServerTrustError.keychainError(status)
     }
-    return try JSONDecoder().decode(PinSet.self, from: data)
+    let pinSet = try JSONDecoder().decode(PinSet.self, from: data)
+    // Migration-on-read: if the on-disk JSON used the legacy
+    // `tlsSPKISHA256` key, re-encode and write back so subsequent reads
+    // no longer hit the alias. Best-effort: a write failure is silently
+    // ignored — the alias-decoder still works on the next call.
+    if !looksLikeNewKey(data) {
+      try? await pin(for: serverURL, pinSet)
+    }
+    return pinSet
+  }
+
+  /// Does the JSON already contain `"tlsLeafKeySHA256"`? If false, the
+  /// blob was written by an older build that used the legacy alias key
+  /// `tlsSPKISHA256`, and `currentPin()` re-encodes via `pin()` to upgrade.
+  private func looksLikeNewKey(_ data: Data) -> Bool {
+    data.range(of: Data("tlsLeafKeySHA256".utf8)) != nil
   }
 
   public func pin(for serverURL: URL, _ pinSet: PinSet) async throws {
@@ -66,9 +112,14 @@ public actor ServerTrustService {
 
     let status = keychain.add(query: query)
     if status == errSecDuplicateItem {
+      // Re-set kSecAttrAccessible on update so the attribute cannot drift
+      // from a different writer pre-seeding the same item.
       let updateStatus = keychain.update(
         query: baseQuery(account: account),
-        attributes: [kSecValueData as String: data]
+        attributes: [
+          kSecValueData as String: data,
+          kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+        ]
       )
       guard updateStatus == errSecSuccess else { throw ServerTrustError.keychainError(updateStatus) }
     } else if status != errSecSuccess {
@@ -105,18 +156,22 @@ public func hashAASA(_ data: Data) -> Data {
 
 // MARK: - TLS SPKI extraction
 
-/// Delegate that captures the leaf-certificate SPKI SHA-256 during a TLS handshake.
+/// Delegate that captures the leaf-certificate public-key SHA-256 during
+/// a TLS handshake.
 ///
-/// Create the `URLSession` with this delegate and make a request to the server;
-/// the delegate records the SPKI hash for subsequent TOFU pinning.
-public final class SPKIPinningDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {
+/// Create the `URLSession` with this delegate and make a request to the
+/// server; the delegate records the leaf-key hash for subsequent TOFU
+/// pinning. NOTE: the captured value is `SHA256(SecKeyCopyExternalRepresentation
+/// output)`, NOT `SHA256(SubjectPublicKeyInfo DER)`. Stable per server
+/// identity, but not interchangeable with values produced by `openssl`.
+public final class LeafKeyPinningDelegate: NSObject, URLSessionDelegate, @unchecked Sendable {
   private let lock = NSLock()
-  private var _capturedSPKIHash: Data?
+  private var _capturedLeafKeyHash: Data?
 
-  public var capturedSPKIHash: Data? {
+  public var capturedLeafKeyHash: Data? {
     lock.lock()
     defer { lock.unlock() }
-    return _capturedSPKIHash
+    return _capturedLeafKeyHash
   }
 
   public func urlSession(
@@ -140,18 +195,21 @@ public final class SPKIPinningDelegate: NSObject, URLSessionDelegate, @unchecked
       return
     }
 
-    // Extract leaf certificate SPKI hash.
-    if let spkiHash = extractLeafSPKIHash(serverTrust: serverTrust) {
+    if let hash = extractLeafKeyHash(serverTrust: serverTrust) {
       lock.lock()
-      _capturedSPKIHash = spkiHash
+      _capturedLeafKeyHash = hash
       lock.unlock()
     }
 
     completionHandler(.useCredential, URLCredential(trust: serverTrust))
   }
 
-  private func extractLeafSPKIHash(serverTrust: SecTrust) -> Data? {
+  private func extractLeafKeyHash(serverTrust: SecTrust) -> Data? {
     // SecTrustCopyCertificateChain replaces SecTrustGetCertificateAtIndex (deprecated iOS 15).
+    // Hash is over `SecKeyCopyExternalRepresentation` output:
+    //   - ECDSA P-256: 65-byte uncompressed point (0x04 || X || Y)
+    //   - RSA: PKCS#1 RSAPublicKey DER
+    // NOT SubjectPublicKeyInfo DER.
     guard
       let chain = SecTrustCopyCertificateChain(serverTrust) as? [SecCertificate],
       let leaf = chain.first,
