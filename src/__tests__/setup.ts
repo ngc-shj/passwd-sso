@@ -1,4 +1,4 @@
-import { vi, beforeEach } from "vitest";
+import { vi, beforeEach, afterEach } from "vitest";
 import { _resetKeyProvider, getKeyProvider } from "@/lib/key-provider";
 
 // Passthrough mock for withRequestLog — prevents wrapper from accessing
@@ -13,6 +13,13 @@ vi.mock("@/lib/http/with-request-log", () => ({
 // Reset all mocks between tests
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+// Restore process.env stubs after every test. Per-test files MUST mutate env
+// via vi.stubEnv (never direct assignment); this afterEach reverts them so
+// later tests in the same file see the baseline values written below.
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 // Set required env vars for crypto-server.ts and Prisma
