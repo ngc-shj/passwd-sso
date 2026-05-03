@@ -21,6 +21,11 @@ vi.mock("@/components/share/share-error", () => ({
 }));
 
 // Stub crypto-utils helpers — keep behavior, but allow overrides per-test.
+// toArrayBuffer must mirror the production no-op cast (returns the Uint8Array
+// itself); returning a bare ArrayBuffer trips jsdom 28's webidl strict
+// BufferSource check on Node 20 (CI passes Uint8Array but rejects ArrayBuffer
+// to Web Crypto APIs, per the PR #425 salt fix). Local Mac Node 25 is more
+// permissive.
 vi.mock("@/lib/crypto/crypto-utils", () => ({
   hexDecode: (hex: string) => {
     const bytes = new Uint8Array(hex.length / 2);
@@ -29,8 +34,7 @@ vi.mock("@/lib/crypto/crypto-utils", () => ({
     }
     return bytes;
   },
-  toArrayBuffer: (b: Uint8Array) =>
-    b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength),
+  toArrayBuffer: (b: Uint8Array) => b,
 }));
 
 import { ShareE2EEntryView } from "./share-e2e-entry-view";
