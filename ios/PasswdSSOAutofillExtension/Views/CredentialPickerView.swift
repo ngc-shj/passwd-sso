@@ -14,19 +14,23 @@ struct CredentialPickerView: View {
 
   @State private var pendingAppSideSelection: VaultEntrySummary?
 
+  // The `.app` IdentifierType is iOS 26+ only and isn't present in iOS 18 SDKs.
+  // Reference its rawValue (1) instead of the symbol `.app` so this file
+  // compiles on Xcode 16 / iOS 18 SDK as well as Xcode 26 / iOS 26 SDK.
+  // Pre-iOS-26 devices never produce rawValue 1 (only `.URL` = 0), so the
+  // check is also safe at runtime.
+  private static let appServiceIdentifierTypeRawValue = 1
+
   private var isAppSideRequest: Bool {
-    if #available(iOS 26.2, *) {
-      return serviceIdentifiers.contains { $0.type == .app }
+    serviceIdentifiers.contains {
+      $0.type.rawValue == Self.appServiceIdentifierTypeRawValue
     }
-    // Before iOS 26.2 there is no .app type; use URL type only.
-    return false
   }
 
   private var bundleID: String? {
-    if #available(iOS 26.2, *) {
-      return serviceIdentifiers.first(where: { $0.type == .app })?.identifier
-    }
-    return nil
+    serviceIdentifiers.first {
+      $0.type.rawValue == Self.appServiceIdentifierTypeRawValue
+    }?.identifier
   }
 
   var body: some View {
