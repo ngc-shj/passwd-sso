@@ -141,6 +141,11 @@ export function PasskeyCredentialsCard() {
     if (!webAuthnAvailable || !vaultUnlocked || registering) return;
 
     setRegistering(true);
+    // Declared outside try so finally can zeroize on every code path including
+    // catch / mid-flow throw. secretKey IS the vault root; prfOutput is
+    // PRF-derived authenticator material — both must NOT linger on heap.
+    let secretKey: Uint8Array | null = null;
+    let prfOutput: Uint8Array | null = null;
     try {
       // 1. Get registration options from server
       const optionsRes = await fetchApi(API_PATH.WEBAUTHN_REGISTER_OPTIONS, {
@@ -161,15 +166,14 @@ export function PasskeyCredentialsCard() {
       const { options, prfSalt } = await optionsRes.json();
 
       // 2. Start WebAuthn registration with PRF
-      const { responseJSON, prfOutput } = await startPasskeyRegistration(
-        options,
-        prfSalt ?? undefined,
-      );
+      const reg = await startPasskeyRegistration(options, prfSalt ?? undefined);
+      const responseJSON = reg.responseJSON;
+      prfOutput = reg.prfOutput;
 
       // 3. If PRF supported and vault unlocked, encrypt secretKey
       let prfData: Record<string, string> = {};
       if (prfOutput) {
-        const secretKey = getSecretKey();
+        secretKey = getSecretKey();
         if (secretKey) {
           const wrapped = await wrapSecretKeyWithPrf(secretKey, prfOutput);
           prfData = {
@@ -177,8 +181,13 @@ export function PasskeyCredentialsCard() {
             prfSecretKeyIv: wrapped.iv,
             prfSecretKeyAuthTag: wrapped.authTag,
           };
+          // Eager zeroize on the success path (narrows the live-buffer
+          // window to wrap-completion); finally is the safety net for the
+          // throw paths. Null the locals so the finally check no-ops.
           secretKey.fill(0);
           prfOutput.fill(0);
+          secretKey = null;
+          prfOutput = null;
         }
       }
 
@@ -202,9 +211,12 @@ export function PasskeyCredentialsCard() {
         const result = await verifyRes.json();
         toast.success(t("registerSuccess"));
 
-        if (isNonDiscoverable(result) && !prfOutput) {
+        // Use reg.prfOutput (NOT the local prfOutput) — the local was nulled
+        // after eager zeroize on the success path; reg captures the original
+        // presence for warning UX.
+        if (isNonDiscoverable(result) && !reg.prfOutput) {
           toast.warning(t("nonDiscoverableNonPrfWarning"));
-        } else if (!prfOutput) {
+        } else if (!reg.prfOutput) {
           toast.warning(t("prfNotSupportedWarning"));
         }
 
@@ -234,6 +246,10 @@ export function PasskeyCredentialsCard() {
       console.error("[WebAuthn] Registration failed:", err);
       toast.error(t("registerError"));
     } finally {
+      // Defense-in-depth zeroize — covers (a) wrapSecretKeyWithPrf throws,
+      // (b) verifyRes rejects, (c) any unexpected exception inside try.
+      if (secretKey) secretKey.fill(0);
+      if (prfOutput) prfOutput.fill(0);
       setRegistering(false);
     }
   };
