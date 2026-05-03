@@ -28,6 +28,8 @@
 			<dict>
 				<key>ProvidesOneTimeCodes</key>
 				<true/>
+				<key>ProvidesPasswords</key>
+				<true/>
 			</dict>
 		</dict>
 		<key>NSExtensionPointIdentifier</key>

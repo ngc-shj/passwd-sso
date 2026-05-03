@@ -110,7 +110,12 @@ targets:
           NSExtensionPointIdentifier: com.apple.authentication-services-credential-provider-ui
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).CredentialProviderViewController
           NSExtensionAttributes:
+            # Both keys required so iOS lists this provider for password fills
+            # AND TOTP fills. With only ProvidesOneTimeCodes set, iOS treats
+            # the provider as TOTP-only and hides it from the password
+            # AutoFill picker.
             ASCredentialProviderExtensionCapabilities:
+              ProvidesPasswords: true
               ProvidesOneTimeCodes: true
     entitlements:
       path: PasswdSSOAutofillExtension/PasswdSSOAutofillExtension.entitlements
