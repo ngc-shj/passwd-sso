@@ -211,8 +211,23 @@ function makeRow(overrides: Partial<OutboxRow> = {}): OutboxRow {
   };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type TxFn = (tx: any) => Promise<unknown>;
+// Structural type matching the txClient mock in vi.hoisted (see line ~31).
+// Prisma's full Prisma.TransactionClient is too wide for the partial mock
+// the tests build (would force fully-typed delegate stubs). The tests need
+// the SAME `Mock<Procedure>` shape that vitest infers for inline `vi.fn()`
+// — anything narrower fails the assignability check at the
+// `mockTransaction.mockImplementation` call sites. Per
+// ~/.claude/rules/typescript/coding-style.md: avoids `any` by binding to
+// vitest's official Mock type.
+import type { Mock } from "vitest";
+interface MockTxClient {
+  $executeRaw: Mock;
+  $queryRawUnsafe: Mock;
+  $executeRawUnsafe: Mock;
+  auditDeliveryTarget: { findMany: Mock };
+  auditDelivery: { upsert: Mock; findMany: Mock; update: Mock };
+}
+type TxFn = (tx: MockTxClient) => Promise<unknown>;
 
 /**
  * Build a $transaction implementation that stops the worker after the first
@@ -523,7 +538,7 @@ describe("error paths", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     let txCallCount = 0;
     mockTransaction.mockImplementation(
-      async function (fn: (tx: unknown) => Promise<unknown>) {
+      async function (fn: TxFn) {
         txCallCount++;
         if (txCallCount === 2) {
           throw new Error("deliver error");
@@ -562,7 +577,7 @@ describe("error paths", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     let txCallCount = 0;
     mockTransaction.mockImplementation(
-      async function (fn: (tx: unknown) => Promise<unknown>) {
+      async function (fn: TxFn) {
         txCallCount++;
         if (txCallCount === 2) {
           throw new Error("final failure");
@@ -598,7 +613,7 @@ describe("error paths", () => {
 
     let txCallCount = 0;
     mockTransaction.mockImplementation(
-      async function (fn: (tx: unknown) => Promise<unknown>) {
+      async function (fn: TxFn) {
         txCallCount++;
         if (txCallCount === 2) {
           throw new Error("unexpected crash");
@@ -626,7 +641,7 @@ describe("error paths", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     let txCallCount = 0;
     mockTransaction.mockImplementation(
-      async function (fn: (tx: unknown) => Promise<unknown>) {
+      async function (fn: TxFn) {
         txCallCount++;
         if (txCallCount === 2) {
           throw new Error("fatal error");
@@ -1021,7 +1036,7 @@ describe("reaper — invoked on first loop tick", () => {
 
     let txCallCount = 0;
     mockTransaction.mockImplementation(
-      async function (fn: (tx: unknown) => Promise<unknown>) {
+      async function (fn: TxFn) {
         txCallCount++;
 
         // Phase 3 flow:
@@ -1089,7 +1104,7 @@ describe("reaper — invoked on first loop tick", () => {
 
     let txCallCount = 0;
     mockTransaction.mockImplementation(
-      async function (fn: (tx: unknown) => Promise<unknown>) {
+      async function (fn: TxFn) {
         txCallCount++;
 
         // Phase 3 flow:
@@ -1153,7 +1168,7 @@ describe("reaper — invoked on first loop tick", () => {
 
     let txCallCount = 0;
     mockTransaction.mockImplementation(
-      async function (fn: (tx: unknown) => Promise<unknown>) {
+      async function (fn: TxFn) {
         txCallCount++;
 
         // Phase 3 flow:
@@ -1214,7 +1229,7 @@ describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () =
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     let txCallCount = 0;
     mockTransaction.mockImplementation(
-      async function (fn: (tx: unknown) => Promise<unknown>) {
+      async function (fn: TxFn) {
         txCallCount++;
         // tx 1 = claimBatch (returns [row])
         // tx 2 = deliverRow — throw to trigger recordError
@@ -1260,7 +1275,7 @@ describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () =
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     let txCallCount = 0;
     mockTransaction.mockImplementation(
-      async function (fn: (tx: unknown) => Promise<unknown>) {
+      async function (fn: TxFn) {
         txCallCount++;
         // tx 1 = claimBatch (returns [row])
         // tx 2 = deliverRow — throw

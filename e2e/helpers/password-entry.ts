@@ -4,6 +4,7 @@
  * Entry data is AES-256-GCM encrypted using the same key the user's vault
  * was set up with, so the browser can decrypt it after vault unlock.
  */
+import { randomBytes } from "node:crypto";
 import { aesGcmEncrypt } from "./crypto";
 import { E2E_TENANT, getPool } from "./db";
 
@@ -82,5 +83,71 @@ export async function seedPasswordEntry(
       now,
       now,
     ]
+  );
+}
+
+export interface SeedAttachmentOptions {
+  /** UUIDv4 row id. */
+  id: string;
+  /** Owning password entry id (must already exist). */
+  passwordEntryId: string;
+  /** Tenant the entry belongs to (defaults to E2E_TENANT.id). */
+  tenantId?: string;
+  /** User id of the entry owner (created_by_id on the row). */
+  createdById: string;
+  /** Filename to surface in the UI (default: "e2e-seed.txt"). */
+  filename?: string;
+}
+
+/**
+ * Seed an Attachment row for E2E tests of the personal-entry attachment flow
+ * (#433/A.4). The encrypted bytes here are placeholder random data — the test
+ * scenarios verify the row is COUNTED + the user-facing acknowledge step
+ * fires, not that the bytes decrypt cleanly. After rotation, downloads of
+ * such rows are intentionally unrecoverable (Phase B will add CEK
+ * indirection — see issue #437).
+ *
+ * Mirrors the columns required by `POST /api/passwords/[id]/attachments`
+ * (encryptedData / iv / authTag / aadVersion=1 / encryptionMode=0).
+ */
+export async function seedAttachment(
+  options: SeedAttachmentOptions,
+): Promise<void> {
+  const p = getPool();
+  const tenantId = options.tenantId ?? E2E_TENANT.id;
+  const filename = options.filename ?? "e2e-seed.txt";
+  const now = new Date().toISOString();
+
+  // Placeholder encrypted bytes — content does not need to be decryptable
+  // for the rotation-side count + acknowledge-flow assertions in #433.
+  const encryptedData = randomBytes(64);
+  const iv = randomBytes(12).toString("hex");
+  const authTag = randomBytes(16).toString("hex");
+
+  await p.query(
+    `INSERT INTO attachments (
+      id, password_entry_id, tenant_id, created_by_id,
+      filename, content_type, size_bytes,
+      encrypted_data, iv, auth_tag,
+      key_version, aad_version, encryption_mode,
+      created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+    ON CONFLICT (id) DO NOTHING`,
+    [
+      options.id,
+      options.passwordEntryId,
+      tenantId,
+      options.createdById,
+      filename,
+      "text/plain",
+      encryptedData.length,
+      encryptedData,
+      iv,
+      authTag,
+      1, // key_version
+      1, // aad_version (#433: route requires exactly 1)
+      0, // encryption_mode (0 = direct vault key wrap, the personal-entry default)
+      now,
+    ],
   );
 }

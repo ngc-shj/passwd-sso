@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaPasswordEntry, mockPrismaPasswordEntryHistory, mockPrismaUser, mockWithUserTenantRls, mockRateLimiterCheck } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaPasswordEntry, mockPrismaPasswordEntryHistory, mockPrismaUser, mockPrismaAttachment, mockWithUserTenantRls, mockRateLimiterCheck } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaPasswordEntry: { findMany: vi.fn() },
   mockPrismaPasswordEntryHistory: { findMany: vi.fn() },
   mockPrismaUser: { findUnique: vi.fn() },
+  // attachment.count drives the pre-flight data-loss warning in the rotation
+  // dialog. See plan #433 / A.4 + Step 7a.
+  mockPrismaAttachment: { count: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockRateLimiterCheck: vi.fn(),
 }));
@@ -16,6 +19,7 @@ vi.mock("@/lib/prisma", () => ({
     passwordEntry: mockPrismaPasswordEntry,
     passwordEntryHistory: mockPrismaPasswordEntryHistory,
     user: mockPrismaUser,
+    attachment: mockPrismaAttachment,
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -66,7 +70,8 @@ describe("GET /api/vault/rotate-key/data", () => {
       ecdhPrivateKeyIv: "a".repeat(24),
       ecdhPrivateKeyAuthTag: "b".repeat(32),
     });
-    // withUserTenantRls resolves all three queries in Promise.all
+    mockPrismaAttachment.count.mockResolvedValue(0);
+    // withUserTenantRls resolves all four queries in Promise.all
     mockWithUserTenantRls.mockImplementation(async (_userId: string, fn: () => unknown) => fn());
   });
 
@@ -98,6 +103,19 @@ describe("GET /api/vault/rotate-key/data", () => {
     expect(json.historyEntries[0].id).toBe("00000000-0000-4000-a000-000000000002");
     expect(json.ecdhPrivateKey).not.toBeNull();
     expect(json.ecdhPrivateKey.encryptedEcdhPrivateKey).toBe("x".repeat(100));
+    // attachmentsAffected drives the rotation dialog's data-loss warning
+    // (#433/A.4 + post-impl review T4).
+    expect(json.attachmentsAffected).toBe(0);
+  });
+
+  it("returns attachmentsAffected reflecting personal-entry attachment count", async () => {
+    mockPrismaAttachment.count.mockResolvedValue(3);
+    const res = await GET(
+      createRequest("GET", "http://localhost/api/vault/rotate-key/data")
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.attachmentsAffected).toBe(3);
   });
 
   it("returns null ecdhPrivateKey when user has no ECDH keys", async () => {

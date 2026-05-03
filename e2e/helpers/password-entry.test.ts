@@ -183,3 +183,38 @@ describe("seedPasswordEntry", () => {
     expect(params1[4]).not.toBe(params2[4]);
   });
 });
+
+describe("seedAttachment", () => {
+  beforeEach(() => {
+    mockQuery.mockClear();
+    mockQuery.mockResolvedValue({ rows: [] });
+  });
+
+  it("inserts an attachments row with the rotation-route-required shape", async () => {
+    const { seedAttachment } = await import("./password-entry");
+    await seedAttachment({
+      id: "00000000-0000-4000-a000-000000000abc",
+      passwordEntryId: "00000000-0000-4000-a000-000000000def",
+      createdById: "00000000-0000-4000-a000-000000000123",
+    });
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+    const params = mockQuery.mock.calls[0][1] as unknown[];
+    // Critical invariants: aad_version=1 (the personal-attachment route
+    // enforces ===1) and encryption_mode=0 (direct vault key wrap, the
+    // personal default). Drift on either would let the row pass insertion
+    // but break the rotation route's count semantics.
+    expect(params[11]).toBe(1); // aad_version
+    expect(params[12]).toBe(0); // encryption_mode
+  });
+
+  it("uses the supplied filename when provided (else default)", async () => {
+    const { seedAttachment } = await import("./password-entry");
+    await seedAttachment({
+      id: "00000000-0000-4000-a000-000000000abc",
+      passwordEntryId: "00000000-0000-4000-a000-000000000def",
+      createdById: "00000000-0000-4000-a000-000000000123",
+      filename: "custom.bin",
+    });
+    expect(mockQuery.mock.calls[0][1][4]).toBe("custom.bin");
+  });
+});

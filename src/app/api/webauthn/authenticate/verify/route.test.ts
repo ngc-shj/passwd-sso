@@ -6,27 +6,13 @@ import { createRequest, parseResponse } from "@/__tests__/helpers/request-builde
 const {
   mockAuth,
   mockRateLimiterCheck,
-  mockGetRedis,
-  mockRedisGetdel,
-  mockPrismaCredentialFindFirst,
-  mockPrismaExecuteRaw,
   mockWithUserTenantRls,
-  mockVerifyAuthentication,
-  mockGetRpOrigin,
-  mockBase64urlToUint8Array,
-  mockParseDeviceFromUserAgent,
+  mockVerifyAuthenticationAssertion,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRateLimiterCheck: vi.fn(),
-  mockGetRedis: vi.fn(),
-  mockRedisGetdel: vi.fn(),
-  mockPrismaCredentialFindFirst: vi.fn(),
-  mockPrismaExecuteRaw: vi.fn(),
   mockWithUserTenantRls: vi.fn(),
-  mockVerifyAuthentication: vi.fn(),
-  mockGetRpOrigin: vi.fn(() => "https://example.com"),
-  mockBase64urlToUint8Array: vi.fn((s: string) => new Uint8Array(Buffer.from(s, "base64url"))),
-  mockParseDeviceFromUserAgent: vi.fn(() => "Chrome on macOS"),
+  mockVerifyAuthenticationAssertion: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -35,15 +21,8 @@ vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
 
-vi.mock("@/lib/redis", () => ({
-  getRedis: mockGetRedis,
-}));
-
 vi.mock("@/lib/prisma", () => ({
-  prisma: {
-    webAuthnCredential: { findFirst: mockPrismaCredentialFindFirst },
-    $executeRaw: mockPrismaExecuteRaw,
-  },
+  prisma: {},
 }));
 
 vi.mock("@/lib/tenant-context", () => ({
@@ -51,13 +30,7 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 
 vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
-  verifyAuthentication: mockVerifyAuthentication,
-  getRpOrigin: mockGetRpOrigin,
-  base64urlToUint8Array: mockBase64urlToUint8Array,
-}));
-
-vi.mock("@/lib/parse-user-agent", () => ({
-  parseDeviceFromUserAgent: mockParseDeviceFromUserAgent,
+  verifyAuthenticationAssertion: mockVerifyAuthenticationAssertion,
 }));
 
 vi.mock("@/lib/http/with-request-log", () => ({
@@ -96,231 +69,130 @@ import { POST } from "./route";
 
 const ROUTE_URL = "http://localhost:3000/api/webauthn/authenticate/verify";
 
-function makeAuthResponse(overrides?: Record<string, unknown>) {
+const validBody = {
+  response: { id: "cred-1", rawId: "cred-1", type: "public-key", response: {} },
+};
+
+function successResult(prfPresent = true) {
   return {
-    id: "cred-id-1",
-    rawId: "cred-id-1",
-    type: "public-key",
-    response: {
-      clientDataJSON: "Y2xpZW50RGF0YQ",
-      authenticatorData: "YXV0aERhdGE",
-      signature: "c2lnbmF0dXJl",
+    ok: true as const,
+    credentialId: "cred-1",
+    storedPrf: {
+      encryptedSecretKey: prfPresent ? "encrypted-key" : null,
+      iv: prfPresent ? "iv-hex" : null,
+      authTag: prfPresent ? "tag-hex" : null,
     },
-    ...overrides,
   };
 }
-
-function makeBody(overrides?: Record<string, unknown>) {
-  return {
-    response: makeAuthResponse(),
-    ...overrides,
-  };
-}
-
-const mockStoredCredential = {
-  id: "db-cred-id",
-  credentialId: "cred-id-1",
-  publicKey: "cHVibGljS2V5",
-  counter: BigInt(5),
-  transports: ["internal", "hybrid"],
-  prfEncryptedSecretKey: null,
-  prfSecretKeyIv: null,
-  prfSecretKeyAuthTag: null,
-};
-
-const mockVerificationResult = {
-  verified: true,
-  authenticationInfo: {
-    newCounter: 6,
-  },
-};
-
-// ── Setup ────────────────────────────────────────────────────
 
 describe("POST /api/webauthn/authenticate/verify", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-
-    vi.stubEnv("WEBAUTHN_RP_ID", "example.com");
-
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRateLimiterCheck.mockResolvedValue({ allowed: true });
-    mockGetRedis.mockReturnValue({ getdel: mockRedisGetdel });
-    mockRedisGetdel.mockResolvedValue("test-challenge");
-    mockPrismaCredentialFindFirst.mockResolvedValue(mockStoredCredential);
-    mockPrismaExecuteRaw.mockResolvedValue(1);
-    mockVerifyAuthentication.mockResolvedValue(mockVerificationResult);
-    // withUserTenantRls: execute the callback directly
-    mockWithUserTenantRls.mockImplementation(
-      (_userId: string, fn: () => unknown) => fn(),
-    );
+    // withUserTenantRls forwards to its callback
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockWithUserTenantRls.mockImplementation(async (_uid: string, fn: any) => fn());
   });
-
-  // ── Auth & guards ────────────────────────────────────────────
 
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
-
-    const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
-    const { status, json } = await parseResponse(await POST(req));
-
+    const res = await POST(createRequest("POST", ROUTE_URL, { body: validBody }));
+    const { status, json: body } = await parseResponse(res);
     expect(status).toBe(401);
-    expect(json.error).toBe("UNAUTHORIZED");
+    expect(body.error).toBe("UNAUTHORIZED");
+    expect(mockVerifyAuthenticationAssertion).not.toHaveBeenCalled();
   });
 
   it("returns 429 when rate limited", async () => {
-    mockRateLimiterCheck.mockResolvedValue({ allowed: false });
-
-    const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
-    const { status, json } = await parseResponse(await POST(req));
-
+    mockRateLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 5000 });
+    const res = await POST(createRequest("POST", ROUTE_URL, { body: validBody }));
+    const { status } = await parseResponse(res);
     expect(status).toBe(429);
-    expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+    expect(mockVerifyAuthenticationAssertion).not.toHaveBeenCalled();
   });
-
-  it("returns 503 when Redis unavailable", async () => {
-    mockGetRedis.mockReturnValue(null);
-
-    const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
-    const { status, json } = await parseResponse(await POST(req));
-
-    expect(status).toBe(503);
-    expect(json.error).toBe("SERVICE_UNAVAILABLE");
-  });
-
-  // ── Validation ───────────────────────────────────────────────
 
   it("returns 400 for invalid body (missing response field)", async () => {
-    const req = createRequest("POST", ROUTE_URL, { body: { notResponse: "foo" } });
-    const { status, json } = await parseResponse(await POST(req));
-
+    const res = await POST(createRequest("POST", ROUTE_URL, { body: { wrong: "field" } }));
+    const { status, json: body } = await parseResponse(res);
     expect(status).toBe(400);
-    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(body.error).toBe("VALIDATION_ERROR");
+    expect(mockVerifyAuthenticationAssertion).not.toHaveBeenCalled();
   });
 
-  it("returns 400 when challenge expired/missing from Redis", async () => {
-    mockRedisGetdel.mockResolvedValue(null);
-
-    const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
-    const { status, json } = await parseResponse(await POST(req));
-
-    expect(status).toBe(400);
-    expect(json.error).toBe("VALIDATION_ERROR");
-    expect(json.details).toMatch(/challenge expired/i);
+  it("delegates assertion verification to verifyAuthenticationAssertion with sign-in challenge key", async () => {
+    mockVerifyAuthenticationAssertion.mockResolvedValue(successResult(false));
+    await POST(createRequest("POST", ROUTE_URL, { body: validBody, headers: { "user-agent": "Test/1.0" } }));
+    expect(mockVerifyAuthenticationAssertion).toHaveBeenCalledWith(
+      expect.anything(), // prisma instance
+      "user-1",
+      validBody.response,
+      "webauthn:challenge:authenticate:user-1",
+      "Test/1.0",
+    );
+    // The route MUST run the helper inside withUserTenantRls so RLS context covers
+    // the credential lookup and counter CAS — see helper's caller obligations.
+    expect(mockWithUserTenantRls).toHaveBeenCalledWith("user-1", expect.any(Function));
   });
 
-  it("returns 503 when WEBAUTHN_RP_ID not set", async () => {
-    vi.stubEnv("WEBAUTHN_RP_ID", "");
-    // Force the env to be falsy by deleting it
-    delete process.env.WEBAUTHN_RP_ID;
-
-    const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
-    const { status, json } = await parseResponse(await POST(req));
-
-    expect(status).toBe(503);
-    expect(json.error).toBe("SERVICE_UNAVAILABLE");
-  });
-
-  it("returns 400 when credential ID missing in response", async () => {
-    const req = createRequest("POST", ROUTE_URL, {
-      body: { response: { type: "public-key" } }, // no id field
+  it("propagates helper failure status + code (e.g., 404 NOT_FOUND)", async () => {
+    mockVerifyAuthenticationAssertion.mockResolvedValue({
+      ok: false,
+      status: 404,
+      code: "NOT_FOUND",
+      details: "Credential not found",
     });
-    const { status, json } = await parseResponse(await POST(req));
-
-    expect(status).toBe(400);
-    expect(json.error).toBe("VALIDATION_ERROR");
-    expect(json.details).toMatch(/missing credential id/i);
-  });
-
-  it("returns 404 when credential not found in DB", async () => {
-    mockPrismaCredentialFindFirst.mockResolvedValue(null);
-
-    const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
-    const { status, json } = await parseResponse(await POST(req));
-
+    const res = await POST(createRequest("POST", ROUTE_URL, { body: validBody }));
+    const { status, json: body } = await parseResponse(res);
     expect(status).toBe(404);
-    expect(json.error).toBe("NOT_FOUND");
+    expect(body.error).toBe("NOT_FOUND");
+    expect(body.details).toBe("Credential not found");
   });
 
-  // ── Verification ─────────────────────────────────────────────
-
-  it("returns 400 when verification throws", async () => {
-    mockVerifyAuthentication.mockRejectedValue(new Error("bad signature"));
-
-    const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
-    const { status, json } = await parseResponse(await POST(req));
-
-    expect(status).toBe(400);
-    expect(json.error).toBe("VALIDATION_ERROR");
-  });
-
-  it("returns 400 when verification.verified is false", async () => {
-    mockVerifyAuthentication.mockResolvedValue({
-      verified: false,
-      authenticationInfo: { newCounter: 6 },
+  it("propagates helper 503 (e.g., Redis unavailable)", async () => {
+    mockVerifyAuthenticationAssertion.mockResolvedValue({
+      ok: false,
+      status: 503,
+      code: "SERVICE_UNAVAILABLE",
     });
+    const res = await POST(createRequest("POST", ROUTE_URL, { body: validBody }));
+    const { status, json: body } = await parseResponse(res);
+    expect(status).toBe(503);
+    expect(body.error).toBe("SERVICE_UNAVAILABLE");
+  });
 
-    const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
-    const { status, json } = await parseResponse(await POST(req));
-
+  it("falls back to VALIDATION_ERROR when helper code is unknown", async () => {
+    mockVerifyAuthenticationAssertion.mockResolvedValue({
+      ok: false,
+      status: 400,
+      code: "SOME_UNKNOWN_CODE",
+    });
+    const res = await POST(createRequest("POST", ROUTE_URL, { body: validBody }));
+    const { status, json: body } = await parseResponse(res);
     expect(status).toBe(400);
-    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(body.error).toBe("VALIDATION_ERROR");
   });
 
-  it("returns 400 on counter mismatch (CAS check fails — 0 rows updated)", async () => {
-    mockPrismaExecuteRaw.mockResolvedValue(0);
-
-    const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
-    const { status, json } = await parseResponse(await POST(req));
-
-    expect(status).toBe(400);
-    expect(json.error).toBe("VALIDATION_ERROR");
-    expect(json.details).toMatch(/counter mismatch/i);
-  });
-
-  it("returns { verified: true } on success", async () => {
-    const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
-    const { status, json } = await parseResponse(await POST(req));
-
+  it("returns { verified: true, credentialId } on success without PRF", async () => {
+    mockVerifyAuthenticationAssertion.mockResolvedValue(successResult(false));
+    const res = await POST(createRequest("POST", ROUTE_URL, { body: validBody }));
+    const { status, json: body } = await parseResponse(res);
     expect(status).toBe(200);
-    expect(json.verified).toBe(true);
-    expect(json.credentialId).toBe("cred-id-1");
-  });
-
-  it("does not include prf field when credential has no PRF data", async () => {
-    const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
-    const { status, json } = await parseResponse(await POST(req));
-
-    expect(status).toBe(200);
-    expect(json.prf).toBeUndefined();
+    expect(body.verified).toBe(true);
+    expect(body.credentialId).toBe("cred-1");
+    expect(body.prf).toBeUndefined();
   });
 
   it("returns PRF data when credential has PRF fields", async () => {
-    mockPrismaCredentialFindFirst.mockResolvedValue({
-      ...mockStoredCredential,
-      prfEncryptedSecretKey: "encrypted-key",
-      prfSecretKeyIv: "prf-iv",
-      prfSecretKeyAuthTag: "prf-auth-tag",
-    });
-
-    const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
-    const { status, json } = await parseResponse(await POST(req));
-
+    mockVerifyAuthenticationAssertion.mockResolvedValue(successResult(true));
+    const res = await POST(createRequest("POST", ROUTE_URL, { body: validBody }));
+    const { status, json: body } = await parseResponse(res);
     expect(status).toBe(200);
-    expect(json.verified).toBe(true);
-    expect(json.prf).toEqual({
+    expect(body.verified).toBe(true);
+    expect(body.prf).toEqual({
       prfEncryptedSecretKey: "encrypted-key",
-      prfSecretKeyIv: "prf-iv",
-      prfSecretKeyAuthTag: "prf-auth-tag",
+      prfSecretKeyIv: "iv-hex",
+      prfSecretKeyAuthTag: "tag-hex",
     });
-  });
-
-  it("updates counter and lastUsedAt on success", async () => {
-    const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
-    await POST(req);
-
-    expect(mockPrismaExecuteRaw).toHaveBeenCalledTimes(1);
-    // withUserTenantRls should have been called twice: findFirst + executeRaw
-    expect(mockWithUserTenantRls).toHaveBeenCalledTimes(2);
   });
 });

@@ -82,6 +82,23 @@ export async function notifyUnlockFailure(): Promise<void> {
 // Re-export so existing consumers can keep importing from vault-context
 export type { VaultStatus };
 
+/**
+ * Side-effects of a vault key rotation, surfaced from the API to the dialog
+ * so the UI can render operator banners (#433 / P3-F2). Counts of zero mean
+ * "nothing was revoked"; null means "the post-tx invalidation call failed —
+ * tokens may still be live, advise manual revocation".
+ */
+export interface RotationEffects {
+  recoveryKeyInvalidated: boolean;
+  emergencyGrantsCleared: number;
+  prfCredentialsCleared: number;
+  attachmentsAffected: number;
+  invalidatedMcpAccessTokens: number | null;
+  invalidatedMcpRefreshTokens: number | null;
+  cacheTombstoneFailures: number | null;
+  invalidationFailed: boolean;
+}
+
 export interface TenantPasswordPolicy {
   minPasswordLength: number;
   requireUppercase: boolean;
@@ -95,6 +112,7 @@ interface VaultContextValue {
   encryptionKey: CryptoKey | null;
   userId: string | null;
   hasRecoveryKey: boolean;
+  recoveryKeyInvalidated: boolean;
   tenantPolicy: TenantPasswordPolicy;
   unlock: (passphrase: string) => Promise<boolean>;
   unlockWithPasskey: () => Promise<boolean>;
@@ -102,10 +120,15 @@ interface VaultContextValue {
   lock: () => void;
   setup: (passphrase: string) => Promise<void>;
   changePassphrase: (currentPassphrase: string, newPassphrase: string) => Promise<void>;
-  rotateKey: (passphrase: string, onProgress?: (phase: string, current: number, total: number) => void) => Promise<void>;
+  rotateKey: (
+    passphrase: string,
+    onProgress?: (phase: string, current: number, total: number) => void,
+    options?: { acknowledgeAttachmentDataLoss?: boolean },
+  ) => Promise<RotationEffects | null>;
   verifyPassphrase: (passphrase: string) => Promise<boolean>;
   getSecretKey: () => Uint8Array | null;
   getAccountSalt: () => Uint8Array | null;
+  getKeyVersion: () => number;
   setHasRecoveryKey: (value: boolean) => void;
   getEcdhPrivateKeyBytes: () => Uint8Array | null;
   getEcdhPublicKeyJwk: () => string | null;
@@ -124,6 +147,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const [vaultStatus, setVaultStatus] = useState<VaultStatus>(VAULT_STATUS.LOADING);
   const [encryptionKey, setEncryptionKey] = useState<CryptoKey | null>(null);
   const [hasRecoveryKey, setHasRecoveryKey] = useState(false);
+  const [recoveryKeyInvalidated, setRecoveryKeyInvalidated] = useState(false);
   const [autoLockMinutes, setAutoLockMinutes] = useState<number | null>(null);
   const [tenantPolicy, setTenantPolicy] = useState<TenantPasswordPolicy>({
     minPasswordLength: 0,
@@ -159,6 +183,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         }
         const data = await res.json();
         setHasRecoveryKey(!!data.hasRecoveryKey);
+        setRecoveryKeyInvalidated(!!data.recoveryKeyInvalidated);
         // Apply tenant-configured vault auto-lock timeout
         if (data.vaultAutoLockMinutes != null && data.vaultAutoLockMinutes > 0) {
           setAutoLockMinutes(data.vaultAutoLockMinutes);
@@ -794,6 +819,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     async (
       passphrase: string,
       onProgress?: (phase: string, current: number, total: number) => void,
+      options?: { acknowledgeAttachmentDataLoss?: boolean },
     ) => {
       if (!secretKeyRef.current || !accountSaltRef.current || !encryptionKey) {
         throw new Error("Vault must be unlocked to rotate key");
@@ -809,7 +835,25 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         const err = await dataRes.json().catch(() => ({}));
         throw err;
       }
-      const { entries, historyEntries } = await dataRes.json();
+      const { entries, historyEntries, attachmentsAffected } = await dataRes.json();
+
+      // Personal-entry attachments are encrypted with the current encryption
+      // key directly. Phase A leaves them in place after rotation (Phase B
+      // will introduce per-attachment CEK indirection). To avoid silently
+      // destroying the user's attachments, we surface the count BEFORE the
+      // expensive re-encryption work and require an explicit acknowledgement.
+      // The dialog catches this error, shows a confirm step, and retries with
+      // acknowledgeAttachmentDataLoss: true. See plan #433 / A.4.
+      if (
+        typeof attachmentsAffected === "number" &&
+        attachmentsAffected > 0 &&
+        options?.acknowledgeAttachmentDataLoss !== true
+      ) {
+        throw {
+          error: "ATTACHMENT_DATA_LOSS_NOT_ACKNOWLEDGED",
+          attachmentsAffected,
+        };
+      }
 
       // 3. Generate new secret key
       const newSecretKey = generateSecretKey();
@@ -934,6 +978,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           encryptedEcdhPrivateKey: hexEncode(ecdhEncrypted.ciphertext),
           ecdhPrivateKeyIv: ecdhEncrypted.iv,
           ecdhPrivateKeyAuthTag: ecdhEncrypted.authTag,
+          ...(options?.acknowledgeAttachmentDataLoss === true
+            ? { acknowledgeAttachmentDataLoss: true }
+            : {}),
         }),
       });
 
@@ -958,6 +1005,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       // did not change, only the wrapping key changed.
       newSecretKey.fill(0);
       setEncryptionKey(newEncKey);
+      // The dialog uses these counts to surface operator banners.
+      const effects = (result as { rotationEffects?: RotationEffects }).rotationEffects;
+      return effects ?? null;
     },
     [encryptionKey, session?.user?.id],
   );
@@ -982,6 +1032,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     return accountSaltRef.current ? new Uint8Array(accountSaltRef.current) : null;
   }, []);
 
+  const getKeyVersion = useCallback(() => keyVersionRef.current, []);
+
   const getEcdhPrivateKeyBytes = useCallback(() => {
     return ecdhPrivateKeyBytesRef.current ? new Uint8Array(ecdhPrivateKeyBytesRef.current) : null;
   }, []);
@@ -999,6 +1051,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         encryptionKey,
         userId: session?.user?.id ?? null,
         hasRecoveryKey,
+        recoveryKeyInvalidated,
         tenantPolicy,
         unlock,
         unlockWithPasskey,
@@ -1010,6 +1063,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         verifyPassphrase,
         getSecretKey,
         getAccountSalt,
+        getKeyVersion,
         setHasRecoveryKey,
         getEcdhPrivateKeyBytes,
         getEcdhPublicKeyJwk,

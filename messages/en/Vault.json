@@ -46,6 +46,7 @@
   "goToSignIn": "Sign In",
   "recoveryKey": "Recovery Key",
   "recoveryKeyBannerMessage": "Set up a Recovery Key to protect against passphrase loss.",
+  "recoveryKeyBannerMessageInvalidated": "Your previous Recovery Key was invalidated by a recent vault key rotation. Regenerate one now to restore protection against passphrase loss.",
   "recoveryKeyBannerAction": "Set up now",
   "recoveryKeyBannerDismiss": "Dismiss recovery key banner",
   "recoveryKeyDialogTitle": "Recovery Key",
@@ -72,5 +73,10 @@
   "rotateKeyPassphrasePlaceholder": "Enter your current passphrase",
   "rotateKeyProgressEntries": "Re-encrypting entries…",
   "rotateKeyProgressHistory": "Re-encrypting history…",
-  "rotateKeyProgress": "{current} / {total}"
+  "rotateKeyProgress": "{current} / {total}",
+  "rotateKeyAttachmentDataLossWarning": "Your vault has {count, plural, one {# attachment} other {# attachments}} encrypted with the current key. After rotation they will be unreadable. Cancel to export them first, or click below to acknowledge and proceed.",
+  "rotateKeyAttachmentAcknowledge": "Acknowledge data loss and rotate",
+  "rotateKeyCacheTombstoneFailureBanner": "Some session caches did not invalidate during rotation (Redis outage). Sign out other devices manually and revoke any active sessions from Settings → Sessions.",
+  "rotateKeyInvalidationFailedBanner": "Token revocation after rotation could not be confirmed. Pre-rotation API keys / MCP tokens may still be live; revoke them manually from Settings.",
+  "rotateKeyMcpRevokedBanner": "{count, plural, one {# pre-rotation MCP token was} other {# pre-rotation MCP tokens were}} revoked. You may need to re-mint at /tenant/service-accounts."
 }

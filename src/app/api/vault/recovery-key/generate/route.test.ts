@@ -59,6 +59,7 @@ const userWithVault = {
   passphraseVerifierVersion: 1,
   recoveryVerifierVersion: 1,
   recoveryKeySetAt: null,
+  recoveryKeyInvalidatedAt: null,
   tenantId: "test-tenant-id",
 };
 
@@ -170,6 +171,29 @@ describe("POST /api/vault/recovery-key/generate", () => {
     mockPrismaUser.findUnique.mockResolvedValue({
       ...userWithVault,
       recoveryKeySetAt: new Date("2025-01-01"),
+      recoveryKeyInvalidatedAt: null,
+    });
+
+    const res = await POST(createRequest("POST", URL, { body: validBody }));
+    expect(res.status).toBe(200);
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "RECOVERY_KEY_REGENERATED",
+      }),
+    );
+  });
+
+  it("logs RECOVERY_KEY_REGENERATED when recovery was invalidated by rotation (#433/F21+S5)", async () => {
+    // Post-rotation state: recoveryKeySetAt was cleared during rotation,
+    // recoveryKeyInvalidatedAt was stamped. The user clicks regenerate.
+    // Per F21 the action MUST be REGENERATED (not CREATED) so the audit
+    // trail and dialog UX both reflect "lost via rotation, re-generating"
+    // instead of first-time setup.
+    mockPrismaUser.findUnique.mockResolvedValue({
+      ...userWithVault,
+      recoveryKeySetAt: null,
+      recoveryKeyInvalidatedAt: new Date(),
     });
 
     const res = await POST(createRequest("POST", URL, { body: validBody }));

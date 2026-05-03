@@ -64,6 +64,7 @@ async function handlePOST(request: NextRequest) {
         passphraseVerifierHmac: true,
         passphraseVerifierVersion: true,
         recoveryKeySetAt: true,
+        recoveryKeyInvalidatedAt: true,
         keyVersion: true,
         tenantId: true,
       },
@@ -116,12 +117,16 @@ async function handlePOST(request: NextRequest) {
         recoveryVerifierHmac: hmacVerifier(data.verifierHash),
         recoveryVerifierVersion: VERIFIER_VERSION,
         recoveryKeySetAt: new Date(),
+        // Clear the rotation-invalidated marker; if rotation had previously
+        // invalidated the recovery key, this re-generation supersedes it.
+        recoveryKeyInvalidatedAt: null,
       },
     }),
   );
 
-  // Audit log
-  const isRegeneration = !!user.recoveryKeySetAt;
+  // Audit log: treat post-rotation invalidation as a prior setup so the user
+  // sees regenerate-flow wording (not first-time setup) — see plan #433 / F21.
+  const isRegeneration = !!user.recoveryKeySetAt || !!user.recoveryKeyInvalidatedAt;
   await logAuditAsync({
     ...personalAuditBase(request, session.user.id),
     action: isRegeneration ? AUDIT_ACTION.RECOVERY_KEY_REGENERATED : AUDIT_ACTION.RECOVERY_KEY_CREATED,

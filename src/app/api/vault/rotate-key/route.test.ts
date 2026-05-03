@@ -9,8 +9,19 @@ const mockPasswordEntryHistory = {
   findMany: vi.fn(),
   updateMany: vi.fn(),
 };
+const mockAttachment = {
+  findMany: vi.fn(),
+  count: vi.fn(),
+};
+const mockWebAuthnCredential = {
+  updateMany: vi.fn(),
+};
+const mockUserTx = {
+  findUnique: vi.fn(),
+  update: vi.fn(),
+};
 
-const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockMarkStale, mockWithUserTenantRls, mockRateLimiterCheck } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockMarkStale, mockWithUserTenantRls, mockRateLimiterCheck, mockInvalidateUserSessions } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaUser: {
     findUnique: vi.fn(),
@@ -23,6 +34,7 @@ const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockMarkS
   mockMarkStale: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockRateLimiterCheck: vi.fn(),
+  mockInvalidateUserSessions: vi.fn(),
 }));
 
 // Transaction mock (txMock) for interactive transaction pattern
@@ -30,7 +42,9 @@ const txMock = {
   $executeRaw: vi.fn(),
   passwordEntry: mockPasswordEntry,
   passwordEntryHistory: mockPasswordEntryHistory,
-  user: { update: vi.fn() },
+  attachment: mockAttachment,
+  webAuthnCredential: mockWebAuthnCredential,
+  user: mockUserTx,
   vaultKey: { create: vi.fn() },
 };
 
@@ -56,8 +70,8 @@ vi.mock("@/lib/logger", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
-vi.mock("@/lib/auth/access/delegation", () => ({
-  revokeAllDelegationSessions: vi.fn(async () => 0),
+vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
+  invalidateUserSessions: mockInvalidateUserSessions,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
@@ -112,11 +126,28 @@ describe("POST /api/vault/rotate-key", () => {
     });
     // Interactive transaction mock: execute the callback with txMock
     mockTransaction.mockImplementation(async (fn: (tx: typeof txMock) => unknown) => fn(txMock));
-    // By default, DB has no entries/history (matches empty arrays in validBody)
+    // By default, DB has no entries/history/attachments (matches empty arrays in validBody)
     mockPasswordEntry.findMany.mockResolvedValue([]);
     mockPasswordEntryHistory.findMany.mockResolvedValue([]);
+    mockAttachment.findMany.mockResolvedValue([]);
+    mockAttachment.count.mockResolvedValue(0);
     mockPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
     mockPasswordEntryHistory.updateMany.mockResolvedValue({ count: 1 });
+    // tx.user.findUnique reads recoveryEncryptedSecretKey to compute
+    // recoveryKeyInvalidated audit flag.
+    mockUserTx.findUnique.mockResolvedValue({ recoveryEncryptedSecretKey: null });
+    mockUserTx.update.mockResolvedValue({});
+    mockWebAuthnCredential.updateMany.mockResolvedValue({ count: 0 });
+    mockMarkStale.mockResolvedValue(0);
+    mockInvalidateUserSessions.mockResolvedValue({
+      sessions: 0,
+      extensionTokens: 0,
+      apiKeys: 0,
+      mcpAccessTokens: 0,
+      mcpRefreshTokens: 0,
+      delegationSessions: 0,
+      cacheTombstoneFailures: 0,
+    });
     txMock.$executeRaw.mockResolvedValue(undefined);
     txMock.user.update.mockResolvedValue({});
     txMock.vaultKey.create.mockResolvedValue({});
@@ -198,9 +229,14 @@ describe("POST /api/vault/rotate-key", () => {
         version: 2,
       }),
     });
-    // Verify delegation sessions are revoked after key rotation
-    const { revokeAllDelegationSessions } = await import("@/lib/auth/access/delegation");
-    expect(revokeAllDelegationSessions).toHaveBeenCalledWith("user-1", "tenant-1", "KEY_ROTATION");
+    // Verify ALL user-bound auth artifacts are revoked after key rotation
+    // (Session/ExtensionToken/ApiKey/McpAccessToken/McpRefreshToken/DelegationSession).
+    // Replaces the prior single revokeAllDelegationSessions call which left
+    // MCP tokens valid against the freshly-rotated vault — see plan #433 / S-N2.
+    expect(mockInvalidateUserSessions).toHaveBeenCalledWith("user-1", {
+      tenantId: "tenant-1",
+      reason: "KEY_ROTATION",
+    });
   });
 
   it("rotates key with entries and history (UUID v4 IDs — legacy label kept for context)", async () => {
@@ -366,19 +402,27 @@ describe("POST /api/vault/rotate-key", () => {
     });
   });
 
-  it("calls markGrantsStaleForOwner with new keyVersion", async () => {
+  it("calls markGrantsStaleForOwner with new keyVersion AND tx client (in-tx atomic)", async () => {
     await POST(
       createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
     );
-    expect(mockMarkStale).toHaveBeenCalledWith("user-1", 2);
+    // After #433 the call is inside the rotation tx and receives the tx client
+    // as a third argument, so atomicity is preserved with the rest of the rotation.
+    expect(mockMarkStale).toHaveBeenCalledWith("user-1", 2, txMock);
   });
 
-  it("succeeds even if markGrantsStaleForOwner fails", async () => {
+  it("aborts rotation when markGrantsStaleForOwner throws inside tx (#433 / F10 atomicity trade-off)", async () => {
     mockMarkStale.mockRejectedValue(new Error("DB error"));
-    const res = await POST(
-      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
-    );
-    expect(res.status).toBe(200);
+    // Behavior change vs prior best-effort post-tx: an EA-table failure now
+    // bubbles up (handled by the Next.js framework as a 500 in production)
+    // because the rotation rolls back atomically. The route does not
+    // try/catch unknown errors — only ENTRY_COUNT_MISMATCH, HISTORY_COUNT_MISMATCH,
+    // and AttachmentAckRequiredError are translated to structured responses.
+    await expect(
+      POST(
+        createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
+      )
+    ).rejects.toThrow("DB error");
   });
 
   it("increments keyVersion from current value", async () => {
@@ -394,18 +438,19 @@ describe("POST /api/vault/rotate-key", () => {
     );
     const json = await res.json();
     expect(json.keyVersion).toBe(6);
-    expect(mockMarkStale).toHaveBeenCalledWith("user-1", 6);
+    expect(mockMarkStale).toHaveBeenCalledWith("user-1", 6, txMock);
   });
 
-  it("runs key rotation and EA stale within withUserTenantRls scope", async () => {
+  it("runs key rotation entirely within withUserTenantRls scope", async () => {
     await POST(
       createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
     );
-    // withUserTenantRls: once for findUnique, once for transaction, once for EA stale
-    expect(mockWithUserTenantRls).toHaveBeenCalledTimes(3);
+    // After #433: 2 calls. (1) Prisma.user.findUnique to fetch outer user,
+    // (2) the rotation transaction. The EA stale call is now INSIDE the tx
+    // (not a separate withUserTenantRls scope as it was pre-#433).
+    expect(mockWithUserTenantRls).toHaveBeenCalledTimes(2);
     expect(mockWithUserTenantRls).toHaveBeenNthCalledWith(1, "user-1", expect.any(Function));
     expect(mockWithUserTenantRls).toHaveBeenNthCalledWith(2, "user-1", expect.any(Function));
-    expect(mockWithUserTenantRls).toHaveBeenNthCalledWith(3, "user-1", expect.any(Function));
   });
 
   it("truncates error details when >10 validation issues", async () => {
@@ -417,5 +462,112 @@ describe("POST /api/vault/rotate-key", () => {
     expect(json.error).toBe("VALIDATION_ERROR");
     expect(json.details.errors[0]).toMatch(/Validation failed with \d+ errors/);
     expect(json.details).not.toHaveProperty("properties");
+  });
+
+  // ── Attachment data-loss safeguard (#433 / A.4) ──────────────────────
+
+  it("rejects (422) when personal attachments exist and ack flag is missing", async () => {
+    mockAttachment.count.mockResolvedValue(2);
+    mockAttachment.findMany.mockResolvedValue([{ id: "att-1" }, { id: "att-2" }]);
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody }),
+    );
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("ATTACHMENT_DATA_LOSS_NOT_ACKNOWLEDGED");
+    expect(json.attachmentsAffected).toBe(2);
+    // The dialog reads this count — silent re-encryption-without-acknowledge
+    // is a critical regression vector (#433 post-impl review T1).
+    expect(mockMarkStale).not.toHaveBeenCalled();
+  });
+
+  it("succeeds with 200 when attachments exist and ack flag is true", async () => {
+    mockAttachment.count.mockResolvedValue(1);
+    mockAttachment.findMany.mockResolvedValue([{ id: "att-1" }]);
+    const mockLogAudit = vi.mocked((await import("@/lib/audit/audit")).logAuditAsync);
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", {
+        body: { ...validBody, acknowledgeAttachmentDataLoss: true },
+      }),
+    );
+    expect(res.status).toBe(200);
+    // Audit captures the affected manifest + ack flag for forensic traceability.
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "VAULT_KEY_ROTATION",
+        metadata: expect.objectContaining({
+          attachmentsAffected: 1,
+          attachmentDataLossAcknowledged: true,
+          affectedAttachmentIds: ["att-1"],
+          affectedAttachmentIdsOverflow: false,
+        }),
+      }),
+    );
+  });
+
+  // ── Recovery wrapping clear (#433 / A.1+S5) ──────────────────────────
+
+  it("audits recoveryKeyInvalidated: true when user had a recovery key set pre-rotation", async () => {
+    mockUserTx.findUnique.mockResolvedValue({
+      recoveryEncryptedSecretKey: "old-wrapping-ciphertext",
+    });
+    const mockLogAudit = vi.mocked((await import("@/lib/audit/audit")).logAuditAsync);
+
+    await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody }),
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ recoveryKeyInvalidated: true }),
+      }),
+    );
+  });
+
+  it("audits recoveryKeyInvalidated: false when user had no recovery key", async () => {
+    // mockUserTx.findUnique default returns recoveryEncryptedSecretKey: null
+    const mockLogAudit = vi.mocked((await import("@/lib/audit/audit")).logAuditAsync);
+
+    await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody }),
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ recoveryKeyInvalidated: false }),
+      }),
+    );
+  });
+
+  // ── invalidateUserSessions audit shape (#433 / S-N2) ─────────────────
+
+  it("audit metadata captures all 7 invalidation count fields", async () => {
+    mockInvalidateUserSessions.mockResolvedValue({
+      sessions: 2,
+      extensionTokens: 1,
+      apiKeys: 0,
+      mcpAccessTokens: 3,
+      mcpRefreshTokens: 3,
+      delegationSessions: 0,
+      cacheTombstoneFailures: 0,
+    });
+    const mockLogAudit = vi.mocked((await import("@/lib/audit/audit")).logAuditAsync);
+
+    await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody }),
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          invalidatedSessions: 2,
+          invalidatedExtensionTokens: 1,
+          invalidatedApiKeys: 0,
+          invalidatedMcpAccessTokens: 3,
+          invalidatedMcpRefreshTokens: 3,
+          invalidatedDelegationSessions: 0,
+          cacheTombstoneFailures: 0,
+        }),
+      }),
+    );
   });
 });

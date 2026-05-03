@@ -108,6 +108,11 @@ model User {
   recoveryVerifierHmac       String?   @map("recovery_verifier_hmac") @db.VarChar(64)
   recoveryVerifierVersion    Int       @default(1) @map("recovery_verifier_version")
   recoveryKeySetAt           DateTime? @map("recovery_key_set_at") @db.Timestamptz(3)
+  // Set by vault key rotation when the recovery wrapping was cleared.
+  // Distinguishes "user never set up recovery" (both NULL) from "user had
+  // recovery but it was invalidated by rotation" (recoveryKeySetAt NULL,
+  // recoveryKeyInvalidatedAt set). See plan #433 / S5.
+  recoveryKeyInvalidatedAt   DateTime? @map("recovery_key_invalidated_at") @db.Timestamptz(3)
 
   // User preference
   locale String? @db.VarChar(5)
@@ -1002,6 +1007,7 @@ enum AuditAction {
   MOBILE_TOKEN_REPLAY_DETECTED
   MOBILE_CACHE_ROLLBACK_REJECTED
   MOBILE_CACHE_FLAG_FORGED
+  WEBAUTHN_PRF_REBOOTSTRAP
 }
 
 enum AuditScope {

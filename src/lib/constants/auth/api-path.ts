@@ -182,6 +182,10 @@ export const apiPath = {
     `${API_PATH.DIRECTORY_SYNC}/${configId}/logs`,
   webauthnCredentialById: (credentialId: string) =>
     `${API_PATH.WEBAUTHN_CREDENTIALS}/${credentialId}`,
+  webauthnCredentialPrf: (credentialRowId: string) =>
+    `${API_PATH.WEBAUTHN_CREDENTIALS}/${credentialRowId}/prf`,
+  webauthnCredentialPrfOptions: (credentialRowId: string) =>
+    `${API_PATH.WEBAUTHN_CREDENTIALS}/${credentialRowId}/prf/options`,
   tenantAuditLogs: () => API_PATH.TENANT_AUDIT_LOGS,
   tenantAuditLogsDownload: () => `${API_PATH.TENANT_AUDIT_LOGS}/download`,
   tenantBreakglass: () => API_PATH.TENANT_BREAKGLASS,

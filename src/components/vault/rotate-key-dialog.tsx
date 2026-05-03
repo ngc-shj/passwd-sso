@@ -36,6 +36,11 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
   const [progressPhase, setProgressPhase] = useState("");
   const [progressCurrent, setProgressCurrent] = useState(0);
   const [progressTotal, setProgressTotal] = useState(0);
+  // When the data fetch reports attachmentsAffected > 0, the user must
+  // explicitly acknowledge that those attachments will become unreadable
+  // post-rotation (Phase B will introduce per-attachment CEK indirection that
+  // removes this trade-off — see plan #433 / A.4).
+  const [attachmentsAffected, setAttachmentsAffected] = useState(0);
 
   function resetForm() {
     setPassphrase("");
@@ -44,6 +49,7 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
     setProgressPhase("");
     setProgressCurrent(0);
     setProgressTotal(0);
+    setAttachmentsAffected(0);
   }
 
   function handleOpenChange(nextOpen: boolean) {
@@ -51,25 +57,47 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
     onOpenChange(nextOpen);
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!passphrase || loading) return;
-
+  async function performRotation(acknowledgeAttachmentDataLoss?: boolean) {
     setLoading(true);
     setError("");
     try {
-      await rotateKey(passphrase, (phase, current, total) => {
-        setProgressPhase(phase);
-        setProgressCurrent(current);
-        setProgressTotal(total);
-      });
+      const effects = await rotateKey(
+        passphrase,
+        (phase, current, total) => {
+          setProgressPhase(phase);
+          setProgressCurrent(current);
+          setProgressTotal(total);
+        },
+        acknowledgeAttachmentDataLoss ? { acknowledgeAttachmentDataLoss: true } : undefined,
+      );
       toast.success(t("rotateKeySuccess"));
+      // Operator banners (#433/P3-F2). Each surfaces only when the
+      // corresponding side-effect actually occurred. Persistent toasts so the
+      // user can act on them rather than dismissing accidentally.
+      if (effects?.cacheTombstoneFailures && effects.cacheTombstoneFailures > 0) {
+        toast.warning(t("rotateKeyCacheTombstoneFailureBanner"), { duration: Infinity });
+      }
+      if (effects?.invalidationFailed) {
+        toast.warning(t("rotateKeyInvalidationFailedBanner"), { duration: Infinity });
+      }
+      const mcpRevoked =
+        (effects?.invalidatedMcpAccessTokens ?? 0) +
+        (effects?.invalidatedMcpRefreshTokens ?? 0);
+      if (mcpRevoked > 0) {
+        toast.info(t("rotateKeyMcpRevokedBanner", { count: mcpRevoked }), {
+          duration: 10_000,
+        });
+      }
       handleOpenChange(false);
     } catch (err: unknown) {
-      const apiErr = err as { error?: string } | undefined;
+      const apiErr = err as { error?: string; attachmentsAffected?: number } | undefined;
       const errorCode = apiErr?.error;
 
-      if (errorCode === "INVALID_PASSPHRASE") {
+      if (errorCode === "ATTACHMENT_DATA_LOSS_NOT_ACKNOWLEDGED") {
+        // Surface the count and switch to the ack confirm step. The user
+        // re-submits to retry with the flag set.
+        setAttachmentsAffected(apiErr?.attachmentsAffected ?? 0);
+      } else if (errorCode === "INVALID_PASSPHRASE") {
         setError(tApi("invalidPassphrase"));
       } else if (errorCode === "RATE_LIMIT_EXCEEDED") {
         setError(tApi("rateLimitExceeded"));
@@ -83,6 +111,17 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!passphrase || loading) return;
+    await performRotation();
+  }
+
+  async function handleAcknowledgeAndProceed() {
+    if (loading) return;
+    await performRotation(true);
   }
 
   const phaseLabel =
@@ -157,8 +196,33 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 
+          {attachmentsAffected > 0 && (
+            <div className="flex flex-col gap-3 rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  {t("rotateKeyAttachmentDataLossWarning", { count: attachmentsAffected })}
+                </span>
+              </div>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                disabled={loading}
+                onClick={handleAcknowledgeAndProceed}
+              >
+                {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {t("rotateKeyAttachmentAcknowledge")}
+              </Button>
+            </div>
+          )}
+
           <DialogFooter>
-            <Button type="submit" disabled={!passphrase || loading} variant="destructive">
+            <Button
+              type="submit"
+              disabled={!passphrase || loading || attachmentsAffected > 0}
+              variant="destructive"
+            >
               {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               {t("rotateKeyButton")}
             </Button>

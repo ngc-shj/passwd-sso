@@ -32,7 +32,21 @@ import type {
   AuthenticatorDevice,
 } from "@simplewebauthn/types";
 import { hkdfSync } from "node:crypto";
+import type { TxOrPrisma } from "@/lib/prisma";
 import { getKeyProviderSync } from "@/lib/key-provider";
+import { getRedis } from "@/lib/redis";
+import { parseDeviceFromUserAgent } from "@/lib/parse-user-agent";
+
+// ── Shared constants ────────────────────────────────────────
+
+/**
+ * One-shot challenge TTL for WebAuthn options (sign-in AND PRF re-bootstrap).
+ *
+ * Both flows consume the challenge via `redis.getdel(...)` from a per-flow
+ * dedicated key namespace. Tuning this value applies to both flows in
+ * lockstep — sub-flows MUST NOT define a local override.
+ */
+export const WEBAUTHN_CHALLENGE_TTL_SECONDS = 300;
 
 // ── Env helpers ──────────────────────────────────────────────
 
@@ -248,4 +262,160 @@ export function uint8ArrayToBase64url(bytes: Uint8Array): string {
     binary += String.fromCharCode(bytes[i]);
   }
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// ── Shared assertion verification helper ────────────────────
+
+/**
+ * Outcome of {@link verifyAuthenticationAssertion}.
+ *
+ * On `ok: true`, callers receive the credential ID plus any stored PRF wrapping
+ * fields (for sign-in to relay back to the client). On failure, callers receive
+ * an HTTP-style status + an API_ERROR-compatible code so the route can produce
+ * a uniform response shape.
+ */
+export type VerifyAssertionResult =
+  | {
+      ok: true;
+      credentialId: string;
+      storedPrf: {
+        encryptedSecretKey: string | null;
+        iv: string | null;
+        authTag: string | null;
+      };
+    }
+  | {
+      ok: false;
+      status: 400 | 401 | 404 | 503;
+      code: string;
+      details?: string;
+    };
+
+/**
+ * Verify a WebAuthn assertion AND advance the credential counter atomically.
+ *
+ * Shared by sign-in (`/api/webauthn/authenticate/verify`) and PRF re-bootstrap
+ * (`/api/webauthn/credentials/[id]/prf`). The counter UPDATE runs on the
+ * supplied `tx` so callers can roll it back atomically with their own work
+ * (e.g., the PRF endpoint's keyVersion CAS).
+ *
+ * Caller obligations:
+ * - Set RLS context (e.g., `withUserTenantRls(userId, ...)`) BEFORE invoking,
+ *   so the credential lookup and counter UPDATE see only the user's row.
+ * - Pass a per-flow Redis challenge key namespace. Sign-in uses
+ *   `webauthn:challenge:authenticate:${userId}`; PRF rebootstrap uses
+ *   `webauthn:challenge:prf-rebootstrap:${userId}`. Sharing a namespace
+ *   between flows opens race / DoS / replay windows (#433 / S-N1).
+ * - When called inside a `prisma.$transaction`, pass the tx client so the
+ *   counter advance rolls back if the surrounding tx aborts. Otherwise pass
+ *   `prisma` directly.
+ */
+export async function verifyAuthenticationAssertion(
+  tx: TxOrPrisma,
+  userId: string,
+  response: AuthenticationResponseJSON,
+  challengeKey: string,
+  userAgent: string | null = null,
+): Promise<VerifyAssertionResult> {
+  const redis = getRedis();
+  if (!redis) {
+    return { ok: false, status: 503, code: "SERVICE_UNAVAILABLE" };
+  }
+
+  const challenge = await redis.getdel(challengeKey);
+  if (!challenge) {
+    return {
+      ok: false,
+      status: 400,
+      code: "VALIDATION_ERROR",
+      details: "Challenge expired or already used",
+    };
+  }
+
+  const rpId = process.env.WEBAUTHN_RP_ID;
+  if (!rpId) {
+    return { ok: false, status: 503, code: "SERVICE_UNAVAILABLE" };
+  }
+
+  const responseCredentialId = (response as unknown as { id?: string }).id;
+  if (!responseCredentialId) {
+    return {
+      ok: false,
+      status: 400,
+      code: "VALIDATION_ERROR",
+      details: "Missing credential ID in response",
+    };
+  }
+
+  const storedCredential = await tx.webAuthnCredential.findFirst({
+    where: { userId, credentialId: responseCredentialId },
+  });
+
+  if (!storedCredential) {
+    return { ok: false, status: 404, code: "NOT_FOUND", details: "Credential not found" };
+  }
+
+  const authenticator: AuthenticatorDevice = {
+    credentialPublicKey: base64urlToUint8Array(storedCredential.publicKey),
+    credentialID: base64urlToUint8Array(storedCredential.credentialId),
+    counter: Number(storedCredential.counter),
+    transports: storedCredential.transports as AuthenticatorDevice["transports"],
+  };
+
+  const origin = getRpOrigin(rpId);
+
+  let verification: VerifiedAuthenticationResponse;
+  try {
+    verification = await verifyAuthentication(response, challenge, rpId, origin, authenticator);
+  } catch {
+    return {
+      ok: false,
+      status: 400,
+      code: "VALIDATION_ERROR",
+      details: "Authentication verification failed",
+    };
+  }
+
+  if (!verification.verified) {
+    return {
+      ok: false,
+      status: 400,
+      code: "VALIDATION_ERROR",
+      details: "Authentication verification failed",
+    };
+  }
+
+  // Counter CAS — runs on the SUPPLIED tx so it rolls back if the caller's tx
+  // aborts. Without this, a captured assertion replayed against the new endpoint
+  // could commit the counter advance even when the surrounding keyVersion CAS
+  // rejects the wrap update (#433 / S-N4).
+  const newCounter = BigInt(verification.authenticationInfo.newCounter);
+  const lastUsedDevice = parseDeviceFromUserAgent(userAgent);
+  const updatedRows = await tx.$executeRaw`
+    UPDATE "webauthn_credentials"
+    SET counter = ${newCounter},
+        "last_used_at" = ${new Date()},
+        "last_used_device" = ${lastUsedDevice}
+    WHERE id = ${storedCredential.id}
+      AND counter = ${storedCredential.counter}
+  `;
+
+  if (updatedRows === 0) {
+    return {
+      ok: false,
+      status: 400,
+      code: "VALIDATION_ERROR",
+      details: "Counter mismatch — credential may be cloned. Re-register your passkey.",
+    };
+  }
+
+  return {
+    ok: true,
+    credentialId: storedCredential.credentialId,
+    storedPrf: {
+      encryptedSecretKey: storedCredential.prfEncryptedSecretKey,
+      iv: storedCredential.prfSecretKeyIv,
+      authTag: storedCredential.prfSecretKeyAuthTag,
+    },
+  };
 }
