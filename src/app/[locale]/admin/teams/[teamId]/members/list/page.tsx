@@ -3,6 +3,10 @@
 import { useEffect, useState, use } from "react";
 import { useTranslations } from "next-intl";
 import { TeamRoleBadge } from "@/components/team/management/team-role-badge";
+import { TeamAddFromTenantSection } from "@/components/team/members/team-add-from-tenant-section";
+import { TeamInviteByEmailSection } from "@/components/team/members/team-invite-by-email-section";
+import { TeamPendingInvitationsList } from "@/components/team/members/team-pending-invitations-list";
+import type { Invitation } from "@/components/team/members/team-pending-invitations-list";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionCardHeader } from "@/components/settings/account/section-card-header";
@@ -25,9 +29,16 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
 import { MemberInfo } from "@/components/member-info";
 import { Link } from "@/i18n/navigation";
-import { Trash2, Users, Search } from "lucide-react";
+import { Trash2, Users, Search, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
@@ -53,19 +64,22 @@ interface Member {
   tenantName: string | null;
 }
 
-export default function TeamMemberListPage({
+export default function TeamMembersPage({
   params,
 }: {
   params: Promise<{ teamId: string }>;
 }) {
   const { teamId } = use(params);
   const t = useTranslations("Team");
+  const tAdmin = useTranslations("AdminConsole");
 
   const [team, setTeam] = useState<TeamInfo | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
+  const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [memberSearch, setMemberSearch] = useState("");
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
   const filteredMembers = filterMembers(members, memberSearch);
 
   useEffect(() => {
@@ -94,6 +108,13 @@ export default function TeamMemberListPage({
       .then((r) => r.json())
       .then((d) => {
         if (Array.isArray(d)) setMembers(d);
+      })
+      .catch(() => {});
+
+    fetchApi(apiPath.teamInvitations(teamId))
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d)) setInvitations(d);
       })
       .catch(() => {});
   };
@@ -159,79 +180,125 @@ export default function TeamMemberListPage({
   }
 
   return (
-    <Card>
-      <SectionCardHeader icon={Users} title={t("memberListTitle")} description={t("memberListDescription")} />
-      <CardContent className="space-y-4">
-        {members.length > 0 && (
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder={t("searchMembers")}
-              value={memberSearch}
-              onChange={(e) => setMemberSearch(e.target.value)}
-              className="pl-9"
+    <div className="space-y-4">
+      <Card>
+        <SectionCardHeader
+          icon={Users}
+          title={t("memberListTitle")}
+          description={t("memberListDescription")}
+        />
+        <CardContent className="space-y-4">
+          {isAdmin && (
+            <div>
+              <Button size="sm" onClick={() => setAddDialogOpen(true)}>
+                <UserPlus className="h-4 w-4 mr-2" />
+                {tAdmin("memberAddButton")}
+              </Button>
+            </div>
+          )}
+          {members.length > 0 && (
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder={t("searchMembers")}
+                value={memberSearch}
+                onChange={(e) => setMemberSearch(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+          )}
+          {members.length > 0 && filteredMembers.length === 0 ? (
+            <p className="py-4 text-center text-sm text-muted-foreground">
+              {t("noMatchingMembers")}
+            </p>
+          ) : (
+            <div className="max-h-96 space-y-2 overflow-y-auto">
+              {filteredMembers.map((m) => (
+                <div
+                  key={m.id}
+                  className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50"
+                >
+                  <MemberInfo
+                    name={m.name}
+                    email={m.email}
+                    image={m.image}
+                    isCurrentUser={m.userId === currentUserId}
+                    tenantName={m.tenantName}
+                    teamTenantName={team.tenantName}
+                  />
+                  {isAdmin && m.role !== TEAM_ROLE.OWNER && m.userId !== currentUserId ? (
+                    <div className="flex items-center gap-2">
+                      <Select value={m.role} onValueChange={(v) => handleChangeRole(m.id, v)}>
+                        <SelectTrigger className="w-28 h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={TEAM_ROLE.ADMIN}>{t("roleAdmin")}</SelectItem>
+                          <SelectItem value={TEAM_ROLE.MEMBER}>{t("roleMember")}</SelectItem>
+                          <SelectItem value={TEAM_ROLE.VIEWER}>{t("roleViewer")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>{t("removeMember")}</AlertDialogTitle>
+                            <AlertDialogDescription>{t("removeMemberConfirm")}</AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>{t("cancelInvitation")}</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleRemoveMember(m.id)}>
+                              {t("removeMember")}
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  ) : (
+                    <TeamRoleBadge role={m.role} />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Always render the pending-invitations card. Empty state is shown
+          inside the component, so the card position is stable (no layout
+          shift when the first invitation appears). */}
+      <Card>
+        <CardContent className="pt-6">
+          <TeamPendingInvitationsList
+            invitations={invitations}
+            teamId={teamId}
+            onCancel={fetchAll}
+          />
+        </CardContent>
+      </Card>
+
+      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{tAdmin("memberAddButton")}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-6">
+            <TeamAddFromTenantSection
+              teamId={teamId}
+              onSuccess={() => { fetchAll(); setAddDialogOpen(false); }}
+            />
+            <Separator />
+            <TeamInviteByEmailSection
+              teamId={teamId}
+              onSuccess={() => { fetchAll(); setAddDialogOpen(false); }}
             />
           </div>
-        )}
-        {members.length > 0 && filteredMembers.length === 0 ? (
-          <p className="py-4 text-center text-sm text-muted-foreground">
-            {t("noMatchingMembers")}
-          </p>
-        ) : (
-          <div className="max-h-96 space-y-2 overflow-y-auto">
-            {filteredMembers.map((m) => (
-              <div
-                key={m.id}
-                className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50"
-              >
-                <MemberInfo
-                  name={m.name}
-                  email={m.email}
-                  image={m.image}
-                  isCurrentUser={m.userId === currentUserId}
-                  tenantName={m.tenantName}
-                  teamTenantName={team.tenantName}
-                />
-                {isAdmin && m.role !== TEAM_ROLE.OWNER && m.userId !== currentUserId ? (
-                  <div className="flex items-center gap-2">
-                    <Select value={m.role} onValueChange={(v) => handleChangeRole(m.id, v)}>
-                      <SelectTrigger className="w-28 h-8">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={TEAM_ROLE.ADMIN}>{t("roleAdmin")}</SelectItem>
-                        <SelectItem value={TEAM_ROLE.MEMBER}>{t("roleMember")}</SelectItem>
-                        <SelectItem value={TEAM_ROLE.VIEWER}>{t("roleViewer")}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>{t("removeMember")}</AlertDialogTitle>
-                          <AlertDialogDescription>{t("removeMemberConfirm")}</AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>{t("cancelInvitation")}</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleRemoveMember(m.id)}>
-                            {t("removeMember")}
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </div>
-                ) : (
-                  <TeamRoleBadge role={m.role} />
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

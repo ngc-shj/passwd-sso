@@ -40,5 +40,8 @@
   "noActiveGrants": "No active grants.",
   "showHistory": "Show history",
   "hideHistory": "Hide history",
-  "rateLimitExceeded": "Too many requests. Please try again later."
+  "rateLimitExceeded": "Too many requests. Please try again later.",
+  "searchMembers": "Search members...",
+  "noMatchingMembers": "No matching members.",
+  "noMembers": "No eligible target users."
 }

@@ -1,0 +1,41 @@
+{
+  "rootTitle": "Personal settings",
+  "section": {
+    "account": "Account",
+    "auth": "Sign-in",
+    "devices": "Devices",
+    "vault": "Vault",
+    "sharing": "Sharing",
+    "developer": "Developer"
+  },
+  "subTab": {
+    "profile": "Profile",
+    "notifications": "Notifications",
+    "passphrase": "Passphrase",
+    "recoveryKey": "Recovery key",
+    "passkey": "Passkeys",
+    "activeDevices": "Active devices",
+    "keyRotation": "Key rotation",
+    "delegation": "Delegation sessions",
+    "travelMode": "Travel mode",
+    "emergencyAccess": "Emergency access",
+    "cliToken": "CLI token",
+    "apiKey": "API keys",
+    "mcpConnections": "MCP connections"
+  },
+  "vaultLockedPlaceholder": {
+    "title": "Vault is locked",
+    "description": "This page requires an unlocked vault. Unlock the vault from the header."
+  },
+  "profile": {
+    "description": "Manage your basic account information."
+  },
+  "notifications": {
+    "description": "Manage how you receive notifications."
+  },
+  "emergencyAccess": {
+    "description": "Allow trusted contacts to access your vault in an emergency. Detailed management is on the Emergency Access page.",
+    "openButton": "Manage emergency access"
+  },
+  "comingSoon": "This feature will be available in an upcoming release."
+}

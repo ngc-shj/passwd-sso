@@ -20,6 +20,7 @@ export function AdminHeader({ onMenuToggle }: AdminHeaderProps) {
           size="icon"
           className="md:hidden"
           onClick={onMenuToggle}
+          aria-label={t("openMenu")}
         >
           <Menu className="h-5 w-5" />
         </Button>

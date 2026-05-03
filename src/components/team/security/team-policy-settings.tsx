@@ -6,7 +6,8 @@ import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/form/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/account/form-dirty-badge";
 import { toast } from "sonner";
-import { ListChecks, Loader2 } from "lucide-react";
+import { ListChecks, Loader2, Lock, Clock, Share2, Globe } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionCardHeader } from "@/components/settings/account/section-card-header";
@@ -97,11 +98,29 @@ export function validatePolicy(
   return errs;
 }
 
+export type TeamPolicySection =
+  | "password"
+  | "session"
+  | "sharing"
+  | "access-restriction";
+
+// Section header config — module-scoped so it isn't reallocated per render.
+const SECTION_HEADER: Record<TeamPolicySection, { icon: LucideIcon; titleKey: string; descKey: string }> = {
+  password: { icon: Lock, titleKey: "sectionPasswordTitle", descKey: "sectionPasswordDesc" },
+  session: { icon: Clock, titleKey: "sectionSessionTitle", descKey: "sectionSessionDesc" },
+  sharing: { icon: Share2, titleKey: "sectionSharingTitle", descKey: "sectionSharingDesc" },
+  "access-restriction": { icon: Globe, titleKey: "sectionAccessRestrictionTitle", descKey: "sectionAccessRestrictionDesc" },
+};
+const FALLBACK_HEADER = { icon: ListChecks, titleKey: "title", descKey: "description" } as const;
+
 interface TeamPolicySettingsProps {
   teamId: string;
+  // section filter: controls which fields render. Save always writes the
+  // full policy (single PUT endpoint), regardless of which section is shown.
+  section?: TeamPolicySection;
 }
 
-export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
+export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps) {
   const t = useTranslations("TeamPolicy");
   const tCommon = useTranslations("Common");
   const [policy, setPolicy] = useState<PolicyData>(DEFAULT_POLICY);
@@ -196,11 +215,24 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
     );
   }
 
+  const showAll = !section;
+  const showPassword = showAll || section === "password";
+  const showSharing = showAll || section === "sharing";
+  const showSession = showAll || section === "session";
+  const showAccessRestriction = showAll || section === "access-restriction";
+
+  const headerConfig = section ? SECTION_HEADER[section] : FALLBACK_HEADER;
+
   return (
     <Card>
-      <SectionCardHeader icon={ListChecks} title={t("title")} description={t("description")} />
+      <SectionCardHeader
+        icon={headerConfig.icon}
+        title={t(headerConfig.titleKey)}
+        description={t(headerConfig.descKey)}
+      />
       <CardContent className="space-y-4">
-        {/* Password Requirements */}
+        {showPassword && (
+        /* Password Requirements */
         <div className="space-y-3">
           <h3 className="text-sm font-medium text-muted-foreground">{t("passwordRequirements")}</h3>
           <div className="space-y-2">
@@ -219,39 +251,42 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
                   return rest;
                 });
               }}
-              className="max-w-[200px]"
             />
             {fieldErrors.minPasswordLength && (
               <p className="text-sm text-destructive">{fieldErrors.minPasswordLength}</p>
             )}
           </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            <SwitchField
-              label={t("requireUppercase")}
-              checked={policy.requireUppercase}
-              onChange={(v) => setPolicy((p) => ({ ...p, requireUppercase: v }))}
-            />
-            <SwitchField
-              label={t("requireLowercase")}
-              checked={policy.requireLowercase}
-              onChange={(v) => setPolicy((p) => ({ ...p, requireLowercase: v }))}
-            />
-            <SwitchField
-              label={t("requireNumbers")}
-              checked={policy.requireNumbers}
-              onChange={(v) => setPolicy((p) => ({ ...p, requireNumbers: v }))}
-            />
-            <SwitchField
-              label={t("requireSymbols")}
-              checked={policy.requireSymbols}
-              onChange={(v) => setPolicy((p) => ({ ...p, requireSymbols: v }))}
-            />
-          </div>
+          <SwitchField
+            id="team-require-uppercase"
+            label={t("requireUppercase")}
+            checked={policy.requireUppercase}
+            onChange={(v) => setPolicy((p) => ({ ...p, requireUppercase: v }))}
+          />
+          <SwitchField
+            id="team-require-lowercase"
+            label={t("requireLowercase")}
+            checked={policy.requireLowercase}
+            onChange={(v) => setPolicy((p) => ({ ...p, requireLowercase: v }))}
+          />
+          <SwitchField
+            id="team-require-numbers"
+            label={t("requireNumbers")}
+            checked={policy.requireNumbers}
+            onChange={(v) => setPolicy((p) => ({ ...p, requireNumbers: v }))}
+          />
+          <SwitchField
+            id="team-require-symbols"
+            label={t("requireSymbols")}
+            checked={policy.requireSymbols}
+            onChange={(v) => setPolicy((p) => ({ ...p, requireSymbols: v }))}
+          />
         </div>
+        )}
 
-        <Separator />
+        {showAll && <Separator />}
 
-        {/* Access Control */}
+        {showSharing && (
+        /* Access Control */
         <div className="space-y-3">
           <h3 className="text-sm font-medium text-muted-foreground">{t("accessControl")}</h3>
           <SwitchField
@@ -290,10 +325,12 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
             )}
           </div>
         </div>
+        )}
 
-        <Separator />
+        {showAll && <Separator />}
 
-        {/* Advanced */}
+        {showSession && (
+        /* Advanced */
         <div className="space-y-3">
           <h3 className="text-sm font-medium text-muted-foreground">{t("advanced")}</h3>
           <div className="space-y-2">
@@ -316,7 +353,6 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
                 },
               )}
               placeholder={t("sessionIdleTimeoutHelp", { min: SESSION_IDLE_TIMEOUT_MIN, max: SESSION_IDLE_TIMEOUT_MAX })}
-              className="max-w-[200px]"
             />
             <p className="text-xs text-muted-foreground">{t("sessionIdleTimeoutHelp", { min: SESSION_IDLE_TIMEOUT_MIN, max: SESSION_IDLE_TIMEOUT_MAX })}</p>
             {fieldErrors.sessionIdleTimeoutMinutes && (
@@ -346,7 +382,6 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
                 },
               )}
               placeholder={t("sessionAbsoluteTimeoutHelp", { min: SESSION_ABSOLUTE_TIMEOUT_MIN, max: SESSION_ABSOLUTE_TIMEOUT_MAX })}
-              className="max-w-[200px]"
             />
             <p className="text-xs text-muted-foreground">{t("sessionAbsoluteTimeoutHelp", { min: SESSION_ABSOLUTE_TIMEOUT_MIN, max: SESSION_ABSOLUTE_TIMEOUT_MAX })}</p>
             {fieldErrors.sessionAbsoluteTimeoutMinutes && (
@@ -363,10 +398,12 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
             }
           />
         </div>
+        )}
 
-        <Separator />
+        {showAll && <Separator />}
 
-        {/* Password Reuse Prevention */}
+        {showPassword && (
+        /* Password Reuse Prevention */
         <div className="space-y-3">
           <h3 className="text-sm font-medium text-muted-foreground">{t("passwordReusePrevention")}</h3>
           <div className="space-y-2">
@@ -381,15 +418,16 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
                 const value = Number.isNaN(parsed) ? 0 : Math.max(0, Math.min(PASSWORD_HISTORY_COUNT_MAX, parsed));
                 setPolicy((p) => ({ ...p, passwordHistoryCount: value }));
               }}
-              className="max-w-[200px]"
             />
             <p className="text-xs text-muted-foreground">{t("passwordHistoryCountHelp")}</p>
           </div>
         </div>
+        )}
 
-        <Separator />
+        {showAll && <Separator />}
 
-        {/* Team IP Restriction */}
+        {showAccessRestriction && (
+        /* Team IP Restriction */
         <div className="space-y-3">
           <h3 className="text-sm font-medium text-muted-foreground">{t("teamIpRestriction")}</h3>
           <SwitchField
@@ -409,6 +447,7 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
             <p className="text-xs text-muted-foreground">{t("teamAllowedCidrsHelp", { max: MAX_CIDRS })}</p>
           </div>
         </div>
+        )}
 
         <div className="flex items-center justify-between pt-1">
           <FormDirtyBadge
@@ -427,18 +466,23 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
 }
 
 function SwitchField({
+  id,
   label,
   checked,
   onChange,
 }: {
+  id?: string;
   label: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
 }) {
+  // Flat row, no border — matches tenant policy card layout for visual
+  // consistency (otherwise team's bordered SwitchField boxes look like
+  // a different concept).
   return (
-    <div className="flex items-center justify-between gap-2 border rounded-md p-3">
-      <Label className="cursor-pointer">{label}</Label>
-      <Switch checked={checked} onCheckedChange={onChange} />
+    <div className="flex items-center justify-between">
+      <Label htmlFor={id} className="cursor-pointer">{label}</Label>
+      <Switch id={id} checked={checked} onCheckedChange={onChange} />
     </div>
   );
 }

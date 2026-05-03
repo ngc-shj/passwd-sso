@@ -24,36 +24,50 @@ vi.mock("@/components/layout/sidebar-shared", () => ({
   CollapsibleSectionHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-import { SecuritySection, SettingsNavSection, ToolsSection } from "./sidebar-section-security";
+import { InsightsSection, SettingsNavSection, ToolsSection } from "./sidebar-section-security";
 
-describe("SecuritySection", () => {
-  it("renders watchtower and emergency access links", () => {
+describe("InsightsSection", () => {
+  it("renders watchtower and audit log links for personal vault", () => {
     render(
-      <SecuritySection
+      <InsightsSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
         vaultContext={{ type: "personal" }}
         isWatchtower={false}
-        isEmergencyAccess={false}
         isPersonalAuditLog={false}
         onNavigate={() => {}}
       />
     );
 
     expect(screen.getByRole("link", { name: "watchtower" })).toHaveAttribute("href", "/dashboard/watchtower");
-    expect(screen.getByRole("link", { name: "emergencyAccess" })).toHaveAttribute("href", "/dashboard/emergency-access");
+    expect(screen.getByRole("link", { name: "auditLog" })).toHaveAttribute("href", "/dashboard/audit-logs");
+  });
+
+  it("does not render emergency access link (promoted to top-level sibling)", () => {
+    render(
+      <InsightsSection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        vaultContext={{ type: "personal" }}
+        isWatchtower={false}
+        isPersonalAuditLog={false}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.queryByRole("link", { name: "emergencyAccess" })).toBeNull();
   });
 
   it("routes watchtower to the selected team vault", () => {
     render(
-      <SecuritySection
+      <InsightsSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
         vaultContext={{ type: "team", teamId: "team-1", teamRole: "MEMBER" }}
         isWatchtower={true}
-        isEmergencyAccess={false}
         isPersonalAuditLog={false}
         onNavigate={() => {}}
       />
@@ -65,32 +79,14 @@ describe("SecuritySection", () => {
     );
   });
 
-  it("hides emergency access when team is selected", () => {
-    render(
-      <SecuritySection
-        isOpen
-        onOpenChange={() => {}}
-        t={(k) => k}
-        vaultContext={{ type: "team", teamId: "team-1", teamRole: "MEMBER" }}
-        isWatchtower={false}
-        isEmergencyAccess={false}
-        isPersonalAuditLog={false}
-        onNavigate={() => {}}
-      />
-    );
-
-    expect(screen.queryByRole("link", { name: "emergencyAccess" })).toBeNull();
-  });
-
   it("hides watchtower for team viewers", () => {
     render(
-      <SecuritySection
+      <InsightsSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
         vaultContext={{ type: "team", teamId: "team-1", teamRole: "VIEWER" }}
         isWatchtower={false}
-        isEmergencyAccess={false}
         isPersonalAuditLog={false}
         onNavigate={() => {}}
       />
@@ -185,16 +181,15 @@ describe("SettingsNavSection", () => {
   });
 });
 
-describe("SecuritySection audit log", () => {
+describe("InsightsSection audit log", () => {
   it("renders audit log link for personal vault", () => {
     render(
-      <SecuritySection
+      <InsightsSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
         vaultContext={{ type: "personal" }}
         isWatchtower={false}
-        isEmergencyAccess={false}
         isPersonalAuditLog={true}
         onNavigate={() => {}}
       />
@@ -205,13 +200,12 @@ describe("SecuritySection audit log", () => {
 
   it("renders audit log link for personal vault (inactive)", () => {
     render(
-      <SecuritySection
+      <InsightsSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
         vaultContext={{ type: "personal" }}
         isWatchtower={false}
-        isEmergencyAccess={false}
         isPersonalAuditLog={false}
         onNavigate={() => {}}
       />
@@ -225,13 +219,12 @@ describe("SecuritySection audit log", () => {
 
     for (const teamRole of roles) {
       const { unmount } = render(
-        <SecuritySection
+        <InsightsSection
           isOpen
           onOpenChange={() => {}}
           t={(k) => k}
           vaultContext={{ type: "team", teamId: "team-1", teamRole }}
           isWatchtower={false}
-          isEmergencyAccess={false}
           isPersonalAuditLog={false}
           onNavigate={() => {}}
         />

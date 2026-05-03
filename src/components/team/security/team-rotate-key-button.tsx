@@ -13,6 +13,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
 import { RotateCcw, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -89,6 +90,7 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
   const [loading, setLoading] = useState(false);
   const [phase, setPhase] = useState<RotatePhase>("idle");
   const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [confirmInput, setConfirmInput] = useState("");
 
   const handleRotate = async () => {
     setLoading(true);
@@ -261,6 +263,7 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
 
       toast.success(t("rotateKeySuccess"));
       setOpen(false);
+      setConfirmInput("");
       onSuccess?.();
     } catch (e) {
       console.error("[TeamRotateKeyButton] rotation failed:", e instanceof Error ? e.message : "unknown error");
@@ -275,7 +278,7 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
   const progressLabel = describeProgress(phase, progress.current, progress.total);
 
   return (
-    <AlertDialog open={open} onOpenChange={(v) => { if (!loading) setOpen(v); }}>
+    <AlertDialog open={open} onOpenChange={(v) => { if (!loading) { setOpen(v); if (!v) setConfirmInput(""); } }}>
       <AlertDialogTrigger asChild>
         <Button variant="destructive" size="sm">
           <RotateCcw className="h-4 w-4 mr-2" />
@@ -293,6 +296,16 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
                 <li>{t("rotateKeyWarning2")}</li>
                 <li>{t("rotateKeyWarning3")}</li>
               </ul>
+              <div className="space-y-1 pt-2">
+                <p className="text-sm font-medium">{t("rotateKeyTypePrompt")}</p>
+                <Input
+                  value={confirmInput}
+                  onChange={(e) => setConfirmInput(e.target.value)}
+                  placeholder={t("rotateKeyTypePlaceholder")}
+                  disabled={loading}
+                  autoComplete="off"
+                />
+              </div>
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -301,7 +314,7 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
           <Button
             variant="destructive"
             onClick={handleRotate}
-            disabled={loading}
+            disabled={loading || confirmInput !== "rotate"}
           >
             {loading ? (
               <>

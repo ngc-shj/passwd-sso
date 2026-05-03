@@ -1,16 +1,36 @@
 // Shared crypto utility functions used by both client and server modules.
 // Pure functions with no side-effects — safe to import from any module.
 
-/** Convert Uint8Array to ArrayBuffer (fixes TS 5.9 BufferSource compatibility) */
-export function toArrayBuffer(arr: Uint8Array): ArrayBuffer {
-  return arr.buffer.slice(
-    arr.byteOffset,
-    arr.byteOffset + arr.byteLength,
-  ) as ArrayBuffer;
+/**
+ * Pass-through helper for SubtleCrypto APIs that take `BufferSource`.
+ *
+ * Originally converted `Uint8Array → ArrayBuffer` (via slice, then via
+ * new+set) to satisfy TS 5.9 BufferSource expectations.
+ *
+ * Now a no-op: returning the input Uint8Array directly is correct because
+ *   1. SubtleCrypto's `BufferSource = ArrayBufferView | ArrayBuffer` —
+ *      a `Uint8Array` is an `ArrayBufferView`, so the type holds.
+ *   2. jsdom 28 + Node 20 rejects plain `ArrayBuffer` in its webidl
+ *      `BufferSource` check (even when `instanceof ArrayBuffer === true`),
+ *      but accepts any TypedArray. Returning the original Uint8Array
+ *      preserves both the realm and bypasses the failing check.
+ *   3. Skipping the slice/copy is also a small perf win — every call
+ *      site previously paid one allocation + one copy.
+ *
+ * Return type narrowed to `BufferSource` so call sites continue to be
+ * accepted by SubtleCrypto signatures unchanged. `Uint8Array` would
+ * also work and is what is actually returned at runtime.
+ */
+export function toArrayBuffer(arr: Uint8Array): BufferSource {
+  // TS 5.9 narrows Uint8Array.buffer to ArrayBufferLike (could be
+  // SharedArrayBuffer); BufferSource requires ArrayBufferView<ArrayBuffer>.
+  // At runtime our Uint8Arrays are always backed by plain ArrayBuffer, so
+  // the cast is safe.
+  return arr as BufferSource;
 }
 
-/** Encode string to ArrayBuffer via TextEncoder */
-export function textEncode(text: string): ArrayBuffer {
+/** Encode string to BufferSource via TextEncoder (for SubtleCrypto APIs) */
+export function textEncode(text: string): BufferSource {
   return toArrayBuffer(new TextEncoder().encode(text));
 }
 

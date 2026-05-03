@@ -19,13 +19,19 @@ export type ProxyOptions = {
 const intlMiddleware = createIntlMiddleware(routing);
 
 // Paths exempt from passkey enforcement to prevent registration loops.
-// Must include the security settings page and all WebAuthn/auth API routes.
-const PASSKEY_EXEMPT_PREFIXES = [
-  "/dashboard/settings/security",
-];
+// Narrowly scoped to the passkey registration page itself — vault-sensitive
+// pages (passphrase, recovery key) MUST stay gated so a passkey-pending user
+// cannot bypass MFA by reaching them while enforcement is in flight.
+//
+// Exact-match (Set), NOT prefix-match: a future sibling like
+// `/dashboard/settings/auth/passkey-recovery` would otherwise silently
+// inherit the bypass.
+const PASSKEY_EXEMPT_PATHS: ReadonlySet<string> = new Set([
+  "/dashboard/settings/auth/passkey",
+]);
 
 function isPasskeyExemptPath(pathWithoutLocale: string): boolean {
-  return PASSKEY_EXEMPT_PREFIXES.some((prefix) => pathWithoutLocale.startsWith(prefix));
+  return PASSKEY_EXEMPT_PATHS.has(pathWithoutLocale);
 }
 
 function isPasskeyGracePeriodExpired(
@@ -45,7 +51,37 @@ function isPasskeyGracePeriodExpired(
 // Deduplicate passkey audit emit — track userId+timestamp, skip if emitted within 5 min
 export const PASSKEY_AUDIT_DEDUP_MS = 5 * MS_PER_MINUTE;
 export const PASSKEY_AUDIT_MAP_MAX = 1000;
-export const passkeyAuditEmitted = new Map<string, number>();
+// Module-private — direct mutation of this Map from outside the module would
+// allow attacker-influenced suppression of passkey-enforcement audit events.
+// Tests use the sanctioned _*ForTests helpers below.
+const passkeyAuditEmitted = new Map<string, number>();
+
+/**
+ * @internal Test-only — clears the passkey-audit dedup map.
+ * Use in `beforeEach` to isolate page-route tests from each other.
+ */
+export function _resetPasskeyAuditForTests(): void {
+  passkeyAuditEmitted.clear();
+}
+
+/** @internal Test-only — size probe for the passkey-audit dedup map. */
+export function _passkeyAuditSizeForTests(): number {
+  return passkeyAuditEmitted.size;
+}
+
+/** @internal Test-only — membership probe for the passkey-audit dedup map. */
+export function _passkeyAuditHasForTests(userId: string): boolean {
+  return passkeyAuditEmitted.has(userId);
+}
+
+/**
+ * @internal Test-only — returns the first (oldest by recency) key in the
+ * passkey-audit dedup map, or undefined if empty. Used to verify staleness
+ * eviction order.
+ */
+export function _passkeyAuditFirstKeyForTests(): string | undefined {
+  return passkeyAuditEmitted.keys().next().value;
+}
 
 /**
  * Record a passkey-enforcement audit emit for `userId` at `now`. Returns
@@ -160,7 +196,7 @@ export async function handlePageRoute(
     ) {
       if (isPasskeyGracePeriodExpired(session.requirePasskeyEnabledAt, session.passkeyGracePeriodDays)) {
         const securityUrl = request.nextUrl.clone();
-        securityUrl.pathname = `/${locale}/dashboard/settings/security`;
+        securityUrl.pathname = `/${locale}/dashboard/settings/auth/passkey`;
 
         // Fire-and-forget audit log — deduplicated per user to avoid flood on repeated redirects
         const userId = session.userId ?? "";

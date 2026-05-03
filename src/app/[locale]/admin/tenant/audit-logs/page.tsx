@@ -1,7 +1,11 @@
-import { redirect } from "next/navigation";
-import { getLocale } from "next-intl/server";
+"use client";
 
-export default async function TenantAuditLogsPage() {
-  const locale = await getLocale();
-  redirect(`/${locale}/admin/tenant/audit-logs/logs`);
+import { TenantAuditLogCard } from "@/components/settings/account/tenant-audit-log-card";
+
+// Audit logs are tenant-scoped sensitive data — opt out of caching to
+// prevent any accidental ISR/CDN cache from serving cross-tenant content.
+export const dynamic = "force-dynamic";
+
+export default function TenantAuditLogsPage() {
+  return <TenantAuditLogCard variant="logs" />;
 }

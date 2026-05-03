@@ -62,6 +62,19 @@ fi
 if git rev-parse --abbrev-ref HEAD | grep -q "^refactor/"; then
   run_step "Refactor phase verify" node scripts/refactor-phase-verify.mjs
 fi
+
+# Manual-test artifact gate (R35 Tier-1) — fails if admin-IA changes ship
+# without an accompanying docs/archive/review/*-manual-test.md.
+if git diff --name-only main...HEAD | grep -q '^src/app/\[locale\]/admin/'; then
+  if ! git diff --name-only --diff-filter=A main...HEAD | grep -q '^docs/archive/review/.*-manual-test\.md$'; then
+    printf "${RED}ERROR: admin/ changes detected but no docs/archive/review/*-manual-test.md added (R35 Tier-1)${RESET}\n" >&2
+    failed=$((failed + 1))
+    failures+=("Manual-test artifact gate (R35 Tier-1)")
+  else
+    printf "${GREEN}  ✓ Manual-test artifact gate (R35 Tier-1)${RESET}\n\n"
+    passed=$((passed + 1))
+  fi
+fi
 # Clear vitest cache to match CI's clean environment
 rm -rf node_modules/.vitest extension/node_modules/.vitest 2>/dev/null || true
 run_step "Test"                   npx vitest run

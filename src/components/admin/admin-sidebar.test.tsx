@@ -13,8 +13,8 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/i18n/navigation", () => ({
-  Link: ({ children, href, onClick, className }: { children: React.ReactNode; href: string; onClick?: () => void; className?: string }) => (
-    <a href={href} onClick={onClick} className={className}>{children}</a>
+  Link: ({ children, href, onClick, className, ...rest }: { children: React.ReactNode; href: string; onClick?: () => void; className?: string } & Record<string, unknown>) => (
+    <a href={href} onClick={onClick} className={className} {...rest}>{children}</a>
   ),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
@@ -53,15 +53,35 @@ vi.mock("@/components/ui/button", () => ({
       : <button data-variant={variant} {...rest}>{children}</button>,
 }));
 
-import { AdminSidebar } from "./admin-sidebar";
+import { AdminSidebar, countLeafLinks, getTenantNavItems, getTeamNavItems } from "./admin-sidebar";
+
+// Mock t function used by getTenantNavItems / getTeamNavItems for derived counts.
+const tMock = ((key: string) => key) as unknown as Parameters<typeof getTenantNavItems>[0];
+const expectedTenantLinks = countLeafLinks(getTenantNavItems(tMock));
+const expectedTeamLinks = countLeafLinks(getTeamNavItems(tMock, "team-1"));
 
 const adminTeams = [
   { team: { id: "team-1", name: "Team Alpha", slug: "team-alpha" } },
   { team: { id: "team-2", name: "Team Beta", slug: "team-beta" } },
 ];
 
+describe("countLeafLinks helper", () => {
+  it("counts leaves and group children but not group headers", () => {
+    const items = [
+      { href: "/a", label: "a", icon: null },
+      { href: "/b", label: "b", icon: null, children: [
+        { href: "/b/1", label: "b1", icon: null },
+        { href: "/b/2", label: "b2", icon: null },
+      ] },
+      { href: "/c", label: "c", icon: null },
+    ];
+    // 1 (leaf a) + 2 (children of b — group header itself not counted) + 1 (leaf c) = 4
+    expect(countLeafLinks(items)).toBe(4);
+  });
+});
+
 describe("AdminSidebar — tenant scope", () => {
-  it("renders tenant leaf and child nav links", () => {
+  it("renders the expected number of tenant nav links", () => {
     mockUsePathname.mockReturnValue("/ja/admin/tenant/members");
     render(
       <AdminSidebar
@@ -72,10 +92,11 @@ describe("AdminSidebar — tenant scope", () => {
       />
     );
 
+    // Link count derived from the navItem source-of-truth via `countLeafLinks`.
+    // Group headers render as <div> (not <a>) so only leaf items contribute.
+    // × 2 sidebars (desktop + mobile sheet).
     const links = screen.getAllByRole("link");
-    // Leaf items (members, teams, security, operator-tokens) + children under groups (provisioning×2, service-accounts×2, mcp×1, audit-logs×3)
-    // = 4 leaf + 8 children = 12 per sidebar × 2 sidebars = 24
-    expect(links.length).toBe(24);
+    expect(links.length).toBe(expectedTenantLinks * 2);
   });
 
   it("renders correct tenant nav hrefs including children", () => {
@@ -90,17 +111,24 @@ describe("AdminSidebar — tenant scope", () => {
     );
 
     const expectedHrefs = [
+      // Top-level leaves
       "/admin/tenant/members",
       "/admin/tenant/teams",
-      "/admin/tenant/security",
-      "/admin/tenant/provisioning/scim",
-      "/admin/tenant/provisioning/directory-sync",
-      "/admin/tenant/service-accounts/accounts",
-      "/admin/tenant/service-accounts/access-requests",
-      "/admin/tenant/mcp/clients",
-      "/admin/tenant/audit-logs/logs",
-      "/admin/tenant/audit-logs/breakglass",
-      "/admin/tenant/audit-logs/delivery",
+      "/admin/tenant/audit-logs",
+      "/admin/tenant/breakglass",
+      // Machine identity group children
+      "/admin/tenant/machine-identity/service-accounts",
+      "/admin/tenant/machine-identity/mcp-clients",
+      "/admin/tenant/machine-identity/operator-tokens",
+      // Policies group children
+      "/admin/tenant/policies/authentication",
+      "/admin/tenant/policies/machine-identity",
+      "/admin/tenant/policies/retention",
+      "/admin/tenant/policies/access-restriction",
+      // Integrations group children
+      "/admin/tenant/integrations/provisioning",
+      "/admin/tenant/integrations/webhooks",
+      "/admin/tenant/integrations/audit-delivery",
     ];
 
     expectedHrefs.forEach((href) => {
@@ -111,7 +139,7 @@ describe("AdminSidebar — tenant scope", () => {
     });
   });
 
-  it("active leaf link has secondary variant", () => {
+  it("active leaf link emits aria-current=page", () => {
     mockUsePathname.mockReturnValue("/ja/admin/tenant/members");
     render(
       <AdminSidebar
@@ -127,12 +155,11 @@ describe("AdminSidebar — tenant scope", () => {
     );
     expect(activeLinks.length).toBeGreaterThan(0);
     activeLinks.forEach((link) => {
-      // Button wraps the link — check parent for variant
-      expect(link.parentElement?.getAttribute("data-variant")).toBe("secondary");
+      expect(link).toHaveAttribute("aria-current", "page");
     });
   });
 
-  it("non-active leaf link has ghost variant", () => {
+  it("non-active leaf link does not emit aria-current", () => {
     mockUsePathname.mockReturnValue("/ja/admin/tenant/members");
     render(
       <AdminSidebar
@@ -148,12 +175,12 @@ describe("AdminSidebar — tenant scope", () => {
     );
     expect(inactiveLinks.length).toBeGreaterThan(0);
     inactiveLinks.forEach((link) => {
-      expect(link.parentElement?.getAttribute("data-variant")).toBe("ghost");
+      expect(link).not.toHaveAttribute("aria-current");
     });
   });
 
-  it("active child link under service-accounts group has secondary variant", () => {
-    mockUsePathname.mockReturnValue("/ja/admin/tenant/service-accounts/accounts");
+  it("active child link under machine-identity group emits aria-current=page", () => {
+    mockUsePathname.mockReturnValue("/ja/admin/tenant/machine-identity/mcp-clients");
     render(
       <AdminSidebar
         open={false}
@@ -164,16 +191,16 @@ describe("AdminSidebar — tenant scope", () => {
     );
 
     const activeLinks = screen.getAllByRole("link").filter(
-      (el) => el.getAttribute("href") === "/admin/tenant/service-accounts/accounts"
+      (el) => el.getAttribute("href") === "/admin/tenant/machine-identity/mcp-clients"
     );
     expect(activeLinks.length).toBeGreaterThan(0);
     activeLinks.forEach((link) => {
-      expect(link.parentElement?.getAttribute("data-variant")).toBe("secondary");
+      expect(link).toHaveAttribute("aria-current", "page");
     });
   });
 
-  it("active child link under mcp group has secondary variant", () => {
-    mockUsePathname.mockReturnValue("/ja/admin/tenant/mcp/clients");
+  it("active child link under policies group emits aria-current=page", () => {
+    mockUsePathname.mockReturnValue("/ja/admin/tenant/policies/authentication/password");
     render(
       <AdminSidebar
         open={false}
@@ -184,17 +211,17 @@ describe("AdminSidebar — tenant scope", () => {
     );
 
     const activeLinks = screen.getAllByRole("link").filter(
-      (el) => el.getAttribute("href") === "/admin/tenant/mcp/clients"
+      (el) => el.getAttribute("href") === "/admin/tenant/policies/authentication"
     );
     expect(activeLinks.length).toBeGreaterThan(0);
     activeLinks.forEach((link) => {
-      expect(link.parentElement?.getAttribute("data-variant")).toBe("secondary");
+      expect(link).toHaveAttribute("aria-current", "page");
     });
   });
 });
 
 describe("AdminSidebar — team scope", () => {
-  it("renders team leaf and child nav links", () => {
+  it("renders the expected number of team nav links", () => {
     mockUsePathname.mockReturnValue("/ja/admin/teams/team-1/general");
     render(
       <AdminSidebar
@@ -205,13 +232,12 @@ describe("AdminSidebar — team scope", () => {
       />
     );
 
+    // Link count derived from the navItem source-of-truth via `countLeafLinks`.
     const links = screen.getAllByRole("link");
-    // Leaf items (general, audit-logs) + children under groups (members×3, security×3)
-    // = 2 leaf + 6 children = 8 per sidebar × 2 sidebars = 16
-    expect(links.length).toBe(16);
+    expect(links.length).toBe(expectedTeamLinks * 2);
   });
 
-  it("renders correct team nav hrefs for team-1 including children", () => {
+  it("renders correct team nav hrefs for team-1", () => {
     mockUsePathname.mockReturnValue("/ja/admin/teams/team-1/general");
     render(
       <AdminSidebar
@@ -224,12 +250,10 @@ describe("AdminSidebar — team scope", () => {
 
     const expectedHrefs = [
       "/admin/teams/team-1/general",
-      "/admin/teams/team-1/members/list",
-      "/admin/teams/team-1/members/add",
-      "/admin/teams/team-1/members/transfer",
-      "/admin/teams/team-1/security/policy",
-      "/admin/teams/team-1/security/key-rotation",
-      "/admin/teams/team-1/security/webhooks",
+      "/admin/teams/team-1/members",
+      "/admin/teams/team-1/policy",
+      "/admin/teams/team-1/key-rotation",
+      "/admin/teams/team-1/webhooks",
       "/admin/teams/team-1/audit-logs",
     ];
 
@@ -241,7 +265,7 @@ describe("AdminSidebar — team scope", () => {
     });
   });
 
-  it("active leaf link for team scope has secondary variant", () => {
+  it("active leaf link for team scope emits aria-current=page", () => {
     mockUsePathname.mockReturnValue("/ja/admin/teams/team-1/general");
     render(
       <AdminSidebar
@@ -257,7 +281,7 @@ describe("AdminSidebar — team scope", () => {
     );
     expect(activeLinks.length).toBeGreaterThan(0);
     activeLinks.forEach((link) => {
-      expect(link.parentElement?.getAttribute("data-variant")).toBe("secondary");
+      expect(link).toHaveAttribute("aria-current", "page");
     });
   });
 });

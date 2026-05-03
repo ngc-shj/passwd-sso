@@ -48,8 +48,21 @@ if [ -n "$deleted_pages" ]; then
 
     # Search E2E files for this route (with or without locale prefix)
     if grep -rq "$route" "$E2E_DIR/" 2>/dev/null; then
-      matching_files=$(grep -rl "$route" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
-      warn "Deleted route '$route' is still referenced in: $matching_files"
+      # Filter out files marked with intentional-reference exemption comment.
+      # Use case: tests that assert deleted URLs return 404 (regression guard
+      # against accidental redirect re-introduction) intentionally reference
+      # the deleted route. Mark the test file with:
+      #   // e2e-selectors:expected-deleted-routes
+      filtered_files=""
+      while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        if ! grep -q "e2e-selectors:expected-deleted-routes" "$f"; then
+          filtered_files="${filtered_files:+$filtered_files,}$f"
+        fi
+      done < <(grep -rl "$route" "$E2E_DIR/" 2>/dev/null)
+      if [ -n "$filtered_files" ]; then
+        warn "Deleted route '$route' is still referenced in: $filtered_files"
+      fi
     fi
   done
 fi

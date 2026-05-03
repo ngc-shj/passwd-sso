@@ -5,6 +5,7 @@ const { mockAuth, mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
   mockPrismaPasswordShare, mockPrismaVaultKey, mockPrismaTag, mockPrismaFolder,
   mockPrismaEmergencyGrant, mockPrismaTeamMemberKey, mockPrismaTeamMember,
   mockPrismaTransaction, mockRateLimiter, mockLogAudit, mockExecuteVaultReset,
+  mockInvalidateUserSessions,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaUser: { update: vi.fn() },
@@ -21,6 +22,7 @@ const { mockAuth, mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
   mockRateLimiter: { check: vi.fn() },
   mockLogAudit: vi.fn(),
   mockExecuteVaultReset: vi.fn(),
+  mockInvalidateUserSessions: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -56,6 +58,9 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/vault/vault-reset", () => ({
   executeVaultReset: mockExecuteVaultReset,
 }));
+vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
+  invalidateUserSessions: mockInvalidateUserSessions,
+}));
 // executeVaultReset uses withBypassRls (not withUserTenantRls)
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: vi.fn((_prisma: unknown, fn: () => unknown) => fn()),
@@ -80,6 +85,14 @@ describe("POST /api/vault/reset", () => {
     mockPrismaAttachment.count.mockResolvedValue(2);
     mockPrismaTransaction.mockResolvedValue([]);
     mockExecuteVaultReset.mockResolvedValue({ deletedEntries: 5, deletedAttachments: 2 });
+    mockInvalidateUserSessions.mockResolvedValue({
+      sessions: 0,
+      extensionTokens: 0,
+      apiKeys: 0,
+      mcpAccessTokens: 0,
+      mcpRefreshTokens: 0,
+      delegationSessions: 0,
+    });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -118,12 +131,59 @@ describe("POST /api/vault/reset", () => {
     // executeVaultReset was called
     expect(mockExecuteVaultReset).toHaveBeenCalledWith("user-1");
 
-    // Audit log
+    // Audit log includes invalidation counts (zero by default in this test)
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "VAULT_RESET_EXECUTED",
         userId: "user-1",
-        metadata: { deletedEntries: 5, deletedAttachments: 2 },
+        metadata: {
+          deletedEntries: 5,
+          deletedAttachments: 2,
+          invalidatedSessions: 0,
+          invalidatedExtensionTokens: 0,
+          invalidatedApiKeys: 0,
+          invalidatedMcpAccessTokens: 0,
+          invalidatedMcpRefreshTokens: 0,
+          invalidatedDelegationSessions: 0,
+        },
+      }),
+    );
+  });
+
+  it("invalidates all user sessions/tokens across tenants after vault reset", async () => {
+    mockInvalidateUserSessions.mockResolvedValue({
+      sessions: 3,
+      extensionTokens: 2,
+      apiKeys: 1,
+      mcpAccessTokens: 4,
+      mcpRefreshTokens: 5,
+      delegationSessions: 6,
+    });
+
+    const res = await POST(createRequest("POST", URL, {
+      body: { confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
+    }));
+    expect(res.status).toBe(200);
+
+    // Sessions/tokens invalidated across all tenants (mirrors admin-reset).
+    expect(mockInvalidateUserSessions).toHaveBeenCalledOnce();
+    expect(mockInvalidateUserSessions).toHaveBeenCalledWith("user-1", {
+      allTenants: true,
+      reason: "self_vault_reset",
+    });
+
+    // Counts propagated to audit metadata.
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "VAULT_RESET_EXECUTED",
+        metadata: expect.objectContaining({
+          invalidatedSessions: 3,
+          invalidatedExtensionTokens: 2,
+          invalidatedApiKeys: 1,
+          invalidatedMcpAccessTokens: 4,
+          invalidatedMcpRefreshTokens: 5,
+          invalidatedDelegationSessions: 6,
+        }),
       }),
     );
   });
@@ -141,6 +201,8 @@ describe("POST /api/vault/reset", () => {
       POST(createRequest("POST", URL, { body: { confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT } })),
     ).rejects.toThrow("DB failure");
     expect(mockLogAudit).not.toHaveBeenCalled();
+    // No invalidation when the wipe itself failed — DB rows still exist.
+    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
   });
 
   it("delegates full vault wipe to executeVaultReset with correct userId", async () => {

@@ -36,6 +36,28 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      // Skip mobile-tagged tests — they run in the dedicated mobile projects
+      grepInvert: /@mobile/,
+    },
+    {
+      // iPhone 13 viewport with chromium engine.
+      // Note: Playwright's `devices["iPhone 13"]` defaults to webkit, but our
+      // session-cookie injection (e2e/helpers/auth.ts) is currently unreliable
+      // under WebKit (cookies not honoured on first navigation). We test the
+      // mobile viewport behaviour (touch, responsive layout) under chromium
+      // until the WebKit cookie path is fixed. mobile-android already provides
+      // chromium-mobile coverage; this project adds the iPhone 13 viewport
+      // (different sizing) on top.
+      name: "mobile-ios",
+      use: { ...devices["iPhone 13"], browserName: "chromium" },
+      // Only run tests tagged @mobile
+      grep: /@mobile/,
+    },
+    {
+      name: "mobile-android",
+      use: { ...devices["Pixel 7"] },
+      // Only run tests tagged @mobile
+      grep: /@mobile/,
     },
   ],
 

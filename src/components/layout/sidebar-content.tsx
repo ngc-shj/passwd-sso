@@ -2,7 +2,7 @@
 
 
 import { VaultSelector } from "@/components/layout/vault-selector";
-import { SecuritySection, SettingsNavSection, ToolsSection } from "@/components/layout/sidebar-section-security";
+import { InsightsSection, SettingsNavSection, ToolsSection } from "@/components/layout/sidebar-section-security";
 import {
   VaultSection,
   CategoriesSection,
@@ -18,6 +18,9 @@ import type {
 } from "@/hooks/sidebar/use-sidebar-data";
 import type { VaultContext } from "@/hooks/vault/use-vault-context";
 import { TEAM_ROLE } from "@/lib/constants";
+import { Button } from "@/components/ui/button";
+import { Link } from "@/i18n/navigation";
+import { HeartPulse } from "lucide-react";
 
 export interface SidebarContentProps {
   t: (key: string) => string;
@@ -185,14 +188,26 @@ export function SidebarContent({
         onNavigate={onNavigate}
       />
 
+      {vaultContext.type !== "team" && (
+        <Button
+          variant={isEmergencyAccess ? "secondary" : "ghost"}
+          className="w-full justify-start gap-2"
+          asChild
+        >
+          <Link href="/dashboard/emergency-access" onClick={onNavigate}>
+            <HeartPulse className="h-4 w-4" />
+            {t("emergencyAccess")}
+          </Link>
+        </Button>
+      )}
+
       {!(vaultContext.type === "team" && vaultContext.teamRole === TEAM_ROLE.VIEWER) && (
-        <SecuritySection
+        <InsightsSection
           isOpen={isOpen("security")}
           onOpenChange={toggleSection("security")}
           t={t}
           vaultContext={vaultContext}
           isWatchtower={isWatchtower}
-          isEmergencyAccess={isEmergencyAccess}
           isPersonalAuditLog={isPersonalAuditLog}
           onNavigate={onNavigate}
         />

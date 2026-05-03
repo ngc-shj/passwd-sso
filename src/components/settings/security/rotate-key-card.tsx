@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { KeyRound, RotateCcw } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -23,7 +23,7 @@ export function RotateKeyCard() {
   return (
     <>
       <Card>
-        <SectionCardHeader icon={KeyRound} title={t("rotateKey")} description={t("rotateKeyDescription")} />
+        <SectionCardHeader icon={RotateCcw} title={t("rotateKey")} description={t("rotateKeyDescription")} />
         <CardContent>
           <Button
             variant="destructive"

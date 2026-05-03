@@ -8,5 +8,5 @@ export default async function SettingsRedirectPage({
 }) {
   const { locale } = await params;
   setRequestLocale(locale);
-  return redirect({ href: "/dashboard/settings/security", locale });
+  return redirect({ href: "/dashboard/settings/account/profile", locale });
 }

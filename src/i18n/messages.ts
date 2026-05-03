@@ -71,6 +71,7 @@ export const NAMESPACES = [
   "AdminConsole",
   "AuditDeliveryTarget",
   "OperatorToken",
+  "Settings",
 ] as const;
 
 export type Namespace = (typeof NAMESPACES)[number];

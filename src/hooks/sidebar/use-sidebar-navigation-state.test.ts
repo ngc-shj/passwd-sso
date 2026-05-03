@@ -150,10 +150,10 @@ describe("useSidebarNavigationState", () => {
     expect(result.current.isAdminActive).toBe(false);
   });
 
-  it("matches isSettings with prefix for sub-paths like /dashboard/settings/security/sessions", () => {
+  it("matches isSettings for sub-paths like /dashboard/settings/auth/passkey", () => {
     const { result } = renderHook(() =>
       useSidebarNavigationState({
-        pathname: "/ja/dashboard/settings/security/sessions",
+        pathname: "/ja/dashboard/settings/auth/passkey",
         searchParams: new URLSearchParams(),
         vaultContext: { type: "personal" },
         teams,
@@ -167,10 +167,10 @@ describe("useSidebarNavigationState", () => {
     expect(result.current.isSettings).toBe(true);
   });
 
-  it("matches isSettings with prefix for /dashboard/settings/security", () => {
+  it("matches isSettings for /dashboard/settings/account", () => {
     const { result } = renderHook(() =>
       useSidebarNavigationState({
-        pathname: "/ja/dashboard/settings/security",
+        pathname: "/ja/dashboard/settings/account",
         searchParams: new URLSearchParams(),
         vaultContext: { type: "personal" },
         teams,
