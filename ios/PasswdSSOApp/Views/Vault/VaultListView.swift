@@ -34,15 +34,17 @@ struct VaultListView: View {
           }
         }
       }
-      .searchable(text: $viewModel.searchQuery, prompt: "Search entries")
-      // simultaneousGesture (NOT onTapGesture) so the tap also propagates to
-      // NavigationLink rows. .onTapGesture would eagerly consume taps and
-      // block navigation to EntryDetailView.
-      .simultaneousGesture(
-        TapGesture().onEnded {
-          autoLockService.recordActivity()
-        }
+      .searchable(
+        text: $viewModel.searchQuery,
+        placement: .navigationBarDrawer(displayMode: .always),
+        prompt: "Search entries"
       )
+      // Activity tracking moved to explicit action sites (Lock button,
+      // search-query change, navigation) so it never competes with
+      // NavigationLink hit-testing inside the List.
+      .onChange(of: viewModel.searchQuery) { _, _ in
+        autoLockService.recordActivity()
+      }
     }
     .onAppear {
       viewModel.loadFromCache(cacheData: cacheData, vaultKey: vaultKey, userId: userId)
