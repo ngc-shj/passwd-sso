@@ -211,8 +211,23 @@ function makeRow(overrides: Partial<OutboxRow> = {}): OutboxRow {
   };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type TxFn = (tx: any) => Promise<unknown>;
+// Structural type matching the txClient mock in vi.hoisted (see line ~31).
+// Prisma's full Prisma.TransactionClient is too wide for the partial mock
+// the tests build (would force fully-typed delegate stubs). The tests need
+// the SAME `Mock<Procedure>` shape that vitest infers for inline `vi.fn()`
+// — anything narrower fails the assignability check at the
+// `mockTransaction.mockImplementation` call sites. Per
+// ~/.claude/rules/typescript/coding-style.md: avoids `any` by binding to
+// vitest's official Mock type.
+import type { Mock } from "vitest";
+interface MockTxClient {
+  $executeRaw: Mock;
+  $queryRawUnsafe: Mock;
+  $executeRawUnsafe: Mock;
+  auditDeliveryTarget: { findMany: Mock };
+  auditDelivery: { upsert: Mock; findMany: Mock; update: Mock };
+}
+type TxFn = (tx: MockTxClient) => Promise<unknown>;
 
 /**
  * Build a $transaction implementation that stops the worker after the first

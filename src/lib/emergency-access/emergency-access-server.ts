@@ -1,9 +1,6 @@
-import type { PrismaClient, Prisma } from "@prisma/client";
-import { prisma as defaultPrisma } from "@/lib/prisma";
+import { prisma as defaultPrisma, type TxOrPrisma } from "@/lib/prisma";
 import { STALE_ELIGIBLE_STATUSES } from "@/lib/emergency-access/emergency-access-state";
 import { EA_STATUS } from "@/lib/constants";
-
-type TxOrPrisma = PrismaClient | Prisma.TransactionClient;
 
 /**
  * Mark all escrow-holding grants as STALE when the owner's keyVersion changes.

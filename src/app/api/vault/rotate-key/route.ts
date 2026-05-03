@@ -400,12 +400,15 @@ async function handlePOST(request: NextRequest) {
   }
 
   // Revoke ALL user-bound auth artifacts (Session, ExtensionToken, ApiKey,
-  // McpAccessToken, McpRefreshToken, DelegationSession). Best-effort — placement
-  // matches existing vault-reset audit shape (cacheTombstoneFailures captured
-  // for forensic visibility on Redis outage). Replaces the prior single
-  // revokeAllDelegationSessions call which left MCP tokens valid against the
-  // freshly-rotated vault. See plan #433 / S-N2 + memory
-  // feedback_user_bound_token_enumeration.md.
+  // McpAccessToken, McpRefreshToken, DelegationSession). Best-effort —
+  // MUST remain OUTSIDE the rotation transaction because the helper opens
+  // its own bypass-RLS transaction on the global prisma client and would
+  // deadlock against the rotation's `pg_advisory_xact_lock` if nested.
+  // Placement matches existing vault-reset audit shape
+  // (cacheTombstoneFailures captured for forensic visibility on Redis
+  // outage). Replaces the prior single revokeAllDelegationSessions call which
+  // left MCP tokens valid against the freshly-rotated vault. See plan #433 /
+  // S-N2 + memory feedback_user_bound_token_enumeration.md.
   const invalidationResult = await invalidateUserSessions(userId, {
     tenantId: user.tenantId,
     reason: "KEY_ROTATION",
@@ -430,8 +433,11 @@ async function handlePOST(request: NextRequest) {
       affectedAttachmentIds: txResult.affectedAttachmentIds,
       affectedAttachmentIdsOverflow: txResult.affectedAttachmentIdsOverflow,
       // From invalidateUserSessions — null when the post-tx call failed
-      // (e.g., transient DB/Redis hiccup). UI should surface a banner when
-      // cacheTombstoneFailures > 0 (#433 / S-N2 caveat).
+      // (e.g., transient DB/Redis hiccup). The explicit `invalidationFailed`
+      // flag distinguishes "call succeeded with 0 revocations" (counts = 0)
+      // from "call failed entirely" (counts = null) so audit-log readers /
+      // SIEM downstream do not conflate the two states (#433 / P3-F6).
+      invalidationFailed: invalidationResult === null,
       invalidatedSessions: invalidationResult?.sessions ?? null,
       invalidatedExtensionTokens: invalidationResult?.extensionTokens ?? null,
       invalidatedApiKeys: invalidationResult?.apiKeys ?? null,

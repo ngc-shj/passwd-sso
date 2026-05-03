@@ -1,8 +1,17 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type Prisma } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
 import { getLogger } from "@/lib/logger";
 import { getTenantRlsContext } from "@/lib/tenant-rls";
+
+/**
+ * Either the global `prisma` client or an interactive transaction client.
+ *
+ * Used by helpers that may be called either standalone (passing `prisma`) or
+ * from inside a `$transaction` callback (passing the `tx` argument). Lets
+ * the helper's writes participate in the caller's atomic unit when present.
+ */
+export type TxOrPrisma = PrismaClient | Prisma.TransactionClient;
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;

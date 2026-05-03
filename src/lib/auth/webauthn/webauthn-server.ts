@@ -32,7 +32,7 @@ import type {
   AuthenticatorDevice,
 } from "@simplewebauthn/types";
 import { hkdfSync } from "node:crypto";
-import type { PrismaClient, Prisma } from "@prisma/client";
+import type { TxOrPrisma } from "@/lib/prisma";
 import { getKeyProviderSync } from "@/lib/key-provider";
 import { getRedis } from "@/lib/redis";
 import { parseDeviceFromUserAgent } from "@/lib/parse-user-agent";
@@ -265,8 +265,6 @@ export function uint8ArrayToBase64url(bytes: Uint8Array): string {
 }
 
 // ── Shared assertion verification helper ────────────────────
-
-type TxOrPrisma = PrismaClient | Prisma.TransactionClient;
 
 /**
  * Outcome of {@link verifyAuthenticationAssertion}.
