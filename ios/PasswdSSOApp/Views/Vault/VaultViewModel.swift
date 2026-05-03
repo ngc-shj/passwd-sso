@@ -45,8 +45,14 @@ public enum VaultViewModelError: Error, Equatable {
   // MARK: - Load from cache
 
   /// Decrypt cached entries using vault_key and populate the view-model.
+  ///
+  /// The cache stores `[CacheEntry]` (the on-disk wire model carrying
+  /// aadVersion/keyVersion/teamKeyVersion/itemKeyVersion needed for AAD
+  /// construction). HostSyncService and DebugVaultLoader both write this
+  /// shape; the previous `[EncryptedEntry]` decode path was a dead Step-7
+  /// type that never matched the on-disk format.
   public func loadFromCache(cacheData: CacheData, vaultKey: SymmetricKey, userId: String) {
-    guard let entries = try? JSONDecoder().decode([EncryptedEntry].self, from: cacheData.entries) else {
+    guard let entries = try? JSONDecoder().decode([CacheEntry].self, from: cacheData.entries) else {
       return
     }
 
@@ -68,7 +74,7 @@ public enum VaultViewModelError: Error, Equatable {
     vaultKey: SymmetricKey,
     userId: String
   ) -> VaultEntryDetail? {
-    guard let entries = try? JSONDecoder().decode([EncryptedEntry].self, from: cacheData.entries),
+    guard let entries = try? JSONDecoder().decode([CacheEntry].self, from: cacheData.entries),
           let entry = entries.first(where: { $0.id == entryId }) else {
       return nil
     }
@@ -77,18 +83,35 @@ public enum VaultViewModelError: Error, Equatable {
 
   // MARK: - Private
 
+  /// Construct AAD per scope, matching CredentialResolver's logic.
+  /// Personal `aadVersion >= 1` → buildPersonalEntryAAD;
+  /// team always → buildTeamEntryAAD.
+  private func buildEntryAAD(
+    entry: CacheEntry,
+    userId: String,
+    vaultType: String
+  ) throws -> Data? {
+    if let teamId = entry.teamId {
+      return try buildTeamEntryAAD(
+        teamId: teamId,
+        entryId: entry.id,
+        vaultType: vaultType,
+        itemKeyVersion: entry.itemKeyVersion ?? 0
+      )
+    }
+    if entry.aadVersion >= 1 {
+      return try buildPersonalEntryAAD(userId: userId, entryId: entry.id)
+    }
+    return nil  // legacy aadVersion == 0 entries have no AAD binding
+  }
+
   private func decryptOverview(
-    entry: EncryptedEntry,
+    entry: CacheEntry,
     vaultKey: SymmetricKey,
     userId: String
   ) -> VaultEntrySummary? {
     do {
-      let aad: Data
-      if let teamId = entry.teamId {
-        aad = try buildTeamEntryAAD(teamId: teamId, entryId: entry.id)
-      } else {
-        aad = try buildPersonalEntryAAD(userId: userId, entryId: entry.id)
-      }
+      let aad = try buildEntryAAD(entry: entry, userId: userId, vaultType: "overview")
       let plaintext = try decryptAESGCMEncoded(
         encrypted: entry.encryptedOverview,
         key: vaultKey,
@@ -101,17 +124,12 @@ public enum VaultViewModelError: Error, Equatable {
   }
 
   private func decryptBlob(
-    entry: EncryptedEntry,
+    entry: CacheEntry,
     vaultKey: SymmetricKey,
     userId: String
   ) -> VaultEntryDetail? {
     do {
-      let aad: Data
-      if let teamId = entry.teamId {
-        aad = try buildTeamEntryAAD(teamId: teamId, entryId: entry.id)
-      } else {
-        aad = try buildPersonalEntryAAD(userId: userId, entryId: entry.id)
-      }
+      let aad = try buildEntryAAD(entry: entry, userId: userId, vaultType: "blob")
       let plaintext = try decryptAESGCMEncoded(
         encrypted: entry.encryptedBlob,
         key: vaultKey,
