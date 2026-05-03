@@ -1,9 +1,30 @@
 import { randomUUID } from "node:crypto";
 import { test, expect } from "@playwright/test";
+import Redis from "ioredis";
 import { injectSession } from "../helpers/auth";
 import { getAuthState } from "../helpers/fixtures";
 import { getPool, seedSession } from "../helpers/db";
 import { seedAttachment } from "../helpers/password-entry";
+
+/**
+ * Reset the per-user vault-rotation rate-limit key in Redis. The route uses
+ * `rl:vault_rotate:${userId}` with windowMs=15min / max=3, shared between
+ * GET /data and POST. Test 2 below makes two rotation round-trips
+ * (rejected-without-ack + accepted-with-ack), each spending 2 hits — plus
+ * test 1's prior rotation puts us over the 3-hit budget. Clearing the key
+ * lets each test attempt run from a fresh quota.
+ */
+async function resetRotationRateLimit(userId: string): Promise<void> {
+  const url = process.env.REDIS_URL;
+  if (!url) return;
+  const r = new Redis(url, { lazyConnect: true });
+  try {
+    await r.connect();
+    await r.del(`rl:vault_rotate:${userId}`);
+  } finally {
+    r.disconnect();
+  }
+}
 import { VaultLockPage } from "../page-objects/vault-lock.page";
 import { DashboardPage } from "../page-objects/dashboard.page";
 import { PasswordEntryPage } from "../page-objects/password-entry.page";
@@ -143,6 +164,11 @@ test("Key rotation requires explicit acknowledge when personal attachments exist
   // test order.
   await seedSession(keyRotation.id, keyRotation.sessionToken);
 
+  // Test 1 already burned 2 of the 3-per-15min rotation rate-limit hits for
+  // this user; this test does TWO rotation round-trips of its own. Reset
+  // upfront so the budget is per-test, not per-CI-window.
+  await resetRotationRateLimit(keyRotation.id);
+
   await injectSession(context, keyRotation.sessionToken);
   await page.goto("/ja/dashboard");
 
@@ -216,6 +242,14 @@ test("Key rotation requires explicit acknowledge when personal attachments exist
   });
 
   await test.step("acknowledge → rotation completes", async () => {
+    // The rejected-without-ack attempt above consumed 2 rate-limit hits
+    // (data fetch + POST). The next rotateKey() call also fetches /data and
+    // POSTs — another 2 hits. Reset between attempts so the second rotation
+    // is not 429'd. Production users do NOT need this because the dialog
+    // gives them seconds between submit + acknowledge clicks; CI fires both
+    // back-to-back inside the same rate-limit window.
+    await resetRotationRateLimit(keyRotation.id);
+
     await page
       .getByRole("button", {
         name: /Acknowledge data loss and rotate|データ消失を承認してローテーション/i,
