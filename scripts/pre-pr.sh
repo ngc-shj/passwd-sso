@@ -43,23 +43,12 @@ run_step "Static: migration-drift" node scripts/checks/check-migration-drift.mjs
 if command -v docker >/dev/null 2>&1 && docker exec passwd-sso-db-1 pg_isready -U passwd_user -q 2>/dev/null; then
   run_step "Static: rls-cross-tenant SQL parse" bash -c '
     set -uo pipefail
-    # Parse-only: feed the FULL manifest. Verify will exit either:
-    #   - 0 (DB has cross-tenant seed applied; full validation, all 5 blocks parsed)
-    #   - non-zero with a known [E-RLS-*] code (parse OK, ASSERT fired)
-    # Without the cross-tenant seed applied, Block 1 manifest parity passes
-    # (manifest matches discovery), and Block 2 then fires [E-RLS-COUNT-A]
-    # because no rows match the tenant — proves Block 1+2 parsed successfully.
-    # Blocks 3-5 are only parsed when the seed is present; CI catches errors
-    # there during the full pipeline run.
-    # Manifest pipeline uses sed (not awk) to avoid bash/awk $-quoting hazards
-    # inside `bash -c "..."`.
+    # sed (not awk) — bash -c "..." double-escapes positional vars and breaks awk $1 references.
     EXPECTED_TABLES=$(sed -E "/^#/d; /^[[:space:]]*$/d; s/^[[:space:]]+//; s/[[:space:]]+$//" \
       scripts/rls-cross-tenant-tables.manifest | paste -sd,)
     out=$(cat scripts/rls-cross-tenant-verify.sql | docker exec -i passwd-sso-db-1 \
       psql -U passwd_app -d passwd_sso -v ON_ERROR_STOP=1 -v expected_tables="$EXPECTED_TABLES" 2>&1) && ec=0 || ec=$?
-    # Whitelist the specific codes that can legitimately fire on the parse
-    # path. Anchored matching prevents typo-codes (e.g. [E-RLS-NUL] missing
-    # the L) from being silently accepted as "parsed OK".
+    # Whitelist exact codes — typos like [E-RLS-NUL] would otherwise pass.
     if (( ec == 0 )) || grep -qE "\[E-RLS-(MANIFEST-(EXTRA|MISSING)|COLPARITY|COUNT-A|COUNT-B|NULL|SYM|BYPASS|DISCOVER|ROLE|COVERAGE)\]" <<<"$out"; then
       exit 0
     fi

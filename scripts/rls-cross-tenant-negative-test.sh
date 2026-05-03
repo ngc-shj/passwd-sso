@@ -104,11 +104,10 @@ run_negative_case() {
   local expected_code="$3"
   local omit_throwaway_from_manifest="${4:-no}"
 
-  # Reset to a clean policy slate, then apply the case's policy.
+  # Reset to a clean policy slate, then apply the case's policy (single -c
+  # call so both run in one connection / transaction).
   psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
-    -c "DROP POLICY IF EXISTS rls_negative_test_tenant_isolation ON rls_negative_test;"
-  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
-    -c "$create_policy_sql"
+    -c "DROP POLICY IF EXISTS rls_negative_test_tenant_isolation ON rls_negative_test; $create_policy_sql;"
 
   local expected_tables
   if [[ "$omit_throwaway_from_manifest" == "yes" ]]; then
@@ -200,9 +199,7 @@ run_negative_case 5 \
 # the throwaway in/out.
 run_case_6_manifest_extra() {
   psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
-    -c "DROP POLICY IF EXISTS rls_negative_test_tenant_isolation ON rls_negative_test;"
-  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
-    -c "$CANONICAL_POLICY_SQL"
+    -c "DROP POLICY IF EXISTS rls_negative_test_tenant_isolation ON rls_negative_test; $CANONICAL_POLICY_SQL;"
   local expected_tables="${manifest_entries},rls_negative_test,rls_phantom_not_in_db"
   local out ec
   out=$(psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 \
@@ -228,9 +225,7 @@ run_case_6_manifest_extra || total_failures=$((total_failures + 1))
 run_case_7_colparity() {
   # Reset to canonical policy so SYM/NULL pass.
   psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
-    -c "DROP POLICY IF EXISTS rls_negative_test_tenant_isolation ON rls_negative_test;"
-  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
-    -c "$CANONICAL_POLICY_SQL"
+    -c "DROP POLICY IF EXISTS rls_negative_test_tenant_isolation ON rls_negative_test; $CANONICAL_POLICY_SQL;"
   # Create the column-only probe.
   psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q -c "
     DROP TABLE IF EXISTS rls_colparity_probe CASCADE;

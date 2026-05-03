@@ -204,8 +204,8 @@ DO $$
 DECLARE
   t text;
   n bigint;
-  expected bigint;
   failures int := 0;
+  tenant_a constant uuid := '00000000-0000-0000-0000-0000000000A0';
 BEGIN
   -- Ensure NOTICE lines are not suppressed by a future PGOPTIONS=-c
   -- client_min_messages=WARNING invocation.
@@ -243,17 +243,12 @@ BEGIN
     ASSERT t ~ '^[a-z_][a-z0-9_]*$',
       format('table name failed regex: %L', t);
 
-    -- Per-table expected count for tenant A. Currently every tenant-scoped
-    -- table has exactly 1 A-row in the seed; the CASE keeps the shape
-    -- identical to Block 4 so future special-cases plug in mechanically.
-    expected := CASE t WHEN 'mcp_clients' THEN 1 ELSE 1 END;
-
     -- %I quotes the identifier safely; never widen to %s for table names.
     EXECUTE format('SELECT count(*) FROM %I', t) INTO n;
 
-    IF n <> expected THEN
-      RAISE NOTICE 'FAIL table=% block=verify-A tenant=A expected=% got=% — likely cause: policy bug (cross-tenant leak). Coverage already confirmed exactly 1 row in DB.',
-        t, expected, n;
+    IF n <> 1 THEN
+      RAISE NOTICE 'FAIL table=% block=verify-A tenant=A expected=1 got=% — likely cause: policy bug (cross-tenant leak). Coverage already confirmed exactly 1 row in DB.',
+        t, n;
       failures := failures + 1;
     END IF;
   END LOOP;
@@ -271,8 +266,8 @@ DO $$
 DECLARE
   t text;
   n bigint;
-  expected bigint;
   failures int := 0;
+  tenant_b constant uuid := '00000000-0000-0000-0000-0000000000B0';
 BEGIN
   SET LOCAL client_min_messages = 'NOTICE';
 
@@ -302,13 +297,11 @@ BEGIN
     ASSERT t ~ '^[a-z_][a-z0-9_]*$',
       format('table name failed regex: %L', t);
 
-    expected := CASE t WHEN 'mcp_clients' THEN 1 ELSE 1 END;
-
     EXECUTE format('SELECT count(*) FROM %I', t) INTO n;
 
-    IF n <> expected THEN
-      RAISE NOTICE 'FAIL table=% block=verify-B tenant=B expected=% got=% — likely cause: policy bug (cross-tenant leak). Coverage already confirmed exactly 1 row in DB.',
-        t, expected, n;
+    IF n <> 1 THEN
+      RAISE NOTICE 'FAIL table=% block=verify-B tenant=B expected=1 got=% — likely cause: policy bug (cross-tenant leak). Coverage already confirmed exactly 1 row in DB.',
+        t, n;
       failures := failures + 1;
     END IF;
   END LOOP;
@@ -334,22 +327,16 @@ DECLARE
   expected bigint;
   filter_clause text;
   failures int := 0;
+  tenant_a constant uuid := '00000000-0000-0000-0000-0000000000A0';
+  tenant_b constant uuid := '00000000-0000-0000-0000-0000000000B0';
+  -- Cannot use `RESET app.tenant_id`: Postgres custom-GUC quirk — once SET in
+  -- a session, current_setting returns '' rather than NULL even after RESET,
+  -- and `''::uuid` errors before the OR-bypass clause can short-circuit. The
+  -- nil sentinel parses cleanly and matches no real tenant_id.
+  nil_sentinel constant uuid := '00000000-0000-0000-0000-000000000000';
 BEGIN
   SET LOCAL client_min_messages = 'NOTICE';
 
-  -- IMPORTANT: cannot use `RESET app.tenant_id` here. Postgres quirk: once a
-  -- custom GUC has been SET (or SET LOCAL'd) in a session, subsequent calls
-  -- to `current_setting('app.tenant_id', true)` return the empty string ''
-  -- — NOT NULL — even after RESET / DISCARD ALL. The policy's USING clause
-  -- then evaluates `tenant_id = ''::uuid`, which raises
-  -- `invalid input syntax for type uuid: ""` BEFORE the OR-bypass branch
-  -- can short-circuit. (Confirmed empirically against postgres:16-alpine.)
-  --
-  -- The fix: set app.tenant_id to a valid sentinel UUID that cannot match
-  -- any real tenant_id. The all-zeros nil-UUID is the canonical choice —
-  -- it parses cleanly, matches no seeded row (tenants A/B use ...000A0/B0),
-  -- and lets the OR-bypass clause exclusively drive the visibility result.
-  -- Net effect: same semantic intent as "tenant filter disabled, bypass-only".
   SET LOCAL app.tenant_id = '00000000-0000-0000-0000-000000000000';
   SET LOCAL app.bypass_rls = 'on';
 
@@ -377,20 +364,16 @@ BEGIN
 
     expected := CASE t WHEN 'mcp_clients' THEN 3 ELSE 2 END;
 
-    -- filter_clause is built from CONSTANTS only (UUID literals from the
-    -- seed). %L quotes them as SQL literals; the cast to ::uuid is added
-    -- explicitly. NEVER widen this to interpolate user input — it is
-    -- inlined into a larger format() via %s and that is only safe because
-    -- the only input shape here is a constant UUID literal.
+    -- filter_clause is inlined into the outer format() via %s. Only safe
+    -- because the inputs are PL/pgSQL constants (tenant_a/tenant_b UUIDs);
+    -- never widen this to interpolate user input.
     filter_clause := CASE t
       WHEN 'mcp_clients' THEN format(
         'tenant_id IN (%L::uuid, %L::uuid) OR tenant_id IS NULL',
-        '00000000-0000-0000-0000-0000000000A0',
-        '00000000-0000-0000-0000-0000000000B0')
+        tenant_a, tenant_b)
       ELSE format(
         'tenant_id IN (%L::uuid, %L::uuid)',
-        '00000000-0000-0000-0000-0000000000A0',
-        '00000000-0000-0000-0000-0000000000B0')
+        tenant_a, tenant_b)
     END;
 
     EXECUTE format('SELECT count(*) FILTER (WHERE %s) FROM %I', filter_clause, t) INTO n;

@@ -458,9 +458,6 @@ jobs:
           psql -v ON_ERROR_STOP=1 postgresql://passwd_app:passwd_app_pass@localhost:5432/passwd_sso -f scripts/rls-smoke-verify.sql
           echo "✓ RLS enforcement verified: passwd_app cannot see seeded rows"
 
-      # Cross-tenant predicate verification (issue #434).
-      # Layered checks: seed two tenants → coverage check → predicate verify
-      # as passwd_app → gate self-check (negative test). All must pass.
       - name: Cross-tenant seed (SUPERUSER)
         run: psql -v ON_ERROR_STOP=1 postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso -f scripts/rls-cross-tenant-seed.sql
 
