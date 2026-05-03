@@ -85,6 +85,11 @@ targets:
       - target: Shared
         embed: true
       - target: PasswdSSOAutofillExtension
+        # embed: true puts the .appex into <App>.app/PlugIns/ which is where
+        # iOS scans for credential provider extensions. Without it the
+        # extension is built but not bundled and never appears in
+        # Settings → AutoFill & Passwords.
+        embed: true
 
   PasswdSSOAutofillExtension:
     type: app-extension
