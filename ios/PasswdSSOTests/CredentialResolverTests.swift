@@ -16,17 +16,24 @@ final class MockRollbackFlagWriter: RollbackFlagWriter, @unchecked Sendable {
 // MARK: - Mock wrapped key store
 
 final class MockWrappedKeyStore: WrappedKeyStore, @unchecked Sendable {
+  var storedVaultKey: WrappedVaultKey?
   var teamKeys: [WrappedTeamKey] = []
 
-  func saveVaultKey(_ wrapped: WrappedVaultKey) throws {}
-  func loadVaultKey() throws -> WrappedVaultKey? { nil }
+  func saveVaultKey(_ wrapped: WrappedVaultKey) throws {
+    storedVaultKey = wrapped
+  }
+
+  func loadVaultKey() throws -> WrappedVaultKey? { storedVaultKey }
 
   func saveTeamKeys(_ keys: [WrappedTeamKey]) throws {
     teamKeys = keys
   }
 
   func loadTeamKeys() throws -> [WrappedTeamKey] { teamKeys }
-  func clearAll() throws { teamKeys = [] }
+  func clearAll() throws {
+    storedVaultKey = nil
+    teamKeys = []
+  }
 }
 
 // MARK: - Counting Keychain accessor
@@ -108,6 +115,21 @@ private func buildCacheFile(
     hostInstallUUID: hostInstallUUID,
     path: url
   )
+}
+
+/// Wrap vaultKey under cacheKey and save into the store.
+/// Returns the wrapped key for verification if needed.
+@discardableResult
+private func wrapAndSaveVaultKey(
+  vaultKey: SymmetricKey,
+  cacheKey: SymmetricKey,
+  store: MockWrappedKeyStore
+) throws -> WrappedVaultKey {
+  let vaultKeyBytes = vaultKey.withUnsafeBytes { Data($0) }
+  let (cipher, iv, tag) = try encryptAESGCM(plaintext: vaultKeyBytes, key: cacheKey)
+  let wrapped = WrappedVaultKey(ciphertext: cipher, iv: iv, authTag: tag, issuedAt: Date())
+  try store.saveVaultKey(wrapped)
+  return wrapped
 }
 
 /// Encrypt a summary struct into EncryptedData (hex-encoded), with optional AAD.
@@ -203,6 +225,26 @@ private func makeTeamCacheEntry(
   )
 }
 
+/// Wrap a team key under cacheKey and build a WrappedTeamKey (no AAD on team key wrapping).
+private func wrapTeamKey(
+  _ teamKey: SymmetricKey,
+  teamId: String,
+  teamKeyVersion: Int,
+  cacheKey: SymmetricKey,
+  issuedAt: Date = Date()
+) throws -> WrappedTeamKey {
+  let teamKeyData = teamKey.withUnsafeBytes { Data($0) }
+  let (cipher, iv, tag) = try encryptAESGCM(plaintext: teamKeyData, key: cacheKey)
+  return WrappedTeamKey(
+    teamId: teamId,
+    ciphertext: cipher,
+    iv: iv,
+    authTag: tag,
+    issuedAt: issuedAt,
+    teamKeyVersion: teamKeyVersion
+  )
+}
+
 // MARK: - Tests
 
 final class CredentialResolverTests: XCTestCase {
@@ -248,12 +290,51 @@ final class CredentialResolverTests: XCTestCase {
     }
   }
 
+  // MARK: - missing WrappedVaultKey → vaultLocked
+
+  func testResolveCandidates_missingWrappedVaultKey_throwsVaultLocked() async throws {
+    // BridgeKeyStore has a valid blob, but WrappedKeyStore has no vault key.
+    let keychain = MockKeychainAccessor()
+    let (bridgeKeyStore, blob) = try makeBridgeKeyBlob(keychain: keychain)
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+
+    // Build cache (needs some valid state to reach the wrappedKeyStore check)
+    try buildCacheFile(
+      at: cacheURL,
+      entries: [],
+      vaultKey: vaultKey,
+      hostInstallUUID: blob.hostInstallUUID,
+      counter: blob.cacheVersionCounter
+    )
+    _ = cacheKey  // suppress unused warning
+
+    // MockWrappedKeyStore has no vault key stored (storedVaultKey == nil)
+    let emptyStore = MockWrappedKeyStore()
+    let resolver = CredentialResolver(
+      bridgeKeyStore: bridgeKeyStore,
+      wrappedKeyStore: emptyStore,
+      cacheURL: cacheURL
+    )
+
+    do {
+      _ = try await resolver.resolveCandidates(for: [])
+      XCTFail("Expected vaultLocked when WrappedVaultKey is absent")
+    } catch CredentialResolver.Error.vaultLocked {
+      // expected: vault_key cannot be unwrapped without the stored wrapped key
+    }
+  }
+
   // MARK: - URL host filtering
 
   func testResolveCandidates_filtersByURLHost() async throws {
     let keychain = MockKeychainAccessor()
     let (bridgeKeyStore, blob) = try makeBridgeKeyBlob(keychain: keychain)
-    let vaultKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+
+    let mockWKS = MockWrappedKeyStore()
+    try wrapAndSaveVaultKey(vaultKey: vaultKey, cacheKey: cacheKey, store: mockWKS)
 
     // Three entries: 2 match mail.google.com, 1 matches github.com
     let summaryA = VaultEntrySummary(
@@ -314,7 +395,7 @@ final class CredentialResolverTests: XCTestCase {
 
     let resolver = CredentialResolver(
       bridgeKeyStore: bridgeKeyStore,
-      wrappedKeyStore: MockWrappedKeyStore(),
+      wrappedKeyStore: mockWKS,
       cacheURL: cacheURL
     )
 
@@ -339,23 +420,19 @@ final class CredentialResolverTests: XCTestCase {
   func testResolveCandidates_excludesStaleTeamEntries() async throws {
     let keychain = MockKeychainAccessor()
     let (bridgeKeyStore, blob) = try makeBridgeKeyBlob(keychain: keychain)
-    let vaultKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
 
-    // A team key that is 16 minutes old (stale; max is 15 min)
+    let mockWKS = MockWrappedKeyStore()
+    try wrapAndSaveVaultKey(vaultKey: vaultKey, cacheKey: cacheKey, store: mockWKS)
+
+    // A team key that is 16 minutes old (stale; max is 15 min).
+    // Team keys are wrapped under cacheKey in the corrected architecture.
     let teamKey = SymmetricKey(size: .bits256)
-    let teamKeyData = teamKey.withUnsafeBytes { Data($0) }
-    let (wrappedCipher, wrappedIV, wrappedTag) = try encryptAESGCM(
-      plaintext: teamKeyData,
-      key: vaultKey
-    )
     let staleIssuedAt = Date().addingTimeInterval(-16 * 60)
-    let wrappedTeamKey = WrappedTeamKey(
-      teamId: "team-stale",
-      ciphertext: wrappedCipher,
-      iv: wrappedIV,
-      authTag: wrappedTag,
-      issuedAt: staleIssuedAt,
-      teamKeyVersion: 1
+    let wrappedTeamKey = try wrapTeamKey(
+      teamKey, teamId: "team-stale", teamKeyVersion: 1,
+      cacheKey: cacheKey, issuedAt: staleIssuedAt
     )
 
     let teamSummary = VaultEntrySummary(
@@ -387,12 +464,11 @@ final class CredentialResolverTests: XCTestCase {
       userId: "test-user-id"
     )
 
-    let mockWrappedKeyStore = MockWrappedKeyStore()
-    try mockWrappedKeyStore.saveTeamKeys([wrappedTeamKey])
+    try mockWKS.saveTeamKeys([wrappedTeamKey])
 
     let resolver = CredentialResolver(
       bridgeKeyStore: bridgeKeyStore,
-      wrappedKeyStore: mockWrappedKeyStore,
+      wrappedKeyStore: mockWKS,
       cacheURL: cacheURL
     )
 
@@ -409,7 +485,11 @@ final class CredentialResolverTests: XCTestCase {
   func testResolveCandidates_cacheRejection_writesFlag() async throws {
     let keychain = MockKeychainAccessor()
     let (bridgeKeyStore, blob) = try makeBridgeKeyBlob(keychain: keychain)
-    let vaultKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+
+    let mockWKS = MockWrappedKeyStore()
+    try wrapAndSaveVaultKey(vaultKey: vaultKey, cacheKey: cacheKey, store: mockWKS)
 
     // Write a valid cache with counter N, but bridge_key_blob has a different counter.
     // We do this by building a cache at counter=999 while the blob counter is different.
@@ -426,7 +506,7 @@ final class CredentialResolverTests: XCTestCase {
     let mockFlagWriter = MockRollbackFlagWriter()
     let resolver = CredentialResolver(
       bridgeKeyStore: bridgeKeyStore,
-      wrappedKeyStore: MockWrappedKeyStore(),
+      wrappedKeyStore: mockWKS,
       cacheURL: cacheURL,
       rollbackFlagWriter: mockFlagWriter
     )
@@ -452,8 +532,12 @@ final class CredentialResolverTests: XCTestCase {
       keychain: counting
     )
     let blob = try bridgeKeyStore.create()
-    let vaultKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
     counting.copyMatchingCallCount = 0  // reset after create
+
+    let mockWKS = MockWrappedKeyStore()
+    try wrapAndSaveVaultKey(vaultKey: vaultKey, cacheKey: cacheKey, store: mockWKS)
 
     // Build a minimal valid cache.
     let entries: [CacheEntry] = []
@@ -467,7 +551,7 @@ final class CredentialResolverTests: XCTestCase {
 
     let resolver = CredentialResolver(
       bridgeKeyStore: bridgeKeyStore,
-      wrappedKeyStore: MockWrappedKeyStore(),
+      wrappedKeyStore: mockWKS,
       cacheURL: cacheURL
     )
 
@@ -485,7 +569,11 @@ final class CredentialResolverTests: XCTestCase {
   func testDecryptEntryDetail_returnsCorrectFields() async throws {
     let keychain = MockKeychainAccessor()
     let (bridgeKeyStore, blob) = try makeBridgeKeyBlob(keychain: keychain)
-    let vaultKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+
+    let mockWKS = MockWrappedKeyStore()
+    try wrapAndSaveVaultKey(vaultKey: vaultKey, cacheKey: cacheKey, store: mockWKS)
 
     let expectedDetail = VaultEntryDetail(
       id: "detail-1",
@@ -521,7 +609,7 @@ final class CredentialResolverTests: XCTestCase {
 
     let resolver = CredentialResolver(
       bridgeKeyStore: bridgeKeyStore,
-      wrappedKeyStore: MockWrappedKeyStore(),
+      wrappedKeyStore: mockWKS,
       cacheURL: cacheURL
     )
 
@@ -540,13 +628,15 @@ final class CredentialResolverTests: XCTestCase {
   // MARK: - Vault key zeroing after return
 
   func testDecryptEntryDetail_zeroesVaultKeyAfterReturn() async throws {
-    // This test verifies the structural contract: CredentialResolver derives vault_key
-    // from the bridge_key only within the call and does not retain it as a stored property.
-    // We verify indirectly by confirming a second call (after bridge_key is removed) fails,
-    // demonstrating the actor doesn't cache the derived key between calls.
+    // Verifies vault_key is not retained between calls by removing bridge_key and
+    // confirming a second decryptEntryDetail fails.
     let keychain = MockKeychainAccessor()
     let (bridgeKeyStore, blob) = try makeBridgeKeyBlob(keychain: keychain)
-    let vaultKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+
+    let mockWKS = MockWrappedKeyStore()
+    try wrapAndSaveVaultKey(vaultKey: vaultKey, cacheKey: cacheKey, store: mockWKS)
 
     let detail = VaultEntryDetail(
       id: "e1", title: "T", username: "u", urlHost: "example.com",
@@ -569,7 +659,7 @@ final class CredentialResolverTests: XCTestCase {
 
     let resolver = CredentialResolver(
       bridgeKeyStore: bridgeKeyStore,
-      wrappedKeyStore: MockWrappedKeyStore(),
+      wrappedKeyStore: mockWKS,
       cacheURL: cacheURL
     )
 
@@ -578,7 +668,6 @@ final class CredentialResolverTests: XCTestCase {
     _ = try await resolver.decryptEntryDetail(entryId: "e1")
 
     // After decryptEntryDetail returns, the retained blob is consumed (nil).
-    // A second decryptEntryDetail requires a new Keychain read.
     // Remove the Keychain item to confirm vault_key is not cached.
     try bridgeKeyStore.delete()
 
@@ -595,7 +684,11 @@ final class CredentialResolverTests: XCTestCase {
   func testResolveCandidates_aadVersion0_personalEntry_decrypts() async throws {
     let keychain = MockKeychainAccessor()
     let (bridgeKeyStore, blob) = try makeBridgeKeyBlob(keychain: keychain)
-    let vaultKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+
+    let mockWKS = MockWrappedKeyStore()
+    try wrapAndSaveVaultKey(vaultKey: vaultKey, cacheKey: cacheKey, store: mockWKS)
 
     let summary = VaultEntrySummary(id: "p-0", title: "T", username: "u", urlHost: "x.com")
     let detail = VaultEntryDetail(
@@ -615,7 +708,7 @@ final class CredentialResolverTests: XCTestCase {
       userId: "user-abc"
     )
     let resolver = CredentialResolver(
-      bridgeKeyStore: bridgeKeyStore, wrappedKeyStore: MockWrappedKeyStore(), cacheURL: cacheURL
+      bridgeKeyStore: bridgeKeyStore, wrappedKeyStore: mockWKS, cacheURL: cacheURL
     )
     let candidates = try await resolver.resolveCandidates(for: [])
     XCTAssertEqual(candidates.count, 1, "aadVersion=0 entry must decrypt cleanly")
@@ -625,7 +718,11 @@ final class CredentialResolverTests: XCTestCase {
   func testResolveCandidates_aadVersion1_personalEntry_wrongUserIdFails() async throws {
     let keychain = MockKeychainAccessor()
     let (bridgeKeyStore, blob) = try makeBridgeKeyBlob(keychain: keychain)
-    let vaultKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+
+    let mockWKS = MockWrappedKeyStore()
+    try wrapAndSaveVaultKey(vaultKey: vaultKey, cacheKey: cacheKey, store: mockWKS)
 
     let summary = VaultEntrySummary(id: "p-1", title: "T", username: "u", urlHost: "x.com")
     let detail = VaultEntryDetail(
@@ -644,7 +741,7 @@ final class CredentialResolverTests: XCTestCase {
       userId: "user-B"
     )
     let resolver = CredentialResolver(
-      bridgeKeyStore: bridgeKeyStore, wrappedKeyStore: MockWrappedKeyStore(), cacheURL: cacheURL
+      bridgeKeyStore: bridgeKeyStore, wrappedKeyStore: mockWKS, cacheURL: cacheURL
     )
     let candidates = try? await resolver.resolveCandidates(for: [])
     // The entry is silently filtered (decrypt fails), so candidates is empty or nil
@@ -657,18 +754,16 @@ final class CredentialResolverTests: XCTestCase {
   func testResolveCandidates_teamEntry_itemKeyVersion0_decrypts() async throws {
     let keychain = MockKeychainAccessor()
     let (bridgeKeyStore, blob) = try makeBridgeKeyBlob(keychain: keychain)
-    let vaultKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+
+    let mockWKS = MockWrappedKeyStore()
+    try wrapAndSaveVaultKey(vaultKey: vaultKey, cacheKey: cacheKey, store: mockWKS)
 
     let teamId = "team-x"
     let teamKey = SymmetricKey(size: .bits256)
-
-    // Wrap team key under vaultKey
-    let teamKeyData = teamKey.withUnsafeBytes { Data($0) }
-    let (wCipher, wIV, wTag) = try encryptAESGCM(plaintext: teamKeyData, key: vaultKey)
-    let wrappedTeamKey = WrappedTeamKey(
-      teamId: teamId, ciphertext: wCipher, iv: wIV, authTag: wTag,
-      issuedAt: Date(), teamKeyVersion: 1
-    )
+    // Team keys are wrapped under cacheKey (not vaultKey) in the corrected architecture.
+    let wrappedTeamKey = try wrapTeamKey(teamKey, teamId: teamId, teamKeyVersion: 1, cacheKey: cacheKey)
 
     let summary = VaultEntrySummary(
       id: "te-0", title: "T", username: "u", urlHost: "y.com", teamId: teamId
@@ -686,7 +781,6 @@ final class CredentialResolverTests: XCTestCase {
       hostInstallUUID: blob.hostInstallUUID, counter: blob.cacheVersionCounter,
       userId: "u-1"
     )
-    let mockWKS = MockWrappedKeyStore()
     try mockWKS.saveTeamKeys([wrappedTeamKey])
     let resolver = CredentialResolver(
       bridgeKeyStore: bridgeKeyStore, wrappedKeyStore: mockWKS, cacheURL: cacheURL
@@ -699,17 +793,15 @@ final class CredentialResolverTests: XCTestCase {
   func testResolveCandidates_teamEntry_itemKeyVersion1_unwrapsItemKey() async throws {
     let keychain = MockKeychainAccessor()
     let (bridgeKeyStore, blob) = try makeBridgeKeyBlob(keychain: keychain)
-    let vaultKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+
+    let mockWKS = MockWrappedKeyStore()
+    try wrapAndSaveVaultKey(vaultKey: vaultKey, cacheKey: cacheKey, store: mockWKS)
 
     let teamId = "team-y"
     let teamKey = SymmetricKey(size: .bits256)
-
-    let teamKeyData = teamKey.withUnsafeBytes { Data($0) }
-    let (wCipher, wIV, wTag) = try encryptAESGCM(plaintext: teamKeyData, key: vaultKey)
-    let wrappedTeamKey = WrappedTeamKey(
-      teamId: teamId, ciphertext: wCipher, iv: wIV, authTag: wTag,
-      issuedAt: Date(), teamKeyVersion: 2
-    )
+    let wrappedTeamKey = try wrapTeamKey(teamKey, teamId: teamId, teamKeyVersion: 2, cacheKey: cacheKey)
 
     let summary = VaultEntrySummary(
       id: "te-1", title: "T", username: "u", urlHost: "z.com", teamId: teamId
@@ -727,7 +819,6 @@ final class CredentialResolverTests: XCTestCase {
       hostInstallUUID: blob.hostInstallUUID, counter: blob.cacheVersionCounter,
       userId: "u-1"
     )
-    let mockWKS = MockWrappedKeyStore()
     try mockWKS.saveTeamKeys([wrappedTeamKey])
     let resolver = CredentialResolver(
       bridgeKeyStore: bridgeKeyStore, wrappedKeyStore: mockWKS, cacheURL: cacheURL
@@ -740,16 +831,15 @@ final class CredentialResolverTests: XCTestCase {
   func testResolveCandidates_teamEntry_itemKeyVersion1_missingItemKey_filtered() async throws {
     let keychain = MockKeychainAccessor()
     let (bridgeKeyStore, blob) = try makeBridgeKeyBlob(keychain: keychain)
-    let vaultKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+
+    let mockWKS = MockWrappedKeyStore()
+    try wrapAndSaveVaultKey(vaultKey: vaultKey, cacheKey: cacheKey, store: mockWKS)
 
     let teamId = "team-z"
     let teamKey = SymmetricKey(size: .bits256)
-    let teamKeyData = teamKey.withUnsafeBytes { Data($0) }
-    let (wCipher, wIV, wTag) = try encryptAESGCM(plaintext: teamKeyData, key: vaultKey)
-    let wrappedTeamKey = WrappedTeamKey(
-      teamId: teamId, ciphertext: wCipher, iv: wIV, authTag: wTag,
-      issuedAt: Date(), teamKeyVersion: 1
-    )
+    let wrappedTeamKey = try wrapTeamKey(teamKey, teamId: teamId, teamKeyVersion: 1, cacheKey: cacheKey)
 
     let summary = VaultEntrySummary(
       id: "te-missing", title: "T", username: "u", urlHost: "w.com", teamId: teamId
@@ -781,7 +871,6 @@ final class CredentialResolverTests: XCTestCase {
       hostInstallUUID: blob.hostInstallUUID, counter: blob.cacheVersionCounter,
       userId: "u-1"
     )
-    let mockWKS = MockWrappedKeyStore()
     try mockWKS.saveTeamKeys([wrappedTeamKey])
     let resolver = CredentialResolver(
       bridgeKeyStore: bridgeKeyStore, wrappedKeyStore: mockWKS, cacheURL: cacheURL
@@ -798,16 +887,15 @@ final class CredentialResolverTests: XCTestCase {
   func testResolveCandidates_teamEntry_wrongAAD_filtered() async throws {
     let keychain = MockKeychainAccessor()
     let (bridgeKeyStore, blob) = try makeBridgeKeyBlob(keychain: keychain)
-    let vaultKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+
+    let mockWKS = MockWrappedKeyStore()
+    try wrapAndSaveVaultKey(vaultKey: vaultKey, cacheKey: cacheKey, store: mockWKS)
 
     let teamId = "team-w"
     let teamKey = SymmetricKey(size: .bits256)
-    let teamKeyData = teamKey.withUnsafeBytes { Data($0) }
-    let (wCipher, wIV, wTag) = try encryptAESGCM(plaintext: teamKeyData, key: vaultKey)
-    let wrappedTeamKey = WrappedTeamKey(
-      teamId: teamId, ciphertext: wCipher, iv: wIV, authTag: wTag,
-      issuedAt: Date(), teamKeyVersion: 1
-    )
+    let wrappedTeamKey = try wrapTeamKey(teamKey, teamId: teamId, teamKeyVersion: 1, cacheKey: cacheKey)
 
     let summary = VaultEntrySummary(
       id: "te-wrong-aad", title: "T", username: "u", urlHost: "v.com", teamId: teamId
@@ -838,7 +926,6 @@ final class CredentialResolverTests: XCTestCase {
       hostInstallUUID: blob.hostInstallUUID, counter: blob.cacheVersionCounter,
       userId: "u-1"
     )
-    let mockWKS = MockWrappedKeyStore()
     try mockWKS.saveTeamKeys([wrappedTeamKey])
     let resolver = CredentialResolver(
       bridgeKeyStore: bridgeKeyStore, wrappedKeyStore: mockWKS, cacheURL: cacheURL

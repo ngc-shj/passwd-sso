@@ -27,6 +27,11 @@ public enum AuthError: Error, Equatable {
 private struct WebAuthParams: Sendable {
   let url: URL
   let host: String
+  /// Full callback path INCLUDING any basePath the server is mounted under
+  /// (e.g. "/passwd-sso/api/mobile/authorize/redirect"). Must match the
+  /// AASA components.path on the server and the URL the server actually
+  /// 302s to — otherwise iOS will not deliver the .https callback.
+  let callbackPath: String
 }
 
 // MARK: - Coordinator
@@ -76,7 +81,11 @@ public actor AuthCoordinator {
     guard let host = serverConfig.baseURL.host else {
       throw AuthError.webAuthFailed("server URL has no host")
     }
-    let params = WebAuthParams(url: authorizeURL, host: host)
+    // serverConfig.baseURL.path holds the basePath (e.g. "/passwd-sso") or
+    // "" for root-mounted deployments. parseAndValidate trims trailing slash.
+    let basePath = serverConfig.baseURL.path
+    let callbackPath = "\(basePath)/api/mobile/authorize/redirect"
+    let params = WebAuthParams(url: authorizeURL, host: host, callbackPath: callbackPath)
 
     let callbackURL = try await AuthCoordinator.launchWebAuthSession(
       params: params,
@@ -170,7 +179,7 @@ public actor AuthCoordinator {
       if #available(iOS 17.4, *) {
         session = ASWebAuthenticationSession(
           url: params.url,
-          callback: .https(host: params.host, path: "/api/mobile/authorize/redirect")
+          callback: .https(host: params.host, path: params.callbackPath)
         ) { callbackURL, error in
           if let error {
             let nsError = error as NSError

@@ -89,13 +89,30 @@ public actor CredentialResolver {
       throw Error.vaultLocked
     }
 
-    // Derive vault key in memory — must be zeroed before return.
-    var vaultKeyData = blob.bridgeKey.withUnsafeBytes { Data($0) }
-    defer { zeroData(&vaultKeyData) }
+    // Derive cacheKey from bridge_key — used only to unwrap the stored vault_key.
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
 
-    let vaultKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    // Load the wrapped vault_key written by VaultUnlocker at unlock time.
+    guard let wrapped = try? wrappedKeyStore.loadVaultKey() else {
+      throw Error.vaultLocked
+    }
 
-    // Read and integrity-check the cache file.
+    // Unwrap: AES-GCM(ciphertext: wrapped.ciphertext, key: cacheKey) → user's vault_key.
+    guard
+      let vaultKeyData = try? decryptAESGCM(
+        ciphertext: wrapped.ciphertext,
+        iv: wrapped.iv,
+        tag: wrapped.authTag,
+        key: cacheKey
+      )
+    else {
+      throw Error.vaultLocked
+    }
+    var mutableVaultKeyData = vaultKeyData
+    defer { zeroData(&mutableVaultKeyData) }
+    let vaultKey = SymmetricKey(data: vaultKeyData)
+
+    // Read and integrity-check the cache file using the user's actual vault_key.
     let cacheData: CacheData
     do {
       cacheData = try readCacheFile(
@@ -139,8 +156,8 @@ public actor CredentialResolver {
           encounteredStaleTeamIds.insert(teamId)
           continue
         }
-        // Decrypt team key using vault_key.
-        guard let teamKey = decryptTeamKey(wrappedTeamKey, vaultKey: vaultKey) else {
+        // Unwrap team key using cacheKey (team keys are wrapped under cacheKey, not vault_key).
+        guard let teamKey = decryptTeamKey(wrappedTeamKey, cacheKey: cacheKey) else {
           continue
         }
         // Unwrap ItemKey if itemKeyVersion >= 1.
@@ -218,9 +235,26 @@ public actor CredentialResolver {
     }
     currentBlob = nil  // consume after one use
 
-    let vaultKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    // Derive cacheKey from bridge_key; unwrap user's vault_key from WrappedKeyStore.
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    guard let wrapped = try? wrappedKeyStore.loadVaultKey() else {
+      throw Error.vaultLocked
+    }
+    guard
+      let vaultKeyData = try? decryptAESGCM(
+        ciphertext: wrapped.ciphertext,
+        iv: wrapped.iv,
+        tag: wrapped.authTag,
+        key: cacheKey
+      )
+    else {
+      throw Error.vaultLocked
+    }
+    var mutableVaultKeyData = vaultKeyData
+    defer { zeroData(&mutableVaultKeyData) }
+    let vaultKey = SymmetricKey(data: vaultKeyData)
 
-    // Re-read and integrity-check the cache.
+    // Re-read and integrity-check the cache using the user's actual vault_key.
     let cacheData: CacheData
     do {
       cacheData = try readCacheFile(
@@ -255,7 +289,8 @@ public actor CredentialResolver {
       guard let wrappedTeamKey = teamKeys.first(where: { $0.teamId == teamId }) else {
         throw Error.entryNotFound
       }
-      guard let teamKey = decryptTeamKey(wrappedTeamKey, vaultKey: vaultKey) else {
+      // Team keys are wrapped under cacheKey (same as vault_key wrapping).
+      guard let teamKey = decryptTeamKey(wrappedTeamKey, cacheKey: cacheKey) else {
         throw Error.entryNotFound
       }
       guard let entryKey = resolveTeamEntryKey(entry: entry, teamKey: teamKey) else {
@@ -380,16 +415,18 @@ public actor CredentialResolver {
     return SymmetricKey(data: itemKeyData)
   }
 
+  /// Unwrap a stored team key using cacheKey (the HKDF-derived bridge_key derivative).
+  /// Team keys are wrapped under cacheKey, matching the vault_key wrapping scheme.
   private func decryptTeamKey(
     _ wrapped: WrappedTeamKey,
-    vaultKey: SymmetricKey
+    cacheKey: SymmetricKey
   ) -> SymmetricKey? {
     guard
       let plaintext = try? decryptAESGCM(
         ciphertext: wrapped.ciphertext,
         iv: wrapped.iv,
         tag: wrapped.authTag,
-        key: vaultKey
+        key: cacheKey
       )
     else {
       return nil

@@ -83,10 +83,12 @@
 		DBFB20A7E48448D3D840FDE7 /* RollbackFlagWriterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775C6B815B59EF7FAADB00EB /* RollbackFlagWriterTests.swift */; };
 		E0832EF8431014E47A2A4636 /* ServerTrustServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662E445816ED2184809324A5 /* ServerTrustServiceTests.swift */; };
 		E0E33F33FBEB6BBA6CC22D06 /* KDFTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A24C3EFD4C6BA4ACDA40380 /* KDFTests.swift */; };
+		E1FA345EE6BF6D38163AD937 /* DebugVaultLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FED91E37F4E8005AEF7E9B6 /* DebugVaultLoaderTests.swift */; };
 		E300850EF22C24B05B82D25B /* SecureEnclaveKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120E0D108C572BDFE0A5E79E /* SecureEnclaveKey.swift */; };
 		E425C49CE0F5257C1821EB50 /* VaultEntryDetail.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00236EB9F799A708CF1C4FC /* VaultEntryDetail.swift */; };
 		E61FA83E34E321C09B0D7176 /* TOTPVectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CB624E102C09D08D7B9BB8D /* TOTPVectorTests.swift */; };
 		E6242A08FB6CD768CBCED638 /* StaleBlobRecoveryServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65EFD0AD3F8896F5D18F2967 /* StaleBlobRecoveryServiceTests.swift */; };
+		EEDC524C6F56E4E378F8DB16 /* DebugVaultLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6190750A2E1A027047EDBB4 /* DebugVaultLoader.swift */; };
 		EF9407000E17ADEB5E667D88 /* EntryCacheFileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24CD914CFF8AD6DD6DAB0129 /* EntryCacheFileTests.swift */; };
 		F376E57211FDE0E03F285949 /* LockedFallbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C6E4E71B2DDEE6BBA03CBF4 /* LockedFallbackView.swift */; };
 		F6D4F11AC118415488FB8DCF /* URLMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F6C27CE52EFE55D86666E7C /* URLMatcher.swift */; };
@@ -190,10 +192,11 @@
 		36DABD88C20A969FBE8AA7BA /* HostTokenStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostTokenStoreTests.swift; sourceTree = "<group>"; };
 		3D7D6EC824EE87139CFBABE4 /* MobileAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileAPIClient.swift; sourceTree = "<group>"; };
 		3E865DC09076361C7278C2FC /* AutoLockServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoLockServiceTests.swift; sourceTree = "<group>"; };
+		3FED91E37F4E8005AEF7E9B6 /* DebugVaultLoaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugVaultLoaderTests.swift; sourceTree = "<group>"; };
 		404B7404ADFE4D340E600931 /* PasswdSSOTests.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PasswdSSOTests.entitlements; sourceTree = "<group>"; };
-		49247874A1D0207489D6F624 /* PasswdSSOApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PasswdSSOApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		49247874A1D0207489D6F624 /* PasswdSSOApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PasswdSSOApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4A24C3EFD4C6BA4ACDA40380 /* KDFTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KDFTests.swift; sourceTree = "<group>"; };
-		4F631B3CA954B4A2A4EC5714 /* PasswdSSOAutofillExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PasswdSSOAutofillExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		4F631B3CA954B4A2A4EC5714 /* PasswdSSOAutofillExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PasswdSSOAutofillExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		5008EABA0367B0BB5E55052F /* LockStateReducer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockStateReducer.swift; sourceTree = "<group>"; };
 		544AC22B1D47CCD69051F85B /* HostSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostSyncService.swift; sourceTree = "<group>"; };
 		588F0525C544FC2740478510 /* RollbackFlagDrain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RollbackFlagDrain.swift; sourceTree = "<group>"; };
@@ -203,7 +206,7 @@
 		65EFD0AD3F8896F5D18F2967 /* StaleBlobRecoveryServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StaleBlobRecoveryServiceTests.swift; sourceTree = "<group>"; };
 		662E445816ED2184809324A5 /* ServerTrustServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerTrustServiceTests.swift; sourceTree = "<group>"; };
 		692EA0DCA5D3E783869B28F1 /* BackgroundSyncTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSyncTask.swift; sourceTree = "<group>"; };
-		6B849351921A9E2E8B78154E /* PasswdSSOUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PasswdSSOUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		6B849351921A9E2E8B78154E /* PasswdSSOUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PasswdSSOUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		720107D734C7B5EBBBFCB91E /* AppGroupContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroupContainer.swift; sourceTree = "<group>"; };
 		72F670E8B421F3D4CB3734A6 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		7546B006E2E44B4AB2F80A42 /* RollbackFlagWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RollbackFlagWriter.swift; sourceTree = "<group>"; };
@@ -225,11 +228,12 @@
 		9FEC5AE0DBB56D25F0537D3C /* DPoPProofBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DPoPProofBuilder.swift; sourceTree = "<group>"; };
 		A2CB0DAE185BE8F6CC8E6351 /* AuthCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthCoordinator.swift; sourceTree = "<group>"; };
 		A3FBC66A0BFC38B393757852 /* SPKIEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SPKIEncoder.swift; sourceTree = "<group>"; };
+		A6190750A2E1A027047EDBB4 /* DebugVaultLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugVaultLoader.swift; sourceTree = "<group>"; };
 		AD0E81B9E8C8455625BADD51 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		B088B96E6D37D767B517A837 /* StaleBlobRecoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StaleBlobRecoveryService.swift; sourceTree = "<group>"; };
 		B19DB7B9B5F953AC7FC8CE8E /* BridgeKeyStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeKeyStoreTests.swift; sourceTree = "<group>"; };
 		B4DEECF70DC7351FAF2E7CB7 /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
-		B67A2748B3B1C69F7543EB64 /* PasswdSSOTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PasswdSSOTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B67A2748B3B1C69F7543EB64 /* PasswdSSOTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PasswdSSOTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		BB8D42DAB6AE67B22BFFB262 /* BackgroundSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSyncCoordinator.swift; sourceTree = "<group>"; };
 		C02778E2A8EE7B7A09B671C4 /* KDF.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KDF.swift; sourceTree = "<group>"; };
 		C19D6A107E63BFA725F2C0F3 /* WrappedKeyStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WrappedKeyStoreTests.swift; sourceTree = "<group>"; };
@@ -298,6 +302,7 @@
 				77C0E5B05F04FC285CE89519 /* BackgroundSyncCoordinatorTests.swift */,
 				B19DB7B9B5F953AC7FC8CE8E /* BridgeKeyStoreTests.swift */,
 				8AC8C547AA2FF81B4A670924 /* CredentialResolverTests.swift */,
+				3FED91E37F4E8005AEF7E9B6 /* DebugVaultLoaderTests.swift */,
 				EBF559B979642506D203C806 /* DPoPProofBuilderTests.swift */,
 				24CD914CFF8AD6DD6DAB0129 /* EntryCacheFileTests.swift */,
 				628885DD1B6E8E32503A7DD9 /* EntryEncrypterTests.swift */,
@@ -347,6 +352,14 @@
 				BB8D42DAB6AE67B22BFFB262 /* BackgroundSyncCoordinator.swift */,
 			);
 			path = Sync;
+			sourceTree = "<group>";
+		};
+		0EFF92CA8C5EFCC54757A77F /* Debug */ = {
+			isa = PBXGroup;
+			children = (
+				A6190750A2E1A027047EDBB4 /* DebugVaultLoader.swift */,
+			);
+			path = Debug;
 			sourceTree = "<group>";
 		};
 		139C9DD1DC8A8A6682950F82 /* AutoFill */ = {
@@ -521,6 +534,7 @@
 			children = (
 				40DA8513346A467E7C406C84 /* Auth */,
 				6E7D608EE9E577FB9C40FC7E /* Background */,
+				0EFF92CA8C5EFCC54757A77F /* Debug */,
 				1F6A90B63D2D62FA3D634599 /* Network */,
 				C87A10A5ED598D69E9F6E73D /* Vault */,
 				AA31A82EA9B51C3120E55C66 /* Views */,
@@ -698,6 +712,7 @@
 						ProvisioningStyle = Automatic;
 					};
 					3408C5C581C8391A1AAB6ABA = {
+						DevelopmentTeam = 9BL8SUVCSG;
 						ProvisioningStyle = Automatic;
 					};
 					84BF354B2F15CE0C8F36B493 = {
@@ -754,6 +769,7 @@
 				A457C9391F7E1E8164C97A46 /* AutoLockService.swift in Sources */,
 				84EB3A5F0E1899E9DC4A7822 /* BackgroundSyncTask.swift in Sources */,
 				D8EA7B209BAE0D68AB7DB5D5 /* ContentView.swift in Sources */,
+				EEDC524C6F56E4E378F8DB16 /* DebugVaultLoader.swift in Sources */,
 				028ADBEDD93783F5080BA973 /* DeviceIdentifier.swift in Sources */,
 				FC74F7D953B2978FE27D3B85 /* EntryDetailView.swift in Sources */,
 				B0974C58F65B8B4CBE7FB084 /* EntryEditForm.swift in Sources */,
@@ -787,6 +803,7 @@
 				99EB5AFBB9A9C2E9C0818CF6 /* BridgeKeyStoreTests.swift in Sources */,
 				B8E8B10956121151C6DF7F9C /* CredentialResolverTests.swift in Sources */,
 				0A36948197E80ACA5ED17F22 /* DPoPProofBuilderTests.swift in Sources */,
+				E1FA345EE6BF6D38163AD937 /* DebugVaultLoaderTests.swift in Sources */,
 				EF9407000E17ADEB5E667D88 /* EntryCacheFileTests.swift in Sources */,
 				96A710A8F83E4FEB146E39D4 /* EntryEncrypterTests.swift in Sources */,
 				53BABB8B7A6B12FE9A269D87 /* EntryFetcherTests.swift in Sources */,
@@ -1150,7 +1167,6 @@
 				CODE_SIGN_ENTITLEMENTS = PasswdSSOApp/PasswdSSOApp.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 4789NDA9RQ;
 				INFOPLIST_FILE = PasswdSSOApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1170,7 +1186,6 @@
 				CODE_SIGN_ENTITLEMENTS = PasswdSSOApp/PasswdSSOApp.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 4789NDA9RQ;
 				INFOPLIST_FILE = PasswdSSOApp/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

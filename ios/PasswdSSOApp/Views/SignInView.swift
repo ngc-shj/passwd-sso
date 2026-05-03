@@ -31,6 +31,9 @@ final class WindowProvider: NSObject, ASWebAuthenticationPresentationContextProv
 struct SignInView: View {
   let coordinator: AuthCoordinator
   let onSignedIn: (TokenPair) -> Void
+  #if DEBUG
+  let onDebugVaultReady: (DebugVaultLoader.LoadedState) -> Void
+  #endif
 
   @State private var state: SignInViewState = .idle
   @State private var windowProvider = WindowProvider()
@@ -64,6 +67,15 @@ struct SignInView: View {
       .buttonStyle(.borderedProminent)
       .disabled(state == .signingIn)
 
+      #if DEBUG
+      Button("Load Test Vault (DEBUG)") {
+        Task { await loadDebugVault() }
+      }
+      .buttonStyle(.bordered)
+      .tint(.orange)
+      .disabled(state == .signingIn)
+      #endif
+
       Spacer()
       Spacer()
     }
@@ -85,6 +97,20 @@ struct SignInView: View {
       state = .error(message: error.localizedDescription)
     }
   }
+
+  #if DEBUG
+  @MainActor
+  private func loadDebugVault() async {
+    state = .signingIn
+    do {
+      try DebugVaultLoader.reset()
+      let loadedState = try await DebugVaultLoader.loadFixtureVault()
+      onDebugVaultReady(loadedState)
+    } catch {
+      state = .error(message: "DEBUG: \(error.localizedDescription)")
+    }
+  }
+  #endif
 }
 
 // MARK: - Window capture helper

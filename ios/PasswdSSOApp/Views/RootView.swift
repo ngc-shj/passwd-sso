@@ -42,16 +42,7 @@ struct RootView: View {
         }
 
       case .signIn(let config, let coordinator):
-        SignInView(coordinator: coordinator) { pair in
-          // Build the real API client using the SE key the coordinator just loaded.
-          Task { @MainActor in
-            let apiClient = await buildRealAPIClient(
-              serverConfig: config,
-              coordinator: coordinator
-            )
-            appState = .signedIn(serverConfig: config, tokens: pair, apiClient: apiClient)
-          }
-        }
+        makeSignInView(config: config, coordinator: coordinator)
 
       case .signedIn(let serverConfig, _, let apiClient):
         vaultLockedScreen(serverConfig: serverConfig, apiClient: apiClient)
@@ -83,6 +74,42 @@ struct RootView: View {
         .padding()
       }
     }
+  }
+
+  // MARK: - Sign-in view factory
+
+  @ViewBuilder
+  private func makeSignInView(config: ServerConfig, coordinator: AuthCoordinator) -> some View {
+    #if DEBUG
+    SignInView(
+      coordinator: coordinator,
+      onSignedIn: { pair in
+        Task { @MainActor in
+          let apiClient = await buildRealAPIClient(
+            serverConfig: config,
+            coordinator: coordinator
+          )
+          appState = .signedIn(serverConfig: config, tokens: pair, apiClient: apiClient)
+        }
+      },
+      onDebugVaultReady: { state in
+        handleDebugVaultLoaded(state, serverConfig: config, coordinator: coordinator)
+      }
+    )
+    #else
+    SignInView(
+      coordinator: coordinator,
+      onSignedIn: { pair in
+        Task { @MainActor in
+          let apiClient = await buildRealAPIClient(
+            serverConfig: config,
+            coordinator: coordinator
+          )
+          appState = .signedIn(serverConfig: config, tokens: pair, apiClient: apiClient)
+        }
+      }
+    )
+    #endif
   }
 
   // MARK: - Vault locked / unlock entry
@@ -227,6 +254,41 @@ struct RootView: View {
       tokenStore: tokenStore
     )
   }
+
+  #if DEBUG
+  /// Transition directly to .vaultUnlocked using the fixture state loaded by DebugVaultLoader.
+  /// The apiClient uses a NoOpDPoPSigner since the DEBUG vault doesn't sync.
+  @MainActor
+  private func handleDebugVaultLoaded(
+    _ state: DebugVaultLoader.LoadedState,
+    serverConfig: ServerConfig,
+    coordinator: AuthCoordinator
+  ) {
+    let debugApiClient = MobileAPIClient(
+      serverURL: URL(string: "https://debug.local")!,
+      signer: NoOpDPoPSigner(),
+      jwk: [:],
+      tokenStore: HostTokenStore()
+    )
+    let bks = BridgeKeyStore(accessGroup: AppGroupContainer.identifier)
+    let wks = AppGroupWrappedKeyStore()
+    let cacheURL = (try? AppGroupContainer.cacheFileURL()) ?? URL(fileURLWithPath: "/dev/null")
+    let autoLockService = AutoLockService(
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      tokenStore: HostTokenStore(),
+      cacheURL: cacheURL
+    )
+    autoLockService.startTimer()
+    appState = .vaultUnlocked(
+      vaultKey: state.vaultKey,
+      userId: state.userId,
+      cacheData: state.cacheData,
+      autoLockService: autoLockService,
+      apiClient: debugApiClient
+    )
+  }
+  #endif
 }
 
 // MARK: - ServerConfig TeamID placeholder

@@ -202,4 +202,69 @@ Added `ios-ci` job to `.github/workflows/ci.yml`:
   - Boots the first available iPhone 15/16/17 simulator (UDID-based destination is the reliable form on Xcode 26.x; documented in `ios/README.md`)
   - Runs `xcodebuild test` against the booted simulator
 
+## Post-handoff fix #1 (orchestrator) — vault-key unwrap chain + DEBUG fixture loader — 2026-05-03
+
+**Root cause**: `CredentialResolver` was using the wrong key to decrypt the cache file and personal entries.
+The `bridge_key_blob → HKDF("passwd-sso-cache-v1") → cacheKey` derivation produces a key intended
+**only** for wrapping/unwrapping the user's vault_key. The cache file and every entry are encrypted
+with the **user's actual vault_key** (obtained from `VaultUnlocker.unlock`, never persisted plain).
+`VaultUnlocker` correctly stores `AES-GCM(vault_key, key: cacheKey)` as `WrappedVaultKey`; the
+resolver never performed this unwrap step and instead used `cacheKey` directly to decrypt the cache.
+The existing unit tests didn't catch this because each test fixture encrypted and decrypted with the
+same key — the cross-process asymmetry was never exercised.
+
+**Changes**:
+
+1. **`CredentialResolver.resolveCandidates` and `decryptEntryDetail`** — Added the correct two-step
+   unwrap chain:
+   - Derive `cacheKey = deriveCacheVaultKey(bridgeKey: blob.bridgeKey)`.
+   - Load `WrappedVaultKey` from `wrappedKeyStore.loadVaultKey()`; if absent, throw `.vaultLocked`.
+   - Decrypt `AES-GCM(ciphertext: wrapped.ciphertext, iv: wrapped.iv, tag: wrapped.authTag, key: cacheKey)` → `vaultKey`.
+   - Use `vaultKey` (the user's actual vault_key) for `readCacheFile` + personal entry decryption.
+   - Use `cacheKey` (the HKDF-derived bridge_key derivative) for unwrapping `WrappedTeamKey` entries.
+
+2. **`decryptTeamKey` renamed parameter** `vaultKey:` → `cacheKey:` to match the architectural reality
+   (team keys, like the vault_key itself, are wrapped under `cacheKey`, not `vaultKey`).
+
+3. **`MockWrappedKeyStore`** — Added `storedVaultKey: WrappedVaultKey?` storage so `saveVaultKey` and
+   `loadVaultKey` are real round-trips instead of no-ops. All 8 existing test helpers that called
+   `deriveCacheVaultKey(bridgeKey:)` now name that result `cacheKey`, generate a separate random
+   `vaultKey`, call `wrapAndSaveVaultKey(vaultKey:, cacheKey:, store:)` to populate the store, and
+   build the cache file with `vaultKey`. Team key wrappers now call `wrapTeamKey(..., cacheKey:)`.
+
+4. **New test**: `testResolveCandidates_missingWrappedVaultKey_throwsVaultLocked` — verifies that
+   when `wrappedKeyStore.loadVaultKey()` returns nil the resolver throws `.vaultLocked` before
+   attempting cache file decryption.
+
+5. **`DebugVaultLoader`** (new file `ios/PasswdSSOApp/Debug/DebugVaultLoader.swift`, `#if DEBUG` only)
+   — Implements the full fixture-vault state machine: fresh `bridge_key`, random `vault_key`,
+   wrap under `cacheKey`, 3 fixture entries (GitHub / Example / Apple ID) encrypted with
+   `VaultEntrySummary` + `VaultEntryDetail` JSON + `buildPersonalEntryAAD`, written to the App Group
+   cache. `reset()` wipes all state. Used by the DEBUG button in `SignInView`.
+
+6. **`SignInView`** — Added `#if DEBUG` "Load Test Vault (DEBUG)" button (orange, `.bordered`).
+   `onDebugVaultReady: (DebugVaultLoader.LoadedState) -> Void` callback added; in `#else` builds
+   the existing `onSignedIn`-only `init` compiles with no change.
+
+7. **`RootView`** — `makeSignInView` helper uses `#if DEBUG` / `#else` to construct the correct
+   `SignInView` init in each configuration. `handleDebugVaultLoaded` builds `AppState.vaultUnlocked`
+   with a `NoOpDPoPSigner`-backed `MobileAPIClient` (sync is never called in the DEBUG path).
+
+8. **`DebugVaultLoaderTests`** (new file `ios/PasswdSSOTests/DebugVaultLoaderTests.swift`,
+   `#if DEBUG`) — 5 tests exercising the full fixture → resolver round-trip with injected
+   `MockKeychainAccessor` + `TempDirWrappedKeyStore`.
+
+**Naming convention in `CredentialResolver`**:
+
+| Variable | Meaning | Used for |
+| -------- | ------- | -------- |
+| `cacheKey` | HKDF(bridge_key, "passwd-sso-cache-v1") | unwrapping WrappedVaultKey + WrappedTeamKeys |
+| `vaultKey` | user's actual AES-256 vault key (unwrapped from WrappedVaultKey) | readCacheFile + personal entry decrypt |
+| `teamKey` | per-team key (unwrapped from WrappedTeamKey using cacheKey) | team entry decrypt |
+
+**Test count delta**: 183 (182 unit + 1 UI) → 189 (188 unit + 1 UI). New tests: 1 in
+`CredentialResolverTests` + 5 in `DebugVaultLoaderTests` = +6.
+
+**`xcodebuild test` exit code**: 0. Build warnings: 0.
+
 Trigger condition: `ios == 'true' || ci == 'true'`. The dorny/paths-filter pattern keeps macOS runner cost bounded to PRs that actually touch iOS or fixtures.
