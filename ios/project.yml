@@ -73,8 +73,12 @@ targets:
           - group.com.passwd-sso.shared
         keychain-access-groups:
           - $(AppIdentifierPrefix)com.passwd-sso.shared
-        com.apple.developer.associated-domains:
-          - applinks:www.jpng.jp
+        # com.apple.developer.associated-domains intentionally omitted —
+        # Apple Personal Team doesn't grant this capability, and including
+        # it causes the provisioning system to reject the WHOLE entitlements
+        # file, falling back to adhoc signing (empty entitlements). For paid
+        # Apple Developer Program: re-add `applinks:<your-server>` here so
+        # Universal Link OAuth callback can fire.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.passwd-sso
