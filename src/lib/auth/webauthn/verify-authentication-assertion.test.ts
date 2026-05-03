@@ -9,7 +9,7 @@
  * coverage so a future refactor cannot regress them through one consumer
  * while leaving the other passing (#433 / C5).
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/types";
 
 const { mockGetRedis, mockRedisGetdel, mockVerifyAuthLib } = vi.hoisted(() => ({
@@ -50,8 +50,6 @@ afterAll(() => {
   if (ORIGINAL_RP_ORIGIN === undefined) delete process.env.WEBAUTHN_RP_ORIGIN;
   else process.env.WEBAUTHN_RP_ORIGIN = ORIGINAL_RP_ORIGIN;
 });
-
-import { afterAll } from "vitest";
 
 const validAssertion = {
   id: "credential-id-base64url",
