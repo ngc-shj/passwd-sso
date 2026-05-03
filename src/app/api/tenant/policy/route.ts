@@ -949,8 +949,14 @@ async function handlePATCH(req: NextRequest) {
     updateData.passkeyGracePeriodDays !== undefined &&
     (currentTenant?.passkeyGracePeriodDays ?? null) !== updateData.passkeyGracePeriodDays;
 
+  let tenantCacheInvalidation: {
+    totalSessions: number;
+    cacheTombstoneFailures: number;
+  } | null = null;
   if (requirePasskeyChanged || gracePeriodChanged) {
-    await invalidateTenantSessionsCache(membership.tenantId);
+    tenantCacheInvalidation = await invalidateTenantSessionsCache(
+      membership.tenantId,
+    );
   }
 
   // Audit any team-policy clamping that cascaded from this tenant change.
@@ -1004,6 +1010,15 @@ async function handlePATCH(req: NextRequest) {
       jitTokenMaxTtlSec: updated.jitTokenMaxTtlSec,
       delegationDefaultTtlSec: updated.delegationDefaultTtlSec,
       delegationMaxTtlSec: updated.delegationMaxTtlSec,
+      // Only present when this PATCH actually triggered tenant cache
+      // invalidation (requirePasskey or grace-period change). Absent for
+      // routine policy edits to keep the audit row minimal.
+      ...(tenantCacheInvalidation
+        ? {
+            cacheInvalidatedSessions: tenantCacheInvalidation.totalSessions,
+            cacheTombstoneFailures: tenantCacheInvalidation.cacheTombstoneFailures,
+          }
+        : {}),
     },
   });
 

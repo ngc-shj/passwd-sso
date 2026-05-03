@@ -312,13 +312,15 @@ describe.skipIf(!redisAvailable)(
           reason: "admin_vault_reset",
         });
 
-        // Helper return shape (T5) — now includes MCP + delegation counts.
+        // Helper return shape (T5) — includes MCP + delegation counts plus
+        // cacheTombstoneFailures (0 here because Redis is healthy).
         expect(result.sessions).toBe(3);
         expect(result.extensionTokens).toBe(1);
         expect(result.apiKeys).toBe(1);
         expect(result.mcpAccessTokens).toBe(2);
         expect(result.mcpRefreshTokens).toBe(2);
         expect(result.delegationSessions).toBe(2);
+        expect(result.cacheTombstoneFailures).toBe(0);
 
         // All 3 Session rows deleted.
         const sessionsAfter = await ctx.su.prisma.$transaction(async (tx) => {

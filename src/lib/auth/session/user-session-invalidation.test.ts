@@ -17,7 +17,9 @@ const {
   mockMcpRefreshToken: { updateMany: vi.fn() },
   mockDelegationSession: { updateMany: vi.fn() },
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
-  mockInvalidateCachedSessions: vi.fn().mockResolvedValue(undefined),
+  mockInvalidateCachedSessions: vi
+    .fn<(tokens: ReadonlyArray<string>) => Promise<{ total: number; failed: number }>>()
+    .mockResolvedValue({ total: 0, failed: 0 }),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -94,6 +96,7 @@ describe("invalidateUserSessions", () => {
       mcpAccessTokens: 4,
       mcpRefreshTokens: 5,
       delegationSessions: 6,
+      cacheTombstoneFailures: 0,
     });
   });
 
@@ -211,6 +214,7 @@ describe("invalidateUserSessions", () => {
       mcpAccessTokens: 4,
       mcpRefreshTokens: 5,
       delegationSessions: 6,
+      cacheTombstoneFailures: 0,
     });
   });
 
@@ -223,6 +227,27 @@ describe("invalidateUserSessions", () => {
       } as unknown as InvalidateUserSessionsOptions),
     ).rejects.toThrow(/mutually exclusive/);
   });
+
+  it(
+    "surfaces Redis tombstone failures into cacheTombstoneFailures so callers " +
+      "can audit a silent cache outage during vault reset / member removal",
+    async () => {
+      mockSession.findMany.mockResolvedValue([
+        { sessionToken: "tok-a" },
+        { sessionToken: "tok-b" },
+        { sessionToken: "tok-c" },
+      ]);
+      mockSession.deleteMany.mockResolvedValue({ count: 3 });
+      // Simulate a partial Redis outage: 2 of 3 tombstones failed to land.
+      mockInvalidateCachedSessions.mockResolvedValueOnce({ total: 3, failed: 2 });
+
+      const result = await invalidateUserSessions("user-1", { tenantId: "tenant-1" });
+
+      expect(result.cacheTombstoneFailures).toBe(2);
+      // DB-side counts unchanged — reset was durable.
+      expect(result.sessions).toBe(3);
+    },
+  );
 
   it("rejects { tenantId, allTenants: true } at compile time", () => {
     // The @ts-expect-error directive itself is the assertion: if the type

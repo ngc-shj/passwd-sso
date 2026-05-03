@@ -92,6 +92,7 @@ describe("POST /api/vault/reset", () => {
       mcpAccessTokens: 0,
       mcpRefreshTokens: 0,
       delegationSessions: 0,
+      cacheTombstoneFailures: 0,
     });
   });
 
@@ -145,6 +146,7 @@ describe("POST /api/vault/reset", () => {
           invalidatedMcpAccessTokens: 0,
           invalidatedMcpRefreshTokens: 0,
           invalidatedDelegationSessions: 0,
+          cacheTombstoneFailures: 0,
         },
       }),
     );
@@ -158,6 +160,7 @@ describe("POST /api/vault/reset", () => {
       mcpAccessTokens: 4,
       mcpRefreshTokens: 5,
       delegationSessions: 6,
+      cacheTombstoneFailures: 0,
     });
 
     const res = await POST(createRequest("POST", URL, {
@@ -187,6 +190,39 @@ describe("POST /api/vault/reset", () => {
       }),
     );
   });
+
+  it(
+    "surfaces Redis tombstone failures into VAULT_RESET_EXECUTED audit " +
+      "metadata so a silent cache outage during reset is forensically visible",
+    async () => {
+      mockInvalidateUserSessions.mockResolvedValue({
+        sessions: 3,
+        extensionTokens: 0,
+        apiKeys: 0,
+        mcpAccessTokens: 0,
+        mcpRefreshTokens: 0,
+        delegationSessions: 0,
+        cacheTombstoneFailures: 3,
+      });
+
+      const res = await POST(
+        createRequest("POST", URL, {
+          body: { confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
+        }),
+      );
+      expect(res.status).toBe(200);
+
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "VAULT_RESET_EXECUTED",
+          metadata: expect.objectContaining({
+            invalidatedSessions: 3,
+            cacheTombstoneFailures: 3,
+          }),
+        }),
+      );
+    },
+  );
 
   it("returns 400 on missing confirmation field", async () => {
     const res = await POST(createRequest("POST", URL, {

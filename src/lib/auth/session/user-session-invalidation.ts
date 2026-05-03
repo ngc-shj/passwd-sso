@@ -20,6 +20,14 @@ export type InvalidateUserSessionsOptions =
 /**
  * Result of {@link invalidateUserSessions}. Counts revoked artifacts per
  * model so callers can record them in audit metadata.
+ *
+ * `cacheTombstoneFailures` is the number of session tokens whose Redis
+ * tombstone write did NOT land. The DB-side delete is durable (Postgres
+ * transaction); a tombstone failure means the cached SessionInfo can
+ * survive on workers until SESSION_CACHE_TTL_MS expires, so a captured
+ * session token may still authenticate from cache during that window.
+ * Callers MUST include this in audit metadata so silent Redis outages
+ * during a vault reset / member removal are forensically visible.
  */
 export type InvalidateUserSessionsResult = {
   sessions: number;
@@ -28,6 +36,7 @@ export type InvalidateUserSessionsResult = {
   mcpAccessTokens: number;
   mcpRefreshTokens: number;
   delegationSessions: number;
+  cacheTombstoneFailures: number;
 };
 
 /**
@@ -107,10 +116,12 @@ export async function invalidateUserSessions(
       }),
     ]);
 
+    let cacheTombstoneFailures = 0;
     if (targetSessions.length > 0) {
-      await invalidateCachedSessions(
+      const cacheResult = await invalidateCachedSessions(
         targetSessions.map((s) => s.sessionToken),
       );
+      cacheTombstoneFailures = cacheResult.failed;
     }
 
     return {
@@ -120,6 +131,7 @@ export async function invalidateUserSessions(
       mcpAccessTokens: mcpAccessTokensResult.count,
       mcpRefreshTokens: mcpRefreshTokensResult.count,
       delegationSessions: delegationSessionsResult.count,
+      cacheTombstoneFailures,
     };
   }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 }
@@ -135,10 +147,16 @@ export async function invalidateUserSessions(
  * Lives here (not in the route handler) so the bypass-rls call inherits
  * the existing user-session-invalidation.ts allowlist for the `session`
  * model — the tenant route does NOT need its own session-model bypass.
+ *
+ * Returns `{ totalSessions, cacheTombstoneFailures }` so the caller can
+ * include the failure count in POLICY_UPDATE audit metadata — a Redis
+ * outage during a tenant policy tightening (e.g., requirePasskey on)
+ * leaves stale-policy sessions cached on workers, and that gap MUST be
+ * forensically visible.
  */
 export async function invalidateTenantSessionsCache(
   tenantId: string,
-): Promise<void> {
+): Promise<{ totalSessions: number; cacheTombstoneFailures: number }> {
   const targetSessions = await withBypassRls(prisma, () =>
     prisma.session.findMany({
       where: { tenantId, expires: { gt: new Date() } },
@@ -146,9 +164,15 @@ export async function invalidateTenantSessionsCache(
     }),
   BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 
-  if (targetSessions.length > 0) {
-    await invalidateCachedSessionsBulk(
-      targetSessions.map((s) => s.sessionToken),
-    );
+  if (targetSessions.length === 0) {
+    return { totalSessions: 0, cacheTombstoneFailures: 0 };
   }
+
+  const result = await invalidateCachedSessionsBulk(
+    targetSessions.map((s) => s.sessionToken),
+  );
+  return {
+    totalSessions: result.total,
+    cacheTombstoneFailures: result.failed,
+  };
 }

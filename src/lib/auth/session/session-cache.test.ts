@@ -336,10 +336,10 @@ describe("setCachedSession", () => {
 
 describe("invalidateCachedSession", () => {
   it(
-    "writes tombstone JSON with PX=TOMBSTONE_TTL_MS (NO DEL, exact string-level call)",
+    "writes tombstone JSON with PX=TOMBSTONE_TTL_MS (NO DEL, exact string-level call) and returns true",
     async () => {
       mockSet.mockResolvedValueOnce("OK");
-      await invalidateCachedSession("tok");
+      await expect(invalidateCachedSession("tok")).resolves.toBe(true);
 
       const expectedKey = `${SESSION_CACHE_KEY_PREFIX}${hashSessionToken("tok")}`;
       expect(mockSet).toHaveBeenCalledTimes(1);
@@ -353,16 +353,16 @@ describe("invalidateCachedSession", () => {
     },
   );
 
-  it("is a no-op (caught + throttled-logged) on Redis error", async () => {
+  it("returns false (caught + throttled-logged) on Redis error so callers can audit the failure", async () => {
     mockSet.mockRejectedValueOnce(
       Object.assign(new Error("ECONNREFUSED"), { code: "ECONNREFUSED" }),
     );
-    await expect(invalidateCachedSession("tok")).resolves.toBeUndefined();
+    await expect(invalidateCachedSession("tok")).resolves.toBe(false);
   });
 
-  it("is a no-op when Redis is unavailable", async () => {
+  it("returns true (no-failure) when Redis is unavailable — there is no cache to invalidate", async () => {
     mockGetRedis.mockReturnValueOnce(null);
-    await invalidateCachedSession("tok");
+    await expect(invalidateCachedSession("tok")).resolves.toBe(true);
     expect(mockSet).not.toHaveBeenCalled();
   });
 });
@@ -382,12 +382,13 @@ describe("error containment (sync throws from hashSessionToken)", () => {
   );
 
   it(
-    "invalidateCachedSession catches sync throws from getMasterKeyByVersion",
+    "invalidateCachedSession catches sync throws from getMasterKeyByVersion " +
+      "and returns false (treated as a tombstone-write failure)",
     async () => {
       mockGetMasterKeyByVersion.mockImplementation(() => {
         throw new Error("master key missing");
       });
-      await expect(invalidateCachedSession("tok")).resolves.toBeUndefined();
+      await expect(invalidateCachedSession("tok")).resolves.toBe(false);
     },
   );
 
@@ -433,10 +434,13 @@ describe("schema mutual exclusivity (S-12 ordering invariants)", () => {
 // ── Test 19: invalidateCachedSessionsBulk ───────────────────
 
 describe("invalidateCachedSessionsBulk", () => {
-  it("issues a single Redis pipeline with N tombstone SETs", async () => {
+  it("issues a single Redis pipeline with N tombstone SETs and returns {total,failed:0}", async () => {
     mockPipelineExec.mockResolvedValueOnce([]);
     const tokens = ["t1", "t2", "t3"];
-    await invalidateCachedSessionsBulk(tokens);
+    await expect(invalidateCachedSessionsBulk(tokens)).resolves.toEqual({
+      total: tokens.length,
+      failed: 0,
+    });
 
     expect(mockPipelineFactory).toHaveBeenCalledTimes(1);
     expect(mockPipelineSet).toHaveBeenCalledTimes(tokens.length);
@@ -453,24 +457,34 @@ describe("invalidateCachedSessionsBulk", () => {
     }
   });
 
-  it("is a no-op on empty input (no Redis call)", async () => {
-    await invalidateCachedSessionsBulk([]);
+  it("returns {total:0,failed:0} on empty input (no Redis call)", async () => {
+    await expect(invalidateCachedSessionsBulk([])).resolves.toEqual({
+      total: 0,
+      failed: 0,
+    });
     expect(mockPipelineFactory).not.toHaveBeenCalled();
     expect(mockGetRedis).not.toHaveBeenCalled();
   });
 
-  it("is a no-op when Redis is unavailable", async () => {
+  it("returns {total,failed:0} when Redis is unavailable — no cache to invalidate", async () => {
     mockGetRedis.mockReturnValueOnce(null);
-    await invalidateCachedSessionsBulk(["t1"]);
+    await expect(invalidateCachedSessionsBulk(["t1"])).resolves.toEqual({
+      total: 1,
+      failed: 0,
+    });
     expect(mockPipelineFactory).not.toHaveBeenCalled();
   });
 
-  it("swallows pipeline.exec errors (caught + throttled-logged)", async () => {
-    mockPipelineExec.mockRejectedValueOnce(
-      Object.assign(new Error("ECONNREFUSED"), { code: "ECONNREFUSED" }),
-    );
-    await expect(
-      invalidateCachedSessionsBulk(["t1", "t2"]),
-    ).resolves.toBeUndefined();
-  });
+  it(
+    "returns {total,failed:total} on pipeline.exec error so callers can " +
+      "surface the silent Redis outage in audit metadata",
+    async () => {
+      mockPipelineExec.mockRejectedValueOnce(
+        Object.assign(new Error("ECONNREFUSED"), { code: "ECONNREFUSED" }),
+      );
+      await expect(
+        invalidateCachedSessionsBulk(["t1", "t2"]),
+      ).resolves.toEqual({ total: 2, failed: 2 });
+    },
+  );
 });

@@ -38,7 +38,9 @@ const {
     mockLogAudit: vi.fn(),
     mockPolicyLimiterCheck: vi.fn(),
     mockInvalidateTenantPolicyCache: vi.fn(),
-    mockInvalidateCachedSessionsBulk: vi.fn().mockResolvedValue(undefined),
+    mockInvalidateCachedSessionsBulk: vi
+      .fn<(tokens: ReadonlyArray<string>) => Promise<{ total: number; failed: number }>>()
+      .mockImplementation(async (tokens) => ({ total: tokens.length, failed: 0 })),
     mockExtractClientIp: vi.fn(() => "127.0.0.1"),
     mockWouldIpBeAllowed: vi.fn(() => true),
     TenantAuthError: _TenantAuthError,
@@ -464,6 +466,114 @@ describe("PATCH /api/tenant/policy", () => {
       expect(status).toBe(200);
       expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessionsBulk);
     });
+
+    it(
+      "records cacheInvalidatedSessions and cacheTombstoneFailures:0 in " +
+        "POLICY_UPDATE audit metadata when invalidation succeeds",
+      async () => {
+        mockPrismaTenantFindUnique.mockResolvedValue({
+          allowedCidrs: [],
+          tailscaleEnabled: false,
+          tailscaleTailnet: null,
+          requirePasskey: false,
+          passkeyGracePeriodDays: null,
+        });
+        mockPrismaSessionFindMany.mockResolvedValue([
+          { sessionToken: "tok-1" },
+          { sessionToken: "tok-2" },
+        ]);
+        mockPrismaTenantUpdate.mockResolvedValue({
+          ...BASE_POLICY,
+          requirePasskey: true,
+        });
+
+        const req = createRequest("PATCH", ROUTE_URL, {
+          body: { requirePasskey: true },
+        });
+        const { status } = await parseResponse(await PATCH(req));
+        expect(status).toBe(200);
+
+        expect(mockLogAudit).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: "POLICY_UPDATE",
+            metadata: expect.objectContaining({
+              cacheInvalidatedSessions: 2,
+              cacheTombstoneFailures: 0,
+            }),
+          }),
+        );
+      },
+    );
+
+    it(
+      "surfaces Redis tombstone failures into POLICY_UPDATE audit metadata " +
+        "when bulk invalidation fails — silent cache outage during a tenant " +
+        "policy tightening MUST be forensically visible",
+      async () => {
+        mockPrismaTenantFindUnique.mockResolvedValue({
+          allowedCidrs: [],
+          tailscaleEnabled: false,
+          tailscaleTailnet: null,
+          requirePasskey: false,
+          passkeyGracePeriodDays: null,
+        });
+        mockPrismaSessionFindMany.mockResolvedValue([
+          { sessionToken: "tok-1" },
+          { sessionToken: "tok-2" },
+          { sessionToken: "tok-3" },
+        ]);
+        mockPrismaTenantUpdate.mockResolvedValue({
+          ...BASE_POLICY,
+          requirePasskey: true,
+        });
+        // Pipeline.exec failed: all-or-nothing, so failed === total.
+        mockInvalidateCachedSessionsBulk.mockResolvedValueOnce({
+          total: 3,
+          failed: 3,
+        });
+
+        const req = createRequest("PATCH", ROUTE_URL, {
+          body: { requirePasskey: true },
+        });
+        const { status } = await parseResponse(await PATCH(req));
+        expect(status).toBe(200);
+
+        expect(mockLogAudit).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: "POLICY_UPDATE",
+            metadata: expect.objectContaining({
+              cacheInvalidatedSessions: 3,
+              cacheTombstoneFailures: 3,
+            }),
+          }),
+        );
+      },
+    );
+
+    it(
+      "omits cacheInvalidatedSessions/cacheTombstoneFailures from POLICY_UPDATE " +
+        "audit metadata for non-passkey policy changes (invalidation did not run)",
+      async () => {
+        mockPrismaTenantUpdate.mockResolvedValue({
+          ...BASE_POLICY,
+          requireMinPinLength: 6,
+        });
+
+        const req = createRequest("PATCH", ROUTE_URL, {
+          body: { requireMinPinLength: 6 },
+        });
+        const { status } = await parseResponse(await PATCH(req));
+        expect(status).toBe(200);
+
+        const call = mockLogAudit.mock.calls.find(
+          (c) => (c[0] as { action: string }).action === "POLICY_UPDATE",
+        );
+        expect(call).toBeDefined();
+        const metadata = (call?.[0] as { metadata: Record<string, unknown> }).metadata;
+        expect(metadata).not.toHaveProperty("cacheInvalidatedSessions");
+        expect(metadata).not.toHaveProperty("cacheTombstoneFailures");
+      },
+    );
 
     it("does not invalidate session cache when policy update transaction throws", async () => {
       mockPrismaTenantFindUnique.mockResolvedValue({
