@@ -1,30 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { test, expect } from "@playwright/test";
-import Redis from "ioredis";
 import { injectSession } from "../helpers/auth";
 import { getAuthState } from "../helpers/fixtures";
 import { getPool, seedSession } from "../helpers/db";
 import { seedAttachment } from "../helpers/password-entry";
-
-/**
- * Reset the per-user vault-rotation rate-limit key in Redis. The route uses
- * `rl:vault_rotate:${userId}` with windowMs=15min / max=3, shared between
- * GET /data and POST. Test 2 below makes two rotation round-trips
- * (rejected-without-ack + accepted-with-ack), each spending 2 hits — plus
- * test 1's prior rotation puts us over the 3-hit budget. Clearing the key
- * lets each test attempt run from a fresh quota.
- */
-async function resetRotationRateLimit(userId: string): Promise<void> {
-  const url = process.env.REDIS_URL;
-  if (!url) return;
-  const r = new Redis(url, { lazyConnect: true });
-  try {
-    await r.connect();
-    await r.del(`rl:vault_rotate:${userId}`);
-  } finally {
-    r.disconnect();
-  }
-}
+import { resetRotationRateLimit } from "../helpers/redis";
 import { VaultLockPage } from "../page-objects/vault-lock.page";
 import { DashboardPage } from "../page-objects/dashboard.page";
 import { PasswordEntryPage } from "../page-objects/password-entry.page";
@@ -46,6 +26,12 @@ test("Key rotation preserves existing vault entries", async ({
   // (confirmed sufficient for ~408 entries in dev DB; CI has fewer).
   test.setTimeout(60_000);
   const { keyRotation } = getAuthState();
+
+  // Defense-in-depth: prior CI runs or other parallel tests in the same
+  // 15-min window may have consumed budget. Reset upfront so this test
+  // starts with a clean rate-limit quota even if invoked in isolation.
+  await resetRotationRateLimit(keyRotation.id);
+
   await injectSession(context, keyRotation.sessionToken);
   await page.goto("/ja/dashboard");
 
