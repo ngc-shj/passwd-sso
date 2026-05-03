@@ -19,6 +19,7 @@
   "notInTrash": "ゴミ箱にありません。",
   "attachmentNotFound": "添付ファイルが見つかりません。",
   "attachmentLimitExceeded": "添付ファイルの上限に達しました。",
+  "attachmentDataLossNotAcknowledged": "保管庫に添付ファイルがあり、キーローテーション後は復号できなくなります。続行する場合はデータ消失を承認してください。エクスポートしてから実行する場合はキャンセルしてください。",
   "fileTooLarge": "ファイルサイズが上限を超えています。",
   "invalidFilename": "無効なファイル名です。",
   "extensionNotAllowed": "許可されていないファイル拡張子です。",

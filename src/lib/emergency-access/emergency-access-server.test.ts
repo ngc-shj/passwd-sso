@@ -27,7 +27,7 @@ describe("markGrantsStaleForOwner", () => {
     expect(mockPrismaGrant.updateMany).toHaveBeenCalledWith({
       where: {
         ownerId: "owner-1",
-        status: { in: [EA_STATUS.IDLE, EA_STATUS.ACTIVATED] },
+        status: { in: [EA_STATUS.IDLE, EA_STATUS.REQUESTED, EA_STATUS.ACTIVATED] },
         OR: [
           { keyVersion: { lt: 2 } },
           { keyVersion: null },

@@ -148,6 +148,7 @@
   "TRAVEL_MODE_DISABLE_FAILED": "トラベルモード無効化に失敗",
   "WEBAUTHN_CREDENTIAL_REGISTER": "パスキーを登録",
   "WEBAUTHN_CREDENTIAL_DELETE": "パスキーを削除",
+  "WEBAUTHN_PRF_REBOOTSTRAP": "パスキー自動アンロックを再構成",
   "DIRECTORY_SYNC_CONFIG_CREATE": "ディレクトリ同期設定を作成",
   "DIRECTORY_SYNC_CONFIG_UPDATE": "ディレクトリ同期設定を更新",
   "DIRECTORY_SYNC_CONFIG_DELETE": "ディレクトリ同期設定を削除",

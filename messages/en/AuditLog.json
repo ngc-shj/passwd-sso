@@ -148,6 +148,7 @@
   "TRAVEL_MODE_DISABLE_FAILED": "Travel mode disable failed",
   "WEBAUTHN_CREDENTIAL_REGISTER": "Passkey registered",
   "WEBAUTHN_CREDENTIAL_DELETE": "Passkey deleted",
+  "WEBAUTHN_PRF_REBOOTSTRAP": "Passkey auto-unlock re-bootstrapped",
   "DIRECTORY_SYNC_CONFIG_CREATE": "Directory sync config created",
   "DIRECTORY_SYNC_CONFIG_UPDATE": "Directory sync config updated",
   "DIRECTORY_SYNC_CONFIG_DELETE": "Directory sync config deleted",

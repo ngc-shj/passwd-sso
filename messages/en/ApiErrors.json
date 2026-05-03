@@ -19,6 +19,7 @@
   "notInTrash": "Item is not in the trash.",
   "attachmentNotFound": "Attachment not found.",
   "attachmentLimitExceeded": "Attachment limit reached.",
+  "attachmentDataLossNotAcknowledged": "Your vault contains attachments that will become unreadable after key rotation. Acknowledge the data loss to proceed, or cancel to export them first.",
   "fileTooLarge": "File size exceeds the limit.",
   "invalidFilename": "Invalid filename.",
   "extensionNotAllowed": "File extension not allowed.",

@@ -77,6 +77,7 @@ describe("GET /api/vault/status", () => {
       kdfType: 0,
       kdfIterations: 600_000,
       recoveryKeySetAt: null,
+      recoveryKeyInvalidatedAt: null,
       tenant: {
         vaultAutoLockMinutes: null,
         tenantMinPasswordLength: 0,
@@ -117,6 +118,7 @@ describe("GET /api/vault/status", () => {
       kdfType: 0,
       kdfIterations: 600_000,
       recoveryKeySetAt: null,
+      recoveryKeyInvalidatedAt: null,
       tenant: {
         vaultAutoLockMinutes: null,
         tenantMinPasswordLength: 0,
@@ -147,6 +149,7 @@ describe("GET /api/vault/status", () => {
       kdfType: 0,
       kdfIterations: 600_000,
       recoveryKeySetAt: new Date(),
+      recoveryKeyInvalidatedAt: null,
       tenant: {
         vaultAutoLockMinutes: null,
         tenantMinPasswordLength: 0,
@@ -172,6 +175,7 @@ describe("GET /api/vault/status", () => {
       kdfType: 0,
       kdfIterations: 600_000,
       recoveryKeySetAt: null,
+      recoveryKeyInvalidatedAt: null,
       tenant: {
         vaultAutoLockMinutes: 30,
         tenantMinPasswordLength: 0,

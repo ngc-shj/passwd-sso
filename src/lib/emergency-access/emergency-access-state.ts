@@ -40,5 +40,17 @@ export function fromStatusesFor(to: EmergencyAccessStatus): EmergencyAccessStatu
   return FROM_STATUSES_FOR[to] ?? [];
 }
 
-/** Statuses that hold escrowed key data and can become STALE on keyVersion bump. */
-export const STALE_ELIGIBLE_STATUSES: EmergencyAccessStatus[] = [EA_STATUS.IDLE, EA_STATUS.ACTIVATED];
+/**
+ * Statuses that hold escrowed key data and can become STALE on keyVersion bump.
+ *
+ * REQUESTED is included because the grant retains the wrapping ciphertext from
+ * its prior IDLE state — see plan #433 / S1. Without REQUESTED in this set, an
+ * in-flight grantee that filed `request` pre-rotation could wait out
+ * `waitExpiresAt`, auto-promote to ACTIVATED post-rotation, and unwrap the
+ * OWNER's old secretKey via the still-valid escrow.
+ */
+export const STALE_ELIGIBLE_STATUSES: EmergencyAccessStatus[] = [
+  EA_STATUS.IDLE,
+  EA_STATUS.REQUESTED,
+  EA_STATUS.ACTIVATED,
+];

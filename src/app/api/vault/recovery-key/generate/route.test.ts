@@ -59,6 +59,7 @@ const userWithVault = {
   passphraseVerifierVersion: 1,
   recoveryVerifierVersion: 1,
   recoveryKeySetAt: null,
+  recoveryKeyInvalidatedAt: null,
   tenantId: "test-tenant-id",
 };
 
@@ -170,6 +171,7 @@ describe("POST /api/vault/recovery-key/generate", () => {
     mockPrismaUser.findUnique.mockResolvedValue({
       ...userWithVault,
       recoveryKeySetAt: new Date("2025-01-01"),
+      recoveryKeyInvalidatedAt: null,
     });
 
     const res = await POST(createRequest("POST", URL, { body: validBody }));
