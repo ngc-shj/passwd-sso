@@ -8,7 +8,7 @@
   "navMembers": "メンバー",
   "navTeams": "チーム",
   "navAuditLogs": "監査ログ",
-  "navGeneral": "全般",
+  "navGeneral": "一般",
   "noAccess": "管理者権限がありません",
 
   "navMachineIdentity": "マシンID",
@@ -84,7 +84,7 @@
   "sectionBreakglass": "ブレイクグラス",
   "sectionBreakglassDesc": "緊急時に管理者へ一時的なアクセスを付与します。",
 
-  "teamSectionGeneral": "全般",
+  "teamSectionGeneral": "一般",
   "teamSectionGeneralDesc": "チーム名、説明、基本設定を管理します。",
   "teamSectionMembers": "メンバー",
   "teamSectionMembersDesc": "メンバー、招待、ロールを管理します。",

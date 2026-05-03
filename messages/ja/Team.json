@@ -27,7 +27,7 @@
   "passwordCount": "{count} 件のパスワード",
   "createdAtLabel": "作成日: {date}",
   "settings": "設定",
-  "generalSettings": "全般",
+  "generalSettings": "一般",
   "securityPolicy": "セキュリティ",
   "teamSettings": "チーム設定",
   "updateTeam": "チームを更新",
