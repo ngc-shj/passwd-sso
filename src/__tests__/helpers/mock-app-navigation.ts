@@ -28,16 +28,22 @@
  *   const router = vi.fn(...);
  *   vi.mock("@/i18n/navigation", () => mockI18nNavigation({ push: router }));
  */
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 import type { ComponentProps, ReactNode } from "react";
 
+// Use explicit callable signatures so the resulting Mock<Fn> retains its
+// `Fn` callability in TypeScript. `ReturnType<typeof vi.fn>` collapses to
+// `Mock<Procedure | Constructable>` which TS rejects at the call site
+// (TS2348 — not callable; "did you mean to include 'new'?").
+type RouterMethod = (...args: unknown[]) => unknown;
+
 export interface MockRouterMethods {
-  push: ReturnType<typeof vi.fn>;
-  replace: ReturnType<typeof vi.fn>;
-  refresh: ReturnType<typeof vi.fn>;
-  back: ReturnType<typeof vi.fn>;
-  forward: ReturnType<typeof vi.fn>;
-  prefetch: ReturnType<typeof vi.fn>;
+  push: Mock<RouterMethod>;
+  replace: Mock<RouterMethod>;
+  refresh: Mock<RouterMethod>;
+  back: Mock<RouterMethod>;
+  forward: Mock<RouterMethod>;
+  prefetch: Mock<RouterMethod>;
 }
 
 export function createMockRouter(
