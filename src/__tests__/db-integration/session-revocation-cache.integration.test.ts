@@ -99,11 +99,12 @@ describe.skipIf(!redisAvailable)("session-cache integration (real Redis)", () =>
 
   // ── Scenario A — single revoke ─────────────────────────────
   it(
-    "scenario A: warm cache → invalidate → key holds tombstone JSON",
+    "scenario A: warm cache → invalidate → key holds tombstone JSON; helper returns true",
     async () => {
       const token = track(uniqueToken("scA"));
       await setCachedSession(token, fixtureValidSession, SESSION_CACHE_TTL_MS);
-      await invalidateCachedSession(token);
+      const ok = await invalidateCachedSession(token);
+      expect(ok).toBe(true);
 
       const raw = await redis.get(key(token));
       expect(raw).not.toBeNull();
@@ -122,8 +123,10 @@ describe.skipIf(!redisAvailable)("session-cache integration (real Redis)", () =>
       await setCachedSession(tA, fixtureValidSession, SESSION_CACHE_TTL_MS);
       await setCachedSession(tB, fixtureValidSession, SESSION_CACHE_TTL_MS);
 
-      await invalidateCachedSession(tA);
-      await invalidateCachedSession(tB);
+      const okA = await invalidateCachedSession(tA);
+      const okB = await invalidateCachedSession(tB);
+      expect(okA).toBe(true);
+      expect(okB).toBe(true);
 
       const rawA = await redis.get(key(tA));
       const rawB = await redis.get(key(tB));
@@ -149,7 +152,8 @@ describe.skipIf(!redisAvailable)("session-cache integration (real Redis)", () =>
         await setCachedSession(t, fixtureValidSession, SESSION_CACHE_TTL_MS);
       }
 
-      await invalidateCachedSessionsBulk(tokens);
+      const result = await invalidateCachedSessionsBulk(tokens);
+      expect(result).toEqual({ total: tokens.length, failed: 0 });
 
       for (const t of tokens) {
         const raw = await redis.get(key(t));
@@ -202,7 +206,8 @@ describe.skipIf(!redisAvailable)("session-cache integration (real Redis)", () =>
         await setCachedSession(t, fixtureValidSession, SESSION_CACHE_TTL_MS);
       }
 
-      await invalidateCachedSessionsBulk(tokens);
+      const result = await invalidateCachedSessionsBulk(tokens);
+      expect(result).toEqual({ total: tokens.length, failed: 0 });
 
       for (const t of tokens) {
         const raw = await redis.get(key(t));
