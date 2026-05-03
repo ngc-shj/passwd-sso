@@ -444,9 +444,22 @@ async function handlePOST(request: NextRequest) {
 
   getLogger().info({ userId }, "vault.rotateKey.success");
 
+  // Surface rotation-side-effects to the UI so the dialog can render
+  // operator banners (#433 / P3-F2). Counts are 0 when nothing was revoked
+  // and null when the invalidation post-tx call failed entirely.
   return NextResponse.json({
     success: true,
     keyVersion: newKeyVersion,
+    rotationEffects: {
+      recoveryKeyInvalidated: txResult.recoveryKeyInvalidated,
+      emergencyGrantsCleared: txResult.emergencyGrantsCleared,
+      prfCredentialsCleared: txResult.prfCredentialsCleared,
+      attachmentsAffected: txResult.attachmentsAffected,
+      invalidatedMcpAccessTokens: invalidationResult?.mcpAccessTokens ?? null,
+      invalidatedMcpRefreshTokens: invalidationResult?.mcpRefreshTokens ?? null,
+      cacheTombstoneFailures: invalidationResult?.cacheTombstoneFailures ?? null,
+      invalidationFailed: invalidationResult === null,
+    },
   });
 }
 

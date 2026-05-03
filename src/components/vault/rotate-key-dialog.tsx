@@ -61,7 +61,7 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
     setLoading(true);
     setError("");
     try {
-      await rotateKey(
+      const effects = await rotateKey(
         passphrase,
         (phase, current, total) => {
           setProgressPhase(phase);
@@ -71,6 +71,23 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
         acknowledgeAttachmentDataLoss ? { acknowledgeAttachmentDataLoss: true } : undefined,
       );
       toast.success(t("rotateKeySuccess"));
+      // Operator banners (#433/P3-F2). Each surfaces only when the
+      // corresponding side-effect actually occurred. Persistent toasts so the
+      // user can act on them rather than dismissing accidentally.
+      if (effects?.cacheTombstoneFailures && effects.cacheTombstoneFailures > 0) {
+        toast.warning(t("rotateKeyCacheTombstoneFailureBanner"), { duration: Infinity });
+      }
+      if (effects?.invalidationFailed) {
+        toast.warning(t("rotateKeyInvalidationFailedBanner"), { duration: Infinity });
+      }
+      const mcpRevoked =
+        (effects?.invalidatedMcpAccessTokens ?? 0) +
+        (effects?.invalidatedMcpRefreshTokens ?? 0);
+      if (mcpRevoked > 0) {
+        toast.info(t("rotateKeyMcpRevokedBanner", { count: mcpRevoked }), {
+          duration: 10_000,
+        });
+      }
       handleOpenChange(false);
     } catch (err: unknown) {
       const apiErr = err as { error?: string; attachmentsAffected?: number } | undefined;

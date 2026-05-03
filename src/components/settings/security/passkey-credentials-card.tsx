@@ -49,6 +49,10 @@ interface Credential {
   largeBlobSupported: boolean | null;
   transports: string[];
   prfSupported: boolean;
+  // True when the server currently holds a PRF wrapping for this credential.
+  // Cleared by vault key rotation; the user re-bootstraps via the
+  // /api/webauthn/credentials/[id]/prf flow. See plan #433 / F9.
+  prfWrappingPresent: boolean;
   registeredDevice: string | null;
   lastUsedDevice: string | null;
   createdAt: string;
@@ -79,7 +83,7 @@ function CredentialIcon({ transports }: { transports: string[] }) {
 export function PasskeyCredentialsCard() {
   const t = useTranslations("WebAuthn");
   const locale = useLocale();
-  const { status, getSecretKey } = useVault();
+  const { status, getSecretKey, getKeyVersion } = useVault();
 
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,6 +99,10 @@ export function PasskeyCredentialsCard() {
 
   // Test credential state
   const [testingId, setTestingId] = useState<string | null>(null);
+
+  // PRF re-bootstrap state — tracks which credential is currently being
+  // re-bootstrapped after vault rotation cleared its wrapping (#433/F3).
+  const [rebootstrappingId, setRebootstrappingId] = useState<string | null>(null);
 
   const vaultUnlocked = status === VAULT_STATUS.UNLOCKED;
   const webAuthnAvailable = isWebAuthnSupported();
@@ -318,6 +326,96 @@ export function PasskeyCredentialsCard() {
 
   const prfCount = credentials.filter((c) => c.prfSupported).length;
 
+  /**
+   * Re-bootstrap PRF wrapping for a credential whose wrapping was cleared by
+   * vault key rotation. Requires the vault to be unlocked (we need the
+   * current secretKey to wrap) AND a fresh WebAuthn ceremony against the
+   * dedicated PRF rebootstrap challenge namespace (#433/F3 + S3+S-N1).
+   */
+  const handleRebootstrapPrf = async (cred: Credential) => {
+    if (!vaultUnlocked || !cred.prfSupported || cred.prfWrappingPresent) return;
+    if (rebootstrappingId) return;
+    setRebootstrappingId(cred.id);
+    try {
+      // 1. Get a fresh challenge from the dedicated PRF rebootstrap namespace.
+      const optsRes = await fetchApi(apiPath.webauthnCredentialPrfOptions(cred.id), {
+        method: "POST",
+      });
+      if (!optsRes.ok) {
+        toast.error(t("rebootstrapError"));
+        return;
+      }
+      const { options } = await optsRes.json();
+
+      // We also need the prfSalt (server-derived from WEBAUTHN_PRF_SECRET).
+      // Re-use the sign-in options endpoint solely for the salt — the
+      // challenge it returns will be discarded; we use the dedicated one above.
+      const saltRes = await fetchApi(API_PATH.WEBAUTHN_AUTHENTICATE_OPTIONS, { method: "POST" });
+      if (!saltRes.ok) {
+        toast.error(t("rebootstrapError"));
+        return;
+      }
+      const { prfSalt } = await saltRes.json();
+      if (!prfSalt) {
+        // PRF salt unavailable (server-side WEBAUTHN_PRF_SECRET unconfigured).
+        toast.error(t("rebootstrapError"));
+        return;
+      }
+
+      // 2. WebAuthn ceremony against the dedicated PRF rebootstrap challenge.
+      const { responseJSON, prfOutput } = await startPasskeyAuthentication(options, prfSalt);
+      if (!prfOutput) {
+        toast.error(t("rebootstrapError"));
+        return;
+      }
+
+      // 3. Wrap the CURRENT secretKey with the new PRF KEK.
+      const secretKey = getSecretKey();
+      if (!secretKey) {
+        prfOutput.fill(0);
+        toast.error(t("rebootstrapError"));
+        return;
+      }
+      const wrapped = await wrapSecretKeyWithPrf(secretKey, prfOutput);
+      secretKey.fill(0);
+      prfOutput.fill(0);
+
+      // 4. POST with assertion + new wrapping + current keyVersion (CAS).
+      const writeRes = await fetchApi(apiPath.webauthnCredentialPrf(cred.id), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assertionResponse: responseJSON,
+          prfEncryptedSecretKey: wrapped.ciphertext,
+          prfSecretKeyIv: wrapped.iv,
+          prfSecretKeyAuthTag: wrapped.authTag,
+          keyVersion: getKeyVersion(),
+        }),
+      });
+
+      if (writeRes.ok) {
+        toast.success(t("rebootstrapSuccess"));
+        fetchCredentials();
+      } else {
+        const body = await writeRes.json().catch(() => ({}));
+        if (body.error === "CONFLICT") {
+          // keyVersion drifted (concurrent rotation). Telling the user to
+          // retry once vault is fresh is the cleanest recovery.
+          toast.error(t("rebootstrapStaleKeyVersion"));
+        } else {
+          toast.error(t("rebootstrapError"));
+        }
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message === "AUTHENTICATION_CANCELLED") {
+        return;
+      }
+      toast.error(t("rebootstrapError"));
+    } finally {
+      setRebootstrappingId(null);
+    }
+  };
+
   return (
     <Card>
       <SectionCardHeader icon={Fingerprint} title={t("title")} description={t("description")} />
@@ -453,13 +551,23 @@ export function PasskeyCredentialsCard() {
                         {t("discoverable")}
                       </span>
 
-                      {/* Vault unlock (PRF) */}
+                      {/* Vault unlock (PRF) — color encodes BOTH "supported"
+                          AND "wrapping currently present". After rotation
+                          clears wrapping the badge dims to amber so the user
+                          knows auto-unlock needs re-bootstrapping. */}
                       <span
                         className={`text-xs px-1.5 py-0.5 rounded inline-flex items-center gap-1 ${
                           cred.prfSupported
-                            ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                            ? cred.prfWrappingPresent
+                              ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                              : "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200"
                             : "text-muted-foreground/50 line-through"
                         }`}
+                        title={
+                          cred.prfSupported && !cred.prfWrappingPresent
+                            ? t("vaultUnlockNeedsRebootstrap")
+                            : undefined
+                        }
                       >
                         {t("vaultUnlock")}
                       </span>
@@ -532,6 +640,26 @@ export function PasskeyCredentialsCard() {
                       )}
                       {t("testAuth")}
                     </Button>
+                    {cred.prfSupported && !cred.prfWrappingPresent && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!vaultUnlocked || !!rebootstrappingId}
+                        onClick={() => handleRebootstrapPrf(cred)}
+                        title={
+                          !vaultUnlocked
+                            ? t("rebootstrapRequiresUnlock")
+                            : t("rebootstrapHint")
+                        }
+                      >
+                        {rebootstrappingId === cred.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <KeyRound className="h-3 w-3" />
+                        )}
+                        {t("rebootstrapButton")}
+                      </Button>
+                    )}
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
                       <Button variant="destructive" size="sm">

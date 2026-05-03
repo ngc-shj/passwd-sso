@@ -46,6 +46,7 @@
   "goToSignIn": "サインイン",
   "recoveryKey": "回復キー",
   "recoveryKeyBannerMessage": "パスフレーズを忘れた場合に備えて回復キーを設定しましょう。",
+  "recoveryKeyBannerMessageInvalidated": "直近の保管庫キーローテーションにより、以前の回復キーは無効化されました。パスフレーズ紛失時の復旧手段を回復するため、今すぐ再生成してください。",
   "recoveryKeyBannerAction": "今すぐ設定",
   "recoveryKeyBannerDismiss": "回復キーバナーを閉じる",
   "recoveryKeyDialogTitle": "回復キー",
@@ -74,5 +75,8 @@
   "rotateKeyProgressHistory": "履歴を再暗号化中…",
   "rotateKeyProgress": "{current} / {total}",
   "rotateKeyAttachmentDataLossWarning": "保管庫に現在のキーで暗号化された添付ファイルが {count} 件あります。ローテーション後は復号できなくなります。エクスポートしてから実行する場合はキャンセル、データ消失を承認して続行する場合は下のボタンを押してください。",
-  "rotateKeyAttachmentAcknowledge": "データ消失を承認してローテーション"
+  "rotateKeyAttachmentAcknowledge": "データ消失を承認してローテーション",
+  "rotateKeyCacheTombstoneFailureBanner": "ローテーション中に一部のセッションキャッシュを無効化できませんでした (Redis 障害)。設定 → セッション から他デバイスのセッションを手動で取り消してください。",
+  "rotateKeyInvalidationFailedBanner": "ローテーション後のトークン取り消しが確認できませんでした。ローテーション前の API キー / MCP トークンが有効なまま残っている可能性があります。設定から手動で取り消してください。",
+  "rotateKeyMcpRevokedBanner": "ローテーション前の MCP トークンを {count} 件取り消しました。/tenant/service-accounts で再発行が必要な場合があります。"
 }

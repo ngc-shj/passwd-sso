@@ -82,6 +82,23 @@ export async function notifyUnlockFailure(): Promise<void> {
 // Re-export so existing consumers can keep importing from vault-context
 export type { VaultStatus };
 
+/**
+ * Side-effects of a vault key rotation, surfaced from the API to the dialog
+ * so the UI can render operator banners (#433 / P3-F2). Counts of zero mean
+ * "nothing was revoked"; null means "the post-tx invalidation call failed —
+ * tokens may still be live, advise manual revocation".
+ */
+export interface RotationEffects {
+  recoveryKeyInvalidated: boolean;
+  emergencyGrantsCleared: number;
+  prfCredentialsCleared: number;
+  attachmentsAffected: number;
+  invalidatedMcpAccessTokens: number | null;
+  invalidatedMcpRefreshTokens: number | null;
+  cacheTombstoneFailures: number | null;
+  invalidationFailed: boolean;
+}
+
 export interface TenantPasswordPolicy {
   minPasswordLength: number;
   requireUppercase: boolean;
@@ -107,10 +124,11 @@ interface VaultContextValue {
     passphrase: string,
     onProgress?: (phase: string, current: number, total: number) => void,
     options?: { acknowledgeAttachmentDataLoss?: boolean },
-  ) => Promise<void>;
+  ) => Promise<RotationEffects | null>;
   verifyPassphrase: (passphrase: string) => Promise<boolean>;
   getSecretKey: () => Uint8Array | null;
   getAccountSalt: () => Uint8Array | null;
+  getKeyVersion: () => number;
   setHasRecoveryKey: (value: boolean) => void;
   getEcdhPrivateKeyBytes: () => Uint8Array | null;
   getEcdhPublicKeyJwk: () => string | null;
@@ -987,6 +1005,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       // did not change, only the wrapping key changed.
       newSecretKey.fill(0);
       setEncryptionKey(newEncKey);
+      // The dialog uses these counts to surface operator banners.
+      const effects = (result as { rotationEffects?: RotationEffects }).rotationEffects;
+      return effects ?? null;
     },
     [encryptionKey, session?.user?.id],
   );
@@ -1010,6 +1031,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const getAccountSalt = useCallback(() => {
     return accountSaltRef.current ? new Uint8Array(accountSaltRef.current) : null;
   }, []);
+
+  const getKeyVersion = useCallback(() => keyVersionRef.current, []);
 
   const getEcdhPrivateKeyBytes = useCallback(() => {
     return ecdhPrivateKeyBytesRef.current ? new Uint8Array(ecdhPrivateKeyBytesRef.current) : null;
@@ -1040,6 +1063,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         verifyPassphrase,
         getSecretKey,
         getAccountSalt,
+        getKeyVersion,
         setHasRecoveryKey,
         getEcdhPrivateKeyBytes,
         getEcdhPublicKeyJwk,
