@@ -126,9 +126,12 @@ test("Key rotation requires explicit acknowledge when personal attachments exist
   context,
   page,
 }) => {
-  // Same rationale as the test above — rotation flow is heavier post-#433
-  // and the 30s default + 10s locator leave no CI margin.
-  test.setTimeout(60_000);
+  // 60s was insufficient (CI run 25283732238): the test does TWO rotation
+  // round-trips (one rejected for missing ack, one accepted) on a user with
+  // many existing entries from test 1 — re-encryption of 100+ entries plus
+  // the second rotation's data fetch + tx pushes the test past 60s on CI.
+  // Bump to 180s to match the dialog's own 120s waitFor budget plus headroom.
+  test.setTimeout(180_000);
 
   const { keyRotation } = getAuthState();
   const attachmentId = randomUUID();
