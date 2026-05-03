@@ -60,15 +60,13 @@ async function handleGET(req: NextRequest) {
     }
   }
 
-  // TODO(audit-log-download-emergency-access-or-clause): personal LIST endpoint
-  // (audit-logs/route.ts:44-57) surfaces EMERGENCY_VAULT_ACCESS events targeting
-  // session.user.id via an OR branch; this download endpoint does not. Symmetry
-  // gap is pre-existing UX (under-disclosure), not security; deferred per plan.
+  // TODO(audit-log-download-emergency-access-or-clause): download omits the OR-branch for EMERGENCY_VAULT_ACCESS events present in the list endpoint; pre-existing UX gap, not security.
   const where: Prisma.AuditLogWhereInput = {
     scope: AUDIT_SCOPE.PERSONAL,
     userId: session.user.id,
-    ...(validActorType ? { actorType: validActorType } : {}),
   };
+
+  if (validActorType) where.actorType = validActorType;
 
   const parsedActions = parseActionsCsvParam(actionsParam);
   if ("invalid" in parsedActions) {
