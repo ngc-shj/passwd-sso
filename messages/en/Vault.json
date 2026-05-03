@@ -72,5 +72,7 @@
   "rotateKeyPassphrasePlaceholder": "Enter your current passphrase",
   "rotateKeyProgressEntries": "Re-encrypting entries…",
   "rotateKeyProgressHistory": "Re-encrypting history…",
-  "rotateKeyProgress": "{current} / {total}"
+  "rotateKeyProgress": "{current} / {total}",
+  "rotateKeyAttachmentDataLossWarning": "Your vault has {count, plural, one {# attachment} other {# attachments}} encrypted with the current key. After rotation they will be unreadable. Cancel to export them first, or click below to acknowledge and proceed.",
+  "rotateKeyAttachmentAcknowledge": "Acknowledge data loss and rotate"
 }

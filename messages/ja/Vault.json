@@ -72,5 +72,7 @@
   "rotateKeyPassphrasePlaceholder": "現在のパスフレーズを入力",
   "rotateKeyProgressEntries": "エントリを再暗号化中…",
   "rotateKeyProgressHistory": "履歴を再暗号化中…",
-  "rotateKeyProgress": "{current} / {total}"
+  "rotateKeyProgress": "{current} / {total}",
+  "rotateKeyAttachmentDataLossWarning": "保管庫に現在のキーで暗号化された添付ファイルが {count} 件あります。ローテーション後は復号できなくなります。エクスポートしてから実行する場合はキャンセル、データ消失を承認して続行する場合は下のボタンを押してください。",
+  "rotateKeyAttachmentAcknowledge": "データ消失を承認してローテーション"
 }

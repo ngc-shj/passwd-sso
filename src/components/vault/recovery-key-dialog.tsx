@@ -100,7 +100,7 @@ export function RecoveryKeyDialog({
 }: RecoveryKeyDialogProps) {
   const t = useTranslations("Vault");
   const tApi = useTranslations("ApiErrors");
-  const { getSecretKey, getAccountSalt, hasRecoveryKey, setHasRecoveryKey } = useVault();
+  const { getSecretKey, getAccountSalt, hasRecoveryKey, recoveryKeyInvalidated, setHasRecoveryKey } = useVault();
 
   const [step, setStep] = useState<Step>("passphrase");
   const [passphrase, setPassphrase] = useState("");
@@ -184,7 +184,7 @@ export function RecoveryKeyDialog({
 
         {step === "passphrase" && (
           <form onSubmit={handleGenerate} onKeyDown={preventIMESubmit} className="space-y-4 rounded-lg border bg-muted/20 p-4">
-            {hasRecoveryKey && (
+            {(hasRecoveryKey || recoveryKeyInvalidated) && (
               <div className="flex items-start gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3 text-sm text-yellow-700 dark:text-yellow-400">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <p>{t("recoveryKeyRegenerateWarning")}</p>

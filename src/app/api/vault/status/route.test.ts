@@ -99,6 +99,7 @@ describe("GET /api/vault/status", () => {
       kdfType: 0,
       kdfIterations: 600_000,
       hasRecoveryKey: false,
+      recoveryKeyInvalidated: false,
       vaultAutoLockMinutes: null,
       tenantMinPasswordLength: 0,
       tenantRequireUppercase: false,

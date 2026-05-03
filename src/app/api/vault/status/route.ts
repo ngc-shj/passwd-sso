@@ -29,6 +29,7 @@ async function handleGET(request: NextRequest) {
         kdfType: true,
         kdfIterations: true,
         recoveryKeySetAt: true,
+        recoveryKeyInvalidatedAt: true,
         tenant: {
           select: {
             vaultAutoLockMinutes: true,
@@ -56,6 +57,10 @@ async function handleGET(request: NextRequest) {
     kdfType: user.kdfType,
     kdfIterations: user.kdfIterations,
     hasRecoveryKey: !!user.recoveryKeySetAt,
+    // True when a previous recovery key was invalidated by vault key rotation
+    // (and not yet regenerated). UI uses this to show the regenerate-flow
+    // wording even though hasRecoveryKey is now false. See plan #433 / F21+S5.
+    recoveryKeyInvalidated: !!user.recoveryKeyInvalidatedAt,
     vaultAutoLockMinutes: user.tenant?.vaultAutoLockMinutes ?? null,
     tenantMinPasswordLength: user.tenant?.tenantMinPasswordLength ?? 0,
     tenantRequireUppercase: user.tenant?.tenantRequireUppercase ?? false,
