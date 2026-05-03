@@ -167,6 +167,35 @@ describe("GET /api/vault/status", () => {
     expect(json.hasRecoveryKey).toBe(true);
   });
 
+  it("returns recoveryKeyInvalidated: true when prior recovery was cleared by rotation (#433/F21+S5)", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({
+      vaultSetupAt: new Date(),
+      accountSalt: "a".repeat(64),
+      keyVersion: 2,
+      kdfType: 0,
+      kdfIterations: 600_000,
+      recoveryKeySetAt: null,
+      recoveryKeyInvalidatedAt: new Date(),
+      tenant: {
+        vaultAutoLockMinutes: null,
+        tenantMinPasswordLength: 0,
+        tenantRequireUppercase: false,
+        tenantRequireLowercase: false,
+        tenantRequireNumbers: false,
+        tenantRequireSymbols: false,
+        passwordMaxAgeDays: null,
+        passwordExpiryWarningDays: 14,
+      },
+    });
+    const res = await GET(createRequest("GET", "http://localhost/api/vault/status"));
+    const json = await res.json();
+    // hasRecoveryKey false (no CURRENT key) AND recoveryKeyInvalidated true
+    // (had one, lost via rotation) — UI uses this combination to render the
+    // regenerate-flow wording instead of first-time setup.
+    expect(json.hasRecoveryKey).toBe(false);
+    expect(json.recoveryKeyInvalidated).toBe(true);
+  });
+
   it("works with Bearer token auth", async () => {
     mockCheckAuth.mockResolvedValue(authOk("token-user-id", "token"));
     mockPrismaUser.findUnique.mockResolvedValue({

@@ -61,6 +61,97 @@ Items where the implementation followed the plan exactly are NOT recorded.
   vs per-attachment CEK indirection vs background migration). It needs its
   own triangulated plan rather than getting bolted onto this PR.
 
+## Phase 3 review findings handled in this PR
+
+### P3-T1 (Critical) — added: AttachmentAckRequiredError 422 path tests
+- Added 5 cases to `src/app/api/vault/rotate-key/route.test.ts`: 422-without-ack
+  + 200-with-ack assertion of audit metadata, recoveryKeyInvalidated true/false,
+  invalidation counts shape.
+
+### P3-F4 (Major) — fixed: `attachmentsAffected` count truncation
+- The original `findMany({ take: CAP+1 }).length` capped the count at
+  CAP+1. Replaced with a real `tx.attachment.count(...)` query for the
+  user-facing + audit count, then a separate capped `findMany` for the
+  forensic ID manifest. Added `affectedAttachmentIdsOverflow: boolean`
+  audit field per Functional Req 4.
+
+### P3-T2/T3/T4 (Major) — added: positive coverage for new fields
+- `vault/status/route.test.ts`: case where `recoveryKeyInvalidated: true`
+  surfaces while `hasRecoveryKey: false` (post-rotation state).
+- `recovery-key/generate/route.test.ts`: case where the rotation-cleared
+  state correctly maps to `RECOVERY_KEY_REGENERATED` (not CREATED).
+- `rotate-key/data/route.test.ts`: positive assertions on
+  `attachmentsAffected` (0 and N).
+
+## Phase 3 review findings deferred to follow-up
+
+### P3-F1 (Major) — recovery-key banner UX gap
+- The banner component (`src/components/vault/recovery-key-banner.tsx`) does
+  not yet read `recoveryKeyInvalidated` from the vault context; it shows
+  the same generic "first-time setup" copy whether the user has never set
+  recovery up OR lost it via rotation. The dialog body (the regenerate
+  warning) DOES branch correctly, so the user sees the right wording once
+  they click into the dialog.
+- **Why deferred**: cosmetic UX gap, not a security or data-correctness
+  issue. The S5 "operational visibility" goal is met at the API/audit
+  level (admins can query `recoveryKeyInvalidatedAt`); the dialog itself
+  shows the right wording; only the banner's at-a-glance message is
+  generic.
+- **Risk**: users may dismiss the banner without realizing rotation
+  invalidated their recovery.
+- **Follow-up**: file an issue for "post-rotation banner copy + ICU plural
+  in `messages/{en,ja}/Vault.json`".
+
+### P3-F2 (Major) — operator alert banners
+- The plan called for two post-rotation banners (cacheTombstoneFailures > 0
+  → "sign out other devices"; invalidatedMcpAccessTokens+RefreshTokens > 0
+  → "MCP tokens were revoked"). Neither lands in this PR. The audit
+  metadata DOES capture the counts, so admins can query them; the
+  user-facing banners do not exist yet.
+- **Why deferred**: requires the rotation route to extend its 200 response
+  with the invalidation counts (currently only `{ success, keyVersion }`)
+  AND the dialog to surface them. Half-implementing one but not the other
+  would be a half-step. Deferring both keeps the PR consistent.
+- **Risk**: in a Redis outage during rotation, users won't see the "sign
+  out other devices manually" prompt; admins can still detect via audit
+  log. MCP token revocation is silent to the user but visible to admins.
+- **Manual test correction**: scenario E in the manual test plan claims
+  the banner surfaces — that is currently inaccurate. See the manual
+  test plan note added in the same commit.
+- **Follow-up**: file an issue for "rotate-key 200 response shape +
+  post-rotation banners".
+
+### P3-F3 (Major) — silent PRF re-bootstrap on next sign-in
+- The plan called for the client to silently re-bootstrap PRF wrapping on
+  the next passkey sign-in when `prfWrappingPresent === false`. The new
+  endpoints exist (Batch 4) but the client `unlockWithPasskey` /
+  `unlockWithStoredPrf` flows do not yet auto-call them.
+- **Why deferred**: scope. The implementation is non-trivial — the client
+  must produce a fresh assertion via the new options endpoint (or reuse
+  the just-completed sign-in assertion if the API exposes it), POST the
+  new wrapping with the current keyVersion, and handle the 409 stale-CAS
+  gracefully. Each integration point needs coverage.
+- **Risk**: after rotation, users sign in with passkey, vault unlock
+  falls back to passphrase, and PRF auto-unlock stays broken until the
+  user manually triggers the rebootstrap (no UI affordance for that
+  yet either).
+- **Follow-up**: file an issue for "client-side PRF re-bootstrap on next
+  sign-in".
+
+### P3-F5 / P3-F6 / P3-F7 (Minor) — non-blocking
+- F5: missing explicit "MUST remain outside transaction" wording at the
+  invalidateUserSessions call site comment.
+- F6: invalidationResult null vs 0 distinguishability in audit metadata.
+- F7: `TxOrPrisma` type duplicated between webauthn-server.ts and
+  emergency-access-server.ts (no shared alias).
+
+### P3-T5 / P3-T6 / P3-T7 (Minor) — non-blocking
+- T5: cacheTombstoneFailures not asserted in the existing rotation route
+  tests (resolved by P3-T1 work above which adds the audit-shape assertion).
+- T6: TxFn alias uses `any`. Per coding-style.md "Never use `any`"; pre-
+  existing in audit-outbox-worker.test.ts.
+- T7: API_ERROR count test message — sufficient as-is (resolved-no-finding).
+
 ## Plan corrections applied during implementation
 
 ### C1. Migration captured Prisma 7 alignment noise

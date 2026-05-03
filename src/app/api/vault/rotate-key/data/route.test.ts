@@ -103,6 +103,19 @@ describe("GET /api/vault/rotate-key/data", () => {
     expect(json.historyEntries[0].id).toBe("00000000-0000-4000-a000-000000000002");
     expect(json.ecdhPrivateKey).not.toBeNull();
     expect(json.ecdhPrivateKey.encryptedEcdhPrivateKey).toBe("x".repeat(100));
+    // attachmentsAffected drives the rotation dialog's data-loss warning
+    // (#433/A.4 + post-impl review T4).
+    expect(json.attachmentsAffected).toBe(0);
+  });
+
+  it("returns attachmentsAffected reflecting personal-entry attachment count", async () => {
+    mockPrismaAttachment.count.mockResolvedValue(3);
+    const res = await GET(
+      createRequest("GET", "http://localhost/api/vault/rotate-key/data")
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.attachmentsAffected).toBe(3);
   });
 
   it("returns null ecdhPrivateKey when user has no ECDH keys", async () => {

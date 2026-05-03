@@ -166,6 +166,7 @@ async function handlePOST(request: NextRequest) {
   let txResult: {
     attachmentsAffected: number;
     affectedAttachmentIds: string[];
+    affectedAttachmentIdsOverflow: boolean;
     recoveryKeyInvalidated: boolean;
     emergencyGrantsCleared: number;
     prfCredentialsCleared: number;
@@ -182,18 +183,30 @@ async function handlePOST(request: NextRequest) {
         // client explicitly acknowledged the data-loss warning. The orphan
         // attachment rows remain in the DB so Phase B's recovery design has
         // material to work with — see plan #433 / A.4.
-        const attachmentRows = await tx.attachment.findMany({
+        // Use a real count query for `attachmentsAffected` so the user-facing
+        // warning + audit metadata reflect the true attachment volume (a prior
+        // findMany-with-take approach would silently cap at CAP+1, see #433
+        // post-implementation review F4).
+        const attachmentsAffected = await tx.attachment.count({
           where: { passwordEntry: { userId } },
-          select: { id: true },
-          take: ATTACHMENT_MANIFEST_CAP + 1,
         });
-        const attachmentsAffected = attachmentRows.length;
         if (attachmentsAffected > 0 && result.data.acknowledgeAttachmentDataLoss !== true) {
           throw new AttachmentAckRequiredError(attachmentsAffected);
         }
-        const affectedAttachmentIds = attachmentRows
-          .slice(0, ATTACHMENT_MANIFEST_CAP)
-          .map((a) => a.id);
+        // Manifest is capped — the ID list is for forensic recovery in Phase B,
+        // not for UI display. The overflow flag below lets a forensic reader
+        // see "we lost more than we recorded".
+        const attachmentRows =
+          attachmentsAffected > 0
+            ? await tx.attachment.findMany({
+                where: { passwordEntry: { userId } },
+                select: { id: true },
+                take: ATTACHMENT_MANIFEST_CAP,
+              })
+            : [];
+        const affectedAttachmentIds = attachmentRows.map((a) => a.id);
+        const affectedAttachmentIdsOverflow =
+          attachmentsAffected > ATTACHMENT_MANIFEST_CAP;
 
         // Verify submitted entries exactly match ALL user entries (including trash/archived)
         const allEntries = await tx.passwordEntry.findMany({
@@ -362,6 +375,7 @@ async function handlePOST(request: NextRequest) {
         return {
           attachmentsAffected,
           affectedAttachmentIds,
+          affectedAttachmentIdsOverflow,
           recoveryKeyInvalidated,
           emergencyGrantsCleared,
           prfCredentialsCleared: prfClearResult.count,
@@ -414,6 +428,7 @@ async function handlePOST(request: NextRequest) {
       attachmentDataLossAcknowledged:
         txResult.attachmentsAffected > 0 ? true : false,
       affectedAttachmentIds: txResult.affectedAttachmentIds,
+      affectedAttachmentIdsOverflow: txResult.affectedAttachmentIdsOverflow,
       // From invalidateUserSessions — null when the post-tx call failed
       // (e.g., transient DB/Redis hiccup). UI should surface a banner when
       // cacheTombstoneFailures > 0 (#433 / S-N2 caveat).

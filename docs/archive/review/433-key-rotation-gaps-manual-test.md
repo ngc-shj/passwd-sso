@@ -151,8 +151,10 @@
     invalidatedMcpAccessTokens / invalidatedMcpRefreshTokens /
     invalidatedDelegationSessions`.
   - `cacheTombstoneFailures` is 0 in a healthy environment. If you simulate a
-    Redis outage during the rotation, the count is positive AND a banner
-    surfaces in the UI advising the user to sign out other devices manually.
+    Redis outage during the rotation, the count appears in the audit metadata.
+- **Known limitation (P3-F2 — deferred to follow-up)**: the user-facing
+  banner "sign out other devices manually" / "MCP tokens were revoked" is
+  NOT yet implemented. The signal is admin-visible via audit log only.
 
 ## Adversarial scenarios
 

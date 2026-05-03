@@ -11,6 +11,7 @@ const mockPasswordEntryHistory = {
 };
 const mockAttachment = {
   findMany: vi.fn(),
+  count: vi.fn(),
 };
 const mockWebAuthnCredential = {
   updateMany: vi.fn(),
@@ -129,6 +130,7 @@ describe("POST /api/vault/rotate-key", () => {
     mockPasswordEntry.findMany.mockResolvedValue([]);
     mockPasswordEntryHistory.findMany.mockResolvedValue([]);
     mockAttachment.findMany.mockResolvedValue([]);
+    mockAttachment.count.mockResolvedValue(0);
     mockPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
     mockPasswordEntryHistory.updateMany.mockResolvedValue({ count: 1 });
     // tx.user.findUnique reads recoveryEncryptedSecretKey to compute
@@ -460,5 +462,112 @@ describe("POST /api/vault/rotate-key", () => {
     expect(json.error).toBe("VALIDATION_ERROR");
     expect(json.details.errors[0]).toMatch(/Validation failed with \d+ errors/);
     expect(json.details).not.toHaveProperty("properties");
+  });
+
+  // ── Attachment data-loss safeguard (#433 / A.4) ──────────────────────
+
+  it("rejects (422) when personal attachments exist and ack flag is missing", async () => {
+    mockAttachment.count.mockResolvedValue(2);
+    mockAttachment.findMany.mockResolvedValue([{ id: "att-1" }, { id: "att-2" }]);
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody }),
+    );
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("ATTACHMENT_DATA_LOSS_NOT_ACKNOWLEDGED");
+    expect(json.attachmentsAffected).toBe(2);
+    // The dialog reads this count — silent re-encryption-without-acknowledge
+    // is a critical regression vector (#433 post-impl review T1).
+    expect(mockMarkStale).not.toHaveBeenCalled();
+  });
+
+  it("succeeds with 200 when attachments exist and ack flag is true", async () => {
+    mockAttachment.count.mockResolvedValue(1);
+    mockAttachment.findMany.mockResolvedValue([{ id: "att-1" }]);
+    const mockLogAudit = vi.mocked((await import("@/lib/audit/audit")).logAuditAsync);
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", {
+        body: { ...validBody, acknowledgeAttachmentDataLoss: true },
+      }),
+    );
+    expect(res.status).toBe(200);
+    // Audit captures the affected manifest + ack flag for forensic traceability.
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "VAULT_KEY_ROTATION",
+        metadata: expect.objectContaining({
+          attachmentsAffected: 1,
+          attachmentDataLossAcknowledged: true,
+          affectedAttachmentIds: ["att-1"],
+          affectedAttachmentIdsOverflow: false,
+        }),
+      }),
+    );
+  });
+
+  // ── Recovery wrapping clear (#433 / A.1+S5) ──────────────────────────
+
+  it("audits recoveryKeyInvalidated: true when user had a recovery key set pre-rotation", async () => {
+    mockUserTx.findUnique.mockResolvedValue({
+      recoveryEncryptedSecretKey: "old-wrapping-ciphertext",
+    });
+    const mockLogAudit = vi.mocked((await import("@/lib/audit/audit")).logAuditAsync);
+
+    await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody }),
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ recoveryKeyInvalidated: true }),
+      }),
+    );
+  });
+
+  it("audits recoveryKeyInvalidated: false when user had no recovery key", async () => {
+    // mockUserTx.findUnique default returns recoveryEncryptedSecretKey: null
+    const mockLogAudit = vi.mocked((await import("@/lib/audit/audit")).logAuditAsync);
+
+    await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody }),
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ recoveryKeyInvalidated: false }),
+      }),
+    );
+  });
+
+  // ── invalidateUserSessions audit shape (#433 / S-N2) ─────────────────
+
+  it("audit metadata captures all 7 invalidation count fields", async () => {
+    mockInvalidateUserSessions.mockResolvedValue({
+      sessions: 2,
+      extensionTokens: 1,
+      apiKeys: 0,
+      mcpAccessTokens: 3,
+      mcpRefreshTokens: 3,
+      delegationSessions: 0,
+      cacheTombstoneFailures: 0,
+    });
+    const mockLogAudit = vi.mocked((await import("@/lib/audit/audit")).logAuditAsync);
+
+    await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody }),
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          invalidatedSessions: 2,
+          invalidatedExtensionTokens: 1,
+          invalidatedApiKeys: 0,
+          invalidatedMcpAccessTokens: 3,
+          invalidatedMcpRefreshTokens: 3,
+          invalidatedDelegationSessions: 0,
+          cacheTombstoneFailures: 0,
+        }),
+      }),
+    );
   });
 });
