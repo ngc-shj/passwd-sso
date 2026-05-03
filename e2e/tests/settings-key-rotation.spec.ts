@@ -20,6 +20,10 @@ test("Key rotation preserves existing vault entries", async ({
   context,
   page,
 }) => {
+  // Rotation now does additional work (rotationEffects response, banner state,
+  // toast checks) — the 30s default leaves no margin in CI. Bump to 60s
+  // (confirmed sufficient for ~408 entries in dev DB; CI has fewer).
+  test.setTimeout(60_000);
   const { keyRotation } = getAuthState();
   await injectSession(context, keyRotation.sessionToken);
   await page.goto("/ja/dashboard");
@@ -115,6 +119,10 @@ test("Key rotation requires explicit acknowledge when personal attachments exist
   context,
   page,
 }) => {
+  // Same rationale as the test above — rotation flow is heavier post-#433
+  // and the 30s default + 10s locator leave no CI margin.
+  test.setTimeout(60_000);
+
   const { keyRotation } = getAuthState();
   const attachmentId = randomUUID();
   const entryTitle = `Attach-Ack ${Date.now()}`;
@@ -123,7 +131,7 @@ test("Key rotation requires explicit acknowledge when personal attachments exist
   await page.goto("/ja/dashboard");
 
   const lockPage = new VaultLockPage(page);
-  await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
+  await expect(lockPage.passphraseInput).toBeVisible({ timeout: 20_000 });
   await lockPage.unlockAndWait(keyRotation.passphrase!);
 
   const dashboard = new DashboardPage(page);
