@@ -18,7 +18,7 @@ async function handleGET(_req: NextRequest) {
   }
   const userId = session.user.id;
 
-  const credentials = await withUserTenantRls(userId, async () =>
+  const rows = await withUserTenantRls(userId, async () =>
     prisma.webAuthnCredential.findMany({
       where: { userId },
       select: {
@@ -32,6 +32,11 @@ async function handleGET(_req: NextRequest) {
         largeBlobSupported: true,
         transports: true,
         prfSupported: true,
+        // Selected only to derive `prfWrappingPresent` below — the ciphertext
+        // itself is NEVER returned to the client. UI uses the derived boolean
+        // to decide whether to prompt for PRF re-bootstrap after a key
+        // rotation cleared the wrapping. See plan #433 / F9.
+        prfEncryptedSecretKey: true,
         registeredDevice: true,
         lastUsedDevice: true,
         createdAt: true,
@@ -40,6 +45,15 @@ async function handleGET(_req: NextRequest) {
       orderBy: { createdAt: "desc" },
     }),
   );
+
+  // Strip the ciphertext — only expose the derived boolean. `prfSupported`
+  // remains the authoritative "authenticator supports PRF capability" flag;
+  // `prfWrappingPresent` indicates whether the server currently holds wrapping
+  // for this credential (cleared by rotation until re-bootstrapped).
+  const credentials = rows.map(({ prfEncryptedSecretKey, ...rest }) => ({
+    ...rest,
+    prfWrappingPresent: prfEncryptedSecretKey != null,
+  }));
 
   return NextResponse.json(credentials);
 }

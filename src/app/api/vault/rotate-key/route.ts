@@ -5,7 +5,7 @@ import { hmacVerifier } from "@/lib/crypto/crypto-server";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { prisma } from "@/lib/prisma";
 import { markGrantsStaleForOwner } from "@/lib/emergency-access/emergency-access-server";
-import { revokeAllDelegationSessions } from "@/lib/auth/access/delegation";
+import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -60,7 +60,25 @@ const rotateKeySchema = z.object({
   encryptedEcdhPrivateKey: z.string().min(1).max(ECDH_PRIVATE_KEY_CIPHERTEXT_MAX),
   ecdhPrivateKeyIv: hexIv,
   ecdhPrivateKeyAuthTag: hexAuthTag,
+  // Personal vault rotation orphans personal-entry attachments (encrypted with
+  // the previous secretKey-derived encryption key). The client MUST set this
+  // to `true` after the user explicitly acknowledges the data-loss warning,
+  // otherwise rotation is rejected when any personal attachment exists.
+  // Phase B (separate issue) will replace this with per-attachment CEK
+  // indirection so rotation re-wraps the small CEK rather than the file body.
+  acknowledgeAttachmentDataLoss: z.boolean().optional(),
 });
+
+// Cap on the per-rotation audit `affectedAttachmentIds` list. Each UUID is
+// 36 chars; 1000 entries = ~40 KB JSON in the audit metadata column.
+const ATTACHMENT_MANIFEST_CAP = 1000;
+
+class AttachmentAckRequiredError extends Error {
+  constructor(public readonly attachmentsAffected: number) {
+    super("ATTACHMENT_DATA_LOSS_NOT_ACKNOWLEDGED");
+    this.name = "AttachmentAckRequiredError";
+  }
+}
 
 /**
  * POST /api/vault/rotate-key
@@ -142,13 +160,40 @@ async function handlePOST(request: NextRequest) {
     ecdhPrivateKeyAuthTag,
   } = result.data;
 
-  // Update vault wrapping, bump keyVersion, re-encrypt all entries, and mark EA grants as STALE.
+  // Update vault wrapping, bump keyVersion, re-encrypt all entries, clear orphan
+  // wrappings (recovery / EA / PRF), and mark EA grants as STALE.
   // Interactive transaction with advisory lock prevents concurrent rotations for the same user.
+  let txResult: {
+    attachmentsAffected: number;
+    affectedAttachmentIds: string[];
+    recoveryKeyInvalidated: boolean;
+    emergencyGrantsCleared: number;
+    prfCredentialsCleared: number;
+  };
   try {
-    await withUserTenantRls(userId, async () =>
+    txResult = await withUserTenantRls(userId, async () =>
       prisma.$transaction(async (tx) => {
         // Advisory lock prevents concurrent key rotations for the same user (S-17 equivalent)
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}::text))`;
+
+        // ── Attachment data-loss safeguard ────────────────────────────────
+        // Phase A interim: count personal-entry attachments (team attachments
+        // are unaffected by personal rotation). Reject rotation unless the
+        // client explicitly acknowledged the data-loss warning. The orphan
+        // attachment rows remain in the DB so Phase B's recovery design has
+        // material to work with — see plan #433 / A.4.
+        const attachmentRows = await tx.attachment.findMany({
+          where: { passwordEntry: { userId } },
+          select: { id: true },
+          take: ATTACHMENT_MANIFEST_CAP + 1,
+        });
+        const attachmentsAffected = attachmentRows.length;
+        if (attachmentsAffected > 0 && result.data.acknowledgeAttachmentDataLoss !== true) {
+          throw new AttachmentAckRequiredError(attachmentsAffected);
+        }
+        const affectedAttachmentIds = attachmentRows
+          .slice(0, ATTACHMENT_MANIFEST_CAP)
+          .map((a) => a.id);
 
         // Verify submitted entries exactly match ALL user entries (including trash/archived)
         const allEntries = await tx.passwordEntry.findMany({
@@ -238,7 +283,17 @@ async function handlePOST(request: NextRequest) {
           }));
         }
 
-        // Update user vault wrapping keys and ECDH private key
+        // Update user vault wrapping keys and ECDH private key. Also clear the
+        // recovery wrapping (was over the OLD secretKey; useless against new
+        // data after rotation) and stamp recoveryKeyInvalidatedAt so admins can
+        // distinguish "never set up" from "lost via rotation". recoveryVerifierVersion
+        // is non-nullable — reset to default 1, NOT null. See plan #433 / S5+F2.
+        const recoveryWasSet = await tx.user.findUnique({
+          where: { id: userId },
+          select: { recoveryEncryptedSecretKey: true },
+        });
+        const recoveryKeyInvalidated = !!recoveryWasSet?.recoveryEncryptedSecretKey;
+
         await tx.user.update({
           where: { id: userId },
           data: {
@@ -260,6 +315,15 @@ async function handlePOST(request: NextRequest) {
             encryptedEcdhPrivateKey,
             ecdhPrivateKeyIv,
             ecdhPrivateKeyAuthTag,
+            // Clear recovery wrapping (over old secretKey)
+            recoveryEncryptedSecretKey: null,
+            recoverySecretKeyIv: null,
+            recoverySecretKeyAuthTag: null,
+            recoveryHkdfSalt: null,
+            recoveryVerifierHmac: null,
+            recoveryVerifierVersion: 1,
+            recoveryKeySetAt: null,
+            recoveryKeyInvalidatedAt: new Date(),
           },
         });
 
@@ -273,9 +337,45 @@ async function handlePOST(request: NextRequest) {
             verificationAuthTag: result.data.verificationArtifact.authTag,
           },
         });
+
+        // Clear PRF wrapping fields on every credential of this user. The
+        // wrapping was over the OLD secretKey; the next passkey sign-in will
+        // re-bootstrap PRF via the new endpoint. `prfSupported` is intentionally
+        // NOT touched — it represents the authenticator's PRF capability, not
+        // wrapping presence. See plan #433 / F8.
+        const prfClearResult = await tx.webAuthnCredential.updateMany({
+          where: { userId, prfEncryptedSecretKey: { not: null } },
+          data: {
+            prfEncryptedSecretKey: null,
+            prfSecretKeyIv: null,
+            prfSecretKeyAuthTag: null,
+          },
+        });
+
+        // Mark EA grants STALE inside the rotation tx so atomicity is preserved.
+        // The helper also nulls ownerEphemeralPublicKey (defeats ECDH unwrap
+        // while preserving the wrapping ciphertext for forensic trail).
+        // Behavior change vs prior best-effort post-tx call: an EA-table failure
+        // now aborts the entire rotation. Trade-off accepted (#433 / F10 / S2).
+        const emergencyGrantsCleared = await markGrantsStaleForOwner(userId, newKeyVersion, tx);
+
+        return {
+          attachmentsAffected,
+          affectedAttachmentIds,
+          recoveryKeyInvalidated,
+          emergencyGrantsCleared,
+          prfCredentialsCleared: prfClearResult.count,
+        };
       }, { timeout: 120_000 }),
     );
   } catch (e) {
+    if (e instanceof AttachmentAckRequiredError) {
+      return errorResponse(
+        API_ERROR.ATTACHMENT_DATA_LOSS_NOT_ACKNOWLEDGED,
+        422,
+        { attachmentsAffected: e.attachmentsAffected },
+      );
+    }
     if (e instanceof Error && e.message === "ENTRY_COUNT_MISMATCH") {
       return errorResponse(API_ERROR.ENTRY_COUNT_MISMATCH, 400);
     }
@@ -285,13 +385,17 @@ async function handlePOST(request: NextRequest) {
     throw e;
   }
 
-  // Mark EA grants as STALE (best-effort, outside transaction)
-  await withUserTenantRls(userId, async () =>
-    markGrantsStaleForOwner(userId, newKeyVersion).catch(() => {}),
-  );
-
-  // Revoke all delegation sessions (key rotation invalidates delegated plaintext)
-  await revokeAllDelegationSessions(userId, user.tenantId, "KEY_ROTATION").catch(() => {});
+  // Revoke ALL user-bound auth artifacts (Session, ExtensionToken, ApiKey,
+  // McpAccessToken, McpRefreshToken, DelegationSession). Best-effort — placement
+  // matches existing vault-reset audit shape (cacheTombstoneFailures captured
+  // for forensic visibility on Redis outage). Replaces the prior single
+  // revokeAllDelegationSessions call which left MCP tokens valid against the
+  // freshly-rotated vault. See plan #433 / S-N2 + memory
+  // feedback_user_bound_token_enumeration.md.
+  const invalidationResult = await invalidateUserSessions(userId, {
+    tenantId: user.tenantId,
+    reason: "KEY_ROTATION",
+  }).catch(() => null);
 
   await logAuditAsync({
     ...personalAuditBase(request, userId),
@@ -303,6 +407,23 @@ async function handlePOST(request: NextRequest) {
       toVersion: newKeyVersion,
       entriesRotated: entries.length,
       historyEntriesRotated: historyEntries.length,
+      recoveryKeyInvalidated: txResult.recoveryKeyInvalidated,
+      emergencyGrantsCleared: txResult.emergencyGrantsCleared,
+      prfCredentialsCleared: txResult.prfCredentialsCleared,
+      attachmentsAffected: txResult.attachmentsAffected,
+      attachmentDataLossAcknowledged:
+        txResult.attachmentsAffected > 0 ? true : false,
+      affectedAttachmentIds: txResult.affectedAttachmentIds,
+      // From invalidateUserSessions — null when the post-tx call failed
+      // (e.g., transient DB/Redis hiccup). UI should surface a banner when
+      // cacheTombstoneFailures > 0 (#433 / S-N2 caveat).
+      invalidatedSessions: invalidationResult?.sessions ?? null,
+      invalidatedExtensionTokens: invalidationResult?.extensionTokens ?? null,
+      invalidatedApiKeys: invalidationResult?.apiKeys ?? null,
+      invalidatedMcpAccessTokens: invalidationResult?.mcpAccessTokens ?? null,
+      invalidatedMcpRefreshTokens: invalidationResult?.mcpRefreshTokens ?? null,
+      invalidatedDelegationSessions: invalidationResult?.delegationSessions ?? null,
+      cacheTombstoneFailures: invalidationResult?.cacheTombstoneFailures ?? null,
     },
   });
 

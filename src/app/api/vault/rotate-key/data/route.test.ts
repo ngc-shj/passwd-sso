@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaPasswordEntry, mockPrismaPasswordEntryHistory, mockPrismaUser, mockWithUserTenantRls, mockRateLimiterCheck } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaPasswordEntry, mockPrismaPasswordEntryHistory, mockPrismaUser, mockPrismaAttachment, mockWithUserTenantRls, mockRateLimiterCheck } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaPasswordEntry: { findMany: vi.fn() },
   mockPrismaPasswordEntryHistory: { findMany: vi.fn() },
   mockPrismaUser: { findUnique: vi.fn() },
+  // attachment.count drives the pre-flight data-loss warning in the rotation
+  // dialog. See plan #433 / A.4 + Step 7a.
+  mockPrismaAttachment: { count: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockRateLimiterCheck: vi.fn(),
 }));
@@ -16,6 +19,7 @@ vi.mock("@/lib/prisma", () => ({
     passwordEntry: mockPrismaPasswordEntry,
     passwordEntryHistory: mockPrismaPasswordEntryHistory,
     user: mockPrismaUser,
+    attachment: mockPrismaAttachment,
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -66,7 +70,8 @@ describe("GET /api/vault/rotate-key/data", () => {
       ecdhPrivateKeyIv: "a".repeat(24),
       ecdhPrivateKeyAuthTag: "b".repeat(32),
     });
-    // withUserTenantRls resolves all three queries in Promise.all
+    mockPrismaAttachment.count.mockResolvedValue(0);
+    // withUserTenantRls resolves all four queries in Promise.all
     mockWithUserTenantRls.mockImplementation(async (_userId: string, fn: () => unknown) => fn());
   });
 

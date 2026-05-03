@@ -9,8 +9,18 @@ const mockPasswordEntryHistory = {
   findMany: vi.fn(),
   updateMany: vi.fn(),
 };
+const mockAttachment = {
+  findMany: vi.fn(),
+};
+const mockWebAuthnCredential = {
+  updateMany: vi.fn(),
+};
+const mockUserTx = {
+  findUnique: vi.fn(),
+  update: vi.fn(),
+};
 
-const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockMarkStale, mockWithUserTenantRls, mockRateLimiterCheck } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockMarkStale, mockWithUserTenantRls, mockRateLimiterCheck, mockInvalidateUserSessions } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaUser: {
     findUnique: vi.fn(),
@@ -23,6 +33,7 @@ const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockMarkS
   mockMarkStale: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockRateLimiterCheck: vi.fn(),
+  mockInvalidateUserSessions: vi.fn(),
 }));
 
 // Transaction mock (txMock) for interactive transaction pattern
@@ -30,7 +41,9 @@ const txMock = {
   $executeRaw: vi.fn(),
   passwordEntry: mockPasswordEntry,
   passwordEntryHistory: mockPasswordEntryHistory,
-  user: { update: vi.fn() },
+  attachment: mockAttachment,
+  webAuthnCredential: mockWebAuthnCredential,
+  user: mockUserTx,
   vaultKey: { create: vi.fn() },
 };
 
@@ -56,8 +69,8 @@ vi.mock("@/lib/logger", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
-vi.mock("@/lib/auth/access/delegation", () => ({
-  revokeAllDelegationSessions: vi.fn(async () => 0),
+vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
+  invalidateUserSessions: mockInvalidateUserSessions,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
@@ -112,11 +125,27 @@ describe("POST /api/vault/rotate-key", () => {
     });
     // Interactive transaction mock: execute the callback with txMock
     mockTransaction.mockImplementation(async (fn: (tx: typeof txMock) => unknown) => fn(txMock));
-    // By default, DB has no entries/history (matches empty arrays in validBody)
+    // By default, DB has no entries/history/attachments (matches empty arrays in validBody)
     mockPasswordEntry.findMany.mockResolvedValue([]);
     mockPasswordEntryHistory.findMany.mockResolvedValue([]);
+    mockAttachment.findMany.mockResolvedValue([]);
     mockPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
     mockPasswordEntryHistory.updateMany.mockResolvedValue({ count: 1 });
+    // tx.user.findUnique reads recoveryEncryptedSecretKey to compute
+    // recoveryKeyInvalidated audit flag.
+    mockUserTx.findUnique.mockResolvedValue({ recoveryEncryptedSecretKey: null });
+    mockUserTx.update.mockResolvedValue({});
+    mockWebAuthnCredential.updateMany.mockResolvedValue({ count: 0 });
+    mockMarkStale.mockResolvedValue(0);
+    mockInvalidateUserSessions.mockResolvedValue({
+      sessions: 0,
+      extensionTokens: 0,
+      apiKeys: 0,
+      mcpAccessTokens: 0,
+      mcpRefreshTokens: 0,
+      delegationSessions: 0,
+      cacheTombstoneFailures: 0,
+    });
     txMock.$executeRaw.mockResolvedValue(undefined);
     txMock.user.update.mockResolvedValue({});
     txMock.vaultKey.create.mockResolvedValue({});
@@ -198,9 +227,14 @@ describe("POST /api/vault/rotate-key", () => {
         version: 2,
       }),
     });
-    // Verify delegation sessions are revoked after key rotation
-    const { revokeAllDelegationSessions } = await import("@/lib/auth/access/delegation");
-    expect(revokeAllDelegationSessions).toHaveBeenCalledWith("user-1", "tenant-1", "KEY_ROTATION");
+    // Verify ALL user-bound auth artifacts are revoked after key rotation
+    // (Session/ExtensionToken/ApiKey/McpAccessToken/McpRefreshToken/DelegationSession).
+    // Replaces the prior single revokeAllDelegationSessions call which left
+    // MCP tokens valid against the freshly-rotated vault — see plan #433 / S-N2.
+    expect(mockInvalidateUserSessions).toHaveBeenCalledWith("user-1", {
+      tenantId: "tenant-1",
+      reason: "KEY_ROTATION",
+    });
   });
 
   it("rotates key with entries and history (UUID v4 IDs — legacy label kept for context)", async () => {
@@ -366,19 +400,27 @@ describe("POST /api/vault/rotate-key", () => {
     });
   });
 
-  it("calls markGrantsStaleForOwner with new keyVersion", async () => {
+  it("calls markGrantsStaleForOwner with new keyVersion AND tx client (in-tx atomic)", async () => {
     await POST(
       createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
     );
-    expect(mockMarkStale).toHaveBeenCalledWith("user-1", 2);
+    // After #433 the call is inside the rotation tx and receives the tx client
+    // as a third argument, so atomicity is preserved with the rest of the rotation.
+    expect(mockMarkStale).toHaveBeenCalledWith("user-1", 2, txMock);
   });
 
-  it("succeeds even if markGrantsStaleForOwner fails", async () => {
+  it("aborts rotation when markGrantsStaleForOwner throws inside tx (#433 / F10 atomicity trade-off)", async () => {
     mockMarkStale.mockRejectedValue(new Error("DB error"));
-    const res = await POST(
-      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
-    );
-    expect(res.status).toBe(200);
+    // Behavior change vs prior best-effort post-tx: an EA-table failure now
+    // bubbles up (handled by the Next.js framework as a 500 in production)
+    // because the rotation rolls back atomically. The route does not
+    // try/catch unknown errors — only ENTRY_COUNT_MISMATCH, HISTORY_COUNT_MISMATCH,
+    // and AttachmentAckRequiredError are translated to structured responses.
+    await expect(
+      POST(
+        createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
+      )
+    ).rejects.toThrow("DB error");
   });
 
   it("increments keyVersion from current value", async () => {
@@ -394,18 +436,19 @@ describe("POST /api/vault/rotate-key", () => {
     );
     const json = await res.json();
     expect(json.keyVersion).toBe(6);
-    expect(mockMarkStale).toHaveBeenCalledWith("user-1", 6);
+    expect(mockMarkStale).toHaveBeenCalledWith("user-1", 6, txMock);
   });
 
-  it("runs key rotation and EA stale within withUserTenantRls scope", async () => {
+  it("runs key rotation entirely within withUserTenantRls scope", async () => {
     await POST(
       createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
     );
-    // withUserTenantRls: once for findUnique, once for transaction, once for EA stale
-    expect(mockWithUserTenantRls).toHaveBeenCalledTimes(3);
+    // After #433: 2 calls. (1) Prisma.user.findUnique to fetch outer user,
+    // (2) the rotation transaction. The EA stale call is now INSIDE the tx
+    // (not a separate withUserTenantRls scope as it was pre-#433).
+    expect(mockWithUserTenantRls).toHaveBeenCalledTimes(2);
     expect(mockWithUserTenantRls).toHaveBeenNthCalledWith(1, "user-1", expect.any(Function));
     expect(mockWithUserTenantRls).toHaveBeenNthCalledWith(2, "user-1", expect.any(Function));
-    expect(mockWithUserTenantRls).toHaveBeenNthCalledWith(3, "user-1", expect.any(Function));
   });
 
   it("truncates error details when >10 validation issues", async () => {

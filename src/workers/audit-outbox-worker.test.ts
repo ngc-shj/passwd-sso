@@ -523,7 +523,7 @@ describe("error paths", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     let txCallCount = 0;
     mockTransaction.mockImplementation(
-      async function (fn: (tx: unknown) => Promise<unknown>) {
+      async function (fn: TxFn) {
         txCallCount++;
         if (txCallCount === 2) {
           throw new Error("deliver error");
@@ -562,7 +562,7 @@ describe("error paths", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     let txCallCount = 0;
     mockTransaction.mockImplementation(
-      async function (fn: (tx: unknown) => Promise<unknown>) {
+      async function (fn: TxFn) {
         txCallCount++;
         if (txCallCount === 2) {
           throw new Error("final failure");
@@ -598,7 +598,7 @@ describe("error paths", () => {
 
     let txCallCount = 0;
     mockTransaction.mockImplementation(
-      async function (fn: (tx: unknown) => Promise<unknown>) {
+      async function (fn: TxFn) {
         txCallCount++;
         if (txCallCount === 2) {
           throw new Error("unexpected crash");
@@ -626,7 +626,7 @@ describe("error paths", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     let txCallCount = 0;
     mockTransaction.mockImplementation(
-      async function (fn: (tx: unknown) => Promise<unknown>) {
+      async function (fn: TxFn) {
         txCallCount++;
         if (txCallCount === 2) {
           throw new Error("fatal error");
@@ -1021,7 +1021,7 @@ describe("reaper — invoked on first loop tick", () => {
 
     let txCallCount = 0;
     mockTransaction.mockImplementation(
-      async function (fn: (tx: unknown) => Promise<unknown>) {
+      async function (fn: TxFn) {
         txCallCount++;
 
         // Phase 3 flow:
@@ -1089,7 +1089,7 @@ describe("reaper — invoked on first loop tick", () => {
 
     let txCallCount = 0;
     mockTransaction.mockImplementation(
-      async function (fn: (tx: unknown) => Promise<unknown>) {
+      async function (fn: TxFn) {
         txCallCount++;
 
         // Phase 3 flow:
@@ -1153,7 +1153,7 @@ describe("reaper — invoked on first loop tick", () => {
 
     let txCallCount = 0;
     mockTransaction.mockImplementation(
-      async function (fn: (tx: unknown) => Promise<unknown>) {
+      async function (fn: TxFn) {
         txCallCount++;
 
         // Phase 3 flow:
@@ -1214,7 +1214,7 @@ describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () =
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     let txCallCount = 0;
     mockTransaction.mockImplementation(
-      async function (fn: (tx: unknown) => Promise<unknown>) {
+      async function (fn: TxFn) {
         txCallCount++;
         // tx 1 = claimBatch (returns [row])
         // tx 2 = deliverRow — throw to trigger recordError
@@ -1260,7 +1260,7 @@ describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () =
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     let txCallCount = 0;
     mockTransaction.mockImplementation(
-      async function (fn: (tx: unknown) => Promise<unknown>) {
+      async function (fn: TxFn) {
         txCallCount++;
         // tx 1 = claimBatch (returns [row])
         // tx 2 = deliverRow — throw

@@ -46,6 +46,7 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
   generateAuthenticationOpts: mockGenerateAuthenticationOpts,
   derivePrfSalt: mockDerivePrfSalt,
+  WEBAUTHN_CHALLENGE_TTL_SECONDS: 300,
 }));
 
 vi.mock("@/lib/http/api-error-codes", () => ({

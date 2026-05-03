@@ -30,7 +30,7 @@ async function handleGET(_request: NextRequest) {
     return rateLimited(rl.retryAfterMs);
   }
 
-  const [entries, historyEntries, user] = await withUserTenantRls(
+  const [entries, historyEntries, user, attachmentsAffected] = await withUserTenantRls(
     session.user.id,
     async () =>
       Promise.all([
@@ -68,6 +68,14 @@ async function handleGET(_request: NextRequest) {
             ecdhPrivateKeyAuthTag: true,
           },
         }),
+        // Pre-flight count of personal-entry attachments. The UI uses this to
+        // surface the data-loss warning before submitting POST. Team
+        // attachments are unaffected by personal vault rotation. Returns 0
+        // for the common case (most users have no personal attachments) — see
+        // plan #433 / A.4.
+        prisma.attachment.count({
+          where: { passwordEntry: { userId: session.user.id } },
+        }),
       ]),
   );
 
@@ -80,7 +88,7 @@ async function handleGET(_request: NextRequest) {
         }
       : null;
 
-  return NextResponse.json({ entries, historyEntries, ecdhPrivateKey });
+  return NextResponse.json({ entries, historyEntries, ecdhPrivateKey, attachmentsAffected });
 }
 
 export const GET = withRequestLog(handleGET);
