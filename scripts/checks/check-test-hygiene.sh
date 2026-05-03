@@ -47,34 +47,42 @@ CHANGED_COUNT=$(echo "$CHANGED_LIST" | wc -l | tr -d ' ')
 # Capture all violations into a single string and decide pass/fail by string
 # emptiness — avoids the subshell-counter pitfall while still emitting per-rule
 # context to stderr.
+#
+# scan_pattern <regex> <message> <file>: emits the matching lines on stdout
+# (collected into VIOLATIONS) and a per-rule message to stderr. Extracted from
+# 4 copy-pasted blocks so adding a 5th gate is a one-liner.
+scan_pattern() {
+  local regex="$1" msg="$2" file="$3" matches
+  if matches=$(grep -nE "$regex" "$file" 2>/dev/null); then
+    printf "%s\n" "${file}: ${matches}"
+    printf "${RED}  ✗ FORBIDDEN: %s${RESET}\n" "$msg" >&2
+  fi
+}
+
 VIOLATIONS=$(
   echo "$CHANGED_LIST" | while IFS= read -r file; do
     [ -f "$file" ] || continue
 
     # Gate (a): vi.mock("node:crypto", ...) — would silently disable AES/HKDF
-    if matches=$(grep -nE "vi\.mock\(['\"]node:crypto['\"]" "$file" 2>/dev/null); then
-      printf "%s\n" "${file}: ${matches}"
-      printf "${RED}  ✗ FORBIDDEN: vi.mock('node:crypto', ...) silently disables AES/HKDF; use vi.spyOn(cryptoModule, 'randomBytes') only${RESET}\n" >&2
-    fi
+    scan_pattern "vi\.mock\(['\"]node:crypto['\"]" \
+      "vi.mock('node:crypto', ...) silently disables AES/HKDF; use vi.spyOn(cryptoModule, 'randomBytes') only" \
+      "$file"
 
     # Gate (b): focused/skipped tests
-    if matches=$(grep -nE "\b(it|describe)\.skip\b|\b(fdescribe|fit)\(" "$file" 2>/dev/null); then
-      printf "%s\n" "${file}: ${matches}"
-      printf "${RED}  ✗ FORBIDDEN: skipped/focused tests (it.skip / describe.skip / fdescribe / fit); document deviation in skip-log instead${RESET}\n" >&2
-    fi
+    scan_pattern "\b(it|describe)\.skip\b|\b(fdescribe|fit)\(" \
+      "skipped/focused tests (it.skip / describe.skip / fdescribe / fit); document deviation in skip-log instead" \
+      "$file"
 
     # Gate (c): direct process.env mutation (allowlist setup.ts is excluded
     # via the CHANGED_LIST filter at the top of this script)
-    if matches=$(grep -nE "^[[:space:]]*process\.env\.[A-Z_]+ *=" "$file" 2>/dev/null); then
-      printf "%s\n" "${file}: ${matches}"
-      printf "${RED}  ✗ FORBIDDEN: direct process.env.X = mutation in tests; use vi.stubEnv (afterEach unstubs are wired in setup.ts)${RESET}\n" >&2
-    fi
+    scan_pattern "^[[:space:]]*process\.env\.[A-Z_]+ *=" \
+      "direct process.env.X = mutation in tests; use vi.stubEnv (afterEach unstubs are wired in setup.ts)" \
+      "$file"
 
     # Gate (d): @ts-ignore / @ts-nocheck
-    if matches=$(grep -nE "@ts-(ignore|nocheck)" "$file" 2>/dev/null); then
-      printf "%s\n" "${file}: ${matches}"
-      printf "${RED}  ✗ FORBIDDEN: @ts-ignore / @ts-nocheck in tests; fix the type instead (R36)${RESET}\n" >&2
-    fi
+    scan_pattern "@ts-(ignore|nocheck)" \
+      "@ts-ignore / @ts-nocheck in tests; fix the type instead (R36)" \
+      "$file"
   done
 )
 

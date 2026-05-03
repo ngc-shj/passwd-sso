@@ -29,7 +29,7 @@
  *   vi.mock("@/i18n/navigation", () => mockI18nNavigation({ push: router }));
  */
 import { vi, type Mock } from "vitest";
-import type { ComponentProps, ReactNode } from "react";
+import { createElement, type ComponentProps, type ReactNode } from "react";
 
 // Use explicit callable signatures so the resulting Mock<Fn> retains its
 // `Fn` callability in TypeScript. `ReturnType<typeof vi.fn>` collapses to
@@ -105,17 +105,15 @@ export function mockI18nNavigation(opts: I18nNavigationMockOptions = {}) {
 
   // Default Link: render an anchor that forwards href + children. Tests using
   // `getByRole("link", { name: ... })` work without further configuration.
+  // Use createElement so the returned value is a real React element (with the
+  // internal $$typeof marker RTL needs); a plain `{ type, props, key }`
+  // literal is NOT a React element and falls through RTL role queries.
   const DefaultLink = ({
     href,
     children,
     ...rest
-  }: ComponentProps<"a"> & { href: string }) => {
-    return {
-      type: "a",
-      props: { href, ...rest, children },
-      key: null,
-    } as unknown as ReactNode;
-  };
+  }: ComponentProps<"a"> & { href: string }) =>
+    createElement("a", { href, ...rest }, children);
 
   return {
     Link: opts.Link ?? DefaultLink,

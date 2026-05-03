@@ -173,8 +173,9 @@ export function PasskeyCredentialsCard() {
             prfSecretKeyIv: wrapped.iv,
             prfSecretKeyAuthTag: wrapped.authTag,
           };
-          // Zeroize is also done in finally as defense in depth; doing it
-          // here too narrows the in-memory window for the success path.
+          // Eager zeroize on the success path (narrows the live-buffer
+          // window to wrap-completion); finally is the safety net for the
+          // throw paths. Null the locals so the finally check no-ops.
           secretKey.fill(0);
           prfOutput.fill(0);
           secretKey = null;
@@ -202,6 +203,9 @@ export function PasskeyCredentialsCard() {
         const result = await verifyRes.json();
         toast.success(t("registerSuccess"));
 
+        // Use reg.prfOutput (NOT the local prfOutput) — the local was nulled
+        // after eager zeroize on the success path; reg captures the original
+        // presence for warning UX.
         if (isNonDiscoverable(result) && !reg.prfOutput) {
           toast.warning(t("nonDiscoverableNonPrfWarning"));
         } else if (!reg.prfOutput) {

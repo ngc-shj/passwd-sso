@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from "vitest";
+import "@testing-library/jest-dom/vitest";
+import { render, screen } from "@testing-library/react";
 import {
   createMockRouter,
   mockI18nNavigation,
@@ -69,15 +71,11 @@ describe("mockI18nNavigation", () => {
     expect(mod.getPathname({ href: "/x" })).toBe("/x");
   });
 
-  it("default Link forwards href + children to its element shape", () => {
+  it("default Link renders as an accessible <a> with href + children", () => {
     const mod = mockI18nNavigation();
-    const node = mod.Link({ href: "/teams", children: "Teams" });
-    // Default Link returns a plain object element shape; we assert the props
-    // surface rather than a full React-element render.
-    const props = (node as { props?: { href?: string; children?: string } })
-      ?.props;
-    expect(props?.href).toBe("/teams");
-    expect(props?.children).toBe("Teams");
+    render(mod.Link({ href: "/teams", children: "Teams" }));
+    const link = screen.getByRole("link", { name: "Teams" });
+    expect(link).toHaveAttribute("href", "/teams");
   });
 
   it("merges router method overrides", () => {
