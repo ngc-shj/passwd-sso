@@ -45,6 +45,8 @@
   "subTabDirectorySync": "ディレクトリ同期",
   "subTabMembersList": "一覧",
   "subTabMembersTransferOwnership": "オーナー権限を移譲",
+  "subTabProfile": "プロフィール",
+  "subTabDelete": "削除",
   "subTabSharing": "共有",
   "subTabAccessRestriction": "アクセス制御",
 
