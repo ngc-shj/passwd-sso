@@ -2,6 +2,16 @@
 
 Tier: Tier-2 — touches vault reset, admin vault reset, and tenant policy change. Each of those is an authentication-state mutation, and the change extends their audit trail. Adversarial scenarios (Redis outage during reset) are included because the entire premise of the change is "the existing throttled-logger does not survive an incident-reconstruction request."
 
+## Automation status
+
+The audit-shape contract — `cacheTombstoneFailures` lands in the helper return value and propagates into audit metadata under both healthy Redis and Redis outage — is automated end-to-end against real Postgres in:
+
+- `src/__tests__/db-integration/admin-vault-reset-cross-tenant-sessions.integration.test.ts` (positive path, real Redis healthy)
+- `src/__tests__/db-integration/session-revocation-cache.integration.test.ts` (helper return shapes, real Redis healthy)
+- `src/__tests__/db-integration/vault-reset-cache-tombstone-redis-failure.integration.test.ts` (Redis outage, faulty ioredis client at non-listening port)
+
+Run via `npm run test:integration`. These cover the load-bearing assertions of S1 / S2 / S3 / S5. The manual steps below remain the source of truth for end-to-end UI verification (audit row inspection, throttled-logger emission, second-tab session-eviction effect) which the integration runner cannot exercise.
+
 ## Pre-conditions
 
 - Local dev stack up: `npm run docker:up` (Postgres + Redis + Jackson + Mailpit + audit-outbox-worker)
