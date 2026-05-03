@@ -10,6 +10,9 @@ out/
 build/
 dist/
 
+# Test coverage snapshots (used by test-gen workflow; never tracked)
+.coverage-snapshots/
+
 # Environment variables - NEVER commit secrets
 .env
 .env.local
