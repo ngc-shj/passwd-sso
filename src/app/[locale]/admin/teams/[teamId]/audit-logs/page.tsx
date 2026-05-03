@@ -204,69 +204,69 @@ export default function TeamAdminAuditLogsPage({
       title={tAdmin("teamSectionAuditLogs")}
       description={tAdmin("teamSectionAuditLogsDesc")}
     >
-    <Card>
-      <SectionCardHeader icon={ScrollText} title={tAdmin("navAuditLogs")} description={tAdmin("teamSectionAuditLogsDesc")} />
-      <CardContent className="space-y-4">
-        <div className="rounded-xl border bg-card/80 p-4">
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="space-y-1">
-                <Label className="text-xs">{t("actorTypeLabel")}</Label>
-                <Select value={audit.actorTypeFilter} onValueChange={audit.setActorTypeFilter}>
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL">{t("actorTypeAll")}</SelectItem>
-                    <SelectItem value="HUMAN">{t("actorTypeHuman")}</SelectItem>
-                    <SelectItem value="SERVICE_ACCOUNT">{t("actorTypeSa")}</SelectItem>
-                    <SelectItem value="MCP_AGENT">{t("actorTypeMcp")}</SelectItem>
-                  </SelectContent>
-                </Select>
+      <Card>
+        <SectionCardHeader icon={ScrollText} title={tAdmin("navAuditLogs")} description={tAdmin("teamSectionAuditLogsDesc")} />
+        <CardContent className="space-y-4">
+          <div className="rounded-xl border bg-card/80 p-4">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">{t("actorTypeLabel")}</Label>
+                  <Select value={audit.actorTypeFilter} onValueChange={audit.setActorTypeFilter}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">{t("actorTypeAll")}</SelectItem>
+                      <SelectItem value="HUMAN">{t("actorTypeHuman")}</SelectItem>
+                      <SelectItem value="SERVICE_ACCOUNT">{t("actorTypeSa")}</SelectItem>
+                      <SelectItem value="MCP_AGENT">{t("actorTypeMcp")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <AuditDateFilter
+                  dateFrom={audit.dateFrom}
+                  dateTo={audit.dateTo}
+                  setDateFrom={audit.setDateFrom}
+                  setDateTo={audit.setDateTo}
+                />
               </div>
-              <AuditDateFilter
-                dateFrom={audit.dateFrom}
-                dateTo={audit.dateTo}
-                setDateFrom={audit.setDateFrom}
-                setDateTo={audit.setDateTo}
+              <AuditActionFilter
+                actionGroups={ACTION_GROUPS}
+                selectedActions={audit.selectedActions}
+                actionSearch={audit.actionSearch}
+                filterOpen={audit.filterOpen}
+                actionSummary={audit.actionSummary}
+                actionLabel={audit.actionLabel}
+                filteredActions={audit.filteredActions}
+                isActionSelected={audit.isActionSelected}
+                toggleAction={audit.toggleAction}
+                setGroupSelection={audit.setGroupSelection}
+                clearActions={audit.clearActions}
+                setActionSearch={audit.setActionSearch}
+                setFilterOpen={audit.setFilterOpen}
               />
             </div>
-            <AuditActionFilter
-              actionGroups={ACTION_GROUPS}
-              selectedActions={audit.selectedActions}
-              actionSearch={audit.actionSearch}
-              filterOpen={audit.filterOpen}
-              actionSummary={audit.actionSummary}
-              actionLabel={audit.actionLabel}
-              filteredActions={audit.filteredActions}
-              isActionSelected={audit.isActionSelected}
-              toggleAction={audit.toggleAction}
-              setGroupSelection={audit.setGroupSelection}
-              clearActions={audit.clearActions}
-              setActionSearch={audit.setActionSearch}
-              setFilterOpen={audit.setFilterOpen}
+          </div>
+
+          <div className="flex justify-end">
+            <AuditDownloadButton
+              downloading={audit.downloading}
+              onDownload={audit.handleDownload}
+              exportAllowed={exportAllowed}
             />
           </div>
-        </div>
 
-        <div className="flex justify-end">
-          <AuditDownloadButton
-            downloading={audit.downloading}
-            onDownload={audit.handleDownload}
-            exportAllowed={exportAllowed}
+          <AuditLogList
+            logs={audit.logs}
+            loading={audit.loading}
+            loadingMore={audit.loadingMore}
+            nextCursor={audit.nextCursor}
+            onLoadMore={audit.handleLoadMore}
+            renderItem={renderItem}
           />
-        </div>
-
-        <AuditLogList
-          logs={audit.logs}
-          loading={audit.loading}
-          loadingMore={audit.loadingMore}
-          nextCursor={audit.nextCursor}
-          onLoadMore={audit.handleLoadMore}
-          renderItem={renderItem}
-        />
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
     </SectionLayout>
   );
 }

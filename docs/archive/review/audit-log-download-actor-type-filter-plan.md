@@ -192,6 +192,33 @@ These items were considered and explicitly excluded — they would expand blast 
 
 - Single commit; revert is `git revert <sha>`. No data migration to undo.
 
+## Implementation Checklist (Phase 2 step 2-1)
+
+### Files to modify
+- [ ] `src/app/api/audit-logs/download/route.ts` — import + parseActorType call (after `to` line 41, before date validation line 44) + spread in `where` literal (lines 62-65)
+- [ ] `src/app/api/tenant/audit-logs/download/route.ts` — import + parseActorType call (after `to` line 46, before `if (!from && !to)` early return line 49) + `if (validActorType) where.actorType = validActorType` after `where` construction
+- [ ] `src/app/[locale]/admin/teams/[teamId]/audit-logs/page.tsx` — re-indent `<Card>` block (line 207) +2 spaces through `</Card>`
+- [ ] `src/app/api/audit-logs/download/route.test.ts` — 3 new tests (present/absent/invalid actorType) with mandatory `await parseStreamResponse(res)` consume + `not.toHaveProperty` for absent/invalid
+- [ ] `src/app/api/tenant/audit-logs/download/route.test.ts` — 3 new tests with mandatory `await streamToString(res)` consume + mandatory `from`/`to` searchParams + `not.toHaveProperty`
+
+### Shared utilities to reuse (must NOT reimplement)
+- `parseActorType(searchParams: URLSearchParams)` from `@/lib/audit/audit-query` — only valid entry point for actorType validation
+- `parseActionsCsvParam(actionsParam: string | null)` from same module — already imported in both target files
+- `VALID_ACTOR_TYPES` constant — already exported from `@/lib/audit/audit-query`; do not redefine
+- `buildAuditLogStream` + `buildAuditLogDownloadResponse` from `@/lib/audit/audit-log-stream` — unchanged; lazy stream behavior is the source of T1/T2 testing requirements
+- `withUserTenantRls(userId, fn)` from `@/lib/tenant-context` — personal route RLS wrapper; unchanged
+- `withTenantRls(prisma, tenantId, fn)` from `@/lib/tenant-rls` — tenant route RLS wrapper; unchanged
+- `createRequest` (test helper) from `@/__tests__/helpers/request-builder` — already imported in both test files
+- `parseStreamResponse` (defined inline in `src/app/api/audit-logs/download/route.test.ts:53-66`) — reuse for personal tests
+- `streamToString` (defined inline in `src/app/api/tenant/audit-logs/download/route.test.ts`) — reuse for tenant tests
+
+### Patterns to follow consistently
+- parseActorType import grouping: add `parseActorType` to the existing destructured import from `@/lib/audit/audit-query` (do NOT create a new import line)
+- parseActorType call position: AFTER `to` extraction, BEFORE the date validation block (matches `teams/[teamId]/audit-logs/download/route.ts:66`)
+- `where` clause shape: spread for `Prisma.AuditLogWhereInput` typing (personal); imperative `if (validActorType) where.actorType = validActorType;` for `Record<string, unknown>` typing (tenant)
+- Test assertion form: `expect.objectContaining({ where: expect.objectContaining({ actorType: "..." }) })` for present case; `expect(calledWith.where).not.toHaveProperty("actorType")` for absent/invalid cases
+- Lazy-stream consume-first: `await parseStreamResponse(res)` (personal) / `await streamToString(res)` (tenant) BEFORE asserting on `mockPrismaAuditLog.findMany.mock.calls`
+
 ## Recurring Issue Check (plan-time)
 
 (Filled in detail by review experts in Step 1-4. Listed here so the plan declares which checks apply.)

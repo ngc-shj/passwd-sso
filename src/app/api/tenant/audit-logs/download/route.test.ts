@@ -224,4 +224,45 @@ describe("GET /api/tenant/audit-logs/download", () => {
       expect.objectContaining({ action: "AUDIT_LOG_DOWNLOAD" }),
     );
   });
+
+  it("filters by actorType when provided", async () => {
+    const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+      searchParams: {
+        from: new Date(Date.now() - 7 * 86400000).toISOString(),
+        actorType: "SERVICE_ACCOUNT",
+      },
+    });
+    const res = await GET(req);
+    await streamToString(res);
+
+    const calledWith = mockPrismaAuditLog.findMany.mock.calls[0][0];
+    expect(calledWith.where).toEqual(
+      expect.objectContaining({ actorType: "SERVICE_ACCOUNT" }),
+    );
+  });
+
+  it("omits actorType filter when param absent", async () => {
+    const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+      searchParams: { from: new Date(Date.now() - 7 * 86400000).toISOString() },
+    });
+    const res = await GET(req);
+    await streamToString(res);
+
+    const calledWith = mockPrismaAuditLog.findMany.mock.calls[0][0];
+    expect(calledWith.where).not.toHaveProperty("actorType");
+  });
+
+  it("ignores unknown actorType silently", async () => {
+    const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
+      searchParams: {
+        from: new Date(Date.now() - 7 * 86400000).toISOString(),
+        actorType: "NOT_REAL",
+      },
+    });
+    const res = await GET(req);
+    await streamToString(res);
+
+    const calledWith = mockPrismaAuditLog.findMany.mock.calls[0][0];
+    expect(calledWith.where).not.toHaveProperty("actorType");
+  });
 });

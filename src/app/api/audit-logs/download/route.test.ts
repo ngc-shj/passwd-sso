@@ -276,4 +276,37 @@ describe("GET /api/audit-logs/download", () => {
       }),
     );
   });
+
+  it("filters by actorType when provided", async () => {
+    const req = createRequest("GET", "http://localhost:3000/api/audit-logs/download", {
+      searchParams: { actorType: "SERVICE_ACCOUNT" },
+    });
+    const res = await GET(req);
+    await parseStreamResponse(res);
+
+    const calledWith = mockPrismaAuditLog.findMany.mock.calls[0][0];
+    expect(calledWith.where).toEqual(
+      expect.objectContaining({ actorType: "SERVICE_ACCOUNT" }),
+    );
+  });
+
+  it("omits actorType filter when param absent", async () => {
+    const req = createRequest("GET", "http://localhost:3000/api/audit-logs/download");
+    const res = await GET(req);
+    await parseStreamResponse(res);
+
+    const calledWith = mockPrismaAuditLog.findMany.mock.calls[0][0];
+    expect(calledWith.where).not.toHaveProperty("actorType");
+  });
+
+  it("ignores unknown actorType silently", async () => {
+    const req = createRequest("GET", "http://localhost:3000/api/audit-logs/download", {
+      searchParams: { actorType: "NOT_REAL" },
+    });
+    const res = await GET(req);
+    await parseStreamResponse(res);
+
+    const calledWith = mockPrismaAuditLog.findMany.mock.calls[0][0];
+    expect(calledWith.where).not.toHaveProperty("actorType");
+  });
 });

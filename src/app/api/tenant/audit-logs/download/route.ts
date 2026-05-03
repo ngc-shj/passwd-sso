@@ -9,7 +9,7 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { parseActionsCsvParam } from "@/lib/audit/audit-query";
+import { parseActionsCsvParam, parseActorType } from "@/lib/audit/audit-query";
 import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common.server";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { buildAuditLogStream, buildAuditLogDownloadResponse } from "@/lib/audit/audit-log-stream";
@@ -44,6 +44,7 @@ async function handleGET(req: NextRequest) {
   const actionsParam = searchParams.get("actions");
   const from = searchParams.get("from");
   const to = searchParams.get("to");
+  const validActorType = parseActorType(searchParams);
 
   // Require at least one date boundary
   if (!from && !to) {
@@ -71,6 +72,8 @@ async function handleGET(req: NextRequest) {
     scope: { in: [AUDIT_SCOPE.TENANT, AUDIT_SCOPE.TEAM] },
     tenantId: actor.tenantId,
   };
+
+  if (validActorType) where.actorType = validActorType;
 
   const parsedActions = parseActionsCsvParam(actionsParam);
   if ("invalid" in parsedActions) {

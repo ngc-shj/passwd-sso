@@ -11,7 +11,7 @@ import {
 import type { Prisma } from "@prisma/client";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { parseActionsCsvParam } from "@/lib/audit/audit-query";
+import { parseActionsCsvParam, parseActorType } from "@/lib/audit/audit-query";
 import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common.server";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { buildAuditLogStream, buildAuditLogDownloadResponse } from "@/lib/audit/audit-log-stream";
@@ -39,6 +39,7 @@ async function handleGET(req: NextRequest) {
   const actionsParam = searchParams.get("actions");
   const from = searchParams.get("from");
   const to = searchParams.get("to");
+  const validActorType = parseActorType(searchParams);
 
   // Validate date range
   if (from || to) {
@@ -62,6 +63,7 @@ async function handleGET(req: NextRequest) {
   const where: Prisma.AuditLogWhereInput = {
     scope: AUDIT_SCOPE.PERSONAL,
     userId: session.user.id,
+    ...(validActorType ? { actorType: validActorType } : {}),
   };
 
   const parsedActions = parseActionsCsvParam(actionsParam);
