@@ -76,14 +76,15 @@ private func makeMockSession() -> URLSession {
 
 private func makeTokenKeychain(token: String) -> MockKeychain {
   let keychain = MockKeychain()
+  let service = "com.passwd-sso.test.tokens"
   // access_token
   if let data = token.data(using: .utf8) {
-    keychain.store["access_token"] = data
+    keychain.store["\(service):access_token"] = data
   }
   // access_token_expiry (1 hour from now)
   let expiry = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
   if let data = expiry.data(using: .utf8) {
-    keychain.store["access_token_expiry"] = data
+    keychain.store["\(service):access_token_expiry"] = data
   }
   return keychain
 }

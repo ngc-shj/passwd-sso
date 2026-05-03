@@ -557,10 +557,14 @@ final class CredentialResolverTests: XCTestCase {
 
     _ = try? await resolver.resolveCandidates(for: [])
 
+    // After the V2 split: readForFill performs 2 SecItemCopyMatching calls —
+    // one for bridge-key-v2 (biometric-gated) and one for bridge-meta-v2
+    // (no ACL, no prompt). Only the FIRST is biometric-gated, so the
+    // single-prompt invariant is preserved: 2 keychain reads = 1 prompt.
     XCTAssertEqual(
       counting.copyMatchingCallCount,
-      1,
-      "resolveCandidates must use exactly ONE Keychain read (one biometric prompt)"
+      2,
+      "resolveCandidates must use exactly TWO Keychain reads (one biometric prompt + one no-ACL meta)"
     )
   }
 

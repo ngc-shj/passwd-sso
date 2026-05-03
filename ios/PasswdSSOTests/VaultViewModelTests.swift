@@ -217,7 +217,7 @@ final class VaultViewModelTests: XCTestCase {
 
   private func makeBridgeKeyStore() -> BridgeKeyStore {
     let kc = MockKeychain()
-    seedBlobInKeychain(kc, counter: 1)
+    seedBlobInKeychain(kc, counter: 1, service: "com.test.vm.bridge-key")
     return BridgeKeyStore(
       accessGroup: "test",
       service: "com.test.vm.bridge-key",

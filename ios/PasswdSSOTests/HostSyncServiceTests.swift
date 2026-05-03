@@ -6,51 +6,64 @@ import XCTest
 
 // MARK: - Test helpers for HostSyncService
 
-/// Write a minimal valid 56-byte bridge_key_blob to the mock keychain.
-func seedBlobInKeychain(_ keychain: MockKeychain, counter: UInt64 = 1) {
-  var blob = Data(repeating: 0x01, count: 32)  // bridge_key
+/// Pre-seed the mock keychain with v2-split items (bridge-key-v2 + bridge-meta-v2)
+/// equivalent to a freshly-created BridgeKeyStore at the given counter.
+func seedBlobInKeychain(
+  _ keychain: MockKeychain,
+  counter: UInt64 = 1,
+  service: String = "com.passwd-sso.test.bridge-key"
+) {
+  let bridgeKey = Data(repeating: 0x01, count: 32)
+  var meta = Data()
   let counterBE = counter.bigEndian
-  withUnsafeBytes(of: counterBE) { blob.append(contentsOf: $0) }
-  blob.append(contentsOf: Data(repeating: 0x02, count: 16))  // uuid
-  keychain.store["blob"] = blob
+  withUnsafeBytes(of: counterBE) { meta.append(contentsOf: $0) }
+  meta.append(contentsOf: Data(repeating: 0x02, count: 16))  // uuid
+  keychain.store["\(service)-v2:blob"] = bridgeKey
+  let metaService = service.hasSuffix("bridge-key")
+    ? service.replacingOccurrences(of: "bridge-key", with: "bridge-meta") + "-v2"
+    : service + "-meta-v2"
+  keychain.store["\(metaService):blob"] = meta
 }
 
-/// Mock keychain for BridgeKeyStore tests.
+/// Mock keychain for BridgeKeyStore tests. Keys by `service:account` so the
+/// V2 split layout (two services sharing account="blob") is modeled correctly.
 final class MockKeychain: KeychainAccessor, @unchecked Sendable {
   var store: [String: Data] = [:]
 
+  private func key(_ query: [String: Any]) -> String {
+    let service = query[kSecAttrService as String] as? String ?? ""
+    let account = query[kSecAttrAccount as String] as? String ?? ""
+    return "\(service):\(account)"
+  }
+
   func add(query: [String: Any]) -> OSStatus {
-    guard let account = query[kSecAttrAccount as String] as? String,
-          let data = query[kSecValueData as String] as? Data else {
+    guard let data = query[kSecValueData as String] as? Data else {
       return errSecParam
     }
-    if store[account] != nil { return errSecDuplicateItem }
-    store[account] = data
+    let k = key(query)
+    if store[k] != nil { return errSecDuplicateItem }
+    store[k] = data
     return errSecSuccess
   }
 
   func copyMatching(query: [String: Any]) -> (OSStatus, Data?) {
-    guard let account = query[kSecAttrAccount as String] as? String else {
-      return (errSecParam, nil)
-    }
-    guard let data = store[account] else { return (errSecItemNotFound, nil) }
+    let k = key(query)
+    guard let data = store[k] else { return (errSecItemNotFound, nil) }
     return (errSecSuccess, data)
   }
 
   func update(query: [String: Any], attributes: [String: Any]) -> OSStatus {
-    guard let account = query[kSecAttrAccount as String] as? String,
-          let data = attributes[kSecValueData as String] as? Data else {
+    guard let data = attributes[kSecValueData as String] as? Data else {
       return errSecParam
     }
-    store[account] = data
+    let k = key(query)
+    store[k] = data
     return errSecSuccess
   }
 
   func delete(query: [String: Any]) -> OSStatus {
-    guard let account = query[kSecAttrAccount as String] as? String else {
-      return errSecParam
-    }
-    if store.removeValue(forKey: account) != nil { return errSecSuccess }
+    let k = key(query)
+    if store.removeValue(forKey: k) != nil { return errSecSuccess }
     return errSecItemNotFound
   }
 }

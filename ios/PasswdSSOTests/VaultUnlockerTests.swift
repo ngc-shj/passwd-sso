@@ -223,9 +223,21 @@ final class VaultUnlockerTests: XCTestCase {
 
     _ = try await unlocker.unlock(passphrase: passphrase)
 
-    // Bridge key blob should exist in keychain
-    XCTAssertNotNil(keychain.store["blob"], "Bridge key blob must be written to keychain")
-    XCTAssertEqual(keychain.store["blob"]?.count, 56)
+    // V2 split: two items written — bridge-key-v2 (32 bytes) + bridge-meta-v2 (24 bytes).
+    XCTAssertNotNil(
+      keychain.store["com.passwd-sso.test.bridge-key-v2:blob"],
+      "Bridge-key v2 item must be written to keychain"
+    )
+    XCTAssertEqual(
+      keychain.store["com.passwd-sso.test.bridge-key-v2:blob"]?.count, 32
+    )
+    XCTAssertNotNil(
+      keychain.store["com.passwd-sso.test.bridge-meta-v2:blob"],
+      "Bridge-meta v2 item must be written to keychain"
+    )
+    XCTAssertEqual(
+      keychain.store["com.passwd-sso.test.bridge-meta-v2:blob"]?.count, 24
+    )
   }
 
   // MARK: - Wrong passphrase
