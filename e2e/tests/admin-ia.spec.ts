@@ -156,10 +156,24 @@ test.describe("Admin IA — team nav", () => {
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 10_000 });
   });
 
-  test("team General page renders without error", async () => {
+  test("team General redirects to Profile sub-tab", async () => {
     test.skip(!teamId, "No team found in teams list");
     const response = await page.goto(`/ja/admin/teams/${teamId}/general`);
     expect(response?.status()).not.toBe(404);
+    // /general is a redirect-only page that lands on /profile by default
+    await expect(page).toHaveURL(new RegExp(`/admin/teams/${teamId}/general/profile$`));
+    // Active sub-tab announces aria-current=page (covers the a11y test-plan item)
+    const activeProfileLink = page.locator(
+      `a[href$="/admin/teams/${teamId}/general/profile"][aria-current="page"]`,
+    );
+    await expect(activeProfileLink.first()).toBeVisible({ timeout: 5_000 });
+  });
+
+  test("team General Delete sub-tab is reachable", async () => {
+    test.skip(!teamId, "No team found in teams list");
+    const response = await page.goto(`/ja/admin/teams/${teamId}/general/delete`);
+    expect(response?.status()).not.toBe(404);
+    await expect(page).toHaveURL(new RegExp(`/admin/teams/${teamId}/general/delete$`));
   });
 
   test("team Policy page renders without error", async () => {
