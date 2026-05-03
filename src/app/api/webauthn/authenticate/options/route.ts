@@ -10,13 +10,12 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import {
   generateAuthenticationOpts,
   derivePrfSalt,
+  WEBAUTHN_CHALLENGE_TTL_SECONDS,
 } from "@/lib/auth/webauthn/webauthn-server";
 
 export const runtime = "nodejs";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
-
-const CHALLENGE_TTL_SECONDS = 300;
 
 // POST /api/webauthn/authenticate/options
 // Body: { credentialId?: string }
@@ -85,7 +84,7 @@ async function handlePOST(req: NextRequest) {
     `webauthn:challenge:authenticate:${userId}`,
     options.challenge,
     "EX",
-    CHALLENGE_TTL_SECONDS,
+    WEBAUTHN_CHALLENGE_TTL_SECONDS,
   );
 
   // Derive PRF salt for vault unlock

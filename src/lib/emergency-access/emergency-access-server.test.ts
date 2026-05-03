@@ -33,7 +33,7 @@ describe("markGrantsStaleForOwner", () => {
           { keyVersion: null },
         ],
       },
-      data: { status: EA_STATUS.STALE },
+      data: { status: EA_STATUS.STALE, ownerEphemeralPublicKey: null },
     });
   });
 
