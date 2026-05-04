@@ -1,11 +1,10 @@
 import { describe, test, expect } from "vitest";
 import { EmergencyAccessStatus } from "@prisma/client";
 import { MATRIX, canTransition } from "./emergency-access-state";
-import type { EaActor } from "./emergency-access-state";
-import { EA_STATUS } from "@/lib/constants";
+import { EA_STATUS, EA_ACTOR } from "@/lib/constants";
 
 const ALL_STATUSES = Object.values(EmergencyAccessStatus) as EmergencyAccessStatus[];
-const EA_ACTORS: ReadonlyArray<EaActor> = ["OWNER", "GRANTEE", "SYSTEM"];
+const EA_ACTORS = Object.values(EA_ACTOR);
 const allFromTos = ALL_STATUSES.flatMap((from) =>
   ALL_STATUSES.map((to) => [from, to] as const),
 );

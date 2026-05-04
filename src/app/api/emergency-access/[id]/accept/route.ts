@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { acceptEmergencyGrantByIdSchema } from "@/lib/validations";
-import { fromStatusesFor } from "@/lib/emergency-access/emergency-access-state";
+import { transition } from "@/lib/emergency-access/emergency-access-state";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyGrantAcceptedEmail } from "@/lib/email/templates/emergency-access";
@@ -69,19 +69,16 @@ async function handlePOST(
   // grant whose status was already moved by a concurrent request.
   const txResult = await withBypassRls(prisma, async () =>
     prisma.$transaction(async (tx) => {
-      const updated = await tx.emergencyAccessGrant.updateMany({
-        where: {
-          id,
-          granteeEmail: grant.granteeEmail,
-          status: { in: fromStatusesFor(EA_STATUS.ACCEPTED) },
-        },
-        data: {
-          status: EA_STATUS.ACCEPTED,
-          granteeId: session.user.id,
-          granteePublicKey,
-        },
+      // C6: throw on { ok: false } to abort the transaction (key-pair create
+      // must not commit if the status transition did not fire).
+      const transitionResult = await transition({
+        db: tx,
+        where: { id, granteeEmail: grant.granteeEmail },
+        to: EA_STATUS.ACCEPTED,
+        actor: "GRANTEE",
+        extraData: { granteeId: session.user.id, granteePublicKey },
       });
-      if (updated.count === 0) {
+      if (!transitionResult.ok) {
         return { ok: false as const };
       }
       await tx.emergencyAccessKeyPair.create({

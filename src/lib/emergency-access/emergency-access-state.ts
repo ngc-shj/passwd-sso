@@ -13,10 +13,10 @@
  */
 import type { EmergencyAccessStatus, Prisma } from "@prisma/client";
 import type { TxOrPrisma } from "@/lib/prisma";
-import { EA_STATUS } from "@/lib/constants";
+import { EA_STATUS, EA_ACTOR, type EaActor } from "@/lib/constants";
 import { isBypassRlsActive } from "@/lib/tenant-rls";
 
-export type EaActor = "OWNER" | "GRANTEE" | "SYSTEM";
+export { EA_ACTOR, type EaActor };
 
 /**
  * Exhaustive transition matrix. Empty array = forbidden transition.
@@ -149,7 +149,9 @@ export async function transition(args: {
   where: Prisma.EmergencyAccessGrantWhereInput;
   to: EmergencyAccessStatus;
   actor: EaActor;
-  extraData?: Omit<Prisma.EmergencyAccessGrantUpdateInput, "status">;
+  // UncheckedUpdateManyInput allows scalar FK fields (granteeId, ownerId, etc.)
+  // directly, matching the data shape accepted by emergencyAccessGrant.updateMany().
+  extraData?: Omit<Prisma.EmergencyAccessGrantUncheckedUpdateManyInput, "status">;
 }): Promise<{ ok: true } | { ok: false }> {
   const allowedFroms = (
     Object.entries(MATRIX) as [
@@ -189,7 +191,8 @@ export async function bulkTransition(args: {
   where: Prisma.EmergencyAccessGrantWhereInput;
   to: EmergencyAccessStatus;
   actor: EaActor;
-  extraData?: Omit<Prisma.EmergencyAccessGrantUpdateInput, "status">;
+  // UncheckedUpdateManyInput allows scalar FK fields directly.
+  extraData?: Omit<Prisma.EmergencyAccessGrantUncheckedUpdateManyInput, "status">;
 }): Promise<{ updated: number }> {
   const allowedFroms = (
     Object.entries(MATRIX) as [

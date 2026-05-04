@@ -14,9 +14,14 @@ import type { AccessRequestStatus, Prisma } from "@prisma/client";
 import type { TxOrPrisma } from "@/lib/prisma";
 import { isBypassRlsActive } from "@/lib/tenant-rls";
 
-export type ArActor = "ADMIN" | "SYSTEM";
+export const AR_ACTOR = {
+  ADMIN: "ADMIN",
+  SYSTEM: "SYSTEM",
+} as const;
 
-const AR_STATUS = {
+export type ArActor = (typeof AR_ACTOR)[keyof typeof AR_ACTOR];
+
+export const AR_STATUS = {
   PENDING: "PENDING",
   APPROVED: "APPROVED",
   DENIED: "DENIED",
@@ -90,7 +95,9 @@ export async function transition(args: {
   where: Prisma.AccessRequestWhereInput;
   to: AccessRequestStatus;
   actor: ArActor;
-  extraData?: Omit<Prisma.AccessRequestUpdateInput, "status">;
+  // UncheckedUpdateManyInput allows scalar FK fields (approvedById, etc.)
+  // directly, matching the data shape accepted by accessRequest.updateMany().
+  extraData?: Omit<Prisma.AccessRequestUncheckedUpdateManyInput, "status">;
 }): Promise<{ ok: true } | { ok: false }> {
   const allowedFroms = (
     Object.entries(MATRIX) as [
@@ -129,7 +136,8 @@ export async function bulkTransition(args: {
   where: Prisma.AccessRequestWhereInput;
   to: AccessRequestStatus;
   actor: ArActor;
-  extraData?: Omit<Prisma.AccessRequestUpdateInput, "status">;
+  // UncheckedUpdateManyInput allows scalar FK fields directly.
+  extraData?: Omit<Prisma.AccessRequestUncheckedUpdateManyInput, "status">;
 }): Promise<{ updated: number }> {
   const allowedFroms = (
     Object.entries(MATRIX) as [

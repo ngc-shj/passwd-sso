@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
+import { personalAuditBase } from "@/lib/audit/audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { EA_STATUS } from "@/lib/constants";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, rateLimited, notFound, unauthorized } from "@/lib/http/api-response";
+import { autoPromoteIfElapsed } from "@/lib/emergency-access/vault-auto-promote";
 
 const vaultLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
@@ -42,23 +43,47 @@ async function handleGET(
     return notFound();
   }
 
-  // Auto-activate if wait period has expired
+  // Auto-activate if wait period has expired (CAS-protected via transition() — closes
+  // the race window where two concurrent GETs both flip REQUESTED → ACTIVATED).
   if (grant.status === EA_STATUS.REQUESTED && grant.waitExpiresAt && grant.waitExpiresAt <= new Date()) {
-    await withBypassRls(prisma, async () =>
-      prisma.emergencyAccessGrant.update({
-        where: { id },
-        data: { status: EA_STATUS.ACTIVATED, activatedAt: new Date() },
-      }),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
-    grant.status = EA_STATUS.ACTIVATED;
-
-    await logAuditAsync({
-      ...personalAuditBase(req, session.user.id),
-      action: AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE,
-      targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
-      targetId: id,
-      metadata: { ownerId: grant.ownerId },
+    const result = await autoPromoteIfElapsed({
+      granteeId: session.user.id,
+      grantId: id,
+      now: new Date(),
+      auditBase: personalAuditBase(req, session.user.id),
     });
+
+    if (result.ok) {
+      return NextResponse.json({
+        grantId: result.grant.id,
+        ownerId: result.grant.ownerId,
+        granteeId: result.grant.granteeId,
+        ownerEphemeralPublicKey: result.grant.ownerEphemeralPublicKey,
+        encryptedSecretKey: result.grant.encryptedSecretKey,
+        secretKeyIv: result.grant.secretKeyIv,
+        secretKeyAuthTag: result.grant.secretKeyAuthTag,
+        hkdfSalt: result.grant.hkdfSalt,
+        wrapVersion: result.grant.wrapVersion,
+        keyVersion: result.grant.keyVersion,
+        keyAlgorithm: result.grant.keyAlgorithm,
+        granteeKeyPair: result.grant.granteeKeyPair && {
+          encryptedPrivateKey: result.grant.granteeKeyPair.encryptedPrivateKey,
+          privateKeyIv: result.grant.granteeKeyPair.privateKeyIv,
+          privateKeyAuthTag: result.grant.granteeKeyPair.privateKeyAuthTag,
+        },
+        owner: result.grant.owner,
+      });
+    }
+
+    if (result.reason === "revoked") {
+      return errorResponse(API_ERROR.GRANT_REVOKED, 403);
+    }
+
+    if (result.reason === "no_escrow") {
+      return errorResponse(API_ERROR.KEY_ESCROW_NOT_COMPLETED, 400);
+    }
+
+    // reason === "not_eligible": fall through to the status check below
   }
 
   if (grant.status !== EA_STATUS.ACTIVATED) {

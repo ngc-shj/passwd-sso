@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { fromStatusesFor } from "@/lib/emergency-access/emergency-access-state";
+import { transition } from "@/lib/emergency-access/emergency-access-state";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyGrantDeclinedEmail } from "@/lib/email/templates/emergency-access";
@@ -40,18 +40,16 @@ async function handlePOST(
   }
 
   // Atomic compare-and-swap: only transitions a still-PENDING row.
-  const updated = await withBypassRls(prisma, async () =>
-    prisma.emergencyAccessGrant.updateMany({
-      where: {
-        id,
-        granteeEmail: grant.granteeEmail,
-        status: { in: fromStatusesFor(EA_STATUS.REJECTED) },
-      },
-      data: { status: EA_STATUS.REJECTED },
+  const transitionResult = await withBypassRls(prisma, async () =>
+    transition({
+      db: prisma,
+      where: { id, granteeEmail: grant.granteeEmail },
+      to: EA_STATUS.REJECTED,
+      actor: "GRANTEE",
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
-  if (updated.count === 0) {
+  if (!transitionResult.ok) {
     return errorResponse(API_ERROR.GRANT_NOT_PENDING, 400);
   }
 

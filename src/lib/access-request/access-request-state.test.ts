@@ -1,10 +1,9 @@
 import { describe, test, expect } from "vitest";
 import { AccessRequestStatus } from "@prisma/client";
-import { MATRIX, canTransition } from "./access-request-state";
-import type { ArActor } from "./access-request-state";
+import { MATRIX, canTransition, AR_ACTOR } from "./access-request-state";
 
 const ALL_STATUSES = Object.values(AccessRequestStatus) as AccessRequestStatus[];
-const AR_ACTORS: ReadonlyArray<ArActor> = ["ADMIN", "SYSTEM"];
+const AR_ACTORS = Object.values(AR_ACTOR);
 const allFromTos = ALL_STATUSES.flatMap((from) =>
   ALL_STATUSES.map((to) => [from, to] as const),
 );

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { fromStatusesFor } from "@/lib/emergency-access/emergency-access-state";
+import { transition } from "@/lib/emergency-access/emergency-access-state";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyAccessApprovedEmail } from "@/lib/email/templates/emergency-access";
@@ -39,21 +39,17 @@ async function handlePOST(
   // Atomic compare-and-swap on status: blocks concurrent transitions out of the
   // permitted from-set even if a parallel revoke/request/etc. lands between
   // the read above and this write.
-  const updated = await withUserTenantRls(session.user.id, async () =>
-    prisma.emergencyAccessGrant.updateMany({
-      where: {
-        id,
-        ownerId: session.user.id,
-        status: { in: fromStatusesFor(EA_STATUS.ACTIVATED) },
-      },
-      data: {
-        status: EA_STATUS.ACTIVATED,
-        activatedAt: new Date(),
-      },
+  const transitionResult = await withUserTenantRls(session.user.id, async () =>
+    transition({
+      db: prisma,
+      where: { id, ownerId: session.user.id },
+      to: EA_STATUS.ACTIVATED,
+      actor: "OWNER",
+      extraData: { activatedAt: new Date() },
     }),
   );
 
-  if (updated.count === 0) {
+  if (!transitionResult.ok) {
     return errorResponse(API_ERROR.INVALID_STATUS, 400);
   }
 

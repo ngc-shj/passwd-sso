@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { confirmEmergencyGrantSchema } from "@/lib/validations";
-import { fromStatusesFor } from "@/lib/emergency-access/emergency-access-state";
+import { transition } from "@/lib/emergency-access/emergency-access-state";
 import { SUPPORTED_KEY_ALGORITHMS } from "@/lib/crypto/crypto-emergency";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
@@ -61,15 +61,13 @@ async function handlePOST(
 
   // Atomic compare-and-swap on status: prevents racing a concurrent revoke
   // that would otherwise let stale escrow data overwrite a REVOKED grant.
-  const updated = await withUserTenantRls(session.user.id, async () =>
-    prisma.emergencyAccessGrant.updateMany({
-      where: {
-        id,
-        ownerId: session.user.id,
-        status: { in: fromStatusesFor(EA_STATUS.IDLE) },
-      },
-      data: {
-        status: EA_STATUS.IDLE,
+  const transitionResult = await withUserTenantRls(session.user.id, async () =>
+    transition({
+      db: prisma,
+      where: { id, ownerId: session.user.id },
+      to: EA_STATUS.IDLE,
+      actor: "OWNER",
+      extraData: {
         ownerEphemeralPublicKey,
         encryptedSecretKey,
         secretKeyIv,
@@ -81,7 +79,7 @@ async function handlePOST(
     }),
   );
 
-  if (updated.count === 0) {
+  if (!transitionResult.ok) {
     return errorResponse(API_ERROR.INVALID_STATUS, 400);
   }
 

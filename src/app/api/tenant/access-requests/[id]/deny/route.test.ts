@@ -89,9 +89,10 @@ describe("POST /api/tenant/access-requests/[id]/deny", () => {
 
     expect(status).toBe(200);
     expect(json.success).toBe(true);
+    // transition() internally adds status: { in: ["PENDING"] } to the WHERE clause
     expect(mockAccessRequestUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ id: REQUEST_ID, status: "PENDING" }),
+        where: expect.objectContaining({ id: REQUEST_ID, status: { in: ["PENDING"] } }),
         data: expect.objectContaining({ status: "DENIED" }),
       }),
     );
