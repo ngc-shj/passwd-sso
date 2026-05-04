@@ -45,13 +45,20 @@ async function handleGET(
 
   // Auto-activate if wait period has expired (CAS-protected via transition() — closes
   // the race window where two concurrent GETs both flip REQUESTED → ACTIVATED).
+  // The lib does not call withBypassRls itself; the route owns the bypass scope
+  // (preserves the existing check-bypass-rls.mjs ALLOWED_USAGE entry for this file).
   if (grant.status === EA_STATUS.REQUESTED && grant.waitExpiresAt && grant.waitExpiresAt <= new Date()) {
-    const result = await autoPromoteIfElapsed({
-      granteeId: session.user.id,
-      grantId: id,
-      now: new Date(),
-      auditBase: personalAuditBase(req, session.user.id),
-    });
+    const result = await withBypassRls(
+      prisma,
+      async () =>
+        autoPromoteIfElapsed({
+          granteeId: session.user.id,
+          grantId: id,
+          now: new Date(),
+          auditBase: personalAuditBase(req, session.user.id),
+        }),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    );
 
     if (result.ok) {
       return NextResponse.json({

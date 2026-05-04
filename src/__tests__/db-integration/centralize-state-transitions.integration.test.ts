@@ -361,17 +361,24 @@ describe("centralize-state-transitions — integration", () => {
     };
     const now = new Date();
 
-    // T17 uses Promise.all (not raceTwoClients) because autoPromoteIfElapsed
-    // opens its own withBypassRls scope internally — each call therefore runs
-    // in a separate AsyncLocalStorage context with its own DB transaction.
-    // Each transaction acquires its own connection from the pool; PostgreSQL
-    // row-level locking on emergencyAccessGrant guarantees the CAS predicate
-    // sees exactly one PENDING-eligible row, exactly one transition succeeds.
-    // (T6 above uses raceTwoClients to exercise transition() directly without
-    // wrapping helpers — different scope, same end-state guarantee.)
+    // T17 uses Promise.all + per-call withBypassRls because autoPromoteIfElapsed
+    // does NOT call withBypassRls itself (caller-owned scope; see route handler
+    // and the lib's file header). Each call opens its own withBypassRls scope,
+    // gets a separate AsyncLocalStorage context + DB transaction, distinct
+    // pool connection. PostgreSQL row-level locking on emergencyAccessGrant
+    // guarantees the CAS predicate sees exactly one REQUESTED-eligible row,
+    // exactly one transition succeeds.
     const [a, b] = await Promise.all([
-      autoPromoteIfElapsed({ granteeId, grantId, now, auditBase }),
-      autoPromoteIfElapsed({ granteeId, grantId, now, auditBase }),
+      withBypassRls(
+        ctx.app.prisma,
+        async () => autoPromoteIfElapsed({ granteeId, grantId, now, auditBase }),
+        BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+      ),
+      withBypassRls(
+        ctx.app.prisma,
+        async () => autoPromoteIfElapsed({ granteeId, grantId, now, auditBase }),
+        BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+      ),
     ]);
 
     const successCount = [a, b].filter((r) => r.ok).length;

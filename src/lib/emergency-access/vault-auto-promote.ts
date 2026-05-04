@@ -5,10 +5,16 @@
  * C5: audit is emitted from this function, gated on the post-refetch success
  * path. The concurrent "loser" does not emit (CAS in transition() ensures
  * exactly one caller wins the REQUESTED → ACTIVATED flip).
+ *
+ * Bypass-RLS contract: this lib does NOT call withBypassRls itself. Callers
+ * MUST invoke under an active withBypassRls scope (the route does, the
+ * integration test does too). The prisma proxy in src/lib/prisma.ts:145-174
+ * inherits the active context via AsyncLocalStorage. Keeping the bypass
+ * decision at the call site (route handler) preserves the existing security
+ * review boundary — see scripts/checks/check-bypass-rls.mjs ALLOWED_USAGE.
  */
 
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { transition } from "./emergency-access-state";
 import { logAuditAsync, type AuditLogParams } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE, EA_STATUS, EA_ACTOR } from "@/lib/constants";
@@ -73,16 +79,14 @@ export async function autoPromoteIfElapsed(args: {
 }): Promise<AutoPromoteResult> {
   const { granteeId, grantId, now, auditBase } = args;
 
+  // Caller MUST wrap in withBypassRls — see file header. The prisma proxy
+  // re-targets all queries below to the active bypass-tx via AsyncLocalStorage.
+
   // Step 1: fetch current grant state to check eligibility
-  const current = await withBypassRls(
-    prisma,
-    async () =>
-      prisma.emergencyAccessGrant.findUnique({
-        where: { id: grantId },
-        select: { status: true, waitExpiresAt: true, granteeId: true },
-      }),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
-  );
+  const current = await prisma.emergencyAccessGrant.findUnique({
+    where: { id: grantId },
+    select: { status: true, waitExpiresAt: true, granteeId: true },
+  });
 
   // Step 2: eligibility check
   if (
@@ -96,18 +100,13 @@ export async function autoPromoteIfElapsed(args: {
   }
 
   // Step 3: CAS-protected transition (closes race window)
-  const promoted = await withBypassRls(
-    prisma,
-    async () =>
-      transition({
-        db: prisma,
-        where: { id: grantId, granteeId },
-        to: EA_STATUS.ACTIVATED,
-        actor: EA_ACTOR.SYSTEM,
-        extraData: { activatedAt: now },
-      }),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
-  );
+  const promoted = await transition({
+    db: prisma,
+    where: { id: grantId, granteeId },
+    to: EA_STATUS.ACTIVATED,
+    actor: EA_ACTOR.SYSTEM,
+    extraData: { activatedAt: now },
+  });
 
   if (!promoted.ok) {
     // Concurrent winner already promoted; this caller is the loser.
@@ -115,18 +114,13 @@ export async function autoPromoteIfElapsed(args: {
   }
 
   // Step 4: re-fetch to get the authoritative post-promotion state
-  const updated = await withBypassRls(
-    prisma,
-    async () =>
-      prisma.emergencyAccessGrant.findUnique({
-        where: { id: grantId },
-        include: {
-          granteeKeyPair: true,
-          owner: { select: { name: true, email: true } },
-        },
-      }),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
-  );
+  const updated = await prisma.emergencyAccessGrant.findUnique({
+    where: { id: grantId },
+    include: {
+      granteeKeyPair: true,
+      owner: { select: { name: true, email: true } },
+    },
+  });
 
   // revokedAt check precedes encryptedSecretKey check (F5/S15 ordering)
   if (!updated || updated.revokedAt !== null) {
