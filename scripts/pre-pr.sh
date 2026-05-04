@@ -61,6 +61,22 @@ else
 fi
 run_step "Static: no-deprecated-logAudit" bash -c 'if grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*" | grep -q .; then echo "Residual logAudit() calls found:"; grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*"; exit 1; fi'
 
+# fetch basePath compliance — every client API call must go through fetchApi()
+# (which honors NEXT_PUBLIC_BASE_PATH) instead of raw fetch("/api/..."). Mirrors
+# the CI gate at .github/workflows/ci.yml "Check fetch basePath compliance".
+run_step "Static: fetch basePath compliance" bash -c '
+  if grep -rn --include="*.tsx" --include="*.ts" \
+    -E "fetch\((API_PATH\.|apiPath\.|\`/api/|\"/api/)" \
+    src/ \
+    --exclude-dir="src/app/api" \
+    | grep -v "fetchApi" | grep -v "\.test\." \
+    | grep -v "src/proxy.ts" | grep -v "src/lib/webhook-dispatcher.ts" \
+    | grep -v "src/lib/url-helpers.ts"; then
+    echo "ERROR: Found fetch() calls that should use fetchApi()"
+    exit 1
+  fi
+'
+
 if command -v gitleaks >/dev/null 2>&1; then
   run_step "Secret scan (gitleaks)" gitleaks detect --no-banner --redact --staged
 else

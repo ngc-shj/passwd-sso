@@ -7,8 +7,9 @@
  * 2. No-secrets-in-error-messages: thrown Error.message MUST NOT contain IV /
  *    auth-tag / ciphertext / key bytes (sentinel-grep enforced).
  *
- * Real `node:crypto` is used. Per plan: `vi.mock("node:crypto", ...)` is
- * FORBIDDEN — only `vi.spyOn(cryptoModule, 'randomBytes')` for fixturing.
+ * Real `node:crypto` is used (no module-level mock — see plan §Batch P5;
+ * the test-hygiene grep enforces this). Only `vi.spyOn(cryptoModule,
+ * 'randomBytes')` is allowed for fixturing.
  */
 
 import { describe, it, expect } from "vitest";
