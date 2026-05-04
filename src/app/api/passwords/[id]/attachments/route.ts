@@ -19,6 +19,7 @@ import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, forbidden, notFound, unauthorized, rateLimited } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { LegacyAttachmentInconsistentVersionError } from "@/lib/vault/rotate-key-server";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -170,26 +171,10 @@ async function handlePOST(
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
-  // Reject uploads whose cekKeyVersion does not match the user's current
-  // vault keyVersion. A stale client (e.g., another tab that did not
-  // observe a recent rotation) would otherwise persist a row whose
-  // cek_key_version is below the user's current keyVersion, which
-  // poisons the next rotation's manifest consistency check and bricks
-  // future rotations until the row is migrated. A residual TOCTOU
-  // window between this read and the attachment.create remains and is
-  // acceptable: the rotation manifest check is the backstop.
-  const user = await withUserTenantRls(session.user.id, async () =>
-    prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { keyVersion: true },
-    }),
-  );
-  if (!user) {
-    return errorResponse(API_ERROR.NOT_FOUND, 404);
-  }
-  if (cekKeyVersion !== user.keyVersion) {
-    return errorResponse(API_ERROR.ATTACHMENT_INCONSISTENT_VERSION, 409);
-  }
+  // The cekKeyVersion ↔ user.keyVersion equality check happens INSIDE the
+  // advisory-locked transaction below (just before attachment.create), so a
+  // rotation that commits between request boundary and lock acquisition
+  // cannot land a stale-cekKeyVersion row in the DB.
 
   // I3.3: keyVersion from request is ignored in mode-2 uploads
   if (keyVersion !== null) {
@@ -237,46 +222,74 @@ async function handlePOST(
   const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const attachmentId = (clientId && UUID_V4_RE.test(clientId)) ? clientId.toLowerCase() : crypto.randomUUID();
   const blobContext = { attachmentId, entryId: id };
-  const storedBlob = await blobStore.putObject(buffer, blobContext);
+  // Validate aadVersion BEFORE blob storage to avoid leaking a stored blob
+  // when the request is rejected.
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : AAD_VERSION;
   if (Number.isNaN(aadVersion) || aadVersion < 1 || aadVersion > 1) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
+  const storedBlob = await blobStore.putObject(buffer, blobContext);
   let attachment;
   try {
     attachment = await withUserTenantRls(session.user.id, async () =>
-      prisma.attachment.create({
-        data: {
-          id: attachmentId,
-          filename: sanitizedFilename,
-          contentType,
-          sizeBytes: originalSize,
-          encryptedData: Buffer.from(storedBlob),
-          iv,
-          authTag,
-          // keyVersion from request is intentionally omitted (I3.3): server sets encryptionMode: 2
-          aadVersion,
-          encryptionMode: 2,
-          cekEncrypted: Buffer.from(cekEncrypted, "base64"),
-          cekIv,
-          cekAuthTag,
-          cekKeyVersion,
-          cekWrapAadVersion,
-          tenantId: entry.tenantId,
-          passwordEntryId: id,
-          createdById: session.user.id,
-        },
-        select: {
-          id: true,
-          filename: true,
-          contentType: true,
-          sizeBytes: true,
-          createdAt: true,
-        },
+      prisma.$transaction(async (tx) => {
+        // Advisory lock serializes upload against any concurrent vault key
+        // rotation for the same user. Holding the lock across the
+        // user.keyVersion read AND attachment.create closes the TOCTOU
+        // window — a rotation that commits between our read and create
+        // can no longer land a stale-cekKeyVersion mode-2 row.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${session.user.id}::text))`;
+
+        const currentUser = await tx.user.findUnique({
+          where: { id: session.user.id },
+          select: { keyVersion: true },
+        });
+        if (!currentUser) {
+          throw new Error("USER_NOT_FOUND");
+        }
+        if (cekKeyVersion !== currentUser.keyVersion) {
+          throw new LegacyAttachmentInconsistentVersionError();
+        }
+
+        return tx.attachment.create({
+          data: {
+            id: attachmentId,
+            filename: sanitizedFilename,
+            contentType,
+            sizeBytes: originalSize,
+            encryptedData: Buffer.from(storedBlob),
+            iv,
+            authTag,
+            // keyVersion from request is intentionally omitted (I3.3): server sets encryptionMode: 2
+            aadVersion,
+            encryptionMode: 2,
+            cekEncrypted: Buffer.from(cekEncrypted, "base64"),
+            cekIv,
+            cekAuthTag,
+            cekKeyVersion,
+            cekWrapAadVersion,
+            tenantId: entry.tenantId,
+            passwordEntryId: id,
+            createdById: session.user.id,
+          },
+          select: {
+            id: true,
+            filename: true,
+            contentType: true,
+            sizeBytes: true,
+            createdAt: true,
+          },
+        });
       }),
     );
   } catch (error) {
     await blobStore.deleteObject(storedBlob, blobContext).catch(() => {});
+    if (error instanceof LegacyAttachmentInconsistentVersionError) {
+      return errorResponse(API_ERROR.ATTACHMENT_INCONSISTENT_VERSION, 409);
+    }
+    if (error instanceof Error && error.message === "USER_NOT_FOUND") {
+      return notFound();
+    }
     throw error;
   }
 
