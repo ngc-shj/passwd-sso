@@ -1,8 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { injectSession } from "../helpers/auth";
 import { getAuthState } from "../helpers/fixtures";
-import { getPool, seedSession } from "../helpers/db";
-import { seedAttachment } from "../helpers/password-entry";
+import { seedSession } from "../helpers/db";
 import { resetRotationRateLimit } from "../helpers/redis";
 import { VaultLockPage } from "../page-objects/vault-lock.page";
 import { DashboardPage } from "../page-objects/dashboard.page";
@@ -128,17 +127,17 @@ test("Key rotation preserves existing vault entries", async ({
  * (CEK indirection) before committing the key rotation. The ack gate is gone;
  * rotation must succeed without any user confirmation step.
  *
- * Attachment seeding: mode-0 placeholder row injected via seedAttachment()
- * (default encryptionMode: 0). The upload route now defaults to mode-2, so
- * direct DB injection is the only way to manufacture a mode-0 row in E2E.
- * No real-crypto plaintext is supplied — placeholder bytes are sufficient to
- * verify the migration path runs; end-to-end decryption of the migrated
- * attachment is covered by integration tests (C12 / T12.1).
- * (Option A: skip post-rotation DB decryption check; rationale: decryption of
- * real ciphertext requires the vault CryptoKey, which is not accessible from
- * Playwright node context. Integration tests own that coverage.)
+ * Scope (Option A): this test verifies the Phase A acknowledge UI is gone and
+ * rotation completes without a data-loss prompt. It does NOT seed mode-0
+ * legacy attachments — direct DB injection of mode-0 rows produces undecryptable
+ * random ciphertext, which the client rotation flow correctly rejects (the
+ * migrate path requires real plaintext to round-trip through user's vault key,
+ * but the vault CryptoKey lives in the browser and is not accessible from
+ * Playwright node context). The mode-0 → mode-2 migration logic itself, plus
+ * the per-iteration cek_key_version assertion, are owned by integration tests
+ * (vault-rotate-key-attachments.integration.test.ts T12.1 / T12.2 / T12.5c).
  */
-test("Key rotation auto-migrates legacy attachments and succeeds", async ({
+test("Key rotation succeeds without the Phase A acknowledge step", async ({
   context,
   page,
 }) => {
@@ -147,7 +146,6 @@ test("Key rotation auto-migrates legacy attachments and succeeds", async ({
   test.setTimeout(120_000);
 
   const { keyRotation } = getAuthState();
-  const entryTitle = `Attach-Phase-B ${Date.now()}`;
 
   // The previous test ("preserves existing vault entries") rotates this same
   // user, which revokes the global-setup session per #433/S-N2. Re-seed
@@ -164,47 +162,9 @@ test("Key rotation auto-migrates legacy attachments and succeeds", async ({
   await expect(lockPage.passphraseInput).toBeVisible({ timeout: 20_000 });
   await lockPage.unlockAndWait(keyRotation.passphrase!);
 
-  const dashboard = new DashboardPage(page);
-  const entryPage = new PasswordEntryPage(page);
   const settings = new SettingsPage(page);
 
-  // Create a real entry via the UI so the entry's encrypted blobs are valid.
-  await test.step("create a host entry for the attachment", async () => {
-    await dashboard.createNewPassword();
-    await entryPage.fill({
-      title: entryTitle,
-      username: "attach-phase-b@example.com",
-      password: "AttachPhaseBPassword!1",
-    });
-    await entryPage.save();
-    await expect(dashboard.entryByTitle(entryTitle)).toBeVisible({
-      timeout: 10_000,
-    });
-  });
-
-  // Inject a mode-0 attachment directly in the DB (the upload route now
-  // always produces mode-2; DB injection is the only E2E way to get mode-0).
-  let entryId: string;
-  let attachmentId: string;
-  await test.step("seed a mode-0 attachment in the DB", async () => {
-    const p = getPool();
-    const r = await p.query<{ id: string }>(
-      `SELECT id FROM password_entries
-       WHERE user_id = $1 AND deleted_at IS NULL
-       ORDER BY created_at DESC LIMIT 1`,
-      [keyRotation.id],
-    );
-    if (r.rowCount === 0) throw new Error("Failed to find seeded entry id");
-    entryId = r.rows[0].id;
-    const result = await seedAttachment({
-      passwordEntryId: entryId,
-      createdById: keyRotation.id,
-      encryptionMode: 0,
-    });
-    attachmentId = result.id;
-  });
-
-  await test.step("rotation completes without ack step", async () => {
+  await test.step("rotation dialog has no ack button (Phase A artifact removed)", async () => {
     await settings.gotoKeyRotation();
     await lockPage.unlockAndWait(keyRotation.passphrase!);
 
@@ -213,29 +173,25 @@ test("Key rotation auto-migrates legacy attachments and succeeds", async ({
       .click();
 
     await page.locator("[role='dialog']").waitFor({ timeout: 5_000 });
-    await page.locator("#rk-passphrase").fill(keyRotation.passphrase!);
 
+    // Phase A's "Acknowledge data loss and rotate" button is gone.
+    await expect(
+      page.locator("[role='dialog']").getByRole("button", {
+        name: /acknowledge|データ損失/i,
+      }),
+    ).toHaveCount(0);
+
+    await page.locator("#rk-passphrase").fill(keyRotation.passphrase!);
     await page
       .locator("[role='dialog']")
       .getByRole("button", { name: /Rotate Key|キーをローテーション/i })
       .click();
 
-    // Dialog closes on success — no ack button appears.
+    // Rotation completes (no mode-0 to migrate; this user has only entries
+    // accumulated by prior tests, all of which rotate cleanly).
     await page.locator("[role='dialog']").waitFor({
       state: "hidden",
-      timeout: 120_000,
+      timeout: 60_000,
     });
-  });
-
-  await test.step("attachment row migrated to mode-2 in DB", async () => {
-    // Verify the migration ran: the row must now be mode-2.
-    // (Decryption of the ciphertext is covered by integration tests, not E2E.)
-    const p = getPool();
-    const r = await p.query<{ encryption_mode: number }>(
-      `SELECT encryption_mode FROM attachments WHERE id = $1`,
-      [attachmentId],
-    );
-    expect(r.rowCount).toBe(1);
-    expect(r.rows[0].encryption_mode).toBe(2);
   });
 });
