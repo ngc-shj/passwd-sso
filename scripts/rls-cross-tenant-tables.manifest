@@ -1,0 +1,78 @@
+# scripts/rls-cross-tenant-tables.manifest
+#
+# Canonical list of tenant-scoped tables (one per line, alphabetical).
+# Used by the cross-tenant RLS predicate verify step in CI to assert
+# discovery == manifest (set equality). See docs/archive/review/
+# verify-rls-predicate-plan.md.
+#
+# Maintenance contract — adding a tenant-scoped table requires THREE deltas
+# in the same PR:
+#   1. Migration: add the `tenant_id` column + ENABLE/FORCE RLS + the
+#      `<table>_tenant_isolation` policy.
+#   2. scripts/rls-cross-tenant-seed.sql: insert dependency-ordered rows
+#      (one for tenant A, one for tenant B; plus one NULL-tenant row if the
+#      table allows nullable tenant_id, e.g. mcp_clients).
+#   3. scripts/rls-cross-tenant-tables.manifest: insert a line in
+#      alphabetical order.
+# Removing a tenant-scoped table requires REMOVING all three.
+#
+# All current tenant_isolation policies follow the <table>_tenant_isolation
+# suffix convention. The bare-name 'tenant_isolation' policy on team_policies
+# was renamed in migration 20260321110000_convert_id_columns_to_uuid_type.
+# The discovery OR-branch for the bare name remains as defensive forward-compat.
+#
+# Total: 53 tenant-scoped tables (excludes `tenants` itself, which is
+# structurally exempt — it has no `tenant_id` column).
+access_requests
+accounts
+admin_vault_resets
+api_keys
+attachments
+audit_chain_anchors
+audit_deliveries
+audit_delivery_targets
+audit_logs
+audit_outbox
+delegation_sessions
+directory_sync_configs
+directory_sync_logs
+emergency_access_grants
+emergency_access_key_pairs
+extension_bridge_codes
+extension_tokens
+folders
+mcp_access_tokens
+mcp_authorization_codes
+mcp_clients
+mcp_refresh_tokens
+mobile_bridge_codes
+notifications
+operator_tokens
+password_entries
+password_entry_histories
+password_shares
+personal_log_access_grants
+scim_external_mappings
+scim_group_mappings
+scim_tokens
+service_account_tokens
+service_accounts
+sessions
+share_access_logs
+tags
+team_folders
+team_invitations
+team_member_keys
+team_members
+team_password_entries
+team_password_entry_histories
+team_password_favorites
+team_policies
+team_tags
+team_webhooks
+teams
+tenant_members
+tenant_webhooks
+users
+vault_keys
+webauthn_credentials

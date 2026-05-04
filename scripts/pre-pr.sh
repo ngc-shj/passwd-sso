@@ -38,6 +38,27 @@ run_step "Static: team-auth-rls"  node scripts/checks/check-team-auth-rls.mjs
 run_step "Static: bypass-rls"     node scripts/checks/check-bypass-rls.mjs
 run_step "Static: crypto-domains" node scripts/checks/check-crypto-domains.mjs
 run_step "Static: migration-drift" node scripts/checks/check-migration-drift.mjs
+# Cross-tenant SQL parse check (issue #434). Runs against the local docker DB
+# if reachable; skips gracefully otherwise (preserves pre-pr.sh's "no Postgres
+# required" contract for the static checks above).
+if command -v docker >/dev/null 2>&1 && docker exec passwd-sso-db-1 pg_isready -U passwd_user -q 2>/dev/null; then
+  run_step "Static: rls-cross-tenant SQL parse" bash -c '
+    set -uo pipefail
+    # sed (not awk) — bash -c "..." double-escapes positional vars and breaks awk $1 references.
+    EXPECTED_TABLES=$(sed -E "/^#/d; /^[[:space:]]*$/d; s/^[[:space:]]+//; s/[[:space:]]+$//" \
+      scripts/rls-cross-tenant-tables.manifest | paste -sd,)
+    out=$(cat scripts/rls-cross-tenant-verify.sql | docker exec -i passwd-sso-db-1 \
+      psql -U passwd_app -d passwd_sso -v ON_ERROR_STOP=1 -v expected_tables="$EXPECTED_TABLES" 2>&1) && ec=0 || ec=$?
+    # Whitelist exact codes — typos like [E-RLS-NUL] would otherwise pass.
+    if (( ec == 0 )) || grep -qE "\[E-RLS-(MANIFEST-(EXTRA|MISSING)|COLPARITY|COUNT-A|COUNT-B|NULL|SYM|BYPASS|DISCOVER|ROLE|COVERAGE)\]" <<<"$out"; then
+      exit 0
+    fi
+    printf "%s\n" "$out"
+    exit 1
+  '
+else
+  printf "  [skip: rls-cross-tenant SQL parse — local docker DB not running (npm run docker:up to enable)]\n\n"
+fi
 run_step "Static: no-deprecated-logAudit" bash -c 'if grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*" | grep -q .; then echo "Residual logAudit() calls found:"; grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*"; exit 1; fi'
 
 if command -v gitleaks >/dev/null 2>&1; then

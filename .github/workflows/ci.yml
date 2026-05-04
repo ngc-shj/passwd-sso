@@ -457,6 +457,25 @@ jobs:
         run: |
           psql -v ON_ERROR_STOP=1 postgresql://passwd_app:passwd_app_pass@localhost:5432/passwd_sso -f scripts/rls-smoke-verify.sql
           echo "✓ RLS enforcement verified: passwd_app cannot see seeded rows"
+
+      - name: Cross-tenant seed (SUPERUSER)
+        run: psql -v ON_ERROR_STOP=1 postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso -f scripts/rls-cross-tenant-seed.sql
+
+      - name: Cross-tenant coverage check (SUPERUSER)
+        run: psql -v ON_ERROR_STOP=1 postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso -f scripts/rls-cross-tenant-coverage.sql
+
+      - name: Cross-tenant RLS predicate verify (NOSUPERUSER)
+        run: |
+          EXPECTED_TABLES=$(awk 'NF && $1 !~ /^#/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); print}' scripts/rls-cross-tenant-tables.manifest | paste -sd,)
+          psql -v ON_ERROR_STOP=1 -v expected_tables="$EXPECTED_TABLES" \
+            postgresql://passwd_app:passwd_app_pass@localhost:5432/passwd_sso \
+            -f scripts/rls-cross-tenant-verify.sql
+
+      - name: Cross-tenant verify negative test (gate self-check)
+        run: bash scripts/rls-cross-tenant-negative-test.sh
+        env:
+          MIGRATION_DATABASE_URL: "postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso"
+          APP_DATABASE_URL: "postgresql://passwd_app:passwd_app_pass@localhost:5432/passwd_sso"
   # ─── Container Scan (Trivy) ─────────────────────────────────
   container-scan:
     name: "Trivy: Container image scan"
