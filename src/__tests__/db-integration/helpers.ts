@@ -180,6 +180,65 @@ export async function createTestContext(): Promise<TestContext> {
         `DELETE FROM audit_outbox WHERE tenant_id = $1::uuid`,
         tenantId,
       );
+      // MCP / delegation cleanup (FK-safe order)
+      await tx.$executeRawUnsafe(
+        `DELETE FROM delegation_sessions WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
+        `DELETE FROM mcp_refresh_tokens WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
+        `DELETE FROM mcp_access_tokens WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
+        `DELETE FROM mcp_authorization_codes WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
+        `DELETE FROM mcp_clients WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
+        `DELETE FROM service_account_tokens WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
+        `DELETE FROM service_accounts WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      // Team-vault cleanup (FK-safe order: history → entries → keys → members → teams)
+      await tx.$executeRawUnsafe(
+        `DELETE FROM team_password_entry_histories WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
+        `DELETE FROM team_password_entries WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
+        `DELETE FROM team_member_keys WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
+        `DELETE FROM team_members WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
+        `DELETE FROM teams WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      // Personal-vault cleanup (FK-safe order: history → entries)
+      await tx.$executeRawUnsafe(
+        `DELETE FROM password_entry_histories WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
+        `DELETE FROM password_entries WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
       await tx.$executeRawUnsafe(
         `DELETE FROM tenant_members WHERE tenant_id = $1::uuid`,
         tenantId,
