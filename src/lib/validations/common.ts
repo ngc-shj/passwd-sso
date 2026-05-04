@@ -234,6 +234,10 @@ export const SWIFT_BIC_MAX = 20;
 
 export const asciiPrintable = /^[\x20-\x7E]*$/;
 
+// ─── Vault Rotation — Attachment Manifest ─────────────────
+export const ATTACHMENT_MANIFEST_CAP = 1000;          // relocated from rotate-key/route.ts
+export const VAULT_ROTATE_ATTACHMENT_CEK_MAX = 5000;  // new in Phase B
+
 // ─── Attachment Constants ────────────────────────────────────
 
 export const ALLOWED_EXTENSIONS = ["pdf", "png", "jpg", "jpeg", "txt", "csv"] as const;

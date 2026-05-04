@@ -13,6 +13,7 @@
  *   "OV" — Team Vault entry       (teamId, entryId, vaultType, itemKeyVersion)
  *   "AT" — Attachment             (entryId, attachmentId)
  *   "IK" — ItemKey wrapping       (teamId, entryId, teamKeyVersion)
+ *   "AW" — Attachment CEK Wrap (entryId, attachmentId, cekKeyVersion, cekWrapAadVersion)
  */
 
 const AAD_VERSION = 1;
@@ -22,6 +23,7 @@ const SCOPE_PERSONAL = "PV";
 const SCOPE_TEAM = "OV";
 const SCOPE_ATTACHMENT = "AT";
 const SCOPE_ITEM_KEY = "IK";
+const SCOPE_ATTACHMENT_WRAP = "AW";
 
 /**
  * Encode fields into the length-prefixed binary AAD format.
@@ -153,6 +155,34 @@ export function buildAttachmentAAD(
 ): Uint8Array {
   return buildAADBytes(SCOPE_ATTACHMENT, 2, [entryId, attachmentId]);
 }
+
+/**
+ * Build AAD for attachment CEK (Content Encryption Key) wrapping.
+ *
+ * Binds the wrapped CEK to its specific attachment, entry, key version, and
+ * AAD version — prevents cross-attachment transplant of CEK blobs (mode-2).
+ */
+export function buildAttachmentCekWrapAAD(
+  entryId: string,
+  attachmentId: string,
+  cekKeyVersion: number,
+  cekWrapAadVersion: number,
+): Uint8Array {
+  return buildAADBytes(SCOPE_ATTACHMENT_WRAP, 4, [
+    entryId,
+    attachmentId,
+    String(cekKeyVersion),
+    String(cekWrapAadVersion),
+  ]);
+}
+
+export const MIN_ACCEPTED_CEK_WRAP_AAD_VERSION = 1;
+
+// Current CEK wrap AAD format version emitted by all client wrap operations.
+// When a future format upgrade lands, bump this AND update the floor (after a
+// back-window). SSoT for the emit value — keeps upload, rewrap, and migrate
+// paths in lockstep.
+export const CURRENT_CEK_WRAP_AAD_VERSION = 1;
 
 // Re-export for tests, schema references, and reuse by other AAD builders
 export { AAD_VERSION, buildAADBytes };
