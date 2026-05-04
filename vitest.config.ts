@@ -9,6 +9,7 @@ export default defineConfig({
       "src/**/*.test.{ts,tsx}",
       "e2e/helpers/*.test.ts",
       "scripts/__tests__/**/*.test.mjs",
+      "scripts/__tests__/**/*.test.ts",
     ],
     exclude: ["src/**/*.integration.test.ts"],
     setupFiles: ["src/__tests__/setup.ts"],

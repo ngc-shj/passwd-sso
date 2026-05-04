@@ -159,6 +159,8 @@ jobs:
       - run: npm run check:bypass-rls
       - run: npm run check:crypto-domains
       - run: npm run check:migration-drift
+      - name: Check state-mutation centralization
+        run: bash scripts/check-state-mutation-centralization.sh
       - run: npm test
       - run: npm run test:coverage
       - run: npm run build

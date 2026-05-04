@@ -19,6 +19,10 @@ on:
       - 'src/__tests__/db-integration/**'
       - 'prisma/schema.prisma'
       - 'prisma/migrations/**'
+      - 'src/app/api/emergency-access/**'
+      - 'src/lib/emergency-access/**'
+      - 'src/lib/access-request/**'
+      - 'src/lib/vault/**'
 
 permissions:
   # Round 4 S23 fix: principle of least privilege — only content read needed.
