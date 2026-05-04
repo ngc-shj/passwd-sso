@@ -11,7 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { transition } from "./emergency-access-state";
 import { logAuditAsync, type AuditLogParams } from "@/lib/audit/audit";
-import { AUDIT_ACTION, AUDIT_TARGET_TYPE, EA_STATUS } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE, EA_STATUS, EA_ACTOR } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 
 /**
@@ -103,7 +103,7 @@ export async function autoPromoteIfElapsed(args: {
         db: prisma,
         where: { id: grantId, granteeId },
         to: EA_STATUS.ACTIVATED,
-        actor: "SYSTEM",
+        actor: EA_ACTOR.SYSTEM,
         extraData: { activatedAt: now },
       }),
     BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,

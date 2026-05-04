@@ -7,7 +7,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { transition } from "@/lib/access-request/access-request-state";
+import { transition, AR_STATUS, AR_ACTOR } from "@/lib/access-request/access-request-state";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
@@ -57,8 +57,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     transition({
       db: prisma,
       where: { id: requestId, tenantId: actor.tenantId },
-      to: "DENIED",
-      actor: "ADMIN",
+      to: AR_STATUS.DENIED,
+      actor: AR_ACTOR.ADMIN,
       extraData: { approvedById: session.user.id, approvedAt: new Date() },
     }),
   );

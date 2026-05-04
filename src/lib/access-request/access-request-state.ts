@@ -80,7 +80,11 @@ export function canTransition(
 }
 
 function hasScopeUnderBypass(where: Prisma.AccessRequestWhereInput): boolean {
-  return where.id !== undefined || where.tenantId !== undefined;
+  // Round-2 S3 fix: require an explicit tenantId predicate under withBypassRls.
+  // `id` alone is insufficient — UUIDs are unguessable so the residual risk is
+  // theoretical, but the predicate is the primary cross-tenant defense in
+  // bypass scope and must mirror EA's per-resource-scope discipline.
+  return where.tenantId !== undefined;
 }
 
 /**

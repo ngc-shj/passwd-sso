@@ -6,7 +6,7 @@ import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyAccessApprovedEmail } from "@/lib/email/templates/emergency-access";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { EA_STATUS, EA_ACTOR, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
@@ -44,7 +44,7 @@ async function handlePOST(
       db: prisma,
       where: { id, ownerId: session.user.id },
       to: EA_STATUS.ACTIVATED,
-      actor: "OWNER",
+      actor: EA_ACTOR.OWNER,
       extraData: { activatedAt: new Date() },
     }),
   );

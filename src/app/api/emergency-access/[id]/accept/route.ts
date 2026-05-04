@@ -9,7 +9,7 @@ import { emergencyGrantAcceptedEmail } from "@/lib/email/templates/emergency-acc
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, rateLimited, notFound, unauthorized } from "@/lib/http/api-response";
-import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { EA_STATUS, EA_ACTOR, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { parseBody } from "@/lib/http/parse-body";
@@ -77,7 +77,7 @@ async function handlePOST(
         db: tx,
         where: { id, granteeEmail: grant.granteeEmail },
         to: EA_STATUS.ACCEPTED,
-        actor: "GRANTEE",
+        actor: EA_ACTOR.GRANTEE,
         extraData: { granteeId: session.user.id, granteePublicKey },
       });
       if (!transitionResult.ok) {

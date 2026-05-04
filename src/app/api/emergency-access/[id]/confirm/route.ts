@@ -6,7 +6,7 @@ import { transition } from "@/lib/emergency-access/emergency-access-state";
 import { SUPPORTED_KEY_ALGORITHMS } from "@/lib/crypto/crypto-emergency";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { EA_STATUS, EA_ACTOR, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { parseBody } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -66,7 +66,7 @@ async function handlePOST(
       db: prisma,
       where: { id, ownerId: session.user.id },
       to: EA_STATUS.IDLE,
-      actor: "OWNER",
+      actor: EA_ACTOR.OWNER,
       extraData: {
         ownerEphemeralPublicKey,
         encryptedSecretKey,

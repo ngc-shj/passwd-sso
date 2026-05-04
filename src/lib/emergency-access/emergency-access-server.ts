@@ -1,5 +1,6 @@
 import { prisma as defaultPrisma, type TxOrPrisma } from "@/lib/prisma";
 import { bulkTransition } from "@/lib/emergency-access/emergency-access-state";
+import { EA_STATUS, EA_ACTOR } from "@/lib/constants";
 
 /**
  * Mark all escrow-holding grants as STALE when the owner's keyVersion changes.
@@ -43,8 +44,8 @@ export async function markGrantsStaleForOwner(
         { keyVersion: null },
       ],
     },
-    to: "STALE",
-    actor: "SYSTEM",
+    to: EA_STATUS.STALE,
+    actor: EA_ACTOR.SYSTEM,
     // F15: clearing ownerEphemeralPublicKey defeats ECDH unwrap even if
     // the wrapping ciphertext is retained for forensic purposes.
     extraData: { ownerEphemeralPublicKey: null },

@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { bulkTransition } from "@/lib/emergency-access/emergency-access-state";
+import { EA_STATUS, EA_ACTOR } from "@/lib/constants";
 
 export interface VaultResetResult {
   deletedEntries: number;
@@ -65,8 +66,8 @@ export async function executeVaultReset(
       await bulkTransition({
         db: tx,
         where: { ownerId: targetUserId },
-        to: "REVOKED",
-        actor: "OWNER",
+        to: EA_STATUS.REVOKED,
+        actor: EA_ACTOR.OWNER,
         extraData: { revokedAt: new Date() },
       });
       // Team E2E: delete all TeamMemberKey records for this user

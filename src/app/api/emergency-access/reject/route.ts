@@ -9,7 +9,7 @@ import { sendEmail } from "@/lib/email";
 import { emergencyGrantDeclinedEmail } from "@/lib/email/templates/emergency-access";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized, notFound } from "@/lib/http/api-response";
-import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { EA_STATUS, EA_ACTOR, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { parseBody } from "@/lib/http/parse-body";
@@ -47,7 +47,7 @@ async function handlePOST(req: NextRequest) {
       db: prisma,
       where: { id: grant.id, tokenHash: grant.tokenHash },
       to: EA_STATUS.REJECTED,
-      actor: "GRANTEE",
+      actor: EA_ACTOR.GRANTEE,
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 

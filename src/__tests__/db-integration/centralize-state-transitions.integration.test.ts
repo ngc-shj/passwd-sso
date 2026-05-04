@@ -37,7 +37,7 @@ import { markGrantsStaleForOwner } from "@/lib/emergency-access/emergency-access
 import { autoPromoteIfElapsed } from "@/lib/emergency-access/vault-auto-promote";
 import { executeVaultReset } from "@/lib/vault/vault-reset";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_ACTION, EA_STATUS, EA_ACTOR } from "@/lib/constants";
 import { AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 
 // ─── Skip guard ──────────────────────────────────────────────────────────────
@@ -205,8 +205,8 @@ describe("centralize-state-transitions — integration", () => {
               // Use granteeId scope for precise CAS — GUC-based bypass, not withBypassRls,
               // so isBypassRlsActive() is false and C3 check does not apply.
               where: { id: grantId, granteeId },
-              to: "ACCEPTED",
-              actor: "GRANTEE",
+              to: EA_STATUS.ACCEPTED,
+              actor: EA_ACTOR.GRANTEE,
             });
           },
           async (db: PrismaClient) => {
@@ -216,8 +216,8 @@ describe("centralize-state-transitions — integration", () => {
             return transition({
               db,
               where: { id: grantId, granteeId },
-              to: "ACCEPTED",
-              actor: "GRANTEE",
+              to: EA_STATUS.ACCEPTED,
+              actor: EA_ACTOR.GRANTEE,
             });
           },
         );
@@ -254,8 +254,8 @@ describe("centralize-state-transitions — integration", () => {
       return transition({
         db: tx,
         where: { id: grantId, ownerId },
-        to: "ACTIVATED",
-        actor: "OWNER",
+        to: EA_STATUS.ACTIVATED,
+        actor: EA_ACTOR.OWNER,
       });
     });
 
@@ -275,8 +275,8 @@ describe("centralize-state-transitions — integration", () => {
       return transition({
         db: tx,
         where: { id: grantId, ownerId: secondOwnerId },
-        to: "REVOKED",
-        actor: "OWNER",
+        to: EA_STATUS.REVOKED,
+        actor: EA_ACTOR.OWNER,
       });
     });
 
@@ -298,8 +298,8 @@ describe("centralize-state-transitions — integration", () => {
           transition({
             db: ctx.su.prisma,
             where: { id: grantId },
-            to: "REVOKED",
-            actor: "OWNER",
+            to: EA_STATUS.REVOKED,
+            actor: EA_ACTOR.OWNER,
           }),
         BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
       ),
@@ -410,8 +410,8 @@ describe("centralize-state-transitions — integration", () => {
           ownerId,
           OR: [{ keyVersion: { lt: 2 } }, { keyVersion: null }],
         },
-        to: "STALE",
-        actor: "SYSTEM",
+        to: EA_STATUS.STALE,
+        actor: EA_ACTOR.SYSTEM,
         extraData: { ownerEphemeralPublicKey: null },
       });
     });

@@ -7,7 +7,7 @@ import { sendEmail } from "@/lib/email";
 import { emergencyAccessRequestedEmail } from "@/lib/email/templates/emergency-access";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { EA_STATUS, EA_ACTOR, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -54,7 +54,7 @@ async function handlePOST(
       db: prisma,
       where: { id, granteeId: session.user.id },
       to: EA_STATUS.REQUESTED,
-      actor: "GRANTEE",
+      actor: EA_ACTOR.GRANTEE,
       extraData: { requestedAt: now, waitExpiresAt },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
