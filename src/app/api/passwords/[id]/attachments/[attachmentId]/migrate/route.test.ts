@@ -1,27 +1,36 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { clearMigrateLimitForUser } from "@/__tests__/helpers/rate-limiters";
+import { ATTACHMENT_MIGRATE_PAYLOAD_MAX } from "@/lib/validations/common";
 
-const { mockAuth, mockPrismaUser, mockPrismaTransaction, mockApplyAttachmentMigration, mockWithUserTenantRls, mockLogAuditAsync } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaTransaction, mockApplyAttachmentMigration, mockWithUserTenantRls, mockLogAuditAsync } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockPrismaUser: { findUnique: vi.fn() },
   mockPrismaTransaction: vi.fn(),
   mockApplyAttachmentMigration: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockLogAuditAsync: vi.fn(),
 }));
 
-// Tx mock with advisory lock stub
-const txMock = { $executeRaw: vi.fn() };
+// Tx mock with advisory lock + user.findUnique (called inside the lock)
+const txMock = {
+  $executeRaw: vi.fn(),
+  user: { findUnique: vi.fn() },
+};
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    user: mockPrismaUser,
     $transaction: mockPrismaTransaction,
   },
 }));
 vi.mock("@/lib/vault/rotate-key-server", () => {
+  class LegacyAttachmentInconsistentVersionError extends Error {
+    constructor() {
+      super("ATTACHMENT_INCONSISTENT_VERSION");
+      this.name = "LegacyAttachmentInconsistentVersionError";
+    }
+  }
   class LegacyMigrationNotApplicableError extends Error {
     constructor() {
       super("LEGACY_MIGRATION_NOT_APPLICABLE");
@@ -36,6 +45,7 @@ vi.mock("@/lib/vault/rotate-key-server", () => {
   }
   return {
     applyAttachmentMigration: mockApplyAttachmentMigration,
+    LegacyAttachmentInconsistentVersionError,
     LegacyMigrationNotApplicableError,
     LegacyBodyHashMismatchError,
   };
@@ -86,9 +96,9 @@ describe("PUT /api/passwords/[id]/attachments/[attachmentId]/migrate", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1", keyVersion: 1 });
     mockPrismaTransaction.mockImplementation(async (fn: (tx: typeof txMock) => unknown) => fn(txMock));
     txMock.$executeRaw.mockResolvedValue(undefined);
+    txMock.user.findUnique.mockResolvedValue({ tenantId: "tenant-1", keyVersion: 1 });
     mockApplyAttachmentMigration.mockResolvedValue({ encryptionMode: 2, fromKeyVersion: 1 });
     mockLogAuditAsync.mockResolvedValue(undefined);
     // Clear rate limit state between tests
@@ -167,11 +177,71 @@ describe("PUT /api/passwords/[id]/attachments/[attachmentId]/migrate", () => {
     expect(Object.keys(json)).toEqual(["error"]);
   });
 
-  it("rejects when cekKeyVersion !== user.keyVersion → 400", async () => {
-    // Server's keyVersion is 1, but request sends 2
+  it("rejects when cekKeyVersion !== user.keyVersion → 409 ATTACHMENT_INCONSISTENT_VERSION", async () => {
+    // Server's keyVersion is 1 (set in beforeEach via tx.user.findUnique mock),
+    // but request sends 2. The check now lives inside the advisory-locked tx.
     const res = await PUT(
       createRequest("PUT", "http://localhost/api/passwords/entry-1/attachments/att-1/migrate", {
         body: { ...validMigrateBody, cekKeyVersion: 2 },
+      }),
+      createParams("entry-1", "att-1"),
+    );
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toBe("ATTACHMENT_INCONSISTENT_VERSION");
+    // applyAttachmentMigration must NOT run when the version mismatch is
+    // detected — the lock-protected check short-circuits before the helper.
+    expect(mockApplyAttachmentMigration).not.toHaveBeenCalled();
+  });
+
+  it("rejects when user record vanishes inside tx → 404", async () => {
+    txMock.user.findUnique.mockResolvedValueOnce(null);
+    const res = await PUT(
+      createRequest("PUT", "http://localhost/api/passwords/entry-1/attachments/att-1/migrate", {
+        body: validMigrateBody,
+      }),
+      createParams("entry-1", "att-1"),
+    );
+    expect(res.status).toBe(404);
+    expect(mockApplyAttachmentMigration).not.toHaveBeenCalled();
+  });
+
+  // Payload-size guard (Fix #4)
+
+  it("rejects oversized Content-Length header → 413 PAYLOAD_TOO_LARGE", async () => {
+    const req = new NextRequest(
+      "http://localhost/api/passwords/entry-1/attachments/att-1/migrate",
+      {
+        method: "PUT",
+        headers: { "content-length": String(ATTACHMENT_MIGRATE_PAYLOAD_MAX + 1) },
+      },
+    );
+    const res = await PUT(req, createParams("entry-1", "att-1"));
+    expect(res.status).toBe(413);
+    const json = await res.json();
+    expect(json.error).toBe("PAYLOAD_TOO_LARGE");
+  });
+
+  it("rejects oversized encryptedData base64 string → 400 FILE_TOO_LARGE", async () => {
+    // Roughly 16MB of base64 chars — well above the cap, well below the
+    // Content-Length cap so Content-Length pre-check passes.
+    const huge = "A".repeat(16 * 1024 * 1024);
+    const res = await PUT(
+      createRequest("PUT", "http://localhost/api/passwords/entry-1/attachments/att-1/migrate", {
+        body: { ...validMigrateBody, encryptedData: huge },
+      }),
+      createParams("entry-1", "att-1"),
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("FILE_TOO_LARGE");
+  });
+
+  it("rejects oversized cekEncrypted base64 string → 400", async () => {
+    const longCek = "A".repeat(257);
+    const res = await PUT(
+      createRequest("PUT", "http://localhost/api/passwords/entry-1/attachments/att-1/migrate", {
+        body: { ...validMigrateBody, cekEncrypted: longCek },
       }),
       createParams("entry-1", "att-1"),
     );

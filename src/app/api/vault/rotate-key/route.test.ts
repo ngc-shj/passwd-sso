@@ -65,12 +65,19 @@ vi.mock("@/lib/vault/rotate-key-server", () => {
       this.name = "RotationPostConditionError";
     }
   }
+  class Mode2InvariantViolationError extends Error {
+    constructor() {
+      super("MODE2_INVARIANT_VIOLATION");
+      this.name = "Mode2InvariantViolationError";
+    }
+  }
   return {
     applyVaultRotation: mockApplyVaultRotation,
     LegacyAttachmentsResidualError,
     AttachmentCekManifestMismatchError,
     LegacyAttachmentInconsistentVersionError,
     RotationPostConditionError,
+    Mode2InvariantViolationError,
   };
 });
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -389,6 +396,18 @@ describe("POST /api/vault/rotate-key", () => {
     const json = await res.json();
     expect(json.error).toBe("ATTACHMENT_INCONSISTENT_VERSION");
     expect(Object.keys(json)).toEqual(["error"]);
+  });
+
+  it("rejects rotation when a mode-2 row violates the cek_* NOT-NULL invariant → 500 INTERNAL_ERROR", async () => {
+    const { Mode2InvariantViolationError } = await import("@/lib/vault/rotate-key-server");
+    mockApplyVaultRotation.mockRejectedValue(new Mode2InvariantViolationError());
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody }),
+    );
+    expect(res.status).toBe(500);
+    const json = await res.json();
+    expect(json.error).toBe("INTERNAL_ERROR");
   });
 
   it("rotation succeeds with empty attachmentCekRewraps when no mode-2 attachments exist", async () => {

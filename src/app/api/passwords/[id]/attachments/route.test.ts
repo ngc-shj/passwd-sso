@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
 
-const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockWithUserTenantRls, mockRateLimitCheck, mockPutObject, mockDeleteObject } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockPrismaUser, mockWithUserTenantRls, mockRateLimitCheck, mockPutObject, mockDeleteObject } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaPasswordEntry: {
     findUnique: vi.fn(),
@@ -11,6 +11,9 @@ const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockWithUserTen
     findMany: vi.fn(),
     count: vi.fn(),
     create: vi.fn(),
+  },
+  mockPrismaUser: {
+    findUnique: vi.fn(),
   },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
@@ -26,6 +29,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: mockPrismaPasswordEntry,
     attachment: mockPrismaAttachment,
+    user: mockPrismaUser,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
 }));
@@ -148,6 +152,8 @@ describe("POST /api/passwords/[id]/attachments", () => {
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockPrismaPasswordEntry.findUnique.mockResolvedValue({ userId: "user-1", tenantId: "tenant-1" });
     mockPrismaAttachment.count.mockResolvedValue(0);
+    // Default current user keyVersion — matches `validCekFields().cekKeyVersion = "1"`
+    mockPrismaUser.findUnique.mockResolvedValue({ keyVersion: 1 });
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
     mockPutObject.mockResolvedValue(Buffer.from("stored-bytes"));
   });
@@ -536,5 +542,70 @@ describe("POST /api/passwords/[id]/attachments", () => {
         }),
       }),
     );
+  });
+
+  // Fix #2: server-side cekKeyVersion validation against user.keyVersion
+
+  it("rejects upload when cekKeyVersion does not match user.keyVersion → 409 ATTACHMENT_INCONSISTENT_VERSION", async () => {
+    // User has keyVersion 2 (e.g., a recent rotation in another tab),
+    // but the client submits cekKeyVersion = 1.
+    mockPrismaUser.findUnique.mockResolvedValueOnce({ keyVersion: 2 });
+
+    const res = await POST(
+      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+        file: new Blob(["encrypted-data"]),
+        iv: "a".repeat(24),
+        authTag: "b".repeat(32),
+        filename: "test.pdf",
+        contentType: "application/pdf",
+        sizeBytes: "100",
+        ...validCekFields(),
+      }),
+      createParams("pw-1"),
+    );
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toBe("ATTACHMENT_INCONSISTENT_VERSION");
+    // Must reject before persisting anything to the blob store / DB.
+    expect(mockPutObject).not.toHaveBeenCalled();
+    expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects upload when user record is missing → 404", async () => {
+    mockPrismaUser.findUnique.mockResolvedValueOnce(null);
+
+    const res = await POST(
+      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+        file: new Blob(["encrypted-data"]),
+        iv: "a".repeat(24),
+        authTag: "b".repeat(32),
+        filename: "test.pdf",
+        contentType: "application/pdf",
+        sizeBytes: "100",
+        ...validCekFields(),
+      }),
+      createParams("pw-1"),
+    );
+    expect(res.status).toBe(404);
+    expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects upload with oversized cekEncrypted → 400 VALIDATION_ERROR", async () => {
+    const longCek = "A".repeat(257);
+    const res = await POST(
+      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+        file: new Blob(["encrypted-data"]),
+        iv: "a".repeat(24),
+        authTag: "b".repeat(32),
+        filename: "test.pdf",
+        contentType: "application/pdf",
+        sizeBytes: "100",
+        ...validCekFields(),
+        cekEncrypted: longCek,
+      }),
+      createParams("pw-1"),
+    );
+    expect(res.status).toBe(400);
+    expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
   });
 });

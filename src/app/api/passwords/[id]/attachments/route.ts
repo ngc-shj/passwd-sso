@@ -10,6 +10,7 @@ import {
   FILENAME_MAX_LENGTH,
   isValidSendFilename,
 } from "@/lib/validations";
+import { CEK_WRAP_BASE64_MAX } from "@/lib/validations/common";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -162,6 +163,32 @@ async function handlePOST(
   const cekWrapAadVersion = parseInt(cekWrapAadVersionStr, 10);
   if (Number.isNaN(cekWrapAadVersion) || cekWrapAadVersion < 1) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
+  // Cap cekEncrypted base64 length at the trust boundary so a malformed
+  // client cannot inflate the column. Same cap as migrate / rotation.
+  if (cekEncrypted.length > CEK_WRAP_BASE64_MAX) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
+
+  // Reject uploads whose cekKeyVersion does not match the user's current
+  // vault keyVersion. A stale client (e.g., another tab that did not
+  // observe a recent rotation) would otherwise persist a row whose
+  // cek_key_version is below the user's current keyVersion, which
+  // poisons the next rotation's manifest consistency check and bricks
+  // future rotations until the row is migrated. A residual TOCTOU
+  // window between this read and the attachment.create remains and is
+  // acceptable: the rotation manifest check is the backstop.
+  const user = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { keyVersion: true },
+    }),
+  );
+  if (!user) {
+    return errorResponse(API_ERROR.NOT_FOUND, 404);
+  }
+  if (cekKeyVersion !== user.keyVersion) {
+    return errorResponse(API_ERROR.ATTACHMENT_INCONSISTENT_VERSION, 409);
   }
 
   // I3.3: keyVersion from request is ignored in mode-2 uploads

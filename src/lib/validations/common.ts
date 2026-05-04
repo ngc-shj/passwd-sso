@@ -244,6 +244,23 @@ export const ALLOWED_EXTENSIONS = ["pdf", "png", "jpg", "jpeg", "txt", "csv"] as
 export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 export const MAX_ATTACHMENTS_PER_ENTRY = 20;
 
+// Content-Length cap for the attachment-migrate JSON payload. Mirrors the
+// upload route's Content-Length pre-check so the migrate endpoint cannot be
+// abused as a memory-DoS vector via oversized base64 body submissions.
+export const ATTACHMENT_MIGRATE_PAYLOAD_MAX = MAX_FILE_SIZE * 2;
+
+// Cap on the base64-encoded `encryptedData` field inside the migrate JSON.
+// Decoded body must stay within MAX_FILE_SIZE; the +64 margin accommodates
+// base64 padding and minor framing overhead.
+export const ATTACHMENT_BODY_BASE64_MAX = Math.ceil((MAX_FILE_SIZE * 4) / 3) + 64;
+
+// Cap on the base64-encoded CEK wrap ciphertext (`cekEncrypted`) on every
+// surface that accepts it: attachment upload, attachment migrate, and the
+// rotation manifest entries. CEK is 32 bytes (256-bit) → 44 base64 chars;
+// 256 leaves headroom for any future wrap-format variation while still
+// rejecting oversized payloads at the trust boundary.
+export const CEK_WRAP_BASE64_MAX = 256;
+
 export const ALLOWED_CONTENT_TYPES = [
   "application/pdf",
   "image/png",
