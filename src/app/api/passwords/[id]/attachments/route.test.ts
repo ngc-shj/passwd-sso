@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
 
-const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockPrismaUser, mockWithUserTenantRls, mockRateLimitCheck, mockPutObject, mockDeleteObject } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockPrismaUser, mockPrismaTransaction, mockWithUserTenantRls, mockRateLimitCheck, mockPutObject, mockDeleteObject } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaPasswordEntry: {
     findUnique: vi.fn(),
@@ -15,11 +15,23 @@ const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockPrismaUser,
   mockPrismaUser: {
     findUnique: vi.fn(),
   },
+  mockPrismaTransaction: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockPutObject: vi.fn(),
   mockDeleteObject: vi.fn(),
 }));
+
+// Tx mock: the upload route now wraps the user.keyVersion check + the
+// attachment.create in a single tx with an advisory lock. We point the tx
+// surface back at the existing `mockPrismaUser` / `mockPrismaAttachment`
+// hoists so existing test setup (.mockResolvedValue, .toHaveBeenCalledWith)
+// keeps working without per-test churn.
+const txMock = {
+  $executeRaw: vi.fn(),
+  user: mockPrismaUser,
+  attachment: mockPrismaAttachment,
+};
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -30,9 +42,19 @@ vi.mock("@/lib/prisma", () => ({
     passwordEntry: mockPrismaPasswordEntry,
     attachment: mockPrismaAttachment,
     user: mockPrismaUser,
+    $transaction: mockPrismaTransaction,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
 }));
+vi.mock("@/lib/vault/rotate-key-server", () => {
+  class LegacyAttachmentInconsistentVersionError extends Error {
+    constructor() {
+      super("ATTACHMENT_INCONSISTENT_VERSION");
+      this.name = "LegacyAttachmentInconsistentVersionError";
+    }
+  }
+  return { LegacyAttachmentInconsistentVersionError };
+});
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
@@ -156,6 +178,13 @@ describe("POST /api/passwords/[id]/attachments", () => {
     mockPrismaUser.findUnique.mockResolvedValue({ keyVersion: 1 });
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
     mockPutObject.mockResolvedValue(Buffer.from("stored-bytes"));
+    // deleteObject must return a Promise — the route's tx-failure cleanup
+    // calls `.catch()` on its return value.
+    mockDeleteObject.mockResolvedValue(undefined);
+    // Wire prisma.$transaction to invoke the callback with our tx mock so
+    // upload's user.keyVersion re-check + attachment.create both run.
+    mockPrismaTransaction.mockImplementation(async (fn: (tx: typeof txMock) => unknown) => fn(txMock));
+    txMock.$executeRaw.mockResolvedValue(undefined);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -544,7 +573,8 @@ describe("POST /api/passwords/[id]/attachments", () => {
     );
   });
 
-  // Fix #2: server-side cekKeyVersion validation against user.keyVersion
+  // Server-side cekKeyVersion validation against user.keyVersion (now
+  // performed INSIDE the upload tx, after the advisory lock).
 
   it("rejects upload when cekKeyVersion does not match user.keyVersion → 409 ATTACHMENT_INCONSISTENT_VERSION", async () => {
     // User has keyVersion 2 (e.g., a recent rotation in another tab),
@@ -566,9 +596,11 @@ describe("POST /api/passwords/[id]/attachments", () => {
     expect(res.status).toBe(409);
     const json = await res.json();
     expect(json.error).toBe("ATTACHMENT_INCONSISTENT_VERSION");
-    // Must reject before persisting anything to the blob store / DB.
-    expect(mockPutObject).not.toHaveBeenCalled();
+    // No DB row written.
     expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
+    // Blob saved before tx; on failure it is deleted as part of cleanup.
+    expect(mockPutObject).toHaveBeenCalledTimes(1);
+    expect(mockDeleteObject).toHaveBeenCalledTimes(1);
   });
 
   it("rejects upload when user record is missing → 404", async () => {
@@ -588,6 +620,44 @@ describe("POST /api/passwords/[id]/attachments", () => {
     );
     expect(res.status).toBe(404);
     expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
+    expect(mockDeleteObject).toHaveBeenCalledTimes(1);
+  });
+
+  it("acquires the advisory lock before reading user.keyVersion (TOCTOU-safe)", async () => {
+    // Drive the order of operations inside the tx by recording call sequence.
+    const calls: string[] = [];
+    txMock.$executeRaw.mockImplementationOnce(async () => {
+      calls.push("advisory_lock");
+    });
+    mockPrismaUser.findUnique.mockImplementationOnce(async () => {
+      calls.push("user.findUnique");
+      return { keyVersion: 1 };
+    });
+    mockPrismaAttachment.create.mockImplementationOnce(async (args: unknown) => {
+      calls.push("attachment.create");
+      return {
+        id: (args as { data: { id: string } }).data.id,
+        filename: "test.pdf",
+        contentType: "application/pdf",
+        sizeBytes: 100,
+        createdAt: now,
+      };
+    });
+
+    const res = await POST(
+      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+        file: new Blob(["encrypted-data"]),
+        iv: "a".repeat(24),
+        authTag: "b".repeat(32),
+        filename: "test.pdf",
+        contentType: "application/pdf",
+        sizeBytes: "100",
+        ...validCekFields(),
+      }),
+      createParams("pw-1"),
+    );
+    expect(res.status).toBe(201);
+    expect(calls).toEqual(["advisory_lock", "user.findUnique", "attachment.create"]);
   });
 
   it("rejects upload with oversized cekEncrypted → 400 VALIDATION_ERROR", async () => {

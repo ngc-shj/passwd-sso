@@ -9,6 +9,8 @@ const {
   mockAttachmentCount,
   mockAttachmentCreate,
   mockUserFindUnique,
+  mockTransaction,
+  mockExecuteRaw,
   mockPutObject,
   mockDeleteObject,
   mockWithUserTenantRls,
@@ -20,11 +22,20 @@ const {
   mockAttachmentCount: vi.fn(),
   mockAttachmentCreate: vi.fn(),
   mockUserFindUnique: vi.fn(),
+  mockTransaction: vi.fn(),
+  mockExecuteRaw: vi.fn(),
   mockPutObject: vi.fn(),
   mockDeleteObject: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockRateLimitCheck: vi.fn(),
 }));
+
+// Tx mock — upload now wraps user.findUnique + attachment.create in a tx.
+const txMock = {
+  $executeRaw: mockExecuteRaw,
+  user: { findUnique: mockUserFindUnique },
+  attachment: { create: mockAttachmentCreate },
+};
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/security/rate-limit", () => ({ createRateLimiter: vi.fn(() => ({ check: mockRateLimitCheck, clear: vi.fn() })) }));
@@ -37,8 +48,18 @@ vi.mock("@/lib/prisma", () => ({
       create: mockAttachmentCreate,
     },
     user: { findUnique: mockUserFindUnique },
+    $transaction: mockTransaction,
   },
 }));
+vi.mock("@/lib/vault/rotate-key-server", () => {
+  class LegacyAttachmentInconsistentVersionError extends Error {
+    constructor() {
+      super("ATTACHMENT_INCONSISTENT_VERSION");
+      this.name = "LegacyAttachmentInconsistentVersionError";
+    }
+  }
+  return { LegacyAttachmentInconsistentVersionError };
+});
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
@@ -153,6 +174,13 @@ describe("POST /api/passwords/[id]/attachments", () => {
     // Tests that exercise the upload happy path rely on this match; tests
     // exercising the keyVersion-mismatch case override per call.
     mockUserFindUnique.mockResolvedValue({ keyVersion: 1 });
+    // Wire the tx callback so user.findUnique + attachment.create resolve
+    // through the same mocks they used pre-tx.
+    mockTransaction.mockImplementation(async (fn: (tx: typeof txMock) => unknown) => fn(txMock));
+    mockExecuteRaw.mockResolvedValue(undefined);
+    // deleteObject must return a Promise — the route's tx-failure cleanup
+    // calls `.catch()` on its return value.
+    mockDeleteObject.mockResolvedValue(undefined);
   });
 
   it("returns 401 when not authenticated", async () => {
