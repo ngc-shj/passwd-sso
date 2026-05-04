@@ -5,9 +5,12 @@
  * The caller must handle RLS context, audit logging, and authorization.
  */
 
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
+import { bulkTransition } from "@/lib/emergency-access/emergency-access-state";
+import { EA_STATUS, EA_ACTOR } from "@/lib/constants";
 
 export interface VaultResetResult {
   deletedEntries: number;
@@ -21,10 +24,15 @@ export interface VaultResetResult {
  * (admin-initiated resets may cross tenant boundaries within the same team).
  *
  * @param targetUserId - The user whose vault will be wiped
+ * @param __testHook   - TEST-ONLY: injected after bulkTransition inside the
+ *                       transaction. Throwing from the hook asserts atomicity
+ *                       (T16 / S4). Ignored in non-test environments even if
+ *                       passed. Never use in production code.
  * @returns Counts of deleted entries and attachments (for audit metadata)
  */
 export async function executeVaultReset(
   targetUserId: string,
+  __testHook?: (tx: Prisma.TransactionClient) => Promise<void>,
 ): Promise<VaultResetResult> {
   // Count data being deleted for audit metadata
   const [deletedEntries, deletedAttachments] = await withBypassRls(
@@ -37,37 +45,40 @@ export async function executeVaultReset(
     BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
   );
 
-  // Single transaction: delete all vault data
+  // Single transaction: delete all vault data (callback form required for bulkTransition — S4).
   await withBypassRls(prisma, async () =>
-    prisma.$transaction([
+    prisma.$transaction(async (tx) => {
       // Attachments (bytea stored directly in DB, no external storage)
-      prisma.attachment.deleteMany({ where: { createdById: targetUserId } }),
+      await tx.attachment.deleteMany({ where: { createdById: targetUserId } });
       // Share links
-      prisma.passwordShare.deleteMany({
-        where: { createdById: targetUserId },
-      }),
+      await tx.passwordShare.deleteMany({ where: { createdById: targetUserId } });
       // Password entries
-      prisma.passwordEntry.deleteMany({ where: { userId: targetUserId } }),
+      await tx.passwordEntry.deleteMany({ where: { userId: targetUserId } });
       // Vault keys
-      prisma.vaultKey.deleteMany({ where: { userId: targetUserId } }),
+      await tx.vaultKey.deleteMany({ where: { userId: targetUserId } });
       // Tags (all entries deleted, tags are now orphaned)
-      prisma.tag.deleteMany({ where: { userId: targetUserId } }),
+      await tx.tag.deleteMany({ where: { userId: targetUserId } });
       // Folders (user-owned, not cascade-deleted by PasswordEntry removal)
-      prisma.folder.deleteMany({ where: { userId: targetUserId } }),
-      // Emergency access grants (revoke as owner)
-      prisma.emergencyAccessGrant.updateMany({
+      await tx.folder.deleteMany({ where: { userId: targetUserId } });
+      // Emergency access grants (revoke as owner — matrix-validated via bulkTransition).
+      // actor: "OWNER" because the matrix models vault-reset as the owner's own revocation
+      // (the user's grants as owner are wiped; SYSTEM has no REVOKED matrix entry).
+      await bulkTransition({
+        db: tx,
         where: { ownerId: targetUserId },
-        data: { status: "REVOKED", revokedAt: new Date() },
-      }),
+        to: EA_STATUS.REVOKED,
+        actor: EA_ACTOR.OWNER,
+        extraData: { revokedAt: new Date() },
+      });
       // Team E2E: delete all TeamMemberKey records for this user
-      prisma.teamMemberKey.deleteMany({ where: { userId: targetUserId } }),
+      await tx.teamMemberKey.deleteMany({ where: { userId: targetUserId } });
       // Team E2E: reset keyDistributed on all TeamMember records for this user
-      prisma.teamMember.updateMany({
+      await tx.teamMember.updateMany({
         where: { userId: targetUserId },
         data: { keyDistributed: false },
-      }),
+      });
       // Null out vault + recovery + lockout + ECDH fields on User
-      prisma.user.update({
+      await tx.user.update({
         where: { id: targetUserId },
         data: {
           vaultSetupAt: null,
@@ -98,8 +109,13 @@ export async function executeVaultReset(
           ecdhPrivateKeyIv: null,
           ecdhPrivateKeyAuthTag: null,
         },
-      }),
-    ]),
+      });
+
+      // TEST-ONLY: failure-injection hook (T16 / S4 atomicity). Never runs in production.
+      if (process.env.NODE_ENV === "test" && __testHook) {
+        await __testHook(tx);
+      }
+    }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   return { deletedEntries, deletedAttachments };

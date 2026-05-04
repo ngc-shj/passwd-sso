@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { fromStatusesFor } from "@/lib/emergency-access/emergency-access-state";
+import { transition } from "@/lib/emergency-access/emergency-access-state";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyAccessRequestedEmail } from "@/lib/email/templates/emergency-access";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { EA_STATUS, EA_ACTOR, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -49,22 +49,17 @@ async function handlePOST(
 
   // Atomic compare-and-swap on status: prevents concurrent transitions that
   // would otherwise race past the optimistic canTransition check.
-  const updated = await withBypassRls(prisma, async () =>
-    prisma.emergencyAccessGrant.updateMany({
-      where: {
-        id,
-        granteeId: session.user.id,
-        status: { in: fromStatusesFor(EA_STATUS.REQUESTED) },
-      },
-      data: {
-        status: EA_STATUS.REQUESTED,
-        requestedAt: now,
-        waitExpiresAt,
-      },
+  const transitionResult = await withBypassRls(prisma, async () =>
+    transition({
+      db: prisma,
+      where: { id, granteeId: session.user.id },
+      to: EA_STATUS.REQUESTED,
+      actor: EA_ACTOR.GRANTEE,
+      extraData: { requestedAt: now, waitExpiresAt },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
-  if (updated.count === 0) {
+  if (!transitionResult.ok) {
     return errorResponse(API_ERROR.INVALID_STATUS, 400);
   }
 

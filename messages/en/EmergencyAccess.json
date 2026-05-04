@@ -64,6 +64,7 @@
   "actionFailed": "Action failed. Please try again.",
   "rateLimitExceeded": "Too many requests. Please try again later.",
   "grantNotPending": "This grant is no longer pending.",
+  "grantRevoked": "This grant has been revoked.",
   "invitationExpired": "The invitation has expired.",
   "cannotAccessOwnGrant": "Cannot accept your own emergency access grant.",
   "notAuthorizedForGrant": "You are not authorized for this grant.",

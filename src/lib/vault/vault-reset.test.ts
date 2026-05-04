@@ -5,19 +5,37 @@ const {
   mockPrismaPasswordShare, mockPrismaVaultKey, mockPrismaTag, mockPrismaFolder,
   mockPrismaEmergencyGrant, mockPrismaTeamMemberKey, mockPrismaTeamMember,
   mockPrismaTransaction,
-} = vi.hoisted(() => ({
-  mockPrismaUser: { update: vi.fn() },
-  mockPrismaPasswordEntry: { count: vi.fn(), deleteMany: vi.fn() },
-  mockPrismaAttachment: { count: vi.fn(), deleteMany: vi.fn() },
-  mockPrismaPasswordShare: { deleteMany: vi.fn() },
-  mockPrismaVaultKey: { deleteMany: vi.fn() },
-  mockPrismaTag: { deleteMany: vi.fn() },
-  mockPrismaFolder: { deleteMany: vi.fn() },
-  mockPrismaEmergencyGrant: { updateMany: vi.fn() },
-  mockPrismaTeamMemberKey: { deleteMany: vi.fn() },
-  mockPrismaTeamMember: { updateMany: vi.fn() },
-  mockPrismaTransaction: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  // Shared tx client mock — used inside the $transaction callback
+  const txClient = {
+    user: { update: vi.fn() },
+    passwordEntry: { deleteMany: vi.fn() },
+    attachment: { deleteMany: vi.fn() },
+    passwordShare: { deleteMany: vi.fn() },
+    vaultKey: { deleteMany: vi.fn() },
+    tag: { deleteMany: vi.fn() },
+    folder: { deleteMany: vi.fn() },
+    emergencyAccessGrant: { updateMany: vi.fn() },
+    teamMemberKey: { deleteMany: vi.fn() },
+    teamMember: { updateMany: vi.fn() },
+  };
+
+  return {
+    mockPrismaUser: txClient.user,
+    mockPrismaPasswordEntry: { count: vi.fn(), ...txClient.passwordEntry },
+    mockPrismaAttachment: { count: vi.fn(), ...txClient.attachment },
+    mockPrismaPasswordShare: txClient.passwordShare,
+    mockPrismaVaultKey: txClient.vaultKey,
+    mockPrismaTag: txClient.tag,
+    mockPrismaFolder: txClient.folder,
+    mockPrismaEmergencyGrant: txClient.emergencyAccessGrant,
+    mockPrismaTeamMemberKey: txClient.teamMemberKey,
+    mockPrismaTeamMember: txClient.teamMember,
+    // Execute the callback with the tx client so individual model mocks are invoked
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockPrismaTransaction: vi.fn((cb: any) => cb(txClient)),
+  };
+});
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -50,7 +68,32 @@ describe("executeVaultReset", () => {
     vi.clearAllMocks();
     mockPrismaPasswordEntry.count.mockResolvedValue(10);
     mockPrismaAttachment.count.mockResolvedValue(3);
-    mockPrismaTransaction.mockResolvedValue([]);
+    // Default: all model operations succeed
+    mockPrismaAttachment.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrismaPasswordShare.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrismaVaultKey.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrismaTag.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrismaFolder.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrismaEmergencyGrant.updateMany.mockResolvedValue({ count: 1 });
+    mockPrismaTeamMemberKey.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrismaTeamMember.updateMany.mockResolvedValue({ count: 1 });
+    mockPrismaUser.update.mockResolvedValue({});
+    // Re-bind the transaction mock to execute the callback (cleared by clearAllMocks)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockPrismaTransaction.mockImplementation((cb: any) => cb({
+        attachment: mockPrismaAttachment,
+        passwordShare: mockPrismaPasswordShare,
+        passwordEntry: mockPrismaPasswordEntry,
+        vaultKey: mockPrismaVaultKey,
+        tag: mockPrismaTag,
+        folder: mockPrismaFolder,
+        emergencyAccessGrant: mockPrismaEmergencyGrant,
+        teamMemberKey: mockPrismaTeamMemberKey,
+        teamMember: mockPrismaTeamMember,
+        user: mockPrismaUser,
+      })
+    );
   });
 
   it("returns deleted entry and attachment counts", async () => {
@@ -58,11 +101,12 @@ describe("executeVaultReset", () => {
     expect(result).toEqual({ deletedEntries: 10, deletedAttachments: 3 });
   });
 
-  it("runs a transaction with all 10 expected operations", async () => {
+  it("runs a single transaction", async () => {
     await executeVaultReset("user-1");
     expect(mockPrismaTransaction).toHaveBeenCalledTimes(1);
-    const txArray = mockPrismaTransaction.mock.calls[0][0];
-    expect(txArray).toHaveLength(10);
+    // Callback form: the argument is a function, not an array
+    const txArg = mockPrismaTransaction.mock.calls[0][0];
+    expect(typeof txArg).toBe("function");
   });
 
   it("deletes attachments for the target user", async () => {
@@ -93,11 +137,11 @@ describe("executeVaultReset", () => {
     });
   });
 
-  it("revokes emergency access grants", async () => {
+  it("revokes emergency access grants via bulkTransition (matrix-validated)", async () => {
     await executeVaultReset("user-1");
     expect(mockPrismaEmergencyGrant.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { ownerId: "user-1" },
+        where: expect.objectContaining({ ownerId: "user-1" }),
         data: expect.objectContaining({ status: "REVOKED" }),
       }),
     );
@@ -162,13 +206,36 @@ describe("executeVaultReset", () => {
     vi.clearAllMocks();
     mockPrismaPasswordEntry.count.mockResolvedValue(10);
     mockPrismaAttachment.count.mockResolvedValue(3);
-    mockPrismaTransaction.mockResolvedValue([]);
+    mockPrismaAttachment.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrismaPasswordShare.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrismaVaultKey.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrismaTag.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrismaFolder.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrismaEmergencyGrant.updateMany.mockResolvedValue({ count: 1 });
+    mockPrismaTeamMemberKey.deleteMany.mockResolvedValue({ count: 1 });
+    mockPrismaTeamMember.updateMany.mockResolvedValue({ count: 1 });
+    mockPrismaUser.update.mockResolvedValue({});
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockPrismaTransaction.mockImplementation((cb: any) => cb({
+        attachment: mockPrismaAttachment,
+        passwordShare: mockPrismaPasswordShare,
+        passwordEntry: mockPrismaPasswordEntry,
+        vaultKey: mockPrismaVaultKey,
+        tag: mockPrismaTag,
+        folder: mockPrismaFolder,
+        emergencyAccessGrant: mockPrismaEmergencyGrant,
+        teamMemberKey: mockPrismaTeamMemberKey,
+        teamMember: mockPrismaTeamMember,
+        user: mockPrismaUser,
+      })
+    );
 
     const resultB = await executeVaultReset("admin-target-user");
     expect(resultB).toEqual({ deletedEntries: 10, deletedAttachments: 3 });
 
-    // Same transaction structure
-    const txA = mockPrismaTransaction.mock.calls[0][0];
-    expect(txA).toHaveLength(10);
+    // Callback form: argument is a function
+    const txArg = mockPrismaTransaction.mock.calls[0][0];
+    expect(typeof txArg).toBe("function");
   });
 });

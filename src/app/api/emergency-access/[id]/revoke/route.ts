@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { revokeEmergencyGrantSchema } from "@/lib/validations";
-import { fromStatusesFor } from "@/lib/emergency-access/emergency-access-state";
+import { transition } from "@/lib/emergency-access/emergency-access-state";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyAccessRevokedEmail } from "@/lib/email/templates/emergency-access";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { EA_STATUS, EA_ACTOR, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
@@ -44,15 +44,13 @@ async function handlePOST(
 
   if (permanent) {
     // Full revoke — atomic compare-and-swap on status.
-    const updated = await withUserTenantRls(session.user.id, async () =>
-      prisma.emergencyAccessGrant.updateMany({
-        where: {
-          id,
-          ownerId: session.user.id,
-          status: { in: fromStatusesFor(EA_STATUS.REVOKED) },
-        },
-        data: {
-          status: EA_STATUS.REVOKED,
+    const transitionResult = await withUserTenantRls(session.user.id, async () =>
+      transition({
+        db: prisma,
+        where: { id, ownerId: session.user.id },
+        to: EA_STATUS.REVOKED,
+        actor: EA_ACTOR.OWNER,
+        extraData: {
           revokedAt: new Date(),
           // Clear crypto data (defense in depth)
           encryptedSecretKey: null,
@@ -64,7 +62,7 @@ async function handlePOST(
       }),
     );
 
-    if (updated.count === 0) {
+    if (!transitionResult.ok) {
       return errorResponse(API_ERROR.INVALID_STATUS, 400);
     }
 
@@ -95,22 +93,17 @@ async function handlePOST(
     return NextResponse.json({ status: EA_STATUS.REVOKED });
   } else {
     // Reject request only (revert to IDLE) — atomic compare-and-swap on status.
-    const updated = await withUserTenantRls(session.user.id, async () =>
-      prisma.emergencyAccessGrant.updateMany({
-        where: {
-          id,
-          ownerId: session.user.id,
-          status: { in: fromStatusesFor(EA_STATUS.IDLE) },
-        },
-        data: {
-          status: EA_STATUS.IDLE,
-          requestedAt: null,
-          waitExpiresAt: null,
-        },
+    const resumeResult = await withUserTenantRls(session.user.id, async () =>
+      transition({
+        db: prisma,
+        where: { id, ownerId: session.user.id },
+        to: EA_STATUS.IDLE,
+        actor: EA_ACTOR.OWNER,
+        extraData: { requestedAt: null, waitExpiresAt: null },
       }),
     );
 
-    if (updated.count === 0) {
+    if (!resumeResult.ok) {
       return errorResponse(API_ERROR.INVALID_STATUS, 400);
     }
 

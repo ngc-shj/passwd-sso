@@ -132,6 +132,7 @@ export const API_ERROR = {
 
   // ── Emergency Access ──────────────────────────────────────
   GRANT_NOT_PENDING: "GRANT_NOT_PENDING",
+  GRANT_REVOKED: "GRANT_REVOKED",
   CANNOT_GRANT_SELF: "CANNOT_GRANT_SELF",
   DUPLICATE_GRANT: "DUPLICATE_GRANT",
   INVALID_STATUS: "INVALID_STATUS",
@@ -293,6 +294,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   INVALID_BODY: "invalidRequest",
   // EA-only codes — generic fallback in non-EA contexts
   GRANT_NOT_PENDING: "unknownError",
+  GRANT_REVOKED: "grantRevoked",
   CANNOT_GRANT_SELF: "unknownError",
   DUPLICATE_GRANT: "unknownError",
   INVALID_STATUS: "unknownError",
@@ -396,6 +398,7 @@ const EA_I18N: Record<string, string> = {
   VALIDATION_ERROR: "actionFailed",
   NOT_FOUND: "grantNotFound",
   GRANT_NOT_PENDING: "grantNotPending",
+  GRANT_REVOKED: "grantRevoked",
   INVITATION_EXPIRED: "invitationExpired",
   INVITATION_ALREADY_USED: "invitationAlreadyUsed",
   INVITATION_WRONG_EMAIL: "notAuthorizedForGrant",

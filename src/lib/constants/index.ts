@@ -25,8 +25,8 @@ export type { TenantPermissionValue } from "./auth/tenant-permission";
 export { TENANT_ROLE, TENANT_ROLE_VALUES, isTenantAdminRole } from "./auth/tenant-role";
 export type { TenantRoleValue } from "./auth/tenant-role";
 
-export { EA_STATUS } from "./integrations/emergency-access";
-export type { EaStatusValue } from "./integrations/emergency-access";
+export { EA_STATUS, EA_ACTOR } from "./integrations/emergency-access";
+export type { EaStatusValue, EaActor } from "./integrations/emergency-access";
 
 export { INVITATION_STATUS } from "./integrations/invitation";
 export type { InvitationStatusValue } from "./integrations/invitation";

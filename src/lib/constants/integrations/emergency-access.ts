@@ -12,3 +12,11 @@ export const EA_STATUS = {
 } as const satisfies Record<EmergencyAccessStatus, EmergencyAccessStatus>;
 
 export type EaStatusValue = EmergencyAccessStatus;
+
+export const EA_ACTOR = {
+  OWNER: "OWNER",
+  GRANTEE: "GRANTEE",
+  SYSTEM: "SYSTEM",
+} as const;
+
+export type EaActor = (typeof EA_ACTOR)[keyof typeof EA_ACTOR];

@@ -1,6 +1,6 @@
 import { prisma as defaultPrisma, type TxOrPrisma } from "@/lib/prisma";
-import { STALE_ELIGIBLE_STATUSES } from "@/lib/emergency-access/emergency-access-state";
-import { EA_STATUS } from "@/lib/constants";
+import { bulkTransition } from "@/lib/emergency-access/emergency-access-state";
+import { EA_STATUS, EA_ACTOR } from "@/lib/constants";
 
 /**
  * Mark all escrow-holding grants as STALE when the owner's keyVersion changes.
@@ -15,6 +15,10 @@ import { EA_STATUS } from "@/lib/constants";
  * even if the wrapping ciphertext (encryptedSecretKey/Iv/AuthTag/hkdfSalt)
  * remains present for forensic trail (#433 / S2 — minimum-clear).
  *
+ * The `keyVersion: null` arm of the OR clause catches grants created before
+ * keyVersion tracking was introduced — omitting it would leak pre-keyVersion
+ * grants past rotation (F14 / PR #433/S1 regression).
+ *
  * @param ownerId        User whose grants are being invalidated.
  * @param newKeyVersion  The new keyVersion the owner is rotating to.
  * @param tx             Optional transaction client. Defaults to `prisma`.
@@ -26,20 +30,25 @@ export async function markGrantsStaleForOwner(
   newKeyVersion: number,
   tx: TxOrPrisma = defaultPrisma,
 ): Promise<number> {
-  const result = await tx.emergencyAccessGrant.updateMany({
+  // bulkTransition derives the allowed-from set from the matrix internally
+  // (for STALE + SYSTEM: [IDLE, REQUESTED, ACTIVATED] — PR #433/S1 invariant).
+  // Do NOT add status: { in: ... } here — that would double-narrow and break the matrix SSoT (C1).
+  const result = await bulkTransition({
+    db: tx,
     where: {
       ownerId,
-      status: { in: STALE_ELIGIBLE_STATUSES },
-      // Only mark stale if the grant's keyVersion is behind the new version
+      // F14: both arms required — lt catches outdated grants; null catches
+      // grants predating keyVersion tracking.
       OR: [
         { keyVersion: { lt: newKeyVersion } },
         { keyVersion: null },
       ],
     },
-    data: {
-      status: EA_STATUS.STALE,
-      ownerEphemeralPublicKey: null,
-    },
+    to: EA_STATUS.STALE,
+    actor: EA_ACTOR.SYSTEM,
+    // F15: clearing ownerEphemeralPublicKey defeats ECDH unwrap even if
+    // the wrapping ciphertext is retained for forensic purposes.
+    extraData: { ownerEphemeralPublicKey: null },
   });
-  return result.count;
+  return result.updated;
 }

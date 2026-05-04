@@ -137,6 +137,7 @@ export async function ensureTenantMembershipForSignIn(
             where: { userId, tenantId: existingTenantId },
             data: { tenantId: found.id },
           });
+          // not a state transition — tenantId reassignment, see ../auth/email-uniqueness-design.md
           await tx.emergencyAccessGrant.updateMany({
             where: { ownerId: userId, tenantId: existingTenantId },
             data: { tenantId: found.id },

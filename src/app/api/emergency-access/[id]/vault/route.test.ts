@@ -1,13 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaGrant, mockWithBypassRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaGrant, mockWithBypassRls, mockLogAuditAsync, mockPersonalAuditBase } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaGrant: {
     findUnique: vi.fn(),
-    update: vi.fn(),
+    updateMany: vi.fn(),
   },
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockLogAuditAsync: vi.fn(),
+  mockPersonalAuditBase: vi.fn((_, userId: string) => ({ scope: "PERSONAL", userId })),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -15,9 +17,9 @@ vi.mock("@/lib/prisma", () => ({
   prisma: { emergencyAccessGrant: mockPrismaGrant },
 }));
 vi.mock("@/lib/audit/audit", () => ({
-  logAuditAsync: vi.fn(),
+  logAuditAsync: mockLogAuditAsync,
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
-  personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
+  personalAuditBase: mockPersonalAuditBase,
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: () => Promise.resolve({ allowed: true }) }),
@@ -34,6 +36,8 @@ const activatedGrant = {
   ownerId: "owner-1",
   granteeId: "grantee-1",
   status: EA_STATUS.ACTIVATED,
+  revokedAt: null,
+  waitExpiresAt: null,
   ownerEphemeralPublicKey: '{"kty":"EC"}',
   encryptedSecretKey: "aabb",
   secretKeyIv: "112233445566778899aabbcc",
@@ -101,20 +105,27 @@ describe("GET /api/emergency-access/[id]/vault", () => {
     expect(res.status).toBe(403);
   });
 
-  it("auto-activates when wait period expired", async () => {
-    mockPrismaGrant.findUnique.mockResolvedValue({
+  it("auto-activates when wait period expired (CAS path)", async () => {
+    // First findUnique (route's initial load): returns REQUESTED grant with elapsed waitExpiresAt
+    // Second findUnique (autoPromoteIfElapsed eligibility): same REQUESTED grant
+    // Third findUnique (autoPromoteIfElapsed post-promotion refetch): returns ACTIVATED grant
+    const requestedGrant = {
       ...activatedGrant,
       status: EA_STATUS.REQUESTED,
       waitExpiresAt: new Date("2020-01-01"),
-    });
-    mockPrismaGrant.update.mockResolvedValue({});
+    };
+    mockPrismaGrant.findUnique
+      .mockResolvedValueOnce(requestedGrant)  // route initial load
+      .mockResolvedValueOnce({ status: EA_STATUS.REQUESTED, waitExpiresAt: new Date("2020-01-01"), granteeId: "grantee-1" }) // eligibility check
+      .mockResolvedValueOnce({ ...activatedGrant, status: EA_STATUS.ACTIVATED }); // post-promotion refetch
+    mockPrismaGrant.updateMany.mockResolvedValue({ count: 1 });
 
     const res = await GET(
       createRequest("GET", "http://localhost/api/emergency-access/grant-1/vault"),
       createParams({ id: "grant-1" })
     );
     expect(res.status).toBe(200);
-    expect(mockPrismaGrant.update).toHaveBeenCalledWith(
+    expect(mockPrismaGrant.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: EA_STATUS.ACTIVATED }),
       })
@@ -138,5 +149,25 @@ describe("GET /api/emergency-access/[id]/vault", () => {
     expect(json.keyVersion).toBe(1);
     expect(json.granteeKeyPair).toBeTruthy();
     expect(mockWithBypassRls).toHaveBeenCalled();
+  });
+
+  it("returns 403 with GRANT_REVOKED when promoted grant was revoked concurrently", async () => {
+    const requestedGrant = {
+      ...activatedGrant,
+      status: EA_STATUS.REQUESTED,
+      waitExpiresAt: new Date("2020-01-01"),
+    };
+    // eligibility passes, transition succeeds, but refetch shows revokedAt set
+    mockPrismaGrant.findUnique
+      .mockResolvedValueOnce(requestedGrant)  // route initial load
+      .mockResolvedValueOnce({ status: EA_STATUS.REQUESTED, waitExpiresAt: new Date("2020-01-01"), granteeId: "grantee-1" }) // eligibility check
+      .mockResolvedValueOnce({ ...activatedGrant, status: EA_STATUS.ACTIVATED, revokedAt: new Date() }); // refetch — revoked
+    mockPrismaGrant.updateMany.mockResolvedValue({ count: 1 });
+
+    const res = await GET(
+      createRequest("GET", "http://localhost/api/emergency-access/grant-1/vault"),
+      createParams({ id: "grant-1" })
+    );
+    expect(res.status).toBe(403);
   });
 });

@@ -3,14 +3,14 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { acceptEmergencyGrantSchema } from "@/lib/validations";
 import { hashToken } from "@/lib/crypto/crypto-server";
-import { fromStatusesFor } from "@/lib/emergency-access/emergency-access-state";
+import { transition } from "@/lib/emergency-access/emergency-access-state";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyGrantAcceptedEmail } from "@/lib/email/templates/emergency-access";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, rateLimited, unauthorized, notFound } from "@/lib/http/api-response";
-import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { EA_STATUS, EA_ACTOR, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { parseBody } from "@/lib/http/parse-body";
@@ -63,19 +63,18 @@ async function handlePOST(req: NextRequest) {
   // creates the escrow key pair if the transition actually fired.
   const txResult = await withBypassRls(prisma, async () =>
     prisma.$transaction(async (tx) => {
-      const updated = await tx.emergencyAccessGrant.updateMany({
-        where: {
-          id: grant.id,
-          tokenHash: grant.tokenHash,
-          status: { in: fromStatusesFor(EA_STATUS.ACCEPTED) },
-        },
-        data: {
-          status: EA_STATUS.ACCEPTED,
-          granteeId: session.user.id,
-          granteePublicKey,
-        },
+      // C6 (early-return variant): if transition() reports !ok, the surrounding
+      // tx commits but nothing follows the early return inside this callback,
+      // so the post-CAS keyPair.create is correctly gated. Equivalent to throw
+      // for atomicity purposes — see deviation log §C6 alternative pattern.
+      const transitionResult = await transition({
+        db: tx,
+        where: { id: grant.id, tokenHash: grant.tokenHash },
+        to: EA_STATUS.ACCEPTED,
+        actor: EA_ACTOR.GRANTEE,
+        extraData: { granteeId: session.user.id, granteePublicKey },
       });
-      if (updated.count === 0) {
+      if (!transitionResult.ok) {
         return { ok: false as const };
       }
       await tx.emergencyAccessKeyPair.create({

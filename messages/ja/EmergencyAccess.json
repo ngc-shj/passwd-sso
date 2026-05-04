@@ -64,6 +64,7 @@
   "actionFailed": "操作に失敗しました。もう一度お試しください。",
   "rateLimitExceeded": "リクエスト回数の上限に達しました。しばらくしてからお試しください。",
   "grantNotPending": "この権限はすでに保留中ではありません。",
+  "grantRevoked": "この権限は取り消されました。",
   "invitationExpired": "招待の有効期限が切れています。",
   "cannotAccessOwnGrant": "自分の緊急アクセス権限は受諾できません。",
   "notAuthorizedForGrant": "この権限に対する操作権限がありません。",
