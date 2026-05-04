@@ -355,6 +355,64 @@ A separate `centralize-state-transitions-manual-test.md` artifact at PR time, wi
 
 Single atomic PR (helper + matrix + route migrations + tests + CI guard + ci-integration.yml paths). No data migration. Rollback = revert.
 
+## Implementation Checklist (Phase 2 Step 2-1)
+
+### Files to modify (verified by grep)
+
+**New files:**
+- [ ] `src/lib/access-request/access-request-state.ts`
+- [ ] `src/lib/access-request/access-request-state.test.ts`
+- [ ] `src/lib/emergency-access/vault-auto-promote.ts` (extracted lib for T17 testability)
+- [ ] `src/__tests__/fixtures/audit-shapes.ts` (T14 fixture)
+- [ ] `src/__tests__/db-integration/centralize-state-transitions.integration.test.ts`
+- [ ] `scripts/check-state-mutation-centralization.sh` + supporting AST script
+- [ ] `scripts/__fixtures__/state-mutation-good.ts` + `state-mutation-bad.ts` (self-test fixtures)
+
+**Modified files:**
+- [ ] `src/lib/emergency-access/emergency-access-state.ts` — replace with contract-first matrix + transition/bulkTransition; remove legacy 2-arg API; remove `STALE_ELIGIBLE_STATUSES` export
+- [ ] `src/lib/emergency-access/emergency-access-state.test.ts` — add EXPECTED_TRANSITIONS fixture + matrix property tests
+- [ ] `src/lib/emergency-access/emergency-access-server.ts` — replace inline `updateMany` with `bulkTransition` (preserve `keyVersion: null` arm + `ownerEphemeralPublicKey: null` clear)
+- [ ] `src/lib/vault/vault-reset.ts` — switch from `prisma.$transaction([...])` to `prisma.$transaction(async (tx) => ...)` + `bulkTransition`; add `__testHook` (NODE_ENV-gated)
+- [ ] `src/lib/tenant-rls.ts` — export `isBypassRlsActive()` derived from `getTenantRlsContext()?.bypass`
+- [ ] `src/lib/http/api-error-codes.ts` — add `GRANT_REVOKED: "GRANT_REVOKED"`
+- [ ] `src/auth.ts:140` — add comment `// not a state transition — tenantId reassignment`
+- [ ] 8 emergency-access route handlers — migrate to `transition()`
+- [ ] 2 access-request route handlers — migrate to `transition()` (approve MUST throw on `{ ok: false }` per C6)
+- [ ] All existing route `.test.ts` — wire in `PRE_MIGRATION_AUDIT_SHAPES` assertions
+- [ ] `.github/workflows/ci.yml` — add lint step running `scripts/check-state-mutation-centralization.sh`
+- [ ] `.github/workflows/ci-integration.yml` — add paths globs: `src/app/api/emergency-access/**`, `src/lib/emergency-access/**`, `src/lib/access-request/**`, `src/lib/vault/**`
+
+### Shared utilities to reuse (C1 — do NOT redefine)
+
+- `TxOrPrisma` from `@/lib/prisma:14`
+- `withTenantRls`, `withBypassRls`, `getTenantRlsContext`, `BYPASS_PURPOSE` from `@/lib/tenant-rls`
+- `withUserTenantRls` from `@/lib/tenant-context`
+- `EA_STATUS` from `@/lib/constants/integrations/emergency-access`
+- `API_ERROR` from `@/lib/http/api-error-codes`
+- `notFound`, `errorResponse`, `unauthorized`, `rateLimited` from `@/lib/http/api-response`
+- `logAuditAsync`, `tenantAuditBase` from `@/lib/audit/audit`
+- `AUDIT_ACTION`, `AUDIT_TARGET_TYPE` from `@/lib/constants`
+- `hashToken` from `@/lib/crypto/crypto-server`
+- `raceTwoClients` from `src/__tests__/db-integration/helpers.ts:238`
+- `EmergencyAccessStatus`, `AccessRequestStatus`, `Prisma` from `@prisma/client`
+
+### Patterns to follow consistently
+
+- Routes call `transition({ db: <tx | prisma>, where, to, actor, extraData })`. The helper inherits the active RLS/tx context via the `prisma` proxy.
+- On `{ ok: false }` from a NON-transactional caller: the route maps to its existing API_ERROR (400/410 per route — see step 3 table).
+- On `{ ok: false }` from a TRANSACTIONAL caller (inside `$transaction(async tx => ...)`): the route MUST `throw` to abort (C6).
+- Audit emit AFTER `transition() === ok` (C5). Helper does not log internally.
+- Bulk operations preserve the existing `where` predicate exactly (C7 — never narrow).
+
+### Pre-Phase-2 Go/No-Go (re-verified at coding start)
+
+- [x] Plan + review committed (commit 381888ff)
+- [x] Locked contracts C1-C8 in plan
+- [x] No DB schema migration needed (verified — matrix is application-side)
+- [x] `prisma` proxy at `src/lib/prisma.ts:145-174` confirmed as inherited path (NOT touched in this PR)
+- [x] `GRANT_REVOKED` will be added in Batch 1 (single-line `api-error-codes.ts` change)
+- [ ] Manual-test artifact `centralize-state-transitions-manual-test.md` skeleton exists (deferred to PR finalization)
+
 ## Open questions / deferrals
 
 - **EXPIRED status (out of scope per Issue)**: `PENDING → EXPIRED (SYSTEM)` registered in matrix but no caller. A future PR adds the cron. TODO marker `// TODO(centralize-state-transitions-followup): no caller transitions to EXPIRED yet — implement cron in a follow-up PR`.
