@@ -39,6 +39,16 @@ const SENTINEL_AAD_B = Buffer.from([0xFE, 0xED, 0xFA, 0xCE, 0x05, 0x06, 0x07, 0x
 const SENTINEL_KEY_HEX = SENTINEL_KEY.toString("hex");
 const SENTINEL_AAD_A_HEX = SENTINEL_AAD_A.toString("hex");
 
+// Plaintext sentinel for tests that grep ciphertext.toString("hex") against
+// thrown error messages. Must be long enough that the ciphertext hex (~2× the
+// plaintext byte length) cannot accidentally match common 2- or 3-char
+// substrings of Node's canonical error text ("Unsupported state or unable to
+// authenticate data" → contains "ab", "le", "to", "un", ...). A 1-byte
+// plaintext was the original choice and produced sporadic CI flakes on hex
+// values like 0xab. 29 bytes → 58 hex chars, longer than the error message
+// itself, so accidental containment is impossible.
+const PLAINTEXT_SENTINEL = "plaintext-payload-do-not-leak";
+
 function assertErrorContainsNoSecretBytes(err: unknown, ciphertext: Buffer, iv: Buffer, tag: Buffer) {
   expect(err).toBeInstanceOf(Error);
   const msg = (err as Error).message;
@@ -234,7 +244,7 @@ describe("envelope", () => {
 
   describe("no-secrets-in-error-messages", () => {
     it("error message does not contain the sentinel key bytes", () => {
-      const ct = encryptWithKey("p", 1, SENTINEL_KEY, SENTINEL_AAD_A);
+      const ct = encryptWithKey(PLAINTEXT_SENTINEL, 1, SENTINEL_KEY, SENTINEL_AAD_A);
       const env = parseEnvelope(ct);
       let thrown: unknown;
       try {
@@ -246,7 +256,7 @@ describe("envelope", () => {
     });
 
     it("error message does not contain the AAD bytes", () => {
-      const ct = encryptWithKey("p", 1, SENTINEL_KEY, SENTINEL_AAD_A);
+      const ct = encryptWithKey(PLAINTEXT_SENTINEL, 1, SENTINEL_KEY, SENTINEL_AAD_A);
       const env = parseEnvelope(ct);
       let thrown: unknown;
       try {
@@ -258,7 +268,7 @@ describe("envelope", () => {
     });
 
     it("error message does not contain ciphertext bytes when key is wrong", () => {
-      const ct = encryptWithKey("p", 1, SENTINEL_KEY, SENTINEL_AAD_A);
+      const ct = encryptWithKey(PLAINTEXT_SENTINEL, 1, SENTINEL_KEY, SENTINEL_AAD_A);
       const env = parseEnvelope(ct);
       const wrongKey = Buffer.alloc(32, 0x42);
       let thrown: unknown;
@@ -271,7 +281,7 @@ describe("envelope", () => {
     });
 
     it("error message does not contain auth-tag when ciphertext is tampered", () => {
-      const ct = encryptWithKey("p", 1, SENTINEL_KEY, SENTINEL_AAD_A);
+      const ct = encryptWithKey(PLAINTEXT_SENTINEL, 1, SENTINEL_KEY, SENTINEL_AAD_A);
       const env = parseEnvelope(ct);
       // Flip one bit of ciphertext to force GCM auth failure
       const tampered: ParsedEnvelope = {
@@ -299,12 +309,12 @@ describe("envelope", () => {
       // string is metadata, not part of AAD). Callers that want
       // version-binding must put the version in their AAD (account-token-crypto
       // and admin-reset-token-crypto do this).
-      const ct = encryptWithKey("p", 1, SENTINEL_KEY, SENTINEL_AAD_A);
+      const ct = encryptWithKey(PLAINTEXT_SENTINEL, 1, SENTINEL_KEY, SENTINEL_AAD_A);
       const env = parseEnvelope(ct);
       // Forge a different-version envelope but same iv/tag/ciphertext + same key
       const forged: ParsedEnvelope = { ...env, version: 99 };
       // Same key + same AAD still decrypts (key version is NOT in GCM AAD here)
-      expect(decryptWithKey(forged, SENTINEL_KEY, SENTINEL_AAD_A)).toBe("p");
+      expect(decryptWithKey(forged, SENTINEL_KEY, SENTINEL_AAD_A)).toBe(PLAINTEXT_SENTINEL);
     });
   });
 
