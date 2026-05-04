@@ -361,6 +361,14 @@ describe("centralize-state-transitions — integration", () => {
     };
     const now = new Date();
 
+    // T17 uses Promise.all (not raceTwoClients) because autoPromoteIfElapsed
+    // opens its own withBypassRls scope internally — each call therefore runs
+    // in a separate AsyncLocalStorage context with its own DB transaction.
+    // Each transaction acquires its own connection from the pool; PostgreSQL
+    // row-level locking on emergencyAccessGrant guarantees the CAS predicate
+    // sees exactly one PENDING-eligible row, exactly one transition succeeds.
+    // (T6 above uses raceTwoClients to exercise transition() directly without
+    // wrapping helpers — different scope, same end-state guarantee.)
     const [a, b] = await Promise.all([
       autoPromoteIfElapsed({ granteeId, grantId, now, auditBase }),
       autoPromoteIfElapsed({ granteeId, grantId, now, auditBase }),
@@ -432,17 +440,28 @@ describe("centralize-state-transitions — integration", () => {
 
   // ─── F14: keyVersion: null guard ─────────────────────────────────────────────
 
-  it.skipIf(SKIP)("F14: markGrantsStaleForOwner includes null-keyVersion grants (OR clause preserved)", async () => {
+  it.skipIf(SKIP)("F14: markGrantsStaleForOwner includes null-keyVersion grants AND excludes high-keyVersion grants (OR clause both arms)", async () => {
     const nullVersionId = randomUUID();
-    await seedGrant({ id: nullVersionId, status: "IDLE", keyVersion: null });
+    const oldVersionId = randomUUID();
+    const futureVersionId = randomUUID();
+    await Promise.all([
+      seedGrant({ id: nullVersionId, status: "IDLE", keyVersion: null }),
+      seedGrant({ id: oldVersionId, status: "IDLE", keyVersion: 1 }),
+      // keyVersion >= newKeyVersion (= 2) must NOT be marked STALE — proves
+      // the `lt` predicate arm is preserved, not silently widened to "all".
+      seedGrant({ id: futureVersionId, status: "IDLE", keyVersion: 99 }),
+    ]);
 
     const cleared = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       return markGrantsStaleForOwner(ownerId, 2, tx);
     });
 
-    // null-keyVersion row IS included (F14)
-    expect(cleared).toBeGreaterThanOrEqual(1);
+    // null-keyVersion AND old (keyVersion < 2) rows ARE included (F14 inclusion arm)
+    expect(cleared).toBeGreaterThanOrEqual(2);
     expect(await fetchStatus(nullVersionId)).toBe("STALE");
+    expect(await fetchStatus(oldVersionId)).toBe("STALE");
+    // High-keyVersion row remains IDLE — F14 exclusion arm (predicate is `lt`, not unconditional)
+    expect(await fetchStatus(futureVersionId)).toBe("IDLE");
   });
 });

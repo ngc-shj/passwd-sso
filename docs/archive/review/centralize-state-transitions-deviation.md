@@ -49,3 +49,21 @@ The `API_ERROR` codes count test (`api-error-codes.test.ts:121`) had a hardcoded
 
 - `centralize-state-transitions-manual-test.md` skeleton (R35 Tier-2 deliverable). Will be authored alongside the PR description.
 - Integration tests run only when `DATABASE_URL` is set; they are gated by `it.skipIf(!process.env.DATABASE_URL)`. Local verification by the PR author against a running Postgres remains a Phase-2 obligation per CLAUDE.md.
+
+## Phase 3 review-driven adjustments (Round 1)
+
+### 8. Round-1 expert-review fixes applied in branch
+The 3-expert Phase 3 review surfaced 3 Major + 9 Minor findings. Major items were fixed inline:
+- **T1**: missing `import type { EaActor }` / `import type { ArActor }` in the 2 state-machine test files. `npx tsc --noEmit` now passes for the modified files. Pre-existing tsc errors in unrelated test files (share-links / scim-tokens / openapi-json / aws-sdk / mcp-refresh-token) are out of scope for this PR.
+- **T3**: Added explanatory comment in T17 explaining why `Promise.all` over `autoPromoteIfElapsed` is sufficient (each call opens its own `withBypassRls` AsyncLocalStorage scope → distinct DB transactions → row-level lock contention is real). Refactoring to `raceTwoClients` would require widening `autoPromoteIfElapsed`'s API to accept a `db` parameter, which is a larger change than the documentation fix.
+- **F1, F2/T6, F3, F4/S1, T5**: Minor cleanups applied — `auth.ts:140` comment, ci-integration.yml duplicate path glob removed, stale `fromStatusesFor` comments updated to "matrix-derived allowed-from", accept routes' C6 comment clarified (early-return pattern is functionally equivalent to `throw` because nothing follows the early return inside the tx callback), F14 test extended with sibling assertion proving the `lt` predicate excludes high-keyVersion rows.
+
+### 9. Deferred to follow-up PR (with rationale)
+
+- **T2 (PRE_MIGRATION_AUDIT_SHAPES fixture)**: The plan committed to a frozen-shape fixture that asserts `logAuditAsync` calls match the pre-migration shape across 10 routes. **Deferred** because: (a) the migration is already complete and visible in `git diff` for PR review (audit-shape changes would be visible); (b) implementing it requires capturing 10 routes' `logAuditAsync` call shapes from the base-commit source AND wiring 10 new assertions — substantial scope creep on top of an already-large PR; (c) the fixture's value is forward-looking (catches drift in *future* PRs that touch these routes), not retroactive. Tracked as a follow-up: `TODO(centralize-state-transitions-followup): add src/__tests__/fixtures/audit-shapes.ts with frozen audit shapes per route`.
+
+- **T4 (vault-auto-promote.ts dedicated unit test)**: 5 branches (not_eligible × 2, revoked, no_escrow, success) are covered split across the integration suite (T17 — success-race) and the route test (`vault/route.test.ts` — revoked race via mocked findUnique sequence). **Deferred** because integration coverage exercises real DB lock semantics that mocks cannot. A dedicated unit test would add coverage for the cheaper-to-test branches but is not strictly required given the existing split coverage. Tracked as follow-up.
+
+- **S2 (AST guard spread detection)**: The CI guard skips spread-assignment detection by design (cannot statically resolve spread variable contents). The script's own comment documents this. **Deferred** as defense-in-depth limitation — the helper-as-only-path convention plus code review remain primary. Tracked as follow-up if a regression is found.
+
+- **S3 (AR bypass-scope check accepts `id` alone)**: The access-request bypass-scope check is theoretically weaker than emergency-access (which requires per-resource owner/grantee scope) but no AR route uses `withBypassRls`, making this check defensive. **Deferred** because UUIDs are unguessable, making the theoretical exploit unreachable.

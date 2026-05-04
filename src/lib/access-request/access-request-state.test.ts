@@ -1,6 +1,6 @@
 import { describe, test, expect } from "vitest";
 import { AccessRequestStatus } from "@prisma/client";
-import { MATRIX, canTransition, AR_ACTOR } from "./access-request-state";
+import { MATRIX, canTransition, AR_ACTOR, type ArActor } from "./access-request-state";
 
 const ALL_STATUSES = Object.values(AccessRequestStatus) as AccessRequestStatus[];
 const AR_ACTORS = Object.values(AR_ACTOR);

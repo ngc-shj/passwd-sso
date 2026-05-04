@@ -69,8 +69,10 @@ async function handlePOST(
   // grant whose status was already moved by a concurrent request.
   const txResult = await withBypassRls(prisma, async () =>
     prisma.$transaction(async (tx) => {
-      // C6: throw on { ok: false } to abort the transaction (key-pair create
-      // must not commit if the status transition did not fire).
+      // C6 (early-return variant): if transition() reports !ok, the surrounding
+      // tx commits but nothing follows the early return inside this callback,
+      // so the post-CAS keyPair.create is correctly gated. Equivalent to throw
+      // for atomicity purposes — see deviation log §C6 alternative pattern.
       const transitionResult = await transition({
         db: tx,
         where: { id, granteeEmail: grant.granteeEmail },

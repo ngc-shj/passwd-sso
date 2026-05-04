@@ -139,7 +139,7 @@ describe("POST /api/emergency-access/[id]/revoke", () => {
   });
 
   it("revokes STALE grant", async () => {
-    // STALE is in fromStatusesFor(REVOKED), so updateMany returns count: 1.
+    // STALE is in <matrix-derived allowed-from for (REVOKED, OWNER)>, so updateMany returns count: 1.
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/revoke", {
         body: { permanent: true },

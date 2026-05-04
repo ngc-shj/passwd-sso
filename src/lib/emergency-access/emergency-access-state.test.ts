@@ -1,7 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { EmergencyAccessStatus } from "@prisma/client";
 import { MATRIX, canTransition } from "./emergency-access-state";
-import { EA_STATUS, EA_ACTOR } from "@/lib/constants";
+import { EA_STATUS, EA_ACTOR, type EaActor } from "@/lib/constants";
 
 const ALL_STATUSES = Object.values(EmergencyAccessStatus) as EmergencyAccessStatus[];
 const EA_ACTORS = Object.values(EA_ACTOR);

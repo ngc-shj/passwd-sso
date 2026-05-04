@@ -106,7 +106,7 @@ describe("POST /api/emergency-access/[id]/request", () => {
   });
 
   it("returns 400 when grant status is not in REQUESTED's permitted from-set (e.g. STALE)", async () => {
-    // updateMany filters by status: { in: fromStatusesFor(REQUESTED) } = [IDLE]
+    // updateMany filters by status: { in: <matrix-derived allowed-from for (REQUESTED, GRANTEE)> } = [IDLE]
     // STALE is not in that set, so the row does not match and count is 0.
     mockPrismaGrant.updateMany.mockResolvedValue({ count: 0 });
     const res = await POST(
