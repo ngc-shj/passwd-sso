@@ -377,10 +377,17 @@ describe("centralize-state-transitions — integration", () => {
     const successCount = [a, b].filter((r) => r.ok).length;
     expect(successCount).toBe(1);
 
-    // Exactly one EMERGENCY_ACCESS_ACTIVATE audit row should exist
-    // (logAuditAsync is async / outbox-based; give it a brief moment to land)
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    const activateCount = await countAuditRows(AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE);
+    // Exactly one EMERGENCY_ACCESS_ACTIVATE audit row should exist.
+    // logAuditAsync is async / outbox-based, so we poll audit_logs until the
+    // worker drains the outbox row (CI runners are slower than local dev —
+    // a fixed-duration sleep is flaky; poll-with-timeout is deterministic).
+    let activateCount = 0;
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      activateCount = await countAuditRows(AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE);
+      if (activateCount >= 1) break;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
     expect(activateCount).toBe(1);
 
     // The grant must now be ACTIVATED

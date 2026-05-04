@@ -96,6 +96,9 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/emergency-access/[id]/revoke/route.ts", ["user"]],
   ["src/app/api/emergency-access/[id]/vault/route.ts", ["emergencyAccessGrant"]],
   ["src/app/api/emergency-access/[id]/vault/entries/route.ts", ["emergencyAccessGrant", "passwordEntry"]],
+  // Vault auto-promote lib (extracted from [id]/vault/route.ts for testability;
+  // F5/S15 refetch-and-revalidate-revokedAt-FIRST invariant, T17)
+  ["src/lib/emergency-access/vault-auto-promote.ts", ["emergencyAccessGrant"]],
   // Machine Identity: SA token validation + MCP Gateway operate cross-tenant by design
   ["src/lib/auth/tokens/service-account-token.ts", ["serviceAccountToken"]],
   // Operator-token validator: cross-tenant lookup is required because the
