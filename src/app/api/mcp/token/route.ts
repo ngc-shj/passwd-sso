@@ -10,6 +10,10 @@ import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { resolveAuditUserId } from "@/lib/constants/app";
+import {
+  REFRESH_EXCHANGE_REASON,
+  FAMILY_REVOKED_REASON,
+} from "@/lib/constants/auth/mcp";
 import { withRequestLog } from "@/lib/http/with-request-log";
 
 const tokenRateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
@@ -118,12 +122,31 @@ async function handlePOST(req: NextRequest) {
     });
 
     if (!result.ok) {
-      if (result.reason === "replay" && result.tenantId) {
+      if (result.reason === REFRESH_EXCHANGE_REASON.REPLAY && result.tenantId) {
         await logAuditAsync({
           ...tenantAuditBase(req, resolveAuditUserId(null, "system"), result.tenantId),
           action: AUDIT_ACTION.MCP_REFRESH_TOKEN_REPLAY,
           actorType: ACTOR_TYPE.SYSTEM,
-          metadata: { clientId: clientIdValue, familyId: result.familyId },
+          metadata: {
+            clientId: clientIdValue,
+            familyId: result.familyId,
+            reason: FAMILY_REVOKED_REASON.REPLAY,
+          },
+        });
+      }
+      if (
+        result.reason === REFRESH_EXCHANGE_REASON.CONCURRENT_ROTATION_REVOKED &&
+        result.tenantId
+      ) {
+        await logAuditAsync({
+          ...tenantAuditBase(req, resolveAuditUserId(null, "system"), result.tenantId),
+          action: AUDIT_ACTION.MCP_REFRESH_TOKEN_FAMILY_REVOKED,
+          actorType: ACTOR_TYPE.SYSTEM,
+          metadata: {
+            clientId: clientIdValue,
+            familyId: result.familyId,
+            reason: FAMILY_REVOKED_REASON.CONCURRENT_ROTATION,
+          },
         });
       }
       return NextResponse.json(

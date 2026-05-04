@@ -9,6 +9,7 @@
  */
 
 import { randomBytes, createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
@@ -20,7 +21,9 @@ import {
   MCP_REFRESH_TOKEN_PREFIX,
   MCP_REFRESH_TOKEN_EXPIRY_SEC,
   MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS,
+  REFRESH_EXCHANGE_REASON,
   type McpScope,
+  type RefreshExchangeReason,
 } from "@/lib/constants/auth/mcp";
 
 export interface McpTokenData {
@@ -286,53 +289,84 @@ export async function createRefreshToken(params: {
 
 /**
  * Exchange a refresh token for a new access + refresh token pair.
- * Implements OAuth 2.1 rotation with replay detection.
+ *
+ * Implements refresh-token rotation with fail-closed family revocation per
+ * RFC 9700 §4.14.2 (extended to concurrent rotation case — see plan
+ * docs/archive/review/adversarial-crypto-tenant-tests-plan.md Contract 2).
+ *
+ * Phase 1 (transactional): validate + atomic CAS to claim rotation slot +
+ * create new tokens on win. On replay (already-rotated token) or race-loss
+ * (CAS count===0), Phase 1 returns a typed marker without mutating tokens.
+ *
+ * Phase 2 (separate transaction): on replay/race-loss, fire family
+ * revocation. The separate transaction commits regardless of Phase 1
+ * outcome, eliminating the rollback window where attacker tokens would
+ * survive.
+ *
+ * `options.prisma` allows tests to inject independent connection pools
+ * (Contract 6) so Promise.all of two exchangeRefreshToken calls actually
+ * races on distinct connections.
  */
-export async function exchangeRefreshToken(params: {
-  refreshToken: string;
-  clientId: string; // McpClient.clientId (mcpc_xxx)
-  clientSecretHash: string;
-}): Promise<
-  | { ok: true; accessToken: string; refreshToken: string; expiresIn: number; scope: string; tenantId: string; userId: string | null }
-  | { ok: false; error: "invalid_grant" | "invalid_client"; reason?: "replay" | "expired" | "revoked"; tenantId?: string; familyId?: string }
+export async function exchangeRefreshToken(
+  params: {
+    refreshToken: string;
+    clientId: string; // McpClient.clientId (mcpc_xxx)
+    clientSecretHash: string;
+  },
+  options: { prisma?: PrismaClient } = {},
+): Promise<
+  | {
+      ok: true;
+      accessToken: string;
+      accessTokenId: string;
+      refreshToken: string;
+      refreshTokenId: string;
+      familyId: string;
+      expiresIn: number;
+      scope: string;
+      tenantId: string;
+      userId: string | null;
+    }
+  | {
+      ok: false;
+      error: "invalid_grant" | "invalid_client";
+      reason?: RefreshExchangeReason;
+      tenantId?: string;
+      familyId?: string;
+    }
 > {
+  const dbClient = options.prisma ?? prisma;
   const tokenHash = hashToken(params.refreshToken);
 
-  return await withBypassRls(prisma, async () =>
-    prisma.$transaction(async (tx) => {
+  // Phase 1: validate + CAS + create new tokens (or detect race/replay).
+  // The `tx` argument from withBypassRls is the transaction-scoped client
+  // with bypass_rls + token_lifecycle GUCs already set on its connection.
+  // Per Contract 1: do NOT call dbClient.$transaction(...) inside — that
+  // would open a second transaction on a different connection where the
+  // GUCs are not set, and FORCE-RLS tables would silently filter to zero
+  // rows (test injection path with raw client).
+  const phase1 = await withBypassRls(
+    dbClient,
+    async (tx) => {
       const rt = await tx.mcpRefreshToken.findUnique({
         where: { tokenHash },
         include: { mcpClient: true },
       });
 
-      if (!rt) return { ok: false as const, error: "invalid_grant" as const };
+      if (!rt) return { type: "not_found" as const };
 
-      // Replay detection: if already rotated, revoke entire family
+      // Replay: caller presented an already-rotated token
       if (rt.rotatedAt) {
-        await tx.mcpRefreshToken.updateMany({
-          where: { familyId: rt.familyId, revokedAt: null },
-          data: { revokedAt: new Date() },
-        });
-        // Also revoke associated access tokens
-        const familyTokens = await tx.mcpRefreshToken.findMany({
-          where: { familyId: rt.familyId },
-          select: { accessTokenId: true },
-        });
-        const accessTokenIds = [...new Set(familyTokens.map((t) => t.accessTokenId))];
-        if (accessTokenIds.length > 0) {
-          await tx.mcpAccessToken.updateMany({
-            where: { id: { in: accessTokenIds }, revokedAt: null },
-            data: { revokedAt: new Date() },
-          });
-        }
-        return { ok: false as const, error: "invalid_grant" as const, reason: "replay" as const, tenantId: rt.tenantId, familyId: rt.familyId };
+        return {
+          type: "replay" as const,
+          tenantId: rt.tenantId,
+          familyId: rt.familyId,
+          accessTokenId: rt.accessTokenId,
+        };
       }
 
-      // Validate: not expired, not revoked
-      if (rt.revokedAt || rt.expiresAt < new Date()) {
-        const reason = rt.revokedAt ? "revoked" as const : "expired" as const;
-        return { ok: false as const, error: "invalid_grant" as const, reason };
-      }
+      if (rt.revokedAt) return { type: "revoked" as const };
+      if (rt.expiresAt < new Date()) return { type: "expired" as const };
 
       // Validate client identity (public clients have empty clientSecretHash)
       const isPublicClient = rt.mcpClient.clientSecretHash === "";
@@ -341,10 +375,10 @@ export async function exchangeRefreshToken(params: {
         (!isPublicClient && !safeEqual(rt.mcpClient.clientSecretHash, params.clientSecretHash)) ||
         !rt.mcpClient.isActive
       ) {
-        return { ok: false as const, error: "invalid_client" as const };
+        return { type: "invalid_client" as const };
       }
 
-      // Mark old refresh token as rotated
+      // Generate new tokens up-front so we can include the new hash in the CAS
       const newAccessToken = MCP_TOKEN_PREFIX + randomBytes(32).toString("base64url");
       const newAccessTokenHash = hashToken(newAccessToken);
       const accessExpiresAt = new Date(Date.now() + MCP_TOKEN_EXPIRY_SEC * 1000);
@@ -353,7 +387,25 @@ export async function exchangeRefreshToken(params: {
       const newRefreshTokenHash = hashToken(newRefreshToken);
       const refreshExpiresAt = new Date(Date.now() + MCP_REFRESH_TOKEN_EXPIRY_SEC * 1000);
 
-      // Create new access token
+      // Atomic compare-and-swap: claim the rotation slot.
+      // UPDATE ... WHERE rotatedAt IS NULL acquires a row-level lock; concurrent
+      // transactions block here and after winner commits, see count===0.
+      const claim = await tx.mcpRefreshToken.updateMany({
+        where: { id: rt.id, rotatedAt: null },
+        data: { rotatedAt: new Date(), replacedByHash: newRefreshTokenHash },
+      });
+
+      if (claim.count === 0) {
+        // Race lost — another transaction won the CAS between our findUnique and updateMany.
+        return {
+          type: "race_lost" as const,
+          tenantId: rt.tenantId,
+          familyId: rt.familyId,
+          accessTokenId: rt.accessTokenId,
+        };
+      }
+
+      // Won the race — create new tokens.
       const newAccess = await tx.mcpAccessToken.create({
         data: {
           tokenHash: newAccessTokenHash,
@@ -366,8 +418,7 @@ export async function exchangeRefreshToken(params: {
         },
       });
 
-      // Create new refresh token (same family)
-      await tx.mcpRefreshToken.create({
+      const newRefresh = await tx.mcpRefreshToken.create({
         data: {
           tokenHash: newRefreshTokenHash,
           familyId: rt.familyId,
@@ -381,27 +432,112 @@ export async function exchangeRefreshToken(params: {
         },
       });
 
-      // Mark old as rotated and revoke old access token
-      await tx.mcpRefreshToken.update({
-        where: { id: rt.id },
-        data: { rotatedAt: new Date(), replacedByHash: newRefreshTokenHash },
-      });
+      // Revoke the OLD access token (the one paired with the now-rotated refresh).
       await tx.mcpAccessToken.update({
         where: { id: rt.accessTokenId },
         data: { revokedAt: new Date() },
       });
 
       return {
-        ok: true as const,
+        type: "success" as const,
         accessToken: newAccessToken,
+        accessTokenId: newAccess.id,
         refreshToken: newRefreshToken,
+        refreshTokenId: newRefresh.id,
+        familyId: rt.familyId,
         expiresIn: MCP_TOKEN_EXPIRY_SEC,
         scope: rt.scope,
         tenantId: rt.tenantId,
         userId: rt.userId,
       };
-    }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+    },
+    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+  );
+
+  // Phase 2: handle outcomes
+  switch (phase1.type) {
+    case "success":
+      return {
+        ok: true,
+        accessToken: phase1.accessToken,
+        accessTokenId: phase1.accessTokenId,
+        refreshToken: phase1.refreshToken,
+        refreshTokenId: phase1.refreshTokenId,
+        familyId: phase1.familyId,
+        expiresIn: phase1.expiresIn,
+        scope: phase1.scope,
+        tenantId: phase1.tenantId,
+        userId: phase1.userId,
+      };
+    case "not_found":
+      return { ok: false, error: "invalid_grant" };
+    case "revoked":
+      return { ok: false, error: "invalid_grant", reason: REFRESH_EXCHANGE_REASON.REVOKED };
+    case "expired":
+      return { ok: false, error: "invalid_grant", reason: REFRESH_EXCHANGE_REASON.EXPIRED };
+    case "invalid_client":
+      return { ok: false, error: "invalid_client" };
+    case "replay":
+    case "race_lost": {
+      // Fail-closed family revocation in a transaction independent of Phase 1
+      // so it commits regardless of business-tx outcome (Contract 2).
+      await revokeFamilyOutOfBand(dbClient, phase1.familyId, phase1.accessTokenId);
+      return {
+        ok: false,
+        error: "invalid_grant",
+        reason:
+          phase1.type === "replay"
+            ? REFRESH_EXCHANGE_REASON.REPLAY
+            : REFRESH_EXCHANGE_REASON.CONCURRENT_ROTATION_REVOKED,
+        tenantId: phase1.tenantId,
+        familyId: phase1.familyId,
+      };
+    }
+  }
+}
+
+/**
+ * Fail-closed family revocation. Runs in a transaction independent of the
+ * caller's business transaction so it commits regardless of business-tx
+ * outcome (Contract 2). On revocation transaction failure, log and return
+ * — the caller's response (invalid_grant) is already semantically correct.
+ */
+async function revokeFamilyOutOfBand(
+  dbClient: PrismaClient,
+  familyId: string,
+  accessTokenId: string,
+): Promise<void> {
+  try {
+    await withBypassRls(
+      dbClient,
+      async (tx) => {
+        const familyTokens = await tx.mcpRefreshToken.findMany({
+          where: { familyId },
+          select: { accessTokenId: true },
+        });
+        const accessTokenIds = [
+          ...new Set([accessTokenId, ...familyTokens.map((t) => t.accessTokenId)]),
+        ];
+
+        await tx.mcpRefreshToken.updateMany({
+          where: { familyId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+        if (accessTokenIds.length > 0) {
+          await tx.mcpAccessToken.updateMany({
+            where: { id: { in: accessTokenIds }, revokedAt: null },
+            data: { revokedAt: new Date() },
+          });
+        }
+      },
+      BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+    );
+  } catch (err) {
+    getLogger().error(
+      { err, familyId, accessTokenId },
+      "mcp.refresh_token.family_revocation_failed",
+    );
+  }
 }
 
 // ─── Token validation ─────────────────────────────────────────
