@@ -9,7 +9,7 @@ import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
-import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE, AR_STATUS } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -23,7 +23,12 @@ const accessRequestCreateLimiter = createRateLimiter({ windowMs: MS_PER_HOUR, ma
 
 export const runtime = "nodejs";
 
-const VALID_ACCESS_REQUEST_STATUSES = ["PENDING", "APPROVED", "DENIED", "EXPIRED"] as const;
+const VALID_ACCESS_REQUEST_STATUSES = [
+  AR_STATUS.PENDING,
+  AR_STATUS.APPROVED,
+  AR_STATUS.DENIED,
+  AR_STATUS.EXPIRED,
+] as const;
 
 // Admin creates request on behalf of SA
 const adminCreateSchema = z.object({

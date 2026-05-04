@@ -34,14 +34,24 @@ function run(fixturePath: string): { stdout: string; stderr: string; exitCode: n
 }
 
 describe("check-state-mutation-centralization", () => {
-  it("exits 1 and reports violation on the bad fixture", () => {
+  it("exits 1 and flags every mutation pattern in the bad fixture", () => {
     const badFixture = resolve(FIXTURES, "state-mutation-bad.ts");
     const { exitCode, stderr } = run(badFixture);
 
     expect(exitCode).toBe(1);
-    // Output should contain the fixture filename and the violation marker
     expect(stderr).toContain("state-mutation-bad.ts");
-    expect(stderr).toContain("data:{status:...} mutation outside allowlist");
+
+    // Every distinct mutation pattern in the fixture must produce a violation.
+    // Counted by counting lines containing the file path inside the violation list.
+    const violationLines = stderr.split("\n").filter((l) => l.includes("state-mutation-bad.ts"));
+    expect(violationLines.length).toBeGreaterThanOrEqual(8);
+
+    // Per-pattern coverage assertions — these document WHICH patterns the lint catches.
+    expect(stderr).toMatch(/updateMany\(\{data:\{status:\.\.\.}\}/); // patterns 1, 7, 8
+    expect(stderr).toMatch(/update\(\{data:\{status:\.\.\.}\}/); // pattern 2, 5
+    expect(stderr).toMatch(/upsert\(\{update:\{status:\.\.\.}\}/); // pattern 3
+    expect(stderr).toMatch(/upsert\(\{create:\{status:\.\.\.}\}/); // pattern 4
+    expect(stderr).toMatch(/computed property name is opaque/); // pattern 6
   });
 
   it("exits 0 with no violation on the good fixture", () => {
@@ -49,8 +59,8 @@ describe("check-state-mutation-centralization", () => {
     const { exitCode, stdout, stderr } = run(goodFixture);
 
     expect(exitCode).toBe(0);
-    // Must not flag anything
-    expect(stderr).not.toContain("data:{status:...}");
+    expect(stderr).not.toContain("mutation outside allowlist");
+    expect(stderr).not.toContain("computed property name is opaque");
     expect(stdout).toContain("OK");
   });
 });

@@ -160,3 +160,42 @@ ORDER BY created_at;
 Pure code change — no DB schema migration. To roll back: `git revert <merge-commit-sha>`. Pre-revert sanity: `git diff main..<feature-branch> -- prisma/migrations/` must be empty.
 
 After revert: routes fall back to inline `prisma.<table>.updateMany({ where: ..., data: { status: ... } })`; the CI guard reverts too. State data in `emergency_access_grants` and `access_requests` is untouched.
+
+---
+
+## Follow-up delta: PR `#443` (harden — strictness + RLS FORCE/SECDEF + crypto adversarial)
+
+This section is a **delta**, not a re-execution. The parent plan above stays the source of truth for the centralize-state-transitions surface; only the manual-only items below were added by `#443`.
+
+### What is automation-covered (do NOT re-execute manually)
+
+- `transition()` strict-throw on `count > 1` — covered by unit-mocked tests in `src/lib/{emergency-access,access-request}/*-state.test.ts` (per-file `transition() return-value strictness` describe block, 3 cases each).
+- MATRIX const usage (`EA_ACTOR.*` / `AR_ACTOR.*`) — compile-time + the existing `EXPECTED_TRANSITIONS` drift detector.
+- State-mutation lint extensions (`upsert`, computed property names, `as`-cast unwrap) — covered by `scripts/__tests__/check-state-mutation-centralization.test.ts` against the 8 expanded bad-fixture cases.
+- T17 `[false, true]` shape + `loser.reason === "not_eligible"` — covered by `centralize-state-transitions.integration.test.ts` (already in the parent plan's automated suite).
+- RLS `[E-RLS-FORCE]` and `[E-RLS-SECDEF]` — covered by `scripts/rls-cross-tenant-negative-test.sh` Cases 8 and 9 (CI gate).
+- Crypto nonce uniqueness / GCM authenticity / rotation rollback — covered by the five `*.adversarial.test.ts` files.
+
+### What genuinely needs manual eyes (M4: access-request UI smoke, ~5 min)
+
+Why manual: the `access-request-card` component re-renders status filter dropdown items + per-request status badges + the conditional approve/deny button via the new `AR_STATUS` constants. Type-checking + the component unit test confirm the values, but the visual rendering of badges (variant mapping `STATUS_VARIANTS[req.status]`) and the locale-bound label (`statusLabel` reading from `t("arStatus*")`) is not exercised by automation against a real request set.
+
+Pre-conditions: all from the parent plan's "Pre-conditions" section, plus at least one tenant member with `service-account.write` permission and one service account.
+
+Steps:
+
+1. As tenant admin, navigate to `/<locale>/dashboard/settings/developer` → "Access Requests" card.
+2. Click **+** to create a new request: pick the seeded service account, request scopes `credentials:list,credentials:use`, justification `<placeholder>`, expiry 60 minutes. Submit.
+3. The new request renders with a `Pending` badge — confirm the badge variant is `default` (not destructive / outline) and the locale label matches `arStatusPending`.
+4. Use the status filter dropdown: cycle through `ALL → PENDING → APPROVED → DENIED → EXPIRED`. Each option must select-and-render correctly; the request created in step 2 should appear under `ALL` and `PENDING`, disappear under the others.
+5. Approve the pending request. Badge flips to `Approved` (variant `secondary`). Confirm the approve/deny buttons are no longer visible (the `req.status === AR_STATUS.PENDING` guard hides them).
+6. Create a second request, deny it. Badge flips to `Denied` (variant `destructive`).
+
+Expected: every status badge maps to the documented variant, the locale label matches `t("arStatus*")` for all four statuses, and the approve/deny buttons appear only in the `PENDING` state.
+
+Adversarial scenario (M4-adv, optional): in DevTools, manually mutate the rendered `req.status` via React DevTools to a string not in `AR_STATUS` (e.g., `"FAKE"`). The badge should fall back gracefully — if it crashes the component, the runtime narrowing has a gap. Not a regression vector this PR introduces; included for thoroughness.
+
+### Sign-off addendum
+
+- [ ] M4 executed; status filter cycles through all five options; badges render with documented variants; approve/deny buttons appear only on `PENDING`.
+- [ ] No `transition: where matched >1 row` server-log entry observed during M4 (the strict-throw never fires under normal UI flows).

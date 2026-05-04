@@ -12,21 +12,12 @@
  */
 import type { AccessRequestStatus, Prisma } from "@prisma/client";
 import type { TxOrPrisma } from "@/lib/prisma";
+import { AR_STATUS, AR_ACTOR, type ArActor } from "@/lib/constants";
 import { isBypassRlsActive } from "@/lib/tenant-rls";
 
-export const AR_ACTOR = {
-  ADMIN: "ADMIN",
-  SYSTEM: "SYSTEM",
-} as const;
-
-export type ArActor = (typeof AR_ACTOR)[keyof typeof AR_ACTOR];
-
-export const AR_STATUS = {
-  PENDING: "PENDING",
-  APPROVED: "APPROVED",
-  DENIED: "DENIED",
-  EXPIRED: "EXPIRED",
-} as const satisfies Record<AccessRequestStatus, AccessRequestStatus>;
+// Re-export for backward compatibility with importers that already pull from here.
+// Canonical location: src/lib/constants/integrations/access-request.ts (client-safe).
+export { AR_STATUS, AR_ACTOR, type ArActor };
 
 /**
  * Exhaustive transition matrix. Empty array = forbidden transition.
@@ -37,10 +28,10 @@ export const MATRIX: Record<
   Record<AccessRequestStatus, ReadonlyArray<ArActor>>
 > = {
   [AR_STATUS.PENDING]: {
-    [AR_STATUS.APPROVED]: ["ADMIN"],
-    [AR_STATUS.DENIED]: ["ADMIN"],
+    [AR_STATUS.APPROVED]: [AR_ACTOR.ADMIN],
+    [AR_STATUS.DENIED]: [AR_ACTOR.ADMIN],
     // TODO(centralize-state-transitions-followup): no caller transitions to EXPIRED yet — implement cron in a follow-up PR
-    [AR_STATUS.EXPIRED]: ["SYSTEM"],
+    [AR_STATUS.EXPIRED]: [AR_ACTOR.SYSTEM],
     [AR_STATUS.PENDING]: [],
   },
   [AR_STATUS.APPROVED]: {
@@ -125,7 +116,12 @@ export async function transition(args: {
     where: { ...args.where, status: { in: allowedFroms } },
     data: { ...args.extraData, status: args.to },
   });
-  return result.count >= 1 ? { ok: true } : { ok: false };
+  if (result.count > 1) {
+    throw new Error(
+      "transition: where matched >1 row; pass a unique-id predicate or use bulkTransition",
+    );
+  }
+  return result.count === 1 ? { ok: true } : { ok: false };
 }
 
 /**

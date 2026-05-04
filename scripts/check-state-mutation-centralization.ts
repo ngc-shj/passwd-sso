@@ -1,12 +1,14 @@
 /**
  * CI guard (C8): AST-based check that no file outside the allowlist writes
- * `data: { status: <value> }` against emergencyAccessGrant or accessRequest
- * tables via Prisma's update / updateMany calls.
+ * `status: <value>` against emergencyAccessGrant or accessRequest tables via
+ * Prisma's update / updateMany / upsert calls.
  *
  * Uses ts-morph to walk the AST so it catches:
  *   - data: { status: "REVOKED" }
  *   - data: { status: someConst }
  *   - data: { ...rest, status: x }
+ *   - update: { status: ... } / create: { status: ... } in upsert
+ *   - { [computedKey]: ... } escape hatch (flagged unconditionally — opaque)
  *   - multi-line / reformatted variants
  *
  * Exit 0 → no violations. Exit 1 → violations found (printed to stdout).
@@ -46,7 +48,16 @@ const TARGET_MODELS = new Set([
 ]);
 
 // ─── Prisma mutating methods ─────────────────────────────────────────────────
-const MUTATING_METHODS = new Set(["update", "updateMany"]);
+// `upsert` carries status writes on `create` and/or `update` keys (not `data`),
+// so it MUST be checked alongside update / updateMany.
+const MUTATING_METHODS = new Set(["update", "updateMany", "upsert"]);
+
+// Top-level keys that hold the status-bearing payload, indexed by mutating method.
+const PAYLOAD_KEYS_BY_METHOD: Record<string, ReadonlyArray<string>> = {
+  update: ["data"],
+  updateMany: ["data"],
+  upsert: ["update", "create"],
+};
 
 // ─── Argument parsing ────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
@@ -89,14 +100,45 @@ if (fixturePath) {
 const violations: string[] = [];
 
 /**
- * Recursively walk an ObjectLiteralExpression looking for a `status` property
- * whose initializer is not `null` and not a function/arrow-function.
- * Returns true if such a property is found.
+ * Walk an ObjectLiteralExpression looking for a status assignment.
+ * Returns a finding kind:
+ *   - "status" — explicit `status: <value>` or `{ status }` shorthand
+ *   - "computed" — `{ [key]: ... }` whose key cannot be statically resolved;
+ *     flagged as a violation regardless because it is an escape hatch that
+ *     can hide a status write
+ *   - null — no violation
+ *
+ * Computed property names are intentionally flagged unconditionally (no
+ * partial-resolution attempts) — partial resolution invites bypass via
+ * indirection (`const k = "stat" + "us"`). If a legitimate use case appears,
+ * add the file to ALLOWED.
  */
-function hasStatusAssignment(objLiteral: Node): boolean {
-  if (!Node.isObjectLiteralExpression(objLiteral)) return false;
-  for (const prop of objLiteral.getProperties()) {
+type StatusFinding = "status" | "computed" | null;
+
+/** Unwrap `(expr)`, `expr as T`, `<T>expr`, `expr satisfies T` chains. */
+function unwrap(node: Node): Node {
+  let n = node;
+  while (
+    Node.isParenthesizedExpression(n) ||
+    Node.isAsExpression(n) ||
+    Node.isTypeAssertion(n) ||
+    Node.isSatisfiesExpression(n)
+  ) {
+    n = n.getExpression();
+  }
+  return n;
+}
+
+function findStatusAssignment(objLiteral: Node): StatusFinding {
+  const target = unwrap(objLiteral);
+  if (!Node.isObjectLiteralExpression(target)) return null;
+  for (const prop of target.getProperties()) {
     if (Node.isPropertyAssignment(prop)) {
+      const nameNode = prop.getNameNode();
+      // Computed property name: `{ [key]: value }` — cannot statically resolve.
+      if (Node.isComputedPropertyName(nameNode)) {
+        return "computed";
+      }
       const name = prop.getName();
       if (name === "status") {
         const init = prop.getInitializer();
@@ -108,26 +150,26 @@ function hasStatusAssignment(objLiteral: Node): boolean {
           Node.isFunctionExpression(init) ||
           Node.isArrowFunction(init)
         ) continue;
-        return true;
+        return "status";
       }
     } else if (Node.isShorthandPropertyAssignment(prop)) {
       // { status } shorthand — the variable name is "status"
-      if (prop.getName() === "status") return true;
+      if (prop.getName() === "status") return "status";
     } else if (Node.isSpreadAssignment(prop)) {
-      // { ...extraData, status: ... } — recursively check the spread source?
-      // We cannot statically resolve the spread variable, so ignore it.
-      // The plain property following a spread will still be caught.
+      // { ...extraData, status: ... } — cannot statically resolve the spread.
+      // The plain property following a spread will still be caught on its own.
       continue;
     }
   }
-  return false;
+  return null;
 }
 
 /**
- * Given a call expression, check whether it is a Prisma update/updateMany
- * call on a target model and has a data:{status:...} argument.
+ * Given a call expression, check whether it is a Prisma mutating call on a
+ * target model with a status-bearing payload.
  *
  * Matches: <x>.emergencyAccessGrant.update({ data: { status: ... } })
+ *          <x>.accessRequest.upsert({ update: { status: ... }, create: {...} })
  * where <x> is any identifier (prisma, tx, db, etc.).
  */
 function checkCallExpression(call: Node, filePath: string): void {
@@ -144,27 +186,30 @@ function checkCallExpression(call: Node, filePath: string): void {
   const modelName = modelExpr.getName();
   if (!TARGET_MODELS.has(modelName)) return;
 
-  // Found a relevant call — now inspect the `data` property
+  // Found a relevant call — inspect the method-specific payload key(s)
   const callArgs = call.getArguments();
   if (callArgs.length === 0) return;
   const firstArg = callArgs[0];
   if (!Node.isObjectLiteralExpression(firstArg)) return;
 
+  const payloadKeys = PAYLOAD_KEYS_BY_METHOD[methodName] ?? [];
   for (const prop of firstArg.getProperties()) {
-    if (
-      Node.isPropertyAssignment(prop) &&
-      prop.getName() === "data"
-    ) {
-      const dataValue = prop.getInitializer();
-      if (dataValue && hasStatusAssignment(dataValue)) {
-        const pos = call.getStartLineNumber();
-        const col = call.getStart() - call.getSourceFile().getFullText().lastIndexOf("\n", call.getStart());
-        const rel = filePath.startsWith(ROOT)
-          ? relative(ROOT, filePath)
-          : filePath;
-        violations.push(`${rel}:${pos}:${col} data:{status:...} mutation outside allowlist`);
-      }
-    }
+    if (!Node.isPropertyAssignment(prop)) continue;
+    if (!payloadKeys.includes(prop.getName())) continue;
+    const payloadValue = prop.getInitializer();
+    if (!payloadValue) continue;
+    const finding = findStatusAssignment(payloadValue);
+    if (!finding) continue;
+    const line = call.getStartLineNumber();
+    const col = call.getStart() - call.getSourceFile().getFullText().lastIndexOf("\n", call.getStart());
+    const rel = filePath.startsWith(ROOT)
+      ? relative(ROOT, filePath)
+      : filePath;
+    const detail =
+      finding === "computed"
+        ? `${methodName}({${prop.getName()}:{[<computed>]:...}}) — computed property name is opaque, refactor to a plain key`
+        : `${methodName}({${prop.getName()}:{status:...}}) mutation outside allowlist`;
+    violations.push(`${rel}:${line}:${col} ${detail}`);
   }
 }
 

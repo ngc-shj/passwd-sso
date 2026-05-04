@@ -2,7 +2,7 @@
 # rls-cross-tenant-negative-test.sh — gate self-check
 #
 # Runs a Case 0 pre-flight calibration (canonical policy → exit 0) plus
-# 7 distinct failure shapes against an ephemeral throwaway table to verify
+# 9 distinct failure shapes against an ephemeral throwaway table to verify
 # the cross-tenant verify SQL correctly detects each:
 #   0. canonical policy + correct manifest (sanity: harness calibrated)
 #   1. permissive symmetric → [E-RLS-COUNT-A]
@@ -12,6 +12,8 @@
 #   5. manifest drift (canonical policy + manifest missing throwaway) → [E-RLS-MANIFEST-MISSING]
 #   6. manifest contains a name not in DB → [E-RLS-MANIFEST-EXTRA]
 #   7. column-parity probe (tenant_id column without policy) → [E-RLS-COLPARITY]
+#   8. FORCE ROW LEVEL SECURITY dropped on a tenant_isolation table → [E-RLS-FORCE]
+#   9. SECURITY DEFINER function created in public schema → [E-RLS-SECDEF]
 #
 # Codes NOT exercised here (acceptable coverage gaps):
 #   - [E-RLS-COUNT-B]: structurally identical to [E-RLS-COUNT-A] (Block 3 mirrors Block 2).
@@ -61,7 +63,7 @@ VERIFY_SQL="$SCRIPT_DIR/rls-cross-tenant-verify.sql"
 # before/after either table has been created.
 cleanup() {
   psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=0 -q \
-    -c "DROP TABLE IF EXISTS rls_negative_test CASCADE; DROP TABLE IF EXISTS rls_colparity_probe CASCADE;" >/dev/null 2>&1 || true
+    -c "DROP TABLE IF EXISTS rls_negative_test CASCADE; DROP TABLE IF EXISTS rls_colparity_probe CASCADE; DROP FUNCTION IF EXISTS rls_negative_secdef_probe();" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
@@ -253,6 +255,69 @@ run_case_7_colparity() {
   printf 'PASS case 7 (matched [E-RLS-COLPARITY])\n'
 }
 run_case_7_colparity || total_failures=$((total_failures + 1))
+
+# Case 8: FORCE ROW LEVEL SECURITY dropped on rls_negative_test → Block 1
+# [E-RLS-FORCE] fires before manifest assertions because FORCE check runs in
+# Block 1 after column parity. Restores FORCE after the case so subsequent
+# runs (or trap-clean re-creates) start from a known-good state.
+run_case_8_force_rls() {
+  # Reset to canonical policy + drop FORCE.
+  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
+    -c "DROP POLICY IF EXISTS rls_negative_test_tenant_isolation ON rls_negative_test; $CANONICAL_POLICY_SQL;
+        ALTER TABLE rls_negative_test NO FORCE ROW LEVEL SECURITY;"
+  local expected_tables="${manifest_entries},rls_negative_test"
+  local out ec
+  out=$(psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 \
+    -v expected_tables="$expected_tables" \
+    -f "$VERIFY_SQL" 2>&1) && ec=0 || ec=$?
+  # Restore FORCE before returning regardless of result.
+  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=0 -q \
+    -c "ALTER TABLE rls_negative_test FORCE ROW LEVEL SECURITY;" >/dev/null 2>&1 || true
+  if (( ec == 0 )); then
+    printf 'FAIL case 8: verify exited 0 with FORCE RLS dropped — gate is broken\n'
+    return 1
+  fi
+  if ! grep -qF -- "[E-RLS-FORCE]" <<<"$out"; then
+    printf 'FAIL case 8: verify failed but expected code [E-RLS-FORCE] not found in output:\n%s\n' "$out"
+    return 1
+  fi
+  printf 'PASS case 8 (matched [E-RLS-FORCE])\n'
+}
+run_case_8_force_rls || total_failures=$((total_failures + 1))
+
+# Case 9: SECURITY DEFINER function created in public schema → Block 1
+# [E-RLS-SECDEF]. Function is owned by passwd_user (created via SUPERUSER
+# connection) and immediately becomes an RLS-bypass surface. Trap also
+# drops the function as a safety net.
+run_case_9_secdef() {
+  # Reset to canonical policy so SYM/NULL/COUNT/COLPARITY all pass.
+  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
+    -c "DROP POLICY IF EXISTS rls_negative_test_tenant_isolation ON rls_negative_test; $CANONICAL_POLICY_SQL;"
+  # Create a minimal SECURITY DEFINER function in public.
+  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -q -c "
+    CREATE OR REPLACE FUNCTION rls_negative_secdef_probe() RETURNS int AS \$\$
+      SELECT 1;
+    \$\$ LANGUAGE sql SECURITY DEFINER;
+  "
+  local expected_tables="${manifest_entries},rls_negative_test"
+  local out ec
+  out=$(psql "$APP_DATABASE_URL" -v ON_ERROR_STOP=1 \
+    -v expected_tables="$expected_tables" \
+    -f "$VERIFY_SQL" 2>&1) && ec=0 || ec=$?
+  # Drop the probe function regardless (trap also covers).
+  psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=0 -q \
+    -c "DROP FUNCTION IF EXISTS rls_negative_secdef_probe();" >/dev/null 2>&1 || true
+  if (( ec == 0 )); then
+    printf 'FAIL case 9: verify exited 0 with SECURITY DEFINER function present — gate is broken\n'
+    return 1
+  fi
+  if ! grep -qF -- "[E-RLS-SECDEF]" <<<"$out"; then
+    printf 'FAIL case 9: verify failed but expected code [E-RLS-SECDEF] not found in output:\n%s\n' "$out"
+    return 1
+  fi
+  printf 'PASS case 9 (matched [E-RLS-SECDEF])\n'
+}
+run_case_9_secdef || total_failures=$((total_failures + 1))
 
 if (( total_failures > 0 )); then
   printf '\n%d negative-test cases failed.\n' "$total_failures"

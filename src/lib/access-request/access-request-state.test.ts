@@ -1,6 +1,13 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, vi } from "vitest";
 import { AccessRequestStatus } from "@prisma/client";
-import { MATRIX, canTransition, AR_ACTOR, type ArActor } from "./access-request-state";
+import {
+  MATRIX,
+  canTransition,
+  transition,
+  AR_ACTOR,
+  AR_STATUS,
+  type ArActor,
+} from "./access-request-state";
 
 const ALL_STATUSES = Object.values(AccessRequestStatus) as AccessRequestStatus[];
 const AR_ACTORS = Object.values(AR_ACTOR);
@@ -91,5 +98,46 @@ describe("terminal states", () => {
 describe("future EXPIRED cron readiness", () => {
   test("PENDING → EXPIRED is permitted for SYSTEM (future cron placeholder)", () => {
     expect(canTransition("PENDING", "EXPIRED", "SYSTEM")).toBe(true);
+  });
+});
+
+describe("transition() return-value strictness", () => {
+  function makeDb(updateManyCount: number) {
+    return {
+      accessRequest: {
+        updateMany: vi.fn().mockResolvedValue({ count: updateManyCount }),
+      },
+    } as unknown as Parameters<typeof transition>[0]["db"];
+  }
+
+  test("count === 1 returns ok:true", async () => {
+    const result = await transition({
+      db: makeDb(1),
+      where: { id: "req-1", tenantId: "tenant-1" },
+      to: AR_STATUS.APPROVED,
+      actor: AR_ACTOR.ADMIN,
+    });
+    expect(result).toEqual({ ok: true });
+  });
+
+  test("count === 0 returns ok:false", async () => {
+    const result = await transition({
+      db: makeDb(0),
+      where: { id: "req-1", tenantId: "tenant-1" },
+      to: AR_STATUS.APPROVED,
+      actor: AR_ACTOR.ADMIN,
+    });
+    expect(result).toEqual({ ok: false });
+  });
+
+  test("count > 1 throws — non-unique where is a programmer error", async () => {
+    await expect(
+      transition({
+        db: makeDb(2),
+        where: { tenantId: "tenant-1" },
+        to: AR_STATUS.APPROVED,
+        actor: AR_ACTOR.ADMIN,
+      }),
+    ).rejects.toThrow(/where matched >1 row/);
   });
 });

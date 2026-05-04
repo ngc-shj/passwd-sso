@@ -39,6 +39,13 @@ SET app.expected_tables TO :'expected_tables';
 --   5. [E-RLS-COLPARITY]          column count vs discovery count parity
 --   6. [E-RLS-MANIFEST-EXTRA]     manifest \ discovery
 --   7. [E-RLS-MANIFEST-MISSING]   discovery \ manifest
+--   8. [E-RLS-FORCE]              FORCE ROW LEVEL SECURITY enabled on every
+--                                 tenant_isolation table — table-owner roles
+--                                 (e.g., passwd_user used by migrations) bypass
+--                                 RLS unless the table has FORCE set
+--   9. [E-RLS-SECDEF]             no SECURITY DEFINER functions in public —
+--                                 a passwd_user-owned secdef function callable
+--                                 by passwd_app is an RLS-bypass surface
 -- =====================================================================
 DO $$
 DECLARE
@@ -191,6 +198,56 @@ BEGIN
         AND c.relname NOT IN (
           SELECT m.t FROM unnest(string_to_array(current_setting('app.expected_tables', true), ',')) AS m(t)
         )
+    ));
+
+  -- 8. FORCE ROW LEVEL SECURITY guard.
+  --    Without FORCE, the table-owner role (passwd_user, used by migrations and
+  --    Prisma's `migrate dev`) bypasses RLS even when policies exist. A migration
+  --    that drops FORCE on a single table is a silent cross-tenant regression
+  --    for every code path running as the owner. Asserts `relrowsecurity = true`
+  --    AND `relforcerowsecurity = true` on every table that has a tenant_isolation
+  --    policy.
+  ASSERT NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_policy p
+    JOIN pg_catalog.pg_class c ON c.oid = p.polrelid
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND (p.polname = 'tenant_isolation' OR p.polname LIKE '%\_tenant_isolation' ESCAPE '\')
+      AND (NOT c.relrowsecurity OR NOT c.relforcerowsecurity)
+  ),
+    format('[E-RLS-FORCE] Tables with tenant_isolation policy missing FORCE/ENABLE RLS: %s', (
+      SELECT string_agg(c.relname || ' (rls=' || c.relrowsecurity || ', force=' || c.relforcerowsecurity || ')', ',')
+      FROM pg_catalog.pg_policy p
+      JOIN pg_catalog.pg_class c ON c.oid = p.polrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public'
+        AND (p.polname = 'tenant_isolation' OR p.polname LIKE '%\_tenant_isolation' ESCAPE '\')
+        AND (NOT c.relrowsecurity OR NOT c.relforcerowsecurity)
+    ));
+
+  -- 9. SECURITY DEFINER function audit.
+  --    A SECURITY DEFINER function in `public` runs with the function-owner's
+  --    privileges. If the owner is passwd_user (SUPERUSER) and EXECUTE is granted
+  --    to passwd_app (or PUBLIC), the function becomes an RLS-bypass primitive:
+  --    its body executes with BYPASSRLS regardless of the calling role. This file
+  --    asserts the absence of such functions; if a future migration introduces a
+  --    legitimate SECURITY DEFINER (e.g., a tightly-scoped audit-rotation helper),
+  --    add a per-name allowlist alongside this ASSERT and document the safety
+  --    argument inline. Trigger functions invoked implicitly by row events are in
+  --    scope — a SECURITY DEFINER trigger on a tenant table bypasses RLS the
+  --    same way a directly-called function would.
+  ASSERT NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_proc pr
+    JOIN pg_catalog.pg_namespace n ON n.oid = pr.pronamespace
+    WHERE n.nspname = 'public'
+      AND pr.prosecdef = true
+  ),
+    format('[E-RLS-SECDEF] SECURITY DEFINER functions exist in public schema: %s — these bypass RLS when called by passwd_app. Add an allowlist + safety justification next to this ASSERT before merging.', (
+      SELECT string_agg(pr.proname || ' (owner=' || (SELECT rolname FROM pg_roles WHERE oid = pr.proowner) || ')', ',')
+      FROM pg_catalog.pg_proc pr
+      JOIN pg_catalog.pg_namespace n ON n.oid = pr.pronamespace
+      WHERE n.nspname = 'public'
+        AND pr.prosecdef = true
     ));
 END $$;
 

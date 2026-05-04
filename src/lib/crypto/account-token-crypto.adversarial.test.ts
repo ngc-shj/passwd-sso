@@ -9,6 +9,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { randomBytes } from "node:crypto";
 import * as cryptoServer from "@/lib/crypto/crypto-server";
+import { parseEnvelope, SENTINEL } from "./envelope";
 import {
   encryptAccountToken,
   decryptAccountToken,
@@ -89,6 +90,56 @@ describe("account-token-crypto adversarial: ciphertext-swap across master keys",
       const ct = encryptAccountToken("plaintext-aad-swap", aadA);
       expect(decryptAccountToken(ct, aadA)).toBe("plaintext-aad-swap");
       expect(() => decryptAccountToken(ct, aadB)).toThrow();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("encryptAccountToken produces unique IVs across 16 calls under the same master key", () => {
+    // Token re-encryption (e.g., after master-key rotation) must not collapse
+    // to a single IV under AES-GCM.
+    const k = randomBytes(32);
+    const aad = {
+      userId: "00000000-0000-0000-0000-0000000000aa",
+      provider: "google",
+      providerAccountId: "google-A",
+    };
+    const spy = vi
+      .spyOn(cryptoServer, "getMasterKeyByVersion")
+      .mockImplementation(() => k);
+    try {
+      const ivs = new Set<string>();
+      for (let i = 0; i < 16; i++) {
+        const ct = encryptAccountToken("same-token-plaintext", aad);
+        const env = parseEnvelope(ct);
+        ivs.add(env.iv.toString("hex"));
+      }
+      expect(ivs.size).toBe(16);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("flipping one byte of envelope ciphertext rejects decryption (authenticity)", () => {
+    // Envelope shape: SENTINEL + <version> + ":" + base64url(iv || tag || ct).
+    // Tamper by parsing, mutating the first ciphertext byte, and re-packing.
+    const k = randomBytes(32);
+    const aad = {
+      userId: "00000000-0000-0000-0000-0000000000aa",
+      provider: "google",
+      providerAccountId: "google-A",
+    };
+    const spy = vi
+      .spyOn(cryptoServer, "getMasterKeyByVersion")
+      .mockImplementation(() => k);
+    try {
+      const ct = encryptAccountToken("authentic-token", aad);
+      const env = parseEnvelope(ct);
+      const tamperedCipher = Buffer.from(env.ciphertext);
+      tamperedCipher[0] ^= 0xff;
+      const blob = Buffer.concat([env.iv, env.tag, tamperedCipher]).toString("base64url");
+      const tampered = `${SENTINEL}${env.version}:${blob}`;
+      expect(() => decryptAccountToken(tampered, aad)).toThrow();
     } finally {
       spy.mockRestore();
     }

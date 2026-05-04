@@ -388,8 +388,19 @@ describe("centralize-state-transitions — integration", () => {
       ),
     ]);
 
-    const successCount = [a, b].filter((r) => r.ok).length;
-    expect(successCount).toBe(1);
+    // RT4 (race-test vacuous-pass guard): assert the EXACT pair shape, not
+    // just the success count. `[false, true]` proves BOTH branches occurred —
+    // a winner (CAS landed) AND a loser (CAS rejected). A bare
+    // `successCount === 1` passes vacuously when the second call short-circuits
+    // before the CAS (e.g., setup races, eligibility check coincidentally fails).
+    const okShape = [a.ok, b.ok].sort();
+    expect(okShape).toEqual([false, true]);
+
+    // The loser must report the CAS-loss reason. Any other reason means the
+    // failure happened upstream of the contested transition, masking races.
+    const loser = a.ok ? b : a;
+    if (loser.ok) throw new Error("unreachable: shape assertion guarantees one loser");
+    expect(loser.reason).toBe("not_eligible");
 
     // Exactly one EMERGENCY_ACCESS_ACTIVATE audit row should exist.
     // logAuditAsync is async / outbox-based, so we poll audit_logs until the

@@ -1,6 +1,6 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, vi } from "vitest";
 import { EmergencyAccessStatus } from "@prisma/client";
-import { MATRIX, canTransition } from "./emergency-access-state";
+import { MATRIX, canTransition, transition } from "./emergency-access-state";
 import { EA_STATUS, EA_ACTOR, type EaActor } from "@/lib/constants";
 
 const ALL_STATUSES = Object.values(EmergencyAccessStatus) as EmergencyAccessStatus[];
@@ -136,5 +136,46 @@ describe("security invariants", () => {
       );
       expect(used, `${actor} must appear in matrix`).toBe(true);
     }
+  });
+});
+
+describe("transition() return-value strictness", () => {
+  function makeDb(updateManyCount: number) {
+    return {
+      emergencyAccessGrant: {
+        updateMany: vi.fn().mockResolvedValue({ count: updateManyCount }),
+      },
+    } as unknown as Parameters<typeof transition>[0]["db"];
+  }
+
+  test("count === 1 returns ok:true", async () => {
+    const result = await transition({
+      db: makeDb(1),
+      where: { id: "grant-1", ownerId: "owner-1" },
+      to: EA_STATUS.REVOKED,
+      actor: EA_ACTOR.OWNER,
+    });
+    expect(result).toEqual({ ok: true });
+  });
+
+  test("count === 0 returns ok:false (eligible from-state mismatch)", async () => {
+    const result = await transition({
+      db: makeDb(0),
+      where: { id: "grant-1", ownerId: "owner-1" },
+      to: EA_STATUS.REVOKED,
+      actor: EA_ACTOR.OWNER,
+    });
+    expect(result).toEqual({ ok: false });
+  });
+
+  test("count > 1 throws — non-unique where is a programmer error, not a silent multi-row write", async () => {
+    await expect(
+      transition({
+        db: makeDb(2),
+        where: { ownerId: "owner-1" },
+        to: EA_STATUS.REVOKED,
+        actor: EA_ACTOR.OWNER,
+      }),
+    ).rejects.toThrow(/where matched >1 row/);
   });
 });
