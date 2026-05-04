@@ -74,8 +74,10 @@
   "rotateKeyProgressEntries": "エントリを再暗号化中…",
   "rotateKeyProgressHistory": "履歴を再暗号化中…",
   "rotateKeyProgress": "{current} / {total}",
-  "rotateKeyAttachmentDataLossWarning": "保管庫に現在のキーで暗号化された添付ファイルが {count} 件あります。ローテーション後は復号できなくなります。エクスポートしてから実行する場合はキャンセル、データ消失を承認して続行する場合は下のボタンを押してください。",
-  "rotateKeyAttachmentAcknowledge": "データ消失を承認してローテーション",
+  "rotateKeyMigratingLegacyAttachments": "{count} 件の添付ファイルを新しい形式に更新中…",
+  "rotateKeyRewrappingAttachments": "添付ファイルを再保護中…",
+  "legacyAttachmentHint": "以前の形式 — 次回の保管庫キーローテーション時に更新されます",
+  "outdatedAttachmentFormat": "この添付ファイルを復号できません。バックアップから復元するか、元のファイルを再アップロードしてください。",
   "rotateKeyCacheTombstoneFailureBanner": "ローテーション中に一部のセッションキャッシュを無効化できませんでした (Redis 障害)。設定 → セッション から他デバイスのセッションを手動で取り消してください。",
   "rotateKeyInvalidationFailedBanner": "ローテーション後のトークン取り消しが確認できませんでした。ローテーション前の API キー / MCP トークンが有効なまま残っている可能性があります。設定から手動で取り消してください。",
   "rotateKeyMcpRevokedBanner": "ローテーション前の MCP トークンを {count} 件取り消しました。/tenant/service-accounts で再発行が必要な場合があります。"

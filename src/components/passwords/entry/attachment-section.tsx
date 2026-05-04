@@ -31,7 +31,13 @@ import {
   decryptBinary,
   type EncryptedBinary,
 } from "@/lib/crypto/crypto-client";
-import { buildAttachmentAAD, AAD_VERSION } from "@/lib/crypto/crypto-aad";
+import {
+  buildAttachmentAAD,
+  buildAttachmentCekWrapAAD,
+  AAD_VERSION,
+  MIN_ACCEPTED_CEK_WRAP_AAD_VERSION,
+  CURRENT_CEK_WRAP_AAD_VERSION,
+} from "@/lib/crypto/crypto-aad";
 import { apiPath } from "@/lib/constants";
 import {
   ALLOWED_EXTENSIONS,
@@ -47,6 +53,7 @@ export interface AttachmentMeta {
   contentType: string;
   sizeBytes: number;
   createdAt: string;
+  encryptionMode?: number;
 }
 
 interface AttachmentSectionProps {
@@ -73,6 +80,54 @@ function getExtension(filename: string): string {
   return filename.split(".").pop()?.toLowerCase() ?? "";
 }
 
+/** Download response shape from GET /api/passwords/[id]/attachments/[attachmentId] */
+interface Mode0AttachmentDownload {
+  encryptionMode: 0;
+  encryptedData: string; // base64
+  iv: string;
+  authTag: string;
+  aadVersion: number;
+  cekEncrypted: null;
+  cekIv: null;
+  cekAuthTag: null;
+  cekKeyVersion: null;
+  cekWrapAadVersion: null;
+}
+
+interface Mode2AttachmentDownload {
+  encryptionMode: 2;
+  encryptedData: string; // base64
+  iv: string;
+  authTag: string;
+  aadVersion: number;
+  cekEncrypted: string; // base64
+  cekIv: string;
+  cekAuthTag: string;
+  cekKeyVersion: number;
+  cekWrapAadVersion: number;
+}
+
+type AttachmentDownload = Mode0AttachmentDownload | Mode2AttachmentDownload;
+
+/** Decode a base64 string to a Uint8Array. */
+function base64ToBytes(b64: string): Uint8Array {
+  const binaryStr = atob(b64);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) {
+    bytes[i] = binaryStr.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/** Encode a Uint8Array to a base64 string. */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binaryStr = "";
+  for (const b of bytes) {
+    binaryStr += String.fromCharCode(b);
+  }
+  return btoa(binaryStr);
+}
+
 export function AttachmentSection({
   entryId,
   attachments,
@@ -81,9 +136,10 @@ export function AttachmentSection({
   keyVersion,
 }: AttachmentSectionProps) {
   const t = useTranslations("Attachments");
+  const tVault = useTranslations("Vault");
   const tApi = useTranslations("ApiErrors");
   const tc = useTranslations("Common");
-  const { encryptionKey } = useVault();
+  const { encryptionKey, getKeyVersion } = useVault();
   const [uploading, setUploading] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AttachmentMeta | null>(null);
@@ -129,10 +185,34 @@ export function AttachmentSection({
 
       // Pre-generate attachment ID for AAD binding
       const attachmentId = crypto.randomUUID();
-      const aad = buildAttachmentAAD(entryId, attachmentId);
+      const currentKeyVersion = keyVersion ?? getKeyVersion();
 
-      // Encrypt client-side with AAD
-      const encrypted: EncryptedBinary = await encryptBinary(arrayBuffer, encryptionKey, aad);
+      // Mode-2: generate a fresh CEK, encrypt body under CEK, wrap CEK with vault key.
+      // Use exportKey("raw") + manual AES-GCM — do NOT use crypto.subtle.wrapKey (I8.1).
+      const cek = await crypto.subtle.generateKey(
+        { name: "AES-GCM", length: 256 },
+        true,
+        ["encrypt", "decrypt"],
+      );
+
+      // Encrypt file body under CEK using the data AAD
+      const dataAad = buildAttachmentAAD(entryId, attachmentId);
+      const encrypted: EncryptedBinary = await encryptBinary(arrayBuffer, cek, dataAad);
+
+      // Export raw CEK bytes, wrap with vault encryptionKey
+      const cekRaw = await crypto.subtle.exportKey("raw", cek);
+      const cekRawBytes = new Uint8Array(cekRaw);
+      const wrapAad = buildAttachmentCekWrapAAD(entryId, attachmentId, currentKeyVersion, 1);
+      const wrappedCek: EncryptedBinary = await encryptBinary(
+        cekRawBytes.buffer.slice(
+          cekRawBytes.byteOffset,
+          cekRawBytes.byteOffset + cekRawBytes.byteLength,
+        ) as ArrayBuffer,
+        encryptionKey,
+        wrapAad,
+      );
+      // Zeroize raw CEK bytes after use
+      cekRawBytes.fill(0);
 
       // Build FormData with encrypted blob
       const formData = new FormData();
@@ -144,6 +224,12 @@ export function AttachmentSection({
       formData.append("contentType", file.type);
       formData.append("sizeBytes", file.size.toString());
       formData.append("aadVersion", String(AAD_VERSION));
+      formData.append("encryptionMode", "2");
+      formData.append("cekEncrypted", bytesToBase64(wrappedCek.ciphertext));
+      formData.append("cekIv", wrappedCek.iv);
+      formData.append("cekAuthTag", wrappedCek.authTag);
+      formData.append("cekKeyVersion", String(currentKeyVersion));
+      formData.append("cekWrapAadVersion", String(CURRENT_CEK_WRAP_AAD_VERSION));
       if (keyVersion) formData.append("keyVersion", keyVersion.toString());
 
       const res = await fetchApi(apiPath.passwordAttachments(entryId), {
@@ -176,24 +262,54 @@ export function AttachmentSection({
       );
       if (!res.ok) throw new Error("Download failed");
 
-      const data = await res.json();
+      const data = (await res.json()) as AttachmentDownload;
 
-      // Decode base64 encrypted data
-      const binaryStr = atob(data.encryptedData);
-      const ciphertext = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) {
-        ciphertext[i] = binaryStr.charCodeAt(i);
-      }
-
-      // Decrypt client-side (with AAD if aadVersion >= 1)
-      const aad = data.aadVersion >= 1
+      // Decode base64 encrypted body
+      const ciphertext = base64ToBytes(data.encryptedData);
+      const dataAad = data.aadVersion >= 1
         ? buildAttachmentAAD(entryId, attachment.id)
         : undefined;
-      const decrypted = await decryptBinary(
-        { ciphertext, iv: data.iv, authTag: data.authTag },
-        encryptionKey,
-        aad
-      );
+
+      let decrypted: ArrayBuffer;
+
+      if (data.encryptionMode === 0) {
+        // Legacy: body encrypted directly with vault encryptionKey
+        decrypted = await decryptBinary(
+          { ciphertext, iv: data.iv, authTag: data.authTag },
+          encryptionKey,
+          dataAad,
+        );
+      } else {
+        // Mode-2: unwrap CEK, then decrypt body with CEK
+        if (data.cekWrapAadVersion < MIN_ACCEPTED_CEK_WRAP_AAD_VERSION) {
+          toast.error(tVault("outdatedAttachmentFormat"));
+          return;
+        }
+        const cekWrapAad = buildAttachmentCekWrapAAD(
+          entryId,
+          attachment.id,
+          data.cekKeyVersion,
+          data.cekWrapAadVersion,
+        );
+        const cekEncryptedBytes = base64ToBytes(data.cekEncrypted);
+        const cekRaw = await decryptBinary(
+          { ciphertext: cekEncryptedBytes, iv: data.cekIv, authTag: data.cekAuthTag },
+          encryptionKey,
+          cekWrapAad,
+        );
+        const cek = await crypto.subtle.importKey(
+          "raw",
+          cekRaw,
+          { name: "AES-GCM", length: 256 },
+          false,
+          ["decrypt"],
+        );
+        decrypted = await decryptBinary(
+          { ciphertext, iv: data.iv, authTag: data.authTag },
+          cek,
+          dataAad,
+        );
+      }
 
       // Trigger download
       const blob = new Blob([decrypted], { type: attachment.contentType });
@@ -291,6 +407,11 @@ export function AttachmentSection({
                   <p className="text-xs text-muted-foreground">
                     {formatFileSize(att.sizeBytes)}
                   </p>
+                  {att.encryptionMode === 0 && (
+                    <p className="text-xs text-muted-foreground/70 italic">
+                      {tVault("legacyAttachmentHint")}
+                    </p>
+                  )}
                 </div>
                 <Button
                   variant="ghost"
