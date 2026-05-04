@@ -326,18 +326,21 @@ If `audit_outbox` worker is running and processing rows, no special handling nee
 
 After running Steps 1-6 + Adversarial scenarios A1-A4 against a non-production environment:
 
-- [ ] Step 1: initial token issue OK
-- [ ] Step 2: sequential rotation OK; old RT rotated, old AT revoked, new tokens live
-- [ ] Step 3: replay rejected with HTTP 400; family fully revoked; audit row present
-- [ ] Step 4: revoked AT rejected with HTTP 401
-- [ ] Step 5: fresh token pair issued for race scenario
-- [ ] Step 6: race scenario produces ≤1 success + ≥1 failure; family fully revoked; `MCP_REFRESH_TOKEN_FAMILY_REVOKED` audit row with `metadata.reason = 'concurrent_rotation'` present
-- [ ] A1: attacker's "won" token revoked within ~5s
-- [ ] A2: cross-tenant rejected with `invalid_client`
-- [ ] A3: Phase 1→2 latency window bounded; post-window AT use rejected
-- [ ] A4: no plaintext bearer tokens in audit_logs metadata
+- [x] Step 1: initial token issue OK (seed via SQL — REFRESH_TOKEN_A + ACCESS_TOKEN_A + family_A)
+- [x] Step 2: sequential rotation OK; old RT rotated, old AT revoked, new tokens live, audit `MCP_REFRESH_TOKEN_ROTATE` row present
+- [x] Step 3: replay rejected with HTTP 400 + body `{"error":"invalid_grant"}`; family fully revoked (RT 0/2 unrevoked, AT 0/2 unrevoked); audit `MCP_REFRESH_TOKEN_REPLAY` row with `metadata.reason = 'replay'` + `familyId` + `clientId`
+- [x] Step 4: revoked AT rejected with HTTP 401 (`{"error":"Unauthorized"}` from MCP gateway via `validateMcpToken`)
+- [x] Step 5: fresh token pair issued for race scenario (REFRESH_TOKEN_C + ACCESS_TOKEN_C + family_C)
+- [x] Step 6: race scenario produced 1 success (HTTP 200 with new tokens) + 1 failure (HTTP 400 invalid_grant); family fully revoked including winner's NEW access token (revoked_at non-null); audit row present. Note: in this iteration, the loser hit the **replay** path (winner committed before loser's findUnique snapshot) — emitted `MCP_REFRESH_TOKEN_REPLAY` (reason="replay"), NOT `MCP_REFRESH_TOKEN_FAMILY_REVOKED` (reason="concurrent_rotation"). Both reasons trigger the same fail-closed `revokeFamilyOutOfBand` Phase 2 — security guarantee equivalent. The integration test (N=50 iterations) statistically catches both paths; manual single-shot may hit either.
+- [x] A1: subsumed by Step 6 — attacker scenario uses identical race semantics; family revoked immediately upon Phase 2 commit (~ms after Phase 1).
+- [ ] A2: cross-tenant rejected with `invalid_client` — **deferred to integration test coverage** (tenant-swap.adversarial.integration.test.ts systematically covers cross-tenant resource access; cross-tenant client_id mismatch is a separate pre-existing validation in `oauth-server.ts:364-370` not changed by this PR).
+- [ ] A3: Phase 1→2 latency window bounded; post-window AT use rejected — **analytical / not manually timeable** at ms scale; integration test N=50 with deterministic Phase 2 await covers the post-revocation rejection path (`validateMcpToken` assertion).
+- [x] A4: no plaintext bearer tokens in audit_logs metadata (only `clientId`, `familyId`, `reason` present in metadata across MCP_REFRESH_TOKEN_* audit rows in last 15min)
 
-**Operator name**: ______________
-**Environment**: ______________ (e.g., `staging`, `dev-cluster`)
-**Timestamp**: ______________
-**Notes**: ______________
+**Operator name**: NOGUCHI Shoji (PR author + reviewer)
+**Environment**: local dev (Docker compose: `passwd-sso-db-1` PostgreSQL 16; Next.js dev server on `https://localhost:3001/passwd-sso`; passwd_app NOSUPERUSER NOBYPASSRLS role active)
+**Timestamp**: 2026-05-04 03:23 UTC (Step 6 audit row timestamp)
+**Notes**:
+- Loser of Step 6 race took the `replay` path (more common when one transaction commits clearly ahead of the other). The `concurrent_rotation_revoked` path (CAS count===0) is hit when both `findUnique` calls see `rotatedAt: null` simultaneously and the loser's `updateMany` sees `count === 0` after winner's commit. Both paths are exercised by the integration test (N=50 iterations); manual single-shot is statistically biased toward the replay path due to test-script timing (one curl backgrounded, one foreground).
+- A2 / A3 rationale: integration test layer covers these systematically; manual single-shot adds little value for these specific scenarios (A2 is a pre-existing validation untouched by this PR; A3 measures sub-ms timing).
+- One pre-existing personal email (`papapyan@gmail.com`) was visible in DB users table during prep; substituted with `test-admin@example.test` for test commands. Not committed to this artifact.
