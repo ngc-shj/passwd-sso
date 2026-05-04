@@ -26,6 +26,10 @@ export function getTenantRlsContext(): TenantRlsContext | undefined {
   return tenantRlsStorage.getStore();
 }
 
+export function isBypassRlsActive(): boolean {
+  return getTenantRlsContext()?.bypass === true;
+}
+
 export async function withTenantRls<T>(
   prisma: PrismaClient,
   tenantId: string,
