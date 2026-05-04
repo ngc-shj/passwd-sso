@@ -28,6 +28,9 @@ export type { TenantRoleValue } from "./auth/tenant-role";
 export { EA_STATUS, EA_ACTOR } from "./integrations/emergency-access";
 export type { EaStatusValue, EaActor } from "./integrations/emergency-access";
 
+export { AR_STATUS, AR_ACTOR } from "./integrations/access-request";
+export type { ArStatusValue, ArActor } from "./integrations/access-request";
+
 export { INVITATION_STATUS } from "./integrations/invitation";
 export type { InvitationStatusValue } from "./integrations/invitation";
 

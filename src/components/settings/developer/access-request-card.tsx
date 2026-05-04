@@ -38,13 +38,13 @@ import {
 } from "@/components/ui/dialog";
 import { Loader2, CheckCircle, XCircle, Plus, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
-import { apiPath } from "@/lib/constants";
+import { apiPath, AR_STATUS } from "@/lib/constants";
 import { SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
 
-type AccessRequestStatus = "PENDING" | "APPROVED" | "DENIED" | "EXPIRED";
+import type { AccessRequestStatus } from "@prisma/client";
 
 interface ServiceAccountRef {
   id: string;
@@ -66,10 +66,10 @@ const STATUS_VARIANTS: Record<
   AccessRequestStatus,
   "default" | "secondary" | "destructive" | "outline"
 > = {
-  PENDING: "default",
-  APPROVED: "secondary",
-  DENIED: "destructive",
-  EXPIRED: "outline",
+  [AR_STATUS.PENDING]: "default",
+  [AR_STATUS.APPROVED]: "secondary",
+  [AR_STATUS.DENIED]: "destructive",
+  [AR_STATUS.EXPIRED]: "outline",
 };
 
 export function AccessRequestCard() {
@@ -227,10 +227,10 @@ export function AccessRequestCard() {
 
   const statusLabel = (status: AccessRequestStatus) => {
     const map: Record<AccessRequestStatus, string> = {
-      PENDING: "arStatusPending",
-      APPROVED: "arStatusApproved",
-      DENIED: "arStatusDenied",
-      EXPIRED: "arStatusExpired",
+      [AR_STATUS.PENDING]: "arStatusPending",
+      [AR_STATUS.APPROVED]: "arStatusApproved",
+      [AR_STATUS.DENIED]: "arStatusDenied",
+      [AR_STATUS.EXPIRED]: "arStatusExpired",
     };
     return t(map[status]);
   };
@@ -260,10 +260,10 @@ export function AccessRequestCard() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="ALL">{t("arStatusAll")}</SelectItem>
-            <SelectItem value="PENDING">{t("arStatusPending")}</SelectItem>
-            <SelectItem value="APPROVED">{t("arStatusApproved")}</SelectItem>
-            <SelectItem value="DENIED">{t("arStatusDenied")}</SelectItem>
-            <SelectItem value="EXPIRED">{t("arStatusExpired")}</SelectItem>
+            <SelectItem value={AR_STATUS.PENDING}>{t("arStatusPending")}</SelectItem>
+            <SelectItem value={AR_STATUS.APPROVED}>{t("arStatusApproved")}</SelectItem>
+            <SelectItem value={AR_STATUS.DENIED}>{t("arStatusDenied")}</SelectItem>
+            <SelectItem value={AR_STATUS.EXPIRED}>{t("arStatusExpired")}</SelectItem>
           </SelectContent>
         </Select>
         <Button variant="outline" size="sm" onClick={openCreate}>
@@ -301,7 +301,7 @@ export function AccessRequestCard() {
                   <span className="text-xs text-muted-foreground">
                     {t("arCreatedAt", { date: formatDateTime(req.createdAt, locale) })}
                   </span>
-                {req.status === "PENDING" && (
+                {req.status === AR_STATUS.PENDING && (
                   <div className="flex items-center gap-1">
                     <Button
                       variant="outline"
