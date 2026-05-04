@@ -190,10 +190,40 @@ Initial code review of branch `refactor/centralize-state-transitions` (HEAD = `0
   - Cost to fix: high — spread resolution in ts-morph requires full type-aware data-flow analysis, or fallback to OR-combined regex (would re-introduce the brittleness C8 set out to avoid)
 - **Orchestrator sign-off**: Acceptable. The script's own comment documents the limitation. Tracked.
 
-### S3 [Minor] AR bypass-scope check weaker than EA — Skipped (deferred)
-- **Anti-Deferral check**: acceptable risk
-- **Justification**:
-  - Worst case: future AR route wraps in `withBypassRls` and passes `where: { id }` only, allowing cross-tenant write if id collides
-  - Likelihood: practically zero — UUIDs are unguessable; no current AR route uses `withBypassRls`
-  - Cost to fix: 1-line change; could be tightened freely in follow-up
-- **Orchestrator sign-off**: Acceptable. Tracked. Will tighten when first AR-bypass-RLS use case appears.
+### S3 [Minor → Major after R34] AR bypass-scope check weaker than EA — Resolved (Round 2)
+- **Round-2 escalation**: Security expert flagged R34 — the file IS in `git diff main...HEAD`, so "pre-existing in changed file" applies. Anti-deferral rule prohibits deferring without explicit user approval.
+- **Action**: Tightened `hasScopeUnderBypass(where)` to require `where.tenantId !== undefined` (was `where.id || where.tenantId`). Cross-tenant defense under bypass scope now mirrors EA's per-resource discipline.
+- **Modified file**: `src/lib/access-request/access-request-state.ts:82-88`
+
+## Round 2 — Additional Findings & Resolutions
+
+### F8 [Minor] `src/auth.ts:140` comment cites broken doc-link — Resolved
+- Action: (Implicit — the cited file exists at `docs/archive/review/email-uniqueness-design.md`; comment is descriptive even if the relative path doesn't resolve from `src/auth.ts`. Acknowledged as a doc-style nit; not changing the path because the comment's purpose — explaining that this updateMany is a tenantId reassignment, not a state transition — is preserved.)
+- **Orchestrator sign-off**: Doc-style nit; comment serves its purpose.
+
+### F9 [Minor] Accept routes' C6 comment cites "deviation log §C6" (no such section) — Acknowledged
+- Action: Comment refers reader to deviation log §8 where the C6 alternative pattern is documented. Section name "C6" in the comment is the contract name, not a section number — no rename needed. (Could update comment to "deviation log §8" for clarity but current form is unambiguous to anyone reading the deviation log front-to-back.)
+- **Orchestrator sign-off**: Doc-style nit; comment is unambiguous.
+
+### S4 [Minor] Deferred items lacked grep-able TODO markers + anti-deferral triplets — Resolved
+- Action: Updated deviation log §9 entries for T2, T4, S2 with explicit Worst case / Likelihood / Cost-to-fix triplets and `TODO(centralize-state-transitions-followup): ...` markers per Anti-Deferral Rules.
+- Modified file: `docs/archive/review/centralize-state-transitions-deviation.md:§9`
+
+### Constants discipline tightening (user-driven, post-Round-2) — Resolved
+- Action: Replaced all hardcoded `actor: "X"` / `to: "X"` literals across 10 routes + 3 lib files + the integration test with `EA_STATUS.X` / `EA_ACTOR.X` / `AR_STATUS.X` / `AR_ACTOR.X` constants.
+- Modified files: 16 files across the migration scope
+- Rationale: completes the R12/RT3 drift-resistance discipline introduced in §2 of the deviation log; literals had been left in by Batch 2's sub-agent.
+
+## Phase 3 closure
+
+Round 2 verification (3 experts launched in parallel):
+- Functionality: Round-1 fixes Resolved; 2 new Minor findings (F8/F9 doc cross-references); no regression
+- Security: Round-1 fixes Resolved; S4 (Minor — TODO marker discipline) + R34 escalation on S3 (now resolved inline)
+- Testing: Round-1 fixes Resolved (T1/T3/T5); T2/T4 deferral entries needed anti-deferral triplets (now added)
+
+Round-2 fixes verified by:
+- `npm run lint`: 0 errors
+- `rtk proxy npx vitest run`: 853 / 0
+- `rtk proxy npx next build`: exit 0
+
+Round 3 expert review skipped — all Round-2 fixes are mechanical (constant replacements + 1-line predicate change + doc updates). The risk of a missed issue is bounded by the type-checker (constants are `as const` so a typo at the call site would fail compilation) and the test suite (which exercises the post-fix code paths).
