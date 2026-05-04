@@ -41,7 +41,7 @@ import {
   MIN_ACCEPTED_CEK_WRAP_AAD_VERSION,
   CURRENT_CEK_WRAP_AAD_VERSION,
 } from "@/lib/crypto/crypto-aad";
-import { API_PATH, VAULT_STATUS } from "@/lib/constants";
+import { API_PATH, apiPath, VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { fetchApi } from "@/lib/url-helpers";
@@ -890,9 +890,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           onProgress?.({ phase: "migrating", current: i, total });
 
           // GET the legacy attachment.
-          const attRes = await fetch(`/api/passwords/${entryId}/attachments/${attId}`, {
-            credentials: "same-origin",
-          });
+          const attRes = await fetchApi(apiPath.passwordAttachmentById(entryId, attId));
           if (!attRes.ok) {
             throw new Error(`MIGRATE_FETCH_FAILED:${attId}`);
           }
@@ -958,11 +956,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
             return btoa(s);
           };
 
-          const migrateRes = await fetch(
-            `/api/passwords/${entryId}/attachments/${attId}/migrate`,
+          const migrateRes = await fetchApi(
+            apiPath.passwordAttachmentMigrate(entryId, attId),
             {
               method: "PUT",
-              credentials: "same-origin",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 oldEncryptedDataHash,
@@ -987,9 +984,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
         // Re-fetch rotation data to pick up next page (overflow) and observe
         // any newly mode-2 rows for the rewrap step.
-        const refetchRes = await fetch("/api/vault/rotate-key/data", {
-          credentials: "same-origin",
-        });
+        const refetchRes = await fetchApi(API_PATH.VAULT_ROTATE_KEY_DATA);
         if (!refetchRes.ok) {
           throw new Error("ROTATE_DATA_REFETCH_FAILED");
         }
