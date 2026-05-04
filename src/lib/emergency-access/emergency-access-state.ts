@@ -27,9 +27,9 @@ export const MATRIX: Record<
   Record<EmergencyAccessStatus, ReadonlyArray<EaActor>>
 > = {
   [EA_STATUS.PENDING]: {
-    [EA_STATUS.ACCEPTED]: ["GRANTEE"],
-    [EA_STATUS.REJECTED]: ["GRANTEE"],
-    [EA_STATUS.REVOKED]: ["OWNER"],
+    [EA_STATUS.ACCEPTED]: [EA_ACTOR.GRANTEE],
+    [EA_STATUS.REJECTED]: [EA_ACTOR.GRANTEE],
+    [EA_STATUS.REVOKED]: [EA_ACTOR.OWNER],
     [EA_STATUS.IDLE]: [],
     [EA_STATUS.STALE]: [],
     [EA_STATUS.REQUESTED]: [],
@@ -37,8 +37,8 @@ export const MATRIX: Record<
     [EA_STATUS.PENDING]: [],
   },
   [EA_STATUS.ACCEPTED]: {
-    [EA_STATUS.IDLE]: ["OWNER"],
-    [EA_STATUS.REVOKED]: ["OWNER"],
+    [EA_STATUS.IDLE]: [EA_ACTOR.OWNER],
+    [EA_STATUS.REVOKED]: [EA_ACTOR.OWNER],
     [EA_STATUS.PENDING]: [],
     [EA_STATUS.ACCEPTED]: [],
     [EA_STATUS.REJECTED]: [],
@@ -47,9 +47,9 @@ export const MATRIX: Record<
     [EA_STATUS.ACTIVATED]: [],
   },
   [EA_STATUS.IDLE]: {
-    [EA_STATUS.REQUESTED]: ["GRANTEE"],
-    [EA_STATUS.STALE]: ["SYSTEM"],
-    [EA_STATUS.REVOKED]: ["OWNER"],
+    [EA_STATUS.REQUESTED]: [EA_ACTOR.GRANTEE],
+    [EA_STATUS.STALE]: [EA_ACTOR.SYSTEM],
+    [EA_STATUS.REVOKED]: [EA_ACTOR.OWNER],
     [EA_STATUS.PENDING]: [],
     [EA_STATUS.ACCEPTED]: [],
     [EA_STATUS.REJECTED]: [],
@@ -57,8 +57,8 @@ export const MATRIX: Record<
     [EA_STATUS.IDLE]: [],
   },
   [EA_STATUS.STALE]: {
-    [EA_STATUS.IDLE]: ["OWNER"],
-    [EA_STATUS.REVOKED]: ["OWNER"],
+    [EA_STATUS.IDLE]: [EA_ACTOR.OWNER],
+    [EA_STATUS.REVOKED]: [EA_ACTOR.OWNER],
     [EA_STATUS.PENDING]: [],
     [EA_STATUS.ACCEPTED]: [],
     [EA_STATUS.REJECTED]: [],
@@ -70,18 +70,18 @@ export const MATRIX: Record<
   // Removing this row allows an in-flight grantee to wait out waitExpiresAt
   // and unwrap the owner's pre-rotation secretKey via the stale escrow.
   [EA_STATUS.REQUESTED]: {
-    [EA_STATUS.ACTIVATED]: ["OWNER", "SYSTEM"],
-    [EA_STATUS.IDLE]: ["OWNER"],
-    [EA_STATUS.STALE]: ["SYSTEM"],
-    [EA_STATUS.REVOKED]: ["OWNER"],
+    [EA_STATUS.ACTIVATED]: [EA_ACTOR.OWNER, EA_ACTOR.SYSTEM],
+    [EA_STATUS.IDLE]: [EA_ACTOR.OWNER],
+    [EA_STATUS.STALE]: [EA_ACTOR.SYSTEM],
+    [EA_STATUS.REVOKED]: [EA_ACTOR.OWNER],
     [EA_STATUS.PENDING]: [],
     [EA_STATUS.ACCEPTED]: [],
     [EA_STATUS.REJECTED]: [],
     [EA_STATUS.REQUESTED]: [],
   },
   [EA_STATUS.ACTIVATED]: {
-    [EA_STATUS.STALE]: ["SYSTEM"],
-    [EA_STATUS.REVOKED]: ["OWNER"],
+    [EA_STATUS.STALE]: [EA_ACTOR.SYSTEM],
+    [EA_STATUS.REVOKED]: [EA_ACTOR.OWNER],
     [EA_STATUS.PENDING]: [],
     [EA_STATUS.ACCEPTED]: [],
     [EA_STATUS.REJECTED]: [],
@@ -176,7 +176,12 @@ export async function transition(args: {
     where: { ...args.where, status: { in: allowedFroms } },
     data: { ...args.extraData, status: args.to },
   });
-  return result.count >= 1 ? { ok: true } : { ok: false };
+  if (result.count > 1) {
+    throw new Error(
+      "transition: where matched >1 row; pass a unique-id predicate or use bulkTransition",
+    );
+  }
+  return result.count === 1 ? { ok: true } : { ok: false };
 }
 
 /**
