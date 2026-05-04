@@ -65,4 +65,36 @@ describe("crypto-team attachment adversarial: ciphertext-swap across team keys",
     }
     expect(thrownError).not.toBeNull();
   });
+
+  it("encryptTeamAttachment produces unique IVs across 16 calls under the same key", async () => {
+    // Nonce-reuse across re-uploaded / re-encrypted attachments must not happen.
+    const k = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
+    const data = new Uint8Array(512);
+    crypto.getRandomValues(data);
+    const buf = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+    const ivs = new Set<string>();
+    for (let i = 0; i < 16; i++) {
+      const c = await encryptTeamAttachment(buf, k);
+      ivs.add(c.iv);
+    }
+    expect(ivs.size).toBe(16);
+  });
+
+  it("flipping one byte of attachment ciphertext rejects decryption", async () => {
+    const k = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
+    const data = new Uint8Array(256);
+    crypto.getRandomValues(data);
+    const buf = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+    const original = await encryptTeamAttachment(buf, k);
+    const tamperedBytes = new Uint8Array(original.ciphertext);
+    tamperedBytes[0] ^= 0xff;
+    const tampered = { ...original, ciphertext: tamperedBytes };
+    let rejected = false;
+    try {
+      await decryptTeamAttachment(tampered, k);
+    } catch {
+      rejected = true;
+    }
+    expect(rejected).toBe(true);
+  });
 });

@@ -94,3 +94,124 @@ describe("crypto-client adversarial: ciphertext-swap across personal-vault keys"
     expect(thrownError).not.toBeNull();
   });
 });
+
+describe("crypto-client adversarial: nonce uniqueness across repeated encryptions", () => {
+  // AES-GCM nonce reuse under the same key is catastrophic (loss of confidentiality
+  // AND authenticity). Vault rotation, delegation, and any flow that re-encrypts
+  // under a stable key is a candidate failure site. The contract we assert is
+  // simply: every encryption under the same key produces a distinct IV. The IV
+  // generator is `crypto.getRandomValues` (96 bits of entropy) — a collision
+  // across N=64 calls has probability ≈ N²/2^97, statistically zero.
+  it("encryptData produces unique IVs across 64 calls under the same key", async () => {
+    const k = await deriveEncryptionKey(generateSecretKey());
+    const ivs = new Set<string>();
+    for (let i = 0; i < 64; i++) {
+      const c = await encryptData("same-plaintext", k);
+      ivs.add(c.iv);
+    }
+    expect(ivs.size).toBe(64);
+  });
+
+  it("encryptBinary produces unique IVs across 64 calls under the same key", async () => {
+    const k = await deriveEncryptionKey(generateSecretKey());
+    const data = new Uint8Array(256);
+    crypto.getRandomValues(data);
+    const ivs = new Set<string>();
+    for (let i = 0; i < 64; i++) {
+      const c = await encryptBinary(
+        data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength),
+        k,
+      );
+      ivs.add(c.iv);
+    }
+    expect(ivs.size).toBe(64);
+  });
+});
+
+describe("crypto-client adversarial: AES-GCM authenticity (ciphertext / tag mutation)", () => {
+  // AES-GCM provides authenticated encryption — flipping a single bit of either
+  // the ciphertext OR the authTag must reject decryption. Without this property,
+  // an attacker who controls server-stored blobs can mutate decrypted plaintext.
+  it("flipping one byte of ciphertext rejects decryption", async () => {
+    const k = await deriveEncryptionKey(generateSecretKey());
+    const original = await encryptData("authentic-plaintext", k);
+    // Flip the first byte of ciphertext (hex string — flip the first hex digit).
+    const tampered = {
+      ...original,
+      ciphertext:
+        ((parseInt(original.ciphertext[0], 16) ^ 0xf).toString(16)) +
+        original.ciphertext.slice(1),
+    };
+    let thrownError: unknown = null;
+    try {
+      await decryptData(tampered, k);
+    } catch (err) {
+      thrownError = err;
+    }
+    expect(thrownError).not.toBeNull();
+  });
+
+  it("flipping one byte of authTag rejects decryption", async () => {
+    const k = await deriveEncryptionKey(generateSecretKey());
+    const original = await encryptData("authentic-plaintext", k);
+    const tampered = {
+      ...original,
+      authTag:
+        ((parseInt(original.authTag[0], 16) ^ 0xf).toString(16)) +
+        original.authTag.slice(1),
+    };
+    let thrownError: unknown = null;
+    try {
+      await decryptData(tampered, k);
+    } catch (err) {
+      thrownError = err;
+    }
+    expect(thrownError).not.toBeNull();
+  });
+
+  it("truncating the authTag rejects decryption", async () => {
+    const k = await deriveEncryptionKey(generateSecretKey());
+    const original = await encryptData("authentic-plaintext", k);
+    // Drop the last 2 hex digits (1 byte) from the tag — should be rejected
+    // as the GCM 128-bit tag length is enforced.
+    const truncated = { ...original, authTag: original.authTag.slice(0, -2) };
+    let thrownError: unknown = null;
+    try {
+      await decryptData(truncated, k);
+    } catch (err) {
+      thrownError = err;
+    }
+    expect(thrownError).not.toBeNull();
+  });
+});
+
+describe("crypto-client adversarial: vault key rotation rollback", () => {
+  // Threat: an attacker who retains the OLD vault key (e.g., by capturing a
+  // memory snapshot before rotation) must NOT be able to decrypt content that
+  // was re-encrypted under the NEW key after rotation. This is the symmetric
+  // dual of the existing K1→K2 swap test. The property follows from AES-GCM
+  // tag authenticity but warrants an explicit regression test because rotation
+  // is the place a future implementation might inadvertently re-use IVs across
+  // keys, weaken the key derivation, or skip the re-encrypt step entirely.
+  it("ciphertext encrypted under K_new cannot be decrypted by leaked K_old", async () => {
+    const kOld = await deriveEncryptionKey(generateSecretKey());
+    const kNew = await deriveEncryptionKey(generateSecretKey());
+
+    // Pre-rotation: content was encrypted under kOld
+    const preRotation = await encryptData("vault-secret-pre", kOld);
+    // Sanity: kOld decrypts its own ciphertext
+    expect(await decryptData(preRotation, kOld)).toBe("vault-secret-pre");
+
+    // Rotation: content is re-encrypted under kNew
+    const postRotation = await encryptData("vault-secret-post", kNew);
+
+    // Adversary still holds kOld but the new ciphertext was sealed under kNew.
+    let thrownError: unknown = null;
+    try {
+      await decryptData(postRotation, kOld);
+    } catch (err) {
+      thrownError = err;
+    }
+    expect(thrownError).not.toBeNull();
+  });
+});

@@ -85,4 +85,51 @@ describe("crypto-team adversarial: ciphertext-swap across team keys", () => {
     }
     expect(rejected).toBe(true);
   });
+
+  it("encryptTeamEntry produces unique IVs across 32 calls under the same team key", async () => {
+    // Nonce-reuse property at the team-vault surface — a key-rotation flow that
+    // re-encrypts every entry under a new key must NOT collapse to a single IV.
+    const k = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
+    const ivs = new Set<string>();
+    for (let i = 0; i < 32; i++) {
+      const c = await encryptTeamEntry("same-team-entry", k);
+      ivs.add(c.iv);
+    }
+    expect(ivs.size).toBe(32);
+  });
+
+  it("flipping one byte of team-entry ciphertext rejects decryption (AES-GCM authenticity)", async () => {
+    const k = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
+    const original = await encryptTeamEntry("team-authentic", k);
+    const tampered = {
+      ...original,
+      ciphertext:
+        ((parseInt(original.ciphertext[0], 16) ^ 0xf).toString(16)) +
+        original.ciphertext.slice(1),
+    };
+    let rejected = false;
+    try {
+      await decryptTeamEntry(tampered, k);
+    } catch {
+      rejected = true;
+    }
+    expect(rejected).toBe(true);
+  });
+
+  it("rotation rollback: ciphertext under K_new cannot be decrypted with leaked K_old", async () => {
+    const kOld = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
+    const kNew = await deriveTeamEncryptionKey(generateTeamSymmetricKey());
+
+    const preRotation = await encryptTeamEntry("pre", kOld);
+    expect(await decryptTeamEntry(preRotation, kOld)).toBe("pre");
+
+    const postRotation = await encryptTeamEntry("post", kNew);
+    let rejected = false;
+    try {
+      await decryptTeamEntry(postRotation, kOld);
+    } catch {
+      rejected = true;
+    }
+    expect(rejected).toBe(true);
+  });
 });
