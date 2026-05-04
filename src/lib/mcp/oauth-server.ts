@@ -21,7 +21,9 @@ import {
   MCP_REFRESH_TOKEN_PREFIX,
   MCP_REFRESH_TOKEN_EXPIRY_SEC,
   MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS,
+  REFRESH_EXCHANGE_REASON,
   type McpScope,
+  type RefreshExchangeReason,
 } from "@/lib/constants/auth/mcp";
 
 export interface McpTokenData {
@@ -318,6 +320,8 @@ export async function exchangeRefreshToken(
       accessToken: string;
       accessTokenId: string;
       refreshToken: string;
+      refreshTokenId: string;
+      familyId: string;
       expiresIn: number;
       scope: string;
       tenantId: string;
@@ -326,7 +330,7 @@ export async function exchangeRefreshToken(
   | {
       ok: false;
       error: "invalid_grant" | "invalid_client";
-      reason?: "replay" | "concurrent_rotation_revoked" | "expired" | "revoked";
+      reason?: RefreshExchangeReason;
       tenantId?: string;
       familyId?: string;
     }
@@ -334,112 +338,119 @@ export async function exchangeRefreshToken(
   const dbClient = options.prisma ?? prisma;
   const tokenHash = hashToken(params.refreshToken);
 
-  // Phase 1: validate + CAS + create new tokens (or detect race/replay)
+  // Phase 1: validate + CAS + create new tokens (or detect race/replay).
+  // The `tx` argument from withBypassRls is the transaction-scoped client
+  // with bypass_rls + token_lifecycle GUCs already set on its connection.
+  // Per Contract 1: do NOT call dbClient.$transaction(...) inside — that
+  // would open a second transaction on a different connection where the
+  // GUCs are not set, and FORCE-RLS tables would silently filter to zero
+  // rows (test injection path with raw client).
   const phase1 = await withBypassRls(
     dbClient,
-    async () =>
-      dbClient.$transaction(async (tx) => {
-        const rt = await tx.mcpRefreshToken.findUnique({
-          where: { tokenHash },
-          include: { mcpClient: true },
-        });
+    async (tx) => {
+      const rt = await tx.mcpRefreshToken.findUnique({
+        where: { tokenHash },
+        include: { mcpClient: true },
+      });
 
-        if (!rt) return { type: "not_found" as const };
+      if (!rt) return { type: "not_found" as const };
 
-        // Replay: caller presented an already-rotated token
-        if (rt.rotatedAt) {
-          return {
-            type: "replay" as const,
-            tenantId: rt.tenantId,
-            familyId: rt.familyId,
-            accessTokenId: rt.accessTokenId,
-          };
-        }
-
-        if (rt.revokedAt) return { type: "revoked" as const };
-        if (rt.expiresAt < new Date()) return { type: "expired" as const };
-
-        // Validate client identity (public clients have empty clientSecretHash)
-        const isPublicClient = rt.mcpClient.clientSecretHash === "";
-        if (
-          rt.mcpClient.clientId !== params.clientId ||
-          (!isPublicClient && !safeEqual(rt.mcpClient.clientSecretHash, params.clientSecretHash)) ||
-          !rt.mcpClient.isActive
-        ) {
-          return { type: "invalid_client" as const };
-        }
-
-        // Generate new tokens up-front so we can include the new hash in the CAS
-        const newAccessToken = MCP_TOKEN_PREFIX + randomBytes(32).toString("base64url");
-        const newAccessTokenHash = hashToken(newAccessToken);
-        const accessExpiresAt = new Date(Date.now() + MCP_TOKEN_EXPIRY_SEC * 1000);
-
-        const newRefreshToken = MCP_REFRESH_TOKEN_PREFIX + randomBytes(32).toString("base64url");
-        const newRefreshTokenHash = hashToken(newRefreshToken);
-        const refreshExpiresAt = new Date(Date.now() + MCP_REFRESH_TOKEN_EXPIRY_SEC * 1000);
-
-        // Atomic compare-and-swap: claim the rotation slot.
-        // UPDATE ... WHERE rotatedAt IS NULL acquires a row-level lock; concurrent
-        // transactions block here and after winner commits, see count===0.
-        const claim = await tx.mcpRefreshToken.updateMany({
-          where: { id: rt.id, rotatedAt: null },
-          data: { rotatedAt: new Date(), replacedByHash: newRefreshTokenHash },
-        });
-
-        if (claim.count === 0) {
-          // Race lost — another transaction won the CAS between our findUnique and updateMany.
-          return {
-            type: "race_lost" as const,
-            tenantId: rt.tenantId,
-            familyId: rt.familyId,
-            accessTokenId: rt.accessTokenId,
-          };
-        }
-
-        // Won the race — create new tokens.
-        const newAccess = await tx.mcpAccessToken.create({
-          data: {
-            tokenHash: newAccessTokenHash,
-            clientId: rt.clientId,
-            tenantId: rt.tenantId,
-            userId: rt.userId,
-            serviceAccountId: rt.serviceAccountId,
-            scope: rt.scope,
-            expiresAt: accessExpiresAt,
-          },
-        });
-
-        await tx.mcpRefreshToken.create({
-          data: {
-            tokenHash: newRefreshTokenHash,
-            familyId: rt.familyId,
-            accessTokenId: newAccess.id,
-            clientId: rt.clientId,
-            tenantId: rt.tenantId,
-            userId: rt.userId,
-            serviceAccountId: rt.serviceAccountId,
-            scope: rt.scope,
-            expiresAt: refreshExpiresAt,
-          },
-        });
-
-        // Revoke the OLD access token (the one paired with the now-rotated refresh).
-        await tx.mcpAccessToken.update({
-          where: { id: rt.accessTokenId },
-          data: { revokedAt: new Date() },
-        });
-
+      // Replay: caller presented an already-rotated token
+      if (rt.rotatedAt) {
         return {
-          type: "success" as const,
-          accessToken: newAccessToken,
-          accessTokenId: newAccess.id,
-          refreshToken: newRefreshToken,
-          expiresIn: MCP_TOKEN_EXPIRY_SEC,
-          scope: rt.scope,
+          type: "replay" as const,
+          tenantId: rt.tenantId,
+          familyId: rt.familyId,
+          accessTokenId: rt.accessTokenId,
+        };
+      }
+
+      if (rt.revokedAt) return { type: "revoked" as const };
+      if (rt.expiresAt < new Date()) return { type: "expired" as const };
+
+      // Validate client identity (public clients have empty clientSecretHash)
+      const isPublicClient = rt.mcpClient.clientSecretHash === "";
+      if (
+        rt.mcpClient.clientId !== params.clientId ||
+        (!isPublicClient && !safeEqual(rt.mcpClient.clientSecretHash, params.clientSecretHash)) ||
+        !rt.mcpClient.isActive
+      ) {
+        return { type: "invalid_client" as const };
+      }
+
+      // Generate new tokens up-front so we can include the new hash in the CAS
+      const newAccessToken = MCP_TOKEN_PREFIX + randomBytes(32).toString("base64url");
+      const newAccessTokenHash = hashToken(newAccessToken);
+      const accessExpiresAt = new Date(Date.now() + MCP_TOKEN_EXPIRY_SEC * 1000);
+
+      const newRefreshToken = MCP_REFRESH_TOKEN_PREFIX + randomBytes(32).toString("base64url");
+      const newRefreshTokenHash = hashToken(newRefreshToken);
+      const refreshExpiresAt = new Date(Date.now() + MCP_REFRESH_TOKEN_EXPIRY_SEC * 1000);
+
+      // Atomic compare-and-swap: claim the rotation slot.
+      // UPDATE ... WHERE rotatedAt IS NULL acquires a row-level lock; concurrent
+      // transactions block here and after winner commits, see count===0.
+      const claim = await tx.mcpRefreshToken.updateMany({
+        where: { id: rt.id, rotatedAt: null },
+        data: { rotatedAt: new Date(), replacedByHash: newRefreshTokenHash },
+      });
+
+      if (claim.count === 0) {
+        // Race lost — another transaction won the CAS between our findUnique and updateMany.
+        return {
+          type: "race_lost" as const,
+          tenantId: rt.tenantId,
+          familyId: rt.familyId,
+          accessTokenId: rt.accessTokenId,
+        };
+      }
+
+      // Won the race — create new tokens.
+      const newAccess = await tx.mcpAccessToken.create({
+        data: {
+          tokenHash: newAccessTokenHash,
+          clientId: rt.clientId,
           tenantId: rt.tenantId,
           userId: rt.userId,
-        };
-      }),
+          serviceAccountId: rt.serviceAccountId,
+          scope: rt.scope,
+          expiresAt: accessExpiresAt,
+        },
+      });
+
+      const newRefresh = await tx.mcpRefreshToken.create({
+        data: {
+          tokenHash: newRefreshTokenHash,
+          familyId: rt.familyId,
+          accessTokenId: newAccess.id,
+          clientId: rt.clientId,
+          tenantId: rt.tenantId,
+          userId: rt.userId,
+          serviceAccountId: rt.serviceAccountId,
+          scope: rt.scope,
+          expiresAt: refreshExpiresAt,
+        },
+      });
+
+      // Revoke the OLD access token (the one paired with the now-rotated refresh).
+      await tx.mcpAccessToken.update({
+        where: { id: rt.accessTokenId },
+        data: { revokedAt: new Date() },
+      });
+
+      return {
+        type: "success" as const,
+        accessToken: newAccessToken,
+        accessTokenId: newAccess.id,
+        refreshToken: newRefreshToken,
+        refreshTokenId: newRefresh.id,
+        familyId: rt.familyId,
+        expiresIn: MCP_TOKEN_EXPIRY_SEC,
+        scope: rt.scope,
+        tenantId: rt.tenantId,
+        userId: rt.userId,
+      };
+    },
     BYPASS_PURPOSE.TOKEN_LIFECYCLE,
   );
 
@@ -451,6 +462,8 @@ export async function exchangeRefreshToken(
         accessToken: phase1.accessToken,
         accessTokenId: phase1.accessTokenId,
         refreshToken: phase1.refreshToken,
+        refreshTokenId: phase1.refreshTokenId,
+        familyId: phase1.familyId,
         expiresIn: phase1.expiresIn,
         scope: phase1.scope,
         tenantId: phase1.tenantId,
@@ -459,9 +472,9 @@ export async function exchangeRefreshToken(
     case "not_found":
       return { ok: false, error: "invalid_grant" };
     case "revoked":
-      return { ok: false, error: "invalid_grant", reason: "revoked" };
+      return { ok: false, error: "invalid_grant", reason: REFRESH_EXCHANGE_REASON.REVOKED };
     case "expired":
-      return { ok: false, error: "invalid_grant", reason: "expired" };
+      return { ok: false, error: "invalid_grant", reason: REFRESH_EXCHANGE_REASON.EXPIRED };
     case "invalid_client":
       return { ok: false, error: "invalid_client" };
     case "replay":
@@ -472,7 +485,10 @@ export async function exchangeRefreshToken(
       return {
         ok: false,
         error: "invalid_grant",
-        reason: phase1.type === "replay" ? "replay" : "concurrent_rotation_revoked",
+        reason:
+          phase1.type === "replay"
+            ? REFRESH_EXCHANGE_REASON.REPLAY
+            : REFRESH_EXCHANGE_REASON.CONCURRENT_ROTATION_REVOKED,
         tenantId: phase1.tenantId,
         familyId: phase1.familyId,
       };
@@ -494,27 +510,26 @@ async function revokeFamilyOutOfBand(
   try {
     await withBypassRls(
       dbClient,
-      async () =>
-        dbClient.$transaction(async (tx) => {
-          const familyTokens = await tx.mcpRefreshToken.findMany({
-            where: { familyId },
-            select: { accessTokenId: true },
-          });
-          const accessTokenIds = [
-            ...new Set([accessTokenId, ...familyTokens.map((t) => t.accessTokenId)]),
-          ];
+      async (tx) => {
+        const familyTokens = await tx.mcpRefreshToken.findMany({
+          where: { familyId },
+          select: { accessTokenId: true },
+        });
+        const accessTokenIds = [
+          ...new Set([accessTokenId, ...familyTokens.map((t) => t.accessTokenId)]),
+        ];
 
-          await tx.mcpRefreshToken.updateMany({
-            where: { familyId, revokedAt: null },
+        await tx.mcpRefreshToken.updateMany({
+          where: { familyId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+        if (accessTokenIds.length > 0) {
+          await tx.mcpAccessToken.updateMany({
+            where: { id: { in: accessTokenIds }, revokedAt: null },
             data: { revokedAt: new Date() },
           });
-          if (accessTokenIds.length > 0) {
-            await tx.mcpAccessToken.updateMany({
-              where: { id: { in: accessTokenIds }, revokedAt: null },
-              data: { revokedAt: new Date() },
-            });
-          }
-        }),
+        }
+      },
       BYPASS_PURPOSE.TOKEN_LIFECYCLE,
     );
   } catch (err) {

@@ -68,3 +68,25 @@ export const MCP_DCR_UNCLAIMED_EXPIRY_SEC = 86400; // 24 hours
 export const MAX_UNCLAIMED_DCR_CLIENTS = 100;
 export const DCR_RATE_LIMIT_WINDOW_MS = 3_600_000; // 1 hour
 export const DCR_RATE_LIMIT_MAX = 20; // per IP (/64 for IPv6)
+
+// Refresh-token exchange failure reasons (returned to caller in `reason`
+// field of the typed result; surfaced to the client via the route handler).
+// Defined as a const-object so callers don't drift into raw string literals
+// (matches AUDIT_ACTION style).
+export const REFRESH_EXCHANGE_REASON = {
+  REPLAY: "replay",
+  CONCURRENT_ROTATION_REVOKED: "concurrent_rotation_revoked",
+  EXPIRED: "expired",
+  REVOKED: "revoked",
+} as const;
+export type RefreshExchangeReason =
+  (typeof REFRESH_EXCHANGE_REASON)[keyof typeof REFRESH_EXCHANGE_REASON];
+
+// Audit metadata `reason` value for MCP_REFRESH_TOKEN_FAMILY_REVOKED audit
+// emission — identifies WHY the family was revoked.
+export const FAMILY_REVOKED_REASON = {
+  CONCURRENT_ROTATION: "concurrent_rotation",
+  REPLAY: "replay",
+} as const;
+export type FamilyRevokedReason =
+  (typeof FAMILY_REVOKED_REASON)[keyof typeof FAMILY_REVOKED_REASON];

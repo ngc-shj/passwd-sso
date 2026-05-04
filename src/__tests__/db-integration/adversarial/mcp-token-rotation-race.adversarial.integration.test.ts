@@ -17,8 +17,11 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { randomBytes, randomUUID } from "node:crypto";
 import { exchangeRefreshToken, validateMcpToken } from "@/lib/mcp/oauth-server";
 import { hashToken } from "@/lib/crypto/crypto-server";
-import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
-import { MCP_TOKEN_PREFIX, MCP_REFRESH_TOKEN_PREFIX } from "@/lib/constants/auth/mcp";
+import {
+  MCP_TOKEN_PREFIX,
+  MCP_REFRESH_TOKEN_PREFIX,
+  REFRESH_EXCHANGE_REASON,
+} from "@/lib/constants/auth/mcp";
 import {
   createTestContext,
   createPrismaForRole,
@@ -241,7 +244,10 @@ describe("mcp token rotation race adversarial: fail-closed family revocation", (
       losses++;
       if (!winner || !loser) throw new Error("type guard — unreachable");
       expect(loser.error).toBe("invalid_grant");
-      expect(loser.reason === "concurrent_rotation_revoked" || loser.reason === "replay").toBe(true);
+      expect(
+        loser.reason === REFRESH_EXCHANGE_REASON.CONCURRENT_ROTATION_REVOKED ||
+          loser.reason === REFRESH_EXCHANGE_REASON.REPLAY,
+      ).toBe(true);
       expect(loser.familyId).toBe(seeded.familyId);
 
       // Family revocation assertion (Contract 2 fail-closed).
@@ -273,23 +279,13 @@ describe("mcp token rotation race adversarial: fail-closed family revocation", (
       const validation = await validateMcpToken(winner.accessToken);
       expect(validation.ok).toBe(false);
 
-      // Audit assertion (Contract 5): MCP_REFRESH_TOKEN_FAMILY_REVOKED row
-      // exists for this family.
-      const auditRow = await ctx.su.prisma.auditLog.findFirst({
-        where: {
-          tenantId,
-          action: AUDIT_ACTION.MCP_REFRESH_TOKEN_FAMILY_REVOKED,
-        },
-        orderBy: { createdAt: "desc" },
-        take: 1,
-      });
-      // Audit is fired by the route handler, NOT by exchangeRefreshToken
-      // directly. Since we call exchangeRefreshToken bypass the route, no
-      // audit is emitted here. This is the EXPECTED behavior given Contract 5
-      // (audit lives in route handler with req context). Document the gap and
-      // skip the audit assertion in this test path.
-      // The audit emission is verified separately via route.test.ts unit tests.
-      void auditRow;
+      // Audit emission of MCP_REFRESH_TOKEN_FAMILY_REVOKED is fired by the
+      // route handler (Contract 5: audit emission stays in route handler with
+      // req context). This integration test calls exchangeRefreshToken
+      // directly to test the race semantics, bypassing the route — so audit
+      // is intentionally NOT verified here. The emission is covered by
+      // src/app/api/mcp/token/route.test.ts (concurrent_rotation_revoked
+      // mock → asserts logAuditAsync called with FAMILY_REVOKED action).
     }
 
     // Cardinality assertions across all iterations.
@@ -301,5 +297,12 @@ describe("mcp token rotation race adversarial: fail-closed family revocation", (
     // is "never both succeed", not "race must always open".
     expect(successes + bothFailedIterations.length).toBe(RACE_ITERATIONS);
     expect(losses).toBe(successes); // by construction of the race
+
+    // Non-vacuous-pass guard: at least one iteration MUST have produced a
+    // (winner, loser) pair. If all iterations end as `bothFailed`, the test
+    // never exercised the actual race window — likely indicating a setup bug
+    // (RLS GUC not propagating, all queries returning zero rows, etc.) and
+    // the family-revocation assertions inside the loop never ran. (T4 fix.)
+    expect(successes).toBeGreaterThan(0);
   });
 });

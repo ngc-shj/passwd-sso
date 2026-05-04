@@ -278,7 +278,43 @@ describe("POST /api/mcp/token", () => {
         tenantId: "tenant-replay",
         ip: "127.0.0.1",
         userAgent: "test-agent",
-        metadata: expect.objectContaining({ familyId: "family-001" }),
+        metadata: expect.objectContaining({
+          familyId: "family-001",
+          reason: "replay",
+        }),
+      }),
+    );
+  });
+
+  // Race-loss audit log (issue #435 — fail-closed family revocation)
+  it("refresh_token: logs MCP_REFRESH_TOKEN_FAMILY_REVOKED audit on concurrent_rotation_revoked", async () => {
+    mockExchangeRefreshToken.mockResolvedValue({
+      ok: false,
+      error: "invalid_grant",
+      reason: "concurrent_rotation_revoked",
+      tenantId: "tenant-race",
+      familyId: "family-race-001",
+    });
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: VALID_REFRESH_BODY,
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_grant");
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "MCP_REFRESH_TOKEN_FAMILY_REVOKED",
+        userId: SYSTEM_ACTOR_ID,
+        actorType: "SYSTEM",
+        tenantId: "tenant-race",
+        ip: "127.0.0.1",
+        userAgent: "test-agent",
+        metadata: expect.objectContaining({
+          familyId: "family-race-001",
+          reason: "concurrent_rotation",
+        }),
       }),
     );
   });

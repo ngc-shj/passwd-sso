@@ -12,7 +12,13 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
-  withBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  // The fn argument may take a `tx` parameter (Phase 1/Phase 2 of
+  // exchangeRefreshToken). Pass the prisma mock as tx so callers can use it
+  // for tx.mcpRefreshToken.findUnique etc. Per Contract 6, purpose is the
+  // mandatory third arg — accept and ignore in mock.
+  withBypassRls: vi.fn(
+    async (prisma: unknown, fn: (tx: unknown) => unknown, _purpose: unknown) => fn(prisma),
+  ),
 }));
 
 vi.mock("@/lib/crypto/crypto-server", () => ({
@@ -139,7 +145,10 @@ describe("exchangeRefreshToken", () => {
       const newAccessId = "new-access-token-id";
       const mockAccessCreate = overrides.newAccessCreate ?? vi.fn().mockResolvedValue({ id: newAccessId });
       const mockRefreshCreate = overrides.newRefreshCreate ?? vi.fn().mockResolvedValue({ id: "new-rt-id" });
-      const mockRefreshUpdateMany = overrides.refreshUpdateMany ?? vi.fn().mockResolvedValue({});
+      // Default: CAS won (count: 1). Override with { count: 0 } to simulate
+      // race-loss path. Real Prisma updateMany returns { count: number } —
+      // tests must mirror this shape (RT1 — mock-reality alignment).
+      const mockRefreshUpdateMany = overrides.refreshUpdateMany ?? vi.fn().mockResolvedValue({ count: 1 });
       const mockRefreshFindMany = overrides.refreshFindMany ?? vi.fn().mockResolvedValue([
         { accessTokenId: VALID_RT.accessTokenId },
       ]);
@@ -344,12 +353,8 @@ describe("exchangeRefreshToken", () => {
   });
 
   it("marks the old refresh token as rotated on successful exchange via CAS updateMany", async () => {
-    const { mockRefreshUpdateMany } = await setupPrisma({
-      // setupPrisma's default updateMany returns {} — needed for revokeFamilyOutOfBand
-      // path in replay tests. Override here so the success-path CAS resolves with
-      // count: 1 (we won the race).
-      refreshUpdateMany: vi.fn().mockResolvedValue({ count: 1 }),
-    });
+    // Default mock returns { count: 1 } now; override only if needed.
+    const { mockRefreshUpdateMany } = await setupPrisma();
 
     await exchangeRefreshToken({
       refreshToken: "valid-refresh-token",
@@ -366,6 +371,40 @@ describe("exchangeRefreshToken", () => {
         data: expect.objectContaining({
           rotatedAt: expect.any(Date),
           replacedByHash: expect.any(String),
+        }),
+      }),
+    );
+  });
+
+  it("CAS race-lost (count === 0): returns concurrent_rotation_revoked + revokes family", async () => {
+    const { mockAccessUpdateMany, mockRefreshFindMany } = await setupPrisma({
+      // Loser path: CAS finds rotatedAt no longer null (winner committed first).
+      refreshUpdateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      // Family revocation lookup returns family members for the loser to revoke.
+      refreshFindMany: vi.fn().mockResolvedValue([{ accessTokenId: "winner-at-id" }]),
+    });
+
+    const result = await exchangeRefreshToken({
+      refreshToken: "valid-refresh-token",
+      clientId: "mcpc_testclient",
+      clientSecretHash: "hashed:correct-secret",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("type guard");
+    expect(result.error).toBe("invalid_grant");
+    expect(result.reason).toBe("concurrent_rotation_revoked");
+    expect(result.tenantId).toBe(VALID_RT.tenantId);
+    expect(result.familyId).toBe(VALID_RT.familyId);
+
+    // Phase 2 family revocation fired in a separate transaction.
+    expect(mockRefreshFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { familyId: VALID_RT.familyId } }),
+    );
+    expect(mockAccessUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { in: expect.arrayContaining([VALID_RT.accessTokenId, "winner-at-id"]) },
         }),
       }),
     );
