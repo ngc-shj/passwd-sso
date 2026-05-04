@@ -36,11 +36,6 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
   const [progressPhase, setProgressPhase] = useState("");
   const [progressCurrent, setProgressCurrent] = useState(0);
   const [progressTotal, setProgressTotal] = useState(0);
-  // When the data fetch reports attachmentsAffected > 0, the user must
-  // explicitly acknowledge that those attachments will become unreadable
-  // post-rotation (Phase B will introduce per-attachment CEK indirection that
-  // removes this trade-off — see plan #433 / A.4).
-  const [attachmentsAffected, setAttachmentsAffected] = useState(0);
 
   function resetForm() {
     setPassphrase("");
@@ -49,7 +44,6 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
     setProgressPhase("");
     setProgressCurrent(0);
     setProgressTotal(0);
-    setAttachmentsAffected(0);
   }
 
   function handleOpenChange(nextOpen: boolean) {
@@ -57,18 +51,17 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
     onOpenChange(nextOpen);
   }
 
-  async function performRotation(acknowledgeAttachmentDataLoss?: boolean) {
+  async function performRotation() {
     setLoading(true);
     setError("");
     try {
       const effects = await rotateKey(
         passphrase,
-        (phase, current, total) => {
+        ({ phase, current, total }) => {
           setProgressPhase(phase);
           setProgressCurrent(current);
           setProgressTotal(total);
         },
-        acknowledgeAttachmentDataLoss ? { acknowledgeAttachmentDataLoss: true } : undefined,
       );
       toast.success(t("rotateKeySuccess"));
       // Operator banners (#433/P3-F2). Each surfaces only when the
@@ -90,14 +83,10 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
       }
       handleOpenChange(false);
     } catch (err: unknown) {
-      const apiErr = err as { error?: string; attachmentsAffected?: number } | undefined;
+      const apiErr = err as { error?: string } | undefined;
       const errorCode = apiErr?.error;
 
-      if (errorCode === "ATTACHMENT_DATA_LOSS_NOT_ACKNOWLEDGED") {
-        // Surface the count and switch to the ack confirm step. The user
-        // re-submits to retry with the flag set.
-        setAttachmentsAffected(apiErr?.attachmentsAffected ?? 0);
-      } else if (errorCode === "INVALID_PASSPHRASE") {
+      if (errorCode === "INVALID_PASSPHRASE") {
         setError(tApi("invalidPassphrase"));
       } else if (errorCode === "RATE_LIMIT_EXCEEDED") {
         setError(tApi("rateLimitExceeded"));
@@ -119,17 +108,18 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
     await performRotation();
   }
 
-  async function handleAcknowledgeAndProceed() {
-    if (loading) return;
-    await performRotation(true);
-  }
-
   const phaseLabel =
     progressPhase === "entries"
       ? t("rotateKeyProgressEntries")
       : progressPhase === "history"
         ? t("rotateKeyProgressHistory")
-        : "";
+        : progressPhase === "migrating"
+          ? t("rotateKeyMigratingLegacyAttachments", { count: progressTotal })
+          : progressPhase === "rewrapping"
+            ? t("rotateKeyRewrappingAttachments")
+            : progressPhase === "committing"
+              ? t("rotateKeyProgress", { current: 1, total: 1 })
+              : "";
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -183,7 +173,7 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
           {loading && phaseLabel && (
             <div className="space-y-1">
               <p className="text-sm text-muted-foreground">{phaseLabel}</p>
-              {progressTotal > 0 && (
+              {progressTotal > 0 && progressPhase !== "migrating" && progressPhase !== "rewrapping" && (
                 <p className="text-xs text-muted-foreground">
                   {t("rotateKeyProgress", {
                     current: progressCurrent,
@@ -196,31 +186,10 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 
-          {attachmentsAffected > 0 && (
-            <div className="flex flex-col gap-3 rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>
-                  {t("rotateKeyAttachmentDataLossWarning", { count: attachmentsAffected })}
-                </span>
-              </div>
-              <Button
-                type="button"
-                variant="destructive"
-                size="sm"
-                disabled={loading}
-                onClick={handleAcknowledgeAndProceed}
-              >
-                {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                {t("rotateKeyAttachmentAcknowledge")}
-              </Button>
-            </div>
-          )}
-
           <DialogFooter>
             <Button
               type="submit"
-              disabled={!passphrase || loading || attachmentsAffected > 0}
+              disabled={!passphrase || loading}
               variant="destructive"
             >
               {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}

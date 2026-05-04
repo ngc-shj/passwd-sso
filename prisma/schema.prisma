@@ -189,27 +189,27 @@ model User {
 }
 
 model ExtensionToken {
-  id              String                   @id @default(uuid(4)) @db.Uuid
-  userId          String                   @map("user_id") @db.Uuid
-  tenantId        String                   @map("tenant_id") @db.Uuid
-  tokenHash       String                   @unique @map("token_hash") @db.VarChar(64)
-  scope           String                   @db.VarChar(255)
-  expiresAt       DateTime                 @map("expires_at") @db.Timestamptz(3)
-  createdAt       DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
-  revokedAt       DateTime?                @map("revoked_at") @db.Timestamptz(3)
-  lastUsedAt      DateTime?                @map("last_used_at") @db.Timestamptz(3)
+  id                String                   @id @default(uuid(4)) @db.Uuid
+  userId            String                   @map("user_id") @db.Uuid
+  tenantId          String                   @map("tenant_id") @db.Uuid
+  tokenHash         String                   @unique @map("token_hash") @db.VarChar(64)
+  scope             String                   @db.VarChar(255)
+  expiresAt         DateTime                 @map("expires_at") @db.Timestamptz(3)
+  createdAt         DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  revokedAt         DateTime?                @map("revoked_at") @db.Timestamptz(3)
+  lastUsedAt        DateTime?                @map("last_used_at") @db.Timestamptz(3)
   /// Refresh-token family identifier. Rows with the same familyId share an absolute lifetime.
-  familyId        String                   @map("family_id") @db.Uuid
+  familyId          String                   @map("family_id") @db.Uuid
   /// Timestamp when the family was first issued. Used to enforce the absolute cap across refreshes.
-  familyCreatedAt DateTime                 @default(now()) @map("family_created_at") @db.Timestamptz(3)
+  familyCreatedAt   DateTime                 @default(now()) @map("family_created_at") @db.Timestamptz(3)
   /// Distinguishes browser-extension tokens from iOS-app tokens. Default keeps existing rows backward-compatible.
-  clientKind      ExtensionTokenClientKind @default(BROWSER_EXTENSION) @map("client_kind")
+  clientKind        ExtensionTokenClientKind @default(BROWSER_EXTENSION) @map("client_kind")
   /// Base64url-encoded SubjectPublicKeyInfo (DER) of the device public key — populated for IOS_APP tokens.
-  devicePubkey    String?                  @map("device_pubkey") @db.Text
+  devicePubkey      String?                  @map("device_pubkey") @db.Text
   /// DPoP key SHA-256 thumbprint (RFC 7638), base64url-encoded — populated for IOS_APP tokens.
-  cnfJkt          String?                  @map("cnf_jkt") @db.VarChar(64)
-  lastUsedIp      String?                  @map("last_used_ip") @db.VarChar(64)
-  lastUsedUserAgent String?                @map("last_used_user_agent") @db.Text
+  cnfJkt            String?                  @map("cnf_jkt") @db.VarChar(64)
+  lastUsedIp        String?                  @map("last_used_ip") @db.VarChar(64)
+  lastUsedUserAgent String?                  @map("last_used_user_agent") @db.Text
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -868,6 +868,7 @@ enum AuditAction {
   ENTRY_EXPORT
   ATTACHMENT_UPLOAD
   ATTACHMENT_DELETE
+  ATTACHMENT_LEGACY_MIGRATION
   TEAM_MEMBER_ADD
   TEAM_MEMBER_INVITE
   TEAM_MEMBER_REMOVE
@@ -1194,16 +1195,21 @@ model AccessRequest {
 // ─── Attachment Models ──────────────────────────────────────────
 
 model Attachment {
-  id             String @id @default(uuid(4)) @db.Uuid
-  filename       String @db.VarChar(255)
-  contentType    String @map("content_type") @db.VarChar(100)
-  sizeBytes      Int    @map("size_bytes")
-  encryptedData  Bytes  @map("encrypted_data")
-  iv             String @db.VarChar(24)
-  authTag        String @map("auth_tag") @db.VarChar(32)
-  keyVersion     Int?   @map("key_version")
-  aadVersion     Int    @default(0) @map("aad_version")
-  encryptionMode Int    @default(0) @map("encryption_mode")
+  id                String  @id @default(uuid(4)) @db.Uuid
+  filename          String  @db.VarChar(255)
+  contentType       String  @map("content_type") @db.VarChar(100)
+  sizeBytes         Int     @map("size_bytes")
+  encryptedData     Bytes   @map("encrypted_data")
+  iv                String  @db.VarChar(24)
+  authTag           String  @map("auth_tag") @db.VarChar(32)
+  keyVersion        Int?    @map("key_version")
+  aadVersion        Int     @default(0) @map("aad_version")
+  encryptionMode    Int     @default(0) @map("encryption_mode")
+  cekEncrypted      Bytes?  @map("cek_encrypted")
+  cekIv             String? @map("cek_iv") @db.VarChar(24)
+  cekAuthTag        String? @map("cek_auth_tag") @db.VarChar(32)
+  cekKeyVersion     Int?    @map("cek_key_version")
+  cekWrapAadVersion Int?    @default(1) @map("cek_wrap_aad_version")
 
   tenantId            String   @map("tenant_id") @db.Uuid
   passwordEntryId     String?  @map("password_entry_id") @db.Uuid

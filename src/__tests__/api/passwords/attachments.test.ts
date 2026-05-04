@@ -90,6 +90,12 @@ function validFormFields(): Record<string, string | Blob> {
     filename: "test.pdf",
     contentType: "application/pdf",
     sizeBytes: "100",
+    // Mode-2 CEK fields required since Phase B (B2)
+    cekEncrypted: "Y2Vr",  // base64 of "cek"
+    cekIv: "a".repeat(24),
+    cekAuthTag: "b".repeat(32),
+    cekKeyVersion: "1",
+    cekWrapAadVersion: "1",
   };
 }
 

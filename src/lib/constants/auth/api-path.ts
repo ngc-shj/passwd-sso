@@ -133,6 +133,8 @@ export const apiPath = {
     `${API_PATH.PASSWORDS}/${entryId}/attachments`,
   passwordAttachmentById: (entryId: string, attachmentId: string) =>
     `${API_PATH.PASSWORDS}/${entryId}/attachments/${attachmentId}`,
+  passwordAttachmentMigrate: (entryId: string, attachmentId: string) =>
+    `${API_PATH.PASSWORDS}/${entryId}/attachments/${attachmentId}/migrate`,
   sendById: (sendId: string) => `${API_PATH.SENDS}/${sendId}`,
   shareLinkById: (shareId: string) => `${API_PATH.SHARE_LINKS}/${shareId}`,
   shareLinkAccessLogs: (shareId: string) =>

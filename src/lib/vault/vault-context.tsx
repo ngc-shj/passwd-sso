@@ -34,8 +34,14 @@ import {
   exportPrivateKey,
   deriveEcdhWrappingKey,
 } from "../crypto/crypto-team";
-import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
-import { API_PATH, VAULT_STATUS } from "@/lib/constants";
+import {
+  buildPersonalEntryAAD,
+  buildAttachmentAAD,
+  buildAttachmentCekWrapAAD,
+  MIN_ACCEPTED_CEK_WRAP_AAD_VERSION,
+  CURRENT_CEK_WRAP_AAD_VERSION,
+} from "@/lib/crypto/crypto-aad";
+import { API_PATH, apiPath, VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { fetchApi } from "@/lib/url-helpers";
@@ -92,7 +98,10 @@ export interface RotationEffects {
   recoveryKeyInvalidated: boolean;
   emergencyGrantsCleared: number;
   prfCredentialsCleared: number;
-  attachmentsAffected: number;
+  cekRewrapsAttempted: number;
+  cekRewrapsSucceeded: number;
+  cekRewrapsFailed: number;
+  legacyAttachmentsMigrated: number;
   invalidatedMcpAccessTokens: number | null;
   invalidatedMcpRefreshTokens: number | null;
   cacheTombstoneFailures: number | null;
@@ -122,8 +131,7 @@ interface VaultContextValue {
   changePassphrase: (currentPassphrase: string, newPassphrase: string) => Promise<void>;
   rotateKey: (
     passphrase: string,
-    onProgress?: (phase: string, current: number, total: number) => void,
-    options?: { acknowledgeAttachmentDataLoss?: boolean },
+    onProgress?: (progress: { phase: "migrating" | "rewrapping" | "committing" | "entries" | "history", current: number, total: number }) => void,
   ) => Promise<RotationEffects | null>;
   verifyPassphrase: (passphrase: string) => Promise<boolean>;
   getSecretKey: () => Uint8Array | null;
@@ -818,56 +826,185 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const rotateKey = useCallback(
     async (
       passphrase: string,
-      onProgress?: (phase: string, current: number, total: number) => void,
-      options?: { acknowledgeAttachmentDataLoss?: boolean },
+      onProgress?: (progress: { phase: "migrating" | "rewrapping" | "committing" | "entries" | "history", current: number, total: number }) => void,
     ) => {
       if (!secretKeyRef.current || !accountSaltRef.current || !encryptionKey) {
         throw new Error("Vault must be unlocked to rotate key");
       }
 
+      const oldEncryptionKey = encryptionKey;
+      const oldKeyVersion = keyVersionRef.current;
+
       // 1. Compute currentAuthHash for server-side identity verification
       const currentAuthKey = await deriveAuthKey(secretKeyRef.current);
       const currentAuthHash = await computeAuthHash(currentAuthKey);
 
-      // 2. Fetch all entries and history via GET /api/vault/rotate-key/data
+      // 2. Fetch rotation data (entries, history, attachment CEK data, mode-0 IDs)
       const dataRes = await fetchApi(API_PATH.VAULT_ROTATE_KEY_DATA);
       if (!dataRes.ok) {
         const err = await dataRes.json().catch(() => ({}));
         throw err;
       }
-      const { entries, historyEntries, attachmentsAffected } = await dataRes.json();
+      const rotationData = await dataRes.json() as {
+        entries: Array<{
+          id: string;
+          encryptedBlob: string;
+          blobIv: string;
+          blobAuthTag: string;
+          encryptedOverview: string;
+          overviewIv: string;
+          overviewAuthTag: string;
+          keyVersion: number;
+          aadVersion: number;
+        }>;
+        historyEntries: Array<{
+          id: string;
+          entryId: string;
+          encryptedBlob: string;
+          blobIv: string;
+          blobAuthTag: string;
+          keyVersion: number;
+          aadVersion: number;
+        }>;
+        mode2Attachments: Array<{
+          id: string;
+          entryId: string;
+          cekEncrypted: string | null; // base64
+          cekIv: string | null;
+          cekAuthTag: string | null;
+          cekKeyVersion: number | null;
+          cekWrapAadVersion: number | null;
+        }>;
+        mode0Attachments: Array<{ id: string; entryId: string }>;
+        mode0AttachmentsOverflow: boolean;
+      };
 
-      // Personal-entry attachments are encrypted with the current encryption
-      // key directly. Phase A leaves them in place after rotation (Phase B
-      // will introduce per-attachment CEK indirection). To avoid silently
-      // destroying the user's attachments, we surface the count BEFORE the
-      // expensive re-encryption work and require an explicit acknowledgement.
-      // The dialog catches this error, shows a confirm step, and retries with
-      // acknowledgeAttachmentDataLoss: true. See plan #433 / A.4.
-      if (
-        typeof attachmentsAffected === "number" &&
-        attachmentsAffected > 0 &&
-        options?.acknowledgeAttachmentDataLoss !== true
-      ) {
-        throw {
-          error: "ATTACHMENT_DATA_LOSS_NOT_ACKNOWLEDGED",
-          attachmentsAffected,
-        };
+      // 3. Migrate all mode-0 attachments to mode-2 using OLD encryption key.
+      //    Loop until mode0Attachments is empty (handles overflow pagination).
+      let legacyAttachmentsMigrated = 0;
+      let currentRotationData = rotationData;
+      while (currentRotationData.mode0Attachments.length > 0) {
+        const total = currentRotationData.mode0Attachments.length;
+        for (let i = 0; i < total; i++) {
+          const { id: attId, entryId } = currentRotationData.mode0Attachments[i];
+          onProgress?.({ phase: "migrating", current: i, total });
+
+          // GET the legacy attachment.
+          const attRes = await fetchApi(apiPath.passwordAttachmentById(entryId, attId));
+          if (!attRes.ok) {
+            throw new Error(`MIGRATE_FETCH_FAILED:${attId}`);
+          }
+          const att = (await attRes.json()) as {
+            encryptedData: string; // base64
+            iv: string;
+            authTag: string;
+            encryptionMode: number;
+          };
+          if (att.encryptionMode !== 0) {
+            // Concurrent migration — skip; next iteration will pick up the
+            // updated mode0Attachments list.
+            continue;
+          }
+
+          // Decode stored ciphertext bytes for body decrypt + hash binding.
+          const storedBinary = atob(att.encryptedData);
+          const storedBytes = new Uint8Array(storedBinary.length);
+          for (let j = 0; j < storedBinary.length; j++) {
+            storedBytes[j] = storedBinary.charCodeAt(j);
+          }
+
+          // I5.4 — bind the migration request to the exact stored bytes the
+          // client decrypted (defense against session-attacker body replacement).
+          const hashBuf = await crypto.subtle.digest("SHA-256", storedBytes);
+          const hashBytes = new Uint8Array(hashBuf);
+          let oldEncryptedDataHash = "";
+          for (const b of hashBytes) {
+            oldEncryptedDataHash += b.toString(16).padStart(2, "0");
+          }
+
+          // Decrypt body with OLD encryption key + data AAD.
+          const dataAad = buildAttachmentAAD(entryId, attId);
+          const plaintext = await decryptBinary(
+            { ciphertext: storedBytes, iv: att.iv, authTag: att.authTag },
+            oldEncryptionKey,
+            dataAad,
+          );
+
+          // Generate fresh CEK, encrypt body under CEK + same data AAD.
+          const cekKey = await crypto.subtle.generateKey(
+            { name: "AES-GCM", length: 256 },
+            true,
+            ["encrypt", "decrypt"],
+          );
+          const newBody = await encryptBinary(plaintext, cekKey, dataAad);
+
+          // Wrap CEK under OLD encryption key + wrap AAD with OLD keyVersion.
+          const cekRaw = await crypto.subtle.exportKey("raw", cekKey);
+          const wrapAad = buildAttachmentCekWrapAAD(entryId, attId, oldKeyVersion, 1);
+          const wrappedCek = await encryptBinary(
+            cekRaw,
+            oldEncryptionKey,
+            wrapAad,
+          );
+          // I8.2 zeroize exported raw CEK bytes.
+          new Uint8Array(cekRaw).fill(0);
+
+          // Base64-encode CEK ciphertext and body ciphertext for the JSON PUT.
+          const encodeB64 = (bytes: Uint8Array): string => {
+            let s = "";
+            for (const byte of bytes) s += String.fromCharCode(byte);
+            return btoa(s);
+          };
+
+          const migrateRes = await fetchApi(
+            apiPath.passwordAttachmentMigrate(entryId, attId),
+            {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                oldEncryptedDataHash,
+                encryptedData: encodeB64(newBody.ciphertext),
+                iv: newBody.iv,
+                authTag: newBody.authTag,
+                cekEncrypted: encodeB64(wrappedCek.ciphertext),
+                cekIv: wrappedCek.iv,
+                cekAuthTag: wrappedCek.authTag,
+                cekKeyVersion: oldKeyVersion,
+                cekWrapAadVersion: CURRENT_CEK_WRAP_AAD_VERSION,
+              }),
+            },
+          );
+          if (!migrateRes.ok) {
+            const err = (await migrateRes.json().catch(() => ({}))) as { error?: string };
+            throw new Error(err.error ?? `MIGRATE_FAILED:${attId}`);
+          }
+          legacyAttachmentsMigrated += 1;
+          onProgress?.({ phase: "migrating", current: i + 1, total });
+        }
+
+        // Re-fetch rotation data to pick up next page (overflow) and observe
+        // any newly mode-2 rows for the rewrap step.
+        const refetchRes = await fetchApi(API_PATH.VAULT_ROTATE_KEY_DATA);
+        if (!refetchRes.ok) {
+          throw new Error("ROTATE_DATA_REFETCH_FAILED");
+        }
+        currentRotationData = (await refetchRes.json()) as typeof currentRotationData;
       }
 
-      // 3. Generate new secret key
+      const { entries, historyEntries } = rotationData;
+
+      // 4. Generate new secret key and derive new encryption key
       const newSecretKey = generateSecretKey();
-
-      // 4. Derive new encryption key
       const newEncKey = await deriveEncryptionKey(newSecretKey);
+      const newKeyVersion = oldKeyVersion + 1;
 
-      // 5. Re-encrypt entries: decrypt with current encryptionKey, re-encrypt with newEncKey
+      // 5. Re-encrypt entries: decrypt with OLD encryptionKey, re-encrypt with newEncKey
       const userId = session?.user?.id;
       const totalEntries = entries.length;
       const reencryptedEntries = [];
       for (let i = 0; i < totalEntries; i++) {
         const entry = entries[i];
-        onProgress?.("entries", i, totalEntries);
+        onProgress?.({ phase: "entries", current: i, total: totalEntries });
 
         const entryAad = entry.aadVersion >= 1 && userId
           ? buildPersonalEntryAAD(userId, entry.id)
@@ -879,7 +1016,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
             iv: entry.blobIv,
             authTag: entry.blobAuthTag,
           },
-          encryptionKey!,
+          oldEncryptionKey,
           entryAad,
         );
         const newBlob = await encryptData(decryptedBlob, newEncKey, entryAad);
@@ -890,7 +1027,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
             iv: entry.overviewIv,
             authTag: entry.overviewAuthTag,
           },
-          encryptionKey!,
+          oldEncryptionKey,
           entryAad,
         );
         const newOverview = await encryptData(decryptedOverview, newEncKey, entryAad);
@@ -902,16 +1039,15 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           aadVersion: entry.aadVersion,
         });
       }
-      onProgress?.("entries", totalEntries, totalEntries);
+      onProgress?.({ phase: "entries", current: totalEntries, total: totalEntries });
 
       // 6. Re-encrypt history entries
       const totalHistory = historyEntries.length;
       const reencryptedHistory = [];
       for (let i = 0; i < totalHistory; i++) {
         const histEntry = historyEntries[i];
-        onProgress?.("history", i, totalHistory);
+        onProgress?.({ phase: "history", current: i, total: totalHistory });
 
-        // History entries use the parent entry's AAD (entryId, not histEntry.id)
         const histAad = histEntry.aadVersion >= 1 && userId
           ? buildPersonalEntryAAD(userId, histEntry.entryId)
           : undefined;
@@ -922,7 +1058,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
             iv: histEntry.blobIv,
             authTag: histEntry.blobAuthTag,
           },
-          encryptionKey!,
+          oldEncryptionKey,
           histAad,
         );
         const newBlob = await encryptData(decryptedBlob, newEncKey, histAad);
@@ -933,9 +1069,70 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           aadVersion: histEntry.aadVersion,
         });
       }
-      onProgress?.("history", totalHistory, totalHistory);
+      onProgress?.({ phase: "history", current: totalHistory, total: totalHistory });
 
-      // 7. Re-wrap ECDH private key with new secret key
+      // 7. Rewrap mode-2 attachment CEKs with new encryption key
+      onProgress?.({ phase: "rewrapping", current: 0, total: currentRotationData.mode2Attachments.length });
+      const attachmentCekRewraps = [];
+      for (let i = 0; i < currentRotationData.mode2Attachments.length; i++) {
+        const att = currentRotationData.mode2Attachments[i];
+        if (
+          att.cekEncrypted == null ||
+          att.cekIv == null ||
+          att.cekAuthTag == null ||
+          att.cekKeyVersion == null ||
+          att.cekWrapAadVersion == null
+        ) {
+          // Inconsistent CEK data — skip; server will reject at ATTACHMENT_CEK_MANIFEST_MISMATCH
+          continue;
+        }
+        // S3 defense: a server-side attacker with DB write access could flip
+        // cekWrapAadVersion below the floor; reject before AES-GCM unwrap so
+        // the client never accepts a downgraded format. Plan I8a.3 / S3.
+        if (att.cekWrapAadVersion < MIN_ACCEPTED_CEK_WRAP_AAD_VERSION) {
+          continue;
+        }
+
+        // Unwrap CEK with old encryptionKey
+        const oldWrapAad = buildAttachmentCekWrapAAD(att.entryId, att.id, att.cekKeyVersion, att.cekWrapAadVersion);
+        const binaryStr = atob(att.cekEncrypted);
+        const cekEncBytes = new Uint8Array(binaryStr.length);
+        for (let j = 0; j < binaryStr.length; j++) {
+          cekEncBytes[j] = binaryStr.charCodeAt(j);
+        }
+        const cekRaw = await decryptBinary(
+          { ciphertext: cekEncBytes, iv: att.cekIv, authTag: att.cekAuthTag },
+          oldEncryptionKey,
+          oldWrapAad,
+        );
+
+        // Rewrap CEK with new encryptionKey (I8.1: manual AES-GCM, not wrapKey)
+        const newWrapAad = buildAttachmentCekWrapAAD(att.entryId, att.id, newKeyVersion, 1);
+        const newWrappedCek = await encryptBinary(cekRaw, newEncKey, newWrapAad);
+
+        // Zeroize raw CEK after use (I8.2)
+        new Uint8Array(cekRaw).fill(0);
+
+        // Encode new wrapped CEK as base64
+        let newCekB64 = "";
+        for (const byte of newWrappedCek.ciphertext) {
+          newCekB64 += String.fromCharCode(byte);
+        }
+        newCekB64 = btoa(newCekB64);
+
+        attachmentCekRewraps.push({
+          id: att.id,
+          cekEncrypted: newCekB64,
+          cekIv: newWrappedCek.iv,
+          cekAuthTag: newWrappedCek.authTag,
+          cekKeyVersion: newKeyVersion,
+          cekWrapAadVersion: CURRENT_CEK_WRAP_AAD_VERSION,
+        });
+
+        onProgress?.({ phase: "rewrapping", current: i + 1, total: currentRotationData.mode2Attachments.length });
+      }
+
+      // 8. Re-wrap ECDH private key with new secret key
       const ecdhWrapKey = await deriveEcdhWrappingKey(newSecretKey);
       if (!ecdhPrivateKeyBytesRef.current) {
         throw new Error("ECDH_KEY_UNAVAILABLE");
@@ -949,18 +1146,19 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         ecdhWrapKey,
       );
 
-      // 8. Generate new accountSalt, derive wrapping key, wrap new secretKey
+      // 9. Generate new accountSalt, derive wrapping key, wrap new secretKey
       const newAccountSalt = generateAccountSalt();
       const newWrappingKey = await deriveWrappingKey(passphrase, newAccountSalt);
       const newWrappedKey = await wrapSecretKey(newSecretKey, newWrappingKey);
 
-      // 9. Compute new auth credentials, verifier, and verification artifact
+      // 10. Compute new auth credentials, verifier, and verification artifact
       const newAuthKey = await deriveAuthKey(newSecretKey);
       const newAuthHash = await computeAuthHash(newAuthKey);
       const newVerifierHash = await computePassphraseVerifier(passphrase, newAccountSalt);
       const verificationArtifact = await createVerificationArtifact(newEncKey);
 
-      // 10. POST to /api/vault/rotate-key
+      // 11. POST to /api/vault/rotate-key
+      onProgress?.({ phase: "committing", current: 0, total: 1 });
       const res = await fetchApi(API_PATH.VAULT_ROTATE_KEY, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -978,9 +1176,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           encryptedEcdhPrivateKey: hexEncode(ecdhEncrypted.ciphertext),
           ecdhPrivateKeyIv: ecdhEncrypted.iv,
           ecdhPrivateKeyAuthTag: ecdhEncrypted.authTag,
-          ...(options?.acknowledgeAttachmentDataLoss === true
-            ? { acknowledgeAttachmentDataLoss: true }
-            : {}),
+          attachmentCekRewraps,
+          legacyAttachmentsMigratedThisCycle: legacyAttachmentsMigrated,
         }),
       });
 
@@ -992,7 +1189,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       const result = await res.json();
 
-      // 11. Update in-memory state
+      // 12. Update in-memory state
       secretKeyRef.current = new Uint8Array(newSecretKey);
       keyVersionRef.current = result.keyVersion ?? keyVersionRef.current + 1;
       accountSaltRef.current = newAccountSalt;
@@ -1001,13 +1198,15 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         iv: newWrappedKey.iv,
         authTag: newWrappedKey.authTag,
       };
-      // ecdhPrivateKeyBytesRef remains valid — the private key bytes themselves
-      // did not change, only the wrapping key changed.
+      // ecdhPrivateKeyBytesRef remains valid — private key bytes did not change.
       newSecretKey.fill(0);
       setEncryptionKey(newEncKey);
       // The dialog uses these counts to surface operator banners.
       const effects = (result as { rotationEffects?: RotationEffects }).rotationEffects;
-      return effects ?? null;
+      if (effects) {
+        return { ...effects, legacyAttachmentsMigrated };
+      }
+      return null;
     },
     [encryptionKey, session?.user?.id],
   );

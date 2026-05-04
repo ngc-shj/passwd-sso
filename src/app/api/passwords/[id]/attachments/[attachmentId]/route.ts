@@ -54,6 +54,7 @@ async function handleGET(
     attachmentId,
     entryId: id,
   });
+  const isMode2 = attachment.encryptionMode === 2;
   // Return encrypted data + crypto metadata for client-side decryption
   return NextResponse.json({
     id: attachment.id,
@@ -65,6 +66,14 @@ async function handleGET(
     authTag: attachment.authTag,
     keyVersion: attachment.keyVersion,
     aadVersion: attachment.aadVersion,
+    encryptionMode: attachment.encryptionMode,
+    cekEncrypted: isMode2 && attachment.cekEncrypted
+      ? Buffer.from(attachment.cekEncrypted).toString("base64")
+      : null,
+    cekIv: isMode2 ? attachment.cekIv : null,
+    cekAuthTag: isMode2 ? attachment.cekAuthTag : null,
+    cekKeyVersion: isMode2 ? attachment.cekKeyVersion : null,
+    cekWrapAadVersion: isMode2 ? attachment.cekWrapAadVersion : null,
   });
 }
 

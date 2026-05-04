@@ -34,6 +34,7 @@
   "ENTRY_EXPORT": "エクスポート実行",
   "ATTACHMENT_UPLOAD": "添付ファイルのアップロード",
   "ATTACHMENT_DELETE": "添付ファイルの削除",
+  "ATTACHMENT_LEGACY_MIGRATION": "添付ファイルの暗号化形式を更新",
   "TEAM_MEMBER_ADD": "メンバー追加",
   "TEAM_MEMBER_INVITE": "メンバー招待",
   "TEAM_MEMBER_REMOVE": "メンバー削除",

@@ -1,14 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { ATTACHMENT_MANIFEST_CAP } from "@/lib/validations/common";
 
 const { mockAuth, mockPrismaPasswordEntry, mockPrismaPasswordEntryHistory, mockPrismaUser, mockPrismaAttachment, mockWithUserTenantRls, mockRateLimiterCheck } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaPasswordEntry: { findMany: vi.fn() },
   mockPrismaPasswordEntryHistory: { findMany: vi.fn() },
   mockPrismaUser: { findUnique: vi.fn() },
-  // attachment.count drives the pre-flight data-loss warning in the rotation
-  // dialog. See plan #433 / A.4 + Step 7a.
-  mockPrismaAttachment: { count: vi.fn() },
+  mockPrismaAttachment: { findMany: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockRateLimiterCheck: vi.fn(),
 }));
@@ -58,6 +57,24 @@ const sampleHistory = {
   aadVersion: 1,
 };
 
+// Helper to build a mode-2 attachment row
+function makeMode2Row(id: string, entryId: string) {
+  return {
+    id,
+    passwordEntryId: entryId,
+    cekEncrypted: Buffer.from("fake-cek-bytes"),
+    cekIv: "a".repeat(24),
+    cekAuthTag: "b".repeat(32),
+    cekKeyVersion: 1,
+    cekWrapAadVersion: 1,
+  };
+}
+
+// Helper to build a mode-0 attachment row
+function makeMode0Row(id: string, entryId: string) {
+  return { id, passwordEntryId: entryId };
+}
+
 describe("GET /api/vault/rotate-key/data", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -70,8 +87,8 @@ describe("GET /api/vault/rotate-key/data", () => {
       ecdhPrivateKeyIv: "a".repeat(24),
       ecdhPrivateKeyAuthTag: "b".repeat(32),
     });
-    mockPrismaAttachment.count.mockResolvedValue(0);
-    // withUserTenantRls resolves all four queries in Promise.all
+    // Default: no mode-2 or mode-0 attachments
+    mockPrismaAttachment.findMany.mockResolvedValue([]);
     mockWithUserTenantRls.mockImplementation(async (_userId: string, fn: () => unknown) => fn());
   });
 
@@ -91,7 +108,7 @@ describe("GET /api/vault/rotate-key/data", () => {
     expect(res.status).toBe(429);
   });
 
-  it("returns entries, historyEntries, and ecdhPrivateKey on success", async () => {
+  it("returns entries, historyEntries, ecdhPrivateKey, and attachment arrays on success", async () => {
     const res = await GET(
       createRequest("GET", "http://localhost/api/vault/rotate-key/data")
     );
@@ -103,19 +120,10 @@ describe("GET /api/vault/rotate-key/data", () => {
     expect(json.historyEntries[0].id).toBe("00000000-0000-4000-a000-000000000002");
     expect(json.ecdhPrivateKey).not.toBeNull();
     expect(json.ecdhPrivateKey.encryptedEcdhPrivateKey).toBe("x".repeat(100));
-    // attachmentsAffected drives the rotation dialog's data-loss warning
-    // (#433/A.4 + post-impl review T4).
-    expect(json.attachmentsAffected).toBe(0);
-  });
-
-  it("returns attachmentsAffected reflecting personal-entry attachment count", async () => {
-    mockPrismaAttachment.count.mockResolvedValue(3);
-    const res = await GET(
-      createRequest("GET", "http://localhost/api/vault/rotate-key/data")
-    );
-    expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json.attachmentsAffected).toBe(3);
+    // Phase B fields are present
+    expect(Array.isArray(json.mode2Attachments)).toBe(true);
+    expect(Array.isArray(json.mode0Attachments)).toBe(true);
+    expect(typeof json.mode0AttachmentsOverflow).toBe("boolean");
   });
 
   it("returns null ecdhPrivateKey when user has no ECDH keys", async () => {
@@ -149,5 +157,78 @@ describe("GET /api/vault/rotate-key/data", () => {
       createRequest("GET", "http://localhost/api/vault/rotate-key/data")
     );
     expect(mockWithUserTenantRls).toHaveBeenCalledWith("user-1", expect.any(Function));
+  });
+
+  // ── Phase B: mode-2 attachment CEK fields ────────────────────────────
+
+  it("returns mode2Attachments array with CEK fields when mode-2 attachments exist", async () => {
+    const entryId = "00000000-0000-4000-a000-000000000001";
+    const attId1 = "00000000-0000-4000-a000-000000000010";
+    const attId2 = "00000000-0000-4000-a000-000000000011";
+    // The route calls attachment.findMany twice: once for mode-2, once for mode-0.
+    // We mock the first call (mode-2) to return rows, second call (mode-0) returns [].
+    mockPrismaAttachment.findMany
+      .mockResolvedValueOnce([makeMode2Row(attId1, entryId), makeMode2Row(attId2, entryId)])
+      .mockResolvedValueOnce([]);
+
+    const res = await GET(
+      createRequest("GET", "http://localhost/api/vault/rotate-key/data")
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.mode2Attachments).toHaveLength(2);
+    const att = json.mode2Attachments[0];
+    expect(att.id).toBe(attId1);
+    expect(att.entryId).toBe(entryId);
+    // cekEncrypted is base64-encoded
+    expect(typeof att.cekEncrypted).toBe("string");
+    expect(att.cekIv).toBe("a".repeat(24));
+    expect(att.cekAuthTag).toBe("b".repeat(32));
+    expect(att.cekKeyVersion).toBe(1);
+    expect(att.cekWrapAadVersion).toBe(1);
+  });
+
+  // ── Phase B: mode-0 attachment fields (D1 field names) ───────────────
+
+  it("returns mode0Attachments array with { id, entryId } shape", async () => {
+    const entryId = "00000000-0000-4000-a000-000000000001";
+    const attId1 = "00000000-0000-4000-a000-000000000020";
+    const attId2 = "00000000-0000-4000-a000-000000000021";
+    // First call: mode-2 returns [], second call: mode-0 returns rows
+    mockPrismaAttachment.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([makeMode0Row(attId1, entryId), makeMode0Row(attId2, entryId)]);
+
+    const res = await GET(
+      createRequest("GET", "http://localhost/api/vault/rotate-key/data")
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.mode0Attachments).toHaveLength(2);
+    expect(json.mode0Attachments[0]).toEqual({ id: attId1, entryId });
+    expect(json.mode0Attachments[1]).toEqual({ id: attId2, entryId });
+    // D1: must NOT contain mode0AttachmentIds
+    expect(json).not.toHaveProperty("mode0AttachmentIds");
+    expect(json.mode0AttachmentsOverflow).toBe(false);
+  });
+
+  it("returns mode0AttachmentsOverflow: true when more than ATTACHMENT_MANIFEST_CAP mode-0 rows exist", async () => {
+    // Route over-fetches by 1 to detect overflow without a separate count query
+    const overflowRows = Array.from({ length: ATTACHMENT_MANIFEST_CAP + 1 }, (_, i) => ({
+      id: `00000000-0000-4000-a000-${String(i).padStart(12, "0")}`,
+      passwordEntryId: "00000000-0000-4000-a000-000000000001",
+    }));
+    mockPrismaAttachment.findMany
+      .mockResolvedValueOnce([])     // mode-2 call returns empty
+      .mockResolvedValueOnce(overflowRows); // mode-0 call returns CAP+1
+
+    const res = await GET(
+      createRequest("GET", "http://localhost/api/vault/rotate-key/data")
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.mode0AttachmentsOverflow).toBe(true);
+    // The response should only contain up to ATTACHMENT_MANIFEST_CAP items
+    expect(json.mode0Attachments.length).toBeLessThanOrEqual(ATTACHMENT_MANIFEST_CAP);
   });
 });

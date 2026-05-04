@@ -74,8 +74,10 @@
   "rotateKeyProgressEntries": "Re-encrypting entries…",
   "rotateKeyProgressHistory": "Re-encrypting history…",
   "rotateKeyProgress": "{current} / {total}",
-  "rotateKeyAttachmentDataLossWarning": "Your vault has {count, plural, one {# attachment} other {# attachments}} encrypted with the current key. After rotation they will be unreadable. Cancel to export them first, or click below to acknowledge and proceed.",
-  "rotateKeyAttachmentAcknowledge": "Acknowledge data loss and rotate",
+  "rotateKeyMigratingLegacyAttachments": "Upgrading {count} attachments to new format…",
+  "rotateKeyRewrappingAttachments": "Re-securing attachments…",
+  "legacyAttachmentHint": "Legacy format — will upgrade on next vault rotation",
+  "outdatedAttachmentFormat": "This attachment cannot be decrypted. Restore from a backup or re-upload the original file.",
   "rotateKeyCacheTombstoneFailureBanner": "Some session caches did not invalidate during rotation (Redis outage). Sign out other devices manually and revoke any active sessions from Settings → Sessions.",
   "rotateKeyInvalidationFailedBanner": "Token revocation after rotation could not be confirmed. Pre-rotation API keys / MCP tokens may still be live; revoke them manually from Settings.",
   "rotateKeyMcpRevokedBanner": "{count, plural, one {# pre-rotation MCP token was} other {# pre-rotation MCP tokens were}} revoked. You may need to re-mint at /tenant/service-accounts."

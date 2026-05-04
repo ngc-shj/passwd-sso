@@ -135,9 +135,38 @@ async function handlePOST(
   const sizeBytes = formData.get("sizeBytes") as string | null;
   const keyVersion = formData.get("keyVersion") as string | null;
   const aadVersionStr = formData.get("aadVersion") as string | null;
+  const cekEncrypted = formData.get("cekEncrypted") as string | null;
+  const cekIv = formData.get("cekIv") as string | null;
+  const cekAuthTag = formData.get("cekAuthTag") as string | null;
+  const cekKeyVersionStr = formData.get("cekKeyVersion") as string | null;
+  const cekWrapAadVersionStr = formData.get("cekWrapAadVersion") as string | null;
 
   if (!file || !iv || !authTag || !filename || !contentType || !sizeBytes) {
     return errorResponse(API_ERROR.MISSING_REQUIRED_FIELDS, 400);
+  }
+
+  // Require mode-2 CEK fields
+  if (!cekEncrypted || !cekIv || !cekAuthTag || !cekKeyVersionStr || !cekWrapAadVersionStr) {
+    return errorResponse(API_ERROR.MISSING_REQUIRED_FIELDS, 400);
+  }
+  if (!/^[0-9a-f]{24}$/.test(cekIv)) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
+  if (!/^[0-9a-f]{32}$/.test(cekAuthTag)) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
+  const cekKeyVersion = parseInt(cekKeyVersionStr, 10);
+  if (Number.isNaN(cekKeyVersion) || cekKeyVersion < 1) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
+  const cekWrapAadVersion = parseInt(cekWrapAadVersionStr, 10);
+  if (Number.isNaN(cekWrapAadVersion) || cekWrapAadVersion < 1) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
+
+  // I3.3: keyVersion from request is ignored in mode-2 uploads
+  if (keyVersion !== null) {
+    console.warn("[attachment upload] keyVersion field received but ignored — server always sets encryptionMode: 2");
   }
 
   // Validate iv/authTag format (hex strings)
@@ -198,8 +227,14 @@ async function handlePOST(
           encryptedData: Buffer.from(storedBlob),
           iv,
           authTag,
-          keyVersion: keyVersion ? parseInt(keyVersion, 10) : null,
+          // keyVersion from request is intentionally omitted (I3.3): server sets encryptionMode: 2
           aadVersion,
+          encryptionMode: 2,
+          cekEncrypted: Buffer.from(cekEncrypted, "base64"),
+          cekIv,
+          cekAuthTag,
+          cekKeyVersion,
+          cekWrapAadVersion,
           tenantId: entry.tenantId,
           passwordEntryId: id,
           createdById: session.user.id,

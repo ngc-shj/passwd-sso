@@ -203,8 +203,13 @@ describe("seedAttachment", () => {
     // enforces ===1) and encryption_mode=0 (direct vault key wrap, the
     // personal default). Drift on either would let the row pass insertion
     // but break the rotation route's count semantics.
-    expect(params[11]).toBe(1); // aad_version
-    expect(params[12]).toBe(0); // encryption_mode
+    // Param layout (0-indexed): attachmentId[0], entryId[1], tenantId[2],
+    //   createdById[3], filename[4], content_type[5], size_bytes[6],
+    //   encryptedData[7], iv[8], authTag[9], cekEncrypted[10], cekIv[11],
+    //   cekAuthTag[12], key_version[13], cek_key_version[14],
+    //   cek_wrap_aad_version[15], aad_version[16], encryption_mode[17], created_at[18]
+    expect(params[16]).toBe(1); // aad_version
+    expect(params[17]).toBe(0); // encryption_mode
   });
 
   it("uses the supplied filename when provided (else default)", async () => {
