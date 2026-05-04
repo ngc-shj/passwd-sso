@@ -299,9 +299,15 @@ describe("exchangeRefreshToken", () => {
         where: { familyId: VALID_RT.familyId },
       }),
     );
+    // Phase 2 revokeFamilyOutOfBand seeds the dedup set with the original
+    // refresh token's accessTokenId (defense-in-depth — even if findMany
+    // misses it for some reason). So the in clause includes both the
+    // original AT and the family-mapped ATs.
     expect(mockAccessUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ id: { in: ["at-1", "at-2"] } }),
+        where: expect.objectContaining({
+          id: { in: expect.arrayContaining([VALID_RT.accessTokenId, "at-1", "at-2"]) },
+        }),
       }),
     );
   });
@@ -337,8 +343,13 @@ describe("exchangeRefreshToken", () => {
     if (!result.ok) expect(result.error).toBe("invalid_client");
   });
 
-  it("marks the old refresh token as rotated on successful exchange", async () => {
-    const { mockRefreshUpdate } = await setupPrisma();
+  it("marks the old refresh token as rotated on successful exchange via CAS updateMany", async () => {
+    const { mockRefreshUpdateMany } = await setupPrisma({
+      // setupPrisma's default updateMany returns {} — needed for revokeFamilyOutOfBand
+      // path in replay tests. Override here so the success-path CAS resolves with
+      // count: 1 (we won the race).
+      refreshUpdateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    });
 
     await exchangeRefreshToken({
       refreshToken: "valid-refresh-token",
@@ -346,10 +357,12 @@ describe("exchangeRefreshToken", () => {
       clientSecretHash: "hashed:correct-secret",
     });
 
-    expect(mockRefreshUpdate).toHaveBeenCalledOnce();
-    expect(mockRefreshUpdate).toHaveBeenCalledWith(
+    expect(mockRefreshUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: VALID_RT.id },
+        where: expect.objectContaining({
+          id: VALID_RT.id,
+          rotatedAt: null,
+        }),
         data: expect.objectContaining({
           rotatedAt: expect.any(Date),
           replacedByHash: expect.any(String),

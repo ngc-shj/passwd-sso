@@ -183,8 +183,8 @@ describe("mcp token rotation race adversarial: fail-closed family revocation", (
   it(`race loop (N=${RACE_ITERATIONS}): concurrent use → exactly one success + one race-loss + family revoked`, async () => {
     let losses = 0;
     let successes = 0;
-    let bothSucceededIterations: number[] = [];
-    let bothFailedIterations: number[] = [];
+    const bothSucceededIterations: number[] = [];
+    const bothFailedIterations: number[] = [];
 
     for (let i = 0; i < RACE_ITERATIONS; i++) {
       const seeded = await seedTokenPair(ctx, {

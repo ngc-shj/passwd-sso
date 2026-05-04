@@ -200,6 +200,7 @@
   "MCP_CONSENT_DENY": "Denied MCP authorization",
   "MCP_REFRESH_TOKEN_ROTATE": "Rotated MCP refresh token",
   "MCP_REFRESH_TOKEN_REPLAY": "Detected MCP refresh token replay",
+  "MCP_REFRESH_TOKEN_FAMILY_REVOKED": "Revoked MCP refresh token family",
   "subTabTenantLogs": "Logs",
   "subTabBreakglass": "Break-Glass",
   "scopeLabel": "Scope",

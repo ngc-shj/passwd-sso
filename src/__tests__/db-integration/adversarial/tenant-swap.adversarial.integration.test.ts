@@ -16,7 +16,6 @@ describe("tenant-swap adversarial: cross-tenant resource access blocked by RLS",
   let ctx: TestContext;
   let tenantA_id: string;
   let tenantB_id: string;
-  let userA_id: string;
   let userB_id: string;
 
   beforeAll(async () => {
@@ -30,7 +29,11 @@ describe("tenant-swap adversarial: cross-tenant resource access blocked by RLS",
   beforeEach(async () => {
     tenantA_id = await ctx.createTenant();
     tenantB_id = await ctx.createTenant();
-    userA_id = await ctx.createUser(tenantA_id);
+    // userA is created so tenant A has a member (defense-in-depth: prevents
+    // a "tenant has no users → empty result is meaningless" interpretation
+    // of the negative assertion). Result not bound — the seed itself is the
+    // contribution.
+    await ctx.createUser(tenantA_id);
     userB_id = await ctx.createUser(tenantB_id);
   });
 
