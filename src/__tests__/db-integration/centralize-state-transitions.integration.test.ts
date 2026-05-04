@@ -174,9 +174,16 @@ describe("centralize-state-transitions — integration", () => {
     return r.rows[0] as { status: string; owner_ephemeral_public_key: string | null; revoked_at: Date | null };
   }
 
+  // Counts audit emissions by tenant + action. Queries audit_outbox (where
+  // logAuditAsync writes initially) instead of audit_logs (where the
+  // outbox-worker drains rows). CI does not run the worker process, so
+  // audit_logs would always be empty there. The outbox row is the
+  // authoritative "audit was emitted" signal independent of worker liveness.
   async function countAuditRows(action: string): Promise<number> {
     const r = await ctx.su.pool.query(
-      `SELECT count(*) FROM audit_logs WHERE tenant_id = $1::uuid AND action = $2`,
+      `SELECT count(*) FROM audit_outbox
+       WHERE tenant_id = $1::uuid
+         AND payload->>'action' = $2`,
       [tenantId, action],
     );
     return parseInt(r.rows[0].count, 10);
