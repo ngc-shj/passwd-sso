@@ -678,4 +678,64 @@ describe("POST /api/passwords/[id]/attachments", () => {
     expect(res.status).toBe(400);
     expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
   });
+
+  it("rejects upload with malformed base64 in cekEncrypted (base64url chars) → 400 VALIDATION_ERROR", async () => {
+    // base64url uses `-` / `_`; standard base64 regex must reject them.
+    const res = await POST(
+      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+        file: new Blob(["encrypted-data"]),
+        iv: "a".repeat(24),
+        authTag: "b".repeat(32),
+        filename: "test.pdf",
+        contentType: "application/pdf",
+        sizeBytes: "100",
+        ...validCekFields(),
+        cekEncrypted: "Y2V-",
+      }),
+      createParams("pw-1"),
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(mockPutObject).not.toHaveBeenCalled();
+    expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects upload with cekEncrypted length not multiple of 4 → 400 VALIDATION_ERROR", async () => {
+    const res = await POST(
+      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+        file: new Blob(["encrypted-data"]),
+        iv: "a".repeat(24),
+        authTag: "b".repeat(32),
+        filename: "test.pdf",
+        contentType: "application/pdf",
+        sizeBytes: "100",
+        ...validCekFields(),
+        cekEncrypted: "abc",
+      }),
+      createParams("pw-1"),
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects upload with cekEncrypted containing the OTHER base64url char `_` → 400", async () => {
+    const res = await POST(
+      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+        file: new Blob(["encrypted-data"]),
+        iv: "a".repeat(24),
+        authTag: "b".repeat(32),
+        filename: "test.pdf",
+        contentType: "application/pdf",
+        sizeBytes: "100",
+        ...validCekFields(),
+        cekEncrypted: "Y2V_",
+      }),
+      createParams("pw-1"),
+    );
+    expect(res.status).toBe(400);
+    expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
+  });
 });

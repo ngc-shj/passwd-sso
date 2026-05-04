@@ -269,7 +269,22 @@ export const ALLOWED_CONTENT_TYPES = [
   "text/csv",
 ] as const;
 
-// ─── Hex String Validator ────────────────────────────────────
+// ─── Base64 / Hex String Validators ──────────────────────────
+
+/**
+ * Strict base64 (RFC 4648 §4) with optional `=` padding. The grouping
+ * makes the total length implicitly a multiple of 4 and forces a final
+ * 4-character group (either a full quartet, or a 2/3-char body with the
+ * matching padding). Use for ciphertext / CEK wrap blobs that are
+ * persisted as base64 strings on the wire.
+ *
+ * Rejects:
+ *   - Empty string (the final group is mandatory — minimum length 4)
+ *   - Non-base64 characters (newlines, whitespace, base64url `-`/`_`)
+ *   - Padding (`=`) in the wrong position
+ *   - Length not a multiple of 4
+ */
+export const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)$/;
 
 /** Validates a hex string of the given byte length (e.g. 12 bytes = 24 hex chars). */
 export const hexString = (bytes: number) =>

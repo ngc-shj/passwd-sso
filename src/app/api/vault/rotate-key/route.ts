@@ -22,6 +22,7 @@ import {
   VAULT_ROTATE_HISTORY_MAX,
   ECDH_PRIVATE_KEY_CIPHERTEXT_MAX,
   VAULT_ROTATE_ATTACHMENT_CEK_MAX,
+  BASE64_RE,
   CEK_WRAP_BASE64_MAX,
 } from "@/lib/validations/common";
 import { AUDIT_ACTION } from "@/lib/constants";
@@ -41,7 +42,10 @@ const rotateLimiter = createRateLimiter({ windowMs: 15 * MS_PER_MINUTE, max: 3 }
 
 const attachmentCekRewrapSchema = z.object({
   id: z.string().uuid(),
-  cekEncrypted: z.string().min(1).max(CEK_WRAP_BASE64_MAX), // base64
+  // Strict standard base64 (RFC 4648 §4); the regex is anchored and
+  // length-mod-4-aware so a malformed wrap never reaches `Buffer.from(_, "base64")`,
+  // which silently drops invalid characters.
+  cekEncrypted: z.string().min(1).max(CEK_WRAP_BASE64_MAX).regex(BASE64_RE),
   cekIv: hexIv,
   cekAuthTag: hexAuthTag,
   cekKeyVersion: z.number().int().min(1),

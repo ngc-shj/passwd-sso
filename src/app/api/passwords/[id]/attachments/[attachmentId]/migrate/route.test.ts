@@ -248,6 +248,70 @@ describe("PUT /api/passwords/[id]/attachments/[attachmentId]/migrate", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects malformed base64 in cekEncrypted (base64url chars) → 400 VALIDATION_ERROR", async () => {
+    // base64url uses `-` / `_`; standard base64 must reject them.
+    const res = await PUT(
+      createRequest("PUT", "http://localhost/api/passwords/entry-1/attachments/att-1/migrate", {
+        body: { ...validMigrateBody, cekEncrypted: "Y2V-" },
+      }),
+      createParams("entry-1", "att-1"),
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(mockApplyAttachmentMigration).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed base64 in encryptedData (length not mod 4) → 400 VALIDATION_ERROR", async () => {
+    const res = await PUT(
+      createRequest("PUT", "http://localhost/api/passwords/entry-1/attachments/att-1/migrate", {
+        body: { ...validMigrateBody, encryptedData: "abc" },
+      }),
+      createParams("entry-1", "att-1"),
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(mockApplyAttachmentMigration).not.toHaveBeenCalled();
+  });
+
+  it("rejects base64 with padding `=` placed mid-string → 400 VALIDATION_ERROR", async () => {
+    const res = await PUT(
+      createRequest("PUT", "http://localhost/api/passwords/entry-1/attachments/att-1/migrate", {
+        body: { ...validMigrateBody, cekEncrypted: "Y2=r" },
+      }),
+      createParams("entry-1", "att-1"),
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(mockApplyAttachmentMigration).not.toHaveBeenCalled();
+  });
+
+  it("rejects empty `cekEncrypted` (regex no longer matches empty) → 400 VALIDATION_ERROR", async () => {
+    const res = await PUT(
+      createRequest("PUT", "http://localhost/api/passwords/entry-1/attachments/att-1/migrate", {
+        body: { ...validMigrateBody, cekEncrypted: "" },
+      }),
+      createParams("entry-1", "att-1"),
+    );
+    expect(res.status).toBe(400);
+    expect(mockApplyAttachmentMigration).not.toHaveBeenCalled();
+  });
+
+  it("rejects CR/LF embedded in cekEncrypted → 400 VALIDATION_ERROR (copy-paste regression)", async () => {
+    const res = await PUT(
+      createRequest("PUT", "http://localhost/api/passwords/entry-1/attachments/att-1/migrate", {
+        body: { ...validMigrateBody, cekEncrypted: "Y2V\nr" },
+      }),
+      createParams("entry-1", "att-1"),
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(mockApplyAttachmentMigration).not.toHaveBeenCalled();
+  });
+
   it("rejects cross-user attempt (findFirst returns null) → 404 (not 403 to avoid enumeration)", async () => {
     mockApplyAttachmentMigration.mockRejectedValue(Object.assign(new Error("NOT_FOUND"), {}));
 
