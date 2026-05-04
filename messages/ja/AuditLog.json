@@ -200,6 +200,7 @@
   "MCP_CONSENT_DENY": "MCP認可を拒否",
   "MCP_REFRESH_TOKEN_ROTATE": "MCPリフレッシュトークンをローテーション",
   "MCP_REFRESH_TOKEN_REPLAY": "MCPリフレッシュトークンのリプレイを検出",
+  "MCP_REFRESH_TOKEN_FAMILY_REVOKED": "MCPリフレッシュトークンファミリを失効",
   "subTabTenantLogs": "ログ",
   "subTabBreakglass": "ブレイクグラス",
   "scopeLabel": "スコープ",
