@@ -58,15 +58,16 @@ Three sub-agents (functionality / security / testing) ran a focused R1-R36 + RS1
 - **R36 cleanup** — removed an unused `eslint-disable-next-line` directive in `webauthn/credentials/[id]/prf/route.test.ts:83` flagged during Step 2-4 lint pass.
 - **Crypto-domain ledger** — added the new `"AW"` AAD scope to `docs/security/crypto-domain-ledger.md` to satisfy `scripts/checks/check-crypto-domains.mjs` (a CI-only gate the local lint pass surfaced via the pre-existing-failure report).
 
-### Partially addressed — deferred to follow-up
+### T4 follow-up (resolved 2026-05-04)
 
 - **T4 (MEDIUM, RT4)** — race-test (T12.6c) per-side win assertions and meaningful contention probe.
-  - **What was applied**: `expect(migrateWonCount).toBeGreaterThan(0)` (catches "migrate path always errors" regression).
-  - **What was deferred**: `expect(rotationWonCount).toBeGreaterThan(0)` and a strict `expect.fail` on probe failure. Discovered during fixing: the integration test calls `applyAttachmentMigration` and `applyVaultRotation` directly (helpers), but the `pg_advisory_xact_lock` is acquired in the route handlers (`migrate/route.ts:119`, `rotate-key/route.ts:165`), NOT in the helpers. The test does NOT exercise the lock at all; mutual exclusion in the loop comes from rotation's `encryption_mode !== 2` early-exit, not from advisory-lock contention. A strict `rotationWonCount > 0` requires the rotation to actually win the race, which the structure makes rare on fast machines.
-  - **Why deferred**: a full RT4 fix requires either (a) restructuring `applyAttachmentMigration` / `applyVaultRotation` to acquire the advisory lock internally, or (b) rewriting T12.6c to invoke the route handlers via `fetch`. Both are larger changes than fits in a Step 2-5 closeout.
-  - **Mitigation in place**: the test file's probe block carries an explicit `KNOWN LIMITATION` comment naming the gap and the two fix options, so future readers don't mistake the partial guard for a complete one.
-  - **Severity post-mitigation**: Major → Minor (the production code is correct; the gap is in the test's coverage claim, not in the production lock implementation; route-level coverage of the lock IS exercised by `vault-rotate-key-gaps.integration.test.ts`).
-  - **TODO marker**: search `KNOWN LIMITATION (T4 follow-up)` in the integration test to find the entry point for the follow-up PR.
+  - **Initial Phase 2 partial fix**: only `expect(migrateWonCount).toBeGreaterThan(0)`; full RT4 assertions and a strict probe were deferred because the test was calling `applyAttachmentMigration` / `applyVaultRotation` helpers directly while the advisory lock lived in the route handlers — the test did not exercise the lock at all.
+  - **Follow-up resolution (test-only, no production change)**: T12.6c's `migrateFirst` / `rotateFirst` closures were rewrapped to acquire `pg_advisory_xact_lock(hashtext(userId))` inside the same `$transaction` they invoke the helper from — exactly mirroring what the production routes do. The probe was also redesigned: `instanceA` now holds the lock for 200ms while `instanceB` races for it and `instanceC` samples `pg_locks`, with strict `expect.fail` if neither signal surfaces contention.
+  - **Assertion redesign**: under proper lock semantics, `doubleSuccessCount === 0` is no longer the right invariant — both ops can serialize and both succeed in a single iteration. Replaced with a per-iteration consistency check (`encryption_mode === 2 AND cek_key_version === rotateOk ? newKeyVersion : oldKeyVersion`), plus RT4-compliant per-side wins:
+    - `expect(migrateWonCount).toBe(ITERATIONS)` — migrate always succeeds (lock-protected, fresh mode-0 each iter).
+    - `expect(rotationWonCount).toBeGreaterThan(0)` — rotation must win at least once (proves the lock genuinely serialized migrate-first; without serialization rotation would always early-exit on mode-0).
+  - **Why test-only fix is correct**: production code modifications purely for test setup are an anti-pattern (the helpers are correct as designed; route handlers correctly own the lock). Wrapping helper calls in test-side `$transaction` with the same lock SQL the route uses is the right way to verify mutual exclusion at the integration layer.
+  - **Verification**: T12.6c runs in ~1.8s now (vs ~0.9s before — the additional time is the genuine lock serialization). 14/14 integration tests pass. `KNOWN LIMITATION` comment removed.
 
 ### Not addressed — deferred per disposition rules
 

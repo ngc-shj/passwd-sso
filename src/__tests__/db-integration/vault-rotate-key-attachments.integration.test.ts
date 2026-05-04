@@ -1284,7 +1284,6 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
   it("T12.6c — contested rotate+migrate loop: mutual exclusion holds across 50 iterations", async () => {
     const ITERATIONS = 50;
 
-    const vaultKey = await generateVaultKey();
     const { userId, keyVersion: baseKeyVersion } = await seedVaultUser(ctx, tenantId);
     const entryId = await seedPasswordEntry(ctx, userId, tenantId);
 
@@ -1300,76 +1299,54 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
         instanceC.pool.query(`SELECT 1`),
       ]);
 
-      // Health-check: one genuine parallel pair to verify contention is reachable
+      // Health-check (RT4): the production routes acquire
+      // pg_advisory_xact_lock(hashtext(userId)) before invoking the helpers
+      // (rotate-key/route.ts, migrate/route.ts). The main loop below mirrors
+      // that pattern in test wrappers around applyVaultRotation /
+      // applyAttachmentMigration. Before running the loop, prove the
+      // environment can actually surface lock contention — a vacuous-pass
+      // test would assert mutual exclusion without exercising the lock.
+      //
+      // Probe: instanceA holds the user-scoped advisory lock for 200ms.
+      // instanceB races for the same lock; instanceC observes pg_locks.
+      // Either signal positive proves contention is reachable.
       {
-        const { id: probeAttId, encryptedData: probeData } = await seedAttachmentRow(ctx, {
-          entryId, userId, tenantId,
-          plaintext: Buffer.from("probe"),
-          vaultKey,
-          encryptionMode: 0,
-          keyVersion: baseKeyVersion,
-        });
+        let pgLocksObserved = false;
+        let bLockLatency = 0;
 
-        const probeHash = createHash("sha256").update(probeData).digest("hex");
-
-        const migrateOp = async () => {
-          const m2 = await encryptMode2(Buffer.from("probe"), vaultKey, entryId, probeAttId, baseKeyVersion, 1);
-          const start = Date.now();
-          try {
-            await ctx.su.prisma.$transaction(async (tx) => {
-              await setBypassRlsGucs(tx);
-              return applyAttachmentMigration(tx, {
-                userId, tenantId, entryId, attachmentId: probeAttId,
-                payload: {
-                  oldEncryptedDataHash: probeHash,
-                  encryptedData: m2.encryptedData,
-                  iv: m2.iv,
-                  authTag: m2.authTag,
-                  cekEncrypted: m2.cekEncrypted,
-                  cekIv: m2.cekIv,
-                  cekAuthTag: m2.cekAuthTag,
-                  cekKeyVersion: baseKeyVersion,
-                  cekWrapAadVersion: 1,
-                },
-              });
-            });
-            return { latency: Date.now() - start, type: "migrate" as const };
-          } catch {
-            return { latency: Date.now() - start, type: "migrate-err" as const };
-          }
-        };
-
-        // KNOWN LIMITATION (T4 follow-up): the advisory lock lives in the
-        // route handlers (rotate-key/route.ts:165, migrate/route.ts:119), not
-        // in applyVaultRotation / applyAttachmentMigration helpers. This test
-        // calls the helpers directly, so it does NOT exercise the advisory
-        // lock; mutual exclusion in the loop below comes from rotateFirst's
-        // early-exit when encryption_mode !== 2, not from lock contention.
-        // True RT4 race coverage requires either (a) restructuring helpers to
-        // acquire the lock internally, or (b) rewriting this test to invoke
-        // the route handlers via fetch. Both are deferred to a follow-up PR.
-        const [migrateResult] = await Promise.all([
-          migrateOp(),
+        await Promise.all([
+          // A: hold the lock for 200ms inside a transaction
+          instanceA.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}::text))`;
+            await new Promise((r) => setTimeout(r, 200));
+          }),
+          // B: try to acquire after A has had time to grab — should block
           (async () => {
-            const pgLocksResult = await instanceC.pool.query<{ count: string }>(
+            await new Promise((r) => setTimeout(r, 30));
+            const start = Date.now();
+            await instanceB.prisma.$transaction(async (tx) => {
+              await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}::text))`;
+            });
+            bLockLatency = Date.now() - start;
+          })(),
+          // C: sample pg_locks mid-contention (between A's grab and release)
+          (async () => {
+            await new Promise((r) => setTimeout(r, 80));
+            const r = await instanceC.pool.query<{ count: string }>(
               `SELECT COUNT(*)::text AS count FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`,
             );
-            return parseInt(pgLocksResult.rows[0].count, 10) > 0;
+            pgLocksObserved = parseInt(r.rows[0].count, 10) > 0;
           })(),
         ]);
-        // Probe is non-strict for now (see KNOWN LIMITATION above). Latency >0
-        // confirms the migrate path executed; we cannot reliably observe lock
-        // contention until the helpers acquire the lock internally.
-        void migrateResult;
 
-        // Clean up probe attachment before main loop
-        await ctx.su.prisma.$transaction(async (tx) => {
-          await setBypassRlsGucs(tx);
-          await tx.$executeRawUnsafe(
-            `DELETE FROM attachments WHERE id = $1::uuid`,
-            probeAttId,
+        const hasContention = pgLocksObserved || bLockLatency > 50;
+        if (!hasContention) {
+          expect.fail(
+            `Pre-loop contention probe failed: pg_locks queue empty AND instanceB lock latency was ${bLockLatency}ms (<=50ms). ` +
+              "The advisory-lock primitive does not surface contention on this environment; " +
+              "the race assertions below would pass vacuously.",
           );
-        });
+        }
       }
 
       // Main loop: 50 iterations of parallel rotate + migrate
@@ -1409,10 +1386,18 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
           cekWrapAadVersion: 1,
         };
 
-        // Try to build rewrap (requires mode-2 row to already exist, so may fail)
+        // Both wrappers acquire the same advisory lock the production routes
+        // do. This makes the test exercise the actual mutual-exclusion path
+        // — whichever side acquires the lock first runs to completion before
+        // the other side proceeds. The race is then "who gets the lock
+        // first": migrate-first → row migrates to mode-2 → rotation finds
+        // mode-2 inside its lock turn → rotation succeeds (both win).
+        // rotate-first → row is still mode-0 inside rotation's lock → rotate
+        // returns false; migrate then runs and succeeds.
         const migrateFirst = async (): Promise<boolean> => {
           try {
-            await ctx.su.prisma.$transaction(async (tx) => {
+            await instanceA.prisma.$transaction(async (tx) => {
+              await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}::text))`;
               await setBypassRlsGucs(tx);
               return applyAttachmentMigration(tx, {
                 userId, tenantId, entryId, attachmentId: iterAttId, payload: migratePayloadIter,
@@ -1426,25 +1411,30 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
 
         const rotateFirst = async (): Promise<boolean> => {
           try {
-            // Rotation requires all entries (mode-0 residual would block)
-            // so first check if attachment is already mode-2
-            const modeRow = await ctx.su.pool.query<{ encryption_mode: number; cek_encrypted: Buffer; cek_iv: string; cek_auth_tag: string }>(
-              `SELECT encryption_mode, cek_encrypted, cek_iv, cek_auth_tag FROM attachments WHERE id = $1::uuid`,
-              [iterAttId],
-            );
-            if (modeRow.rows[0].encryption_mode !== 2) return false;
-
-            const rewrapIter = await rewrapCek(
-              { cekEncrypted: modeRow.rows[0].cek_encrypted, cekIv: modeRow.rows[0].cek_iv, cekAuthTag: modeRow.rows[0].cek_auth_tag },
-              entryId, iterAttId, oldKeyVersion, 1, iterVaultKey, iterNewVaultKey, newKeyVersion,
-            );
-            const rotPayload = buildRotationPayload({
-              entryIds: [entryId],
-              historyIds: [],
-              attachmentCekRewraps: [rewrapIter],
-            });
-            await ctx.su.prisma.$transaction(async (tx) => {
+            await instanceB.prisma.$transaction(async (tx) => {
+              await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}::text))`;
               await setBypassRlsGucs(tx);
+              // Inside the lock: read the current state. If migrate has not
+              // yet committed, the row is still mode-0 and rotation cannot
+              // proceed (defensive guard A would throw LegacyAttachmentsResidualError
+              // anyway).
+              const modeRow = await tx.$queryRaw<{ encryption_mode: number; cek_encrypted: Buffer; cek_iv: string; cek_auth_tag: string }[]>`
+                SELECT encryption_mode, cek_encrypted, cek_iv, cek_auth_tag
+                FROM attachments
+                WHERE id = ${iterAttId}::uuid
+              `;
+              if (modeRow[0].encryption_mode !== 2) {
+                throw new Error("ROTATE_FIRST_NOT_YET_MODE_2");
+              }
+              const rewrapIter = await rewrapCek(
+                { cekEncrypted: modeRow[0].cek_encrypted, cekIv: modeRow[0].cek_iv, cekAuthTag: modeRow[0].cek_auth_tag },
+                entryId, iterAttId, oldKeyVersion, 1, iterVaultKey, iterNewVaultKey, newKeyVersion,
+              );
+              const rotPayload = buildRotationPayload({
+                entryIds: [entryId],
+                historyIds: [],
+                attachmentCekRewraps: [rewrapIter],
+              });
               return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", rotPayload);
             });
             return true;
@@ -1458,6 +1448,24 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
         if (migrateOk) migrateWonCount++;
         if (rotateOk) rotationWonCount++;
         if (migrateOk && rotateOk) doubleSuccessCount++;
+
+        // Per-iteration consistency check (replaces the old doubleSuccessCount
+        // === 0 assertion which assumed broken early-exit semantics).
+        // Under proper lock semantics:
+        //   - migrate ALWAYS succeeds (lock-protected, fresh mode-0 row each iter)
+        //   - if rotateOk: row is mode-2 with cek_key_version === newKeyVersion
+        //   - if !rotateOk: row is mode-2 with cek_key_version === oldKeyVersion
+        //     (rotation acquired the lock first, found mode-0, returned false;
+        //      migrate then ran)
+        // Half-rotated state (mode=2 but cek_key_version mismatching either)
+        // would indicate a serialization bug.
+        const finalState = await ctx.su.pool.query<{ encryption_mode: number; cek_key_version: number | null }>(
+          `SELECT encryption_mode, cek_key_version FROM attachments WHERE id = $1::uuid`,
+          [iterAttId],
+        );
+        expect(migrateOk).toBe(true); // lock guarantees migrate always succeeds
+        expect(finalState.rows[0].encryption_mode).toBe(2);
+        expect(finalState.rows[0].cek_key_version).toBe(rotateOk ? newKeyVersion : oldKeyVersion);
 
         // Advance key version if rotation succeeded
         if (rotateOk) {
@@ -1474,15 +1482,21 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
         });
       }
 
-      // The loop's structure means one or both ops may succeed per iteration.
-      // Key invariant: no double-success (both fully committed) must occur.
-      expect(doubleSuccessCount).toBe(0);
-      // RT4 partial guard: migrate must win at least once (catches the
-      // "migrate path always errors" regression). Per-side rotationWonCount>0
-      // is NOT asserted because rotation's early-exit on mode!=2 makes
-      // rotation winning rare — see KNOWN LIMITATION at the probe above.
-      expect(migrateWonCount).toBeGreaterThan(0);
-      expect(rotationWonCount + migrateWonCount).toBeGreaterThan(0);
+      // RT4-compliant assertions:
+      // - migrate wins every iteration (lock-protected, fresh mode-0 each iter).
+      // - rotation wins at least once: requires migrate to acquire the lock
+      //   first AND rotation to acquire it second AND find mode-2 — i.e., the
+      //   advisory lock genuinely serialized the two ops at least once. If the
+      //   lock primitive were broken or never contended, rotationWonCount=0
+      //   would silently pass under the old summed assertion.
+      // - doubleSuccessCount === 0 is removed: under proper lock semantics
+      //   both ops can succeed sequentially (per-iteration consistency check
+      //   above already verifies the resulting row state is coherent).
+      expect(migrateWonCount).toBe(ITERATIONS);
+      expect(rotationWonCount).toBeGreaterThan(0);
+      // doubleSuccessCount tracks "both promises returned true" — a normal
+      // outcome under serial lock execution. No assertion; informational only.
+      void doubleSuccessCount;
     } finally {
       await instanceA.prisma.$disconnect().then(() => instanceA.pool.end());
       await instanceB.prisma.$disconnect().then(() => instanceB.pool.end());
