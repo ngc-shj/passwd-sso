@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
 
-const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockWithUserTenantRls, mockRateLimitCheck } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockWithUserTenantRls, mockRateLimitCheck, mockPutObject, mockDeleteObject } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaPasswordEntry: {
     findUnique: vi.fn(),
@@ -14,6 +14,8 @@ const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockWithUserTen
   },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
+  mockPutObject: vi.fn(),
+  mockDeleteObject: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -29,6 +31,20 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/blob-store", () => ({
+  getAttachmentBlobStore: () => ({
+    putObject: mockPutObject,
+    deleteObject: mockDeleteObject,
+  }),
+}));
+vi.mock("@/lib/audit/audit", () => ({
+  logAuditAsync: vi.fn(),
+  extractRequestMeta: () => ({ ip: "127.0.0.1" }),
+  personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
+}));
+vi.mock("@/lib/http/with-request-log", () => ({
+  withRequestLog: (fn: (...args: unknown[]) => unknown) => fn,
 }));
 
 import { GET, POST } from "./route";
@@ -53,6 +69,17 @@ function createFormDataRequest(
     method: "POST",
     body: formData,
   });
+}
+
+// Mode-2 CEK fields required for all uploads
+function validCekFields(): Record<string, string> {
+  return {
+    cekEncrypted: "Y2Vr", // base64 of "cek"
+    cekIv: "a".repeat(24),
+    cekAuthTag: "b".repeat(32),
+    cekKeyVersion: "1",
+    cekWrapAadVersion: "1",
+  };
 }
 
 const now = new Date("2025-01-01T00:00:00Z");
@@ -119,9 +146,10 @@ describe("POST /api/passwords/[id]/attachments", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockPrismaPasswordEntry.findUnique.mockResolvedValue({ userId: "user-1" });
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue({ userId: "user-1", tenantId: "tenant-1" });
     mockPrismaAttachment.count.mockResolvedValue(0);
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
+    mockPutObject.mockResolvedValue(Buffer.from("stored-bytes"));
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -134,6 +162,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
         filename: "test.pdf",
         contentType: "application/pdf",
         sizeBytes: "100",
+        ...validCekFields(),
       }),
       createParams("pw-1")
     );
@@ -150,6 +179,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
         filename: "test.pdf",
         contentType: "application/pdf",
         sizeBytes: "100",
+        ...validCekFields(),
       }),
       createParams("pw-1")
     );
@@ -158,7 +188,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     expect(json.error).toBe("ATTACHMENT_LIMIT_EXCEEDED");
   });
 
-  it("returns 400 for invalid extension", async () => {
+  it("returns 400 for invalid extension (EXTENSION_NOT_ALLOWED)", async () => {
     const res = await POST(
       createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["data"]),
@@ -167,6 +197,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
         filename: "test.exe",
         contentType: "application/pdf",
         sizeBytes: "100",
+        ...validCekFields(),
       }),
       createParams("pw-1")
     );
@@ -175,7 +206,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     expect(json.error).toBe("EXTENSION_NOT_ALLOWED");
   });
 
-  it("returns 400 for file too large", async () => {
+  it("returns 400 for file too large (FILE_TOO_LARGE)", async () => {
     const res = await POST(
       createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["data"]),
@@ -184,6 +215,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
         filename: "test.pdf",
         contentType: "application/pdf",
         sizeBytes: String(11 * 1024 * 1024), // 11MB
+        ...validCekFields(),
       }),
       createParams("pw-1")
     );
@@ -192,7 +224,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     expect(json.error).toBe("FILE_TOO_LARGE");
   });
 
-  it("returns 400 for invalid content type", async () => {
+  it("returns 400 for invalid content type (CONTENT_TYPE_NOT_ALLOWED)", async () => {
     const res = await POST(
       createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["data"]),
@@ -201,6 +233,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
         filename: "test.pdf",
         contentType: "application/zip",
         sizeBytes: "100",
+        ...validCekFields(),
       }),
       createParams("pw-1")
     );
@@ -209,7 +242,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     expect(json.error).toBe("CONTENT_TYPE_NOT_ALLOWED");
   });
 
-  it("returns 400 for invalid iv format", async () => {
+  it("returns 400 for invalid iv format (INVALID_IV_FORMAT)", async () => {
     const res = await POST(
       createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["data"]),
@@ -218,6 +251,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
         filename: "test.pdf",
         contentType: "application/pdf",
         sizeBytes: "100",
+        ...validCekFields(),
       }),
       createParams("pw-1")
     );
@@ -226,18 +260,13 @@ describe("POST /api/passwords/[id]/attachments", () => {
     expect(json.error).toBe("INVALID_IV_FORMAT");
   });
 
-  it("creates attachment successfully", async () => {
-    mockPrismaAttachment.create.mockResolvedValue({
-      id: "att-new",
-      filename: "test.pdf",
-      contentType: "application/pdf",
-      sizeBytes: 100,
-      createdAt: now,
-    });
+  // ── B2: mode-2 CEK required ───────────────────────────────────────────
 
+  it("rejects upload missing cekEncrypted → 400 INVALID_REQUEST", async () => {
+    // No CEK fields at all
     const res = await POST(
       createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
-        file: new Blob(["encrypted-data"]),
+        file: new Blob(["data"]),
         iv: "a".repeat(24),
         authTag: "b".repeat(32),
         filename: "test.pdf",
@@ -246,10 +275,86 @@ describe("POST /api/passwords/[id]/attachments", () => {
       }),
       createParams("pw-1")
     );
+    expect(res.status).toBe(400);
+  });
+
+  it("uploads with full mode-2 CEK fields → 201, row has encryptionMode: 2", async () => {
+    const clientId = "550e8400-e29b-41d4-a716-446655440099";
+    mockPrismaAttachment.create.mockResolvedValue({
+      id: clientId,
+      filename: "test.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      createdAt: now,
+    });
+
+    const res = await POST(
+      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+        id: clientId,
+        file: new Blob(["encrypted-data"]),
+        iv: "a".repeat(24),
+        authTag: "b".repeat(32),
+        filename: "test.pdf",
+        contentType: "application/pdf",
+        sizeBytes: "100",
+        aadVersion: "1",
+        ...validCekFields(),
+      }),
+      createParams("pw-1")
+    );
     expect(res.status).toBe(201);
-    const json = await res.json();
-    expect(json.id).toBe("att-new");
-    expect(json.filename).toBe("test.pdf");
+    expect(mockPrismaAttachment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          encryptionMode: 2,
+          cekIv: "a".repeat(24),
+          cekAuthTag: "b".repeat(32),
+          cekKeyVersion: 1,
+          cekWrapAadVersion: 1,
+        }),
+      }),
+    );
+  });
+
+  it("request keyVersion field is ignored — server unconditionally sets encryptionMode: 2", async () => {
+    const clientId = "550e8400-e29b-41d4-a716-446655440098";
+    mockPrismaAttachment.create.mockResolvedValue({
+      id: clientId,
+      filename: "test.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      createdAt: now,
+    });
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const res = await POST(
+      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+        id: clientId,
+        file: new Blob(["encrypted-data"]),
+        iv: "a".repeat(24),
+        authTag: "b".repeat(32),
+        filename: "test.pdf",
+        contentType: "application/pdf",
+        sizeBytes: "100",
+        keyVersion: "99", // ignored per I3.3
+        ...validCekFields(),
+      }),
+      createParams("pw-1")
+    );
+    expect(res.status).toBe(201);
+    // Server must set encryptionMode: 2 regardless of submitted keyVersion
+    expect(mockPrismaAttachment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ encryptionMode: 2 }),
+      }),
+    );
+    // keyVersion must NOT appear in the persisted data (server omits it)
+    const createCall = mockPrismaAttachment.create.mock.calls[0][0];
+    expect(createCall.data).not.toHaveProperty("keyVersion");
+    // Warning log should fire when keyVersion is submitted
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 
   it("stores client-generated id and aadVersion from FormData", async () => {
@@ -272,6 +377,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
         contentType: "application/pdf",
         sizeBytes: "100",
         aadVersion: "1",
+        ...validCekFields(),
       }),
       createParams("pw-1")
     );
@@ -287,7 +393,6 @@ describe("POST /api/passwords/[id]/attachments", () => {
   });
 
   it("returns 400 when actual file blob exceeds MAX_FILE_SIZE", async () => {
-    // Declare sizeBytes as small, but upload a huge blob
     const hugeBlob = new Blob([new Uint8Array(11 * 1024 * 1024)]); // 11MB
     const res = await POST(
       createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
@@ -296,7 +401,8 @@ describe("POST /api/passwords/[id]/attachments", () => {
         authTag: "b".repeat(32),
         filename: "test.pdf",
         contentType: "application/pdf",
-        sizeBytes: "100", // declared small
+        sizeBytes: "100",
+        ...validCekFields(),
       }),
       createParams("pw-1")
     );
@@ -336,6 +442,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
         filename: "test.pdf",
         contentType: "application/pdf",
         sizeBytes: "100",
+        ...validCekFields(),
       }),
       createParams("pw-1")
     );
@@ -358,6 +465,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
         filename: "test.pdf",
         contentType: "application/pdf",
         sizeBytes: "100",
+        ...validCekFields(),
       }),
       createParams("pw-1")
     );
@@ -386,6 +494,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
         filename: "test.pdf",
         contentType: "application/pdf",
         sizeBytes: "100",
+        ...validCekFields(),
       }),
       createParams("pw-1")
     );
@@ -415,6 +524,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
         filename: "test.pdf",
         contentType: "application/pdf",
         sizeBytes: "100",
+        ...validCekFields(),
       }),
       createParams("pw-1")
     );

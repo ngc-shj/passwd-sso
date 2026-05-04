@@ -80,7 +80,6 @@ describe("POST /api/webauthn/credentials/[id]/prf", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockWithUserTenantRls.mockImplementation(async (_uid: string, fn: any) => fn());
     mockTransaction.mockImplementation(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       async (fn: (tx: typeof txMock) => Promise<unknown>) => fn(txMock),
     );
     mockTxExecuteRaw.mockResolvedValue(undefined);
