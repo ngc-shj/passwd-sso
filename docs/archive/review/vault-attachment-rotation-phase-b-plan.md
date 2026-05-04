@@ -158,7 +158,7 @@ client                            server
   │                                 mode2Attachments: [{ id, entryId,
   │                                   cekEncrypted, cekIv, cekAuthTag,
   │                                   cekKeyVersion, cekWrapAadVersion }],
-  │                                 mode0AttachmentIds: [id, ...] }
+  │                                 mode0Attachments: [{ id, entryId }, ...] }
   │
   │ ── For each mode-0 attachment ─────────────────────────┐
   │    GET  /api/passwords/[entryId]/attachments/[id]      │
@@ -229,7 +229,7 @@ mode-0 → mode-2 transition is atomic with rotation. Rejected because:
 | `POST /api/passwords/[id]/attachments` | Accept `cekEncrypted`, `cekIv`, `cekAuthTag`, `cekKeyVersion`, `cekWrapAadVersion`; reject if absent (mode-2 required for new uploads). Store with `encryptionMode = 2`. |
 | `GET /api/passwords/[id]/attachments/[attachmentId]` | Return new CEK fields alongside existing data fields. |
 | `PUT /api/passwords/[id]/attachments/[attachmentId]/migrate` (NEW) | Accept replacement `encryptedData`/`iv`/`authTag` plus CEK fields; only succeeds when source row is `encryptionMode = 0`; updates row to `encryptionMode = 2` in a single transaction; emits audit log; sequenced behind the same per-user advisory lock used by rotation to prevent racing rotation against migration. |
-| `GET /api/vault/rotate-key/data` | Add `mode2Attachments` (CEK manifest) + `mode0AttachmentIds` to response. Drop `attachmentsAffected` (replaced by the two new lists). |
+| `GET /api/vault/rotate-key/data` | Add `mode2Attachments` (CEK manifest) + `mode0Attachments` (each `{ id, entryId }`) to response. Drop `attachmentsAffected` (replaced by the two new lists). D1: original spec said `mode0AttachmentIds: string[]` — corrected so the client can build the migrate URL + data AAD. |
 | `POST /api/vault/rotate-key` | Drop `acknowledgeAttachmentDataLoss` field (request schema). Add `attachmentCekRewraps` array. Reject the rotation if any mode-0 attachments still exist (defensive guard — `LEGACY_ATTACHMENTS_RESIDUAL` error; should never fire if client flow is followed). |
 | `/api/v1/*` (REST API v1, Bearer-key public surface) | Audit `src/lib/openapi-spec.ts` for attachment exposure: the OpenAPI spec at `/api/v1/openapi.json` is the public contract. (a) If v1 currently exposes attachment metadata or download, extend the response schema with the new fields (`encryptionMode`, `cekEncrypted`, `cekIv`, `cekAuthTag`, `cekKeyVersion`, `cekWrapAadVersion`) and bump the `info.version` of the spec. (b) If v1 does NOT currently expose attachments, add an explicit out-of-scope note in the plan recording that `grep -rn attachment src/app/api/v1` returned 0 attachment-touching routes. F10. |
 
@@ -600,22 +600,31 @@ back-references in subsequent rounds.
     id, entryId, cekEncrypted (base64), cekIv, cekAuthTag,
     cekKeyVersion, cekWrapAadVersion
   }>,
-  mode0AttachmentIds: string[]   // capped at ATTACHMENT_MANIFEST_CAP (1000)
+  mode0Attachments: Array<{ id, entryId }>   // capped at ATTACHMENT_MANIFEST_CAP (1000)
   ```
+  **D1 (2026-05-04)**: the original spec said `mode0AttachmentIds: string[]`
+  but the client requires `entryId` to call
+  `/api/passwords/{entryId}/attachments/{id}` AND to build the data AAD
+  `buildAttachmentAAD(entryId, attachmentId)`. The shape is therefore
+  `Array<{ id, entryId }>` and the overflow boolean is renamed to
+  `mode0AttachmentsOverflow`.
 - **Invariants**:
   - I6.1: `attachmentsAffected` field is REMOVED from the response.
   - I6.2: Both arrays are scoped by `passwordEntry: { userId }`.
-  - I6.3: When `mode0AttachmentIds.length === ATTACHMENT_MANIFEST_CAP`, the
-    response also carries `mode0AttachmentIdsOverflow: true` so the client
+  - I6.3: When `mode0Attachments.length === ATTACHMENT_MANIFEST_CAP`, the
+    response also carries `mode0AttachmentsOverflow: true` so the client
     can paginate (loop GET → migrate → GET) until empty.
 - **Forbidden patterns**:
   - `pattern: attachmentsAffected:\s*` (in the response object) — reason:
     Phase A field removed.
+  - `pattern: mode0AttachmentIds\s*:` — reason: replaced by `mode0Attachments`
+    per D1; bare `id[]` shape is insufficient for client-side migration.
 - **Acceptance**:
   - Integration test: vault with 3 mode-0 + 2 mode-2 attachments → response
-    has `mode0AttachmentIds.length === 3` and `mode2Attachments.length === 2`.
-  - Integration test: 1500 mode-0 attachments → first GET returns 1000 ids
-    + `mode0AttachmentIdsOverflow: true`.
+    has `mode0Attachments.length === 3` and `mode2Attachments.length === 2`,
+    each `mode0Attachments` element exposes `id` AND `entryId`.
+  - Integration test: 1500 mode-0 attachments → first GET returns 1000 entries
+    + `mode0AttachmentsOverflow: true`.
 
 ### C7 — Rotation POST (`POST /api/vault/rotate-key`)
 
@@ -826,14 +835,16 @@ back-references in subsequent rounds.
 - **Signature**: pseudo-flow:
   ```
   1. data = await GET /api/vault/rotate-key/data
-  2. while (data.mode0AttachmentIds.length > 0):
-       for each id in data.mode0AttachmentIds:
-         (att, key) = await GET /attachments/{id}; decrypt with old secretKey
+  2. while (data.mode0Attachments.length > 0):
+       for each { id, entryId } in data.mode0Attachments:
+         (att) = await GET /api/passwords/{entryId}/attachments/{id}; decrypt with old secretKey
+         oldEncryptedDataHash = sha256(rawBytes of stored encryptedData)  // hex
          cek = randomAESKey(256)
          ct  = encrypt(att.body, cek, AAD = buildAttachmentAAD(entryId, id))
          wrap = wrap(cek, oldSecretKey, AAD =
                 buildAttachmentCekWrapAAD(entryId, id, oldKeyVersion, 1))
-         await PUT /attachments/{id}/migrate { ct, ...wrap, cekKeyVersion: oldKeyVersion }
+         await PUT /api/passwords/{entryId}/attachments/{id}/migrate
+                { oldEncryptedDataHash, ct, ...wrap, cekKeyVersion: oldKeyVersion, cekWrapAadVersion: 1 }
        data = await GET /api/vault/rotate-key/data    // pagination loop
   3. for each m in data.mode2Attachments:
        cek = unwrap(m.cek*, oldSecretKey, AAD =
@@ -944,8 +955,8 @@ back-references in subsequent rounds.
   - `src/app/api/vault/rotate-key/data/route.test.ts` — currently 4
     references to `attachmentsAffected` in mock returns. Drop those
     mocks. Add: "returns `mode2Attachments` array", "returns
-    `mode0AttachmentIds` array (capped at `ATTACHMENT_MANIFEST_CAP`)",
-    "returns `mode0AttachmentIdsOverflow: true` when 1500 mode-0 rows
+    `mode0Attachments` array of `{ id, entryId }` (capped at `ATTACHMENT_MANIFEST_CAP`)",
+    "returns `mode0AttachmentsOverflow: true` when 1500 mode-0 rows
     exist".
   - **NOTE on `src/components/vault/rotate-key-dialog.tsx`**: the dialog
     component file itself is covered by §C9 (Phase A artifact removal);
@@ -1382,7 +1393,7 @@ back-references in subsequent rounds.
 | C3   | Attachment upload schema (mode-2 only; ignored-on-writes assertion for `keyVersion`)   | locked |
 | C4   | Attachment download schema (CEK fields, `encryptionMode`)                              | locked |
 | C5   | Legacy migration endpoint (`PUT /migrate`, body-hash binding, session-only auth, `applyAttachmentMigration` extraction) | locked |
-| C6   | Rotation data fetch (mode2Attachments + mode0AttachmentIds + overflow boolean)         | locked |
+| C6   | Rotation data fetch (mode2Attachments + mode0Attachments[{id,entryId}] + overflow)     | locked |
 | C7   | Rotation POST (`applyVaultRotation` extraction, defensive guards A/B + step-3 + step-5, `cekRewrappedAttachmentIds` audit) | locked |
 | C8a  | Client-side attachment-section refactor (mode-0/2 branching, AAD-version floor gate)   | locked |
 | C8   | Client-side rotation flow (auto-migrate mode-0 then rewrap mode-2)                     | locked |
@@ -1416,7 +1427,7 @@ comments.
 
 | Risk | Mitigation |
 |------|------------|
-| User has thousands of mode-0 attachments → migration step is slow | `mode0AttachmentIds` is paginated (cap 1000 per fetch). The rotation dialog reports progress (count + bytes) and is resumable: a user who cancels and restarts simply continues from the remaining mode-0 set. |
+| User has thousands of mode-0 attachments → migration step is slow | `mode0Attachments` is paginated (cap 1000 per fetch). The rotation dialog reports progress (count + bytes) and is resumable: a user who cancels and restarts simply continues from the remaining mode-0 set. |
 | Migration drives blob-store cost (overwrite per legacy attachment) | Migration only happens once per attachment per user lifetime. Cost is bounded by total existing user attachment bytes, paid one time. |
 | Schema migration window: between `npx prisma migrate dev` and code deploy, queries reading the new columns from old code → null reads | New columns are nullable; old code does not reference them. (R24 split — additive only in this phase; the future strict-NOT-NULL flip is a separate migration.) |
 | The advisory-lock interleaving makes migrate vs. rotate races possible to misroute | C5 and C7 both acquire `pg_advisory_xact_lock(hashtext(userId::text))`. C12 T12.6 covers the race in integration tests with the RT4 vacuous-pass guard. |
@@ -1445,7 +1456,7 @@ comments.
 
 1. User opens Settings → Security → Rotate Master Passphrase.
 2. Dialog asks for old + new passphrase. User submits.
-3. Client GETs `/api/vault/rotate-key/data` → `mode0AttachmentIds` is empty.
+3. Client GETs `/api/vault/rotate-key/data` → `mode0Attachments` is empty.
 4. Client unwraps each CEK with old `secretKey`, rewraps with new `secretKey`.
 5. Client POSTs `/api/vault/rotate-key` with the rewrap manifest.
 6. UI shows success; entries, history, and attachments are all under the new
@@ -1454,7 +1465,7 @@ comments.
 ### S2 — User with mixed mode-0 + mode-2 attachments rotates
 
 1. As S1 steps 1–2.
-2. Client GETs `/api/vault/rotate-key/data` → `mode0AttachmentIds` has 12 ids.
+2. Client GETs `/api/vault/rotate-key/data` → `mode0Attachments` has 12 entries (each `{ id, entryId }`).
 3. UI shows progress: "Migrating 12 legacy attachments…".
 4. For each id: client downloads via existing GET, decrypts with old key,
    generates CEK, encrypts body, wraps CEK with old key, PUTs `/migrate`.
@@ -1521,7 +1532,7 @@ comments.
    the migrate endpoint at the same moment.
 4. The advisory lock serializes: tab #2's PUT acquires the lock first,
    migrates the row, releases. Tab #1's GET sees the now-mode-2 row in the
-   second-pass `mode0AttachmentIds`. (Or vice versa — tab #1 acquires
+   second-pass `mode0Attachments`. (Or vice versa — tab #1 acquires
    first, migration commits, then tab #2's PUT sees mode-2 and returns 409
    `LEGACY_MIGRATION_NOT_APPLICABLE`. Tab #2 falls back to the standard
    download path.)
@@ -1531,3 +1542,81 @@ comments.
 
 End of plan. Contracts are pending until plan review concludes; once locked,
 implementation proceeds against the contract IDs C1–C12.
+
+## Implementation Checklist (Step 2-1, generated 2026-05-04)
+
+### Files to MODIFY (Phase A artifact removal — covered by C9)
+
+- `src/app/api/vault/rotate-key/route.ts` — drop `acknowledgeAttachmentDataLoss`, `AttachmentAckRequiredError`, `attachmentsAffected`, inline `ATTACHMENT_MANIFEST_CAP` (relocate to `validations/common.ts`)
+- `src/app/api/vault/rotate-key/data/route.ts` — drop `attachmentsAffected`, add `mode2Attachments` + `mode0Attachments` (each `{ id, entryId }`) + `mode0AttachmentsOverflow` boolean (D1)
+- `src/app/api/vault/rotate-key/route.test.ts` — drop ack-required cases; add manifest-mismatch / mode-0-residual / inconsistent-version cases (C9b)
+- `src/app/api/vault/rotate-key/data/route.test.ts` — drop `attachmentsAffected` mocks; add new fields (C9b)
+- `src/app/api/passwords/[id]/attachments/route.ts` — accept mode-2 CEK fields, reject missing (C3); store `encryptionMode = 2`
+- `src/app/api/passwords/[id]/attachments/[attachmentId]/route.ts` — extend GET response with CEK fields + `encryptionMode` (C4)
+- `src/lib/vault/vault-context.tsx` — drop ack-required option/branch; replace rotation flow body (C8/C9); update `RotationEffects`
+- `src/components/vault/rotate-key-dialog.tsx` — drop data-loss banner; add progress UI (C8/C9)
+- `src/components/passwords/entry/attachment-section.tsx` — branch on `encryptionMode` for upload/download (C8a)
+- `src/lib/http/api-error-codes.ts` — drop `ATTACHMENT_DATA_LOSS_NOT_ACKNOWLEDGED`; add `LEGACY_ATTACHMENTS_RESIDUAL`, `LEGACY_MIGRATION_NOT_APPLICABLE`, `LEGACY_BODY_HASH_MISMATCH`, `ATTACHMENT_CEK_MANIFEST_MISMATCH`, `ATTACHMENT_INCONSISTENT_VERSION`
+- `src/lib/validations/common.ts` — add `ATTACHMENT_MANIFEST_CAP` + `VAULT_ROTATE_ATTACHMENT_CEK_MAX` (C0)
+- `src/lib/crypto/crypto-aad.ts` — add `SCOPE_ATTACHMENT_WRAP = "AW"`, `buildAttachmentCekWrapAAD`, `MIN_ACCEPTED_CEK_WRAP_AAD_VERSION` (C2); update header comment listing scopes
+- `src/lib/security/rate-limiters.ts` — add `migrateLimiter` (C5)
+- `src/lib/constants/audit/audit.ts` — add `ATTACHMENT_LEGACY_MIGRATION` action; register in `PERSONAL.ATTACHMENT` group (lines 437, 518)
+- `messages/en/AuditLog.json`, `messages/ja/AuditLog.json` — add `ATTACHMENT_LEGACY_MIGRATION` label (C10)
+- `messages/en/ApiErrors.json`, `messages/ja/ApiErrors.json` — drop `attachmentDataLossNotAcknowledged`; add 5 new error keys (C9 I9.2)
+- `messages/en/Vault.json`, `messages/ja/Vault.json` — drop `rotateKeyAttachmentDataLossWarning` family; add migration progress strings
+- `prisma/schema.prisma` — `Attachment` model gains 5 nullable columns (C1)
+- `e2e/tests/settings-key-rotation.spec.ts` — drop Phase A ack case; add Phase B mode-0 → mode-2 + rotation case (C9)
+- `docs/security/cryptography-whitepaper.md` — rewrite §6.1.d, reword §6.1.c (C11)
+
+### Files to CREATE
+
+- `prisma/migrations/<new-timestamp>_add_attachment_cek_indirection/migration.sql` (C1)
+- `src/lib/vault/rotate-key-server.ts` — `applyVaultRotation` + `applyAttachmentMigration` extraction (C5/C7)
+- `src/app/api/passwords/[id]/attachments/[attachmentId]/migrate/route.ts` — `PUT /migrate` (C5)
+- `src/__tests__/helpers/rate-limiters.ts` — `clearMigrateLimitForUser` helper (C5 test infra)
+- `src/__tests__/audit-action-group-coverage.test.ts` — group-coverage test (C10b)
+- `src/__tests__/db-integration/vault-rotate-key-attachments.integration.test.ts` — T12 cases (C12)
+- `docs/archive/review/vault-attachment-rotation-phase-b-manual-test.md` — R35 Tier-2 deliverable (C13)
+
+### Shared utilities to REUSE (no reimplementation)
+
+- `buildAADBytes` (`crypto-aad.ts:33`) — `buildAttachmentCekWrapAAD` MUST delegate to this; do NOT copy validation logic (C2 I2.4)
+- `createRateLimiter` (`security/rate-limit.ts`) — for `migrateLimiter`
+- `withUserTenantRls` (`tenant-context.ts`) — every DB query path
+- `pg_advisory_xact_lock(hashtext($userId::text))` — same lock id as existing `route.ts:175`
+- `getAttachmentBlobStore()` + `AttachmentBlobStore` interface — unchanged (constraint)
+- `prisma.attachment.updateMany` (NOT `update`) — relation/encryptionMode predicates only work in `updateMany` (I5.8 / I7.6)
+- `personalAuditBase` (`@/lib/audit/audit`) — for `ATTACHMENT_LEGACY_MIGRATION` emit
+- `createPrismaForRole("app")` (`db-integration/helpers.ts`) — RLS-honoring instances for T12
+- Existing patterns: `recoveryLimiter.clear(...)` at `recovery-key/recover/route.ts:83` mirrors test-helper pattern
+- `seedAttachment` (`e2e/helpers/password-entry.ts:113`) — extend with real AES-GCM, NOT a parallel helper (T1/T21)
+- `buildAttachmentAAD` import — production AAD path mandatory in helpers (T21)
+
+### Patterns / invariants to follow consistently
+
+- `updateMany` + `if (count !== 1) throw` guard at every per-row attachment write (I5.8 / I7.6)
+- `passwordEntry: { userId, tenantId }` scoping on every personal attachment query (I5.2 / I7.2)
+- `passwordEntryId: { not: null }, teamPasswordEntryId: null` on personal-scope queries (I5.2)
+- Scope/encryptionMode predicate parity between SELECT and UPDATE (S14)
+- 409/400 error responses carry NO additional payload (S11 — no expected/observed counts)
+- `expect("field" in metadata).toBe(true)` then `expect(metadata.field).toBe(...)` for audit metadata (T24)
+- Only `auth()` (no `authOrToken`) on `/migrate` route (I5.7)
+
+### CI gates that fire on this diff
+
+- `.github/workflows/ci.yml` — lint, build, test, version-check (every diff)
+- `.github/workflows/ci-integration.yml` — `npm run test:integration` (db-integration)
+- `.github/workflows/codeql.yml` — JS/TS analysis (every diff)
+- `.github/workflows/refactor-phase-verify.yml` — schema/route refactor gates if matched
+- Pre-PR verification: `scripts/pre-pr.sh` (per `feedback_run_pre_pr_before_push.md`)
+
+### Phase A artifact grep (must return 0 after Phase B lands — I9.1)
+
+```
+grep -rn "acknowledgeAttachmentDataLoss\|ATTACHMENT_DATA_LOSS_NOT_ACKNOWLEDGED\|AttachmentAckRequiredError\|RotationEffects.*attachmentsAffected\|attachmentsAffected:\s*number" \
+  src/ e2e/ messages/ cli/src/ extension/src/
+```
+
+### R35 Tier-2 mechanical fire
+
+Diff matches `prisma/migrations/*` + `*-compose.yml`-adjacent? No deployment artifacts touched, BUT C1 introduces a schema migration that affects encryption-material chain — qualifies as **R35 Tier-2 (cryptographic-material change)** → `vault-attachment-rotation-phase-b-manual-test.md` is **mandatory** (covered by C13).

@@ -233,19 +233,42 @@ that wrapped the previous `secretKey`:
 | `WebAuthnCredential.prfEncryptedSecretKey` | All wrapping fields cleared on every credential. `prfSupported` is intentionally NOT touched — it represents the authenticator's PRF capability, not wrapping presence. The user re-bootstraps via `POST /api/webauthn/credentials/[id]/prf` (separate Redis challenge namespace, advisory lock, keyVersion CAS). |
 | `Session` / `ExtensionToken` / `ApiKey` / `McpAccessToken` / `McpRefreshToken` / `DelegationSession` | All revoked via `invalidateUserSessions`. `cacheTombstoneFailures` count is recorded in the audit metadata so silent Redis outages remain forensically visible. |
 
-#### 6.1.d Known limitation: personal attachments
+Previous `secretKey` is removed from the trust boundary. File bodies remain
+encrypted under their stable, freshly-rewrapped CEK (the body is not
+re-encrypted; only the CEK wrap is). An attacker who recovered the old
+`secretKey` AND a pre-rotation snapshot of `cekEncrypted` rows would still
+recover plaintext from the snapshot; rotation freshness is bound to backup
+hygiene.
 
-Personal-entry `Attachment.encryptedData` is encrypted with the previous
-encryption key directly (no per-attachment CEK). The Phase A rotation flow
-does NOT re-encrypt attachment bodies. Instead, the API rejects rotation
-when attachments exist unless the client passes
-`acknowledgeAttachmentDataLoss: true`. Once acknowledged, the orphan rows
-remain in the DB (so a future Phase B recovery design has material to work
-with), but the file bodies are unrecoverable with the new `secretKey`.
+#### 6.1.d Personal attachments under CEK indirection
 
-Phase B (separate issue) will introduce per-attachment CEK indirection
-mirroring the team `ItemKey` model, so rotation re-wraps the small CEKs
-without touching file bodies.
+Each personal-entry attachment uses a randomly generated 256-bit AES-GCM
+Content Encryption Key (CEK):
+
+1. The file body is encrypted with the CEK using data AAD scope `"AT"`
+   (fields: `entryId`, `attachmentId`). This AAD is stable across rotations —
+   the body ciphertext is never re-encrypted.
+2. The CEK is wrapped with the user's vault `secretKey` using wrap AAD scope
+   `"AW"` (fields: `entryId`, `attachmentId`, `cekKeyVersion`,
+   `cekWrapAadVersion`). Including `cekKeyVersion` in the wrap AAD prevents
+   replay of a pre-rotation wrap blob after rotation, because the AAD bytes
+   change with each new key version.
+3. Vault rotation re-wraps each CEK with the new `secretKey` (under the new
+   `cekKeyVersion`). File bodies are not re-encrypted.
+4. Pre-Phase-B attachments (`encryptionMode = 0`, encrypted directly under the
+   vault key without a CEK layer) migrate to mode-2 the first time their owner
+   runs vault rotation: the client decrypts the body with the old `secretKey`,
+   generates a fresh CEK, encrypts the body under the CEK, wraps the CEK under
+   the old `secretKey`, and commits the result via `PUT .../migrate` before the
+   rotation POST. After migration, the attachment behaves identically to a
+   freshly uploaded mode-2 attachment.
+5. **Snapshot-window risk**: Mode-2 wraps written by the legacy-migration flow
+   under the OLD `secretKey` persist in the database and backup tape until the
+   corresponding rotation POST commits and re-wraps them under the NEW
+   `secretKey`. An operator who aborts mid-migration leaves these wraps in the
+   OLD-key trust posture; the next rotation cycle clears them. Backup tape
+   retains the OLD-key wrap forever — rotation freshness is bound to backup
+   hygiene.
 
 #### 6.1.e Known limitation: ECDH identity is NOT rotated (cross-domain attack surface)
 
