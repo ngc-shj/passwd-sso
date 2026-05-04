@@ -126,6 +126,14 @@ async function handlePOST(req: NextRequest) {
           metadata: { clientId: clientIdValue, familyId: result.familyId },
         });
       }
+      if (result.reason === "concurrent_rotation_revoked" && result.tenantId) {
+        await logAuditAsync({
+          ...tenantAuditBase(req, resolveAuditUserId(null, "system"), result.tenantId),
+          action: AUDIT_ACTION.MCP_REFRESH_TOKEN_FAMILY_REVOKED,
+          actorType: ACTOR_TYPE.SYSTEM,
+          metadata: { clientId: clientIdValue, familyId: result.familyId, reason: "concurrent_rotation" },
+        });
+      }
       return NextResponse.json(
         { error: result.error },
         { status: result.error === "invalid_client" ? 401 : 400 },
