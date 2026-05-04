@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { test, expect } from "@playwright/test";
 import { injectSession } from "../helpers/auth";
 import { getAuthState } from "../helpers/fixtures";
@@ -125,34 +124,37 @@ test("Key rotation preserves existing vault entries", async ({
 });
 
 /**
- * Rotation must surface the data-loss acknowledge step when personal-entry
- * attachments exist (#433 / A.4). The attachment row remains in the DB after
- * the user acknowledges — Phase B (issue #437) recovery flows depend on this.
+ * Phase B (#437): rotation auto-migrates legacy mode-0 attachments to mode-2
+ * (CEK indirection) before committing the key rotation. The ack gate is gone;
+ * rotation must succeed without any user confirmation step.
+ *
+ * Attachment seeding: mode-0 placeholder row injected via seedAttachment()
+ * (default encryptionMode: 0). The upload route now defaults to mode-2, so
+ * direct DB injection is the only way to manufacture a mode-0 row in E2E.
+ * No real-crypto plaintext is supplied — placeholder bytes are sufficient to
+ * verify the migration path runs; end-to-end decryption of the migrated
+ * attachment is covered by integration tests (C12 / T12.1).
+ * (Option A: skip post-rotation DB decryption check; rationale: decryption of
+ * real ciphertext requires the vault CryptoKey, which is not accessible from
+ * Playwright node context. Integration tests own that coverage.)
  */
-test("Key rotation requires explicit acknowledge when personal attachments exist", async ({
+test("Key rotation auto-migrates legacy attachments and succeeds", async ({
   context,
   page,
 }) => {
-  // 60s was insufficient (CI run 25283732238): the test does TWO rotation
-  // round-trips (one rejected for missing ack, one accepted) on a user with
-  // many existing entries from test 1 — re-encryption of 100+ entries plus
-  // the second rotation's data fetch + tx pushes the test past 60s on CI.
-  // Bump to 180s to match the dialog's own 120s waitFor budget plus headroom.
-  test.setTimeout(180_000);
+  // Single rotation round-trip, but the user accumulates entries from the
+  // first test in this file. 120s covers the dialog's own waitFor budget.
+  test.setTimeout(120_000);
 
   const { keyRotation } = getAuthState();
-  const attachmentId = randomUUID();
-  const entryTitle = `Attach-Ack ${Date.now()}`;
+  const entryTitle = `Attach-Phase-B ${Date.now()}`;
 
   // The previous test ("preserves existing vault entries") rotates this same
-  // user, which now revokes the global-setup session per #433/S-N2. Re-seed
-  // (UPSERT) so this test starts from a valid auth state regardless of prior
-  // test order.
+  // user, which revokes the global-setup session per #433/S-N2. Re-seed
+  // (UPSERT) so this test starts from a valid auth state regardless of order.
   await seedSession(keyRotation.id, keyRotation.sessionToken);
 
-  // Test 1 already burned 2 of the 3-per-15min rotation rate-limit hits for
-  // this user; this test does TWO rotation round-trips of its own. Reset
-  // upfront so the budget is per-test, not per-CI-window.
+  // Reset rate-limit so prior test's rotation hits do not bleed into this one.
   await resetRotationRateLimit(keyRotation.id);
 
   await injectSession(context, keyRotation.sessionToken);
@@ -166,14 +168,13 @@ test("Key rotation requires explicit acknowledge when personal attachments exist
   const entryPage = new PasswordEntryPage(page);
   const settings = new SettingsPage(page);
 
-  // Use the UI to create an entry — this guarantees the entry id is real
-  // and the entry's encrypted blobs are valid for post-rotation checks.
+  // Create a real entry via the UI so the entry's encrypted blobs are valid.
   await test.step("create a host entry for the attachment", async () => {
     await dashboard.createNewPassword();
     await entryPage.fill({
       title: entryTitle,
-      username: "attach-ack@example.com",
-      password: "AttachAckPassword!1",
+      username: "attach-phase-b@example.com",
+      password: "AttachPhaseBPassword!1",
     });
     await entryPage.save();
     await expect(dashboard.entryByTitle(entryTitle)).toBeVisible({
@@ -181,9 +182,11 @@ test("Key rotation requires explicit acknowledge when personal attachments exist
     });
   });
 
-  // Resolve the entry id from the DB so we can attach to it.
+  // Inject a mode-0 attachment directly in the DB (the upload route now
+  // always produces mode-2; DB injection is the only E2E way to get mode-0).
   let entryId: string;
-  await test.step("seed an attachment directly in the DB", async () => {
+  let attachmentId: string;
+  await test.step("seed a mode-0 attachment in the DB", async () => {
     const p = getPool();
     const r = await p.query<{ id: string }>(
       `SELECT id FROM password_entries
@@ -193,16 +196,18 @@ test("Key rotation requires explicit acknowledge when personal attachments exist
     );
     if (r.rowCount === 0) throw new Error("Failed to find seeded entry id");
     entryId = r.rows[0].id;
-    await seedAttachment({
-      id: attachmentId,
+    const result = await seedAttachment({
       passwordEntryId: entryId,
       createdById: keyRotation.id,
+      encryptionMode: 0,
     });
+    attachmentId = result.id;
   });
 
-  await test.step("rotation dialog surfaces ack step with attachment count", async () => {
+  await test.step("rotation completes without ack step", async () => {
     await settings.gotoKeyRotation();
     await lockPage.unlockAndWait(keyRotation.passphrase!);
+
     await page
       .getByRole("button", { name: /Rotate Key|キーをローテーション/i })
       .click();
@@ -210,53 +215,27 @@ test("Key rotation requires explicit acknowledge when personal attachments exist
     await page.locator("[role='dialog']").waitFor({ timeout: 5_000 });
     await page.locator("#rk-passphrase").fill(keyRotation.passphrase!);
 
-    // Initial submit goes through; the data fetch returns attachmentsAffected > 0
-    // and the dialog rejects with the ack step. The ack button is the only
-    // way forward; the original submit becomes disabled.
     await page
       .locator("[role='dialog']")
-      .getByRole("button", {
-        name: /^Rotate Key$|^キーをローテーション$/i,
-      })
+      .getByRole("button", { name: /Rotate Key|キーをローテーション/i })
       .click();
 
-    await expect(
-      page.getByRole("button", {
-        name: /Acknowledge data loss and rotate|データ消失を承認してローテーション/i,
-      }),
-    ).toBeVisible({ timeout: 10_000 });
-  });
-
-  await test.step("acknowledge → rotation completes", async () => {
-    // The rejected-without-ack attempt above consumed 2 rate-limit hits
-    // (data fetch + POST). The next rotateKey() call also fetches /data and
-    // POSTs — another 2 hits. Reset between attempts so the second rotation
-    // is not 429'd. Production users do NOT need this because the dialog
-    // gives them seconds between submit + acknowledge clicks; CI fires both
-    // back-to-back inside the same rate-limit window.
-    await resetRotationRateLimit(keyRotation.id);
-
-    await page
-      .getByRole("button", {
-        name: /Acknowledge data loss and rotate|データ消失を承認してローテーション/i,
-      })
-      .click();
-
+    // Dialog closes on success — no ack button appears.
     await page.locator("[role='dialog']").waitFor({
       state: "hidden",
       timeout: 120_000,
     });
   });
 
-  await test.step("attachment row remains in DB (Phase B recovery dependency)", async () => {
+  await test.step("attachment row migrated to mode-2 in DB", async () => {
+    // Verify the migration ran: the row must now be mode-2.
+    // (Decryption of the ciphertext is covered by integration tests, not E2E.)
     const p = getPool();
-    const r = await p.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count FROM attachments WHERE id = $1`,
+    const r = await p.query<{ encryption_mode: number }>(
+      `SELECT encryption_mode FROM attachments WHERE id = $1`,
       [attachmentId],
     );
-    // The orphan row stays — Phase A intentionally preserves it so the Phase B
-    // recovery design (issue #437) has material to work with. Production code
-    // surfaces the orphan as an undecryptable download.
-    expect(r.rows[0].count).toBe("1");
+    expect(r.rowCount).toBe(1);
+    expect(r.rows[0].encryption_mode).toBe(2);
   });
 });
