@@ -50,7 +50,7 @@ if command -v docker >/dev/null 2>&1 && docker exec passwd-sso-db-1 pg_isready -
     out=$(cat scripts/rls-cross-tenant-verify.sql | docker exec -i passwd-sso-db-1 \
       psql -U passwd_app -d passwd_sso -v ON_ERROR_STOP=1 -v expected_tables="$EXPECTED_TABLES" 2>&1) && ec=0 || ec=$?
     # Whitelist exact codes — typos like [E-RLS-NUL] would otherwise pass.
-    if (( ec == 0 )) || grep -qE "\[E-RLS-(MANIFEST-(EXTRA|MISSING)|COLPARITY|COUNT-A|COUNT-B|NULL|SYM|BYPASS|DISCOVER|ROLE|COVERAGE)\]" <<<"$out"; then
+    if (( ec == 0 )) || grep -qE "\[E-RLS-(MANIFEST-(EXTRA|MISSING)|COLPARITY|COUNT-A|COUNT-B|NULL|SYM|BYPASS|DISCOVER|ROLE|COVERAGE|FORCE|SECDEF)\]" <<<"$out"; then
       exit 0
     fi
     printf "%s\n" "$out"
