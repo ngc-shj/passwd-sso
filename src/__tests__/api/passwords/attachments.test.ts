@@ -8,6 +8,7 @@ const {
   mockAttachmentFindMany,
   mockAttachmentCount,
   mockAttachmentCreate,
+  mockUserFindUnique,
   mockPutObject,
   mockDeleteObject,
   mockWithUserTenantRls,
@@ -18,6 +19,7 @@ const {
   mockAttachmentFindMany: vi.fn(),
   mockAttachmentCount: vi.fn(),
   mockAttachmentCreate: vi.fn(),
+  mockUserFindUnique: vi.fn(),
   mockPutObject: vi.fn(),
   mockDeleteObject: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
@@ -34,6 +36,7 @@ vi.mock("@/lib/prisma", () => ({
       count: mockAttachmentCount,
       create: mockAttachmentCreate,
     },
+    user: { findUnique: mockUserFindUnique },
   },
 }));
 vi.mock("@/lib/audit/audit", () => ({
@@ -146,6 +149,10 @@ describe("POST /api/passwords/[id]/attachments", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
+    // Default current user keyVersion — matches the "1" in validFormFields().
+    // Tests that exercise the upload happy path rely on this match; tests
+    // exercising the keyVersion-mismatch case override per call.
+    mockUserFindUnique.mockResolvedValue({ keyVersion: 1 });
   });
 
   it("returns 401 when not authenticated", async () => {

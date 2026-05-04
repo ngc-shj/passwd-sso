@@ -9,7 +9,13 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, notFound, unauthorized, rateLimited } from "@/lib/http/api-response";
 import { migrateLimiter } from "@/lib/security/rate-limiters";
 import {
+  ATTACHMENT_BODY_BASE64_MAX,
+  ATTACHMENT_MIGRATE_PAYLOAD_MAX,
+  CEK_WRAP_BASE64_MAX,
+} from "@/lib/validations/common";
+import {
   applyAttachmentMigration,
+  LegacyAttachmentInconsistentVersionError,
   LegacyMigrationNotApplicableError,
   LegacyBodyHashMismatchError,
 } from "@/lib/vault/rotate-key-server";
@@ -39,6 +45,16 @@ async function handlePUT(
   // Rate limit per user
   const rl = await migrateLimiter.check(`rl:attachment_migrate:${userId}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);
+
+  // Reject oversized JSON payloads early (memory-DoS guard) — mirror the
+  // upload route's Content-Length pre-check before we buffer the body.
+  const contentLength = req.headers.get("content-length");
+  if (contentLength) {
+    const declaredSize = parseInt(contentLength, 10);
+    if (!Number.isNaN(declaredSize) && declaredSize > ATTACHMENT_MIGRATE_PAYLOAD_MAX) {
+      return errorResponse(API_ERROR.PAYLOAD_TOO_LARGE, 413);
+    }
+  }
 
   // Parse JSON body
   let body: unknown;
@@ -94,33 +110,43 @@ async function handlePUT(
   if (!Number.isInteger(cekWrapAadVersion) || cekWrapAadVersion < 1) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
-
-  // Fetch user record (tenantId + current keyVersion) — outside tx (advisory lock covers the window)
-  const user = await withUserTenantRls(userId, async () =>
-    prisma.user.findUnique({
-      where: { id: userId },
-      select: { tenantId: true, keyVersion: true },
-    }),
-  );
-  if (!user?.tenantId) {
-    return errorResponse(API_ERROR.NOT_FOUND, 404);
+  // Cap the base64-encoded blobs so a malformed client cannot inflate the
+  // JSON parse output. The Content-Length pre-check above bounds the wire
+  // payload; these caps bound the post-parse strings.
+  if (encryptedData.length > ATTACHMENT_BODY_BASE64_MAX) {
+    return errorResponse(API_ERROR.FILE_TOO_LARGE, 400);
   }
-
-  // CEK key version must match user's current key version (I5.6)
-  if (cekKeyVersion !== user.keyVersion) {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
+  if (cekEncrypted.length > CEK_WRAP_BASE64_MAX) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
   let result: { encryptionMode: 2; fromKeyVersion: number | null };
   try {
     result = await withUserTenantRls(userId, async () =>
       prisma.$transaction(async (tx) => {
-        // Advisory lock prevents concurrent migrations for the same user
+        // Advisory lock prevents concurrent migrations / rotations for the
+        // same user. The user record is read INSIDE the lock so the
+        // keyVersion equality check is not racy against a concurrent
+        // rotation that bumped the keyVersion between request boundary and
+        // lock acquisition.
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}::text))`;
+
+        const u = await tx.user.findUnique({
+          where: { id: userId },
+          select: { tenantId: true, keyVersion: true },
+        });
+        if (!u?.tenantId) {
+          throw new Error("USER_NOT_FOUND");
+        }
+        // I5.6: cekKeyVersion must match the user's current keyVersion at
+        // lock-acquisition time.
+        if (cekKeyVersion !== u.keyVersion) {
+          throw new LegacyAttachmentInconsistentVersionError();
+        }
 
         return applyAttachmentMigration(tx, {
           userId,
-          tenantId: user.tenantId!,
+          tenantId: u.tenantId,
           entryId,
           attachmentId,
           payload: {
@@ -138,6 +164,9 @@ async function handlePUT(
       }),
     );
   } catch (err) {
+    if (err instanceof LegacyAttachmentInconsistentVersionError) {
+      return errorResponse(API_ERROR.ATTACHMENT_INCONSISTENT_VERSION, 409);
+    }
     if (err instanceof LegacyMigrationNotApplicableError) {
       // No payload per S11
       return errorResponse(API_ERROR.LEGACY_MIGRATION_NOT_APPLICABLE, 409);
@@ -146,7 +175,7 @@ async function handlePUT(
       // No payload per S11
       return errorResponse(API_ERROR.LEGACY_BODY_HASH_MISMATCH, 409);
     }
-    if (err instanceof Error && err.message === "NOT_FOUND") {
+    if (err instanceof Error && (err.message === "NOT_FOUND" || err.message === "USER_NOT_FOUND")) {
       return notFound();
     }
     throw err;

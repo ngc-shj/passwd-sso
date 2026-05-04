@@ -22,6 +22,7 @@ import {
   VAULT_ROTATE_HISTORY_MAX,
   ECDH_PRIVATE_KEY_CIPHERTEXT_MAX,
   VAULT_ROTATE_ATTACHMENT_CEK_MAX,
+  CEK_WRAP_BASE64_MAX,
 } from "@/lib/validations/common";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -30,6 +31,7 @@ import {
   LegacyAttachmentsResidualError,
   AttachmentCekManifestMismatchError,
   LegacyAttachmentInconsistentVersionError,
+  Mode2InvariantViolationError,
   RotationPostConditionError,
 } from "@/lib/vault/rotate-key-server";
 
@@ -39,7 +41,7 @@ const rotateLimiter = createRateLimiter({ windowMs: 15 * MS_PER_MINUTE, max: 3 }
 
 const attachmentCekRewrapSchema = z.object({
   id: z.string().uuid(),
-  cekEncrypted: z.string().min(1), // base64
+  cekEncrypted: z.string().min(1).max(CEK_WRAP_BASE64_MAX), // base64
   cekIv: hexIv,
   cekAuthTag: hexAuthTag,
   cekKeyVersion: z.number().int().min(1),
@@ -185,6 +187,13 @@ async function handlePOST(request: NextRequest) {
     }
     if (e instanceof LegacyAttachmentInconsistentVersionError) {
       return errorResponse(API_ERROR.ATTACHMENT_INCONSISTENT_VERSION, 409);
+    }
+    if (e instanceof Mode2InvariantViolationError) {
+      // Server-side data corruption (mode-2 row with NULL cek_*). Surface
+      // as 500 to match the post-condition error pattern; rotation must
+      // not silently rewrap a half-written row.
+      getLogger().error({ userId }, "vault.rotateKey.mode2InvariantViolation");
+      return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
     }
     if (e instanceof RotationPostConditionError) {
       return errorResponse(API_ERROR.INTERNAL_ERROR, 500);

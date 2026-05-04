@@ -47,6 +47,21 @@ export class RotationPostConditionError extends Error {
   }
 }
 
+/**
+ * Pre-write sanity check failed — at least one mode-2 attachment has a
+ * NULL CEK column. The schema permits this (additive migration leaves
+ * cek_* nullable), but the application invariant is "encryptionMode = 2
+ * implies all cek_* fields populated". A row violating the invariant
+ * indicates DB corruption or an out-of-band write; rotation aborts so
+ * the operator can investigate before the row's CEK gets overwritten.
+ */
+export class Mode2InvariantViolationError extends Error {
+  constructor() {
+    super("MODE2_INVARIANT_VIOLATION");
+    this.name = "Mode2InvariantViolationError";
+  }
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface AttachmentCekRewrap {
@@ -143,6 +158,29 @@ export async function applyVaultRotation(
   });
   if (mode0Residual > 0) {
     throw new LegacyAttachmentsResidualError();
+  }
+
+  // ── Defensive guard A2: mode-2 invariant ────────────────────────────────
+  // Schema permits NULL cek_* on mode-2 rows (additive migration), but the
+  // application invariant is that mode-2 implies all CEK columns populated.
+  // Detecting a violation here keeps rotation from silently rewrapping a
+  // half-written row and preserves the original ciphertext for forensic
+  // recovery.
+  const mode2InvariantViolations = await tx.attachment.count({
+    where: {
+      passwordEntry: { userId },
+      encryptionMode: 2,
+      OR: [
+        { cekEncrypted: null },
+        { cekIv: null },
+        { cekAuthTag: null },
+        { cekKeyVersion: null },
+        { cekWrapAadVersion: null },
+      ],
+    },
+  });
+  if (mode2InvariantViolations > 0) {
+    throw new Mode2InvariantViolationError();
   }
 
   // ── Defensive guard B: manifest subset check ─────────────────────────────
