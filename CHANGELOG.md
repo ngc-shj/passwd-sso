@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.4.46](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.45...passwd-sso-v0.4.46) (2026-05-05)
+
+
+### Features
+
+* **api/mobile:** server-side foundation for iOS AutoFill MVP — DPoP-bound /api/mobile/* endpoints ([#418](https://github.com/ngc-shj/passwd-sso/issues/418)) ([edf082b](https://github.com/ngc-shj/passwd-sso/commit/edf082b14b48b5a3263506af316a7f9b1765a79c))
+* **audit-anchor:** external commitment — ADR + publisher + verifier CLI (Phase 1-3) ([#419](https://github.com/ngc-shj/passwd-sso/issues/419)) ([2462e5e](https://github.com/ngc-shj/passwd-sso/commit/2462e5eaa6781e07597f99a111f59446644bce53))
+* **auth:** bind userId to OAuth token AAD + audit GCM tampering ([#421](https://github.com/ngc-shj/passwd-sso/issues/421)) ([7198d46](https://github.com/ngc-shj/passwd-sso/commit/7198d465611b5bc33021739ee8d18c93d4852f73))
+* **ci:** runtime cross-tenant RLS predicate verification ([#440](https://github.com/ngc-shj/passwd-sso/issues/440)) ([f4d4068](https://github.com/ngc-shj/passwd-sso/commit/f4d4068ce2371eff99c62aeced6c5608f9f9fd16))
+* **crypto:** dual-version verifier pepper support for non-disruptive rotation ([#414](https://github.com/ngc-shj/passwd-sso/issues/414)) ([9f43522](https://github.com/ngc-shj/passwd-sso/commit/9f4352217370a3638f45d61e5671c40d3338a38d))
+* **ia:** admin-ia redesign — tenant + team admin restructure (mental-model-driven) ([#424](https://github.com/ngc-shj/passwd-sso/issues/424)) ([9c9bc8b](https://github.com/ngc-shj/passwd-sso/commit/9c9bc8baca5a82719f372f6aa8997b554fe2e805))
+* **ia:** personal-security IA redesign — mental-model-driven settings restructure ([#423](https://github.com/ngc-shj/passwd-sso/issues/423)) ([6394f95](https://github.com/ngc-shj/passwd-sso/commit/6394f95ec18b3feb10624f4cb5695423f71d3475))
+* **security:** adversarial tests + MCP refresh race fix ([#435](https://github.com/ngc-shj/passwd-sso/issues/435)) ([a910199](https://github.com/ngc-shj/passwd-sso/commit/a9101993a50f854a51bef603aa75790699da44e8))
+* **vault:** Admin Vault Reset dual-admin approval + post-reset session invalidation ([#415](https://github.com/ngc-shj/passwd-sso/issues/415)) ([a1efe8a](https://github.com/ngc-shj/passwd-sso/commit/a1efe8a77d2c4b8df45729e34ea3eb0b15b58117))
+* **vault:** non-destructive attachment rotation (Phase B) ([#444](https://github.com/ngc-shj/passwd-sso/issues/444)) ([ab31f82](https://github.com/ngc-shj/passwd-sso/commit/ab31f822e0cea10654dd94d036fe8d4a5ce0c8e4))
+
+
+### Bug Fixes
+
+* **audit-anchor:** apply encodeURIComponent sanitizer for CodeQL taint flow ([#420](https://github.com/ngc-shj/passwd-sso/issues/420)) ([52e505c](https://github.com/ngc-shj/passwd-sso/commit/52e505c6f475d421f25c827e6924bb9f8a764ff5))
+* **audit:** emit cacheTombstoneFailures on vault reset / tenant policy invalidation ([#431](https://github.com/ngc-shj/passwd-sso/issues/431)) ([dc294e8](https://github.com/ngc-shj/passwd-sso/commit/dc294e86365630c800a4f839050deb908635cdf3))
+* **audit:** honor actorType filter in personal/tenant download ([#430](https://github.com/ngc-shj/passwd-sso/issues/430)) ([4cbe340](https://github.com/ngc-shj/passwd-sso/commit/4cbe3407763e71d9e5e04389610e1f1e96119768))
+* **crypto:** cover Recovery / EmergencyAccess / WebAuthn PRF wrappings + token revocation in vault key rotation ([#438](https://github.com/ngc-shj/passwd-sso/issues/438)) ([c07bba1](https://github.com/ngc-shj/passwd-sso/commit/c07bba13e9cfb5c4e9bd11eca871134ae34da1ea))
+* **ios/autofill:** harden cache AAD, split bridge-key keychain, rename leaf-key hash ([#432](https://github.com/ngc-shj/passwd-sso/issues/432)) ([2b26c4a](https://github.com/ngc-shj/passwd-sso/commit/2b26c4ad710d88499918976b009589fd49861b37))
+* **maintenance:** scope op_* token routes to issuer tenant ([#410](https://github.com/ngc-shj/passwd-sso/issues/410)) ([560b019](https://github.com/ngc-shj/passwd-sso/commit/560b019048dc16d7b614f71d192b577083a13bde))
+* **vault:** close upload TOCTOU by moving cekKeyVersion check into tx ([#446](https://github.com/ngc-shj/passwd-sso/issues/446)) ([afb71e6](https://github.com/ngc-shj/passwd-sso/commit/afb71e6f00a5ad5ae00bbe74c8cb44f358fbee5f))
+* **vault:** invalidate user sessions/tokens on self-initiated vault reset ([#422](https://github.com/ngc-shj/passwd-sso/issues/422)) ([0fc159a](https://github.com/ngc-shj/passwd-sso/commit/0fc159afaa5989952b8b803fd0741a32b34b2a92))
+* **vault:** reject malformed base64 at attachment CEK trust boundaries ([#447](https://github.com/ngc-shj/passwd-sso/issues/447)) ([9a5d458](https://github.com/ngc-shj/passwd-sso/commit/9a5d4580e0fed4cd64119379920e2ad7614b7688))
+* **vault:** tighten attachment CEK validation on upload, migrate, and rotation ([#445](https://github.com/ngc-shj/passwd-sso/issues/445)) ([03e037a](https://github.com/ngc-shj/passwd-sso/commit/03e037a1ec59cd0b3f0654c646d4d8e6cd2e195d))
+
+
+### Code Refactoring
+
+* **dcr-cleanup:** replace tenant-admin endpoint with background sweeper ([#412](https://github.com/ngc-shj/passwd-sso/issues/412)) ([1ececb2](https://github.com/ngc-shj/passwd-sso/commit/1ececb21e73f4fef675a4692fe4d589de987af3e))
+* **ia:** split team General into Profile/Delete sub-tabs ([#426](https://github.com/ngc-shj/passwd-sso/issues/426)) ([105400c](https://github.com/ngc-shj/passwd-sso/commit/105400ca62337b9e2fdf13d974e879511c84941a))
+* **state-machine:** centralize EmergencyAccess + AccessRequest transitions ([#436](https://github.com/ngc-shj/passwd-sso/issues/436)) ([#442](https://github.com/ngc-shj/passwd-sso/issues/442)) ([c0671bd](https://github.com/ngc-shj/passwd-sso/commit/c0671bd25bab6070a48622819efc7a684f070925))
+
 ## [0.4.45](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.44...passwd-sso-v0.4.45) (2026-04-27)
 
 
