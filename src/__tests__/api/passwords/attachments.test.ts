@@ -370,6 +370,19 @@ describe("POST /api/passwords/[id]/attachments", () => {
     expect(json.filename).toBe("test.pdf");
   });
 
+  it("rejects upload with malformed base64 in cekEncrypted (R19 mirror of route.test.ts) → 400", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockEntryFindUnique.mockResolvedValue({ userId: DEFAULT_SESSION.user.id });
+    mockAttachmentCount.mockResolvedValue(0);
+    const fields = { ...validFormFields(), cekEncrypted: "Y2V-" };
+    const req = createFormDataRequest(fields);
+    const res = await POST(req, createParams("e1"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(mockAttachmentCreate).not.toHaveBeenCalled();
+  });
+
   it("normalizes uppercase UUID clientId to lowercase for AAD consistency", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockEntryFindUnique.mockResolvedValue({ userId: DEFAULT_SESSION.user.id });

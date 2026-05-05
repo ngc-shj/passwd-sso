@@ -11,6 +11,7 @@ import { migrateLimiter } from "@/lib/security/rate-limiters";
 import {
   ATTACHMENT_BODY_BASE64_MAX,
   ATTACHMENT_MIGRATE_PAYLOAD_MAX,
+  BASE64_RE,
   CEK_WRAP_BASE64_MAX,
 } from "@/lib/validations/common";
 import {
@@ -117,6 +118,13 @@ async function handlePUT(
     return errorResponse(API_ERROR.FILE_TOO_LARGE, 400);
   }
   if (cekEncrypted.length > CEK_WRAP_BASE64_MAX) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
+  // Reject non-base64 characters before `Buffer.from(_, "base64")` silently
+  // drops invalid bytes — both blobs are persisted verbatim into BYTEA
+  // columns, so a malformed input would corrupt the row instead of failing
+  // fast.
+  if (!BASE64_RE.test(encryptedData) || !BASE64_RE.test(cekEncrypted)) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 

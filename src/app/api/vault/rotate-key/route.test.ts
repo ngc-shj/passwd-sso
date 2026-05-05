@@ -410,6 +410,70 @@ describe("POST /api/vault/rotate-key", () => {
     expect(json.error).toBe("INTERNAL_ERROR");
   });
 
+  it("rejects attachmentCekRewraps[].cekEncrypted with non-base64 characters → 400 VALIDATION_ERROR", async () => {
+    // base64url chars (`-` / `_`) are not valid standard base64.
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", {
+        body: {
+          ...validBody,
+          attachmentCekRewraps: [
+            {
+              id: "550e8400-e29b-41d4-a716-446655440000",
+              cekEncrypted: "Y2V-",
+              cekIv: "a".repeat(24),
+              cekAuthTag: "b".repeat(32),
+              cekKeyVersion: 2,
+              cekWrapAadVersion: 1,
+            },
+          ],
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+    // applyVaultRotation must NOT be invoked — Zod parse rejects first.
+    expect(mockApplyVaultRotation).not.toHaveBeenCalled();
+  });
+
+  it("accepts non-empty attachmentCekRewraps with valid base64 (regex happy-path) → 200", async () => {
+    // Locks in that the new `.regex(BASE64_RE)` does NOT reject canonical
+    // standard base64 — without this, a regex regression that rejects ALL
+    // base64 would still let every other rotation test pass (validBody has
+    // an empty rewraps array).
+    mockApplyVaultRotation.mockResolvedValue({
+      ...defaultRotationEffects,
+      cekRewrapsAttempted: 1,
+      cekRewrapsSucceeded: 1,
+    });
+    const rewrap = {
+      id: "550e8400-e29b-41d4-a716-446655440000",
+      cekEncrypted: "Y2Vr", // base64 of "cek"
+      cekIv: "a".repeat(24),
+      cekAuthTag: "b".repeat(32),
+      cekKeyVersion: 2,
+      cekWrapAadVersion: 1,
+    };
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", {
+        body: { ...validBody, attachmentCekRewraps: [rewrap] },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockApplyVaultRotation).toHaveBeenCalledWith(
+      expect.anything(), // tx
+      "user-1",
+      "tenant-1",
+      1, // oldKeyVersion
+      2, // newKeyVersion
+      expect.any(String), // newServerHash
+      expect.any(String), // newServerSalt
+      expect.objectContaining({
+        attachmentCekRewraps: [expect.objectContaining({ cekEncrypted: "Y2Vr" })],
+      }),
+    );
+  });
+
   it("rotation succeeds with empty attachmentCekRewraps when no mode-2 attachments exist", async () => {
     mockApplyVaultRotation.mockResolvedValue({
       ...defaultRotationEffects,

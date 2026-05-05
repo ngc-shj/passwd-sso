@@ -10,7 +10,7 @@ import {
   FILENAME_MAX_LENGTH,
   isValidSendFilename,
 } from "@/lib/validations";
-import { CEK_WRAP_BASE64_MAX } from "@/lib/validations/common";
+import { BASE64_RE, CEK_WRAP_BASE64_MAX } from "@/lib/validations/common";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -168,6 +168,13 @@ async function handlePOST(
   // Cap cekEncrypted base64 length at the trust boundary so a malformed
   // client cannot inflate the column. Same cap as migrate / rotation.
   if (cekEncrypted.length > CEK_WRAP_BASE64_MAX) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
+  // Reject non-base64 characters (newlines, base64url `-`/`_`, padding in
+  // wrong position, etc.) before they reach `Buffer.from(_, "base64")`,
+  // which silently drops invalid bytes and would otherwise let a malformed
+  // wrap survive on the row.
+  if (!BASE64_RE.test(cekEncrypted)) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
