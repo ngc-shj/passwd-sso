@@ -21,11 +21,9 @@ const forbidden = (): NextResponse =>
  * Assert that the request's Origin header matches the application URL.
  * Returns null if valid, or a 403 NextResponse if invalid.
  *
- * Destructive endpoints always require an Origin header. When APP_URL /
- * AUTH_URL is not configured, the expected origin is derived from the Host
- * header. Note: `x-forwarded-proto` is only honored as a scheme hint — the
- * origin comparison still requires Host to match, so a spoofed proto alone
- * cannot forge a same-origin request.
+ * Destructive endpoints always require an Origin header. The expected
+ * origin must come from APP_URL / AUTH_URL; if neither is configured we
+ * fail closed rather than trusting request headers to define "same origin".
  *
  * Usage in route handlers:
  *   const originError = assertOrigin(request);
@@ -35,19 +33,11 @@ export function assertOrigin(request: Request): NextResponse | null {
   const origin = request.headers.get("origin");
   if (!origin) return forbidden();
 
-  let expectedOrigin: string;
   const appUrl = getAppOrigin();
-  if (appUrl) {
-    expectedOrigin = appUrl;
-  } else {
-    const host = request.headers.get("host");
-    if (!host) return forbidden();
-    const proto = request.headers.get("x-forwarded-proto") || "http";
-    expectedOrigin = `${proto}://${host}`;
-  }
+  if (!appUrl) return forbidden();
 
   try {
-    if (new URL(origin).origin !== new URL(expectedOrigin).origin) {
+    if (new URL(origin).origin !== new URL(appUrl).origin) {
       return forbidden();
     }
   } catch {

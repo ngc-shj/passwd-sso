@@ -8,6 +8,7 @@ const {
   mockPrismaUser,
   mockWithUserTenantRls,
   mockRateLimitCheck,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockCheckAuth: vi.fn(),
   mockPrismaApiKey: {
@@ -18,6 +19,7 @@ const {
   mockPrismaUser: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/lib/auth/session/check-auth", () => ({
@@ -37,6 +39,9 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/auth/session/step-up", () => ({
+  requireRecentSession: mockRequireRecentSession,
 }));
 vi.mock("@/lib/logger", () => {
   const noop = vi.fn();
@@ -170,6 +175,7 @@ describe("POST /api/api-keys", () => {
     mockPrismaApiKey.create.mockReset();
     mockPrismaUser.findUnique.mockReset();
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
+    mockRequireRecentSession.mockResolvedValue(null);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -265,6 +271,56 @@ describe("POST /api/api-keys", () => {
     );
     expect(res.status).toBe(429);
     expect(res.headers.get("Retry-After")).toBe("30");
+  });
+
+  it("returns 403 when session step-up is required for session auth", async () => {
+    mockCheckAuth.mockResolvedValue({
+      ok: true,
+      auth: { type: "session", userId: "u1" },
+    });
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const res = await POST(
+      createRequest("POST", "http://localhost:3000/api/api-keys", {
+        body: { name: "test", scope: ["passwords:read"] },
+      }),
+    );
+
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockPrismaApiKey.create).not.toHaveBeenCalled();
+  });
+
+  it("skips session step-up for extension-token auth", async () => {
+    mockCheckAuth.mockResolvedValue({
+      ok: true,
+      auth: { type: "token", userId: "u2", scopes: [] },
+    });
+    mockPrismaApiKey.count.mockResolvedValue(0);
+    mockPrismaApiKey.create.mockResolvedValue({
+      id: "new-key",
+      prefix: "api_XXXX",
+      name: "Test",
+      scope: "passwords:read",
+      expiresAt: new Date("2026-06-01"),
+      createdAt: new Date("2026-01-01"),
+    });
+
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 30);
+
+    const res = await POST(
+      createRequest("POST", "http://localhost:3000/api/api-keys", {
+        body: { name: "Test", scope: ["passwords:read"], expiresAt: expiresAt.toISOString() },
+      }),
+    );
+
+    expect(res.status).toBe(201);
+    expect(mockRequireRecentSession).not.toHaveBeenCalled();
+    expect(mockPrismaApiKey.create).toHaveBeenCalledTimes(1);
   });
 
   it("creates API key for session auth", async () => {

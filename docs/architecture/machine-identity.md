@@ -360,6 +360,7 @@ Tenant audit log UI includes an actor type filter dropdown. The API accepts an o
 6. **Tenant isolation** — All models carry `tenantId`; RLS defense-in-depth on MCP client routes
 7. **Token lifecycle** — Deactivation immediately rejects all tokens; hard delete cascades
 8. **JIT atomicity** — Single transaction + optimistic lock prevents double-approval
+9. **Recent-session issuance hardening** — Browser-session endpoints that mint machine credentials require a recent Auth.js session (15-minute shared step-up window)
 
 ## Database Models
 
@@ -402,7 +403,8 @@ challenge: 1QqV6dforNv_7P9vVt611sRQDJ3SnU6jHJAbSV6bBuU
 
 ### Step 3: Authorize (Browser)
 
-Open this URL in a browser where you are logged into passwd-sso:
+Open this URL in a browser where you are logged into passwd-sso with a recent
+session:
 
 ```
 https://<your-server>/api/mcp/authorize?\
@@ -416,6 +418,27 @@ https://<your-server>/api/mcp/authorize?\
 ```
 
 The browser redirects to `http://localhost:3000/callback?code=<AUTH_CODE>&state=test`. Copy the `code` value from the URL.
+
+If the browser session is older than the step-up window, the authorize route
+returns `SESSION_STEP_UP_REQUIRED`; re-authenticate in the dashboard and retry.
+
+### Recent-session requirement for browser-issued credentials
+
+The shared `requireRecentSession()` guard applies to browser-session routes
+that mint non-session credentials:
+
+- `GET /api/mcp/authorize`
+- `POST /api/mcp/authorize/consent`
+- `GET /api/mobile/authorize`
+- `POST /api/extension/bridge-code`
+- `POST /api/extension/token` (legacy direct issuance)
+- `POST /api/tenant/scim-tokens`
+- `POST /api/tenant/service-accounts/[id]/tokens`
+- `POST /api/tenant/operator-tokens`
+
+Refresh, revoke, and one-time code exchange endpoints are not part of this
+step-up boundary because they are already authenticated by existing bearer
+credentials or single-use codes.
 
 ### Step 4: Exchange Code for Token
 

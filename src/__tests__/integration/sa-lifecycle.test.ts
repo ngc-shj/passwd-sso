@@ -34,6 +34,7 @@ const {
   mockServiceAccountTokenUpdateMany,
   mockPrismaTransaction,
   mockPasswordsAuthOrToken,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -53,11 +54,15 @@ const {
   mockServiceAccountTokenUpdateMany: vi.fn(),
   mockPrismaTransaction: vi.fn(),
   mockPasswordsAuthOrToken: vi.fn(),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 // ─── Module mocks ─────────────────────────────────────────────────────────────
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/auth/session/step-up", () => ({
+  requireRecentSession: mockRequireRecentSession,
+}));
 
 vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {

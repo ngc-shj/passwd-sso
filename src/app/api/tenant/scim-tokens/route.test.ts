@@ -11,6 +11,7 @@ const {
   mockHashToken,
   mockGenerateScimToken,
   mockRateLimitCheck,
+  mockRequireRecentSession,
   TenantAuthError,
 } = vi.hoisted(() => {
   class _TenantAuthError extends Error {
@@ -34,6 +35,7 @@ const {
     mockHashToken: vi.fn((t: string) => `hashed:${t}`),
     mockGenerateScimToken: vi.fn(() => "scim_test_plaintext_token"),
     mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
+    mockRequireRecentSession: vi.fn().mockResolvedValue(null),
     TenantAuthError: _TenantAuthError,
   };
 });
@@ -65,6 +67,9 @@ vi.mock("@/lib/security/rate-limit", () => ({
     check: mockRateLimitCheck,
     clear: vi.fn(),
   })),
+}));
+vi.mock("@/lib/auth/session/step-up", () => ({
+  requireRecentSession: mockRequireRecentSession,
 }));
 
 import { GET, POST } from "./route";
@@ -124,6 +129,7 @@ describe("POST /api/tenant/scim-tokens", () => {
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockPrismaScimToken.count.mockResolvedValue(0);
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
+    mockRequireRecentSession.mockResolvedValue(null);
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -158,6 +164,22 @@ describe("POST /api/tenant/scim-tokens", () => {
     });
     const res = await POST(req);
     expect(res.status).toBe(400);
+  });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/tenant/scim-tokens", {
+        body: { description: "test" },
+      }),
+    );
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockPrismaScimToken.create).not.toHaveBeenCalled();
   });
 
   it("returns 409 when token limit is exceeded", async () => {

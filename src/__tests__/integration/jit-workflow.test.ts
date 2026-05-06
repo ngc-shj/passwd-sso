@@ -27,6 +27,7 @@ const {
   mockPrismaTransaction,
   mockHashToken,
   mockDispatchTenantWebhook,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockAuthOrToken: vi.fn(),
@@ -43,9 +44,13 @@ const {
   mockPrismaTransaction: vi.fn(),
   mockHashToken: vi.fn().mockReturnValue("hashed-token"),
   mockDispatchTenantWebhook: vi.fn(),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/auth/session/step-up", () => ({
+  requireRecentSession: mockRequireRecentSession,
+}));
 vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;

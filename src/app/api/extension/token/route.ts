@@ -12,6 +12,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { TokenIssueResponseSchema, TokenRevokeResponseSchema } from "@/lib/validations/extension-token";
 import logger from "@/lib/logger";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { requireRecentSession } from "@/lib/auth/session/step-up";
 
 function internalError() {
   return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
@@ -29,11 +30,14 @@ const tokenLimiter = createRateLimiter({
  * Requires Auth.js session (user must be logged in on the web app).
  * Returns the plaintext token (only visible once).
  */
-async function handlePOST() {
+async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
   }
+
+  const stepUpError = await requireRecentSession(req);
+  if (stepUpError) return stepUpError;
 
   const rl = await tokenLimiter.check(`rl:ext_token:${session.user.id}`);
   if (!rl.allowed) {

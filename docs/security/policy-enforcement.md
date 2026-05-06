@@ -20,7 +20,7 @@ Password content (plaintext) is encrypted client-side before reaching the server
 | `extensionTokenIdleTimeoutMinutes` | Blocking | Server | `src/lib/auth/tokens/extension-token.ts` `issueExtensionToken()` + `token/refresh/route.ts` | Access token `expiresAt = now + value` at issuance and on every refresh |
 | `extensionTokenAbsoluteTimeoutMinutes` | Blocking | Server | `src/lib/auth/tokens/extension-token.ts` + `token/refresh/route.ts` | Family is revoked and refresh rejected with `EXTENSION_TOKEN_FAMILY_EXPIRED` when `now - familyCreatedAt > value` |
 | `vaultAutoLockMinutes` | Timer | Client | `auto-lock-context.tsx` | Browser inactivity timer; server cannot know vault lock state |
-| `allowedCidrs` | Blocking | Server | `proxy.ts` + `access-restriction.ts` | Middleware (Edge) + route handler (Node.js); 60s cache |
+| `allowedCidrs` | Blocking | Server | `proxy.ts` + `access-restriction.ts` | Session-cookie routes are blocked in proxy (`API_SESSION_REQUIRED`, including MCP/mobile authorization issuance). Bearer and other non-session flows enforce the same policy in route handlers. 60s cache |
 | `tailscaleEnabled` / `tailscaleTailnet` | Blocking | Server | `access-restriction.ts` | Two-stage: Edge (CGNAT heuristic) + Node.js (WhoIs verify) |
 | `requireMinPinLength` | Blocking | Server | `webauthn/register/verify/route.ts` | Platform authenticators (Touch ID, etc.) exempt — they don't report PIN length |
 | `requirePasskey` | Blocking/Advisory | Server | `proxy.ts` middleware | After grace period: redirect (blocking) + audit via `/api/internal/audit-emit`. Within grace: advisory banner via `/api/user/passkey-status` |
@@ -41,6 +41,13 @@ Password content (plaintext) is encrypted client-side before reaching the server
 | `delegationDefaultTtlSec` | Blocking | Server | `vault/delegation/route.ts` | Default TTL for delegation sessions |
 | `delegationMaxTtlSec` | Blocking | Server | `vault/delegation/route.ts` | Hard ceiling for delegation TTL; enforced via `Math.min(requested, max)` |
 | `saTokenMaxExpiryDays` | Blocking | Server | `tenant/service-accounts/[id]/tokens/route.ts` | Caps SA token `expiresAt` to `now + saTokenMaxExpiryDays`; null = no limit. Admin UI: Security → Machine Identity → Token |
+
+## Credential Issuance Hardening
+
+Sensitive browser-session flows that mint non-session credentials require a recent Auth.js session (`requireRecentSession()`; default window: 15 minutes). This blocks stolen long-lived dashboard sessions from being upgraded into machine or automation credentials.
+
+- **Protected by recent-session step-up:** MCP authorize / consent, mobile authorize, extension bridge-code issuance, legacy direct extension token issuance, SCIM token creation, service-account token creation, operator token creation
+- **Not covered by this step-up:** refresh, revoke, and code/token exchange endpoints that are already authenticated by one-time codes or existing bearer credentials
 
 ## Team Policy Fields
 

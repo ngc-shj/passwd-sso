@@ -73,6 +73,12 @@ const SESSION_REQUIRED_PREFIXES: readonly string[] = [
   API_PATH.WEBAUTHN,
 ];
 
+const SESSION_REQUIRED_EXACT_PATHS: readonly string[] = [
+  API_PATH.MCP_AUTHORIZE,
+  API_PATH.MCP_AUTHORIZE_CONSENT,
+  API_PATH.MOBILE_AUTHORIZE,
+];
+
 /**
  * Classify a request pathname. The CALLER is responsible for handling
  * preflight (OPTIONS method) before consulting this function — the
@@ -124,7 +130,10 @@ export function classifyRoute(pathname: string): RoutePolicy {
   // isBearerBypassRoute(pathname) directly to decide whether the
   // bypass dispatch is taken for a given request; the classification
   // stays "api-session-required" either way.
-  if (SESSION_REQUIRED_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
+  if (
+    SESSION_REQUIRED_EXACT_PATHS.includes(pathname) ||
+    SESSION_REQUIRED_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+  ) {
     return { kind: ROUTE_POLICY_KIND.API_SESSION_REQUIRED };
   }
 

@@ -14,7 +14,8 @@ Token delivery uses a **one-time bridge code exchange**
 (introduced in PR #364):
 
 1. The web app's JavaScript obtains a single-use bridge code from
-   `POST /api/extension/bridge-code` (requires Auth.js session).
+   `POST /api/extension/bridge-code` (requires Auth.js session and a recent
+   sign-in within the shared step-up window).
 2. The web app posts the code via `window.postMessage` to the content script.
 3. The content script (ISOLATED world) calls `POST /api/extension/token/exchange`
    directly via `fetch()` to atomically consume the code and receive a token.
@@ -77,10 +78,10 @@ sequenceDiagram
 
 | Phase | Mechanism | TTL |
 |-------|-----------|-----|
-| **Issue (bridge code)** | `POST /api/extension/bridge-code` (requires Auth.js session) | 60 s code TTL |
+| **Issue (bridge code)** | `POST /api/extension/bridge-code` (requires Auth.js session + recent-session step-up) | 60 s code TTL |
 | **Code delivery** | `window.postMessage` (MAIN → ISOLATED) | instant |
 | **Code → token exchange** | `POST /api/extension/token/exchange` (no session, atomic single-use consume) | issues token with tenant-policy TTL (default 7d idle / 30d absolute) |
-| **Issue (legacy direct)** | `POST /api/extension/token` (Auth.js session) — **DEPRECATED** | tenant-policy TTL |
+| **Issue (legacy direct)** | `POST /api/extension/token` (Auth.js session + recent-session step-up) — **DEPRECATED** | tenant-policy TTL |
 | **Storage** | Encrypted with ephemeral AES-256-GCM key in `chrome.storage.session` | until browser close |
 | **Refresh** | `POST /api/extension/token/refresh` (Bearer + session) | tenant-policy TTL (new token) |
 | **Refresh trigger** | `ALARM_TOKEN_REFRESH` fires before idle expiry | — |
@@ -167,6 +168,14 @@ CSRF protection (`assertOrigin`) is intentionally NOT applied to this endpoint
 because the content script's effective origin may be `chrome-extension://`,
 which would fail any same-origin check. The compensating control is the
 256-bit single-use code.
+
+### Browser-session issuance hardening
+
+Both browser-session issuance paths (`POST /api/extension/bridge-code` and the
+legacy `POST /api/extension/token`) also require a recent Auth.js session via
+the shared `requireRecentSession()` helper. This prevents an attacker with a
+stolen but older dashboard session from upgrading it into a longer-lived
+extension credential.
 
 ## Threat Model
 

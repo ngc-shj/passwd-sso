@@ -17,6 +17,7 @@ const {
   mockTenantFindUnique,
   mockPrismaTransaction,
   mockHashToken,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -27,6 +28,7 @@ const {
   mockTenantFindUnique: vi.fn(),
   mockPrismaTransaction: vi.fn(),
   mockHashToken: vi.fn().mockReturnValue("hashed-token"),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -69,6 +71,9 @@ vi.mock("@/lib/http/with-request-log", () => ({
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
+}));
+vi.mock("@/lib/auth/session/step-up", () => ({
+  requireRecentSession: mockRequireRecentSession,
 }));
 
 import { POST } from "@/app/api/tenant/access-requests/[id]/approve/route";
@@ -116,7 +121,10 @@ const makeTransactionSuccess = () => {
 };
 
 describe("POST /api/tenant/access-requests/[id]/approve", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRequireRecentSession.mockResolvedValue(null);
+  });
 
   it("approves pending request and returns JIT token", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
@@ -266,6 +274,25 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
     const { status } = await parseResponse(res);
 
     expect(status).toBe(403);
+  });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/access-requests/${REQUEST_ID}/approve`,
+    );
+    const res = await POST(req, createParams({ id: REQUEST_ID }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockPrismaTransaction).not.toHaveBeenCalled();
   });
 
   it("returns 409 when service account is inactive", async () => {

@@ -15,6 +15,7 @@ const {
   mockWithBypassRls,
   mockLogAudit,
   mockExtractClientIp,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockBridgeCodeCreate: vi.fn(),
@@ -26,6 +27,7 @@ const {
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
   mockExtractClientIp: vi.fn(() => "1.2.3.4"),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -72,6 +74,9 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: mockExtractClientIp,
 }));
+vi.mock("@/lib/auth/session/step-up", () => ({
+  requireRecentSession: mockRequireRecentSession,
+}));
 
 import { POST } from "./route";
 
@@ -91,6 +96,7 @@ describe("POST /api/extension/bridge-code", () => {
     mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockBridgeCodeFindMany.mockResolvedValue([]);
     mockBridgeCodeCreate.mockResolvedValue({});
+    mockRequireRecentSession.mockResolvedValue(null);
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -118,6 +124,20 @@ describe("POST /api/extension/bridge-code", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(429);
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+  });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const res = await POST(makeRequest());
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
   });
 
   it("issues a bridge code on success and emits an audit log", async () => {

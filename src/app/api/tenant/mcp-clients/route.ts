@@ -15,6 +15,7 @@ import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-res
 import { parseBody } from "@/lib/http/parse-body";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { requireRecentSession } from "@/lib/auth/session/step-up";
 
 const createSchema = z.object({
   name: z.string().min(1).max(100),
@@ -108,6 +109,9 @@ async function handlePOST(req: NextRequest) {
   } catch (err) {
     return handleAuthError(err);
   }
+
+  const stepUpError = await requireRecentSession(req);
+  if (stepUpError) return stepUpError;
 
   const result = await parseBody(req, createSchema);
   if (!result.ok) return result.response;

@@ -209,6 +209,7 @@ export const API_ERROR = {
   // ── Tenant / Session ────────────────────────────────────
   NO_TENANT: "NO_TENANT",
   INVALID_SESSION: "INVALID_SESSION",
+  SESSION_STEP_UP_REQUIRED: "SESSION_STEP_UP_REQUIRED",
   INTERNAL_ERROR: "INTERNAL_ERROR",
 } as const;
 
@@ -367,6 +368,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   DELEGATION_ENTRIES_NOT_FOUND: "delegationEntriesNotFound",
   NO_TENANT: "noTenant",
   INVALID_SESSION: "invalidSession",
+  SESSION_STEP_UP_REQUIRED: "sessionStepUpRequired",
   INTERNAL_ERROR: "internalError",
 } satisfies Record<ApiErrorCode, string>;
 

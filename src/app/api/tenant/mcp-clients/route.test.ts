@@ -14,6 +14,7 @@ const {
   mockMcpClientCreate,
   mockHashToken,
   mockUserFindMany,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -26,6 +27,7 @@ const {
   mockMcpClientCreate: vi.fn(),
   mockHashToken: vi.fn((token: string) => `hashed:${token}`),
   mockUserFindMany: vi.fn().mockResolvedValue([]),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -76,6 +78,9 @@ vi.mock("@/lib/security/rate-limit", () => ({
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
+}));
+vi.mock("@/lib/auth/session/step-up", () => ({
+  requireRecentSession: mockRequireRecentSession,
 }));
 
 import { GET, POST } from "@/app/api/tenant/mcp-clients/route";
@@ -166,7 +171,10 @@ describe("GET /api/tenant/mcp-clients", () => {
 });
 
 describe("POST /api/tenant/mcp-clients", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRequireRecentSession.mockResolvedValue(null);
+  });
 
   it("creates a MCP client and returns clientSecret once", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
@@ -315,5 +323,27 @@ describe("POST /api/tenant/mcp-clients", () => {
     const { status } = await parseResponse(res);
 
     expect(status).toBe(403);
+  });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const req = createRequest("POST", "http://localhost/api/tenant/mcp-clients", {
+      body: {
+        name: "my-mcp-client",
+        redirectUris: ["https://example.com/callback"],
+        allowedScopes: ["credentials:list", "credentials:use"],
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockMcpClientCreate).not.toHaveBeenCalled();
   });
 });

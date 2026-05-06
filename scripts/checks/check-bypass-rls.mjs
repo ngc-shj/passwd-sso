@@ -41,6 +41,8 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/auth/policy/account-lockout.ts", ["user", "tenant", "auditOutbox"]],
   ["src/lib/auth/policy/lockout-admin-notify.ts", ["user", "tenantMember"]],
   ["src/lib/auth/policy/new-device-detection.ts", ["session", "user"]],
+  // Shared step-up helper: reads Session.createdAt from the session-token cookie.
+  ["src/lib/auth/session/step-up.ts", ["session"]],
   ["src/lib/notification.ts", ["user", "notification"]],
   ["src/lib/webhook-dispatcher.ts", ["teamWebhook", "tenantWebhook"]],
   ["src/lib/auth/access/tenant-auth.ts", ["tenantMember"]],
@@ -101,9 +103,6 @@ const ALLOWED_USAGE = new Map([
   // Operator-token validator: cross-tenant lookup is required because the
   // bearer-token caller has no tenant context until the token row resolves it
   ["src/lib/auth/tokens/operator-token.ts", ["operatorToken"]],
-  // Operator-token issuance: reads Session.createdAt for step-up via session-token cookie
-  // (no tenant context available until session resolves to the actor's tenant)
-  ["src/app/api/tenant/operator-tokens/route.ts", ["session"]],
   ["src/lib/mcp/oauth-server.ts", ["mcpAuthorizationCode", "mcpAccessToken", "mcpRefreshToken"]],
   ["src/app/api/mcp/authorize/route.ts", ["mcpClient", "user"]],
   ["src/app/api/mcp/register/route.ts", ["mcpClient"]],

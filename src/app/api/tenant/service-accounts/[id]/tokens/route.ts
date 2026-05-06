@@ -18,6 +18,7 @@ import {
 } from "@/lib/constants/auth/service-account";
 import { saTokenCreateSchema } from "@/lib/validations/service-account";
 import { MS_PER_DAY } from "@/lib/constants/time";
+import { requireRecentSession } from "@/lib/auth/session/step-up";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -91,6 +92,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   } catch (err) {
     return handleAuthError(err);
   }
+
+  const stepUpError = await requireRecentSession(req);
+  if (stepUpError) return stepUpError;
 
   const { id } = await params;
 

@@ -110,7 +110,7 @@ Set the following values:
 | Variable | Description | How to Generate |
 |----------|-------------|-----------------|
 | `DATABASE_URL` | PostgreSQL connection string | Use default for development |
-| `AUTH_URL` | Application origin (e.g., `https://example.com`) — do NOT include path | `http://localhost:3000` for dev |
+| `AUTH_URL` | Application origin (e.g., `https://example.com`) — do NOT include path. Used as the canonical Origin for cookie-auth CSRF checks when `APP_URL` is unset | `http://localhost:3000` for dev |
 | `NEXT_PUBLIC_BASE_PATH` | (Optional) Sub-path for reverse proxy deployment | e.g., `/passwd-sso` |
 | `AUTH_SECRET` | NextAuth session signing key | `openssl rand -base64 32` |
 | `AUTH_GOOGLE_ID` | Google OAuth Client ID | From Google Cloud Console |
@@ -128,6 +128,11 @@ Set the following values:
 | `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` | Required if `BLOB_BACKEND=s3` | e.g., `ap-northeast-1`, bucket name |
 | `AZURE_STORAGE_ACCOUNT`, `AZURE_BLOB_CONTAINER` | Required if `BLOB_BACKEND=azure` | Azure Storage account / container |
 | `GCS_ATTACHMENTS_BUCKET` | Required if `BLOB_BACKEND=gcs` | GCS bucket name |
+
+If both `APP_URL` and `AUTH_URL` are unset, cookie-authenticated mutating API
+requests fail closed at Origin validation time. Production deployments should
+always set at least `AUTH_URL`, and reverse-proxy/CDN deployments should set
+`APP_URL` to the external origin.
 
 > **Redis is REQUIRED in production.** The Zod schema (`src/lib/env-schema.ts:366-370`) enforces `REDIS_URL` for `NODE_ENV=production`. Redis backs the session cache introduced in PR #407 (tombstone-based revocation propagation across nodes) and shared rate limiting. In single-instance development you may omit `REDIS_URL`; the app falls back to in-memory caches and logs a warning. Set `HEALTH_REDIS_REQUIRED=true` to fail `/api/health/ready` when Redis is unreachable.
 

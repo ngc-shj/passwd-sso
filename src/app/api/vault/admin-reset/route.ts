@@ -33,8 +33,8 @@ const adminResetSchema = z.object({
 // Execute a vault reset initiated by a team admin.
 // The target user must be authenticated and submit the token + confirmation.
 async function handlePOST(req: NextRequest) {
-  // Intentionally stricter than proxy CSRF gate (which skips when unset for dev
-  // convenience): admin vault reset must never run without a configured origin.
+  // Intentionally stricter than the generic CSRF helper: admin vault reset
+  // must never run without an explicit canonical origin configuration.
   const appUrl = getAppOrigin();
   if (!appUrl) {
     return NextResponse.json(

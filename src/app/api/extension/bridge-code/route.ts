@@ -25,6 +25,7 @@ import {
   BRIDGE_CODE_MAX_ACTIVE,
 } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { requireRecentSession } from "@/lib/auth/session/step-up";
 
 export const runtime = "nodejs";
 
@@ -39,6 +40,9 @@ async function handlePOST(req: NextRequest) {
   if (!session?.user?.id) {
     return unauthorized();
   }
+
+  const stepUpError = await requireRecentSession(req);
+  if (stepUpError) return stepUpError;
 
   // Per-user rate limit (matches existing tokenLimiter on POST /api/extension/token)
   const rl = await bridgeCodeLimiter.check(`rl:ext_bridge:${session.user.id}`);

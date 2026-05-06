@@ -215,10 +215,10 @@ npm run docker:down
 | --- | --- |
 | `NEXT_PUBLIC_APP_NAME` | （任意）UI に表示するアプリ名 |
 | `NEXT_PUBLIC_BASE_PATH` | （任意）リバースプロキシ配下のサブパス（例: `/passwd-sso`）。ビルド前に設定 |
-| `APP_URL` | （任意）リバースプロキシ / CDN 配下の外部 URL（オリジンのみ） |
+| `APP_URL` | （推奨）リバースプロキシ / CDN 配下の外部 URL（オリジンのみ）。Cookie 認証 API の CSRF Origin 判定に使われます |
 | `DATABASE_URL` | PostgreSQL 接続文字列（アプリロール、例: `passwd_app`） |
 | `MIGRATION_DATABASE_URL` | マイグレーション用 PostgreSQL 接続（スーパーユーザーロール、例: `passwd_user`）。`npm run db:migrate` に必要 |
-| `AUTH_URL` | アプリケーションのオリジン（例: `http://localhost:3000`） |
+| `AUTH_URL` | アプリケーションのオリジン（例: `http://localhost:3000`）。`APP_URL` 未設定時の canonical Origin として使われます |
 | `AUTH_SECRET` | `openssl rand -base64 32` |
 | `AUTH_GOOGLE_ID` | Google OAuth クライアント ID |
 | `AUTH_GOOGLE_SECRET` | Google OAuth クライアントシークレット |
@@ -263,6 +263,8 @@ npm run docker:down
 </details>
 
 > **Redis は本番必須です。** 開発/テスト環境では `REDIS_URL` 未設定時に in-memory フォールバックを利用できます。
+>
+> **Cookie 認証の破壊的 API では canonical origin の設定が必要です。** `assertOrigin()` は `APP_URL` / `AUTH_URL` のどちらも無い場合、`Host` ヘッダーから same-origin を推測せず fail-closed で 403 を返します。
 
 ### 管理 / メンテナンススクリプト
 
@@ -322,7 +324,7 @@ cd extension && npm install && npm run build
 - **AAD バインディング** — 追加認証データで暗号文をユーザー・エントリ ID に紐付け
 - **セッションセキュリティ** — データベースセッション（JWT ではない）、テナント/チームポリシーによる絶対タイムアウト（デフォルト 30 日、ポリシーで最短 5 分まで設定可能）、15 分無操作または 5 分タブ非表示で自動ロック
 - **クリップボードクリア** — コピーしたパスワードは 30 秒後に自動消去
-- **CSRF 防御** — JSON body + SameSite Cookie + CSP + Origin ヘッダー検証
+- **CSRF 防御** — JSON body + SameSite Cookie + CSP + 設定済み `APP_URL` / `AUTH_URL` に対する Origin ヘッダー検証（未設定時は fail-closed）
 
 詳細は[暗号設計ホワイトペーパー](docs/security/cryptography-whitepaper.md)を参照してください。
 

@@ -32,7 +32,7 @@ CORS is a **browser-enforced constraint only**. Non-browser clients (curl, scrip
    - `src/app/api/auth/passkey/options/email/route.ts` — non-discoverable challenge generation
    - `src/app/api/auth/passkey/verify/route.ts` — pre-auth verification (creates session as output; WebAuthn `expectedOrigin` provides primary defense; inline `assertOrigin` is defense-in-depth)
 
-3. **Stricter post-baseline guard** (`src/app/api/vault/admin-reset/route.ts`): Keeps `if (!getAppOrigin()) return 500` check. The proxy CSRF gate uses Host-header fallback when `APP_URL` is unset; admin-reset intentionally disallows this fallback.
+3. **Stricter post-baseline guard** (`src/app/api/vault/admin-reset/route.ts`): Keeps `if (!getAppOrigin()) return 500` check. The shared `assertOrigin()` helper now fails closed when neither `APP_URL` nor `AUTH_URL` is configured; admin-reset preserves its explicit configuration requirement on top of that.
 
 ## Browser Extension
 

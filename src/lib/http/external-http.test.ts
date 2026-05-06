@@ -115,6 +115,24 @@ describe("resolveAndValidateIps", () => {
     ).rejects.toThrow("Private IP rejected");
   });
 
+  it("IPv4-mapped IPv6 literal in hex form is rejected as private", async () => {
+    await expect(
+      resolveAndValidateIps("https://[::ffff:7f00:1]/path"),
+    ).rejects.toThrow("Private IP rejected");
+  });
+
+  it("uppercase IPv4-mapped IPv6 literal in hex form is rejected as private", async () => {
+    await expect(
+      resolveAndValidateIps("https://[::FFFF:7F00:1]/path"),
+    ).rejects.toThrow("Private IP rejected");
+  });
+
+  it("zero-padded IPv4-mapped IPv6 literal in hex form is rejected as private", async () => {
+    await expect(
+      resolveAndValidateIps("https://[::ffff:7f00:0001]/path"),
+    ).rejects.toThrow("Private IP rejected");
+  });
+
   it("hostname resolving to public IP returns IPs", async () => {
     mockResolve4.mockResolvedValue(["93.184.216.34"]);
     mockResolve6.mockResolvedValue([]);
@@ -125,6 +143,30 @@ describe("resolveAndValidateIps", () => {
   it("hostname resolving to private IP throws", async () => {
     mockResolve4.mockResolvedValue(["192.168.1.1"]);
     mockResolve6.mockResolvedValue([]);
+    await expect(
+      resolveAndValidateIps("https://evil.example.com/path"),
+    ).rejects.toThrow("private IP");
+  });
+
+  it("hostname resolving to hex-form IPv4-mapped IPv6 loopback throws", async () => {
+    mockResolve4.mockResolvedValue([]);
+    mockResolve6.mockResolvedValue(["::ffff:7f00:1"]);
+    await expect(
+      resolveAndValidateIps("https://evil.example.com/path"),
+    ).rejects.toThrow("private IP");
+  });
+
+  it("hostname resolving to uppercase hex-form IPv4-mapped IPv6 loopback throws", async () => {
+    mockResolve4.mockResolvedValue([]);
+    mockResolve6.mockResolvedValue(["::FFFF:7F00:1"]);
+    await expect(
+      resolveAndValidateIps("https://evil.example.com/path"),
+    ).rejects.toThrow("private IP");
+  });
+
+  it("hostname resolving to zero-padded hex-form IPv4-mapped IPv6 loopback throws", async () => {
+    mockResolve4.mockResolvedValue([]);
+    mockResolve6.mockResolvedValue(["::ffff:7f00:0001"]);
     await expect(
       resolveAndValidateIps("https://evil.example.com/path"),
     ).rejects.toThrow("private IP");

@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
+import { requireRecentSession } from "@/lib/auth/session/step-up";
 
 const authorizeLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
@@ -48,6 +49,9 @@ export async function GET(req: NextRequest) {
     const callbackUrl = serverAppUrl(req.nextUrl.pathname + req.nextUrl.search);
     return NextResponse.redirect(`${loginUrl}?callbackUrl=${encodeURIComponent(callbackUrl)}`);
   }
+
+  const stepUpError = await requireRecentSession(req);
+  if (stepUpError) return stepUpError;
 
   const sp = req.nextUrl.searchParams;
   const clientId = sp.get("client_id");
