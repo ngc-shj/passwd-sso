@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockMcpClientFindFirst, mockWithBypassRls, mockServerAppUrl, mockDetectLocale, mockRateLimiterCheck } =
+const { mockAuth, mockMcpClientFindFirst, mockWithBypassRls, mockServerAppUrl, mockDetectLocale, mockRateLimiterCheck, mockRequireRecentSession } =
   vi.hoisted(() => ({
     mockAuth: vi.fn(),
     mockMcpClientFindFirst: vi.fn(),
@@ -9,9 +9,13 @@ const { mockAuth, mockMcpClientFindFirst, mockWithBypassRls, mockServerAppUrl, m
     mockServerAppUrl: vi.fn((path: string) => `http://localhost:3000${path}`),
     mockDetectLocale: vi.fn(() => "en"),
     mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
+    mockRequireRecentSession: vi.fn().mockResolvedValue(null),
   }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/auth/session/step-up", () => ({
+  requireRecentSession: mockRequireRecentSession,
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: { mcpClient: { findFirst: mockMcpClientFindFirst } },
 }));

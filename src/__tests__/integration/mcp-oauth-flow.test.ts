@@ -36,6 +36,7 @@ const {
   mockHashToken,
   mockRateLimiterCheck,
   mockPrismaTransaction,
+  mockRequireRecentSession,
 } = vi.hoisted(() => {
   const mockPrismaTransaction = vi.fn(async (fn: (tx: unknown) => unknown) =>
     fn({
@@ -69,12 +70,17 @@ const {
     mockHashToken: vi.fn((token: string) => `hashed:${token}`),
     mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
     mockPrismaTransaction,
+    mockRequireRecentSession: vi.fn().mockResolvedValue(null),
   };
 });
 
 // ─── Module mocks ─────────────────────────────────────────────
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+
+vi.mock("@/lib/auth/session/step-up", () => ({
+  requireRecentSession: mockRequireRecentSession,
+}));
 
 vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
