@@ -37,16 +37,17 @@ describe("assertOrigin", () => {
     expect(result).toBeNull();
   });
 
-  it("returns null when origin matches Host header (APP_URL/AUTH_URL unset)", () => {
+  it("returns 403 when APP_URL and AUTH_URL are both unset even if Host matches", async () => {
     delete process.env.APP_URL;
     delete process.env.AUTH_URL;
     const result = assertOrigin(
       makeRequest("http://localhost:3000", { host: "localhost:3000" }),
     );
-    expect(result).toBeNull();
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe(403);
   });
 
-  it("returns 403 when origin differs from Host (APP_URL/AUTH_URL unset)", async () => {
+  it("returns 403 when origin differs from Host and APP_URL/AUTH_URL are unset", async () => {
     delete process.env.APP_URL;
     delete process.env.AUTH_URL;
     const result = assertOrigin(
