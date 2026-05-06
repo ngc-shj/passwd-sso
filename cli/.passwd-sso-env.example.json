@@ -1,5 +1,4 @@
 {
-  "server": "https://localhost:3000/passwd-sso",
   "apiKey": "api_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "secrets": {
     "DATABASE_PASSWORD": {

@@ -3,7 +3,6 @@
  *
  * Schema:
  * {
- *   "server": "https://...",
  *   "apiKey?": "api_...",         // optional — uses /api/v1/ path
  *   "secrets": {
  *     "ENV_VAR_NAME": { "entry": "<entryId>", "field": "password" }
@@ -17,6 +16,8 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { loadConfig } from "./config.js";
+import { validateServerUrl } from "./oauth.js";
 
 export interface SecretMapping {
   entry: string;
@@ -24,9 +25,12 @@ export interface SecretMapping {
 }
 
 export interface SecretsConfig {
-  server: string;
   apiKey?: string;
   secrets: Record<string, SecretMapping>;
+}
+
+function isPlaceholderEntryId(entryId: string): boolean {
+  return entryId === "dummy-entry-id" || /^<[^>]+>$/.test(entryId);
 }
 
 export function loadSecretsConfig(configPath?: string): SecretsConfig {
@@ -41,14 +45,48 @@ export function loadSecretsConfig(configPath?: string): SecretsConfig {
   const raw = readFileSync(filePath, "utf-8");
   const parsed = JSON.parse(raw) as SecretsConfig;
 
-  if (!parsed.server || typeof parsed.server !== "string") {
-    throw new Error("Config file must have a 'server' field.");
-  }
   if (!parsed.secrets || typeof parsed.secrets !== "object") {
     throw new Error("Config file must have a 'secrets' field.");
   }
 
+  for (const [envName, mapping] of Object.entries(parsed.secrets)) {
+    if (!mapping || typeof mapping !== "object") {
+      throw new Error(`Secret mapping for '${envName}' must be an object.`);
+    }
+
+    const rawMapping = mapping as Partial<SecretMapping>;
+    if (typeof rawMapping.entry !== "string" || rawMapping.entry.trim().length === 0) {
+      throw new Error(`Secret mapping for '${envName}' must have a non-empty 'entry' string.`);
+    }
+    if (typeof rawMapping.field !== "string" || rawMapping.field.trim().length === 0) {
+      throw new Error(`Secret mapping for '${envName}' must have a non-empty 'field' string.`);
+    }
+    const entry = rawMapping.entry.trim();
+    const field = rawMapping.field.trim();
+    if (isPlaceholderEntryId(entry)) {
+      throw new Error(
+        `Secret mapping for '${envName}' uses placeholder entry ID "${entry}". Replace it with a real vault entry ID.`,
+      );
+    }
+    // Preserve unknown keys (e.g. user-added comment fields) while normalising entry/field.
+    parsed.secrets[envName] = { ...rawMapping, entry, field } as SecretMapping;
+  }
+
   return parsed;
+}
+
+export function getSecretsServerUrl(): string {
+  const { serverUrl } = loadConfig();
+  if (!serverUrl) {
+    throw new Error(
+      "Server URL not configured. Run `passwd-sso login -s <server-url>` once to configure it.",
+    );
+  }
+  // Defense-in-depth: re-validate the persisted URL before issuing a fetch
+  // with a Bearer token. Login validates at write time, but a hand-edited
+  // config file would otherwise reach fetch() unchecked.
+  validateServerUrl(serverUrl);
+  return serverUrl.replace(/\/$/, "");
 }
 
 /**

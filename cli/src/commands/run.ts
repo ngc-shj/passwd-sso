@@ -6,7 +6,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { loadSecretsConfig, getPasswordPath } from "../lib/secrets-config.js";
+import { loadSecretsConfig, getPasswordPath, getSecretsServerUrl } from "../lib/secrets-config.js";
 import { getEncryptionKey, getUserId } from "../lib/vault-state.js";
 import { autoUnlockIfNeeded } from "./unlock.js";
 import { getToken } from "../lib/api-client.js";
@@ -35,7 +35,13 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     process.exit(1);
   }
   const useV1 = !!config.apiKey;
-  const baseUrl = config.server.replace(/\/$/, "");
+  let baseUrl: string;
+  try {
+    baseUrl = getSecretsServerUrl();
+  } catch (err) {
+    output.error(err instanceof Error ? err.message : "Failed to resolve server URL.");
+    process.exit(1);
+  }
 
   let authHeader: string;
   if (config.apiKey) {
