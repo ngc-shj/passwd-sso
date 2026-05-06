@@ -179,6 +179,7 @@ describe("POST /api/tenant/scim-tokens", () => {
     expect(res.status).toBe(403);
     const body = await res.json();
     expect(body.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockPrismaScimToken.create).not.toHaveBeenCalled();
   });
 
   it("returns 409 when token limit is exceeded", async () => {

@@ -43,12 +43,24 @@ describe("normalizeIp", () => {
     expect(normalizeIp("::ffff:7f00:1")).toBe("127.0.0.1");
   });
 
+  it("normalizes uppercase hex-form IPv4-mapped IPv6 to dotted IPv4", () => {
+    expect(normalizeIp("::FFFF:7F00:1")).toBe("127.0.0.1");
+  });
+
+  it("normalizes zero-padded hex-form IPv4-mapped IPv6 to dotted IPv4", () => {
+    expect(normalizeIp("::ffff:7f00:0001")).toBe("127.0.0.1");
+  });
+
   it("trims surrounding whitespace", () => {
     expect(normalizeIp("  1.2.3.4 ")).toBe("1.2.3.4");
   });
 
   it("strips IPv6 literal brackets", () => {
     expect(normalizeIp("[2001:db8::1]")).toBe("2001:db8::1");
+  });
+
+  it("normalizes bracketed hex-form IPv4-mapped IPv6 to dotted IPv4", () => {
+    expect(normalizeIp("[::ffff:7f00:1]")).toBe("127.0.0.1");
   });
 
   it("passes through plain IPv4 unchanged", () => {
@@ -120,6 +132,14 @@ describe("isIpInCidr", () => {
 
   it("matches hex-form IPv4-mapped IPv6 against an IPv4 CIDR", () => {
     expect(isIpInCidr("::ffff:7f00:1", "127.0.0.0/8")).toBe(true);
+  });
+
+  it("matches uppercase hex-form IPv4-mapped IPv6 against an IPv4 CIDR", () => {
+    expect(isIpInCidr("::FFFF:7F00:1", "127.0.0.0/8")).toBe(true);
+  });
+
+  it("matches zero-padded hex-form IPv4-mapped IPv6 against an IPv4 CIDR", () => {
+    expect(isIpInCidr("::ffff:7f00:0001", "127.0.0.0/8")).toBe(true);
   });
 });
 

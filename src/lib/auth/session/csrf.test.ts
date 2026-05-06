@@ -57,6 +57,19 @@ describe("assertOrigin", () => {
     expect(result!.status).toBe(403);
   });
 
+  it("returns 403 when x-forwarded-proto suggests https but canonical origin is unset", async () => {
+    delete process.env.APP_URL;
+    delete process.env.AUTH_URL;
+    const result = assertOrigin(
+      makeRequest("https://localhost:3000", {
+        host: "localhost:3000",
+        "x-forwarded-proto": "https",
+      }),
+    );
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe(403);
+  });
+
   it("returns 403 when origin is missing even if APP_URL/AUTH_URL are unset", async () => {
     delete process.env.APP_URL;
     delete process.env.AUTH_URL;

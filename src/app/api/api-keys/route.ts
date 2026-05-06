@@ -18,6 +18,7 @@ import {
 import { API_KEY_TOKEN_LENGTH, API_KEY_PREFIX_LENGTH } from "@/lib/validations/common";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { MS_PER_HOUR } from "@/lib/constants/time";
+import { requireRecentSession } from "@/lib/auth/session/step-up";
 
 const apiKeyCreateLimiter = createRateLimiter({ windowMs: MS_PER_HOUR, max: 5 });
 
@@ -71,6 +72,10 @@ async function handlePOST(req: NextRequest) {
   // Only session and extension token can create API keys
   if (authed.auth.type === "api_key" || authed.auth.type === "mcp_token") {
     return unauthorized();
+  }
+  if (authed.auth.type === "session") {
+    const stepUpError = await requireRecentSession(req);
+    if (stepUpError) return stepUpError;
   }
   const { userId } = authed.auth;
 

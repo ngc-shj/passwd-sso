@@ -368,7 +368,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   DELEGATION_ENTRIES_NOT_FOUND: "delegationEntriesNotFound",
   NO_TENANT: "noTenant",
   INVALID_SESSION: "invalidSession",
-  SESSION_STEP_UP_REQUIRED: "operatorTokenStaleSession",
+  SESSION_STEP_UP_REQUIRED: "sessionStepUpRequired",
   INTERNAL_ERROR: "internalError",
 } satisfies Record<ApiErrorCode, string>;
 

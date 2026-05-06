@@ -15,6 +15,7 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { SA_TOKEN_PREFIX, MAX_SA_TOKENS_PER_ACCOUNT } from "@/lib/constants/auth/service-account";
 import { parseSaTokenScopes } from "@/lib/auth/tokens/service-account-token";
 import { randomBytes } from "node:crypto";
+import { requireRecentSession } from "@/lib/auth/session/step-up";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -41,6 +42,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   } catch (err) {
     return handleAuthError(err);
   }
+
+  const stepUpError = await requireRecentSession(req);
+  if (stepUpError) return stepUpError;
 
   const rl = await approveLimiter.check(`rl:access_request_approve:${actor.tenantId}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);

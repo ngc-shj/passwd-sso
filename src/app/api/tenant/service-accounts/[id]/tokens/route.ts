@@ -43,9 +43,6 @@ async function handleGET(req: NextRequest, { params }: Params) {
     return handleAuthError(err);
   }
 
-  const stepUpError = await requireRecentSession(req);
-  if (stepUpError) return stepUpError;
-
   const { id } = await params;
 
   const sa = await withTenantRls(prisma, actor.tenantId, async () =>

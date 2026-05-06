@@ -102,5 +102,6 @@ describe("GET /api/mcp/authorize", () => {
     expect(res.status).toBe(403);
     const json = await res.json();
     expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockFindFirst).not.toHaveBeenCalled();
   });
 });

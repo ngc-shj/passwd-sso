@@ -112,6 +112,7 @@
   "operatorTokenLimitExceeded": "Maximum number of operator tokens per tenant reached. Please revoke unused tokens first.",
   "operatorTokenNotFound": "Operator token not found.",
   "operatorTokenStaleSession": "Re-authenticate within the last 15 minutes to issue an operator token.",
+  "sessionStepUpRequired": "Re-authenticate within the last 15 minutes to continue this sensitive action.",
   "mcpClientNameConflict": "An MCP client with this name already exists.",
   "mcpClientLimitExceeded": "Maximum number of MCP clients per tenant reached.",
   "mcpTokenNotFound": "MCP token not found or expired.",

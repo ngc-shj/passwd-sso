@@ -197,6 +197,7 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(res.status).toBe(403);
     const json = await res.json();
     expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
   });
 
   it("returns 400 when client_id is missing", async () => {

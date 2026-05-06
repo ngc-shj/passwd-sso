@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 const {
   mockAuth,
@@ -91,7 +92,9 @@ const ACTOR = {
 // A fresh session (just created)
 const FRESH_SESSION = { createdAt: new Date(Date.now() - 5 * 60 * 1000) }; // 5 min ago
 // A stale session (older than 15 min step-up window)
-const STALE_SESSION = { createdAt: new Date(Date.now() - 16 * 60 * 1000) }; // 16 min ago
+const STALE_SESSION = {
+  createdAt: new Date(Date.now() - 16 * MS_PER_MINUTE),
+};
 
 const SESSION_TOKEN_VALUE = "session-token-abc123";
 

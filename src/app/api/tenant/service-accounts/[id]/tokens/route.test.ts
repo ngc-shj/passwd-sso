@@ -114,7 +114,11 @@ const makeTransactionSuccess = () => {
 };
 
 describe("GET /api/tenant/service-accounts/[id]/tokens", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRequireRecentSession.mockReset();
+    mockRequireRecentSession.mockResolvedValue(null);
+  });
 
   it("returns list of tokens for a service account", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
@@ -133,6 +137,27 @@ describe("GET /api/tenant/service-accounts/[id]/tokens", () => {
     expect(Array.isArray(json)).toBe(true);
     expect(json).toHaveLength(1);
     expect(json[0].id).toBe(TOKEN_ID);
+    expect(mockRequireRecentSession).not.toHaveBeenCalled();
+  });
+
+  it("does not require session step-up for listing tokens", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+    mockServiceAccountFindUnique.mockResolvedValue({ id: SA_ID, tenantId: "tenant-1" });
+    mockServiceAccountTokenFindMany.mockResolvedValue([makeToken()]);
+
+    const req = createRequest(
+      "GET",
+      `http://localhost/api/tenant/service-accounts/${SA_ID}/tokens`,
+    );
+    const res = await GET(req, createParams({ id: SA_ID }));
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(mockRequireRecentSession).not.toHaveBeenCalled();
   });
 
   it("returns 404 when service account not found", async () => {
@@ -167,6 +192,7 @@ describe("GET /api/tenant/service-accounts/[id]/tokens", () => {
 describe("POST /api/tenant/service-accounts/[id]/tokens", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRequireRecentSession.mockReset();
     mockRequireRecentSession.mockResolvedValue(null);
   });
 
@@ -258,6 +284,7 @@ describe("POST /api/tenant/service-accounts/[id]/tokens", () => {
 
     expect(status).toBe(403);
     expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockPrismaTransaction).not.toHaveBeenCalled();
   });
 
   it("returns 409 when token limit is reached", async () => {

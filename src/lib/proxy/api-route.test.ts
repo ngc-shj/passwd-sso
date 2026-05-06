@@ -225,6 +225,12 @@ describe("handleApiAuth — session-required + access restriction", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("ACCESS_DENIED");
+    expect(mockCheckAccessWithAudit).toHaveBeenCalledWith(
+      "t-1",
+      null,
+      "u-1",
+      expect.any(NextRequest),
+    );
   });
 
   it("applies access restriction to /api/mcp/authorize/consent after proxy classification", async () => {
@@ -242,6 +248,12 @@ describe("handleApiAuth — session-required + access restriction", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("ACCESS_DENIED");
+    expect(mockCheckAccessWithAudit).toHaveBeenCalledWith(
+      "t-1",
+      null,
+      "u-1",
+      expect.any(NextRequest),
+    );
   });
 
   it("applies access restriction to /api/mobile/authorize after proxy classification", async () => {
@@ -258,6 +270,12 @@ describe("handleApiAuth — session-required + access restriction", () => {
     expect(res.status).toBe(403);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("ACCESS_DENIED");
+    expect(mockCheckAccessWithAudit).toHaveBeenCalledWith(
+      "t-1",
+      null,
+      "u-1",
+      expect.any(NextRequest),
+    );
   });
 });
 
