@@ -30,9 +30,9 @@ const { loadSecretsConfig, getSecretsServerUrl } = await import("../../lib/secre
 const { getToken } = await import("../../lib/api-client.js");
 const { autoUnlockIfNeeded } = await import("../../commands/unlock.js");
 const output = await import("../../lib/output.js");
-const { envCommand } = await import("../../commands/env.js");
+const { runCommand } = await import("../../commands/run.js");
 
-describe("envCommand", () => {
+describe("runCommand", () => {
   let exitSpy: ReturnType<typeof vi.spyOn>;
   let exitCode: number | undefined;
 
@@ -43,7 +43,6 @@ describe("envCommand", () => {
     vi.mocked(getToken).mockReset();
     vi.mocked(autoUnlockIfNeeded).mockReset();
     vi.mocked(output.error).mockReset();
-    vi.mocked(output.warn).mockReset();
 
     exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
       exitCode = code;
@@ -55,12 +54,21 @@ describe("envCommand", () => {
     exitSpy.mockRestore();
   });
 
+  it("exits with code 1 when no command is supplied", async () => {
+    await expect(runCommand({ command: [] })).rejects.toThrow();
+
+    expect(exitCode).toBe(1);
+    expect(vi.mocked(output.error)).toHaveBeenCalledWith(
+      expect.stringContaining("No command specified"),
+    );
+  });
+
   it("exits with code 1 when loadSecretsConfig throws", async () => {
     vi.mocked(loadSecretsConfig).mockImplementation(() => {
       throw new Error("placeholder entry ID");
     });
 
-    await expect(envCommand({ format: "shell" })).rejects.toThrow();
+    await expect(runCommand({ command: ["true"] })).rejects.toThrow();
 
     expect(exitCode).toBe(1);
     expect(vi.mocked(output.error)).toHaveBeenCalledWith(
@@ -68,7 +76,7 @@ describe("envCommand", () => {
     );
   });
 
-  it("exits with code 1 when getSecretsServerUrl throws (no saved login)", async () => {
+  it("exits with code 1 when getSecretsServerUrl throws", async () => {
     vi.mocked(loadSecretsConfig).mockReturnValue({
       apiKey: "api_test",
       secrets: {},
@@ -77,7 +85,7 @@ describe("envCommand", () => {
       throw new Error("Server URL not configured. Run `passwd-sso login -s <server-url>` once to configure it.");
     });
 
-    await expect(envCommand({ format: "shell" })).rejects.toThrow();
+    await expect(runCommand({ command: ["true"] })).rejects.toThrow();
 
     expect(exitCode).toBe(1);
     expect(vi.mocked(output.error)).toHaveBeenCalledWith(
@@ -90,7 +98,7 @@ describe("envCommand", () => {
     vi.mocked(getSecretsServerUrl).mockReturnValue("https://example.com");
     vi.mocked(getToken).mockResolvedValue(null);
 
-    await expect(envCommand({ format: "shell" })).rejects.toThrow();
+    await expect(runCommand({ command: ["true"] })).rejects.toThrow();
 
     expect(exitCode).toBe(1);
     expect(vi.mocked(output.error)).toHaveBeenCalledWith(
@@ -106,7 +114,7 @@ describe("envCommand", () => {
     vi.mocked(getSecretsServerUrl).mockReturnValue("https://example.com");
     vi.mocked(autoUnlockIfNeeded).mockResolvedValue(false);
 
-    await expect(envCommand({ format: "shell" })).rejects.toThrow();
+    await expect(runCommand({ command: ["true"] })).rejects.toThrow();
 
     expect(exitCode).toBe(1);
     expect(vi.mocked(output.error)).toHaveBeenCalledWith(

@@ -17,6 +17,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { loadConfig } from "./config.js";
+import { validateServerUrl } from "./oauth.js";
 
 export interface SecretMapping {
   entry: string;
@@ -54,18 +55,21 @@ export function loadSecretsConfig(configPath?: string): SecretsConfig {
       throw new Error(`Secret mapping for '${envName}' must be an object.`);
     }
 
-    const { entry, field } = mapping as Partial<SecretMapping>;
-    if (typeof entry !== "string" || entry.trim().length === 0) {
+    const raw = mapping as Partial<SecretMapping>;
+    if (typeof raw.entry !== "string" || raw.entry.trim().length === 0) {
       throw new Error(`Secret mapping for '${envName}' must have a non-empty 'entry' string.`);
     }
-    if (typeof field !== "string" || field.trim().length === 0) {
+    if (typeof raw.field !== "string" || raw.field.trim().length === 0) {
       throw new Error(`Secret mapping for '${envName}' must have a non-empty 'field' string.`);
     }
+    const entry = raw.entry.trim();
+    const field = raw.field.trim();
     if (isPlaceholderEntryId(entry)) {
       throw new Error(
         `Secret mapping for '${envName}' uses placeholder entry ID "${entry}". Replace it with a real vault entry ID.`,
       );
     }
+    parsed.secrets[envName] = { entry, field };
   }
 
   return parsed;
@@ -74,8 +78,14 @@ export function loadSecretsConfig(configPath?: string): SecretsConfig {
 export function getSecretsServerUrl(): string {
   const { serverUrl } = loadConfig();
   if (!serverUrl) {
-    throw new Error("Server URL not configured. Run `passwd-sso login` first.");
+    throw new Error(
+      "Server URL not configured. Run `passwd-sso login -s <server-url>` once to configure it.",
+    );
   }
+  // Defense-in-depth: re-validate the persisted URL before issuing a fetch
+  // with a Bearer token. Login validates at write time, but a hand-edited
+  // config file would otherwise reach fetch() unchecked.
+  validateServerUrl(serverUrl);
   return serverUrl.replace(/\/$/, "");
 }
 
