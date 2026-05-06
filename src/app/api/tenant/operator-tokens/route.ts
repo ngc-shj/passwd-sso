@@ -10,7 +10,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withBypassRls, withTenantRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import {
   errorResponse,
@@ -19,8 +19,8 @@ import {
   unauthorized,
 } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
-import { getSessionToken } from "@/app/api/sessions/helpers";
+import { MS_PER_DAY } from "@/lib/constants/time";
+import { requireRecentSession } from "@/lib/auth/session/step-up";
 import {
   OPERATOR_TOKEN_PREFIX,
   OPERATOR_TOKEN_DEFAULT_EXPIRES_DAYS,
@@ -32,7 +32,6 @@ import {
 
 export const runtime = "nodejs";
 
-const STEP_UP_WINDOW_MS = 15 * MS_PER_MINUTE;
 const TOKEN_LIMIT_PER_TENANT = 50;
 
 const createTokenLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
@@ -124,28 +123,10 @@ async function handlePOST(req: NextRequest) {
     return handleAuthError(err);
   }
 
-  // Step-up: session must have been created within the last 15 minutes.
-  // Read Session.createdAt directly from the DB (Auth.js v5 does not expose it
-  // on the returned session object).
-  const sessionToken = getSessionToken(req);
-  if (!sessionToken) {
-    return unauthorized();
-  }
-  const sessionRow = await withBypassRls(
-    prisma,
-    async () =>
-      prisma.session.findUnique({
-        where: { sessionToken },
-        select: { createdAt: true },
-      }),
-    BYPASS_PURPOSE.AUTH_FLOW,
-  );
-  if (!sessionRow) {
-    return unauthorized();
-  }
-  if (Date.now() - sessionRow.createdAt.getTime() > STEP_UP_WINDOW_MS) {
-    return errorResponse(API_ERROR.OPERATOR_TOKEN_STALE_SESSION, 403);
-  }
+  const stepUpError = await requireRecentSession(req, {
+    errorCode: API_ERROR.OPERATOR_TOKEN_STALE_SESSION,
+  });
+  if (stepUpError) return stepUpError;
 
   const rl = await createTokenLimiter.check(
     `rl:op_token_create:${actor.tenantId}`,

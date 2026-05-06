@@ -17,6 +17,7 @@ const {
   mockWithUserTenantRls,
   mockWithBypassRls,
   mockEnforceAccessRestriction,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockCreate: vi.fn(),
@@ -30,6 +31,7 @@ const {
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
   mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -71,6 +73,9 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/auth/policy/access-restriction", () => ({
   enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
+vi.mock("@/lib/auth/session/step-up", () => ({
+  requireRecentSession: mockRequireRecentSession,
+}));
 
 import { POST, DELETE } from "./route";
 
@@ -80,6 +85,7 @@ describe("POST /api/extension/token", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockRequireRecentSession.mockResolvedValue(null);
     // Default: transaction executes the callback with the mock prisma
     mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
       cb({
@@ -94,7 +100,7 @@ describe("POST /api/extension/token", () => {
 
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
-    const res = await POST();
+    const res = await POST(createRequest("POST", "http://localhost/api/extension/token"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(401);
     expect(json.error).toBe("UNAUTHORIZED");
@@ -103,10 +109,24 @@ describe("POST /api/extension/token", () => {
   it("returns 429 when rate limited", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockCheck.mockResolvedValueOnce({ allowed: false });
-    const res = await POST();
+    const res = await POST(createRequest("POST", "http://localhost/api/extension/token"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(429);
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+  });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const res = await POST(createRequest("POST", "http://localhost/api/extension/token"));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockCreate).not.toHaveBeenCalled();
   });
 
   it("issues a token successfully", async () => {
@@ -118,7 +138,7 @@ describe("POST /api/extension/token", () => {
       scope: "passwords:read,vault:unlock-data",
     });
 
-    const res = await POST();
+    const res = await POST(createRequest("POST", "http://localhost/api/extension/token"));
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(201);
@@ -145,7 +165,7 @@ describe("POST /api/extension/token", () => {
       scope: "passwords:read,vault:unlock-data",
     });
 
-    await POST();
+    await POST(createRequest("POST", "http://localhost/api/extension/token"));
 
     expect(mockUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({

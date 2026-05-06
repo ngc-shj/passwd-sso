@@ -37,6 +37,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
 import { BRIDGE_CODE_TTL_MS } from "@/lib/constants";
 import { generateShareToken } from "@/lib/crypto/crypto-server";
+import { requireRecentSession } from "@/lib/auth/session/step-up";
 
 export const runtime = "nodejs";
 
@@ -60,6 +61,9 @@ async function handleGET(req: NextRequest): Promise<Response> {
   if (!session?.user?.id) {
     return unauthorized();
   }
+
+  const stepUpError = await requireRecentSession(req);
+  if (stepUpError) return stepUpError;
 
   // 2. Validate query params.
   const url = new URL(req.url);

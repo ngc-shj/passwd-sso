@@ -21,6 +21,7 @@ import {
   SCIM_TOKEN_EXPIRY_DEFAULT_DAYS,
 } from "@/lib/validations/common";
 import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
+import { requireRecentSession } from "@/lib/auth/session/step-up";
 
 const scimTokenCreateLimiter = createRateLimiter({ windowMs: MS_PER_HOUR, max: 5 });
 
@@ -86,6 +87,9 @@ async function handlePOST(req: NextRequest) {
   } catch (err) {
     return handleAuthError(err);
   }
+
+  const stepUpError = await requireRecentSession(req);
+  if (stepUpError) return stepUpError;
 
   const rl = await scimTokenCreateLimiter.check(`rl:scim_token_create:${actor.tenantId}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);

@@ -8,6 +8,7 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { requireRecentSession } from "@/lib/auth/session/step-up";
 
 export async function POST(req: NextRequest) {
   // Origin presence guard (early return / defense-in-depth).
@@ -27,6 +28,9 @@ export async function POST(req: NextRequest) {
   if (!session?.user?.id) {
     return unauthorized();
   }
+
+  const stepUpError = await requireRecentSession(req);
+  if (stepUpError) return stepUpError;
 
   // Parse form data submitted from the consent UI
   const formData = await req.formData();

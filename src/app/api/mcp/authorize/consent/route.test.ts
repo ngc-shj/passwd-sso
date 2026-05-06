@@ -11,6 +11,7 @@ const {
   mockMcpClientUpdateMany,
   mockMcpClientFindUnique,
   mockTxFindFirst,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockWithBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
@@ -22,6 +23,7 @@ const {
   mockMcpClientUpdateMany: vi.fn().mockResolvedValue({ count: 1 }),
   mockMcpClientFindUnique: vi.fn(),
   mockTxFindFirst: vi.fn().mockResolvedValue(null),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({
@@ -65,6 +67,10 @@ vi.mock("@/lib/audit/audit", () => ({
   personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId, ip: "127.0.0.1", userAgent: "test-agent", acceptLanguage: null }),
   teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: "127.0.0.1", userAgent: "test-agent", acceptLanguage: null }),
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: "test-agent", acceptLanguage: null }),
+}));
+
+vi.mock("@/lib/auth/session/step-up", () => ({
+  requireRecentSession: mockRequireRecentSession,
 }));
 
 import { POST } from "@/app/api/mcp/authorize/consent/route";
@@ -126,6 +132,7 @@ describe("POST /api/mcp/authorize/consent", () => {
     mockTxFindFirst.mockResolvedValue(null); // default: no existing same-name client
     mockMcpClientCount.mockResolvedValue(0);
     mockMcpClientUpdateMany.mockResolvedValue({ count: 1 });
+    mockRequireRecentSession.mockResolvedValue(null);
     mockCreateAuthorizationCode.mockResolvedValue({
       code: "auth-code-abc123",
       expiresAt: new Date(Date.now() + 60000),
@@ -173,6 +180,23 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(res.status).toBe(401);
     const json = await res.json();
     expect(json.error).toBe("UNAUTHORIZED");
+  });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockRequireRecentSession.mockResolvedValue(Response.json(
+      { error: "SESSION_STEP_UP_REQUIRED" },
+      { status: 403 },
+    ));
+
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
   });
 
   it("returns 400 when client_id is missing", async () => {

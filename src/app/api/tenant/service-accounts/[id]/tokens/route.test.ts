@@ -15,6 +15,7 @@ const {
   mockServiceAccountTokenFindMany,
   mockPrismaTransaction,
   mockHashToken,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -24,6 +25,7 @@ const {
   mockServiceAccountTokenFindMany: vi.fn(),
   mockPrismaTransaction: vi.fn(),
   mockHashToken: vi.fn().mockReturnValue("hashed-token"),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -65,6 +67,9 @@ vi.mock("@/lib/http/with-request-log", () => ({
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
+}));
+vi.mock("@/lib/auth/session/step-up", () => ({
+  requireRecentSession: mockRequireRecentSession,
 }));
 
 import { GET, POST } from "@/app/api/tenant/service-accounts/[id]/tokens/route";
@@ -160,7 +165,10 @@ describe("GET /api/tenant/service-accounts/[id]/tokens", () => {
 });
 
 describe("POST /api/tenant/service-accounts/[id]/tokens", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRequireRecentSession.mockResolvedValue(null);
+  });
 
   it("creates a token and returns plaintext once", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
@@ -224,6 +232,32 @@ describe("POST /api/tenant/service-accounts/[id]/tokens", () => {
     const { status } = await parseResponse(res);
 
     expect(status).toBe(409);
+  });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const expiresAt = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/service-accounts/${SA_ID}/tokens`,
+      {
+        body: {
+          name: "deploy-token",
+          scope: ["passwords:read"],
+          expiresAt,
+        },
+      },
+    );
+    const res = await POST(req, createParams({ id: SA_ID }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
   });
 
   it("returns 409 when token limit is reached", async () => {

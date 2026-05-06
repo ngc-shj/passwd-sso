@@ -174,6 +174,7 @@ describe("handleApiAuth — session-required + access restriction", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
+    vi.stubEnv("APP_URL", APP_ORIGIN);
     fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ user: { id: "u-1" } }), { status: 200 }),
     );
@@ -181,6 +182,7 @@ describe("handleApiAuth — session-required + access restriction", () => {
     mockResolveUserTenantId.mockResolvedValue(null);
   });
   afterEach(() => {
+    vi.unstubAllEnvs();
     fetchSpy.mockRestore();
   });
 
@@ -207,6 +209,55 @@ describe("handleApiAuth — session-required + access restriction", () => {
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("ACCESS_DENIED");
     expect(res.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  it("applies access restriction to /api/mcp/authorize after proxy classification", async () => {
+    mockResolveUserTenantId.mockResolvedValueOnce("t-1");
+    mockCheckAccessWithAudit.mockResolvedValueOnce({
+      allowed: false,
+      reason: "IP not in allowed CIDRs",
+    });
+    const res = await handleApiAuth(
+      makeRequest("/api/mcp/authorize", "GET", {
+        Cookie: "authjs.session-token=sess",
+      }),
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("ACCESS_DENIED");
+  });
+
+  it("applies access restriction to /api/mcp/authorize/consent after proxy classification", async () => {
+    mockResolveUserTenantId.mockResolvedValueOnce("t-1");
+    mockCheckAccessWithAudit.mockResolvedValueOnce({
+      allowed: false,
+      reason: "IP not in allowed CIDRs",
+    });
+    const res = await handleApiAuth(
+      makeRequest("/api/mcp/authorize/consent", "POST", {
+        Cookie: "authjs.session-token=sess",
+        origin: APP_ORIGIN,
+      }),
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("ACCESS_DENIED");
+  });
+
+  it("applies access restriction to /api/mobile/authorize after proxy classification", async () => {
+    mockResolveUserTenantId.mockResolvedValueOnce("t-1");
+    mockCheckAccessWithAudit.mockResolvedValueOnce({
+      allowed: false,
+      reason: "IP not in allowed CIDRs",
+    });
+    const res = await handleApiAuth(
+      makeRequest("/api/mobile/authorize", "GET", {
+        Cookie: "authjs.session-token=sess",
+      }),
+    );
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("ACCESS_DENIED");
   });
 });
 

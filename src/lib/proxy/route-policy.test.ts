@@ -45,6 +45,9 @@ const POSITIVE_CASES: Record<RoutePolicyKind, readonly ClassifyCase[]> = {
     { pathname: "/api/folders", description: "folders prefix" },
     { pathname: "/api/notifications", description: "notifications prefix" },
     { pathname: "/api/extension/bridge-code", description: "extension non-token-exchange" },
+    { pathname: "/api/mcp/authorize", description: "mcp authorize exact path" },
+    { pathname: "/api/mcp/authorize/consent", description: "mcp consent exact path" },
+    { pathname: "/api/mobile/authorize", description: "mobile authorize exact path" },
   ],
   [ROUTE_POLICY_KIND.API_DEFAULT]: [
     { pathname: "/api/auth/session", description: "auth session" },
@@ -52,6 +55,8 @@ const POSITIVE_CASES: Record<RoutePolicyKind, readonly ClassifyCase[]> = {
     { pathname: "/api/maintenance/purge-history", description: "maintenance" },
     { pathname: "/api/scim/v2/Users", description: "scim (route-handler auth)" },
     { pathname: "/api/admin/rotate-master-key", description: "admin" },
+    { pathname: "/api/mcp/token", description: "mcp token remains route-authenticated" },
+    { pathname: "/api/mobile/token", description: "mobile token remains route-authenticated" },
   ],
   [ROUTE_POLICY_KIND.PAGE]: [
     { pathname: "/", description: "root" },

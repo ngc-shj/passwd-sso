@@ -9,6 +9,7 @@ const {
   mockWithBypassRls,
   mockWithUserTenantRls,
   mockGetAppOrigin,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockMobileBridgeCodeCreate: vi.fn(),
@@ -18,6 +19,7 @@ const {
       fn("22222222-2222-2222-2222-222222222222"),
   ),
   mockGetAppOrigin: vi.fn(() => "https://example.test"),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -51,6 +53,10 @@ vi.mock("@/lib/redis", () => ({
   validateRedisConfig: () => {},
 }));
 
+vi.mock("@/lib/auth/session/step-up", () => ({
+  requireRecentSession: mockRequireRecentSession,
+}));
+
 import { GET } from "./route";
 
 const VALID = {
@@ -78,6 +84,7 @@ describe("GET /api/mobile/authorize", () => {
       async (_u: string, fn: (tenantId: string) => unknown) =>
         fn("22222222-2222-2222-2222-222222222222"),
     );
+    mockRequireRecentSession.mockResolvedValue(null);
     mockMobileBridgeCodeCreate.mockResolvedValue({ id: "00000000-0000-4000-8000-000000000003" });
   });
 
@@ -104,6 +111,17 @@ describe("GET /api/mobile/authorize", () => {
     mockAuth.mockResolvedValue(null);
     const res = await GET(createRequest("GET", buildUrl(VALID)));
     expect(res.status).toBe(401);
+    expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockRequireRecentSession.mockResolvedValue(Response.json(
+      { error: "SESSION_STEP_UP_REQUIRED" },
+      { status: 403 },
+    ));
+
+    const res = await GET(createRequest("GET", buildUrl(VALID)));
+    expect(res.status).toBe(403);
     expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
   });
 
