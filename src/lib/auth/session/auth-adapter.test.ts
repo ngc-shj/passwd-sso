@@ -852,7 +852,7 @@ describe("createCustomAdapter", () => {
       expect(mockPrismaSession.delete).toHaveBeenCalled();
     });
 
-    it("passes webauthn provider to resolver (AAL3 clamp relies on it)", async () => {
+    it("passes webauthn provider to resolver for session provenance", async () => {
       const now = new Date("2025-03-15T12:00:00Z");
       vi.setSystemTime(now);
 

@@ -11,9 +11,10 @@ import { AUDIT_ACTION } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isHttps } from "@/lib/url-helpers";
-import { PASSKEY_SESSION_MAX_AGE_SECONDS } from "@/lib/validations/common.server";
 import { revokeAllExtensionTokensForUser } from "@/lib/auth/tokens/extension-token";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
+import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
@@ -94,7 +95,11 @@ async function handlePOST(req: NextRequest) {
 
   // Create database session (same as Auth.js would for OAuth providers)
   const sessionToken = `${randomUUID()}${randomBytes(16).toString("hex")}`;
-  const expires = new Date(Date.now() + PASSKEY_SESSION_MAX_AGE_SECONDS * 1000);
+  const verifiedAt = new Date();
+  const resolvedTimeouts = await resolveEffectiveSessionTimeouts(user.id, "webauthn");
+  const expires = new Date(
+    verifiedAt.getTime() + resolvedTimeouts.idleMinutes * MS_PER_MINUTE,
+  );
 
   const meta = extractRequestMeta(req);
 
@@ -123,9 +128,7 @@ async function handlePOST(req: NextRequest) {
           expires,
           ipAddress: meta.ip ?? null,
           userAgent: meta.userAgent?.slice(0, 512) ?? null,
-          // AAL3 provenance: the resolver clamps idle/absolute to NIST SP
-          // 800-63B-4 §2.3.3 AAL3 reauthentication ceilings (12h absolute /
-          // 15min inactivity) for sessions with provider="webauthn".
+          passkeyVerifiedAt: verifiedAt,
           provider: "webauthn",
         },
       });

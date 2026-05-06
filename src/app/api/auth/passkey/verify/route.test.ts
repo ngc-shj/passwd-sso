@@ -15,6 +15,7 @@ const {
   mockPrismaTransaction,
   mockWithBypassRls,
   mockInvalidateCachedSessions,
+  mockResolveEffectiveSessionTimeouts,
 } = vi.hoisted(() => ({
   mockAssertOrigin: vi.fn(),
   mockRateLimiterCheck: vi.fn(),
@@ -27,6 +28,7 @@ const {
   mockPrismaTransaction: vi.fn(),
   mockWithBypassRls: vi.fn(),
   mockInvalidateCachedSessions: vi.fn().mockResolvedValue(undefined),
+  mockResolveEffectiveSessionTimeouts: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/session/csrf", () => ({
@@ -76,6 +78,10 @@ vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
   invalidateCachedSessions: mockInvalidateCachedSessions,
 }));
 
+vi.mock("@/lib/auth/session/session-timeout", () => ({
+  resolveEffectiveSessionTimeouts: mockResolveEffectiveSessionTimeouts,
+}));
+
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
@@ -119,6 +125,11 @@ describe("POST /api/auth/passkey/verify", () => {
     mockAssertOrigin.mockReturnValue(null);
     mockRateLimiterCheck.mockResolvedValue({ allowed: true });
     mockAuthorizeWebAuthn.mockResolvedValue(mockUser);
+    mockResolveEffectiveSessionTimeouts.mockResolvedValue({
+      idleMinutes: 480,
+      absoluteMinutes: 43200,
+      tenantId: "tenant-1",
+    });
 
     // withBypassRls: call the callback directly
     mockWithBypassRls.mockImplementation(
@@ -200,6 +211,7 @@ describe("POST /api/auth/passkey/verify", () => {
         userId: "user-1",
         tenantId: "tenant-1",
         expires: expect.any(Date),
+        passkeyVerifiedAt: expect.any(Date),
       }),
     });
   });

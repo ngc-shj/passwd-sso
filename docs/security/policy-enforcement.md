@@ -44,7 +44,7 @@ Password content (plaintext) is encrypted client-side before reaching the server
 
 ## Credential Issuance Hardening
 
-Sensitive browser-session flows that mint non-session credentials require a recent Auth.js session (`requireRecentSession()`; default window: 15 minutes). This blocks stolen long-lived dashboard sessions from being upgraded into machine or automation credentials.
+Sensitive browser-session flows that mint non-session credentials require a recent Auth.js session (`requireRecentSession()`; default window: 15 minutes). Personal passkey sessions may additionally use explicit passkey freshness (`requireFreshPasskey()`) on selected routes without shortening the entire browser session lifetime. Together these checks block stolen long-lived dashboard sessions from being upgraded into machine or automation credentials.
 
 - **Protected by recent-session step-up:** MCP authorize / consent, mobile authorize, extension bridge-code issuance, legacy direct extension token issuance, SCIM token creation, service-account token creation, operator token creation
 - **Not covered by this step-up:** refresh, revoke, and code/token exchange endpoints that are already authenticated by one-time codes or existing bearer credentials

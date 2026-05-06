@@ -1,9 +1,5 @@
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import {
-  AAL3_IDLE_TIMEOUT_MAX_MINUTES,
-  AAL3_ABSOLUTE_TIMEOUT_MAX_MINUTES,
-} from "@/lib/validations/common";
 
 // Cache scaffold. 60s TTL matches the pattern used by the retired sessionDurationCache.
 const SESSION_TIMEOUT_CACHE_TTL_MS = 60_000;
@@ -31,18 +27,12 @@ export interface ResolvedSessionTimeouts {
   tenantId: string;
 }
 
-const WEBAUTHN_PROVIDER = "webauthn";
-
 /**
  * Resolve the effective session idle + absolute timeouts for a user.
  *
  * Rule: `min(tenant, ...teams.filter(non-null))` for each axis. Team values
  * are constrained to `<= tenant value` on write, so this is equivalent to
  * "tenant value, with a stricter team override if any."
- *
- * AAL3 clamp: when `sessionProvider === "webauthn"`, the result is clamped
- * to NIST SP 800-63B-4 §2.3.3 AAL3 reauthentication ceilings (12h
- * absolute / 15min inactivity) regardless of policy values.
  *
  * Cache: per-userId, 60s TTL, bounded map. Invalidate on:
  *  - tenant policy PATCH via `invalidateSessionTimeoutCacheForTenant`
@@ -51,11 +41,15 @@ const WEBAUTHN_PROVIDER = "webauthn";
  */
 export async function resolveEffectiveSessionTimeouts(
   userId: string,
-  sessionProvider: string | null,
+  _sessionProvider: string | null,
 ): Promise<ResolvedSessionTimeouts> {
   const cached = cache.get(userId);
   if (cached && cached.expiresAt > Date.now()) {
-    return applyAal3Clamp(cached, sessionProvider);
+    return {
+      idleMinutes: cached.idleMinutes,
+      absoluteMinutes: cached.absoluteMinutes,
+      tenantId: cached.tenantId,
+    };
   }
   if (cached) cache.delete(userId);
 
@@ -140,24 +134,10 @@ export async function resolveEffectiveSessionTimeouts(
   }
   cache.set(userId, resolved);
 
-  return applyAal3Clamp(resolved, sessionProvider);
-}
-
-function applyAal3Clamp(
-  entry: { idleMinutes: number; absoluteMinutes: number; tenantId: string },
-  sessionProvider: string | null,
-): ResolvedSessionTimeouts {
-  if (sessionProvider !== WEBAUTHN_PROVIDER) {
-    return {
-      idleMinutes: entry.idleMinutes,
-      absoluteMinutes: entry.absoluteMinutes,
-      tenantId: entry.tenantId,
-    };
-  }
   return {
-    idleMinutes: Math.min(entry.idleMinutes, AAL3_IDLE_TIMEOUT_MAX_MINUTES),
-    absoluteMinutes: Math.min(entry.absoluteMinutes, AAL3_ABSOLUTE_TIMEOUT_MAX_MINUTES),
-    tenantId: entry.tenantId,
+    idleMinutes: resolved.idleMinutes,
+    absoluteMinutes: resolved.absoluteMinutes,
+    tenantId: resolved.tenantId,
   };
 }
 

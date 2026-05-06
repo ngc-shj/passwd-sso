@@ -13,7 +13,6 @@ export const KDF_ARGON2_PARALLELISM_MIN = 1;
 export const KDF_ARGON2_PARALLELISM_MAX = 16;
 
 // ─── Session & Auth ───────────────────────────────────────────
-export const PASSKEY_SESSION_MAX_AGE_SECONDS = 28_800; // 8 hours
 // Session policy min/max constants are in common.ts (shared with client).
 
 // ─── Audit Log ────────────────────────────────────────────────

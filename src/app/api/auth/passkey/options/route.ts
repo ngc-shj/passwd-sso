@@ -6,14 +6,16 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { rateLimited } from "@/lib/http/api-response";
 import { assertOrigin } from "@/lib/auth/session/csrf";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
-import { generateDiscoverableAuthOpts, derivePrfSalt } from "@/lib/auth/webauthn/webauthn-server";
+import {
+  generateDiscoverableAuthOpts,
+  derivePrfSalt,
+  WEBAUTHN_CHALLENGE_TTL_SECONDS,
+} from "@/lib/auth/webauthn/webauthn-server";
 import { randomBytes } from "node:crypto";
 
 export const runtime = "nodejs";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
-
-const CHALLENGE_TTL_SECONDS = 300;
 
 // POST /api/auth/passkey/options
 // Unauthenticated endpoint — generates discoverable credential options for passkey sign-in.
@@ -55,7 +57,7 @@ async function handlePOST(req: NextRequest) {
     `webauthn:challenge:signin:${challengeId}`,
     options.challenge,
     "EX",
-    CHALLENGE_TTL_SECONDS,
+    WEBAUTHN_CHALLENGE_TTL_SECONDS,
   );
 
   // Derive PRF salt so the client can request PRF in the same ceremony

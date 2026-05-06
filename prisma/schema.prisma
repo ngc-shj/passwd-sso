@@ -39,9 +39,10 @@ model Session {
   expires      DateTime @db.Timestamptz(3)
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   lastActiveAt DateTime @default(now()) @map("last_active_at") @db.Timestamptz(3)
+  passkeyVerifiedAt DateTime? @map("passkey_verified_at") @db.Timestamptz(3)
   ipAddress    String?  @map("ip_address") @db.VarChar(45)
   userAgent    String?  @map("user_agent") @db.VarChar(512)
-  /// Authentication method used to establish the session. "webauthn" triggers AAL3 clamp.
+  /// Authentication method used to establish the session.
   /// Null for sessions created before the provenance migration.
   provider     String?  @db.VarChar(64)
 

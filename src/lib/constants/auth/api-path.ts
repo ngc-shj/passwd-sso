@@ -73,6 +73,8 @@ export const API_PATH = {
   WEBAUTHN_CREDENTIALS: "/api/webauthn/credentials",
   AUTH_PASSKEY_OPTIONS: "/api/auth/passkey/options",
   AUTH_PASSKEY_OPTIONS_EMAIL: "/api/auth/passkey/options/email",
+  AUTH_PASSKEY_REAUTH_OPTIONS: "/api/auth/passkey/reauth/options",
+  AUTH_PASSKEY_REAUTH_VERIFY: "/api/auth/passkey/reauth/verify",
   AUTH_PASSKEY_VERIFY: "/api/auth/passkey/verify",
   HEALTH_LIVE: "/api/health/live",
   HEALTH_READY: "/api/health/ready",
