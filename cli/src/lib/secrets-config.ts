@@ -3,7 +3,6 @@
  *
  * Schema:
  * {
- *   "server": "https://...",
  *   "apiKey?": "api_...",         // optional — uses /api/v1/ path
  *   "secrets": {
  *     "ENV_VAR_NAME": { "entry": "<entryId>", "field": "password" }
@@ -17,6 +16,7 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { loadConfig } from "./config.js";
 
 export interface SecretMapping {
   entry: string;
@@ -24,9 +24,13 @@ export interface SecretMapping {
 }
 
 export interface SecretsConfig {
-  server: string;
   apiKey?: string;
   secrets: Record<string, SecretMapping>;
+}
+
+function isPlaceholderEntryId(entryId: string): boolean {
+  const trimmed = entryId.trim();
+  return trimmed === "dummy-entry-id" || /^<[^>]+>$/.test(trimmed);
 }
 
 export function loadSecretsConfig(configPath?: string): SecretsConfig {
@@ -41,14 +45,38 @@ export function loadSecretsConfig(configPath?: string): SecretsConfig {
   const raw = readFileSync(filePath, "utf-8");
   const parsed = JSON.parse(raw) as SecretsConfig;
 
-  if (!parsed.server || typeof parsed.server !== "string") {
-    throw new Error("Config file must have a 'server' field.");
-  }
   if (!parsed.secrets || typeof parsed.secrets !== "object") {
     throw new Error("Config file must have a 'secrets' field.");
   }
 
+  for (const [envName, mapping] of Object.entries(parsed.secrets)) {
+    if (!mapping || typeof mapping !== "object") {
+      throw new Error(`Secret mapping for '${envName}' must be an object.`);
+    }
+
+    const { entry, field } = mapping as Partial<SecretMapping>;
+    if (typeof entry !== "string" || entry.trim().length === 0) {
+      throw new Error(`Secret mapping for '${envName}' must have a non-empty 'entry' string.`);
+    }
+    if (typeof field !== "string" || field.trim().length === 0) {
+      throw new Error(`Secret mapping for '${envName}' must have a non-empty 'field' string.`);
+    }
+    if (isPlaceholderEntryId(entry)) {
+      throw new Error(
+        `Secret mapping for '${envName}' uses placeholder entry ID "${entry}". Replace it with a real vault entry ID.`,
+      );
+    }
+  }
+
   return parsed;
+}
+
+export function getSecretsServerUrl(): string {
+  const { serverUrl } = loadConfig();
+  if (!serverUrl) {
+    throw new Error("Server URL not configured. Run `passwd-sso login` first.");
+  }
+  return serverUrl.replace(/\/$/, "");
 }
 
 /**
