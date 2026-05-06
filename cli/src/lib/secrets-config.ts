@@ -30,8 +30,7 @@ export interface SecretsConfig {
 }
 
 function isPlaceholderEntryId(entryId: string): boolean {
-  const trimmed = entryId.trim();
-  return trimmed === "dummy-entry-id" || /^<[^>]+>$/.test(trimmed);
+  return entryId === "dummy-entry-id" || /^<[^>]+>$/.test(entryId);
 }
 
 export function loadSecretsConfig(configPath?: string): SecretsConfig {
@@ -55,21 +54,22 @@ export function loadSecretsConfig(configPath?: string): SecretsConfig {
       throw new Error(`Secret mapping for '${envName}' must be an object.`);
     }
 
-    const raw = mapping as Partial<SecretMapping>;
-    if (typeof raw.entry !== "string" || raw.entry.trim().length === 0) {
+    const rawMapping = mapping as Partial<SecretMapping>;
+    if (typeof rawMapping.entry !== "string" || rawMapping.entry.trim().length === 0) {
       throw new Error(`Secret mapping for '${envName}' must have a non-empty 'entry' string.`);
     }
-    if (typeof raw.field !== "string" || raw.field.trim().length === 0) {
+    if (typeof rawMapping.field !== "string" || rawMapping.field.trim().length === 0) {
       throw new Error(`Secret mapping for '${envName}' must have a non-empty 'field' string.`);
     }
-    const entry = raw.entry.trim();
-    const field = raw.field.trim();
+    const entry = rawMapping.entry.trim();
+    const field = rawMapping.field.trim();
     if (isPlaceholderEntryId(entry)) {
       throw new Error(
         `Secret mapping for '${envName}' uses placeholder entry ID "${entry}". Replace it with a real vault entry ID.`,
       );
     }
-    parsed.secrets[envName] = { entry, field };
+    // Preserve unknown keys (e.g. user-added comment fields) while normalising entry/field.
+    parsed.secrets[envName] = { ...rawMapping, entry, field } as SecretMapping;
   }
 
   return parsed;

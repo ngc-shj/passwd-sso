@@ -24,6 +24,9 @@ vi.mock("../../lib/output.js", () => ({
   warn: vi.fn(),
   info: vi.fn(),
   success: vi.fn(),
+  table: vi.fn(),
+  json: vi.fn(),
+  masked: vi.fn(),
 }));
 
 const { loadSecretsConfig, getSecretsServerUrl } = await import("../../lib/secrets-config.js");
@@ -100,6 +103,7 @@ describe("runCommand", () => {
 
     await expect(runCommand({ command: ["true"] })).rejects.toThrow();
 
+    expect(vi.mocked(getToken)).toHaveBeenCalled();
     expect(exitCode).toBe(1);
     expect(vi.mocked(output.error)).toHaveBeenCalledWith(
       expect.stringContaining("Not logged in"),
@@ -116,6 +120,7 @@ describe("runCommand", () => {
 
     await expect(runCommand({ command: ["true"] })).rejects.toThrow();
 
+    expect(vi.mocked(autoUnlockIfNeeded)).toHaveBeenCalled();
     expect(exitCode).toBe(1);
     expect(vi.mocked(output.error)).toHaveBeenCalledWith(
       expect.stringContaining("Vault is not unlocked"),
