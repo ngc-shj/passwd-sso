@@ -567,6 +567,10 @@ describe("proxy — access restriction", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // CSRF gate now fails closed without configured origin — must stub APP_URL
+    // so cookie-bearing mutating requests reach the access-restriction stage
+    // instead of short-circuiting at INVALID_ORIGIN.
+    vi.stubEnv("APP_URL", APP_ORIGIN);
     // Session returns valid user with ID
     fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ user: { id: "u1" } }), { status: 200 }),

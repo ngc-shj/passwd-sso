@@ -739,21 +739,17 @@ describe("Scenario 7: OAuth Discovery endpoint", () => {
   });
 
   it("discovery issuer matches APP_URL", async () => {
-    const prev = process.env.APP_URL;
-    process.env.APP_URL = "https://sso.example.com";
-    try {
-      const res = await getDiscovery();
-      const { status, json } = await parseResponse(res);
+    // setup.ts wires `vi.unstubAllEnvs()` in afterEach, so the stub
+    // is reverted automatically — no manual finally cleanup needed.
+    vi.stubEnv("APP_URL", "https://sso.example.com");
+    const res = await getDiscovery();
+    const { status, json } = await parseResponse(res);
 
-      expect(status).toBe(200);
-      expect(json.issuer).toBe("https://sso.example.com");
-      expect(json.authorization_endpoint).toBe("https://sso.example.com/api/mcp/authorize");
-      expect(json.token_endpoint).toBe("https://sso.example.com/api/mcp/token");
-      expect(json.registration_endpoint).toBe("https://sso.example.com/api/mcp/register");
-    } finally {
-      if (prev === undefined) delete process.env.APP_URL;
-      else process.env.APP_URL = prev;
-    }
+    expect(status).toBe(200);
+    expect(json.issuer).toBe("https://sso.example.com");
+    expect(json.authorization_endpoint).toBe("https://sso.example.com/api/mcp/authorize");
+    expect(json.token_endpoint).toBe("https://sso.example.com/api/mcp/token");
+    expect(json.registration_endpoint).toBe("https://sso.example.com/api/mcp/register");
   });
 
   it("response_types_supported includes 'code' only", async () => {

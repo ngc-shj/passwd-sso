@@ -11,6 +11,7 @@ import {
   describe,
   it,
   expect,
+  vi,
   beforeAll,
   afterAll,
   beforeEach,
@@ -22,7 +23,6 @@ import { requireRecentSession, STEP_UP_WINDOW_MS } from "@/lib/auth/session/step
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 
 const hasDatabase = !!process.env.DATABASE_URL;
-const AUTH_URL_BEFORE = process.env.AUTH_URL;
 
 describe.skipIf(!hasDatabase)(
   "requireRecentSession (real DB)",
@@ -33,11 +33,11 @@ describe.skipIf(!hasDatabase)(
 
     beforeAll(async () => {
       ctx = await createTestContext();
-      process.env.AUTH_URL = "http://localhost:3000";
+      vi.stubEnv("AUTH_URL", "http://localhost:3000");
     });
 
     afterAll(async () => {
-      process.env.AUTH_URL = AUTH_URL_BEFORE;
+      vi.unstubAllEnvs();
       await ctx.cleanup();
     });
 
