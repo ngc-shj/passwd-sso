@@ -108,20 +108,39 @@ function parseIpv6(ip: string): number[] | null {
   return [...left, ...new Array<number>(padding).fill(0), ...right];
 }
 
+function ipv4BytesFromMappedIpv6(ip: string): number[] | null {
+  const parsed = parseIpv6(ip);
+  if (!parsed || parsed.length !== 16) return null;
+
+  const hasMappedPrefix = parsed
+    .slice(0, 12)
+    .every((byte, index) => (index < 10 ? byte === 0 : byte === 0xff));
+  if (!hasMappedPrefix) return null;
+
+  return parsed.slice(12, 16);
+}
+
 /**
  * Normalize an IP address string.
  * Strips IPv4-mapped IPv6 prefix (::ffff:) and returns pure IPv4.
  */
 export function normalizeIp(ip: string): string {
   const trimmed = ip.trim();
+  const unwrapped =
+    trimmed.startsWith("[") && trimmed.endsWith("]")
+      ? trimmed.slice(1, -1)
+      : trimmed;
 
   // Strip IPv4-mapped IPv6 prefix
-  const v4MappedMatch = trimmed.match(
+  const v4MappedMatch = unwrapped.match(
     /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i,
   );
   if (v4MappedMatch) return v4MappedMatch[1];
 
-  return trimmed;
+  const mappedBytes = ipv4BytesFromMappedIpv6(unwrapped);
+  if (mappedBytes) return mappedBytes.join(".");
+
+  return unwrapped;
 }
 
 /**

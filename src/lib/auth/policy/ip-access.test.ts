@@ -39,8 +39,16 @@ describe("normalizeIp", () => {
     expect(normalizeIp("::ffff:1.2.3.4")).toBe("1.2.3.4");
   });
 
+  it("normalizes hex-form IPv4-mapped IPv6 to dotted IPv4", () => {
+    expect(normalizeIp("::ffff:7f00:1")).toBe("127.0.0.1");
+  });
+
   it("trims surrounding whitespace", () => {
     expect(normalizeIp("  1.2.3.4 ")).toBe("1.2.3.4");
+  });
+
+  it("strips IPv6 literal brackets", () => {
+    expect(normalizeIp("[2001:db8::1]")).toBe("2001:db8::1");
   });
 
   it("passes through plain IPv4 unchanged", () => {
@@ -108,6 +116,10 @@ describe("isIpInCidr", () => {
 
   it("matches IPv4-mapped IPv6 against an IPv4 CIDR (after normalization)", () => {
     expect(isIpInCidr("::ffff:192.168.0.42", "192.168.0.0/24")).toBe(true);
+  });
+
+  it("matches hex-form IPv4-mapped IPv6 against an IPv4 CIDR", () => {
+    expect(isIpInCidr("::ffff:7f00:1", "127.0.0.0/8")).toBe(true);
   });
 });
 
