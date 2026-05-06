@@ -135,7 +135,7 @@ Revoking sets `revokedAt`; the row remains for audit-trail forensics. Subsequent
 1. Revoke immediately (UI or API).
 2. Inspect `audit_logs` for `metadata.tokenId = <revoked id>` to enumerate everything the compromised token did.
 3. Mint a fresh token to resume operations.
-4. If the compromise vector is unclear, also revoke the operator's dashboard sessions (`DELETE /api/sessions/<id>`). The 15-minute step-up window means an attacker cannot mint a *new* operator token from a stolen session unless they can trigger a fresh sign-in within 15 minutes.
+4. If the compromise vector is unclear, also revoke the operator's dashboard sessions (`DELETE /api/sessions/<id>`). The 15-minute step-up window means an attacker cannot mint a *new* operator token from a stolen session unless they can trigger a fresh sign-in within 15 minutes. The same shared recent-session guard is also used by other browser-session credential issuance flows (MCP/mobile authorization, extension bridge/direct issuance, SCIM token creation, service-account token creation).
 
 ## Audit attribution
 

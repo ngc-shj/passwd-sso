@@ -216,10 +216,10 @@ Key variables:
 | --- | --- |
 | `NEXT_PUBLIC_APP_NAME` | (Optional) Display name shown in the UI |
 | `NEXT_PUBLIC_BASE_PATH` | (Optional) Sub-path for reverse proxy (e.g., `/passwd-sso`). Set before build |
-| `APP_URL` | (Optional) External URL when behind reverse proxy/CDN (origin only) |
+| `APP_URL` | (Recommended) External URL when behind reverse proxy/CDN (origin only). Used as the canonical Origin for cookie-auth CSRF checks |
 | `DATABASE_URL` | PostgreSQL connection string (app role, e.g. `passwd_app`) |
 | `MIGRATION_DATABASE_URL` | PostgreSQL connection for migrations (superuser role, e.g. `passwd_user`). Required for `npm run db:migrate` |
-| `AUTH_URL` | Application origin (e.g., `http://localhost:3000`) |
+| `AUTH_URL` | Application origin (e.g., `http://localhost:3000`). Used as the canonical Origin when `APP_URL` is unset |
 | `AUTH_SECRET` | `openssl rand -base64 32` |
 | `AUTH_GOOGLE_ID` | Google OAuth client ID |
 | `AUTH_GOOGLE_SECRET` | Google OAuth client secret |
@@ -264,6 +264,8 @@ Key variables:
 </details>
 
 > **Redis is required in production.** In dev/test, omit `REDIS_URL` for in-memory fallback.
+>
+> **Canonical origin is required for cookie-authenticated mutating APIs.** `assertOrigin()` now fails closed when neither `APP_URL` nor `AUTH_URL` is configured, instead of deriving same-origin from request `Host` headers.
 
 ### Admin / maintenance scripts
 
@@ -323,7 +325,7 @@ Zero-knowledge architecture — the server stores only ciphertext and cannot dec
 - **AAD binding** — Additional Authenticated Data ties ciphertext to user and entry IDs
 - **Session security** — Database sessions (not JWT), tenant/team-policy-driven absolute timeout (default 30 days, configurable down to 5 minutes per policy), auto-lock after 15 min idle or 5 min tab hidden
 - **Clipboard clear** — Copied passwords auto-clear after 30 seconds
-- **CSRF defense** — JSON body + SameSite cookie + CSP + Origin validation
+- **CSRF defense** — JSON body + SameSite cookie + CSP + Origin validation against configured `APP_URL` / `AUTH_URL` (fail-closed if unset)
 
 For the full design, see the [Cryptography Whitepaper](docs/security/cryptography-whitepaper.md).
 

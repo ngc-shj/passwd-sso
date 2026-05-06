@@ -46,8 +46,8 @@ Evidence:
 5. Token lifecycle boundaries are explicit  
 Status: `PASS`  
 Evidence:
-- Issue (legacy direct) requires Auth.js session: `src/app/api/extension/token/route.ts`.
-- Issue (bridge code) requires Auth.js session + Origin check: `src/app/api/extension/bridge-code/route.ts`.
+- Issue (legacy direct) requires Auth.js session + recent-session step-up: `src/app/api/extension/token/route.ts`.
+- Issue (bridge code) requires Auth.js session + recent-session step-up: `src/app/api/extension/bridge-code/route.ts`.
 - Exchange consumes a one-time, server-side, atomically-claimed code (no session): `src/app/api/extension/token/exchange/route.ts`.
 - Revoke requires valid Bearer token: `src/app/api/extension/token/route.ts` (DELETE handler).
 - Refresh requires valid Bearer token + active DB session: `src/app/api/extension/token/refresh/route.ts`.
