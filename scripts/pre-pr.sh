@@ -11,19 +11,99 @@ RESET='\033[0m'
 passed=0
 failed=0
 failures=()
+tempfiles=()
+
+cleanup_tempfiles() {
+  local logfile
+  for logfile in "${tempfiles[@]:-}"; do
+    [ -n "$logfile" ] && [ -f "$logfile" ] && rm -f "$logfile"
+  done
+}
+
+show_failure_context() {
+  local label="$1"
+  local logfile="$2"
+  local markers='(FAIL |Failed Tests|AssertionError|TypeError|ReferenceError|SyntaxError|^Error:|error TS[0-9]+|FORBIDDEN:|✗ |violations in)'
+  # Audit dead-letter test fixtures emit pino JSON containing "TypeError"
+  # inside the error field — exclude those structured-log lines so the
+  # marker scan surfaces real failures, not log-shaped noise.
+  local noise='"_logType":'
+  local matches
+  local fail_summary_line
+  local fail_count
+  local first_line
+  local start_line
+  local end_line
+
+  printf "\n${BOLD}▸ %s${RESET}" "$label"
+  if [ -n "$logfile" ]; then
+    printf "  %s" "$logfile"
+    # `|| true` keeps `set -e + pipefail` from killing the function when
+    # the inner greps find no match (common: not a vitest run).
+    fail_count=$({ grep -oE 'Failed Tests [0-9]+' "$logfile" || true; } \
+      | tail -1 | { grep -oE '[0-9]+' || true; })
+    if [ -n "$fail_count" ]; then
+      printf "  ${RED}(%s failed)${RESET}" "$fail_count"
+    fi
+    printf "\n"
+  else
+    printf "\n  (no captured logfile; see output above)\n"
+    return
+  fi
+
+  matches=$({ grep -nE "$markers" "$logfile" || true; } \
+    | { grep -v "$noise" || true; } | head -30)
+  if [ -n "$matches" ]; then
+    printf "%s\n" "$matches"
+    echo ""
+
+    # Prefer vitest's "Failed Tests N" summary line as the context anchor —
+    # it marks the start of the actual failure block. Fall back to the
+    # first non-noise marker for non-vitest failures (lint, build, etc.).
+    fail_summary_line=$({ grep -nE 'Failed Tests [0-9]+' "$logfile" || true; } \
+      | tail -1 | cut -d: -f1)
+    if [ -n "$fail_summary_line" ]; then
+      start_line=$(( fail_summary_line > 3 ? fail_summary_line - 3 : 1 ))
+      end_line=$(( start_line + 60 ))
+    else
+      first_line=$(printf "%s\n" "$matches" | head -1 | cut -d: -f1)
+      start_line=$(( first_line > 5 ? first_line - 5 : 1 ))
+      end_line=$(( start_line + 24 ))
+    fi
+    sed -n "${start_line},${end_line}p" "$logfile"
+  else
+    tail -20 "$logfile"
+  fi
+}
+
+trap cleanup_tempfiles EXIT
 
 run_step() {
   local label="$1"
   shift
+  local logfile
+  local ec
+
+  logfile=$(mktemp -t "pre-pr.XXXXXX")
+  tempfiles+=("$logfile")
   printf "${BOLD}▸ %s${RESET}\n" "$label"
-  if "$@"; then
+
+  set +e
+  "$@" 2>&1 | tee "$logfile"
+  ec=${PIPESTATUS[0]}
+  set -e
+
+  if [ "$ec" -eq 0 ]; then
     printf "${GREEN}  ✓ %s${RESET}\n\n" "$label"
     passed=$((passed + 1))
   else
     printf "${RED}  ✗ %s${RESET}\n\n" "$label"
     failed=$((failed + 1))
-    failures+=("$label")
+    failures+=("$label|$logfile")
+    return
   fi
+
+  rm -f "$logfile"
 }
 
 echo ""
@@ -93,7 +173,7 @@ else
     echo "$LEAK_OUTPUT"
     echo "Install gitleaks for full-coverage scanning (brew install gitleaks / apt install gitleaks)."
     failed=$((failed + 1))
-    failures+=("Secret scan (gitleaks fallback)")
+    failures+=("Secret scan (gitleaks fallback)|")
   fi
 fi
 
@@ -107,7 +187,7 @@ if git diff --name-only main...HEAD | grep -q '^src/app/\[locale\]/admin/'; then
   if ! git diff --name-only --diff-filter=A main...HEAD | grep -q '^docs/archive/review/.*-manual-test\.md$'; then
     printf "${RED}ERROR: admin/ changes detected but no docs/archive/review/*-manual-test.md added (R35 Tier-1)${RESET}\n" >&2
     failed=$((failed + 1))
-    failures+=("Manual-test artifact gate (R35 Tier-1)")
+    failures+=("Manual-test artifact gate (R35 Tier-1)|")
   else
     printf "${GREEN}  ✓ Manual-test artifact gate (R35 Tier-1)${RESET}\n\n"
     passed=$((passed + 1))
@@ -144,8 +224,13 @@ printf "${GREEN}  Passed: %d${RESET}\n" "$passed"
 
 if [ "$failed" -gt 0 ]; then
   printf "${RED}  Failed: %d${RESET}\n" "$failed"
-  for f in "${failures[@]}"; do
-    printf "${RED}    - %s${RESET}\n" "$f"
+  for failure in "${failures[@]}"; do
+    printf "${RED}    - %s${RESET}\n" "${failure%%|*}"
+  done
+  echo ""
+  printf "${BOLD}═══ Failure Context ═══${RESET}\n"
+  for failure in "${failures[@]}"; do
+    show_failure_context "${failure%%|*}" "${failure#*|}"
   done
   echo ""
   printf "${RED}${BOLD}✗ Pre-PR checks failed. Fix the above before creating a PR.${RESET}\n"
