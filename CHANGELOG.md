@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.47](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.46...passwd-sso-v0.4.47) (2026-05-06)
+
+
+### Code Refactoring
+
+* **cli:** derive secrets server URL from CLI login config ([#450](https://github.com/ngc-shj/passwd-sso/issues/450)) ([c21eed6](https://github.com/ngc-shj/passwd-sso/commit/c21eed6c4e1f78106a82744bed219a541bfc1c60))
+
 ## [0.4.46](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.45...passwd-sso-v0.4.46) (2026-05-05)
 
 
