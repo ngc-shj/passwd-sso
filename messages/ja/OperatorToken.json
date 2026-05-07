@@ -35,6 +35,9 @@
   "reauthCancelled": "Passkey による本人確認をキャンセルしました。",
   "reauthStillRequired": "再認証が完了していません。もう一度お試しください。",
   "reauthRetryFailed": "本人確認後の運用者トークン発行に失敗しました。もう一度お試しください。",
+  "recentSessionTitle": "続行するには再サインインが必要です",
+  "recentSessionDescription": "この操作には、現在の認証方式に対するより新しいブラウザサインインが必要です。再サインインしてから、もう一度お試しください。",
+  "recentSessionAction": "再サインイン",
   "limitExceeded": "テナントごとの運用者トークン上限に達しました。不要なトークンを失効させてください。",
   "usageHint": "スクリプトでの利用: ADMIN_API_TOKEN=op_... scripts/purge-history.sh"
 }

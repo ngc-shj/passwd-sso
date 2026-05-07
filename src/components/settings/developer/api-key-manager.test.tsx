@@ -41,6 +41,11 @@ vi.mock("@/components/passwords/shared/copy-button", () => ({
   ),
 }));
 
+vi.mock("@/components/auth/recent-session-required-dialog", () => ({
+  RecentSessionRequiredDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="recent-session-dialog" /> : null,
+}));
+
 import { ApiKeyManager } from "./api-key-manager";
 
 interface ApiKeyEntry {

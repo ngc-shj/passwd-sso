@@ -44,6 +44,11 @@ vi.mock("@/components/passwords/shared/copy-button", () => ({
   ),
 }));
 
+vi.mock("@/components/auth/recent-session-required-dialog", () => ({
+  RecentSessionRequiredDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="recent-session-dialog" /> : null,
+}));
+
 vi.mock("@/components/settings/account/section-card-header", () => ({
   SectionCardHeader: ({ title }: { title: string }) => (
     <div data-testid="section-header">{title}</div>

@@ -34,6 +34,8 @@ import { fetchApi } from "@/lib/url-helpers";
 import { NAME_MAX_LENGTH } from "@/lib/validations";
 import { formatDate } from "@/lib/format/format-datetime";
 import { API_KEY_SCOPE, API_KEY_SCOPES, MAX_API_KEYS_PER_USER, type ApiKeyScope } from "@/lib/constants/auth/api-key";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 
 interface ApiKeyEntry {
   id: string;
@@ -72,6 +74,7 @@ export function ApiKeyManager() {
     new Set([API_KEY_SCOPE.PASSWORDS_READ]),
   );
   const [expiryDays, setExpiryDays] = useState("90");
+  const [recentSessionOpen, setRecentSessionOpen] = useState(false);
 
   const fetchKeys = useCallback(async () => {
     try {
@@ -130,7 +133,9 @@ export function ApiKeyManager() {
         fetchKeys();
       } else {
         const err = await res.json().catch(() => ({}));
-        if (err.error === "API_KEY_LIMIT_EXCEEDED") {
+        if (err.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          setRecentSessionOpen(true);
+        } else if (err.error === API_ERROR.API_KEY_LIMIT_EXCEEDED) {
           toast.error(t("limitExceeded", { max: MAX_API_KEYS_PER_USER }));
         } else if (res.status === 400) {
           toast.error(t("validationError"));
@@ -171,9 +176,8 @@ export function ApiKeyManager() {
     <Card>
       <SectionCardHeader icon={Key} title={t("title")} description={t("description")} />
       <CardContent className="space-y-6">
-
-      {/* Create Key Form */}
-      <section className="space-y-3">
+        {/* Create Key Form */}
+        <section className="space-y-3">
         <h3 className="text-sm font-medium">{t("createKey")}</h3>
         <div className="space-y-2">
           <Label>{t("name")}</Label>
@@ -230,11 +234,19 @@ export function ApiKeyManager() {
           )}
           {t("createKey")}
         </Button>
-      </section>
+        </section>
+        <RecentSessionRequiredDialog
+          actionLabel={t("recentSessionAction")}
+          cancelLabel={t("cancel")}
+          description={t("recentSessionDescription")}
+          onOpenChange={setRecentSessionOpen}
+          open={recentSessionOpen}
+          title={t("recentSessionTitle")}
+        />
 
-      {/* Newly created token (shown once) */}
-      {newToken && (
-        <section className="border rounded-md p-4 bg-muted/50 space-y-2">
+        {/* Newly created token (shown once) */}
+        {newToken && (
+          <section className="border rounded-md p-4 bg-muted/50 space-y-2">
           <p className="text-sm font-medium">{t("tokenReady")}</p>
           <div className="flex items-center gap-2">
             <Input value={newToken} readOnly className="font-mono text-xs" />
@@ -248,8 +260,8 @@ export function ApiKeyManager() {
           >
             OK
           </Button>
-        </section>
-      )}
+          </section>
+        )}
 
       {/* Key List */}
       <KeyList

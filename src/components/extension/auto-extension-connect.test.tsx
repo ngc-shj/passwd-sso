@@ -17,19 +17,28 @@ import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
 // ── Hoisted mocks ──────────────────────────────────────────
-const { mockInjectBridgeCode, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
+const { mockInjectBridgeCode, mockReauthenticateWithPasskey, mockSignOut } = vi.hoisted(() => ({
   mockInjectBridgeCode: vi.fn(),
   mockReauthenticateWithPasskey: vi.fn(),
+  mockSignOut: vi.fn(),
 }));
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+  useLocale: () => "en",
+}));
+vi.mock("next-auth/react", () => ({
+  signOut: mockSignOut,
 }));
 vi.mock("@/lib/inject-extension-bridge-code", () => ({
   injectExtensionBridgeCode: mockInjectBridgeCode,
 }));
 vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
   reauthenticateWithPasskey: mockReauthenticateWithPasskey,
+}));
+vi.mock("@/lib/url-helpers", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  withBasePath: (path: string) => path,
 }));
 
 import { AutoExtensionConnect, isOverlayActive } from "./auto-extension-connect";
@@ -58,6 +67,7 @@ beforeEach(() => {
   replaceStateSpy = vi.spyOn(window.history, "replaceState").mockImplementation(() => {});
   fetchSpy = vi.spyOn(globalThis, "fetch");
   mockReauthenticateWithPasskey.mockReset();
+  mockSignOut.mockReset();
 });
 
 afterEach(() => {
@@ -152,12 +162,16 @@ describe("AutoExtensionConnect", () => {
 
   it("shows reauth guidance when bridge-code returns SESSION_STEP_UP_REQUIRED", async () => {
     setSearchParams("?ext_connect=1");
-    fetchSpy.mockResolvedValue(
-      new Response(
-        JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }),
-        { status: 403 },
-      ),
-    );
+    fetchSpy
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }),
+          { status: 403 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ canPasskeySignIn: true }), { status: 200 }),
+      );
 
     render(<AutoExtensionConnect />);
 
@@ -175,6 +189,9 @@ describe("AutoExtensionConnect", () => {
           JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }),
           { status: 403 },
         ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ canPasskeySignIn: true }), { status: 200 }),
       )
       .mockResolvedValueOnce(
         new Response(
@@ -206,12 +223,16 @@ describe("AutoExtensionConnect", () => {
 
   it("shows cancellation feedback when reauth is cancelled", async () => {
     setSearchParams("?ext_connect=1");
-    fetchSpy.mockResolvedValue(
-      new Response(
-        JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }),
-        { status: 403 },
-      ),
-    );
+    fetchSpy
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }),
+          { status: 403 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ canPasskeySignIn: true }), { status: 200 }),
+      );
     mockReauthenticateWithPasskey.mockResolvedValue({
       ok: false,
       error: "AUTHENTICATION_CANCELLED",
@@ -228,6 +249,33 @@ describe("AutoExtensionConnect", () => {
 
     await waitFor(() => {
       expect(screen.getByText("connectReauthCancelled")).toBeInTheDocument();
+    });
+  });
+
+  it("redirects to sign-in when stale session is returned for a non-passkey user", async () => {
+    setSearchParams("?ext_connect=1");
+    fetchSpy
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }),
+          { status: 403 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ canPasskeySignIn: false }), { status: 200 }),
+      );
+
+    render(<AutoExtensionConnect />);
+
+    await waitFor(() => {
+      expect(screen.getByText("connectRecentSessionTitle")).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByText("connectRecentSessionAction"));
+
+    await waitFor(() => {
+      expect(mockSignOut).toHaveBeenCalledTimes(1);
     });
   });
 

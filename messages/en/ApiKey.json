@@ -34,5 +34,8 @@
   "scopePasswordsWrite": "Write passwords",
   "scopeTagsRead": "Read tags",
   "scopeVaultStatus": "Vault status",
+  "recentSessionTitle": "Sign in again to continue",
+  "recentSessionDescription": "This action requires a more recent browser sign-in. Sign in again, then retry.",
+  "recentSessionAction": "Sign in again",
   "cancel": "Cancel"
 }

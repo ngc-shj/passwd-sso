@@ -45,6 +45,8 @@ import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
 import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { FormDirtyBadge } from "@/components/settings/account/form-dirty-badge";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 
 interface ServiceAccount {
   id: string;
@@ -111,6 +113,7 @@ export function ServiceAccountCard() {
   const [tokenNameError, setTokenNameError] = useState("");
   const [tokenScopeError, setTokenScopeError] = useState("");
   const [newTokenSecret, setNewTokenSecret] = useState<string | null>(null);
+  const [recentSessionOpen, setRecentSessionOpen] = useState(false);
 
   const fetchAccounts = useCallback(async () => {
     try {
@@ -329,7 +332,9 @@ export function ServiceAccountCard() {
       if (!res.ok) {
         const errData = await res.json().catch(() => null);
         const code = errData?.error;
-        if (res.status === 409 && code === "SA_TOKEN_LIMIT_EXCEEDED") {
+        if (code === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          setRecentSessionOpen(true);
+        } else if (res.status === 409 && code === API_ERROR.SA_TOKEN_LIMIT_EXCEEDED) {
           toast.error(t("tokenLimitReached"));
         } else if (res.status === 409) {
           toast.error(t("saInactiveError"));
@@ -395,13 +400,21 @@ export function ServiceAccountCard() {
         }
       />
       <CardContent className="space-y-4">
+        <RecentSessionRequiredDialog
+          actionLabel={t("recentSessionAction")}
+          cancelLabel={tCommon("cancel")}
+          description={t("recentSessionDescription")}
+          onOpenChange={setRecentSessionOpen}
+          open={recentSessionOpen}
+          title={t("recentSessionTitle")}
+        />
 
-      {loading ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
-      ) : accounts.length === 0 ? (
-        <p className="text-center text-muted-foreground">{t("noServiceAccounts")}</p>
-      ) : (
-        <div className="space-y-2">
+        {loading ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : accounts.length === 0 ? (
+          <p className="text-center text-muted-foreground">{t("noServiceAccounts")}</p>
+        ) : (
+          <div className="space-y-2">
           {activeAccounts.length === 0 && inactiveAccounts.length > 0 && (
             <p className="text-sm text-muted-foreground">{t("noActiveServiceAccounts")}</p>
           )}
@@ -747,8 +760,8 @@ export function ServiceAccountCard() {
               </CollapsibleContent>
             </Collapsible>
           )}
-        </div>
-      )}
+          </div>
+        )}
       </CardContent>
 
       {/* Create SA dialog */}

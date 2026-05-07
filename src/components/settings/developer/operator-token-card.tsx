@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/collapsible";
 import { KeyRound, Loader2, Plus, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
-import { apiPath } from "@/lib/constants";
+import { API_PATH, apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
 import {
@@ -43,6 +43,7 @@ import {
 } from "@/lib/constants/auth/operator-token";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 
 const TOKEN_STATUS_VARIANT: Record<
   string,
@@ -94,6 +95,7 @@ export function OperatorTokenCard() {
   const [reauthOpen, setReauthOpen] = useState(false);
   const [reauthenticating, setReauthenticating] = useState(false);
   const [reauthError, setReauthError] = useState<string | null>(null);
+  const [recentSessionOpen, setRecentSessionOpen] = useState(false);
 
   const createToken = useCallback(async () => {
     return fetchApi(apiPath.tenantOperatorTokens(), {
@@ -126,6 +128,17 @@ export function OperatorTokenCard() {
     fetchTokens();
   }, [fetchTokens]);
 
+  const canUsePasskeyRecovery = useCallback(async () => {
+    try {
+      const res = await fetchApi(API_PATH.USER_AUTH_PROVIDER);
+      if (!res.ok) return true;
+      const data = (await res.json()) as { canPasskeySignIn?: boolean };
+      return data.canPasskeySignIn !== false;
+    } catch {
+      return true;
+    }
+  }, []);
+
   const handleCreate = async () => {
     if (!tokenName.trim()) return;
     setCreating(true);
@@ -144,7 +157,11 @@ export function OperatorTokenCard() {
         };
         if (errBody.error === API_ERROR.OPERATOR_TOKEN_STALE_SESSION) {
           setReauthError(null);
-          setReauthOpen(true);
+          if (await canUsePasskeyRecovery()) {
+            setReauthOpen(true);
+          } else {
+            setRecentSessionOpen(true);
+          }
         } else if (errBody.error === API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED) {
           toast.error(t("limitExceeded"));
         } else {
@@ -181,7 +198,12 @@ export function OperatorTokenCard() {
           setReauthOpen(false);
           toast.error(t("limitExceeded"));
         } else if (errBody.error === API_ERROR.OPERATOR_TOKEN_STALE_SESSION) {
-          setReauthError(t("reauthStillRequired"));
+          if (await canUsePasskeyRecovery()) {
+            setReauthError(t("reauthStillRequired"));
+          } else {
+            setReauthOpen(false);
+            setRecentSessionOpen(true);
+          }
         } else {
           setReauthError(t("reauthRetryFailed"));
         }
@@ -303,6 +325,14 @@ export function OperatorTokenCard() {
         description={t("description")}
       />
       <CardContent className="space-y-6">
+        <RecentSessionRequiredDialog
+          actionLabel={t("recentSessionAction")}
+          cancelLabel={t("cancel")}
+          description={t("recentSessionDescription")}
+          onOpenChange={setRecentSessionOpen}
+          open={recentSessionOpen}
+          title={t("recentSessionTitle")}
+        />
         <p className="text-xs text-muted-foreground">{t("tenantScopeNote")}</p>
 
         {/* Create form */}

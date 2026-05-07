@@ -52,7 +52,7 @@
   "sessionPolicyValidationMin": "{min}以上で入力してください。",
   "sessionPolicyValidationMax": "{max}以下で入力してください。",
   "idleTimeoutMinutes": "Webセッション アイドルタイムアウト（分）",
-  "idleTimeoutHelp": "指定時間操作がないユーザーを自動サインアウトします。{min}〜{max}分の範囲で指定してください。WebAuthn（パスキー）セッションはこの値に関わらず、AAL3要件（15分アイドル／12時間絶対）が適用されます。",
+  "idleTimeoutHelp": "指定時間操作がないユーザーを自動サインアウトします。{min}〜{max}分の範囲で指定してください。",
   "idleTimeoutValidationMin": "{min}分以上で入力してください。",
   "idleTimeoutValidationMax": "{max}分以下で入力してください。",
   "absoluteTimeoutMinutes": "Webセッション 絶対タイムアウト（分）",

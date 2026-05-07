@@ -34,5 +34,8 @@
   "scopePasswordsWrite": "パスワード書き込み",
   "scopeTagsRead": "タグ読み取り",
   "scopeVaultStatus": "保管庫状態",
+  "recentSessionTitle": "続行するには再サインインが必要です",
+  "recentSessionDescription": "この操作には、より新しいブラウザサインインが必要です。再サインインしてから、もう一度お試しください。",
+  "recentSessionAction": "再サインイン",
   "cancel": "キャンセル"
 }

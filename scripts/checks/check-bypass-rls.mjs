@@ -43,6 +43,8 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/auth/policy/new-device-detection.ts", ["session", "user"]],
   // Shared step-up helper: reads Session.createdAt from the session-token cookie.
   ["src/lib/auth/session/step-up.ts", ["session"]],
+  // Route-level chooser: selects passkey freshness vs generic recent-session by session provider.
+  ["src/lib/auth/session/recent-current-auth-method.ts", ["session"]],
   // WebAuthn-specific freshness guard/helper for selected route-level reauth checks.
   ["src/lib/auth/webauthn/recent-passkey-verification.ts", ["session"]],
   ["src/lib/notification.ts", ["user", "notification"]],

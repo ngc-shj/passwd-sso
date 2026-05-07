@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { injectExtensionBridgeCode } from "@/lib/inject-extension-bridge-code";
 import {
   APP_NAME,
@@ -13,9 +13,10 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, Loader2, KeyRound } from "lucide-react";
-import { fetchApi } from "@/lib/url-helpers";
+import { fetchApi, withBasePath } from "@/lib/url-helpers";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
+import { signOut } from "next-auth/react";
 
 /**
  * Returns true when a full-screen overlay with `data-overlay-active` is
@@ -36,22 +37,40 @@ export function isOverlayActive(): boolean {
  */
 export function AutoExtensionConnect() {
   const t = useTranslations("Extension");
+  const locale = useLocale();
   const didRunRef = useRef(false);
   const [status, setStatus] = useState<ConnectStatus>(CONNECT_STATUS.IDLE);
   const [requiresReauth, setRequiresReauth] = useState(false);
+  const [requiresRecentSession, setRequiresRecentSession] = useState(false);
   const [reauthenticating, setReauthenticating] = useState(false);
   const [reauthError, setReauthError] = useState<string | null>(null);
 
-  const connect = async (): Promise<{ ok: boolean; requiresReauth: boolean }> => {
+  const canUsePasskeyRecovery = async () => {
+    try {
+      const res = await fetchApi(API_PATH.USER_AUTH_PROVIDER);
+      if (!res.ok) return true;
+      const data = (await res.json()) as { canPasskeySignIn?: boolean };
+      return data.canPasskeySignIn !== false;
+    } catch {
+      return true;
+    }
+  };
+
+  const connect = useCallback(async (): Promise<{ ok: boolean; requiresReauth: boolean }> => {
     setStatus(CONNECT_STATUS.CONNECTING);
     setRequiresReauth(false);
+    setRequiresRecentSession(false);
     setReauthError(null);
     try {
       const res = await fetchApi(API_PATH.EXTENSION_BRIDGE_CODE, { method: "POST" });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         const needsReauth = body.error === API_ERROR.SESSION_STEP_UP_REQUIRED;
-        setRequiresReauth(needsReauth);
+        if (needsReauth) {
+          const passkeyCapable = await canUsePasskeyRecovery();
+          setRequiresReauth(passkeyCapable);
+          setRequiresRecentSession(!passkeyCapable);
+        }
         setStatus(CONNECT_STATUS.FAILED);
         return { ok: false, requiresReauth: needsReauth };
       }
@@ -63,7 +82,7 @@ export function AutoExtensionConnect() {
       setStatus(CONNECT_STATUS.FAILED);
       return { ok: false, requiresReauth: false };
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (didRunRef.current) return;
@@ -81,10 +100,24 @@ export function AutoExtensionConnect() {
     window.history.replaceState(null, "", newUrl);
 
     connect();
-  }, []);
+  }, [connect]);
 
   const handleRetry = async () => {
     if (!requiresReauth) {
+      if (requiresRecentSession) {
+        setReauthenticating(true);
+        try {
+          const currentUrl = new URL(window.location.href);
+          currentUrl.searchParams.set(EXT_CONNECT_PARAM, "1");
+          const callbackUrl =
+            `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`;
+          const signInPath = `${withBasePath(`/${locale}/auth/signin`)}?callbackUrl=${encodeURIComponent(callbackUrl)}`;
+          await signOut({ callbackUrl: signInPath });
+        } finally {
+          setReauthenticating(false);
+        }
+        return;
+      }
       await connect();
       return;
     }
@@ -158,12 +191,18 @@ export function AutoExtensionConnect() {
           {status === CONNECT_STATUS.FAILED && (
             <div className="space-y-2">
               <h1 className="text-xl font-semibold">
-                {requiresReauth ? t("connectReauthTitle") : t("connectFailedTitle")}
+                {requiresReauth
+                  ? t("connectReauthTitle")
+                  : requiresRecentSession
+                    ? t("connectRecentSessionTitle")
+                    : t("connectFailedTitle")}
               </h1>
               <p className="text-sm text-muted-foreground">
                 {requiresReauth
                   ? t("connectReauthDescription")
-                  : t("connectFailedDescription")}
+                  : requiresRecentSession
+                    ? t("connectRecentSessionDescription")
+                    : t("connectFailedDescription")}
               </p>
               {reauthError ? (
                 <p className="text-sm text-destructive">{reauthError}</p>
@@ -196,6 +235,8 @@ export function AutoExtensionConnect() {
                   </>
                 ) : requiresReauth ? (
                   t("connectReauthAction")
+                ) : requiresRecentSession ? (
+                  t("connectRecentSessionAction")
                 ) : (
                   t("retry")
                 )}

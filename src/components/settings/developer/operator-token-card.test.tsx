@@ -35,9 +35,14 @@ vi.mock("sonner", () => ({
 
 vi.mock("@/lib/url-helpers", () => ({
   fetchApi: mockFetchApi,
+  withBasePath: (path: string) => path,
 }));
 vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
   reauthenticateWithPasskey: mockReauthenticateWithPasskey,
+}));
+vi.mock("@/components/auth/recent-session-required-dialog", () => ({
+  RecentSessionRequiredDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="recent-session-dialog" /> : null,
 }));
 
 vi.mock("@/lib/format/format-datetime", () => ({
@@ -225,6 +230,10 @@ describe("OperatorTokenCard", () => {
       })
       .mockResolvedValueOnce({
         ok: true,
+        json: async () => ({ canPasskeySignIn: true }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
         json: async () => ({
           id: "tok-1",
           prefix: "op_1234",
@@ -274,6 +283,10 @@ describe("OperatorTokenCard", () => {
       .mockResolvedValueOnce({
         ok: false,
         json: async () => ({ error: "OPERATOR_TOKEN_STALE_SESSION" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ canPasskeySignIn: true }),
       });
     mockReauthenticateWithPasskey.mockResolvedValueOnce({
       ok: false,

@@ -9,7 +9,7 @@ const {
   mockLogAudit,
   mockHashToken,
   mockRateLimitCheck,
-  mockRequireRecentPasskeyVerification,
+  mockRequireRecentCurrentAuthMethod,
   TenantAuthError,
 } = vi.hoisted(() => {
   class _TenantAuthError extends Error {
@@ -32,7 +32,7 @@ const {
     mockLogAudit: vi.fn(),
     mockHashToken: vi.fn((t: string) => `hashed:${t}`),
     mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
-    mockRequireRecentPasskeyVerification: vi.fn(),
+    mockRequireRecentCurrentAuthMethod: vi.fn(),
     TenantAuthError: _TenantAuthError,
   };
 });
@@ -65,8 +65,8 @@ vi.mock("@/lib/security/rate-limit", () => ({
     clear: vi.fn(),
   })),
 }));
-vi.mock("@/lib/auth/webauthn/recent-passkey-verification", () => ({
-  requireRecentPasskeyVerification: mockRequireRecentPasskeyVerification,
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
 }));
 
 import { GET, POST } from "./route";
@@ -87,7 +87,7 @@ describe("GET /api/tenant/operator-tokens", () => {
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
     mockPrismaOperatorToken.findMany.mockResolvedValue([]);
-    mockRequireRecentPasskeyVerification.mockResolvedValue(null);
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -146,7 +146,7 @@ describe("POST /api/tenant/operator-tokens", () => {
     mockAuth.mockResolvedValue({ user: { id: USER_ID } });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
-    mockRequireRecentPasskeyVerification.mockResolvedValue(null);
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
     mockPrismaOperatorToken.count.mockResolvedValue(0);
     mockPrismaOperatorToken.create.mockResolvedValue({
       id: "tok-new",
@@ -183,7 +183,7 @@ describe("POST /api/tenant/operator-tokens", () => {
   });
 
   it("returns 403 with OPERATOR_TOKEN_STALE_SESSION when session is older than 15 minutes", async () => {
-    mockRequireRecentPasskeyVerification.mockResolvedValue(
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(
       Response.json(
         { error: "OPERATOR_TOKEN_STALE_SESSION" },
         { status: 403 },

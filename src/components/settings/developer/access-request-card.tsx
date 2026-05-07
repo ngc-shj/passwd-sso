@@ -43,6 +43,8 @@ import { SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 
 import type { AccessRequestStatus } from "@prisma/client";
 
@@ -83,6 +85,7 @@ export function AccessRequestCard() {
   const [approving, setApproving] = useState<string | null>(null);
   const [jitToken, setJitToken] = useState<string | null>(null);
   const [jitTokenOpen, setJitTokenOpen] = useState(false);
+  const [recentSessionOpen, setRecentSessionOpen] = useState(false);
 
   // Create dialog state
   const [createOpen, setCreateOpen] = useState(false);
@@ -184,13 +187,15 @@ export function AccessRequestCard() {
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         const code = data?.error ?? "";
-        if (res.status === 409 && code === "SA_TOKEN_LIMIT_EXCEEDED") {
+        if (code === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          setRecentSessionOpen(true);
+        } else if (res.status === 409 && code === API_ERROR.SA_TOKEN_LIMIT_EXCEEDED) {
           toast.error(t("arTokenLimitExceeded"));
-        } else if (res.status === 409 && (code === "SA_NOT_FOUND")) {
+        } else if (res.status === 409 && code === API_ERROR.SA_NOT_FOUND) {
           toast.error(t("arSaInactive"));
         } else if (res.status === 409) {
           toast.error(t("arAlreadyProcessed"));
-        } else if (res.status === 400 && code === "INVALID_SCOPE") {
+        } else if (res.status === 400 && code === API_ERROR.SA_INVALID_SCOPE) {
           toast.error(t("arInvalidScope"));
         } else {
           toast.error(t("arApproveFailed"));
@@ -250,27 +255,35 @@ export function AccessRequestCard() {
     <Card>
       <SectionCardHeader icon={ShieldCheck} title={t("accessRequestCardTitle")} description={t("accessRequestCardDescription")} />
       <CardContent className="space-y-4">
-      <div className="flex items-center justify-between">
-        <Select
-          value={statusFilter}
-          onValueChange={(v) => setStatusFilter(v as "ALL" | AccessRequestStatus)}
-        >
-          <SelectTrigger className="w-[140px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">{t("arStatusAll")}</SelectItem>
-            <SelectItem value={AR_STATUS.PENDING}>{t("arStatusPending")}</SelectItem>
-            <SelectItem value={AR_STATUS.APPROVED}>{t("arStatusApproved")}</SelectItem>
-            <SelectItem value={AR_STATUS.DENIED}>{t("arStatusDenied")}</SelectItem>
-            <SelectItem value={AR_STATUS.EXPIRED}>{t("arStatusExpired")}</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button variant="outline" size="sm" onClick={openCreate}>
-          <Plus className="h-4 w-4 mr-1" />
-          {t("arCreate")}
-        </Button>
-      </div>
+        <RecentSessionRequiredDialog
+          actionLabel={t("recentSessionAction")}
+          cancelLabel={tCommon("cancel")}
+          description={t("recentSessionDescription")}
+          onOpenChange={setRecentSessionOpen}
+          open={recentSessionOpen}
+          title={t("recentSessionTitle")}
+        />
+        <div className="flex items-center justify-between">
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => setStatusFilter(v as "ALL" | AccessRequestStatus)}
+          >
+            <SelectTrigger className="w-[140px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">{t("arStatusAll")}</SelectItem>
+              <SelectItem value={AR_STATUS.PENDING}>{t("arStatusPending")}</SelectItem>
+              <SelectItem value={AR_STATUS.APPROVED}>{t("arStatusApproved")}</SelectItem>
+              <SelectItem value={AR_STATUS.DENIED}>{t("arStatusDenied")}</SelectItem>
+              <SelectItem value={AR_STATUS.EXPIRED}>{t("arStatusExpired")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button variant="outline" size="sm" onClick={openCreate}>
+            <Plus className="h-4 w-4 mr-1" />
+            {t("arCreate")}
+          </Button>
+        </div>
 
       {loading ? (
         <div className="flex justify-center py-4">

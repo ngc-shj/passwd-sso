@@ -343,6 +343,6 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(400);
-    expect(json.error).toBe("INVALID_SCOPE");
+    expect(json.error).toBe("SA_INVALID_SCOPE");
   });
 });

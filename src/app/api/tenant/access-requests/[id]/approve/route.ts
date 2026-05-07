@@ -163,7 +163,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     }
     if (err instanceof Error && err.message === "No valid scopes after re-validation") {
       return NextResponse.json(
-        { error: "INVALID_SCOPE", message: "No valid scopes remain after re-validation" },
+        { error: API_ERROR.SA_INVALID_SCOPE, message: "No valid scopes remain after re-validation" },
         { status: 400 },
       );
     }

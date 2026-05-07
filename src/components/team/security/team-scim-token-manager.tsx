@@ -39,6 +39,8 @@ import { formatDate } from "@/lib/format/format-datetime";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
 import { DISPLAY_ID_SHORT } from "@/lib/validations/common";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 
 const TOKEN_STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   active: "default",
@@ -68,6 +70,7 @@ export function ScimTokenManager({ locale }: Props) {
   const [newToken, setNewToken] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [expiresInDays, setExpiresInDays] = useState<string>("365");
+  const [recentSessionOpen, setRecentSessionOpen] = useState(false);
 
   const scimEndpoint =
     typeof window !== "undefined"
@@ -112,7 +115,12 @@ export function ScimTokenManager({ locale }: Props) {
         toast.success(t("scimTokenCreated"));
         fetchTokens();
       } else {
-        toast.error(t("networkError"));
+        const err = await res.json().catch(() => ({}));
+        if (err.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          setRecentSessionOpen(true);
+        } else {
+          toast.error(t("networkError"));
+        }
       }
     } catch {
       toast.error(t("networkError"));
@@ -228,9 +236,17 @@ export function ScimTokenManager({ locale }: Props) {
     <Card>
       <SectionCardHeader icon={Database} title={t("scimTitle")} description={t("scimDescription")} />
       <CardContent className="space-y-6">
-      <p className="text-xs text-muted-foreground">
-        {t("scimTenantScopeNote")}
-      </p>
+        <RecentSessionRequiredDialog
+          actionLabel={t("recentSessionAction")}
+          cancelLabel={t("cancel")}
+          description={t("recentSessionDescription")}
+          onOpenChange={setRecentSessionOpen}
+          open={recentSessionOpen}
+          title={t("recentSessionTitle")}
+        />
+        <p className="text-xs text-muted-foreground">
+          {t("scimTenantScopeNote")}
+        </p>
 
       {/* SCIM Endpoint URL */}
       <section className="space-y-2">
