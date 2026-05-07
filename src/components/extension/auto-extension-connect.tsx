@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, Loader2, KeyRound } from "lucide-react";
 import { fetchApi } from "@/lib/url-helpers";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
 
 /**
  * Returns true when a full-screen overlay with `data-overlay-active` is
@@ -38,23 +39,29 @@ export function AutoExtensionConnect() {
   const didRunRef = useRef(false);
   const [status, setStatus] = useState<ConnectStatus>(CONNECT_STATUS.IDLE);
   const [requiresReauth, setRequiresReauth] = useState(false);
+  const [reauthenticating, setReauthenticating] = useState(false);
+  const [reauthError, setReauthError] = useState<string | null>(null);
 
-  const connect = async () => {
+  const connect = async (): Promise<{ ok: boolean; requiresReauth: boolean }> => {
     setStatus(CONNECT_STATUS.CONNECTING);
     setRequiresReauth(false);
+    setReauthError(null);
     try {
       const res = await fetchApi(API_PATH.EXTENSION_BRIDGE_CODE, { method: "POST" });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
-        setRequiresReauth(body.error === API_ERROR.SESSION_STEP_UP_REQUIRED);
+        const needsReauth = body.error === API_ERROR.SESSION_STEP_UP_REQUIRED;
+        setRequiresReauth(needsReauth);
         setStatus(CONNECT_STATUS.FAILED);
-        return;
+        return { ok: false, requiresReauth: needsReauth };
       }
       const json = await res.json();
       injectExtensionBridgeCode(json.code, Date.parse(json.expiresAt));
       setStatus(CONNECT_STATUS.CONNECTED);
+      return { ok: true, requiresReauth: false };
     } catch {
       setStatus(CONNECT_STATUS.FAILED);
+      return { ok: false, requiresReauth: false };
     }
   };
 
@@ -73,12 +80,35 @@ export function AutoExtensionConnect() {
       window.location.pathname + (newSearch ? `?${newSearch}` : "") + window.location.hash;
     window.history.replaceState(null, "", newUrl);
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     connect();
   }, []);
 
-  const handleRetry = () => {
-    connect();
+  const handleRetry = async () => {
+    if (!requiresReauth) {
+      await connect();
+      return;
+    }
+
+    setReauthenticating(true);
+    setReauthError(null);
+    try {
+      const result = await reauthenticateWithPasskey();
+      if (!result.ok) {
+        setReauthError(
+          result.error === "AUTHENTICATION_CANCELLED"
+            ? t("connectReauthCancelled")
+            : t("connectReauthFailed"),
+        );
+        return;
+      }
+
+      const retryResult = await connect();
+      if (!retryResult.ok && retryResult.requiresReauth) {
+        setReauthError(t("connectReauthStillRequired"));
+      }
+    } finally {
+      setReauthenticating(false);
+    }
   };
 
   // No ext_connect param — render nothing, let dashboard show
@@ -135,6 +165,9 @@ export function AutoExtensionConnect() {
                   ? t("connectReauthDescription")
                   : t("connectFailedDescription")}
               </p>
+              {reauthError ? (
+                <p className="text-sm text-destructive">{reauthError}</p>
+              ) : null}
             </div>
           )}
 
@@ -154,8 +187,18 @@ export function AutoExtensionConnect() {
               <Button
                 onClick={handleRetry}
                 className="w-full"
+                disabled={reauthenticating}
               >
-                {t("retry")}
+                {reauthenticating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    {t("connecting")}
+                  </>
+                ) : requiresReauth ? (
+                  t("connectReauthAction")
+                ) : (
+                  t("retry")
+                )}
               </Button>
               <Button
                 variant="ghost"

@@ -4,7 +4,7 @@ import { startPasskeyAuthentication } from "@/lib/auth/webauthn/webauthn-client"
 
 type ReauthOptionsResponse = {
   challengeId: string;
-  publicKey: Record<string, unknown>;
+  options: Record<string, unknown>;
 };
 
 export type PasskeyReauthResult =
@@ -23,12 +23,12 @@ export async function reauthenticateWithPasskey(): Promise<PasskeyReauthResult> 
     return { ok: false, error: await readErrorCode(optionsRes, "PASSKEY_REAUTH_FAILED") };
   }
 
-  const { challengeId, publicKey } =
+  const { challengeId, options } =
     (await optionsRes.json()) as ReauthOptionsResponse;
 
   let responseJSON: Record<string, unknown>;
   try {
-    ({ responseJSON } = await startPasskeyAuthentication(publicKey));
+    ({ responseJSON } = await startPasskeyAuthentication(options));
   } catch (err) {
     if (err instanceof Error && err.message === "AUTHENTICATION_CANCELLED") {
       return { ok: false, error: "AUTHENTICATION_CANCELLED" };

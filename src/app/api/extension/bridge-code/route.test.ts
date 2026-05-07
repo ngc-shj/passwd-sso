@@ -15,7 +15,7 @@ const {
   mockWithBypassRls,
   mockLogAudit,
   mockExtractClientIp,
-  mockRequireRecentSession,
+  mockRequireRecentPasskeyVerification,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockBridgeCodeCreate: vi.fn(),
@@ -27,7 +27,7 @@ const {
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
   mockExtractClientIp: vi.fn(() => "1.2.3.4"),
-  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
+  mockRequireRecentPasskeyVerification: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -74,8 +74,8 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: mockExtractClientIp,
 }));
-vi.mock("@/lib/auth/session/step-up", () => ({
-  requireRecentSession: mockRequireRecentSession,
+vi.mock("@/lib/auth/webauthn/recent-passkey-verification", () => ({
+  requireRecentPasskeyVerification: mockRequireRecentPasskeyVerification,
 }));
 
 import { POST } from "./route";
@@ -96,7 +96,7 @@ describe("POST /api/extension/bridge-code", () => {
     mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockBridgeCodeFindMany.mockResolvedValue([]);
     mockBridgeCodeCreate.mockResolvedValue({});
-    mockRequireRecentSession.mockResolvedValue(null);
+    mockRequireRecentPasskeyVerification.mockResolvedValue(null);
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -128,7 +128,7 @@ describe("POST /api/extension/bridge-code", () => {
 
   it("returns 403 when session step-up is required", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireRecentSession.mockResolvedValueOnce(
+    mockRequireRecentPasskeyVerification.mockResolvedValueOnce(
       Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
     );
 

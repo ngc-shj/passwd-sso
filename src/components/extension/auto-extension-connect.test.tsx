@@ -17,8 +17,9 @@ import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
 // ── Hoisted mocks ──────────────────────────────────────────
-const { mockInjectBridgeCode } = vi.hoisted(() => ({
+const { mockInjectBridgeCode, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
   mockInjectBridgeCode: vi.fn(),
+  mockReauthenticateWithPasskey: vi.fn(),
 }));
 
 vi.mock("next-intl", () => ({
@@ -26,6 +27,9 @@ vi.mock("next-intl", () => ({
 }));
 vi.mock("@/lib/inject-extension-bridge-code", () => ({
   injectExtensionBridgeCode: mockInjectBridgeCode,
+}));
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
 
 import { AutoExtensionConnect, isOverlayActive } from "./auto-extension-connect";
@@ -53,6 +57,7 @@ beforeEach(() => {
   originalLocation = window.location;
   replaceStateSpy = vi.spyOn(window.history, "replaceState").mockImplementation(() => {});
   fetchSpy = vi.spyOn(globalThis, "fetch");
+  mockReauthenticateWithPasskey.mockReset();
 });
 
 afterEach(() => {
@@ -160,6 +165,70 @@ describe("AutoExtensionConnect", () => {
       expect(screen.getByText("connectReauthTitle")).toBeInTheDocument();
     });
     expect(screen.getByText("connectReauthDescription")).toBeInTheDocument();
+  });
+
+  it("reauthenticates and retries when retry is clicked from reauth-required state", async () => {
+    setSearchParams("?ext_connect=1");
+    fetchSpy
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }),
+          { status: 403 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ code: "d".repeat(64), expiresAt: "2099-01-01T00:00:00Z" }),
+          { status: 200 },
+        ),
+      );
+    mockReauthenticateWithPasskey.mockResolvedValue({
+      ok: true,
+      verifiedAt: "2099-01-01T00:00:00Z",
+    });
+
+    render(<AutoExtensionConnect />);
+
+    await waitFor(() => {
+      expect(screen.getByText("connectReauthTitle")).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByText("connectReauthAction"));
+
+    await waitFor(() => {
+      expect(mockReauthenticateWithPasskey).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("connectedTitle")).toBeInTheDocument();
+    });
+  });
+
+  it("shows cancellation feedback when reauth is cancelled", async () => {
+    setSearchParams("?ext_connect=1");
+    fetchSpy.mockResolvedValue(
+      new Response(
+        JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }),
+        { status: 403 },
+      ),
+    );
+    mockReauthenticateWithPasskey.mockResolvedValue({
+      ok: false,
+      error: "AUTHENTICATION_CANCELLED",
+    });
+
+    render(<AutoExtensionConnect />);
+
+    await waitFor(() => {
+      expect(screen.getByText("connectReauthTitle")).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByText("connectReauthAction"));
+
+    await waitFor(() => {
+      expect(screen.getByText("connectReauthCancelled")).toBeInTheDocument();
+    });
   });
 
   it("retry button triggers a new connection attempt", async () => {

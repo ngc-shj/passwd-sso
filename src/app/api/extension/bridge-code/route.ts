@@ -25,7 +25,7 @@ import {
   BRIDGE_CODE_MAX_ACTIVE,
 } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
-import { requireRecentSession } from "@/lib/auth/session/step-up";
+import { requireRecentPasskeyVerification } from "@/lib/auth/webauthn/recent-passkey-verification";
 
 export const runtime = "nodejs";
 
@@ -41,7 +41,7 @@ async function handlePOST(req: NextRequest) {
     return unauthorized();
   }
 
-  const stepUpError = await requireRecentSession(req);
+  const stepUpError = await requireRecentPasskeyVerification(req);
   if (stepUpError) return stepUpError;
 
   // Per-user rate limit (matches existing tokenLimiter on POST /api/extension/token)

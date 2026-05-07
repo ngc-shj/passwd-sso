@@ -26,7 +26,7 @@ describe("reauthenticateWithPasskey", () => {
         new Response(
           JSON.stringify({
             challengeId: "a".repeat(32),
-            publicKey: { challenge: "abc" },
+            options: { challenge: "abc" },
           }),
           { status: 200 },
         ),
@@ -48,11 +48,11 @@ describe("reauthenticateWithPasskey", () => {
 
   it("returns AUTHENTICATION_CANCELLED when the user cancels the ceremony", async () => {
     mockFetchApi.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          challengeId: "a".repeat(32),
-          publicKey: { challenge: "abc" },
-        }),
+        new Response(
+          JSON.stringify({
+            challengeId: "a".repeat(32),
+            options: { challenge: "abc" },
+          }),
         { status: 200 },
       ),
     );
@@ -71,7 +71,7 @@ describe("reauthenticateWithPasskey", () => {
         new Response(
           JSON.stringify({
             challengeId: "a".repeat(32),
-            publicKey: { challenge: "abc" },
+            options: { challenge: "abc" },
           }),
           { status: 200 },
         ),
