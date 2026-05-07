@@ -82,7 +82,7 @@ Personal-use passkey sign-in currently creates a web session that is always trea
 ### C3. Authenticated passkey reauth flow has a dedicated contract
 - Subject: Dedicated passkey reauth API and verification flow
 - Function/module signatures:
-  - `POST /api/auth/passkey/reauth/options -> { challengeId: string; publicKey: PublicKeyCredentialRequestOptionsJSON }`
+  - `POST /api/auth/passkey/reauth/options -> { challengeId: string; options: PublicKeyCredentialRequestOptionsJSON }`
   - `POST /api/auth/passkey/reauth/verify -> { ok: true; verifiedAt: string } | { error: string }`
   - `authorizeWebAuthn(input: { credentialResponse: string; challengeId: string; expectedUserId?: string }): Promise<AuthorizedWebAuthnUser | null>`
 - Invariants:
@@ -100,7 +100,7 @@ Personal-use passkey sign-in currently creates a web session that is always trea
   - Current session token, audit behavior, and rate limiting remain coherent with the existing auth architecture.
 - Consumer-flow walkthrough:
   - Consumer `personal sensitive action gate` (path: `src/components/settings/developer/operator-token-card.tsx` and other existing step-up callers migrated in this change) reads `{ error }` from a protected action response and, when the error is `SESSION_STEP_UP_REQUIRED`, invokes the reauth flow before retrying the original mutation.
-  - Consumer `passkey reauth client helper` (new shared client module or existing passkey sign-in button helper) reads `{ challengeId, publicKey }` from `reauth/options`, passes `publicKey` into the WebAuthn browser ceremony, then sends `{ credentialResponse, challengeId }` to `reauth/verify`; on success it reads `{ verifiedAt }` only to confirm freshness was updated before retrying the blocked action.
+  - Consumer `passkey reauth client helper` (new shared client module or existing passkey sign-in button helper) reads `{ challengeId, options }` from `reauth/options`, passes `options` into the WebAuthn browser ceremony, then sends `{ credentialResponse, challengeId }` to `reauth/verify`; on success it reads `{ verifiedAt }` only to confirm freshness was updated before retrying the blocked action.
   - Consumer `server-side freshness guard` (path: new helper in `src/lib/auth/session`) reads `passkeyVerifiedAt` from the current session row and compares it with `maxAgeMs` to decide whether to allow the action or return `SESSION_STEP_UP_REQUIRED`.
 
 ### C4. Sensitive-surface rollout is explicit and limited
@@ -110,20 +110,24 @@ Personal-use passkey sign-in currently creates a web session that is always trea
   - Existing route handlers keep their current signatures.
 - Invariants:
   - Every step-up-protected route must be classified by caller type before Phase 2 starts: `web-ui-inline-reauth`, `web-ui-browser-redirect`, or `non-passkey-capable`.
+  - Every step-up-protected route must also be classified by auth class before Phase 2 starts: `personal-passkey-only`, `session-mixed`, `sso-mixed`, or `non-interactive`.
   - Only routes explicitly listed in this plan may switch from generic recent-session checks to recent-passkey-verification checks in this change.
   - A route may adopt recent-passkey-verification only if its caller has a concrete recovery path for `SESSION_STEP_UP_REQUIRED`; otherwise it must stay on existing `requireRecentSession` semantics in this change.
+  - A route may adopt recent-passkey-verification only if its auth class is explicitly passkey-capable. `sso-mixed` routes must not switch to a passkey-only guard until an SSO/IdP step-up contract exists.
   - Tenant-admin and SSO-oriented step-up flows not listed below must keep current behavior.
   - Any client-visible retry loop must remain idempotent across a failed protected action followed by successful reauth and retry.
   - Extension, mobile, MCP, and other bridge-style callers must not surface `SESSION_STEP_UP_REQUIRED` as a generic network/connection error.
 - Forbidden patterns:
   - `pattern: requireRecentPasskeyVerification\\(` outside the enumerated route list — reason: rollout scope must stay auditable.
+  - `pattern: requireRecentPasskeyVerification\\(` on an `sso-mixed` route without an explicit IdP-reauth contract — reason: passkey-only step-up cannot be the only recovery mechanism for mixed SSO endpoints.
   - `pattern: SESSION_STEP_UP_REQUIRED.*AUTHENTICATION_FAILED` — reason: step-up and sign-in failure paths must remain distinct.
   - `pattern: connectFailed|networkError` in a `SESSION_STEP_UP_REQUIRED` branch — reason: step-up must be presented as recoverable reauthentication, not transport failure.
 - Acceptance criteria:
   - The plan enumerates the exact routes/components migrated in this change.
-  - Every migrated route has a corresponding passkey-capable caller or documented exclusion path.
+  - Every migrated route has a corresponding passkey-capable caller and passkey-capable auth class, or a documented exclusion path.
   - Non-migrated routes continue using their existing step-up guard.
   - Retry behavior after successful reauth is documented for each migrated consumer.
+  - The plan explicitly identifies which routes remain blocked on future SSO/IdP step-up design.
 - Recovery UX contract:
   - `web-ui-inline-reauth`
     - Meaning: the caller can launch the passkey ceremony without leaving the current screen.
@@ -137,59 +141,89 @@ Personal-use passkey sign-in currently creates a web session that is always trea
     - Meaning: the caller has no reliable way to perform passkey reauth in the current channel.
     - Required UX: remain on `requireRecentSession` in this round, and if it returns `SESSION_STEP_UP_REQUIRED`, direct the user to a browser flow that can recover instead of trying to inline passkey logic in the caller.
     - Forbidden UX: adopting `requireRecentPasskeyVerification` before a concrete recovery channel exists.
+- Auth-class contract:
+  - `personal-passkey-only`
+    - Meaning: the route is reachable only from the bootstrap/personal flow where the app itself can require a passkey ceremony.
+    - Allowed guard: `requireRecentPasskeyVerification` once the caller recovery UX exists.
+  - `session-mixed`
+    - Meaning: the route accepts ordinary browser sessions from multiple auth methods, including non-passkey sessions.
+    - Allowed guard in this plan: `requireRecentSession` by default; may migrate only after the route has a negotiated fallback for non-passkey sessions.
+  - `sso-mixed`
+    - Meaning: the route is used by SSO-backed users for whom the app cannot assume a local passkey exists.
+    - Allowed guard in this plan: `requireRecentSession` only.
+    - Future prerequisite: define `IdP reauth` or equivalent SSO step-up before any migration.
+  - `non-interactive`
+    - Meaning: the caller cannot present a browser passkey ceremony or IdP prompt in-band.
+    - Allowed guard in this plan: `requireRecentSession` only.
 - Route / caller matrix:
   - `src/app/api/tenant/operator-tokens/route.ts`
     - Caller: `src/components/settings/developer/operator-token-card.tsx`
-    - Current UX: caller already distinguishes stale-session with `OPERATOR_TOKEN_STALE_SESSION`, but only shows a toast and does not launch passkey reauth.
+    - Auth class: `personal-passkey-only`
+    - Current UX: caller now launches passkey reauth and retries inline.
     - Classification: `web-ui-inline-reauth`
-    - Phase-2 decision: eligible first migration target once the shared reauth modal + retry helper exists.
+    - Phase-2 decision: migrated to `requireRecentPasskeyVerification`.
   - `src/app/api/extension/bridge-code/route.ts`
     - Caller: `src/components/extension/auto-extension-connect.tsx`
-    - Current UX: `403 SESSION_STEP_UP_REQUIRED` becomes generic connect failure UI.
+    - Auth class: `personal-passkey-only`
+    - Current UX: caller now launches passkey reauth in the browser surface and retries bridge-code issuance.
     - Classification: `web-ui-browser-redirect`
-    - Phase-2 decision: do not migrate to recent-passkey-verification in this change; first fix caller to present browser reauthentication required, then optionally keep `requireRecentSession` or later adopt passkey freshness with a dedicated extension reconnect flow.
+    - Phase-2 decision: migrated to `requireRecentPasskeyVerification`.
   - `src/app/api/extension/token/route.ts`
     - Caller: browser extension background/popup, plus legacy direct issuance path.
+    - Auth class: `non-interactive`
     - Current UX: no inline passkey ceremony; failures can collapse into unlock/connect errors.
     - Classification: `non-passkey-capable`
     - Phase-2 decision: stay on `requireRecentSession`.
   - `src/app/api/api-keys/route.ts`
     - Caller: `src/components/settings/developer/api-key-manager.tsx`
+    - Auth class: `session-mixed`
     - Current UX: handles validation/limit errors only; no special `SESSION_STEP_UP_REQUIRED` branch.
     - Classification: `web-ui-inline-reauth`
-    - Phase-2 decision: eligible only if the shared reauth modal + retry helper is also wired into this caller; otherwise stay on `requireRecentSession`.
+    - Phase-2 decision: stay on `requireRecentSession` in this change; requires auth-class split or non-passkey recovery before any migration.
   - `src/app/api/tenant/service-accounts/[id]/tokens/route.ts`
     - Caller: `src/components/settings/developer/service-account-card.tsx`
+    - Auth class: `sso-mixed`
     - Current UX: handles validation/conflict errors only; no special `SESSION_STEP_UP_REQUIRED` branch.
     - Classification: `web-ui-inline-reauth`
-    - Phase-2 decision: keep on `requireRecentSession` in this change unless the shared reauth modal is adopted here too.
+    - Phase-2 decision: stay on `requireRecentSession`; blocked on future IdP/SSO step-up design.
   - `src/app/api/tenant/scim-tokens/route.ts`
     - Caller: `src/components/team/security/team-scim-token-manager.tsx`
+    - Auth class: `sso-mixed`
     - Current UX: generic network-error toast on non-OK response.
     - Classification: `web-ui-inline-reauth`
-    - Phase-2 decision: keep on `requireRecentSession` in this change unless the shared reauth modal is adopted here too.
+    - Phase-2 decision: stay on `requireRecentSession`; blocked on future IdP/SSO step-up design.
   - `src/app/api/tenant/mcp-clients/route.ts`
     - Caller: `src/components/settings/developer/mcp-client-card.tsx`
+    - Auth class: `sso-mixed`
     - Current UX: handles conflict/limit errors only; no special `SESSION_STEP_UP_REQUIRED` branch.
     - Classification: `web-ui-inline-reauth`
-    - Phase-2 decision: keep on `requireRecentSession` in this change unless the shared reauth modal is adopted here too.
+    - Phase-2 decision: stay on `requireRecentSession`; blocked on future IdP/SSO step-up design.
+  - `src/app/api/tenant/access-requests/[id]/approve/route.ts`
+    - Caller: `src/components/settings/developer/access-request-card.tsx`
+    - Auth class: `sso-mixed`
+    - Current UX: approval flow handles domain-specific conflicts only; no special `SESSION_STEP_UP_REQUIRED` branch.
+    - Classification: `web-ui-inline-reauth`
+    - Phase-2 decision: stay on `requireRecentSession`; blocked on future IdP/SSO step-up design.
   - `src/app/api/mcp/authorize/route.ts` and `src/app/api/mcp/authorize/consent/route.ts`
     - Caller: browser OAuth-style MCP authorize flow (`src/app/[locale]/mcp/authorize/page.tsx`, `src/app/[locale]/mcp/authorize/consent-form.tsx`)
+    - Auth class: `sso-mixed`
     - Current UX: no dedicated passkey reauth retry contract.
     - Classification: `web-ui-browser-redirect`
-    - Phase-2 decision: stay on `requireRecentSession`.
+    - Phase-2 decision: stay on `requireRecentSession`; blocked on future IdP/SSO step-up design.
   - `src/app/api/mobile/authorize/route.ts`
     - Caller: iOS `ASWebAuthenticationSession` bridge flow
+    - Auth class: `sso-mixed`
     - Current UX: browser redirect handshake only; no inline passkey reauth contract in the host app.
     - Classification: `web-ui-browser-redirect`
-    - Phase-2 decision: stay on `requireRecentSession`.
+    - Phase-2 decision: stay on `requireRecentSession`; blocked on future IdP/SSO step-up design.
 - Phase-2 rollout subset for this change:
-  - Only `src/app/api/tenant/operator-tokens/route.ts` may migrate to `requireRecentPasskeyVerification`, and only if the same change ships a shared browser reauth helper plus retry UX in `src/components/settings/developer/operator-token-card.tsx`.
-  - All other currently step-up-protected routes stay on `requireRecentSession` in this change.
+  - `src/app/api/tenant/operator-tokens/route.ts` may migrate to `requireRecentPasskeyVerification` only together with inline passkey reauth UX in `src/components/settings/developer/operator-token-card.tsx`.
+  - `src/app/api/extension/bridge-code/route.ts` may migrate to `requireRecentPasskeyVerification` only together with browser-surface passkey reauth retry UX in `src/components/extension/auto-extension-connect.tsx`.
+  - All `session-mixed`, `sso-mixed`, and `non-interactive` routes stay on `requireRecentSession` in this change.
 - Consumer-flow walkthrough:
   - Consumer `developer operator token UI` reads a `403 OPERATOR_TOKEN_STALE_SESSION` from `src/app/api/tenant/operator-tokens/route.ts`, launches passkey reauth inline, and retries the create-token mutation only after `reauth/verify` succeeds.
-  - Consumer `extension connect UI` reads a `403 SESSION_STEP_UP_REQUIRED` from `src/app/api/extension/bridge-code/route.ts`, must show `browser reauthentication required` instead of generic connect failure, and may only retry after the user completes reauth in the browser.
-  - Consumer `API key / service-account / SCIM / MCP client UIs` remain on generic recent-session semantics in this round unless they also adopt the same inline reauth + retry helper.
+  - Consumer `extension connect UI` reads a `403 SESSION_STEP_UP_REQUIRED` from `src/app/api/extension/bridge-code/route.ts`, launches passkey reauth in the browser surface, and retries bridge-code issuance only after `reauth/verify` succeeds.
+  - Consumer `API key / service-account / SCIM / MCP client / access-request UIs` remain on generic recent-session semantics in this round because the route auth class is not yet guaranteed passkey-capable.
 
 ## Go/No-Go Gate
 | ID | Subject | Status |
