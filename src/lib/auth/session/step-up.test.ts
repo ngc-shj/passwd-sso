@@ -3,11 +3,9 @@ import { NextRequest } from "next/server";
 
 const {
   mockSessionFindUnique,
-  mockSessionUpdate,
   mockWithBypassRls,
 } = vi.hoisted(() => ({
   mockSessionFindUnique: vi.fn(),
-  mockSessionUpdate: vi.fn(),
   mockWithBypassRls: vi.fn(),
 }));
 
@@ -15,7 +13,6 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     session: {
       findUnique: mockSessionFindUnique,
-      update: mockSessionUpdate,
     },
   },
 }));
@@ -25,11 +22,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   withBypassRls: mockWithBypassRls,
 }));
 
-import {
-  markCurrentSessionPasskeyVerified,
-  PASSKEY_STEP_UP_WINDOW_MS,
-  requireFreshPasskey,
-} from "./step-up";
+import { requireRecentSession, STEP_UP_WINDOW_MS } from "./step-up";
 
 function makeRequest(cookie = "authjs.session-token=sess-1") {
   return new NextRequest("http://localhost:3000/api/test", {
@@ -37,7 +30,7 @@ function makeRequest(cookie = "authjs.session-token=sess-1") {
   });
 }
 
-describe("requireFreshPasskey", () => {
+describe("requireRecentSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockWithBypassRls.mockImplementation(
@@ -45,64 +38,36 @@ describe("requireFreshPasskey", () => {
     );
   });
 
-  it("returns null when passkey freshness is still within the window", async () => {
+  it("returns null when the session was created within the allowed window", async () => {
     mockSessionFindUnique.mockResolvedValue({
-      passkeyVerifiedAt: new Date(Date.now() - PASSKEY_STEP_UP_WINDOW_MS + 30_000),
+      createdAt: new Date(Date.now() - STEP_UP_WINDOW_MS + 30_000),
     });
 
-    const result = await requireFreshPasskey(makeRequest());
+    const result = await requireRecentSession(makeRequest());
     expect(result).toBeNull();
   });
 
-  it("returns 403 when no passkey verification is recorded", async () => {
+  it("returns 403 when the session is stale", async () => {
     mockSessionFindUnique.mockResolvedValue({
-      passkeyVerifiedAt: null,
+      createdAt: new Date(Date.now() - STEP_UP_WINDOW_MS - 30_000),
     });
 
-    const result = await requireFreshPasskey(makeRequest());
+    const result = await requireRecentSession(makeRequest());
     expect(result?.status).toBe(403);
     await expect(result?.json()).resolves.toEqual({
       error: "SESSION_STEP_UP_REQUIRED",
     });
   });
 
-  it("returns 403 when passkey freshness is stale", async () => {
-    mockSessionFindUnique.mockResolvedValue({
-      passkeyVerifiedAt: new Date(Date.now() - PASSKEY_STEP_UP_WINDOW_MS - 30_000),
-    });
-
-    const result = await requireFreshPasskey(makeRequest());
-    expect(result?.status).toBe(403);
-    await expect(result?.json()).resolves.toEqual({
-      error: "SESSION_STEP_UP_REQUIRED",
-    });
+  it("returns 401 when the request has no session cookie", async () => {
+    const result = await requireRecentSession(makeRequest(""));
+    expect(result?.status).toBe(401);
   });
 
   it("returns 401 when the session row does not exist", async () => {
     mockSessionFindUnique.mockResolvedValue(null);
 
-    const result = await requireFreshPasskey(makeRequest());
+    const result = await requireRecentSession(makeRequest());
     expect(result?.status).toBe(401);
-  });
-});
-
-describe("markCurrentSessionPasskeyVerified", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockWithBypassRls.mockImplementation(
-      (_prisma: unknown, fn: () => unknown) => fn(),
-    );
-  });
-
-  it("updates passkeyVerifiedAt on the current session row", async () => {
-    const verifiedAt = new Date("2026-05-07T00:00:00Z");
-    mockSessionUpdate.mockResolvedValue({});
-
-    await markCurrentSessionPasskeyVerified("sess-1", verifiedAt);
-
-    expect(mockSessionUpdate).toHaveBeenCalledWith({
-      where: { sessionToken: "sess-1" },
-      data: { passkeyVerifiedAt: verifiedAt },
-    });
   });
 });

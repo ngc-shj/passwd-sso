@@ -145,6 +145,23 @@ describe("AutoExtensionConnect", () => {
     });
   });
 
+  it("shows reauth guidance when bridge-code returns SESSION_STEP_UP_REQUIRED", async () => {
+    setSearchParams("?ext_connect=1");
+    fetchSpy.mockResolvedValue(
+      new Response(
+        JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }),
+        { status: 403 },
+      ),
+    );
+
+    render(<AutoExtensionConnect />);
+
+    await waitFor(() => {
+      expect(screen.getByText("connectReauthTitle")).toBeInTheDocument();
+    });
+    expect(screen.getByText("connectReauthDescription")).toBeInTheDocument();
+  });
+
   it("retry button triggers a new connection attempt", async () => {
     setSearchParams("?ext_connect=1");
     fetchSpy.mockResolvedValueOnce(new Response(null, { status: 500 }));

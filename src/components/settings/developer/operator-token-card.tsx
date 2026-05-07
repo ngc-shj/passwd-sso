@@ -42,6 +42,7 @@ import {
   OPERATOR_TOKEN_NAME_MAX_LENGTH,
 } from "@/lib/constants/auth/operator-token";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
 
 const TOKEN_STATUS_VARIANT: Record<
   string,
@@ -90,6 +91,20 @@ export function OperatorTokenCard() {
     String(OPERATOR_TOKEN_DEFAULT_EXPIRES_DAYS),
   );
   const [showInactive, setShowInactive] = useState(false);
+  const [reauthOpen, setReauthOpen] = useState(false);
+  const [reauthenticating, setReauthenticating] = useState(false);
+  const [reauthError, setReauthError] = useState<string | null>(null);
+
+  const createToken = useCallback(async () => {
+    return fetchApi(apiPath.tenantOperatorTokens(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: tokenName.trim(),
+        expiresInDays: parseInt(expiresInDays, 10),
+      }),
+    });
+  }, [tokenName, expiresInDays]);
 
   const fetchTokens = useCallback(async () => {
     try {
@@ -115,14 +130,7 @@ export function OperatorTokenCard() {
     if (!tokenName.trim()) return;
     setCreating(true);
     try {
-      const res = await fetchApi(apiPath.tenantOperatorTokens(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: tokenName.trim(),
-          expiresInDays: parseInt(expiresInDays, 10),
-        }),
-      });
+      const res = await createToken();
       if (res.ok) {
         const data = (await res.json()) as CreatedToken;
         setCreatedToken(data);
@@ -135,7 +143,8 @@ export function OperatorTokenCard() {
           error?: string;
         };
         if (errBody.error === API_ERROR.OPERATOR_TOKEN_STALE_SESSION) {
-          toast.error(t("staleSession"));
+          setReauthError(null);
+          setReauthOpen(true);
         } else if (errBody.error === API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED) {
           toast.error(t("limitExceeded"));
         } else {
@@ -146,6 +155,48 @@ export function OperatorTokenCard() {
       toast.error(t("networkError"));
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleReauthenticate = async () => {
+    setReauthenticating(true);
+    setReauthError(null);
+    try {
+      const result = await reauthenticateWithPasskey();
+      if (!result.ok) {
+        setReauthError(
+          result.error === "AUTHENTICATION_CANCELLED"
+            ? t("reauthCancelled")
+            : t("reauthFailed"),
+        );
+        return;
+      }
+
+      const retryRes = await createToken();
+      if (!retryRes.ok) {
+        const errBody = (await retryRes.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        if (errBody.error === API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED) {
+          setReauthOpen(false);
+          toast.error(t("limitExceeded"));
+        } else if (errBody.error === API_ERROR.OPERATOR_TOKEN_STALE_SESSION) {
+          setReauthError(t("reauthStillRequired"));
+        } else {
+          setReauthError(t("reauthRetryFailed"));
+        }
+        return;
+      }
+
+      const data = (await retryRes.json()) as CreatedToken;
+      setCreatedToken(data);
+      setTokenName("");
+      setExpiresInDays(String(OPERATOR_TOKEN_DEFAULT_EXPIRES_DAYS));
+      setReauthOpen(false);
+      toast.success(t("tokenCreated"));
+      fetchTokens();
+    } finally {
+      setReauthenticating(false);
     }
   };
 
@@ -357,6 +408,38 @@ export function OperatorTokenCard() {
             </div>
           )}
         </section>
+
+        <AlertDialog open={reauthOpen} onOpenChange={setReauthOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("reauthTitle")}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("reauthDescription")}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {reauthError && (
+              <p className="text-sm text-destructive">{reauthError}</p>
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={reauthenticating}>
+                {t("cancel")}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(event) => {
+                  event.preventDefault();
+                  void handleReauthenticate();
+                }}
+                disabled={reauthenticating}
+              >
+                {reauthenticating ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  t("reauthAction")
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </CardContent>
     </Card>
   );

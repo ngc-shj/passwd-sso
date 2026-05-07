@@ -20,7 +20,7 @@ import {
 } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_DAY } from "@/lib/constants/time";
-import { requireRecentSession } from "@/lib/auth/session/step-up";
+import { requireRecentPasskeyVerification } from "@/lib/auth/webauthn/recent-passkey-verification";
 import {
   OPERATOR_TOKEN_PREFIX,
   OPERATOR_TOKEN_DEFAULT_EXPIRES_DAYS,
@@ -123,7 +123,7 @@ async function handlePOST(req: NextRequest) {
     return handleAuthError(err);
   }
 
-  const stepUpError = await requireRecentSession(req, {
+  const stepUpError = await requireRecentPasskeyVerification(req, {
     errorCode: API_ERROR.OPERATOR_TOKEN_STALE_SESSION,
   });
   if (stepUpError) return stepUpError;

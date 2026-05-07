@@ -3,7 +3,14 @@ import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 
-const { mockFetchApi, mockToastSuccess, mockToastError, stableT, stableLocale } =
+const {
+  mockFetchApi,
+  mockToastSuccess,
+  mockToastError,
+  mockReauthenticateWithPasskey,
+  stableT,
+  stableLocale,
+} =
   vi.hoisted(() => {
     const t = (key: string, params?: Record<string, unknown>) =>
       params ? `${key}:${JSON.stringify(params)}` : key;
@@ -11,6 +18,7 @@ const { mockFetchApi, mockToastSuccess, mockToastError, stableT, stableLocale } 
       mockFetchApi: vi.fn(),
       mockToastSuccess: vi.fn(),
       mockToastError: vi.fn(),
+      mockReauthenticateWithPasskey: vi.fn(),
       stableT: t,
       stableLocale: "en",
     };
@@ -27,6 +35,9 @@ vi.mock("sonner", () => ({
 
 vi.mock("@/lib/url-helpers", () => ({
   fetchApi: mockFetchApi,
+}));
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
 
 vi.mock("@/lib/format/format-datetime", () => ({
@@ -86,17 +97,37 @@ vi.mock("@/components/ui/select", () => ({
   SelectValue: () => null,
 }));
 vi.mock("@/components/ui/alert-dialog", () => ({
-  AlertDialog: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  AlertDialog: ({
+    children,
+    open = true,
+  }: {
+    children: React.ReactNode;
+    open?: boolean;
+  }) => (open ? <>{children}</> : null),
   AlertDialogTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  AlertDialogContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  AlertDialogHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  AlertDialogFooter: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  AlertDialogTitle: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  AlertDialogDescription: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  AlertDialogAction: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
-    <button onClick={onClick}>{children}</button>
+  AlertDialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  AlertDialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  AlertDialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  AlertDialogTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  AlertDialogDescription: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  AlertDialogAction: ({
+    children,
+    onClick,
+    disabled,
+  }: {
+    children: React.ReactNode;
+    onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
+    disabled?: boolean;
+  }) => (
+    <button onClick={onClick} disabled={disabled}>{children}</button>
   ),
-  AlertDialogCancel: ({ children }: { children: React.ReactNode }) => <button>{children}</button>,
+  AlertDialogCancel: ({
+    children,
+    disabled,
+  }: {
+    children: React.ReactNode;
+    disabled?: boolean;
+  }) => <button disabled={disabled}>{children}</button>,
 }));
 vi.mock("@/components/ui/collapsible", () => ({
   Collapsible: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -119,6 +150,10 @@ import { OperatorTokenCard } from "./operator-token-card";
 describe("OperatorTokenCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockReauthenticateWithPasskey.mockResolvedValue({
+      ok: true,
+      verifiedAt: "2026-05-07T00:00:00Z",
+    });
   });
 
   it("renders title + empty list when no tokens exist", async () => {
@@ -181,12 +216,28 @@ describe("OperatorTokenCard", () => {
     expect(mockToastSuccess).toHaveBeenCalledWith("tokenCreated");
   });
 
-  it("shows stale-session error when create returns 403 with that code", async () => {
+  it("opens reauth and retries create when stale-session is returned", async () => {
     mockFetchApi
       .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })
       .mockResolvedValueOnce({
         ok: false,
         json: async () => ({ error: "OPERATOR_TOKEN_STALE_SESSION" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: "tok-1",
+          prefix: "op_1234",
+          plaintext: "op_PLAINTEXT_AFTER_REAUTH",
+          name: "stale-test",
+          scope: "maintenance",
+          expiresAt: "2026-06-01T00:00:00Z",
+          createdAt: "2026-05-07T00:00:00Z",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ tokens: [] }),
       });
 
     render(<OperatorTokenCard />);
@@ -201,7 +252,54 @@ describe("OperatorTokenCard", () => {
     fireEvent.click(createButton);
 
     await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith("staleSession");
+      expect(screen.getByText("reauthTitle")).toBeInTheDocument();
+    });
+
+    const reauthButtons = await screen.findAllByText("reauthAction");
+    fireEvent.click(reauthButtons[reauthButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(mockReauthenticateWithPasskey).toHaveBeenCalled();
+      expect(mockToastSuccess).toHaveBeenCalledWith("tokenCreated");
+    });
+
+    expect(
+      await screen.findByDisplayValue("op_PLAINTEXT_AFTER_REAUTH"),
+    ).toBeInTheDocument();
+  });
+
+  it("shows reauth failure message when the ceremony is cancelled", async () => {
+    mockFetchApi
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: "OPERATOR_TOKEN_STALE_SESSION" }),
+      });
+    mockReauthenticateWithPasskey.mockResolvedValueOnce({
+      ok: false,
+      error: "AUTHENTICATION_CANCELLED",
+    });
+
+    render(<OperatorTokenCard />);
+
+    const input = await screen.findByPlaceholderText("tokenNamePlaceholder");
+    fireEvent.change(input, { target: { value: "stale-test" } });
+
+    const createButton = (await screen.findAllByText("createToken")).find(
+      (el) => el.tagName === "BUTTON",
+    );
+    if (!createButton) throw new Error("createToken button not found");
+    fireEvent.click(createButton);
+
+    await waitFor(() => {
+      expect(screen.getByText("reauthTitle")).toBeInTheDocument();
+    });
+
+    const reauthButtons = await screen.findAllByText("reauthAction");
+    fireEvent.click(reauthButtons[reauthButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(screen.getByText("reauthCancelled")).toBeInTheDocument();
     });
   });
 

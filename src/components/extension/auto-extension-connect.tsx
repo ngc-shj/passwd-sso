@@ -14,6 +14,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, Loader2, KeyRound } from "lucide-react";
 import { fetchApi } from "@/lib/url-helpers";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 /**
  * Returns true when a full-screen overlay with `data-overlay-active` is
@@ -36,12 +37,16 @@ export function AutoExtensionConnect() {
   const t = useTranslations("Extension");
   const didRunRef = useRef(false);
   const [status, setStatus] = useState<ConnectStatus>(CONNECT_STATUS.IDLE);
+  const [requiresReauth, setRequiresReauth] = useState(false);
 
   const connect = async () => {
     setStatus(CONNECT_STATUS.CONNECTING);
+    setRequiresReauth(false);
     try {
       const res = await fetchApi(API_PATH.EXTENSION_BRIDGE_CODE, { method: "POST" });
       if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setRequiresReauth(body.error === API_ERROR.SESSION_STEP_UP_REQUIRED);
         setStatus(CONNECT_STATUS.FAILED);
         return;
       }
@@ -122,9 +127,13 @@ export function AutoExtensionConnect() {
           )}
           {status === CONNECT_STATUS.FAILED && (
             <div className="space-y-2">
-              <h1 className="text-xl font-semibold">{t("connectFailedTitle")}</h1>
+              <h1 className="text-xl font-semibold">
+                {requiresReauth ? t("connectReauthTitle") : t("connectFailedTitle")}
+              </h1>
               <p className="text-sm text-muted-foreground">
-                {t("connectFailedDescription")}
+                {requiresReauth
+                  ? t("connectReauthDescription")
+                  : t("connectFailedDescription")}
               </p>
             </div>
           )}

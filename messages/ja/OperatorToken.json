@@ -27,7 +27,14 @@
   "inactiveTokens": "{count, plural, =1 {失効/期限切れトークン 1 件を表示} other {失効/期限切れトークン # 件を表示}}",
   "cancel": "キャンセル",
   "networkError": "ネットワークエラー。再試行してください。",
-  "staleSession": "運用者トークンを発行するには、過去 15 分以内に再認証してください。一度サインアウトしてから再度サインインしてください。",
+  "staleSession": "運用者トークンの発行には再認証が必要です。",
+  "reauthTitle": "Passkey による本人確認が必要です",
+  "reauthDescription": "この画面を離れずに運用者トークンを発行するため、Passkey で本人確認してください。",
+  "reauthAction": "Passkey で確認",
+  "reauthFailed": "Passkey による本人確認に失敗しました。もう一度お試しください。",
+  "reauthCancelled": "Passkey による本人確認をキャンセルしました。",
+  "reauthStillRequired": "再認証が完了していません。もう一度お試しください。",
+  "reauthRetryFailed": "本人確認後の運用者トークン発行に失敗しました。もう一度お試しください。",
   "limitExceeded": "テナントごとの運用者トークン上限に達しました。不要なトークンを失効させてください。",
   "usageHint": "スクリプトでの利用: ADMIN_API_TOKEN=op_... scripts/purge-history.sh"
 }

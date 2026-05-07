@@ -3,10 +3,10 @@
 ## Project context
 - Type: `web app`
 - Test infrastructure: `unit + integration + E2E`
-- Branch name: `refactor/rebalance-personal-passkey-session-aal2`
+- Branch name: `feature/rebalance-personal-passkey-session-aal2`
 
 ## Objective
-Personal-use passkey sign-in currently creates a web session that is always treated as AAL3-equivalent, forcing a `15 min` inactivity timeout and `12 h` overall timeout. Rebalance that behavior so ordinary personal passkey sessions behave as AAL2-level web sessions, while preserving stronger assurance for sensitive actions through explicit fresh-passkey step-up.
+Personal-use passkey sign-in currently creates a web session that is always treated as AAL3-equivalent, forcing a `15 min` inactivity timeout and `12 h` overall timeout. Rebalance that behavior so ordinary personal passkey sessions behave as AAL2-level web sessions, while preserving stronger assurance for sensitive actions through explicit recent-passkey-verification step-up.
 
 ## Requirements
 ### Functional requirements
@@ -20,7 +20,7 @@ Personal-use passkey sign-in currently creates a web session that is always trea
 - Session assurance rules must be explicit in code and docs; no hidden policy coupling to a provider string.
 - The change must not weaken CSRF, rate-limiting, audit logging, or session cache invalidation guarantees.
 - The change must remain compatible with current NextAuth database-session behavior and current WebAuthn challenge namespaces.
-- Tests must cover timeout resolution, fresh-passkey enforcement, and no-regression behavior for existing step-up consumers.
+- Tests must cover timeout resolution, recent-passkey-verification enforcement, and no-regression behavior for existing step-up consumers.
 
 ## Technical approach
 1. Separate two concepts that are currently conflated:
@@ -34,8 +34,8 @@ Personal-use passkey sign-in currently creates a web session that is always trea
    - verifies a passkey assertion against the current signed-in user
    - updates session freshness metadata atomically for the current session only
    - does not revoke unrelated sessions or extension tokens
-6. Keep the current unauthenticated passkey sign-in flow for bootstrap users, but change its session creation semantics so it creates an ordinary personal web session plus initial fresh-passkey metadata.
-7. Roll out fresh-passkey enforcement only to explicitly enumerated sensitive personal surfaces in this change; leave unrelated tenant-admin step-up flows on their current `requireRecentSession` semantics unless the implementation intentionally migrates them.
+6. Keep the current unauthenticated passkey sign-in flow for bootstrap users, but change its session creation semantics so it creates an ordinary personal web session plus initial recent-passkey-verification metadata.
+7. Roll out recent-passkey-verification enforcement only to explicitly enumerated sensitive personal surfaces in this change; leave unrelated tenant-admin step-up flows on their current `requireRecentSession` semantics unless the implementation intentionally migrates them.
 
 ## Contracts
 
@@ -60,14 +60,14 @@ Personal-use passkey sign-in currently creates a web session that is always trea
   - Existing non-passkey session behavior is unchanged.
   - `src/auth.ts` and the custom auth adapter continue to use one authoritative policy source for ordinary web-session expiry.
 
-### C2. Fresh-passkey assurance is explicit session metadata
+### C2. Recent-passkey-verification assurance is explicit session metadata
 - Subject: Session schema and helper contract for passkey freshness
 - Function/module signatures:
   - `model Session { passkeyVerifiedAt DateTime? @map("passkey_verified_at") @db.Timestamptz(3) }`
-  - `requireFreshPasskey(req: NextRequest, options?: { maxAgeMs?: number; errorCode?: ApiErrorCode }): Promise<NextResponse | null>`
+  - `requireRecentPasskeyVerification(req: NextRequest, options?: { maxAgeMs?: number; errorCode?: ApiErrorCode }): Promise<NextResponse | null>`
   - `markCurrentSessionPasskeyVerified(sessionToken: string, verifiedAt: Date): Promise<void>`
 - Invariants:
-  - Fresh-passkey eligibility must be tied to the current session row, not to global user state.
+  - Recent-passkey-verification eligibility must be tied to the current session row, not to global user state.
   - A successful passkey reauth updates only the current session's freshness metadata.
   - Ordinary session activity updates `lastActiveAt` but must not implicitly refresh `passkeyVerifiedAt`.
   - `requireRecentSession` remains available for existing non-passkey consumers until explicitly migrated.
@@ -104,41 +104,105 @@ Personal-use passkey sign-in currently creates a web session that is always trea
   - Consumer `server-side freshness guard` (path: new helper in `src/lib/auth/session`) reads `passkeyVerifiedAt` from the current session row and compares it with `maxAgeMs` to decide whether to allow the action or return `SESSION_STEP_UP_REQUIRED`.
 
 ### C4. Sensitive-surface rollout is explicit and limited
-- Subject: Initial enforcement scope for fresh-passkey requirement
+- Subject: Initial enforcement scope and caller matrix for recent-passkey-verification
 - Function/module signatures:
-  - `requireFreshPasskey(req: NextRequest, options?: { maxAgeMs?: number; errorCode?: ApiErrorCode }): Promise<NextResponse | null>`
+  - `requireRecentPasskeyVerification(req: NextRequest, options?: { maxAgeMs?: number; errorCode?: ApiErrorCode }): Promise<NextResponse | null>`
   - Existing route handlers keep their current signatures.
 - Invariants:
-  - Only routes explicitly listed in this plan may switch from generic recent-session checks to fresh-passkey checks in this change.
-  - A route may adopt fresh-passkey only if its caller has an in-product passkey reauth path; otherwise it must stay on existing `requireRecentSession` semantics in this change.
+  - Every step-up-protected route must be classified by caller type before Phase 2 starts: `web-ui-inline-reauth`, `web-ui-browser-redirect`, or `non-passkey-capable`.
+  - Only routes explicitly listed in this plan may switch from generic recent-session checks to recent-passkey-verification checks in this change.
+  - A route may adopt recent-passkey-verification only if its caller has a concrete recovery path for `SESSION_STEP_UP_REQUIRED`; otherwise it must stay on existing `requireRecentSession` semantics in this change.
   - Tenant-admin and SSO-oriented step-up flows not listed below must keep current behavior.
   - Any client-visible retry loop must remain idempotent across a failed protected action followed by successful reauth and retry.
+  - Extension, mobile, MCP, and other bridge-style callers must not surface `SESSION_STEP_UP_REQUIRED` as a generic network/connection error.
 - Forbidden patterns:
-  - `pattern: requireFreshPasskey\\(` outside the enumerated route list — reason: rollout scope must stay auditable.
+  - `pattern: requireRecentPasskeyVerification\\(` outside the enumerated route list — reason: rollout scope must stay auditable.
   - `pattern: SESSION_STEP_UP_REQUIRED.*AUTHENTICATION_FAILED` — reason: step-up and sign-in failure paths must remain distinct.
+  - `pattern: connectFailed|networkError` in a `SESSION_STEP_UP_REQUIRED` branch — reason: step-up must be presented as recoverable reauthentication, not transport failure.
 - Acceptance criteria:
   - The plan enumerates the exact routes/components migrated in this change.
   - Every migrated route has a corresponding passkey-capable caller or documented exclusion path.
   - Non-migrated routes continue using their existing step-up guard.
   - Retry behavior after successful reauth is documented for each migrated consumer.
+- Recovery UX contract:
+  - `web-ui-inline-reauth`
+    - Meaning: the caller can launch the passkey ceremony without leaving the current screen.
+    - Required UX: show an explicit reauthentication prompt, call `reauth/options` -> browser WebAuthn ceremony -> `reauth/verify`, then retry the blocked mutation automatically or with one clear confirm action.
+    - Forbidden UX: generic `networkError`, silent failure, or forcing the user to rediscover the original screen.
+  - `web-ui-browser-redirect`
+    - Meaning: the caller runs in a browser-controlled bridge or OAuth-style flow and cannot safely embed the passkey ceremony inline.
+    - Required UX: show `browser reauthentication required`, explain that the current session is still signed in but not fresh enough for the requested action, provide a clear next action, and retry only after the browser flow has re-established freshness.
+    - Forbidden UX: generic connect/auth failure copy that implies bad passphrase, bad transport, or total sign-out.
+  - `non-passkey-capable`
+    - Meaning: the caller has no reliable way to perform passkey reauth in the current channel.
+    - Required UX: remain on `requireRecentSession` in this round, and if it returns `SESSION_STEP_UP_REQUIRED`, direct the user to a browser flow that can recover instead of trying to inline passkey logic in the caller.
+    - Forbidden UX: adopting `requireRecentPasskeyVerification` before a concrete recovery channel exists.
+- Route / caller matrix:
+  - `src/app/api/tenant/operator-tokens/route.ts`
+    - Caller: `src/components/settings/developer/operator-token-card.tsx`
+    - Current UX: caller already distinguishes stale-session with `OPERATOR_TOKEN_STALE_SESSION`, but only shows a toast and does not launch passkey reauth.
+    - Classification: `web-ui-inline-reauth`
+    - Phase-2 decision: eligible first migration target once the shared reauth modal + retry helper exists.
+  - `src/app/api/extension/bridge-code/route.ts`
+    - Caller: `src/components/extension/auto-extension-connect.tsx`
+    - Current UX: `403 SESSION_STEP_UP_REQUIRED` becomes generic connect failure UI.
+    - Classification: `web-ui-browser-redirect`
+    - Phase-2 decision: do not migrate to recent-passkey-verification in this change; first fix caller to present browser reauthentication required, then optionally keep `requireRecentSession` or later adopt passkey freshness with a dedicated extension reconnect flow.
+  - `src/app/api/extension/token/route.ts`
+    - Caller: browser extension background/popup, plus legacy direct issuance path.
+    - Current UX: no inline passkey ceremony; failures can collapse into unlock/connect errors.
+    - Classification: `non-passkey-capable`
+    - Phase-2 decision: stay on `requireRecentSession`.
+  - `src/app/api/api-keys/route.ts`
+    - Caller: `src/components/settings/developer/api-key-manager.tsx`
+    - Current UX: handles validation/limit errors only; no special `SESSION_STEP_UP_REQUIRED` branch.
+    - Classification: `web-ui-inline-reauth`
+    - Phase-2 decision: eligible only if the shared reauth modal + retry helper is also wired into this caller; otherwise stay on `requireRecentSession`.
+  - `src/app/api/tenant/service-accounts/[id]/tokens/route.ts`
+    - Caller: `src/components/settings/developer/service-account-card.tsx`
+    - Current UX: handles validation/conflict errors only; no special `SESSION_STEP_UP_REQUIRED` branch.
+    - Classification: `web-ui-inline-reauth`
+    - Phase-2 decision: keep on `requireRecentSession` in this change unless the shared reauth modal is adopted here too.
+  - `src/app/api/tenant/scim-tokens/route.ts`
+    - Caller: `src/components/team/security/team-scim-token-manager.tsx`
+    - Current UX: generic network-error toast on non-OK response.
+    - Classification: `web-ui-inline-reauth`
+    - Phase-2 decision: keep on `requireRecentSession` in this change unless the shared reauth modal is adopted here too.
+  - `src/app/api/tenant/mcp-clients/route.ts`
+    - Caller: `src/components/settings/developer/mcp-client-card.tsx`
+    - Current UX: handles conflict/limit errors only; no special `SESSION_STEP_UP_REQUIRED` branch.
+    - Classification: `web-ui-inline-reauth`
+    - Phase-2 decision: keep on `requireRecentSession` in this change unless the shared reauth modal is adopted here too.
+  - `src/app/api/mcp/authorize/route.ts` and `src/app/api/mcp/authorize/consent/route.ts`
+    - Caller: browser OAuth-style MCP authorize flow (`src/app/[locale]/mcp/authorize/page.tsx`, `src/app/[locale]/mcp/authorize/consent-form.tsx`)
+    - Current UX: no dedicated passkey reauth retry contract.
+    - Classification: `web-ui-browser-redirect`
+    - Phase-2 decision: stay on `requireRecentSession`.
+  - `src/app/api/mobile/authorize/route.ts`
+    - Caller: iOS `ASWebAuthenticationSession` bridge flow
+    - Current UX: browser redirect handshake only; no inline passkey reauth contract in the host app.
+    - Classification: `web-ui-browser-redirect`
+    - Phase-2 decision: stay on `requireRecentSession`.
+- Phase-2 rollout subset for this change:
+  - Only `src/app/api/tenant/operator-tokens/route.ts` may migrate to `requireRecentPasskeyVerification`, and only if the same change ships a shared browser reauth helper plus retry UX in `src/components/settings/developer/operator-token-card.tsx`.
+  - All other currently step-up-protected routes stay on `requireRecentSession` in this change.
 - Consumer-flow walkthrough:
-  - Consumer `extension token issuance` (path: `src/app/api/extension/token/route.ts`) reads the current session and uses the fresh-passkey helper before issuing a long-lived machine credential; if stale, the caller must receive `SESSION_STEP_UP_REQUIRED` and no token is minted.
-  - Consumer `developer operator token UI` (path: `src/components/settings/developer/operator-token-card.tsx`) reads a `403` step-up error from `src/app/api/tenant/operator-tokens/route.ts`, launches passkey reauth, and retries the create-token mutation only after `reauth/verify` succeeds.
-  - Consumer `API key UI` (path: route caller to `src/app/api/api-keys/route.ts`) must be migrated only if the current UI surface can launch the same passkey reauth helper; otherwise the route stays on `requireRecentSession` in this change.
-  - Consumer `MCP / service-account issuance routes` (paths: `src/app/api/mcp/authorize/route.ts`, `src/app/api/mcp/authorize/consent/route.ts`, `src/app/api/tenant/service-accounts/[id]/tokens/route.ts`) remain on existing generic step-up unless this change also lands a passkey-capable retry path for their concrete callers.
+  - Consumer `developer operator token UI` reads a `403 OPERATOR_TOKEN_STALE_SESSION` from `src/app/api/tenant/operator-tokens/route.ts`, launches passkey reauth inline, and retries the create-token mutation only after `reauth/verify` succeeds.
+  - Consumer `extension connect UI` reads a `403 SESSION_STEP_UP_REQUIRED` from `src/app/api/extension/bridge-code/route.ts`, must show `browser reauthentication required` instead of generic connect failure, and may only retry after the user completes reauth in the browser.
+  - Consumer `API key / service-account / SCIM / MCP client UIs` remain on generic recent-session semantics in this round unless they also adopt the same inline reauth + retry helper.
 
 ## Go/No-Go Gate
 | ID | Subject | Status |
 |----|---------|--------|
 | C1 | Personal passkey web sessions resolve as ordinary web sessions | locked |
-| C2 | Fresh-passkey assurance is explicit session metadata | locked |
+| C2 | Recent-passkey-verification assurance is explicit session metadata | locked |
 | C3 | Authenticated passkey reauth flow has a dedicated contract | locked |
 | C4 | Sensitive-surface rollout is explicit and limited | locked |
 
 ## Testing strategy
 - Unit tests:
   - `resolveEffectiveSessionTimeouts` returns tenant/team policy values for bootstrap passkey sessions and does not reintroduce hidden AAL3 clamp.
-  - `requireFreshPasskey` accepts fresh sessions, rejects stale ones, and leaves `requireRecentSession` behavior unchanged.
+  - `requireRecentPasskeyVerification` accepts fresh sessions, rejects stale ones, and leaves `requireRecentSession` behavior unchanged.
   - Passkey reauth route validation rejects wrong body shape, wrong user binding, stale/missing session, and reused challenge.
 - Integration / DB tests:
   - Session row stores and updates `passkeyVerifiedAt` correctly for sign-in and reauth.
@@ -147,6 +211,9 @@ Personal-use passkey sign-in currently creates a web session that is always trea
 - E2E tests:
   - Personal bootstrap user signs in with passkey, stays signed in longer than 15 minutes of configured policy-equivalent usage, and can complete a protected action after an in-flow passkey step-up.
   - Non-migrated step-up consumers preserve current UX and do not regress.
+  - Extension connect path must prove that `SESSION_STEP_UP_REQUIRED` from `bridge-code` is surfaced as reauthentication guidance, not as generic connection failure.
+  - Inline browser-management UIs must prove that a stale protected action can recover through passkey reauth without losing form state or forcing a full page restart.
+  - Browser-redirect flows must prove that `SESSION_STEP_UP_REQUIRED` copy does not mention passphrase mismatch, transport failure, or sign-out unless one of those conditions is actually true.
 - If the current browser automation harness cannot drive real WebAuthn ceremonies, the plan must provide:
   - integration coverage for route-level passkey reauth semantics, and
   - a targeted manual-test script for the end-to-end browser ceremony and retry UX.
@@ -157,6 +224,7 @@ Personal-use passkey sign-in currently creates a web session that is always trea
 - The reauth flow must not reuse PRF rebootstrap challenge keys or semantics.
 - If a migrated consumer lacks a client-side retry path today, the implementation must either add one or keep that consumer out of scope for this change.
 - Before Phase 2 starts, the implementation owner must confirm which current UI surfaces can actually invoke passkey reauth without introducing a dead-end `SESSION_STEP_UP_REQUIRED` loop for users who are not in the bootstrap personal flow.
+- Before any extension/mobile/MCP caller is migrated away from `requireRecentSession`, the implementation must define where reauthentication happens, how success is communicated back, and what exact user-facing copy replaces today's generic failure states.
 - Out of scope:
   - Changing tenant/team session policy UI defaults
   - Reworking SSO tenant passkey policy enforcement
@@ -164,10 +232,11 @@ Personal-use passkey sign-in currently creates a web session that is always trea
 
 ## User operation scenarios
 1. Personal user signs in with passkey on the bootstrap sign-in page, browses the vault for longer than 15 minutes with ordinary activity, and remains signed in according to the normal personal session policy.
-2. The same user tries to mint an extension token after the fresh-passkey window has elapsed and is prompted for passkey reauth in-flow rather than being fully logged out.
-3. The user completes passkey reauth successfully and retries the sensitive action without losing other active sessions or browser state.
+2. The same user tries to mint an operator token after the recent-passkey-verification window has elapsed, completes passkey reauth inline, and retries without being fully logged out.
+3. A user coming from the extension sees `browser reauthentication required` when `POST /api/extension/bridge-code` returns `SESSION_STEP_UP_REQUIRED`, rather than a generic connection failure.
 4. A stale or replayed reauth challenge is rejected and the sensitive action remains blocked.
-5. An SSO-backed tenant user who does not use the bootstrap personal sign-in flow sees no unintended change in ordinary session handling from this refactor.
+5. API key, service-account token, SCIM token, MCP client, MCP consent, mobile authorize, and extension token flows remain on current recent-session semantics until each caller has a concrete recovery path.
+6. An SSO-backed tenant user who does not use the bootstrap personal sign-in flow sees no unintended change in ordinary session handling from this refactor.
 
 ## Files expected to change
 - `docs/security/session-timeout-design.md`
@@ -181,11 +250,19 @@ Personal-use passkey sign-in currently creates a web session that is always trea
 - `src/lib/auth/session/step-up.ts`
 - `src/lib/auth/webauthn/webauthn-authorize.ts`
 - `src/lib/constants/auth/api-path.ts`
+- `src/components/settings/developer/operator-token-card.tsx`
+- `src/components/extension/auto-extension-connect.tsx`
 - Route handlers explicitly migrated under C4
 - Corresponding unit, integration, and E2E tests for the files above
 
 ## Implementation Checklist
 - Files and locations to modify
+  - `src/app/api/tenant/operator-tokens/route.ts`
+    - replace `requireRecentSession(...OPERATOR_TOKEN_STALE_SESSION)` with `requireRecentPasskeyVerification(...OPERATOR_TOKEN_STALE_SESSION)` only when the same change also lands inline reauth recovery in the caller.
+  - `src/components/settings/developer/operator-token-card.tsx`
+    - add inline passkey reauth + retry handling for `OPERATOR_TOKEN_STALE_SESSION`.
+  - `src/components/extension/auto-extension-connect.tsx`
+    - distinguish `SESSION_STEP_UP_REQUIRED` from generic connect failure and present browser reauthentication guidance.
   - `prisma/schema.prisma`
     - `Session` model: add `passkeyVerifiedAt` nullable timestamp.
   - `prisma/migrations/<new migration>/migration.sql`
@@ -196,8 +273,9 @@ Personal-use passkey sign-in currently creates a web session that is always trea
     - replace hidden `PASSKEY_SESSION_MAX_AGE_SECONDS` expiry with resolver-derived expiry.
     - initialize `passkeyVerifiedAt` on newly-created passkey session rows.
   - `src/lib/auth/session/step-up.ts`
-    - keep `requireRecentSession`.
-    - add `requireFreshPasskey` and current-session freshness update helper.
+    - keep `requireRecentSession` only.
+  - `src/lib/auth/webauthn/recent-passkey-verification.ts`
+    - add `requireRecentPasskeyVerification` and current-session freshness update helper.
   - `src/lib/auth/webauthn/webauthn-authorize.ts`
     - extend challenge verification to support authenticated reauth namespace and optional expected-user binding.
   - `src/app/api/auth/passkey/reauth/options/route.ts`
@@ -213,7 +291,7 @@ Personal-use passkey sign-in currently creates a web session that is always trea
   - Tests
     - `src/lib/auth/session/session-timeout.test.ts`
     - `src/app/api/auth/passkey/verify/route.test.ts`
-    - new route/helper tests for reauth options + verify + fresh-passkey guard
+    - new route/helper tests for reauth options + verify + recent-passkey-verification guard
     - integration test around session freshness persistence if existing DB harness fits
 - Shared utilities that must be reused
   - `src/app/api/sessions/helpers.ts:getSessionToken` — canonical current-session cookie lookup.
@@ -223,16 +301,25 @@ Personal-use passkey sign-in currently creates a web session that is always trea
   - `src/lib/auth/webauthn/webauthn-client.ts:startPasskeyAuthentication` — browser ceremony; do not create a parallel client implementation.
   - `src/lib/auth/webauthn/webauthn-server.ts` helpers — challenge/verification primitives and RP handling.
   - `src/lib/http/with-request-log.ts:withRequestLog` — route wrapper consistency.
+  - `src/lib/constants/auth/api-path.ts:API_PATH|apiPath` — reuse existing route builders for reauth endpoints and caller fetches.
+  - `src/lib/url-helpers.ts:fetchApi` — reuse existing browser fetch helper rather than bespoke retry code in UI callers.
+  - `src/lib/http/api-error-codes.ts:API_ERROR` — reuse existing error-code constants for UI branching.
+  - `src/lib/constants/time.ts:MS_PER_MINUTE` — reuse shared time constants; do not introduce duplicate minute literals.
+  - `src/lib/security/rate-limit.ts:createRateLimiter` — already used by all affected auth routes; keep parity with existing step-up-protected issuance routes.
 - Patterns that must be followed consistently
   - Dedicated challenge namespaces per flow: `signin`, `prf-rebootstrap`, and new `reauth` must stay separate.
   - Passkey freshness is session-scoped state, not user-global state.
   - Reauth must update only the current session row and must not revoke all sessions or extension-token families.
   - `SESSION_STEP_UP_REQUIRED` contract remains the generic retry signal for client callers.
-  - Route rollout for `requireFreshPasskey` is deferred unless a concrete passkey-capable caller path exists in the same change.
+  - Route rollout for `requireRecentPasskeyVerification` is deferred unless a concrete passkey-capable caller path exists in the same change.
+  - UI callers must preserve user input/form state across reauth recovery; retry should resume the blocked mutation rather than resetting the screen.
+  - Redirect/bridge callers must map `SESSION_STEP_UP_REQUIRED` to reauthentication guidance, not `networkError` / `connectFailed`.
 - Duplicate implementation check
   - Existing browser passkey ceremony already lives in `src/lib/auth/webauthn/webauthn-client.ts`; no second helper may be introduced in component code.
-  - Existing recent-session guard already lives in `src/lib/auth/session/step-up.ts`; fresh-passkey logic must extend that module instead of adding route-local DB checks.
+  - Existing recent-session guard already lives in `src/lib/auth/session/step-up.ts`; recent-passkey-verification logic stays as a separate passkey-specific route guard helper rather than route-local DB checks.
+  - Existing extension-connect flow already lives in `src/components/extension/auto-extension-connect.tsx` + `src/lib/inject-extension-bridge-code.ts`; do not add a parallel bridge-code bootstrap path.
+  - Existing operator-token stale-session UI branch already exists in `src/components/settings/developer/operator-token-card.tsx`; extend it into recovery rather than introducing a second token-creation flow.
 - CI parity notes
   - CI extractor reports these gates: `check-state-mutation-centralization`, `refactor-phase-verify`, `check:bypass-rls`, `check:crypto-domains`, `check:env-docs`, `check:migration-drift`, `check:team-auth-rls`, `licenses:check:*`, `lint`.
-  - `scripts/pre-pr.sh` already runs most local gates plus additional project-specific static checks and tests/build.
+  - `scripts/pre-pr.sh` already runs most local gates plus additional project-specific static checks and tests/build, but the extracted CI gate list includes `check-state-mutation-centralization`, which is not present in the current local pre-PR extraction and must be run manually during Phase 2 completion.
   - Remaining manual parity task before completion: inspect the multi-line `run:` workflow blocks flagged by `extract-ci-checks.sh` (`.github/workflows/ci-integration.yml`, `.github/workflows/ci.yml`, `.github/workflows/refactor-phase-verify.yml`, `.github/workflows/release.yml`) and confirm no extra CI-only auth/session gate was missed.
