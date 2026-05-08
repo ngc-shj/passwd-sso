@@ -20,7 +20,7 @@ const KNOWN_PREFIXES = [API_KEY_PREFIX, SA_TOKEN_PREFIX, MCP_TOKEN_PREFIX, "scim
 
 export type AuthResult =
   | { type: "session"; userId: string }
-  | { type: "token"; userId: string; scopes: ExtensionTokenScope[] }
+  | { type: "token"; userId: string; tenantId: string; scopes: ExtensionTokenScope[] }
   | { type: "api_key"; userId: string; tenantId: string; apiKeyId: string; scopes: ApiKeyScope[] }
   | { type: "service_account"; serviceAccountId: string; tenantId: string; tokenId: string; scopes: SaTokenScope[] }
   | { type: "mcp_token"; userId: string | null; tenantId: string; tokenId: string; mcpClientId: string; scopes: McpScope[] };
@@ -144,6 +144,7 @@ export async function authOrToken(
   return {
     type: "token",
     userId: result.data.userId,
+    tenantId: result.data.tenantId,
     scopes: result.data.scopes,
   };
 }

@@ -2,10 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextResponse } from "next/server";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockCheckAuth, mockPrismaUser, mockWithUserTenantRls } = vi.hoisted(() => ({
+const { mockCheckAuth, mockPrismaUser, mockWithUserTenantRls, mockWithTenantRls } = vi.hoisted(() => ({
   mockCheckAuth: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
 }));
 vi.mock("@/lib/auth/session/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -13,6 +14,9 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withTenantRls: mockWithTenantRls,
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -22,9 +26,9 @@ vi.mock("@/lib/logger", () => ({
 
 import { GET } from "./route";
 
-function authOk(userId = "test-user-id", type = "session") {
+function authOk(userId = "test-user-id", type = "session", tenantId = "tenant-1") {
   const auth = type === "token"
-    ? { type, userId, scopes: [] as string[] }
+    ? { type, userId, tenantId, scopes: [] as string[] }
     : { type, userId };
   return { ok: true, auth };
 }
@@ -197,7 +201,7 @@ describe("GET /api/vault/status", () => {
   });
 
   it("works with Bearer token auth", async () => {
-    mockCheckAuth.mockResolvedValue(authOk("token-user-id", "token"));
+    mockCheckAuth.mockResolvedValue(authOk("token-user-id", "token", "tenant-xyz"));
     mockPrismaUser.findUnique.mockResolvedValue({
       vaultSetupAt: new Date(),
       accountSalt: "b".repeat(64),
@@ -223,6 +227,7 @@ describe("GET /api/vault/status", () => {
     expect(json.accountSalt).toBe("b".repeat(64));
     expect(json.kdfType).toBe(0);
     expect(json.kdfIterations).toBe(600_000);
-    expect(mockWithUserTenantRls).toHaveBeenCalledWith("token-user-id", expect.any(Function));
+    expect(mockWithTenantRls).toHaveBeenCalledWith(expect.anything(), "tenant-xyz", expect.any(Function));
+    expect(mockWithUserTenantRls).not.toHaveBeenCalled();
   });
 });
