@@ -8,9 +8,9 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { buildTeamMemberDisplayItems } from "@/lib/team/team-member-display";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -32,39 +32,17 @@ async function handleGET(req: NextRequest, { params }: Params) {
   const members = await withTeamTenantRls(teamId, async () =>
     prisma.teamMember.findMany({
       where: { teamId: teamId, deactivatedAt: null },
-      include: {
-        user: {
-          select: { id: true, name: true, email: true, image: true },
-        },
+      select: {
+        id: true,
+        userId: true,
+        role: true,
+        createdAt: true,
       },
       orderBy: [{ role: "asc" }, { createdAt: "asc" }],
     }),
   );
 
-  // Batch-fetch each member's own tenant name (cross-tenant: user's tenant ≠ team's tenant)
-  // userIds are constrained to this team's members from the withTeamTenantRls query above.
-  // System enforces single tenant per user; if multiple TenantMember records exist, last wins.
-  const userIds = members.map((m) => m.userId);
-  const userTenants = await withBypassRls(prisma, async () =>
-    prisma.tenantMember.findMany({
-      where: { userId: { in: userIds }, deactivatedAt: null },
-      select: { userId: true, tenant: { select: { name: true } } },
-    }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
-  const tenantByUserId = new Map(userTenants.map((t) => [t.userId, t.tenant.name]));
-
-  return NextResponse.json(
-    members.map((m) => ({
-      id: m.id,
-      userId: m.userId,
-      role: m.role,
-      name: m.user.name,
-      email: m.user.email,
-      image: m.user.image,
-      joinedAt: m.createdAt,
-      tenantName: tenantByUserId.get(m.userId) ?? null,
-    }))
-  );
+  return NextResponse.json(await buildTeamMemberDisplayItems(members));
 }
 
 // POST /api/teams/[teamId]/members — Direct-add a tenant member

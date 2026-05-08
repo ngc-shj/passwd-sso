@@ -30,7 +30,7 @@ const {
     mockPrismaTeamMember: { findMany: vi.fn(), findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
     mockPrismaTeamMemberKey: { deleteMany: vi.fn() },
     mockPrismaTenantMember: { findMany: vi.fn(), findFirst: vi.fn() },
-    mockPrismaUser: { findFirst: vi.fn() },
+    mockPrismaUser: { findFirst: vi.fn(), findMany: vi.fn() },
     mockPrismaTransaction: vi.fn(),
     mockRequireTeamMember: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
@@ -108,15 +108,17 @@ describe("GET /api/teams/[teamId]/members", () => {
         userId: "u1",
         role: TEAM_ROLE.OWNER,
         createdAt: now,
-        user: { id: "u1", name: "Owner", email: "owner@test.com", image: null },
       },
       {
         id: "m2",
         userId: "u2",
         role: TEAM_ROLE.MEMBER,
         createdAt: now,
-        user: { id: "u2", name: "Member", email: "member@test.com", image: null },
       },
+    ]);
+    mockPrismaUser.findMany.mockResolvedValue([
+      { id: "u1", name: "Owner", email: "owner@test.com", image: null },
+      { id: "u2", name: "Member", email: "member@test.com", image: null },
     ]);
     mockPrismaTenantMember.findMany.mockResolvedValue([
       { userId: "u1", tenant: { name: "Acme Corp" } },
@@ -143,8 +145,10 @@ describe("GET /api/teams/[teamId]/members", () => {
         userId: "u1",
         role: TEAM_ROLE.OWNER,
         createdAt: now,
-        user: { id: "u1", name: "Owner", email: "owner@test.com", image: null },
       },
+    ]);
+    mockPrismaUser.findMany.mockResolvedValue([
+      { id: "u1", name: "Owner", email: "owner@test.com", image: null },
     ]);
     mockPrismaTenantMember.findMany.mockResolvedValue([]);
 
@@ -157,7 +161,17 @@ describe("GET /api/teams/[teamId]/members", () => {
   });
 
   it("uses withBypassRls for tenant member lookup", async () => {
-    mockPrismaTeamMember.findMany.mockResolvedValue([]);
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      {
+        id: "m1",
+        userId: "u1",
+        role: TEAM_ROLE.OWNER,
+        createdAt: now,
+      },
+    ]);
+    mockPrismaUser.findMany.mockResolvedValue([
+      { id: "u1", name: "Owner", email: "owner@test.com", image: null },
+    ]);
     mockPrismaTenantMember.findMany.mockResolvedValue([]);
 
     await GET(
@@ -166,6 +180,47 @@ describe("GET /api/teams/[teamId]/members", () => {
     );
     expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
     expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function), expect.any(String));
+  });
+
+  it("keeps a cross-tenant guest visible by loading user profiles outside team RLS", async () => {
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      {
+        id: "m1",
+        userId: "owner-user",
+        role: TEAM_ROLE.OWNER,
+        createdAt: now,
+      },
+      {
+        id: "m2",
+        userId: "guest-user",
+        role: TEAM_ROLE.MEMBER,
+        createdAt: now,
+      },
+    ]);
+    mockPrismaUser.findMany.mockResolvedValue([
+      { id: "owner-user", name: "Owner", email: "owner@test.com", image: null },
+      { id: "guest-user", name: "Guest", email: "guest@test.com", image: null },
+    ]);
+    mockPrismaTenantMember.findMany.mockResolvedValue([
+      { userId: "owner-user", tenant: { name: "Team Tenant" } },
+      { userId: "guest-user", tenant: { name: "Guest Tenant" } },
+    ]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/members`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json).toEqual([
+      expect.objectContaining({ userId: "owner-user", email: "owner@test.com" }),
+      expect.objectContaining({ userId: "guest-user", email: "guest@test.com", tenantName: "Guest Tenant" }),
+    ]);
+    expect(mockPrismaUser.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["owner-user", "guest-user"] } },
+      select: { id: true, name: true, email: true, image: true },
+    });
   });
 });
 
