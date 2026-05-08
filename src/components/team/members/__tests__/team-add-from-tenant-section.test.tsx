@@ -15,7 +15,10 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 const { mockFetchApi } = vi.hoisted(() => ({ mockFetchApi: vi.fn() }));
 
 vi.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, values?: Record<string, string>) =>
+    key === "addFromTenantCrossTenantNote" && values?.tenantName
+      ? `${key}:${values.tenantName}`
+      : key,
 }));
 
 vi.mock("sonner", () => ({
@@ -142,5 +145,17 @@ describe("TeamAddFromTenantSection", () => {
       expect(body.userId).toBe("user-1");
       expect(body.role).toBe("MEMBER");
     });
+  });
+
+  it("shows a team-tenant note for guest admins", () => {
+    render(
+      <TeamAddFromTenantSection
+        teamId="team-1"
+        teamTenantName="Security Tenant"
+        onSuccess={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("addFromTenantCrossTenantNote:Security Tenant")).toBeInTheDocument();
   });
 });

@@ -15,6 +15,7 @@ interface MemberInfoProps {
   isCurrentUser?: boolean;
   nameExtra?: React.ReactNode;
   tenantName?: string | null;
+  viewerTenantName?: string | null;
   teamTenantName?: string | null;
   children?: React.ReactNode;
 }
@@ -26,10 +27,12 @@ export function MemberInfo({
   isCurrentUser,
   nameExtra,
   tenantName,
+  viewerTenantName,
   teamTenantName,
   children,
 }: MemberInfoProps) {
   const t = useTranslations("Team");
+  const comparisonTenantName = viewerTenantName ?? teamTenantName;
 
   return (
     <>
@@ -53,7 +56,7 @@ export function MemberInfo({
           <p className="text-xs text-muted-foreground truncate">{email}</p>
         )}
         {children}
-        {tenantName && teamTenantName && tenantName !== teamTenantName && (
+        {tenantName && comparisonTenantName && tenantName !== comparisonTenantName && (
           <p className="text-xs text-amber-600 dark:text-amber-400 truncate flex items-center gap-1">
             <Globe className="h-3 w-3 shrink-0" />
             {tenantName}

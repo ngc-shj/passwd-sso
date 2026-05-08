@@ -159,6 +159,7 @@
   "addMember": "メンバー追加",
   "addFromTenantLabel": "テナントから追加",
   "addFromTenantDesc": "テナント内の既存メンバーを検索してこのチームに追加します。",
+  "addFromTenantCrossTenantNote": "ここで検索するのは、あなたの所属テナントではなく、このチームが属するテナント「{tenantName}」のメンバーです。",
   "inviteByEmailLabel": "メールで招待",
   "inviteByEmailDesc": "テナント外のユーザーにメールで招待を送信します。",
   "addFromTenant": "テナントから追加",

@@ -81,6 +81,11 @@ export default function TeamMembersPage({
   const [memberSearch, setMemberSearch] = useState("");
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const filteredMembers = filterMembers(members, memberSearch);
+  const viewerTenantName = members.find((m) => m.userId === currentUserId)?.tenantName ?? null;
+  const addFromTenantName =
+    viewerTenantName && team?.tenantName && viewerTenantName !== team.tenantName
+      ? team.tenantName
+      : null;
 
   useEffect(() => {
     fetchApi(API_PATH.AUTH_SESSION)
@@ -224,7 +229,7 @@ export default function TeamMembersPage({
                     image={m.image}
                     isCurrentUser={m.userId === currentUserId}
                     tenantName={m.tenantName}
-                    teamTenantName={team.tenantName}
+                    viewerTenantName={viewerTenantName}
                   />
                   {isAdmin && m.role !== TEAM_ROLE.OWNER && m.userId !== currentUserId ? (
                     <div className="flex items-center gap-2">
@@ -289,6 +294,7 @@ export default function TeamMembersPage({
           <div className="space-y-6">
             <TeamAddFromTenantSection
               teamId={teamId}
+              teamTenantName={addFromTenantName}
               onSuccess={() => { fetchAll(); setAddDialogOpen(false); }}
             />
             <Separator />

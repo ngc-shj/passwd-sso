@@ -159,6 +159,7 @@
   "addMember": "Add Member",
   "addFromTenantLabel": "Add from tenant",
   "addFromTenantDesc": "Search and add existing tenant members to this team.",
+  "addFromTenantCrossTenantNote": "This searches members in the team's tenant: {tenantName}.",
   "inviteByEmailLabel": "Invite by email",
   "inviteByEmailDesc": "Send an email invitation to someone outside the tenant.",
   "addFromTenant": "Add from Tenant",

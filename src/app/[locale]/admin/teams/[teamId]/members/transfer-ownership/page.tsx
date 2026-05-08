@@ -58,6 +58,7 @@ export default function TeamTransferOwnershipPage({
   const [loadError, setLoadError] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
   const [transferSearch, setTransferSearch] = useState("");
+  const viewerTenantName = members.find((m) => m.role === TEAM_ROLE.OWNER)?.tenantName ?? null;
   const transferCandidates = filterMembers(
     members.filter((m) => m.role !== TEAM_ROLE.OWNER),
     transferSearch,
@@ -174,6 +175,8 @@ export default function TeamTransferOwnershipPage({
                   name={m.name}
                   email={m.email}
                   image={m.image}
+                  tenantName={m.tenantName}
+                  viewerTenantName={viewerTenantName}
                 >
                   <TeamRoleBadge role={m.role} />
                 </MemberInfo>

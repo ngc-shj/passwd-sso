@@ -27,9 +27,10 @@ interface TenantMemberResult {
 interface Props {
   teamId: string;
   onSuccess: () => void;
+  teamTenantName?: string | null;
 }
 
-export function TeamAddFromTenantSection({ teamId, onSuccess }: Props) {
+export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: Props) {
   const t = useTranslations("Team");
   const [addSearch, setAddSearch] = useState("");
   const [addRole, setAddRole] = useState<string>(TEAM_ROLE.MEMBER);
@@ -109,6 +110,11 @@ export function TeamAddFromTenantSection({ teamId, onSuccess }: Props) {
       <div>
         <h3 className="text-sm font-medium">{t("addFromTenantLabel")}</h3>
         <p className="text-xs text-muted-foreground mt-0.5">{t("addFromTenantDesc")}</p>
+        {teamTenantName && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+            {t("addFromTenantCrossTenantNote", { tenantName: teamTenantName })}
+          </p>
+        )}
       </div>
       <div className="flex flex-col gap-3 md:flex-row md:items-end">
         <div className="flex-1 space-y-2">
