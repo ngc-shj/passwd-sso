@@ -5,15 +5,18 @@ const {
   mockAuth,
   mockRequireTeamPermission,
   mockWithTeamTenantRls,
+  mockWithBypassRls,
   MockTeamAuthError,
   mockTeamFindUnique,
   mockTeamPasswordEntryFindMany,
   mockTeamMemberFindMany,
   mockTeamMemberKeyFindMany,
+  mockUserFindMany,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
   mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
   MockTeamAuthError: class MockTeamAuthError extends Error {
     status: number;
     constructor(message: string, status = 403) {
@@ -26,6 +29,7 @@ const {
   mockTeamPasswordEntryFindMany: vi.fn(),
   mockTeamMemberFindMany: vi.fn(),
   mockTeamMemberKeyFindMany: vi.fn(),
+  mockUserFindMany: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -39,10 +43,14 @@ vi.mock("@/lib/prisma", () => ({
     teamPasswordEntry: { findMany: mockTeamPasswordEntryFindMany },
     teamMember: { findMany: mockTeamMemberFindMany },
     teamMemberKey: { findMany: mockTeamMemberKeyFindMany },
+    user: { findMany: mockUserFindMany },
   },
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -86,9 +94,8 @@ describe("GET /api/teams/[teamId]/rotate-key/data", () => {
     mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 1 });
     mockTeamPasswordEntryFindMany.mockResolvedValue([sampleEntry]);
     mockTeamMemberFindMany.mockResolvedValue([{ userId: "user-1" }]);
-    mockTeamMemberKeyFindMany.mockResolvedValue([
-      { userId: "user-1", user: { ecdhPublicKey: "public-key-data" } },
-    ]);
+    mockTeamMemberKeyFindMany.mockResolvedValue([{ userId: "user-1" }]);
+    mockUserFindMany.mockResolvedValue([{ id: "user-1", ecdhPublicKey: "public-key-data" }]);
     // withTeamTenantRls is called 3 times: team, entries+members, member keys
     mockWithTeamTenantRls.mockImplementation(async (_teamId: string, fn: () => unknown) => fn());
   });
@@ -116,6 +123,7 @@ describe("GET /api/teams/[teamId]/rotate-key/data", () => {
     expect(mockTeamPasswordEntryFindMany).not.toHaveBeenCalled();
     expect(mockTeamMemberFindMany).not.toHaveBeenCalled();
     expect(mockTeamMemberKeyFindMany).not.toHaveBeenCalled();
+    expect(mockUserFindMany).not.toHaveBeenCalled();
   });
 
   it("returns teamKeyVersion, entries, and members on success", async () => {
@@ -132,9 +140,10 @@ describe("GET /api/teams/[teamId]/rotate-key/data", () => {
 
   it("excludes members without an ECDH public key", async () => {
     mockTeamMemberFindMany.mockResolvedValue([{ userId: "user-1" }, { userId: "user-2" }]);
-    mockTeamMemberKeyFindMany.mockResolvedValue([
-      { userId: "user-1", user: { ecdhPublicKey: "public-key-data" } },
-      { userId: "user-2", user: { ecdhPublicKey: null } },
+    mockTeamMemberKeyFindMany.mockResolvedValue([{ userId: "user-1" }, { userId: "user-2" }]);
+    mockUserFindMany.mockResolvedValue([
+      { id: "user-1", ecdhPublicKey: "public-key-data" },
+      { id: "user-2", ecdhPublicKey: null },
     ]);
     const res = await GET(createRequest("team-1"), createParams("team-1"));
     expect(res.status).toBe(200);
@@ -152,6 +161,7 @@ describe("GET /api/teams/[teamId]/rotate-key/data", () => {
     expect(json.members).toHaveLength(0);
     // teamMemberKey.findMany should not be called when no active members
     expect(mockTeamMemberKeyFindMany).not.toHaveBeenCalled();
+    expect(mockUserFindMany).not.toHaveBeenCalled();
     // Only 2 withTeamTenantRls calls: team + entries/members (no memberKeys call)
     expect(mockWithTeamTenantRls).toHaveBeenCalledTimes(2);
   });
@@ -169,6 +179,29 @@ describe("GET /api/teams/[teamId]/rotate-key/data", () => {
     expect(mockWithTeamTenantRls).toHaveBeenCalledWith("team-abc", expect.any(Function));
     // 3 calls: team findUnique, entries+members, memberKeys
     expect(mockWithTeamTenantRls).toHaveBeenCalledTimes(3);
+  });
+
+  it("uses bypass user lookup so cross-tenant guests remain eligible for rotation", async () => {
+    mockTeamMemberFindMany.mockResolvedValue([{ userId: "owner-user" }, { userId: "guest-user" }]);
+    mockTeamMemberKeyFindMany.mockResolvedValue([{ userId: "owner-user" }, { userId: "guest-user" }]);
+    mockUserFindMany.mockResolvedValue([
+      { id: "owner-user", ecdhPublicKey: "owner-public-key" },
+      { id: "guest-user", ecdhPublicKey: "guest-public-key" },
+    ]);
+
+    const res = await GET(createRequest("team-1"), createParams("team-1"));
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
+    expect(mockUserFindMany).toHaveBeenCalledWith({
+      where: { id: { in: ["owner-user", "guest-user"] } },
+      select: { id: true, ecdhPublicKey: true },
+    });
+    expect(json.members).toEqual([
+      { userId: "owner-user", ecdhPublicKey: "owner-public-key" },
+      { userId: "guest-user", ecdhPublicKey: "guest-public-key" },
+    ]);
   });
 
   it("re-throws non-TeamAuthError permission errors", async () => {

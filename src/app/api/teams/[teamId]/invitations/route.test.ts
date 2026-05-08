@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeam, mockPrismaTeamMember, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeam, mockPrismaTeamMember, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockWithBypassRls } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -23,6 +23,7 @@ const { mockAuth, mockPrismaTeamInvitation, mockPrismaUser, mockPrismaTeam, mock
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+    mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
   };
 });
 
@@ -42,6 +43,9 @@ vi.mock("@/lib/auth/access/team-auth", () => ({
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
+  withBypassRls: mockWithBypassRls,
 }));
 
 import { GET, POST } from "./route";
@@ -145,6 +149,27 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     expect(res.status).toBe(409);
     const json = await res.json();
     expect(json.error).toBe("ALREADY_A_MEMBER");
+  });
+
+  it("blocks re-inviting a guest member found via bypass user lookup", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({ id: "guest-user" });
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: "guest-member",
+      deactivatedAt: null,
+      scimManaged: false,
+    });
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/invitations`, {
+        body: { email: "guest@test.com", role: TEAM_ROLE.ADMIN },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(res.status).toBe(409);
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
+    expect(mockPrismaUser.findUnique).toHaveBeenCalledWith({ where: { email: "guest@test.com" } });
+    expect(mockPrismaTeamInvitation.create).not.toHaveBeenCalled();
   });
 
   it("returns 409 when invitation already pending", async () => {
