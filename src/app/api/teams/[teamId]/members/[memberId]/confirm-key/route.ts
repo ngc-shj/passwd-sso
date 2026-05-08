@@ -7,6 +7,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { BYPASS_PURPOSE, withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 
@@ -43,7 +44,6 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         userId: true,
         keyDistributed: true,
         deactivatedAt: true,
-        user: { select: { ecdhPublicKey: true } },
       },
     }),
   );
@@ -52,7 +52,14 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     return errorResponse(API_ERROR.MEMBER_NOT_FOUND, 404);
   }
 
-  if (!targetMember.user?.ecdhPublicKey) {
+  const targetUser = await withBypassRls(prisma, async () =>
+    prisma.user.findUnique({
+      where: { id: targetMember.userId },
+      select: { ecdhPublicKey: true },
+    }),
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+
+  if (!targetUser?.ecdhPublicKey) {
     return errorResponse(API_ERROR.VAULT_NOT_READY, 409);
   }
 

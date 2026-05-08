@@ -36,6 +36,8 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/maintenance/purge-history/route.ts", ["passwordEntryHistory"]],
   ["src/app/api/teams/route.ts", ["teamMember"]],
   ["src/app/api/teams/pending-key-distributions/route.ts", ["teamMember"]],
+  // Team key distribution: guest members require cross-tenant public-key lookup
+  ["src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts", ["user"]],
   ["src/app/api/teams/invitations/accept/route.ts", ["teamInvitation"]],
   ["src/lib/auth/policy/account-lockout.ts", ["user", "tenant", "auditOutbox"]],
   ["src/lib/auth/policy/lockout-admin-notify.ts", ["user", "tenantMember"]],
