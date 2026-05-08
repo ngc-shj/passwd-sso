@@ -5,7 +5,13 @@ import { AdminHeader } from "./admin-header";
 import { AdminSidebar } from "./admin-sidebar";
 
 interface AdminTeam {
-  team: { id: string; name: string; slug: string };
+  team: {
+    id: string;
+    name: string;
+    slug: string;
+    tenantName: string;
+    isCrossTenant: boolean;
+  };
 }
 
 interface AdminShellProps {

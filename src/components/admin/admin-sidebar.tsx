@@ -31,7 +31,13 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 interface AdminTeam {
-  team: { id: string; name: string; slug: string };
+  team: {
+    id: string;
+    name: string;
+    slug: string;
+    tenantName: string;
+    isCrossTenant: boolean;
+  };
 }
 
 interface AdminSidebarProps {

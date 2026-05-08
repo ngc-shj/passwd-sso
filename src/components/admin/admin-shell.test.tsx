@@ -45,8 +45,8 @@ vi.mock("./admin-sidebar", () => ({
 
 import { AdminShell } from "./admin-shell";
 
-const teamA = { team: { id: "team-a", name: "A", slug: "a" } };
-const teamB = { team: { id: "team-b", name: "B", slug: "b" } };
+const teamA = { team: { id: "team-a", name: "A", slug: "a", tenantName: "Tenant A", isCrossTenant: false } };
+const teamB = { team: { id: "team-b", name: "B", slug: "b", tenantName: "Tenant B", isCrossTenant: true } };
 
 describe("AdminShell", () => {
   it("renders header, sidebar, and children", () => {
