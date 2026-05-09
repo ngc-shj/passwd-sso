@@ -68,8 +68,10 @@ export default function AdminTenantTeamsPage() {
           icon={UsersRound}
           title={tAdmin("navTeams")}
           description={t("teamsDescription")}
-          action={
-            isAdmin ? (
+        />
+        <CardContent className="space-y-3">
+          {isAdmin ? (
+            <section className="space-y-3">
               <TeamCreateDialog
                 trigger={
                   <Button size="sm">
@@ -79,10 +81,8 @@ export default function AdminTenantTeamsPage() {
                 }
                 onCreated={handleCreated}
               />
-            ) : undefined
-          }
-        />
-        <CardContent className="space-y-3">
+            </section>
+          ) : null}
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />

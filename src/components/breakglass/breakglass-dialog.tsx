@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import type { ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -32,9 +33,10 @@ interface TenantMember {
 
 interface BreakGlassDialogProps {
   onGrantCreated: () => void;
+  trigger?: ReactNode;
 }
 
-export function BreakGlassDialog({ onGrantCreated }: BreakGlassDialogProps) {
+export function BreakGlassDialog({ onGrantCreated, trigger }: BreakGlassDialogProps) {
   const t = useTranslations("Breakglass");
   const tc = useTranslations("Common");
   const [open, setOpen] = useState(false);
@@ -120,10 +122,12 @@ export function BreakGlassDialog({ onGrantCreated }: BreakGlassDialogProps) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          <ShieldAlert className="h-4 w-4 mr-2" />
-          {t("requestAccess")}
-        </Button>
+        {trigger ?? (
+          <Button variant="outline" size="sm">
+            <ShieldAlert className="h-4 w-4 mr-2" />
+            {t("requestAccess")}
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="max-w-md">
         <DialogHeader>

@@ -128,21 +128,21 @@ export function DelegationManager() {
         icon={Handshake}
         title={t("title")}
         description={t("description")}
-        action={
-          <div className="flex gap-2">
-            {sessions.length > 0 && (
+      />
+      <CardContent className="space-y-4">
+        <section className="space-y-3">
+          <Button size="sm" onClick={() => setDialogOpen(true)}>
+            <Plus className="mr-1 h-4 w-4" />
+            {t("newDelegation")}
+          </Button>
+          {sessions.length > 0 && (
+            <div>
               <Button variant="destructive" size="sm" onClick={handleRevokeAll}>
                 {t("revokeAll")}
               </Button>
-            )}
-            <Button size="sm" onClick={() => setDialogOpen(true)}>
-              <Plus className="mr-1 h-4 w-4" />
-              {t("newDelegation")}
-            </Button>
-          </div>
-        }
-      />
-      <CardContent>
+            </div>
+          )}
+        </section>
         {sessions.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("noSessions")}</p>
         ) : (
