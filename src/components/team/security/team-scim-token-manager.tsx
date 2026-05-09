@@ -39,6 +39,7 @@ import { formatDate } from "@/lib/format/format-datetime";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
 import { DISPLAY_ID_SHORT } from "@/lib/validations/common";
+import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 
 const TOKEN_STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   active: "default",
@@ -62,6 +63,7 @@ interface Props {
 
 export function ScimTokenManager({ locale }: Props) {
   const t = useTranslations("Team");
+  const tApi = useTranslations("ApiErrors");
   const [tokens, setTokens] = useState<ScimToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -112,7 +114,12 @@ export function ScimTokenManager({ locale }: Props) {
         toast.success(t("scimTokenCreated"));
         fetchTokens();
       } else {
-        toast.error(t("networkError"));
+        const err = await res.json().catch(() => ({}));
+        if (apiErrorToI18nKey(err.error) !== "unknownError") {
+          toast.error(tApi(apiErrorToI18nKey(err.error)));
+        } else {
+          toast.error(t("networkError"));
+        }
       }
     } catch {
       toast.error(t("networkError"));

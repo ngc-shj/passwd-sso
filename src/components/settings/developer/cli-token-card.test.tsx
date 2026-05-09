@@ -76,6 +76,19 @@ describe("CliTokenCard", () => {
     });
   });
 
+  it("shows recent-session error instead of generic failure on 403", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+    });
+    render(<CliTokenCard />);
+    fireEvent.click(screen.getByRole("button", { name: /generate/ }));
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("sessionStepUpRequired");
+    });
+  });
+
   it("hides the token panel when OK is clicked", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,

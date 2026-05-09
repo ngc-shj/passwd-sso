@@ -10,7 +10,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 
 const { mockFetch, mockToast } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
@@ -169,5 +169,32 @@ describe("ScimTokenManager", () => {
     // Tokens are still loading; we just verify the component renders without crash
     expect(document.querySelector("body")).toBeDefined();
     resolveFetch({ ok: true, json: () => Promise.resolve([]) });
+  });
+
+  it("shows recent-session error instead of generic network error on create", async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+      });
+
+    await act(async () => {
+      render(<ScimTokenManager locale="en" />);
+    });
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalled();
+    });
+
+    const createButtons = screen.getAllByRole("button", { name: "scimCreateToken" });
+    await act(async () => {
+      fireEvent.click(createButtons[createButtons.length - 1]);
+    });
+
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("sessionStepUpRequired");
+    });
   });
 });

@@ -10,9 +10,11 @@ import { SectionCardHeader } from "@/components/settings/account/section-card-he
 import { Input } from "@/components/ui/input";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 
 export function CliTokenCard() {
   const t = useTranslations("CliToken");
+  const tApi = useTranslations("ApiErrors");
   const [generating, setGenerating] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -28,7 +30,12 @@ export function CliTokenCard() {
       } else if (res.status === 429) {
         toast.error(t("rateLimited"));
       } else {
-        toast.error(t("generateError"));
+        const err = await res.json().catch(() => ({}));
+        if (apiErrorToI18nKey(err.error) !== "unknownError") {
+          toast.error(tApi(apiErrorToI18nKey(err.error)));
+        } else {
+          toast.error(t("generateError"));
+        }
       }
     } catch {
       toast.error(t("generateError"));

@@ -34,6 +34,7 @@ import { fetchApi } from "@/lib/url-helpers";
 import { NAME_MAX_LENGTH } from "@/lib/validations";
 import { formatDate } from "@/lib/format/format-datetime";
 import { API_KEY_SCOPE, API_KEY_SCOPES, MAX_API_KEYS_PER_USER, type ApiKeyScope } from "@/lib/constants/auth/api-key";
+import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 
 interface ApiKeyEntry {
   id: string;
@@ -62,6 +63,7 @@ const EXPIRY_OPTIONS = [
 
 export function ApiKeyManager() {
   const t = useTranslations("ApiKey");
+  const tApi = useTranslations("ApiErrors");
   const locale = useLocale();
   const [keys, setKeys] = useState<ApiKeyEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -134,6 +136,8 @@ export function ApiKeyManager() {
           toast.error(t("limitExceeded", { max: MAX_API_KEYS_PER_USER }));
         } else if (res.status === 400) {
           toast.error(t("validationError"));
+        } else if (apiErrorToI18nKey(err.error) !== "unknownError") {
+          toast.error(tApi(apiErrorToI18nKey(err.error)));
         } else {
           toast.error(t("createError"));
         }

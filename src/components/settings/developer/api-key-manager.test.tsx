@@ -118,6 +118,42 @@ describe("ApiKeyManager", () => {
     expect(screen.getByDisplayValue("api-token-xyz")).toBeInTheDocument();
   });
 
+  it("shows recent-session error instead of generic create error", async () => {
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (
+        String(url).includes("/api/api-keys") &&
+        (!init || init.method === undefined || init.method === "GET")
+      ) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve([]),
+        });
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 403,
+        json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+      });
+    });
+
+    render(<ApiKeyManager />);
+    await waitFor(() => {
+      expect(screen.getByText("noKeys")).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("namePlaceholder"), {
+      target: { value: "my-key" },
+    });
+
+    const buttons = screen.getAllByRole("button", { name: /createKey/ });
+    fireEvent.click(buttons[buttons.length - 1]);
+
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("sessionStepUpRequired");
+    });
+  });
+
   it("renders the list of active keys when present", async () => {
     setupKeysList([
       {

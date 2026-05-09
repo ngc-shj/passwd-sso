@@ -371,12 +371,16 @@ describe("ServiceAccountCard", () => {
       fireEvent.click(createBtn);
     });
 
+    const submitBtn = screen.getByText("create");
+    expect(submitBtn).toBeDisabled();
+
     // Fill in name
     const nameInput = screen.getByPlaceholderText("saNamePlaceholder");
     fireEvent.change(nameInput, { target: { value: "my-new-sa" } });
 
+    expect(submitBtn).not.toBeDisabled();
+
     // Submit
-    const submitBtn = screen.getByText("create");
     await act(async () => {
       fireEvent.click(submitBtn);
     });
@@ -531,6 +535,75 @@ describe("ServiceAccountCard", () => {
     expect(
       screen.queryByDisplayValue("sa_plaintext_token_value")
     ).not.toBeInTheDocument();
+  });
+
+  it("shows recent-session error instead of generic token create failure", async () => {
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        if (url.includes("/tokens")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ tokens: sampleTokens }),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            serviceAccounts: [
+              {
+                id: "sa-active",
+                name: "active-sa",
+                description: null,
+                isActive: true,
+                createdAt: "2025-01-01T00:00:00Z",
+              },
+            ],
+          }),
+        });
+      }
+      if (init.method === "POST" && url.includes("/tokens")) {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+        });
+      }
+      return Promise.resolve({ ok: false });
+    });
+
+    await act(async () => {
+      render(<ServiceAccountCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("active-sa")).toBeInTheDocument();
+    });
+
+    const tokenBtns = screen
+      .getAllByRole("button")
+      .filter((b) => b.textContent?.includes("createToken"));
+    await act(async () => {
+      fireEvent.click(tokenBtns[0]);
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("tokenNamePlaceholder"), {
+      target: { value: "my-token" },
+    });
+    fireEvent.click(screen.getAllByTestId("checkbox")[0]);
+    fireEvent.change(screen.getByDisplayValue(""), {
+      target: { value: "2026-12-31" },
+    });
+
+    const createTokenBtn = screen
+      .getAllByRole("button")
+      .find((b) => b.textContent === "create" && !b.hasAttribute("disabled"));
+    await act(async () => {
+      fireEvent.click(createTokenBtn!);
+    });
+
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("sessionStepUpRequired");
+    });
   });
 
   it("deletes SA — click delete, confirm in AlertDialog, verifies DELETE call", async () => {

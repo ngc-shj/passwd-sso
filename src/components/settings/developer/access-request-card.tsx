@@ -43,6 +43,7 @@ import { SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
+import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 
 import type { AccessRequestStatus } from "@prisma/client";
 
@@ -75,6 +76,7 @@ const STATUS_VARIANTS: Record<
 export function AccessRequestCard() {
   const t = useTranslations("MachineIdentity");
   const tCommon = useTranslations("Common");
+  const tApi = useTranslations("ApiErrors");
   const locale = useLocale();
 
   const [requests, setRequests] = useState<AccessRequest[]>([]);
@@ -159,6 +161,8 @@ export function AccessRequestCard() {
           toast.error(t("arSaNotFound"));
         } else if (res.status === 400) {
           toast.error(t("arCreateValidationError"));
+        } else if (apiErrorToI18nKey(data?.error) !== "unknownError") {
+          toast.error(tApi(apiErrorToI18nKey(data?.error)));
         } else {
           toast.error(data?.message ?? t("arCreateFailed"));
         }
@@ -184,14 +188,18 @@ export function AccessRequestCard() {
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         const code = data?.error ?? "";
-        if (res.status === 409 && code === "SA_TOKEN_LIMIT_EXCEEDED") {
+        if (code === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          toast.error(tApi("sessionStepUpRequired"));
+        } else if (res.status === 409 && code === "SA_TOKEN_LIMIT_EXCEEDED") {
           toast.error(t("arTokenLimitExceeded"));
-        } else if (res.status === 409 && (code === "SA_NOT_FOUND")) {
+        } else if (res.status === 409 && code === "SA_NOT_FOUND") {
           toast.error(t("arSaInactive"));
         } else if (res.status === 409) {
           toast.error(t("arAlreadyProcessed"));
         } else if (res.status === 400 && code === "INVALID_SCOPE") {
           toast.error(t("arInvalidScope"));
+        } else if (apiErrorToI18nKey(code) !== "unknownError") {
+          toast.error(tApi(apiErrorToI18nKey(code)));
         } else {
           toast.error(t("arApproveFailed"));
         }
