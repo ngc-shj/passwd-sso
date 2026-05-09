@@ -98,6 +98,16 @@ vi.mock("@/components/ui/alert-dialog", () => ({
   ),
   AlertDialogCancel: ({ children }: { children: React.ReactNode }) => <button>{children}</button>,
 }));
+vi.mock("@/components/ui/dialog", () => ({
+  Dialog: ({ children, open }: { children: React.ReactNode; open?: boolean }) => (
+    open ? <>{children}</> : null
+  ),
+  DialogContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogTitle: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogDescription: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogFooter: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
 vi.mock("@/components/ui/collapsible", () => ({
   Collapsible: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   CollapsibleTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -119,6 +129,12 @@ import { OperatorTokenCard } from "./operator-token-card";
 describe("OperatorTokenCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFetchApi.mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        json: async () => ({ tokens: [] }),
+      }),
+    );
   });
 
   it("renders title + empty list when no tokens exist", async () => {
@@ -156,13 +172,13 @@ describe("OperatorTokenCard", () => {
 
     render(<OperatorTokenCard />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "createToken" }));
+
     const input = await screen.findByPlaceholderText("tokenNamePlaceholder");
     fireEvent.change(input, { target: { value: "test-token" } });
 
-    const createButton = (await screen.findAllByText("createToken")).find(
-      (el) => el.tagName === "BUTTON",
-    );
-    if (!createButton) throw new Error("createToken button not found");
+    const createButtons = await screen.findAllByRole("button", { name: "createToken" });
+    const createButton = createButtons[createButtons.length - 1];
     fireEvent.click(createButton);
 
     await waitFor(() => {
@@ -181,7 +197,7 @@ describe("OperatorTokenCard", () => {
     expect(mockToastSuccess).toHaveBeenCalledWith("tokenCreated");
   });
 
-  it("shows stale-session error when create returns 403 with that code", async () => {
+  it("shows recent-session error when create returns 403 with that code", async () => {
     mockFetchApi
       .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })
       .mockResolvedValueOnce({
@@ -191,17 +207,17 @@ describe("OperatorTokenCard", () => {
 
     render(<OperatorTokenCard />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "createToken" }));
+
     const input = await screen.findByPlaceholderText("tokenNamePlaceholder");
     fireEvent.change(input, { target: { value: "stale-test" } });
 
-    const createButton = (await screen.findAllByText("createToken")).find(
-      (el) => el.tagName === "BUTTON",
-    );
-    if (!createButton) throw new Error("createToken button not found");
+    const createButtons = await screen.findAllByRole("button", { name: "createToken" });
+    const createButton = createButtons[createButtons.length - 1];
     fireEvent.click(createButton);
 
     await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith("staleSession");
+      expect(mockToastError).toHaveBeenCalledWith("sessionStepUpRequired");
     });
   });
 
