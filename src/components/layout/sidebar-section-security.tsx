@@ -95,6 +95,7 @@ interface SettingsNavSectionProps {
   onOpenChange: (open: boolean) => void;
   t: (key: string) => string;
   selectedTeam?: SecurityTeam | null;
+  adminConsoleHref?: string;
   isAdminActive?: boolean;
   isSettingsActive?: boolean;
   isAdmin?: boolean;
@@ -106,6 +107,7 @@ export function SettingsNavSection({
   onOpenChange,
   t,
   selectedTeam,
+  adminConsoleHref = "/admin/tenant/members",
   isAdminActive,
   isSettingsActive,
   isAdmin,
@@ -128,7 +130,7 @@ export function SettingsNavSection({
           )}
           {isAdmin && (
             <Button variant={isAdminActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-              <Link href="/admin" onClick={onNavigate}>
+              <Link href={adminConsoleHref} onClick={onNavigate}>
                 <LayoutDashboard className="h-4 w-4" />
                 {t("adminConsole")}
               </Link>

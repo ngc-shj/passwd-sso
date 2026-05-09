@@ -98,6 +98,10 @@ export function SidebarContent({
   const teamItems = teams;
   const scopedTeamId =
     vaultContext.type === "team" ? (vaultContext.teamId) : "";
+  const adminConsoleHref =
+    vaultContext.type === "team"
+      ? `/admin/teams/${scopedTeamId}/general`
+      : "/admin/tenant/members";
   return (
     <nav className="space-y-2 p-4">
       <VaultSelector
@@ -218,6 +222,7 @@ export function SidebarContent({
         onOpenChange={toggleSection("settingsNav")}
         t={t}
         selectedTeam={selectedTeam}
+        adminConsoleHref={adminConsoleHref}
         isAdminActive={isAdminActive}
         isSettingsActive={isSettingsActive}
         isAdmin={isAdmin}
