@@ -120,7 +120,8 @@ describe("BreakGlassGrantList", () => {
     await waitFor(() => {
       expect(screen.getByText("noActiveGrants")).toBeInTheDocument();
     });
-    expect(screen.getByText("noGrants")).toBeInTheDocument();
+    // The redundant `noGrants` bottom block was dropped — `noActiveGrants`
+    // (under the parent h3 "activeGrants") covers the empty case alone.
   });
 
   it("renders active grants with target name", async () => {

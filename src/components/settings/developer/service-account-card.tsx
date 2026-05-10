@@ -422,7 +422,7 @@ export function ServiceAccountCard() {
         {loading ? (
           <Loader2 className="h-4 w-4 animate-spin" />
         ) : accounts.length === 0 ? (
-          <p className="text-center text-muted-foreground">{t("noServiceAccounts")}</p>
+          <p className="text-sm text-muted-foreground">{t("noServiceAccounts")}</p>
         ) : (
           <div className="space-y-2">
           {activeAccounts.length === 0 && inactiveAccounts.length > 0 && (

@@ -5,6 +5,7 @@
   "providerGoogleWorkspace": "Google Workspace",
   "providerOkta": "Okta",
   "addConfig": "設定を追加",
+  "registeredConfigs": "登録済み設定",
   "editConfig": "設定を編集",
   "deleteConfig": "設定を削除",
   "deleteConfirm": "このディレクトリ同期設定を削除してもよろしいですか？この操作は元に戻せません。",

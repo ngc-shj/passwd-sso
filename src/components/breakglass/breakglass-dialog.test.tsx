@@ -268,12 +268,18 @@ describe("BreakGlassDialog", () => {
     });
   });
 
-  it("shows self-access error when 400 with details.targetUserId", async () => {
+  it("shows self-access error when 400 with details.properties.targetUserId", async () => {
     mockFetchApi.mockResolvedValueOnce({ ok: true, json: async () => members });
     mockFetchApi.mockResolvedValueOnce({
       ok: false,
       status: 400,
-      json: async () => ({ details: { targetUserId: "self" } }),
+      // Match the actual shape produced by validationError() / zodValidationError():
+      // details.properties.<field>. The dialog now correctly checks this path
+      // (regression fix: the prior `details.targetUserId` check never matched).
+      json: async () => ({
+        error: "VALIDATION_ERROR",
+        details: { properties: { targetUserId: { errors: ["Cannot request access to your own logs"] } } },
+      }),
     });
 
     render(<BreakGlassDialog onGrantCreated={onGrantCreated} />);

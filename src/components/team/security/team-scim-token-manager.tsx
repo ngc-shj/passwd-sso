@@ -267,19 +267,15 @@ export function ScimTokenManager({ locale }: Props) {
           {t("scimTenantScopeNote")}
         </p>
 
-      {/* SCIM Endpoint URL */}
-      <section className="space-y-2">
-        <Label>{t("scimEndpointUrl")}</Label>
-        <div className="flex items-center gap-2">
-          <Input value={scimEndpoint} readOnly className="font-mono text-sm" />
-          <CopyButton getValue={() => scimEndpoint} />
-        </div>
-      </section>
-
-      <Separator />
-
-      {/* Create Token Form */}
+      {/* SCIM Endpoint URL + Create Token (controls group) */}
       <section className="space-y-3">
+        <div className="space-y-2">
+          <Label>{t("scimEndpointUrl")}</Label>
+          <div className="flex items-center gap-2">
+            <Input value={scimEndpoint} readOnly className="font-mono text-sm" />
+            <CopyButton getValue={() => scimEndpoint} />
+          </div>
+        </div>
         <Button onClick={() => setCreateOpen(true)} size="sm">
           <Plus className="mr-1 h-4 w-4" />
           {t("scimCreateToken")}

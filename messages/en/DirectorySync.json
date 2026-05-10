@@ -5,6 +5,7 @@
   "providerGoogleWorkspace": "Google Workspace",
   "providerOkta": "Okta",
   "addConfig": "Add Configuration",
+  "registeredConfigs": "Registered configurations",
   "editConfig": "Edit Configuration",
   "deleteConfig": "Delete Configuration",
   "deleteConfirm": "Are you sure you want to delete this directory sync configuration? This action cannot be undone.",

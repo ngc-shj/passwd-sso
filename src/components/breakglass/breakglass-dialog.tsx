@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AlertTriangle, Check, Loader2, Search, ShieldAlert } from "lucide-react";
 import { apiPath, API_PATH } from "@/lib/constants";
+import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { fetchApi } from "@/lib/url-helpers";
 import { filterMembers } from "@/lib/filter-members";
 import { cn } from "@/lib/utils";
@@ -39,6 +40,7 @@ interface BreakGlassDialogProps {
 export function BreakGlassDialog({ onGrantCreated, trigger }: BreakGlassDialogProps) {
   const t = useTranslations("Breakglass");
   const tc = useTranslations("Common");
+  const tApi = useTranslations("ApiErrors");
   const [open, setOpen] = useState(false);
   const [members, setMembers] = useState<TenantMember[]>([]);
   const [targetUserId, setTargetUserId] = useState("");
@@ -99,10 +101,17 @@ export function BreakGlassDialog({ onGrantCreated, trigger }: BreakGlassDialogPr
 
       if (res.status === 400) {
         const data = await res.json().catch(() => null);
-        if (data?.details?.targetUserId) {
+        // `validationError` and `zodValidationError` both put field-level
+        // detail under `details.properties.<field>` (per Zod's treeifyError
+        // shape). The previous check on `details.targetUserId` (without the
+        // `properties` segment) never matched, so self-access leaked into
+        // the generic VALIDATION_ERROR toast instead of showing the
+        // intended "Cannot request access to your own logs" message.
+        if (data?.details?.properties?.targetUserId) {
           toast.error(t("selfAccessError"));
         } else {
-          toast.error(data?.error ?? t("reasonTooShort"));
+          const code = typeof data?.error === "string" ? data.error : null;
+          toast.error(code ? tApi(apiErrorToI18nKey(code)) : t("reasonTooShort"));
         }
       } else if (res.status === 409) {
         toast.error(t("duplicateGrantError"));
@@ -110,7 +119,8 @@ export function BreakGlassDialog({ onGrantCreated, trigger }: BreakGlassDialogPr
         toast.error(t("rateLimitExceeded"));
       } else {
         const data = await res.json().catch(() => null);
-        toast.error(data?.error ?? "Error");
+        const code = typeof data?.error === "string" ? data.error : null;
+        toast.error(code ? tApi(apiErrorToI18nKey(code)) : tApi("unknownError"));
       }
     } finally {
       setSubmitting(false);

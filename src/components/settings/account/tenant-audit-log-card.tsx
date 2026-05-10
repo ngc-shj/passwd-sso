@@ -7,6 +7,7 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { SectionCardHeader } from "@/components/settings/account/section-card-header";
+import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -329,7 +330,13 @@ export function TenantAuditLogCard({ variant }: TenantAuditLogCardProps) {
             onGrantCreated={() => setGrantRefreshTrigger((n) => n + 1)}
           />
         </section>
-        <BreakGlassGrantList refreshTrigger={grantRefreshTrigger} />
+
+        <Separator />
+
+        <section className="space-y-3">
+          <h3 className="text-sm font-medium">{tb("activeGrants")}</h3>
+          <BreakGlassGrantList refreshTrigger={grantRefreshTrigger} />
+        </section>
       </CardContent>
     </Card>
   );

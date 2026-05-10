@@ -178,7 +178,6 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
     <>
       <div className="space-y-3">
         <div className="space-y-1">
-          <p className="text-sm font-medium">{t("activeGrants")}</p>
           {activeGrants.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("noActiveGrants")}</p>
           ) : (
@@ -216,9 +215,6 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
           </div>
         )}
 
-        {grants.length === 0 && (
-          <p className="text-sm text-muted-foreground">{t("noGrants")}</p>
-        )}
       </div>
 
       <AlertDialog open={!!revokeTargetId} onOpenChange={(open) => { if (!open) setRevokeTargetId(null); }}>

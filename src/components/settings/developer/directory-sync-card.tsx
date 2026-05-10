@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionCardHeader } from "@/components/settings/account/section-card-header";
+import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -495,6 +496,11 @@ export function DirectorySyncCard() {
               {t("addConfig")}
             </Button>
           </section>
+
+          <Separator />
+
+          <section className="space-y-3">
+          <h3 className="text-sm font-medium">{t("registeredConfigs")}</h3>
           {loading ? (
             <div className="flex justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -579,6 +585,7 @@ export function DirectorySyncCard() {
               ))}
             </div>
           )}
+          </section>
         </CardContent>
       </Card>
 

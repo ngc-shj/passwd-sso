@@ -320,7 +320,7 @@ export function AccessRequestCard() {
               <Loader2 className="h-4 w-4 animate-spin" />
             </div>
           ) : requests.length === 0 ? (
-            <p className="text-center text-muted-foreground">{t("noAccessRequests")}</p>
+            <p className="text-sm text-muted-foreground">{t("noAccessRequests")}</p>
           ) : (
             <div className="space-y-2">
               {requests.map((req) => (

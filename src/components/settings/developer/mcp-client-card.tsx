@@ -531,7 +531,7 @@ const toastUpdateApiError = (errorCode: unknown) => {
           {loading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : clients.length === 0 ? (
-            <p className="text-center text-muted-foreground">{t("noMcpClients")}</p>
+            <p className="text-sm text-muted-foreground">{t("noMcpClients")}</p>
           ) : (
             <div className="space-y-2">
               {activeClients.length === 0 && inactiveClients.length > 0 && (
