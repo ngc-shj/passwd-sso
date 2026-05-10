@@ -49,7 +49,8 @@ import {
   OPERATOR_TOKEN_DEFAULT_EXPIRES_DAYS,
   OPERATOR_TOKEN_NAME_MAX_LENGTH,
 } from "@/lib/constants/auth/operator-token";
-import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 
 const TOKEN_STATUS_VARIANT: Record<
   string,
@@ -151,12 +152,11 @@ export function OperatorTokenCard() {
         const errBody = (await res.json().catch(() => ({}))) as {
           error?: string;
         };
-        if (errBody.error === API_ERROR.OPERATOR_TOKEN_STALE_SESSION) {
-          toast.error(tApi("sessionStepUpRequired"));
-        } else if (errBody.error === API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED) {
-          toast.error(tApi(apiErrorToI18nKey(errBody.error)));
+        if (errBody.error === API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED) {
+          toast.error(t("limitExceeded"));
         } else {
-          toast.error(t("networkError"));
+          const apiKey = tokenMintApiErrorKey(errBody.error);
+          toast.error(apiKey ? tApi(apiKey) : t("networkError"));
         }
       }
     } catch {

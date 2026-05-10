@@ -41,6 +41,16 @@ vi.mock("@/components/passwords/shared/copy-button", () => ({
   ),
 }));
 
+vi.mock("@/components/ui/dialog", () => ({
+  Dialog: ({ children, open }: { children: React.ReactNode; open?: boolean }) => (
+    open ? <>{children}</> : null
+  ),
+  DialogContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogTitle: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogFooter: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
 import { ApiKeyManager } from "./api-key-manager";
 
 interface ApiKeyEntry {
@@ -93,6 +103,7 @@ describe("ApiKeyManager", () => {
     await waitFor(() =>
       expect(screen.getByText("noKeys")).toBeInTheDocument(),
     );
+    fireEvent.click(screen.getByRole("button", { name: /createKey/ }));
     const buttons = screen.getAllByRole("button", { name: /createKey/ });
     const createBtn = buttons[buttons.length - 1];
     expect(createBtn).toBeDisabled();
@@ -104,6 +115,8 @@ describe("ApiKeyManager", () => {
     await waitFor(() =>
       expect(screen.getByText("noKeys")).toBeInTheDocument(),
     );
+
+    fireEvent.click(screen.getByRole("button", { name: /createKey/ }));
 
     const nameInput = screen.getByPlaceholderText("namePlaceholder");
     fireEvent.change(nameInput, { target: { value: "my-key" } });
@@ -141,6 +154,8 @@ describe("ApiKeyManager", () => {
     await waitFor(() => {
       expect(screen.getByText("noKeys")).toBeInTheDocument();
     });
+
+    fireEvent.click(screen.getByRole("button", { name: /createKey/ }));
 
     fireEvent.change(screen.getByPlaceholderText("namePlaceholder"), {
       target: { value: "my-key" },

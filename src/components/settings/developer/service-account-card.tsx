@@ -43,7 +43,7 @@ import { SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
-import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { FormDirtyBadge } from "@/components/settings/account/form-dirty-badge";
 
@@ -337,10 +337,9 @@ export function ServiceAccountCard() {
           toast.error(t("saInactiveError"));
         } else if (res.status === 400) {
           toast.error(t("tokenValidationError"));
-        } else if (apiErrorToI18nKey(code) !== "unknownError") {
-          toast.error(tApi(apiErrorToI18nKey(code)));
         } else {
-          toast.error(t("tokenCreateFailed"));
+          const apiKey = tokenMintApiErrorKey(code);
+          toast.error(apiKey ? tApi(apiKey) : t("tokenCreateFailed"));
         }
         return;
       }

@@ -50,6 +50,16 @@ vi.mock("@/components/settings/account/section-card-header", () => ({
   ),
 }));
 
+vi.mock("@/components/ui/dialog", () => ({
+  Dialog: ({ children, open }: { children: React.ReactNode; open?: boolean }) => (
+    open ? <>{children}</> : null
+  ),
+  DialogContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogTitle: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogFooter: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
 import { ScimTokenManager } from "./team-scim-token-manager";
 
 const ACTIVE_TOKEN = {
@@ -188,6 +198,7 @@ describe("ScimTokenManager", () => {
       expect(mockFetch).toHaveBeenCalled();
     });
 
+    fireEvent.click(screen.getByRole("button", { name: "scimCreateToken" }));
     const createButtons = screen.getAllByRole("button", { name: "scimCreateToken" });
     await act(async () => {
       fireEvent.click(createButtons[createButtons.length - 1]);

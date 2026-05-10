@@ -42,7 +42,7 @@ import { apiPath } from "@/lib/constants";
 import { MCP_SCOPES, LOOPBACK_REDIRECT_RE } from "@/lib/constants/auth/mcp";
 import { fetchApi } from "@/lib/url-helpers";
 import { formatDateTime } from "@/lib/format/format-datetime";
-import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { FormDirtyBadge } from "@/components/settings/account/form-dirty-badge";
@@ -171,13 +171,15 @@ export function McpClientCard() {
     createUris.length > 0 &&
     createScopes.size > 0;
 
-  const toastCreateApiError = (errorCode: unknown) => {
-    toast.error(tApi(apiErrorToI18nKey(errorCode)));
-  };
+const toastCreateApiError = (errorCode: unknown) => {
+  const apiKey = tokenMintApiErrorKey(errorCode);
+  toast.error(apiKey ? tApi(apiKey) : t("mcpCreateFailed"));
+};
 
-  const toastUpdateApiError = (errorCode: unknown) => {
-    toast.error(tApi(apiErrorToI18nKey(errorCode)));
-  };
+const toastUpdateApiError = (errorCode: unknown) => {
+  const apiKey = tokenMintApiErrorKey(errorCode);
+  toast.error(apiKey ? tApi(apiKey) : t("mcpUpdateFailed"));
+};
 
   const handleCreate = async () => {
     let valid = true;

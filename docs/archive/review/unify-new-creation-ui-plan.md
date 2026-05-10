@@ -24,6 +24,7 @@ Unify creation UX across the settings and admin surfaces by standardizing:
 - Create or register submit buttons inside dialogs should remain disabled until all required fields are filled.
 - One-time secrets must still be shown safely and clearly.
 - Recent-session-required failures for sensitive creation or approval actions should surface one consistent user-facing message.
+- Token-mint screens (those calling routes guarded by `requireRecentSession`) translate the recent-session and rate-limit codes through the shared `tokenMintApiErrorKey` allow-list helper; codes outside the allow-list fall back to the component's domain-generic toast.
 - Existing CRUD behavior and permission checks must remain unchanged.
 - Existing list views must remain intact.
 
@@ -144,24 +145,53 @@ This avoids broad header refactoring while still enforcing a consistent primary-
   - Service-account token creation (`src/components/settings/developer/service-account-card.tsx`) translates recent-session failures through `ApiErrors` while preserving token-limit and validation errors.
   - Access-request approval (`src/components/settings/developer/access-request-card.tsx`) translates recent-session failures through `ApiErrors` while preserving already-processed and invalid-scope handling.
 
+### C6. Token-mint API error allow-list
+
+- Subject: Settings cards whose underlying create/approve route is guarded by `requireRecentSession` (i.e. token-mint surfaces) translate API error responses through a shared per-surface allow-list helper, NOT through a permissive "any code that exists in `apiErrorToI18nKey`" filter. Each component handles its own domain-specific codes (quota, validation, name conflict) inline before consulting the helper.
+- Helper: `src/lib/http/token-mint-error.ts` exporting `tokenMintApiErrorKey(error: unknown): string | null`.
+  - Returns the ApiErrors i18n key for codes on the allow-list; returns `null` for everything else.
+  - Allow-list: `SESSION_STEP_UP_REQUIRED`, `RATE_LIMIT_EXCEEDED`.
+  - Aliases: `OPERATOR_TOKEN_STALE_SESSION → "sessionStepUpRequired"` (operator-token routes return a flow-specific stale-session code that should surface the SAME re-auth message as the generic step-up code).
+- Invariants:
+  - Token-mint cards MUST inspect `body.error` and route through `tokenMintApiErrorKey`. They MUST NOT use the previous over-permissive pattern `apiErrorToI18nKey(err.error) !== "unknownError"`, which would surface ANY code in the global mapping (≈100+ codes spanning vault, SCIM, team, mobile, EA — codes the surface never opted in to).
+  - Components MUST NOT hardcode an ApiErrors key (e.g. `tApi("sessionStepUpRequired")`) for a known code — the alias mapping is owned by the helper.
+  - Per-component domain codes (e.g. `API_KEY_LIMIT_EXCEEDED` with quota interpolation, `MCP_CLIENT_NAME_CONFLICT` with inline field error, `SA_TOKEN_LIMIT_EXCEEDED`) handle inline BEFORE calling the helper, using the component's own translation namespace (not ApiErrors).
+- Forbidden patterns:
+  - `pattern: apiErrorToI18nKey\([^)]+\) !== "unknownError" — reason: over-permissive — accepts any code in the global mapping; replace with tokenMintApiErrorKey`
+  - `pattern: tApi\("(sessionStepUpRequired|rateLimitExceeded|operatorTokenStaleSession)"\) — reason: hardcoded alias bypasses the helper`
+- Acceptance criteria:
+  - For each in-scope component: an allow-listed code (`SESSION_STEP_UP_REQUIRED`, `RATE_LIMIT_EXCEEDED`, or the operator-token alias) surfaces its translated ApiErrors message; any other code falls back to the component's domain-generic toast (e.g. `t("createError")`, `t("networkError")`); preserved domain-specific early returns (quota, validation, conflict) still fire with their inline UX.
+- Components in scope (7 — exactly the screens calling routes guarded by `requireRecentSession`):
+  - `src/components/settings/developer/api-key-manager.tsx` → `POST /api/api-keys`
+  - `src/components/team/security/team-scim-token-manager.tsx` → `POST /api/tenant/scim-tokens`
+  - `src/components/settings/developer/mcp-client-card.tsx` → `POST /api/tenant/mcp-clients` (create + update via `toastCreateApiError`/`toastUpdateApiError`)
+  - `src/components/settings/developer/operator-token-card.tsx` → `POST /api/tenant/operator-tokens`
+  - `src/components/settings/developer/service-account-card.tsx` → `POST /api/tenant/service-accounts/[id]/tokens`
+  - `src/components/settings/developer/access-request-card.tsx` → `POST /api/tenant/access-requests/[id]/approve` (handleApprove); handleCreate uses the same helper for consistency, though its route is not `requireRecentSession`-guarded — the helper's null fallback makes that safe.
+  - `src/components/settings/developer/cli-token-card.tsx` → `POST /api/extension/token`
+- Out of scope (NOT token-mint surfaces):
+  - `base-webhook-card.tsx`, `audit-delivery-target-card.tsx`, `passkey-credentials-card.tsx` — their routes do not call `requireRecentSession`. Their existing error-handling stays unchanged.
+  - List/fetch (GET) error paths.
+  - Delete/revoke flows. (Verified: none of the in-scope components' delete/revoke routes use `requireRecentSession` — the guard sits only on the create/approve side already covered by C5.)
+
 ### C4. Passkey nickname timing
 
 - Subject: Passkey registration no longer requires nickname entry before registration.
 - Function/module signatures:
-  - Passkey registration continues to accept an optional nickname.
-  - Default nickname generation remains available and unchanged in behavior.
+  - Passkey registration verification continues to accept a nickname.
+  - Default nickname generation remains available and is now used by the registration UI by default.
 - Invariants:
-  - Registration can proceed without pre-filled nickname input.
-  - A generated nickname is applied when no custom nickname is provided.
+  - Registration can proceed immediately without a pre-filled nickname input.
+  - A generated nickname is applied during registration.
   - Rename remains possible after creation.
 - Forbidden patterns:
   - `pattern: <Label>.*nickname.*</Label>[\s\S]*<Input[\s\S]*value=\{nickname\}[\s\S]*<Button[\s\S]*register — reason: flags pre-registration nickname-first UI that should be reconsidered`
 - Acceptance criteria:
   - User can register a passkey immediately.
-  - A generated nickname is applied when no custom nickname is provided.
+  - A generated nickname is applied during registration.
   - Post-registration rename remains available.
 - Consumer-flow walkthrough:
-  - Passkey registration UI (`src/components/settings/security/passkey-credentials-card.tsx`) reads the generated or user-supplied nickname and passes it to registration verification.
+  - Passkey registration UI (`src/components/settings/security/passkey-credentials-card.tsx`) generates a default nickname from authenticator transports and passes it to registration verification.
   - Credential list rendering on the same screen reads the stored nickname and uses it as the primary label, falling back to a shortened ID when absent.
   - Rename flow on the same screen reads the persisted nickname and updates it via the existing patch endpoint.
 
@@ -204,14 +234,14 @@ Reason:
 - Shared components need to be preserved while moving to dialog-first creation.
 - Event-selection or target-type-selection UI increases migration complexity.
 
-### Phase 4: Separate UX subtask
+### Phase 4: UX-sensitive completion item
 
 - Passkey nickname timing
 
 Reason:
 
-- This is not just a layout change; it changes the registration flow itself.
-- It should be reviewed independently from the broader consistency refactor.
+- This changes the registration flow itself, but still belongs to the same consistency effort.
+- The change should preserve rename discoverability while removing pre-registration friction.
 
 ## Testing Strategy
 
@@ -220,6 +250,8 @@ Reason:
 - Verify that one-time secret completion states appear only after successful creation.
 - Verify that closing the completion state clears visible secret-bearing UI state.
 - Verify that recent-session-required failures surface the shared re-authentication message instead of a generic error.
+- Verify that codes outside the C6 allow-list (e.g. `SCIM_TOKEN_INVALID`, `INVALID_PASSPHRASE`, `TEAM_NOT_FOUND`) do NOT surface on token-mint screens — they fall back to the component's domain-generic toast.
+- `src/lib/http/token-mint-error.test.ts` covers the helper's allow-list, alias mapping, and null fallback for unrecognized / out-of-list codes.
 - Update and run the concrete affected component tests:
   - `src/components/settings/developer/base-webhook-card.test.tsx`
   - `src/components/settings/account/tenant-audit-log-card.test.tsx`
@@ -232,7 +264,7 @@ Reason:
   - `src/components/team/security/team-scim-token-manager.test.tsx`
   - `src/components/settings/developer/access-request-card.test.tsx`
   - `src/components/team/management/team-create-dialog.test.tsx`
-  - `src/components/settings/security/passkey-credentials-card.test.tsx` if C4 is included in scope
+  - `src/components/settings/security/passkey-credentials-card.test.tsx`
 - Add or adjust assertions for:
   - parent-owned trigger placement
   - dialog open/close lifecycle
@@ -253,7 +285,9 @@ Reason:
 - `BreakGlassDialog` currently owns its trigger internally, while `TeamCreateDialog` already accepts a caller-provided trigger; the implementation must converge these trigger-ownership patterns instead of adding one-off placement exceptions.
 - Some screens include required read-only context above creation today, such as tenant-scope notes or endpoint URLs; those context blocks may remain above the CTA if they are necessary for correct use of the flow.
 - Recent-session messaging unification applies to the six settings flows currently guarded by `requireRecentSession`: API keys, SCIM tokens, operator tokens, MCP clients, service-account tokens, and JIT access-request approval.
-- Passkey nickname timing should not block the rest of the UI unification work.
+- C6 covers exactly the screens calling routes guarded by `requireRecentSession` — token-mint surfaces. base-webhook, audit-delivery-target, and passkey registration are NOT in C6 scope (their routes do not use `requireRecentSession`).
+- C6 deliberately uses a per-surface allow-list (`SESSION_STEP_UP_REQUIRED`, `RATE_LIMIT_EXCEEDED`) instead of routing every recognized code through `apiErrorToI18nKey`. The over-permissive pattern surfaces ≈100+ codes spanning unrelated domains (vault, SCIM, team, mobile, EA) that the surface never opted in to display.
+- Passkey nickname timing should preserve the existing rename affordance after registration.
 
 ## User Operation Scenarios
 
@@ -271,6 +305,7 @@ Reason:
 | C2 | Primary CTA placement | locked |
 | C3 | One-time secret completion state | locked |
 | C5 | Recent-session-required messaging | locked |
-| C4 | Passkey nickname timing | pending |
+| C4 | Passkey nickname timing | locked |
+| C6 | Token-mint API error allow-list | locked |
 
-Implementation should not start for the broad refactor until C1-C3 and C5 remain stable. C4 is intentionally left pending so passkey flow redesign can be handled as a separate UX-sensitive follow-up if desired.
+Implementation should keep C1-C5 stable together; passkey nickname timing is now part of the completed consistency scope rather than a deferred follow-up. C6 was rewritten in round 3 from "any recognized code through `apiErrorToI18nKey`" to "per-surface allow-list via `tokenMintApiErrorKey` helper", scoped exactly to the 7 screens calling `requireRecentSession`-guarded routes. The previous over-permissive pattern would surface ~100+ codes from unrelated domains; the allow-list restricts the surface to codes the user-facing flow opted in to.
