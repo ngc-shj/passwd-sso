@@ -490,6 +490,9 @@ export function DirectorySyncCard() {
           description={t("description")}
         />
         <CardContent className="space-y-4">
+          {configs.length === 0 && !loading && (
+            <p className="text-xs text-muted-foreground">{t("noConfigsHint")}</p>
+          )}
           <section className="space-y-3">
             <Button size="sm" className="shrink-0" onClick={openCreateDialog}>
               <Plus className="mr-1 h-4 w-4" />
@@ -502,14 +505,9 @@ export function DirectorySyncCard() {
           <section className="space-y-3">
           <h3 className="text-sm font-medium">{t("registeredConfigs")}</h3>
           {loading ? (
-            <div className="flex justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
+            <Loader2 className="h-4 w-4 animate-spin" />
           ) : configs.length === 0 ? (
-            <div className="py-8 text-center">
-              <p className="text-sm text-muted-foreground">{t("noConfigs")}</p>
-              <p className="text-xs text-muted-foreground mt-1">{t("noConfigsHint")}</p>
-            </div>
+            <p className="text-sm text-muted-foreground">{t("noConfigs")}</p>
           ) : (
             <div className="space-y-3">
               {configs.map((config) => (
