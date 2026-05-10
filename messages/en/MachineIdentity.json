@@ -8,6 +8,7 @@
   "mcpRegisteredClients": "Registered MCP clients",
   "accessRequestCardTitle": "Access Requests",
   "accessRequestCardDescription": "Manage just-in-time access requests from service accounts.",
+  "accessRequestList": "Access request list",
   "noServiceAccounts": "No service accounts",
   "noActiveServiceAccounts": "No active service accounts",
   "createServiceAccount": "Create Service Account",

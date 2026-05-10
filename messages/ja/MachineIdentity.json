@@ -8,6 +8,7 @@
   "mcpRegisteredClients": "登録済み MCP クライアント",
   "accessRequestCardTitle": "アクセスリクエスト",
   "accessRequestCardDescription": "サービスアカウントからのジャストインタイムアクセスリクエストを管理します。",
+  "accessRequestList": "アクセスリクエスト一覧",
   "noServiceAccounts": "サービスアカウントがありません",
   "noActiveServiceAccounts": "有効なサービスアカウントがありません",
   "createServiceAccount": "サービスアカウントを作成",

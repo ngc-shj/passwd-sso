@@ -6,6 +6,7 @@ import { useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionCardHeader } from "@/components/settings/account/section-card-header";
+import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -287,27 +288,34 @@ export function AccessRequestCard() {
           }}
           cancelLabel={tCommon("cancel")}
         />
-        <div className="flex items-center justify-between">
-          <Select
-            value={statusFilter}
-            onValueChange={(v) => setStatusFilter(v as "ALL" | AccessRequestStatus)}
-          >
-            <SelectTrigger className="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">{t("arStatusAll")}</SelectItem>
-              <SelectItem value={AR_STATUS.PENDING}>{t("arStatusPending")}</SelectItem>
-              <SelectItem value={AR_STATUS.APPROVED}>{t("arStatusApproved")}</SelectItem>
-              <SelectItem value={AR_STATUS.DENIED}>{t("arStatusDenied")}</SelectItem>
-              <SelectItem value={AR_STATUS.EXPIRED}>{t("arStatusExpired")}</SelectItem>
-            </SelectContent>
-          </Select>
+        <section className="space-y-3">
           <Button variant="outline" size="sm" onClick={openCreate}>
             <Plus className="h-4 w-4 mr-1" />
             {t("arCreate")}
           </Button>
-        </div>
+        </section>
+
+        <Separator />
+
+        <section className="space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-medium">{t("accessRequestList")}</h3>
+            <Select
+              value={statusFilter}
+              onValueChange={(v) => setStatusFilter(v as "ALL" | AccessRequestStatus)}
+            >
+              <SelectTrigger className="w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">{t("arStatusAll")}</SelectItem>
+                <SelectItem value={AR_STATUS.PENDING}>{t("arStatusPending")}</SelectItem>
+                <SelectItem value={AR_STATUS.APPROVED}>{t("arStatusApproved")}</SelectItem>
+                <SelectItem value={AR_STATUS.DENIED}>{t("arStatusDenied")}</SelectItem>
+                <SelectItem value={AR_STATUS.EXPIRED}>{t("arStatusExpired")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
       {loading ? (
         <div className="flex justify-center py-4">
@@ -382,6 +390,7 @@ export function AccessRequestCard() {
           ))}
         </div>
       )}
+        </section>
       </CardContent>
 
       {/* Create access request dialog */}
