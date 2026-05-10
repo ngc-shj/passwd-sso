@@ -6,6 +6,7 @@ import { useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionCardHeader } from "@/components/settings/account/section-card-header";
+import { InactiveItemsSection } from "@/components/settings/shared/inactive-items-section";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -588,13 +589,12 @@ export function ServiceAccountCard() {
             </Collapsible>
           ))}
           {inactiveAccounts.length > 0 && (
-            <Collapsible open={showInactiveSa} onOpenChange={setShowInactiveSa}>
-              <CollapsibleTrigger className="flex items-center gap-1 text-sm text-muted-foreground hover:underline">
-                {t("saInactive")} ({inactiveAccounts.length})
-                <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", showInactiveSa && "rotate-180")} />
-              </CollapsibleTrigger>
-              <CollapsibleContent className="space-y-2 mt-2">
-                {inactiveAccounts.map((sa) => (
+            <InactiveItemsSection
+              open={showInactiveSa}
+              onOpenChange={setShowInactiveSa}
+              triggerLabel={`${t("saInactive")} (${inactiveAccounts.length})`}
+            >
+              {inactiveAccounts.map((sa) => (
                   <Collapsible
                     key={sa.id}
                     open={expandedSa.has(sa.id)}
@@ -762,8 +762,7 @@ export function ServiceAccountCard() {
                     </div>
                   </Collapsible>
                 ))}
-              </CollapsibleContent>
-            </Collapsible>
+            </InactiveItemsSection>
           )}
           </div>
         )}

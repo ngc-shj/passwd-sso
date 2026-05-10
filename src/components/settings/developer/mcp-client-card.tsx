@@ -12,11 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { CopyButton } from "@/components/passwords/shared/copy-button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { InactiveItemsSection } from "@/components/settings/shared/inactive-items-section";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,9 +31,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Blocks, ChevronDown, Loader2, Plus, Search, Trash2, Pencil, Users } from "lucide-react";
+import { Blocks, Loader2, Plus, Search, Trash2, Pencil, Users } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
 import { apiPath } from "@/lib/constants";
 import { MCP_SCOPES, LOOPBACK_REDIRECT_RE } from "@/lib/constants/auth/mcp";
 import { fetchApi } from "@/lib/url-helpers";
@@ -538,15 +533,13 @@ const toastUpdateApiError = (errorCode: unknown) => {
             )}
             {activeClients.map(renderClientItem)}
             {inactiveClients.length > 0 && (
-              <Collapsible open={showInactive} onOpenChange={setShowInactive}>
-                <CollapsibleTrigger className="flex items-center gap-1 text-sm text-muted-foreground hover:underline">
-                  {t("mcpInactive")} ({inactiveClients.length})
-                  <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", showInactive && "rotate-180")} />
-                </CollapsibleTrigger>
-                <CollapsibleContent className="space-y-2 mt-2">
-                  {inactiveClients.map(renderClientItem)}
-                </CollapsibleContent>
-              </Collapsible>
+              <InactiveItemsSection
+                open={showInactive}
+                onOpenChange={setShowInactive}
+                triggerLabel={`${t("mcpInactive")} (${inactiveClients.length})`}
+              >
+                {inactiveClients.map(renderClientItem)}
+              </InactiveItemsSection>
             )}
             {searchFiltered.length === 0 && searchQuery && (
               <p className="text-sm text-center text-muted-foreground py-4">
