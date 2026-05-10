@@ -261,8 +261,6 @@ export function AccessRequestCard() {
     return t(map[status]);
   };
 
-
-
   const toggleScope = (scope: string, checked: boolean) => {
     setSelectedScopes((prev) => {
       const next = new Set(prev);
@@ -317,79 +315,79 @@ export function AccessRequestCard() {
             </Select>
           </div>
 
-      {loading ? (
-        <div className="flex justify-center py-4">
-          <Loader2 className="h-4 w-4 animate-spin" />
-        </div>
-      ) : requests.length === 0 ? (
-        <p className="text-center text-muted-foreground">{t("noAccessRequests")}</p>
-      ) : (
-        <div className="space-y-2">
-          {requests.map((req) => (
-            <div key={req.id} className="border rounded-md p-3 space-y-2">
-              <div className="flex items-start justify-between gap-2">
-                <div className="space-y-1 min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">
-                      {req.serviceAccount?.name ?? "—"}
-                    </span>
-                    <Badge variant={STATUS_VARIANTS[req.status]} className="shrink-0">
-                      {statusLabel(req.status)}
-                    </Badge>
-                  </div>
-                  <ScopeBadges scopes={req.requestedScope} />
-                  {req.justification && (
-                    <p className="text-xs text-muted-foreground">{req.justification}</p>
-                  )}
-                </div>
-                <div className="flex flex-col items-end gap-1 shrink-0">
-                  <span className="text-xs text-muted-foreground">
-                    {t("arCreatedAt", { date: formatDateTime(req.createdAt, locale) })}
-                  </span>
-                {req.status === AR_STATUS.PENDING && (
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => handleApprove(req.id)}
-                      disabled={approving === req.id}
-                    >
-                      {approving === req.id ? (
-                        <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                      ) : (
-                        <CheckCircle className="h-3 w-3 mr-1" />
-                      )}
-                      {t("arApprove")}
-                    </Button>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive">
-                          <XCircle className="h-3 w-3 mr-1" />
-                          {t("arDeny")}
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>{t("arDenyConfirm")}</AlertDialogTitle>
-                          <AlertDialogDescription>{t("arDenyWarning")}</AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleDeny(req.id)}>
-                            {t("arDeny")}
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </div>
-                )}
-                </div>
-              </div>
+          {loading ? (
+            <div className="flex justify-center py-4">
+              <Loader2 className="h-4 w-4 animate-spin" />
             </div>
-          ))}
-        </div>
-      )}
+          ) : requests.length === 0 ? (
+            <p className="text-center text-muted-foreground">{t("noAccessRequests")}</p>
+          ) : (
+            <div className="space-y-2">
+              {requests.map((req) => (
+                <div key={req.id} className="border rounded-md p-3 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="space-y-1 min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">
+                          {req.serviceAccount?.name ?? "—"}
+                        </span>
+                        <Badge variant={STATUS_VARIANTS[req.status]} className="shrink-0">
+                          {statusLabel(req.status)}
+                        </Badge>
+                      </div>
+                      <ScopeBadges scopes={req.requestedScope} />
+                      {req.justification && (
+                        <p className="text-xs text-muted-foreground">{req.justification}</p>
+                      )}
+                    </div>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <span className="text-xs text-muted-foreground">
+                        {t("arCreatedAt", { date: formatDateTime(req.createdAt, locale) })}
+                      </span>
+                      {req.status === AR_STATUS.PENDING && (
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => handleApprove(req.id)}
+                            disabled={approving === req.id}
+                          >
+                            {approving === req.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                            ) : (
+                              <CheckCircle className="h-3 w-3 mr-1" />
+                            )}
+                            {t("arApprove")}
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive">
+                                <XCircle className="h-3 w-3 mr-1" />
+                                {t("arDeny")}
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>{t("arDenyConfirm")}</AlertDialogTitle>
+                                <AlertDialogDescription>{t("arDenyWarning")}</AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleDeny(req.id)}>
+                                  {t("arDeny")}
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       </CardContent>
 
