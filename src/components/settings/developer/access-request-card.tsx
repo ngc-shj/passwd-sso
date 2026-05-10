@@ -195,6 +195,12 @@ export function AccessRequestCard() {
           toast.error(t("arAlreadyProcessed"));
         } else if (res.status === 400 && code === "INVALID_SCOPE") {
           toast.error(t("arInvalidScope"));
+        } else if (res.status === 400) {
+          // Other 400 codes (e.g. VALIDATION_ERROR) are validation failures
+          // unrelated to scope; surface them as the approve-failed fallback
+          // rather than letting the helper try to translate codes from
+          // unrelated domains.
+          toast.error(t("arApproveFailed"));
         } else {
           const apiKey = tokenMintApiErrorKey(code);
           toast.error(apiKey ? tApi(apiKey) : t("arApproveFailed"));

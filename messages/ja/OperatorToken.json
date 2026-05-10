@@ -3,6 +3,7 @@
   "description": "admin/maintenance 系ルート (purge-history, purge-audit-logs, rotate-master-key 等) を呼ぶための、運用者ごとの bearer トークン。各トークンは発行者本人に紐づき、漏洩時もそのユーザーのみが偽装される (任意の admin への詐称は不可)。",
   "tenantScopeNote": "トークンは現在のテナントにスコープされます。複数テナントの運用者はテナントごとに別トークンを発行してください。",
   "createToken": "トークンを発行",
+  "createTokenDescription": "発行する運用者トークンの名前と有効期限を指定してください。発行後にプレーンテキストの値が一度だけ表示されます。",
   "tokenName": "名前",
   "tokenNamePlaceholder": "例: laptop, 2026-04-27",
   "tokenExpiry": "有効期限",

@@ -331,7 +331,7 @@ export function OperatorTokenCard() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("createToken")}</DialogTitle>
-            <DialogDescription>{t("description")}</DialogDescription>
+            <DialogDescription>{t("createTokenDescription")}</DialogDescription>
           </DialogHeader>
 
           {createdToken ? (

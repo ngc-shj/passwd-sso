@@ -3,6 +3,7 @@
   "description": "Per-operator bearer tokens for the admin/maintenance routes (purge-history, purge-audit-logs, rotate-master-key, etc.). Each token is bound to your user identity; a leaked token forges only your identity, never an arbitrary admin.",
   "tenantScopeNote": "Tokens are scoped to the current tenant. Multi-tenant operators must mint a separate token per tenant.",
   "createToken": "Create token",
+  "createTokenDescription": "Configure name and expiry for the new operator token. The plaintext value will be shown once after creation.",
   "tokenName": "Name",
   "tokenNamePlaceholder": "e.g. laptop, 2026-04-27",
   "tokenExpiry": "Expires in",

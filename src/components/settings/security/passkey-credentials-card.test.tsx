@@ -227,9 +227,13 @@ describe("PasskeyCredentialsCard", () => {
     );
 
     expect(verifyCall).toBeTruthy();
-    expect(JSON.parse(String(verifyCall?.[1]?.body))).toMatchObject({
-      nickname: "auto-name",
-    });
+    const verifyBody = JSON.parse(String(verifyCall?.[1]?.body));
+    expect(verifyBody).toMatchObject({ nickname: "auto-name" });
+    // No-PRF path: PRF-wrapped fields must be absent (otherwise the server
+    // would attempt to register a PRF wrapping that the client never derived).
+    expect(verifyBody).not.toHaveProperty("prfEncryptedSecretKey");
+    expect(verifyBody).not.toHaveProperty("prfSecretKeyIv");
+    expect(verifyBody).not.toHaveProperty("prfSecretKeyAuthTag");
   });
 
   it("Sec-7(b) wrap-throws path: finally still zeroizes secretKey AND prfOutput", async () => {

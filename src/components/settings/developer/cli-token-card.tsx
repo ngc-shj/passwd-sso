@@ -27,8 +27,6 @@ export function CliTokenCard() {
         const data = await res.json();
         setToken(data.token);
         toast.success(t("generated"));
-      } else if (res.status === 429) {
-        toast.error(t("rateLimited"));
       } else {
         const err = await res.json().catch(() => ({}));
         const apiKey = tokenMintApiErrorKey(err.error);

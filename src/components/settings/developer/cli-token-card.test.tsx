@@ -50,16 +50,16 @@ describe("CliTokenCard", () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
-  it("shows rate-limit toast on 429", async () => {
+  it("shows rate-limit toast on 429 (routed through ApiErrors)", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 429,
-      json: () => Promise.resolve({}),
+      json: () => Promise.resolve({ error: "RATE_LIMIT_EXCEEDED" }),
     });
     render(<CliTokenCard />);
     fireEvent.click(screen.getByRole("button", { name: /generate/ }));
     await waitFor(() => {
-      expect(mockToast.error).toHaveBeenCalledWith("rateLimited");
+      expect(mockToast.error).toHaveBeenCalledWith("rateLimitExceeded");
     });
   });
 

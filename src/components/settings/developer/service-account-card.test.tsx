@@ -606,6 +606,75 @@ describe("ServiceAccountCard", () => {
     });
   });
 
+  it("falls back to local tokenCreateFailed for an unrecognized API error code", async () => {
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        if (url.includes("/tokens")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ tokens: sampleTokens }),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            serviceAccounts: [
+              {
+                id: "sa-active",
+                name: "active-sa",
+                description: null,
+                isActive: true,
+                createdAt: "2025-01-01T00:00:00Z",
+              },
+            ],
+          }),
+        });
+      }
+      if (init.method === "POST" && url.includes("/tokens")) {
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          json: () => Promise.resolve({ error: "BOGUS_NOT_IN_ALLOWLIST" }),
+        });
+      }
+      return Promise.resolve({ ok: false });
+    });
+
+    await act(async () => {
+      render(<ServiceAccountCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("active-sa")).toBeInTheDocument();
+    });
+
+    const tokenBtns = screen
+      .getAllByRole("button")
+      .filter((b) => b.textContent?.includes("createToken"));
+    await act(async () => {
+      fireEvent.click(tokenBtns[0]);
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("tokenNamePlaceholder"), {
+      target: { value: "my-token" },
+    });
+    fireEvent.click(screen.getAllByTestId("checkbox")[0]);
+    fireEvent.change(screen.getByDisplayValue(""), {
+      target: { value: "2026-12-31" },
+    });
+
+    const createTokenBtn = screen
+      .getAllByRole("button")
+      .find((b) => b.textContent === "create" && !b.hasAttribute("disabled"));
+    await act(async () => {
+      fireEvent.click(createTokenBtn!);
+    });
+
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("tokenCreateFailed");
+    });
+  });
+
   it("deletes SA — click delete, confirm in AlertDialog, verifies DELETE call", async () => {
     setupFetchAccounts();
 

@@ -208,4 +208,32 @@ describe("ScimTokenManager", () => {
       expect(mockToast.error).toHaveBeenCalledWith("sessionStepUpRequired");
     });
   });
+
+  it("falls back to local networkError for an unrecognized API error code", async () => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({ error: "BOGUS_NOT_IN_ALLOWLIST" }),
+      });
+
+    await act(async () => {
+      render(<ScimTokenManager locale="en" />);
+    });
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalled();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "scimCreateToken" }));
+    const createButtons = screen.getAllByRole("button", { name: "scimCreateToken" });
+    await act(async () => {
+      fireEvent.click(createButtons[createButtons.length - 1]);
+    });
+
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("networkError");
+    });
+  });
 });

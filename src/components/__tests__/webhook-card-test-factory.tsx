@@ -2,7 +2,7 @@
 // Each test file imports this module and calls the exported helpers at the top level
 // so that vi.mock() hoisting works correctly.
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import React from "react";
 
@@ -94,6 +94,24 @@ export function setupFetchWebhooks(
     }
     return Promise.resolve({ ok: false });
   });
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// Locate the submit button INSIDE the create dialog. Avoids the trigger button
+// (same text) that lives outside `dialog-content` after the C1 dialog refactor.
+function getDialogSubmitButton(textIncludes: string): HTMLElement {
+  const btn = within(screen.getByTestId("dialog-content"))
+    .getAllByRole("button")
+    .find((b) => b.textContent?.includes(textIncludes));
+  if (!btn) {
+    throw new Error(
+      `submit button matching "${textIncludes}" not found inside dialog-content`,
+    );
+  }
+  return btn;
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +232,11 @@ export function setupWebhookCardMocks() {
     }) => <button className={className}>{children}</button>,
   }));
 
+  // NOTE: This Dialog mock unconditionally renders its children regardless of
+  // the `open` prop, mirroring the AlertDialog mock below. Individual test
+  // files (`base-webhook-card.test.tsx`, `audit-delivery-target-card.test.tsx`)
+  // gate on `open ?` instead — be aware of the divergence when porting tests
+  // between the factory and those files.
   vi.mock("@/components/ui/dialog", () => ({
     Dialog: ({ children }: { children: ReactNode }) => <div>{children}</div>,
     DialogTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -414,12 +437,9 @@ export function createWebhookCardTests(
       expect(checkboxes.length).toBeGreaterThan(0);
       fireEvent.click(checkboxes[0]);
 
-      const createButtons = screen
-        .getAllByRole("button")
-        .filter((b) => b.textContent?.includes("addWebhook"));
-      expect(createButtons.length).toBeGreaterThan(0);
+      const submitBtn = getDialogSubmitButton("addWebhook");
       await act(async () => {
-        fireEvent.click(createButtons[createButtons.length - 1]);
+        fireEvent.click(submitBtn);
       });
 
       await waitFor(() => {
@@ -494,12 +514,9 @@ export function createWebhookCardTests(
       expect(checkboxes.length).toBeGreaterThan(0);
       fireEvent.click(checkboxes[0]);
 
-      const createButtons = screen
-        .getAllByRole("button")
-        .filter((b) => b.textContent?.includes("addWebhook"));
-      expect(createButtons.length).toBeGreaterThan(0);
+      const submitBtn = getDialogSubmitButton("addWebhook");
       await act(async () => {
-        fireEvent.click(createButtons[createButtons.length - 1]);
+        fireEvent.click(submitBtn);
       });
 
       await waitFor(() => {
@@ -527,11 +544,9 @@ export function createWebhookCardTests(
       const checkboxes = screen.getAllByTestId("checkbox");
       fireEvent.click(checkboxes[0]);
 
-      const createButtons = screen
-        .getAllByRole("button")
-        .filter((b) => b.textContent?.includes("addWebhook"));
+      const submitBtn = getDialogSubmitButton("addWebhook");
       await act(async () => {
-        fireEvent.click(createButtons[createButtons.length - 1]);
+        fireEvent.click(submitBtn);
       });
 
       expect(screen.getByText("urlHttpsRequired")).toBeInTheDocument();
@@ -560,11 +575,9 @@ export function createWebhookCardTests(
       const checkboxes = screen.getAllByTestId("checkbox");
       fireEvent.click(checkboxes[0]);
 
-      const createButtons = screen
-        .getAllByRole("button")
-        .filter((b) => b.textContent?.includes("addWebhook"));
+      const submitBtn = getDialogSubmitButton("addWebhook");
       await act(async () => {
-        fireEvent.click(createButtons[createButtons.length - 1]);
+        fireEvent.click(submitBtn);
       });
 
       expect(screen.getByText("urlInvalid")).toBeInTheDocument();
@@ -608,11 +621,9 @@ export function createWebhookCardTests(
       const checkboxes = screen.getAllByTestId("checkbox");
       fireEvent.click(checkboxes[0]);
 
-      const createButtons = screen
-        .getAllByRole("button")
-        .filter((b) => b.textContent?.includes("addWebhook"));
+      const submitBtn = getDialogSubmitButton("addWebhook");
       await act(async () => {
-        fireEvent.click(createButtons[createButtons.length - 1]);
+        fireEvent.click(submitBtn);
       });
 
       await waitFor(() => {
@@ -638,11 +649,9 @@ export function createWebhookCardTests(
       const checkboxes = screen.getAllByTestId("checkbox");
       fireEvent.click(checkboxes[0]);
 
-      const createButtons = screen
-        .getAllByRole("button")
-        .filter((b) => b.textContent?.includes("addWebhook"));
+      const submitBtn = getDialogSubmitButton("addWebhook");
       await act(async () => {
-        fireEvent.click(createButtons[createButtons.length - 1]);
+        fireEvent.click(submitBtn);
       });
 
       expect(screen.getByText("urlInvalid")).toBeInTheDocument();
@@ -669,10 +678,8 @@ export function createWebhookCardTests(
         target: { value: "https://example.com/hook" },
       });
 
-      const createButtons = screen
-        .getAllByRole("button")
-        .filter((b) => b.textContent?.includes("addWebhook"));
-      expect(createButtons[createButtons.length - 1]).toBeDisabled();
+      const submitBtn = getDialogSubmitButton("addWebhook");
+      expect(submitBtn).toBeDisabled();
     });
 
     // 13. shows toast error on delete failure
@@ -867,11 +874,9 @@ export function createWebhookCardTests(
       const checkboxes = screen.getAllByTestId("checkbox");
       fireEvent.click(checkboxes[0]);
 
-      const createButtons = screen
-        .getAllByRole("button")
-        .filter((b) => b.textContent?.includes("addWebhook"));
+      const submitBtn = getDialogSubmitButton("addWebhook");
       await act(async () => {
-        fireEvent.click(createButtons[createButtons.length - 1]);
+        fireEvent.click(submitBtn);
       });
 
       await waitFor(() => {
@@ -910,11 +915,9 @@ export function createWebhookCardTests(
       const checkboxes = screen.getAllByTestId("checkbox");
       fireEvent.click(checkboxes[0]);
 
-      const createButtons = screen
-        .getAllByRole("button")
-        .filter((b) => b.textContent?.includes("addWebhook"));
+      const submitBtn = getDialogSubmitButton("addWebhook");
       await act(async () => {
-        fireEvent.click(createButtons[createButtons.length - 1]);
+        fireEvent.click(submitBtn);
       });
 
       await waitFor(() => {
@@ -998,13 +1001,11 @@ export function createWebhookCardTests(
       });
 
       // Create button should now be enabled (URL + events selected)
-      const createButtons = screen
-        .getAllByRole("button")
-        .filter((b) => b.textContent?.includes("addWebhook"));
-      expect(createButtons[createButtons.length - 1]).not.toBeDisabled();
+      const submitBtn = getDialogSubmitButton("addWebhook");
+      expect(submitBtn).not.toBeDisabled();
 
       await act(async () => {
-        fireEvent.click(createButtons[createButtons.length - 1]);
+        fireEvent.click(submitBtn);
       });
 
       await waitFor(() => {

@@ -221,6 +221,30 @@ describe("OperatorTokenCard", () => {
     });
   });
 
+  it("falls back to local networkError for an unrecognized API error code", async () => {
+    mockFetchApi
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: "BOGUS_NOT_IN_ALLOWLIST" }),
+      });
+
+    render(<OperatorTokenCard />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "createToken" }));
+
+    const input = await screen.findByPlaceholderText("tokenNamePlaceholder");
+    fireEvent.change(input, { target: { value: "bogus-test" } });
+
+    const createButtons = await screen.findAllByRole("button", { name: "createToken" });
+    const createButton = createButtons[createButtons.length - 1];
+    fireEvent.click(createButton);
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith("networkError");
+    });
+  });
+
   it("renders an existing token and triggers revoke on confirm", async () => {
     const existingToken = {
       id: "tok-existing",

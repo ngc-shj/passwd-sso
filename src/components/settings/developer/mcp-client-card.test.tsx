@@ -654,6 +654,59 @@ describe("McpClientCard", () => {
     expect(mockToast.error).not.toHaveBeenCalledWith("mcpCreateFailed");
   });
 
+  it("create — falls back to local mcpCreateFailed for an unrecognized API error code", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ clients: [] }),
+        });
+      }
+      if (init.method === "POST") {
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          json: () => Promise.resolve({ error: "BOGUS_NOT_IN_ALLOWLIST" }),
+        });
+      }
+      return Promise.resolve({ ok: false });
+    });
+
+    await act(async () => {
+      render(<McpClientCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("noMcpClients")).toBeInTheDocument();
+    });
+
+    const registerBtn = screen.getAllByRole("button").find(
+      (b) => b.textContent?.includes("registerMcpClient")
+    );
+    await act(async () => {
+      fireEvent.click(registerBtn!);
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("mcpNamePlaceholder"), {
+      target: { value: "Loopback Client" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("mcpRedirectUrisPlaceholder"), {
+      target: { value: "http://localhost:3000/callback" },
+    });
+    fireEvent.click(screen.getAllByTestId("checkbox")[0]);
+
+    const createBtn = screen.getAllByRole("button").find(
+      (b) => b.textContent?.includes("create")
+    );
+    await act(async () => {
+      fireEvent.click(createBtn!);
+    });
+
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("mcpCreateFailed");
+    });
+  });
+
   it("delete client — confirm dialog, verify DELETE called", async () => {
     setupFetchClients();
 
