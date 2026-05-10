@@ -161,7 +161,13 @@ jobs:
       - run: npm run check:migration-drift
       - name: Check state-mutation centralization
         run: bash scripts/check-state-mutation-centralization.sh
-      - run: npm test
+      # `test:coverage` is `vitest run --coverage` — a strict superset of
+      # `npm test` (`vitest run`). Running both back-to-back doubled the test
+      # phase (~5m + ~6m) and pushed the job past its 15m timeout-minutes
+      # cap, even though every step succeeded. Drop the bare run; the
+      # coverage run carries the same pass/fail signal and the coverage
+      # report is already produced (no artifact upload, but the report stays
+      # available in the job log for spot inspection).
       - run: npm run test:coverage
       - run: npm run build
 
