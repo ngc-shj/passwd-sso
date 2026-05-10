@@ -18,7 +18,7 @@ import {
 import { API_KEY_TOKEN_LENGTH, API_KEY_PREFIX_LENGTH } from "@/lib/validations/common";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { MS_PER_HOUR } from "@/lib/constants/time";
-import { requireRecentSession } from "@/lib/auth/session/step-up";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 
 const apiKeyCreateLimiter = createRateLimiter({ windowMs: MS_PER_HOUR, max: 5 });
 
@@ -74,7 +74,7 @@ async function handlePOST(req: NextRequest) {
     return unauthorized();
   }
   if (authed.auth.type === "session") {
-    const stepUpError = await requireRecentSession(req);
+    const stepUpError = await requireRecentCurrentAuthMethod(req);
     if (stepUpError) return stepUpError;
   }
   const { userId } = authed.auth;

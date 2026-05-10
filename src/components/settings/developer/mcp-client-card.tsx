@@ -48,6 +48,9 @@ import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { FormDirtyBadge } from "@/components/settings/account/form-dirty-badge";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
+import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
+import { canUsePasskeyRecovery } from "@/lib/auth/webauthn/can-use-passkey-recovery";
 
 interface McpClient {
   id: string;
@@ -103,6 +106,7 @@ export function McpClientCard() {
   const t = useTranslations("MachineIdentity");
   const tCommon = useTranslations("Common");
   const tApi = useTranslations("ApiErrors");
+  const tAuth = useTranslations("Auth");
   const locale = useLocale();
 
   const [clients, setClients] = useState<McpClient[]>([]);
@@ -121,6 +125,9 @@ export function McpClientCard() {
   const [createScopeError, setCreateScopeError] = useState("");
   const [newCredentials, setNewCredentials] = useState<NewClientCredentials | null>(null);
   const [recentSessionOpen, setRecentSessionOpen] = useState(false);
+  const [reauthOpen, setReauthOpen] = useState(false);
+  const [reauthenticating, setReauthenticating] = useState(false);
+  const [reauthError, setReauthError] = useState<string | null>(null);
 
   // Edit dialog
   const [editOpen, setEditOpen] = useState(false);
@@ -218,7 +225,12 @@ const toastUpdateApiError = (errorCode: unknown) => {
       if (!res.ok) {
         const data = await res.json().catch(() => null) as ValidationErrorResponse | null;
         if (data?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-          setRecentSessionOpen(true);
+          setReauthError(null);
+          if (await canUsePasskeyRecovery()) {
+            setReauthOpen(true);
+          } else {
+            setRecentSessionOpen(true);
+          }
         } else if (res.status === 409 && data?.error === API_ERROR.MCP_CLIENT_NAME_CONFLICT) {
           setCreateNameError(t("mcpNameConflict"));
         } else if (res.status === 400 && data?.error === API_ERROR.VALIDATION_ERROR) {
@@ -258,6 +270,29 @@ const toastUpdateApiError = (errorCode: unknown) => {
       toast.error(t("mcpCreateFailed"));
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleReauthenticate = async () => {
+    setReauthenticating(true);
+    setReauthError(null);
+    try {
+      const result = await reauthenticateWithPasskey();
+      if (!result.ok) {
+        setReauthError(
+          result.error === "AUTHENTICATION_CANCELLED"
+            ? tAuth("reauthCancelled")
+            : tAuth("reauthFailed"),
+        );
+        return;
+      }
+      setReauthOpen(false);
+      // Retry the original mutation. After a successful ceremony the API will
+      // see fresh `passkey_verified_at`, so the SESSION_STEP_UP_REQUIRED branch
+      // does not re-trigger. Form state is preserved across the retry.
+      await handleCreate();
+    } finally {
+      setReauthenticating(false);
     }
   };
 
@@ -501,12 +536,23 @@ const toastUpdateApiError = (errorCode: unknown) => {
       />
       <CardContent className="space-y-4">
         <RecentSessionRequiredDialog
-          actionLabel={t("recentSessionAction")}
+          actionLabel={tAuth("recentSessionAction")}
           cancelLabel={tCommon("cancel")}
-          description={t("recentSessionDescription")}
+          description={tAuth("recentSessionDescription")}
           onOpenChange={setRecentSessionOpen}
           open={recentSessionOpen}
-          title={t("recentSessionTitle")}
+          title={tAuth("recentSessionTitle")}
+        />
+        <PasskeyReauthDialog
+          open={reauthOpen}
+          onOpenChange={setReauthOpen}
+          title={tAuth("reauthTitle")}
+          description={tAuth("reauthDescription")}
+          actionLabel={tAuth("reauthAction")}
+          cancelLabel={tCommon("cancel")}
+          errorMessage={reauthError}
+          isReauthenticating={reauthenticating}
+          onAction={handleReauthenticate}
         />
         <section className="space-y-3">
           <Button size="sm" onClick={() => setCreateOpen(true)}>

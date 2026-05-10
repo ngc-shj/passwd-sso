@@ -13,7 +13,9 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import type { ReactNode } from "react";
 
-const { mockFetch, mockToast } = vi.hoisted(() => ({
+const { mockFetch, mockToast, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
+  mockCanUsePasskeyRecovery: vi.fn(),
+  mockReauthenticateWithPasskey: vi.fn(),
   mockFetch: vi.fn(),
   mockToast: { error: vi.fn(), success: vi.fn() },
 }));
@@ -41,6 +43,31 @@ vi.mock("@/components/passwords/shared/copy-button", () => ({
       Copy
     </button>
   ),
+}));
+
+vi.mock("@/components/auth/passkey-reauth-dialog", () => ({
+  PasskeyReauthDialog: ({
+    open,
+    onAction,
+  }: {
+    open: boolean;
+    onAction: () => void | Promise<void>;
+  }) =>
+    open ? (
+      <div data-testid="passkey-reauth-dialog">
+        <button type="button" data-testid="passkey-reauth-action" onClick={() => void onAction()}>
+          verify
+        </button>
+      </div>
+    ) : null,
+}));
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
 
 vi.mock("@/components/auth/recent-session-required-dialog", () => ({
@@ -302,6 +329,10 @@ function setupFetchClients(clients = sampleClients) {
 describe("McpClientCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: user has no passkey → recent-session dialog opens. Tests
+    // exercising the inline passkey reauth path override this.
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true, verifiedAt: "2026-05-10T00:00:00Z" });
   });
 
   it("shows loading spinner initially", async () => {

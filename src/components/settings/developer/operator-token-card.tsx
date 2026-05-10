@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/collapsible";
 import { KeyRound, Loader2, Plus, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
-import { API_PATH, apiPath } from "@/lib/constants";
+import { apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
 import {
@@ -51,7 +51,9 @@ import {
 } from "@/lib/constants/auth/operator-token";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
+import { canUsePasskeyRecovery } from "@/lib/auth/webauthn/can-use-passkey-recovery";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 
 const TOKEN_STATUS_VARIANT: Record<
@@ -91,6 +93,7 @@ interface CreatedToken {
 export function OperatorTokenCard() {
   const t = useTranslations("OperatorToken");
   const tApi = useTranslations("ApiErrors");
+  const tAuth = useTranslations("Auth");
   const locale = useLocale();
 
   const [tokens, setTokens] = useState<OperatorToken[]>([]);
@@ -138,17 +141,6 @@ export function OperatorTokenCard() {
   useEffect(() => {
     fetchTokens();
   }, [fetchTokens]);
-
-  const canUsePasskeyRecovery = useCallback(async () => {
-    try {
-      const res = await fetchApi(API_PATH.USER_AUTH_PROVIDER);
-      if (!res.ok) return true;
-      const data = (await res.json()) as { canPasskeySignIn?: boolean };
-      return data.canPasskeySignIn !== false;
-    } catch {
-      return true;
-    }
-  }, []);
 
   const closeCreateDialog = () => {
     setCreateOpen(false);
@@ -202,8 +194,8 @@ export function OperatorTokenCard() {
       if (!result.ok) {
         setReauthError(
           result.error === "AUTHENTICATION_CANCELLED"
-            ? t("reauthCancelled")
-            : t("reauthFailed"),
+            ? tAuth("reauthCancelled")
+            : tAuth("reauthFailed"),
         );
         return;
       }
@@ -345,12 +337,12 @@ export function OperatorTokenCard() {
       />
       <CardContent className="space-y-6">
         <RecentSessionRequiredDialog
-          actionLabel={t("recentSessionAction")}
+          actionLabel={tAuth("recentSessionAction")}
           cancelLabel={t("cancel")}
-          description={t("recentSessionDescription")}
+          description={tAuth("recentSessionDescription")}
           onOpenChange={setRecentSessionOpen}
           open={recentSessionOpen}
-          title={t("recentSessionTitle")}
+          title={tAuth("recentSessionTitle")}
         />
         <p className="text-xs text-muted-foreground">{t("tenantScopeNote")}</p>
         <section className="space-y-3">
@@ -400,37 +392,17 @@ export function OperatorTokenCard() {
           )}
         </section>
 
-        <AlertDialog open={reauthOpen} onOpenChange={setReauthOpen}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t("reauthTitle")}</AlertDialogTitle>
-              <AlertDialogDescription>
-                {t("reauthDescription")}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            {reauthError && (
-              <p className="text-sm text-destructive">{reauthError}</p>
-            )}
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={reauthenticating}>
-                {t("cancel")}
-              </AlertDialogCancel>
-              <AlertDialogAction
-                onClick={(event) => {
-                  event.preventDefault();
-                  void handleReauthenticate();
-                }}
-                disabled={reauthenticating}
-              >
-                {reauthenticating ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  t("reauthAction")
-                )}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <PasskeyReauthDialog
+          open={reauthOpen}
+          onOpenChange={setReauthOpen}
+          title={tAuth("reauthTitle")}
+          description={tAuth("reauthDescription")}
+          actionLabel={tAuth("reauthAction")}
+          cancelLabel={t("cancel")}
+          errorMessage={reauthError}
+          isReauthenticating={reauthenticating}
+          onAction={handleReauthenticate}
+        />
       </CardContent>
 
       <Dialog

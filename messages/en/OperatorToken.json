@@ -29,16 +29,8 @@
   "cancel": "Cancel",
   "networkError": "Network error. Please retry.",
   "staleSession": "Re-authenticate within the last 15 minutes to continue this action, then try again.",
-  "reauthTitle": "Passkey verification required",
-  "reauthDescription": "Confirm with your passkey to finish issuing this operator token without leaving the page.",
-  "reauthAction": "Verify with passkey",
-  "reauthFailed": "Passkey verification failed. Please try again.",
-  "reauthCancelled": "Passkey verification was cancelled.",
   "reauthStillRequired": "Passkey verification is still required. Please try again.",
   "reauthRetryFailed": "Operator token issuance could not be completed after verification. Please try again.",
-  "recentSessionTitle": "Sign in again to continue",
-  "recentSessionDescription": "This action requires a more recent browser sign-in for your current authentication method. Sign in again, then retry.",
-  "recentSessionAction": "Sign in again",
   "limitExceeded": "Maximum number of operator tokens per tenant reached. Please revoke unused tokens first.",
   "usageHint": "Use in scripts: ADMIN_API_TOKEN=op_... scripts/purge-history.sh"
 }

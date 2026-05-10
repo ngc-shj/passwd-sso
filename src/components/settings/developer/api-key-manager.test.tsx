@@ -11,9 +11,11 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
-const { mockFetch, mockToast } = vi.hoisted(() => ({
+const { mockFetch, mockToast, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
   mockToast: { success: vi.fn(), error: vi.fn() },
+  mockCanUsePasskeyRecovery: vi.fn(),
+  mockReauthenticateWithPasskey: vi.fn(),
 }));
 
 vi.mock("next-intl", () => ({
@@ -44,6 +46,31 @@ vi.mock("@/components/passwords/shared/copy-button", () => ({
 vi.mock("@/components/auth/recent-session-required-dialog", () => ({
   RecentSessionRequiredDialog: ({ open }: { open: boolean }) =>
     open ? <div data-testid="recent-session-dialog" /> : null,
+}));
+
+vi.mock("@/components/auth/passkey-reauth-dialog", () => ({
+  PasskeyReauthDialog: ({
+    open,
+    onAction,
+  }: {
+    open: boolean;
+    onAction: () => void | Promise<void>;
+  }) =>
+    open ? (
+      <div data-testid="passkey-reauth-dialog">
+        <button type="button" data-testid="passkey-reauth-action" onClick={() => void onAction()}>
+          verify
+        </button>
+      </div>
+    ) : null,
+}));
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
 
 vi.mock("@/components/ui/dialog", () => ({
@@ -92,6 +119,11 @@ function setupKeysList(keys: ApiKeyEntry[]) {
 describe("ApiKeyManager", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: user has no passkey, so the recent-session dialog opens (the
+    // pre-passkey-rebalance UX). Tests that exercise the inline passkey reauth
+    // flow override this.
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true, verifiedAt: "2026-05-10T00:00:00Z" });
   });
 
   it("renders the empty state when no keys exist", async () => {

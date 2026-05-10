@@ -79,6 +79,9 @@ export const NS_DASHBOARD_ALL: readonly Namespace[] = [
 export const NS_ADMIN_ALL: readonly Namespace[] = [
   ...NS_GLOBAL,
   "Vault",
+  // Auth is required for shared inline-reauth dialogs (PasskeyReauthDialog,
+  // RecentSessionRequiredDialog) consumed by credential-issuance cards.
+  "Auth",
   "AdminConsole",
   "TenantAdmin",
   "TenantWebhook",

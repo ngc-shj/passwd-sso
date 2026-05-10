@@ -40,8 +40,8 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
-vi.mock("@/lib/auth/session/step-up", () => ({
-  requireRecentSession: mockRequireRecentSession,
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 vi.mock("@/lib/logger", () => {
   const noop = vi.fn();

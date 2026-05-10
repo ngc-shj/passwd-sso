@@ -51,6 +51,7 @@ interface TargetItem {
   lastError: string | null;
   lastDeliveredAt: string | null;
   createdAt: string;
+  endpoint: string | null;
 }
 
 interface ConfigState {
@@ -187,8 +188,7 @@ export function AuditDeliveryTargetCard() {
         return;
       }
       toast.success(t("created"));
-      setKind("");
-      setConfig(defaultConfig);
+      closeCreateDialog();
       fetchTargets();
     } catch {
       toast.error(t("createFailed"));
@@ -257,6 +257,11 @@ export function AuditDeliveryTargetCard() {
             {formatDateTime(target.createdAt, locale)}
           </span>
         </div>
+        {target.endpoint && (
+          <p className="text-xs font-mono text-muted-foreground truncate" title={target.endpoint}>
+            {target.endpoint}
+          </p>
+        )}
         <div className="text-xs text-muted-foreground space-x-3">
           {target.failCount > 0 && (
             <span className="text-amber-600 dark:text-amber-400">
