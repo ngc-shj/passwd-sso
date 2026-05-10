@@ -9,7 +9,6 @@ import {
 } from "@/components/ui/card";
 import { SectionCardHeader } from "@/components/settings/account/section-card-header";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -88,7 +87,6 @@ export function PasskeyCredentialsCard() {
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [loading, setLoading] = useState(true);
   const [registering, setRegistering] = useState(false);
-  const [nickname, setNickname] = useState("");
 
   // Auth provider check — whether user can use passkey for sign-in
   const [canPasskeySignIn, setCanPasskeySignIn] = useState(true); // fail-open
@@ -191,10 +189,10 @@ export function PasskeyCredentialsCard() {
         }
       }
 
-      // 4. Resolve nickname: user input or auto-generated from transports
+      // 4. Auto-generate nickname from transports; user can rename after registration.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const transports: string[] = (responseJSON as any).response?.transports ?? [];
-      const resolvedNickname = nickname || generateDefaultNickname(transports);
+      const resolvedNickname = generateDefaultNickname(transports);
 
       // 5. Send to server
       const verifyRes = await fetchApi(API_PATH.WEBAUTHN_REGISTER_VERIFY, {
@@ -220,7 +218,6 @@ export function PasskeyCredentialsCard() {
           toast.warning(t("prfNotSupportedWarning"));
         }
 
-        setNickname("");
         fetchCredentials();
       } else {
         const err = await verifyRes.json().catch(() => ({}));
@@ -439,15 +436,6 @@ export function PasskeyCredentialsCard() {
         {/* Register section */}
         {webAuthnAvailable && (
           <section className="space-y-3">
-            <div className="space-y-2">
-              <Label>{t("nickname")}</Label>
-              <Input
-                value={nickname}
-                onChange={(e) => setNickname(e.target.value)}
-                placeholder={t("nicknamePlaceholder")}
-                maxLength={NAME_MAX_LENGTH}
-              />
-            </div>
             <Button
               onClick={handleRegister}
               disabled={registering || !vaultUnlocked}
@@ -460,6 +448,7 @@ export function PasskeyCredentialsCard() {
               )}
               {t("register")}
             </Button>
+            <p className="text-xs text-muted-foreground">{t("registerHint")}</p>
             {!vaultUnlocked && (
               <p className="text-xs text-muted-foreground">
                 {t("vaultMustBeUnlocked")}

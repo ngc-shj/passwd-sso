@@ -214,6 +214,19 @@ export function setupWebhookCardMocks() {
     }) => <button className={className}>{children}</button>,
   }));
 
+  vi.mock("@/components/ui/dialog", () => ({
+    Dialog: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+    DialogTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
+    DialogContent: ({ children }: { children: ReactNode }) => (
+      <div data-testid="dialog-content">{children}</div>
+    ),
+    DialogHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+    DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
+    DialogDescription: ({ children }: { children: ReactNode }) => <p>{children}</p>,
+    DialogFooter: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+    DialogClose: ({ children }: { children: ReactNode }) => <>{children}</>,
+  }));
+
   vi.mock("@/components/ui/alert-dialog", () => ({
     AlertDialog: ({ children }: { children: ReactNode }) => (
       <div>{children}</div>
@@ -406,7 +419,7 @@ export function createWebhookCardTests(
         .filter((b) => b.textContent?.includes("addWebhook"));
       expect(createButtons.length).toBeGreaterThan(0);
       await act(async () => {
-        fireEvent.click(createButtons[0]);
+        fireEvent.click(createButtons[createButtons.length - 1]);
       });
 
       await waitFor(() => {
@@ -486,7 +499,7 @@ export function createWebhookCardTests(
         .filter((b) => b.textContent?.includes("addWebhook"));
       expect(createButtons.length).toBeGreaterThan(0);
       await act(async () => {
-        fireEvent.click(createButtons[0]);
+        fireEvent.click(createButtons[createButtons.length - 1]);
       });
 
       await waitFor(() => {
@@ -518,7 +531,7 @@ export function createWebhookCardTests(
         .getAllByRole("button")
         .filter((b) => b.textContent?.includes("addWebhook"));
       await act(async () => {
-        fireEvent.click(createButtons[0]);
+        fireEvent.click(createButtons[createButtons.length - 1]);
       });
 
       expect(screen.getByText("urlHttpsRequired")).toBeInTheDocument();
@@ -551,7 +564,7 @@ export function createWebhookCardTests(
         .getAllByRole("button")
         .filter((b) => b.textContent?.includes("addWebhook"));
       await act(async () => {
-        fireEvent.click(createButtons[0]);
+        fireEvent.click(createButtons[createButtons.length - 1]);
       });
 
       expect(screen.getByText("urlInvalid")).toBeInTheDocument();
@@ -599,7 +612,7 @@ export function createWebhookCardTests(
         .getAllByRole("button")
         .filter((b) => b.textContent?.includes("addWebhook"));
       await act(async () => {
-        fireEvent.click(createButtons[0]);
+        fireEvent.click(createButtons[createButtons.length - 1]);
       });
 
       await waitFor(() => {
@@ -629,7 +642,7 @@ export function createWebhookCardTests(
         .getAllByRole("button")
         .filter((b) => b.textContent?.includes("addWebhook"));
       await act(async () => {
-        fireEvent.click(createButtons[0]);
+        fireEvent.click(createButtons[createButtons.length - 1]);
       });
 
       expect(screen.getByText("urlInvalid")).toBeInTheDocument();
@@ -659,7 +672,7 @@ export function createWebhookCardTests(
       const createButtons = screen
         .getAllByRole("button")
         .filter((b) => b.textContent?.includes("addWebhook"));
-      expect(createButtons[0]).toBeDisabled();
+      expect(createButtons[createButtons.length - 1]).toBeDisabled();
     });
 
     // 13. shows toast error on delete failure
@@ -858,7 +871,7 @@ export function createWebhookCardTests(
         .getAllByRole("button")
         .filter((b) => b.textContent?.includes("addWebhook"));
       await act(async () => {
-        fireEvent.click(createButtons[0]);
+        fireEvent.click(createButtons[createButtons.length - 1]);
       });
 
       await waitFor(() => {
@@ -901,7 +914,7 @@ export function createWebhookCardTests(
         .getAllByRole("button")
         .filter((b) => b.textContent?.includes("addWebhook"));
       await act(async () => {
-        fireEvent.click(createButtons[0]);
+        fireEvent.click(createButtons[createButtons.length - 1]);
       });
 
       await waitFor(() => {
@@ -988,10 +1001,10 @@ export function createWebhookCardTests(
       const createButtons = screen
         .getAllByRole("button")
         .filter((b) => b.textContent?.includes("addWebhook"));
-      expect(createButtons[0]).not.toBeDisabled();
+      expect(createButtons[createButtons.length - 1]).not.toBeDisabled();
 
       await act(async () => {
-        fireEvent.click(createButtons[0]);
+        fireEvent.click(createButtons[createButtons.length - 1]);
       });
 
       await waitFor(() => {

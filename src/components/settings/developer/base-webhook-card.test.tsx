@@ -40,6 +40,16 @@ vi.mock("@/components/passwords/shared/copy-button", () => ({
   ),
 }));
 
+vi.mock("@/components/ui/dialog", () => ({
+  Dialog: ({ children, open }: { children: React.ReactNode; open?: boolean }) => (
+    open ? <>{children}</> : null
+  ),
+  DialogContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogTitle: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogFooter: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
 import { BaseWebhookCard } from "./base-webhook-card";
 
 const config = {
@@ -89,6 +99,7 @@ describe("BaseWebhookCard", () => {
       expect(screen.getByText("noWebhooks")).toBeInTheDocument(),
     );
 
+    fireEvent.click(screen.getByRole("button", { name: /addWebhook/ }));
     const buttons = screen.getAllByRole("button", { name: /addWebhook/ });
     const submitBtn = buttons[buttons.length - 1];
     expect(submitBtn).toBeDisabled();
@@ -101,6 +112,7 @@ describe("BaseWebhookCard", () => {
       expect(screen.getByText("noWebhooks")).toBeInTheDocument(),
     );
 
+    fireEvent.click(screen.getByRole("button", { name: /addWebhook/ }));
     const url = screen.getByPlaceholderText("urlPlaceholder");
     fireEvent.change(url, { target: { value: "http://example.com/hook" } });
 

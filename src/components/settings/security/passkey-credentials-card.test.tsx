@@ -202,6 +202,36 @@ describe("PasskeyCredentialsCard", () => {
     expect(capturedPrfOutput.value!.every((b) => b === 0)).toBe(true);
   });
 
+  it("registers with an auto-generated nickname and shows the post-registration hint", async () => {
+    setupCredentialsList([]);
+    mockStartReg.mockResolvedValue({
+      responseJSON: { id: "cred-1", response: { transports: ["internal"] } },
+      prfOutput: null,
+    });
+
+    render(<PasskeyCredentialsCard />);
+    await waitFor(() => {
+      expect(screen.getByText("noPasskeys")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("registerHint")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /register/ }));
+
+    await waitFor(() => {
+      expect(mockGenerateNickname).toHaveBeenCalledWith(["internal"]);
+    });
+
+    const verifyCall = mockFetch.mock.calls.find(
+      ([url, init]: [unknown, RequestInit | undefined]) =>
+        String(url).includes("/register/verify") && init?.method === "POST",
+    );
+
+    expect(verifyCall).toBeTruthy();
+    expect(JSON.parse(String(verifyCall?.[1]?.body))).toMatchObject({
+      nickname: "auto-name",
+    });
+  });
+
   it("Sec-7(b) wrap-throws path: finally still zeroizes secretKey AND prfOutput", async () => {
     setupCredentialsList([]);
     mockStartReg.mockResolvedValue({
