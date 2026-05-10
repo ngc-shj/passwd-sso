@@ -44,8 +44,7 @@ import { API_KEY_SCOPE, API_KEY_SCOPES, MAX_API_KEYS_PER_USER, type ApiKeyScope 
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
-import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
-import { canUsePasskeyRecovery } from "@/lib/auth/webauthn/can-use-passkey-recovery";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 
 interface ApiKeyEntry {
@@ -77,7 +76,6 @@ export function ApiKeyManager() {
   const t = useTranslations("ApiKey");
   const tApi = useTranslations("ApiErrors");
   const tCommon = useTranslations("Common");
-  const tAuth = useTranslations("Auth");
   const locale = useLocale();
   const [keys, setKeys] = useState<ApiKeyEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,10 +87,7 @@ export function ApiKeyManager() {
     new Set([API_KEY_SCOPE.PASSWORDS_READ]),
   );
   const [expiryDays, setExpiryDays] = useState("90");
-  const [recentSessionOpen, setRecentSessionOpen] = useState(false);
-  const [reauthOpen, setReauthOpen] = useState(false);
-  const [reauthenticating, setReauthenticating] = useState(false);
-  const [reauthError, setReauthError] = useState<string | null>(null);
+  const inlineReauth = useInlineReauth(() => handleCreate());
 
   const fetchKeys = useCallback(async () => {
     try {
@@ -161,12 +156,7 @@ export function ApiKeyManager() {
       } else {
         const err = await res.json().catch(() => ({}));
         if (err.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-          setReauthError(null);
-          if (await canUsePasskeyRecovery()) {
-            setReauthOpen(true);
-          } else {
-            setRecentSessionOpen(true);
-          }
+          await inlineReauth.triggerOnStaleError();
         } else if (err.error === API_ERROR.API_KEY_LIMIT_EXCEEDED) {
           toast.error(t("limitExceeded", { max: MAX_API_KEYS_PER_USER }));
         } else if (res.status === 400) {
@@ -180,27 +170,6 @@ export function ApiKeyManager() {
       toast.error(t("createError"));
     } finally {
       setCreating(false);
-    }
-  };
-
-  const handleReauthenticate = async () => {
-    setReauthenticating(true);
-    setReauthError(null);
-    try {
-      const result = await reauthenticateWithPasskey();
-      if (!result.ok) {
-        setReauthError(
-          result.error === "AUTHENTICATION_CANCELLED"
-            ? tAuth("reauthCancelled")
-            : tAuth("reauthFailed"),
-        );
-        return;
-      }
-      setReauthOpen(false);
-      // After reauth, replay the create with current form state.
-      await handleCreate();
-    } finally {
-      setReauthenticating(false);
     }
   };
 
@@ -240,23 +209,12 @@ export function ApiKeyManager() {
           </Button>
         </section>
         <RecentSessionRequiredDialog
-          actionLabel={tAuth("recentSessionAction")}
+          {...inlineReauth.recentSessionDialogProps}
           cancelLabel={tCommon("cancel")}
-          description={tAuth("recentSessionDescription")}
-          onOpenChange={setRecentSessionOpen}
-          open={recentSessionOpen}
-          title={tAuth("recentSessionTitle")}
         />
         <PasskeyReauthDialog
-          open={reauthOpen}
-          onOpenChange={setReauthOpen}
-          title={tAuth("reauthTitle")}
-          description={tAuth("reauthDescription")}
-          actionLabel={tAuth("reauthAction")}
+          {...inlineReauth.reauthDialogProps}
           cancelLabel={tCommon("cancel")}
-          errorMessage={reauthError}
-          isReauthenticating={reauthenticating}
-          onAction={handleReauthenticate}
         />
 
       {/* Key List */}

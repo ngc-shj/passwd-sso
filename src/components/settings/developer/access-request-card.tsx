@@ -46,8 +46,7 @@ import { fetchApi } from "@/lib/url-helpers";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
-import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
-import { canUsePasskeyRecovery } from "@/lib/auth/webauthn/can-use-passkey-recovery";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 
 import type { AccessRequestStatus } from "@prisma/client";
@@ -82,7 +81,6 @@ export function AccessRequestCard() {
   const t = useTranslations("MachineIdentity");
   const tCommon = useTranslations("Common");
   const tApi = useTranslations("ApiErrors");
-  const tAuth = useTranslations("Auth");
   const locale = useLocale();
 
   const [requests, setRequests] = useState<AccessRequest[]>([]);
@@ -91,11 +89,12 @@ export function AccessRequestCard() {
   const [approving, setApproving] = useState<string | null>(null);
   const [jitToken, setJitToken] = useState<string | null>(null);
   const [jitTokenOpen, setJitTokenOpen] = useState(false);
-  const [recentSessionOpen, setRecentSessionOpen] = useState(false);
-  const [reauthOpen, setReauthOpen] = useState(false);
-  const [reauthenticating, setReauthenticating] = useState(false);
-  const [reauthError, setReauthError] = useState<string | null>(null);
   const [reauthApproveTargetId, setReauthApproveTargetId] = useState<string | null>(null);
+  const inlineReauth = useInlineReauth(async () => {
+    const target = reauthApproveTargetId;
+    setReauthApproveTargetId(null);
+    if (target) await handleApprove(target);
+  });
 
   // Create dialog state
   const [createOpen, setCreateOpen] = useState(false);
@@ -199,15 +198,10 @@ export function AccessRequestCard() {
         const data = await res.json().catch(() => null);
         const code = data?.error ?? "";
         if (code === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-          setReauthError(null);
-          if (await canUsePasskeyRecovery()) {
-            // Remember which request the operator was trying to approve so
-            // the post-reauth retry hits the same target.
-            setReauthApproveTargetId(requestId);
-            setReauthOpen(true);
-          } else {
-            setRecentSessionOpen(true);
-          }
+          // Remember which request the operator was trying to approve so the
+          // post-reauth retry hits the same target.
+          setReauthApproveTargetId(requestId);
+          await inlineReauth.triggerOnStaleError();
         } else if (res.status === 409 && code === API_ERROR.SA_TOKEN_LIMIT_EXCEEDED) {
           toast.error(t("arTokenLimitExceeded"));
         } else if (res.status === 409 && code === API_ERROR.SA_NOT_FOUND) {
@@ -237,30 +231,6 @@ export function AccessRequestCard() {
       toast.error(t("arApproveFailed"));
     } finally {
       setApproving(null);
-    }
-  };
-
-  const handleReauthenticate = async () => {
-    setReauthenticating(true);
-    setReauthError(null);
-    try {
-      const result = await reauthenticateWithPasskey();
-      if (!result.ok) {
-        setReauthError(
-          result.error === "AUTHENTICATION_CANCELLED"
-            ? tAuth("reauthCancelled")
-            : tAuth("reauthFailed"),
-        );
-        return;
-      }
-      const target = reauthApproveTargetId;
-      setReauthOpen(false);
-      setReauthApproveTargetId(null);
-      if (target) {
-        await handleApprove(target);
-      }
-    } finally {
-      setReauthenticating(false);
     }
   };
 
@@ -306,26 +276,16 @@ export function AccessRequestCard() {
       <SectionCardHeader icon={ShieldCheck} title={t("accessRequestCardTitle")} description={t("accessRequestCardDescription")} />
       <CardContent className="space-y-4">
         <RecentSessionRequiredDialog
-          actionLabel={tAuth("recentSessionAction")}
+          {...inlineReauth.recentSessionDialogProps}
           cancelLabel={tCommon("cancel")}
-          description={tAuth("recentSessionDescription")}
-          onOpenChange={setRecentSessionOpen}
-          open={recentSessionOpen}
-          title={tAuth("recentSessionTitle")}
         />
         <PasskeyReauthDialog
-          open={reauthOpen}
+          {...inlineReauth.reauthDialogProps}
           onOpenChange={(open) => {
-            setReauthOpen(open);
+            inlineReauth.reauthDialogProps.onOpenChange(open);
             if (!open) setReauthApproveTargetId(null);
           }}
-          title={tAuth("reauthTitle")}
-          description={tAuth("reauthDescription")}
-          actionLabel={tAuth("reauthAction")}
           cancelLabel={tCommon("cancel")}
-          errorMessage={reauthError}
-          isReauthenticating={reauthenticating}
-          onAction={handleReauthenticate}
         />
         <div className="flex items-center justify-between">
           <Select

@@ -45,22 +45,8 @@ vi.mock("@/components/passwords/shared/copy-button", () => ({
   ),
 }));
 
-vi.mock("@/components/auth/passkey-reauth-dialog", () => ({
-  PasskeyReauthDialog: ({
-    open,
-    onAction,
-  }: {
-    open: boolean;
-    onAction: () => void | Promise<void>;
-  }) =>
-    open ? (
-      <div data-testid="passkey-reauth-dialog">
-        <button type="button" data-testid="passkey-reauth-action" onClick={() => void onAction()}>
-          verify
-        </button>
-      </div>
-    ) : null,
-}));
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
 
 vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
   canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
@@ -68,11 +54,6 @@ vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
 
 vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
   reauthenticateWithPasskey: mockReauthenticateWithPasskey,
-}));
-
-vi.mock("@/components/auth/recent-session-required-dialog", () => ({
-  RecentSessionRequiredDialog: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="recent-session-dialog" /> : null,
 }));
 
 vi.mock("@/components/settings/account/section-card-header", () => ({

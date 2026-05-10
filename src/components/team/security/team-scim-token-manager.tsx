@@ -49,8 +49,7 @@ import { DISPLAY_ID_SHORT } from "@/lib/validations/common";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
-import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
-import { canUsePasskeyRecovery } from "@/lib/auth/webauthn/can-use-passkey-recovery";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 
 const TOKEN_STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
@@ -77,7 +76,6 @@ export function ScimTokenManager({ locale }: Props) {
   const t = useTranslations("Team");
   const tApi = useTranslations("ApiErrors");
   const tCommon = useTranslations("Common");
-  const tAuth = useTranslations("Auth");
   const [tokens, setTokens] = useState<ScimToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
@@ -85,10 +83,7 @@ export function ScimTokenManager({ locale }: Props) {
   const [newToken, setNewToken] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [expiresInDays, setExpiresInDays] = useState<string>("365");
-  const [recentSessionOpen, setRecentSessionOpen] = useState(false);
-  const [reauthOpen, setReauthOpen] = useState(false);
-  const [reauthenticating, setReauthenticating] = useState(false);
-  const [reauthError, setReauthError] = useState<string | null>(null);
+  const inlineReauth = useInlineReauth(() => handleCreate());
 
   const scimEndpoint =
     typeof window !== "undefined"
@@ -143,12 +138,7 @@ export function ScimTokenManager({ locale }: Props) {
       } else {
         const err = await res.json().catch(() => ({}));
         if (err.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-          setReauthError(null);
-          if (await canUsePasskeyRecovery()) {
-            setReauthOpen(true);
-          } else {
-            setRecentSessionOpen(true);
-          }
+          await inlineReauth.triggerOnStaleError();
         } else {
           const apiKey = tokenMintApiErrorKey(err.error);
           toast.error(apiKey ? tApi(apiKey) : t("networkError"));
@@ -158,26 +148,6 @@ export function ScimTokenManager({ locale }: Props) {
       toast.error(t("networkError"));
     } finally {
       setCreating(false);
-    }
-  };
-
-  const handleReauthenticate = async () => {
-    setReauthenticating(true);
-    setReauthError(null);
-    try {
-      const result = await reauthenticateWithPasskey();
-      if (!result.ok) {
-        setReauthError(
-          result.error === "AUTHENTICATION_CANCELLED"
-            ? tAuth("reauthCancelled")
-            : tAuth("reauthFailed"),
-        );
-        return;
-      }
-      setReauthOpen(false);
-      await handleCreate();
-    } finally {
-      setReauthenticating(false);
     }
   };
 
@@ -289,23 +259,12 @@ export function ScimTokenManager({ locale }: Props) {
       <SectionCardHeader icon={Database} title={t("scimTitle")} description={t("scimDescription")} />
       <CardContent className="space-y-6">
         <RecentSessionRequiredDialog
-          actionLabel={tAuth("recentSessionAction")}
+          {...inlineReauth.recentSessionDialogProps}
           cancelLabel={tCommon("cancel")}
-          description={tAuth("recentSessionDescription")}
-          onOpenChange={setRecentSessionOpen}
-          open={recentSessionOpen}
-          title={tAuth("recentSessionTitle")}
         />
         <PasskeyReauthDialog
-          open={reauthOpen}
-          onOpenChange={setReauthOpen}
-          title={tAuth("reauthTitle")}
-          description={tAuth("reauthDescription")}
-          actionLabel={tAuth("reauthAction")}
+          {...inlineReauth.reauthDialogProps}
           cancelLabel={tCommon("cancel")}
-          errorMessage={reauthError}
-          isReauthenticating={reauthenticating}
-          onAction={handleReauthenticate}
         />
         <p className="text-xs text-muted-foreground">
           {t("scimTenantScopeNote")}

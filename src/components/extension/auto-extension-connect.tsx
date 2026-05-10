@@ -16,6 +16,7 @@ import { CheckCircle2, XCircle, Loader2, KeyRound } from "lucide-react";
 import { fetchApi, withBasePath } from "@/lib/url-helpers";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
+import { canUsePasskeyRecovery } from "@/lib/auth/webauthn/can-use-passkey-recovery";
 import { signOut } from "next-auth/react";
 
 /**
@@ -44,17 +45,6 @@ export function AutoExtensionConnect() {
   const [requiresRecentSession, setRequiresRecentSession] = useState(false);
   const [reauthenticating, setReauthenticating] = useState(false);
   const [reauthError, setReauthError] = useState<string | null>(null);
-
-  const canUsePasskeyRecovery = async () => {
-    try {
-      const res = await fetchApi(API_PATH.USER_AUTH_PROVIDER);
-      if (!res.ok) return true;
-      const data = (await res.json()) as { canPasskeySignIn?: boolean };
-      return data.canPasskeySignIn !== false;
-    } catch {
-      return true;
-    }
-  };
 
   const connect = useCallback(async (): Promise<{ ok: boolean; requiresReauth: boolean }> => {
     setStatus(CONNECT_STATUS.CONNECTING);
