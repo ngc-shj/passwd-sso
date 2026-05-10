@@ -362,6 +362,12 @@ describe("AccessRequestCard", () => {
 
     // Justification
     expect(screen.getByText("Need access for automation")).toBeInTheDocument();
+
+    // Section heading (per Phase 3 finding T-1: regression guard for the
+    // accessRequestList h3 introduced when this card was aligned with siblings).
+    expect(
+      screen.getByRole("heading", { level: 3, name: /accessRequestList/ }),
+    ).toBeInTheDocument();
   });
 
   it("calls fetchApi with status param when filter changes", async () => {

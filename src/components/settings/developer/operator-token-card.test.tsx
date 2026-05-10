@@ -144,11 +144,12 @@ vi.mock("@/components/ui/dialog", () => ({
   DialogDescription: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DialogFooter: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
-vi.mock("@/components/ui/collapsible", () => ({
-  Collapsible: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  CollapsibleTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  CollapsibleContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
+vi.mock("@/components/ui/collapsible", async () => {
+  const { mockCollapsibleSmart } = await import(
+    "@/components/__tests__/mocks/collapsible-smart-mock"
+  );
+  return mockCollapsibleSmart();
+});
 vi.mock("@/components/passwords/shared/copy-button", () => ({
   CopyButton: () => <button>copy</button>,
 }));

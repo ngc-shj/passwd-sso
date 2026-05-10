@@ -17,6 +17,7 @@
   "tokenOnce": "今すぐコピーしてください。再表示はできません。",
   "noKeys": "API キーはまだありません。",
   "noActiveKeys": "有効な API キーはありません。",
+  "issuedKeys": "発行済み API キー",
   "inactiveKeys": "取り消し済み / 期限切れのキー（{count}）",
   "active": "有効",
   "expired": "期限切れ",
@@ -34,8 +35,5 @@
   "scopePasswordsWrite": "パスワード書き込み",
   "scopeTagsRead": "タグ読み取り",
   "scopeVaultStatus": "保管庫状態",
-  "recentSessionTitle": "続行するには再サインインが必要です",
-  "recentSessionDescription": "この操作には、より新しいブラウザサインインが必要です。再サインインしてから、もう一度お試しください。",
-  "recentSessionAction": "再サインイン",
   "cancel": "キャンセル"
 }

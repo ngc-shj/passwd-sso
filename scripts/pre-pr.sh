@@ -18,6 +18,13 @@ cleanup_tempfiles() {
   for logfile in "${tempfiles[@]:-}"; do
     [ -n "$logfile" ] && [ -f "$logfile" ] && rm -f "$logfile"
   done
+  # The for-loop's last iteration short-circuits at `[ -f "$logfile" ]` when
+  # run_step already removed the file on success — leaving the function's
+  # exit code at 1, which the EXIT trap then propagates as the script's
+  # exit code (a known Bash quirk: EXIT trap's last command sets the exit
+  # status). Force `return 0` so cleanup never influences the success/failure
+  # signal that the explicit `exit 1` / fall-through 0 at the bottom carry.
+  return 0
 }
 
 show_failure_context() {
@@ -112,6 +119,7 @@ printf "${BOLD}═══ Pre-PR Checks ═══${RESET}\n\n"
 run_step "Static: e2e-selectors"  bash scripts/checks/check-e2e-selectors.sh
 run_step "Static: security-doc-exists" bash scripts/checks/check-security-doc-exists.sh
 run_step "Static: test-hygiene"   bash scripts/checks/check-test-hygiene.sh
+run_step "Static: settings-card-layout"  bash scripts/checks/check-settings-card-layout.sh
 run_step "Lint"                   npx eslint .
 run_step "Static: env drift check"  npm run check:env-docs
 run_step "Static: team-auth-rls"  node scripts/checks/check-team-auth-rls.mjs

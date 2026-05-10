@@ -120,7 +120,8 @@ describe("BreakGlassGrantList", () => {
     await waitFor(() => {
       expect(screen.getByText("noActiveGrants")).toBeInTheDocument();
     });
-    expect(screen.getByText("noGrants")).toBeInTheDocument();
+    // The redundant `noGrants` bottom block was dropped — `noActiveGrants`
+    // (under the parent h3 "activeGrants") covers the empty case alone.
   });
 
   it("renders active grants with target name", async () => {
@@ -185,14 +186,16 @@ describe("BreakGlassGrantList", () => {
 
     render(<BreakGlassGrantList refreshTrigger={0} />);
 
+    // Trigger label is now "showHistory (1)" — count interpolated by the
+    // string-template form (matches the mcp-client / service-account pattern).
     await waitFor(() => {
-      expect(screen.getByText("showHistory")).toBeInTheDocument();
+      expect(screen.getByText(/showHistory/)).toBeInTheDocument();
     });
 
     // History is hidden until clicked
     expect(screen.queryByText("statusExpired")).toBeNull();
 
-    fireEvent.click(screen.getByText("showHistory"));
+    fireEvent.click(screen.getByText(/showHistory/));
 
     await waitFor(() => {
       expect(screen.getByText("statusExpired")).toBeInTheDocument();

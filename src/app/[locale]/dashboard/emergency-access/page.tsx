@@ -3,9 +3,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { useSession } from "next-auth/react";
-import { HeartPulse, Users, Shield, ChevronDown } from "lucide-react";
+import { HeartPulse, Users, Shield } from "lucide-react";
 import { CreateGrantDialog } from "@/components/emergency-access/create-grant-dialog";
 import { GrantCard } from "@/components/emergency-access/grant-card";
+import { InactiveItemsSection } from "@/components/settings/shared/inactive-items-section";
 import {
   Card,
   CardContent,
@@ -112,30 +113,22 @@ export default function EmergencyAccessPage() {
                   />
                 ))}
                 {inactiveOwner.length > 0 && (
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() => setShowInactiveOwner((v) => !v)}
-                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      <ChevronDown
-                        className={`h-3 w-3 transition-transform ${showInactiveOwner ? "rotate-0" : "-rotate-90"}`}
+                  <InactiveItemsSection
+                    open={showInactiveOwner}
+                    onOpenChange={setShowInactiveOwner}
+                    triggerLabel={t("inactiveGrants", {
+                      count: String(inactiveOwner.length),
+                    })}
+                  >
+                    {inactiveOwner.map((grant) => (
+                      <GrantCard
+                        key={grant.id}
+                        grant={grant}
+                        currentUserId={userId}
+                        onRefresh={fetchGrants}
                       />
-                      {t("inactiveGrants", { count: String(inactiveOwner.length) })}
-                    </button>
-                    {showInactiveOwner && (
-                      <div className="mt-2 space-y-2">
-                        {inactiveOwner.map((grant) => (
-                          <GrantCard
-                            key={grant.id}
-                            grant={grant}
-                            currentUserId={userId}
-                            onRefresh={fetchGrants}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                    ))}
+                  </InactiveItemsSection>
                 )}
               </div>
             )}
@@ -171,30 +164,22 @@ export default function EmergencyAccessPage() {
                   />
                 ))}
                 {inactiveGrantee.length > 0 && (
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() => setShowInactiveGrantee((v) => !v)}
-                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      <ChevronDown
-                        className={`h-3 w-3 transition-transform ${showInactiveGrantee ? "rotate-0" : "-rotate-90"}`}
+                  <InactiveItemsSection
+                    open={showInactiveGrantee}
+                    onOpenChange={setShowInactiveGrantee}
+                    triggerLabel={t("inactiveGrants", {
+                      count: String(inactiveGrantee.length),
+                    })}
+                  >
+                    {inactiveGrantee.map((grant) => (
+                      <GrantCard
+                        key={grant.id}
+                        grant={grant}
+                        currentUserId={userId}
+                        onRefresh={fetchGrants}
                       />
-                      {t("inactiveGrants", { count: String(inactiveGrantee.length) })}
-                    </button>
-                    {showInactiveGrantee && (
-                      <div className="mt-2 space-y-2">
-                        {inactiveGrantee.map((grant) => (
-                          <GrantCard
-                            key={grant.id}
-                            grant={grant}
-                            currentUserId={userId}
-                            onRefresh={fetchGrants}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                    ))}
+                  </InactiveItemsSection>
                 )}
               </div>
             )}

@@ -34,12 +34,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { SectionCardHeader } from "@/components/settings/account/section-card-header";
+import { InactiveItemsSection } from "@/components/settings/shared/inactive-items-section";
 import { fetchApi } from "@/lib/url-helpers";
 import { apiPath } from "@/lib/constants";
 import { MAX_AUDIT_DELIVERY_TARGETS } from "@/lib/validations/common";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { toast } from "sonner";
-import { ChevronDown, Loader2, Plus, RotateCcw, Send, Trash2 } from "lucide-react";
+import { Loader2, Plus, RotateCcw, Send, Trash2 } from "lucide-react";
 
 type Kind = "WEBHOOK" | "SIEM_HEC" | "S3_OBJECT";
 
@@ -347,23 +348,15 @@ export function AuditDeliveryTargetCard() {
               )}
               {activeTargets.map(renderTargetItem)}
               {inactiveTargets.length > 0 && (
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setShowInactive((v) => !v)}
-                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <ChevronDown
-                      className={`h-3 w-3 transition-transform ${showInactive ? "rotate-0" : "-rotate-90"}`}
-                    />
-                    {t("inactiveTargets", { count: inactiveTargets.length })}
-                  </button>
-                  {showInactive && (
-                    <div className="mt-2 space-y-3">
-                      {inactiveTargets.map(renderTargetItem)}
-                    </div>
-                  )}
-                </div>
+                <InactiveItemsSection
+                  open={showInactive}
+                  onOpenChange={setShowInactive}
+                  triggerLabel={t("inactiveTargets", {
+                    count: inactiveTargets.length,
+                  })}
+                >
+                  {inactiveTargets.map(renderTargetItem)}
+                </InactiveItemsSection>
               )}
             </div>
           )}

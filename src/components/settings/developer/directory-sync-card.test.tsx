@@ -67,7 +67,6 @@ describe("DirectorySyncCard", () => {
     await waitFor(() => {
       expect(screen.getByText("noConfigs")).toBeInTheDocument();
     });
-    expect(screen.getByText("noConfigsHint")).toBeInTheDocument();
   });
 
   it("renders a config row with provider/status badges", async () => {

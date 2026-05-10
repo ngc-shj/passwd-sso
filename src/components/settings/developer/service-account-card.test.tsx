@@ -146,36 +146,12 @@ vi.mock("@/components/ui/switch", () => ({
   ),
 }));
 
-vi.mock("@/components/ui/collapsible", () => ({
-  Collapsible: ({
-    children,
-    open,
-    onOpenChange,
-  }: {
-    children: ReactNode;
-    open?: boolean;
-    onOpenChange?: () => void;
-  }) => (
-    <div data-open={open} onClick={onOpenChange}>
-      {children}
-    </div>
-  ),
-  CollapsibleContent: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
-  ),
-  CollapsibleTrigger: ({
-    children,
-    className,
-    asChild,
-  }: {
-    children: ReactNode;
-    className?: string;
-    asChild?: boolean;
-  }) => {
-    if (asChild) return <>{children}</>;
-    return <button className={className}>{children}</button>;
-  },
-}));
+vi.mock("@/components/ui/collapsible", async () => {
+  const { mockCollapsibleSmart } = await import(
+    "@/components/__tests__/mocks/collapsible-smart-mock"
+  );
+  return mockCollapsibleSmart();
+});
 
 vi.mock("@/components/ui/alert-dialog", () => ({
   AlertDialog: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -285,6 +261,29 @@ const sampleTokens = [
   },
 ];
 
+// After migration to InactiveItemsSection, the smart Collapsible mock
+// (collapsible-smart-mock.tsx) honors the controlled `open` prop. The
+// inactive section starts closed; tests that need to see inactive content
+// must click the trigger first. Per-SA detail Collapsibles are also gated
+// by `open` (showing the SA's tokens / createToken button) — the `expandSa`
+// helper handles those.
+async function expandInactiveSection() {
+  const trigger = screen.getByText(/saInactive\s*\(\d+\)/);
+  await act(async () => {
+    fireEvent.click(trigger);
+  });
+}
+
+async function expandSa(name: string) {
+  // Each SA's detail Collapsible trigger is a button containing the SA name.
+  // The text node renders inside the trigger button; clicking the text bubbles
+  // to the button and the smart mock fires onOpenChange.
+  const nameNode = screen.getByText(name);
+  await act(async () => {
+    fireEvent.click(nameNode);
+  });
+}
+
 function setupFetchAccounts(accounts = sampleAccounts) {
   mockFetch.mockImplementation((url: string, init?: RequestInit) => {
     if (!init?.method || init.method === "GET") {
@@ -361,6 +360,8 @@ describe("ServiceAccountCard", () => {
     await waitFor(() => {
       expect(screen.getByText("deploy-bot")).toBeInTheDocument();
     });
+
+    await expandInactiveSection();
 
     expect(screen.getByText("read-only-agent")).toBeInTheDocument();
 
@@ -471,11 +472,16 @@ describe("ServiceAccountCard", () => {
       render(<ServiceAccountCard />);
     });
 
+    await expandInactiveSection();
+
     await waitFor(() => {
       expect(screen.getByText("inactive-sa")).toBeInTheDocument();
     });
 
-    // createToken button should be disabled for inactive SA
+    // Per-SA detail must also be expanded so the (disabled) createToken
+    // button inside CollapsibleContent renders.
+    await expandSa("inactive-sa");
+
     const tokenBtns = screen
       .getAllByRole("button")
       .filter((b) => b.textContent?.includes("createToken"));
@@ -501,6 +507,10 @@ describe("ServiceAccountCard", () => {
     await waitFor(() => {
       expect(screen.getByText("active-sa")).toBeInTheDocument();
     });
+
+    // Per-SA detail panel must be expanded so the createToken button
+    // inside CollapsibleContent renders.
+    await expandSa("active-sa");
 
     // Open token create dialog
     const tokenBtns = screen
@@ -594,6 +604,8 @@ describe("ServiceAccountCard", () => {
       expect(screen.getByText("active-sa")).toBeInTheDocument();
     });
 
+    await expandSa("active-sa");
+
     const tokenBtns = screen
       .getAllByRole("button")
       .filter((b) => b.textContent?.includes("createToken"));
@@ -663,6 +675,8 @@ describe("ServiceAccountCard", () => {
     await waitFor(() => {
       expect(screen.getByText("active-sa")).toBeInTheDocument();
     });
+
+    await expandSa("active-sa");
 
     const tokenBtns = screen
       .getAllByRole("button")

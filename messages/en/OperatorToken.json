@@ -13,6 +13,7 @@
   "expiry90": "90 days (max)",
   "tokenCreated": "Token created. Copy it now — it will not be shown again.",
   "tokens": "Tokens",
+  "issuedTokens": "Issued tokens",
   "noTokens": "No tokens issued yet.",
   "tokenActive": "active",
   "tokenExpired": "expired",

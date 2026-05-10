@@ -5,6 +5,7 @@ import { useTranslations, useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionCardHeader } from "@/components/settings/account/section-card-header";
+import { InactiveItemsSection } from "@/components/settings/shared/inactive-items-section";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,7 +36,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ChevronDown, Loader2, Plus, Key } from "lucide-react";
+import { Loader2, Plus, Key } from "lucide-react";
 import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
 import { NAME_MAX_LENGTH } from "@/lib/validations";
@@ -355,7 +356,7 @@ function KeyList({
     <>
       <Separator />
       <section className="space-y-3">
-      <h3 className="text-sm font-medium">{t("title")}</h3>
+      <h3 className="text-sm font-medium">{t("issuedKeys")}</h3>
       {loading ? (
         <Loader2 className="h-4 w-4 animate-spin" />
       ) : keys.length === 0 ? (
@@ -376,32 +377,24 @@ function KeyList({
             />
           ))}
           {inactiveKeys.length > 0 && (
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowInactive((v) => !v)}
-                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <ChevronDown
-                  className={`h-3 w-3 transition-transform ${showInactive ? "rotate-0" : "-rotate-90"}`}
+            <InactiveItemsSection
+              open={showInactive}
+              onOpenChange={setShowInactive}
+              triggerLabel={t("inactiveKeys", {
+                count: String(inactiveKeys.length),
+              })}
+            >
+              {inactiveKeys.map((key) => (
+                <KeyRow
+                  key={key.id}
+                  entry={key}
+                  status={getStatus(key)}
+                  locale={locale}
+                  t={t}
+                  onRevoke={onRevoke}
                 />
-                {t("inactiveKeys", { count: String(inactiveKeys.length) })}
-              </button>
-              {showInactive && (
-                <div className="mt-2 space-y-3">
-                  {inactiveKeys.map((key) => (
-                    <KeyRow
-                      key={key.id}
-                      entry={key}
-                      status={getStatus(key)}
-                      locale={locale}
-                      t={t}
-                      onRevoke={onRevoke}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
+              ))}
+            </InactiveItemsSection>
           )}
         </div>
       )}

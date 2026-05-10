@@ -8,6 +8,7 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { SectionCardHeader } from "@/components/settings/account/section-card-header";
+import { InactiveItemsSection } from "@/components/settings/shared/inactive-items-section";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
@@ -340,23 +341,15 @@ export function BaseWebhookCard({ config }: Props) {
               )}
               {activeWebhooks.map(renderWebhookItem)}
               {inactiveWebhooks.length > 0 && (
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setShowInactive((v) => !v)}
-                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <ChevronDown
-                      className={`h-3 w-3 transition-transform ${showInactive ? "rotate-0" : "-rotate-90"}`}
-                    />
-                    {t("inactiveWebhooks", { count: inactiveWebhooks.length })}
-                  </button>
-                  {showInactive && (
-                    <div className="mt-2 space-y-3">
-                      {inactiveWebhooks.map(renderWebhookItem)}
-                    </div>
-                  )}
-                </div>
+                <InactiveItemsSection
+                  open={showInactive}
+                  onOpenChange={setShowInactive}
+                  triggerLabel={t("inactiveWebhooks", {
+                    count: inactiveWebhooks.length,
+                  })}
+                >
+                  {inactiveWebhooks.map(renderWebhookItem)}
+                </InactiveItemsSection>
               )}
             </div>
           )}
