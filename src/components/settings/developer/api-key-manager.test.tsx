@@ -11,9 +11,11 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
-const { mockFetch, mockToast } = vi.hoisted(() => ({
+const { mockFetch, mockToast, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
   mockToast: { success: vi.fn(), error: vi.fn() },
+  mockCanUsePasskeyRecovery: vi.fn(),
+  mockReauthenticateWithPasskey: vi.fn(),
 }));
 
 vi.mock("next-intl", () => ({
@@ -39,6 +41,17 @@ vi.mock("@/components/passwords/shared/copy-button", () => ({
       copy
     </button>
   ),
+}));
+
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
 
 vi.mock("@/components/ui/dialog", () => ({
@@ -87,6 +100,11 @@ function setupKeysList(keys: ApiKeyEntry[]) {
 describe("ApiKeyManager", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: user has no passkey, so the recent-session dialog opens (the
+    // pre-passkey-rebalance UX). Tests that exercise the inline passkey reauth
+    // flow override this.
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true, verifiedAt: "2026-05-10T00:00:00Z" });
   });
 
   it("renders the empty state when no keys exist", async () => {
@@ -131,7 +149,7 @@ describe("ApiKeyManager", () => {
     expect(screen.getByDisplayValue("api-token-xyz")).toBeInTheDocument();
   });
 
-  it("shows recent-session error instead of generic create error", async () => {
+  it("opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned", async () => {
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
       if (
         String(url).includes("/api/api-keys") &&
@@ -165,8 +183,9 @@ describe("ApiKeyManager", () => {
     fireEvent.click(buttons[buttons.length - 1]);
 
     await waitFor(() => {
-      expect(mockToast.error).toHaveBeenCalledWith("sessionStepUpRequired");
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
     });
+    expect(mockToast.error).not.toHaveBeenCalled();
   });
 
   it("falls back to local createError for an unrecognized API error code", async () => {

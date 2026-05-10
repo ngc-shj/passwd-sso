@@ -29,6 +29,8 @@
   "cancel": "キャンセル",
   "networkError": "ネットワークエラー。再試行してください。",
   "staleSession": "この操作を続行するには、過去 15 分以内に再認証してください。再認証後にもう一度お試しください。",
+  "reauthStillRequired": "再認証が完了していません。もう一度お試しください。",
+  "reauthRetryFailed": "本人確認後の運用者トークン発行に失敗しました。もう一度お試しください。",
   "limitExceeded": "テナントごとの運用者トークン上限に達しました。不要なトークンを失効させてください。",
   "usageHint": "スクリプトでの利用: ADMIN_API_TOKEN=op_... scripts/purge-history.sh"
 }

@@ -11,9 +11,10 @@ import { AUDIT_ACTION } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isHttps } from "@/lib/url-helpers";
-import { PASSKEY_SESSION_MAX_AGE_SECONDS } from "@/lib/validations/common.server";
 import { revokeAllExtensionTokensForUser } from "@/lib/auth/tokens/extension-token";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
+import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
@@ -94,7 +95,11 @@ async function handlePOST(req: NextRequest) {
 
   // Create database session (same as Auth.js would for OAuth providers)
   const sessionToken = `${randomUUID()}${randomBytes(16).toString("hex")}`;
-  const expires = new Date(Date.now() + PASSKEY_SESSION_MAX_AGE_SECONDS * 1000);
+  const verifiedAt = new Date();
+  const resolvedTimeouts = await resolveEffectiveSessionTimeouts(user.id, "webauthn");
+  const expires = new Date(
+    verifiedAt.getTime() + resolvedTimeouts.idleMinutes * MS_PER_MINUTE,
+  );
 
   const meta = extractRequestMeta(req);
 
@@ -115,6 +120,17 @@ async function handlePOST(req: NextRequest) {
       const deleted = await tx.session.deleteMany({
         where: { userId: user.id },
       });
+      // Note on passkeyVerifiedAt ownership (split with auth-adapter):
+      // Initial value is set HERE because the passkey sign-in route owns
+      // session creation for the WebAuthn provider (not the Auth.js
+      // adapter). The auth-adapter's createSession sets passkeyVerifiedAt
+      // to null implicitly for OAuth/email sessions, which is correct —
+      // those flows do not establish passkey freshness.
+      // Subsequent updates: ordinary session activity in
+      // `src/lib/auth/session/auth-adapter.ts:updateSession` writes only
+      // {expires, lastActiveAt}; it MUST NOT refresh passkeyVerifiedAt
+      // (C2 invariant). Refresh happens via the dedicated reauth flow at
+      // `src/app/api/auth/passkey/reauth/verify/route.ts`.
       await tx.session.create({
         data: {
           sessionToken,
@@ -123,9 +139,7 @@ async function handlePOST(req: NextRequest) {
           expires,
           ipAddress: meta.ip ?? null,
           userAgent: meta.userAgent?.slice(0, 512) ?? null,
-          // AAL3 provenance: the resolver clamps idle/absolute to NIST SP
-          // 800-63B-4 §2.3.3 AAL3 reauthentication ceilings (12h absolute /
-          // 15min inactivity) for sessions with provider="webauthn".
+          passkeyVerifiedAt: verifiedAt,
           provider: "webauthn",
         },
       });

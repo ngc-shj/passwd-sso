@@ -8,7 +8,7 @@ export interface SessionMeta {
    * Authentication provider for the session being established. Populated by
    * the `signIn` callback via `params.account?.provider`. Read by
    * `auth-adapter.ts createSession` to tag the Session.provider column so
-   * the resolver can apply AAL3 clamping for WebAuthn sessions.
+   * downstream code can retain session provenance for policy and audit logic.
    *
    * NOTE: this field is mutated on the shared object held by the surrounding
    * `sessionMetaStorage.run(meta, ...)` call. AsyncLocalStorage returns the

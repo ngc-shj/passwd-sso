@@ -106,6 +106,7 @@
   "saLimitExceeded": "Maximum number of service accounts reached.",
   "saNotFound": "Service account not found.",
   "saNameConflict": "A service account with this name already exists.",
+  "saInvalidScope": "The selected scopes are invalid for this service account.",
   "saTokenLimitExceeded": "Maximum number of tokens per service account reached.",
   "saTokenNotFound": "Service account token not found.",
   "saTokenAlreadyRevoked": "Service account token has already been revoked.",

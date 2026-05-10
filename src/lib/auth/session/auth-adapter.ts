@@ -558,7 +558,7 @@ export function createCustomAdapter(): Adapter {
       session: Partial<AdapterSession> & Pick<AdapterSession, "sessionToken">,
     ): Promise<AdapterSession | null | undefined> {
       try {
-        // Read current session (provider included for AAL3 clamping)
+        // Read current session (provider included for provenance-aware resolution)
         const current = await withBypassRls(prisma, async () =>
           prisma.session.findUnique({
             where: { sessionToken: session.sessionToken },
@@ -575,7 +575,6 @@ export function createCustomAdapter(): Adapter {
         if (!current) return null;
 
         // Resolve per-user idle + absolute in a single call.
-        // AAL3 clamp applied when provider === "webauthn".
         const resolved = await resolveEffectiveSessionTimeouts(
           current.userId,
           current.provider ?? null,

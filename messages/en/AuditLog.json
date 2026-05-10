@@ -18,6 +18,7 @@
   "filter": "Filter",
   "AUTH_LOGIN": "Logged in",
   "AUTH_LOGOUT": "Logged out",
+  "AUTH_PASSKEY_REAUTH": "Passkey re-verified for sensitive action",
   "ENTRY_CREATE": "Created entry",
   "ENTRY_IMPORT": "Import executed",
   "ENTRY_BULK_IMPORT": "Bulk imported entries",

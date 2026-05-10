@@ -13,7 +13,9 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import type { ReactNode } from "react";
 
-const { mockFetch, mockToast } = vi.hoisted(() => ({
+const { mockFetch, mockToast, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
+  mockCanUsePasskeyRecovery: vi.fn(),
+  mockReauthenticateWithPasskey: vi.fn(),
   mockFetch: vi.fn(),
   mockToast: { error: vi.fn(), success: vi.fn() },
 }));
@@ -41,6 +43,17 @@ vi.mock("@/components/passwords/shared/copy-button", () => ({
       Copy
     </button>
   ),
+}));
+
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
 
 vi.mock("@/components/settings/account/section-card-header", () => ({
@@ -311,6 +324,8 @@ function setupFetchAccounts(accounts = sampleAccounts) {
 describe("ServiceAccountCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true, verifiedAt: "2026-05-10T00:00:00Z" });
   });
 
   it("shows spinner while loading", async () => {
@@ -537,7 +552,7 @@ describe("ServiceAccountCard", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows recent-session error instead of generic token create failure", async () => {
+  it("opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned on token create", async () => {
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
       if (!init?.method || init.method === "GET") {
         if (url.includes("/tokens")) {
@@ -602,8 +617,9 @@ describe("ServiceAccountCard", () => {
     });
 
     await waitFor(() => {
-      expect(mockToast.error).toHaveBeenCalledWith("sessionStepUpRequired");
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
     });
+    expect(mockToast.error).not.toHaveBeenCalled();
   });
 
   it("falls back to local tokenCreateFailed for an unrecognized API error code", async () => {

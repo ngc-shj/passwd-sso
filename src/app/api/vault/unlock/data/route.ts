@@ -8,6 +8,7 @@ import { checkAuth } from "@/lib/auth/session/check-auth";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { rateLimited } from "@/lib/http/api-response";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { withTenantRls } from "@/lib/tenant-rls";
 
 export const runtime = "nodejs";
 
@@ -26,11 +27,15 @@ async function handleGET(req: NextRequest) {
   const authResult = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.VAULT_UNLOCK_DATA });
   if (!authResult.ok) return authResult.response;
   const { userId } = authResult.auth;
+  const tenantId = "tenantId" in authResult.auth ? authResult.auth.tenantId : null;
 
   const rl = await vaultUnlockDataLimiter.check(`rl:vault_unlock_data:${userId}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
-  const user = await withUserTenantRls(userId, async () =>
+  const withVaultTenantRls = <T>(fn: () => Promise<T>) =>
+    tenantId ? withTenantRls(prisma, tenantId, fn) : withUserTenantRls(userId, fn);
+
+  const user = await withVaultTenantRls(async () =>
     prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -62,7 +67,7 @@ async function handleGET(req: NextRequest) {
     );
   }
 
-  const vaultKey = await withUserTenantRls(userId, async () =>
+  const vaultKey = await withVaultTenantRls(async () =>
     prisma.vaultKey.findUnique({
       where: {
         userId_version: {

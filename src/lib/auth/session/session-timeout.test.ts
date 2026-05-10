@@ -99,14 +99,14 @@ describe("resolveEffectiveSessionTimeouts", () => {
     expect(result.absoluteMinutes).toBe(240);
   });
 
-  it("clamps to AAL3 ceilings when sessionProvider is webauthn", async () => {
+  it("returns tenant policy for webauthn sessions (no AAL3-style clamp post D1)", async () => {
     seedUser({
       tenantIdle: 480,
       tenantAbsolute: 43200,
     });
     const result = await resolveEffectiveSessionTimeouts("user-5", "webauthn");
-    expect(result.idleMinutes).toBe(15);
-    expect(result.absoluteMinutes).toBe(720);
+    expect(result.idleMinutes).toBe(480);
+    expect(result.absoluteMinutes).toBe(43200);
   });
 
   it("does NOT clamp for non-webauthn providers", async () => {
@@ -128,10 +128,10 @@ describe("resolveEffectiveSessionTimeouts", () => {
     expect(unknown.absoluteMinutes).toBe(43200);
   });
 
-  it("AAL3 clamp takes the min of policy and AAL3 ceiling (does not loosen policy)", async () => {
+  it("preserves stricter policy values for webauthn sessions", async () => {
     seedUser({
-      tenantIdle: 10, // already stricter than AAL3 idle (15)
-      tenantAbsolute: 360, // already stricter than AAL3 absolute (720)
+      tenantIdle: 10,
+      tenantAbsolute: 360,
     });
     const result = await resolveEffectiveSessionTimeouts("user-8", "webauthn");
     expect(result.idleMinutes).toBe(10);
@@ -148,18 +148,16 @@ describe("resolveEffectiveSessionTimeouts", () => {
     expect(mockFindUnique).toHaveBeenCalledTimes(1);
   });
 
-  it("cache entry is per-provider-agnostic; AAL3 clamp is applied at read time from cached values", async () => {
+  it("cache entry is per-provider-agnostic and returns the same resolved values", async () => {
     seedUser({
       tenantIdle: 480,
       tenantAbsolute: 43200,
     });
-    // First call caches the non-clamped (google) values
     const google = await resolveEffectiveSessionTimeouts("user-9", "google");
     expect(google.idleMinutes).toBe(480);
-    // Second call reads cache but applies AAL3 clamp
     const webauthn = await resolveEffectiveSessionTimeouts("user-9", "webauthn");
-    expect(webauthn.idleMinutes).toBe(15);
-    expect(webauthn.absoluteMinutes).toBe(720);
+    expect(webauthn.idleMinutes).toBe(480);
+    expect(webauthn.absoluteMinutes).toBe(43200);
     expect(mockFindUnique).toHaveBeenCalledTimes(1);
   });
 

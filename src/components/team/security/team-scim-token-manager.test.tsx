@@ -12,7 +12,9 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 
 import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 
-const { mockFetch, mockToast } = vi.hoisted(() => ({
+const { mockFetch, mockToast, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
+  mockCanUsePasskeyRecovery: vi.fn(),
+  mockReauthenticateWithPasskey: vi.fn(),
   mockFetch: vi.fn(),
   mockToast: { error: vi.fn(), success: vi.fn() },
 }));
@@ -42,6 +44,17 @@ vi.mock("@/components/passwords/shared/copy-button", () => ({
       copy
     </button>
   ),
+}));
+
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
 
 vi.mock("@/components/settings/account/section-card-header", () => ({
@@ -95,6 +108,8 @@ const EXPIRED_TOKEN = {
 describe("ScimTokenManager", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true, verifiedAt: "2026-05-10T00:00:00Z" });
   });
 
   it("fetches tokens on mount", async () => {
@@ -181,7 +196,7 @@ describe("ScimTokenManager", () => {
     resolveFetch({ ok: true, json: () => Promise.resolve([]) });
   });
 
-  it("shows recent-session error instead of generic network error on create", async () => {
+  it("opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned on create", async () => {
     mockFetch
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })
       .mockResolvedValueOnce({
@@ -205,8 +220,9 @@ describe("ScimTokenManager", () => {
     });
 
     await waitFor(() => {
-      expect(mockToast.error).toHaveBeenCalledWith("sessionStepUpRequired");
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
     });
+    expect(mockToast.error).not.toHaveBeenCalled();
   });
 
   it("falls back to local networkError for an unrecognized API error code", async () => {

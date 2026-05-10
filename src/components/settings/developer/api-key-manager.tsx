@@ -41,6 +41,10 @@ import { fetchApi } from "@/lib/url-helpers";
 import { NAME_MAX_LENGTH } from "@/lib/validations";
 import { formatDate } from "@/lib/format/format-datetime";
 import { API_KEY_SCOPE, API_KEY_SCOPES, MAX_API_KEYS_PER_USER, type ApiKeyScope } from "@/lib/constants/auth/api-key";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 
 interface ApiKeyEntry {
@@ -83,6 +87,7 @@ export function ApiKeyManager() {
     new Set([API_KEY_SCOPE.PASSWORDS_READ]),
   );
   const [expiryDays, setExpiryDays] = useState("90");
+  const inlineReauth = useInlineReauth(() => handleCreate());
 
   const fetchKeys = useCallback(async () => {
     try {
@@ -150,7 +155,9 @@ export function ApiKeyManager() {
         fetchKeys();
       } else {
         const err = await res.json().catch(() => ({}));
-        if (err.error === "API_KEY_LIMIT_EXCEEDED") {
+        if (err.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          await inlineReauth.triggerOnStaleError();
+        } else if (err.error === API_ERROR.API_KEY_LIMIT_EXCEEDED) {
           toast.error(t("limitExceeded", { max: MAX_API_KEYS_PER_USER }));
         } else if (res.status === 400) {
           toast.error(t("validationError"));
@@ -198,9 +205,17 @@ export function ApiKeyManager() {
             size="sm"
           >
             <Plus className="mr-1 h-4 w-4" />
-          {t("createKey")}
+            {t("createKey")}
           </Button>
         </section>
+        <RecentSessionRequiredDialog
+          {...inlineReauth.recentSessionDialogProps}
+          cancelLabel={tCommon("cancel")}
+        />
+        <PasskeyReauthDialog
+          {...inlineReauth.reauthDialogProps}
+          cancelLabel={tCommon("cancel")}
+        />
 
       {/* Key List */}
       <KeyList

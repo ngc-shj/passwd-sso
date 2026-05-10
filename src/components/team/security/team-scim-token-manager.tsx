@@ -46,6 +46,10 @@ import { formatDate } from "@/lib/format/format-datetime";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
 import { DISPLAY_ID_SHORT } from "@/lib/validations/common";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 
 const TOKEN_STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
@@ -79,6 +83,7 @@ export function ScimTokenManager({ locale }: Props) {
   const [newToken, setNewToken] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [expiresInDays, setExpiresInDays] = useState<string>("365");
+  const inlineReauth = useInlineReauth(() => handleCreate());
 
   const scimEndpoint =
     typeof window !== "undefined"
@@ -132,8 +137,12 @@ export function ScimTokenManager({ locale }: Props) {
         fetchTokens();
       } else {
         const err = await res.json().catch(() => ({}));
-        const apiKey = tokenMintApiErrorKey(err.error);
-        toast.error(apiKey ? tApi(apiKey) : t("networkError"));
+        if (err.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          await inlineReauth.triggerOnStaleError();
+        } else {
+          const apiKey = tokenMintApiErrorKey(err.error);
+          toast.error(apiKey ? tApi(apiKey) : t("networkError"));
+        }
       }
     } catch {
       toast.error(t("networkError"));
@@ -249,9 +258,17 @@ export function ScimTokenManager({ locale }: Props) {
     <Card>
       <SectionCardHeader icon={Database} title={t("scimTitle")} description={t("scimDescription")} />
       <CardContent className="space-y-6">
-      <p className="text-xs text-muted-foreground">
-        {t("scimTenantScopeNote")}
-      </p>
+        <RecentSessionRequiredDialog
+          {...inlineReauth.recentSessionDialogProps}
+          cancelLabel={tCommon("cancel")}
+        />
+        <PasskeyReauthDialog
+          {...inlineReauth.reauthDialogProps}
+          cancelLabel={tCommon("cancel")}
+        />
+        <p className="text-xs text-muted-foreground">
+          {t("scimTenantScopeNote")}
+        </p>
 
       {/* SCIM Endpoint URL */}
       <section className="space-y-2">

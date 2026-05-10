@@ -79,8 +79,8 @@ vi.mock("@/lib/security/rate-limit", () => ({
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
 }));
-vi.mock("@/lib/auth/session/step-up", () => ({
-  requireRecentSession: mockRequireRecentSession,
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { GET, POST } from "@/app/api/tenant/mcp-clients/route";

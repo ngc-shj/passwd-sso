@@ -106,6 +106,7 @@
   "saLimitExceeded": "サービスアカウントの上限に達しました。",
   "saNotFound": "サービスアカウントが見つかりません。",
   "saNameConflict": "同じ名前のサービスアカウントが既に存在します。",
+  "saInvalidScope": "選択したスコープはこのサービスアカウントでは利用できません。",
   "saTokenLimitExceeded": "サービスアカウントのトークン上限に達しました。",
   "saTokenNotFound": "サービスアカウントトークンが見つかりません。",
   "saTokenAlreadyRevoked": "サービスアカウントトークンは既に取り消されています。",

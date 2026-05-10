@@ -13,7 +13,9 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import type { ReactNode } from "react";
 
-const { mockFetch, mockToast } = vi.hoisted(() => ({
+const { mockFetch, mockToast, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
+  mockCanUsePasskeyRecovery: vi.fn(),
+  mockReauthenticateWithPasskey: vi.fn(),
   mockFetch: vi.fn(),
   mockToast: { error: vi.fn(), success: vi.fn() },
 }));
@@ -45,6 +47,17 @@ vi.mock("@/components/passwords/shared/copy-button", () => ({
       Copy
     </button>
   ),
+}));
+
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
 
 vi.mock("@/components/settings/account/section-card-header", () => ({
@@ -296,6 +309,8 @@ function setupFetchRequests(requests = sampleRequests) {
 describe("AccessRequestCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true, verifiedAt: "2026-05-10T00:00:00Z" });
   });
 
   it("shows loading spinner initially", async () => {
@@ -487,7 +502,7 @@ describe("AccessRequestCard", () => {
     });
   });
 
-  it("shows recent-session error on 403 approve response", async () => {
+  it("opens RecentSessionRequiredDialog on 403 SESSION_STEP_UP_REQUIRED approve response", async () => {
     setupFetchRequests();
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
       if (!init?.method || init.method === "GET") {
@@ -524,8 +539,9 @@ describe("AccessRequestCard", () => {
     });
 
     await waitFor(() => {
-      expect(mockToast.error).toHaveBeenCalledWith("sessionStepUpRequired");
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
     });
+    expect(mockToast.error).not.toHaveBeenCalled();
   });
 
   it("falls back to local arApproveFailed for an unrecognized API error code on approve", async () => {

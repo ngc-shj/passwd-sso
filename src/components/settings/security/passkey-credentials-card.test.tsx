@@ -222,8 +222,9 @@ describe("PasskeyCredentialsCard", () => {
     });
 
     const verifyCall = mockFetch.mock.calls.find(
-      ([url, init]: [unknown, RequestInit | undefined]) =>
-        String(url).includes("/register/verify") && init?.method === "POST",
+      (args: unknown[]) =>
+        String(args[0]).includes("/register/verify") &&
+        (args[1] as RequestInit | undefined)?.method === "POST",
     );
 
     expect(verifyCall).toBeTruthy();

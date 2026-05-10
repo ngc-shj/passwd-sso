@@ -7,12 +7,14 @@ const {
   mockPrismaUser,
   mockPrismaVaultKey,
   mockWithUserTenantRls,
+  mockWithTenantRls,
   mockRateLimitCheck,
 } = vi.hoisted(() => ({
   mockCheckAuth: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn() },
   mockPrismaVaultKey: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
   mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
 vi.mock("@/lib/auth/session/check-auth", () => ({ checkAuth: mockCheckAuth }));
@@ -28,6 +30,9 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
+vi.mock("@/lib/tenant-rls", () => ({
+  withTenantRls: mockWithTenantRls,
+}));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
@@ -36,9 +41,9 @@ vi.mock("@/lib/logger", () => ({
 
 import { GET } from "./route";
 
-function authOk(userId = "test-user-id", type = "session") {
+function authOk(userId = "test-user-id", type = "session", tenantId = "tenant-1") {
   const auth = type === "token"
-    ? { type, userId, scopes: [] as string[] }
+    ? { type, userId, tenantId, scopes: [] as string[] }
     : { type, userId };
   return { ok: true, auth };
 }
@@ -63,7 +68,7 @@ describe("GET /api/vault/unlock/data", () => {
   });
 
   it("accepts extension token with vault:unlock-data scope", async () => {
-    mockCheckAuth.mockResolvedValue(authOk("token-user", "token"));
+    mockCheckAuth.mockResolvedValue(authOk("token-user", "token", "tenant-xyz"));
     mockPrismaUser.findUnique.mockResolvedValue({
       vaultSetupAt: new Date(),
       accountSalt: "salt-hex",
@@ -79,6 +84,8 @@ describe("GET /api/vault/unlock/data", () => {
 
     const res = await GET(req());
     expect(res.status).toBe(200);
+    expect(mockWithTenantRls).toHaveBeenCalledWith(expect.anything(), "tenant-xyz", expect.any(Function));
+    expect(mockWithUserTenantRls).not.toHaveBeenCalled();
   });
 
   it("returns 403 when extension token lacks required scope", async () => {

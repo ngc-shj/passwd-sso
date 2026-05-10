@@ -46,6 +46,10 @@ import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { FormDirtyBadge } from "@/components/settings/account/form-dirty-badge";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 
 interface McpClient {
   id: string;
@@ -118,6 +122,7 @@ export function McpClientCard() {
   const [createUriError, setCreateUriError] = useState("");
   const [createScopeError, setCreateScopeError] = useState("");
   const [newCredentials, setNewCredentials] = useState<NewClientCredentials | null>(null);
+  const inlineReauth = useInlineReauth(() => handleCreate());
 
   // Edit dialog
   const [editOpen, setEditOpen] = useState(false);
@@ -214,9 +219,11 @@ const toastUpdateApiError = (errorCode: unknown) => {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => null) as ValidationErrorResponse | null;
-        if (res.status === 409 && data?.error === "MCP_CLIENT_NAME_CONFLICT") {
+        if (data?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          await inlineReauth.triggerOnStaleError();
+        } else if (res.status === 409 && data?.error === API_ERROR.MCP_CLIENT_NAME_CONFLICT) {
           setCreateNameError(t("mcpNameConflict"));
-        } else if (res.status === 400 && data?.error === "VALIDATION_ERROR") {
+        } else if (res.status === 400 && data?.error === API_ERROR.VALIDATION_ERROR) {
           const properties = data.details?.properties;
           let handled = false;
           if (hasValidationErrors(properties?.name)) {
@@ -234,7 +241,7 @@ const toastUpdateApiError = (errorCode: unknown) => {
           if (!handled) {
             toastCreateApiError(data?.error);
           }
-        } else if (res.status === 422 && data?.error === "MCP_CLIENT_LIMIT_EXCEEDED") {
+        } else if (res.status === 422 && data?.error === API_ERROR.MCP_CLIENT_LIMIT_EXCEEDED) {
           toast.error(t("mcpLimitReached"));
         } else {
           toastCreateApiError(data?.error);
@@ -495,51 +502,59 @@ const toastUpdateApiError = (errorCode: unknown) => {
         description={t("mcpCardDescription")}
       />
       <CardContent className="space-y-4">
-      <section className="space-y-3">
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
-          <Plus className="mr-1 h-4 w-4" />
-          {t("registerMcpClient")}
-        </Button>
-      </section>
-      {!loading && clients.length > 0 && (
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder={t("mcpSearchPlaceholder")}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
-          />
-        </div>
-      )}
-      {loading ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
-      ) : clients.length === 0 ? (
-        <p className="text-center text-muted-foreground">{t("noMcpClients")}</p>
-      ) : (
-        <div className="space-y-2">
-          {activeClients.length === 0 && inactiveClients.length > 0 && (
-            <p className="text-sm text-muted-foreground">{t("noActiveMcpClients")}</p>
-          )}
-          {activeClients.map(renderClientItem)}
-          {inactiveClients.length > 0 && (
-            <Collapsible open={showInactive} onOpenChange={setShowInactive}>
-              <CollapsibleTrigger className="flex items-center gap-1 text-sm text-muted-foreground hover:underline">
-                {t("mcpInactive")} ({inactiveClients.length})
-                <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", showInactive && "rotate-180")} />
-              </CollapsibleTrigger>
-              <CollapsibleContent className="space-y-2 mt-2">
-                {inactiveClients.map(renderClientItem)}
-              </CollapsibleContent>
-            </Collapsible>
-          )}
-          {searchFiltered.length === 0 && searchQuery && (
-            <p className="text-sm text-center text-muted-foreground py-4">
-              {t("mcpNoMatchingClients")}
-            </p>
-          )}
-        </div>
-      )}
+        <RecentSessionRequiredDialog
+          {...inlineReauth.recentSessionDialogProps}
+          cancelLabel={tCommon("cancel")}
+        />
+        <PasskeyReauthDialog
+          {...inlineReauth.reauthDialogProps}
+          cancelLabel={tCommon("cancel")}
+        />
+        <section className="space-y-3">
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="mr-1 h-4 w-4" />
+            {t("registerMcpClient")}
+          </Button>
+        </section>
+        {!loading && clients.length > 0 && (
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder={t("mcpSearchPlaceholder")}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+        )}
+        {loading ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : clients.length === 0 ? (
+          <p className="text-center text-muted-foreground">{t("noMcpClients")}</p>
+        ) : (
+          <div className="space-y-2">
+            {activeClients.length === 0 && inactiveClients.length > 0 && (
+              <p className="text-sm text-muted-foreground">{t("noActiveMcpClients")}</p>
+            )}
+            {activeClients.map(renderClientItem)}
+            {inactiveClients.length > 0 && (
+              <Collapsible open={showInactive} onOpenChange={setShowInactive}>
+                <CollapsibleTrigger className="flex items-center gap-1 text-sm text-muted-foreground hover:underline">
+                  {t("mcpInactive")} ({inactiveClients.length})
+                  <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", showInactive && "rotate-180")} />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="space-y-2 mt-2">
+                  {inactiveClients.map(renderClientItem)}
+                </CollapsibleContent>
+              </Collapsible>
+            )}
+            {searchFiltered.length === 0 && searchQuery && (
+              <p className="text-sm text-center text-muted-foreground py-4">
+                {t("mcpNoMatchingClients")}
+              </p>
+            )}
+          </div>
+        )}
       </CardContent>
 
       {/* Create dialog */}

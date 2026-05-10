@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { injectExtensionBridgeCode } from "@/lib/inject-extension-bridge-code";
 import {
   APP_NAME,
@@ -13,7 +13,11 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, Loader2, KeyRound } from "lucide-react";
-import { fetchApi } from "@/lib/url-helpers";
+import { fetchApi, withBasePath } from "@/lib/url-helpers";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
+import { canUsePasskeyRecovery } from "@/lib/auth/webauthn/can-use-passkey-recovery";
+import { signOut } from "next-auth/react";
 
 /**
  * Returns true when a full-screen overlay with `data-overlay-active` is
@@ -34,24 +38,41 @@ export function isOverlayActive(): boolean {
  */
 export function AutoExtensionConnect() {
   const t = useTranslations("Extension");
+  const locale = useLocale();
   const didRunRef = useRef(false);
   const [status, setStatus] = useState<ConnectStatus>(CONNECT_STATUS.IDLE);
+  const [requiresReauth, setRequiresReauth] = useState(false);
+  const [requiresRecentSession, setRequiresRecentSession] = useState(false);
+  const [reauthenticating, setReauthenticating] = useState(false);
+  const [reauthError, setReauthError] = useState<string | null>(null);
 
-  const connect = async () => {
+  const connect = useCallback(async (): Promise<{ ok: boolean; requiresReauth: boolean }> => {
     setStatus(CONNECT_STATUS.CONNECTING);
+    setRequiresReauth(false);
+    setRequiresRecentSession(false);
+    setReauthError(null);
     try {
       const res = await fetchApi(API_PATH.EXTENSION_BRIDGE_CODE, { method: "POST" });
       if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        const needsReauth = body.error === API_ERROR.SESSION_STEP_UP_REQUIRED;
+        if (needsReauth) {
+          const passkeyCapable = await canUsePasskeyRecovery();
+          setRequiresReauth(passkeyCapable);
+          setRequiresRecentSession(!passkeyCapable);
+        }
         setStatus(CONNECT_STATUS.FAILED);
-        return;
+        return { ok: false, requiresReauth: needsReauth };
       }
       const json = await res.json();
       injectExtensionBridgeCode(json.code, Date.parse(json.expiresAt));
       setStatus(CONNECT_STATUS.CONNECTED);
+      return { ok: true, requiresReauth: false };
     } catch {
       setStatus(CONNECT_STATUS.FAILED);
+      return { ok: false, requiresReauth: false };
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (didRunRef.current) return;
@@ -68,12 +89,49 @@ export function AutoExtensionConnect() {
       window.location.pathname + (newSearch ? `?${newSearch}` : "") + window.location.hash;
     window.history.replaceState(null, "", newUrl);
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     connect();
-  }, []);
+  }, [connect]);
 
-  const handleRetry = () => {
-    connect();
+  const handleRetry = async () => {
+    if (!requiresReauth) {
+      if (requiresRecentSession) {
+        setReauthenticating(true);
+        try {
+          const currentUrl = new URL(window.location.href);
+          currentUrl.searchParams.set(EXT_CONNECT_PARAM, "1");
+          const callbackUrl =
+            `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`;
+          const signInPath = `${withBasePath(`/${locale}/auth/signin`)}?callbackUrl=${encodeURIComponent(callbackUrl)}`;
+          await signOut({ callbackUrl: signInPath });
+        } finally {
+          setReauthenticating(false);
+        }
+        return;
+      }
+      await connect();
+      return;
+    }
+
+    setReauthenticating(true);
+    setReauthError(null);
+    try {
+      const result = await reauthenticateWithPasskey();
+      if (!result.ok) {
+        setReauthError(
+          result.error === "AUTHENTICATION_CANCELLED"
+            ? t("connectReauthCancelled")
+            : t("connectReauthFailed"),
+        );
+        return;
+      }
+
+      const retryResult = await connect();
+      if (!retryResult.ok && retryResult.requiresReauth) {
+        setReauthError(t("connectReauthStillRequired"));
+      }
+    } finally {
+      setReauthenticating(false);
+    }
   };
 
   // No ext_connect param — render nothing, let dashboard show
@@ -122,10 +180,23 @@ export function AutoExtensionConnect() {
           )}
           {status === CONNECT_STATUS.FAILED && (
             <div className="space-y-2">
-              <h1 className="text-xl font-semibold">{t("connectFailedTitle")}</h1>
+              <h1 className="text-xl font-semibold">
+                {requiresReauth
+                  ? t("connectReauthTitle")
+                  : requiresRecentSession
+                    ? t("connectRecentSessionTitle")
+                    : t("connectFailedTitle")}
+              </h1>
               <p className="text-sm text-muted-foreground">
-                {t("connectFailedDescription")}
+                {requiresReauth
+                  ? t("connectReauthDescription")
+                  : requiresRecentSession
+                    ? t("connectRecentSessionDescription")
+                    : t("connectFailedDescription")}
               </p>
+              {reauthError ? (
+                <p className="text-sm text-destructive">{reauthError}</p>
+              ) : null}
             </div>
           )}
 
@@ -145,8 +216,20 @@ export function AutoExtensionConnect() {
               <Button
                 onClick={handleRetry}
                 className="w-full"
+                disabled={reauthenticating}
               >
-                {t("retry")}
+                {reauthenticating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    {t("connecting")}
+                  </>
+                ) : requiresReauth ? (
+                  t("connectReauthAction")
+                ) : requiresRecentSession ? (
+                  t("connectRecentSessionAction")
+                ) : (
+                  t("retry")
+                )}
               </Button>
               <Button
                 variant="ghost"

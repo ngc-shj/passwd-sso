@@ -52,7 +52,7 @@
   "sessionPolicyValidationMin": "Must be at least {min}.",
   "sessionPolicyValidationMax": "Must be {max} or less.",
   "idleTimeoutMinutes": "Web session idle timeout (minutes)",
-  "idleTimeoutHelp": "Sign out users after this many minutes of inactivity. Range: {min}–{max} minutes. WebAuthn (passkey) sessions use stricter AAL3 limits (15 min idle / 12 h absolute) regardless of this value.",
+  "idleTimeoutHelp": "Sign out users after this many minutes of inactivity. Range: {min}–{max} minutes.",
   "idleTimeoutValidationMin": "Must be at least {min} minutes.",
   "idleTimeoutValidationMax": "Must be {max} minutes or less.",
   "absoluteTimeoutMinutes": "Web session absolute timeout (minutes)",

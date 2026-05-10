@@ -50,6 +50,10 @@ import {
   OPERATOR_TOKEN_NAME_MAX_LENGTH,
 } from "@/lib/constants/auth/operator-token";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
+import { canUsePasskeyRecovery } from "@/lib/auth/webauthn/can-use-passkey-recovery";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 
 const TOKEN_STATUS_VARIANT: Record<
@@ -89,6 +93,7 @@ interface CreatedToken {
 export function OperatorTokenCard() {
   const t = useTranslations("OperatorToken");
   const tApi = useTranslations("ApiErrors");
+  const tAuth = useTranslations("Auth");
   const locale = useLocale();
 
   const [tokens, setTokens] = useState<OperatorToken[]>([]);
@@ -101,6 +106,21 @@ export function OperatorTokenCard() {
     String(OPERATOR_TOKEN_DEFAULT_EXPIRES_DAYS),
   );
   const [showInactive, setShowInactive] = useState(false);
+  const [reauthOpen, setReauthOpen] = useState(false);
+  const [reauthenticating, setReauthenticating] = useState(false);
+  const [reauthError, setReauthError] = useState<string | null>(null);
+  const [recentSessionOpen, setRecentSessionOpen] = useState(false);
+
+  const createToken = useCallback(async () => {
+    return fetchApi(apiPath.tenantOperatorTokens(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: tokenName.trim(),
+        expiresInDays: parseInt(expiresInDays, 10),
+      }),
+    });
+  }, [tokenName, expiresInDays]);
 
   const fetchTokens = useCallback(async () => {
     try {
@@ -133,14 +153,7 @@ export function OperatorTokenCard() {
     if (!tokenName.trim()) return;
     setCreating(true);
     try {
-      const res = await fetchApi(apiPath.tenantOperatorTokens(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: tokenName.trim(),
-          expiresInDays: parseInt(expiresInDays, 10),
-        }),
-      });
+      const res = await createToken();
       if (res.ok) {
         const data = (await res.json()) as CreatedToken;
         setCreatedToken(data);
@@ -152,7 +165,14 @@ export function OperatorTokenCard() {
         const errBody = (await res.json().catch(() => ({}))) as {
           error?: string;
         };
-        if (errBody.error === API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED) {
+        if (errBody.error === API_ERROR.OPERATOR_TOKEN_STALE_SESSION) {
+          setReauthError(null);
+          if (await canUsePasskeyRecovery()) {
+            setReauthOpen(true);
+          } else {
+            setRecentSessionOpen(true);
+          }
+        } else if (errBody.error === API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED) {
           toast.error(t("limitExceeded"));
         } else {
           const apiKey = tokenMintApiErrorKey(errBody.error);
@@ -163,6 +183,53 @@ export function OperatorTokenCard() {
       toast.error(t("networkError"));
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleReauthenticate = async () => {
+    setReauthenticating(true);
+    setReauthError(null);
+    try {
+      const result = await reauthenticateWithPasskey();
+      if (!result.ok) {
+        setReauthError(
+          result.error === "AUTHENTICATION_CANCELLED"
+            ? tAuth("reauthCancelled")
+            : tAuth("reauthFailed"),
+        );
+        return;
+      }
+
+      const retryRes = await createToken();
+      if (!retryRes.ok) {
+        const errBody = (await retryRes.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        if (errBody.error === API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED) {
+          setReauthOpen(false);
+          toast.error(t("limitExceeded"));
+        } else if (errBody.error === API_ERROR.OPERATOR_TOKEN_STALE_SESSION) {
+          if (await canUsePasskeyRecovery()) {
+            setReauthError(t("reauthStillRequired"));
+          } else {
+            setReauthOpen(false);
+            setRecentSessionOpen(true);
+          }
+        } else {
+          setReauthError(t("reauthRetryFailed"));
+        }
+        return;
+      }
+
+      const data = (await retryRes.json()) as CreatedToken;
+      setCreatedToken(data);
+      setTokenName("");
+      setExpiresInDays(String(OPERATOR_TOKEN_DEFAULT_EXPIRES_DAYS));
+      setReauthOpen(false);
+      toast.success(t("tokenCreated"));
+      fetchTokens();
+    } finally {
+      setReauthenticating(false);
     }
   };
 
@@ -269,6 +336,14 @@ export function OperatorTokenCard() {
         description={t("description")}
       />
       <CardContent className="space-y-6">
+        <RecentSessionRequiredDialog
+          actionLabel={tAuth("recentSessionAction")}
+          cancelLabel={t("cancel")}
+          description={tAuth("recentSessionDescription")}
+          onOpenChange={setRecentSessionOpen}
+          open={recentSessionOpen}
+          title={tAuth("recentSessionTitle")}
+        />
         <p className="text-xs text-muted-foreground">{t("tenantScopeNote")}</p>
         <section className="space-y-3">
           <Button size="sm" onClick={() => setCreateOpen(true)}>
@@ -316,6 +391,18 @@ export function OperatorTokenCard() {
             </div>
           )}
         </section>
+
+        <PasskeyReauthDialog
+          open={reauthOpen}
+          onOpenChange={setReauthOpen}
+          title={tAuth("reauthTitle")}
+          description={tAuth("reauthDescription")}
+          actionLabel={tAuth("reauthAction")}
+          cancelLabel={t("cancel")}
+          errorMessage={reauthError}
+          isReauthenticating={reauthenticating}
+          onAction={handleReauthenticate}
+        />
       </CardContent>
 
       <Dialog

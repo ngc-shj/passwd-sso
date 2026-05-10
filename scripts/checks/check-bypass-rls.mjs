@@ -43,6 +43,10 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/auth/policy/new-device-detection.ts", ["session", "user"]],
   // Shared step-up helper: reads Session.createdAt from the session-token cookie.
   ["src/lib/auth/session/step-up.ts", ["session"]],
+  // Route-level chooser: selects passkey freshness vs generic recent-session by session provider.
+  ["src/lib/auth/session/recent-current-auth-method.ts", ["session"]],
+  // WebAuthn-specific freshness guard/helper for selected route-level reauth checks.
+  ["src/lib/auth/webauthn/recent-passkey-verification.ts", ["session"]],
   ["src/lib/notification.ts", ["user", "notification"]],
   ["src/lib/webhook-dispatcher.ts", ["teamWebhook", "tenantWebhook"]],
   ["src/lib/auth/access/tenant-auth.ts", ["tenantMember"]],
@@ -54,6 +58,8 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/auth/webauthn/webauthn-authorize.ts", ["webAuthnCredential"]],
   ["src/app/api/auth/passkey/verify/route.ts", ["user", "session"]],
   ["src/app/api/auth/passkey/options/email/route.ts", ["user", "webAuthnCredential"]],
+  ["src/app/api/auth/passkey/reauth/options/route.ts", ["webAuthnCredential"]],
+  ["src/app/api/auth/passkey/reauth/verify/route.ts", ["webAuthnCredential", "session"]],
   ["src/lib/auth/session/user-session-invalidation.ts", ["session", "extensionToken", "apiKey"]],
   ["src/app/api/tenant/policy/route.ts", ["user", "tenant", "teamPolicy"]],
   ["src/lib/auth/policy/access-restriction.ts", ["tenant"]],

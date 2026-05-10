@@ -72,8 +72,8 @@ vi.mock("@/lib/http/with-request-log", () => ({
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
 }));
-vi.mock("@/lib/auth/session/step-up", () => ({
-  requireRecentSession: mockRequireRecentSession,
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { POST } from "@/app/api/tenant/access-requests/[id]/approve/route";
@@ -343,6 +343,6 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(400);
-    expect(json.error).toBe("INVALID_SCOPE");
+    expect(json.error).toBe("SA_INVALID_SCOPE");
   });
 });

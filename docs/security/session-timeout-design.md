@@ -30,7 +30,7 @@ Symptoms:
 |----------|-------------|-------------|
 | [OWASP ASVS 5.0 V7.3.1](https://github.com/OWASP/ASVS/blob/v5.0.0_release/5.0/en/0x16-V7-Session-Management.md#v73-session-timeout) | Inactivity timeout required (L2) | `sessionIdleTimeoutMinutes` non-null |
 | [OWASP ASVS 5.0 V7.3.2](https://github.com/OWASP/ASVS/blob/v5.0.0_release/5.0/en/0x16-V7-Session-Management.md#v73-session-timeout) | Absolute maximum session lifetime required (L2) | `sessionAbsoluteTimeoutMinutes` non-null |
-| [NIST SP 800-63B-4 §2.3.3 (AAL3 Reauthentication)](https://pages.nist.gov/800-63-4/sp800-63b.html) | 12h absolute OR 15min inactivity | WebAuthn/Passkey sessions clamp to AAL3 limits automatically |
+| [NIST SP 800-63B-4 §2.3.3 (AAL3 Reauthentication)](https://pages.nist.gov/800-63-4/sp800-63b.html) | 12h absolute OR 15min inactivity | Sensitive actions MAY require fresh passkey verification without forcing the entire browser session into AAL3 timeouts |
 | [NIST SP 800-207 §2.1 tenet 6](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-207.pdf) | All resource authentication and authorization are dynamic and strictly enforced before access is allowed | Team-level override (strictest wins) |
 | [OWASP Session Management Cheat Sheet § Session Expiration](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html#session-expiration) | "It is mandatory to set expiration timeouts for every session" | Nullability removed |
 | [RFC 9700 §2.2.2 (Refresh Tokens)](https://www.rfc-editor.org/rfc/rfc9700#name-refresh-tokens) | Refresh tokens for public clients MUST be sender-constrained or use refresh token rotation | Extension reuses the rotation/revocation machinery already built for MCP |
@@ -72,14 +72,15 @@ absolute = min(tenant.absolute, ...teams.absolute.filter(non-null))
 
 Recomputed on every `auth()` call — the session-timeout resolver itself is recomputed each time; the 60s in-process team-policy cache continues to apply. Session validity itself is cached in Redis (see policy-enforcement.md §Cache Invalidation). Tombstones short-circuit revocation propagation under both the positive cache (`SESSION_CACHE_TTL_MS`) and the tombstone window (`TOMBSTONE_TTL_MS`). Team membership changes or policy edits propagate within the team-policy cache TTL (60s).
 
-## AAL3 Clamp
+## Fresh Passkey Reauthentication
 
-When the current session was established via WebAuthn / Passkey (discoverable or non-discoverable), the resolved limits are clamped to [NIST SP 800-63B-4 §2.3.3](https://pages.nist.gov/800-63-4/sp800-63b.html) AAL3 ceilings:
+Personal passkey sign-in sessions now follow the ordinary tenant/team web-session policy envelope. High-assurance reauthentication is enforced separately through explicit session-scoped passkey freshness metadata:
 
-- `idle ≤ 15 min`
-- `absolute ≤ 12h`
+- ordinary session expiry still uses tenant/team `idle` and `absolute` policy values
+- sensitive routes MAY require `passkeyVerifiedAt` to be within a short freshness window
+- successful in-session passkey reauthentication resets freshness without rotating the whole browser session family
 
-Rationale: a Passkey session is AAL3 only for as long as the reauthentication interval is AAL3-compliant. Letting a passkey session run for 30 days silently demotes it below its own authentication assurance.
+Rationale: for personal bootstrap users, the normal browsing session is treated as an AAL2-style web session, while sensitive actions can still require a fresh passkey ceremony when stronger assurance is needed.
 
 ## Extension Token Policy
 

@@ -13,7 +13,9 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import type { ReactNode } from "react";
 
-const { mockFetch, mockToast } = vi.hoisted(() => ({
+const { mockFetch, mockToast, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
+  mockCanUsePasskeyRecovery: vi.fn(),
+  mockReauthenticateWithPasskey: vi.fn(),
   mockFetch: vi.fn(),
   mockToast: { error: vi.fn(), success: vi.fn() },
 }));
@@ -41,6 +43,17 @@ vi.mock("@/components/passwords/shared/copy-button", () => ({
       Copy
     </button>
   ),
+}));
+
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
 
 vi.mock("@/components/settings/account/section-card-header", () => ({
@@ -297,6 +310,10 @@ function setupFetchClients(clients = sampleClients) {
 describe("McpClientCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: user has no passkey → recent-session dialog opens. Tests
+    // exercising the inline passkey reauth path override this.
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true, verifiedAt: "2026-05-10T00:00:00Z" });
   });
 
   it("shows loading spinner initially", async () => {
@@ -600,7 +617,7 @@ describe("McpClientCard", () => {
     expect(mockToast.error).not.toHaveBeenCalledWith("mcpCreateFailed");
   });
 
-  it("create — surfaces step-up required as translated API error instead of generic failure", async () => {
+  it("create — opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned", async () => {
     mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
       if (!init?.method || init.method === "GET") {
         return Promise.resolve({
@@ -649,9 +666,9 @@ describe("McpClientCard", () => {
     });
 
     await waitFor(() => {
-      expect(mockToast.error).toHaveBeenCalledWith("sessionStepUpRequired");
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
     });
-    expect(mockToast.error).not.toHaveBeenCalledWith("mcpCreateFailed");
+    expect(mockToast.error).not.toHaveBeenCalled();
   });
 
   it("create — falls back to local mcpCreateFailed for an unrecognized API error code", async () => {

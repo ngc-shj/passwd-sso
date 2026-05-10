@@ -1,18 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
-import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 const {
   mockAuth,
   mockRequireTenantPermission,
-  mockGetSessionToken,
-  mockPrismaSession,
   mockPrismaOperatorToken,
-  mockWithBypassRls,
   mockWithTenantRls,
   mockLogAudit,
   mockHashToken,
   mockRateLimitCheck,
+  mockRequireRecentCurrentAuthMethod,
   TenantAuthError,
 } = vi.hoisted(() => {
   class _TenantAuthError extends Error {
@@ -26,20 +23,16 @@ const {
   return {
     mockAuth: vi.fn(),
     mockRequireTenantPermission: vi.fn(),
-    mockGetSessionToken: vi.fn(),
-    mockPrismaSession: {
-      findUnique: vi.fn(),
-    },
     mockPrismaOperatorToken: {
       findMany: vi.fn(),
       count: vi.fn(),
       create: vi.fn(),
     },
-    mockWithBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
     mockWithTenantRls: vi.fn(async (_p: unknown, _t: unknown, fn: () => unknown) => fn()),
     mockLogAudit: vi.fn(),
     mockHashToken: vi.fn((t: string) => `hashed:${t}`),
     mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
+    mockRequireRecentCurrentAuthMethod: vi.fn(),
     TenantAuthError: _TenantAuthError,
   };
 });
@@ -47,7 +40,6 @@ const {
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    session: mockPrismaSession,
     operatorToken: mockPrismaOperatorToken,
   },
 }));
@@ -57,7 +49,6 @@ vi.mock("@/lib/auth/access/tenant-auth", () => ({
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
-  withBypassRls: mockWithBypassRls,
   withTenantRls: mockWithTenantRls,
 }));
 vi.mock("@/lib/audit/audit", () => ({
@@ -74,8 +65,8 @@ vi.mock("@/lib/security/rate-limit", () => ({
     clear: vi.fn(),
   })),
 }));
-vi.mock("@/app/api/sessions/helpers", () => ({
-  getSessionToken: mockGetSessionToken,
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
 }));
 
 import { GET, POST } from "./route";
@@ -89,15 +80,6 @@ const ACTOR = {
   role: "OWNER",
 };
 
-// A fresh session (just created)
-const FRESH_SESSION = { createdAt: new Date(Date.now() - 5 * 60 * 1000) }; // 5 min ago
-// A stale session (older than 15 min step-up window)
-const STALE_SESSION = {
-  createdAt: new Date(Date.now() - 16 * MS_PER_MINUTE),
-};
-
-const SESSION_TOKEN_VALUE = "session-token-abc123";
-
 describe("GET /api/tenant/operator-tokens", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -105,6 +87,7 @@ describe("GET /api/tenant/operator-tokens", () => {
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
     mockPrismaOperatorToken.findMany.mockResolvedValue([]);
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -163,8 +146,7 @@ describe("POST /api/tenant/operator-tokens", () => {
     mockAuth.mockResolvedValue({ user: { id: USER_ID } });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
-    mockGetSessionToken.mockReturnValue(SESSION_TOKEN_VALUE);
-    mockPrismaSession.findUnique.mockResolvedValue(FRESH_SESSION);
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
     mockPrismaOperatorToken.count.mockResolvedValue(0);
     mockPrismaOperatorToken.create.mockResolvedValue({
       id: "tok-new",
@@ -201,7 +183,12 @@ describe("POST /api/tenant/operator-tokens", () => {
   });
 
   it("returns 403 with OPERATOR_TOKEN_STALE_SESSION when session is older than 15 minutes", async () => {
-    mockPrismaSession.findUnique.mockResolvedValue(STALE_SESSION);
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(
+      Response.json(
+        { error: "OPERATOR_TOKEN_STALE_SESSION" },
+        { status: 403 },
+      ),
+    );
 
     const res = await POST(
       createRequest("POST", "http://localhost/api/tenant/operator-tokens", {
@@ -211,28 +198,6 @@ describe("POST /api/tenant/operator-tokens", () => {
     expect(res.status).toBe(403);
     const body = await res.json();
     expect(body.error).toBe("OPERATOR_TOKEN_STALE_SESSION");
-  });
-
-  it("returns 401 when session token cookie is missing", async () => {
-    mockGetSessionToken.mockReturnValue(null);
-
-    const res = await POST(
-      createRequest("POST", "http://localhost/api/tenant/operator-tokens", {
-        body: { name: "Test token" },
-      }),
-    );
-    expect(res.status).toBe(401);
-  });
-
-  it("returns 401 when session row not found in DB", async () => {
-    mockPrismaSession.findUnique.mockResolvedValue(null);
-
-    const res = await POST(
-      createRequest("POST", "http://localhost/api/tenant/operator-tokens", {
-        body: { name: "Test token" },
-      }),
-    );
-    expect(res.status).toBe(401);
   });
 
   it("returns 400 when body contains subjectUserId (strict schema rejection)", async () => {

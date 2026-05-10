@@ -4,7 +4,6 @@ import {
   KDF_PBKDF2_ITERATIONS_MAX,
   KDF_ARGON2_MEMORY_MIN,
   KDF_ARGON2_MEMORY_MAX,
-  PASSKEY_SESSION_MAX_AGE_SECONDS,
   AUDIT_LOG_BATCH_SIZE,
   AUDIT_LOG_MAX_ROWS,
   RATE_WINDOW_MS,
@@ -46,14 +45,6 @@ describe("KDF constants", () => {
 
   it("KDF_ARGON2_MEMORY_MAX is 4_194_304 KiB (4 GiB)", () => {
     expect(KDF_ARGON2_MEMORY_MAX).toBe(4_194_304);
-  });
-});
-
-// ─── Session constants ───────────────────────────────────────
-
-describe("Session constants", () => {
-  it("PASSKEY_SESSION_MAX_AGE_SECONDS is 28800 (8 hours)", () => {
-    expect(PASSKEY_SESSION_MAX_AGE_SECONDS).toBe(28_800);
   });
 });
 

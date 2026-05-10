@@ -6,6 +6,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { checkAuth } from "@/lib/auth/session/check-auth";
 import { errorResponse } from "@/lib/http/api-response";
+import { withTenantRls } from "@/lib/tenant-rls";
 
 export const runtime = "nodejs";
 
@@ -18,8 +19,12 @@ async function handleGET(request: NextRequest) {
   const result = await checkAuth(request, { scope: EXTENSION_TOKEN_SCOPE.VAULT_UNLOCK_DATA });
   if (!result.ok) return result.response;
   const { userId } = result.auth;
+  const tenantId = "tenantId" in result.auth ? result.auth.tenantId : null;
 
-  const user = await withUserTenantRls(userId, async () =>
+  const withVaultTenantRls = <T>(fn: () => Promise<T>) =>
+    tenantId ? withTenantRls(prisma, tenantId, fn) : withUserTenantRls(userId, fn);
+
+  const user = await withVaultTenantRls(async () =>
     prisma.user.findUnique({
       where: { id: userId },
       select: {

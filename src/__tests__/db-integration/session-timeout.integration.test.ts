@@ -2,7 +2,7 @@
  * Integration tests for the unified session-timeout policy:
  *   - Tenant-level defaults and per-column backfill from the Batch A migration
  *   - Team-override (strictest-wins) resolution
- *   - AAL3 clamp for webauthn sessions
+ *   - ordinary passkey sessions follow tenant/team policy values
  *   - Extension token family tracking across refresh
  *   - family_id / family_created_at NOT NULL flip (Batch D migration)
  *
@@ -110,13 +110,13 @@ describe("session timeout — integration", () => {
       expect(result.absoluteMinutes).toBe(43200);
     });
 
-    it("applies AAL3 clamp when sessionProvider === 'webauthn'", async () => {
+    it("returns tenant policy values for webauthn sessions", async () => {
       const mod = await import("@/lib/auth/session/session-timeout");
       mod._internal.clear();
 
       const result = await mod.resolveEffectiveSessionTimeouts(userId, "webauthn");
-      expect(result.idleMinutes).toBe(15);
-      expect(result.absoluteMinutes).toBe(720);
+      expect(result.idleMinutes).toBe(480);
+      expect(result.absoluteMinutes).toBe(43200);
     });
 
     it("applies the strictest team override across memberships", async () => {

@@ -28,6 +28,7 @@ vi.mock("@/lib/security/rate-limit", () => ({
 
 vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
   generateDiscoverableAuthOpts: mockGenerateDiscoverableAuthOpts,
+  WEBAUTHN_CHALLENGE_TTL_SECONDS: 300,
 }));
 
 vi.mock("@/lib/auth/session/csrf", () => ({
