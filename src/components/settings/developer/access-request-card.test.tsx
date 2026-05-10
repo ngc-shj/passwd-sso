@@ -492,6 +492,87 @@ describe("AccessRequestCard", () => {
     });
   });
 
+  it("opens RecentSessionRequiredDialog on 403 SESSION_STEP_UP_REQUIRED approve response", async () => {
+    setupFetchRequests();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ requests: sampleRequests }),
+        });
+      }
+      if (init.method === "POST" && String(url).includes("/approve")) {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 500 });
+    });
+
+    await act(async () => {
+      render(<AccessRequestCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("deploy-bot")).toBeInTheDocument();
+    });
+
+    const approveButtons = screen
+      .getAllByRole("button")
+      .filter((b) => b.textContent?.includes("arApprove"));
+    expect(approveButtons.length).toBeGreaterThan(0);
+
+    await act(async () => {
+      fireEvent.click(approveButtons[0]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
+  it("falls back to local arApproveFailed for an unrecognized API error code on approve", async () => {
+    setupFetchRequests();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ requests: sampleRequests }),
+        });
+      }
+      if (init.method === "POST" && String(url).includes("/approve")) {
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          json: () => Promise.resolve({ error: "BOGUS_NOT_IN_ALLOWLIST" }),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 500 });
+    });
+
+    await act(async () => {
+      render(<AccessRequestCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("deploy-bot")).toBeInTheDocument();
+    });
+
+    const approveButtons = screen
+      .getAllByRole("button")
+      .filter((b) => b.textContent?.includes("arApprove"));
+    await act(async () => {
+      fireEvent.click(approveButtons[0]);
+    });
+
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("arApproveFailed");
+    });
+  });
+
   it("calls deny endpoint after confirmation dialog action", async () => {
     setupFetchRequests();
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {

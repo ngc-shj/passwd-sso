@@ -45,6 +45,7 @@ import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 
 import type { AccessRequestStatus } from "@prisma/client";
 
@@ -77,6 +78,7 @@ const STATUS_VARIANTS: Record<
 export function AccessRequestCard() {
   const t = useTranslations("MachineIdentity");
   const tCommon = useTranslations("Common");
+  const tApi = useTranslations("ApiErrors");
   const locale = useLocale();
 
   const [requests, setRequests] = useState<AccessRequest[]>([]);
@@ -163,7 +165,8 @@ export function AccessRequestCard() {
         } else if (res.status === 400) {
           toast.error(t("arCreateValidationError"));
         } else {
-          toast.error(data?.message ?? t("arCreateFailed"));
+          const apiKey = tokenMintApiErrorKey(data?.error);
+          toast.error(apiKey ? tApi(apiKey) : t("arCreateFailed"));
         }
         return;
       }
@@ -197,8 +200,15 @@ export function AccessRequestCard() {
           toast.error(t("arAlreadyProcessed"));
         } else if (res.status === 400 && code === API_ERROR.SA_INVALID_SCOPE) {
           toast.error(t("arInvalidScope"));
-        } else {
+        } else if (res.status === 400) {
+          // Other 400 codes (e.g. VALIDATION_ERROR) are validation failures
+          // unrelated to scope; surface them as the approve-failed fallback
+          // rather than letting the helper try to translate codes from
+          // unrelated domains.
           toast.error(t("arApproveFailed"));
+        } else {
+          const apiKey = tokenMintApiErrorKey(code);
+          toast.error(apiKey ? tApi(apiKey) : t("arApproveFailed"));
         }
         return;
       }

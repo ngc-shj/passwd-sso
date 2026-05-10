@@ -26,6 +26,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import {
   Collapsible,
@@ -44,6 +52,7 @@ import {
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 
 const TOKEN_STATUS_VARIANT: Record<
   string,
@@ -81,12 +90,14 @@ interface CreatedToken {
 
 export function OperatorTokenCard() {
   const t = useTranslations("OperatorToken");
+  const tApi = useTranslations("ApiErrors");
   const locale = useLocale();
 
   const [tokens, setTokens] = useState<OperatorToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [createdToken, setCreatedToken] = useState<CreatedToken | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   const [tokenName, setTokenName] = useState("");
   const [expiresInDays, setExpiresInDays] = useState<string>(
     String(OPERATOR_TOKEN_DEFAULT_EXPIRES_DAYS),
@@ -139,6 +150,13 @@ export function OperatorTokenCard() {
     }
   }, []);
 
+  const closeCreateDialog = () => {
+    setCreateOpen(false);
+    setCreatedToken(null);
+    setTokenName("");
+    setExpiresInDays(String(OPERATOR_TOKEN_DEFAULT_EXPIRES_DAYS));
+  };
+
   const handleCreate = async () => {
     if (!tokenName.trim()) return;
     setCreating(true);
@@ -165,7 +183,8 @@ export function OperatorTokenCard() {
         } else if (errBody.error === API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED) {
           toast.error(t("limitExceeded"));
         } else {
-          toast.error(t("networkError"));
+          const apiKey = tokenMintApiErrorKey(errBody.error);
+          toast.error(apiKey ? tApi(apiKey) : t("networkError"));
         }
       }
     } catch {
@@ -334,70 +353,12 @@ export function OperatorTokenCard() {
           title={t("recentSessionTitle")}
         />
         <p className="text-xs text-muted-foreground">{t("tenantScopeNote")}</p>
-
-        {/* Create form */}
-        <section className="space-y-3 border-t pt-4">
-          <h3 className="text-sm font-medium">{t("createToken")}</h3>
-          <div className="space-y-2">
-            <Label htmlFor="op-token-name">{t("tokenName")}</Label>
-            <Input
-              id="op-token-name"
-              value={tokenName}
-              onChange={(e) => setTokenName(e.target.value)}
-              placeholder={t("tokenNamePlaceholder")}
-              maxLength={OPERATOR_TOKEN_NAME_MAX_LENGTH}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="op-token-expiry">{t("tokenExpiry")}</Label>
-            <Select value={expiresInDays} onValueChange={setExpiresInDays}>
-              <SelectTrigger id="op-token-expiry">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="7">{t("expiry7")}</SelectItem>
-                <SelectItem value="30">{t("expiry30")}</SelectItem>
-                <SelectItem value="60">{t("expiry60")}</SelectItem>
-                <SelectItem value="90">{t("expiry90")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <Button
-            onClick={handleCreate}
-            disabled={creating || !tokenName.trim()}
-            size="sm"
-          >
-            {creating ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Plus className="h-4 w-4" />
-            )}
+        <section className="space-y-3">
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="mr-1 h-4 w-4" />
             {t("createToken")}
           </Button>
         </section>
-
-        {/* One-time plaintext display */}
-        {createdToken && (
-          <section className="border rounded-md p-4 bg-muted/50 space-y-2">
-            <p className="text-sm font-medium">{t("tokenCreated")}</p>
-            <div className="flex items-center gap-2">
-              <Input
-                value={createdToken.plaintext}
-                readOnly
-                className="font-mono text-xs"
-              />
-              <CopyButton getValue={() => createdToken.plaintext} />
-            </div>
-            <p className="text-xs text-muted-foreground">{t("usageHint")}</p>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setCreatedToken(null)}
-            >
-              OK
-            </Button>
-          </section>
-        )}
 
         {/* Token list */}
         <section className="space-y-3 border-t pt-4">
@@ -471,6 +432,89 @@ export function OperatorTokenCard() {
           </AlertDialogContent>
         </AlertDialog>
       </CardContent>
+
+      <Dialog
+        open={createOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeCreateDialog();
+            return;
+          }
+          setCreateOpen(true);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("createToken")}</DialogTitle>
+            <DialogDescription>{t("createTokenDescription")}</DialogDescription>
+          </DialogHeader>
+
+          {createdToken ? (
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">{t("tokenCreated")}</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={createdToken.plaintext}
+                    readOnly
+                    className="font-mono text-xs"
+                  />
+                  <CopyButton getValue={() => createdToken.plaintext} />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">{t("usageHint")}</p>
+              <Button variant="outline" size="sm" onClick={closeCreateDialog}>
+                OK
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-4 py-2">
+                <div className="space-y-2">
+                  <Label htmlFor="op-token-name">{t("tokenName")}</Label>
+                  <Input
+                    id="op-token-name"
+                    value={tokenName}
+                    onChange={(e) => setTokenName(e.target.value)}
+                    placeholder={t("tokenNamePlaceholder")}
+                    maxLength={OPERATOR_TOKEN_NAME_MAX_LENGTH}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="op-token-expiry">{t("tokenExpiry")}</Label>
+                  <Select value={expiresInDays} onValueChange={setExpiresInDays}>
+                    <SelectTrigger id="op-token-expiry">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="7">{t("expiry7")}</SelectItem>
+                      <SelectItem value="30">{t("expiry30")}</SelectItem>
+                      <SelectItem value="60">{t("expiry60")}</SelectItem>
+                      <SelectItem value="90">{t("expiry90")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={closeCreateDialog}>
+                  {t("cancel")}
+                </Button>
+                <Button
+                  onClick={handleCreate}
+                  disabled={creating || !tokenName.trim()}
+                >
+                  {creating ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="h-4 w-4" />
+                  )}
+                  {t("createToken")}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

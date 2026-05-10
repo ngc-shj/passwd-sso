@@ -99,7 +99,7 @@ describe("resolveEffectiveSessionTimeouts", () => {
     expect(result.absoluteMinutes).toBe(240);
   });
 
-  it("does not clamp bootstrap passkey sessions to AAL3 ceilings", async () => {
+  it("returns tenant policy for webauthn sessions (no AAL3-style clamp post D1)", async () => {
     seedUser({
       tenantIdle: 480,
       tenantAbsolute: 43200,

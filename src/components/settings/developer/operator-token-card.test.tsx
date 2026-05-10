@@ -134,6 +134,16 @@ vi.mock("@/components/ui/alert-dialog", () => ({
     disabled?: boolean;
   }) => <button disabled={disabled}>{children}</button>,
 }));
+vi.mock("@/components/ui/dialog", () => ({
+  Dialog: ({ children, open }: { children: React.ReactNode; open?: boolean }) => (
+    open ? <>{children}</> : null
+  ),
+  DialogContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogTitle: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogDescription: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogFooter: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
 vi.mock("@/components/ui/collapsible", () => ({
   Collapsible: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   CollapsibleTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -159,6 +169,12 @@ describe("OperatorTokenCard", () => {
       ok: true,
       verifiedAt: "2026-05-07T00:00:00Z",
     });
+    mockFetchApi.mockImplementation(() =>
+      Promise.resolve({
+        ok: true,
+        json: async () => ({ tokens: [] }),
+      }),
+    );
   });
 
   it("renders title + empty list when no tokens exist", async () => {
@@ -196,13 +212,13 @@ describe("OperatorTokenCard", () => {
 
     render(<OperatorTokenCard />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "createToken" }));
+
     const input = await screen.findByPlaceholderText("tokenNamePlaceholder");
     fireEvent.change(input, { target: { value: "test-token" } });
 
-    const createButton = (await screen.findAllByText("createToken")).find(
-      (el) => el.tagName === "BUTTON",
-    );
-    if (!createButton) throw new Error("createToken button not found");
+    const createButtons = await screen.findAllByRole("button", { name: "createToken" });
+    const createButton = createButtons[createButtons.length - 1];
     fireEvent.click(createButton);
 
     await waitFor(() => {
@@ -251,13 +267,13 @@ describe("OperatorTokenCard", () => {
 
     render(<OperatorTokenCard />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "createToken" }));
+
     const input = await screen.findByPlaceholderText("tokenNamePlaceholder");
     fireEvent.change(input, { target: { value: "stale-test" } });
 
-    const createButton = (await screen.findAllByText("createToken")).find(
-      (el) => el.tagName === "BUTTON",
-    );
-    if (!createButton) throw new Error("createToken button not found");
+    const createButtons = await screen.findAllByRole("button", { name: "createToken" });
+    const createButton = createButtons[createButtons.length - 1];
     fireEvent.click(createButton);
 
     await waitFor(() => {
@@ -295,13 +311,13 @@ describe("OperatorTokenCard", () => {
 
     render(<OperatorTokenCard />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "createToken" }));
+
     const input = await screen.findByPlaceholderText("tokenNamePlaceholder");
     fireEvent.change(input, { target: { value: "stale-test" } });
 
-    const createButton = (await screen.findAllByText("createToken")).find(
-      (el) => el.tagName === "BUTTON",
-    );
-    if (!createButton) throw new Error("createToken button not found");
+    const createButtons = await screen.findAllByRole("button", { name: "createToken" });
+    const createButton = createButtons[createButtons.length - 1];
     fireEvent.click(createButton);
 
     await waitFor(() => {
@@ -313,6 +329,104 @@ describe("OperatorTokenCard", () => {
 
     await waitFor(() => {
       expect(screen.getByText("reauthCancelled")).toBeInTheDocument();
+    });
+  });
+
+  it("falls back to local networkError for an unrecognized API error code", async () => {
+    mockFetchApi
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: "BOGUS_NOT_IN_ALLOWLIST" }),
+      });
+
+    render(<OperatorTokenCard />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "createToken" }));
+
+    const input = await screen.findByPlaceholderText("tokenNamePlaceholder");
+    fireEvent.change(input, { target: { value: "bogus-test" } });
+
+    const createButtons = await screen.findAllByRole("button", { name: "createToken" });
+    const createButton = createButtons[createButtons.length - 1];
+    fireEvent.click(createButton);
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith("networkError");
+    });
+  });
+
+  it("opens RecentSessionRequiredDialog when stale-session occurs and canPasskeySignIn is false", async () => {
+    mockFetchApi
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })
+      // first POST: stale
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: "OPERATOR_TOKEN_STALE_SESSION" }),
+      })
+      // canPasskeyRecovery probe: user has no passkey
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ canPasskeySignIn: false }),
+      });
+
+    render(<OperatorTokenCard />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "createToken" }));
+
+    const input = await screen.findByPlaceholderText("tokenNamePlaceholder");
+    fireEvent.change(input, { target: { value: "no-passkey" } });
+
+    const createButtons = await screen.findAllByRole("button", { name: "createToken" });
+    fireEvent.click(createButtons[createButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    // The passkey reauth dialog must NOT have been opened in this branch.
+    expect(screen.queryByText("reauthTitle")).not.toBeInTheDocument();
+    expect(mockReauthenticateWithPasskey).not.toHaveBeenCalled();
+  });
+
+  it("shows reauthStillRequired when retry after successful reauth still returns stale", async () => {
+    mockFetchApi
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })
+      // first POST: stale
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: "OPERATOR_TOKEN_STALE_SESSION" }),
+      })
+      // canPasskeyRecovery probe
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ canPasskeySignIn: true }),
+      })
+      // retry POST after reauth: still stale (e.g. clock skew)
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: "OPERATOR_TOKEN_STALE_SESSION" }),
+      });
+
+    render(<OperatorTokenCard />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "createToken" }));
+
+    const input = await screen.findByPlaceholderText("tokenNamePlaceholder");
+    fireEvent.change(input, { target: { value: "second-stale" } });
+
+    const createButtons = await screen.findAllByRole("button", { name: "createToken" });
+    fireEvent.click(createButtons[createButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(screen.getByText("reauthTitle")).toBeInTheDocument();
+    });
+
+    const reauthButtons = await screen.findAllByText("reauthAction");
+    fireEvent.click(reauthButtons[reauthButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(mockReauthenticateWithPasskey).toHaveBeenCalled();
+      expect(screen.getByText("reauthStillRequired")).toBeInTheDocument();
     });
   });
 

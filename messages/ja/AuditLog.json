@@ -18,6 +18,7 @@
   "filter": "フィルタ",
   "AUTH_LOGIN": "ログイン",
   "AUTH_LOGOUT": "ログアウト",
+  "AUTH_PASSKEY_REAUTH": "Passkey で本人確認を更新",
   "ENTRY_CREATE": "エントリー作成",
   "ENTRY_IMPORT": "インポート実行",
   "ENTRY_BULK_IMPORT": "エントリー一括インポート",

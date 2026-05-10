@@ -43,6 +43,7 @@ import { SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
+import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { FormDirtyBadge } from "@/components/settings/account/form-dirty-badge";
 import { API_ERROR } from "@/lib/http/api-error-codes";
@@ -69,6 +70,7 @@ interface SaToken {
 export function ServiceAccountCard() {
   const t = useTranslations("MachineIdentity");
   const tCommon = useTranslations("Common");
+  const tApi = useTranslations("ApiErrors");
   const locale = useLocale();
 
   const [accounts, setAccounts] = useState<ServiceAccount[]>([]);
@@ -341,7 +343,8 @@ export function ServiceAccountCard() {
         } else if (res.status === 400) {
           toast.error(t("tokenValidationError"));
         } else {
-          toast.error(t("tokenCreateFailed"));
+          const apiKey = tokenMintApiErrorKey(code);
+          toast.error(apiKey ? tApi(apiKey) : t("tokenCreateFailed"));
         }
         return;
       }
@@ -392,12 +395,6 @@ export function ServiceAccountCard() {
         icon={Bot}
         title={t("saCardTitle")}
         description={t("saCardDescription")}
-        action={
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4" />
-            {t("createServiceAccount")}
-          </Button>
-        }
       />
       <CardContent className="space-y-4">
         <RecentSessionRequiredDialog
@@ -408,6 +405,12 @@ export function ServiceAccountCard() {
           open={recentSessionOpen}
           title={t("recentSessionTitle")}
         />
+        <section className="space-y-3">
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="mr-1 h-4 w-4" />
+            {t("createServiceAccount")}
+          </Button>
+        </section>
 
         {loading ? (
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -809,7 +812,7 @@ export function ServiceAccountCard() {
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
               {tCommon("cancel")}
             </Button>
-            <Button onClick={handleCreate} disabled={creating}>
+            <Button onClick={handleCreate} disabled={creating || !createName.trim()}>
               {creating && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
               {tCommon("create")}
             </Button>

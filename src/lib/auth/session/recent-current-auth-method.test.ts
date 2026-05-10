@@ -47,7 +47,7 @@ describe("requireRecentCurrentAuthMethod", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockWithBypassRls.mockImplementation(
-      (_prisma: unknown, fn: () => unknown) => fn(),
+      (_prisma: unknown, fn: () => unknown, _purpose: string) => fn(),
     );
     mockRequireRecentPasskeyVerification.mockResolvedValue(null);
     mockRequireRecentSession.mockResolvedValue(null);
@@ -80,5 +80,28 @@ describe("requireRecentCurrentAuthMethod", () => {
   it("returns 401 when the request has no session cookie", async () => {
     const result = await requireRecentCurrentAuthMethod(makeRequest(""));
     expect(result?.status).toBe(401);
+  });
+
+  it("returns 401 when the cookie is valid but the session row is missing (DB miss)", async () => {
+    mockSessionFindUnique.mockResolvedValue(null);
+
+    const result = await requireRecentCurrentAuthMethod(makeRequest());
+
+    expect(result?.status).toBe(401);
+    expect(mockRequireRecentPasskeyVerification).not.toHaveBeenCalled();
+    expect(mockRequireRecentSession).not.toHaveBeenCalled();
+  });
+
+  it("falls back to recent session when provider is null (pre-provenance-migration session)", async () => {
+    mockSessionFindUnique.mockResolvedValue({ provider: null });
+
+    const result = await requireRecentCurrentAuthMethod(makeRequest());
+
+    expect(result).toBeNull();
+    expect(mockRequireRecentSession).toHaveBeenCalledWith(
+      expect.any(NextRequest),
+      {},
+    );
+    expect(mockRequireRecentPasskeyVerification).not.toHaveBeenCalled();
   });
 });

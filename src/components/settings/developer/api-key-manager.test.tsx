@@ -46,6 +46,16 @@ vi.mock("@/components/auth/recent-session-required-dialog", () => ({
     open ? <div data-testid="recent-session-dialog" /> : null,
 }));
 
+vi.mock("@/components/ui/dialog", () => ({
+  Dialog: ({ children, open }: { children: React.ReactNode; open?: boolean }) => (
+    open ? <>{children}</> : null
+  ),
+  DialogContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogTitle: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogFooter: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
 import { ApiKeyManager } from "./api-key-manager";
 
 interface ApiKeyEntry {
@@ -98,6 +108,7 @@ describe("ApiKeyManager", () => {
     await waitFor(() =>
       expect(screen.getByText("noKeys")).toBeInTheDocument(),
     );
+    fireEvent.click(screen.getByRole("button", { name: /createKey/ }));
     const buttons = screen.getAllByRole("button", { name: /createKey/ });
     const createBtn = buttons[buttons.length - 1];
     expect(createBtn).toBeDisabled();
@@ -110,6 +121,8 @@ describe("ApiKeyManager", () => {
       expect(screen.getByText("noKeys")).toBeInTheDocument(),
     );
 
+    fireEvent.click(screen.getByRole("button", { name: /createKey/ }));
+
     const nameInput = screen.getByPlaceholderText("namePlaceholder");
     fireEvent.change(nameInput, { target: { value: "my-key" } });
 
@@ -121,6 +134,82 @@ describe("ApiKeyManager", () => {
       expect(screen.getByText("tokenReady")).toBeInTheDocument();
     });
     expect(screen.getByDisplayValue("api-token-xyz")).toBeInTheDocument();
+  });
+
+  it("opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned", async () => {
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (
+        String(url).includes("/api/api-keys") &&
+        (!init || init.method === undefined || init.method === "GET")
+      ) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve([]),
+        });
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 403,
+        json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+      });
+    });
+
+    render(<ApiKeyManager />);
+    await waitFor(() => {
+      expect(screen.getByText("noKeys")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /createKey/ }));
+
+    fireEvent.change(screen.getByPlaceholderText("namePlaceholder"), {
+      target: { value: "my-key" },
+    });
+
+    const buttons = screen.getAllByRole("button", { name: /createKey/ });
+    fireEvent.click(buttons[buttons.length - 1]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
+  it("falls back to local createError for an unrecognized API error code", async () => {
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (
+        String(url).includes("/api/api-keys") &&
+        (!init || init.method === undefined || init.method === "GET")
+      ) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve([]),
+        });
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({ error: "BOGUS_NOT_IN_ALLOWLIST" }),
+      });
+    });
+
+    render(<ApiKeyManager />);
+    await waitFor(() => {
+      expect(screen.getByText("noKeys")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /createKey/ }));
+    fireEvent.change(screen.getByPlaceholderText("namePlaceholder"), {
+      target: { value: "my-key" },
+    });
+
+    const buttons = screen.getAllByRole("button", { name: /createKey/ });
+    fireEvent.click(buttons[buttons.length - 1]);
+
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("createError");
+    });
   });
 
   it("renders the list of active keys when present", async () => {

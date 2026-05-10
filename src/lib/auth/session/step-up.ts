@@ -8,7 +8,7 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
 export const STEP_UP_WINDOW_MS = 15 * MS_PER_MINUTE;
 
-type RequireRecentSessionOptions = {
+export type RequireRecentSessionOptions = {
   maxAgeMs?: number;
   errorCode?: ApiErrorCode;
 };

@@ -28,6 +28,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ChevronDown, Loader2, Plus, Key } from "lucide-react";
 import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
@@ -36,6 +43,7 @@ import { formatDate } from "@/lib/format/format-datetime";
 import { API_KEY_SCOPE, API_KEY_SCOPES, MAX_API_KEYS_PER_USER, type ApiKeyScope } from "@/lib/constants/auth/api-key";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 
 interface ApiKeyEntry {
   id: string;
@@ -64,9 +72,12 @@ const EXPIRY_OPTIONS = [
 
 export function ApiKeyManager() {
   const t = useTranslations("ApiKey");
+  const tApi = useTranslations("ApiErrors");
+  const tCommon = useTranslations("Common");
   const locale = useLocale();
   const [keys, setKeys] = useState<ApiKeyEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newToken, setNewToken] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -105,6 +116,15 @@ export function ApiKeyManager() {
     });
   };
 
+  const closeCreateDialog = () => {
+    setCreateOpen(false);
+    setCreating(false);
+    setNewToken(null);
+    setName("");
+    setSelectedScopes(new Set([API_KEY_SCOPE.PASSWORDS_READ]));
+    setExpiryDays("90");
+  };
+
   const handleCreate = async () => {
     if (!name.trim() || selectedScopes.size === 0) return;
 
@@ -140,7 +160,8 @@ export function ApiKeyManager() {
         } else if (res.status === 400) {
           toast.error(t("validationError"));
         } else {
-          toast.error(t("createError"));
+          const apiKey = tokenMintApiErrorKey(err.error);
+          toast.error(apiKey ? tApi(apiKey) : t("createError"));
         }
       }
     } catch {
@@ -176,92 +197,23 @@ export function ApiKeyManager() {
     <Card>
       <SectionCardHeader icon={Key} title={t("title")} description={t("description")} />
       <CardContent className="space-y-6">
-        {/* Create Key Form */}
         <section className="space-y-3">
-        <h3 className="text-sm font-medium">{t("createKey")}</h3>
-        <div className="space-y-2">
-          <Label>{t("name")}</Label>
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder={t("namePlaceholder")}
-            maxLength={NAME_MAX_LENGTH}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label>{t("scopes")}</Label>
-          <div className="grid grid-cols-2 gap-2">
-            {API_KEY_SCOPES.map((scope) => (
-              <label
-                key={scope}
-                className="flex items-center gap-2 text-sm cursor-pointer"
-              >
-                <Checkbox
-                  checked={selectedScopes.has(scope)}
-                  onCheckedChange={(checked) =>
-                    handleScopeToggle(scope, !!checked)
-                  }
-                />
-                {t(SCOPE_I18N_KEYS[scope])}
-              </label>
-            ))}
-          </div>
-        </div>
-        <div className="space-y-2">
-          <Label>{t("expiry")}</Label>
-          <Select value={expiryDays} onValueChange={setExpiryDays}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {EXPIRY_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {t(opt.key)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <Button
-          onClick={handleCreate}
-          disabled={creating || !name.trim() || selectedScopes.size === 0}
-          size="sm"
-        >
-          {creating ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Plus className="h-4 w-4" />
-          )}
-          {t("createKey")}
-        </Button>
+          <Button
+            onClick={() => setCreateOpen(true)}
+            size="sm"
+          >
+            <Plus className="mr-1 h-4 w-4" />
+            {t("createKey")}
+          </Button>
         </section>
         <RecentSessionRequiredDialog
           actionLabel={t("recentSessionAction")}
-          cancelLabel={t("cancel")}
+          cancelLabel={tCommon("cancel")}
           description={t("recentSessionDescription")}
           onOpenChange={setRecentSessionOpen}
           open={recentSessionOpen}
           title={t("recentSessionTitle")}
         />
-
-        {/* Newly created token (shown once) */}
-        {newToken && (
-          <section className="border rounded-md p-4 bg-muted/50 space-y-2">
-          <p className="text-sm font-medium">{t("tokenReady")}</p>
-          <div className="flex items-center gap-2">
-            <Input value={newToken} readOnly className="font-mono text-xs" />
-            <CopyButton getValue={() => newToken} />
-          </div>
-          <p className="text-xs text-muted-foreground">{t("tokenOnce")}</p>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setNewToken(null)}
-          >
-            OK
-          </Button>
-          </section>
-        )}
 
       {/* Key List */}
       <KeyList
@@ -273,6 +225,102 @@ export function ApiKeyManager() {
         onRevoke={handleRevoke}
       />
       </CardContent>
+
+      <Dialog
+        open={createOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeCreateDialog();
+            return;
+          }
+          setCreateOpen(true);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("createKey")}</DialogTitle>
+          </DialogHeader>
+          {newToken ? (
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <p className="text-sm font-medium">{t("tokenReady")}</p>
+                <div className="flex items-center gap-2">
+                  <Input value={newToken} readOnly className="font-mono text-xs" />
+                  <CopyButton getValue={() => newToken} />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">{t("tokenOnce")}</p>
+              <Button variant="outline" size="sm" onClick={closeCreateDialog}>
+                OK
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-4 py-2">
+                <div className="space-y-2">
+                  <Label>{t("name")}</Label>
+                  <Input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder={t("namePlaceholder")}
+                    maxLength={NAME_MAX_LENGTH}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>{t("scopes")}</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {API_KEY_SCOPES.map((scope) => (
+                      <label
+                        key={scope}
+                        className="flex items-center gap-2 text-sm cursor-pointer"
+                      >
+                        <Checkbox
+                          checked={selectedScopes.has(scope)}
+                          onCheckedChange={(checked) =>
+                            handleScopeToggle(scope, !!checked)
+                          }
+                        />
+                        {t(SCOPE_I18N_KEYS[scope])}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>{t("expiry")}</Label>
+                  <Select value={expiryDays} onValueChange={setExpiryDays}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {EXPIRY_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {t(opt.key)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={closeCreateDialog}>
+                  {tCommon("cancel")}
+                </Button>
+                <Button
+                  onClick={handleCreate}
+                  disabled={creating || !name.trim() || selectedScopes.size === 0}
+                >
+                  {creating ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="h-4 w-4" />
+                  )}
+                  {t("createKey")}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

@@ -33,6 +33,16 @@ vi.mock("@/lib/format/format-datetime", () => ({
   formatDateTime: (d: string) => d,
 }));
 
+vi.mock("@/components/ui/dialog", () => ({
+  Dialog: ({ children, open }: { children: React.ReactNode; open?: boolean }) => (
+    open ? <>{children}</> : null
+  ),
+  DialogContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogTitle: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogFooter: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
 import { AuditDeliveryTargetCard } from "./audit-delivery-target-card";
 
 function setupTargets(targets: Array<Record<string, unknown>>) {

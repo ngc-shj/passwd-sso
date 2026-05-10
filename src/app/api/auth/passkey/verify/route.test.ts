@@ -265,7 +265,7 @@ describe("POST /api/auth/passkey/verify", () => {
     await POST(req);
 
     const revokeAllCalls = mockLogAudit.mock.calls.filter(
-      ([arg]: [{ action: string }]) => arg.action === "SESSION_REVOKE_ALL",
+      (args: unknown[]) => (args[0] as { action: string }).action === "SESSION_REVOKE_ALL",
     );
     expect(revokeAllCalls).toHaveLength(0);
   });

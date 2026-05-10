@@ -32,6 +32,13 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Database, Loader2, Plus, ShieldAlert, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 import { apiPath } from "@/lib/constants";
@@ -41,6 +48,7 @@ import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
 import { DISPLAY_ID_SHORT } from "@/lib/validations/common";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 
 const TOKEN_STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   active: "default",
@@ -64,8 +72,11 @@ interface Props {
 
 export function ScimTokenManager({ locale }: Props) {
   const t = useTranslations("Team");
+  const tApi = useTranslations("ApiErrors");
+  const tCommon = useTranslations("Common");
   const [tokens, setTokens] = useState<ScimToken[]>([]);
   const [loading, setLoading] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newToken, setNewToken] = useState<string | null>(null);
   const [description, setDescription] = useState("");
@@ -96,6 +107,14 @@ export function ScimTokenManager({ locale }: Props) {
     fetchTokens();
   }, [fetchTokens]);
 
+  const closeCreateDialog = () => {
+    setCreateOpen(false);
+    setCreating(false);
+    setNewToken(null);
+    setDescription("");
+    setExpiresInDays("365");
+  };
+
   const handleCreate = async () => {
     setCreating(true);
     try {
@@ -119,7 +138,8 @@ export function ScimTokenManager({ locale }: Props) {
         if (err.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
           setRecentSessionOpen(true);
         } else {
-          toast.error(t("networkError"));
+          const apiKey = tokenMintApiErrorKey(err.error);
+          toast.error(apiKey ? tApi(apiKey) : t("networkError"));
         }
       }
     } catch {
@@ -259,59 +279,11 @@ export function ScimTokenManager({ locale }: Props) {
 
       {/* Create Token Form */}
       <section className="space-y-3 border-t pt-4">
-        <h3 className="text-sm font-medium">{t("scimCreateToken")}</h3>
-        <div className="space-y-2">
-          <Label>{t("scimTokenDescription")}</Label>
-          <Input
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder={t("scimTokenDescriptionPlaceholder")}
-            maxLength={SCIM_TOKEN_DESC_MAX_LENGTH}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label>{t("scimTokenExpiry")}</Label>
-          <Select value={expiresInDays} onValueChange={setExpiresInDays}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="90">{t("scimExpiry90")}</SelectItem>
-              <SelectItem value="180">{t("scimExpiry180")}</SelectItem>
-              <SelectItem value="365">{t("scimExpiry365")}</SelectItem>
-              <SelectItem value="null">{t("scimExpiryNever")}</SelectItem>
-            </SelectContent>
-          </Select>
-          {expiresInDays === "null" && (
-            <p className="text-xs text-amber-600 flex items-center gap-1">
-              <ShieldAlert className="h-3 w-3" />
-              {t("scimExpiryNeverWarning")}
-            </p>
-          )}
-        </div>
-        <Button onClick={handleCreate} disabled={creating} size="sm">
-          {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+        <Button onClick={() => setCreateOpen(true)} size="sm">
+          <Plus className="mr-1 h-4 w-4" />
           {t("scimCreateToken")}
         </Button>
       </section>
-
-      {/* Newly created token (shown once) */}
-      {newToken && (
-        <section className="border rounded-md p-4 bg-muted/50 space-y-2">
-          <p className="text-sm font-medium">{t("scimTokenCreated")}</p>
-          <div className="flex items-center gap-2">
-            <Input value={newToken} readOnly className="font-mono text-xs" />
-            <CopyButton getValue={() => newToken} />
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setNewToken(null)}
-          >
-            OK
-          </Button>
-        </section>
-      )}
 
       {/* Token List — Active */}
       <section className="space-y-3 border-t pt-4">
@@ -349,6 +321,87 @@ export function ScimTokenManager({ locale }: Props) {
         )}
       </section>
       </CardContent>
+
+      <Dialog
+        open={createOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeCreateDialog();
+            return;
+          }
+          setCreateOpen(true);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("scimCreateToken")}</DialogTitle>
+          </DialogHeader>
+          {newToken ? (
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label>{t("scimEndpointUrl")}</Label>
+                <div className="flex items-center gap-2">
+                  <Input value={scimEndpoint} readOnly className="font-mono text-xs" />
+                  <CopyButton getValue={() => scimEndpoint} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <p className="text-sm font-medium">{t("scimTokenCreated")}</p>
+                <div className="flex items-center gap-2">
+                  <Input value={newToken} readOnly className="font-mono text-xs" />
+                  <CopyButton getValue={() => newToken} />
+                </div>
+              </div>
+              <Button variant="outline" size="sm" onClick={closeCreateDialog}>
+                OK
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-4 py-2">
+                <div className="space-y-2">
+                  <Label>{t("scimTokenDescription")}</Label>
+                  <Input
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder={t("scimTokenDescriptionPlaceholder")}
+                    maxLength={SCIM_TOKEN_DESC_MAX_LENGTH}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>{t("scimTokenExpiry")}</Label>
+                  <Select value={expiresInDays} onValueChange={setExpiresInDays}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="90">{t("scimExpiry90")}</SelectItem>
+                      <SelectItem value="180">{t("scimExpiry180")}</SelectItem>
+                      <SelectItem value="365">{t("scimExpiry365")}</SelectItem>
+                      <SelectItem value="null">{t("scimExpiryNever")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {expiresInDays === "null" && (
+                    <p className="text-xs text-amber-600 flex items-center gap-1">
+                      <ShieldAlert className="h-3 w-3" />
+                      {t("scimExpiryNeverWarning")}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={closeCreateDialog}>
+                  {tCommon("cancel")}
+                </Button>
+                <Button onClick={handleCreate} disabled={creating} size="sm">
+                  {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  {t("scimCreateToken")}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

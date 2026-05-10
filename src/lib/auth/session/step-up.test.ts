@@ -34,7 +34,7 @@ describe("requireRecentSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockWithBypassRls.mockImplementation(
-      (_prisma: unknown, fn: () => unknown) => fn(),
+      (_prisma: unknown, fn: () => unknown, _purpose: string) => fn(),
     );
   });
 
