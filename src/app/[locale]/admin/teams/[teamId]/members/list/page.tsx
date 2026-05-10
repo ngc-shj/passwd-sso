@@ -43,6 +43,7 @@ import { toast } from "sonner";
 import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { filterMembers } from "@/lib/filter-members";
+import type { TeamMemberDisplayApiItem as Member } from "@/lib/team/team-member-display";
 
 interface TeamInfo {
   id: string;
@@ -51,17 +52,6 @@ interface TeamInfo {
   description: string | null;
   role: string;
   tenantName?: string;
-}
-
-interface Member {
-  id: string;
-  userId: string;
-  role: string;
-  name: string | null;
-  email: string | null;
-  image: string | null;
-  joinedAt: string;
-  tenantName: string | null;
 }
 
 export default function TeamMembersPage({
@@ -81,6 +71,11 @@ export default function TeamMembersPage({
   const [memberSearch, setMemberSearch] = useState("");
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const filteredMembers = filterMembers(members, memberSearch);
+  const viewerTenantName = members.find((m) => m.userId === currentUserId)?.tenantName ?? null;
+  const addFromTenantName =
+    viewerTenantName && team?.tenantName && viewerTenantName !== team.tenantName
+      ? team.tenantName
+      : null;
 
   useEffect(() => {
     fetchApi(API_PATH.AUTH_SESSION)
@@ -224,7 +219,7 @@ export default function TeamMembersPage({
                     image={m.image}
                     isCurrentUser={m.userId === currentUserId}
                     tenantName={m.tenantName}
-                    teamTenantName={team.tenantName}
+                    viewerTenantName={viewerTenantName}
                   />
                   {isAdmin && m.role !== TEAM_ROLE.OWNER && m.userId !== currentUserId ? (
                     <div className="flex items-center gap-2">
@@ -289,6 +284,7 @@ export default function TeamMembersPage({
           <div className="space-y-6">
             <TeamAddFromTenantSection
               teamId={teamId}
+              teamTenantName={addFromTenantName}
               onSuccess={() => { fetchAll(); setAddDialogOpen(false); }}
             />
             <Separator />

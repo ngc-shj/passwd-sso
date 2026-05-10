@@ -23,8 +23,22 @@ vi.mock("@/lib/prisma", () => {
   const proxy = new Proxy({}, handler);
   return { prisma: proxy };
 });
+const { mockResolveUserTenantId } = vi.hoisted(() => ({
+  mockResolveUserTenantId: vi.fn(),
+}));
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+  resolveUserTenantIdFromClient: mockResolveUserTenantId,
+}));
+
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  BYPASS_PURPOSE: { CROSS_TENANT_LOOKUP: "CROSS_TENANT_LOOKUP" },
+}));
+
+vi.mock("@/lib/team/team-policy", () => ({
+  withTeamIpRestriction: vi.fn(async () => undefined),
+  PolicyViolationError: class PolicyViolationError extends Error {},
 }));
 
 import { prisma } from "@/lib/prisma";
@@ -35,6 +49,7 @@ import {
   getTeamMembership,
   requireTeamMember,
   requireTeamPermission,
+  getAdminTeamMemberships,
   TeamAuthError,
 } from "./team-auth";
 
@@ -205,6 +220,84 @@ describe("requireTeamPermission", () => {
     } catch (err) {
       expect((err as TeamAuthError).status).toBe(404);
     }
+  });
+});
+
+describe("getAdminTeamMemberships", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("flags isCrossTenant=false for teams in the user's home tenant", async () => {
+    mockResolveUserTenantId.mockResolvedValue("home-tenant");
+    mockPrisma.teamMember.findMany.mockResolvedValue([
+      {
+        id: "m-1",
+        userId: "u-1",
+        role: TEAM_ROLE.OWNER,
+        team: {
+          id: "team-1",
+          name: "Acme Team",
+          slug: "acme",
+          tenant: { id: "home-tenant", name: "Acme Corp" },
+        },
+      },
+    ]);
+
+    const result = await getAdminTeamMemberships("u-1");
+
+    expect(result).toHaveLength(1);
+    expect(result[0].team).toEqual({
+      id: "team-1",
+      name: "Acme Team",
+      slug: "acme",
+      tenantName: "Acme Corp",
+      isCrossTenant: false,
+    });
+  });
+
+  it("flags isCrossTenant=true and surfaces the team's home-tenant name for guest teams", async () => {
+    mockResolveUserTenantId.mockResolvedValue("home-tenant");
+    mockPrisma.teamMember.findMany.mockResolvedValue([
+      {
+        id: "m-2",
+        userId: "u-1",
+        role: TEAM_ROLE.ADMIN,
+        team: {
+          id: "team-2",
+          name: "Guest Team",
+          slug: "guest",
+          tenant: { id: "other-tenant", name: "Other Corp" },
+        },
+      },
+    ]);
+
+    const result = await getAdminTeamMemberships("u-1");
+
+    expect(result[0].team).toEqual({
+      id: "team-2",
+      name: "Guest Team",
+      slug: "guest",
+      tenantName: "Other Corp",
+      isCrossTenant: true,
+    });
+  });
+
+  it("filters by ADMIN/OWNER and active deactivatedAt", async () => {
+    mockResolveUserTenantId.mockResolvedValue("home-tenant");
+    mockPrisma.teamMember.findMany.mockResolvedValue([]);
+
+    await getAdminTeamMemberships("u-1");
+
+    expect(mockPrisma.teamMember.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId: "u-1",
+          role: { in: [TEAM_ROLE.ADMIN, TEAM_ROLE.OWNER] },
+          deactivatedAt: null,
+        },
+      }),
+    );
   });
 });
 

@@ -128,7 +128,26 @@ describe("SettingsNavSection", () => {
 
     expect(screen.getByRole("link", { name: "adminConsole" })).toHaveAttribute(
       "href",
-      "/admin"
+      "/admin/tenant/members"
+    );
+  });
+
+  it("routes admin console to the selected team admin page in team context", () => {
+    render(
+      <SettingsNavSection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        selectedTeam={{ id: "team-1", name: "Acme", role: "ADMIN" }}
+        adminConsoleHref="/admin/teams/team-1/general"
+        isAdmin={true}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "adminConsole" })).toHaveAttribute(
+      "href",
+      "/admin/teams/team-1/general"
     );
   });
 
@@ -176,7 +195,7 @@ describe("SettingsNavSection", () => {
 
     expect(screen.getByRole("link", { name: "adminConsole" })).toHaveAttribute(
       "href",
-      "/admin"
+      "/admin/tenant/members"
     );
   });
 });

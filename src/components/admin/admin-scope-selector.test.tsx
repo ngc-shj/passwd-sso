@@ -4,6 +4,26 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
+function textContent(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textContent).join(" ");
+  if (React.isValidElement(node)) {
+    const props = node.props as {
+      children?: React.ReactNode;
+      name?: string;
+      tenantName?: string;
+      isCrossTenant?: boolean;
+    };
+    if (typeof props.name === "string") {
+      return props.isCrossTenant && props.tenantName
+        ? `${props.name} ${props.tenantName}`
+        : props.name;
+    }
+    return textContent(props.children);
+  }
+  return "";
+}
+
 const { mockUsePathname } = vi.hoisted(() => ({
   // usePathname returns locale-prefixed paths in production; tests mirror that
   mockUsePathname: vi.fn(() => "/ja/admin/tenant/members"),
@@ -24,7 +44,6 @@ vi.mock("next-intl", () => ({
 vi.mock("@/i18n/locale-utils", () => ({
   stripLocalePrefix: (p: string) => p.replace(/^\/[a-z]{2}/, ""),
 }));
-
 // Render Select as a simple native select so SelectItem values are testable
 vi.mock("@/components/ui/select", () => ({
   Select: ({
@@ -47,16 +66,16 @@ vi.mock("@/components/ui/select", () => ({
   SelectTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SelectValue: () => null,
   SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SelectItem: ({ value }: { children: React.ReactNode; value: string }) => (
-    <option value={value} data-value={value}>{value}</option>
+  SelectItem: ({ value, children }: { children: React.ReactNode; value: string }) => (
+    <option value={value} data-value={value}>{textContent(children)}</option>
   ),
 }));
 
 import { AdminScopeSelector } from "./admin-scope-selector";
 
 const adminTeams = [
-  { team: { id: "team-1", name: "Team Alpha", slug: "team-alpha" } },
-  { team: { id: "team-2", name: "Team Beta", slug: "team-beta" } },
+  { team: { id: "team-1", name: "Team Alpha", slug: "team-alpha", tenantName: "Home Tenant", isCrossTenant: false } },
+  { team: { id: "team-2", name: "Team Beta", slug: "team-beta", tenantName: "Guest Tenant", isCrossTenant: true } },
 ];
 
 describe("AdminScopeSelector", () => {
@@ -64,7 +83,7 @@ describe("AdminScopeSelector", () => {
     mockUsePathname.mockReturnValue("/ja/admin/tenant/members");
     render(<AdminScopeSelector adminTeams={adminTeams} hasTenantRole={true} />);
 
-    const option = screen.getByRole("option", { name: "tenant" });
+    const option = screen.getByRole("option", { name: "scopeTenant" });
     expect(option).toBeInTheDocument();
     expect(option).toHaveValue("tenant");
   });
@@ -73,23 +92,23 @@ describe("AdminScopeSelector", () => {
     mockUsePathname.mockReturnValue("/ja/admin/teams/team-1/general");
     render(<AdminScopeSelector adminTeams={adminTeams} hasTenantRole={false} />);
 
-    expect(screen.queryByRole("option", { name: "tenant" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "scopeTenant" })).toBeNull();
   });
 
   it("always renders team options from adminTeams prop", () => {
     mockUsePathname.mockReturnValue("/ja/admin/tenant/members");
     render(<AdminScopeSelector adminTeams={adminTeams} hasTenantRole={true} />);
 
-    expect(screen.getByRole("option", { name: "team-1" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "team-2" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Team Alpha" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Team Beta Guest Tenant" })).toBeInTheDocument();
   });
 
   it("renders team options even when hasTenantRole=false", () => {
     mockUsePathname.mockReturnValue("/ja/admin/teams/team-1/general");
     render(<AdminScopeSelector adminTeams={adminTeams} hasTenantRole={false} />);
 
-    expect(screen.getByRole("option", { name: "team-1" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "team-2" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Team Alpha" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Team Beta Guest Tenant" })).toBeInTheDocument();
   });
 
   it('detects current scope as "tenant" for /admin/tenant/members', () => {

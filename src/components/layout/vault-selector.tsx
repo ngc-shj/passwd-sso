@@ -1,6 +1,6 @@
 "use client";
 
-import { Globe, Lock, Users } from "lucide-react";
+import { Lock } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
   Select,
@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { TeamScopeOption } from "@/components/layout/team-scope-option";
 
 interface VaultSelectorTeam {
   id: string;
@@ -47,19 +48,11 @@ export function VaultSelector({ value, teams, onValueChange }: VaultSelectorProp
           </SelectItem>
           {teamOptions.map((team) => (
             <SelectItem key={team.id} value={team.id}>
-              <div className="flex items-start gap-2">
-                {team.isCrossTenant ? (
-                  <Globe className="h-4 w-4 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
-                ) : (
-                  <Users className="h-4 w-4 mt-0.5 shrink-0" />
-                )}
-                <span className="flex flex-col items-start">
-                  <span>{team.name}</span>
-                  {team.isCrossTenant && (
-                    <span className="text-xs text-amber-600 dark:text-amber-400">{team.tenantName}</span>
-                  )}
-                </span>
-              </div>
+              <TeamScopeOption
+                name={team.name}
+                tenantName={team.tenantName}
+                isCrossTenant={team.isCrossTenant}
+              />
             </SelectItem>
           ))}
         </SelectContent>

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
@@ -25,9 +25,13 @@ vi.mock("@/components/layout/vault-selector", () => ({
   ),
 }));
 
+const settingsNavSpy = vi.fn();
 vi.mock("@/components/layout/sidebar-section-security", () => ({
   InsightsSection: () => <div>insights</div>,
-  SettingsNavSection: () => <div>settings-nav</div>,
+  SettingsNavSection: (props: { adminConsoleHref?: string; isAdmin?: boolean }) => {
+    settingsNavSpy(props);
+    return <div data-testid="settings-nav" data-href={props.adminConsoleHref}>settings-nav</div>;
+  },
   ToolsSection: () => <div>tools</div>,
 }));
 
@@ -64,6 +68,7 @@ function baseProps(overrides: Partial<SidebarContentProps> = {}): SidebarContent
     isExportActive: false,
     isImportActive: false,
     isAdmin: false,
+    isTenantAdmin: false,
     isWatchtower: false,
     isShareLinks: false,
     isEmergencyAccess: false,
@@ -84,6 +89,10 @@ function baseProps(overrides: Partial<SidebarContentProps> = {}): SidebarContent
 }
 
 describe("SidebarContent", () => {
+  beforeEach(() => {
+    settingsNavSpy.mockClear();
+  });
+
   it("calls onVaultChange from VaultSelector", () => {
     const props = baseProps();
     render(<SidebarContent {...props} />);
@@ -137,6 +146,51 @@ describe("SidebarContent", () => {
     render(<SidebarContent {...props} />);
 
     expect(screen.getByText("settings-nav")).toBeInTheDocument();
+  });
+
+  it("routes admin console to team admin when team vault is selected", () => {
+    const props = baseProps({
+      vaultContext: { type: "team", teamId: "team-1", teamRole: "ADMIN" },
+      isAdmin: true,
+      isTenantAdmin: true,
+    });
+    render(<SidebarContent {...props} />);
+
+    expect(settingsNavSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ adminConsoleHref: "/admin/teams/team-1/general" }),
+    );
+  });
+
+  it("routes admin console to tenant admin for tenant admin in personal vault", () => {
+    const props = baseProps({
+      vaultContext: { type: "personal" },
+      isAdmin: true,
+      isTenantAdmin: true,
+    });
+    render(<SidebarContent {...props} />);
+
+    expect(settingsNavSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ adminConsoleHref: "/admin/tenant/members" }),
+    );
+  });
+
+  it("routes admin console to first admin team for team-only admin in personal vault", () => {
+    // Reproduces F1 finding: a user who is a team admin but NOT a tenant admin
+    // would 404 if sent to /admin/tenant/members, so personal-vault context
+    // should fall back to their first admin team's general page.
+    const props = baseProps({
+      vaultContext: { type: "personal" },
+      teams: [
+        { id: "team-1", name: "Acme", slug: "acme", role: "ADMIN", tenantName: "Acme", isCrossTenant: false },
+      ],
+      isAdmin: true,
+      isTenantAdmin: false,
+    });
+    render(<SidebarContent {...props} />);
+
+    expect(settingsNavSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ adminConsoleHref: "/admin/teams/team-1/general" }),
+    );
   });
 
   it("renders emergency access link at top level for personal vault", () => {

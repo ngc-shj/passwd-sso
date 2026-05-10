@@ -17,7 +17,7 @@ import type {
   SidebarTeamTagItem,
 } from "@/hooks/sidebar/use-sidebar-data";
 import type { VaultContext } from "@/hooks/vault/use-vault-context";
-import { TEAM_ROLE } from "@/lib/constants";
+import { TEAM_ROLE, isTeamAdminRole } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/navigation";
 import { HeartPulse } from "lucide-react";
@@ -42,6 +42,7 @@ export interface SidebarContentProps {
   isExportActive: boolean;
   isImportActive: boolean;
   isAdmin: boolean;
+  isTenantAdmin: boolean;
   isWatchtower: boolean;
   isShareLinks: boolean;
   isEmergencyAccess: boolean;
@@ -57,6 +58,37 @@ export interface SidebarContentProps {
   onEditTag: (tag: SidebarTeamTagItem, teamId?: string) => void;
   onDeleteTag: (tag: SidebarTeamTagItem, teamId?: string) => void;
   onNavigate: () => void;
+}
+
+// Pick the destination of the sidebar "Admin Console" link based on the
+// active vault scope and the user's admin reach:
+//
+//   - team vault                    → that team's admin home
+//   - personal + tenant admin       → tenant admin home
+//   - personal + team-only admin    → first admin team's home (sending
+//                                     team-only admins to /admin/tenant/*
+//                                     would 404)
+//   - fallback                      → tenant admin home; reachable only if
+//                                     the caller renders the link without
+//                                     `isAdmin` gating (sidebar.tsx prevents
+//                                     this — kept defensively).
+function resolveAdminConsoleHref(args: {
+  vaultContext: VaultContext;
+  isTenantAdmin: boolean;
+  teams: SidebarTeamItem[];
+}): string {
+  const { vaultContext, isTenantAdmin, teams } = args;
+  if (vaultContext.type === "team") {
+    return `/admin/teams/${vaultContext.teamId}/general`;
+  }
+  if (isTenantAdmin) {
+    return "/admin/tenant/members";
+  }
+  const firstAdminTeamId = teams.find((team) => isTeamAdminRole(team.role))?.id;
+  if (firstAdminTeamId) {
+    return `/admin/teams/${firstAdminTeamId}/general`;
+  }
+  return "/admin/tenant/members";
 }
 
 export function SidebarContent({
@@ -79,6 +111,7 @@ export function SidebarContent({
   isExportActive,
   isImportActive,
   isAdmin,
+  isTenantAdmin,
   isWatchtower,
   isShareLinks,
   isEmergencyAccess,
@@ -98,6 +131,11 @@ export function SidebarContent({
   const teamItems = teams;
   const scopedTeamId =
     vaultContext.type === "team" ? (vaultContext.teamId) : "";
+  const adminConsoleHref = resolveAdminConsoleHref({
+    vaultContext,
+    isTenantAdmin,
+    teams,
+  });
   return (
     <nav className="space-y-2 p-4">
       <VaultSelector
@@ -218,6 +256,7 @@ export function SidebarContent({
         onOpenChange={toggleSection("settingsNav")}
         t={t}
         selectedTeam={selectedTeam}
+        adminConsoleHref={adminConsoleHref}
         isAdminActive={isAdminActive}
         isSettingsActive={isSettingsActive}
         isAdmin={isAdmin}

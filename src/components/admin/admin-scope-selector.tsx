@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, Users } from "lucide-react";
+import { Building2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { usePathname } from "next/navigation";
 import { useRouter } from "@/i18n/navigation";
@@ -12,13 +12,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
-interface AdminTeam {
-  team: { id: string; name: string; slug: string };
-}
+import { TeamScopeOption } from "@/components/layout/team-scope-option";
+import type { AdminTeamMembership } from "@/lib/auth/access/team-auth";
 
 interface AdminScopeSelectorProps {
-  adminTeams: AdminTeam[];
+  adminTeams: AdminTeamMembership[];
   hasTenantRole: boolean;
 }
 
@@ -63,10 +61,11 @@ export function AdminScopeSelector({ adminTeams, hasTenantRole }: AdminScopeSele
           )}
           {adminTeams.map(({ team }) => (
             <SelectItem key={team.id} value={team.id}>
-              <div className="flex items-center gap-2">
-                <Users className="h-4 w-4 shrink-0" />
-                <span>{team.name}</span>
-              </div>
+              <TeamScopeOption
+                name={team.name}
+                tenantName={team.tenantName}
+                isCrossTenant={team.isCrossTenant}
+              />
             </SelectItem>
           ))}
         </SelectContent>

@@ -36,7 +36,12 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/maintenance/purge-history/route.ts", ["passwordEntryHistory"]],
   ["src/app/api/teams/route.ts", ["teamMember"]],
   ["src/app/api/teams/pending-key-distributions/route.ts", ["teamMember"]],
-  ["src/app/api/teams/[teamId]/members/route.ts", ["tenantMember"]],
+  // Team key distribution: guest members require cross-tenant public-key lookup
+  ["src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts", ["user"]],
+  // Team invitations: existing-user lookup must see guest users across tenants
+  ["src/app/api/teams/[teamId]/invitations/route.ts", ["user"]],
+  // Team key rotation prep: guest members require cross-tenant public-key lookup
+  ["src/app/api/teams/[teamId]/rotate-key/data/route.ts", ["user"]],
   ["src/app/api/teams/invitations/accept/route.ts", ["teamInvitation"]],
   ["src/lib/auth/policy/account-lockout.ts", ["user", "tenant", "auditOutbox"]],
   ["src/lib/auth/policy/lockout-admin-notify.ts", ["user", "tenantMember"]],
@@ -64,6 +69,8 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/tenant/policy/route.ts", ["user", "tenant", "teamPolicy"]],
   ["src/lib/auth/policy/access-restriction.ts", ["tenant"]],
   ["src/lib/team/team-policy.ts", ["teamMember", "teamPolicy", "tenant"]],
+  // Team member display: cross-tenant user + home-tenant name hydration for guest members
+  ["src/lib/team/team-member-display.ts", ["user", "tenantMember"]],
   // Session timeout resolver: cross-team policy read for session lifetime enforcement
   ["src/lib/auth/session/session-timeout.ts", ["user"]],
   // Extension token refresh: cross-tenant token lookup + family-absolute check

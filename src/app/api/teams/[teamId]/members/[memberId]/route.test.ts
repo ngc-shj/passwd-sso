@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError, mockWithTeamTenantRls, mockInvalidateUserSessions, mockLogger, mockLogAudit } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError, mockWithTeamTenantRls, mockInvalidateUserSessions, mockLogger, mockLogAudit, mockBuildTeamMemberDisplayItems } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -31,6 +31,7 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
     mockInvalidateUserSessions: vi.fn().mockResolvedValue({ sessions: 1, extensionTokens: 0, apiKeys: 0 }),
     mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     mockLogAudit: vi.fn(),
+    mockBuildTeamMemberDisplayItems: vi.fn(),
   };
 });
 
@@ -63,6 +64,9 @@ vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: vi.fn().mockReturnValue({ ip: "127.0.0.1", userAgent: "test" }),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
+vi.mock("@/lib/team/team-member-display", () => ({
+  buildTeamMemberDisplayItems: mockBuildTeamMemberDisplayItems,
+}));
 
 import { PUT, DELETE } from "./route";
 import { TEAM_ROLE } from "@/lib/constants";
@@ -78,6 +82,18 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue(ownerMembership);
     mockIsRoleAbove.mockReturnValue(true);
+    mockBuildTeamMemberDisplayItems.mockResolvedValue([
+      {
+        id: MEMBER_ID,
+        userId: "target-user",
+        role: TEAM_ROLE.ADMIN,
+        name: "Target",
+        email: "t@test.com",
+        image: null,
+        joinedAt: new Date("2025-01-01T00:00:00Z"),
+        tenantName: "Guest Tenant",
+      },
+    ]);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -165,6 +181,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
   });
 
   it("changes member role (OWNER changes MEMBER to ADMIN)", async () => {
+    const createdAt = new Date("2025-01-01T00:00:00Z");
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
       teamId: TEAM_ID,
@@ -176,7 +193,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
       id: MEMBER_ID,
       userId: "target-user",
       role: TEAM_ROLE.ADMIN,
-      user: { id: "target-user", name: "Target", email: "t@test.com", image: null },
+      createdAt,
     });
 
     const res = await PUT(
@@ -188,9 +205,19 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.role).toBe(TEAM_ROLE.ADMIN);
+    expect(json.email).toBe("t@test.com");
+    expect(mockBuildTeamMemberDisplayItems).toHaveBeenCalledWith([
+      {
+        id: MEMBER_ID,
+        userId: "target-user",
+        role: TEAM_ROLE.ADMIN,
+        createdAt,
+      },
+    ]);
   });
 
   it("transfers ownership: promotes target to OWNER, demotes self to ADMIN", async () => {
+    const createdAt = new Date("2025-01-01T00:00:00Z");
     mockPrismaTeamMember.findUnique.mockResolvedValue({
       id: MEMBER_ID,
       teamId: TEAM_ID,
@@ -202,8 +229,18 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
       id: MEMBER_ID,
       userId: "target-user",
       role: TEAM_ROLE.OWNER,
-      user: { id: "target-user", name: "New Owner", email: "new@test.com", image: null },
+      createdAt,
     };
+    mockBuildTeamMemberDisplayItems.mockResolvedValue([
+      {
+        ...updatedOwner,
+        name: "New Owner",
+        email: "new@test.com",
+        image: null,
+        joinedAt: createdAt,
+        tenantName: "Guest Tenant",
+      },
+    ]);
     mockPrismaTeamMember.update.mockResolvedValue(updatedOwner);
     mockTransaction.mockResolvedValue([{}, updatedOwner]);
 
@@ -220,6 +257,54 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     expect(mockPrismaTeamMember.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: ownerMembership.id }, data: { role: TEAM_ROLE.ADMIN } }),
     );
+  });
+
+  it("keeps a cross-tenant guest visible in the role update response", async () => {
+    const createdAt = new Date("2025-01-01T00:00:00Z");
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID,
+      teamId: TEAM_ID,
+      userId: "guest-user",
+      role: TEAM_ROLE.MEMBER,
+      deactivatedAt: null,
+    });
+    mockPrismaTeamMember.update.mockResolvedValue({
+      id: MEMBER_ID,
+      userId: "guest-user",
+      role: TEAM_ROLE.ADMIN,
+      createdAt,
+    });
+    mockBuildTeamMemberDisplayItems.mockResolvedValue([
+      {
+        id: MEMBER_ID,
+        userId: "guest-user",
+        role: TEAM_ROLE.ADMIN,
+        name: "Guest User",
+        email: "guest@test.com",
+        image: null,
+        joinedAt: createdAt,
+        tenantName: "Guest Tenant",
+      },
+    ]);
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, {
+        body: { role: TEAM_ROLE.ADMIN },
+      }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json).toEqual({
+      id: MEMBER_ID,
+      userId: "guest-user",
+      role: TEAM_ROLE.ADMIN,
+      name: "Guest User",
+      email: "guest@test.com",
+      image: null,
+      tenantName: "Guest Tenant",
+    });
   });
 
   it("returns 403 when non-OWNER tries to transfer ownership", async () => {

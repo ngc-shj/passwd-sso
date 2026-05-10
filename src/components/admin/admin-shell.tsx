@@ -1,15 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import type { AdminTeamMembership } from "@/lib/auth/access/team-auth";
 import { AdminHeader } from "./admin-header";
 import { AdminSidebar } from "./admin-sidebar";
 
-interface AdminTeam {
-  team: { id: string; name: string; slug: string };
-}
-
 interface AdminShellProps {
-  adminTeams: AdminTeam[];
+  adminTeams: AdminTeamMembership[];
   hasTenantRole: boolean;
   children: React.ReactNode;
 }

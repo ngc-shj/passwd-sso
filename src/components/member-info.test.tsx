@@ -119,38 +119,38 @@ describe("MemberInfo", () => {
     expect(screen.getByTestId("child-content")).toBeInTheDocument();
   });
 
-  it("shows tenant badge when tenantName differs from teamTenantName", () => {
+  it("shows tenant badge when tenantName differs from viewerTenantName", () => {
     renderMemberInfo({
       name: "External",
       email: "ext@example.com",
       image: null,
       tenantName: "Other Org",
-      teamTenantName: "My Org",
+      viewerTenantName: "My Org",
     });
 
     expect(screen.getByTestId("globe-icon")).toBeInTheDocument();
     expect(screen.getByText("Other Org")).toBeInTheDocument();
   });
 
-  it("does not show tenant badge when tenantName equals teamTenantName", () => {
+  it("does not show tenant badge when tenantName equals viewerTenantName", () => {
     renderMemberInfo({
       name: "Internal",
       email: "int@example.com",
       image: null,
       tenantName: "Same Org",
-      teamTenantName: "Same Org",
+      viewerTenantName: "Same Org",
     });
 
     expect(screen.queryByTestId("globe-icon")).not.toBeInTheDocument();
   });
 
-  it("does not show tenant badge when teamTenantName is null", () => {
+  it("does not show tenant badge when viewerTenantName is null", () => {
     renderMemberInfo({
       name: "User",
       email: "user@example.com",
       image: null,
       tenantName: "Some Org",
-      teamTenantName: null,
+      viewerTenantName: null,
     });
 
     expect(screen.queryByTestId("globe-icon")).not.toBeInTheDocument();

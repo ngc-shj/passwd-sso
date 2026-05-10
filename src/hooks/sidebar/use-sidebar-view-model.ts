@@ -32,6 +32,7 @@ interface UseSidebarViewModelParams {
   isExportActive: boolean;
   isImportActive: boolean;
   isAdmin: boolean;
+  isTenantAdmin: boolean;
   isWatchtower: boolean;
   isShareLinks: boolean;
   isEmergencyAccess: boolean;
@@ -69,6 +70,7 @@ export function useSidebarViewModel({
   isExportActive,
   isImportActive,
   isAdmin,
+  isTenantAdmin,
   isWatchtower,
   isShareLinks,
   isEmergencyAccess,
@@ -123,6 +125,7 @@ export function useSidebarViewModel({
     isExportActive,
     isImportActive,
     isAdmin,
+    isTenantAdmin,
     isWatchtower,
     isShareLinks,
     isEmergencyAccess,

@@ -5,6 +5,7 @@ import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { BYPASS_PURPOSE, withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 
@@ -80,21 +81,27 @@ async function handleGET(req: NextRequest, { params }: Params) {
           distinct: ["userId"],
           select: {
             userId: true,
-            user: {
-              select: {
-                ecdhPublicKey: true,
-              },
-            },
           },
         }),
       )
     : [];
 
+  const publicKeys = memberKeys.length > 0
+    ? await withBypassRls(prisma, async () =>
+        prisma.user.findMany({
+          where: { id: { in: memberKeys.map((mk) => mk.userId) } },
+          select: { id: true, ecdhPublicKey: true },
+        }),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP)
+    : [];
+
+  const publicKeyByUserId = new Map(publicKeys.map((user) => [user.id, user.ecdhPublicKey]));
+
   const members = memberKeys
-    .filter((mk) => mk.user.ecdhPublicKey != null)
+    .filter((mk) => publicKeyByUserId.get(mk.userId) != null)
     .map((mk) => ({
       userId: mk.userId,
-      ecdhPublicKey: mk.user.ecdhPublicKey as string,
+      ecdhPublicKey: publicKeyByUserId.get(mk.userId) as string,
     }));
 
   return NextResponse.json({

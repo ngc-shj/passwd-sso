@@ -11,7 +11,7 @@
 import { prisma } from "@/lib/prisma";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
-import { withTeamTenantRls } from "@/lib/tenant-context";
+import { resolveUserTenantIdFromClient, withTeamTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withTeamIpRestriction, PolicyViolationError } from "@/lib/team/team-policy";
 import type { TeamRole } from "@prisma/client";
@@ -134,13 +134,25 @@ export async function requireTeamPermission(
 }
 
 /**
+ * Single source of truth for the admin-team membership row passed from
+ * `getAdminTeamMemberships` to admin shell components (`AdminShell`,
+ * `AdminSidebar`, `AdminScopeSelector`). Centralizing here avoids
+ * triplicating the `{ team: { id, name, slug, tenantName, isCrossTenant } }`
+ * interface in each consumer.
+ */
+export type AdminTeamMembership = Awaited<
+  ReturnType<typeof getAdminTeamMemberships>
+>[number];
+
+/**
  * Get all team memberships where the user holds an ADMIN or OWNER role.
  * Uses withBypassRls to query across tenants since this is called from a
  * layout that does not yet know the tenant context.
  */
 export async function getAdminTeamMemberships(userId: string) {
-  return withBypassRls(prisma, async () =>
-    prisma.teamMember.findMany({
+  return withBypassRls(prisma, async () => {
+    const userTenantId = await resolveUserTenantIdFromClient(prisma, userId);
+    const memberships = await prisma.teamMember.findMany({
       where: {
         userId,
         role: { in: [TEAM_ROLE.ADMIN, TEAM_ROLE.OWNER] },
@@ -148,11 +160,27 @@ export async function getAdminTeamMemberships(userId: string) {
       },
       include: {
         team: {
-          select: { id: true, name: true, slug: true },
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            tenant: { select: { id: true, name: true } },
+          },
         },
       },
-    }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+    });
+
+    return memberships.map((membership) => ({
+      ...membership,
+      team: {
+        id: membership.team.id,
+        name: membership.team.name,
+        slug: membership.team.slug,
+        tenantName: membership.team.tenant.name,
+        isCrossTenant: membership.team.tenant.id !== userTenantId,
+      },
+    }));
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 }
 
 // ─── Error Class ────────────────────────────────────────────────

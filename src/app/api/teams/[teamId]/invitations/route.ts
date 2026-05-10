@@ -9,6 +9,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { INVITATION_STATUS, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { BYPASS_PURPOSE, withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import { MS_PER_DAY } from "@/lib/constants/time";
@@ -75,21 +76,30 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   const { email, role } = result.data;
 
-  // Parallelize independent lookups: user, pending invitation, team
-  const [existingUser, existingInv, team] = await withTeamTenantRls(
-    teamId,
-    () =>
-      Promise.all([
-        prisma.user.findUnique({ where: { email } }),
-        prisma.teamInvitation.findFirst({
-          where: { teamId: teamId, email, status: INVITATION_STATUS.PENDING },
-        }),
-        prisma.team.findUnique({
-          where: { id: teamId },
-          select: { tenantId: true },
-        }),
-      ]),
+  const teamContextPromise = withTeamTenantRls(teamId, () =>
+    Promise.all([
+      prisma.teamInvitation.findFirst({
+        where: { teamId: teamId, email, status: INVITATION_STATUS.PENDING },
+      }),
+      prisma.team.findUnique({
+        where: { id: teamId },
+        select: { tenantId: true },
+      }),
+    ]),
   );
+
+  // Existing-user lookup must bypass team tenant RLS so guest users from a
+  // different home tenant are still recognized as already-added team members.
+  // Only id is needed downstream — fetching the full row would expose
+  // private-key-encryption material across tenants if the row leaks via logs.
+  const existingUserPromise = withBypassRls(prisma, () =>
+    prisma.user.findUnique({ where: { email }, select: { id: true } }),
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+
+  const [[existingInv, team], existingUser] = await Promise.all([
+    teamContextPromise,
+    existingUserPromise,
+  ]);
 
   if (!team) {
     return notFound();

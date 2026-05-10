@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { filterMembers } from "@/lib/filter-members";
+import type { TeamMemberDisplayApiItem as Member } from "@/lib/team/team-member-display";
 
 interface TeamInfo {
   id: string;
@@ -33,17 +34,6 @@ interface TeamInfo {
   description: string | null;
   role: string;
   tenantName?: string;
-}
-
-interface Member {
-  id: string;
-  userId: string;
-  role: string;
-  name: string | null;
-  email: string | null;
-  image: string | null;
-  joinedAt: string;
-  tenantName: string | null;
 }
 
 export default function TeamTransferOwnershipPage({
@@ -58,6 +48,7 @@ export default function TeamTransferOwnershipPage({
   const [loadError, setLoadError] = useState(false);
   const [members, setMembers] = useState<Member[]>([]);
   const [transferSearch, setTransferSearch] = useState("");
+  const viewerTenantName = members.find((m) => m.role === TEAM_ROLE.OWNER)?.tenantName ?? null;
   const transferCandidates = filterMembers(
     members.filter((m) => m.role !== TEAM_ROLE.OWNER),
     transferSearch,
@@ -174,6 +165,8 @@ export default function TeamTransferOwnershipPage({
                   name={m.name}
                   email={m.email}
                   image={m.image}
+                  tenantName={m.tenantName}
+                  viewerTenantName={viewerTenantName}
                 >
                   <TeamRoleBadge role={m.role} />
                 </MemberInfo>

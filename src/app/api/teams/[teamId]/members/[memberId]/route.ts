@@ -15,8 +15,28 @@ import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalida
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { buildTeamMemberDisplayItems } from "@/lib/team/team-member-display";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
+
+async function buildMemberRoleResponse(member: {
+  id: string;
+  userId: string;
+  role: string;
+  createdAt: Date;
+}) {
+  const [display] = await buildTeamMemberDisplayItems([member]);
+
+  return {
+    id: member.id,
+    userId: member.userId,
+    role: member.role,
+    name: display?.name ?? null,
+    email: display?.email ?? null,
+    image: display?.image ?? null,
+    tenantName: display?.tenantName ?? null,
+  };
+}
 
 // PUT /api/teams/[teamId]/members/[memberId] — Change member role
 async function handlePUT(req: NextRequest, { params }: Params) {
@@ -68,8 +88,11 @@ async function handlePUT(req: NextRequest, { params }: Params) {
         prisma.teamMember.update({
           where: { id: memberId },
           data: { role: TEAM_ROLE.OWNER },
-          include: {
-            user: { select: { id: true, name: true, email: true, image: true } },
+          select: {
+            id: true,
+            userId: true,
+            role: true,
+            createdAt: true,
           },
         }),
       ]),
@@ -83,14 +106,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       metadata: { newRole: TEAM_ROLE.OWNER, previousRole: target.role, transfer: true },
     });
 
-    return NextResponse.json({
-      id: updated.id,
-      userId: updated.userId,
-      role: updated.role,
-      name: updated.user.name,
-      email: updated.user.email,
-      image: updated.user.image,
-    });
+    return NextResponse.json(await buildMemberRoleResponse(updated));
   }
 
   // Cannot change OWNER role (unless transferring ownership above)
@@ -110,8 +126,11 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     prisma.teamMember.update({
       where: { id: memberId },
       data: { role: result.data.role },
-      include: {
-        user: { select: { id: true, name: true, email: true, image: true } },
+      select: {
+        id: true,
+        userId: true,
+        role: true,
+        createdAt: true,
       },
     }),
   );
@@ -124,14 +143,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     metadata: { newRole: result.data.role, previousRole: target.role },
   });
 
-  return NextResponse.json({
-    id: updated.id,
-    userId: updated.userId,
-    role: updated.role,
-    name: updated.user.name,
-    email: updated.user.email,
-    image: updated.user.image,
-  });
+  return NextResponse.json(await buildMemberRoleResponse(updated));
 }
 
 // DELETE /api/teams/[teamId]/members/[memberId] — Remove member
