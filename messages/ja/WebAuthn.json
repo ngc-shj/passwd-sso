@@ -5,6 +5,7 @@
   "registering": "登録中...",
   "registerSuccess": "パスキーを登録しました。",
   "registerError": "パスキーの登録に失敗しました。",
+  "registerHint": "登録時に自動で名前を付けます。必要であれば登録後に変更できます。",
   "nickname": "ニックネーム",
   "nicknamePlaceholder": "例: MacBook Touch ID",
   "nicknameUpdated": "ニックネームを更新しました。",

@@ -43,6 +43,7 @@ import { SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
+import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 
 import type { AccessRequestStatus } from "@prisma/client";
 
@@ -75,6 +76,7 @@ const STATUS_VARIANTS: Record<
 export function AccessRequestCard() {
   const t = useTranslations("MachineIdentity");
   const tCommon = useTranslations("Common");
+  const tApi = useTranslations("ApiErrors");
   const locale = useLocale();
 
   const [requests, setRequests] = useState<AccessRequest[]>([]);
@@ -160,7 +162,8 @@ export function AccessRequestCard() {
         } else if (res.status === 400) {
           toast.error(t("arCreateValidationError"));
         } else {
-          toast.error(data?.message ?? t("arCreateFailed"));
+          const apiKey = tokenMintApiErrorKey(data?.error);
+          toast.error(apiKey ? tApi(apiKey) : t("arCreateFailed"));
         }
         return;
       }
@@ -186,14 +189,21 @@ export function AccessRequestCard() {
         const code = data?.error ?? "";
         if (res.status === 409 && code === "SA_TOKEN_LIMIT_EXCEEDED") {
           toast.error(t("arTokenLimitExceeded"));
-        } else if (res.status === 409 && (code === "SA_NOT_FOUND")) {
+        } else if (res.status === 409 && code === "SA_NOT_FOUND") {
           toast.error(t("arSaInactive"));
         } else if (res.status === 409) {
           toast.error(t("arAlreadyProcessed"));
         } else if (res.status === 400 && code === "INVALID_SCOPE") {
           toast.error(t("arInvalidScope"));
-        } else {
+        } else if (res.status === 400) {
+          // Other 400 codes (e.g. VALIDATION_ERROR) are validation failures
+          // unrelated to scope; surface them as the approve-failed fallback
+          // rather than letting the helper try to translate codes from
+          // unrelated domains.
           toast.error(t("arApproveFailed"));
+        } else {
+          const apiKey = tokenMintApiErrorKey(code);
+          toast.error(apiKey ? tApi(apiKey) : t("arApproveFailed"));
         }
         return;
       }

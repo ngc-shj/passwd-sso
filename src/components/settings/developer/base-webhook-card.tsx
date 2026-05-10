@@ -30,6 +30,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ChevronDown, Loader2, Plus, Trash2, Webhook } from "lucide-react";
 import { toast } from "sonner";
 import { formatDateTime } from "@/lib/format/format-datetime";
@@ -84,6 +91,7 @@ export function BaseWebhookCard({ config }: Props) {
 
   const [webhooks, setWebhooks] = useState<WebhookItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [url, setUrl] = useState("");
   const [selectedEvents, setSelectedEvents] = useState<Set<string>>(new Set());
@@ -110,6 +118,15 @@ export function BaseWebhookCard({ config }: Props) {
   }, [fetchWebhooks]);
 
   const [urlError, setUrlError] = useState("");
+
+  const closeCreateDialog = () => {
+    setCreateOpen(false);
+    setCreating(false);
+    setUrl("");
+    setSelectedEvents(new Set());
+    setNewSecret(null);
+    setUrlError("");
+  };
 
   const validateUrl = (value: string): string | null => {
     const trimmed = value.trim();
@@ -293,102 +310,18 @@ export function BaseWebhookCard({ config }: Props) {
     <Card>
       <SectionCardHeader icon={Webhook} title={t("title")} description={t("description")} />
       <CardContent className="space-y-6">
-        {/* Create webhook form */}
-        <section className="space-y-4">
-          <h3 className="text-sm font-medium">{t("addWebhook")}</h3>
-
+        <section className="space-y-3">
           {limitReached ? (
-          <p className="text-sm text-muted-foreground">{t("limitReached")}</p>
-        ) : (
-          <>
-            <div className="space-y-2">
-              <Label>{t("url")}</Label>
-              <Input
-                type="url"
-                value={url}
-                onChange={(e) => {
-                  setUrl(e.target.value);
-                  setUrlError("");
-                }}
-                placeholder={t("urlPlaceholder")}
-              />
-              {urlError && (
-                <p className="text-sm text-destructive">{urlError}</p>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label>{t("events")}</Label>
-              <div className="max-h-64 overflow-y-auto border rounded-md p-3 space-y-1">
-                {eventGroups.map(({ key, actions }) => (
-                  <Collapsible key={key}>
-                    <div className="flex items-center gap-2 py-1">
-                      <Checkbox
-                        checked={actions.every((a) => selectedEvents.has(a))}
-                        onCheckedChange={(checked) =>
-                          toggleGroup(actions, !!checked)
-                        }
-                      />
-                      <CollapsibleTrigger className="flex items-center gap-1 text-sm font-medium hover:underline">
-                        {groupLabel(key)}
-                        <ChevronDown className="h-3.5 w-3.5" />
-                      </CollapsibleTrigger>
-                    </div>
-                    <CollapsibleContent className="pl-6 space-y-1">
-                      {actions.map((action) => (
-                        <label
-                          key={action}
-                          className="flex items-center gap-2 text-sm py-0.5"
-                        >
-                          <Checkbox
-                            checked={selectedEvents.has(action)}
-                            onCheckedChange={(checked) =>
-                              toggleEvent(action, !!checked)
-                            }
-                          />
-                          {tAudit(action)}
-                        </label>
-                      ))}
-                    </CollapsibleContent>
-                  </Collapsible>
-                ))}
-              </div>
-            </div>
-
+            <p className="text-sm text-muted-foreground">{t("limitReached")}</p>
+          ) : (
             <Button
-              onClick={handleCreate}
-              disabled={creating || !url.trim() || selectedEvents.size === 0}
+              onClick={() => setCreateOpen(true)}
               size="sm"
             >
-              {creating ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="h-4 w-4" />
-              )}
+              <Plus className="mr-1 h-4 w-4" />
               {t("addWebhook")}
             </Button>
-          </>
-        )}
-
-        {/* Secret display (shown once after creation) */}
-        {newSecret && (
-          <div className="border rounded-md p-4 bg-muted/50 space-y-2">
-            <p className="text-sm font-medium">{t("secret")}</p>
-            <div className="flex items-center gap-2">
-              <Input
-                value={newSecret}
-                readOnly
-                autoComplete="off"
-                className="font-mono text-xs"
-              />
-              <CopyButton getValue={() => newSecret} />
-            </div>
-            <p className="text-xs text-muted-foreground">{t("secretCopied")}</p>
-            <Button variant="ghost" size="sm" onClick={() => setNewSecret(null)}>
-              OK
-            </Button>
-          </div>
-        )}
+          )}
         </section>
 
         <Separator />
@@ -429,6 +362,118 @@ export function BaseWebhookCard({ config }: Props) {
           )}
         </section>
       </CardContent>
+
+      <Dialog
+        open={createOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeCreateDialog();
+            return;
+          }
+          setCreateOpen(true);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("addWebhook")}</DialogTitle>
+          </DialogHeader>
+          {newSecret ? (
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <p className="text-sm font-medium">{t("secret")}</p>
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={newSecret}
+                    readOnly
+                    autoComplete="off"
+                    className="font-mono text-xs"
+                  />
+                  <CopyButton getValue={() => newSecret} />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">{t("secretCopied")}</p>
+              <Button variant="outline" size="sm" onClick={closeCreateDialog}>
+                OK
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-4 py-2">
+                <div className="space-y-2">
+                  <Label>{t("url")}</Label>
+                  <Input
+                    type="url"
+                    value={url}
+                    onChange={(e) => {
+                      setUrl(e.target.value);
+                      setUrlError("");
+                    }}
+                    placeholder={t("urlPlaceholder")}
+                  />
+                  {urlError && (
+                    <p className="text-sm text-destructive">{urlError}</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label>{t("events")}</Label>
+                  <div className="max-h-64 overflow-y-auto border rounded-md p-3 space-y-1">
+                    {eventGroups.map(({ key, actions }) => (
+                      <Collapsible key={key}>
+                        <div className="flex items-center gap-2 py-1">
+                          <Checkbox
+                            checked={actions.every((a) => selectedEvents.has(a))}
+                            onCheckedChange={(checked) =>
+                              toggleGroup(actions, !!checked)
+                            }
+                          />
+                          <CollapsibleTrigger className="flex items-center gap-1 text-sm font-medium hover:underline">
+                            {groupLabel(key)}
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          </CollapsibleTrigger>
+                        </div>
+                        <CollapsibleContent className="pl-6 space-y-1">
+                          {actions.map((action) => (
+                            <label
+                              key={action}
+                              className="flex items-center gap-2 text-sm py-0.5"
+                            >
+                              <Checkbox
+                                checked={selectedEvents.has(action)}
+                                onCheckedChange={(checked) =>
+                                  toggleEvent(action, !!checked)
+                                }
+                              />
+                              {tAudit(action)}
+                            </label>
+                          ))}
+                        </CollapsibleContent>
+                      </Collapsible>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={closeCreateDialog}>
+                  {tCommon("cancel")}
+                </Button>
+                <Button
+                  onClick={handleCreate}
+                  disabled={creating || !url.trim() || selectedEvents.size === 0}
+                  size="sm"
+                >
+                  {creating ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="h-4 w-4" />
+                  )}
+                  {t("addWebhook")}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

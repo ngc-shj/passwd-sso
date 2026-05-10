@@ -3,6 +3,7 @@
   "description": "Per-operator bearer tokens for the admin/maintenance routes (purge-history, purge-audit-logs, rotate-master-key, etc.). Each token is bound to your user identity; a leaked token forges only your identity, never an arbitrary admin.",
   "tenantScopeNote": "Tokens are scoped to the current tenant. Multi-tenant operators must mint a separate token per tenant.",
   "createToken": "Create token",
+  "createTokenDescription": "Configure name and expiry for the new operator token. The plaintext value will be shown once after creation.",
   "tokenName": "Name",
   "tokenNamePlaceholder": "e.g. laptop, 2026-04-27",
   "tokenExpiry": "Expires in",
@@ -27,7 +28,7 @@
   "inactiveTokens": "{count, plural, =1 {Show 1 inactive token} other {Show # inactive tokens}}",
   "cancel": "Cancel",
   "networkError": "Network error. Please retry.",
-  "staleSession": "Re-authenticate within the last 15 minutes to issue an operator token. Sign out and sign in again, then retry.",
+  "staleSession": "Re-authenticate within the last 15 minutes to continue this action, then try again.",
   "limitExceeded": "Maximum number of operator tokens per tenant reached. Please revoke unused tokens first.",
   "usageHint": "Use in scripts: ADMIN_API_TOKEN=op_... scripts/purge-history.sh"
 }

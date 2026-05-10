@@ -487,14 +487,14 @@ export function DirectorySyncCard() {
           icon={FolderSync}
           title={t("title")}
           description={t("description")}
-          action={
+        />
+        <CardContent className="space-y-4">
+          <section className="space-y-3">
             <Button size="sm" className="shrink-0" onClick={openCreateDialog}>
-              <Plus className="h-4 w-4 mr-1" />
+              <Plus className="mr-1 h-4 w-4" />
               {t("addConfig")}
             </Button>
-          }
-        />
-        <CardContent>
+          </section>
           {loading ? (
             <div className="flex justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />

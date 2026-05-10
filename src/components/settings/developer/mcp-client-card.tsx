@@ -42,6 +42,7 @@ import { apiPath } from "@/lib/constants";
 import { MCP_SCOPES, LOOPBACK_REDIRECT_RE } from "@/lib/constants/auth/mcp";
 import { fetchApi } from "@/lib/url-helpers";
 import { formatDateTime } from "@/lib/format/format-datetime";
+import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { FormDirtyBadge } from "@/components/settings/account/form-dirty-badge";
@@ -64,6 +65,17 @@ interface NewClientCredentials {
   clientSecret: string;
 }
 
+interface ValidationTreeNode {
+  errors?: string[];
+  properties?: Record<string, ValidationTreeNode | undefined>;
+  items?: Array<ValidationTreeNode | undefined>;
+}
+
+interface ValidationErrorResponse {
+  error?: string;
+  details?: ValidationTreeNode;
+}
+
 function validateRedirectUris(uris: string[]): boolean {
   // Mirrors the server-side schema in `src/app/api/tenant/mcp-clients/route.ts`
   // and DCR (`src/app/api/mcp/register/route.ts`). Keep in sync via the shared
@@ -78,9 +90,17 @@ function validateRedirectUris(uris: string[]): boolean {
   });
 }
 
+function hasValidationErrors(node: ValidationTreeNode | undefined): boolean {
+  if (!node) return false;
+  if ((node.errors?.length ?? 0) > 0) return true;
+  if (node.items?.some((item) => hasValidationErrors(item))) return true;
+  return Object.values(node.properties ?? {}).some((child) => hasValidationErrors(child));
+}
+
 export function McpClientCard() {
   const t = useTranslations("MachineIdentity");
   const tCommon = useTranslations("Common");
+  const tApi = useTranslations("ApiErrors");
   const locale = useLocale();
 
   const [clients, setClients] = useState<McpClient[]>([]);
@@ -145,6 +165,22 @@ export function McpClientCard() {
       .map((u) => u.trim())
       .filter(Boolean);
 
+  const createUris = parseUris(createRedirectUris);
+  const createFormReady =
+    !!createName.trim() &&
+    createUris.length > 0 &&
+    createScopes.size > 0;
+
+const toastCreateApiError = (errorCode: unknown) => {
+  const apiKey = tokenMintApiErrorKey(errorCode);
+  toast.error(apiKey ? tApi(apiKey) : t("mcpCreateFailed"));
+};
+
+const toastUpdateApiError = (errorCode: unknown) => {
+  const apiKey = tokenMintApiErrorKey(errorCode);
+  toast.error(apiKey ? tApi(apiKey) : t("mcpUpdateFailed"));
+};
+
   const handleCreate = async () => {
     let valid = true;
     if (!createName.trim()) {
@@ -177,13 +213,31 @@ export function McpClientCard() {
         }),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
+        const data = await res.json().catch(() => null) as ValidationErrorResponse | null;
         if (res.status === 409 && data?.error === "MCP_CLIENT_NAME_CONFLICT") {
           setCreateNameError(t("mcpNameConflict"));
+        } else if (res.status === 400 && data?.error === "VALIDATION_ERROR") {
+          const properties = data.details?.properties;
+          let handled = false;
+          if (hasValidationErrors(properties?.name)) {
+            setCreateNameError(t("mcpNameRequired"));
+            handled = true;
+          }
+          if (hasValidationErrors(properties?.redirectUris)) {
+            setCreateUriError(t("mcpRedirectUriInvalid"));
+            handled = true;
+          }
+          if (hasValidationErrors(properties?.allowedScopes)) {
+            setCreateScopeError(t("mcpScopeRequired"));
+            handled = true;
+          }
+          if (!handled) {
+            toastCreateApiError(data?.error);
+          }
         } else if (res.status === 422 && data?.error === "MCP_CLIENT_LIMIT_EXCEEDED") {
           toast.error(t("mcpLimitReached"));
         } else {
-          toast.error(t("mcpCreateFailed"));
+          toastCreateApiError(data?.error);
         }
         return;
       }
@@ -256,12 +310,33 @@ export function McpClientCard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      const data = await res.json().catch(() => null) as ValidationErrorResponse | null;
       if (res.status === 409) {
         setEditNameError(t("mcpNameConflict"));
         return;
       }
+      if (res.status === 400 && data?.error === "VALIDATION_ERROR") {
+        const properties = data.details?.properties;
+        let handled = false;
+        if (hasValidationErrors(properties?.name)) {
+          setEditNameError(t("mcpNameRequired"));
+          handled = true;
+        }
+        if (hasValidationErrors(properties?.redirectUris)) {
+          setEditUriError(t("mcpRedirectUriInvalid"));
+          handled = true;
+        }
+        if (hasValidationErrors(properties?.allowedScopes)) {
+          setEditScopeError(t("mcpScopeRequired"));
+          handled = true;
+        }
+        if (!handled) {
+          toastUpdateApiError(data?.error);
+        }
+        return;
+      }
       if (!res.ok) {
-        toast.error(t("mcpUpdateFailed"));
+        toastUpdateApiError(data?.error);
         return;
       }
       toast.success(t("mcpUpdated"));
@@ -418,14 +493,14 @@ export function McpClientCard() {
         icon={Blocks}
         title={t("mcpCardTitle")}
         description={t("mcpCardDescription")}
-        action={
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4" />
-            {t("registerMcpClient")}
-          </Button>
-        }
       />
       <CardContent className="space-y-4">
+      <section className="space-y-3">
+        <Button size="sm" onClick={() => setCreateOpen(true)}>
+          <Plus className="mr-1 h-4 w-4" />
+          {t("registerMcpClient")}
+        </Button>
+      </section>
       {!loading && clients.length > 0 && (
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -566,7 +641,7 @@ export function McpClientCard() {
                 <Button variant="outline" onClick={closeCreateDialog}>
                   {tCommon("cancel")}
                 </Button>
-                <Button onClick={handleCreate} disabled={creating}>
+                <Button onClick={handleCreate} disabled={creating || !createFormReady}>
                   {creating && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
                   {tCommon("create")}
                 </Button>
