@@ -54,7 +54,6 @@
   "logErrorMessage": "エラー",
   "loadMore": "もっと読み込む",
   "noConfigs": "ディレクトリ同期設定がありません。",
-  "noConfigsHint": "IDプロバイダーからユーザーの同期を開始するには設定を追加してください。",
   "syncStarted": "同期を開始しました。",
   "syncFailed": "同期に失敗しました。詳細はログを確認してください。",
   "validationError": "入力内容に誤りがあります。",

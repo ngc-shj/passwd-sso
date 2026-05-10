@@ -490,9 +490,6 @@ export function DirectorySyncCard() {
           description={t("description")}
         />
         <CardContent className="space-y-4">
-          {configs.length === 0 && !loading && (
-            <p className="text-xs text-muted-foreground">{t("noConfigsHint")}</p>
-          )}
           <section className="space-y-3">
             <Button size="sm" className="shrink-0" onClick={openCreateDialog}>
               <Plus className="mr-1 h-4 w-4" />
