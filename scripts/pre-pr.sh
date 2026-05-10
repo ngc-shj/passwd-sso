@@ -18,6 +18,13 @@ cleanup_tempfiles() {
   for logfile in "${tempfiles[@]:-}"; do
     [ -n "$logfile" ] && [ -f "$logfile" ] && rm -f "$logfile"
   done
+  # The for-loop's last iteration short-circuits at `[ -f "$logfile" ]` when
+  # run_step already removed the file on success — leaving the function's
+  # exit code at 1, which the EXIT trap then propagates as the script's
+  # exit code (a known Bash quirk: EXIT trap's last command sets the exit
+  # status). Force `return 0` so cleanup never influences the success/failure
+  # signal that the explicit `exit 1` / fall-through 0 at the bottom carry.
+  return 0
 }
 
 show_failure_context() {
