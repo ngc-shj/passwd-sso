@@ -5,11 +5,11 @@
 - Type: `web app`
 - Test infrastructure: `unit + integration + E2E (Playwright)`
 - Scope: tenant settings, team settings, and personal settings list-style cards under `src/components/settings/**`, `src/components/team/**`, and the dashboard / admin pages that compose them. Vault / passwords main UI is explicitly out of scope.
-- Prior work this plan builds on: PR #456 (`unify-new-creation-ui`) merged 2026-05-10. #456 already locked C1 (dialog-first creation), C2 (primary CTA below description, left-aligned), C3 (one-time secret completion state), C4 (passkey nickname timing), C5 (recent-session messaging), C6 (token-mint allow-list). This plan does NOT re-open those contracts; it addresses the remaining axes of layout inconsistency.
+- Prior work this plan builds on: PR `#456` (`unify-new-creation-ui`) merged 2026-05-10. `#456` already locked C1 (dialog-first creation), C2 (primary CTA below description, left-aligned), C3 (one-time secret completion state), C4 (passkey nickname timing), C5 (recent-session messaging), C6 (token-mint allow-list). This plan does NOT re-open those contracts; it addresses the remaining axes of layout inconsistency.
 
 ## Objective
 
-Continue the layout-unification effort begun by #456 by addressing the **three axes that #456 explicitly did not touch**:
+Continue the layout-unification effort begun by `#456` by addressing the **three axes that `#456` explicitly did not touch**:
 
 1. **Inactive / revoked data display** — currently three implementation styles (custom `<button>` + `ChevronDown` + conditional render, shadcn `<Collapsible>`, and inline `<Badge>`-only) exist for the same conceptual UI element. Unify on a single helper component.
 2. **Search / filter field policy** — most cards have no filter; `passkey-credentials-card` has client-side filter; `tenant-audit-log-card` has server-side filter. Define when a search field belongs and standardize its position.
@@ -25,18 +25,18 @@ The goal is **convergent consistency, not template uniformity**. The user's prop
 |--------|-------------|------|
 | A | Force every settings card into the user-proposed full template | Over-prescribes — low-data screens (sessions, breakglass list, delegation policy) gain useless search fields; visually inflates short cards |
 | B | Two patterns split by data-volume characteristics (low / high) | Adds a classification axis with no clear boundary; "is this a high-volume screen?" becomes a bikeshed; future screens land in the wrong bucket |
-| C (recommended) | Reuse `SectionCardHeader` (already unified by #456 via C2) as the spine; extract ONE shared helper for the inactive-data collapse; document a written policy for search field and separator placement; migrate only the cards that already have inconsistent inactive-data UI | Lowest churn; aligns the actually-divergent code; leaves screen-level decisions where they belong |
+| C (recommended) | Reuse `SectionCardHeader` (already unified by `#456` via C2) as the spine; extract ONE shared helper for the inactive-data collapse; document a written policy for search field and separator placement; migrate only the cards that already have inconsistent inactive-data UI | Lowest churn; aligns the actually-divergent code; leaves screen-level decisions where they belong |
 
 ### Why C beats A and B
 
-- After #456, the **header (SectionCardHeader), the description text slot, the primary CTA position, and dialog-first creation** are all already standardized. The user-perceived inconsistency that remains is dominated by inactive-data collapse divergence (six cards, three implementations) — that is a code-deduplication problem, not a layout-template problem.
+- After `#456`, the **header (SectionCardHeader), the description text slot, the primary CTA position, and dialog-first creation** are all already standardized. The user-perceived inconsistency that remains is dominated by inactive-data collapse divergence (six cards, three implementations) — that is a code-deduplication problem, not a layout-template problem.
 - A single template (Option A) imposes a search field on screens that have <10 rows on every realistic tenant (`sessions-card`, `delegation-manager`, `breakglass`, `tenant-password-policy-card`, `team-policy-settings`). Adding a search field there is dead UI.
 - The two-pattern split (Option B) requires every new card to declare its bucket. That decision is invisible in code and decays — six months later we will be back to three patterns.
-- Option C keeps `SectionCardHeader` as the spine that #456 already validated; extracts the one piece of code that has measurable divergence; and writes the policy for the policy-shaped questions (search, separator) instead of pretending a component can encode them.
+- Option C keeps `SectionCardHeader` as the spine that `#456` already validated; extracts the one piece of code that has measurable divergence; and writes the policy for the policy-shaped questions (search, separator) instead of pretending a component can encode them.
 
 ### Note on the user-proposed template
 
-The user proposed `Title > Desc > Create > Separator > Search > Active list > Collapsible inactive list`. After investigation, the post-#456 state already satisfies the first three slots (`SectionCardHeader` + description + primary CTA below description). The remaining slots are the ones this plan addresses. The Separator slot is treated as policy, not as a forced visual element — see C3.
+The user proposed `Title > Desc > Create > Separator > Search > Active list > Collapsible inactive list`. After investigation, the post-`#456` state already satisfies the first three slots (`SectionCardHeader` + description + primary CTA below description). The remaining slots are the ones this plan addresses. The Separator slot is treated as policy, not as a forced visual element — see C3.
 
 ## Requirements
 
@@ -93,7 +93,7 @@ A search field belongs in a card iff **all three** conditions hold:
 2. The card already supports server-side query parameters. Adding a search field that filters client-side over a paginated list silently breaks (it only filters the current page).
 3. The card has a primary discovery use case — admins look for a specific item by name / email / IP. Cards whose use case is "review every item in turn" (policy settings, breakglass list, recent sessions) do not benefit.
 
-**Cards that pass all three after #456:** `tenant-audit-log-card` (already has it), `passkey-credentials-card` (already has client-side, will be re-evaluated in C2 — see below), and any future card matching the rule. **No card gains a new search field in this plan.**
+**Cards that pass all three after `#456`:** `tenant-audit-log-card` (already has it), `passkey-credentials-card` (already has client-side, will be re-evaluated in C2 — see below), and any future card matching the rule. **No card gains a new search field in this plan.**
 
 **Special case — `passkey-credentials-card`:** It currently filters client-side. The 16-passkey policy limit means rule (1) fails. The plan's C2 documents the exception ("retained for personal-vault discoverability with mixed authenticator names") rather than removing it.
 
@@ -335,7 +335,7 @@ Verified at plan-time: `section-nav.tsx` is navigation chevron; `operator-token-
 
 - `passkey-credentials-card` keeps its inline `<Badge>` pattern and its client-side search (documented in Search field policy and List density rule).
 - `sessions-card` keeps its inline `<Badge>` pattern (documented in List density rule).
-- No header-component refactor; `SectionCardHeader` remains the spine post-#456.
+- No header-component refactor; `SectionCardHeader` remains the spine post-`#456`.
 - No `SectionLayout` changes; SectionLayout is page-level and is correctly scoped.
 - No new search field added to any card.
 - No `<Separator />` added or removed.
@@ -368,7 +368,7 @@ Verified at plan-time: `section-nav.tsx` is navigation chevron; `operator-token-
 6. Tenant admin opens Audit Delivery Targets. Same UI (assuming the card lives where the survey indicated; if not, the deviation log records the path resolution at implementation time).
 7. Personal user opens Passkeys, sees every passkey including revoked, each with a status `<Badge>`. No inactive trigger — the rule explicitly preserves the badge pattern here.
 8. Personal user opens Sessions, sees current and recent sessions inline with badges. No inactive trigger.
-9. Tenant admin opens Audit Log, uses the existing search filter — unchanged from #456 state.
+9. Tenant admin opens Audit Log, uses the existing search filter — unchanged from `#456` state.
 
 ## Out-of-Scope (explicit)
 
