@@ -8,6 +8,7 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { SectionCardHeader } from "@/components/settings/account/section-card-header";
+import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import {
   AlertDialog,
@@ -463,8 +464,10 @@ export function PasskeyCredentialsCard() {
           </p>
         )}
 
+        <Separator />
+
         {/* Credentials list */}
-        <section className="space-y-3 border-t pt-4">
+        <section className="space-y-3">
           {loading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : credentials.length === 0 ? (

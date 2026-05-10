@@ -15,8 +15,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Eye, X, ChevronDown, ChevronUp } from "lucide-react";
+import { Loader2, Eye, X } from "lucide-react";
+import { InactiveItemsSection } from "@/components/settings/shared/inactive-items-section";
 import { apiPath, GRANT_STATUS } from "@/lib/constants";
+import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import type { GrantStatus } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { DISPLAY_REASON_PREVIEW } from "@/lib/validations/common";
@@ -50,6 +52,7 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "
 export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps) {
   const t = useTranslations("Breakglass");
   const tc = useTranslations("Common");
+  const tApi = useTranslations("ApiErrors");
   const locale = useLocale();
   const [grants, setGrants] = useState<BreakGlassGrant[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,7 +86,8 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
         fetchGrants();
       } else {
         const data = await res.json().catch(() => null);
-        toast.error(data?.error ?? "Error");
+        const code = typeof data?.error === "string" ? data.error : null;
+        toast.error(code ? tApi(apiErrorToI18nKey(code)) : tApi("unknownError"));
       }
     } finally {
       setRevoking(null);
@@ -188,31 +192,15 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
         </div>
 
         {historyGrants.length > 0 && (
-          <div className="space-y-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs gap-1"
-              onClick={() => setShowHistory((v) => !v)}
-            >
-              {showHistory ? (
-                <>
-                  <ChevronUp className="h-3.5 w-3.5" />
-                  {t("hideHistory")}
-                </>
-              ) : (
-                <>
-                  <ChevronDown className="h-3.5 w-3.5" />
-                  {t("showHistory")}
-                </>
-              )}
-            </Button>
-            {showHistory && (
-              <Card className="rounded-xl border bg-card/80 divide-y">
-                {historyGrants.map(renderGrantRow)}
-              </Card>
-            )}
-          </div>
+          <InactiveItemsSection
+            open={showHistory}
+            onOpenChange={setShowHistory}
+            triggerLabel={`${t("showHistory")} (${historyGrants.length})`}
+          >
+            <Card className="rounded-xl border bg-card/80 divide-y">
+              {historyGrants.map(renderGrantRow)}
+            </Card>
+          </InactiveItemsSection>
         )}
 
       </div>

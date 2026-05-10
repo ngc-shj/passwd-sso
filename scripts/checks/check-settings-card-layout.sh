@@ -50,8 +50,11 @@ fi
 
 # Identify added or modified settings-card files since BASE_REF.
 # Status filter: A=added, M=modified, R=renamed (treat as added).
+# Scope expanded after the unify-settings-page-layout follow-up: BreakGlass
+# (showHistory toggle) and emergency-access dashboard (showInactiveOwner /
+# showInactiveGrantee toggles) adopted InactiveItemsSection — guard them too.
 CHANGED_LIST=$(git diff --name-only --diff-filter=AMR "$BASE_REF...HEAD" 2>/dev/null \
-  | grep -E '^src/components/(settings/developer|team/security)/[^/]+\.tsx$' \
+  | grep -E '^(src/components/(settings/developer|team/security|breakglass)/[^/]+\.tsx|src/app/\[locale\]/dashboard/emergency-access/page\.tsx)$' \
   | grep -v -E '\.test\.tsx$' \
   | grep -v -E '/inactive-items-section\.tsx$' \
   || true)
