@@ -1,6 +1,6 @@
 {
   "title": "Webhooks",
-  "description": "Send real-time audit events to external services",
+  "description": "Send real-time audit events to external services.",
   "addWebhook": "Add webhook",
   "url": "Endpoint URL",
   "urlPlaceholder": "https://example.com/webhook",

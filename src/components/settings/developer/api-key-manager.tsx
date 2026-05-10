@@ -356,7 +356,7 @@ function KeyList({
     <>
       <Separator />
       <section className="space-y-3">
-      <h3 className="text-sm font-medium">{t("title")}</h3>
+      <h3 className="text-sm font-medium">{t("issuedKeys")}</h3>
       {loading ? (
         <Loader2 className="h-4 w-4 animate-spin" />
       ) : keys.length === 0 ? (

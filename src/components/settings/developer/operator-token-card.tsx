@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { InactiveItemsSection } from "@/components/settings/shared/inactive-items-section";
+import { Separator } from "@/components/ui/separator";
 import { KeyRound, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { apiPath } from "@/lib/constants";
@@ -348,9 +349,11 @@ export function OperatorTokenCard() {
           </Button>
         </section>
 
+        <Separator />
+
         {/* Token list */}
-        <section className="space-y-3 border-t pt-4">
-          <h3 className="text-sm font-medium">{t("tokens")}</h3>
+        <section className="space-y-3">
+          <h3 className="text-sm font-medium">{t("issuedTokens")}</h3>
           {loading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : tokens.length === 0 ? (

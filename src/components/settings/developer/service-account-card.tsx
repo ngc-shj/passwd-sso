@@ -38,7 +38,7 @@ import {
 } from "@/components/ui/dialog";
 import { Bot, ChevronDown, Loader2, Plus, Trash2, Pencil, KeyRound } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { Separator } from "@/components/ui/separator";
 import { apiPath } from "@/lib/constants";
 import { SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { formatDateTime } from "@/lib/format/format-datetime";
@@ -415,6 +415,10 @@ export function ServiceAccountCard() {
           </Button>
         </section>
 
+        <Separator />
+
+        <section className="space-y-3">
+        <h3 className="text-sm font-medium">{t("saRegisteredAccounts")}</h3>
         {loading ? (
           <Loader2 className="h-4 w-4 animate-spin" />
         ) : accounts.length === 0 ? (
@@ -766,6 +770,7 @@ export function ServiceAccountCard() {
           )}
           </div>
         )}
+        </section>
       </CardContent>
 
       {/* Create SA dialog */}

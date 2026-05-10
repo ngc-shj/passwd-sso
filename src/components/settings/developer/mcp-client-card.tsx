@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { CopyButton } from "@/components/passwords/shared/copy-button";
 import { InactiveItemsSection } from "@/components/settings/shared/inactive-items-section";
+import { Separator } from "@/components/ui/separator";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -511,27 +512,32 @@ const toastUpdateApiError = (errorCode: unknown) => {
             {t("registerMcpClient")}
           </Button>
         </section>
-        {!loading && clients.length > 0 && (
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder={t("mcpSearchPlaceholder")}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-        )}
-        {loading ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : clients.length === 0 ? (
-          <p className="text-center text-muted-foreground">{t("noMcpClients")}</p>
-        ) : (
-          <div className="space-y-2">
-            {activeClients.length === 0 && inactiveClients.length > 0 && (
-              <p className="text-sm text-muted-foreground">{t("noActiveMcpClients")}</p>
-            )}
-            {activeClients.map(renderClientItem)}
+
+        <Separator />
+
+        <section className="space-y-3">
+          <h3 className="text-sm font-medium">{t("mcpRegisteredClients")}</h3>
+          {!loading && clients.length > 0 && (
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder={t("mcpSearchPlaceholder")}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+          )}
+          {loading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : clients.length === 0 ? (
+            <p className="text-center text-muted-foreground">{t("noMcpClients")}</p>
+          ) : (
+            <div className="space-y-2">
+              {activeClients.length === 0 && inactiveClients.length > 0 && (
+                <p className="text-sm text-muted-foreground">{t("noActiveMcpClients")}</p>
+              )}
+              {activeClients.map(renderClientItem)}
             {inactiveClients.length > 0 && (
               <InactiveItemsSection
                 open={showInactive}
@@ -541,13 +547,14 @@ const toastUpdateApiError = (errorCode: unknown) => {
                 {inactiveClients.map(renderClientItem)}
               </InactiveItemsSection>
             )}
-            {searchFiltered.length === 0 && searchQuery && (
-              <p className="text-sm text-center text-muted-foreground py-4">
-                {t("mcpNoMatchingClients")}
-              </p>
-            )}
-          </div>
-        )}
+              {searchFiltered.length === 0 && searchQuery && (
+                <p className="text-sm text-center text-muted-foreground py-4">
+                  {t("mcpNoMatchingClients")}
+                </p>
+              )}
+            </div>
+          )}
+        </section>
       </CardContent>
 
       {/* Create dialog */}

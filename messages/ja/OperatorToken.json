@@ -13,6 +13,7 @@
   "expiry90": "90 日 (上限)",
   "tokenCreated": "トークンを発行しました。今すぐコピーしてください — 二度と表示されません。",
   "tokens": "トークン一覧",
+  "issuedTokens": "発行済みトークン",
   "noTokens": "発行済みのトークンはありません。",
   "tokenActive": "有効",
   "tokenExpired": "期限切れ",

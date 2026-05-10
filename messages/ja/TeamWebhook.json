@@ -1,6 +1,6 @@
 {
   "title": "Webhook",
-  "description": "監査イベントを外部サービスにリアルタイム送信",
+  "description": "監査イベントを外部サービスにリアルタイム送信します。",
   "addWebhook": "Webhook を追加",
   "url": "エンドポイント URL",
   "urlPlaceholder": "https://example.com/webhook",
