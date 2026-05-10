@@ -167,8 +167,13 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     );
 
     expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toBe("ALREADY_A_MEMBER");
     expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
-    expect(mockPrismaUser.findUnique).toHaveBeenCalledWith({ where: { email: "guest@test.com" } });
+    expect(mockPrismaUser.findUnique).toHaveBeenCalledWith({
+      where: { email: "guest@test.com" },
+      select: { id: true },
+    });
     expect(mockPrismaTeamInvitation.create).not.toHaveBeenCalled();
   });
 

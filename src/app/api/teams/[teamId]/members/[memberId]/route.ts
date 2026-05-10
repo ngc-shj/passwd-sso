@@ -34,6 +34,7 @@ async function buildMemberRoleResponse(member: {
     name: display?.name ?? null,
     email: display?.email ?? null,
     image: display?.image ?? null,
+    tenantName: display?.tenantName ?? null,
   };
 }
 

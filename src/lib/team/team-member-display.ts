@@ -1,6 +1,15 @@
 import { prisma } from "@/lib/prisma";
 import { BYPASS_PURPOSE, withBypassRls } from "@/lib/tenant-rls";
 
+/**
+ * Input shape consumed by `buildTeamMemberDisplayItems`.
+ *
+ * Only the four fields below are read by the helper. Plan C1 listed
+ * `keyDistributed` and `deactivatedAt` as inputs in spirit, but no consumer
+ * needs them — list/update routes already filter on `deactivatedAt: null`,
+ * and `keyDistributed` lives on `teamMemberKey`, not `teamMember`. See
+ * `team-guest-cross-tenant-admin-deviation.md` for the recorded deviation.
+ */
 export interface TeamMemberDisplayRow {
   id: string;
   userId: string;
@@ -37,9 +46,13 @@ export async function buildTeamMemberDisplayItems(
         where: { id: { in: userIds } },
         select: { id: true, name: true, email: true, image: true },
       }),
+      // The single-active-tenant invariant is enforced at the write boundary
+      // (`resolveUserTenantIdFromClient`) — order by `createdAt` to keep the
+      // chosen membership stable if the invariant is ever transiently violated.
       prisma.tenantMember.findMany({
         where: { userId: { in: userIds }, deactivatedAt: null },
         select: { userId: true, tenant: { select: { name: true } } },
+        orderBy: { createdAt: "asc" },
       }),
     ]),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);

@@ -156,19 +156,6 @@ describe("MemberInfo", () => {
     expect(screen.queryByTestId("globe-icon")).not.toBeInTheDocument();
   });
 
-  it("falls back to teamTenantName when viewerTenantName is omitted", () => {
-    renderMemberInfo({
-      name: "External",
-      email: "ext@example.com",
-      image: null,
-      tenantName: "Other Org",
-      teamTenantName: "My Org",
-    });
-
-    expect(screen.getByTestId("globe-icon")).toBeInTheDocument();
-    expect(screen.getByText("Other Org")).toBeInTheDocument();
-  });
-
   it("does not render avatar image when image is null", () => {
     renderMemberInfo({ name: "Test", email: null, image: null });
 

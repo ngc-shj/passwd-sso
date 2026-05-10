@@ -303,6 +303,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
       name: "Guest User",
       email: "guest@test.com",
       image: null,
+      tenantName: "Guest Tenant",
     });
   });
 

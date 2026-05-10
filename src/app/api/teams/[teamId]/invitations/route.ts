@@ -76,11 +76,6 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   const { email, role } = result.data;
 
-  // Existing-user lookup must bypass team tenant RLS so guest users from a
-  // different home tenant are still recognized as already-added team members.
-  const existingUserPromise = withBypassRls(prisma, () =>
-    prisma.user.findUnique({ where: { email } }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
   const teamContextPromise = withTeamTenantRls(teamId, () =>
     Promise.all([
       prisma.teamInvitation.findFirst({
@@ -93,9 +88,17 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     ]),
   );
 
-  const [existingUser, [existingInv, team]] = await Promise.all([
-    existingUserPromise,
+  // Existing-user lookup must bypass team tenant RLS so guest users from a
+  // different home tenant are still recognized as already-added team members.
+  // Only id is needed downstream — fetching the full row would expose
+  // private-key-encryption material across tenants if the row leaks via logs.
+  const existingUserPromise = withBypassRls(prisma, () =>
+    prisma.user.findUnique({ where: { email }, select: { id: true } }),
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+
+  const [[existingInv, team], existingUser] = await Promise.all([
     teamContextPromise,
+    existingUserPromise,
   ]);
 
   if (!team) {

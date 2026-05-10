@@ -39,7 +39,7 @@ const ALLOWED_USAGE = new Map([
   // Team key distribution: guest members require cross-tenant public-key lookup
   ["src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts", ["user"]],
   // Team invitations: existing-user lookup must see guest users across tenants
-  ["src/app/api/teams/[teamId]/invitations/route.ts", ["user", "teamInvitation", "team"]],
+  ["src/app/api/teams/[teamId]/invitations/route.ts", ["user"]],
   // Team key rotation prep: guest members require cross-tenant public-key lookup
   ["src/app/api/teams/[teamId]/rotate-key/data/route.ts", ["user"]],
   ["src/app/api/teams/invitations/accept/route.ts", ["teamInvitation"]],

@@ -182,6 +182,35 @@ describe("GET /api/teams/[teamId]/members", () => {
     expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function), expect.any(String));
   });
 
+  it("excludes members whose user profile is not visible in the bypass lookup", async () => {
+    // Route-level guard for C1 invariant: members missing a hydratable user
+    // profile must be omitted from the response, not surfaced as null entries.
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      { id: "m1", userId: "u1", role: TEAM_ROLE.OWNER, createdAt: now },
+      { id: "m2", userId: "u-orphan", role: TEAM_ROLE.MEMBER, createdAt: now },
+    ]);
+    mockPrismaUser.findMany.mockResolvedValue([
+      { id: "u1", name: "Owner", email: "owner@test.com", image: null },
+    ]);
+    mockPrismaTenantMember.findMany.mockResolvedValue([
+      { userId: "u1", tenant: { name: "Acme Corp" } },
+    ]);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/members`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json).toHaveLength(1);
+    expect(json[0].userId).toBe("u1");
+    expect(mockPrismaTenantMember.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: { in: ["u1", "u-orphan"] }, deactivatedAt: null },
+      }),
+    );
+  });
+
   it("keeps a cross-tenant guest visible by loading user profiles outside team RLS", async () => {
     mockPrismaTeamMember.findMany.mockResolvedValue([
       {

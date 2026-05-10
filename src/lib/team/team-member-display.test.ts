@@ -85,6 +85,7 @@ describe("buildTeamMemberDisplayItems", () => {
     expect(mockPrismaTenantMemberFindMany).toHaveBeenCalledWith({
       where: { userId: { in: ["u1", "u2"] }, deactivatedAt: null },
       select: { userId: true, tenant: { select: { name: true } } },
+      orderBy: { createdAt: "asc" },
     });
   });
 

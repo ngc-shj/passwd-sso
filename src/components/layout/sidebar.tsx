@@ -169,6 +169,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     isExportActive: isExport,
     isImportActive: isImport,
     isAdmin,
+    isTenantAdmin,
     isWatchtower,
     isShareLinks,
     isEmergencyAccess,
