@@ -29,6 +29,15 @@ export interface TeamMemberDisplayItem {
 }
 
 /**
+ * Same shape as `TeamMemberDisplayItem` but with `joinedAt` as the JSON
+ * string the API serializes Date to. Use this on the client side to type
+ * `members` arrays parsed from `GET /api/teams/[teamId]/members`.
+ */
+export type TeamMemberDisplayApiItem = Omit<TeamMemberDisplayItem, "joinedAt"> & {
+  joinedAt: string;
+};
+
+/**
  * Hydrate display fields for team members outside team-tenant RLS so guest
  * users from a different primary tenant remain visible in team management UIs.
  */

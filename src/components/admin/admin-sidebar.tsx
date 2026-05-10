@@ -29,21 +29,12 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-
-interface AdminTeam {
-  team: {
-    id: string;
-    name: string;
-    slug: string;
-    tenantName: string;
-    isCrossTenant: boolean;
-  };
-}
+import type { AdminTeamMembership } from "@/lib/auth/access/team-auth";
 
 interface AdminSidebarProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  adminTeams: AdminTeam[];
+  adminTeams: AdminTeamMembership[];
   hasTenantRole: boolean;
 }
 
@@ -255,7 +246,7 @@ function AdminSidebarContent({
   hasTenantRole,
   onNavigate,
 }: {
-  adminTeams: AdminTeam[];
+  adminTeams: AdminTeamMembership[];
   hasTenantRole: boolean;
   onNavigate?: () => void;
 }) {

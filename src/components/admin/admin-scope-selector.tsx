@@ -13,19 +13,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TeamScopeOption } from "@/components/layout/team-scope-option";
-
-interface AdminTeam {
-  team: {
-    id: string;
-    name: string;
-    slug: string;
-    tenantName: string;
-    isCrossTenant: boolean;
-  };
-}
+import type { AdminTeamMembership } from "@/lib/auth/access/team-auth";
 
 interface AdminScopeSelectorProps {
-  adminTeams: AdminTeam[];
+  adminTeams: AdminTeamMembership[];
   hasTenantRole: boolean;
 }
 

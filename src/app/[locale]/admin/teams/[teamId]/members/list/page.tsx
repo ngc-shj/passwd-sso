@@ -43,6 +43,7 @@ import { toast } from "sonner";
 import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { filterMembers } from "@/lib/filter-members";
+import type { TeamMemberDisplayApiItem as Member } from "@/lib/team/team-member-display";
 
 interface TeamInfo {
   id: string;
@@ -51,17 +52,6 @@ interface TeamInfo {
   description: string | null;
   role: string;
   tenantName?: string;
-}
-
-interface Member {
-  id: string;
-  userId: string;
-  role: string;
-  name: string | null;
-  email: string | null;
-  image: string | null;
-  joinedAt: string;
-  tenantName: string | null;
 }
 
 export default function TeamMembersPage({

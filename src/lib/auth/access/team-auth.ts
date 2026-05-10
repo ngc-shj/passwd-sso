@@ -134,6 +134,17 @@ export async function requireTeamPermission(
 }
 
 /**
+ * Single source of truth for the admin-team membership row passed from
+ * `getAdminTeamMemberships` to admin shell components (`AdminShell`,
+ * `AdminSidebar`, `AdminScopeSelector`). Centralizing here avoids
+ * triplicating the `{ team: { id, name, slug, tenantName, isCrossTenant } }`
+ * interface in each consumer.
+ */
+export type AdminTeamMembership = Awaited<
+  ReturnType<typeof getAdminTeamMemberships>
+>[number];
+
+/**
  * Get all team memberships where the user holds an ADMIN or OWNER role.
  * Uses withBypassRls to query across tenants since this is called from a
  * layout that does not yet know the tenant context.
