@@ -216,21 +216,18 @@ export function setupWebhookCardMocks() {
     ),
   }));
 
-  vi.mock("@/components/ui/collapsible", () => ({
-    Collapsible: ({ children }: { children: ReactNode }) => (
-      <div>{children}</div>
-    ),
-    CollapsibleContent: ({ children }: { children: ReactNode }) => (
-      <div>{children}</div>
-    ),
-    CollapsibleTrigger: ({
-      children,
-      className,
-    }: {
-      children: ReactNode;
-      className?: string;
-    }) => <button className={className}>{children}</button>,
-  }));
+  // Smart Collapsible mock that respects the controlled `open` prop.
+  // Required so InactiveItemsSection (which wraps Collapsible and passes
+  // `open` explicitly) hides its children when closed; render-through
+  // stubs would let inactive-toggle tests pass vacuously even when the
+  // helper's collapse logic is broken (per C5 of unify-settings-page-layout
+  // plan / review F-10).
+  vi.mock("@/components/ui/collapsible", async () => {
+    const { mockCollapsibleSmart } = await import(
+      "@/components/__tests__/mocks/collapsible-smart-mock"
+    );
+    return mockCollapsibleSmart();
+  });
 
   // NOTE: This Dialog mock unconditionally renders its children regardless of
   // the `open` prop, mirroring the AlertDialog mock below. Individual test
