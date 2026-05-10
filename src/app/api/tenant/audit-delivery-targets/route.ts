@@ -13,6 +13,7 @@ import {
   getCurrentMasterKeyVersion,
   getMasterKeyByVersion,
   encryptServerData,
+  decryptServerData,
 } from "@/lib/crypto/crypto-server";
 import { AuditDeliveryTargetKind } from "@prisma/client";
 import { randomUUID } from "node:crypto";
@@ -61,7 +62,7 @@ async function handleGET(_req: NextRequest) {
     return handleAuthError(e);
   }
 
-  const targets = await withTenantRls(prisma, actor.tenantId, async () =>
+  const rows = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.auditDeliveryTarget.findMany({
       where: { tenantId: actor.tenantId },
       select: {
@@ -72,10 +73,55 @@ async function handleGET(_req: NextRequest) {
         lastError: true,
         lastDeliveredAt: true,
         createdAt: true,
+        configEncrypted: true,
+        configIv: true,
+        configAuthTag: true,
+        masterKeyVersion: true,
       },
       orderBy: { createdAt: "desc" },
     }),
   );
+
+  // Extract endpoint URL from the encrypted config so the list view can show
+  // it. Secrets (webhook secret, HEC token, S3 access keys) are NEVER included
+  // in the response — only the URL/endpoint, which is destination metadata
+  // and was already user-supplied at create time.
+  const targets = rows.map((row) => {
+    let endpoint: string | null = null;
+    try {
+      const masterKey = getMasterKeyByVersion(row.masterKeyVersion);
+      const aad = Buffer.concat([
+        Buffer.from(row.id.replace(/-/g, ""), "hex"),
+        Buffer.from(actor.tenantId.replace(/-/g, ""), "hex"),
+      ]);
+      const configJson = decryptServerData(
+        {
+          ciphertext: row.configEncrypted,
+          iv: row.configIv,
+          authTag: row.configAuthTag,
+        },
+        masterKey,
+        aad,
+      );
+      const config = JSON.parse(configJson) as { url?: string; endpoint?: string };
+      endpoint = config.url ?? config.endpoint ?? null;
+    } catch {
+      // Decrypt failure (missing master key version, AAD mismatch, corruption)
+      // — keep the row visible without the endpoint rather than 500-ing the
+      // whole list. The worker will surface the same error via lastError.
+      endpoint = null;
+    }
+    return {
+      id: row.id,
+      kind: row.kind,
+      isActive: row.isActive,
+      failCount: row.failCount,
+      lastError: row.lastError,
+      lastDeliveredAt: row.lastDeliveredAt,
+      createdAt: row.createdAt,
+      endpoint,
+    };
+  });
 
   return NextResponse.json({ targets });
 }

@@ -38,6 +38,18 @@ export interface ResolvedSessionTimeouts {
  *  - tenant policy PATCH via `invalidateSessionTimeoutCacheForTenant`
  *  - team policy PATCH via `invalidateSessionTimeoutCacheForTenant`
  *  - team membership change (add/remove member) via `invalidateSessionTimeoutCache`
+ *
+ * Provider awareness: `_sessionProvider` is currently unused. Plan C1 originally
+ * required a per-provider clamp for personal bootstrap passkey sessions only;
+ * deviation D1 (see docs/archive/review/rebalance-personal-passkey-session-aal2-deviation.md)
+ * widened the rebalance to all sessions. The bootstrap-only safety invariant
+ * is now enforced upstream in `src/app/api/auth/passkey/verify/route.ts`,
+ * which rejects non-bootstrap users before any passkey-provider session is
+ * created. Recent-passkey-verification step-up for sensitive flows lives in
+ * `src/lib/auth/webauthn/recent-passkey-verification.ts`.
+ * The parameter is preserved on the signature for forward compatibility:
+ * if a future plan needs differentiated timeouts for non-bootstrap passkey
+ * flows, the call sites already pass the provider string.
  */
 export async function resolveEffectiveSessionTimeouts(
   userId: string,

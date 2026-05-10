@@ -13,7 +13,9 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import type { ReactNode } from "react";
 
-const { mockFetch, mockToast } = vi.hoisted(() => ({
+const { mockFetch, mockToast, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
+  mockCanUsePasskeyRecovery: vi.fn(),
+  mockReauthenticateWithPasskey: vi.fn(),
   mockFetch: vi.fn(),
   mockToast: { error: vi.fn(), success: vi.fn() },
 }));
@@ -47,9 +49,15 @@ vi.mock("@/components/passwords/shared/copy-button", () => ({
   ),
 }));
 
-vi.mock("@/components/auth/recent-session-required-dialog", () => ({
-  RecentSessionRequiredDialog: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="recent-session-dialog" /> : null,
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
 
 vi.mock("@/components/settings/account/section-card-header", () => ({
@@ -301,6 +309,8 @@ function setupFetchRequests(requests = sampleRequests) {
 describe("AccessRequestCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true, verifiedAt: "2026-05-10T00:00:00Z" });
   });
 
   it("shows loading spinner initially", async () => {
@@ -489,6 +499,87 @@ describe("AccessRequestCard", () => {
 
     await waitFor(() => {
       expect(mockToast.error).toHaveBeenCalledWith("arAlreadyProcessed");
+    });
+  });
+
+  it("opens RecentSessionRequiredDialog on 403 SESSION_STEP_UP_REQUIRED approve response", async () => {
+    setupFetchRequests();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ requests: sampleRequests }),
+        });
+      }
+      if (init.method === "POST" && String(url).includes("/approve")) {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 500 });
+    });
+
+    await act(async () => {
+      render(<AccessRequestCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("deploy-bot")).toBeInTheDocument();
+    });
+
+    const approveButtons = screen
+      .getAllByRole("button")
+      .filter((b) => b.textContent?.includes("arApprove"));
+    expect(approveButtons.length).toBeGreaterThan(0);
+
+    await act(async () => {
+      fireEvent.click(approveButtons[0]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
+  it("falls back to local arApproveFailed for an unrecognized API error code on approve", async () => {
+    setupFetchRequests();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ requests: sampleRequests }),
+        });
+      }
+      if (init.method === "POST" && String(url).includes("/approve")) {
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          json: () => Promise.resolve({ error: "BOGUS_NOT_IN_ALLOWLIST" }),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 500 });
+    });
+
+    await act(async () => {
+      render(<AccessRequestCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("deploy-bot")).toBeInTheDocument();
+    });
+
+    const approveButtons = screen
+      .getAllByRole("button")
+      .filter((b) => b.textContent?.includes("arApprove"));
+    await act(async () => {
+      fireEvent.click(approveButtons[0]);
+    });
+
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("arApproveFailed");
     });
   });
 

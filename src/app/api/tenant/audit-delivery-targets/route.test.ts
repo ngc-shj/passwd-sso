@@ -13,6 +13,7 @@ const {
   mockGetCurrentMasterKeyVersion,
   mockGetMasterKeyByVersion,
   mockEncryptServerData,
+  mockDecryptServerData,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -28,6 +29,7 @@ const {
     iv: "iv123456789012",
     authTag: "authtag1234567890123456789012",
   }),
+  mockDecryptServerData: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -75,6 +77,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   getCurrentMasterKeyVersion: mockGetCurrentMasterKeyVersion,
   getMasterKeyByVersion: mockGetMasterKeyByVersion,
   encryptServerData: mockEncryptServerData,
+  decryptServerData: mockDecryptServerData,
 }));
 
 import { GET, POST } from "@/app/api/tenant/audit-delivery-targets/route";
@@ -91,6 +94,10 @@ const makeTargetSelectResult = (overrides: Record<string, unknown> = {}) => ({
   lastError: null,
   lastDeliveredAt: null,
   createdAt: new Date(),
+  configEncrypted: "ciphertext-hex",
+  configIv: "iv-hex",
+  configAuthTag: "authtag-hex",
+  masterKeyVersion: 1,
   ...overrides,
 });
 
@@ -118,10 +125,13 @@ describe("GET /api/tenant/audit-delivery-targets", () => {
     expect(status).toBe(403);
   });
 
-  it("returns list of targets without config fields", async () => {
+  it("returns list of targets with endpoint URL but no secret material", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockAuditDeliveryTargetFindMany.mockResolvedValue([makeTargetSelectResult()]);
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({ url: "https://hooks.example.com/audit", secret: "s3cret" }),
+    );
 
     const req = createRequest("GET", "http://localhost/api/tenant/audit-delivery-targets");
     const res = await GET(req);
@@ -131,25 +141,59 @@ describe("GET /api/tenant/audit-delivery-targets", () => {
     expect(Array.isArray(json.targets)).toBe(true);
     expect(json.targets).toHaveLength(1);
     expect(json.targets[0].id).toBe("adt-1");
+    // Endpoint URL is exposed for the list view.
+    expect(json.targets[0].endpoint).toBe("https://hooks.example.com/audit");
 
-    // Verify Prisma select omits config fields
-    expect(mockAuditDeliveryTargetFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        select: expect.not.objectContaining({
-          configEncrypted: expect.anything(),
-          configIv: expect.anything(),
-          configAuthTag: expect.anything(),
-          masterKeyVersion: expect.anything(),
-        }),
-      }),
-    );
-
-    // Verify response does not expose config fields
+    // Response MUST NOT expose secrets, raw config, or key-management metadata.
     const target = json.targets[0];
     expect(target).not.toHaveProperty("configEncrypted");
     expect(target).not.toHaveProperty("configIv");
     expect(target).not.toHaveProperty("configAuthTag");
     expect(target).not.toHaveProperty("masterKeyVersion");
+    expect(target).not.toHaveProperty("secret");
+    expect(target).not.toHaveProperty("token");
+    expect(target).not.toHaveProperty("accessKeyId");
+    expect(target).not.toHaveProperty("secretAccessKey");
+  });
+
+  it("returns null endpoint when decryption fails (e.g. master key version missing)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAuditDeliveryTargetFindMany.mockResolvedValue([makeTargetSelectResult()]);
+    mockDecryptServerData.mockImplementation(() => {
+      throw new Error("AAD mismatch");
+    });
+
+    const req = createRequest("GET", "http://localhost/api/tenant/audit-delivery-targets");
+    const res = await GET(req);
+    const { status, json } = await parseResponse(res);
+
+    // The list still renders; the failed row simply omits the endpoint.
+    expect(status).toBe(200);
+    expect(json.targets[0].id).toBe("adt-1");
+    expect(json.targets[0].endpoint).toBeNull();
+  });
+
+  it("uses S3 endpoint field when target kind has no top-level url", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAuditDeliveryTargetFindMany.mockResolvedValue([
+      makeTargetSelectResult({ kind: "S3_OBJECT" }),
+    ]);
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({
+        endpoint: "https://s3.example.com",
+        region: "us-east-1",
+        accessKeyId: "AKIA...",
+        secretAccessKey: "s3cret",
+      }),
+    );
+
+    const req = createRequest("GET", "http://localhost/api/tenant/audit-delivery-targets");
+    const res = await GET(req);
+    const { json } = await parseResponse(res);
+
+    expect(json.targets[0].endpoint).toBe("https://s3.example.com");
   });
 });
 

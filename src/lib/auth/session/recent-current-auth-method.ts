@@ -14,6 +14,14 @@ import { requireRecentPasskeyVerification } from "@/lib/auth/webauthn/recent-pas
  *
  * WebAuthn-established sessions use recent passkey verification; other
  * session types stay on the generic recent-session gate.
+ *
+ * Bootstrap-tenant invariant: a `provider === "webauthn"` session can only
+ * exist for bootstrap-tenant users because `src/app/api/auth/passkey/verify/route.ts`
+ * rejects non-bootstrap users before creating the session row. This means
+ * routing the webauthn branch to passkey reauth is always recoverable in-app
+ * (the user has at least one credential by construction).
+ * `provider === null` (legacy sessions predating the provenance migration)
+ * falls through to the generic recent-session gate.
  */
 export async function requireRecentCurrentAuthMethod(
   req: NextRequest,

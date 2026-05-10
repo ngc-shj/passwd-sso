@@ -45,6 +45,9 @@ import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
+import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 
 import type { AccessRequestStatus } from "@prisma/client";
 
@@ -77,6 +80,7 @@ const STATUS_VARIANTS: Record<
 export function AccessRequestCard() {
   const t = useTranslations("MachineIdentity");
   const tCommon = useTranslations("Common");
+  const tApi = useTranslations("ApiErrors");
   const locale = useLocale();
 
   const [requests, setRequests] = useState<AccessRequest[]>([]);
@@ -85,7 +89,12 @@ export function AccessRequestCard() {
   const [approving, setApproving] = useState<string | null>(null);
   const [jitToken, setJitToken] = useState<string | null>(null);
   const [jitTokenOpen, setJitTokenOpen] = useState(false);
-  const [recentSessionOpen, setRecentSessionOpen] = useState(false);
+  const [reauthApproveTargetId, setReauthApproveTargetId] = useState<string | null>(null);
+  const inlineReauth = useInlineReauth(async () => {
+    const target = reauthApproveTargetId;
+    setReauthApproveTargetId(null);
+    if (target) await handleApprove(target);
+  });
 
   // Create dialog state
   const [createOpen, setCreateOpen] = useState(false);
@@ -163,7 +172,8 @@ export function AccessRequestCard() {
         } else if (res.status === 400) {
           toast.error(t("arCreateValidationError"));
         } else {
-          toast.error(data?.message ?? t("arCreateFailed"));
+          const apiKey = tokenMintApiErrorKey(data?.error);
+          toast.error(apiKey ? tApi(apiKey) : t("arCreateFailed"));
         }
         return;
       }
@@ -188,7 +198,10 @@ export function AccessRequestCard() {
         const data = await res.json().catch(() => null);
         const code = data?.error ?? "";
         if (code === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-          setRecentSessionOpen(true);
+          // Remember which request the operator was trying to approve so the
+          // post-reauth retry hits the same target.
+          setReauthApproveTargetId(requestId);
+          await inlineReauth.triggerOnStaleError();
         } else if (res.status === 409 && code === API_ERROR.SA_TOKEN_LIMIT_EXCEEDED) {
           toast.error(t("arTokenLimitExceeded"));
         } else if (res.status === 409 && code === API_ERROR.SA_NOT_FOUND) {
@@ -197,8 +210,15 @@ export function AccessRequestCard() {
           toast.error(t("arAlreadyProcessed"));
         } else if (res.status === 400 && code === API_ERROR.SA_INVALID_SCOPE) {
           toast.error(t("arInvalidScope"));
-        } else {
+        } else if (res.status === 400) {
+          // Other 400 codes (e.g. VALIDATION_ERROR) are validation failures
+          // unrelated to scope; surface them as the approve-failed fallback
+          // rather than letting the helper try to translate codes from
+          // unrelated domains.
           toast.error(t("arApproveFailed"));
+        } else {
+          const apiKey = tokenMintApiErrorKey(code);
+          toast.error(apiKey ? tApi(apiKey) : t("arApproveFailed"));
         }
         return;
       }
@@ -256,12 +276,16 @@ export function AccessRequestCard() {
       <SectionCardHeader icon={ShieldCheck} title={t("accessRequestCardTitle")} description={t("accessRequestCardDescription")} />
       <CardContent className="space-y-4">
         <RecentSessionRequiredDialog
-          actionLabel={t("recentSessionAction")}
+          {...inlineReauth.recentSessionDialogProps}
           cancelLabel={tCommon("cancel")}
-          description={t("recentSessionDescription")}
-          onOpenChange={setRecentSessionOpen}
-          open={recentSessionOpen}
-          title={t("recentSessionTitle")}
+        />
+        <PasskeyReauthDialog
+          {...inlineReauth.reauthDialogProps}
+          onOpenChange={(open) => {
+            inlineReauth.reauthDialogProps.onOpenChange(open);
+            if (!open) setReauthApproveTargetId(null);
+          }}
+          cancelLabel={tCommon("cancel")}
         />
         <div className="flex items-center justify-between">
           <Select

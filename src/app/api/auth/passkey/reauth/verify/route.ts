@@ -96,9 +96,8 @@ async function handlePOST(req: NextRequest) {
 
   await logAuditAsync({
     ...personalAuditBase(req, session.user.id),
-    action: AUDIT_ACTION.AUTH_LOGIN,
+    action: AUDIT_ACTION.AUTH_PASSKEY_REAUTH,
     metadata: {
-      trigger: "passkey_reauth",
       credentialId: verification.credentialId,
     },
   });

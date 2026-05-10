@@ -82,7 +82,7 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
       },
     });
     mockWithBypassRls.mockImplementation(
-      (_prisma: unknown, fn: () => unknown) => fn(),
+      (_prisma: unknown, fn: () => unknown, _purpose: string) => fn(),
     );
     mockPrismaTransaction.mockImplementation(
       async (fn: (tx: unknown) => unknown) => fn({
@@ -123,9 +123,8 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
     });
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: "AUTH_LOGIN",
+        action: "AUTH_PASSKEY_REAUTH",
         metadata: expect.objectContaining({
-          trigger: "passkey_reauth",
           credentialId: "cred-1",
         }),
       }),
@@ -159,5 +158,67 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
       error: "NOT_FOUND",
       details: "Credential not found",
     });
+  });
+
+  it("returns 401 when the request has no authenticated session", async () => {
+    mockAuth.mockResolvedValue(null);
+
+    const res = await POST(
+      createRequest("POST", ROUTE_URL, {
+        headers: {
+          origin: "http://localhost:3000",
+          cookie: "authjs.session-token=sess-1",
+          "Content-Type": "application/json",
+        },
+        body: {
+          credentialResponse: JSON.stringify({ id: "cred-1", type: "public-key" }),
+          challengeId: "a".repeat(32),
+        },
+      }),
+    );
+
+    expect(res.status).toBe(401);
+    expect(mockSessionUpdate).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when the session cookie is absent (no sessionToken)", async () => {
+    const res = await POST(
+      createRequest("POST", ROUTE_URL, {
+        headers: {
+          origin: "http://localhost:3000",
+          "Content-Type": "application/json",
+        },
+        body: {
+          credentialResponse: JSON.stringify({ id: "cred-1", type: "public-key" }),
+          challengeId: "a".repeat(32),
+        },
+      }),
+    );
+
+    expect(res.status).toBe(401);
+    expect(mockSessionUpdate).not.toHaveBeenCalled();
+  });
+
+  it("returns 429 when the rate limiter denies the request", async () => {
+    mockRateLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 60_000 });
+
+    const res = await POST(
+      createRequest("POST", ROUTE_URL, {
+        headers: {
+          origin: "http://localhost:3000",
+          cookie: "authjs.session-token=sess-1",
+          "Content-Type": "application/json",
+        },
+        body: {
+          credentialResponse: JSON.stringify({ id: "cred-1", type: "public-key" }),
+          challengeId: "a".repeat(32),
+        },
+      }),
+    );
+
+    expect(res.status).toBe(429);
+    expect(mockVerifyAuthenticationAssertion).not.toHaveBeenCalled();
+    expect(mockSessionUpdate).not.toHaveBeenCalled();
   });
 });

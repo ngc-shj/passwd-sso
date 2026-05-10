@@ -26,6 +26,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { SectionCardHeader } from "@/components/settings/account/section-card-header";
 import { fetchApi } from "@/lib/url-helpers";
 import { apiPath } from "@/lib/constants";
@@ -44,6 +51,7 @@ interface TargetItem {
   lastError: string | null;
   lastDeliveredAt: string | null;
   createdAt: string;
+  endpoint: string | null;
 }
 
 interface ConfigState {
@@ -76,6 +84,7 @@ export function AuditDeliveryTargetCard() {
 
   const [targets, setTargets] = useState<TargetItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [kind, setKind] = useState<Kind | "">("");
   const [config, setConfig] = useState<ConfigState>(defaultConfig);
@@ -99,6 +108,14 @@ export function AuditDeliveryTargetCard() {
   useEffect(() => {
     fetchTargets();
   }, [fetchTargets]);
+
+  const closeCreateDialog = () => {
+    setCreateOpen(false);
+    setCreating(false);
+    setKind("");
+    setConfig(defaultConfig);
+    setUrlError("");
+  };
 
   const validateUrl = (value: string): string | null => {
     const trimmed = value.trim();
@@ -171,8 +188,7 @@ export function AuditDeliveryTargetCard() {
         return;
       }
       toast.success(t("created"));
-      setKind("");
-      setConfig(defaultConfig);
+      closeCreateDialog();
       fetchTargets();
     } catch {
       toast.error(t("createFailed"));
@@ -241,6 +257,11 @@ export function AuditDeliveryTargetCard() {
             {formatDateTime(target.createdAt, locale)}
           </span>
         </div>
+        {target.endpoint && (
+          <p className="text-xs font-mono text-muted-foreground truncate" title={target.endpoint}>
+            {target.endpoint}
+          </p>
+        )}
         <div className="text-xs text-muted-foreground space-x-3">
           {target.failCount > 0 && (
             <span className="text-amber-600 dark:text-amber-400">
@@ -297,154 +318,16 @@ export function AuditDeliveryTargetCard() {
         description={t("description")}
       />
       <CardContent className="space-y-6">
-        {/* Create form */}
-        <section className="space-y-4">
-          <h3 className="text-sm font-medium">{t("addTarget")}</h3>
-
+        <section className="space-y-3">
           {limitReached ? (
             <p className="text-sm text-muted-foreground">
               {t("limitReached", { limit: MAX_AUDIT_DELIVERY_TARGETS })}
             </p>
           ) : (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="target-kind">{t("kind")}</Label>
-                <Select
-                  value={kind}
-                  onValueChange={(v) => {
-                    setKind(v as Kind);
-                    setConfig(defaultConfig);
-                    setUrlError("");
-                  }}
-                >
-                  <SelectTrigger id="target-kind">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="WEBHOOK">{t("kindWebhook")}</SelectItem>
-                    <SelectItem value="SIEM_HEC">{t("kindSiemHec")}</SelectItem>
-                    <SelectItem value="S3_OBJECT">{t("kindS3Object")}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {kind === "WEBHOOK" && (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="webhook-url">{t("url")}</Label>
-                    <Input
-                      id="webhook-url"
-                      type="url"
-                      value={config.url}
-                      onChange={(e) => setConfigField("url", e.target.value)}
-                      placeholder={t("urlPlaceholder")}
-                    />
-                    {urlError && (
-                      <p className="text-sm text-destructive">{urlError}</p>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="webhook-secret">{t("secret")}</Label>
-                    <Input
-                      id="webhook-secret"
-                      type="password"
-                      value={config.secret}
-                      onChange={(e) => setConfigField("secret", e.target.value)}
-                      placeholder={t("secretPlaceholder")}
-                    />
-                  </div>
-                </>
-              )}
-
-              {kind === "SIEM_HEC" && (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="hec-url">{t("url")}</Label>
-                    <Input
-                      id="hec-url"
-                      type="url"
-                      value={config.url}
-                      onChange={(e) => setConfigField("url", e.target.value)}
-                      placeholder={t("urlPlaceholder")}
-                    />
-                    {urlError && (
-                      <p className="text-sm text-destructive">{urlError}</p>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="hec-token">{t("hecToken")}</Label>
-                    <Input
-                      id="hec-token"
-                      type="password"
-                      value={config.hecToken}
-                      onChange={(e) => setConfigField("hecToken", e.target.value)}
-                      placeholder={t("hecTokenPlaceholder")}
-                    />
-                  </div>
-                </>
-              )}
-
-              {kind === "S3_OBJECT" && (
-                <>
-                  <div className="space-y-2">
-                    <Label htmlFor="s3-endpoint">{t("endpoint")}</Label>
-                    <Input
-                      id="s3-endpoint"
-                      type="url"
-                      value={config.endpoint}
-                      onChange={(e) => setConfigField("endpoint", e.target.value)}
-                      placeholder={t("endpointPlaceholder")}
-                    />
-                    {urlError && (
-                      <p className="text-sm text-destructive">{urlError}</p>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="s3-region">{t("region")}</Label>
-                    <Input
-                      id="s3-region"
-                      value={config.region}
-                      onChange={(e) => setConfigField("region", e.target.value)}
-                      placeholder={t("regionPlaceholder")}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="s3-access-key-id">{t("accessKeyId")}</Label>
-                    <Input
-                      id="s3-access-key-id"
-                      value={config.accessKeyId}
-                      onChange={(e) => setConfigField("accessKeyId", e.target.value)}
-                      placeholder={t("accessKeyIdPlaceholder")}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="s3-secret-access-key">{t("secretAccessKey")}</Label>
-                    <Input
-                      id="s3-secret-access-key"
-                      type="password"
-                      value={config.secretAccessKey}
-                      onChange={(e) => setConfigField("secretAccessKey", e.target.value)}
-                      placeholder={t("secretAccessKeyPlaceholder")}
-                    />
-                  </div>
-                </>
-              )}
-
-              {kind && (
-                <Button
-                  onClick={handleCreate}
-                  disabled={isCreateDisabled()}
-                  size="sm"
-                >
-                  {creating ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Plus className="h-4 w-4" />
-                  )}
-                  {t("addTarget")}
-                </Button>
-              )}
-            </>
+            <Button onClick={() => setCreateOpen(true)} size="sm">
+              <Plus className="mr-1 h-4 w-4" />
+              {t("addTarget")}
+            </Button>
           )}
         </section>
 
@@ -486,6 +369,164 @@ export function AuditDeliveryTargetCard() {
           )}
         </section>
       </CardContent>
+
+      <Dialog
+        open={createOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeCreateDialog();
+            return;
+          }
+          setCreateOpen(true);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("addTarget")}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="target-kind">{t("kind")}</Label>
+              <Select
+                value={kind}
+                onValueChange={(v) => {
+                  setKind(v as Kind);
+                  setConfig(defaultConfig);
+                  setUrlError("");
+                }}
+              >
+                <SelectTrigger id="target-kind">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="WEBHOOK">{t("kindWebhook")}</SelectItem>
+                  <SelectItem value="SIEM_HEC">{t("kindSiemHec")}</SelectItem>
+                  <SelectItem value="S3_OBJECT">{t("kindS3Object")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {kind === "WEBHOOK" && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="webhook-url">{t("url")}</Label>
+                  <Input
+                    id="webhook-url"
+                    type="url"
+                    value={config.url}
+                    onChange={(e) => setConfigField("url", e.target.value)}
+                    placeholder={t("urlPlaceholder")}
+                  />
+                  {urlError && (
+                    <p className="text-sm text-destructive">{urlError}</p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="webhook-secret">{t("secret")}</Label>
+                  <Input
+                    id="webhook-secret"
+                    type="password"
+                    value={config.secret}
+                    onChange={(e) => setConfigField("secret", e.target.value)}
+                    placeholder={t("secretPlaceholder")}
+                  />
+                </div>
+              </>
+            )}
+
+            {kind === "SIEM_HEC" && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="hec-url">{t("url")}</Label>
+                  <Input
+                    id="hec-url"
+                    type="url"
+                    value={config.url}
+                    onChange={(e) => setConfigField("url", e.target.value)}
+                    placeholder={t("urlPlaceholder")}
+                  />
+                  {urlError && (
+                    <p className="text-sm text-destructive">{urlError}</p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="hec-token">{t("hecToken")}</Label>
+                  <Input
+                    id="hec-token"
+                    type="password"
+                    value={config.hecToken}
+                    onChange={(e) => setConfigField("hecToken", e.target.value)}
+                    placeholder={t("hecTokenPlaceholder")}
+                  />
+                </div>
+              </>
+            )}
+
+            {kind === "S3_OBJECT" && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="s3-endpoint">{t("endpoint")}</Label>
+                  <Input
+                    id="s3-endpoint"
+                    type="url"
+                    value={config.endpoint}
+                    onChange={(e) => setConfigField("endpoint", e.target.value)}
+                    placeholder={t("endpointPlaceholder")}
+                  />
+                  {urlError && (
+                    <p className="text-sm text-destructive">{urlError}</p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="s3-region">{t("region")}</Label>
+                  <Input
+                    id="s3-region"
+                    value={config.region}
+                    onChange={(e) => setConfigField("region", e.target.value)}
+                    placeholder={t("regionPlaceholder")}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="s3-access-key-id">{t("accessKeyId")}</Label>
+                  <Input
+                    id="s3-access-key-id"
+                    value={config.accessKeyId}
+                    onChange={(e) => setConfigField("accessKeyId", e.target.value)}
+                    placeholder={t("accessKeyIdPlaceholder")}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="s3-secret-access-key">{t("secretAccessKey")}</Label>
+                  <Input
+                    id="s3-secret-access-key"
+                    type="password"
+                    value={config.secretAccessKey}
+                    onChange={(e) => setConfigField("secretAccessKey", e.target.value)}
+                    placeholder={t("secretAccessKeyPlaceholder")}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeCreateDialog}>
+              {tCommon("cancel")}
+            </Button>
+            <Button
+              onClick={handleCreate}
+              disabled={isCreateDisabled()}
+              size="sm"
+            >
+              {creating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Plus className="h-4 w-4" />
+              )}
+              {t("addTarget")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

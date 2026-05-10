@@ -120,6 +120,17 @@ async function handlePOST(req: NextRequest) {
       const deleted = await tx.session.deleteMany({
         where: { userId: user.id },
       });
+      // Note on passkeyVerifiedAt ownership (split with auth-adapter):
+      // Initial value is set HERE because the passkey sign-in route owns
+      // session creation for the WebAuthn provider (not the Auth.js
+      // adapter). The auth-adapter's createSession sets passkeyVerifiedAt
+      // to null implicitly for OAuth/email sessions, which is correct —
+      // those flows do not establish passkey freshness.
+      // Subsequent updates: ordinary session activity in
+      // `src/lib/auth/session/auth-adapter.ts:updateSession` writes only
+      // {expires, lastActiveAt}; it MUST NOT refresh passkeyVerifiedAt
+      // (C2 invariant). Refresh happens via the dedicated reauth flow at
+      // `src/app/api/auth/passkey/reauth/verify/route.ts`.
       await tx.session.create({
         data: {
           sessionToken,

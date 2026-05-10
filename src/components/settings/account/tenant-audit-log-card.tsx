@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollText, ShieldAlert, Users } from "lucide-react";
 import { ACTION_ICONS, DEFAULT_AUDIT_ICON } from "@/components/audit/audit-action-icons";
 import {
@@ -317,11 +318,17 @@ export function TenantAuditLogCard({ variant }: TenantAuditLogCardProps) {
     <Card>
       <SectionCardHeader icon={ShieldAlert} title={tb("title")} description={tb("description")} />
       <CardContent className="space-y-4">
-        <div className="flex justify-end">
+        <section className="space-y-3">
           <BreakGlassDialog
+            trigger={(
+              <Button size="sm">
+                <ShieldAlert className="mr-2 h-4 w-4" />
+                {tb("requestAccess")}
+              </Button>
+            )}
             onGrantCreated={() => setGrantRefreshTrigger((n) => n + 1)}
           />
-        </div>
+        </section>
         <BreakGlassGrantList refreshTrigger={grantRefreshTrigger} />
       </CardContent>
     </Card>

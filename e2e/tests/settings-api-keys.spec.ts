@@ -42,27 +42,38 @@ test.describe("Settings - API Keys", () => {
     await test.step("create a new API key", async () => {
       const apiKeySection = settingsPage.apiKeySection;
 
-      // Fill in the key name
-      await apiKeySection
-        .getByRole("textbox")
-        .fill(API_KEY_NAME);
-
-      // At least one scope checkbox is already checked by default (passwords:read)
-      // Click "Create Key" button
+      // C1 dialog refactor: the create form is now inside a Dialog. Click the
+      // trigger button in the card body to open the dialog.
       await apiKeySection
         .getByRole("button", { name: /Create Key|キーを作成/i })
         .click();
 
-      // Newly created token section should appear (shown once)
+      // Scope subsequent queries to the dialog (the trigger button has the
+      // same accessible name as the submit button inside the dialog).
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible({ timeout: 5_000 });
+
+      // Fill in the key name
+      await dialog.getByRole("textbox").fill(API_KEY_NAME);
+
+      // At least one scope checkbox is already checked by default (passwords:read).
+      // Click the dialog's "Create Key" submit button.
+      await dialog
+        .getByRole("button", { name: /Create Key|キーを作成/i })
+        .click();
+
+      // Newly created token section appears inside the same dialog (post-success completion state).
       // t("tokenReady") = "API キー（一度だけ表示されます）:"
       await expect(
-        page.getByText(/API key.*once|API\s*キー.*一度/i)
+        dialog.getByText(/API key.*once|API\s*キー.*一度/i)
       ).toBeVisible({ timeout: 10_000 });
     });
 
     await test.step("dismiss token reveal and verify key listed", async () => {
-      // Dismiss the token-once banner
-      await page.getByRole("button", { name: "OK" }).click();
+      // Dismiss the token-once banner — OK button lives inside the dialog.
+      await page.getByRole("dialog")
+        .getByRole("button", { name: "OK" })
+        .click();
 
       // The API key name should now appear in the key list
       await expect(

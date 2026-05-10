@@ -26,6 +26,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import {
   Collapsible,
@@ -34,7 +42,7 @@ import {
 } from "@/components/ui/collapsible";
 import { KeyRound, Loader2, Plus, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
-import { API_PATH, apiPath } from "@/lib/constants";
+import { apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
 import {
@@ -43,7 +51,10 @@ import {
 } from "@/lib/constants/auth/operator-token";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
+import { canUsePasskeyRecovery } from "@/lib/auth/webauthn/can-use-passkey-recovery";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
+import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 
 const TOKEN_STATUS_VARIANT: Record<
   string,
@@ -81,12 +92,15 @@ interface CreatedToken {
 
 export function OperatorTokenCard() {
   const t = useTranslations("OperatorToken");
+  const tApi = useTranslations("ApiErrors");
+  const tAuth = useTranslations("Auth");
   const locale = useLocale();
 
   const [tokens, setTokens] = useState<OperatorToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [createdToken, setCreatedToken] = useState<CreatedToken | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   const [tokenName, setTokenName] = useState("");
   const [expiresInDays, setExpiresInDays] = useState<string>(
     String(OPERATOR_TOKEN_DEFAULT_EXPIRES_DAYS),
@@ -128,16 +142,12 @@ export function OperatorTokenCard() {
     fetchTokens();
   }, [fetchTokens]);
 
-  const canUsePasskeyRecovery = useCallback(async () => {
-    try {
-      const res = await fetchApi(API_PATH.USER_AUTH_PROVIDER);
-      if (!res.ok) return true;
-      const data = (await res.json()) as { canPasskeySignIn?: boolean };
-      return data.canPasskeySignIn !== false;
-    } catch {
-      return true;
-    }
-  }, []);
+  const closeCreateDialog = () => {
+    setCreateOpen(false);
+    setCreatedToken(null);
+    setTokenName("");
+    setExpiresInDays(String(OPERATOR_TOKEN_DEFAULT_EXPIRES_DAYS));
+  };
 
   const handleCreate = async () => {
     if (!tokenName.trim()) return;
@@ -165,7 +175,8 @@ export function OperatorTokenCard() {
         } else if (errBody.error === API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED) {
           toast.error(t("limitExceeded"));
         } else {
-          toast.error(t("networkError"));
+          const apiKey = tokenMintApiErrorKey(errBody.error);
+          toast.error(apiKey ? tApi(apiKey) : t("networkError"));
         }
       }
     } catch {
@@ -183,8 +194,8 @@ export function OperatorTokenCard() {
       if (!result.ok) {
         setReauthError(
           result.error === "AUTHENTICATION_CANCELLED"
-            ? t("reauthCancelled")
-            : t("reauthFailed"),
+            ? tAuth("reauthCancelled")
+            : tAuth("reauthFailed"),
         );
         return;
       }
@@ -326,78 +337,20 @@ export function OperatorTokenCard() {
       />
       <CardContent className="space-y-6">
         <RecentSessionRequiredDialog
-          actionLabel={t("recentSessionAction")}
+          actionLabel={tAuth("recentSessionAction")}
           cancelLabel={t("cancel")}
-          description={t("recentSessionDescription")}
+          description={tAuth("recentSessionDescription")}
           onOpenChange={setRecentSessionOpen}
           open={recentSessionOpen}
-          title={t("recentSessionTitle")}
+          title={tAuth("recentSessionTitle")}
         />
         <p className="text-xs text-muted-foreground">{t("tenantScopeNote")}</p>
-
-        {/* Create form */}
-        <section className="space-y-3 border-t pt-4">
-          <h3 className="text-sm font-medium">{t("createToken")}</h3>
-          <div className="space-y-2">
-            <Label htmlFor="op-token-name">{t("tokenName")}</Label>
-            <Input
-              id="op-token-name"
-              value={tokenName}
-              onChange={(e) => setTokenName(e.target.value)}
-              placeholder={t("tokenNamePlaceholder")}
-              maxLength={OPERATOR_TOKEN_NAME_MAX_LENGTH}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="op-token-expiry">{t("tokenExpiry")}</Label>
-            <Select value={expiresInDays} onValueChange={setExpiresInDays}>
-              <SelectTrigger id="op-token-expiry">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="7">{t("expiry7")}</SelectItem>
-                <SelectItem value="30">{t("expiry30")}</SelectItem>
-                <SelectItem value="60">{t("expiry60")}</SelectItem>
-                <SelectItem value="90">{t("expiry90")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <Button
-            onClick={handleCreate}
-            disabled={creating || !tokenName.trim()}
-            size="sm"
-          >
-            {creating ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Plus className="h-4 w-4" />
-            )}
+        <section className="space-y-3">
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="mr-1 h-4 w-4" />
             {t("createToken")}
           </Button>
         </section>
-
-        {/* One-time plaintext display */}
-        {createdToken && (
-          <section className="border rounded-md p-4 bg-muted/50 space-y-2">
-            <p className="text-sm font-medium">{t("tokenCreated")}</p>
-            <div className="flex items-center gap-2">
-              <Input
-                value={createdToken.plaintext}
-                readOnly
-                className="font-mono text-xs"
-              />
-              <CopyButton getValue={() => createdToken.plaintext} />
-            </div>
-            <p className="text-xs text-muted-foreground">{t("usageHint")}</p>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setCreatedToken(null)}
-            >
-              OK
-            </Button>
-          </section>
-        )}
 
         {/* Token list */}
         <section className="space-y-3 border-t pt-4">
@@ -439,38 +392,101 @@ export function OperatorTokenCard() {
           )}
         </section>
 
-        <AlertDialog open={reauthOpen} onOpenChange={setReauthOpen}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t("reauthTitle")}</AlertDialogTitle>
-              <AlertDialogDescription>
-                {t("reauthDescription")}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            {reauthError && (
-              <p className="text-sm text-destructive">{reauthError}</p>
-            )}
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={reauthenticating}>
-                {t("cancel")}
-              </AlertDialogCancel>
-              <AlertDialogAction
-                onClick={(event) => {
-                  event.preventDefault();
-                  void handleReauthenticate();
-                }}
-                disabled={reauthenticating}
-              >
-                {reauthenticating ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  t("reauthAction")
-                )}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <PasskeyReauthDialog
+          open={reauthOpen}
+          onOpenChange={setReauthOpen}
+          title={tAuth("reauthTitle")}
+          description={tAuth("reauthDescription")}
+          actionLabel={tAuth("reauthAction")}
+          cancelLabel={t("cancel")}
+          errorMessage={reauthError}
+          isReauthenticating={reauthenticating}
+          onAction={handleReauthenticate}
+        />
       </CardContent>
+
+      <Dialog
+        open={createOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeCreateDialog();
+            return;
+          }
+          setCreateOpen(true);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("createToken")}</DialogTitle>
+            <DialogDescription>{t("createTokenDescription")}</DialogDescription>
+          </DialogHeader>
+
+          {createdToken ? (
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">{t("tokenCreated")}</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={createdToken.plaintext}
+                    readOnly
+                    className="font-mono text-xs"
+                  />
+                  <CopyButton getValue={() => createdToken.plaintext} />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">{t("usageHint")}</p>
+              <Button variant="outline" size="sm" onClick={closeCreateDialog}>
+                OK
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-4 py-2">
+                <div className="space-y-2">
+                  <Label htmlFor="op-token-name">{t("tokenName")}</Label>
+                  <Input
+                    id="op-token-name"
+                    value={tokenName}
+                    onChange={(e) => setTokenName(e.target.value)}
+                    placeholder={t("tokenNamePlaceholder")}
+                    maxLength={OPERATOR_TOKEN_NAME_MAX_LENGTH}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="op-token-expiry">{t("tokenExpiry")}</Label>
+                  <Select value={expiresInDays} onValueChange={setExpiresInDays}>
+                    <SelectTrigger id="op-token-expiry">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="7">{t("expiry7")}</SelectItem>
+                      <SelectItem value="30">{t("expiry30")}</SelectItem>
+                      <SelectItem value="60">{t("expiry60")}</SelectItem>
+                      <SelectItem value="90">{t("expiry90")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={closeCreateDialog}>
+                  {t("cancel")}
+                </Button>
+                <Button
+                  onClick={handleCreate}
+                  disabled={creating || !tokenName.trim()}
+                >
+                  {creating ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="h-4 w-4" />
+                  )}
+                  {t("createToken")}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

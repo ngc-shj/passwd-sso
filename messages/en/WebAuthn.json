@@ -5,6 +5,7 @@
   "registering": "Registering...",
   "registerSuccess": "Passkey registered",
   "registerError": "Failed to register passkey.",
+  "registerHint": "A name is assigned automatically when you register. You can rename it afterwards if needed.",
   "nickname": "Nickname",
   "nicknamePlaceholder": "e.g. MacBook Touch ID",
   "nicknameUpdated": "Nickname updated",

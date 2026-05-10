@@ -75,7 +75,7 @@ describe("POST /api/auth/passkey/reauth/options", () => {
       rpId: "localhost",
     });
     mockWithBypassRls.mockImplementation(
-      (_prisma: unknown, fn: () => unknown) => fn(),
+      (_prisma: unknown, fn: () => unknown, _purpose: string) => fn(),
     );
   });
 
@@ -112,5 +112,33 @@ describe("POST /api/auth/passkey/reauth/options", () => {
 
     expect(res.status).toBe(404);
     await expect(res.json()).resolves.toEqual({ error: "NOT_FOUND" });
+  });
+
+  it("returns 401 when the request has no authenticated session", async  () => {
+    mockAuth.mockResolvedValue(null);
+
+    const res = await POST(
+      createRequest("POST", ROUTE_URL, {
+        headers: { origin: "http://localhost:3000" },
+      }),
+    );
+
+    expect(res.status).toBe(401);
+    expect(mockGenerateAuthenticationOpts).not.toHaveBeenCalled();
+    expect(mockRedisSet).not.toHaveBeenCalled();
+  });
+
+  it("returns 429 when the rate limiter denies the request", async () => {
+    mockRateLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 60_000 });
+
+    const res = await POST(
+      createRequest("POST", ROUTE_URL, {
+        headers: { origin: "http://localhost:3000" },
+      }),
+    );
+
+    expect(res.status).toBe(429);
+    expect(mockGenerateAuthenticationOpts).not.toHaveBeenCalled();
+    expect(mockRedisSet).not.toHaveBeenCalled();
   });
 });

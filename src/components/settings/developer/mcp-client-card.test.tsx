@@ -13,7 +13,9 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import type { ReactNode } from "react";
 
-const { mockFetch, mockToast } = vi.hoisted(() => ({
+const { mockFetch, mockToast, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
+  mockCanUsePasskeyRecovery: vi.fn(),
+  mockReauthenticateWithPasskey: vi.fn(),
   mockFetch: vi.fn(),
   mockToast: { error: vi.fn(), success: vi.fn() },
 }));
@@ -43,9 +45,15 @@ vi.mock("@/components/passwords/shared/copy-button", () => ({
   ),
 }));
 
-vi.mock("@/components/auth/recent-session-required-dialog", () => ({
-  RecentSessionRequiredDialog: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="recent-session-dialog" /> : null,
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
 
 vi.mock("@/components/settings/account/section-card-header", () => ({
@@ -302,6 +310,10 @@ function setupFetchClients(clients = sampleClients) {
 describe("McpClientCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: user has no passkey → recent-session dialog opens. Tests
+    // exercising the inline passkey reauth path override this.
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true, verifiedAt: "2026-05-10T00:00:00Z" });
   });
 
   it("shows loading spinner initially", async () => {
@@ -397,6 +409,12 @@ describe("McpClientCard", () => {
       fireEvent.click(registerBtn!);
     });
 
+    const createBtn = screen.getAllByRole("button").find(
+      (b) => b.textContent?.includes("create")
+    );
+    expect(createBtn).toBeDefined();
+    expect(createBtn).toBeDisabled();
+
     // Fill name
     const nameInput = screen.getByPlaceholderText("mcpNamePlaceholder");
     fireEvent.change(nameInput, { target: { value: "Test Client" } });
@@ -410,11 +428,9 @@ describe("McpClientCard", () => {
     expect(checkboxes.length).toBeGreaterThan(0);
     fireEvent.click(checkboxes[0]);
 
+    expect(createBtn).not.toBeDisabled();
+
     // Submit
-    const createBtn = screen.getAllByRole("button").find(
-      (b) => b.textContent?.includes("create")
-    );
-    expect(createBtn).toBeDefined();
     await act(async () => {
       fireEvent.click(createBtn!);
     });
@@ -533,6 +549,178 @@ describe("McpClientCard", () => {
 
     await waitFor(() => {
       expect(screen.getByText("mcpNameConflict")).toBeInTheDocument();
+    });
+  });
+
+  it("create — surfaces redirect URI validation errors inline instead of generic failure", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ clients: [] }),
+        });
+      }
+      if (init.method === "POST") {
+        return Promise.resolve({
+          ok: false,
+          status: 400,
+          json: () => Promise.resolve({
+            error: "VALIDATION_ERROR",
+            details: {
+              errors: [],
+              properties: {
+                redirectUris: {
+                  errors: [],
+                  items: [{ errors: ["redirect_uri must use https:// or http://(127.0.0.1|localhost|[::1]):<port>/"] }],
+                },
+              },
+            },
+          }),
+        });
+      }
+      return Promise.resolve({ ok: false });
+    });
+
+    await act(async () => {
+      render(<McpClientCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("noMcpClients")).toBeInTheDocument();
+    });
+
+    const registerBtn = screen.getAllByRole("button").find(
+      (b) => b.textContent?.includes("registerMcpClient")
+    );
+    await act(async () => {
+      fireEvent.click(registerBtn!);
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("mcpNamePlaceholder"), {
+      target: { value: "Loopback Client" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("mcpRedirectUrisPlaceholder"), {
+      target: { value: "http://localhost/callback" },
+    });
+    fireEvent.click(screen.getAllByTestId("checkbox")[0]);
+
+    const createBtn = screen.getAllByRole("button").find(
+      (b) => b.textContent?.includes("create")
+    );
+    await act(async () => {
+      fireEvent.click(createBtn!);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("mcpRedirectUriInvalid")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalledWith("mcpCreateFailed");
+  });
+
+  it("create — opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ clients: [] }),
+        });
+      }
+      if (init.method === "POST") {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+        });
+      }
+      return Promise.resolve({ ok: false });
+    });
+
+    await act(async () => {
+      render(<McpClientCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("noMcpClients")).toBeInTheDocument();
+    });
+
+    const registerBtn = screen.getAllByRole("button").find(
+      (b) => b.textContent?.includes("registerMcpClient")
+    );
+    await act(async () => {
+      fireEvent.click(registerBtn!);
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("mcpNamePlaceholder"), {
+      target: { value: "Loopback Client" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("mcpRedirectUrisPlaceholder"), {
+      target: { value: "http://localhost:3000/callback" },
+    });
+    fireEvent.click(screen.getAllByTestId("checkbox")[0]);
+
+    const createBtn = screen.getAllByRole("button").find(
+      (b) => b.textContent?.includes("create")
+    );
+    await act(async () => {
+      fireEvent.click(createBtn!);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
+  it("create — falls back to local mcpCreateFailed for an unrecognized API error code", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ clients: [] }),
+        });
+      }
+      if (init.method === "POST") {
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          json: () => Promise.resolve({ error: "BOGUS_NOT_IN_ALLOWLIST" }),
+        });
+      }
+      return Promise.resolve({ ok: false });
+    });
+
+    await act(async () => {
+      render(<McpClientCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("noMcpClients")).toBeInTheDocument();
+    });
+
+    const registerBtn = screen.getAllByRole("button").find(
+      (b) => b.textContent?.includes("registerMcpClient")
+    );
+    await act(async () => {
+      fireEvent.click(registerBtn!);
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("mcpNamePlaceholder"), {
+      target: { value: "Loopback Client" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("mcpRedirectUrisPlaceholder"), {
+      target: { value: "http://localhost:3000/callback" },
+    });
+    fireEvent.click(screen.getAllByTestId("checkbox")[0]);
+
+    const createBtn = screen.getAllByRole("button").find(
+      (b) => b.textContent?.includes("create")
+    );
+    await act(async () => {
+      fireEvent.click(createBtn!);
+    });
+
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("mcpCreateFailed");
     });
   });
 
