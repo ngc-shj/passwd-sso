@@ -157,3 +157,17 @@ None — all findings cite specific files and line numbers.
 - `npx vitest run` — 10154 passed / 1 skipped / 0 failed
 - `npx next build` — succeeded
 
+## Round 2 — not run (finalized at user's request)
+
+Round 1 fixes (commit `7063273f`) applied all Round 1 findings and were verified by full vitest + production build. The Round 1 commit's scope:
+- Test additions only for T1 (no production behavior change).
+- Helper test edge cases for T2 (test-only).
+- Test factory refactor for T3, T4 (test-only).
+- One assertion added for T5 (test-only).
+- F1: dropped a duplicate code path on cli-token-card (404 / 429 / other behavior unified through the helper); paired test updated.
+- F3: added explicit `else if (status === 400)` branch in access-request handleApprove; unrelated 400 codes now surface `arApproveFailed` instead of round-tripping through the helper.
+- F4: i18n key swap on operator-token DialogDescription (text-only).
+
+None of these changes touch a security boundary as defined by the skill (auth / authz / cryptography / session / federation / key custody / signing / rate-limit gate / audit logging / input validation). The branch already passed Round 1 review by all three experts. The user authorized finalization without Round 2.
+
+
