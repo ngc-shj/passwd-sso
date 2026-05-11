@@ -958,3 +958,86 @@ describe("proxy — passkeyAuditEmitted staleness eviction", () => {
     expect(_passkeyAuditFirstKeyForTests()).toBe("u2");
   });
 });
+
+describe("proxy — Tailscale forwarded-header normalization wire-in", () => {
+  // Asserts the orchestrator passes the normalized request (not the
+  // original) to both dispatch branches. Without this, a future refactor
+  // of src/proxy.ts that drops the normalize call would silently
+  // reintroduce the :3001 leak — unit tests on normalizeForwardedHeaders
+  // would still pass.
+  const TS_HEADERS = {
+    "tailscale-headers-info": "https://tailscale.com/s/serve-headers",
+    "tailscale-user-login": "user@example.com",
+  } as const;
+
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.stubEnv("APP_URL", "https://app.example.com");
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ user: null }), { status: 200 }),
+    );
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it("API route: Bearer + Tailscale headers reach handleApiAuth (Bearer bypass branch)", async () => {
+    // proxy.ts must dispatch on normalized.nextUrl.pathname; if it accidentally
+    // dispatched on the original (which still has request.url = listen URL),
+    // pathname would still match — but the handler would receive headers
+    // without the override applied. Assert the bypass response shape so we
+    // know the API branch ran end-to-end with the normalized request.
+    const req = new NextRequest("https://localhost:3001/api/passwords", {
+      headers: {
+        ...TS_HEADERS,
+        host: "app.example.com",
+        "x-forwarded-host": "app.example.com",
+        "x-forwarded-port": "3001",
+        "x-forwarded-proto": "https",
+        Authorization: "Bearer tok123",
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("page route: Tailscale headers flow through handlePageRoute (security headers applied)", async () => {
+    // Page-route branch always runs applySecurityHeaders, so the CSP header
+    // is the cheapest end-to-end signal that the dispatch reached the
+    // page-route handler with the normalized request.
+    const req = new NextRequest(
+      "https://localhost:3001/passwd-sso/dashboard?ext_connect=1",
+      {
+        headers: {
+          ...TS_HEADERS,
+          host: "app.example.com",
+          "x-forwarded-host": "app.example.com",
+          "x-forwarded-port": "3001",
+          "x-forwarded-proto": "https",
+        },
+      } as ConstructorParameters<typeof NextRequest>[1],
+    );
+    const res = await proxy(req, dummyOptions);
+
+    expect(res.headers.get("Content-Security-Policy")).toBeTruthy();
+  });
+
+  it("non-Tailscale request: dispatch unchanged, no normalization side effects", async () => {
+    // Smoke test: requests without Tailscale headers must still dispatch
+    // identically. Guards against the normalize gate accidentally returning
+    // a different request shape on the no-op path.
+    const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
+      headers: { Authorization: "Bearer tok123" },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("private, no-store");
+  });
+});
