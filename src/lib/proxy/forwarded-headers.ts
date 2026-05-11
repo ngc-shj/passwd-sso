@@ -1,10 +1,22 @@
 import { NextRequest } from "next/server";
+import { getAppOrigin } from "../url-helpers";
 
 const BODYLESS_METHODS: ReadonlySet<string> = new Set([
   "GET",
   "HEAD",
   "OPTIONS",
 ]);
+
+/**
+ * Tailscale serve injects this fixed set of `Tailscale-*` headers
+ * (https://tailscale.com/s/serve-headers) on every forwarded request.
+ * Exported so tests reference the same source-of-truth tokens instead of
+ * redeclaring string literals.
+ */
+export const TAILSCALE_DETECTION_HEADERS = [
+  "tailscale-headers-info",
+  "tailscale-user-login",
+] as const;
 
 /**
  * `tailscale serve` populates `X-Forwarded-Port` with the BACKEND port
@@ -28,7 +40,7 @@ const BODYLESS_METHODS: ReadonlySet<string> = new Set([
 export function normalizeForwardedHeaders(request: NextRequest): NextRequest {
   if (!isViaTailscaleServe(request)) return request;
 
-  const canonicalRaw = process.env.APP_URL || process.env.AUTH_URL;
+  const canonicalRaw = getAppOrigin();
   if (!canonicalRaw) return request;
 
   let canonical: URL;
@@ -45,6 +57,11 @@ export function normalizeForwardedHeaders(request: NextRequest): NextRequest {
     request.headers.get("x-forwarded-host") ?? request.headers.get("host");
   if (!externalHostRaw) return request;
 
+  // We extract via the URL parser to handle `host:port` forms uniformly.
+  // The parser is permissive (e.g. `@app.example.com` parses to hostname
+  // `app.example.com`); the equality check below ensures any parsing quirk
+  // cannot pivot to an unintended hostname — only requests whose forwarded
+  // hostname already matches canonical reach the override path.
   let externalHostname: string;
   try {
     externalHostname = new URL(`http://${externalHostRaw}`).hostname;
@@ -93,7 +110,9 @@ export function normalizeForwardedHeaders(request: NextRequest): NextRequest {
     nextConfig: { basePath: request.nextUrl.basePath || undefined },
   };
 
-  if (!BODYLESS_METHODS.has(request.method.toUpperCase())) {
+  // Per Fetch spec, Request.method is normalized to uppercase for the
+  // standard methods we care about — no defensive .toUpperCase() needed.
+  if (!BODYLESS_METHODS.has(request.method)) {
     init.body = request.body;
     init.duplex = "half";
   }
@@ -103,16 +122,11 @@ export function normalizeForwardedHeaders(request: NextRequest): NextRequest {
 }
 
 /**
- * Tailscale serve injects a fixed set of `Tailscale-*` headers (see
- * https://tailscale.com/s/serve-headers) on every forwarded request.
- * These headers are not standard / spoofable from outside the tailnet
- * because they originate after TLS termination at the local
- * `tailscaled` daemon — an external attacker would have to compromise
- * the tailnet to inject them.
+ * The `Tailscale-*` headers are not standard / spoofable from outside the
+ * tailnet because they originate after TLS termination at the local
+ * `tailscaled` daemon — an external attacker would have to compromise the
+ * tailnet to inject them.
  */
 function isViaTailscaleServe(request: NextRequest): boolean {
-  return (
-    request.headers.has("tailscale-headers-info") ||
-    request.headers.has("tailscale-user-login")
-  );
+  return TAILSCALE_DETECTION_HEADERS.some((h) => request.headers.has(h));
 }
