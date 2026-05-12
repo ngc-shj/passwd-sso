@@ -376,4 +376,45 @@ All Round 1 + Round 2 + Round 3 findings resolved. Plan is internally consistent
 
 Plan is ready for Go/No-Go gate transition. Contracts to be flipped to `locked`.
 
+---
+
+# Plan Review: unify-api-error-handling (Round 4 — scope expansion)
+
+Date: 2026-05-12
+Review round: 4 (scope amendment)
+
+## Changes from Previous Round
+
+User explicitly authorized expansion: address the "essence" of the API error code exposure concern by renaming internal-jargon codes (CEK, IV, AuthTag, DPoP, body hash, escrow, refresh family) to user-domain vocabulary. Pre-1.0 hard rename, no backward-compatibility aliases.
+
+## Changes Applied
+
+- **New contract C11**: 10 source codes → 9 destination codes (IV/AuthTag merged into `INVALID_ENCRYPTION_FORMAT`). Locked in Go/No-Go gate.
+- **C10 §3.4 updated**: user-domain vocabulary rule added — codes are a permanent contract artifact exposed via dev tools / CLI / SDK / OpenAPI; internal implementation tokens (CEK, IV, AAD, DPoP, escrow, refresh family, ...) are forbidden going forward.
+- **Count math updated**: `147 + 3 − 1 = 149` (C5/C6 add ACCESS_DENIED, AUDIT_CHAIN_SEED_NOT_FOUND, INVALID_CHALLENGE; C11 merges IV/AuthTag into one code).
+- **Risk #1 updated**: C11 wire-string changes are observable to iOS, browser-extension, and CLI consumers — but all three live in the same monorepo and ship in lockstep.
+- **Risk #4 updated**: OpenAPI enum size now 149.
+
+## Scope Justification
+
+The user's concern was the **essence** of the matter, not a checklist item:
+
+> "気になっているのは API Error Code がエンドユーザーに露出する点です" / "本質。後方互換、移行はきにしなくてよい。開発中のプロダクトだから。"
+
+Three exposure layers:
+- **Layer 1 (UI display)**: protected today by `apiErrorToI18nKey` translation.
+- **Layer 2 (DevTools / CLI / SDK)**: codes ARE exposed (industry standard — Stripe, GitHub, AWS).
+- **Layer 3 (internal-jargon leakage)**: real problem — codes like `ATTACHMENT_CEK_MANIFEST_MISMATCH` violate the existing `feedback_no_internal_jargon_in_user_strings.md` principle when extended to permanent contract artifacts.
+
+C11 addresses Layer 3 at the source while pre-1.0 hard-rename is cheap. Intentionally NOT renamed: PKCE (OAuth industry term), DEVICE_PUBKEY (user-discoverable concept), ITEM_KEY_* / MEMBER_KEY_* / TEAM_KEY_* family (vault product vocabulary already in UI).
+
+## Round 4 Summary
+
+- Functionality: Critical 0 / Major 0 / Minor 0 — C11 introduces a clean rename pass with explicit grep-acceptance.
+- Security: Critical 0 / Major 0 / Minor 0 — wire-string rename does not expand or shrink the security surface; codes still convey the same information, just in user-domain phrasing.
+- Testing: Critical 0 / Major 0 / Minor 0 — affected tests update in lockstep with the rename (grep-driven mechanical change).
+
+All 11 contracts locked. Plan ready for Phase 2.
+
+
 

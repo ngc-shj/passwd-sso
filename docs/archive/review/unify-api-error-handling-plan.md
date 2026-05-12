@@ -283,7 +283,7 @@ function eaErrorToI18nKey(error: unknown): string;
 - The ~14 test assertion sites that match `body.error === "ACCESS_DENIED"` (enumerated in Testing strategy below) remain green without modification (the wire string is unchanged).
 - Add `"accessDenied": "Access denied."` to `messages/en/ApiErrors.json` and `"アクセスが拒否されました。"` to `messages/ja/ApiErrors.json`.
 - Add the new code to the `API_ERROR_I18N` map in `api-error-codes.ts` (the `satisfies Record<ApiErrorCode, string>` constraint at line 375 enforces presence at compile time).
-- Update `src/lib/http/api-error-codes.test.ts:121` from `.toBe(147)` to the new count: `148` after C5 alone. If C5+C6 ship together, the final count is `150` (3 new codes: ACCESS_DENIED, AUDIT_CHAIN_SEED_NOT_FOUND, INVALID_CHALLENGE). Set to actual `Object.keys(API_ERROR).length` at PR creation time (concurrent merges may shift the baseline).
+- Update `src/lib/http/api-error-codes.test.ts:121` from `.toBe(147)` to the new count. If C5+C6+C11 all ship in this PR, the final count is `149` (`147 + 3 from C5/C6 − 1 from C11 merge`). Set to actual `Object.keys(API_ERROR).length` at PR creation time.
 
 **Forbidden patterns**:
 - `pattern: NextResponse\.json\(\s*\{\s*error:\s*"ACCESS_DENIED"` outside `__tests__/` and `*.test.ts` — reason: catches future copy-paste of the old string-literal form. Production code MUST go through `errorResponse(API_ERROR.ACCESS_DENIED, ...)`.
@@ -320,7 +320,7 @@ function eaErrorToI18nKey(error: unknown): string;
 - `grep -rn 'API_ERROR\.VALIDATION_ERROR.*details:\s*"' src/` returns zero hits.
 - Existing test that asserts the expired-challenge response at `src/app/api/webauthn/register/verify/route.test.ts` (the `it("returns 400 with VALIDATION_ERROR when challenge has expired", ...)` block) is updated to assert `INVALID_CHALLENGE` instead. The two SIBLING `VALIDATION_ERROR` assertions in the same file (`verifyRegistration throws`, `verified === false`) are unchanged — they exercise different code paths and remain at `VALIDATION_ERROR`.
 - The `vi.mock("@/lib/http/api-error-codes", ...)` factory at `src/app/api/webauthn/register/verify/route.test.ts:91-99` is extended to include `INVALID_CHALLENGE: "INVALID_CHALLENGE"`. The new test asserts against the literal string `"INVALID_CHALLENGE"`, not against `API_ERROR.INVALID_CHALLENGE` from the mock — the literal protects against mock-reality drift.
-- Update `src/lib/http/api-error-codes.test.ts:121` count to `150` (C5 + C6 add 3 codes: ACCESS_DENIED, AUDIT_CHAIN_SEED_NOT_FOUND, INVALID_CHALLENGE; 147 + 3 = 150). Verify exact count at PR creation time to account for concurrent merges.
+- Update `src/lib/http/api-error-codes.test.ts:121` count to `149` (C5 + C6 + C11: `147 + 3 − 1 = 149`). Verify exact count at PR creation time.
 
 ---
 
@@ -437,6 +437,7 @@ ErrorResponse: {
        - 401 vs 403 boundary; SESSION_STEP_UP_REQUIRED → 403 (deliberate divergence from RFC 9470's 401, justified in C2 prose)
        - ACCOUNT_LOCKED → 403 (per C7; with RFC 4918 §11.3 TODO marker)
    3.4 Adding a new error code (5-step checklist: enum, i18n EN, i18n JA, route usage, optional test)
+       - **User-domain vocabulary rule**: code names use product-domain language (vault, passphrase, recovery, member, grant, session, ...), NOT internal implementation jargon (CEK, IV, auth tag, DPoP, AAD, body hash, escrow, refresh family, ...). Codes are exposed via dev tools, CLI output, SDKs, and OpenAPI spec — they are a permanent contract artifact. The principle is the same as `feedback_no_internal_jargon_in_user_strings.md` extended to error codes.
        - Note: codes returned on pre-auth / anonymous routes (e.g. share-link content access) should err toward generality; existing differentiation in SHARE_PASSWORD_* + NOT_FOUND(410) is grandfathered.
 4. SCIM envelope (RFC 7644 — point at src/lib/scim/response.ts; do not duplicate spec)
 5. OAuth/MCP envelope
@@ -495,12 +496,15 @@ These scenarios are deliberately short — this plan touches infrastructure, not
 
 ### Known risks
 
-1. **Out-of-tree consumers**: the SDK (`cli/`), iOS app, and browser extension all decode `{ error }` shapes today. C5 (wire-string unchanged) and C6 (new codes `INVALID_CHALLENGE`, `AUDIT_CHAIN_SEED_NOT_FOUND`) are the only spots where consumers see anything new. For C6, audit-chain-verify is admin-only and webauthn-register-verify is browser-only; neither is consumed by the CLI/iOS/extension surfaces. Low risk. The C6 audit-chain-verify status change (422 → 400) is observable to admin operators via `scripts/purge-history.sh` and similar; their scripts read the body's `error` field, not the HTTP status, so the change is compatible.
+1. **Out-of-tree consumers**: the SDK (`cli/`), iOS app, and browser extension all decode `{ error }` shapes today.
+   - C5 (wire-string unchanged) — no consumer impact.
+   - C6 (new codes `INVALID_CHALLENGE`, `AUDIT_CHAIN_SEED_NOT_FOUND`) — audit-chain-verify is admin-only and webauthn-register-verify is browser-only; neither is consumed by CLI/iOS/extension. Low risk. The C6 audit-chain-verify status change (422 → 400) is observable to admin operators via `scripts/purge-history.sh` and similar; their scripts read the body's `error` field, not the HTTP status, so the change is compatible.
+   - **C11 (wire-string renames)** — IS observable to all out-of-tree consumers because the wire string changes. Affected surfaces: `MOBILE_*` codes are iOS-only; `EXTENSION_TOKEN_FAMILY_EXPIRED` is browser-extension-only; `LEGACY_*` and `KEY_ESCROW_NOT_COMPLETED` and `ATTACHMENT_CEK_MANIFEST_MISMATCH` and `INVALID_IV/AUTH_TAG_FORMAT` are all server-internal/browser-only with no CLI consumer. The iOS and extension teams MUST be notified of the renames before merge (or the PR ships them in coordination if those repos are in this monorepo — they are, under `cli/`, `extension/`, `ios/`). Pre-1.0 hard rename per user authorization.
 2. **i18n key collision**: `"accessDenied"` (C5), `"invalidChallenge"` (C6), `"auditChainSeedNotFound"` (C6) are new keys. Two enforcement layers:
    - **Compile-time**: the `satisfies Record<ApiErrorCode, string>` constraint at `api-error-codes.ts:375` enforces every code has a TS-map entry.
    - **Runtime**: `src/i18n/messages-consistency.test.ts:62` enforces locale parity (en ↔ ja key sets equal per namespace). The new dedicated test `src/__tests__/api-errors-i18n-coverage.test.ts` (introduced under C5) closes the JSON-vs-TS-map gap.
 3. **`unknownError` fallback divergence between locales**: the EA fallback is `"actionFailed"`, the general fallback is `"unknownError"`. C10 documents this divergence as intentional; no change.
-4. **OpenAPI enum bloat**: adding all 150 codes (147 current + 3 new after C5+C6) to the OpenAPI enum (C8) increases spec size by a few KB. Negligible.
+4. **OpenAPI enum bloat**: adding all 149 codes (`147 + 3 − 1` after C5+C6+C11) to the OpenAPI enum (C8) increases spec size by a few KB. Negligible.
 5. **Inline mock drift** (RT1): 15+ test files inline-mock `@/lib/http/api-error-codes` with curated subsets. C6's `INVALID_CHALLENGE` is explicitly added to the webauthn mock under C6 Acceptance. Other sites are not affected by this PR (none reference ACCESS_DENIED or the new codes in their mocked subset), but the structural risk remains. Follow-up plan should introduce a shared `__fixtures__/api-error-codes.mock.ts`.
 6. **Future ESLint rule** (out of scope): a custom ESLint rule could enforce the forbidden patterns from C1/C2/C3/C5/C6 at lint time. The shell-script grep gate in `pre-pr.sh` (C8 Testing strategy) is the minimum-cost equivalent for this PR; ESLint rule tracked as a TODO in `docs/api/error-handling.md` § 9.
 7. **Cache-Control on ACCESS_DENIED responses (per-site asymmetry)**: the proxy site at `src/lib/proxy/api-route.ts:111-117` sets `Cache-Control: no-store` today; the three `access-restriction.ts` sites do NOT. C5 preserves this asymmetry (see C5 Invariants). A future plan could harmonize by adding `no-store` to all four sites, but doing so in this PR would be a wire-additive change at three sites contradicting the "byte-identical" requirement.
@@ -522,7 +526,54 @@ These scenarios are deliberately short — this plan touches infrastructure, not
 
 ---
 
-## Go/No-Go Gate
+---
+
+### C11 — Rename internal-jargon codes to user-domain vocabulary
+
+**Decision** (user-confirmed): pre-1.0 hard rename, NO backward-compatibility aliases. The wire string changes for all renamed codes; all callers (server source, i18n maps, tests, CLI/extension/iOS consumers) update in lockstep within this PR.
+
+**Rename table**:
+
+| Current code | New code | Reason |
+|--------------|----------|--------|
+| `LEGACY_BODY_HASH_MISMATCH` | `LEGACY_INTEGRITY_MISMATCH` | "body hash" exposes HMAC implementation; "integrity" is the user-facing concept. |
+| `ATTACHMENT_CEK_MANIFEST_MISMATCH` | `ATTACHMENT_KEY_MANIFEST_MISMATCH` | CEK (Content Encryption Key) is crypto-internal; "key" is the user concept. |
+| `INVALID_IV_FORMAT` + `INVALID_AUTH_TAG_FORMAT` | `INVALID_ENCRYPTION_FORMAT` (single merged code) | IV (Initialization Vector) and AES-GCM auth tag are both AES-GCM-internal; collapse to one user-domain code. Both source codes mapped to the same i18n key (`invalidRequest`) already. |
+| `MOBILE_DPOP_INVALID` | `MOBILE_TOKEN_BINDING_INVALID` | DPoP (RFC 9449) is unfamiliar; "token binding" is the user-domain effect. |
+| `MOBILE_REFRESH_REPLAY_DETECTED` | `MOBILE_REFRESH_REUSE_DETECTED` | "replay" is security-domain; "reuse" reads as user-domain. |
+| `MOBILE_REFRESH_FAMILY_EXPIRED` | `MOBILE_REFRESH_SESSION_EXPIRED` | "family" is OAuth rotation-internal; "session" is the user-facing concept. |
+| `EXTENSION_TOKEN_FAMILY_EXPIRED` | `EXTENSION_TOKEN_SESSION_EXPIRED` | same reasoning as MOBILE_REFRESH_FAMILY_EXPIRED. |
+| `LEGACY_ATTACHMENTS_RESIDUAL` | `ATTACHMENT_MIGRATION_INCOMPLETE` | "residual" is unclear; "migration incomplete" is plain. |
+| `KEY_ESCROW_NOT_COMPLETED` | `EMERGENCY_RECOVERY_KEY_MISSING` | "key escrow" is a specialized legal/crypto term; "emergency recovery key" matches the Emergency Access UX vocabulary. |
+
+Total: 10 source codes → 9 destination codes (net `-1` from the IV/AuthTag merge).
+
+**Codes intentionally NOT renamed** (user-confirmed):
+- `MOBILE_PKCE_MISMATCH` — PKCE is an OAuth industry-standard term; SDK / iOS dev consumers expect it.
+- `MOBILE_DEVICE_PUBKEY_MISMATCH` — "pubkey" is borderline but DEVICE_PUBKEY conveys the user concept of "this device's identity".
+- `ITEM_KEY_*`, `MEMBER_KEY_*`, `TEAM_KEY_*`, `KEY_NOT_DISTRIBUTED`, `KEY_ALREADY_DISTRIBUTED` — these refer to vault/team key concepts that ARE user-visible in the rotation UI.
+- All other 130+ codes already user-domain.
+
+**Invariants**:
+- For each rename: update `API_ERROR` enum + `API_ERROR_I18N` map + `messages/en/ApiErrors.json` + `messages/ja/ApiErrors.json` + every production call site + every test asserting the old wire string. The TypeScript `satisfies Record<ApiErrorCode, string>` constraint guarantees the i18n map covers the new name (or compile fails).
+- For the IV/AuthTag merge: production call sites that previously emitted EITHER code now emit `INVALID_ENCRYPTION_FORMAT`. The Phase 2 grep MUST identify all such sites (likely under `src/lib/crypto/` and attachment upload routes).
+- New i18n keys: `legacyIntegrityMismatch`, `attachmentKeyManifestMismatch`, `invalidEncryptionFormat`, `mobileTokenBindingInvalid`, `mobileRefreshReuseDetected`, `mobileRefreshSessionExpired`, `extensionTokenSessionExpired`, `attachmentMigrationIncomplete`, `emergencyRecoveryKeyMissing` — both en and ja MUST be added. The retired i18n keys (`legacyBodyHashMismatch`, `attachmentCekManifestMismatch`, etc., from `API_ERROR_I18N` at api-error-codes.ts:248-330) are removed from both JSON files.
+- No `@deprecated` alias is emitted; the wire string changes are immediate and load-bearing.
+
+**Forbidden patterns**:
+- `pattern: "LEGACY_BODY_HASH_MISMATCH"|"ATTACHMENT_CEK_MANIFEST_MISMATCH"|"INVALID_IV_FORMAT"|"INVALID_AUTH_TAG_FORMAT"|"MOBILE_DPOP_INVALID"|"MOBILE_REFRESH_REPLAY_DETECTED"|"MOBILE_REFRESH_FAMILY_EXPIRED"|"EXTENSION_TOKEN_FAMILY_EXPIRED"|"LEGACY_ATTACHMENTS_RESIDUAL"|"KEY_ESCROW_NOT_COMPLETED"` anywhere in `src/` (including tests). Reason: any survivor of the rename is a propagation bug.
+
+**Acceptance**:
+- `git grep -E '"(LEGACY_BODY_HASH_MISMATCH|ATTACHMENT_CEK_MANIFEST_MISMATCH|INVALID_IV_FORMAT|INVALID_AUTH_TAG_FORMAT|MOBILE_DPOP_INVALID|MOBILE_REFRESH_REPLAY_DETECTED|MOBILE_REFRESH_FAMILY_EXPIRED|EXTENSION_TOKEN_FAMILY_EXPIRED|LEGACY_ATTACHMENTS_RESIDUAL|KEY_ESCROW_NOT_COMPLETED)"' returns zero hits in `src/`.
+- `git grep -E '\b(legacyBodyHashMismatch|attachmentCekManifestMismatch|invalidIvFormat|invalidAuthTagFormat|mobileDpopInvalid|mobileRefreshReplayDetected|mobileRefreshFamilyExpired|extensionTokenFamilyExpired|legacyAttachmentsResidual|keyEscrowNotCompleted)\b'` returns zero hits anywhere (camelCase i18n keys retired too).
+- All previously-existing tests that asserted the old wire strings now assert the new wire strings (each affected test is updated in lockstep).
+- `messages/en/ApiErrors.json` and `messages/ja/ApiErrors.json` each contain entries for all 9 new keys; the retired keys are removed from both. `messages-consistency.test.ts:63` continues to pass.
+- `api-error-codes.test.ts:121` count is `149` (`147 - 1 from C11 merge + 3 from C5+C6`).
+- The `__tests__` integration suites that may exercise the merged-or-renamed codes (e.g., `vault-rotate-key-attachments.integration.test.ts`, `mcp-oauth-flow.test.ts`, mobile-token integration tests) all pass.
+
+**Anti-Deferral check**: rename pass is in-scope per user decision. No deferred TODOs.
+
+
 
 | ID  | Subject                                                                | Status  |
 |-----|------------------------------------------------------------------------|---------|
@@ -535,6 +586,7 @@ These scenarios are deliberately short — this plan touches infrastructure, not
 | C7  | ACCOUNT_LOCKED → 403 documentation (observation only)                  | locked  |
 | C8  | OpenAPI error schema tightening (enum + closure assertions)            | locked  |
 | C9  | OAuth `"rate_limited"` extension documentation (code comment + docs)   | locked  |
-| C10 | docs/api/error-handling.md content outline                             | locked  |
+| C10 | docs/api/error-handling.md content outline (incl. user-domain vocab rule) | locked  |
+| C11 | Rename internal-jargon codes to user-domain vocabulary (10 → 9, hard rename) | locked  |
 
 Phase 2 cannot begin until every status reads `locked` and all plan-review rounds have closed.
