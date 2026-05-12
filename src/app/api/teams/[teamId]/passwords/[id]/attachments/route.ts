@@ -154,10 +154,10 @@ async function handlePOST(
 
   // Validate iv/authTag format (hex strings)
   if (!/^[0-9a-f]{24}$/.test(iv)) {
-    return errorResponse(API_ERROR.INVALID_IV_FORMAT, 400);
+    return errorResponse(API_ERROR.INVALID_ENCRYPTION_FORMAT, 400);
   }
   if (!/^[0-9a-f]{32}$/.test(authTag)) {
-    return errorResponse(API_ERROR.INVALID_AUTH_TAG_FORMAT, 400);
+    return errorResponse(API_ERROR.INVALID_ENCRYPTION_FORMAT, 400);
   }
 
   // Validate original file size (before encryption)

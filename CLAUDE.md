@@ -68,6 +68,10 @@ These are non-negotiable. A passing test suite alone is insufficient — the bui
 
 **Stack:** Next.js 16 (App Router) + TypeScript 5.9 + Prisma 7 + PostgreSQL 16 + Auth.js v5 + Tailwind CSS 4 + shadcn/ui
 
+### API Error Handling
+
+See [docs/api/error-handling.md](./docs/api/error-handling.md) for the canonical API error envelope, HTTP status code semantics, and client consumption pattern.
+
 ### Proxy / Route Responsibility Boundary
 
 The proxy (`src/proxy.ts` orchestrator + `src/lib/proxy/*` modules) is the

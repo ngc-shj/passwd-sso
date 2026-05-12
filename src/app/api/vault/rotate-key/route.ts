@@ -184,10 +184,10 @@ async function handlePOST(request: NextRequest) {
     );
   } catch (e) {
     if (e instanceof LegacyAttachmentsResidualError) {
-      return errorResponse(API_ERROR.LEGACY_ATTACHMENTS_RESIDUAL, 409);
+      return errorResponse(API_ERROR.ATTACHMENT_MIGRATION_INCOMPLETE, 409);
     }
     if (e instanceof AttachmentCekManifestMismatchError) {
-      return errorResponse(API_ERROR.ATTACHMENT_CEK_MANIFEST_MISMATCH, 409);
+      return errorResponse(API_ERROR.ATTACHMENT_KEY_MANIFEST_MISMATCH, 409);
     }
     if (e instanceof LegacyAttachmentInconsistentVersionError) {
       return errorResponse(API_ERROR.ATTACHMENT_INCONSISTENT_VERSION, 409);

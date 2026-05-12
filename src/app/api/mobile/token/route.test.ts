@@ -251,7 +251,7 @@ describe("POST /api/mobile/token", () => {
     const res = await POST(makeReq());
     const { status, json } = await parseResponse(res);
     expect(status).toBe(401);
-    expect(json.error).toBe("MOBILE_DPOP_INVALID");
+    expect(json.error).toBe("MOBILE_TOKEN_BINDING_INVALID");
     expect(mockIssueIosToken).not.toHaveBeenCalled();
   });
 
@@ -265,7 +265,7 @@ describe("POST /api/mobile/token", () => {
     );
     const { status, json } = await parseResponse(res);
     expect(status).toBe(401);
-    expect(json.error).toBe("MOBILE_DPOP_INVALID");
+    expect(json.error).toBe("MOBILE_TOKEN_BINDING_INVALID");
   });
 
   it("returns 400 on unknown body field (Zod strict)", async () => {

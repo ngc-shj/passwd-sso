@@ -199,10 +199,7 @@ async function handleGET(req: NextRequest) {
       BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
     );
     if (!seedRows[0]?.event_hash) {
-      return NextResponse.json(
-        { error: `Seed row for chain_seq ${fromSeq - 1} not found — partial verification requires the preceding row` },
-        { status: 422 },
-      );
+      return errorResponse(API_ERROR.AUDIT_CHAIN_SEED_NOT_FOUND, 400);
     }
     seedPrevHash = Buffer.from(seedRows[0].event_hash);
   }

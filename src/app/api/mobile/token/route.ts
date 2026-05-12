@@ -214,7 +214,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       },
       "mobile token failed: DPoP verification failed",
     );
-    return errorResponse(API_ERROR.MOBILE_DPOP_INVALID, 401);
+    return errorResponse(API_ERROR.MOBILE_TOKEN_BINDING_INVALID, 401);
   }
 
   // 7. Issue the token pair. cnfJkt is the verifier-computed thumbprint of

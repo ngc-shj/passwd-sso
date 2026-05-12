@@ -181,7 +181,7 @@ async function handlePUT(
     }
     if (err instanceof LegacyBodyHashMismatchError) {
       // No payload per S11
-      return errorResponse(API_ERROR.LEGACY_BODY_HASH_MISMATCH, 409);
+      return errorResponse(API_ERROR.LEGACY_INTEGRITY_MISMATCH, 409);
     }
     if (err instanceof Error && (err.message === "NOT_FOUND" || err.message === "USER_NOT_FOUND")) {
       return notFound();

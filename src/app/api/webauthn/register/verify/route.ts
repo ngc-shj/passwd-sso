@@ -7,7 +7,7 @@ import { getRedis } from "@/lib/redis";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited } from "@/lib/http/api-response";
+import { errorResponse, rateLimited } from "@/lib/http/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
@@ -84,10 +84,7 @@ async function handlePOST(req: NextRequest) {
   // Consume challenge from Redis (separate key from authentication)
   const challenge = await redis.getdel(`webauthn:challenge:register:${userId}`);
   if (!challenge) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: "Challenge expired or already used" },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.INVALID_CHALLENGE, 400);
   }
 
   const rpId = process.env.WEBAUTHN_RP_ID;

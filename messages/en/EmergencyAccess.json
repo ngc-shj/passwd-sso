@@ -71,7 +71,7 @@
   "invalidStatus": "This action is not available in the current status.",
   "duplicateGrant": "An active grant already exists for this email.",
   "notActivated": "Emergency access has not been activated yet.",
-  "keyEscrowNotCompleted": "Key escrow is not yet completed. The vault owner needs to unlock their vault.",
+  "emergencyRecoveryKeyMissing": "Key escrow is not yet completed. The vault owner needs to unlock their vault.",
   "grantNotFound": "Emergency access grant not found.",
   "inactiveGrants": "Revoked / Rejected ({count})",
   "copied": "Copied",

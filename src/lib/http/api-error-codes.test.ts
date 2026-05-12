@@ -30,7 +30,7 @@ describe("apiErrorToI18nKey", () => {
           "INVALID_STATUS",
           "NOT_AUTHORIZED_FOR_GRANT",
           "NOT_ACTIVATED",
-          "KEY_ESCROW_NOT_COMPLETED",
+          "EMERGENCY_RECOVERY_KEY_MISSING",
           "INCOMPATIBLE_KEY_ALGORITHM",
         ].includes(code)
       ) {
@@ -82,7 +82,7 @@ describe("eaErrorToI18nKey", () => {
     "INVALID_STATUS",
     "NOT_AUTHORIZED_FOR_GRANT",
     "NOT_ACTIVATED",
-    "KEY_ESCROW_NOT_COMPLETED",
+    "EMERGENCY_RECOVERY_KEY_MISSING",
     "INCOMPATIBLE_KEY_ALGORITHM",
   ] as const;
 
@@ -118,6 +118,6 @@ describe("API_ERROR structural invariants", () => {
   it("code count matches expected (update this when adding new codes)", () => {
     // If this fails, you added a new code to API_ERROR.
     // Update this count AND add the code to API_ERROR_I18N + i18n messages.
-    expect(Object.keys(API_ERROR).length).toBe(147);
+    expect(Object.keys(API_ERROR).length).toBe(149);
   });
 });

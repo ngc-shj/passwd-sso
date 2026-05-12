@@ -87,7 +87,7 @@ async function handleGET(
     }
 
     if (result.reason === "no_escrow") {
-      return errorResponse(API_ERROR.KEY_ESCROW_NOT_COMPLETED, 400);
+      return errorResponse(API_ERROR.EMERGENCY_RECOVERY_KEY_MISSING, 400);
     }
 
     // reason === "not_eligible": fall through to the status check below
@@ -98,7 +98,7 @@ async function handleGET(
   }
 
   if (!grant.encryptedSecretKey || !grant.granteeKeyPair) {
-    return errorResponse(API_ERROR.KEY_ESCROW_NOT_COMPLETED, 400);
+    return errorResponse(API_ERROR.EMERGENCY_RECOVERY_KEY_MISSING, 400);
   }
 
   return NextResponse.json({

@@ -269,7 +269,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     const res = await POST(req, createParams("e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
-    expect(json.error).toBe("INVALID_IV_FORMAT");
+    expect(json.error).toBe("INVALID_ENCRYPTION_FORMAT");
   });
 
   it("returns 400 for invalid authTag format", async () => {
@@ -282,7 +282,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     const res = await POST(req, createParams("e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
-    expect(json.error).toBe("INVALID_AUTH_TAG_FORMAT");
+    expect(json.error).toBe("INVALID_ENCRYPTION_FORMAT");
   });
 
   it("returns 400 for extension not allowed", async () => {

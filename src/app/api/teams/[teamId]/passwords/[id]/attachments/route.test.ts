@@ -336,7 +336,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     );
     const json = await res.json();
     expect(res.status).toBe(400);
-    expect(json.error).toBe("INVALID_IV_FORMAT");
+    expect(json.error).toBe("INVALID_ENCRYPTION_FORMAT");
   });
 
   it("returns 400 for invalid authTag format", async () => {
@@ -353,7 +353,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     );
     const json = await res.json();
     expect(res.status).toBe(400);
-    expect(json.error).toBe("INVALID_AUTH_TAG_FORMAT");
+    expect(json.error).toBe("INVALID_ENCRYPTION_FORMAT");
   });
 
   it("creates attachment with client-encrypted data (encryptionMode=1)", async () => {

@@ -43,13 +43,13 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/vault/rotate-key-server", () => {
   class LegacyAttachmentsResidualError extends Error {
     constructor() {
-      super("LEGACY_ATTACHMENTS_RESIDUAL");
+      super("ATTACHMENT_MIGRATION_INCOMPLETE");
       this.name = "LegacyAttachmentsResidualError";
     }
   }
   class AttachmentCekManifestMismatchError extends Error {
     constructor() {
-      super("ATTACHMENT_CEK_MANIFEST_MISMATCH");
+      super("ATTACHMENT_KEY_MANIFEST_MISMATCH");
       this.name = "AttachmentCekManifestMismatchError";
     }
   }
@@ -358,7 +358,7 @@ describe("POST /api/vault/rotate-key", () => {
 
   // ── New Phase B error-mapping tests ──────────────────────────────────
 
-  it("rejects rotation when mode-0 residue exists → 409 LEGACY_ATTACHMENTS_RESIDUAL", async () => {
+  it("rejects rotation when mode-0 residue exists → 409 ATTACHMENT_MIGRATION_INCOMPLETE", async () => {
     const { LegacyAttachmentsResidualError } = await import("@/lib/vault/rotate-key-server");
     mockApplyVaultRotation.mockRejectedValue(new LegacyAttachmentsResidualError());
 
@@ -367,12 +367,12 @@ describe("POST /api/vault/rotate-key", () => {
     );
     expect(res.status).toBe(409);
     const json = await res.json();
-    expect(json.error).toBe("LEGACY_ATTACHMENTS_RESIDUAL");
+    expect(json.error).toBe("ATTACHMENT_MIGRATION_INCOMPLETE");
     // No extra payload fields per S11
     expect(Object.keys(json)).toEqual(["error"]);
   });
 
-  it("rejects rotation when manifest references non-existent mode-2 id → 409 ATTACHMENT_CEK_MANIFEST_MISMATCH", async () => {
+  it("rejects rotation when manifest references non-existent mode-2 id → 409 ATTACHMENT_KEY_MANIFEST_MISMATCH", async () => {
     const { AttachmentCekManifestMismatchError } = await import("@/lib/vault/rotate-key-server");
     mockApplyVaultRotation.mockRejectedValue(new AttachmentCekManifestMismatchError());
 
@@ -381,7 +381,7 @@ describe("POST /api/vault/rotate-key", () => {
     );
     expect(res.status).toBe(409);
     const json = await res.json();
-    expect(json.error).toBe("ATTACHMENT_CEK_MANIFEST_MISMATCH");
+    expect(json.error).toBe("ATTACHMENT_KEY_MANIFEST_MISMATCH");
     expect(Object.keys(json)).toEqual(["error"]);
   });
 

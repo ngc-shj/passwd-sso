@@ -80,7 +80,7 @@ async function handlePOST(req: NextRequest) {
   // Family absolute timeout enforcement. Pre-migration tokens have null familyId;
   // we refuse to refresh them so every live token eventually converges to a family.
   if (!familyId || !familyCreatedAt) {
-    return errorResponse(API_ERROR.EXTENSION_TOKEN_FAMILY_EXPIRED, 401);
+    return errorResponse(API_ERROR.EXTENSION_TOKEN_SESSION_EXPIRED, 401);
   }
   const familyAgeMs = now.getTime() - familyCreatedAt.getTime();
   if (familyAgeMs > absoluteMinutes * MS_PER_MINUTE) {
@@ -91,7 +91,7 @@ async function handlePOST(req: NextRequest) {
       tenantId: activeSession.tenantId,
       reason: "family_expired",
     });
-    return errorResponse(API_ERROR.EXTENSION_TOKEN_FAMILY_EXPIRED, 401);
+    return errorResponse(API_ERROR.EXTENSION_TOKEN_SESSION_EXPIRED, 401);
   }
 
   // Interactive transaction: revoke old (optimistic lock), then create new only if revoke succeeded

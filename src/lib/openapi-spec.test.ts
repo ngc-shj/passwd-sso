@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildOpenApiSpec } from "@/lib/openapi-spec";
 import { HEX_IV_LENGTH, HEX_AUTH_TAG_LENGTH } from "@/lib/validations/common";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 describe("buildOpenApiSpec", () => {
   const BASE_URL = "https://api.example.com";
@@ -156,6 +157,11 @@ describe("buildOpenApiSpec", () => {
     it("ErrorResponse requires error field", () => {
       const schema = spec.components.schemas.ErrorResponse;
       expect(schema.required).toContain("error");
+    });
+
+    it("ErrorResponse.error.enum matches API_ERROR values exactly", () => {
+      const enumValues = spec.components.schemas.ErrorResponse.properties.error.enum;
+      expect(new Set(enumValues)).toEqual(new Set(Object.values(API_ERROR)));
     });
   });
 
