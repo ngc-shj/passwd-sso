@@ -19,7 +19,7 @@ import { AuditDeliveryTargetKind } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import {
   MAX_AUDIT_DELIVERY_TARGETS,
@@ -149,13 +149,9 @@ async function handlePOST(req: NextRequest) {
     prisma.auditDeliveryTarget.count({ where: { tenantId: actor.tenantId } }),
   );
   if (existingCount >= MAX_AUDIT_DELIVERY_TARGETS) {
-    return NextResponse.json(
-      {
-        error: API_ERROR.VALIDATION_ERROR,
-        details: { limit: `Maximum ${MAX_AUDIT_DELIVERY_TARGETS} audit delivery targets per tenant` },
-      },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
+      details: { limit: `Maximum ${MAX_AUDIT_DELIVERY_TARGETS} audit delivery targets per tenant` },
+    });
   }
 
   // Pre-generate UUID so we can build AAD before DB insert

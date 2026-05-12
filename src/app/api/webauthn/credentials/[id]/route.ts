@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { API_ERROR } from "@/lib/http/api-error-codes";
+import { notFound, unauthorized } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -23,10 +23,7 @@ async function handleDELETE(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
   const userId = session.user.id;
   const { id } = await params;
@@ -39,10 +36,7 @@ async function handleDELETE(
   );
 
   if (!existing) {
-    return NextResponse.json(
-      { error: API_ERROR.NOT_FOUND },
-      { status: 404 },
-    );
+    return notFound();
   }
 
   await withUserTenantRls(userId, async () =>
@@ -69,10 +63,7 @@ async function handlePATCH(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
   const userId = session.user.id;
   const { id } = await params;
@@ -89,10 +80,7 @@ async function handlePATCH(
   );
 
   if (!existing) {
-    return NextResponse.json(
-      { error: API_ERROR.NOT_FOUND },
-      { status: 404 },
-    );
+    return notFound();
   }
 
   const updated = await withUserTenantRls(userId, async () =>

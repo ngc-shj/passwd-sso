@@ -6,7 +6,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { checkAuth } from "@/lib/auth/session/check-auth";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { rateLimited } from "@/lib/http/api-response";
+import { errorResponse, rateLimited } from "@/lib/http/api-response";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { withTenantRls } from "@/lib/tenant-rls";
 
@@ -61,10 +61,7 @@ async function handleGET(req: NextRequest) {
   );
 
   if (!user?.vaultSetupAt) {
-    return NextResponse.json(
-      { error: API_ERROR.VAULT_NOT_SETUP },
-      { status: 404 },
-    );
+    return errorResponse(API_ERROR.VAULT_NOT_SETUP, 404);
   }
 
   const vaultKey = await withVaultTenantRls(async () =>

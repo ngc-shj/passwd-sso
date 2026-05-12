@@ -8,7 +8,7 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getSessionToken } from "../helpers";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { rateLimited } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 
 const revokeLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
@@ -19,10 +19,7 @@ async function handleDELETE(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   const rl = await revokeLimiter.check(`rl:session_revoke:${session.user.id}`);
@@ -35,10 +32,7 @@ async function handleDELETE(
   // Check if the target session is the current one
   const currentToken = getSessionToken(request);
   if (!currentToken) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   const target = await withUserTenantRls(session.user.id, async () =>
@@ -48,10 +42,7 @@ async function handleDELETE(
     }),
   );
   if (target?.sessionToken === currentToken) {
-    return NextResponse.json(
-      { error: API_ERROR.CANNOT_REVOKE_CURRENT_SESSION },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.CANNOT_REVOKE_CURRENT_SESSION, 400);
   }
 
   // Delete with userId condition to prevent deleting other users' sessions
@@ -62,10 +53,7 @@ async function handleDELETE(
   );
 
   if (result.count === 0) {
-    return NextResponse.json(
-      { error: API_ERROR.SESSION_NOT_FOUND },
-      { status: 404 },
-    );
+    return errorResponse(API_ERROR.SESSION_NOT_FOUND, 404);
   }
 
   // R3: invalidate cache after DB delete commits (S-6 sequencing).

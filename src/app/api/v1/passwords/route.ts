@@ -14,7 +14,7 @@ import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import type { EntryType } from "@prisma/client";
-import { rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
@@ -24,10 +24,7 @@ async function handleGET(req: NextRequest) {
   const authResult = await validateV1Auth(req, API_KEY_SCOPE.PASSWORDS_READ);
   if (!authResult.ok) {
     if (authResult.error === "SCOPE_INSUFFICIENT") {
-      return NextResponse.json(
-        { error: API_ERROR.API_KEY_SCOPE_INSUFFICIENT },
-        { status: 403 },
-      );
+      return errorResponse(API_ERROR.API_KEY_SCOPE_INSUFFICIENT, 403);
     }
     return unauthorized();
   }
@@ -35,10 +32,7 @@ async function handleGET(req: NextRequest) {
   const { userId, tenantId, rateLimitKey } = authResult.data;
 
   if (!userId) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED, message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." },
-      { status: 403 },
-    );
+    return errorResponse(API_ERROR.UNAUTHORIZED, 403, { message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." });
   }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);
@@ -116,10 +110,7 @@ async function handlePOST(req: NextRequest) {
   const authResult = await validateV1Auth(req, API_KEY_SCOPE.PASSWORDS_WRITE);
   if (!authResult.ok) {
     if (authResult.error === "SCOPE_INSUFFICIENT") {
-      return NextResponse.json(
-        { error: API_ERROR.API_KEY_SCOPE_INSUFFICIENT },
-        { status: 403 },
-      );
+      return errorResponse(API_ERROR.API_KEY_SCOPE_INSUFFICIENT, 403);
     }
     return unauthorized();
   }
@@ -127,10 +118,7 @@ async function handlePOST(req: NextRequest) {
   const { userId, tenantId, rateLimitKey } = authResult.data;
 
   if (!userId) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED, message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." },
-      { status: 403 },
-    );
+    return errorResponse(API_ERROR.UNAUTHORIZED, 403, { message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." });
   }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);
@@ -183,10 +171,7 @@ async function handlePOST(req: NextRequest) {
 
   if ("error" in createResult) {
     const detail = createResult.error === "INVALID_FOLDER" ? "Invalid folderId" : "Invalid tagIds";
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: detail },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { details: detail });
   }
 
   const { entry } = createResult;

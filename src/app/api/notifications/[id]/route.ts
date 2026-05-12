@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { API_ERROR } from "@/lib/http/api-error-codes";
+import { notFound, unauthorized } from "@/lib/http/api-response";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 
@@ -12,10 +12,7 @@ async function handlePATCH(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   const { id } = await params;
@@ -24,10 +21,7 @@ async function handlePATCH(
     prisma.notification.findFirst({ where: { id, userId: session.user.id } }),
   );
   if (!existing) {
-    return NextResponse.json(
-      { error: API_ERROR.NOT_FOUND },
-      { status: 404 },
-    );
+    return notFound();
   }
 
   const notification = await withUserTenantRls(session.user.id, async () =>
@@ -50,10 +44,7 @@ async function handleDELETE(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   const { id } = await params;
@@ -62,10 +53,7 @@ async function handleDELETE(
     prisma.notification.findFirst({ where: { id, userId: session.user.id } }),
   );
   if (!existing) {
-    return NextResponse.json(
-      { error: API_ERROR.NOT_FOUND },
-      { status: 404 },
-    );
+    return notFound();
   }
 
   await withUserTenantRls(session.user.id, async () =>

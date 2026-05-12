@@ -14,7 +14,7 @@ import { AUDIT_TARGET_TYPE, AUDIT_ACTION, TEAM_PERMISSION } from "@/lib/constant
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -99,10 +99,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         (parentIdValue) => getTeamParent(teamId, parentIdValue),
       );
     } catch {
-      return NextResponse.json(
-        { error: API_ERROR.NOT_FOUND },
-        { status: 404 },
-      );
+      return errorResponse(API_ERROR.NOT_FOUND, 404);
     }
   }
 
@@ -113,10 +110,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       (parentIdValue) => getTeamParent(teamId, parentIdValue),
     );
   } catch {
-    return NextResponse.json(
-      { error: API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED, 400);
   }
 
   if (parentId) {
@@ -126,10 +120,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       }),
     );
     if (dup) {
-      return NextResponse.json(
-        { error: API_ERROR.FOLDER_ALREADY_EXISTS },
-        { status: 409 },
-      );
+      return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
     }
   } else {
     const rootDup = await withTeamTenantRls(teamId, async () =>
@@ -138,10 +129,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       }),
     );
     if (rootDup) {
-      return NextResponse.json(
-        { error: API_ERROR.FOLDER_ALREADY_EXISTS },
-        { status: 409 },
-      );
+      return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
     }
   }
 

@@ -13,7 +13,7 @@ import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 
 
-import { notFound, rateLimited, validationError } from "@/lib/http/api-response";
+import { errorResponse, notFound, rateLimited, validationError } from "@/lib/http/api-response";
 import type { V1AuthResult } from "@/lib/auth/session/v1-auth";
 
 type V1AuthData = Extract<V1AuthResult, { ok: true }>["data"];
@@ -30,7 +30,7 @@ async function checkAuth(
   if (!authResult.ok) {
     const status = authResult.error === "SCOPE_INSUFFICIENT" ? 403 : 401;
     const error = status === 403 ? API_ERROR.API_KEY_SCOPE_INSUFFICIENT : API_ERROR.UNAUTHORIZED;
-    return { ok: false, error: NextResponse.json({ error }, { status }) };
+    return { ok: false, error: errorResponse(error, status) };
   }
 
   const rl = await v1ApiKeyLimiter.check(`rl:api_key:${authResult.data.rateLimitKey}`);
@@ -51,10 +51,7 @@ async function handleGET(
   const { userId, tenantId } = auth.data;
 
   if (!userId) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED, message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." },
-      { status: 403 },
-    );
+    return errorResponse(API_ERROR.UNAUTHORIZED, 403, { message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." });
   }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);
@@ -109,10 +106,7 @@ async function handlePUT(
   const { userId, tenantId } = auth.data;
 
   if (!userId) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED, message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." },
-      { status: 403 },
-    );
+    return errorResponse(API_ERROR.UNAUTHORIZED, 403, { message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." });
   }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);
@@ -258,10 +252,7 @@ async function handleDELETE(
   const { userId, tenantId } = auth.data;
 
   if (!userId) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED, message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." },
-      { status: 403 },
-    );
+    return errorResponse(API_ERROR.UNAUTHORIZED, 403, { message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." });
   }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);

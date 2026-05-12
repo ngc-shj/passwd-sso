@@ -16,7 +16,7 @@ import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/audit/notification";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 
 export const runtime = "nodejs";
 
@@ -75,10 +75,7 @@ async function handlePOST(
   );
 
   if (existingApprovedAt === undefined) {
-    return NextResponse.json(
-      { error: API_ERROR.CONFLICT },
-      { status: 409 },
-    );
+    return errorResponse(API_ERROR.CONFLICT, 409);
   }
 
   // Atomic revoke with TOCTOU prevention: only revoke if still in a revocable
@@ -103,10 +100,7 @@ async function handlePOST(
   );
 
   if (result.count === 0) {
-    return NextResponse.json(
-      { error: API_ERROR.CONFLICT },
-      { status: 409 },
-    );
+    return errorResponse(API_ERROR.CONFLICT, 409);
   }
 
   // Audit log — fires unconditionally regardless of prior approval state.

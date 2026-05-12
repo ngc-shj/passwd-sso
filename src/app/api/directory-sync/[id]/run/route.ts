@@ -31,10 +31,7 @@ const runSchema = z.object({
 async function handlePOST(req: NextRequest, ctx: RouteContext) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return errorResponse(API_ERROR.UNAUTHORIZED, 401);
   }
 
   const { id } = await ctx.params;
@@ -58,10 +55,7 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
     }),
   );
   if (!config) {
-    return NextResponse.json(
-      { error: API_ERROR.NOT_FOUND },
-      { status: 404 },
-    );
+    return errorResponse(API_ERROR.NOT_FOUND, 404);
   }
 
   // Empty body is allowed: defaults are used.
@@ -107,15 +101,9 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
   if (!result.success) {
     // If it was a lock conflict, return 409
     if (result.errorMessage?.includes("already running")) {
-      return NextResponse.json(
-        { error: API_ERROR.CONFLICT, result },
-        { status: 409 },
-      );
+      return errorResponse(API_ERROR.CONFLICT, 409, { result });
     }
-    return NextResponse.json(
-      { error: "SYNC_FAILED", result },
-      { status: 500 },
-    );
+    return errorResponse(API_ERROR.SYNC_FAILED, 500, { details: result });
   }
 
   return NextResponse.json(result);

@@ -718,10 +718,7 @@ async function handlePATCH(req: NextRequest) {
       const message = clientIp
         ? "Your current IP would be blocked by this policy. Set confirmLockout: true to proceed."
         : "Your IP could not be determined; you may be locked out by this policy. Set confirmLockout: true to proceed.";
-      return NextResponse.json(
-        { error: API_ERROR.SELF_LOCKOUT, message },
-        { status: 409 },
-      );
+      return errorResponse(API_ERROR.SELF_LOCKOUT, 409, { message });
     }
   }
 

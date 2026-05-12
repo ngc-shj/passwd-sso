@@ -92,3 +92,59 @@ All 17 `pre-pr.sh` checks passed:
 - Build (production next build succeeded)
 
 No new findings outside the deviations above.
+
+## Phase 2 scope expansion (post-initial-Phase-2 commit)
+
+### D8 — C12 added by user authorization
+
+After initial Phase 2 commit, the user surfaced the "errorResponse helper omission"
+question. A grep of production code found **139 sites** still using the verbose
+`NextResponse.json({ error: API_ERROR.XXX }, { status: NNN })` pattern instead
+of the canonical `errorResponse()` helper. User authorized C12 as a follow-up
+contract: full migration of all 139 sites.
+
+Three sub-agents executed C12 in parallel (auth/vault/webauthn; teams/tenant/etc.;
+passwords/folders/etc.). Total migrated: ~125 sites across ~50 files. The
+remaining 14 sites were either:
+- C2 envelope violations using raw-string codes not in `API_ERROR` enum
+  (addressed by C13 below)
+- Deliberate carve-outs (CLI custom envelope, deprecated stubs, etc.)
+
+Side-fix during C12: pre-pr.sh test-hygiene gate fired on a pre-existing
+`process.env.WEBAUTHN_RP_ID = "..."` mutation at `webauthn/register/verify/route.test.ts:171`
+(originally added 2026-03-16, but became visible because Phase 2 touched the
+file). Converted to `vi.stubEnv("WEBAUTHN_RP_ID", "example.com")` per the gate's
+recommendation; the corresponding `delete process.env.WEBAUTHN_RP_ID` at line 427
+became `vi.stubEnv("WEBAUTHN_RP_ID", "")` since the production check uses
+`if (!rpId)` falsy semantics.
+
+### D9 — C13 added (raw-string C2 violations + post-C12 gate)
+
+C12 surfaced 11 production sites using UPPER_SNAKE_CASE codes not registered
+in `API_ERROR`: `INVALID_REQUEST` (2), `AUTHENTICATION_FAILED` (2), `SYNC_FAILED` (1),
+`KEY_VERSION_NOT_NEWER` (2), `BLOB_HASH_MISMATCH` (4). User authorized C13:
+add the 5 missing codes, migrate the 11 sites, and enable the post-C12 grep
+gate.
+
+Implementation:
+- 5 new codes added to `API_ERROR` + `API_ERROR_I18N` map
+- 4 new i18n JSON keys (en + ja); `INVALID_REQUEST` reuses the existing
+  `invalidRequest` key per plan note (avoids duplicate UI copy)
+- 11 production sites migrated to `errorResponse()`
+- Count test: `149` → `154`
+- `scripts/checks/check-api-error-codes.sh` gained rule (5): forbids bare
+  `NextResponse.json({ error: ... })` in main-API routes, with documented
+  carve-outs (4 sites: dcr-cleanup 410 stub, vault/delegation/check CLI envelope,
+  admin/rotate-master-key operator-only, apple-app-site-association)
+
+C4 invariant enforcement: `directory-sync/[id]/run/route.ts:107` originally
+emitted `{ error: "SYNC_FAILED", result }` (extra `result` field violates C4
+closed list). Migrated to `errorResponse(API_ERROR.SYNC_FAILED, 500, { details: result })` —
+wrapping the diagnostic payload in `details` per the C4 invariant. Existing
+test only asserts the `error` field, so no test update needed.
+
+Pre-existing site NOT touched: `directory-sync/[id]/run/route.ts:104` uses
+`errorResponse(API_ERROR.CONFLICT, 409, { result })` (already migrated form
+but with the same `result` body field). Out of scope for C13 (C12-style
+migration was applied here pre-this-PR); C4 enforcement on it would be a
+follow-up.

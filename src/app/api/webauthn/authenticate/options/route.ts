@@ -5,7 +5,7 @@ import { getRedis } from "@/lib/redis";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import {
   generateAuthenticationOpts,
@@ -24,10 +24,7 @@ const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
   const userId = session.user.id;
 
@@ -38,10 +35,7 @@ async function handlePOST(req: NextRequest) {
 
   const redis = getRedis();
   if (!redis) {
-    return NextResponse.json(
-      { error: API_ERROR.SERVICE_UNAVAILABLE },
-      { status: 503 },
-    );
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 503);
   }
 
   // Parse optional body for targeted credential test
@@ -66,10 +60,9 @@ async function handlePOST(req: NextRequest) {
   );
 
   if (credentials.length === 0) {
-    return NextResponse.json(
-      { error: API_ERROR.NOT_FOUND, details: "No matching credentials found" },
-      { status: 404 },
-    );
+    return errorResponse(API_ERROR.NOT_FOUND, 404, {
+      details: "No matching credentials found",
+    });
   }
 
   const options = await generateAuthenticationOpts(

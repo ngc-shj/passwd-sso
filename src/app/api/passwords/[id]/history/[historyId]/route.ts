@@ -113,19 +113,13 @@ async function handlePATCH(
 
   // Prevent key version downgrade or same-version re-encryption
   if (keyVersion <= history.keyVersion) {
-    return NextResponse.json(
-      { error: "KEY_VERSION_NOT_NEWER" },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.KEY_VERSION_NOT_NEWER, 400);
   }
 
   // Compare-and-swap: verify old blob hash
   const actualHash = createHash("sha256").update(history.encryptedBlob).digest("hex");
   if (oldBlobHash !== actualHash) {
-    return NextResponse.json(
-      { error: "BLOB_HASH_MISMATCH" },
-      { status: 409 },
-    );
+    return errorResponse(API_ERROR.BLOB_HASH_MISMATCH, 409);
   }
 
   // Atomic update with optimistic locking on keyVersion to prevent TOCTOU
@@ -142,10 +136,7 @@ async function handlePATCH(
   );
 
   if (result.count === 0) {
-    return NextResponse.json(
-      { error: "BLOB_HASH_MISMATCH" },
-      { status: 409 },
-    );
+    return errorResponse(API_ERROR.BLOB_HASH_MISMATCH, 409);
   }
 
   await logAuditAsync({

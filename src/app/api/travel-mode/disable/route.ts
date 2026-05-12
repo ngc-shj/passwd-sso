@@ -32,10 +32,7 @@ async function handlePOST(request: NextRequest) {
   // Lockout check — shared with vault unlock
   const lockoutStatus = await checkLockout(session.user.id);
   if (lockoutStatus.locked) {
-    return NextResponse.json(
-      { error: API_ERROR.ACCOUNT_LOCKED, lockedUntil: lockoutStatus.lockedUntil },
-      { status: 403 },
-    );
+    return errorResponse(API_ERROR.ACCOUNT_LOCKED, 403, { lockedUntil: lockoutStatus.lockedUntil });
   }
 
   const result = await parseBody(request, disableSchema);
@@ -63,10 +60,7 @@ async function handlePOST(request: NextRequest) {
 
   // Verify passphrase
   if (!user.passphraseVerifierHmac) {
-    return NextResponse.json(
-      { error: API_ERROR.VAULT_NOT_SETUP },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.VAULT_NOT_SETUP, 400);
   }
 
   const verifyResult = verifyPassphraseVerifier(

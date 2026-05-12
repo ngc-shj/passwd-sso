@@ -11,6 +11,9 @@
 #      (catches snake_case OAuth-style leakage into main API).
 #  (4) C11: retired internal-jargon code names must not reappear anywhere
 #      in `src/` (production or tests).
+#  (5) C12: bare `NextResponse.json({ error: ... })` in main-API routes —
+#      must go through `errorResponse()` helper. SCIM/OAuth envelopes
+#      and documented carve-outs are excluded.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -69,6 +72,27 @@ retired_hits=$(grep -RnE "\"(${retired_pat})\"" src/ \
 if [ -n "$retired_hits" ]; then
   echo "FORBIDDEN: retired internal-jargon error code name (C11)"
   echo "$retired_hits"
+  violations=$((violations + 1))
+fi
+
+# (5) Post-C12 — bare `NextResponse.json({ error: ... })` in main-API routes.
+# Excludes SCIM/OAuth envelopes (own RFCs) and documented carve-outs:
+#  - maintenance/dcr-cleanup (410 Gone deprecated stub)
+#  - vault/delegation/check (CLI custom envelope)
+#  - admin/rotate-master-key (operator-only free-form)
+#  - mobile/.well-known/apple-app-site-association (Apple platform-mandated)
+c12_hits=$(grep -RnE 'NextResponse\.json\(\s*\{\s*[^}]*error:' src/app/api/ \
+  --include='*.ts' --include='*.tsx' \
+  | grep -v '\.test\.' | grep -v '/__tests__/' \
+  | grep -vE '/(scim|mcp)/' \
+  | grep -v 'maintenance/dcr-cleanup/route\.ts' \
+  | grep -v 'vault/delegation/check/route\.ts' \
+  | grep -v 'admin/rotate-master-key/route\.ts' \
+  | grep -v 'apple-app-site-association/route\.ts' \
+  || true)
+if [ -n "$c12_hits" ]; then
+  echo "FORBIDDEN: bare NextResponse.json({error:...}) — must use errorResponse() helper (C12)"
+  echo "$c12_hits"
   violations=$((violations + 1))
 fi
 

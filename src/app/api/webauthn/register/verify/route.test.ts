@@ -168,7 +168,7 @@ describe("POST /api/webauthn/register/verify", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    process.env.WEBAUTHN_RP_ID = "example.com";
+    vi.stubEnv("WEBAUTHN_RP_ID", "example.com");
 
     mockAuth.mockResolvedValue({ user: { id: "user-1", email: "test@example.com" } });
     mockRateLimiterCheck.mockResolvedValue({ allowed: true });
@@ -424,7 +424,7 @@ describe("POST /api/webauthn/register/verify", () => {
   });
 
   it("returns 503 with SERVICE_UNAVAILABLE when WEBAUTHN_RP_ID is not set", async () => {
-    delete process.env.WEBAUTHN_RP_ID;
+    vi.stubEnv("WEBAUTHN_RP_ID", "");
 
     const req = createRequest("POST", ROUTE_URL, {
       body: makeBody(),

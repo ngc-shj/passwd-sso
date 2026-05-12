@@ -3,7 +3,7 @@ import { getRedis } from "@/lib/redis";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited } from "@/lib/http/api-response";
+import { errorResponse, rateLimited } from "@/lib/http/api-response";
 import { assertOrigin } from "@/lib/auth/session/csrf";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import {
@@ -33,18 +33,12 @@ async function handlePOST(req: NextRequest) {
 
   const redis = getRedis();
   if (!redis) {
-    return NextResponse.json(
-      { error: API_ERROR.SERVICE_UNAVAILABLE },
-      { status: 503 },
-    );
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 503);
   }
 
   const rpId = process.env.WEBAUTHN_RP_ID;
   if (!rpId) {
-    return NextResponse.json(
-      { error: API_ERROR.SERVICE_UNAVAILABLE },
-      { status: 503 },
-    );
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 503);
   }
 
   const options = await generateDiscoverableAuthOpts();

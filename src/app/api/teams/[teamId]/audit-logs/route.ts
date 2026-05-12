@@ -61,10 +61,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     );
     if (actionFilter !== undefined) where.action = actionFilter;
   } catch (err) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: err },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { details: err });
   }
 
   const dateFilter = buildAuditLogDateFilter(from, to);

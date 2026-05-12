@@ -39,18 +39,12 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 
   // Only OWNER can change roles
   if (actor.role !== TENANT_ROLE.OWNER) {
-    return NextResponse.json(
-      { error: API_ERROR.OWNER_ONLY },
-      { status: 403 },
-    );
+    return errorResponse(API_ERROR.OWNER_ONLY, 403);
   }
 
   // Cannot change own role — must be before ownership transfer
   if (userId === session.user.id) {
-    return NextResponse.json(
-      { error: API_ERROR.CANNOT_CHANGE_OWN_ROLE },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.CANNOT_CHANGE_OWN_ROLE, 400);
   }
 
   // Validate request body
@@ -74,10 +68,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 
   // SCIM guard
   if (target.scimManaged) {
-    return NextResponse.json(
-      { error: API_ERROR.SCIM_MANAGED_MEMBER },
-      { status: 409 },
-    );
+    return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER, 409);
   }
 
   // Ownership transfer
@@ -108,10 +99,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     });
 
     if (!updated) {
-      return NextResponse.json(
-        { error: API_ERROR.OWNER_ONLY },
-        { status: 403 },
-      );
+      return errorResponse(API_ERROR.OWNER_ONLY, 403);
     }
 
     await logAuditAsync({
@@ -134,10 +122,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 
   // Cannot change OWNER role (non-transfer)
   if (target.role === TENANT_ROLE.OWNER) {
-    return NextResponse.json(
-      { error: API_ERROR.CANNOT_CHANGE_OWNER_ROLE },
-      { status: 403 },
-    );
+    return errorResponse(API_ERROR.CANNOT_CHANGE_OWNER_ROLE, 403);
   }
 
   // Update role

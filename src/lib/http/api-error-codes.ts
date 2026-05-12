@@ -216,6 +216,13 @@ export const API_ERROR = {
   INVALID_SESSION: "INVALID_SESSION",
   SESSION_STEP_UP_REQUIRED: "SESSION_STEP_UP_REQUIRED",
   INTERNAL_ERROR: "INTERNAL_ERROR",
+
+  // ── API / Auth ──────────────────────────────────────────
+  INVALID_REQUEST: "INVALID_REQUEST",
+  AUTHENTICATION_FAILED: "AUTHENTICATION_FAILED",
+  SYNC_FAILED: "SYNC_FAILED",
+  KEY_VERSION_NOT_NEWER: "KEY_VERSION_NOT_NEWER",
+  BLOB_HASH_MISMATCH: "BLOB_HASH_MISMATCH",
 } as const;
 
 export type ApiErrorCode = (typeof API_ERROR)[keyof typeof API_ERROR];
@@ -377,6 +384,11 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   INVALID_SESSION: "invalidSession",
   SESSION_STEP_UP_REQUIRED: "sessionStepUpRequired",
   INTERNAL_ERROR: "internalError",
+  INVALID_REQUEST: "invalidRequest",
+  AUTHENTICATION_FAILED: "authenticationFailed",
+  SYNC_FAILED: "syncFailed",
+  KEY_VERSION_NOT_NEWER: "keyVersionNotNewer",
+  BLOB_HASH_MISMATCH: "blobHashMismatch",
 } satisfies Record<ApiErrorCode, string>;
 
 /**

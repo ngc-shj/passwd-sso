@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { verifyAuthenticationAssertion } from "@/lib/auth/webauthn/webauthn-server";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/types";
@@ -23,10 +23,7 @@ const verifyAuthenticationSchema = z.object({
 async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
   const userId = session.user.id;
 
@@ -50,9 +47,10 @@ async function handlePOST(req: NextRequest) {
   );
 
   if (!verifyResult.ok) {
-    return NextResponse.json(
-      { error: API_ERROR[verifyResult.code as keyof typeof API_ERROR] ?? API_ERROR.VALIDATION_ERROR, details: verifyResult.details },
-      { status: verifyResult.status },
+    return errorResponse(
+      API_ERROR[verifyResult.code as keyof typeof API_ERROR] ?? API_ERROR.VALIDATION_ERROR,
+      verifyResult.status,
+      { details: verifyResult.details },
     );
   }
 

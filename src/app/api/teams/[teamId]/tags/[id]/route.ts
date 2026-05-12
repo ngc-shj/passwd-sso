@@ -61,10 +61,9 @@ async function handlePUT(req: NextRequest, { params }: Params) {
         validateParentChain(id, newParentId, allTags);
       } catch (e) {
         if (e instanceof TagTreeError) {
-          return NextResponse.json(
-            { error: API_ERROR.VALIDATION_ERROR, message: e.message },
-            { status: 400 },
-          );
+          return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
+            message: e.message,
+          });
         }
         throw e;
       }
@@ -89,10 +88,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       }),
     );
     if (duplicate) {
-      return NextResponse.json(
-        { error: API_ERROR.TAG_ALREADY_EXISTS },
-        { status: 409 },
-      );
+      return errorResponse(API_ERROR.TAG_ALREADY_EXISTS, 409);
     }
   }
 

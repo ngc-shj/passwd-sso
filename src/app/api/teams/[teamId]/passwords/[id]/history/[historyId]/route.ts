@@ -125,19 +125,13 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
   const newItemKV = itemKeyVersion ?? 0;
 
   if (!(teamKeyVersion > oldTeamKV || (teamKeyVersion >= oldTeamKV && newItemKV > oldItemKV))) {
-    return NextResponse.json(
-      { error: "KEY_VERSION_NOT_NEWER" },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.KEY_VERSION_NOT_NEWER, 400);
   }
 
   // Compare-and-swap
   const actualHash = createHash("sha256").update(history.encryptedBlob).digest("hex");
   if (oldBlobHash !== actualHash) {
-    return NextResponse.json(
-      { error: "BLOB_HASH_MISMATCH" },
-      { status: 409 },
-    );
+    return errorResponse(API_ERROR.BLOB_HASH_MISMATCH, 409);
   }
 
   // Build update data
@@ -161,10 +155,7 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
   );
 
   if (result.count === 0) {
-    return NextResponse.json(
-      { error: "BLOB_HASH_MISMATCH" },
-      { status: 409 },
-    );
+    return errorResponse(API_ERROR.BLOB_HASH_MISMATCH, 409);
   }
 
   await logAuditAsync({

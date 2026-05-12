@@ -72,17 +72,11 @@ async function handlePUT(req: NextRequest, { params }: Params) {
             (parentIdValue) => getTeamParent(teamId, parentIdValue),
           );
         } catch {
-          return NextResponse.json(
-            { error: API_ERROR.NOT_FOUND },
-            { status: 404 },
-          );
+          return errorResponse(API_ERROR.NOT_FOUND, 404);
         }
 
         if (newParentId === id) {
-          return NextResponse.json(
-            { error: API_ERROR.FOLDER_CIRCULAR_REFERENCE },
-            { status: 400 },
-          );
+          return errorResponse(API_ERROR.FOLDER_CIRCULAR_REFERENCE, 400);
         }
 
         const isCircular = await checkCircularReference(
@@ -91,10 +85,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
           (parentIdValue) => getTeamParent(teamId, parentIdValue),
         );
         if (isCircular) {
-          return NextResponse.json(
-            { error: API_ERROR.FOLDER_CIRCULAR_REFERENCE },
-            { status: 400 },
-          );
+          return errorResponse(API_ERROR.FOLDER_CIRCULAR_REFERENCE, 400);
         }
       }
 
@@ -105,10 +96,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
           (parentIdValue) => getTeamParent(teamId, parentIdValue),
         );
       } catch {
-        return NextResponse.json(
-          { error: API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED },
-          { status: 400 },
-        );
+        return errorResponse(API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED, 400);
       }
 
       updateData.parentId = newParentId;
@@ -129,10 +117,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
         }),
       );
       if (dup && dup.id !== id) {
-        return NextResponse.json(
-          { error: API_ERROR.FOLDER_ALREADY_EXISTS },
-          { status: 409 },
-        );
+        return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
       }
     } else {
       const rootDup = await withTeamTenantRls(teamId, async () =>
@@ -141,10 +126,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
         }),
       );
       if (rootDup && rootDup.id !== id) {
-        return NextResponse.json(
-          { error: API_ERROR.FOLDER_ALREADY_EXISTS },
-          { status: 409 },
-        );
+        return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
       }
     }
   }

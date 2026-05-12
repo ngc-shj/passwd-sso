@@ -22,7 +22,7 @@ import {
 } from "@/lib/validations/common";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
-import { handleAuthError } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError } from "@/lib/http/api-response";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -57,10 +57,7 @@ async function resolveAdminAndConfig(
 async function handleGET(req: NextRequest, ctx: RouteContext) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return errorResponse(API_ERROR.UNAUTHORIZED, 401);
   }
 
   const { id } = await ctx.params;
@@ -93,10 +90,7 @@ async function handleGET(req: NextRequest, ctx: RouteContext) {
   );
 
   if (!config) {
-    return NextResponse.json(
-      { error: API_ERROR.NOT_FOUND },
-      { status: 404 },
-    );
+    return errorResponse(API_ERROR.NOT_FOUND, 404);
   }
 
   return NextResponse.json(config);
@@ -107,10 +101,7 @@ async function handleGET(req: NextRequest, ctx: RouteContext) {
 async function handlePUT(req: NextRequest, ctx: RouteContext) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return errorResponse(API_ERROR.UNAUTHORIZED, 401);
   }
 
   const { id } = await ctx.params;
@@ -122,10 +113,7 @@ async function handlePUT(req: NextRequest, ctx: RouteContext) {
     return handleAuthError(e);
   }
   if (!resolved) {
-    return NextResponse.json(
-      { error: API_ERROR.NOT_FOUND },
-      { status: 404 },
-    );
+    return errorResponse(API_ERROR.NOT_FOUND, 404);
   }
 
   const { tenantId, config } = resolved;
@@ -192,10 +180,7 @@ async function handlePUT(req: NextRequest, ctx: RouteContext) {
 async function handleDELETE(req: NextRequest, ctx: RouteContext) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return errorResponse(API_ERROR.UNAUTHORIZED, 401);
   }
 
   const { id } = await ctx.params;
@@ -207,10 +192,7 @@ async function handleDELETE(req: NextRequest, ctx: RouteContext) {
     return handleAuthError(e);
   }
   if (!resolved) {
-    return NextResponse.json(
-      { error: API_ERROR.NOT_FOUND },
-      { status: 404 },
-    );
+    return errorResponse(API_ERROR.NOT_FOUND, 404);
   }
 
   const { tenantId, config } = resolved;

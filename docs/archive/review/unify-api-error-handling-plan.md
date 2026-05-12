@@ -588,5 +588,103 @@ Total: 10 source codes → 9 destination codes (net `-1` from the IV/AuthTag mer
 | C9  | OAuth `"rate_limited"` extension documentation (code comment + docs)   | locked  |
 | C10 | docs/api/error-handling.md content outline (incl. user-domain vocab rule) | locked  |
 | C11 | Rename internal-jargon codes to user-domain vocabulary (10 → 9, hard rename) | locked  |
+| C12 | Migrate all main-API `NextResponse.json({error,status})` sites → `errorResponse()` | locked  |
+| C13 | Add 5 missing `API_ERROR` codes for raw-string sites surfaced by C12; enable post-C12 grep gate | locked  |
 
 Phase 2 cannot begin until every status reads `locked` and all plan-review rounds have closed.
+
+---
+
+### C13 — Add missing API_ERROR codes + enable post-C12 grep gate
+
+**Decision** (user-confirmed during C12 verification): C12 surfaced 11 production sites using UPPER_SNAKE_CASE error codes that were NOT registered in the `API_ERROR` enum — raw string literals like `"INVALID_REQUEST"`, `"AUTHENTICATION_FAILED"`, `"SYNC_FAILED"`, `"KEY_VERSION_NOT_NEWER"`, `"BLOB_HASH_MISMATCH"`. These are C2 envelope violations (the value is not a member of `API_ERROR`). Add the missing codes, migrate the 11 sites to `errorResponse()`, and enable the post-C12 grep gate that forbids any future `NextResponse.json({ error: ... }, { status: ... })` in main-API routes.
+
+**Sites covered**:
+
+| Site | Raw code | New `API_ERROR` entry | Status |
+|------|----------|----------------------|--------|
+| `src/app/api/auth/passkey/verify/route.ts:50,60` | `"INVALID_REQUEST"` | `INVALID_REQUEST` | 400 |
+| `src/app/api/auth/passkey/verify/route.ts:73,91` | `"AUTHENTICATION_FAILED"` | `AUTHENTICATION_FAILED` | 401 |
+| `src/app/api/directory-sync/[id]/run/route.ts:107` | `"SYNC_FAILED"` | `SYNC_FAILED` | 500 |
+| `src/app/api/passwords/[id]/history/[historyId]/route.ts:117` | `"KEY_VERSION_NOT_NEWER"` | `KEY_VERSION_NOT_NEWER` | 400 |
+| `src/app/api/passwords/[id]/history/[historyId]/route.ts:126,146` | `"BLOB_HASH_MISMATCH"` | `BLOB_HASH_MISMATCH` | 409 |
+| `src/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/route.ts:129,138,165` | (same KEY/BLOB codes) | (shared with above) | 400 / 409 |
+
+**Deliberate carve-outs** (NOT migrated):
+
+| Site | Reason |
+|------|--------|
+| `src/app/api/maintenance/dcr-cleanup/route.ts:56` (`"endpoint_removed"`) | 410 Gone stub for deprecated endpoint — non-standard by design |
+| `src/app/api/vault/delegation/check/route.ts` (`{authorized,reason}` envelope) | CLI consumer-specific shape, analogous to SCIM/OAuth envelope exclusions |
+| `src/app/api/admin/rotate-master-key/route.ts` (free-form English) | Admin-only operator endpoint; operator scripts; design decision deferred |
+| `src/app/api/mobile/.well-known/apple-app-site-association/route.ts` (free-form English) | Apple platform-mandated endpoint; non-API surface |
+
+**Invariants**:
+- New codes (`INVALID_REQUEST`, `AUTHENTICATION_FAILED`, `SYNC_FAILED`, `KEY_VERSION_NOT_NEWER`, `BLOB_HASH_MISMATCH`) added to `API_ERROR` AND `API_ERROR_I18N`.
+- New i18n keys `invalidRequest_passkey` (or reuse existing `invalidRequest` — see below), `authenticationFailed`, `syncFailed`, `keyVersionNotNewer`, `blobHashMismatch` added to both en/ja `ApiErrors.json`.
+- **`invalidRequest` collision**: an i18n key `invalidRequest` already exists in `ApiErrors.json` and is used by `INVALID_JSON`, `TOKEN_REQUIRED`, `INVALID_IV_FORMAT`/`INVALID_AUTH_TAG_FORMAT` (pre-C11), `INVALID_PREFIX`, `INVALID_CURSOR`, `INVALID_BODY`. The new `INVALID_REQUEST` code can REUSE this key (no duplicate JSON entry needed); only the TS map entry `INVALID_REQUEST: "invalidRequest"` is added. This avoids both creating a parallel key and the ambiguity of having two codes that map to the same UI copy.
+- The 11 production sites switch from `NextResponse.json({error:"X"}, {status:N})` to `errorResponse(API_ERROR.X, N, [details if any])`.
+- Test files keep their wire-string assertions (`expect(json.error).toBe("INVALID_REQUEST")` etc.) — the wire strings are unchanged.
+- `api-error-codes.test.ts:121` count updates from `149` → `154` (+5).
+- The grep gate `scripts/checks/check-api-error-codes.sh` gains a NEW rule: `NextResponse\.json\(\s*\{\s*error:` is forbidden in main-API routes (exclude `scim/`, `mcp/`, and the documented carve-outs). After C13, this gate runs clean.
+
+**Acceptance**:
+- `grep -RnE 'NextResponse\.json\(\s*\{\s*error:' src/app/api/ --include='*.ts' | grep -v '\.test\.' | grep -v '/__tests__/' | grep -v '/scim/' | grep -v '/mcp/'` returns ONLY the 4 documented carve-outs.
+- `pre-pr.sh` passes all 17 checks (the existing api-error-codes gate now includes the new pattern).
+- `Object.keys(API_ERROR).length === 154`.
+- `npx vitest run` passes (~10237+ tests).
+
+**Anti-Deferral**: in-scope per user authorization during C12 verification.
+
+
+---
+
+### C12 — Migrate all main-API error sites to `errorResponse()` helper
+
+**Decision** (user-confirmed post Phase 2-1): the plan's minimum scope (C5/C6 site-level migration only) left ~139 production sites bypassing the `errorResponse()` helper despite emitting the canonical envelope shape. These sites are correct in wire output but the inconsistency means:
+1. Future envelope-shape changes (e.g., adding `requestId`/`traceId`) require touching 139 sites instead of one helper.
+2. Reviewers cannot pattern-spot "main-API error response" — three variants compete (`NextResponse.json` vs `errorResponse()` vs preset helpers like `unauthorized()`).
+3. The grep gate cannot enforce a canonical pattern without first eliminating the legacy variant.
+
+C12 closes this consistency gap.
+
+**Signature**: convert every production site matching the pattern below to use `errorResponse()`.
+
+| Current pattern | Target pattern |
+|-----------------|----------------|
+| `return NextResponse.json({ error: API_ERROR.XXX }, { status: N });` | `return errorResponse(API_ERROR.XXX, N);` |
+| `return NextResponse.json({ error: API_ERROR.XXX, foo: "bar" }, { status: N });` | `return errorResponse(API_ERROR.XXX, N, { foo: "bar" });` |
+| `return NextResponse.json({ error: API_ERROR.XXX }, { status: N, headers: { ... } });` | `return errorResponse(API_ERROR.XXX, N, undefined, { ... });` |
+
+**Scope** (139 sites total, top files):
+
+- `src/app/api/webauthn/register/verify/route.ts` (6)
+- `src/app/api/vault/admin-reset/route.ts` (6)
+- `src/app/api/teams/[teamId]/folders/[id]/route.ts` (6)
+- `src/app/api/directory-sync/[id]/route.ts` (6)
+- `src/app/api/vault/recovery-key/recover/route.ts` (5)
+- `src/app/api/v1/passwords/route.ts` (5)
+- `src/app/api/tenant/members/[userId]/route.ts` (5)
+- ... ~109 additional sites across `src/app/api/{auth,teams,tenant,passwords,folders,notifications,sessions,extension,share-links,sends,emergency-access,travel-mode,api-keys,user,maintenance,vault,audit-logs}/**/*.ts`
+
+**Excluded** (envelope-specific, preserve current code):
+
+- `src/app/api/scim/v2/**` — RFC 7644 envelope via `scimError()`.
+- `src/app/api/mcp/**` — RFC 6749 envelope (inline) and RFC 8628 device flow.
+- Helper definitions themselves (`src/lib/http/api-response.ts:errorResponse` etc.).
+
+**Invariants**:
+- Wire output MUST remain byte-identical for every migrated site. `errorResponse()` produces `{ error, ...details }` when details is provided, `{ error }` when it isn't — matching the spread shape used at the call sites today.
+- Headers passed via the 4th argument MUST land in the response unchanged (verify `errorResponse` signature handles this correctly at `src/lib/http/api-response.ts:27-37`).
+- `NextResponse` import is removed from migrated files ONLY when no remaining `NextResponse.*` use exists (e.g., success-path `NextResponse.json(data)` calls or type annotations like `Promise<NextResponse>`). Leave the import alone if any other use remains.
+
+**Forbidden patterns** (enforced via `scripts/checks/check-api-error-codes.sh` after C12):
+- `pattern: NextResponse\.json\(\s*\{\s*error:` outside `src/app/api/scim/`, `src/app/api/mcp/`, and helper files — reason: the canonical error envelope MUST go through `errorResponse()`. Existing patterns for OAuth/SCIM stay as-is.
+
+**Acceptance**:
+- After C12 + grep-gate update, running `grep -RnE 'NextResponse\.json\(\s*\{\s*error:' src/app/api/ --include='*.ts' --include='*.tsx' | grep -v '\.test\.' | grep -v '/__tests__/' | grep -v '/scim/' | grep -v '/mcp/'` returns ZERO hits.
+- `npx vitest run` passes the full suite. No test assertions need updating — all assertions read `body.error` (the wire string) which is unchanged.
+- `pre-pr.sh` passes all 18 checks (17 + the C12-extended grep gate).
+
+**Anti-Deferral**: in-scope per user authorization post Phase 2-1.
+

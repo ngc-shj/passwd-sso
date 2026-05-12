@@ -90,10 +90,7 @@ async function handlePOST(req: NextRequest) {
       validateParentChain(null, parentId, allTags);
     } catch (e) {
       if (e instanceof TagTreeError) {
-        return NextResponse.json(
-          { error: API_ERROR.VALIDATION_ERROR, message: e.message },
-          { status: 400 },
-        );
+        return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: e.message });
       }
       throw e;
     }

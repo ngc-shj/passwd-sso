@@ -7,7 +7,7 @@ import { getRedis } from "@/lib/redis";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, rateLimited } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
@@ -51,10 +51,7 @@ const verifyRegistrationSchema = z.object({
 async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
   const userId = session.user.id;
 
@@ -65,10 +62,7 @@ async function handlePOST(req: NextRequest) {
 
   const redis = getRedis();
   if (!redis) {
-    return NextResponse.json(
-      { error: API_ERROR.SERVICE_UNAVAILABLE },
-      { status: 503 },
-    );
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 503);
   }
 
   const result = await parseBody(req, verifyRegistrationSchema);
@@ -89,10 +83,7 @@ async function handlePOST(req: NextRequest) {
 
   const rpId = process.env.WEBAUTHN_RP_ID;
   if (!rpId) {
-    return NextResponse.json(
-      { error: API_ERROR.SERVICE_UNAVAILABLE },
-      { status: 503 },
-    );
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 503);
   }
 
   const origin = getRpOrigin(rpId);
@@ -102,17 +93,15 @@ async function handlePOST(req: NextRequest) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     verification = await verifyRegistration(response as any, challenge, rpId, origin);
   } catch {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: "Registration verification failed" },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
+      details: "Registration verification failed",
+    });
   }
 
   if (!verification.verified || !verification.registrationInfo) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: "Registration verification failed" },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
+      details: "Registration verification failed",
+    });
   }
 
   const { registrationInfo } = verification;
@@ -173,10 +162,7 @@ async function handlePOST(req: NextRequest) {
   // this value — they are always allowed regardless of policy.
   const requireMinPin = userInfo.tenant?.requireMinPinLength ?? null;
   if (requireMinPin !== null && minPinLength !== null && minPinLength < requireMinPin) {
-    return NextResponse.json(
-      { error: API_ERROR.PIN_LENGTH_POLICY_NOT_SATISFIED },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.PIN_LENGTH_POLICY_NOT_SATISFIED, 400);
   }
 
   const credential = await withUserTenantRls(userId, async () => {

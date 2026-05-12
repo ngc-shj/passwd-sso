@@ -131,5 +131,9 @@
   "delegationEntriesNotFound": "一部のエントリが見つからないか、アクセスできません。",
   "noTenant": "テナントに所属していません。",
   "invalidSession": "セッションIDが無効です。",
-  "internalError": "内部エラーが発生しました。"
+  "internalError": "内部エラーが発生しました。",
+  "authenticationFailed": "認証に失敗しました。もう一度サインインしてください。",
+  "syncFailed": "ディレクトリ同期に失敗しました。ログを確認して再試行してください。",
+  "keyVersionNotNewer": "エントリは既により新しいキーバージョンで更新されています。再読み込みして再試行してください。",
+  "blobHashMismatch": "このバージョン作成以降にエントリが変更されています。再読み込みして再試行してください。"
 }

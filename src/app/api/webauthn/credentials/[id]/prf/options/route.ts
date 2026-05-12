@@ -5,7 +5,7 @@ import { getRedis } from "@/lib/redis";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited, unauthorized, notFound } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, unauthorized, notFound } from "@/lib/http/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import {
   generateAuthenticationOpts,
@@ -51,10 +51,7 @@ async function handlePOST(
 
   const redis = getRedis();
   if (!redis) {
-    return NextResponse.json(
-      { error: API_ERROR.SERVICE_UNAVAILABLE },
-      { status: 503 },
-    );
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 503);
   }
 
   // Ownership check — the caller must own the credential they want to

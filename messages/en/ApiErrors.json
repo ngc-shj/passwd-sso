@@ -131,5 +131,9 @@
   "delegationEntriesNotFound": "Some entries not found or not accessible.",
   "noTenant": "No tenant membership found.",
   "invalidSession": "Invalid session ID.",
-  "internalError": "An internal error occurred."
+  "internalError": "An internal error occurred.",
+  "authenticationFailed": "Authentication failed. Please try signing in again.",
+  "syncFailed": "Directory sync failed. Please check the logs and retry.",
+  "keyVersionNotNewer": "The entry has already been updated to a newer key version. Please refresh and try again.",
+  "blobHashMismatch": "The entry has changed since this history version was created. Please refresh and try again."
 }

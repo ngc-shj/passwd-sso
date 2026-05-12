@@ -10,7 +10,7 @@ import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MAX_SERVICE_ACCOUNTS_PER_TENANT } from "@/lib/constants/auth/service-account";
 import { serviceAccountCreateSchema } from "@/lib/validations/service-account";
@@ -94,10 +94,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
   if (count >= MAX_SERVICE_ACCOUNTS_PER_TENANT) {
-    return NextResponse.json(
-      { error: API_ERROR.SA_LIMIT_EXCEEDED },
-      { status: 409 },
-    );
+    return errorResponse(API_ERROR.SA_LIMIT_EXCEEDED, 409);
   }
 
   let sa;
@@ -129,10 +126,7 @@ async function handlePOST(req: NextRequest) {
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"
     ) {
-      return NextResponse.json(
-        { error: API_ERROR.SA_NAME_CONFLICT },
-        { status: 409 },
-      );
+      return errorResponse(API_ERROR.SA_NAME_CONFLICT, 409);
     }
     throw err;
   }

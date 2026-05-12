@@ -99,10 +99,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   // Validate version increment
   if (newTeamKeyVersion !== team.teamKeyVersion + 1) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: { expected: team.teamKeyVersion + 1 } },
-      { status: 409 }
-    );
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 409, {
+      details: { expected: team.teamKeyVersion + 1 },
+    });
   }
 
   // Interactive transaction with optimistic lock on teamKeyVersion (S-17)

@@ -11,7 +11,7 @@ import { executeVaultReset } from "@/lib/vault/vault-reset";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { forbidden, notFound, unauthorized, rateLimited } from "@/lib/http/api-response";
+import { errorResponse, forbidden, notFound, unauthorized, rateLimited } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -37,10 +37,7 @@ async function handlePOST(req: NextRequest) {
   // must never run without an explicit canonical origin configuration.
   const appUrl = getAppOrigin();
   if (!appUrl) {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_ORIGIN },
-      { status: 500 },
-    );
+    return errorResponse(API_ERROR.INVALID_ORIGIN, 500);
   }
 
   const session = await auth();
@@ -58,10 +55,7 @@ async function handlePOST(req: NextRequest) {
 
   // Confirmation must be exact English string
   if (confirmation !== CONFIRMATION_TOKEN) {
-    return NextResponse.json(
-      { error: API_ERROR.VAULT_RESET_CONFIRMATION_MISMATCH },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.VAULT_RESET_CONFIRMATION_MISMATCH, 400);
   }
 
   // Verify token
@@ -84,28 +78,19 @@ async function handlePOST(req: NextRequest) {
 
   // Token must not be expired
   if (resetRecord.expiresAt < new Date()) {
-    return NextResponse.json(
-      { error: API_ERROR.VAULT_RESET_TOKEN_EXPIRED },
-      { status: 410 },
-    );
+    return errorResponse(API_ERROR.VAULT_RESET_TOKEN_EXPIRED, 410);
   }
 
   // Token must not be already executed or revoked
   if (resetRecord.executedAt || resetRecord.revokedAt) {
-    return NextResponse.json(
-      { error: API_ERROR.VAULT_RESET_TOKEN_USED },
-      { status: 410 },
-    );
+    return errorResponse(API_ERROR.VAULT_RESET_TOKEN_USED, 410);
   }
 
   // Dual-approval gate: a row that has not been approved by a second admin
   // is not consumable by the target user (FR1, FR2). Defense-in-depth — the
   // CAS WHERE below also requires `approvedAt: { not: null }`.
   if (resetRecord.approvedAt === null) {
-    return NextResponse.json(
-      { error: API_ERROR.VAULT_RESET_NOT_APPROVED },
-      { status: 409 },
-    );
+    return errorResponse(API_ERROR.VAULT_RESET_NOT_APPROVED, 409);
   }
 
   // TOCTOU prevention: atomically mark the token as executed BEFORE deleting
@@ -126,10 +111,7 @@ async function handlePOST(req: NextRequest) {
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (atomicResult.count === 0) {
-    return NextResponse.json(
-      { error: API_ERROR.VAULT_RESET_TOKEN_USED },
-      { status: 410 },
-    );
+    return errorResponse(API_ERROR.VAULT_RESET_TOKEN_USED, 410);
   }
 
   // Token secured — now execute the irreversible vault reset
