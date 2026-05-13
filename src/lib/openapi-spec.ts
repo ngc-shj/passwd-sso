@@ -185,12 +185,10 @@ export function buildOpenApiSpec(baseUrl: string) {
               description: "Forbidden — stale session (re-authenticate within 15 min) or insufficient role",
               content: {
                 "application/json": {
-                  schema: {
-                    type: "object",
-                    properties: {
-                      error: { type: "string", example: "stale_session" },
-                      message: { type: "string" },
-                    },
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                  examples: {
+                    staleSession: { value: { error: "OPERATOR_TOKEN_STALE_SESSION" } },
+                    insufficientRole: { value: { error: "FORBIDDEN_INSUFFICIENT_ROLE" } },
                   },
                 },
               },

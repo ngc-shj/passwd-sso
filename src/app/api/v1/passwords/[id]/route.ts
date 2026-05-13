@@ -51,7 +51,7 @@ async function handleGET(
   const { userId, tenantId } = auth.data;
 
   if (!userId) {
-    return errorResponse(API_ERROR.UNAUTHORIZED, 403, { message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." });
+    return errorResponse(API_ERROR.UNAUTHORIZED, 403, { details: { message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." } });
   }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);
@@ -106,7 +106,7 @@ async function handlePUT(
   const { userId, tenantId } = auth.data;
 
   if (!userId) {
-    return errorResponse(API_ERROR.UNAUTHORIZED, 403, { message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." });
+    return errorResponse(API_ERROR.UNAUTHORIZED, 403, { details: { message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." } });
   }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);
@@ -252,7 +252,7 @@ async function handleDELETE(
   const { userId, tenantId } = auth.data;
 
   if (!userId) {
-    return errorResponse(API_ERROR.UNAUTHORIZED, 403, { message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." });
+    return errorResponse(API_ERROR.UNAUTHORIZED, 403, { details: { message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." } });
   }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);

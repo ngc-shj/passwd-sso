@@ -111,7 +111,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   if (!sa.isActive) {
     return errorResponse(API_ERROR.SA_NOT_FOUND, 409, {
-      message: "Service account is inactive",
+      details: { message: "Service account is inactive" },
     });
   }
 

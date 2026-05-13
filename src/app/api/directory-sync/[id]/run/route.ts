@@ -101,7 +101,7 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
   if (!result.success) {
     // If it was a lock conflict, return 409
     if (result.errorMessage?.includes("already running")) {
-      return errorResponse(API_ERROR.CONFLICT, 409, { result });
+      return errorResponse(API_ERROR.CONFLICT, 409, { details: result });
     }
     return errorResponse(API_ERROR.SYNC_FAILED, 500, { details: result });
   }

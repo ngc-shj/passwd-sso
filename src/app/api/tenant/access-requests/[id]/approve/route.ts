@@ -72,7 +72,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   if (!request.serviceAccount.isActive) {
     return errorResponse(API_ERROR.SA_NOT_FOUND, 409, {
-      message: "Service account is inactive",
+      details: { message: "Service account is inactive" },
     });
   }
 
@@ -156,7 +156,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     }
     if (err instanceof Error && err.message === "No valid scopes after re-validation") {
       return errorResponse(API_ERROR.SA_INVALID_SCOPE, 400, {
-        message: "No valid scopes remain after re-validation",
+        details: { message: "No valid scopes remain after re-validation" },
       });
     }
     throw err;

@@ -122,7 +122,7 @@ async function handlePOST(req: NextRequest) {
     prisma.mcpClient.count({ where: { tenantId: actor.tenantId } }),
   );
   if (count >= MAX_MCP_CLIENTS_PER_TENANT) {
-    return errorResponse(API_ERROR.MCP_CLIENT_LIMIT_EXCEEDED, 422, { message: `Maximum ${MAX_MCP_CLIENTS_PER_TENANT} MCP clients per tenant` });
+    return errorResponse(API_ERROR.MCP_CLIENT_LIMIT_EXCEEDED, 422, { details: { message: `Maximum ${MAX_MCP_CLIENTS_PER_TENANT} MCP clients per tenant` } });
   }
 
   // Check name uniqueness

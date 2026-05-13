@@ -111,7 +111,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     result.data.sessionIdleTimeoutMinutes > teamTenant.tenant.sessionIdleTimeoutMinutes
   ) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-      message: `sessionIdleTimeoutMinutes exceeds tenant cap of ${teamTenant.tenant.sessionIdleTimeoutMinutes} minutes`,
+      details: { message: `sessionIdleTimeoutMinutes exceeds tenant cap of ${teamTenant.tenant.sessionIdleTimeoutMinutes} minutes` },
     });
   }
   if (
@@ -119,7 +119,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     result.data.sessionAbsoluteTimeoutMinutes > teamTenant.tenant.sessionAbsoluteTimeoutMinutes
   ) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-      message: `sessionAbsoluteTimeoutMinutes exceeds tenant cap of ${teamTenant.tenant.sessionAbsoluteTimeoutMinutes} minutes`,
+      details: { message: `sessionAbsoluteTimeoutMinutes exceeds tenant cap of ${teamTenant.tenant.sessionAbsoluteTimeoutMinutes} minutes` },
     });
   }
 

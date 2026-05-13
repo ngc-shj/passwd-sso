@@ -283,7 +283,7 @@ export function DirectorySyncCard() {
         toast.error(t("syncConflict"));
       } else {
         const data = await res.json().catch(() => ({}));
-        if (data?.result?.abortedSafety) {
+        if (data?.details?.abortedSafety) {
           toast.error(t("safetyGuardTriggered"));
         } else {
           toast.error(t("syncFailed"));

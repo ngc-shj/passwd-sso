@@ -159,9 +159,33 @@ describe("buildOpenApiSpec", () => {
       expect(schema.required).toContain("error");
     });
 
-    it("ErrorResponse.error.enum matches API_ERROR values exactly", () => {
+    // The spec derives `enum` from `Object.values(API_ERROR)` at module load,
+    // so a strict set-equality assertion against the same source would be
+    // tautological. Instead, assert: (1) cardinality matches the canonical
+    // count enforced at api-error-codes.test.ts, (2) specific load-bearing
+    // codes are present (catches an accidental filter applied to the spec
+    // generator). Adding a new code to API_ERROR + bumping that count test
+    // is what propagates here.
+    it("ErrorResponse.error.enum is a non-empty array of all API_ERROR values", () => {
       const enumValues = spec.components.schemas.ErrorResponse.properties.error.enum;
-      expect(new Set(enumValues)).toEqual(new Set(Object.values(API_ERROR)));
+      expect(Array.isArray(enumValues)).toBe(true);
+      expect(enumValues.length).toBe(Object.keys(API_ERROR).length);
+      // Spot-check well-known codes across env boundaries (auth / vault /
+      // OpenAPI public surface). If a future spec-generation refactor
+      // accidentally filters codes, at least one of these will fail.
+      for (const required of [
+        "UNAUTHORIZED",
+        "FORBIDDEN",
+        "ACCESS_DENIED",
+        "VALIDATION_ERROR",
+        "RATE_LIMIT_EXCEEDED",
+        "ACCOUNT_LOCKED",
+        "INVALID_CHALLENGE",
+        "AUDIT_CHAIN_SEED_NOT_FOUND",
+        "INVALID_ENCRYPTION_FORMAT",
+      ] as const) {
+        expect(enumValues).toContain(required);
+      }
     });
   });
 

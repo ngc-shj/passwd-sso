@@ -114,7 +114,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     } catch (e) {
       if (e instanceof TagTreeError) {
         return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-          message: e.message,
+          details: { message: e.message },
         });
       }
       throw e;

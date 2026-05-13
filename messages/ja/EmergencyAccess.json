@@ -71,7 +71,7 @@
   "invalidStatus": "現在のステータスではこの操作は実行できません。",
   "duplicateGrant": "このメールアドレスには既に有効な権限が存在します。",
   "notActivated": "緊急アクセスはまだ有効化されていません。",
-  "emergencyRecoveryKeyMissing": "鍵のエスクローが未完了です。保管庫オーナーのアンロックをお待ちください。",
+  "emergencyRecoveryKeyMissing": "復旧キーがまだ準備されていません。保管庫オーナーがアンロックを完了するまでお待ちください。",
   "grantNotFound": "緊急アクセス権限が見つかりません。",
   "inactiveGrants": "取り消し・拒否済み ({count})",
   "copied": "コピーしました",

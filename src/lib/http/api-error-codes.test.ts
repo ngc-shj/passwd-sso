@@ -21,7 +21,10 @@ describe("apiErrorToI18nKey", () => {
   it("never returns unknownError for a known code", () => {
     for (const code of allCodes) {
       const key = apiErrorToI18nKey(code);
-      // EA-only codes are allowed to map to unknownError in non-EA context
+      // EA-only codes are allowed to map to unknownError in non-EA context.
+      // EMERGENCY_RECOVERY_KEY_MISSING (renamed from KEY_ESCROW_NOT_COMPLETED
+      // in C11) now has its own ApiErrors-namespace translation, so it is no
+      // longer in this allow-list.
       if (
         [
           "GRANT_NOT_PENDING",
@@ -30,7 +33,6 @@ describe("apiErrorToI18nKey", () => {
           "INVALID_STATUS",
           "NOT_AUTHORIZED_FOR_GRANT",
           "NOT_ACTIVATED",
-          "EMERGENCY_RECOVERY_KEY_MISSING",
           "INCOMPATIBLE_KEY_ALGORITHM",
         ].includes(code)
       ) {

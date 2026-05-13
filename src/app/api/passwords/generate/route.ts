@@ -36,7 +36,7 @@ async function handlePOST(req: NextRequest) {
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Generation failed";
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message });
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { details: { message } });
   }
 
   return NextResponse.json({ password });

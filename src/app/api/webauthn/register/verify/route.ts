@@ -94,13 +94,13 @@ async function handlePOST(req: NextRequest) {
     verification = await verifyRegistration(response as any, challenge, rpId, origin);
   } catch {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-      details: "Registration verification failed",
+      details: { message: "Registration verification failed" },
     });
   }
 
   if (!verification.verified || !verification.registrationInfo) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-      details: "Registration verification failed",
+      details: { message: "Registration verification failed" },
     });
   }
 

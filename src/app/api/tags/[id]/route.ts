@@ -57,7 +57,7 @@ async function handlePUT(
         validateParentChain(id, newParentId, allTags);
       } catch (e) {
         if (e instanceof TagTreeError) {
-          return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: e.message });
+          return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { details: { message: e.message } });
         }
         throw e;
       }

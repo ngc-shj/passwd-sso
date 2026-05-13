@@ -94,10 +94,9 @@ export async function handleApiAuth(request: NextRequest) {
     if (!session.valid) {
       return applyCorsHeaders(
         request,
-        NextResponse.json(
-          { error: "UNAUTHORIZED" },
-          { status: 401, headers: { "Cache-Control": "no-store" } },
-        ),
+        errorResponse(API_ERROR.UNAUTHORIZED, 401, undefined, {
+          "Cache-Control": "no-store",
+        }),
       );
     }
 
