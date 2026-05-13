@@ -406,18 +406,25 @@ Domain overrides go through the `overrides` parameter — manually constructed
 switch statements on the error code in component code are a forbidden pattern
 (see §9). The server returns codes only; the client translates.
 
-### Typed body access (`readApiErrorBody`)
+### Typed body access (`readApiErrorBody` + `getApiErrorMessage` / `getApiErrorDetail`)
 
 When a UI consumer needs to read **body fields** (not just the HTTP status), use
-`readApiErrorBody(res)` from `@/lib/http/read-api-error-body`. The helper returns
-`MainApiErrorBody | null` — a `readonly` shape that lists exactly the four
-permitted top-level fields (`error`, `details`, `lockedUntil`,
-`currentKeyVersion`). Accessing `body.message` or any other key triggers a
-TypeScript compile error.
+the typed helpers from `@/lib/http/read-api-error-body`:
+
+- `readApiErrorBody(res)` → `MainApiErrorBody | null` — typed envelope. Accessing
+  `body.message` or any other non-listed key is a TypeScript compile error
+  (the closed list is `error`, `details`, `lockedUntil`, `currentKeyVersion`).
+- `getApiErrorMessage(body)` → the inner `details.message` string (or `null`).
+- `getApiErrorDetail(body, field, guard)` → a single field from `details` with
+  a runtime type guard.
 
 ```ts
 import { fetchApi } from "@/lib/url-helpers";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import {
+  readApiErrorBody,
+  getApiErrorMessage,
+  getApiErrorDetail,
+} from "@/lib/http/read-api-error-body";
 
 const res = await fetchApi("/api/tenant/policy", {
   method: "PATCH",
@@ -425,25 +432,43 @@ const res = await fetchApi("/api/tenant/policy", {
 });
 
 if (!res.ok) {
-  const body = await readApiErrorBody(res);
-  // body.message  // TS error: Property 'message' does not exist on type ...
-  const inner =
-    body &&
-    typeof body.details === "object" &&
-    body.details !== null &&
-    "message" in body.details &&
-    typeof (body.details as { message?: unknown }).message === "string"
-      ? (body.details as { message: string }).message
-      : null;
-  toast.error(inner ?? t("genericFailure"));
+  const detail = getApiErrorMessage(await readApiErrorBody(res));
+  toast.error(detail ?? t("genericFailure"));
   return;
 }
+
+// Or for a non-`message` field:
+const body = await readApiErrorBody(res);
+const aborted = getApiErrorDetail(body, "abortedSafety", (v): v is true => v === true);
 ```
 
 This is the compile-time guard that prevents F8-class regressions
 (UI reading a top-level field that the server moved into `details`). Existing
 code that does `await res.json()` directly remains valid but loses the type
-safety; new code SHOULD prefer the helper.
+safety; new code SHOULD prefer the helpers.
+
+### Server-side: `errorResponseWithMessage` for `{ details: { message } }`
+
+Server-side, the equivalent wrap is canonicalized through
+`errorResponseWithMessage(code, status, message)` in
+`@/lib/http/api-response`. Replaces the verbose form
+`errorResponse(CODE, STATUS, { details: { message: "..." } })` at ~33 production
+sites and keeps the wrap-shape in one helper:
+
+```ts
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponseWithMessage } from "@/lib/http/api-response";
+
+return errorResponseWithMessage(
+  API_ERROR.VALIDATION_ERROR,
+  400,
+  `Maximum ${MAX_CIDRS} CIDRs allowed`,
+);
+```
+
+For Zod / multi-field validation errors, use `validationError(treeOrObject)`
+directly (it takes `Record<string, unknown>` — strings would be a TypeScript
+compile error per the C6 invariant).
 
 ## 8. Adding a new context field
 

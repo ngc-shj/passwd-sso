@@ -13,7 +13,7 @@ import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 
 
-import { errorResponse, notFound, rateLimited, validationError } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, notFound, rateLimited, validationError } from "@/lib/http/api-response";
 import type { V1AuthResult } from "@/lib/auth/session/v1-auth";
 
 type V1AuthData = Extract<V1AuthResult, { ok: true }>["data"];
@@ -51,7 +51,7 @@ async function handleGET(
   const { userId, tenantId } = auth.data;
 
   if (!userId) {
-    return errorResponse(API_ERROR.UNAUTHORIZED, 403, { details: { message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." } });
+    return errorResponseWithMessage(API_ERROR.UNAUTHORIZED, 403, "Service account tokens cannot access personal data via v1 API. Use MCP Gateway.");
   }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);
@@ -106,7 +106,7 @@ async function handlePUT(
   const { userId, tenantId } = auth.data;
 
   if (!userId) {
-    return errorResponse(API_ERROR.UNAUTHORIZED, 403, { details: { message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." } });
+    return errorResponseWithMessage(API_ERROR.UNAUTHORIZED, 403, "Service account tokens cannot access personal data via v1 API. Use MCP Gateway.");
   }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);
@@ -144,7 +144,7 @@ async function handlePUT(
       prisma.folder.findFirst({ where: { id: folderId, userId } }),
     );
     if (!folder) {
-      return validationError("Invalid folderId");
+      return validationError({ message: "Invalid folderId" });
     }
   }
 
@@ -154,7 +154,7 @@ async function handlePUT(
       prisma.tag.count({ where: { id: { in: tagIds }, userId } }),
     );
     if (ownedCount !== tagIds.length) {
-      return validationError("Invalid tagIds");
+      return validationError({ message: "Invalid tagIds" });
     }
   }
 
@@ -252,7 +252,7 @@ async function handleDELETE(
   const { userId, tenantId } = auth.data;
 
   if (!userId) {
-    return errorResponse(API_ERROR.UNAUTHORIZED, 403, { details: { message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." } });
+    return errorResponseWithMessage(API_ERROR.UNAUTHORIZED, 403, "Service account tokens cannot access personal data via v1 API. Use MCP Gateway.");
   }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);

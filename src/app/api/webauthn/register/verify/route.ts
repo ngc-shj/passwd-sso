@@ -7,7 +7,7 @@ import { getRedis } from "@/lib/redis";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
@@ -93,15 +93,11 @@ async function handlePOST(req: NextRequest) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     verification = await verifyRegistration(response as any, challenge, rpId, origin);
   } catch {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-      details: { message: "Registration verification failed" },
-    });
+    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "Registration verification failed");
   }
 
   if (!verification.verified || !verification.registrationInfo) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-      details: { message: "Registration verification failed" },
-    });
+    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "Registration verification failed");
   }
 
   const { registrationInfo } = verification;

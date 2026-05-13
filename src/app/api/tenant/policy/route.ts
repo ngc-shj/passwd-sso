@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { createRateLimiter } from "@/lib/security/rate-limit";
@@ -300,12 +300,12 @@ async function handlePATCH(req: NextRequest) {
       return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
     }
     if (allowedCidrs.length > MAX_CIDRS) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { details: { message: `Maximum ${MAX_CIDRS} CIDRs allowed` } });
+      return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, `Maximum ${MAX_CIDRS} CIDRs allowed`);
     }
     for (const cidr of allowedCidrs) {
       if (typeof cidr !== "string" || !isValidCidr(cidr)) {
         const truncated = typeof cidr === "string" ? cidr.slice(0, IP_ADDRESS_MAX_LENGTH) : String(cidr).slice(0, IP_ADDRESS_MAX_LENGTH);
-        return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { details: { message: `Invalid CIDR: ${truncated}` } });
+        return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, `Invalid CIDR: ${truncated}`);
       }
     }
   }
@@ -322,7 +322,7 @@ async function handlePATCH(req: NextRequest) {
     }
     // DNS hostname characters only: alphanumeric, hyphens, dots
     if (tailscaleTailnet.length > 0 && !/^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$/.test(tailscaleTailnet)) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { details: { message: "tailscaleTailnet must contain only valid DNS hostname characters (a-z, 0-9, hyphens, dots)" } });
+      return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "tailscaleTailnet must contain only valid DNS hostname characters (a-z, 0-9, hyphens, dots)");
     }
   }
 
@@ -611,10 +611,10 @@ async function handlePATCH(req: NextRequest) {
     if (tailscaleTailnet === undefined) {
       // Not in request — check if DB already has a value
       if (!currentTenant?.tailscaleTailnet) {
-        return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { details: { message: "tailscaleTailnet is required when tailscaleEnabled is true" } });
+        return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "tailscaleTailnet is required when tailscaleEnabled is true");
       }
     } else if (!tailscaleTailnet || typeof tailscaleTailnet !== "string" || tailscaleTailnet.trim().length === 0) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { details: { message: "tailscaleTailnet is required when tailscaleEnabled is true" } });
+      return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "tailscaleTailnet is required when tailscaleEnabled is true");
     }
   }
 
@@ -632,12 +632,12 @@ async function handlePATCH(req: NextRequest) {
 
   // Lockout thresholds must always be strictly ascending
   if (t1 >= t2 || t2 >= t3) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { details: { message: "Lockout thresholds must be strictly ascending: threshold1 < threshold2 < threshold3" } });
+    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "Lockout thresholds must be strictly ascending: threshold1 < threshold2 < threshold3");
   }
 
   // Lockout durations must always be strictly ascending
   if (d1 >= d2 || d2 >= d3) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { details: { message: "Lockout durations must be strictly ascending: duration1 < duration2 < duration3" } });
+    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "Lockout durations must be strictly ascending: duration1 < duration2 < duration3");
   }
 
   // Cross-field: vault_auto_lock must not exceed idle timeouts.
@@ -660,25 +660,29 @@ async function handlePATCH(req: NextRequest) {
     typeof mergedSessionIdle === "number" &&
     mergedVaultAutoLock > mergedSessionIdle
   ) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-      details: { message: `vaultAutoLockMinutes (${mergedVaultAutoLock}) must be <= sessionIdleTimeoutMinutes (${mergedSessionIdle})` },
-    });
+    return errorResponseWithMessage(
+      API_ERROR.VALIDATION_ERROR,
+      400,
+      `vaultAutoLockMinutes (${mergedVaultAutoLock}) must be <= sessionIdleTimeoutMinutes (${mergedSessionIdle})`,
+    );
   }
   if (
     typeof mergedVaultAutoLock === "number" &&
     typeof mergedExtIdle === "number" &&
     mergedVaultAutoLock > mergedExtIdle
   ) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-      details: { message: `vaultAutoLockMinutes (${mergedVaultAutoLock}) must be <= extensionTokenIdleTimeoutMinutes (${mergedExtIdle})` },
-    });
+    return errorResponseWithMessage(
+      API_ERROR.VALIDATION_ERROR,
+      400,
+      `vaultAutoLockMinutes (${mergedVaultAutoLock}) must be <= extensionTokenIdleTimeoutMinutes (${mergedExtIdle})`,
+    );
   }
 
   // Password expiry warning must be less than max age when both are set
   const mergedMaxAge = passwordMaxAgeDays !== undefined ? passwordMaxAgeDays : currentTenant?.passwordMaxAgeDays;
   const mergedWarning = passwordExpiryWarningDays !== undefined ? passwordExpiryWarningDays : currentTenant?.passwordExpiryWarningDays;
   if (mergedMaxAge != null && mergedWarning != null && mergedWarning >= mergedMaxAge) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { details: { message: "passwordExpiryWarningDays must be less than passwordMaxAgeDays" } });
+    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "passwordExpiryWarningDays must be less than passwordMaxAgeDays");
   }
 
   // Cross-field validation: jitTokenDefaultTtlSec must be <= jitTokenMaxTtlSec when both set
@@ -686,7 +690,7 @@ async function handlePATCH(req: NextRequest) {
   const mergedJitDefault = jitTokenDefaultTtlSec !== undefined ? jitTokenDefaultTtlSec : currentTenant?.jitTokenDefaultTtlSec ?? null;
   const mergedJitMax = jitTokenMaxTtlSec !== undefined ? jitTokenMaxTtlSec : currentTenant?.jitTokenMaxTtlSec ?? null;
   if (mergedJitDefault != null && mergedJitMax != null && mergedJitDefault > mergedJitMax) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { details: { message: "jitTokenDefaultTtlSec must be <= jitTokenMaxTtlSec" } });
+    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "jitTokenDefaultTtlSec must be <= jitTokenMaxTtlSec");
   }
 
   // Cross-field validation: delegationDefaultTtlSec must be <= delegationMaxTtlSec when both set
@@ -694,7 +698,7 @@ async function handlePATCH(req: NextRequest) {
   const mergedDelegDefault = delegationDefaultTtlSec !== undefined ? delegationDefaultTtlSec : currentTenant?.delegationDefaultTtlSec ?? null;
   const mergedDelegMax = delegationMaxTtlSec !== undefined ? delegationMaxTtlSec : currentTenant?.delegationMaxTtlSec ?? null;
   if (mergedDelegDefault != null && mergedDelegMax != null && mergedDelegDefault > mergedDelegMax) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { details: { message: "delegationDefaultTtlSec must be <= delegationMaxTtlSec" } });
+    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "delegationDefaultTtlSec must be <= delegationMaxTtlSec");
   }
 
   // requirePasskeyEnabledAt set-once logic uses the already-fetched current state
@@ -718,7 +722,7 @@ async function handlePATCH(req: NextRequest) {
       const message = clientIp
         ? "Your current IP would be blocked by this policy. Set confirmLockout: true to proceed."
         : "Your IP could not be determined; you may be locked out by this policy. Set confirmLockout: true to proceed.";
-      return errorResponse(API_ERROR.SELF_LOCKOUT, 409, { details: { message } });
+      return errorResponseWithMessage(API_ERROR.SELF_LOCKOUT, 409, message);
     }
   }
 

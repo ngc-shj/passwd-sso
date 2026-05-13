@@ -8,7 +8,7 @@ import { parseBody } from "@/lib/http/parse-body";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { validateParentChain, TagTreeError } from "@/lib/format/tag-tree";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, forbidden, notFound, unauthorized } from "@/lib/http/api-response";
 
 // PUT /api/tags/[id] - Update a tag
 async function handlePUT(
@@ -57,7 +57,7 @@ async function handlePUT(
         validateParentChain(id, newParentId, allTags);
       } catch (e) {
         if (e instanceof TagTreeError) {
-          return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { details: { message: e.message } });
+          return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, e.message);
         }
         throw e;
       }

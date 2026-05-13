@@ -10,7 +10,7 @@ import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { validateParentChain, TagTreeError } from "@/lib/format/tag-tree";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -61,9 +61,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
         validateParentChain(id, newParentId, allTags);
       } catch (e) {
         if (e instanceof TagTreeError) {
-          return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-            details: { message: e.message },
-          });
+          return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, e.message);
         }
         throw e;
       }

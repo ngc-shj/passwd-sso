@@ -8,7 +8,7 @@ import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
 import { API_KEY_SCOPE } from "@/lib/constants/auth/api-key";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, rateLimited, unauthorized } from "@/lib/http/api-response";
 
 
 // GET /api/v1/tags — List tags (API key or SA token)
@@ -24,7 +24,7 @@ async function handleGET(req: NextRequest) {
   const { userId, tenantId, rateLimitKey } = authResult.data;
 
   if (!userId) {
-    return errorResponse(API_ERROR.UNAUTHORIZED, 403, { details: { message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." } });
+    return errorResponseWithMessage(API_ERROR.UNAUTHORIZED, 403, "Service account tokens cannot access personal data via v1 API. Use MCP Gateway.");
   }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);

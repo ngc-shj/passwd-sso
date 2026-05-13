@@ -5,7 +5,7 @@ import { getRedis } from "@/lib/redis";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import {
   generateAuthenticationOpts,
@@ -60,9 +60,7 @@ async function handlePOST(req: NextRequest) {
   );
 
   if (credentials.length === 0) {
-    return errorResponse(API_ERROR.NOT_FOUND, 404, {
-      details: { message: "No matching credentials found" },
-    });
+    return errorResponseWithMessage(API_ERROR.NOT_FOUND, 404, "No matching credentials found");
   }
 
   const options = await generateAuthenticationOpts(

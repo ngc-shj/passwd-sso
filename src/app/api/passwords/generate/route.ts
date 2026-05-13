@@ -5,7 +5,7 @@ import { generateRequestSchema } from "@/lib/validations";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponseWithMessage, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 
 const generateLimiter = createRateLimiter({ windowMs: 60_000, max: 120 });
@@ -36,7 +36,7 @@ async function handlePOST(req: NextRequest) {
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Generation failed";
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { details: { message } });
+    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, message);
   }
 
   return NextResponse.json({ password });

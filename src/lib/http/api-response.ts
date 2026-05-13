@@ -71,13 +71,35 @@ export const notFound = () =>
 export const forbidden = () =>
   errorResponse(API_ERROR.FORBIDDEN, 403);
 
-export const validationError = (details: unknown) =>
+// `validationError(details)` accepts only object-shaped details (per C6 — the
+// `details` body field must be a z.treeifyError tree or equivalent object).
+// Passing a string would be a runtime envelope violation; the type now
+// rejects it at compile time. Use `errorResponseWithMessage(VALIDATION_ERROR,
+// 400, msg)` for single-line message wrapping.
+export const validationError = (details: Record<string, unknown>) =>
   errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
     details,
   });
 
 export const zodValidationError = (error: ZodError) =>
-  validationError(z.treeifyError(error));
+  validationError(z.treeifyError(error) as Record<string, unknown>);
+
+/**
+ * Convenience wrapper for the canonical `{ details: { message: "..." } }` shape.
+ *
+ * Replaces the verbose `errorResponse(code, status, { details: { message: "..." } })`
+ * pattern at ~33 production sites. Keeps the wrap centralized so that future
+ * changes to the message-wrap shape only need to touch this helper.
+ *
+ * For Zod / multi-field validation errors, use `validationError(treeOrObject)`
+ * directly; this helper is for single-line diagnostic messages.
+ */
+export const errorResponseWithMessage = (
+  code: ApiErrorCode,
+  status: number,
+  message: string,
+): NextResponse =>
+  errorResponse(code, status, { details: { message } });
 
 export const rateLimited = (retryAfterMs?: number) => {
   const headers: Record<string, string> = {};

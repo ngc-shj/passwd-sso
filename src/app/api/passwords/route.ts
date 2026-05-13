@@ -186,8 +186,8 @@ async function handlePOST(req: NextRequest) {
   });
 
   if ("error" in createResult) {
-    const detail = createResult.error === "INVALID_FOLDER" ? "Invalid folderId" : "Invalid tagIds";
-    return validationError(detail);
+    const message = createResult.error === "INVALID_FOLDER" ? "Invalid folderId" : "Invalid tagIds";
+    return validationError({ message });
   }
 
   const { entry } = createResult;

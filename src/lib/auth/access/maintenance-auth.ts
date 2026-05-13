@@ -11,7 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse } from "@/lib/http/api-response";
+import { errorResponseWithMessage } from "@/lib/http/api-response";
 
 export interface MaintenanceOperator {
   tenantId: string;
@@ -54,9 +54,7 @@ export async function requireMaintenanceOperator(
   if (!membership) {
     return {
       ok: false,
-      response: errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-        details: { message: "operatorId is not an active tenant admin" },
-      }),
+      response: errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "operatorId is not an active tenant admin"),
     };
   }
   // The role filter above guarantees membership.role is OWNER or ADMIN, but

@@ -127,6 +127,13 @@ vi.mock("@/lib/http/api-response", () => ({
       headers: { "Content-Type": "application/json" },
     });
   },
+  errorResponseWithMessage: (error: string, status: number, message: string) => {
+    const body = { error, details: { message } };
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  },
   unauthorized: () =>
     new Response(JSON.stringify({ error: "UNAUTHORIZED" }), {
       status: 401,

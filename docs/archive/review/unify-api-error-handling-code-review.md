@@ -374,6 +374,78 @@ All known classes of omission now have mechanical detection:
 
 Future PRs that violate these gain immediate CI/compile failures.
 
+---
+
+# Round 4 — Commonalization (DRY for the wrap pattern)
+
+User asked: "共通処理化も含めて考えてくださいね" ("Include commonalization in
+your thinking"). The Round 3 wrap pattern was repeated 33 times on the server
+side and 5 lines of nested type-checks on the client side. Round 4 centralizes
+both.
+
+## Server-side helper: `errorResponseWithMessage`
+
+New helper in `src/lib/http/api-response.ts`:
+
+```ts
+export const errorResponseWithMessage = (
+  code: ApiErrorCode,
+  status: number,
+  message: string,
+): NextResponse =>
+  errorResponse(code, status, { details: { message } });
+```
+
+Refactored ~33 production sites from the verbose form
+`errorResponse(CODE, STATUS, { details: { message: ... } })` to one-line
+`errorResponseWithMessage(CODE, STATUS, ...)`. Wire shape unchanged.
+
+Files: tags, v1/passwords, v1/tags, tenant/{policy, mcp-clients,
+access-requests, service-accounts}, teams/[teamId]/{policy,tags}, webauthn/
+{register/verify, authenticate/options}, passwords/generate, lib/auth/access/
+maintenance-auth — total 17 files, 33 sites.
+
+## `validationError` type tightening
+
+`validationError(details: unknown)` → `validationError(details: Record<string, unknown>)`.
+Now compile-time rejects the F3-class string-typed-details bypass via the
+existing helper. The 4 sites that previously did `validationError("Invalid ...")`
+in v1/passwords + non-v1/passwords are converted to
+`validationError({ message: "..." })`.
+
+## Client-side helpers: `getApiErrorMessage` + `getApiErrorDetail`
+
+New helpers in `src/lib/http/read-api-error-body.ts`:
+
+- `getApiErrorMessage(body)` → returns `details.message` (or `null`)
+- `getApiErrorDetail(body, field, guard)` → returns a typed field from
+  `details` with a runtime predicate
+
+Refactored the 2 UI consumers I migrated in Round 3:
+
+- `tenant-session-policy-card.tsx`: 5-line nested type-check → one-liner
+  `getApiErrorMessage(await readApiErrorBody(res))`
+- `directory-sync-card.tsx`: nested `abortedSafety` check → one-liner
+  `getApiErrorDetail(body, "abortedSafety", (v): v is true => v === true)`
+
+## Documentation
+
+`docs/api/error-handling.md` § 7 now documents:
+- The full helper triad (`readApiErrorBody`, `getApiErrorMessage`, `getApiErrorDetail`)
+- The server-side `errorResponseWithMessage` complement
+- Cross-link between them so the wrap-and-unwrap pair is discoverable together
+
+## Round 4 Summary
+
+- 3 new helpers added (1 server-side + 2 client-side)
+- 33 server sites de-duplicated to the helper
+- 2 UI sites simplified from 5-line check to 1-line helper call
+- `validationError(details)` type-narrowed so string bypass becomes a compile error
+- All 17 pre-pr.sh checks pass
+
+Wire shape: byte-identical across all changes. Internal representation: less
+boilerplate, single point of change for future shape evolution.
+
 ## Round 1 Summary
 
 - Functionality: Critical 0 / Major 3 (F1, F2, F3) / Minor 3 (F4, F5, F6)

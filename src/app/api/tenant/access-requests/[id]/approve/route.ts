@@ -10,7 +10,7 @@ import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { transition, AR_STATUS, AR_ACTOR } from "@/lib/access-request/access-request-state";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { SA_TOKEN_PREFIX, MAX_SA_TOKENS_PER_ACCOUNT } from "@/lib/constants/auth/service-account";
 import { parseSaTokenScopes } from "@/lib/auth/tokens/service-account-token";
@@ -71,9 +71,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   if (!request.serviceAccount.isActive) {
-    return errorResponse(API_ERROR.SA_NOT_FOUND, 409, {
-      details: { message: "Service account is inactive" },
-    });
+    return errorResponseWithMessage(API_ERROR.SA_NOT_FOUND, 409, "Service account is inactive");
   }
 
   // Read tenant policy for JIT TTL bounds
@@ -155,9 +153,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       return errorResponse(API_ERROR.SA_TOKEN_LIMIT_EXCEEDED, 409);
     }
     if (err instanceof Error && err.message === "No valid scopes after re-validation") {
-      return errorResponse(API_ERROR.SA_INVALID_SCOPE, 400, {
-        details: { message: "No valid scopes remain after re-validation" },
-      });
+      return errorResponseWithMessage(API_ERROR.SA_INVALID_SCOPE, 400, "No valid scopes remain after re-validation");
     }
     throw err;
   }

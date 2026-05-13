@@ -14,7 +14,7 @@ import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import type { EntryType } from "@prisma/client";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, rateLimited, unauthorized } from "@/lib/http/api-response";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
@@ -32,7 +32,7 @@ async function handleGET(req: NextRequest) {
   const { userId, tenantId, rateLimitKey } = authResult.data;
 
   if (!userId) {
-    return errorResponse(API_ERROR.UNAUTHORIZED, 403, { details: { message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." } });
+    return errorResponseWithMessage(API_ERROR.UNAUTHORIZED, 403, "Service account tokens cannot access personal data via v1 API. Use MCP Gateway.");
   }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);
@@ -118,7 +118,7 @@ async function handlePOST(req: NextRequest) {
   const { userId, tenantId, rateLimitKey } = authResult.data;
 
   if (!userId) {
-    return errorResponse(API_ERROR.UNAUTHORIZED, 403, { details: { message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." } });
+    return errorResponseWithMessage(API_ERROR.UNAUTHORIZED, 403, "Service account tokens cannot access personal data via v1 API. Use MCP Gateway.");
   }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);
@@ -171,7 +171,7 @@ async function handlePOST(req: NextRequest) {
 
   if ("error" in createResult) {
     const detail = createResult.error === "INVALID_FOLDER" ? "Invalid folderId" : "Invalid tagIds";
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { details: { message: detail } });
+    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, detail);
   }
 
   const { entry } = createResult;
