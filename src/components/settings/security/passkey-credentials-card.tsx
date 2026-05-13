@@ -25,6 +25,8 @@ import { Fingerprint, KeyRound, Loader2, Monitor, Plus, Smartphone } from "lucid
 import { toast } from "sonner";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { NAME_MAX_LENGTH } from "@/lib/validations";
 import { DISPLAY_ID_SHORT } from "@/lib/validations/common";
 import { formatDateTime } from "@/lib/format/format-datetime";
@@ -151,10 +153,10 @@ export function PasskeyCredentialsCard() {
         method: "POST",
       });
       if (!optionsRes.ok) {
-        const err = await optionsRes.json().catch(() => ({}));
-        if (err.error === "RATE_LIMIT_EXCEEDED") {
+        const err = await readApiErrorBody(optionsRes);
+        if (err?.error === API_ERROR.RATE_LIMIT_EXCEEDED) {
           toast.error(t("serviceUnavailable"));
-        } else if (err.error === "SERVICE_UNAVAILABLE") {
+        } else if (err?.error === API_ERROR.SERVICE_UNAVAILABLE) {
           toast.error(t("serviceUnavailable"));
         } else {
           toast.error(t("registerError"));

@@ -176,16 +176,17 @@ c4_client_hits=$(
     # regex was unreliable; line-based scan with following-line lookahead
     # is more robust.
     perl -ne '
-      # Matches three error-path entry shapes:
-      #   if (!res.ok)              — generic error branch
-      #   if (res.status === 4xx)   — specific HTTP code branch (4xx / 5xx)
-      #   if (res.status >= 400)    — range error branch
-      # `} else if (...)` matches too. When already inside a tracked block,
-      # the else-if is treated as a continuation: depth-tracking absorbs it
-      # so the whole if-else chain is scanned as one block (a bypass in any
-      # branch fires once with the line of the opening `if`).
-      if (/^\s*(?:\}\s*else\s+)?if\s*\(\s*(?:!(?:res|response)\.ok|(?:res|response)\.status\s*===\s*[45]\d\d|(?:res|response)\.status\s*>=?\s*4\d\d)\s*\)/) {
+      # Matches error-path entry shapes for ANY response variable name:
+      #   if (!X.ok)                — generic error branch
+      #   if (X.status === Nxx)     — specific HTTP code branch (4xx / 5xx)
+      #   if (X.status >= 4xx)      — range error branch
+      # The matching variable name is captured and reused to check body access
+      # (X.json()) inside the block. Single-statement `if (...) stmt;` form is
+      # ignored (no block to track). `} else if (...)` is treated as
+      # continuation when already inside a tracked block.
+      if (/^\s*(?:\}\s*else\s+)?if\s*\(\s*(?:!\s*([a-zA-Z_][a-zA-Z0-9_]*)\.ok|([a-zA-Z_][a-zA-Z0-9_]*)\.status\s*(?:===\s*[45]\d\d|>=?\s*4\d\d))\s*\)\s*\{\s*$/) {
         if (!$in_block) {
+          $var = $1 // $2;
           $start = $.;
           $in_block = 1;
           $depth = 0;
@@ -197,8 +198,8 @@ c4_client_hits=$(
         $depth += () = /\{/g;
         $depth -= () = /\}/g;
         if ($depth <= 0 && $block =~ /\{/) {
-          if ($block =~ /\bawait\s+(?:res|response)\.json\(/) {
-            print "$ARGV:$start: error-path res.json() bypass — use readApiErrorBody()\n";
+          if ($block =~ /\bawait\s+\Q$var\E\.json\(/) {
+            print "$ARGV:$start: error-path $var.json() bypass — use readApiErrorBody()\n";
           }
           $in_block = 0;
         }

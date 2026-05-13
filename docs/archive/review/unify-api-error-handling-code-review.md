@@ -584,6 +584,108 @@ contract explicit.
 
 Total UI consumer migrations across Rounds 5+6: **50 sites** (46 in R5 + 4 in R6).
 
+---
+
+# Round 7 — Deep horizontal sweep: gate variable-name universality + dead-code
+
+User pushed: "漏れが多いですね。確実にゼロにするために再調査" — "many
+omissions still; re-investigate to guarantee zero."
+
+Five-axis comprehensive sweep covered: A1-A11 (HTTP response check shapes),
+B5 (server-side helper bypass), C3 (test mocks), D (CLI/extension), E
+(internal server-side fetch). The sweep used multi-pattern grep across all
+of `src/` not just `src/components`.
+
+## Findings
+
+### Gate scanner limitation (var-name & block-form)
+
+Rule 8's perl regex matched only `(res|response).ok` — missed alternate
+variable names like `optionsRes`, `verifyRes`, `dataRes`, `retryRes`,
+`startRes`, `vaultRes`, `listRes`, etc. Also accumulated false positives
+on brace-less `if (!res.ok) throw;` form because the depth tracker scanned
+past the statement until it found the next `}`.
+
+**Fixed**: regex now captures any JS-identifier as `$var`, requires `{` at
+end-of-line (block-form only), and uses back-reference `\Q$var\E.json(`
+for body access check so variable name matches across `if` and `json` calls.
+
+### 4 real violations the universalized gate caught
+
+1. **`emergency-access/[id]/vault/page.tsx:99`** — `vaultRes.json()` read
+   for `eaErrorToI18nKey(data?.error)` — migrated to `readApiErrorBody`.
+2. **`operator-token-card.tsx:201`** — `retryRes.json()` cast to
+   `{ error?: string }` and branched on `OPERATOR_TOKEN_*` codes —
+   migrated to `readApiErrorBody` with typed `body?.error` access.
+3. **`passkey-credentials-card.tsx:153`** — `optionsRes.json()` branched on
+   `RATE_LIMIT_EXCEEDED` / `SERVICE_UNAVAILABLE` (lowercase wire literal!
+   gate didn't catch because it was inside the `.json()` callback body,
+   not at the `error:` field of a NextResponse.json) — migrated.
+4. **`use-watchtower.ts:261`** — `startRes.json()` read `body.retryAt`
+   from a 429 response. **Dead code path**: the server emits
+   `Retry-After` header only (via `rateLimited()` helper); the body has
+   no `retryAt` field. The consumer was always falling through to the
+   fallback branch since 2026-03. Migrated to read `Retry-After` header
+   correctly; test fixtures and test names updated to match.
+
+### Mock fixture updates (RT1 mock-reality divergence cascade)
+
+The watchtower test's `jsonResponse(data, status)` helper didn't include
+a `headers` object — my Retry-After-based migration required `headers.get()`
+to be callable. Updated the helper to accept an optional `headers` object
+and surface a header-lookup that's case-insensitive. Updated 3 test cases
+to assert the new behavior (Retry-After header instead of dead `body.retryAt`).
+
+### Audited and verified clean (no actionable misses)
+
+- **A4**: `if (res.status !== 200)` shape — 0 hits in UI.
+- **A6**: `try/catch` reading parsed value — 0 hits.
+- **A5/A8 false positives (3 sites)**: `tenant-members-card.tsx:77`,
+  `tenant/general/delete/page.tsx:54`, similar admin pages —
+  `if (!r.ok) throw new Error()` with `throw` only (no body read).
+  Brace-less single-statement form. Gate ignores them (block-form-only
+  rule). No migration needed.
+- **B5**: `new Response()` direct construction — 3 sites
+  (`scim/v2/Users/[id]/route.ts:248` returns 204 No Content,
+  `with-request-log.ts:56` clones a response for logging,
+  `audit-log-stream.ts:131` streams audit logs as text/event-stream).
+  None are main-API error envelope; all intentional.
+- **D**: CLI consumers (10+ sites) — separate consumer surface; outside
+  the UI gate scope. Tracked for future SDK plan.
+- **E**: server-side internal `fetch()` to GitHub Release / Google OAuth /
+  external services — non-main-API consumers, intentionally typed
+  per the external API's shape.
+
+## Detection completeness after Round 7
+
+Every shape of bypass now has detection:
+
+| Shape | Detection |
+|-------|-----------|
+| `if (!X.ok) { X.json() }` — any var name X | Gate rule 8 |
+| `if (X.status === Nxx) { X.json() }` — any var X | Gate rule 8 |
+| `if (X.status >= 400) { X.json() }` — any var X | Gate rule 8 |
+| `if (!X.ok) STMT;` (no braces) | Gate ignores (no block); style by convention |
+| else-if chain | Gate treats as continuation (R6 fix) |
+| `body.message` / non-canonical fields in UI | TypeScript compile error |
+| Server-side `errorResponse(..., { message: ... })` | Gate rule 6 |
+| Server-side `errorResponse(..., { details: "string" })` | Gate rule 7 |
+| Server-side `validationError("string")` | TypeScript compile error (Record<string,unknown> type) |
+| Server-side bare `NextResponse.json({error,...})` | Gate rule 5 |
+| Test mock missing `error` field | Surfaced by typed helper at test runtime |
+
+## Round 7 Summary
+
+- 1 gate regex universalization (any var name + block-form-only)
+- 4 real violations migrated (vaultRes, retryRes, optionsRes, startRes)
+- 1 dead-code path fixed (watchtower body.retryAt → Retry-After header)
+- 3 mock fixtures updated to match production envelope
+- All 17 pre-pr.sh checks pass
+- 5-axis sweep (A/B/C/D/E) verified no other class of bypass exists in UI
+
+Cumulative UI consumer migrations across R5+R6+R7: **54 sites**.
+Cumulative gate rule 8 detection power: **5 shapes × any-variable-name × multi-line**.
+
 ## Round 1 Summary
 
 - Functionality: Critical 0 / Major 3 (F1, F2, F3) / Minor 3 (F4, F5, F6)

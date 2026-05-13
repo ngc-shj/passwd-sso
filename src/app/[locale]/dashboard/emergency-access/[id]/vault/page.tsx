@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { useRouter } from "@/i18n/navigation";
 import { ArrowLeft, KeyRound, Loader2, Lock } from "lucide-react";
 import { eaErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import {
   decryptPrivateKey,
   importPrivateKey,
@@ -97,8 +98,8 @@ export default function EmergencyVaultPage() {
       // 1. Fetch ECDH data
       const vaultRes = await fetchApi(apiPath.emergencyGrantVault(grantId));
       if (!vaultRes.ok) {
-        const data = await vaultRes.json().catch(() => null);
-        setError(t(eaErrorToI18nKey(data?.error)));
+        const body = await readApiErrorBody(vaultRes);
+        setError(t(eaErrorToI18nKey(body?.error)));
         setLoading(false);
         return;
       }

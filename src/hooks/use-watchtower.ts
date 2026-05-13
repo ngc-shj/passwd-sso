@@ -260,22 +260,19 @@ export function useWatchtower(
       const startRes = await fetchApi(API_PATH.WATCHTOWER_START, { method: "POST" });
       if (!startRes.ok) {
         if (startRes.status === 429) {
-          const body = await startRes.json().catch(() => null) as { retryAt?: number } | null;
-          if (typeof body?.retryAt === "number") {
-            const startedAt = body.retryAt - WATCHTOWER_COOLDOWN_MS;
-            setLastAnalyzedAt(startedAt);
-            window.localStorage.setItem(
-              LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
-              String(startedAt)
-            );
-          } else {
-            const fallbackStartedAt = Date.now();
-            setLastAnalyzedAt(fallbackStartedAt);
-            window.localStorage.setItem(
-              LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
-              String(fallbackStartedAt)
-            );
-          }
+          // Server emits Retry-After header (seconds) via rateLimited() helper;
+          // the body has no retryAt field per the canonical envelope. Reconstruct
+          // the cooldown anchor from the header so the UI countdown lines up.
+          const retryAfterSec = Number(startRes.headers.get("Retry-After"));
+          const startedAt =
+            Number.isFinite(retryAfterSec) && retryAfterSec > 0
+              ? Date.now() + retryAfterSec * 1000 - WATCHTOWER_COOLDOWN_MS
+              : Date.now();
+          setLastAnalyzedAt(startedAt);
+          window.localStorage.setItem(
+            LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
+            String(startedAt)
+          );
         }
         return;
       }
