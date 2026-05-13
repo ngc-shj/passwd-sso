@@ -110,7 +110,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   if (!sa.isActive) {
-    return errorResponseWithMessage(API_ERROR.SA_NOT_FOUND, 409, "Service account is inactive");
+    return errorResponseWithMessage(API_ERROR.SA_INACTIVE, "Service account is inactive");
   }
 
   const result = await parseBody(req, saTokenCreateSchema);

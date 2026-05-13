@@ -71,7 +71,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   if (!request.serviceAccount.isActive) {
-    return errorResponseWithMessage(API_ERROR.SA_NOT_FOUND, 409, "Service account is inactive");
+    return errorResponseWithMessage(API_ERROR.SA_INACTIVE, "Service account is inactive");
   }
 
   // Read tenant policy for JIT TTL bounds

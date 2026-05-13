@@ -228,14 +228,19 @@ the canonical UNAUTHORIZED status. Centralizing the mapping makes the code
 
 - `INVALID_ORIGIN, 500` in `vault/admin-reset` — that route refuses Host-
   header fallback when `APP_URL` is unset (see CLAUDE.md "stricter route-
-  level guard").
-- `NOT_FOUND, 410` in `share-links/[id]/content` — race-condition path where
-  a share was valid pre-check but became revoked/expired/maxViews-exceeded
-  between the check and the UPDATE. 410 Gone fits the post-race state better
-  than 404.
-- `SA_NOT_FOUND, 409` in `tenant/access-requests/[id]/approve` and
-  `tenant/service-accounts/[id]/tokens` — the SA exists but is inactive
-  (state-conflict, not not-found). TODO: introduce `SA_INACTIVE` code.
+  level guard"). This is the only remaining production override.
+
+Two earlier override candidates were resolved by introducing dedicated
+codes whose default-status matches the semantic intent:
+
+- `SHARE_GONE` (default 410) — `share-links/[id]/content` race-condition
+  path where a share was valid pre-check but became revoked/expired/
+  maxViews-exceeded between the check and the UPDATE. Replaces a previous
+  `NOT_FOUND, 410` override.
+- `SA_INACTIVE` (default 409) — service account exists but is inactive
+  (state-conflict). Replaces a previous `SA_NOT_FOUND, 409` override at
+  `tenant/access-requests/[id]/approve` and
+  `tenant/service-accounts/[id]/tokens`.
 
 The `check-api-error-codes.sh` gate rule (10) flags any `(code, status)`
 pair where the explicit status matches the default — drop the second arg.

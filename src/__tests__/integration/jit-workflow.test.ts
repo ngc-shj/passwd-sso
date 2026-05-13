@@ -404,6 +404,6 @@ describe("Scenario 4: Inactive SA JIT rejection", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(409);
-    expect(json.error).toBe("SA_NOT_FOUND");
+    expect(json.error).toBe("SA_INACTIVE");
   });
 });

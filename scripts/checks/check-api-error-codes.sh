@@ -35,8 +35,9 @@
 #      number explicitly is noise that allowed code/status mismatch bugs to
 #      ship undetected (cf. v1 API `(UNAUTHORIZED, 403)` pre-gate). Drop the
 #      second arg; use explicit override only for documented exceptions in
-#      API_ERROR_STATUS comments (currently INVALID_ORIGIN=500 in admin-reset,
-#      NOT_FOUND=410 in share-links/content, SA_NOT_FOUND=409 inactive-state).
+#      API_ERROR_STATUS comments (currently INVALID_ORIGIN=500 in admin-reset
+#      only — earlier `NOT_FOUND, 410` and `SA_NOT_FOUND, 409` overrides were
+#      replaced by dedicated codes SHARE_GONE / SA_INACTIVE).
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."

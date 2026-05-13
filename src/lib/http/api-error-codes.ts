@@ -117,6 +117,7 @@ export const API_ERROR = {
   ALREADY_REVOKED: "ALREADY_REVOKED",
   SHARE_PASSWORD_REQUIRED: "SHARE_PASSWORD_REQUIRED",
   SHARE_PASSWORD_INCORRECT: "SHARE_PASSWORD_INCORRECT",
+  SHARE_GONE: "SHARE_GONE",
 
   // ── Send ────────────────────────────────────────────────
   SEND_TEXT_TOO_LARGE: "SEND_TEXT_TOO_LARGE",
@@ -195,6 +196,7 @@ export const API_ERROR = {
   // ── Service Accounts ──────────────────────────────────────
   SA_LIMIT_EXCEEDED: "SA_LIMIT_EXCEEDED",
   SA_NOT_FOUND: "SA_NOT_FOUND",
+  SA_INACTIVE: "SA_INACTIVE",
   SA_NAME_CONFLICT: "SA_NAME_CONFLICT",
   SA_INVALID_SCOPE: "SA_INVALID_SCOPE",
   SA_TOKEN_LIMIT_EXCEEDED: "SA_TOKEN_LIMIT_EXCEEDED",
@@ -247,16 +249,10 @@ export type ApiErrorCode = (typeof API_ERROR)[keyof typeof API_ERROR];
  *   passes 500 explicitly because that route refuses Host-header fallback
  *   when APP_URL is unset (see CLAUDE.md "stricter route-level guard").
  *
- * - `NOT_FOUND` defaults to 404. `share-links/[id]/content` passes 410 in
- *   the race-condition path where a share was valid pre-check but became
- *   revoked/expired/maxViews-exceeded between the check and the UPDATE.
- *   410 Gone is HTTP-semantic for "the resource existed but is now
- *   permanently gone", which fits the post-race state better than 404.
- *
- * - `SA_NOT_FOUND` defaults to 404. Two callsites pass 409 with message
- *   "Service account is inactive" — semantically these are state-conflict
- *   not not-found. TODO: introduce SA_INACTIVE code; until then the
- *   override remains.
+ * No other production overrides remain. The historical `NOT_FOUND, 410`
+ * (share-links race-condition) and `SA_NOT_FOUND, 409` (inactive state)
+ * overrides were superseded by dedicated codes `SHARE_GONE` (default 410)
+ * and `SA_INACTIVE` (default 409) — wire shape now matches semantic intent.
  *
  * ## Status semantics quick reference
  *
@@ -373,6 +369,7 @@ export const API_ERROR_STATUS = {
   ALREADY_REVOKED: 409,
   SHARE_PASSWORD_REQUIRED: 401,
   SHARE_PASSWORD_INCORRECT: 403,
+  SHARE_GONE: 410,
 
   // ── Send ──────────────────────────────────────────────────
   SEND_TEXT_TOO_LARGE: 400,
@@ -453,6 +450,7 @@ export const API_ERROR_STATUS = {
   // ── Service Accounts ──────────────────────────────────────
   SA_LIMIT_EXCEEDED: 409,
   SA_NOT_FOUND: 404,
+  SA_INACTIVE: 409,
   SA_NAME_CONFLICT: 409,
   SA_INVALID_SCOPE: 400,
   SA_TOKEN_LIMIT_EXCEEDED: 409,
@@ -563,6 +561,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   ALREADY_REVOKED: "alreadyRevoked",
   SHARE_PASSWORD_REQUIRED: "sharePasswordRequired",
   SHARE_PASSWORD_INCORRECT: "sharePasswordIncorrect",
+  SHARE_GONE: "shareGone",
   SEND_TEXT_TOO_LARGE: "sendTextTooLarge",
   SEND_FILE_TOO_LARGE: "sendFileTooLarge",
   SEND_FILE_TYPE_NOT_ALLOWED: "sendFileTypeNotAllowed",
@@ -627,6 +626,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   OPERATOR_TOKEN_STALE_SESSION: "operatorTokenStaleSession",
   SA_LIMIT_EXCEEDED: "saLimitExceeded",
   SA_NOT_FOUND: "saNotFound",
+  SA_INACTIVE: "saInactive",
   SA_NAME_CONFLICT: "saNameConflict",
   SA_INVALID_SCOPE: "saInvalidScope",
   SA_TOKEN_LIMIT_EXCEEDED: "saTokenLimitExceeded",

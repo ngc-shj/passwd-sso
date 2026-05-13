@@ -94,7 +94,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
           AND ("max_views" IS NULL OR "view_count" < "max_views")`;
 
       if (updated === 0) {
-        return errorResponse(API_ERROR.NOT_FOUND, 410);
+        return errorResponse(API_ERROR.SHARE_GONE);
       }
       viewCountDelta = 1;
     } else {
@@ -111,7 +111,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
           AND ("max_views" IS NULL OR "view_count" < "max_views")`;
 
       if (stillValid === 0) {
-        return errorResponse(API_ERROR.NOT_FOUND, 410);
+        return errorResponse(API_ERROR.SHARE_GONE);
       }
     }
 
