@@ -61,7 +61,7 @@ async function handlePOST(req: NextRequest) {
 
   if (credentials.length === 0) {
     return errorResponse(API_ERROR.NOT_FOUND, 404, {
-      details: "No matching credentials found",
+      details: { message: "No matching credentials found" },
     });
   }
 

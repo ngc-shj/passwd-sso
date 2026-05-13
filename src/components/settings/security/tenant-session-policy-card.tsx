@@ -245,8 +245,8 @@ export function TenantSessionPolicyCard() {
         let detail: string | null = null;
         try {
           const data = await res.json();
-          if (typeof data?.message === "string") {
-            detail = data.message;
+          if (typeof data?.details?.message === "string") {
+            detail = data.details.message;
           }
         } catch {
           // Response was not JSON; fall back to the generic message.

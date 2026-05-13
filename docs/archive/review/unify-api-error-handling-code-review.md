@@ -268,6 +268,33 @@ pre-pr.sh status: ✓ 17/17 pass on HEAD after fixes.
 
 Per Step 3-8 termination rules: no Critical or Major findings remain unresolved. Next round (Round 2) verifies fixes did not introduce regressions, or skip per the Tightening-only rule.
 
+---
+
+# Round 2 — Verification & 2 new Major findings
+
+Round 2 verified all Round 1 fixes are correct and complete EXCEPT it surfaced 2 new Major findings that were either missed siblings or regressions introduced by Round 1.
+
+## F7 — Major — `webauthn/authenticate/options` adjacent string-typed details (missed in F2) — RESOLVED
+
+- File: `src/app/api/webauthn/authenticate/options/route.ts:63-65`
+- Evidence: `errorResponse(API_ERROR.NOT_FOUND, 404, { details: "No matching credentials found" })` — same class as F2 (string instead of object). F2's grep was limited to `register/verify`; this sibling slipped through.
+- Fix: wrapped as `{ details: { message: "No matching credentials found" } }`.
+
+## F8 — Major — Tenant session policy UI consumer regression introduced by F3 — RESOLVED
+
+- File: `src/components/settings/security/tenant-session-policy-card.tsx:248-249`
+- Evidence: UI reads `data?.message` from `PATCH /api/tenant/policy`. F3 migrated that route's 12 sites from top-level `{ message }` to `{ details: { message } }`, but the UI consumer was not audited (only the directory-sync UI was audited under F1).
+- Impact: tenant admins updating session policy lost the actionable cross-field validation message (e.g. "vaultAutoLockMinutes (60) must be <=..."), seeing only the generic "session policy save failed" toast.
+- Fix: updated consumer to read `data?.details?.message`. Verified no other UI consumer (broad grep across `src/components/`, `src/cli/`, `src/extension/`) reads `data.message` / `body.message`.
+
+## Round 2 Summary
+
+- 2 Major findings (F7, F8) both RESOLVED.
+- No new findings beyond what was already enumerated. All Round 1 fixes verified correct.
+- pre-pr.sh ✓ 17/17 on the Round 2 fix commit.
+
+Per Step 3-8, all Critical/Major findings resolved. Round 3 not required — proceeding to final commit (Step 3-9).
+
 ## Round 1 Summary
 
 - Functionality: Critical 0 / Major 3 (F1, F2, F3) / Minor 3 (F4, F5, F6)
