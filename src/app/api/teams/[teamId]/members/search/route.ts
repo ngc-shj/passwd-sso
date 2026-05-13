@@ -7,7 +7,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { TEAM_PERMISSION, INVITATION_STATUS } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
 import { SEARCH_QUERY_MAX_LENGTH } from "@/lib/validations/common";
 import { TEAM_MEMBER_SEARCH_LIMIT } from "@/lib/validations/common.server";
 
@@ -33,7 +33,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   const q = req.nextUrl.searchParams.get("q") ?? "";
   const parsed = querySchema.safeParse(q);
   if (!parsed.success) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
 
   // Escape LIKE wildcards to prevent full-table scans

@@ -64,7 +64,7 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
   try {
     body = rawText ? JSON.parse(rawText) : {};
   } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
+    return errorResponse(API_ERROR.INVALID_JSON);
   }
   const parsed = runSchema.safeParse(body);
   if (!parsed.success) {
@@ -101,9 +101,9 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
   if (!result.success) {
     // If it was a lock conflict, return 409
     if (result.errorMessage?.includes("already running")) {
-      return errorResponse(API_ERROR.CONFLICT, 409, { details: result });
+      return errorResponse(API_ERROR.CONFLICT, undefined, { details: result });
     }
-    return errorResponse(API_ERROR.SYNC_FAILED, 500, { details: result });
+    return errorResponse(API_ERROR.SYNC_FAILED, undefined, { details: result });
   }
 
   return NextResponse.json(result);

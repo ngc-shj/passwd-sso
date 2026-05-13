@@ -219,7 +219,7 @@ async function handlePOST(
         currentKeyVersion: outcome.currentKeyVersion,
       },
     });
-    return errorResponse(API_ERROR.CONFLICT, 409, {
+    return errorResponse(API_ERROR.CONFLICT, undefined, {
       currentKeyVersion: outcome.currentKeyVersion,
     });
   }

@@ -66,7 +66,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   );
 
   if (!target || target.teamId !== teamId || target.deactivatedAt !== null) {
-    return errorResponse(API_ERROR.MEMBER_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
   }
 
   const result = await parseBody(req, updateMemberRoleSchema);
@@ -75,7 +75,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   // Owner transfer: only OWNER can promote someone to OWNER
   if (result.data.role === TEAM_ROLE.OWNER) {
     if (actorMembership.role !== TEAM_ROLE.OWNER) {
-      return errorResponse(API_ERROR.OWNER_ONLY, 403);
+      return errorResponse(API_ERROR.OWNER_ONLY);
     }
 
     // Transfer: promote target to OWNER, demote self to ADMIN (atomic)
@@ -111,7 +111,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 
   // Cannot change OWNER role (unless transferring ownership above)
   if (target.role === TEAM_ROLE.OWNER) {
-    return errorResponse(API_ERROR.CANNOT_CHANGE_OWNER_ROLE, 403);
+    return errorResponse(API_ERROR.CANNOT_CHANGE_OWNER_ROLE);
   }
 
   // Cannot change role of someone at or above your level (except OWNER can do anything)
@@ -119,7 +119,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     actorMembership.role !== TEAM_ROLE.OWNER &&
     !isRoleAbove(actorMembership.role, target.role)
   ) {
-    return errorResponse(API_ERROR.CANNOT_CHANGE_HIGHER_ROLE, 403);
+    return errorResponse(API_ERROR.CANNOT_CHANGE_HIGHER_ROLE);
   }
 
   const updated = await withTeamTenantRls(teamId, async () =>
@@ -175,18 +175,18 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   );
 
   if (!target || target.teamId !== teamId || target.deactivatedAt !== null) {
-    return errorResponse(API_ERROR.MEMBER_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
   }
 
   if (target.role === TEAM_ROLE.OWNER) {
-    return errorResponse(API_ERROR.CANNOT_REMOVE_OWNER, 403);
+    return errorResponse(API_ERROR.CANNOT_REMOVE_OWNER);
   }
 
   if (
     actorMembership.role !== TEAM_ROLE.OWNER &&
     !isRoleAbove(actorMembership.role, target.role)
   ) {
-    return errorResponse(API_ERROR.CANNOT_REMOVE_HIGHER_ROLE, 403);
+    return errorResponse(API_ERROR.CANNOT_REMOVE_HIGHER_ROLE);
   }
 
   await withTeamTenantRls(teamId, async () =>

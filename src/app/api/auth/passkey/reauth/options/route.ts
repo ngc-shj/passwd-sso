@@ -31,11 +31,11 @@ async function handlePOST(req: NextRequest) {
 
   const redis = getRedis();
   if (!redis) {
-    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 503);
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
   }
 
   if (!process.env.WEBAUTHN_RP_ID) {
-    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 503);
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
   }
 
   const allowCredentials = await withBypassRls(

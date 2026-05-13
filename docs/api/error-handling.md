@@ -207,20 +207,57 @@ deferred because it is a wire-shape change visible to existing clients (CLI,
 extension, iOS would all need updating to interpret 423). When the migration
 runs, it must coordinate across all consuming surfaces.
 
-### 3.4 Adding a new error code
+### 3.4 Default HTTP status per code
 
-Five steps:
+Each `ApiErrorCode` has a single canonical HTTP status declared in
+`API_ERROR_STATUS` (in `src/lib/http/api-error-codes.ts`). `errorResponse(code)`
+and `errorResponseWithMessage(code, message)` (no status arg) read from this
+map. Pass an explicit status only when the route genuinely needs to deviate.
+
+The `satisfies Record<ApiErrorCode, number>` constraint enforces that every
+code has a default at compile time. Adding a code without a status mapping
+fails the build.
+
+**Why centralized**: prior to this map, every callsite duplicated the
+status next to the code. That duplication allowed code/status mismatch bugs
+to ship undetected — e.g. v1 API returning `(UNAUTHORIZED, 403)` when 401 is
+the canonical UNAUTHORIZED status. Centralizing the mapping makes the code
+→ status invariant compiler-enforced and reviewable in one place.
+
+**Documented overrides** (do NOT migrate to default):
+
+- `INVALID_ORIGIN, 500` in `vault/admin-reset` — that route refuses Host-
+  header fallback when `APP_URL` is unset (see CLAUDE.md "stricter route-
+  level guard").
+- `NOT_FOUND, 410` in `share-links/[id]/content` — race-condition path where
+  a share was valid pre-check but became revoked/expired/maxViews-exceeded
+  between the check and the UPDATE. 410 Gone fits the post-race state better
+  than 404.
+- `SA_NOT_FOUND, 409` in `tenant/access-requests/[id]/approve` and
+  `tenant/service-accounts/[id]/tokens` — the SA exists but is inactive
+  (state-conflict, not not-found). TODO: introduce `SA_INACTIVE` code.
+
+The `check-api-error-codes.sh` gate rule (10) flags any `(code, status)`
+pair where the explicit status matches the default — drop the second arg.
+
+### 3.5 Adding a new error code
+
+Six steps:
 
 1. Add the code to `API_ERROR` in `src/lib/http/api-error-codes.ts`.
-2. Add the i18n key mapping to `API_ERROR_I18N` in the same file. The
+2. Add the default HTTP status to `API_ERROR_STATUS` in the same file. The
+   `satisfies Record<ApiErrorCode, number>` constraint enforces presence at
+   compile time. Pick the status from §3.3 by semantic class.
+3. Add the i18n key mapping to `API_ERROR_I18N` in the same file. The
    `satisfies Record<ApiErrorCode, string>` constraint enforces presence at
    compile time.
-3. Add the English copy to `messages/en/ApiErrors.json`.
-4. Add the Japanese copy to `messages/ja/ApiErrors.json`. `src/i18n/messages-consistency.test.ts`
+4. Add the English copy to `messages/en/ApiErrors.json`.
+5. Add the Japanese copy to `messages/ja/ApiErrors.json`. `src/i18n/messages-consistency.test.ts`
    enforces locale parity per namespace; both locales MUST be updated in
    lockstep.
-5. Use `errorResponse(API_ERROR.YOUR_NEW_CODE, <status>)` at the route. If a
-   test asserts the wire string, update it.
+6. Use `errorResponse(API_ERROR.YOUR_NEW_CODE)` at the route (no status arg
+   — the default from step 2 is applied automatically). If a test asserts
+   the wire string, update it.
 
 **User-domain vocabulary rule**: code names use product-domain language
 (vault, passphrase, recovery, member, grant, session, team, attachment, ...),
@@ -461,14 +498,21 @@ import { errorResponseWithMessage } from "@/lib/http/api-response";
 
 return errorResponseWithMessage(
   API_ERROR.VALIDATION_ERROR,
-  400,
   `Maximum ${MAX_CIDRS} CIDRs allowed`,
 );
 ```
 
+The status defaults to `API_ERROR_STATUS[code]` (see §3.4). Pass an explicit
+status as the middle argument only for documented overrides:
+
+```ts
+errorResponseWithMessage(API_ERROR.SA_NOT_FOUND, 409, "Service account is inactive");
+```
+
 For Zod / multi-field validation errors, use `validationError(treeOrObject)`
 directly (it takes `Record<string, unknown>` — strings would be a TypeScript
-compile error per the C6 invariant).
+compile error per the C6 invariant). For input that fails earlier than Zod
+(no details to surface), call `validationError()` with no arguments.
 
 ## 8. Adding a new context field
 
@@ -513,6 +557,7 @@ Grep patterns (forbidden):
 | `schemas":\s*\[\s*"urn:ietf:params:scim` outside `src/lib/scim/` | SCIM envelope must not leak into non-SCIM routes |
 | `jsonrpc:\s*"2\.0"` outside `src/lib/mcp/` and `src/app/api/mcp/route.ts` | JSON-RPC envelope must not leak into other routes |
 | `switch.*err.*case ["']` in `src/components/` (allow-list: `eaErrorToI18nKey`) | Catches manual switch-on-error-code that bypasses `apiErrorToI18nKey` |
+| `errorResponse(API_ERROR.X, <status>)` where `<status>` matches `API_ERROR_STATUS[X]` | Rule (10): redundant explicit status — the default-status map is the SSoT; passing it again is noise that allows code/status mismatch bugs to ship undetected. Drop the second arg. Documented overrides (see §3.4) deviate from the default and are not flagged. |
 
 **TODO**: a custom ESLint rule could enforce the above at lint time with
 better filename allow-listing. The shell-script grep gate is the

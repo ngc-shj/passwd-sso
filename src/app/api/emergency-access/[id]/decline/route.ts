@@ -36,7 +36,7 @@ async function handlePOST(
   }
 
   if (grant.granteeEmail.toLowerCase() !== session.user.email.toLowerCase()) {
-    return errorResponse(API_ERROR.NOT_AUTHORIZED_FOR_GRANT, 403);
+    return errorResponse(API_ERROR.NOT_AUTHORIZED_FOR_GRANT);
   }
 
   // Atomic compare-and-swap: only transitions a still-PENDING row.
@@ -50,7 +50,7 @@ async function handlePOST(
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!transitionResult.ok) {
-    return errorResponse(API_ERROR.GRANT_NOT_PENDING, 400);
+    return errorResponse(API_ERROR.GRANT_NOT_PENDING);
   }
 
   await logAuditAsync({

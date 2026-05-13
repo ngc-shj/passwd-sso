@@ -75,7 +75,7 @@ async function handlePUT(
 
         // Cannot set parent to self
         if (newParentId === id) {
-          return errorResponse(API_ERROR.FOLDER_CIRCULAR_REFERENCE, 400);
+          return errorResponse(API_ERROR.FOLDER_CIRCULAR_REFERENCE);
         }
 
         const isCircular = await checkCircularReference(
@@ -84,7 +84,7 @@ async function handlePUT(
           (parentId) => getPersonalParent(session.user.id, parentId),
         );
         if (isCircular) {
-          return errorResponse(API_ERROR.FOLDER_CIRCULAR_REFERENCE, 400);
+          return errorResponse(API_ERROR.FOLDER_CIRCULAR_REFERENCE);
         }
       }
 
@@ -95,7 +95,7 @@ async function handlePUT(
           (parentId) => getPersonalParent(session.user.id, parentId),
         );
       } catch {
-        return errorResponse(API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED, 400);
+        return errorResponse(API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED);
       }
 
       updateData.parentId = newParentId;
@@ -123,7 +123,7 @@ async function handlePUT(
         }),
       );
       if (dup && dup.id !== id) {
-        return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
+        return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS);
       }
     } else {
       const rootDup = await withUserTenantRls(session.user.id, async () =>
@@ -132,7 +132,7 @@ async function handlePUT(
         }),
       );
       if (rootDup && rootDup.id !== id) {
-        return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
+        return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS);
       }
     }
   }
@@ -150,7 +150,7 @@ async function handlePUT(
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"
     ) {
-      return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
+      return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS);
     }
     throw err;
   }

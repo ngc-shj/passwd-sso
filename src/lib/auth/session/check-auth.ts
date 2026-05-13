@@ -68,7 +68,7 @@ export async function checkAuth(
     if (authResult?.type === "scope_insufficient") {
       return {
         ok: false,
-        response: errorResponse(API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT, 403),
+        response: errorResponse(API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT),
       };
     }
 

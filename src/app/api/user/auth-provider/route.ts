@@ -34,7 +34,7 @@ async function handleGET() {
 
     return NextResponse.json({ canPasskeySignIn });
   } catch {
-    return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
+    return errorResponse(API_ERROR.INTERNAL_ERROR);
   }
 }
 

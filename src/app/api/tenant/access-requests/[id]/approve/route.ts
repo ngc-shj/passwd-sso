@@ -147,13 +147,13 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     );
   } catch (err) {
     if (err instanceof Error && err.message === "Already processed or wrong tenant") {
-      return errorResponse(API_ERROR.CONFLICT, 409);
+      return errorResponse(API_ERROR.CONFLICT);
     }
     if (err instanceof Error && err.message === "Token limit exceeded") {
-      return errorResponse(API_ERROR.SA_TOKEN_LIMIT_EXCEEDED, 409);
+      return errorResponse(API_ERROR.SA_TOKEN_LIMIT_EXCEEDED);
     }
     if (err instanceof Error && err.message === "No valid scopes after re-validation") {
-      return errorResponseWithMessage(API_ERROR.SA_INVALID_SCOPE, 400, "No valid scopes remain after re-validation");
+      return errorResponseWithMessage(API_ERROR.SA_INVALID_SCOPE, "No valid scopes remain after re-validation");
     }
     throw err;
   }

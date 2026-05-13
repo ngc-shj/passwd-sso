@@ -109,7 +109,7 @@ async function handlePOST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
+    return errorResponse(API_ERROR.INVALID_JSON);
   }
 
   const parsed = rotateKeySchema.safeParse(body);
@@ -139,7 +139,7 @@ async function handlePOST(request: NextRequest) {
   );
 
   if (!user?.vaultSetupAt || !user.masterPasswordServerHash || !user.masterPasswordServerSalt) {
-    return errorResponse(API_ERROR.VAULT_NOT_SETUP, 404);
+    return errorResponse(API_ERROR.VAULT_NOT_SETUP);
   }
 
   // Verify current passphrase
@@ -150,7 +150,7 @@ async function handlePOST(request: NextRequest) {
   const hashA = Buffer.from(computedHash, "hex");
   const hashB = Buffer.from(user.masterPasswordServerHash, "hex");
   if (hashA.length !== hashB.length || !timingSafeEqual(hashA, hashB)) {
-    return errorResponse(API_ERROR.INVALID_PASSPHRASE, 401);
+    return errorResponse(API_ERROR.INVALID_PASSPHRASE);
   }
 
   const newKeyVersion = user.keyVersion + 1;
@@ -184,29 +184,29 @@ async function handlePOST(request: NextRequest) {
     );
   } catch (e) {
     if (e instanceof LegacyAttachmentsResidualError) {
-      return errorResponse(API_ERROR.ATTACHMENT_MIGRATION_INCOMPLETE, 409);
+      return errorResponse(API_ERROR.ATTACHMENT_MIGRATION_INCOMPLETE);
     }
     if (e instanceof AttachmentCekManifestMismatchError) {
-      return errorResponse(API_ERROR.ATTACHMENT_KEY_MANIFEST_MISMATCH, 409);
+      return errorResponse(API_ERROR.ATTACHMENT_KEY_MANIFEST_MISMATCH);
     }
     if (e instanceof LegacyAttachmentInconsistentVersionError) {
-      return errorResponse(API_ERROR.ATTACHMENT_INCONSISTENT_VERSION, 409);
+      return errorResponse(API_ERROR.ATTACHMENT_INCONSISTENT_VERSION);
     }
     if (e instanceof Mode2InvariantViolationError) {
       // Server-side data corruption (mode-2 row with NULL cek_*). Surface
       // as 500 to match the post-condition error pattern; rotation must
       // not silently rewrap a half-written row.
       getLogger().error({ userId }, "vault.rotateKey.mode2InvariantViolation");
-      return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
+      return errorResponse(API_ERROR.INTERNAL_ERROR);
     }
     if (e instanceof RotationPostConditionError) {
-      return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
+      return errorResponse(API_ERROR.INTERNAL_ERROR);
     }
     if (e instanceof Error && e.message === "ENTRY_COUNT_MISMATCH") {
-      return errorResponse(API_ERROR.ENTRY_COUNT_MISMATCH, 400);
+      return errorResponse(API_ERROR.ENTRY_COUNT_MISMATCH);
     }
     if (e instanceof Error && e.message === "HISTORY_COUNT_MISMATCH") {
-      return errorResponse(API_ERROR.ENTRY_COUNT_MISMATCH, 400);
+      return errorResponse(API_ERROR.ENTRY_COUNT_MISMATCH);
     }
     throw e;
   }

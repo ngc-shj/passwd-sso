@@ -51,7 +51,7 @@ async function handlePOST(
 
   const redis = getRedis();
   if (!redis) {
-    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 503);
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
   }
 
   // Ownership check — the caller must own the credential they want to

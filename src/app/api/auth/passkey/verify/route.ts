@@ -47,14 +47,14 @@ async function handlePOST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return errorResponse(API_ERROR.INVALID_REQUEST, 400);
+    return errorResponse(API_ERROR.INVALID_REQUEST);
   }
 
   if (
     typeof body.credentialResponse !== "string" ||
     typeof body.challengeId !== "string"
   ) {
-    return errorResponse(API_ERROR.INVALID_REQUEST, 400);
+    return errorResponse(API_ERROR.INVALID_REQUEST);
   }
 
   // Verify WebAuthn authentication
@@ -64,7 +64,7 @@ async function handlePOST(req: NextRequest) {
   });
 
   if (!user) {
-    return errorResponse(API_ERROR.AUTHENTICATION_FAILED, 401);
+    return errorResponse(API_ERROR.AUTHENTICATION_FAILED);
   }
 
   // SSO tenant guard: reject non-bootstrap (SSO) tenant users.
@@ -79,7 +79,7 @@ async function handlePOST(req: NextRequest) {
     }),
   BYPASS_PURPOSE.AUTH_FLOW);
   if (!existingUser?.tenantId || !existingUser.tenant || !existingUser.tenant.isBootstrap) {
-    return errorResponse(API_ERROR.AUTHENTICATION_FAILED, 401);
+    return errorResponse(API_ERROR.AUTHENTICATION_FAILED);
   }
 
   // Create database session (same as Auth.js would for OAuth providers)

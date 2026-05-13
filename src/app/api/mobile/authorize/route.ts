@@ -115,7 +115,7 @@ async function handleGET(req: NextRequest): Promise<Response> {
   try {
     redirectTarget = canonicalHtu({ route: "/api/mobile/authorize/redirect" });
   } catch {
-    return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
+    return errorResponse(API_ERROR.INTERNAL_ERROR);
   }
   const redirectUrl = new URL(redirectTarget);
   redirectUrl.searchParams.set("code", code);

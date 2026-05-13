@@ -20,7 +20,7 @@ async function handleGET(_req: NextRequest) {
   const userId = session.user.id;
   const tenantId = await resolveUserTenantId(userId);
   if (!tenantId) {
-    return errorResponse(API_ERROR.NO_TENANT, 403);
+    return errorResponse(API_ERROR.NO_TENANT);
   }
 
   const clients = await withBypassRls(prisma, () =>
@@ -77,7 +77,7 @@ async function handleDELETE(_req: NextRequest) {
 
   const tenantId = await resolveUserTenantId(userId);
   if (!tenantId) {
-    return errorResponse(API_ERROR.NO_TENANT, 403);
+    return errorResponse(API_ERROR.NO_TENANT);
   }
 
   const now = new Date();

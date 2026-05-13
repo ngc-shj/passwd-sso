@@ -66,7 +66,7 @@ async function handleGET(request: NextRequest) {
       gracePeriodRemaining,
     });
   } catch {
-    return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
+    return errorResponse(API_ERROR.INTERNAL_ERROR);
   }
 }
 

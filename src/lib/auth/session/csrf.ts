@@ -16,7 +16,7 @@ import { errorResponse } from "../../http/api-response";
 import { getAppOrigin } from "@/lib/url-helpers";
 
 const forbidden = (): NextResponse =>
-  errorResponse(API_ERROR.INVALID_ORIGIN, 403);
+  errorResponse(API_ERROR.INVALID_ORIGIN);
 
 /**
  * Assert that the request's Origin header matches the application URL.

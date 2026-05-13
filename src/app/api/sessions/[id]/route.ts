@@ -42,7 +42,7 @@ async function handleDELETE(
     }),
   );
   if (target?.sessionToken === currentToken) {
-    return errorResponse(API_ERROR.CANNOT_REVOKE_CURRENT_SESSION, 400);
+    return errorResponse(API_ERROR.CANNOT_REVOKE_CURRENT_SESSION);
   }
 
   // Delete with userId condition to prevent deleting other users' sessions
@@ -53,7 +53,7 @@ async function handleDELETE(
   );
 
   if (result.count === 0) {
-    return errorResponse(API_ERROR.SESSION_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.SESSION_NOT_FOUND);
   }
 
   // R3: invalidate cache after DB delete commits (S-6 sequencing).

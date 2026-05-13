@@ -25,8 +25,8 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
 
-vi.mock("@/lib/http/api-error-codes", () => ({
-  API_ERROR: { UNAUTHORIZED: "UNAUTHORIZED" },
+vi.mock("@/lib/http/api-error-codes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/http/api-error-codes")>()),
 }));
 
 vi.mock("@/lib/http/with-request-log", () => ({

@@ -18,6 +18,18 @@ describe("errorResponse", () => {
     expect(await res.json()).toEqual({ error: "NOT_FOUND" });
   });
 
+  it("derives status from API_ERROR_STATUS when omitted", async () => {
+    const res = errorResponse(API_ERROR.CONFLICT);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "CONFLICT" });
+  });
+
+  it("explicit status overrides the default (used for documented exceptions)", async () => {
+    // INVALID_ORIGIN defaults to 403; vault/admin-reset overrides to 500.
+    const res = errorResponse(API_ERROR.INVALID_ORIGIN, 500);
+    expect(res.status).toBe(500);
+  });
+
   it("merges details into response body", async () => {
     const res = errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
       details: { properties: { title: { errors: ["required"] } } },
@@ -86,6 +98,14 @@ describe("preset helpers", () => {
     const body = await res.json();
     expect(body.error).toBe("VALIDATION_ERROR");
     expect(body.details).toEqual(details);
+  });
+
+  it("validationError() (no arg) returns 400 without details key", async () => {
+    const res = validationError();
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body).toEqual({ error: "VALIDATION_ERROR" });
+    expect("details" in body).toBe(false);
   });
 
   it("zodValidationError returns treeifyError shape from ZodError", async () => {

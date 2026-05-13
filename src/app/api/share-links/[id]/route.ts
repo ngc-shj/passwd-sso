@@ -40,7 +40,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   }
 
   if (share.revokedAt) {
-    return errorResponse(API_ERROR.ALREADY_REVOKED, 409);
+    return errorResponse(API_ERROR.ALREADY_REVOKED);
   }
 
   const teamPasswordEntryId = share.teamPasswordEntryId;

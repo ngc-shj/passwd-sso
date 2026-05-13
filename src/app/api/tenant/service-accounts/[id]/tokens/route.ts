@@ -156,7 +156,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     );
   } catch (err) {
     if (err instanceof Error && err.message === "Token limit exceeded") {
-      return errorResponse(API_ERROR.SA_TOKEN_LIMIT_EXCEEDED, 409);
+      return errorResponse(API_ERROR.SA_TOKEN_LIMIT_EXCEEDED);
     }
     throw err;
   }

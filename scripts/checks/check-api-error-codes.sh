@@ -28,6 +28,15 @@
 #  (9) C4 client-side: same scope — MUST NOT use `.then((<r>) => <r>.json())`
 #      Response-chain form. Convert to `await` form so rule 8 covers it.
 #      Includes `.js` files in extension/src/ (parallel content-script impl).
+# (10) Redundant explicit status — `errorResponse(API_ERROR.X, <status>)` /
+#      `errorResponseWithMessage(API_ERROR.X, <status>, msg)` where `<status>`
+#      matches `API_ERROR_STATUS[X]`. The default-status map in
+#      `api-error-codes.ts` is the SSoT for code → status. Passing the same
+#      number explicitly is noise that allowed code/status mismatch bugs to
+#      ship undetected (cf. v1 API `(UNAUTHORIZED, 403)` pre-gate). Drop the
+#      second arg; use explicit override only for documented exceptions in
+#      API_ERROR_STATUS comments (currently INVALID_ORIGIN=500 in admin-reset,
+#      NOT_FOUND=410 in share-links/content, SA_NOT_FOUND=409 inactive-state).
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -265,6 +274,81 @@ c9_hits=$(
 if [ -n "$c9_hits" ]; then
   echo "FORBIDDEN: .then() chain with .json() — use await form so readApiErrorBody gate covers it (C4)"
   echo "$c9_hits"
+  violations=$((violations + 1))
+fi
+
+# (10) Redundant explicit status — `errorResponse(API_ERROR.X, <status>)` /
+# `errorResponseWithMessage(API_ERROR.X, <status>, msg)` where `<status>`
+# matches `API_ERROR_STATUS[X]`. Extract the map from api-error-codes.ts and
+# compare each callsite's explicit status against the default. Multi-line
+# aware. Excludes test files and helper module. Documented overrides remain
+# explicit (their default-vs-actual differs).
+c10_hits=$(
+  perl -0777 -e '
+    use strict;
+    use warnings;
+
+    # Step 1: parse API_ERROR_STATUS = { ... } from api-error-codes.ts.
+    open(my $src, "<", "src/lib/http/api-error-codes.ts") or die "cannot open api-error-codes.ts";
+    my $content = do { local $/; <$src> };
+    close($src);
+    my %defaults;
+    if ($content =~ /API_ERROR_STATUS\s*=\s*\{(.*?)\}\s*as\s+const\s+satisfies/s) {
+      my $body = $1;
+      while ($body =~ /^\s*([A-Z_][A-Z0-9_]*)\s*:\s*(\d+)\s*,/gm) {
+        $defaults{$1} = $2;
+      }
+    } else {
+      die "could not locate API_ERROR_STATUS map in api-error-codes.ts";
+    }
+
+    # Step 2: scan production files for errorResponse(...) / errorResponseWithMessage(...).
+    use File::Find;
+    my @files;
+    for my $root ("src/app", "src/lib") {
+      find(sub {
+        return unless -f $_;
+        return unless /\.(ts|tsx)$/;
+        return if $File::Find::name =~ /\.test\.(ts|tsx)$/;
+        return if $File::Find::name =~ m|/__tests__/|;
+        return if $File::Find::name =~ m|src/lib/http/api-response\.ts$|;
+        push @files, $File::Find::name;
+      }, $root);
+    }
+
+    my $violations = 0;
+    for my $f (@files) {
+      open(my $fh, "<", $f) or next;
+      my $body = do { local $/; <$fh> };
+      close($fh);
+
+      # errorResponse(API_ERROR.CODE, NUM) / errorResponse(API_ERROR.CODE, NUM, ...
+      while ($body =~ /errorResponse\(\s*API_ERROR\.([A-Z_][A-Z0-9_]*)\s*,\s*(\d+)\s*[,)]/g) {
+        my ($code, $status) = ($1, $2);
+        next unless exists $defaults{$code};
+        if ($defaults{$code} == $status) {
+          my $line = (substr($body, 0, $-[0]) =~ tr/\n/\n/) + 1;
+          print "$f:$line: redundant status $status — drop arg (default for $code is $status)\n";
+          $violations++;
+        }
+      }
+
+      # errorResponseWithMessage(API_ERROR.CODE, NUM, "...")
+      while ($body =~ /errorResponseWithMessage\(\s*API_ERROR\.([A-Z_][A-Z0-9_]*)\s*,\s*(\d+)\s*,/g) {
+        my ($code, $status) = ($1, $2);
+        next unless exists $defaults{$code};
+        if ($defaults{$code} == $status) {
+          my $line = (substr($body, 0, $-[0]) =~ tr/\n/\n/) + 1;
+          print "$f:$line: redundant status $status in errorResponseWithMessage — drop arg (default for $code is $status)\n";
+          $violations++;
+        }
+      }
+    }
+  ' 2>/dev/null || true
+)
+if [ -n "$c10_hits" ]; then
+  echo "FORBIDDEN: redundant explicit status arg matching API_ERROR_STATUS default"
+  echo "$c10_hits"
   violations=$((violations + 1))
 fi
 

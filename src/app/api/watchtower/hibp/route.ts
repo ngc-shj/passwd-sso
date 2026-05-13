@@ -37,7 +37,7 @@ async function handleGET(request: Request) {
   const { searchParams } = new URL(request.url);
   const prefix = (searchParams.get("prefix") || "").toUpperCase();
   if (!PREFIX_REGEX.test(prefix)) {
-    return errorResponse(API_ERROR.INVALID_PREFIX, 400);
+    return errorResponse(API_ERROR.INVALID_PREFIX);
   }
 
   const now = Date.now();
@@ -60,7 +60,7 @@ async function handleGET(request: Request) {
   );
 
   if (!res.ok) {
-    return errorResponse(API_ERROR.UPSTREAM_ERROR, 502);
+    return errorResponse(API_ERROR.UPSTREAM_ERROR);
   }
 
   const text = await res.text();

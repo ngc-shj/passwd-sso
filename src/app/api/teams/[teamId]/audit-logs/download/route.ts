@@ -47,7 +47,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     await assertPolicyAllowsExport(teamId);
   } catch (e) {
     if (e instanceof PolicyViolationError) {
-      return errorResponse(API_ERROR.POLICY_EXPORT_DISABLED, 403);
+      return errorResponse(API_ERROR.POLICY_EXPORT_DISABLED);
     }
     throw e;
   }

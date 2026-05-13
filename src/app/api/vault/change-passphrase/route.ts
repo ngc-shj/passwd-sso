@@ -70,12 +70,12 @@ async function handlePOST(request: NextRequest) {
   );
 
   if (!user?.vaultSetupAt) {
-    return errorResponse(API_ERROR.VAULT_NOT_SETUP, 404);
+    return errorResponse(API_ERROR.VAULT_NOT_SETUP);
   }
 
   // Verifier must be set (backfilled during unlock)
   if (!user.passphraseVerifierHmac) {
-    return errorResponse(API_ERROR.VERIFIER_NOT_SET, 409);
+    return errorResponse(API_ERROR.VERIFIER_NOT_SET);
   }
 
   // Verify current passphrase via verifier (dual-version: verifies against stored pepper version)
@@ -92,7 +92,7 @@ async function handlePOST(request: NextRequest) {
         metadata: { storedVersion: user.passphraseVerifierVersion },
       });
     }
-    return errorResponse(API_ERROR.INVALID_PASSPHRASE, 401);
+    return errorResponse(API_ERROR.INVALID_PASSPHRASE);
   }
 
   // Update: re-wrapped secret key + new verifier (keyVersion unchanged)

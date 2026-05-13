@@ -35,7 +35,7 @@ async function handlePOST(req: NextRequest) {
 
   const redis = getRedis();
   if (!redis) {
-    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 503);
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
   }
 
   // Parse optional body for targeted credential test
@@ -60,7 +60,7 @@ async function handlePOST(req: NextRequest) {
   );
 
   if (credentials.length === 0) {
-    return errorResponseWithMessage(API_ERROR.NOT_FOUND, 404, "No matching credentials found");
+    return errorResponseWithMessage(API_ERROR.NOT_FOUND, "No matching credentials found");
   }
 
   const options = await generateAuthenticationOpts(

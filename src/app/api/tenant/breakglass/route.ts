@@ -49,7 +49,7 @@ async function handlePOST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
 
   const parsed = createBreakglassGrantSchema.safeParse(body);
@@ -137,7 +137,7 @@ async function handlePOST(req: NextRequest) {
       return { status: "created" as const, grant, targetUser: member.user };
     });
   } catch {
-    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 500);
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
   }
 
   if (result.status === "no_member") {
@@ -145,7 +145,7 @@ async function handlePOST(req: NextRequest) {
   }
 
   if (result.status === "duplicate") {
-    return errorResponse(API_ERROR.CONFLICT, 409);
+    return errorResponse(API_ERROR.CONFLICT);
   }
 
   const { grant, targetUser: targetMemberUser } = result;

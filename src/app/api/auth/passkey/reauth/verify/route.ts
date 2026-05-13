@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { assertOrigin } from "@/lib/auth/session/csrf";
 import { parseBody } from "@/lib/http/parse-body";
@@ -51,7 +51,7 @@ async function handlePOST(req: NextRequest) {
   try {
     response = JSON.parse(result.data.credentialResponse) as AuthenticationResponseJSON;
   } catch {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
 
   const verifiedAt = new Date();

@@ -110,35 +110,8 @@ vi.mock("@/lib/constants/auth/tenant-permission", () => ({
   TENANT_PERMISSION: { MEMBER_MANAGE: "MEMBER_MANAGE" },
 }));
 
-vi.mock("@/lib/http/api-error-codes", () => ({
-  API_ERROR: {
-    UNAUTHORIZED: "UNAUTHORIZED",
-    RATE_LIMIT_EXCEEDED: "RATE_LIMIT_EXCEEDED",
-    VALIDATION_ERROR: "VALIDATION_ERROR",
-    SELF_LOCKOUT: "SELF_LOCKOUT",
-  },
-}));
-
-vi.mock("@/lib/http/api-response", () => ({
-  errorResponse: (error: string, status: number, extra?: Record<string, unknown>) => {
-    const body = { error, ...extra };
-    return new Response(JSON.stringify(body), {
-      status,
-      headers: { "Content-Type": "application/json" },
-    });
-  },
-  errorResponseWithMessage: (error: string, status: number, message: string) => {
-    const body = { error, details: { message } };
-    return new Response(JSON.stringify(body), {
-      status,
-      headers: { "Content-Type": "application/json" },
-    });
-  },
-  unauthorized: () =>
-    new Response(JSON.stringify({ error: "UNAUTHORIZED" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    }),
+vi.mock("@/lib/http/api-error-codes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/http/api-error-codes")>()),
 }));
 
 vi.mock("@/lib/validations", () => ({

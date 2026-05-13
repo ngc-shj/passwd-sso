@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
 import { requireTeamMember } from "@/lib/auth/access/team-auth";
 import { TEAM_ROLE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -22,12 +22,12 @@ async function handleGET(req: NextRequest) {
   const status = searchParams.get("status"); // "active" | "expired" | "revoked" | null (all)
   const shareType = searchParams.get("shareType"); // "entry" | "send" | null (all)
   if (shareType && shareType !== "entry" && shareType !== "send") {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
   const teamId = searchParams.get("team");
   const cursor = searchParams.get("cursor");
   if (!isValidCursorId(cursor)) {
-    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+    return errorResponse(API_ERROR.INVALID_CURSOR);
   }
   const limit = 30;
 
@@ -96,7 +96,7 @@ async function handleGET(req: NextRequest) {
       }),
     );
   } catch {
-    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+    return errorResponse(API_ERROR.INVALID_CURSOR);
   }
 
   const hasMore = shares.length > limit;

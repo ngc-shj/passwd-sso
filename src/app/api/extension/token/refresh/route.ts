@@ -80,7 +80,7 @@ async function handlePOST(req: NextRequest) {
   // Family absolute timeout enforcement. Pre-migration tokens have null familyId;
   // we refuse to refresh them so every live token eventually converges to a family.
   if (!familyId || !familyCreatedAt) {
-    return errorResponse(API_ERROR.EXTENSION_TOKEN_SESSION_EXPIRED, 401);
+    return errorResponse(API_ERROR.EXTENSION_TOKEN_SESSION_EXPIRED);
   }
   const familyAgeMs = now.getTime() - familyCreatedAt.getTime();
   if (familyAgeMs > absoluteMinutes * MS_PER_MINUTE) {
@@ -91,7 +91,7 @@ async function handlePOST(req: NextRequest) {
       tenantId: activeSession.tenantId,
       reason: "family_expired",
     });
-    return errorResponse(API_ERROR.EXTENSION_TOKEN_SESSION_EXPIRED, 401);
+    return errorResponse(API_ERROR.EXTENSION_TOKEN_SESSION_EXPIRED);
   }
 
   // Interactive transaction: revoke old (optimistic lock), then create new only if revoke succeeded
@@ -130,7 +130,7 @@ async function handlePOST(req: NextRequest) {
   );
 
   if (!created) {
-    return errorResponse(API_ERROR.EXTENSION_TOKEN_REVOKED, 401);
+    return errorResponse(API_ERROR.EXTENSION_TOKEN_REVOKED);
   }
 
   const body = {
@@ -142,7 +142,7 @@ async function handlePOST(req: NextRequest) {
   const parsed = TokenIssueResponseSchema.safeParse(body);
   if (!parsed.success) {
     logger.error({ error: parsed.error.message }, "extension token refresh response validation failed");
-    return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
+    return errorResponse(API_ERROR.INTERNAL_ERROR);
   }
 
   return NextResponse.json(parsed.data);

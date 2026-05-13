@@ -58,7 +58,7 @@ export async function parseBody<T>(
   } catch {
     return {
       ok: false,
-      response: errorResponse(API_ERROR.INVALID_JSON, 400),
+      response: errorResponse(API_ERROR.INVALID_JSON),
     };
   }
 

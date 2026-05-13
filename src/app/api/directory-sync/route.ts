@@ -104,7 +104,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
   if (existing) {
-    return errorResponse(API_ERROR.CONFLICT, 409);
+    return errorResponse(API_ERROR.CONFLICT);
   }
 
   // We need a temporary ID for AAD — create the row first with empty creds,

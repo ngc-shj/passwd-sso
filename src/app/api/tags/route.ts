@@ -90,7 +90,7 @@ async function handlePOST(req: NextRequest) {
       validateParentChain(null, parentId, allTags);
     } catch (e) {
       if (e instanceof TagTreeError) {
-        return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, e.message);
+        return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, e.message);
       }
       throw e;
     }
@@ -107,7 +107,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
   if (existing) {
-    return errorResponse(API_ERROR.TAG_ALREADY_EXISTS, 409);
+    return errorResponse(API_ERROR.TAG_ALREADY_EXISTS);
   }
 
   const tag = await withUserTenantRls(session.user.id, async (tenantId) =>

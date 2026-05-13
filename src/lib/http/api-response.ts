@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { z, type ZodError } from "zod";
-import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
+import {
+  API_ERROR,
+  API_ERROR_STATUS,
+  type ApiErrorCode,
+} from "@/lib/http/api-error-codes";
 import { mapPrismaError } from "@/lib/prisma/prisma-error";
 
 /**
@@ -47,39 +51,46 @@ function isAuthError(e: unknown): e is AuthErrorShape {
  *
  * Replaces direct `NextResponse.json({ error: ... }, { status })` calls
  * with a single helper that enforces consistent error shape.
+ *
+ * The `status` argument is optional and defaults to `API_ERROR_STATUS[code]`
+ * (see `@/lib/http/api-error-codes`). Pass an explicit status only for the
+ * documented exceptions in that map (e.g. `INVALID_ORIGIN, 500` in
+ * vault/admin-reset). When the explicit value matches the default, the gate
+ * `scripts/checks/check-api-error-codes.sh` flags it as redundant — drop
+ * the second argument.
  */
 export function errorResponse(
   code: ApiErrorCode,
-  status: number,
+  status?: number,
   details?: Record<string, unknown>,
   headers?: HeadersInit,
 ): NextResponse {
   return NextResponse.json(
     details ? { error: code, ...details } : { error: code },
-    { status, headers },
+    { status: status ?? API_ERROR_STATUS[code], headers },
   );
 }
 
 // ── Common presets ──────────────────────────────────────────────
 
-export const unauthorized = () =>
-  errorResponse(API_ERROR.UNAUTHORIZED, 401);
+export const unauthorized = () => errorResponse(API_ERROR.UNAUTHORIZED);
 
-export const notFound = () =>
-  errorResponse(API_ERROR.NOT_FOUND, 404);
+export const notFound = () => errorResponse(API_ERROR.NOT_FOUND);
 
-export const forbidden = () =>
-  errorResponse(API_ERROR.FORBIDDEN, 403);
+export const forbidden = () => errorResponse(API_ERROR.FORBIDDEN);
 
-// `validationError(details)` accepts only object-shaped details (per C6 — the
-// `details` body field must be a z.treeifyError tree or equivalent object).
-// Passing a string would be a runtime envelope violation; the type now
+// `validationError(details?)` — `details` is optional (undefined → no
+// `details` field in the body). Accepts only object-shaped details (per C6
+// — the `details` body field must be a z.treeifyError tree or equivalent
+// object). Passing a string would be a runtime envelope violation; the type
 // rejects it at compile time. Use `errorResponseWithMessage(VALIDATION_ERROR,
-// 400, msg)` for single-line message wrapping.
-export const validationError = (details: Record<string, unknown>) =>
-  errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-    details,
-  });
+// msg)` for single-line message wrapping.
+export const validationError = (details?: Record<string, unknown>) =>
+  errorResponse(
+    API_ERROR.VALIDATION_ERROR,
+    undefined,
+    details ? { details } : undefined,
+  );
 
 export const zodValidationError = (error: ZodError) =>
   validationError(z.treeifyError(error) as Record<string, unknown>);
@@ -93,20 +104,48 @@ export const zodValidationError = (error: ZodError) =>
  *
  * For Zod / multi-field validation errors, use `validationError(treeOrObject)`
  * directly; this helper is for single-line diagnostic messages.
+ *
+ * Two call shapes:
+ * - `errorResponseWithMessage(code, message)` — status defaults to
+ *   `API_ERROR_STATUS[code]` (preferred)
+ * - `errorResponseWithMessage(code, status, message)` — explicit status
+ *   override (only for documented exceptions in API_ERROR_STATUS)
  */
-export const errorResponseWithMessage = (
+export function errorResponseWithMessage(
+  code: ApiErrorCode,
+  message: string,
+): NextResponse;
+export function errorResponseWithMessage(
   code: ApiErrorCode,
   status: number,
   message: string,
-): NextResponse =>
-  errorResponse(code, status, { details: { message } });
+): NextResponse;
+export function errorResponseWithMessage(
+  code: ApiErrorCode,
+  statusOrMessage: number | string,
+  message?: string,
+): NextResponse {
+  if (typeof statusOrMessage === "string") {
+    return errorResponse(code, undefined, {
+      details: { message: statusOrMessage },
+    });
+  }
+  return errorResponse(code, statusOrMessage, {
+    details: { message: message as string },
+  });
+}
 
 export const rateLimited = (retryAfterMs?: number) => {
   const headers: Record<string, string> = {};
   if (retryAfterMs != null && retryAfterMs > 0) {
     headers["Retry-After"] = String(Math.ceil(retryAfterMs / 1000));
   }
-  return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429, undefined, headers);
+  return errorResponse(
+    API_ERROR.RATE_LIMIT_EXCEEDED,
+    undefined,
+    undefined,
+    headers,
+  );
 };
 
 /**

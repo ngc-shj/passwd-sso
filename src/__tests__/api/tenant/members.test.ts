@@ -60,12 +60,8 @@ vi.mock("@/lib/webhook-dispatcher", () => ({
 vi.mock("@/lib/constants/auth/tenant-permission", () => ({
   TENANT_PERMISSION: { MEMBER_MANAGE: "MEMBER_MANAGE" },
 }));
-vi.mock("@/lib/http/api-response", () => ({
-  unauthorized: () => new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401 }),
-  errorResponse: (msg: string, status: number, extra?: unknown) =>
-    new Response(JSON.stringify({ error: msg, ...extra }), { status }),
-  notFound: () => new Response(JSON.stringify({ error: "NOT_FOUND" }), { status: 404 }),
-  forbidden: () => new Response(JSON.stringify({ error: "FORBIDDEN" }), { status: 403 }),
+vi.mock("@/lib/http/api-response", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/http/api-response")>()),
 }));
 
 import { PUT } from "@/app/api/tenant/members/[userId]/route";

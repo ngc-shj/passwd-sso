@@ -61,7 +61,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   );
 
   if (!history || history.entryId !== id) {
-    return errorResponse(API_ERROR.HISTORY_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.HISTORY_NOT_FOUND);
   }
 
   await withTeamTenantRls(teamId, async () =>

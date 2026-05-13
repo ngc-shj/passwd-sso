@@ -103,7 +103,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     membership.role === TEAM_ROLE.MEMBER &&
     existingEntry.createdById !== session.user.id
   ) {
-    return errorResponse(API_ERROR.ONLY_OWN_ENTRIES, 403);
+    return errorResponse(API_ERROR.ONLY_OWN_ENTRIES);
   }
 
   const result = await parseBody(req, updateTeamE2EPasswordSchema);

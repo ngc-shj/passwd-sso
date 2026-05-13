@@ -26,17 +26,17 @@ async function handleDELETE(
   const userId = session.user.id;
   const tenantId = await resolveUserTenantId(userId);
   if (!tenantId) {
-    return errorResponse(API_ERROR.NO_TENANT, 403);
+    return errorResponse(API_ERROR.NO_TENANT);
   }
 
   const { id: sessionId } = await params;
   if (!z.string().uuid().safeParse(sessionId).success) {
-    return errorResponse(API_ERROR.INVALID_SESSION, 400);
+    return errorResponse(API_ERROR.INVALID_SESSION);
   }
 
   const revoked = await revokeDelegationSession(userId, sessionId, tenantId);
   if (!revoked) {
-    return errorResponse(API_ERROR.SESSION_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.SESSION_NOT_FOUND);
   }
 
   return NextResponse.json({ revoked: true });

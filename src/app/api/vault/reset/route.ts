@@ -47,7 +47,7 @@ async function handlePOST(request: NextRequest) {
   if (!result.ok) return result.response;
 
   if (result.data.confirmation !== CONFIRMATION_TOKEN) {
-    return errorResponse(API_ERROR.VAULT_RESET_CONFIRMATION_MISMATCH, 400);
+    return errorResponse(API_ERROR.VAULT_RESET_CONFIRMATION_MISMATCH);
   }
 
   const userId = session.user.id;

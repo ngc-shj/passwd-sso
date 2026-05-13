@@ -30,7 +30,7 @@ async function handlePOST(_req: NextRequest) {
 
   const redis = getRedis();
   if (!redis) {
-    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 503);
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
   }
 
   // Fetch existing credentials to exclude re-registration

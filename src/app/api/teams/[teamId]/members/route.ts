@@ -9,7 +9,7 @@ import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
 import { buildTeamMemberDisplayItems } from "@/lib/team/team-member-display";
 
 type Params = { params: Promise<{ teamId: string }> };
@@ -67,7 +67,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   // Cannot add yourself
   if (userId === session.user.id) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
 
   type MemberResult = {
@@ -133,14 +133,14 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     });
   } catch (e) {
     if (e instanceof AlreadyMemberError) {
-      return errorResponse(API_ERROR.ALREADY_A_MEMBER, 409);
+      return errorResponse(API_ERROR.ALREADY_A_MEMBER);
     }
     if (e instanceof ScimManagedError) {
-      return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER, 409);
+      return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER);
     }
     // Prisma unique constraint violation (race condition)
     if (isPrismaUniqueConstraintError(e)) {
-      return errorResponse(API_ERROR.ALREADY_A_MEMBER, 409);
+      return errorResponse(API_ERROR.ALREADY_A_MEMBER);
     }
     return handleAuthError(e);
   }

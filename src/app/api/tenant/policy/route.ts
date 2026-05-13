@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, errorResponseWithMessage, handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { createRateLimiter } from "@/lib/security/rate-limit";
@@ -172,7 +172,7 @@ async function handlePATCH(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
   const {
     maxConcurrentSessions,
@@ -218,7 +218,7 @@ async function handlePATCH(req: NextRequest) {
       maxConcurrentSessions < MAX_CONCURRENT_SESSIONS_MIN ||
       maxConcurrentSessions > MAX_CONCURRENT_SESSIONS_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -230,7 +230,7 @@ async function handlePATCH(req: NextRequest) {
       vaultAutoLockMinutes < VAULT_AUTO_LOCK_MIN ||
       vaultAutoLockMinutes > VAULT_AUTO_LOCK_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -239,7 +239,7 @@ async function handlePATCH(req: NextRequest) {
   // provider; default-deny protects against AutoFill phishing in apps that
   // do not publish AASA. (S24 of ios-autofill-mvp plan.)
   if (allowAppSideAutofill !== undefined && typeof allowAppSideAutofill !== "boolean") {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
 
   // Validate sessionIdleTimeoutMinutes: now non-nullable per design. null is rejected.
@@ -251,7 +251,7 @@ async function handlePATCH(req: NextRequest) {
       sessionIdleTimeoutMinutes < SESSION_IDLE_TIMEOUT_MIN ||
       sessionIdleTimeoutMinutes > SESSION_IDLE_TIMEOUT_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -264,7 +264,7 @@ async function handlePATCH(req: NextRequest) {
       sessionAbsoluteTimeoutMinutes < SESSION_ABSOLUTE_TIMEOUT_MIN ||
       sessionAbsoluteTimeoutMinutes > SESSION_ABSOLUTE_TIMEOUT_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -277,7 +277,7 @@ async function handlePATCH(req: NextRequest) {
       extensionTokenIdleTimeoutMinutes < EXTENSION_TOKEN_IDLE_TIMEOUT_MIN ||
       extensionTokenIdleTimeoutMinutes > EXTENSION_TOKEN_IDLE_TIMEOUT_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -290,52 +290,52 @@ async function handlePATCH(req: NextRequest) {
       extensionTokenAbsoluteTimeoutMinutes < EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MIN ||
       extensionTokenAbsoluteTimeoutMinutes > EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
   // Validate allowedCidrs: null/[] or array of valid CIDR strings, max 50
   if (allowedCidrs !== null && allowedCidrs !== undefined) {
     if (!Array.isArray(allowedCidrs)) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
     if (allowedCidrs.length > MAX_CIDRS) {
-      return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, `Maximum ${MAX_CIDRS} CIDRs allowed`);
+      return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, `Maximum ${MAX_CIDRS} CIDRs allowed`);
     }
     for (const cidr of allowedCidrs) {
       if (typeof cidr !== "string" || !isValidCidr(cidr)) {
         const truncated = typeof cidr === "string" ? cidr.slice(0, IP_ADDRESS_MAX_LENGTH) : String(cidr).slice(0, IP_ADDRESS_MAX_LENGTH);
-        return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, `Invalid CIDR: ${truncated}`);
+        return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, `Invalid CIDR: ${truncated}`);
       }
     }
   }
 
   // Validate tailscaleEnabled: boolean
   if (tailscaleEnabled !== undefined && typeof tailscaleEnabled !== "boolean") {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
 
   // Validate tailscaleTailnet format before the DB read (pure string validation)
   if (tailscaleTailnet !== null && tailscaleTailnet !== undefined) {
     if (typeof tailscaleTailnet !== "string" || tailscaleTailnet.length > TAILNET_NAME_MAX_LENGTH) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
     // DNS hostname characters only: alphanumeric, hyphens, dots
     if (tailscaleTailnet.length > 0 && !/^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$/.test(tailscaleTailnet)) {
-      return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "tailscaleTailnet must contain only valid DNS hostname characters (a-z, 0-9, hyphens, dots)");
+      return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, "tailscaleTailnet must contain only valid DNS hostname characters (a-z, 0-9, hyphens, dots)");
     }
   }
 
   // Validate requireMinPinLength: null (disabled) or integer within CTAP2 bounds
   if (requireMinPinLength !== null && requireMinPinLength !== undefined) {
     if (!pinLengthSchema.safeParse(requireMinPinLength).success) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
   // Validate requirePasskey: boolean
   if (requirePasskey !== undefined && typeof requirePasskey !== "boolean") {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
 
   // Validate passkeyGracePeriodDays: null (immediate enforcement) or integer within bounds
@@ -346,7 +346,7 @@ async function handlePATCH(req: NextRequest) {
       passkeyGracePeriodDays < PASSKEY_GRACE_PERIOD_MIN ||
       passkeyGracePeriodDays > PASSKEY_GRACE_PERIOD_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -358,7 +358,7 @@ async function handlePATCH(req: NextRequest) {
       lockoutThreshold1 < LOCKOUT_THRESHOLD_MIN ||
       lockoutThreshold1 > LOCKOUT_THRESHOLD_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -370,7 +370,7 @@ async function handlePATCH(req: NextRequest) {
       lockoutDuration1Minutes < LOCKOUT_DURATION_MIN ||
       lockoutDuration1Minutes > LOCKOUT_DURATION_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -382,7 +382,7 @@ async function handlePATCH(req: NextRequest) {
       lockoutThreshold2 < LOCKOUT_THRESHOLD_MIN ||
       lockoutThreshold2 > LOCKOUT_THRESHOLD_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -394,7 +394,7 @@ async function handlePATCH(req: NextRequest) {
       lockoutDuration2Minutes < LOCKOUT_DURATION_MIN ||
       lockoutDuration2Minutes > LOCKOUT_DURATION_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -406,7 +406,7 @@ async function handlePATCH(req: NextRequest) {
       lockoutThreshold3 < LOCKOUT_THRESHOLD_MIN ||
       lockoutThreshold3 > LOCKOUT_THRESHOLD_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -418,7 +418,7 @@ async function handlePATCH(req: NextRequest) {
       lockoutDuration3Minutes < LOCKOUT_DURATION_MIN ||
       lockoutDuration3Minutes > LOCKOUT_DURATION_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -430,7 +430,7 @@ async function handlePATCH(req: NextRequest) {
       passwordMaxAgeDays < PASSWORD_MAX_AGE_MIN ||
       passwordMaxAgeDays > PASSWORD_MAX_AGE_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -442,7 +442,7 @@ async function handlePATCH(req: NextRequest) {
       passwordExpiryWarningDays < PASSWORD_EXPIRY_WARNING_MIN ||
       passwordExpiryWarningDays > PASSWORD_EXPIRY_WARNING_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -454,7 +454,7 @@ async function handlePATCH(req: NextRequest) {
       auditLogRetentionDays < AUDIT_LOG_RETENTION_MIN ||
       auditLogRetentionDays > AUDIT_LOG_RETENTION_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -466,28 +466,28 @@ async function handlePATCH(req: NextRequest) {
       tenantMinPasswordLength < POLICY_MIN_PW_LENGTH_MIN ||
       tenantMinPasswordLength > POLICY_MIN_PW_LENGTH_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
   // Validate tenantRequireUppercase: boolean
   if (tenantRequireUppercase !== undefined && typeof tenantRequireUppercase !== "boolean") {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
 
   // Validate tenantRequireLowercase: boolean
   if (tenantRequireLowercase !== undefined && typeof tenantRequireLowercase !== "boolean") {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
 
   // Validate tenantRequireNumbers: boolean
   if (tenantRequireNumbers !== undefined && typeof tenantRequireNumbers !== "boolean") {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
 
   // Validate tenantRequireSymbols: boolean
   if (tenantRequireSymbols !== undefined && typeof tenantRequireSymbols !== "boolean") {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
 
   // Validate saTokenMaxExpiryDays: null (no limit) or integer within bounds
@@ -498,7 +498,7 @@ async function handlePATCH(req: NextRequest) {
       saTokenMaxExpiryDays < SA_TOKEN_MAX_EXPIRY_MIN ||
       saTokenMaxExpiryDays > SA_TOKEN_MAX_EXPIRY_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -510,7 +510,7 @@ async function handlePATCH(req: NextRequest) {
       jitTokenDefaultTtlSec < JIT_TOKEN_TTL_MIN ||
       jitTokenDefaultTtlSec > JIT_TOKEN_TTL_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -522,7 +522,7 @@ async function handlePATCH(req: NextRequest) {
       jitTokenMaxTtlSec < JIT_TOKEN_TTL_MIN ||
       jitTokenMaxTtlSec > JIT_TOKEN_TTL_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -534,7 +534,7 @@ async function handlePATCH(req: NextRequest) {
       delegationDefaultTtlSec < DELEGATION_TTL_MIN ||
       delegationDefaultTtlSec > DELEGATION_TTL_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -546,7 +546,7 @@ async function handlePATCH(req: NextRequest) {
       delegationMaxTtlSec < DELEGATION_TTL_MIN ||
       delegationMaxTtlSec > DELEGATION_TTL_MAX
     ) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
   }
 
@@ -611,10 +611,10 @@ async function handlePATCH(req: NextRequest) {
     if (tailscaleTailnet === undefined) {
       // Not in request — check if DB already has a value
       if (!currentTenant?.tailscaleTailnet) {
-        return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "tailscaleTailnet is required when tailscaleEnabled is true");
+        return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, "tailscaleTailnet is required when tailscaleEnabled is true");
       }
     } else if (!tailscaleTailnet || typeof tailscaleTailnet !== "string" || tailscaleTailnet.trim().length === 0) {
-      return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "tailscaleTailnet is required when tailscaleEnabled is true");
+      return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, "tailscaleTailnet is required when tailscaleEnabled is true");
     }
   }
 
@@ -632,12 +632,12 @@ async function handlePATCH(req: NextRequest) {
 
   // Lockout thresholds must always be strictly ascending
   if (t1 >= t2 || t2 >= t3) {
-    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "Lockout thresholds must be strictly ascending: threshold1 < threshold2 < threshold3");
+    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, "Lockout thresholds must be strictly ascending: threshold1 < threshold2 < threshold3");
   }
 
   // Lockout durations must always be strictly ascending
   if (d1 >= d2 || d2 >= d3) {
-    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "Lockout durations must be strictly ascending: duration1 < duration2 < duration3");
+    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, "Lockout durations must be strictly ascending: duration1 < duration2 < duration3");
   }
 
   // Cross-field: vault_auto_lock must not exceed idle timeouts.
@@ -662,7 +662,6 @@ async function handlePATCH(req: NextRequest) {
   ) {
     return errorResponseWithMessage(
       API_ERROR.VALIDATION_ERROR,
-      400,
       `vaultAutoLockMinutes (${mergedVaultAutoLock}) must be <= sessionIdleTimeoutMinutes (${mergedSessionIdle})`,
     );
   }
@@ -673,7 +672,6 @@ async function handlePATCH(req: NextRequest) {
   ) {
     return errorResponseWithMessage(
       API_ERROR.VALIDATION_ERROR,
-      400,
       `vaultAutoLockMinutes (${mergedVaultAutoLock}) must be <= extensionTokenIdleTimeoutMinutes (${mergedExtIdle})`,
     );
   }
@@ -682,7 +680,7 @@ async function handlePATCH(req: NextRequest) {
   const mergedMaxAge = passwordMaxAgeDays !== undefined ? passwordMaxAgeDays : currentTenant?.passwordMaxAgeDays;
   const mergedWarning = passwordExpiryWarningDays !== undefined ? passwordExpiryWarningDays : currentTenant?.passwordExpiryWarningDays;
   if (mergedMaxAge != null && mergedWarning != null && mergedWarning >= mergedMaxAge) {
-    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "passwordExpiryWarningDays must be less than passwordMaxAgeDays");
+    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, "passwordExpiryWarningDays must be less than passwordMaxAgeDays");
   }
 
   // Cross-field validation: jitTokenDefaultTtlSec must be <= jitTokenMaxTtlSec when both set
@@ -690,7 +688,7 @@ async function handlePATCH(req: NextRequest) {
   const mergedJitDefault = jitTokenDefaultTtlSec !== undefined ? jitTokenDefaultTtlSec : currentTenant?.jitTokenDefaultTtlSec ?? null;
   const mergedJitMax = jitTokenMaxTtlSec !== undefined ? jitTokenMaxTtlSec : currentTenant?.jitTokenMaxTtlSec ?? null;
   if (mergedJitDefault != null && mergedJitMax != null && mergedJitDefault > mergedJitMax) {
-    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "jitTokenDefaultTtlSec must be <= jitTokenMaxTtlSec");
+    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, "jitTokenDefaultTtlSec must be <= jitTokenMaxTtlSec");
   }
 
   // Cross-field validation: delegationDefaultTtlSec must be <= delegationMaxTtlSec when both set
@@ -698,7 +696,7 @@ async function handlePATCH(req: NextRequest) {
   const mergedDelegDefault = delegationDefaultTtlSec !== undefined ? delegationDefaultTtlSec : currentTenant?.delegationDefaultTtlSec ?? null;
   const mergedDelegMax = delegationMaxTtlSec !== undefined ? delegationMaxTtlSec : currentTenant?.delegationMaxTtlSec ?? null;
   if (mergedDelegDefault != null && mergedDelegMax != null && mergedDelegDefault > mergedDelegMax) {
-    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "delegationDefaultTtlSec must be <= delegationMaxTtlSec");
+    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, "delegationDefaultTtlSec must be <= delegationMaxTtlSec");
   }
 
   // requirePasskeyEnabledAt set-once logic uses the already-fetched current state
@@ -708,7 +706,7 @@ async function handlePATCH(req: NextRequest) {
   const newAllowedCidrs = allowedCidrs !== undefined ? (allowedCidrs ?? []) : undefined;
   const newTailscaleEnabled = tailscaleEnabled !== undefined ? tailscaleEnabled : undefined;
   if (confirmLockout !== undefined && typeof confirmLockout !== "boolean") {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
   if ((newAllowedCidrs !== undefined || newTailscaleEnabled !== undefined) && !confirmLockout) {
     const hypothetical = {
@@ -722,7 +720,7 @@ async function handlePATCH(req: NextRequest) {
       const message = clientIp
         ? "Your current IP would be blocked by this policy. Set confirmLockout: true to proceed."
         : "Your IP could not be determined; you may be locked out by this policy. Set confirmLockout: true to proceed.";
-      return errorResponseWithMessage(API_ERROR.SELF_LOCKOUT, 409, message);
+      return errorResponseWithMessage(API_ERROR.SELF_LOCKOUT, message);
     }
   }
 

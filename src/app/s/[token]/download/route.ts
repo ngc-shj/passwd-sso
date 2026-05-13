@@ -70,14 +70,14 @@ export async function GET(req: NextRequest, { params }: Params) {
     if (share.accessPasswordHash) {
       const authHeader = req.headers.get("authorization");
       if (!authHeader?.startsWith("Bearer ")) {
-        return errorResponse(API_ERROR.SHARE_PASSWORD_REQUIRED, 401);
+        return errorResponse(API_ERROR.SHARE_PASSWORD_REQUIRED);
       }
       const accessToken = authHeader.slice(7);
       if (accessToken.length > 512) {
-        return errorResponse(API_ERROR.UNAUTHORIZED, 401);
+        return errorResponse(API_ERROR.UNAUTHORIZED);
       }
       if (!verifyShareAccessToken(accessToken, share.id)) {
-        return errorResponse(API_ERROR.UNAUTHORIZED, 401);
+        return errorResponse(API_ERROR.UNAUTHORIZED);
       }
 
       // Atomically increment viewCount for password-protected downloads.

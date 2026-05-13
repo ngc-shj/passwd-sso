@@ -17,7 +17,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, forbidden, notFound, unauthorized, rateLimited } from "@/lib/http/api-response";
+import { errorResponse, forbidden, notFound, unauthorized, rateLimited, validationError } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { LegacyAttachmentInconsistentVersionError } from "@/lib/vault/rotate-key-server";
 
@@ -108,7 +108,7 @@ async function handlePOST(
     }),
   );
   if (count >= MAX_ATTACHMENTS_PER_ENTRY) {
-    return errorResponse(API_ERROR.ATTACHMENT_LIMIT_EXCEEDED, 400);
+    return errorResponse(API_ERROR.ATTACHMENT_LIMIT_EXCEEDED);
   }
 
   // Early rejection: check Content-Length before consuming body into memory
@@ -116,7 +116,7 @@ async function handlePOST(
   if (contentLength) {
     const declaredSize = parseInt(contentLength, 10);
     if (!Number.isNaN(declaredSize) && declaredSize > MAX_FILE_SIZE * 2) {
-      return errorResponse(API_ERROR.PAYLOAD_TOO_LARGE, 413);
+      return errorResponse(API_ERROR.PAYLOAD_TOO_LARGE);
     }
   }
 
@@ -125,7 +125,7 @@ async function handlePOST(
   try {
     formData = await req.formData();
   } catch {
-    return errorResponse(API_ERROR.INVALID_FORM_DATA, 400);
+    return errorResponse(API_ERROR.INVALID_FORM_DATA);
   }
 
   const clientId = formData.get("id") as string | null;
@@ -144,38 +144,38 @@ async function handlePOST(
   const cekWrapAadVersionStr = formData.get("cekWrapAadVersion") as string | null;
 
   if (!file || !iv || !authTag || !filename || !contentType || !sizeBytes) {
-    return errorResponse(API_ERROR.MISSING_REQUIRED_FIELDS, 400);
+    return errorResponse(API_ERROR.MISSING_REQUIRED_FIELDS);
   }
 
   // Require mode-2 CEK fields
   if (!cekEncrypted || !cekIv || !cekAuthTag || !cekKeyVersionStr || !cekWrapAadVersionStr) {
-    return errorResponse(API_ERROR.MISSING_REQUIRED_FIELDS, 400);
+    return errorResponse(API_ERROR.MISSING_REQUIRED_FIELDS);
   }
   if (!/^[0-9a-f]{24}$/.test(cekIv)) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
   if (!/^[0-9a-f]{32}$/.test(cekAuthTag)) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
   const cekKeyVersion = parseInt(cekKeyVersionStr, 10);
   if (Number.isNaN(cekKeyVersion) || cekKeyVersion < 1) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
   const cekWrapAadVersion = parseInt(cekWrapAadVersionStr, 10);
   if (Number.isNaN(cekWrapAadVersion) || cekWrapAadVersion < 1) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
   // Cap cekEncrypted base64 length at the trust boundary so a malformed
   // client cannot inflate the column. Same cap as migrate / rotation.
   if (cekEncrypted.length > CEK_WRAP_BASE64_MAX) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
   // Reject non-base64 characters (newlines, base64url `-`/`_`, padding in
   // wrong position, etc.) before they reach `Buffer.from(_, "base64")`,
   // which silently drops invalid bytes and would otherwise let a malformed
   // wrap survive on the row.
   if (!BASE64_RE.test(cekEncrypted)) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
 
   // The cekKeyVersion ↔ user.keyVersion equality check happens INSIDE the
@@ -190,39 +190,39 @@ async function handlePOST(
 
   // Validate iv/authTag format (hex strings)
   if (!/^[0-9a-f]{24}$/.test(iv)) {
-    return errorResponse(API_ERROR.INVALID_ENCRYPTION_FORMAT, 400);
+    return errorResponse(API_ERROR.INVALID_ENCRYPTION_FORMAT);
   }
   if (!/^[0-9a-f]{32}$/.test(authTag)) {
-    return errorResponse(API_ERROR.INVALID_ENCRYPTION_FORMAT, 400);
+    return errorResponse(API_ERROR.INVALID_ENCRYPTION_FORMAT);
   }
 
   // Validate original file size (before encryption)
   const originalSize = parseInt(sizeBytes, 10);
   if (Number.isNaN(originalSize) || originalSize <= 0 || originalSize > MAX_FILE_SIZE) {
-    return errorResponse(API_ERROR.FILE_TOO_LARGE, 400);
+    return errorResponse(API_ERROR.FILE_TOO_LARGE);
   }
 
   // Validate extension
   const ext = getExtension(filename);
   if (!ALLOWED_EXTENSIONS.includes(ext as typeof ALLOWED_EXTENSIONS[number])) {
-    return errorResponse(API_ERROR.EXTENSION_NOT_ALLOWED, 400);
+    return errorResponse(API_ERROR.EXTENSION_NOT_ALLOWED);
   }
 
   // Validate content type
   if (!ALLOWED_CONTENT_TYPES.includes(contentType as typeof ALLOWED_CONTENT_TYPES[number])) {
-    return errorResponse(API_ERROR.CONTENT_TYPE_NOT_ALLOWED, 400);
+    return errorResponse(API_ERROR.CONTENT_TYPE_NOT_ALLOWED);
   }
 
   // Validate filename (reject path traversal, CRLF, null bytes, Windows reserved names, etc.)
   if (!isValidSendFilename(filename)) {
-    return errorResponse(API_ERROR.INVALID_FILENAME, 400);
+    return errorResponse(API_ERROR.INVALID_FILENAME);
   }
   const sanitizedFilename = filename.slice(0, FILENAME_MAX_LENGTH);
 
   // Read encrypted blob and validate actual size
   const buffer = Buffer.from(await file.arrayBuffer());
   if (buffer.length > MAX_FILE_SIZE) {
-    return errorResponse(API_ERROR.FILE_TOO_LARGE, 400);
+    return errorResponse(API_ERROR.FILE_TOO_LARGE);
   }
 
   const blobStore = getAttachmentBlobStore();
@@ -233,7 +233,7 @@ async function handlePOST(
   // when the request is rejected.
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : AAD_VERSION;
   if (Number.isNaN(aadVersion) || aadVersion < 1 || aadVersion > 1) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
   const storedBlob = await blobStore.putObject(buffer, blobContext);
   let attachment;
@@ -292,7 +292,7 @@ async function handlePOST(
   } catch (error) {
     await blobStore.deleteObject(storedBlob, blobContext).catch(() => {});
     if (error instanceof LegacyAttachmentInconsistentVersionError) {
-      return errorResponse(API_ERROR.ATTACHMENT_INCONSISTENT_VERSION, 409);
+      return errorResponse(API_ERROR.ATTACHMENT_INCONSISTENT_VERSION);
     }
     if (error instanceof Error && error.message === "USER_NOT_FOUND") {
       return notFound();

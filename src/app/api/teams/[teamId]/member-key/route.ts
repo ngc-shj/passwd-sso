@@ -6,7 +6,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, validationError } from "@/lib/http/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -34,7 +34,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   );
 
   if (!membership?.keyDistributed) {
-    return errorResponse(API_ERROR.KEY_NOT_DISTRIBUTED, 403);
+    return errorResponse(API_ERROR.KEY_NOT_DISTRIBUTED);
   }
 
   // Optional keyVersion query param (for history restore with old key)
@@ -44,7 +44,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   if (keyVersionParam) {
     const keyVersion = parseInt(keyVersionParam, 10);
     if (Number.isNaN(keyVersion) || keyVersion < 1 || keyVersion > 10000) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+      return validationError();
     }
     memberKey = await withTeamTenantRls(teamId, async () =>
       prisma.teamMemberKey.findUnique({
@@ -68,7 +68,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   }
 
   if (!memberKey) {
-    return errorResponse(API_ERROR.MEMBER_KEY_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.MEMBER_KEY_NOT_FOUND);
   }
 
   return NextResponse.json({

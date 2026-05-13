@@ -50,7 +50,7 @@ async function handlePOST(
   );
 
   if (!transitionResult.ok) {
-    return errorResponse(API_ERROR.INVALID_STATUS, 400);
+    return errorResponse(API_ERROR.INVALID_STATUS);
   }
 
   await logAuditAsync({

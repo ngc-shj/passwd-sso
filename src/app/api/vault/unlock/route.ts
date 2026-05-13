@@ -43,7 +43,7 @@ async function handlePOST(request: NextRequest) {
   // Lockout check — before rate limiter and passphrase verification
   const lockoutStatus = await checkLockout(session.user.id);
   if (lockoutStatus.locked) {
-    return errorResponse(API_ERROR.ACCOUNT_LOCKED, 403, {
+    return errorResponse(API_ERROR.ACCOUNT_LOCKED, undefined, {
       lockedUntil: lockoutStatus.lockedUntil,
     });
   }
@@ -78,7 +78,7 @@ async function handlePOST(request: NextRequest) {
   );
 
   if (!user?.vaultSetupAt || !user.masterPasswordServerHash || !user.masterPasswordServerSalt) {
-    return errorResponse(API_ERROR.VAULT_NOT_SETUP, 404);
+    return errorResponse(API_ERROR.VAULT_NOT_SETUP);
   }
 
   // Verify: SHA-256(authHash + serverSalt) === stored serverHash
@@ -95,13 +95,13 @@ async function handlePOST(request: NextRequest) {
       // Client should retry with Retry-After + random jitter (0-2s)
       return errorResponse(
         API_ERROR.SERVICE_UNAVAILABLE,
-        503,
+        undefined,
         undefined,
         { "Retry-After": "1" },
       );
     }
     if (failResult.locked) {
-      return errorResponse(API_ERROR.ACCOUNT_LOCKED, 403, {
+      return errorResponse(API_ERROR.ACCOUNT_LOCKED, undefined, {
         lockedUntil: failResult.lockedUntil,
       });
     }

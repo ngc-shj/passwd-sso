@@ -136,7 +136,7 @@ async function handlePOST(req: NextRequest) {
       },
       "consumed code not found after successful update — system invariant violated",
     );
-    return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
+    return errorResponse(API_ERROR.INTERNAL_ERROR);
   }
 
   // Issue ExtensionToken via shared helper (same logic as legacy POST /api/extension/token).
@@ -166,7 +166,7 @@ async function handlePOST(req: NextRequest) {
       },
       "extension token exchange failed: issueExtensionToken threw",
     );
-    return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
+    return errorResponse(API_ERROR.INTERNAL_ERROR);
   }
 
   // Audit success: userId and tenantId both come from the consumed code record

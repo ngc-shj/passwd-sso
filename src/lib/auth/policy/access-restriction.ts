@@ -241,7 +241,7 @@ export async function enforceAccessRestriction(
   // Fail-closed: sentinel actor IDs are never in the users table, so
   // resolveUserTenantId would return null and silently skip all checks.
   if (SENTINEL_ACTOR_IDS.has(userId) && !tenantIdOverride) {
-    return errorResponse(API_ERROR.ACCESS_DENIED, 403);
+    return errorResponse(API_ERROR.ACCESS_DENIED);
   }
 
   const tenantId = tenantIdOverride ?? (await resolveUserTenantId(userId));
@@ -261,7 +261,7 @@ export async function enforceAccessRestriction(
       userAgent: req.headers.get("user-agent"),
       metadata: { clientIp, reason: result.reason },
     });
-    return errorResponse(API_ERROR.ACCESS_DENIED, 403);
+    return errorResponse(API_ERROR.ACCESS_DENIED);
   }
 
   // Additional Tailscale tailnet verification via WhoIs (Node.js runtime only).
@@ -281,7 +281,7 @@ export async function enforceAccessRestriction(
         userAgent: req.headers.get("user-agent"),
         metadata: { clientIp, reason: "Tailscale tailnet mismatch" },
       });
-      return errorResponse(API_ERROR.ACCESS_DENIED, 403);
+      return errorResponse(API_ERROR.ACCESS_DENIED);
     }
   }
 

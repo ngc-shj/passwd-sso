@@ -34,7 +34,7 @@ async function handleGET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const { action, actions: actionsParam, from, to, cursor, limit } = parseAuditLogParams(searchParams);
   if (!isValidCursorId(cursor)) {
-    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+    return errorResponse(API_ERROR.INVALID_CURSOR);
   }
   const validActorType = parseActorType(searchParams);
 
@@ -81,7 +81,7 @@ async function handleGET(req: NextRequest) {
       }),
     );
   } catch {
-    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+    return errorResponse(API_ERROR.INVALID_CURSOR);
   }
 
   const { items, nextCursor } = paginateResult(logs, limit);

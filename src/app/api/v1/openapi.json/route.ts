@@ -13,7 +13,7 @@ async function handleGET(req: NextRequest) {
     // Require any valid auth (session, extension token, or API key)
     const result = await authOrToken(req);
     if (!result) {
-      return errorResponse(API_ERROR.UNAUTHORIZED, 401, undefined, { "Cache-Control": "no-store" });
+      return errorResponse(API_ERROR.UNAUTHORIZED, undefined, undefined, { "Cache-Control": "no-store" });
     }
   }
 

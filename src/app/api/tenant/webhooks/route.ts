@@ -18,7 +18,7 @@ import {
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { MAX_WEBHOOKS, WEBHOOK_URL_MAX_LENGTH } from "@/lib/validations/common";
 import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE } from "@/lib/url/url-validation";
@@ -91,8 +91,8 @@ async function handlePOST(req: NextRequest) {
     prisma.tenantWebhook.count({ where: { tenantId: actor.tenantId } }),
   );
   if (existingCount >= MAX_WEBHOOKS) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-      details: { limit: `Maximum ${MAX_WEBHOOKS} webhooks per tenant` },
+    return validationError({
+      limit: `Maximum ${MAX_WEBHOOKS} webhooks per tenant`,
     });
   }
 

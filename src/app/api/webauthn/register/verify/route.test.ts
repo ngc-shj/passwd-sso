@@ -89,15 +89,8 @@ vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (fn: any) => fn,
 }));
 
-vi.mock("@/lib/http/api-error-codes", () => ({
-  API_ERROR: {
-    UNAUTHORIZED: "UNAUTHORIZED",
-    RATE_LIMIT_EXCEEDED: "RATE_LIMIT_EXCEEDED",
-    SERVICE_UNAVAILABLE: "SERVICE_UNAVAILABLE",
-    VALIDATION_ERROR: "VALIDATION_ERROR",
-    PIN_LENGTH_POLICY_NOT_SATISFIED: "PIN_LENGTH_POLICY_NOT_SATISFIED",
-    INVALID_CHALLENGE: "INVALID_CHALLENGE",
-  },
+vi.mock("@/lib/http/api-error-codes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/http/api-error-codes")>()),
 }));
 
 vi.mock("@/lib/http/parse-body", () => ({

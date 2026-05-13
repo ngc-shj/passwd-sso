@@ -56,7 +56,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   }
 
   if (token.revokedAt) {
-    return errorResponse(API_ERROR.SA_TOKEN_ALREADY_REVOKED, 409);
+    return errorResponse(API_ERROR.SA_TOKEN_ALREADY_REVOKED);
   }
 
   await withTenantRls(prisma, actor.tenantId, async () =>

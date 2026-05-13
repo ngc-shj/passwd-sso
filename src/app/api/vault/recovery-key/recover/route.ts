@@ -102,7 +102,7 @@ async function handleVerify(data: z.infer<typeof verifySchema>, userId: string, 
   );
 
   if (!user?.recoveryVerifierHmac) {
-    return errorResponse(API_ERROR.RECOVERY_KEY_NOT_SET, 404);
+    return errorResponse(API_ERROR.RECOVERY_KEY_NOT_SET);
   }
 
   // Verify recovery key via HMAC comparison (dual-version: verifies against stored pepper version)
@@ -115,7 +115,7 @@ async function handleVerify(data: z.infer<typeof verifySchema>, userId: string, 
         metadata: { storedVersion: user.recoveryVerifierVersion },
       });
     }
-    return errorResponse(API_ERROR.INVALID_RECOVERY_KEY, 401);
+    return errorResponse(API_ERROR.INVALID_RECOVERY_KEY);
   }
 
   // Return encrypted data for client-side decryption (never return HMAC)
@@ -145,7 +145,7 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
   );
 
   if (!user?.recoveryVerifierHmac) {
-    return errorResponse(API_ERROR.RECOVERY_KEY_NOT_SET, 404);
+    return errorResponse(API_ERROR.RECOVERY_KEY_NOT_SET);
   }
 
   // Verify recovery key (dual-version: verifies against stored pepper version)
@@ -158,7 +158,7 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
         metadata: { storedVersion: user.recoveryVerifierVersion },
       });
     }
-    return errorResponse(API_ERROR.INVALID_RECOVERY_KEY, 401);
+    return errorResponse(API_ERROR.INVALID_RECOVERY_KEY);
   }
 
   // Update passphrase + recovery key data in a single transaction

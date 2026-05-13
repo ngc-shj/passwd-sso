@@ -49,13 +49,8 @@ vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
   WEBAUTHN_CHALLENGE_TTL_SECONDS: 300,
 }));
 
-vi.mock("@/lib/http/api-error-codes", () => ({
-  API_ERROR: {
-    UNAUTHORIZED: "UNAUTHORIZED",
-    RATE_LIMIT_EXCEEDED: "RATE_LIMIT_EXCEEDED",
-    SERVICE_UNAVAILABLE: "SERVICE_UNAVAILABLE",
-    NOT_FOUND: "NOT_FOUND",
-  },
+vi.mock("@/lib/http/api-error-codes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/http/api-error-codes")>()),
 }));
 
 vi.mock("@/lib/http/with-request-log", () => ({

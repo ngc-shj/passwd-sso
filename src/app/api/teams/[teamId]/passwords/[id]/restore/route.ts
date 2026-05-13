@@ -38,7 +38,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   if (!existing.deletedAt) {
-    return errorResponse(API_ERROR.NOT_IN_TRASH, 400);
+    return errorResponse(API_ERROR.NOT_IN_TRASH);
   }
 
   await withTeamTenantRls(teamId, async () =>

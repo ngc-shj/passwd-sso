@@ -67,12 +67,12 @@ async function handlePOST(req: NextRequest) {
 
   const redis = getRedis();
   if (!redis) {
-    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 503);
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
   }
 
   const rpId = process.env.WEBAUTHN_RP_ID;
   if (!rpId) {
-    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 503);
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
   }
 
   const result = await parseBody(req, emailSchema);

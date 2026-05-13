@@ -58,12 +58,12 @@ async function handleDELETE(
 
   // Must be active: not expired, not revoked
   if (grant.revokedAt) {
-    return errorResponse(API_ERROR.CONFLICT, 409, {
+    return errorResponse(API_ERROR.CONFLICT, undefined, {
       details: { status: "already_revoked" },
     });
   }
   if (grant.expiresAt <= now) {
-    return errorResponse(API_ERROR.CONFLICT, 409, {
+    return errorResponse(API_ERROR.CONFLICT, undefined, {
       details: { status: "already_expired" },
     });
   }
@@ -82,7 +82,7 @@ async function handleDELETE(
   );
 
   if (result.count === 0) {
-    return errorResponse(API_ERROR.CONFLICT, 409);
+    return errorResponse(API_ERROR.CONFLICT);
   }
 
   // Audit log (non-blocking)

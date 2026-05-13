@@ -48,7 +48,7 @@ async function handleGET(
   }
 
   if (!history || history.entryId !== id) {
-    return errorResponse(API_ERROR.HISTORY_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.HISTORY_NOT_FOUND);
   }
 
   return NextResponse.json({
@@ -108,18 +108,18 @@ async function handlePATCH(
   }
 
   if (!history || history.entryId !== id) {
-    return errorResponse(API_ERROR.HISTORY_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.HISTORY_NOT_FOUND);
   }
 
   // Prevent key version downgrade or same-version re-encryption
   if (keyVersion <= history.keyVersion) {
-    return errorResponse(API_ERROR.KEY_VERSION_NOT_NEWER, 400);
+    return errorResponse(API_ERROR.KEY_VERSION_NOT_NEWER);
   }
 
   // Compare-and-swap: verify old blob hash
   const actualHash = createHash("sha256").update(history.encryptedBlob).digest("hex");
   if (oldBlobHash !== actualHash) {
-    return errorResponse(API_ERROR.BLOB_HASH_MISMATCH, 409);
+    return errorResponse(API_ERROR.BLOB_HASH_MISMATCH);
   }
 
   // Atomic update with optimistic locking on keyVersion to prevent TOCTOU
@@ -136,7 +136,7 @@ async function handlePATCH(
   );
 
   if (result.count === 0) {
-    return errorResponse(API_ERROR.BLOB_HASH_MISMATCH, 409);
+    return errorResponse(API_ERROR.BLOB_HASH_MISMATCH);
   }
 
   await logAuditAsync({

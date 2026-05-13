@@ -55,7 +55,7 @@ async function handlePOST(req: NextRequest) {
 
   // Confirmation must be exact English string
   if (confirmation !== CONFIRMATION_TOKEN) {
-    return errorResponse(API_ERROR.VAULT_RESET_CONFIRMATION_MISMATCH, 400);
+    return errorResponse(API_ERROR.VAULT_RESET_CONFIRMATION_MISMATCH);
   }
 
   // Verify token
@@ -78,19 +78,19 @@ async function handlePOST(req: NextRequest) {
 
   // Token must not be expired
   if (resetRecord.expiresAt < new Date()) {
-    return errorResponse(API_ERROR.VAULT_RESET_TOKEN_EXPIRED, 410);
+    return errorResponse(API_ERROR.VAULT_RESET_TOKEN_EXPIRED);
   }
 
   // Token must not be already executed or revoked
   if (resetRecord.executedAt || resetRecord.revokedAt) {
-    return errorResponse(API_ERROR.VAULT_RESET_TOKEN_USED, 410);
+    return errorResponse(API_ERROR.VAULT_RESET_TOKEN_USED);
   }
 
   // Dual-approval gate: a row that has not been approved by a second admin
   // is not consumable by the target user (FR1, FR2). Defense-in-depth — the
   // CAS WHERE below also requires `approvedAt: { not: null }`.
   if (resetRecord.approvedAt === null) {
-    return errorResponse(API_ERROR.VAULT_RESET_NOT_APPROVED, 409);
+    return errorResponse(API_ERROR.VAULT_RESET_NOT_APPROVED);
   }
 
   // TOCTOU prevention: atomically mark the token as executed BEFORE deleting
@@ -111,7 +111,7 @@ async function handlePOST(req: NextRequest) {
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (atomicResult.count === 0) {
-    return errorResponse(API_ERROR.VAULT_RESET_TOKEN_USED, 410);
+    return errorResponse(API_ERROR.VAULT_RESET_TOKEN_USED);
   }
 
   // Token secured — now execute the irreversible vault reset

@@ -31,11 +31,11 @@ async function handleDELETE(
   );
 
   if (!key || key.userId !== userId) {
-    return errorResponse(API_ERROR.API_KEY_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.API_KEY_NOT_FOUND);
   }
 
   if (key.revokedAt) {
-    return errorResponse(API_ERROR.API_KEY_ALREADY_REVOKED, 400);
+    return errorResponse(API_ERROR.API_KEY_ALREADY_REVOKED);
   }
 
   await withUserTenantRls(userId, async () =>

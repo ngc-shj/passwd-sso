@@ -94,7 +94,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
   if (count >= MAX_SERVICE_ACCOUNTS_PER_TENANT) {
-    return errorResponse(API_ERROR.SA_LIMIT_EXCEEDED, 409);
+    return errorResponse(API_ERROR.SA_LIMIT_EXCEEDED);
   }
 
   let sa;
@@ -126,7 +126,7 @@ async function handlePOST(req: NextRequest) {
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"
     ) {
-      return errorResponse(API_ERROR.SA_NAME_CONFLICT, 409);
+      return errorResponse(API_ERROR.SA_NAME_CONFLICT);
     }
     throw err;
   }

@@ -96,7 +96,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       ? null
       : JSON.parse(new TextDecoder().decode(rawBody));
   } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
+    return errorResponse(API_ERROR.INVALID_JSON);
   }
   const parsed = RefreshRequestSchema.safeParse(parsedBody);
   if (!parsed.success) {
@@ -148,7 +148,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       },
       "IOS_APP token row missing cnfJkt/devicePubkey",
     );
-    return errorResponse(API_ERROR.MOBILE_REFRESH_TOKEN_REVOKED, 401);
+    return errorResponse(API_ERROR.MOBILE_REFRESH_TOKEN_REVOKED);
   }
 
   // Per-userId rate limit (only after we know the user). A stranger holding
@@ -171,7 +171,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     jtiCache: getJtiCache(),
   });
   if (!dpopResult.ok) {
-    return errorResponse(API_ERROR.MOBILE_TOKEN_BINDING_INVALID, 401);
+    return errorResponse(API_ERROR.MOBILE_TOKEN_BINDING_INVALID);
   }
 
   // Hand off to `refreshIosToken` — it owns rotation, replay-vs-retry
@@ -199,9 +199,9 @@ async function handlePOST(req: NextRequest): Promise<Response> {
   if (!result.ok) {
     switch (result.error) {
       case "REFRESH_REPLAY_DETECTED":
-        return errorResponse(API_ERROR.MOBILE_REFRESH_REUSE_DETECTED, 401);
+        return errorResponse(API_ERROR.MOBILE_REFRESH_REUSE_DETECTED);
       case "REFRESH_TOKEN_FAMILY_EXPIRED":
-        return errorResponse(API_ERROR.MOBILE_REFRESH_SESSION_EXPIRED, 401);
+        return errorResponse(API_ERROR.MOBILE_REFRESH_SESSION_EXPIRED);
     }
   }
 

@@ -64,7 +64,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   );
 
   if (!transitionResult.ok) {
-    return errorResponse(API_ERROR.CONFLICT, 409);
+    return errorResponse(API_ERROR.CONFLICT);
   }
 
   await logAuditAsync({

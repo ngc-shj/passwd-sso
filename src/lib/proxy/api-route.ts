@@ -94,7 +94,7 @@ export async function handleApiAuth(request: NextRequest) {
     if (!session.valid) {
       return applyCorsHeaders(
         request,
-        errorResponse(API_ERROR.UNAUTHORIZED, 401, undefined, {
+        errorResponse(API_ERROR.UNAUTHORIZED, undefined, undefined, {
           "Cache-Control": "no-store",
         }),
       );
@@ -111,7 +111,7 @@ export async function handleApiAuth(request: NextRequest) {
       if (!accessResult.allowed) {
         return applyCorsHeaders(
           request,
-          errorResponse(API_ERROR.ACCESS_DENIED, 403, undefined, { "Cache-Control": "no-store" }),
+          errorResponse(API_ERROR.ACCESS_DENIED, undefined, undefined, { "Cache-Control": "no-store" }),
         );
       }
     }

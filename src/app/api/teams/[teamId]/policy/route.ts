@@ -112,7 +112,6 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   ) {
     return errorResponseWithMessage(
       API_ERROR.VALIDATION_ERROR,
-      400,
       `sessionIdleTimeoutMinutes exceeds tenant cap of ${teamTenant.tenant.sessionIdleTimeoutMinutes} minutes`,
     );
   }
@@ -122,7 +121,6 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   ) {
     return errorResponseWithMessage(
       API_ERROR.VALIDATION_ERROR,
-      400,
       `sessionAbsoluteTimeoutMinutes exceeds tenant cap of ${teamTenant.tenant.sessionAbsoluteTimeoutMinutes} minutes`,
     );
   }

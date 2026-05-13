@@ -15,7 +15,7 @@ async function handleGET(req: NextRequest) {
   const authResult = await validateV1Auth(req, API_KEY_SCOPE.VAULT_STATUS);
   if (!authResult.ok) {
     if (authResult.error === "SCOPE_INSUFFICIENT") {
-      return errorResponse(API_ERROR.API_KEY_SCOPE_INSUFFICIENT, 403);
+      return errorResponse(API_ERROR.API_KEY_SCOPE_INSUFFICIENT);
     }
     return unauthorized();
   }

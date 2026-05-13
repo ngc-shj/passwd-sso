@@ -61,7 +61,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
         validateParentChain(id, newParentId, allTags);
       } catch (e) {
         if (e instanceof TagTreeError) {
-          return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, e.message);
+          return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, e.message);
         }
         throw e;
       }
@@ -86,7 +86,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       }),
     );
     if (duplicate) {
-      return errorResponse(API_ERROR.TAG_ALREADY_EXISTS, 409);
+      return errorResponse(API_ERROR.TAG_ALREADY_EXISTS);
     }
   }
 
@@ -103,7 +103,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"
     ) {
-      return errorResponse(API_ERROR.TAG_ALREADY_EXISTS, 409);
+      return errorResponse(API_ERROR.TAG_ALREADY_EXISTS);
     }
     throw err;
   }

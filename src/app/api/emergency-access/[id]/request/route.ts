@@ -60,7 +60,7 @@ async function handlePOST(
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!transitionResult.ok) {
-    return errorResponse(API_ERROR.INVALID_STATUS, 400);
+    return errorResponse(API_ERROR.INVALID_STATUS);
   }
 
   await logAuditAsync({

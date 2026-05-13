@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   API_ERROR,
+  API_ERROR_STATUS,
   apiErrorToI18nKey,
   eaErrorToI18nKey,
 } from "./api-error-codes";
@@ -121,5 +122,23 @@ describe("API_ERROR structural invariants", () => {
     // If this fails, you added a new code to API_ERROR.
     // Update this count AND add the code to API_ERROR_I18N + i18n messages.
     expect(Object.keys(API_ERROR).length).toBe(154);
+  });
+});
+
+// ── API_ERROR_STATUS invariants ─────────────────────────────────
+
+describe("API_ERROR_STATUS", () => {
+  it("covers every API_ERROR code (satisfies completeness)", () => {
+    for (const code of Object.values(API_ERROR)) {
+      expect(API_ERROR_STATUS).toHaveProperty(code);
+      expect(typeof API_ERROR_STATUS[code]).toBe("number");
+    }
+  });
+
+  it("only assigns valid HTTP status codes (4xx/5xx)", () => {
+    for (const status of Object.values(API_ERROR_STATUS)) {
+      expect(status).toBeGreaterThanOrEqual(400);
+      expect(status).toBeLessThan(600);
+    }
   });
 });

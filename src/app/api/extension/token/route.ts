@@ -15,7 +15,7 @@ import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { requireRecentSession } from "@/lib/auth/session/step-up";
 
 function internalError() {
-  return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
+  return errorResponse(API_ERROR.INTERNAL_ERROR);
 }
 
 export const runtime = "nodejs";

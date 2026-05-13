@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   // rather than walking through the consent processing.
   const origin = req.headers.get("origin");
   if (!origin) {
-    return errorResponse(API_ERROR.INVALID_ORIGIN, 403);
+    return errorResponse(API_ERROR.INVALID_ORIGIN);
   }
 
   const session = await auth();

@@ -54,7 +54,7 @@ export async function requireMaintenanceOperator(
   if (!membership) {
     return {
       ok: false,
-      response: errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, "operatorId is not an active tenant admin"),
+      response: errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, "operatorId is not an active tenant admin"),
     };
   }
   // The role filter above guarantees membership.role is OWNER or ADMIN, but

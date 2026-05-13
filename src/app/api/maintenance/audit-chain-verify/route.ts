@@ -199,7 +199,7 @@ async function handleGET(req: NextRequest) {
       BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
     );
     if (!seedRows[0]?.event_hash) {
-      return errorResponse(API_ERROR.AUDIT_CHAIN_SEED_NOT_FOUND, 400);
+      return errorResponse(API_ERROR.AUDIT_CHAIN_SEED_NOT_FOUND);
     }
     seedPrevHash = Buffer.from(seedRows[0].event_hash);
   }

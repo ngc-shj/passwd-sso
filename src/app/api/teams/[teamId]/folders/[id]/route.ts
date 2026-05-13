@@ -76,7 +76,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
         }
 
         if (newParentId === id) {
-          return errorResponse(API_ERROR.FOLDER_CIRCULAR_REFERENCE, 400);
+          return errorResponse(API_ERROR.FOLDER_CIRCULAR_REFERENCE);
         }
 
         const isCircular = await checkCircularReference(
@@ -85,7 +85,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
           (parentIdValue) => getTeamParent(teamId, parentIdValue),
         );
         if (isCircular) {
-          return errorResponse(API_ERROR.FOLDER_CIRCULAR_REFERENCE, 400);
+          return errorResponse(API_ERROR.FOLDER_CIRCULAR_REFERENCE);
         }
       }
 
@@ -96,7 +96,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
           (parentIdValue) => getTeamParent(teamId, parentIdValue),
         );
       } catch {
-        return errorResponse(API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED, 400);
+        return errorResponse(API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED);
       }
 
       updateData.parentId = newParentId;
@@ -117,7 +117,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
         }),
       );
       if (dup && dup.id !== id) {
-        return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
+        return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS);
       }
     } else {
       const rootDup = await withTeamTenantRls(teamId, async () =>
@@ -126,7 +126,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
         }),
       );
       if (rootDup && rootDup.id !== id) {
-        return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
+        return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS);
       }
     }
   }
@@ -144,7 +144,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"
     ) {
-      return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
+      return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS);
     }
     throw err;
   }

@@ -123,7 +123,7 @@ async function handlePOST(
     return forbidden();
   }
   if (eligibility === APPROVE_ELIGIBILITY.INSUFFICIENT_ROLE) {
-    return errorResponse(API_ERROR.FORBIDDEN_INSUFFICIENT_ROLE, 403);
+    return errorResponse(API_ERROR.FORBIDDEN_INSUFFICIENT_ROLE);
   }
 
   // Email-snapshot guard (FR12 / S9). If the target's email changed since
@@ -143,7 +143,7 @@ async function handlePOST(
         cause: "RESET_TARGET_EMAIL_CHANGED",
       },
     });
-    return errorResponse(API_ERROR.RESET_TARGET_EMAIL_CHANGED, 409);
+    return errorResponse(API_ERROR.RESET_TARGET_EMAIL_CHANGED);
   }
 
   // Rate limits
@@ -191,7 +191,7 @@ async function handlePOST(
       targetId: targetUserId,
       metadata: { resetId, cause: "RESET_NOT_APPROVABLE" },
     });
-    return errorResponse(API_ERROR.RESET_NOT_APPROVABLE, 409);
+    return errorResponse(API_ERROR.RESET_NOT_APPROVABLE);
   }
 
   // CAS update — `initiatedById: { not: actor.id }` is the load-bearing
@@ -227,7 +227,7 @@ async function handlePOST(
   if (result.count === 0) {
     // Generic 409 — covers race-lost / already-approved / revoked / expired
     // / self-approval. Distinct causes are NOT leaked.
-    return errorResponse(API_ERROR.RESET_NOT_APPROVABLE, 409);
+    return errorResponse(API_ERROR.RESET_NOT_APPROVABLE);
   }
 
   // Best-effort target notification + email. Errors are logged, not

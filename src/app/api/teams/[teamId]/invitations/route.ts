@@ -106,7 +106,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   if (existingInv) {
-    return errorResponse(API_ERROR.INVITATION_ALREADY_SENT, 409);
+    return errorResponse(API_ERROR.INVITATION_ALREADY_SENT);
   }
 
   if (existingUser) {
@@ -119,10 +119,10 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     );
     if (existingMember) {
       if (existingMember.deactivatedAt === null) {
-        return errorResponse(API_ERROR.ALREADY_A_MEMBER, 409);
+        return errorResponse(API_ERROR.ALREADY_A_MEMBER);
       }
       if (existingMember.scimManaged) {
-        return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER, 409);
+        return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER);
       }
     }
   }

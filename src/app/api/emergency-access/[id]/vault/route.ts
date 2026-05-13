@@ -83,22 +83,22 @@ async function handleGET(
     }
 
     if (result.reason === "revoked") {
-      return errorResponse(API_ERROR.GRANT_REVOKED, 403);
+      return errorResponse(API_ERROR.GRANT_REVOKED);
     }
 
     if (result.reason === "no_escrow") {
-      return errorResponse(API_ERROR.EMERGENCY_RECOVERY_KEY_MISSING, 400);
+      return errorResponse(API_ERROR.EMERGENCY_RECOVERY_KEY_MISSING);
     }
 
     // reason === "not_eligible": fall through to the status check below
   }
 
   if (grant.status !== EA_STATUS.ACTIVATED) {
-    return errorResponse(API_ERROR.NOT_ACTIVATED, 403);
+    return errorResponse(API_ERROR.NOT_ACTIVATED);
   }
 
   if (!grant.encryptedSecretKey || !grant.granteeKeyPair) {
-    return errorResponse(API_ERROR.EMERGENCY_RECOVERY_KEY_MISSING, 400);
+    return errorResponse(API_ERROR.EMERGENCY_RECOVERY_KEY_MISSING);
   }
 
   return NextResponse.json({

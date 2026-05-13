@@ -61,7 +61,7 @@ async function handleGET(req: NextRequest) {
   );
 
   if (!user?.vaultSetupAt) {
-    return errorResponse(API_ERROR.VAULT_NOT_SETUP, 404);
+    return errorResponse(API_ERROR.VAULT_NOT_SETUP);
   }
 
   const vaultKey = await withVaultTenantRls(async () =>

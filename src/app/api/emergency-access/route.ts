@@ -38,7 +38,7 @@ async function handlePOST(req: NextRequest) {
 
   // Cannot grant to self
   if (granteeEmail.toLowerCase() === sessionEmail.toLowerCase()) {
-    return errorResponse(API_ERROR.CANNOT_GRANT_SELF, 400);
+    return errorResponse(API_ERROR.CANNOT_GRANT_SELF);
   }
 
   // Check for duplicate active grant
@@ -53,7 +53,7 @@ async function handlePOST(req: NextRequest) {
   );
 
   if (existing) {
-    return errorResponse(API_ERROR.DUPLICATE_GRANT, 409);
+    return errorResponse(API_ERROR.DUPLICATE_GRANT);
   }
 
   const token = generateShareToken();

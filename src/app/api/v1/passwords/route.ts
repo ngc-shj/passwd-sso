@@ -24,7 +24,7 @@ async function handleGET(req: NextRequest) {
   const authResult = await validateV1Auth(req, API_KEY_SCOPE.PASSWORDS_READ);
   if (!authResult.ok) {
     if (authResult.error === "SCOPE_INSUFFICIENT") {
-      return errorResponse(API_ERROR.API_KEY_SCOPE_INSUFFICIENT, 403);
+      return errorResponse(API_ERROR.API_KEY_SCOPE_INSUFFICIENT);
     }
     return unauthorized();
   }
@@ -32,7 +32,7 @@ async function handleGET(req: NextRequest) {
   const { userId, tenantId, rateLimitKey } = authResult.data;
 
   if (!userId) {
-    return errorResponseWithMessage(API_ERROR.UNAUTHORIZED, 403, "Service account tokens cannot access personal data via v1 API. Use MCP Gateway.");
+    return errorResponseWithMessage(API_ERROR.FORBIDDEN, "Service account tokens cannot access personal data via v1 API. Use MCP Gateway.");
   }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);
@@ -110,7 +110,7 @@ async function handlePOST(req: NextRequest) {
   const authResult = await validateV1Auth(req, API_KEY_SCOPE.PASSWORDS_WRITE);
   if (!authResult.ok) {
     if (authResult.error === "SCOPE_INSUFFICIENT") {
-      return errorResponse(API_ERROR.API_KEY_SCOPE_INSUFFICIENT, 403);
+      return errorResponse(API_ERROR.API_KEY_SCOPE_INSUFFICIENT);
     }
     return unauthorized();
   }
@@ -118,7 +118,7 @@ async function handlePOST(req: NextRequest) {
   const { userId, tenantId, rateLimitKey } = authResult.data;
 
   if (!userId) {
-    return errorResponseWithMessage(API_ERROR.UNAUTHORIZED, 403, "Service account tokens cannot access personal data via v1 API. Use MCP Gateway.");
+    return errorResponseWithMessage(API_ERROR.FORBIDDEN, "Service account tokens cannot access personal data via v1 API. Use MCP Gateway.");
   }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);
@@ -171,7 +171,7 @@ async function handlePOST(req: NextRequest) {
 
   if ("error" in createResult) {
     const detail = createResult.error === "INVALID_FOLDER" ? "Invalid folderId" : "Invalid tagIds";
-    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, 400, detail);
+    return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, detail);
   }
 
   const { entry } = createResult;

@@ -20,7 +20,7 @@ async function handleDELETE(
   const userId = session.user.id;
   const tenantId = await resolveUserTenantId(userId);
   if (!tenantId) {
-    return errorResponse(API_ERROR.NO_TENANT, 403);
+    return errorResponse(API_ERROR.NO_TENANT);
   }
   const { id } = await params;
 

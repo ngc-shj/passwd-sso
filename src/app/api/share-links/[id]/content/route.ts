@@ -27,7 +27,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   // Extract access token from Authorization header
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) {
-    return errorResponse(API_ERROR.SHARE_PASSWORD_REQUIRED, 401);
+    return errorResponse(API_ERROR.SHARE_PASSWORD_REQUIRED);
   }
   const accessToken = authHeader.slice(7);
   if (accessToken.length > 512) {

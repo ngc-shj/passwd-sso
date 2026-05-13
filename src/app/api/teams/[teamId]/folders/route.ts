@@ -110,7 +110,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       (parentIdValue) => getTeamParent(teamId, parentIdValue),
     );
   } catch {
-    return errorResponse(API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED, 400);
+    return errorResponse(API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED);
   }
 
   if (parentId) {
@@ -120,7 +120,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       }),
     );
     if (dup) {
-      return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
+      return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS);
     }
   } else {
     const rootDup = await withTeamTenantRls(teamId, async () =>
@@ -129,7 +129,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       }),
     );
     if (rootDup) {
-      return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
+      return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS);
     }
   }
 

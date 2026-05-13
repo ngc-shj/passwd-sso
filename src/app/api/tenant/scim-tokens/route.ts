@@ -108,7 +108,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
   if (tokenCount >= 10) {
-    return errorResponse(API_ERROR.SCIM_TOKEN_LIMIT_EXCEEDED, 409);
+    return errorResponse(API_ERROR.SCIM_TOKEN_LIMIT_EXCEEDED);
   }
 
   const plaintext = generateScimToken();

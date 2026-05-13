@@ -75,7 +75,7 @@ async function handlePOST(
   );
 
   if (existingApprovedAt === undefined) {
-    return errorResponse(API_ERROR.CONFLICT, 409);
+    return errorResponse(API_ERROR.CONFLICT);
   }
 
   // Atomic revoke with TOCTOU prevention: only revoke if still in a revocable
@@ -100,7 +100,7 @@ async function handlePOST(
   );
 
   if (result.count === 0) {
-    return errorResponse(API_ERROR.CONFLICT, 409);
+    return errorResponse(API_ERROR.CONFLICT);
   }
 
   // Audit log — fires unconditionally regardless of prior approval state.
