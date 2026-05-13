@@ -23,7 +23,7 @@ import {
 } from "@/lib/validations/common";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
-import { errorResponse, handleAuthError } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 
 // ─── Validation ──────────────────────────────────────────────
 
@@ -40,7 +40,7 @@ const createSchema = z.object({
 async function handleGET(_req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return errorResponse(API_ERROR.UNAUTHORIZED, 401);
+    return unauthorized();
   }
 
   let member;
@@ -80,7 +80,7 @@ async function handleGET(_req: NextRequest) {
 async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return errorResponse(API_ERROR.UNAUTHORIZED, 401);
+    return unauthorized();
   }
 
   let member;

@@ -42,7 +42,7 @@ import { ChevronDown, Loader2, Plus, Trash2, Webhook } from "lucide-react";
 import { toast } from "sonner";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { readApiErrorBody, getApiErrorFieldErrors } from "@/lib/http/read-api-error-body";
 import { MAX_WEBHOOKS } from "@/lib/validations/common";
 
 export interface WebhookItem {
@@ -162,10 +162,7 @@ export function BaseWebhookCard({ config }: Props) {
       });
       if (res.status === 400) {
         const body = await readApiErrorBody(res);
-        const urlErrors = (
-          body?.details as { properties?: { url?: { errors?: unknown[] } } } | undefined
-        )?.properties?.url?.errors;
-        if (urlErrors?.length) {
+        if (getApiErrorFieldErrors(body, "url")?.length) {
           setUrlError(t("urlInvalid"));
         } else {
           toast.error(t("validationError"));

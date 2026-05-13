@@ -22,8 +22,7 @@ import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
-import { API_ERROR } from "@/lib/http/api-error-codes";
+import { rateLimited, unauthorized, forbidden } from "@/lib/http/api-response";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });
 
@@ -54,7 +53,7 @@ async function handlePOST(req: NextRequest) {
   // token per tenant. Body-supplied tenantId is accepted only as an explicit
   // restatement of auth.tenantId — never as a way to target another tenant.
   if (filterTenantId !== undefined && filterTenantId !== auth.tenantId) {
-    return errorResponse(API_ERROR.FORBIDDEN, 403);
+    return forbidden();
   }
 
   const op = await requireMaintenanceOperator(auth.subjectUserId, {

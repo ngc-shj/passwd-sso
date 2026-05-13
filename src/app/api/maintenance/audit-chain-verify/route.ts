@@ -20,7 +20,7 @@ import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, unauthorized, forbidden } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseQuery } from "@/lib/http/parse-body";
 import {
@@ -111,7 +111,7 @@ async function handleGET(req: NextRequest) {
   // cross-tenant chain-verify requests; multi-tenant operators must mint
   // a separate token per tenant they need to verify.
   if (auth.tenantId !== tenantId) {
-    return errorResponse(API_ERROR.FORBIDDEN, 403);
+    return forbidden();
   }
 
   // Operator must be admin in the (token's) target tenant being verified

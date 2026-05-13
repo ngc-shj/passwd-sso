@@ -15,7 +15,7 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { runDirectorySync } from "@/lib/directory-sync/engine";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { errorResponse, rateLimited, zodValidationError, handleAuthError } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, zodValidationError, handleAuthError, unauthorized, notFound } from "@/lib/http/api-response";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 
@@ -31,7 +31,7 @@ const runSchema = z.object({
 async function handlePOST(req: NextRequest, ctx: RouteContext) {
   const session = await auth();
   if (!session?.user?.id) {
-    return errorResponse(API_ERROR.UNAUTHORIZED, 401);
+    return unauthorized();
   }
 
   const { id } = await ctx.params;
@@ -55,7 +55,7 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
     }),
   );
   if (!config) {
-    return errorResponse(API_ERROR.NOT_FOUND, 404);
+    return notFound();
   }
 
   // Empty body is allowed: defaults are used.

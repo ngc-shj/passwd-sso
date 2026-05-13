@@ -14,7 +14,7 @@ import { AUDIT_TARGET_TYPE, AUDIT_ACTION, TEAM_PERMISSION } from "@/lib/constant
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, unauthorized, notFound } from "@/lib/http/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -99,7 +99,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         (parentIdValue) => getTeamParent(teamId, parentIdValue),
       );
     } catch {
-      return errorResponse(API_ERROR.NOT_FOUND, 404);
+      return notFound();
     }
   }
 

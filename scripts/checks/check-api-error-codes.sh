@@ -32,6 +32,38 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
+# Shared file lists. Server-side scope: routes + libs. Client-side scope: UI,
+# hooks, app pages, plus CLI + extension sources (all consumers that read the
+# Main API error envelope). Both exclude tests and route handlers.
+list_server_ts_files() {
+  find src/app/api src/app/s src/lib \( -name '*.ts' -o -name '*.tsx' \) 2>/dev/null \
+    | grep -v '\.test\.' | grep -v '/__tests__/' | grep -vE '/(scim|mcp)/'
+}
+
+list_client_files() {
+  {
+    find src/components src/hooks src/app \( -name '*.ts' -o -name '*.tsx' \) 2>/dev/null
+    find cli/src extension/src \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' \) 2>/dev/null
+  } \
+    | grep -v '\.test\.' | grep -v '/__tests__/' | grep -vE '/app/api/'
+}
+
+# Files allowed to bypass rule 5 (bare `NextResponse.json({error:...})`).
+# Each entry MUST have a one-line rationale comment immediately above it.
+RULE5_CARVEOUTS=(
+  # 410 Gone deprecated stub — documented in plan C9 deviation log
+  "src/app/api/maintenance/dcr-cleanup/route.ts"
+  # CLI consumer-specific envelope ({authorized,reason}) — analogous to SCIM/OAuth exclusions
+  "src/app/api/vault/delegation/check/route.ts"
+  # Operator-only free-form admin endpoint
+  "src/app/api/admin/rotate-master-key/route.ts"
+  # Apple platform-mandated AASA file
+  "src/app/api/mobile/.well-known/apple-app-site-association/route.ts"
+  # Helper module that DEFINES errorResponse (intentional)
+  "src/lib/http/api-response.ts"
+)
+RULE5_CARVEOUT_PAT=$(IFS='|'; printf '%s' "${RULE5_CARVEOUTS[*]}" | sed 's/\./\\./g')
+
 violations=0
 
 # (1) C5 — ACCESS_DENIED string literal outside tests
@@ -96,11 +128,8 @@ fi
 #  - Documented carve-outs (dcr-cleanup stub, vault/delegation/check CLI envelope,
 #    admin/rotate-master-key, apple-app-site-association)
 c12_hits=$(
-  find src/app/api src/app/s src/lib \
-    -name '*.ts' -o -name '*.tsx' 2>/dev/null \
-    | grep -v '\.test\.' | grep -v '/__tests__/' \
-    | grep -vE '/(scim|mcp)/' \
-    | grep -vE '(maintenance/dcr-cleanup/route|vault/delegation/check/route|admin/rotate-master-key/route|apple-app-site-association/route|src/lib/http/api-response)\.ts$' \
+  list_server_ts_files \
+    | grep -vE "(${RULE5_CARVEOUT_PAT})$" \
     | xargs -r perl -0777 -ne '
       while (/NextResponse\.json\(\s*\{[\s\S]*?\berror\s*:/g) {
         my $pos = pos($_);
@@ -121,10 +150,7 @@ fi
 # `{ reason: ... }`. Multi-line aware. Inner keys inside `details: { ... }`
 # are NOT enforced (developers are free to shape the details object).
 c4_hits=$(
-  find src/app/api src/app/s src/lib \
-    -name '*.ts' -o -name '*.tsx' 2>/dev/null \
-    | grep -v '\.test\.' | grep -v '/__tests__/' \
-    | grep -vE '/(scim|mcp)/' \
+  list_server_ts_files \
     | xargs -r perl -0777 -ne '
       while (/errorResponse\([^,]+,\s*\d+\s*,\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g) {
         my $body = $1;
@@ -150,10 +176,7 @@ fi
 
 # (7) C6 — `details` MUST be an object, never a bare string literal.
 c6_hits=$(
-  find src/app/api src/app/s src/lib \
-    -name '*.ts' -o -name '*.tsx' 2>/dev/null \
-    | grep -v '\.test\.' | grep -v '/__tests__/' \
-    | grep -vE '/(scim|mcp)/' \
+  list_server_ts_files \
     | xargs -r perl -0777 -ne '
       while (/errorResponse\([^)]*?\bdetails:\s*"[^"]+"/g) {
         my $pos = pos($_);
@@ -210,21 +233,7 @@ c4_client_hits=$(
         }
       }
     ' "$f"
-  done < <(
-    # Scope: UI (components/hooks/app), CLI (cli/src), extension (extension/src)
-    # — every consumer surface that talks to the main API.
-    # Includes `.js` files in extension/src because extension content scripts
-    # are deployed as parallel `.js` (production) + `-lib.ts` (test) per the
-    # codebase convention (see `feedback_extension_parallel_impl`).
-    {
-      find src/components src/hooks src/app \
-        \( -name '*.ts' -o -name '*.tsx' \) 2>/dev/null
-      find cli/src extension/src \
-        \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' \) 2>/dev/null
-    } \
-      | grep -v '\.test\.' | grep -v '/__tests__/' \
-      | grep -vE '/app/api/'
-  ) 2>/dev/null || true
+  done < <(list_client_files) 2>/dev/null || true
 )
 if [ -n "$c4_client_hits" ]; then
   echo "FORBIDDEN: consumer reads error body via res.json() — use readApiErrorBody() helper (C4)"
@@ -238,14 +247,7 @@ fi
 # matches `await res.json()`). Flag any `.then((<r>) => ...<r>.json()...)`
 # in UI / hook / page / CLI / extension code (including `.js` content scripts).
 c9_hits=$(
-  {
-    find src/components src/hooks src/app \
-      \( -name '*.ts' -o -name '*.tsx' \) 2>/dev/null
-    find cli/src extension/src \
-      \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' \) 2>/dev/null
-  } \
-    | grep -v '\.test\.' | grep -v '/__tests__/' \
-    | grep -vE '/app/api/' \
+  list_client_files \
     | xargs -r perl -ne '
       # Reset line counter per file so reported line numbers are file-local.
       if (eof) { close ARGV; }

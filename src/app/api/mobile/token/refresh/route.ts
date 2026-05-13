@@ -38,6 +38,7 @@ import {
   errorResponse,
   rateLimited,
   zodValidationError,
+  unauthorized,
 } from "@/lib/http/api-response";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -106,7 +107,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
   // Authorization header must carry the same refresh token.
   const headerToken = extractDpopBearer(req);
   if (!headerToken || !safeStringEqual(headerToken, bodyRefreshToken)) {
-    return errorResponse(API_ERROR.UNAUTHORIZED, 401);
+    return unauthorized();
   }
 
   // Look up the refresh-token row by its hash. Lookup is via bypass-RLS
@@ -135,7 +136,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     BYPASS_PURPOSE.TOKEN_LIFECYCLE,
   );
   if (!oldRow || oldRow.clientKind !== "IOS_APP") {
-    return errorResponse(API_ERROR.UNAUTHORIZED, 401);
+    return unauthorized();
   }
   if (!oldRow.cnfJkt || !oldRow.devicePubkey) {
     // Defensive — IOS_APP rows MUST have these set. If we ever read a

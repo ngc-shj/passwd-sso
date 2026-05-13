@@ -1,3 +1,9 @@
+// Canonical helpers for accessing the Main API error envelope.
+//
+// Keep in sync with the other 2 copies:
+//   - cli/src/lib/api-error-body.ts (CLI; loose `error: string` for cross-tsconfig)
+//   - extension/src/lib/api-error-body.ts (browser extension)
+// CI drift check: scripts/checks/check-api-error-body-drift.sh
 import type { MainApiErrorBody } from "@/lib/http/api-response";
 
 /**
@@ -83,4 +89,39 @@ export function getApiErrorDetail<T>(
   }
   const value = (body.details as Record<string, unknown>)[field];
   return guard(value) ? value : null;
+}
+
+/**
+ * Read `details.properties[<field>].errors` from a Zod `treeifyError()` shape.
+ *
+ * Centralizes the per-field Zod-tree access pattern used by validation-error
+ * UI consumers (slug, url, etc.) so the deep cast chain isn't repeated.
+ * Returns the errors array if present, `null` otherwise.
+ */
+export function getApiErrorFieldErrors(
+  body: MainApiErrorBody | null,
+  field: string,
+): readonly unknown[] | null {
+  if (!body || typeof body.details !== "object" || body.details === null) {
+    return null;
+  }
+  const properties = (body.details as { properties?: Record<string, unknown> }).properties;
+  if (!properties || typeof properties !== "object") return null;
+  const fieldObj = (properties as Record<string, unknown>)[field];
+  if (!fieldObj || typeof fieldObj !== "object") return null;
+  const errors = (fieldObj as { errors?: unknown }).errors;
+  return Array.isArray(errors) ? errors : null;
+}
+
+/**
+ * Narrow an unknown value (e.g. an already-extracted JSON body) to
+ * `MainApiErrorBody`. Use this when you already have the parsed body in hand
+ * rather than a `Response`.
+ */
+export function readMainApiErrorBody(
+  value: unknown,
+): MainApiErrorBody | null {
+  if (!value || typeof value !== "object") return null;
+  if (typeof (value as { error?: unknown }).error !== "string") return null;
+  return value as MainApiErrorBody;
 }

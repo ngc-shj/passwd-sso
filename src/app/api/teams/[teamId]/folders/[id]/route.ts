@@ -72,7 +72,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
             (parentIdValue) => getTeamParent(teamId, parentIdValue),
           );
         } catch {
-          return errorResponse(API_ERROR.NOT_FOUND, 404);
+          return notFound();
         }
 
         if (newParentId === id) {

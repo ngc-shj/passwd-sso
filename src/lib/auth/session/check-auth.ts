@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { authOrToken, hasUserId, type UserAuthResult } from "@/lib/auth/session/auth-or-token";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse } from "@/lib/http/api-response";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import type { ExtensionTokenScope } from "@/lib/constants";
 import type { ApiKeyScope } from "@/lib/constants/auth/api-key";
 import type { McpScope } from "@/lib/constants/auth/mcp";
@@ -75,7 +75,7 @@ export async function checkAuth(
     if (!authResult || !hasUserId(authResult)) {
       return {
         ok: false,
-        response: errorResponse(API_ERROR.UNAUTHORIZED, 401),
+        response: unauthorized(),
       };
     }
 
@@ -99,7 +99,7 @@ export async function checkAuth(
   if (!session?.user?.id) {
     return {
       ok: false,
-      response: errorResponse(API_ERROR.UNAUTHORIZED, 401),
+      response: unauthorized(),
     };
   }
 
