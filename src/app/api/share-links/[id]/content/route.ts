@@ -27,7 +27,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   // Extract access token from Authorization header
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) {
-    return errorResponse(API_ERROR.SHARE_PASSWORD_REQUIRED, 401);
+    return errorResponse(API_ERROR.SHARE_PASSWORD_REQUIRED);
   }
   const accessToken = authHeader.slice(7);
   if (accessToken.length > 512) {
@@ -94,7 +94,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
           AND ("max_views" IS NULL OR "view_count" < "max_views")`;
 
       if (updated === 0) {
-        return errorResponse(API_ERROR.NOT_FOUND, 410);
+        return errorResponse(API_ERROR.SHARE_GONE);
       }
       viewCountDelta = 1;
     } else {
@@ -111,7 +111,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
           AND ("max_views" IS NULL OR "view_count" < "max_views")`;
 
       if (stillValid === 0) {
-        return errorResponse(API_ERROR.NOT_FOUND, 410);
+        return errorResponse(API_ERROR.SHARE_GONE);
       }
     }
 

@@ -117,7 +117,7 @@ async function handlePUT(
       prisma.folder.findFirst({ where: { id: folderId, userId } }),
     );
     if (!folder) {
-      return validationError("Invalid folderId");
+      return validationError({ message: "Invalid folderId" });
     }
   }
 
@@ -127,7 +127,7 @@ async function handlePUT(
       prisma.tag.count({ where: { id: { in: tagIds }, userId } }),
     );
     if (ownedCount !== tagIds.length) {
-      return validationError("Invalid tagIds");
+      return validationError({ message: "Invalid tagIds" });
     }
   }
 

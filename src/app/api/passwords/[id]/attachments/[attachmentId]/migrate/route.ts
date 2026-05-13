@@ -6,7 +6,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, notFound, unauthorized, rateLimited } from "@/lib/http/api-response";
+import { errorResponse, notFound, unauthorized, rateLimited, validationError } from "@/lib/http/api-response";
 import { migrateLimiter } from "@/lib/security/rate-limiters";
 import {
   ATTACHMENT_BODY_BASE64_MAX,
@@ -53,7 +53,7 @@ async function handlePUT(
   if (contentLength) {
     const declaredSize = parseInt(contentLength, 10);
     if (!Number.isNaN(declaredSize) && declaredSize > ATTACHMENT_MIGRATE_PAYLOAD_MAX) {
-      return errorResponse(API_ERROR.PAYLOAD_TOO_LARGE, 413);
+      return errorResponse(API_ERROR.PAYLOAD_TOO_LARGE);
     }
   }
 
@@ -62,11 +62,11 @@ async function handlePUT(
   try {
     body = await req.json();
   } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
+    return errorResponse(API_ERROR.INVALID_JSON);
   }
 
   if (typeof body !== "object" || body === null) {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
+    return errorResponse(API_ERROR.INVALID_JSON);
   }
   const b = body as Record<string, unknown>;
 
@@ -92,40 +92,40 @@ async function handlePUT(
     typeof cekKeyVersion !== "number" ||
     typeof cekWrapAadVersion !== "number"
   ) {
-    return errorResponse(API_ERROR.MISSING_REQUIRED_FIELDS, 400);
+    return errorResponse(API_ERROR.MISSING_REQUIRED_FIELDS);
   }
 
   // Validate hex formats
   if (!/^[0-9a-f]{64}$/.test(oldEncryptedDataHash)) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
   if (!/^[0-9a-f]{24}$/.test(iv) || !/^[0-9a-f]{24}$/.test(cekIv)) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
   if (!/^[0-9a-f]{32}$/.test(authTag) || !/^[0-9a-f]{32}$/.test(cekAuthTag)) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
   if (!Number.isInteger(cekKeyVersion) || cekKeyVersion < 1) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
   if (!Number.isInteger(cekWrapAadVersion) || cekWrapAadVersion < 1) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
   // Cap the base64-encoded blobs so a malformed client cannot inflate the
   // JSON parse output. The Content-Length pre-check above bounds the wire
   // payload; these caps bound the post-parse strings.
   if (encryptedData.length > ATTACHMENT_BODY_BASE64_MAX) {
-    return errorResponse(API_ERROR.FILE_TOO_LARGE, 400);
+    return errorResponse(API_ERROR.FILE_TOO_LARGE);
   }
   if (cekEncrypted.length > CEK_WRAP_BASE64_MAX) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
   // Reject non-base64 characters before `Buffer.from(_, "base64")` silently
   // drops invalid bytes — both blobs are persisted verbatim into BYTEA
   // columns, so a malformed input would corrupt the row instead of failing
   // fast.
   if (!BASE64_RE.test(encryptedData) || !BASE64_RE.test(cekEncrypted)) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
 
   let result: { encryptionMode: 2; fromKeyVersion: number | null };
@@ -173,15 +173,15 @@ async function handlePUT(
     );
   } catch (err) {
     if (err instanceof LegacyAttachmentInconsistentVersionError) {
-      return errorResponse(API_ERROR.ATTACHMENT_INCONSISTENT_VERSION, 409);
+      return errorResponse(API_ERROR.ATTACHMENT_INCONSISTENT_VERSION);
     }
     if (err instanceof LegacyMigrationNotApplicableError) {
       // No payload per S11
-      return errorResponse(API_ERROR.LEGACY_MIGRATION_NOT_APPLICABLE, 409);
+      return errorResponse(API_ERROR.LEGACY_MIGRATION_NOT_APPLICABLE);
     }
     if (err instanceof LegacyBodyHashMismatchError) {
       // No payload per S11
-      return errorResponse(API_ERROR.LEGACY_BODY_HASH_MISMATCH, 409);
+      return errorResponse(API_ERROR.LEGACY_INTEGRITY_MISMATCH);
     }
     if (err instanceof Error && (err.message === "NOT_FOUND" || err.message === "USER_NOT_FOUND")) {
       return notFound();

@@ -3,7 +3,6 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
-import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import {
   TEAM_PERMISSION,
@@ -19,7 +18,7 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS } from "@/lib/constants";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
 import { MAX_WEBHOOKS, WEBHOOK_URL_MAX_LENGTH } from "@/lib/validations/common";
 import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE } from "@/lib/url/url-validation";
 
@@ -93,10 +92,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     prisma.teamWebhook.count({ where: { teamId } }),
   );
   if (existingCount >= MAX_WEBHOOKS) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: { limit: `Maximum ${MAX_WEBHOOKS} webhooks per team` } },
-      { status: 400 },
-    );
+    return validationError({
+      limit: `Maximum ${MAX_WEBHOOKS} webhooks per team`,
+    });
   }
 
   // Generate HMAC secret and encrypt it

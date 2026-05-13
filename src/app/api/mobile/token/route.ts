@@ -164,7 +164,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       },
       "mobile token failed: bridge code unknown, expired, or already consumed",
     );
-    return errorResponse(API_ERROR.MOBILE_BRIDGE_CODE_INVALID, 400);
+    return errorResponse(API_ERROR.MOBILE_BRIDGE_CODE_INVALID);
   }
 
   // 4. Verify device_pubkey binding (constant-time).
@@ -177,7 +177,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       },
       "mobile token failed: device_pubkey mismatch",
     );
-    return errorResponse(API_ERROR.MOBILE_DEVICE_PUBKEY_MISMATCH, 400);
+    return errorResponse(API_ERROR.MOBILE_DEVICE_PUBKEY_MISMATCH);
   }
 
   // 5. PKCE: stored.codeChallenge must equal base64url(SHA-256(code_verifier)).
@@ -190,7 +190,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       },
       "mobile token failed: PKCE challenge did not match",
     );
-    return errorResponse(API_ERROR.MOBILE_PKCE_MISMATCH, 400);
+    return errorResponse(API_ERROR.MOBILE_PKCE_MISMATCH);
   }
 
   // 6. Verify DPoP proof. No `ath` at this step (no access token yet); the
@@ -214,7 +214,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       },
       "mobile token failed: DPoP verification failed",
     );
-    return errorResponse(API_ERROR.MOBILE_DPOP_INVALID, 401);
+    return errorResponse(API_ERROR.MOBILE_TOKEN_BINDING_INVALID);
   }
 
   // 7. Issue the token pair. cnfJkt is the verifier-computed thumbprint of
@@ -238,7 +238,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       },
       "mobile token issuance threw",
     );
-    return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
+    return errorResponse(API_ERROR.INTERNAL_ERROR);
   }
 
   await logAuditAsync({

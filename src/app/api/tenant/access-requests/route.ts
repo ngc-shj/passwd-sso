@@ -119,7 +119,7 @@ async function handlePOST(req: NextRequest) {
   if (authResult.type === "service_account") {
     // SA self-service: requires access-request:create scope
     if (!authResult.scopes.includes(SA_TOKEN_SCOPE.ACCESS_REQUEST_CREATE)) {
-      return errorResponse(API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT, 403);
+      return errorResponse(API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT);
     }
 
     tenantId = authResult.tenantId;
@@ -156,8 +156,11 @@ async function handlePOST(req: NextRequest) {
         select: { isActive: true, createdById: true },
       }),
     BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
-    if (!sa || !sa.isActive) {
-      return errorResponse(API_ERROR.SA_NOT_FOUND, 404);
+    if (!sa) {
+      return errorResponse(API_ERROR.SA_NOT_FOUND);
+    }
+    if (!sa.isActive) {
+      return errorResponse(API_ERROR.SA_INACTIVE);
     }
     userId = sa.createdById;
   } else {
@@ -204,8 +207,14 @@ async function handlePOST(req: NextRequest) {
         select: { id: true, tenantId: true, isActive: true },
       }),
     );
-    if (!sa || sa.tenantId !== tenantId || !sa.isActive) {
-      return errorResponse(API_ERROR.SA_NOT_FOUND, 404);
+    // Cross-tenant SAs are collapsed into SA_NOT_FOUND so callers cannot probe
+    // for SA existence in other tenants. Inactive SAs in the caller's own
+    // tenant return SA_INACTIVE since the SA is observably present.
+    if (!sa || sa.tenantId !== tenantId) {
+      return errorResponse(API_ERROR.SA_NOT_FOUND);
+    }
+    if (!sa.isActive) {
+      return errorResponse(API_ERROR.SA_INACTIVE);
     }
   }
 

@@ -32,7 +32,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   );
 
   if (!invitation || invitation.teamId !== teamId) {
-    return errorResponse(API_ERROR.INVITATION_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.INVITATION_NOT_FOUND);
   }
 
   await withTeamTenantRls(teamId, async () =>

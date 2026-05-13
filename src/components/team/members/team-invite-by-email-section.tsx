@@ -16,6 +16,8 @@ import { Loader2, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 interface Props {
   teamId: string;
@@ -38,16 +40,18 @@ export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
         body: JSON.stringify({ email: invEmail.trim(), role: invRole }),
       });
       if (res.status === 409) {
-        const data = await res.json();
+        const body = await readApiErrorBody(res);
         toast.error(
-          data.error === "ALREADY_A_MEMBER"
+          body?.error === API_ERROR.ALREADY_A_MEMBER
             ? t("alreadyMember")
             : t("alreadyInvited")
         );
         setInviting(false);
         return;
       }
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        throw new Error("Failed");
+      }
       const data = await res.json();
       const inviteUrl = appUrl(`/dashboard/teams/invite/${data.token}`);
       await navigator.clipboard.writeText(inviteUrl);

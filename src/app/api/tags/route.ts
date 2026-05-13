@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createTagSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, unauthorized } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
@@ -90,10 +90,7 @@ async function handlePOST(req: NextRequest) {
       validateParentChain(null, parentId, allTags);
     } catch (e) {
       if (e instanceof TagTreeError) {
-        return NextResponse.json(
-          { error: API_ERROR.VALIDATION_ERROR, message: e.message },
-          { status: 400 },
-        );
+        return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, e.message);
       }
       throw e;
     }
@@ -110,7 +107,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
   if (existing) {
-    return errorResponse(API_ERROR.TAG_ALREADY_EXISTS, 409);
+    return errorResponse(API_ERROR.TAG_ALREADY_EXISTS);
   }
 
   const tag = await withUserTenantRls(session.user.id, async (tenantId) =>

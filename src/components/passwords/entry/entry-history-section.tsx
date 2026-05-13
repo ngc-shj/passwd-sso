@@ -192,7 +192,9 @@ export function EntryHistorySection({
         // Currently uses latest key only — history from before key rotation
         // will fail to decrypt until re-encryption is implemented.
         const res = await fetchApi(apiPath.teamPasswordHistoryById(scopedTeamId, entryId, h.id));
-        if (!res.ok) return;
+        if (!res.ok) {
+          return;
+        }
         const data = await res.json();
         // Use the history record's own itemKeyVersion for AAD and key selection
         const historyItemKeyVersion = (data.itemKeyVersion as number) ?? 0;

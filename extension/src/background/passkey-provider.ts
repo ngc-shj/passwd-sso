@@ -5,6 +5,7 @@ import {
   buildPersonalEntryAAD,
 } from "../lib/crypto";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
+import { readApiErrorBody } from "../lib/api-error-body";
 import { normalizeErrorCode } from "../lib/error-utils";
 import { EXT_ENTRY_TYPE, WEBAUTHN_TYPE_GET, WEBAUTHN_TYPE_CREATE } from "../lib/constants";
 import type {
@@ -408,10 +409,10 @@ export async function handlePasskeyCreateCredential(
     });
 
     if (!res.ok) {
-      const json = await res.json().catch(() => ({}));
+      const body = await readApiErrorBody(res);
       return {
         ok: false,
-        error: (json as { error?: string }).error ?? "SAVE_FAILED",
+        error: body?.error ?? "SAVE_FAILED",
       };
     }
 

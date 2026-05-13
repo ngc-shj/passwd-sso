@@ -5,6 +5,7 @@
  */
 
 import { HEX_IV_LENGTH, HEX_AUTH_TAG_LENGTH } from "@/lib/validations/common";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 export function buildOpenApiSpec(baseUrl: string) {
   return {
@@ -184,12 +185,10 @@ export function buildOpenApiSpec(baseUrl: string) {
               description: "Forbidden — stale session (re-authenticate within 15 min) or insufficient role",
               content: {
                 "application/json": {
-                  schema: {
-                    type: "object",
-                    properties: {
-                      error: { type: "string", example: "stale_session" },
-                      message: { type: "string" },
-                    },
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                  examples: {
+                    staleSession: { value: { error: "OPERATOR_TOKEN_STALE_SESSION" } },
+                    insufficientRole: { value: { error: "FORBIDDEN_INSUFFICIENT_ROLE" } },
                   },
                 },
               },
@@ -405,8 +404,23 @@ export function buildOpenApiSpec(baseUrl: string) {
           type: "object",
           required: ["error"],
           properties: {
-            error: { type: "string" },
-            details: {},
+            error: {
+              type: "string",
+              enum: Object.values(API_ERROR),
+            },
+            details: {
+              description: "Validation tree from z.treeifyError() — present only on VALIDATION_ERROR",
+            },
+            lockedUntil: {
+              type: ["string", "null"],
+              format: "date-time",
+              description: "Present only on ACCOUNT_LOCKED; null when expiry is unknown",
+            },
+            currentKeyVersion: {
+              type: "integer",
+              description: "Present only on CONFLICT (webauthn PRF CAS path)",
+            },
+            // No body context for RATE_LIMIT_EXCEEDED — Retry-After header carries wait duration.
           },
         },
       },

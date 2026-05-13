@@ -40,17 +40,16 @@ export function useTeamPolicy(open: boolean, teamId: string) {
   useEffect(() => {
     if (!open) return;
 
-    fetchApi(apiPath.teamPolicy(teamId))
-      .then((res) => {
+    (async () => {
+      try {
+        const res = await fetchApi(apiPath.teamPolicy(teamId));
         if (!res.ok) return;
-        return res.json();
-      })
-      .then((data) => {
+        const data = await res.json();
         if (data) setPolicy(data as TeamPolicyClient);
-      })
-      .catch(() => {
+      } catch {
         // silently fallback to defaults
-      });
+      }
+    })();
   }, [open, teamId]);
 
   return { policy };

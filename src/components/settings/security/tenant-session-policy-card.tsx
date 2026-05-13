@@ -16,6 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { readApiErrorBody, getApiErrorMessage } from "@/lib/http/read-api-error-body";
 import {
   MAX_CONCURRENT_SESSIONS_MIN,
   MAX_CONCURRENT_SESSIONS_MAX,
@@ -242,15 +243,10 @@ export function TenantSessionPolicyCard() {
         // Surface the server-side validation message so cross-field
         // errors (e.g. "vaultAutoLockMinutes (60) must be <= ...") are
         // visible instead of a generic "failed to update".
-        let detail: string | null = null;
-        try {
-          const data = await res.json();
-          if (typeof data?.message === "string") {
-            detail = data.message;
-          }
-        } catch {
-          // Response was not JSON; fall back to the generic message.
-        }
+        // C2/C4 envelope: error context is wrapped under `details: { message }`.
+        // `getApiErrorMessage` walks the typed envelope safely; accessing
+        // `body.message` directly would be a TypeScript error.
+        const detail = getApiErrorMessage(await readApiErrorBody(res));
         setError(detail ?? t("sessionPolicySaveFailed"));
         toast.error(detail ?? t("sessionPolicySaveFailed"));
       }

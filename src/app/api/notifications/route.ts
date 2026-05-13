@@ -23,7 +23,7 @@ async function handleGET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const cursor = searchParams.get("cursor");
   if (!isValidCursorId(cursor)) {
-    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+    return errorResponse(API_ERROR.INVALID_CURSOR);
   }
   const limitParam = searchParams.get("limit");
   const limit = Math.min(
@@ -48,7 +48,7 @@ async function handleGET(req: NextRequest) {
       }),
     );
   } catch {
-    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+    return errorResponse(API_ERROR.INVALID_CURSOR);
   }
 
   const hasMore = notifications.length > limit;

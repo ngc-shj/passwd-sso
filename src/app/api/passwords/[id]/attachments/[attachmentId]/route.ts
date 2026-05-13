@@ -46,7 +46,7 @@ async function handleGET(
   );
 
   if (!attachment) {
-    return errorResponse(API_ERROR.ATTACHMENT_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.ATTACHMENT_NOT_FOUND);
   }
 
   const blobStore = getAttachmentBlobStore();
@@ -111,7 +111,7 @@ async function handleDELETE(
   );
 
   if (!attachment) {
-    return errorResponse(API_ERROR.ATTACHMENT_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.ATTACHMENT_NOT_FOUND);
   }
 
   const blobStore = getAttachmentBlobStore();

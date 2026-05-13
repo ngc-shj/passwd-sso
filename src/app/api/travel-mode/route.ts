@@ -29,7 +29,7 @@ async function handleGET(_request: NextRequest) {
   );
 
   if (!user) {
-    return errorResponse(API_ERROR.USER_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.USER_NOT_FOUND);
   }
 
   return NextResponse.json({

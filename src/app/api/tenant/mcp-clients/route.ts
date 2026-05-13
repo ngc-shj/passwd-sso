@@ -11,7 +11,7 @@ import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { MAX_MCP_CLIENTS_PER_TENANT, MCP_SCOPES, LOOPBACK_REDIRECT_RE } from "@/lib/constants/auth/mcp";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -122,7 +122,7 @@ async function handlePOST(req: NextRequest) {
     prisma.mcpClient.count({ where: { tenantId: actor.tenantId } }),
   );
   if (count >= MAX_MCP_CLIENTS_PER_TENANT) {
-    return errorResponse(API_ERROR.MCP_CLIENT_LIMIT_EXCEEDED, 422, { message: `Maximum ${MAX_MCP_CLIENTS_PER_TENANT} MCP clients per tenant` });
+    return errorResponseWithMessage(API_ERROR.MCP_CLIENT_LIMIT_EXCEEDED, `Maximum ${MAX_MCP_CLIENTS_PER_TENANT} MCP clients per tenant`);
   }
 
   // Check name uniqueness
@@ -130,7 +130,7 @@ async function handlePOST(req: NextRequest) {
     prisma.mcpClient.findFirst({ where: { tenantId: actor.tenantId, name } }),
   );
   if (existing) {
-    return errorResponse(API_ERROR.MCP_CLIENT_NAME_CONFLICT, 409);
+    return errorResponse(API_ERROR.MCP_CLIENT_NAME_CONFLICT);
   }
 
   // Generate client credentials

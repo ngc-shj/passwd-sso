@@ -39,7 +39,7 @@ vi.mock("@/lib/vault/rotate-key-server", () => {
   }
   class LegacyBodyHashMismatchError extends Error {
     constructor() {
-      super("LEGACY_BODY_HASH_MISMATCH");
+      super("LEGACY_INTEGRITY_MISMATCH");
       this.name = "LegacyBodyHashMismatchError";
     }
   }
@@ -161,7 +161,7 @@ describe("PUT /api/passwords/[id]/attachments/[attachmentId]/migrate", () => {
     expect(Object.keys(json)).toEqual(["error"]);
   });
 
-  it("rejects when stored body hash mismatches → 409 LEGACY_BODY_HASH_MISMATCH", async () => {
+  it("rejects when stored body hash mismatches → 409 LEGACY_INTEGRITY_MISMATCH", async () => {
     const { LegacyBodyHashMismatchError } = await import("@/lib/vault/rotate-key-server");
     mockApplyAttachmentMigration.mockRejectedValue(new LegacyBodyHashMismatchError());
 
@@ -173,7 +173,7 @@ describe("PUT /api/passwords/[id]/attachments/[attachmentId]/migrate", () => {
     );
     expect(res.status).toBe(409);
     const json = await res.json();
-    expect(json.error).toBe("LEGACY_BODY_HASH_MISMATCH");
+    expect(json.error).toBe("LEGACY_INTEGRITY_MISMATCH");
     expect(Object.keys(json)).toEqual(["error"]);
   });
 

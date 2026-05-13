@@ -7,6 +7,7 @@ import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, rateLimited } from "@/lib/http/api-response";
 
 const downloadLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
@@ -18,8 +19,9 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   // Rate limit by IP
   const ip = extractClientIp(req) ?? "unknown";
-  if (!(await downloadLimiter.check(`rl:send_download:${rateLimitKeyFromIp(ip)}`)).allowed) {
-    return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
+  const rl = await downloadLimiter.check(`rl:send_download:${rateLimitKeyFromIp(ip)}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   // Validate token format (must be 64 hex chars)
@@ -68,23 +70,14 @@ export async function GET(req: NextRequest, { params }: Params) {
     if (share.accessPasswordHash) {
       const authHeader = req.headers.get("authorization");
       if (!authHeader?.startsWith("Bearer ")) {
-        return NextResponse.json(
-          { error: API_ERROR.SHARE_PASSWORD_REQUIRED },
-          { status: 401 },
-        );
+        return errorResponse(API_ERROR.SHARE_PASSWORD_REQUIRED);
       }
       const accessToken = authHeader.slice(7);
       if (accessToken.length > 512) {
-        return NextResponse.json(
-          { error: API_ERROR.UNAUTHORIZED },
-          { status: 401 },
-        );
+        return errorResponse(API_ERROR.UNAUTHORIZED);
       }
       if (!verifyShareAccessToken(accessToken, share.id)) {
-        return NextResponse.json(
-          { error: API_ERROR.UNAUTHORIZED },
-          { status: 401 },
-        );
+        return errorResponse(API_ERROR.UNAUTHORIZED);
       }
 
       // Atomically increment viewCount for password-protected downloads.
@@ -101,6 +94,11 @@ export async function GET(req: NextRequest, { params }: Params) {
           AND ("max_views" IS NULL OR "view_count" < "max_views")`;
 
       if (updated === 0) {
+        // Binary download route — return bare 410 (no JSON envelope) to keep
+        // response shape consistent with the file-payload responses below
+        // (NextResponse with binary body or empty body). The paired metadata
+        // route share-links/[id]/content emits errorResponse(SHARE_GONE) for
+        // the equivalent state since it is a JSON endpoint.
         return new NextResponse(null, { status: 410 });
       }
     } else {
@@ -115,6 +113,7 @@ export async function GET(req: NextRequest, { params }: Params) {
           AND ("max_views" IS NULL OR "view_count" < "max_views")`;
 
       if (updated === 0) {
+        // Bare 410 by design — see comment on the password-protected branch above.
         return new NextResponse(null, { status: 410 });
       }
     }

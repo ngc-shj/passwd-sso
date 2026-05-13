@@ -32,10 +32,7 @@ async function handlePOST(request: NextRequest) {
   // Lockout check — shared with vault unlock
   const lockoutStatus = await checkLockout(session.user.id);
   if (lockoutStatus.locked) {
-    return NextResponse.json(
-      { error: API_ERROR.ACCOUNT_LOCKED, lockedUntil: lockoutStatus.lockedUntil },
-      { status: 403 },
-    );
+    return errorResponse(API_ERROR.ACCOUNT_LOCKED, undefined, { lockedUntil: lockoutStatus.lockedUntil });
   }
 
   const result = await parseBody(request, disableSchema);
@@ -54,7 +51,7 @@ async function handlePOST(request: NextRequest) {
   );
 
   if (!user) {
-    return errorResponse(API_ERROR.USER_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.USER_NOT_FOUND);
   }
 
   if (!user.travelModeActive) {
@@ -63,10 +60,7 @@ async function handlePOST(request: NextRequest) {
 
   // Verify passphrase
   if (!user.passphraseVerifierHmac) {
-    return NextResponse.json(
-      { error: API_ERROR.VAULT_NOT_SETUP },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.VAULT_NOT_SETUP);
   }
 
   const verifyResult = verifyPassphraseVerifier(
@@ -91,7 +85,7 @@ async function handlePOST(request: NextRequest) {
       action: AUDIT_ACTION.TRAVEL_MODE_DISABLE_FAILED,
     });
 
-    return errorResponse(API_ERROR.INVALID_PASSPHRASE, 401);
+    return errorResponse(API_ERROR.INVALID_PASSPHRASE);
   }
 
   await withUserTenantRls(session.user.id, async () =>

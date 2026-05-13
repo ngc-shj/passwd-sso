@@ -7,7 +7,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { extractRequestMeta } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, unauthorized, notFound, validationError } from "@/lib/http/api-response";
 import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { AUDIT_ACTION, AUDIT_ACTION_GROUPS_PERSONAL, AUDIT_SCOPE } from "@/lib/constants";
 import {
@@ -79,14 +79,14 @@ async function handleGET(
   );
 
   if (!grant) {
-    return errorResponse(API_ERROR.NOT_FOUND, 404);
+    return notFound();
   }
 
   const now = new Date();
 
   // Check grant validity
   if (grant.revokedAt) {
-    return errorResponse(API_ERROR.FORBIDDEN, 403, {
+    return errorResponse(API_ERROR.FORBIDDEN, undefined, {
       details: { status: "revoked" },
     });
   }
@@ -121,7 +121,7 @@ async function handleGET(
       })();
     }
 
-    return errorResponse(API_ERROR.FORBIDDEN, 403, {
+    return errorResponse(API_ERROR.FORBIDDEN, undefined, {
       details: { status: "expired" },
     });
   }
@@ -139,7 +139,7 @@ async function handleGET(
   );
 
   if (!targetMember) {
-    return errorResponse(API_ERROR.FORBIDDEN, 403, {
+    return errorResponse(API_ERROR.FORBIDDEN, undefined, {
       details: { status: "target_deactivated" },
     });
   }
@@ -171,7 +171,7 @@ async function handleGET(
       evictStaleCacheEntries();
       viewAuditCache.set(grantId, Date.now());
     } catch {
-      return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 503);
+      return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
     }
   }
 
@@ -179,7 +179,7 @@ async function handleGET(
   const { searchParams } = new URL(req.url);
   const { action, actions, from, to, cursor, limit } = parseAuditLogParams(searchParams);
   if (!isValidCursorId(cursor)) {
-    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+    return errorResponse(API_ERROR.INVALID_CURSOR);
   }
 
   const where: Prisma.AuditLogWhereInput = {
@@ -196,9 +196,7 @@ async function handleGET(
     if (actionFilter !== undefined) where.action = actionFilter;
   } catch (e) {
     const err = e as { actions?: string[] };
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-      details: { actions: err.actions },
-    });
+    return validationError({ actions: err.actions });
   }
 
   const dateFilter = buildAuditLogDateFilter(from, to);
@@ -215,7 +213,7 @@ async function handleGET(
       }),
     );
   } catch {
-    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+    return errorResponse(API_ERROR.INVALID_CURSOR);
   }
 
   const { items, nextCursor } = paginateResult(logs, limit);

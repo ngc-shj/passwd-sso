@@ -7,7 +7,7 @@ import { hmacVerifier, verifyPassphraseVerifier as verifyHmac } from "@/lib/cryp
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
@@ -58,10 +58,7 @@ const resetLimiter = createRateLimiter({
 async function handlePOST(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   const userId = session.user.id;
@@ -105,10 +102,7 @@ async function handleVerify(data: z.infer<typeof verifySchema>, userId: string, 
   );
 
   if (!user?.recoveryVerifierHmac) {
-    return NextResponse.json(
-      { error: API_ERROR.RECOVERY_KEY_NOT_SET },
-      { status: 404 },
-    );
+    return errorResponse(API_ERROR.RECOVERY_KEY_NOT_SET);
   }
 
   // Verify recovery key via HMAC comparison (dual-version: verifies against stored pepper version)
@@ -121,10 +115,7 @@ async function handleVerify(data: z.infer<typeof verifySchema>, userId: string, 
         metadata: { storedVersion: user.recoveryVerifierVersion },
       });
     }
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_RECOVERY_KEY },
-      { status: 401 },
-    );
+    return errorResponse(API_ERROR.INVALID_RECOVERY_KEY);
   }
 
   // Return encrypted data for client-side decryption (never return HMAC)
@@ -154,10 +145,7 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
   );
 
   if (!user?.recoveryVerifierHmac) {
-    return NextResponse.json(
-      { error: API_ERROR.RECOVERY_KEY_NOT_SET },
-      { status: 404 },
-    );
+    return errorResponse(API_ERROR.RECOVERY_KEY_NOT_SET);
   }
 
   // Verify recovery key (dual-version: verifies against stored pepper version)
@@ -170,10 +158,7 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
         metadata: { storedVersion: user.recoveryVerifierVersion },
       });
     }
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_RECOVERY_KEY },
-      { status: 401 },
-    );
+    return errorResponse(API_ERROR.INVALID_RECOVERY_KEY);
   }
 
   // Update passphrase + recovery key data in a single transaction

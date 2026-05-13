@@ -7,7 +7,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, notFound, unauthorized, forbidden } from "@/lib/http/api-response";
 import { AUDIT_ACTION, TENANT_ROLE } from "@/lib/constants";
 
 export const runtime = "nodejs";
@@ -51,19 +51,19 @@ async function handleDELETE(
 
   // Only the requester or an OWNER can revoke
   if (grant.requesterId !== userId && actor.role !== TENANT_ROLE.OWNER) {
-    return errorResponse(API_ERROR.FORBIDDEN, 403);
+    return forbidden();
   }
 
   const now = new Date();
 
   // Must be active: not expired, not revoked
   if (grant.revokedAt) {
-    return errorResponse(API_ERROR.CONFLICT, 409, {
+    return errorResponse(API_ERROR.CONFLICT, undefined, {
       details: { status: "already_revoked" },
     });
   }
   if (grant.expiresAt <= now) {
-    return errorResponse(API_ERROR.CONFLICT, 409, {
+    return errorResponse(API_ERROR.CONFLICT, undefined, {
       details: { status: "already_expired" },
     });
   }
@@ -82,7 +82,7 @@ async function handleDELETE(
   );
 
   if (result.count === 0) {
-    return errorResponse(API_ERROR.CONFLICT, 409);
+    return errorResponse(API_ERROR.CONFLICT);
   }
 
   // Audit log (non-blocking)

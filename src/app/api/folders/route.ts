@@ -88,7 +88,7 @@ async function handlePOST(req: NextRequest) {
       (pid) => getPersonalParent(session.user.id, pid),
     );
   } catch {
-    return errorResponse(API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED, 400);
+    return errorResponse(API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED);
   }
 
   // Duplicate check — use Prisma unique constraint for non-null parentId,
@@ -102,7 +102,7 @@ async function handlePOST(req: NextRequest) {
       }),
     );
     if (dup) {
-      return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
+      return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS);
     }
   } else {
     const rootDup = await withUserTenantRls(session.user.id, async () =>
@@ -111,7 +111,7 @@ async function handlePOST(req: NextRequest) {
       }),
     );
     if (rootDup) {
-      return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
+      return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS);
     }
   }
 

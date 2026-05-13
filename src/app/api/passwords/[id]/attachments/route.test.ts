@@ -277,7 +277,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     expect(json.error).toBe("CONTENT_TYPE_NOT_ALLOWED");
   });
 
-  it("returns 400 for invalid iv format (INVALID_IV_FORMAT)", async () => {
+  it("returns 400 for invalid iv format (INVALID_ENCRYPTION_FORMAT)", async () => {
     const res = await POST(
       createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["data"]),
@@ -292,7 +292,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     );
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toBe("INVALID_IV_FORMAT");
+    expect(json.error).toBe("INVALID_ENCRYPTION_FORMAT");
   });
 
   // ── B2: mode-2 CEK required ───────────────────────────────────────────

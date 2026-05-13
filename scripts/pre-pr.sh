@@ -120,6 +120,8 @@ run_step "Static: e2e-selectors"  bash scripts/checks/check-e2e-selectors.sh
 run_step "Static: security-doc-exists" bash scripts/checks/check-security-doc-exists.sh
 run_step "Static: test-hygiene"   bash scripts/checks/check-test-hygiene.sh
 run_step "Static: settings-card-layout"  bash scripts/checks/check-settings-card-layout.sh
+run_step "Static: api-error-codes" bash scripts/checks/check-api-error-codes.sh
+run_step "Static: api-error-body-drift" bash scripts/checks/check-api-error-body-drift.sh
 run_step "Lint"                   npx eslint .
 run_step "Static: env drift check"  npm run check:env-docs
 run_step "Static: team-auth-rls"  node scripts/checks/check-team-auth-rls.mjs

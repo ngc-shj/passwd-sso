@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { AlertTriangle, Check, Loader2, Search, ShieldAlert } from "lucide-react";
 import { apiPath, API_PATH } from "@/lib/constants";
 import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { fetchApi } from "@/lib/url-helpers";
 import { filterMembers } from "@/lib/filter-members";
 import { cn } from "@/lib/utils";
@@ -52,13 +53,18 @@ export function BreakGlassDialog({ onGrantCreated, trigger }: BreakGlassDialogPr
   useEffect(() => {
     if (!open) return;
     if (members.length > 0) return;
-    fetchApi(API_PATH.TENANT_MEMBERS)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
+    (async () => {
+      try {
+        const res = await fetchApi(API_PATH.TENANT_MEMBERS);
+        if (!res.ok) return;
+        const data = await res.json();
         if (Array.isArray(data)) {
           setMembers(data.filter((m: { deactivatedAt?: string | null }) => !m.deactivatedAt));
         }
-      });
+      } catch {
+        // best-effort — leave members empty
+      }
+    })();
   }, [open, members.length]);
 
   // Reset form state + member roster when dialog closes; the next open
@@ -100,27 +106,26 @@ export function BreakGlassDialog({ onGrantCreated, trigger }: BreakGlassDialogPr
       }
 
       if (res.status === 400) {
-        const data = await res.json().catch(() => null);
+        const body = await readApiErrorBody(res);
         // `validationError` and `zodValidationError` both put field-level
         // detail under `details.properties.<field>` (per Zod's treeifyError
         // shape). The previous check on `details.targetUserId` (without the
         // `properties` segment) never matched, so self-access leaked into
         // the generic VALIDATION_ERROR toast instead of showing the
         // intended "Cannot request access to your own logs" message.
-        if (data?.details?.properties?.targetUserId) {
+        const properties = (body?.details as { properties?: Record<string, unknown> } | undefined)?.properties;
+        if (properties?.targetUserId) {
           toast.error(t("selfAccessError"));
         } else {
-          const code = typeof data?.error === "string" ? data.error : null;
-          toast.error(code ? tApi(apiErrorToI18nKey(code)) : t("reasonTooShort"));
+          toast.error(body?.error ? tApi(apiErrorToI18nKey(body.error)) : t("reasonTooShort"));
         }
       } else if (res.status === 409) {
         toast.error(t("duplicateGrantError"));
       } else if (res.status === 429) {
         toast.error(t("rateLimitExceeded"));
       } else {
-        const data = await res.json().catch(() => null);
-        const code = typeof data?.error === "string" ? data.error : null;
-        toast.error(code ? tApi(apiErrorToI18nKey(code)) : tApi("unknownError"));
+        const body = await readApiErrorBody(res);
+        toast.error(body?.error ? tApi(apiErrorToI18nKey(body.error)) : tApi("unknownError"));
       }
     } finally {
       setSubmitting(false);

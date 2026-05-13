@@ -28,7 +28,9 @@ async function fetchDecryptedHistoryPasswords(
   count: number,
 ): Promise<string[]> {
   const res = await fetchApi(apiPath.teamPasswordHistory(teamId, entryId));
-  if (!res.ok) return [];
+  if (!res.ok) {
+    return [];
+  }
   const records: Array<{
     encryptedBlob: { ciphertext: string; iv: string; authTag: string };
     aadVersion: number;

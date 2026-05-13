@@ -12,7 +12,7 @@ import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 /** Rotation attempted while mode-0 attachment rows still exist for the user. */
 export class LegacyAttachmentsResidualError extends Error {
   constructor() {
-    super("LEGACY_ATTACHMENTS_RESIDUAL");
+    super("ATTACHMENT_MIGRATION_INCOMPLETE");
     this.name = "LegacyAttachmentsResidualError";
   }
 }
@@ -20,7 +20,7 @@ export class LegacyAttachmentsResidualError extends Error {
 /** Client manifest references attachment IDs that do not match the server set. */
 export class AttachmentCekManifestMismatchError extends Error {
   constructor() {
-    super("ATTACHMENT_CEK_MANIFEST_MISMATCH");
+    super("ATTACHMENT_KEY_MANIFEST_MISMATCH");
     this.name = "AttachmentCekManifestMismatchError";
   }
 }
@@ -448,7 +448,7 @@ export class LegacyMigrationNotApplicableError extends Error {
 /** Error thrown when the supplied hash does not match the stored body. */
 export class LegacyBodyHashMismatchError extends Error {
   constructor() {
-    super("LEGACY_BODY_HASH_MISMATCH");
+    super("LEGACY_INTEGRITY_MISMATCH");
     this.name = "LegacyBodyHashMismatchError";
   }
 }

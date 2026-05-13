@@ -141,7 +141,9 @@ export function useBulkAction({
         body: JSON.stringify(body),
       });
 
-      if (!res.ok) throw new Error("bulk action failed");
+      if (!res.ok) {
+        throw new Error("bulk action failed");
+      }
 
       const json = await res.json();
       const count = extractCount(json, ids.length);

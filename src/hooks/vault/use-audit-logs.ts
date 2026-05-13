@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { normalizeAuditActionKey } from "@/lib/audit/audit-action-key";
 import { fetchApi } from "@/lib/url-helpers";
+import { readApiErrorBody, getApiErrorDetail } from "@/lib/http/read-api-error-body";
 import { downloadBlob } from "@/lib/ui/download-blob";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import type { AuditActionValue } from "@/lib/constants";
@@ -188,18 +189,16 @@ export function useAuditLogs(config: UseAuditLogsConfig): UseAuditLogsReturn {
         if (res.status === 429) {
           toast.error(td("rateLimited"));
         } else if (res.status === 400) {
-          try {
-            const body = await res.json();
-            const details = body?.details ?? {};
-            // Map known validation keys to i18n messages
-            const msg =
-              details.date ? td("dateRequired")
-              : details.range ? td("maxRange")
-              : td("downloadError");
-            toast.error(msg);
-          } catch {
-            toast.error(td("downloadError"));
-          }
+          const body = await readApiErrorBody(res);
+          const isTruthy = (v: unknown): v is unknown => Boolean(v);
+          const hasDate = getApiErrorDetail(body, "date", isTruthy) !== null;
+          const hasRange = getApiErrorDetail(body, "range", isTruthy) !== null;
+          // Map known validation keys to i18n messages
+          const msg =
+            hasDate ? td("dateRequired")
+            : hasRange ? td("maxRange")
+            : td("downloadError");
+          toast.error(msg);
         } else {
           toast.error(td("downloadError"));
         }

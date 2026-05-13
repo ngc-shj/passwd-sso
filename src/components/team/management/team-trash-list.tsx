@@ -85,7 +85,9 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
     setLoading(true);
     try {
       const res = await fetchApi(`${apiPath.teamPasswords(teamId)}?trash=true`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        return;
+      }
       const data = await res.json();
       if (!Array.isArray(data)) return;
 

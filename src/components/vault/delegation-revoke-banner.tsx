@@ -19,7 +19,9 @@ export function DelegationRevokeBanner() {
   const fetchCount = useCallback(async (): Promise<number | undefined> => {
     try {
       const res = await fetchApi(API_PATH.VAULT_DELEGATION);
-      if (!res.ok) return undefined;
+      if (!res.ok) {
+        return undefined;
+      }
       const data = await res.json();
       return data.sessions?.length ?? 0;
     } catch {

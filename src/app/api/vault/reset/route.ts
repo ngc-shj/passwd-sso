@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
@@ -34,10 +34,7 @@ const resetLimiter = createRateLimiter({
 async function handlePOST(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   const rateKey = `rl:vault_reset:${session.user.id}`;
@@ -50,10 +47,7 @@ async function handlePOST(request: NextRequest) {
   if (!result.ok) return result.response;
 
   if (result.data.confirmation !== CONFIRMATION_TOKEN) {
-    return NextResponse.json(
-      { error: API_ERROR.VAULT_RESET_CONFIRMATION_MISMATCH },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.VAULT_RESET_CONFIRMATION_MISMATCH);
   }
 
   const userId = session.user.id;

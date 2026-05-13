@@ -20,6 +20,7 @@ export const API_ERROR = {
   // ── Common ────────────────────────────────────────────────
   UNAUTHORIZED: "UNAUTHORIZED",
   RATE_LIMIT_EXCEEDED: "RATE_LIMIT_EXCEEDED",
+  ACCESS_DENIED: "ACCESS_DENIED",
   INVALID_JSON: "INVALID_JSON",
   VALIDATION_ERROR: "VALIDATION_ERROR",
   NOT_FOUND: "NOT_FOUND",
@@ -61,10 +62,10 @@ export const API_ERROR = {
   NOT_IN_TRASH: "NOT_IN_TRASH",
   ATTACHMENT_NOT_FOUND: "ATTACHMENT_NOT_FOUND",
   ATTACHMENT_LIMIT_EXCEEDED: "ATTACHMENT_LIMIT_EXCEEDED",
-  LEGACY_ATTACHMENTS_RESIDUAL: "LEGACY_ATTACHMENTS_RESIDUAL",
+  ATTACHMENT_MIGRATION_INCOMPLETE: "ATTACHMENT_MIGRATION_INCOMPLETE",
   LEGACY_MIGRATION_NOT_APPLICABLE: "LEGACY_MIGRATION_NOT_APPLICABLE",
-  LEGACY_BODY_HASH_MISMATCH: "LEGACY_BODY_HASH_MISMATCH",
-  ATTACHMENT_CEK_MANIFEST_MISMATCH: "ATTACHMENT_CEK_MANIFEST_MISMATCH",
+  LEGACY_INTEGRITY_MISMATCH: "LEGACY_INTEGRITY_MISMATCH",
+  ATTACHMENT_KEY_MANIFEST_MISMATCH: "ATTACHMENT_KEY_MANIFEST_MISMATCH",
   ATTACHMENT_INCONSISTENT_VERSION: "ATTACHMENT_INCONSISTENT_VERSION",
   FILE_TOO_LARGE: "FILE_TOO_LARGE",
   PAYLOAD_TOO_LARGE: "PAYLOAD_TOO_LARGE",
@@ -73,8 +74,7 @@ export const API_ERROR = {
   CONTENT_TYPE_NOT_ALLOWED: "CONTENT_TYPE_NOT_ALLOWED",
   INVALID_FORM_DATA: "INVALID_FORM_DATA",
   INVALID_FILENAME: "INVALID_FILENAME",
-  INVALID_IV_FORMAT: "INVALID_IV_FORMAT",
-  INVALID_AUTH_TAG_FORMAT: "INVALID_AUTH_TAG_FORMAT",
+  INVALID_ENCRYPTION_FORMAT: "INVALID_ENCRYPTION_FORMAT",
   ITEM_KEY_REQUIRED: "ITEM_KEY_REQUIRED",
   ITEM_KEY_VERSION_DOWNGRADE: "ITEM_KEY_VERSION_DOWNGRADE",
 
@@ -117,6 +117,7 @@ export const API_ERROR = {
   ALREADY_REVOKED: "ALREADY_REVOKED",
   SHARE_PASSWORD_REQUIRED: "SHARE_PASSWORD_REQUIRED",
   SHARE_PASSWORD_INCORRECT: "SHARE_PASSWORD_INCORRECT",
+  SHARE_GONE: "SHARE_GONE",
 
   // ── Send ────────────────────────────────────────────────
   SEND_TEXT_TOO_LARGE: "SEND_TEXT_TOO_LARGE",
@@ -133,6 +134,7 @@ export const API_ERROR = {
 
   // ── Audit ─────────────────────────────────────────────────
   INVALID_BODY: "INVALID_BODY",
+  AUDIT_CHAIN_SEED_NOT_FOUND: "AUDIT_CHAIN_SEED_NOT_FOUND",
 
   // ── Emergency Access ──────────────────────────────────────
   GRANT_NOT_PENDING: "GRANT_NOT_PENDING",
@@ -142,28 +144,31 @@ export const API_ERROR = {
   INVALID_STATUS: "INVALID_STATUS",
   NOT_AUTHORIZED_FOR_GRANT: "NOT_AUTHORIZED_FOR_GRANT",
   NOT_ACTIVATED: "NOT_ACTIVATED",
-  KEY_ESCROW_NOT_COMPLETED: "KEY_ESCROW_NOT_COMPLETED",
+  EMERGENCY_RECOVERY_KEY_MISSING: "EMERGENCY_RECOVERY_KEY_MISSING",
   INCOMPATIBLE_KEY_ALGORITHM: "INCOMPATIBLE_KEY_ALGORITHM",
 
   // ── Sessions ───────────────────────────────────────────
   SESSION_NOT_FOUND: "SESSION_NOT_FOUND",
   CANNOT_REVOKE_CURRENT_SESSION: "CANNOT_REVOKE_CURRENT_SESSION",
 
+  // ── WebAuthn / Passkey ──────────────────────────────────
+  INVALID_CHALLENGE: "INVALID_CHALLENGE",
+
   // ── Extension Token ─────────────────────────────────────
   EXTENSION_TOKEN_EXPIRED: "EXTENSION_TOKEN_EXPIRED",
   EXTENSION_TOKEN_REVOKED: "EXTENSION_TOKEN_REVOKED",
   EXTENSION_TOKEN_INVALID: "EXTENSION_TOKEN_INVALID",
-  EXTENSION_TOKEN_FAMILY_EXPIRED: "EXTENSION_TOKEN_FAMILY_EXPIRED",
+  EXTENSION_TOKEN_SESSION_EXPIRED: "EXTENSION_TOKEN_SESSION_EXPIRED",
   EXTENSION_TOKEN_SCOPE_INSUFFICIENT: "EXTENSION_TOKEN_SCOPE_INSUFFICIENT",
 
   // ── Mobile (iOS) Token ──────────────────────────────────
   MOBILE_BRIDGE_CODE_INVALID: "MOBILE_BRIDGE_CODE_INVALID",
   MOBILE_PKCE_MISMATCH: "MOBILE_PKCE_MISMATCH",
   MOBILE_DEVICE_PUBKEY_MISMATCH: "MOBILE_DEVICE_PUBKEY_MISMATCH",
-  MOBILE_DPOP_INVALID: "MOBILE_DPOP_INVALID",
-  MOBILE_REFRESH_REPLAY_DETECTED: "MOBILE_REFRESH_REPLAY_DETECTED",
+  MOBILE_TOKEN_BINDING_INVALID: "MOBILE_TOKEN_BINDING_INVALID",
+  MOBILE_REFRESH_REUSE_DETECTED: "MOBILE_REFRESH_REUSE_DETECTED",
   MOBILE_REFRESH_TOKEN_REVOKED: "MOBILE_REFRESH_TOKEN_REVOKED",
-  MOBILE_REFRESH_FAMILY_EXPIRED: "MOBILE_REFRESH_FAMILY_EXPIRED",
+  MOBILE_REFRESH_SESSION_EXPIRED: "MOBILE_REFRESH_SESSION_EXPIRED",
 
   // ── SCIM ──────────────────────────────────────────────────
   SCIM_TOKEN_INVALID: "SCIM_TOKEN_INVALID",
@@ -191,6 +196,7 @@ export const API_ERROR = {
   // ── Service Accounts ──────────────────────────────────────
   SA_LIMIT_EXCEEDED: "SA_LIMIT_EXCEEDED",
   SA_NOT_FOUND: "SA_NOT_FOUND",
+  SA_INACTIVE: "SA_INACTIVE",
   SA_NAME_CONFLICT: "SA_NAME_CONFLICT",
   SA_INVALID_SCOPE: "SA_INVALID_SCOPE",
   SA_TOKEN_LIMIT_EXCEEDED: "SA_TOKEN_LIMIT_EXCEEDED",
@@ -212,9 +218,270 @@ export const API_ERROR = {
   INVALID_SESSION: "INVALID_SESSION",
   SESSION_STEP_UP_REQUIRED: "SESSION_STEP_UP_REQUIRED",
   INTERNAL_ERROR: "INTERNAL_ERROR",
+
+  // ── API / Auth ──────────────────────────────────────────
+  INVALID_REQUEST: "INVALID_REQUEST",
+  AUTHENTICATION_FAILED: "AUTHENTICATION_FAILED",
+  SYNC_FAILED: "SYNC_FAILED",
+  KEY_VERSION_NOT_NEWER: "KEY_VERSION_NOT_NEWER",
+  BLOB_HASH_MISMATCH: "BLOB_HASH_MISMATCH",
 } as const;
 
 export type ApiErrorCode = (typeof API_ERROR)[keyof typeof API_ERROR];
+
+/**
+ * Default HTTP status for each error code.
+ *
+ * `errorResponse(code)` (no status arg) reads from this map. Pass an explicit
+ * status to override — needed only for genuine special cases (see exceptions
+ * below). The vast majority of callsites should rely on the default.
+ *
+ * Why this exists: prior to this map, every callsite passed `(code, status)`
+ * separately, which (a) duplicated information already implied by the code
+ * and (b) allowed code/status mismatches to ship undetected — e.g. v1 API
+ * returning `(UNAUTHORIZED, 403)` when 401 is the canonical UNAUTHORIZED
+ * status. Centralizing the mapping makes the code → status invariant
+ * compiler-enforced via `satisfies Record<ApiErrorCode, number>`.
+ *
+ * ## Documented exceptions (intentional explicit status)
+ *
+ * - `INVALID_ORIGIN` defaults to 403 (CSRF rejection). `vault/admin-reset`
+ *   passes 500 explicitly because that route refuses Host-header fallback
+ *   when APP_URL is unset (see CLAUDE.md "stricter route-level guard").
+ *
+ * No other production overrides remain. The historical `NOT_FOUND, 410`
+ * (share-links race-condition) and `SA_NOT_FOUND, 409` (inactive state)
+ * overrides were superseded by dedicated codes `SHARE_GONE` (default 410)
+ * and `SA_INACTIVE` (default 409) — wire shape now matches semantic intent.
+ *
+ * ## Status semantics quick reference
+ *
+ * - 400 Bad Request: malformed input or violated input invariant
+ * - 401 Unauthorized: authentication failure (missing/invalid credentials)
+ * - 403 Forbidden: authenticated but lacks permission, or origin/policy denial
+ * - 404 Not Found: resource (or precondition resource) does not exist
+ * - 409 Conflict: state conflict — already exists, version mismatch, etc.
+ * - 410 Gone: resource existed but is now permanently revoked/expired
+ * - 413 Payload Too Large: request body exceeds size limit
+ * - 422 Unprocessable Entity: tenant-quota / business-rule rejection
+ * - 429 Too Many Requests: rate limit exceeded
+ * - 500 Internal Server Error: unexpected server failure
+ * - 502 Bad Gateway: upstream service returned an error
+ * - 503 Service Unavailable: dependency (DB/Redis/upstream) unreachable
+ */
+export const API_ERROR_STATUS = {
+  // ── Common ────────────────────────────────────────────────
+  UNAUTHORIZED: 401,
+  RATE_LIMIT_EXCEEDED: 429,
+  ACCESS_DENIED: 403,
+  INVALID_JSON: 400,
+  VALIDATION_ERROR: 400,
+  NOT_FOUND: 404,
+  FORBIDDEN: 403,
+  CONFLICT: 409,
+
+  // ── Vault ─────────────────────────────────────────────────
+  VAULT_ALREADY_SETUP: 409,
+  VAULT_NOT_SETUP: 404,
+  INVALID_PASSPHRASE: 401,
+  VERIFIER_NOT_SET: 409,
+  USER_NOT_FOUND: 404,
+  ACCOUNT_LOCKED: 403,
+  SERVICE_UNAVAILABLE: 503,
+  INVALID_RECOVERY_KEY: 401,
+  RECOVERY_KEY_NOT_SET: 404,
+  VAULT_RESET_CONFIRMATION_MISMATCH: 400,
+  VAULT_RESET_TOKEN_EXPIRED: 410,
+  VAULT_RESET_TOKEN_USED: 410,
+  VAULT_RESET_NOT_APPROVED: 409,
+  RESET_NOT_APPROVABLE: 409,
+  RESET_TARGET_EMAIL_CHANGED: 409,
+  FORBIDDEN_INSUFFICIENT_ROLE: 403,
+  INVALID_ORIGIN: 403,
+
+  // ── Tags / Folders ────────────────────────────────────────
+  TAG_ALREADY_EXISTS: 409,
+  FOLDER_ALREADY_EXISTS: 409,
+  FOLDER_MAX_DEPTH_EXCEEDED: 400,
+  FOLDER_CIRCULAR_REFERENCE: 400,
+  FOLDER_NOT_FOUND: 404,
+
+  // ── History ───────────────────────────────────────────────
+  HISTORY_NOT_FOUND: 404,
+
+  // ── Passwords / Attachments ───────────────────────────────
+  NOT_IN_TRASH: 400,
+  ATTACHMENT_NOT_FOUND: 404,
+  ATTACHMENT_LIMIT_EXCEEDED: 400,
+  ATTACHMENT_MIGRATION_INCOMPLETE: 409,
+  LEGACY_MIGRATION_NOT_APPLICABLE: 409,
+  LEGACY_INTEGRITY_MISMATCH: 409,
+  ATTACHMENT_KEY_MANIFEST_MISMATCH: 409,
+  ATTACHMENT_INCONSISTENT_VERSION: 409,
+  FILE_TOO_LARGE: 400,
+  PAYLOAD_TOO_LARGE: 413,
+  MISSING_REQUIRED_FIELDS: 400,
+  EXTENSION_NOT_ALLOWED: 400,
+  CONTENT_TYPE_NOT_ALLOWED: 400,
+  INVALID_FORM_DATA: 400,
+  INVALID_FILENAME: 400,
+  INVALID_ENCRYPTION_FORMAT: 400,
+  ITEM_KEY_REQUIRED: 400,
+  ITEM_KEY_VERSION_DOWNGRADE: 409,
+
+  // ── Teams ─────────────────────────────────────────────────
+  SLUG_ALREADY_TAKEN: 409,
+  TEAM_NOT_FOUND: 404,
+  MEMBER_NOT_FOUND: 404,
+  ALREADY_A_MEMBER: 409,
+  OWNER_ONLY: 403,
+  CANNOT_CHANGE_OWNER_ROLE: 403,
+  CANNOT_CHANGE_HIGHER_ROLE: 403,
+  CANNOT_CHANGE_OWN_ROLE: 400,
+  CANNOT_REMOVE_OWNER: 403,
+  CANNOT_REMOVE_HIGHER_ROLE: 403,
+  KEY_NOT_DISTRIBUTED: 403,
+  KEY_ALREADY_DISTRIBUTED: 409,
+  MEMBER_KEY_NOT_FOUND: 404,
+  VAULT_NOT_READY: 409,
+  TEAM_KEY_VERSION_MISMATCH: 409,
+  ENTRY_COUNT_MISMATCH: 400,
+  ONLY_OWN_ENTRIES: 403,
+  INVALID_DATE_RANGE: 400,
+
+  // ── Team Invitations ──────────────────────────────────────
+  TOKEN_REQUIRED: 400,
+  INVALID_INVITATION: 404,
+  INVITATION_ALREADY_USED: 410,
+  INVITATION_EXPIRED: 410,
+  INVITATION_WRONG_EMAIL: 403,
+  INVITATION_ALREADY_SENT: 409,
+  INVITATION_NOT_FOUND: 404,
+
+  // ── Policy ────────────────────────────────────────────────
+  SELF_LOCKOUT: 409,
+  PIN_LENGTH_POLICY_NOT_SATISFIED: 400,
+  POLICY_SHARING_DISABLED: 403,
+  POLICY_EXPORT_DISABLED: 403,
+  POLICY_SHARE_PASSWORD_REQUIRED: 403,
+
+  // ── Share Links ───────────────────────────────────────────
+  ALREADY_REVOKED: 409,
+  SHARE_PASSWORD_REQUIRED: 401,
+  SHARE_PASSWORD_INCORRECT: 403,
+  SHARE_GONE: 410,
+
+  // ── Send ──────────────────────────────────────────────────
+  SEND_TEXT_TOO_LARGE: 400,
+  SEND_FILE_TOO_LARGE: 400,
+  SEND_FILE_TYPE_NOT_ALLOWED: 400,
+  SEND_STORAGE_LIMIT_EXCEEDED: 400,
+
+  // ── Watchtower ────────────────────────────────────────────
+  INVALID_PREFIX: 400,
+  UPSTREAM_ERROR: 502,
+
+  // ── Pagination ────────────────────────────────────────────
+  INVALID_CURSOR: 400,
+
+  // ── Audit ─────────────────────────────────────────────────
+  INVALID_BODY: 400,
+  AUDIT_CHAIN_SEED_NOT_FOUND: 400,
+
+  // ── Emergency Access ──────────────────────────────────────
+  GRANT_NOT_PENDING: 400,
+  GRANT_REVOKED: 403,
+  CANNOT_GRANT_SELF: 400,
+  DUPLICATE_GRANT: 409,
+  INVALID_STATUS: 400,
+  NOT_AUTHORIZED_FOR_GRANT: 403,
+  NOT_ACTIVATED: 403,
+  EMERGENCY_RECOVERY_KEY_MISSING: 400,
+  INCOMPATIBLE_KEY_ALGORITHM: 400,
+
+  // ── Sessions ──────────────────────────────────────────────
+  SESSION_NOT_FOUND: 404,
+  CANNOT_REVOKE_CURRENT_SESSION: 400,
+
+  // ── WebAuthn / Passkey ────────────────────────────────────
+  INVALID_CHALLENGE: 400,
+
+  // ── Extension Token ───────────────────────────────────────
+  EXTENSION_TOKEN_EXPIRED: 401,
+  EXTENSION_TOKEN_REVOKED: 401,
+  EXTENSION_TOKEN_INVALID: 401,
+  EXTENSION_TOKEN_SESSION_EXPIRED: 401,
+  EXTENSION_TOKEN_SCOPE_INSUFFICIENT: 403,
+
+  // ── Mobile (iOS) Token ────────────────────────────────────
+  MOBILE_BRIDGE_CODE_INVALID: 400,
+  MOBILE_PKCE_MISMATCH: 400,
+  MOBILE_DEVICE_PUBKEY_MISMATCH: 400,
+  MOBILE_TOKEN_BINDING_INVALID: 401,
+  MOBILE_REFRESH_REUSE_DETECTED: 401,
+  MOBILE_REFRESH_TOKEN_REVOKED: 401,
+  MOBILE_REFRESH_SESSION_EXPIRED: 401,
+
+  // ── SCIM ──────────────────────────────────────────────────
+  // SCIM responses use scimError() helper (not errorResponse), so these
+  // defaults are never read. Listed here for satisfies completeness only.
+  SCIM_TOKEN_INVALID: 401,
+  SCIM_TOKEN_EXPIRED: 401,
+  SCIM_TOKEN_REVOKED: 401,
+  SCIM_OWNER_PROTECTED: 403,
+  SCIM_MANAGED_MEMBER: 409,
+  SCIM_FILTER_INVALID: 400,
+  SCIM_UNSUPPORTED_OPERATION: 400,
+  SCIM_RESOURCE_EXISTS: 409,
+  SCIM_TOKEN_LIMIT_EXCEEDED: 409,
+
+  // ── API Keys ──────────────────────────────────────────────
+  API_KEY_LIMIT_EXCEEDED: 400,
+  API_KEY_NOT_FOUND: 404,
+  API_KEY_ALREADY_REVOKED: 400,
+  API_KEY_INVALID: 401,
+  API_KEY_SCOPE_INSUFFICIENT: 403,
+
+  // ── Operator Tokens ───────────────────────────────────────
+  OPERATOR_TOKEN_LIMIT_EXCEEDED: 409,
+  OPERATOR_TOKEN_NOT_FOUND: 404,
+  OPERATOR_TOKEN_STALE_SESSION: 401,
+
+  // ── Service Accounts ──────────────────────────────────────
+  SA_LIMIT_EXCEEDED: 409,
+  SA_NOT_FOUND: 404,
+  SA_INACTIVE: 409,
+  SA_NAME_CONFLICT: 409,
+  SA_INVALID_SCOPE: 400,
+  SA_TOKEN_LIMIT_EXCEEDED: 409,
+  SA_TOKEN_NOT_FOUND: 404,
+  SA_TOKEN_ALREADY_REVOKED: 409,
+
+  // ── MCP Clients ───────────────────────────────────────────
+  // 422 chosen over 409 for tenant-quota rejection; UI consumer at
+  // mcp-client-card.tsx:242 explicitly checks `res.status === 422`.
+  MCP_CLIENT_NAME_CONFLICT: 409,
+  MCP_CLIENT_LIMIT_EXCEEDED: 422,
+  MCP_TOKEN_NOT_FOUND: 404,
+  MCP_TOKEN_SCOPE_INSUFFICIENT: 403,
+
+  // ── Delegation ────────────────────────────────────────────
+  DELEGATION_STORE_FAILED: 503,
+  DELEGATION_ENTRIES_NOT_FOUND: 403,
+
+  // ── Tenant / Session ──────────────────────────────────────
+  NO_TENANT: 403,
+  INVALID_SESSION: 400,
+  SESSION_STEP_UP_REQUIRED: 403,
+  INTERNAL_ERROR: 500,
+
+  // ── API / Auth ────────────────────────────────────────────
+  INVALID_REQUEST: 400,
+  AUTHENTICATION_FAILED: 401,
+  SYNC_FAILED: 500,
+  KEY_VERSION_NOT_NEWER: 400,
+  BLOB_HASH_MISMATCH: 409,
+} as const satisfies Record<ApiErrorCode, number>;
 
 /**
  * Maps every error code to an i18n key under the ApiErrors namespace.
@@ -224,6 +491,7 @@ export type ApiErrorCode = (typeof API_ERROR)[keyof typeof API_ERROR];
 const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   UNAUTHORIZED: "unauthorized",
   RATE_LIMIT_EXCEEDED: "rateLimitExceeded",
+  ACCESS_DENIED: "accessDenied",
   INVALID_JSON: "invalidRequest",
   VALIDATION_ERROR: "validationError",
   NOT_FOUND: "notFound",
@@ -245,10 +513,10 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   NOT_IN_TRASH: "notInTrash",
   ATTACHMENT_NOT_FOUND: "attachmentNotFound",
   ATTACHMENT_LIMIT_EXCEEDED: "attachmentLimitExceeded",
-  LEGACY_ATTACHMENTS_RESIDUAL: "legacyAttachmentsResidual",
+  ATTACHMENT_MIGRATION_INCOMPLETE: "attachmentMigrationIncomplete",
   LEGACY_MIGRATION_NOT_APPLICABLE: "legacyMigrationNotApplicable",
-  LEGACY_BODY_HASH_MISMATCH: "legacyBodyHashMismatch",
-  ATTACHMENT_CEK_MANIFEST_MISMATCH: "attachmentCekManifestMismatch",
+  LEGACY_INTEGRITY_MISMATCH: "legacyIntegrityMismatch",
+  ATTACHMENT_KEY_MANIFEST_MISMATCH: "attachmentKeyManifestMismatch",
   ATTACHMENT_INCONSISTENT_VERSION: "attachmentInconsistentVersion",
   FILE_TOO_LARGE: "fileTooLarge",
   PAYLOAD_TOO_LARGE: "fileTooLarge",
@@ -257,8 +525,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   CONTENT_TYPE_NOT_ALLOWED: "contentTypeNotAllowed",
   INVALID_FORM_DATA: "invalidFormData",
   INVALID_FILENAME: "invalidFilename",
-  INVALID_IV_FORMAT: "invalidRequest",
-  INVALID_AUTH_TAG_FORMAT: "invalidRequest",
+  INVALID_ENCRYPTION_FORMAT: "invalidEncryptionFormat",
   ITEM_KEY_REQUIRED: "itemKeyRequired",
   ITEM_KEY_VERSION_DOWNGRADE: "itemKeyVersionDowngrade",
   SLUG_ALREADY_TAKEN: "slugAlreadyTaken",
@@ -294,6 +561,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   ALREADY_REVOKED: "alreadyRevoked",
   SHARE_PASSWORD_REQUIRED: "sharePasswordRequired",
   SHARE_PASSWORD_INCORRECT: "sharePasswordIncorrect",
+  SHARE_GONE: "shareGone",
   SEND_TEXT_TOO_LARGE: "sendTextTooLarge",
   SEND_FILE_TOO_LARGE: "sendFileTooLarge",
   SEND_FILE_TYPE_NOT_ALLOWED: "sendFileTypeNotAllowed",
@@ -310,24 +578,25 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   INVALID_STATUS: "unknownError",
   NOT_AUTHORIZED_FOR_GRANT: "unknownError",
   NOT_ACTIVATED: "unknownError",
-  KEY_ESCROW_NOT_COMPLETED: "unknownError",
+  EMERGENCY_RECOVERY_KEY_MISSING: "emergencyRecoveryKeyMissing",
   INCOMPATIBLE_KEY_ALGORITHM: "unknownError",
   SESSION_NOT_FOUND: "sessionNotFound",
   CANNOT_REVOKE_CURRENT_SESSION: "cannotRevokeCurrentSession",
+  INVALID_CHALLENGE: "invalidChallenge",
   EXTENSION_TOKEN_EXPIRED: "extensionTokenExpired",
   EXTENSION_TOKEN_REVOKED: "extensionTokenRevoked",
   EXTENSION_TOKEN_INVALID: "extensionTokenInvalid",
-  EXTENSION_TOKEN_FAMILY_EXPIRED: "extensionTokenFamilyExpired",
+  EXTENSION_TOKEN_SESSION_EXPIRED: "extensionTokenSessionExpired",
   EXTENSION_TOKEN_SCOPE_INSUFFICIENT: "extensionTokenScopeInsufficient",
   // Mobile-specific failure codes — surfaced to native iOS clients only.
-  // No human-facing UI; reuse the closest existing i18n key.
   MOBILE_BRIDGE_CODE_INVALID: "unauthorized",
   MOBILE_PKCE_MISMATCH: "unauthorized",
   MOBILE_DEVICE_PUBKEY_MISMATCH: "unauthorized",
-  MOBILE_DPOP_INVALID: "unauthorized",
-  MOBILE_REFRESH_REPLAY_DETECTED: "unauthorized",
+  MOBILE_TOKEN_BINDING_INVALID: "mobileTokenBindingInvalid",
+  MOBILE_REFRESH_REUSE_DETECTED: "mobileRefreshReuseDetected",
   MOBILE_REFRESH_TOKEN_REVOKED: "unauthorized",
-  MOBILE_REFRESH_FAMILY_EXPIRED: "unauthorized",
+  MOBILE_REFRESH_SESSION_EXPIRED: "mobileRefreshSessionExpired",
+  AUDIT_CHAIN_SEED_NOT_FOUND: "auditChainSeedNotFound",
   INVALID_RECOVERY_KEY: "invalidRecoveryKey",
   RECOVERY_KEY_NOT_SET: "recoveryKeyNotSet",
   VAULT_RESET_CONFIRMATION_MISMATCH: "vaultResetConfirmationMismatch",
@@ -357,6 +626,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   OPERATOR_TOKEN_STALE_SESSION: "operatorTokenStaleSession",
   SA_LIMIT_EXCEEDED: "saLimitExceeded",
   SA_NOT_FOUND: "saNotFound",
+  SA_INACTIVE: "saInactive",
   SA_NAME_CONFLICT: "saNameConflict",
   SA_INVALID_SCOPE: "saInvalidScope",
   SA_TOKEN_LIMIT_EXCEEDED: "saTokenLimitExceeded",
@@ -372,6 +642,11 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   INVALID_SESSION: "invalidSession",
   SESSION_STEP_UP_REQUIRED: "sessionStepUpRequired",
   INTERNAL_ERROR: "internalError",
+  INVALID_REQUEST: "invalidRequest",
+  AUTHENTICATION_FAILED: "authenticationFailed",
+  SYNC_FAILED: "syncFailed",
+  KEY_VERSION_NOT_NEWER: "keyVersionNotNewer",
+  BLOB_HASH_MISMATCH: "blobHashMismatch",
 } satisfies Record<ApiErrorCode, string>;
 
 /**
@@ -419,7 +694,7 @@ const EA_I18N: Record<string, string> = {
   INVALID_STATUS: "invalidStatus",
   NOT_AUTHORIZED_FOR_GRANT: "notAuthorizedForGrant",
   NOT_ACTIVATED: "notActivated",
-  KEY_ESCROW_NOT_COMPLETED: "keyEscrowNotCompleted",
+  EMERGENCY_RECOVERY_KEY_MISSING: "emergencyRecoveryKeyMissing",
   INCOMPATIBLE_KEY_ALGORITHM: "actionFailed",
 };
 

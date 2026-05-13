@@ -51,7 +51,9 @@ export function TeamEditDialogLoader({
     async function load() {
       try {
         const res = await fetchApi(apiPath.teamPasswordById(teamId, id));
-        if (!res.ok) throw new Error(td("notFound"));
+        if (!res.ok) {
+          throw new Error(td("notFound"));
+        }
         const raw = await res.json();
 
         const itemKeyVersion = (raw.itemKeyVersion as number) ?? 0;

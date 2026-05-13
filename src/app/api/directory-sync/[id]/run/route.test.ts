@@ -195,6 +195,8 @@ describe("POST /api/directory-sync/[id]/run", () => {
 
     expect(status).toBe(409);
     expect(json.error).toBe("CONFLICT");
+    expect(json.details).toBeDefined();
+    expect(json.result).toBeUndefined();
   });
 
   it("returns 500 when sync fails for other reasons", async () => {
@@ -212,6 +214,11 @@ describe("POST /api/directory-sync/[id]/run", () => {
 
     expect(status).toBe(500);
     expect(json.error).toBe("SYNC_FAILED");
+    // C4 closed-list: failure context goes through `details`, never a
+    // top-level `result` field (regression guard for the C13 wrap).
+    expect(json.details).toBeDefined();
+    expect(json.details.errorMessage).toBe("provider unreachable");
+    expect(json.result).toBeUndefined();
   });
 
   it("returns sync result stats on success", async () => {

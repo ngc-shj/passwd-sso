@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, Loader2, KeyRound } from "lucide-react";
 import { fetchApi, withBasePath } from "@/lib/url-helpers";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
 import { canUsePasskeyRecovery } from "@/lib/auth/webauthn/can-use-passkey-recovery";
 import { signOut } from "next-auth/react";
@@ -54,8 +55,8 @@ export function AutoExtensionConnect() {
     try {
       const res = await fetchApi(API_PATH.EXTENSION_BRIDGE_CODE, { method: "POST" });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        const needsReauth = body.error === API_ERROR.SESSION_STEP_UP_REQUIRED;
+        const body = await readApiErrorBody(res);
+        const needsReauth = body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED;
         if (needsReauth) {
           const passkeyCapable = await canUsePasskeyRecovery();
           setRequiresReauth(passkeyCapable);

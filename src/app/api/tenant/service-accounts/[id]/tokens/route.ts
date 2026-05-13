@@ -11,7 +11,7 @@ import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import {
   SA_TOKEN_PREFIX,
   MAX_SA_TOKENS_PER_ACCOUNT,
@@ -110,10 +110,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   if (!sa.isActive) {
-    return NextResponse.json(
-      { error: API_ERROR.SA_NOT_FOUND, message: "Service account is inactive" },
-      { status: 409 },
-    );
+    return errorResponseWithMessage(API_ERROR.SA_INACTIVE, "Service account is inactive");
   }
 
   const result = await parseBody(req, saTokenCreateSchema);
@@ -159,10 +156,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     );
   } catch (err) {
     if (err instanceof Error && err.message === "Token limit exceeded") {
-      return NextResponse.json(
-        { error: API_ERROR.SA_TOKEN_LIMIT_EXCEEDED },
-        { status: 409 },
-      );
+      return errorResponse(API_ERROR.SA_TOKEN_LIMIT_EXCEEDED);
     }
     throw err;
   }

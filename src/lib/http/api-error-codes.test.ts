@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   API_ERROR,
+  API_ERROR_STATUS,
   apiErrorToI18nKey,
   eaErrorToI18nKey,
 } from "./api-error-codes";
@@ -21,7 +22,10 @@ describe("apiErrorToI18nKey", () => {
   it("never returns unknownError for a known code", () => {
     for (const code of allCodes) {
       const key = apiErrorToI18nKey(code);
-      // EA-only codes are allowed to map to unknownError in non-EA context
+      // EA-only codes are allowed to map to unknownError in non-EA context.
+      // EMERGENCY_RECOVERY_KEY_MISSING (renamed from KEY_ESCROW_NOT_COMPLETED
+      // in C11) now has its own ApiErrors-namespace translation, so it is no
+      // longer in this allow-list.
       if (
         [
           "GRANT_NOT_PENDING",
@@ -30,7 +34,6 @@ describe("apiErrorToI18nKey", () => {
           "INVALID_STATUS",
           "NOT_AUTHORIZED_FOR_GRANT",
           "NOT_ACTIVATED",
-          "KEY_ESCROW_NOT_COMPLETED",
           "INCOMPATIBLE_KEY_ALGORITHM",
         ].includes(code)
       ) {
@@ -82,7 +85,7 @@ describe("eaErrorToI18nKey", () => {
     "INVALID_STATUS",
     "NOT_AUTHORIZED_FOR_GRANT",
     "NOT_ACTIVATED",
-    "KEY_ESCROW_NOT_COMPLETED",
+    "EMERGENCY_RECOVERY_KEY_MISSING",
     "INCOMPATIBLE_KEY_ALGORITHM",
   ] as const;
 
@@ -118,6 +121,24 @@ describe("API_ERROR structural invariants", () => {
   it("code count matches expected (update this when adding new codes)", () => {
     // If this fails, you added a new code to API_ERROR.
     // Update this count AND add the code to API_ERROR_I18N + i18n messages.
-    expect(Object.keys(API_ERROR).length).toBe(147);
+    expect(Object.keys(API_ERROR).length).toBe(156);
+  });
+});
+
+// ── API_ERROR_STATUS invariants ─────────────────────────────────
+
+describe("API_ERROR_STATUS", () => {
+  it("covers every API_ERROR code (satisfies completeness)", () => {
+    for (const code of Object.values(API_ERROR)) {
+      expect(API_ERROR_STATUS).toHaveProperty(code);
+      expect(typeof API_ERROR_STATUS[code]).toBe("number");
+    }
+  });
+
+  it("only assigns valid HTTP status codes (4xx/5xx)", () => {
+    for (const status of Object.values(API_ERROR_STATUS)) {
+      expect(status).toBeGreaterThanOrEqual(400);
+      expect(status).toBeLessThan(600);
+    }
   });
 });

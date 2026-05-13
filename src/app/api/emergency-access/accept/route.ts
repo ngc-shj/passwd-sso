@@ -47,16 +47,16 @@ async function handlePOST(req: NextRequest) {
   }
 
   if (grant.tokenExpiresAt < new Date()) {
-    return errorResponse(API_ERROR.INVITATION_EXPIRED, 410);
+    return errorResponse(API_ERROR.INVITATION_EXPIRED);
   }
 
   if (grant.granteeEmail.toLowerCase() !== session.user.email.toLowerCase()) {
-    return errorResponse(API_ERROR.INVITATION_WRONG_EMAIL, 403);
+    return errorResponse(API_ERROR.INVITATION_WRONG_EMAIL);
   }
 
   // Cannot accept own grant
   if (grant.ownerId === session.user.id) {
-    return errorResponse(API_ERROR.CANNOT_GRANT_SELF, 400);
+    return errorResponse(API_ERROR.CANNOT_GRANT_SELF);
   }
 
   // Atomic compare-and-swap: only transitions a still-PENDING row, and only
@@ -91,7 +91,7 @@ async function handlePOST(req: NextRequest) {
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!txResult.ok) {
-    return errorResponse(API_ERROR.INVITATION_ALREADY_USED, 410);
+    return errorResponse(API_ERROR.INVITATION_ALREADY_USED);
   }
 
   await logAuditAsync({

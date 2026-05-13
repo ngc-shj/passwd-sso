@@ -34,7 +34,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   const { searchParams } = new URL(req.url);
   const cursor = searchParams.get("cursor");
   if (!isValidCursorId(cursor)) {
-    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+    return errorResponse(API_ERROR.INVALID_CURSOR);
   }
   const limit = SHARE_ACCESS_LOG_LIMIT;
 
@@ -55,7 +55,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       }),
     );
   } catch {
-    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+    return errorResponse(API_ERROR.INVALID_CURSOR);
   }
 
   const hasMore = logs.length > limit;

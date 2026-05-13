@@ -54,7 +54,7 @@ async function handleGET(req: NextRequest, ctx: RouteContext) {
   );
   const cursor = url.searchParams.get("cursor");
   if (!isValidCursorId(cursor)) {
-    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+    return errorResponse(API_ERROR.INVALID_CURSOR);
   }
 
   // Fetch logs with keyset pagination
@@ -86,7 +86,7 @@ async function handleGET(req: NextRequest, ctx: RouteContext) {
       }),
     );
   } catch {
-    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+    return errorResponse(API_ERROR.INVALID_CURSOR);
   }
 
   const hasMore = logs.length > limit;

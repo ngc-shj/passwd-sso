@@ -10,6 +10,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponseWithMessage } from "@/lib/http/api-response";
 
 export interface MaintenanceOperator {
   tenantId: string;
@@ -52,10 +54,7 @@ export async function requireMaintenanceOperator(
   if (!membership) {
     return {
       ok: false,
-      response: NextResponse.json(
-        { error: "operatorId is not an active tenant admin" },
-        { status: 400 },
-      ),
+      response: errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, "operatorId is not an active tenant admin"),
     };
   }
   // The role filter above guarantees membership.role is OWNER or ADMIN, but

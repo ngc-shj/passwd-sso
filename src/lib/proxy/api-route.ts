@@ -10,6 +10,8 @@ import { classifyRoute, ROUTE_POLICY_KIND } from "./route-policy";
 import { shouldEnforceCsrf, assertSessionCsrf } from "./csrf-gate";
 import { extractClientIp } from "../auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "../auth/policy/access-restriction";
+import { errorResponse } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 export async function handleApiAuth(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -92,10 +94,9 @@ export async function handleApiAuth(request: NextRequest) {
     if (!session.valid) {
       return applyCorsHeaders(
         request,
-        NextResponse.json(
-          { error: "UNAUTHORIZED" },
-          { status: 401, headers: { "Cache-Control": "no-store" } },
-        ),
+        errorResponse(API_ERROR.UNAUTHORIZED, undefined, undefined, {
+          "Cache-Control": "no-store",
+        }),
       );
     }
 
@@ -110,10 +111,7 @@ export async function handleApiAuth(request: NextRequest) {
       if (!accessResult.allowed) {
         return applyCorsHeaders(
           request,
-          NextResponse.json(
-            { error: "ACCESS_DENIED" },
-            { status: 403, headers: { "Cache-Control": "no-store" } },
-          ),
+          errorResponse(API_ERROR.ACCESS_DENIED, undefined, undefined, { "Cache-Control": "no-store" }),
         );
       }
     }

@@ -89,14 +89,8 @@ vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (fn: any) => fn,
 }));
 
-vi.mock("@/lib/http/api-error-codes", () => ({
-  API_ERROR: {
-    UNAUTHORIZED: "UNAUTHORIZED",
-    RATE_LIMIT_EXCEEDED: "RATE_LIMIT_EXCEEDED",
-    SERVICE_UNAVAILABLE: "SERVICE_UNAVAILABLE",
-    VALIDATION_ERROR: "VALIDATION_ERROR",
-    PIN_LENGTH_POLICY_NOT_SATISFIED: "PIN_LENGTH_POLICY_NOT_SATISFIED",
-  },
+vi.mock("@/lib/http/api-error-codes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/http/api-error-codes")>()),
 }));
 
 vi.mock("@/lib/http/parse-body", () => ({
@@ -167,7 +161,7 @@ describe("POST /api/webauthn/register/verify", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    process.env.WEBAUTHN_RP_ID = "example.com";
+    vi.stubEnv("WEBAUTHN_RP_ID", "example.com");
 
     mockAuth.mockResolvedValue({ user: { id: "user-1", email: "test@example.com" } });
     mockRateLimiterCheck.mockResolvedValue({ allowed: true });
@@ -410,7 +404,7 @@ describe("POST /api/webauthn/register/verify", () => {
     });
   });
 
-  it("returns 400 with VALIDATION_ERROR when challenge has expired", async () => {
+  it("returns 400 with INVALID_CHALLENGE when challenge has expired", async () => {
     mockRedisGetdel.mockResolvedValue(null);
 
     const req = createRequest("POST", ROUTE_URL, {
@@ -419,11 +413,11 @@ describe("POST /api/webauthn/register/verify", () => {
     const { status, json } = await parseResponse(await POST(req));
 
     expect(status).toBe(400);
-    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(json.error).toBe("INVALID_CHALLENGE");
   });
 
   it("returns 503 with SERVICE_UNAVAILABLE when WEBAUTHN_RP_ID is not set", async () => {
-    delete process.env.WEBAUTHN_RP_ID;
+    vi.stubEnv("WEBAUTHN_RP_ID", "");
 
     const req = createRequest("POST", ROUTE_URL, {
       body: makeBody(),

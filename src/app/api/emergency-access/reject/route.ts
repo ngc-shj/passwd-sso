@@ -38,7 +38,7 @@ async function handlePOST(req: NextRequest) {
   }
 
   if (grant.granteeEmail.toLowerCase() !== session.user.email.toLowerCase()) {
-    return errorResponse(API_ERROR.INVITATION_WRONG_EMAIL, 403);
+    return errorResponse(API_ERROR.INVITATION_WRONG_EMAIL);
   }
 
   // Atomic compare-and-swap: only transitions a still-PENDING row.
@@ -52,7 +52,7 @@ async function handlePOST(req: NextRequest) {
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!transitionResult.ok) {
-    return errorResponse(API_ERROR.INVITATION_ALREADY_USED, 410);
+    return errorResponse(API_ERROR.INVITATION_ALREADY_USED);
   }
 
   await logAuditAsync({

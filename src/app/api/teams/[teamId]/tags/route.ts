@@ -18,7 +18,7 @@ import {
   TagTreeError,
 } from "@/lib/format/tag-tree";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, handleAuthError, unauthorized } from "@/lib/http/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -113,10 +113,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       validateParentChain(null, parentId, allTags);
     } catch (e) {
       if (e instanceof TagTreeError) {
-        return NextResponse.json(
-          { error: API_ERROR.VALIDATION_ERROR, message: e.message },
-          { status: 400 },
-        );
+        return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, e.message);
       }
       throw e;
     }
@@ -133,7 +130,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     }),
   );
   if (existing) {
-    return errorResponse(API_ERROR.TAG_ALREADY_EXISTS, 409);
+    return errorResponse(API_ERROR.TAG_ALREADY_EXISTS);
   }
 
   const tag = await withTeamTenantRls(teamId, async (tenantId) =>

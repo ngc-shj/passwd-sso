@@ -47,6 +47,7 @@ import {
   OPERATOR_TOKEN_NAME_MAX_LENGTH,
 } from "@/lib/constants/auth/operator-token";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
 import { canUsePasskeyRecovery } from "@/lib/auth/webauthn/can-use-passkey-recovery";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
@@ -199,13 +200,11 @@ export function OperatorTokenCard() {
 
       const retryRes = await createToken();
       if (!retryRes.ok) {
-        const errBody = (await retryRes.json().catch(() => ({}))) as {
-          error?: string;
-        };
-        if (errBody.error === API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED) {
+        const errBody = await readApiErrorBody(retryRes);
+        if (errBody?.error === API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED) {
           setReauthOpen(false);
           toast.error(t("limitExceeded"));
-        } else if (errBody.error === API_ERROR.OPERATOR_TOKEN_STALE_SESSION) {
+        } else if (errBody?.error === API_ERROR.OPERATOR_TOKEN_STALE_SESSION) {
           if (await canUsePasskeyRecovery()) {
             setReauthError(t("reauthStillRequired"));
           } else {

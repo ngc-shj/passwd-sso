@@ -147,7 +147,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
   if (tokenCount >= TOKEN_LIMIT_PER_TENANT) {
-    return errorResponse(API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED, 409);
+    return errorResponse(API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED);
   }
 
   const plaintext = generateOperatorToken();

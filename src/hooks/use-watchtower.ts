@@ -195,16 +195,18 @@ export function useWatchtower(
   // that already has the vault status, or in tests).
   useEffect(() => {
     if (policyProvidedRef.current || scope.type !== "personal" || !encryptionKey) return;
-    fetchApi(API_PATH.VAULT_STATUS)
-      .then((res) => res.ok ? res.json() : null)
-      .then((data) => {
+    (async () => {
+      try {
+        const res = await fetchApi(API_PATH.VAULT_STATUS);
+        if (!res.ok) return;
+        const data = await res.json();
         if (!data) return;
         setPasswordMaxAgeDays(data.passwordMaxAgeDays ?? null);
         setPasswordExpiryWarningDays(data.passwordExpiryWarningDays ?? 14);
-      })
-      .catch(() => {
+      } catch {
         // Ignore errors — policy-driven expiry is best-effort
-      });
+      }
+    })();
   }, [scope.type, encryptionKey]);
 
 
@@ -260,22 +262,19 @@ export function useWatchtower(
       const startRes = await fetchApi(API_PATH.WATCHTOWER_START, { method: "POST" });
       if (!startRes.ok) {
         if (startRes.status === 429) {
-          const body = await startRes.json().catch(() => null) as { retryAt?: number } | null;
-          if (typeof body?.retryAt === "number") {
-            const startedAt = body.retryAt - WATCHTOWER_COOLDOWN_MS;
-            setLastAnalyzedAt(startedAt);
-            window.localStorage.setItem(
-              LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
-              String(startedAt)
-            );
-          } else {
-            const fallbackStartedAt = Date.now();
-            setLastAnalyzedAt(fallbackStartedAt);
-            window.localStorage.setItem(
-              LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
-              String(fallbackStartedAt)
-            );
-          }
+          // Server emits Retry-After header (seconds) via rateLimited() helper;
+          // the body has no retryAt field per the canonical envelope. Reconstruct
+          // the cooldown anchor from the header so the UI countdown lines up.
+          const retryAfterSec = Number(startRes.headers.get("Retry-After"));
+          const startedAt =
+            Number.isFinite(retryAfterSec) && retryAfterSec > 0
+              ? Date.now() + retryAfterSec * 1000 - WATCHTOWER_COOLDOWN_MS
+              : Date.now();
+          setLastAnalyzedAt(startedAt);
+          window.localStorage.setItem(
+            LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
+            String(startedAt)
+          );
         }
         return;
       }
@@ -723,7 +722,9 @@ async function fetchPersonalWatchtowerEntries({
 }): Promise<DecryptedEntry[]> {
   if (!encryptionKey) return [];
   const res = await fetchApi(`${API_PATH.PASSWORDS}?include=blob`);
-  if (!res.ok) throw new Error("Failed to fetch passwords");
+  if (!res.ok) {
+    throw new Error("Failed to fetch passwords");
+  }
   const rawEntries = await res.json();
   const entries: DecryptedEntry[] = [];
 

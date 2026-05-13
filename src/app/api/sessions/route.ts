@@ -3,12 +3,11 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants";
-import { API_ERROR } from "@/lib/http/api-error-codes";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getSessionToken } from "./helpers";
 import { withUserTenantRls, resolveUserTenantId } from "@/lib/tenant-context";
-import { rateLimited } from "@/lib/http/api-response";
+import { rateLimited, unauthorized } from "@/lib/http/api-response";
 import { revokeAllExtensionTokensForUser } from "@/lib/auth/tokens/extension-token";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 
@@ -17,10 +16,7 @@ const revokeAllLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
 async function handleGET(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   const currentToken = getSessionToken(request);
@@ -111,10 +107,7 @@ async function handleGET(request: NextRequest) {
 async function handleDELETE(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   const rl = await revokeAllLimiter.check(`rl:session_revoke_all:${session.user.id}`);
@@ -124,10 +117,7 @@ async function handleDELETE(request: NextRequest) {
 
   const currentToken = getSessionToken(request);
   if (!currentToken) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   // SELECT tokens before deleteMany so we can invalidate the cache after

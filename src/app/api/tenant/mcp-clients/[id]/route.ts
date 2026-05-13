@@ -111,7 +111,7 @@ async function handlePUT(
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"
     ) {
-      return errorResponse(API_ERROR.MCP_CLIENT_NAME_CONFLICT, 409);
+      return errorResponse(API_ERROR.MCP_CLIENT_NAME_CONFLICT);
     }
     throw err;
   }

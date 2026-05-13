@@ -9,7 +9,7 @@ import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { transition, AR_STATUS, AR_ACTOR } from "@/lib/access-request/access-request-state";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 
 type Params = { params: Promise<{ id: string }> };
@@ -64,10 +64,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   );
 
   if (!transitionResult.ok) {
-    return NextResponse.json(
-      { error: API_ERROR.CONFLICT },
-      { status: 409 },
-    );
+    return errorResponse(API_ERROR.CONFLICT);
   }
 
   await logAuditAsync({

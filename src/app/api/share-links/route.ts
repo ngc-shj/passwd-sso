@@ -15,7 +15,7 @@ import { assertPolicyAllowsSharing, assertPolicySharePassword, PolicyViolationEr
 import { logAuditInTx, personalAuditBase, teamAuditBase } from "@/lib/audit/audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import {
   TEAM_PERMISSION,
@@ -122,7 +122,7 @@ async function handlePOST(req: NextRequest) {
       await assertPolicyAllowsSharing(teamEntry.teamId);
     } catch (e) {
       if (e instanceof PolicyViolationError) {
-        return errorResponse(API_ERROR.POLICY_SHARING_DISABLED, 403);
+        return errorResponse(API_ERROR.POLICY_SHARING_DISABLED);
       }
       throw e;
     }
@@ -132,7 +132,7 @@ async function handlePOST(req: NextRequest) {
       await assertPolicySharePassword(teamEntry.teamId, requirePassword);
     } catch (e) {
       if (e instanceof PolicyViolationError) {
-        return errorResponse(API_ERROR.POLICY_SHARE_PASSWORD_REQUIRED, 403);
+        return errorResponse(API_ERROR.POLICY_SHARE_PASSWORD_REQUIRED);
       }
       throw e;
     }
@@ -220,7 +220,7 @@ async function handleGET(req: NextRequest) {
   const teamPasswordEntryId = searchParams.get("teamPasswordEntryId");
 
   if (!passwordEntryId && !teamPasswordEntryId) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
 
   const where: Record<string, unknown> = {

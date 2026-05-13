@@ -8,7 +8,7 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, rateLimited, notFound } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, notFound, validationError } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
@@ -67,7 +67,7 @@ async function handlePOST(req: NextRequest) {
   }
 
   if (!share.accessPasswordHash) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    return validationError();
   }
 
   const verifyResult = verifyAccessPassword(password, share.accessPasswordHash, share.accessPasswordHashVersion);
@@ -92,7 +92,7 @@ async function handlePOST(req: NextRequest) {
       metadata: { ip },
     });
 
-    return errorResponse(API_ERROR.SHARE_PASSWORD_INCORRECT, 403);
+    return errorResponse(API_ERROR.SHARE_PASSWORD_INCORRECT);
   }
 
   await logAuditAsync({

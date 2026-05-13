@@ -12,7 +12,7 @@ import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constant
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, notFound, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, notFound, unauthorized } from "@/lib/http/api-response";
 import { invalidateSessionTimeoutCacheForTenant } from "@/lib/auth/session/session-timeout";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
@@ -110,17 +110,19 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     result.data.sessionIdleTimeoutMinutes != null &&
     result.data.sessionIdleTimeoutMinutes > teamTenant.tenant.sessionIdleTimeoutMinutes
   ) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-      message: `sessionIdleTimeoutMinutes exceeds tenant cap of ${teamTenant.tenant.sessionIdleTimeoutMinutes} minutes`,
-    });
+    return errorResponseWithMessage(
+      API_ERROR.VALIDATION_ERROR,
+      `sessionIdleTimeoutMinutes exceeds tenant cap of ${teamTenant.tenant.sessionIdleTimeoutMinutes} minutes`,
+    );
   }
   if (
     result.data.sessionAbsoluteTimeoutMinutes != null &&
     result.data.sessionAbsoluteTimeoutMinutes > teamTenant.tenant.sessionAbsoluteTimeoutMinutes
   ) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-      message: `sessionAbsoluteTimeoutMinutes exceeds tenant cap of ${teamTenant.tenant.sessionAbsoluteTimeoutMinutes} minutes`,
-    });
+    return errorResponseWithMessage(
+      API_ERROR.VALIDATION_ERROR,
+      `sessionAbsoluteTimeoutMinutes exceeds tenant cap of ${teamTenant.tenant.sessionAbsoluteTimeoutMinutes} minutes`,
+    );
   }
 
   const policy = await withTeamTenantRls(teamId, async (tenantId) =>

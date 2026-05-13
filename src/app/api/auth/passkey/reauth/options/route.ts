@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, unauthorized, notFound } from "@/lib/http/api-response";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { assertOrigin } from "@/lib/auth/session/csrf";
 import { generateAuthenticationOpts, WEBAUTHN_CHALLENGE_TTL_SECONDS } from "@/lib/auth/webauthn/webauthn-server";
@@ -31,11 +31,11 @@ async function handlePOST(req: NextRequest) {
 
   const redis = getRedis();
   if (!redis) {
-    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 503);
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
   }
 
   if (!process.env.WEBAUTHN_RP_ID) {
-    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 503);
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
   }
 
   const allowCredentials = await withBypassRls(
@@ -49,7 +49,7 @@ async function handlePOST(req: NextRequest) {
   );
 
   if (allowCredentials.length === 0) {
-    return errorResponse(API_ERROR.NOT_FOUND, 404);
+    return notFound();
   }
 
   const options = await generateAuthenticationOpts(

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Lock, Loader2, AlertTriangle } from "lucide-react";
 import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { SHARE_PASSWORD_MAX_ATTEMPTS } from "@/lib/validations/common";
 import { fetchApi } from "@/lib/url-helpers";
 
@@ -54,7 +55,7 @@ export function SharePasswordGate({
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => null);
+        const err = await readApiErrorBody(res);
         setAttempts((a) => a + 1);
         if (err?.error === "RATE_LIMIT_EXCEEDED") {
           setError(t("tooManyAttempts"));

@@ -63,7 +63,9 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
     setLoading(true);
     try {
       const res = await fetchApi(`${API_PATH.PASSWORDS}?trash=true`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        return;
+      }
       const data = await res.json();
 
       const decrypted: TrashEntry[] = [];

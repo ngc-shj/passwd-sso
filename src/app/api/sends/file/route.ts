@@ -46,7 +46,7 @@ async function handlePOST(req: NextRequest) {
   try {
     formData = await req.formData();
   } catch {
-    return errorResponse(API_ERROR.INVALID_FORM_DATA, 400);
+    return errorResponse(API_ERROR.INVALID_FORM_DATA);
   }
 
   // Extract fields
@@ -81,7 +81,7 @@ async function handlePOST(req: NextRequest) {
 
   // Check file size
   if (file.size > SEND_MAX_FILE_SIZE) {
-    return errorResponse(API_ERROR.SEND_FILE_TOO_LARGE, 400);
+    return errorResponse(API_ERROR.SEND_FILE_TOO_LARGE);
   }
 
   // Read file bytes
@@ -94,7 +94,7 @@ async function handlePOST(req: NextRequest) {
   if (detected) {
     const declaredType = file.type || "application/octet-stream";
     if (declaredType !== detected.mime && declaredType !== "application/octet-stream") {
-      return errorResponse(API_ERROR.SEND_FILE_TYPE_NOT_ALLOWED, 400);
+      return errorResponse(API_ERROR.SEND_FILE_TYPE_NOT_ALLOWED);
     }
   }
   // If detected is undefined (text files like .txt, .csv, .json), trust declared content type
@@ -124,7 +124,7 @@ async function handlePOST(req: NextRequest) {
 
   const currentTotal = activeTotal._sum.sendSizeBytes ?? 0;
   if (currentTotal + file.size > SEND_MAX_ACTIVE_TOTAL_BYTES) {
-    return errorResponse(API_ERROR.SEND_STORAGE_LIMIT_EXCEEDED, 400);
+    return errorResponse(API_ERROR.SEND_STORAGE_LIMIT_EXCEEDED);
   }
   if (!actor) {
     return unauthorized();

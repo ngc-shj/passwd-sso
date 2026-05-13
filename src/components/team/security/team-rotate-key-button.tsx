@@ -29,6 +29,8 @@ import { buildTeamEntryAAD, buildItemKeyWrapAAD } from "@/lib/crypto/crypto-aad"
 import { fetchApi } from "@/lib/url-helpers";
 import { apiPath } from "@/lib/constants";
 import { useTeamVault } from "@/lib/team/team-vault-core";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -247,10 +249,10 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
       });
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
+        const body = await readApiErrorBody(res);
         if (res.status === 409) {
           toast.error(t("rotateKeyVersionConflict"));
-        } else if (body?.error === "ENTRY_COUNT_MISMATCH") {
+        } else if (body?.error === API_ERROR.ENTRY_COUNT_MISMATCH) {
           toast.error(t("rotateKeyEntryMismatch"));
         } else {
           toast.error(t("rotateKeyFailed"));

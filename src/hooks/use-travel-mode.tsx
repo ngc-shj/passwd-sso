@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import type { ReactNode } from "react";
 import { fetchApi } from "@/lib/url-helpers";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 
 interface TravelModeState {
   active: boolean;
@@ -54,7 +55,9 @@ export function TravelModeProvider({ children }: { children: ReactNode }) {
   const enable = useCallback(async (): Promise<boolean> => {
     try {
       const res = await fetchApi("/api/travel-mode/enable", { method: "POST" });
-      if (!res.ok) return false;
+      if (!res.ok) {
+        return false;
+      }
       const data = await res.json();
       setState((prev) => ({
         ...prev,
@@ -78,14 +81,14 @@ export function TravelModeProvider({ children }: { children: ReactNode }) {
         });
 
         if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
           if (res.status === 401) {
             return { success: false, error: "INVALID_PASSPHRASE" };
           }
           if (res.status === 403) {
             return { success: false, error: "ACCOUNT_LOCKED" };
           }
-          return { success: false, error: data.error || `HTTP ${res.status}` };
+          const body = await readApiErrorBody(res);
+          return { success: false, error: body?.error ?? `HTTP ${res.status}` };
         }
 
         const data = await res.json();

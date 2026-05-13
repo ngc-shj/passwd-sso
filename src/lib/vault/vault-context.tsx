@@ -1083,7 +1083,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           att.cekKeyVersion == null ||
           att.cekWrapAadVersion == null
         ) {
-          // Inconsistent CEK data — skip; server will reject at ATTACHMENT_CEK_MANIFEST_MISMATCH
+          // Inconsistent CEK data — skip; server will reject at ATTACHMENT_KEY_MANIFEST_MISMATCH
           continue;
         }
         // S3 defense: a server-side attacker with DB write access could flip

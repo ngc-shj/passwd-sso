@@ -38,7 +38,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   );
 
   if (!team) {
-    return errorResponse(API_ERROR.TEAM_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.TEAM_NOT_FOUND);
   }
 
   const [entries, activeMembers] = await withTeamTenantRls(teamId, async () =>

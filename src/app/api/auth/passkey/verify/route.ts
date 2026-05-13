@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID, randomBytes } from "node:crypto";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited } from "@/lib/http/api-response";
+import { errorResponse, rateLimited } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { assertOrigin } from "@/lib/auth/session/csrf";
 import { authorizeWebAuthn } from "@/lib/auth/webauthn/webauthn-authorize";
 import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit/audit";
@@ -46,20 +47,14 @@ async function handlePOST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json(
-      { error: "INVALID_REQUEST" },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.INVALID_REQUEST);
   }
 
   if (
     typeof body.credentialResponse !== "string" ||
     typeof body.challengeId !== "string"
   ) {
-    return NextResponse.json(
-      { error: "INVALID_REQUEST" },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.INVALID_REQUEST);
   }
 
   // Verify WebAuthn authentication
@@ -69,10 +64,7 @@ async function handlePOST(req: NextRequest) {
   });
 
   if (!user) {
-    return NextResponse.json(
-      { error: "AUTHENTICATION_FAILED" },
-      { status: 401 },
-    );
+    return errorResponse(API_ERROR.AUTHENTICATION_FAILED);
   }
 
   // SSO tenant guard: reject non-bootstrap (SSO) tenant users.
@@ -87,10 +79,7 @@ async function handlePOST(req: NextRequest) {
     }),
   BYPASS_PURPOSE.AUTH_FLOW);
   if (!existingUser?.tenantId || !existingUser.tenant || !existingUser.tenant.isBootstrap) {
-    return NextResponse.json(
-      { error: "AUTHENTICATION_FAILED" },
-      { status: 401 },
-    );
+    return errorResponse(API_ERROR.AUTHENTICATION_FAILED);
   }
 
   // Create database session (same as Auth.js would for OAuth providers)

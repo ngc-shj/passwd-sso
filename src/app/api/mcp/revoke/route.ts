@@ -20,6 +20,9 @@ export async function POST(req: NextRequest) {
   const ip = extractClientIp(req) ?? "unknown";
   const rl = await revokeLimiter.check(`rl:mcp_revoke:${rateLimitKeyFromIp(ip)}`);
   if (!rl.allowed) {
+    // Deliberate extension: RFC 7009 §2.2 says "always 200"; we return 429 +
+    // { error: "rate_limited" } for abuse mitigation. See docs/api/error-handling.md
+    // § "Extensions to RFC 6749".
     return NextResponse.json(
       { error: "rate_limited" },
       { status: 429, headers: { "Retry-After": String(Math.ceil((rl.retryAfterMs ?? 60_000) / 1000)) } },

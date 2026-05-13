@@ -15,7 +15,7 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { runDirectorySync } from "@/lib/directory-sync/engine";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { errorResponse, rateLimited, zodValidationError, handleAuthError } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, zodValidationError, handleAuthError, unauthorized, notFound } from "@/lib/http/api-response";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 
@@ -31,10 +31,7 @@ const runSchema = z.object({
 async function handlePOST(req: NextRequest, ctx: RouteContext) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   const { id } = await ctx.params;
@@ -58,10 +55,7 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
     }),
   );
   if (!config) {
-    return NextResponse.json(
-      { error: API_ERROR.NOT_FOUND },
-      { status: 404 },
-    );
+    return notFound();
   }
 
   // Empty body is allowed: defaults are used.
@@ -70,7 +64,7 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
   try {
     body = rawText ? JSON.parse(rawText) : {};
   } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
+    return errorResponse(API_ERROR.INVALID_JSON);
   }
   const parsed = runSchema.safeParse(body);
   if (!parsed.success) {
@@ -107,15 +101,9 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
   if (!result.success) {
     // If it was a lock conflict, return 409
     if (result.errorMessage?.includes("already running")) {
-      return NextResponse.json(
-        { error: API_ERROR.CONFLICT, result },
-        { status: 409 },
-      );
+      return errorResponse(API_ERROR.CONFLICT, undefined, { details: result });
     }
-    return NextResponse.json(
-      { error: "SYNC_FAILED", result },
-      { status: 500 },
-    );
+    return errorResponse(API_ERROR.SYNC_FAILED, undefined, { details: result });
   }
 
   return NextResponse.json(result);

@@ -43,7 +43,7 @@ async function handlePOST(
   );
 
   if (!owner) {
-    return errorResponse(API_ERROR.USER_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.USER_NOT_FOUND);
   }
 
   const result = await parseBody(req, confirmEmergencyGrantSchema);
@@ -53,7 +53,7 @@ async function handlePOST(
   // Validate keyAlgorithm is compatible with wrapVersion
   const allowedAlgorithms = SUPPORTED_KEY_ALGORITHMS[wrapVersion];
   if (!allowedAlgorithms?.includes(grant.keyAlgorithm)) {
-    return errorResponse(API_ERROR.INCOMPATIBLE_KEY_ALGORITHM, 400);
+    return errorResponse(API_ERROR.INCOMPATIBLE_KEY_ALGORITHM);
   }
 
   // Use server-fetched keyVersion, ignore client-sent value
@@ -80,7 +80,7 @@ async function handlePOST(
   );
 
   if (!transitionResult.ok) {
-    return errorResponse(API_ERROR.INVALID_STATUS, 400);
+    return errorResponse(API_ERROR.INVALID_STATUS);
   }
 
   await logAuditAsync({

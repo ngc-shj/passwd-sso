@@ -53,7 +53,9 @@ export function DelegationManager() {
   const fetchData = useCallback(async () => {
     try {
       const res = await fetchApi(API_PATH.VAULT_DELEGATION);
-      if (!res.ok) return undefined;
+      if (!res.ok) {
+        return undefined;
+      }
       return await res.json() as { sessions: DelegationSession[]; availableTokens: AvailableToken[] };
     } catch {
       return undefined;

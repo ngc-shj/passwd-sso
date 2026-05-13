@@ -10,7 +10,7 @@ import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { validateParentChain, TagTreeError } from "@/lib/format/tag-tree";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -61,10 +61,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
         validateParentChain(id, newParentId, allTags);
       } catch (e) {
         if (e instanceof TagTreeError) {
-          return NextResponse.json(
-            { error: API_ERROR.VALIDATION_ERROR, message: e.message },
-            { status: 400 },
-          );
+          return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, e.message);
         }
         throw e;
       }
@@ -89,10 +86,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       }),
     );
     if (duplicate) {
-      return NextResponse.json(
-        { error: API_ERROR.TAG_ALREADY_EXISTS },
-        { status: 409 },
-      );
+      return errorResponse(API_ERROR.TAG_ALREADY_EXISTS);
     }
   }
 
@@ -109,7 +103,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"
     ) {
-      return errorResponse(API_ERROR.TAG_ALREADY_EXISTS, 409);
+      return errorResponse(API_ERROR.TAG_ALREADY_EXISTS);
     }
     throw err;
   }

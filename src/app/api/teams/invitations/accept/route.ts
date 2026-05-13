@@ -40,11 +40,11 @@ async function handlePOST(req: NextRequest) {
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!invitation) {
-    return errorResponse(API_ERROR.INVALID_INVITATION, 404);
+    return errorResponse(API_ERROR.INVALID_INVITATION);
   }
 
   if (invitation.status !== INVITATION_STATUS.PENDING) {
-    return errorResponse(API_ERROR.INVITATION_ALREADY_USED, 410);
+    return errorResponse(API_ERROR.INVITATION_ALREADY_USED);
   }
 
   if (invitation.expiresAt < new Date()) {
@@ -54,14 +54,14 @@ async function handlePOST(req: NextRequest) {
         data: { status: INVITATION_STATUS.EXPIRED },
       }),
     );
-    return errorResponse(API_ERROR.INVITATION_EXPIRED, 410);
+    return errorResponse(API_ERROR.INVITATION_EXPIRED);
   }
 
   // Verify the invitation email matches the authenticated user.
   // Known limitation: uses case-insensitive comparison only.
   // Gmail alias normalization (+tag removal, dot removal) is not handled.
   if (invitation.email.toLowerCase() !== session.user.email.toLowerCase()) {
-    return errorResponse(API_ERROR.INVITATION_WRONG_EMAIL, 403);
+    return errorResponse(API_ERROR.INVITATION_WRONG_EMAIL);
   }
 
   // Check if already a member (active or deactivated) — team tenant context
@@ -94,7 +94,7 @@ async function handlePOST(req: NextRequest) {
 
     // Deactivated + scimManaged → reject, IdP should re-activate
     if (existingMember.scimManaged) {
-      return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER, 409);
+      return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER);
     }
 
     // Deactivated + !scimManaged → re-activate via invitation

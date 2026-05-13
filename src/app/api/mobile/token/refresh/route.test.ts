@@ -181,7 +181,7 @@ describe("POST /api/mobile/token/refresh", () => {
     const res = await POST(makeRequest());
     const { status, json } = await parseJson(res);
     expect(status).toBe(401);
-    expect(json.error).toBe("MOBILE_REFRESH_REPLAY_DETECTED");
+    expect(json.error).toBe("MOBILE_REFRESH_REUSE_DETECTED");
   });
 
   it("returns 200 with the cached token on a legitimate retry (replayed=true)", async () => {
@@ -208,7 +208,7 @@ describe("POST /api/mobile/token/refresh", () => {
     const res = await POST(makeRequest());
     const { status, json } = await parseJson(res);
     expect(status).toBe(401);
-    expect(json.error).toBe("MOBILE_DPOP_INVALID");
+    expect(json.error).toBe("MOBILE_TOKEN_BINDING_INVALID");
     expect(mockRefreshIosToken).not.toHaveBeenCalled();
   });
 
@@ -237,7 +237,7 @@ describe("POST /api/mobile/token/refresh", () => {
     const res = await POST(makeRequest());
     const { status, json } = await parseJson(res);
     expect(status).toBe(401);
-    expect(json.error).toBe("MOBILE_REFRESH_FAMILY_EXPIRED");
+    expect(json.error).toBe("MOBILE_REFRESH_SESSION_EXPIRED");
   });
 
   it("returns 429 when the rate limit is exceeded", async () => {

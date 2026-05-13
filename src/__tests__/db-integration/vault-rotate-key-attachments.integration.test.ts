@@ -700,7 +700,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
     }
   });
 
-  // ── T12.3: residual mode-0 → 409 LEGACY_ATTACHMENTS_RESIDUAL ─────────────
+  // ── T12.3: residual mode-0 → 409 ATTACHMENT_MIGRATION_INCOMPLETE ─────────
 
   it("T12.3 — residual mode-0 attachment causes LegacyAttachmentsResidualError; no VAULT_KEY_ROTATION audit row written", async () => {
     const vaultKey = await generateVaultKey();
@@ -1003,7 +1003,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
     ).rejects.toThrow("NOT_FOUND");
   });
 
-  // ── T12.5c: mismatched oldEncryptedDataHash → LEGACY_BODY_HASH_MISMATCH ──
+  // ── T12.5c: mismatched oldEncryptedDataHash → LEGACY_INTEGRITY_MISMATCH ──
 
   it("T12.5c — migrate with mismatched oldEncryptedDataHash → LegacyBodyHashMismatchError", async () => {
     const vaultKey = await generateVaultKey();

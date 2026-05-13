@@ -233,7 +233,7 @@ describe("POST /api/travel-mode/disable", () => {
     expect(json.lockedUntil).toBe(lockedUntil.toISOString());
   });
 
-  it("returns 400 when vault not setup (no verifier)", async () => {
+  it("returns 404 when vault not setup (no verifier)", async () => {
     mockPrismaUser.findUnique.mockResolvedValue({
       passphraseVerifierHmac: null,
       passphraseVerifierVersion: 1,
@@ -244,7 +244,7 @@ describe("POST /api/travel-mode/disable", () => {
     const res = await DisablePOST(makeDisableRequest());
     const json = await res.json();
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
     expect(json.error).toBe("VAULT_NOT_SETUP");
   });
 

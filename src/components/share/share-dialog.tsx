@@ -206,9 +206,11 @@ export function ShareDialog({
 
   useEffect(() => {
     if (!open || !teamId) return;
-    fetchApi(apiPath.teamPolicy(teamId))
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
+    (async () => {
+      try {
+        const res = await fetchApi(apiPath.teamPolicy(teamId));
+        if (!res.ok) return;
+        const data = await res.json();
         if (data && data.allowSharing === false) setSharingAllowed(false);
         else setSharingAllowed(true);
         if (data && data.requireSharePassword === true) {
@@ -217,8 +219,10 @@ export function ShareDialog({
         } else {
           setPasswordRequired(false);
         }
-      })
-      .catch(() => {});
+      } catch {
+        // best-effort — keep defaults
+      }
+    })();
   }, [open, teamId]);
 
   const fieldPreview = useMemo(() => {

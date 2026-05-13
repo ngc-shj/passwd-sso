@@ -13,22 +13,21 @@ export function useTeamFolders(open: boolean, teamId: string) {
     if (!open) return;
 
     const url = apiPath.teamFolders(teamId);
-    fetchApi(url)
-      .then((res) => {
+    (async () => {
+      try {
+        const res = await fetchApi(url);
         if (!res.ok) throw new Error(`${res.status}`);
-        return res.json();
-      })
-      .then((data) => {
+        const data = await res.json();
         if (Array.isArray(data)) {
           setFolders(data);
           setFetchError(null);
         }
-      })
-      .catch((e: unknown) => {
+      } catch (e: unknown) {
         setFetchError(
           `Failed to load ${url}: ${e instanceof Error ? e.message : "unknown"}`,
         );
-      });
+      }
+    })();
   }, [open, teamId]);
 
   return { folders, fetchError };

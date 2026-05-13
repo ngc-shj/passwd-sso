@@ -8,7 +8,7 @@ import { parseBody } from "@/lib/http/parse-body";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { validateParentChain, TagTreeError } from "@/lib/format/tag-tree";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, forbidden, notFound, unauthorized } from "@/lib/http/api-response";
 
 // PUT /api/tags/[id] - Update a tag
 async function handlePUT(
@@ -57,10 +57,7 @@ async function handlePUT(
         validateParentChain(id, newParentId, allTags);
       } catch (e) {
         if (e instanceof TagTreeError) {
-          return NextResponse.json(
-            { error: API_ERROR.VALIDATION_ERROR, message: e.message },
-            { status: 400 },
-          );
+          return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, e.message);
         }
         throw e;
       }
@@ -88,7 +85,7 @@ async function handlePUT(
       }),
     );
     if (duplicate) {
-      return errorResponse(API_ERROR.TAG_ALREADY_EXISTS, 409);
+      return errorResponse(API_ERROR.TAG_ALREADY_EXISTS);
     }
   }
 
@@ -105,7 +102,7 @@ async function handlePUT(
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"
     ) {
-      return errorResponse(API_ERROR.TAG_ALREADY_EXISTS, 409);
+      return errorResponse(API_ERROR.TAG_ALREADY_EXISTS);
     }
     throw err;
   }

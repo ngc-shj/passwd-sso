@@ -49,7 +49,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   );
 
   if (!targetMember || targetMember.teamId !== teamId || targetMember.deactivatedAt !== null) {
-    return errorResponse(API_ERROR.MEMBER_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
   }
 
   const targetUser = await withBypassRls(prisma, async () =>
@@ -60,12 +60,12 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!targetUser?.ecdhPublicKey) {
-    return errorResponse(API_ERROR.VAULT_NOT_READY, 409);
+    return errorResponse(API_ERROR.VAULT_NOT_READY);
   }
 
   // Prevent overwriting an already-distributed key (S-11)
   if (targetMember.keyDistributed) {
-    return errorResponse(API_ERROR.KEY_ALREADY_DISTRIBUTED, 409);
+    return errorResponse(API_ERROR.KEY_ALREADY_DISTRIBUTED);
   }
 
   const result = await parseBody(req, teamMemberKeySchema);
@@ -132,13 +132,13 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   );
 
   if (distributed === "member_not_found") {
-    return errorResponse(API_ERROR.MEMBER_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
   }
   if (distributed === "already_distributed") {
-    return errorResponse(API_ERROR.KEY_ALREADY_DISTRIBUTED, 409);
+    return errorResponse(API_ERROR.KEY_ALREADY_DISTRIBUTED);
   }
   if (distributed === "version_mismatch") {
-    return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH, 409);
+    return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH);
   }
 
   return NextResponse.json({ success: true });

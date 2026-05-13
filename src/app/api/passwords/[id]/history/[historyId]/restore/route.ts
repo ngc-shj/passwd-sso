@@ -58,7 +58,7 @@ async function handlePOST(
   );
 
   if (!history || history.entryId !== id) {
-    return errorResponse(API_ERROR.HISTORY_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.HISTORY_NOT_FOUND);
   }
 
   // Snapshot current blob, then overwrite with history version

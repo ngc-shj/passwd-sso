@@ -174,7 +174,9 @@ export function TeamAttachmentSection({
       const res = await fetchApi(
         apiPath.teamPasswordAttachmentById(scopedId, entryId, attachment.id)
       );
-      if (!res.ok) throw new Error("Download failed");
+      if (!res.ok) {
+        throw new Error("Download failed");
+      }
 
       const data = await res.json();
 

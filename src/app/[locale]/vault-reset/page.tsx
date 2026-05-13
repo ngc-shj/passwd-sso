@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { API_PATH } from "@/lib/constants";
 import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
@@ -42,9 +43,9 @@ export default function VaultResetPage() {
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        if (err.error) {
-          setError(tApi(apiErrorToI18nKey(err.error)));
+        const body = await readApiErrorBody(res);
+        if (body?.error) {
+          setError(tApi(apiErrorToI18nKey(body.error)));
         } else {
           setError(tApi("unknownError"));
         }

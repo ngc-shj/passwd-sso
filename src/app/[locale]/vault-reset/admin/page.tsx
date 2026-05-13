@@ -6,6 +6,7 @@ import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { API_PATH } from "@/lib/constants";
 import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
 import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -52,9 +53,9 @@ export default function AdminVaultResetPage() {
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        if (err.error) {
-          setError(tApi(apiErrorToI18nKey(err.error)));
+        const body = await readApiErrorBody(res);
+        if (body?.error) {
+          setError(tApi(apiErrorToI18nKey(body.error)));
         } else {
           setError(tApi("unknownError"));
         }

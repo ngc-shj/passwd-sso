@@ -94,7 +94,7 @@ async function handlePOST(request: NextRequest) {
     return unauthorized();
   }
   if (existingUser?.vaultSetupAt) {
-    return errorResponse(API_ERROR.VAULT_ALREADY_SETUP, 409);
+    return errorResponse(API_ERROR.VAULT_ALREADY_SETUP);
   }
 
   const result = await parseBody(request, setupSchema);

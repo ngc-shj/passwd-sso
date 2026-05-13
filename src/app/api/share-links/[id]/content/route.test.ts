@@ -214,17 +214,18 @@ describe("GET /api/share-links/[id]/content", () => {
   // the test with findUnique returning a still-valid share and $executeRaw
   // returning 0 simulates the row being revoked/expired/max-views-hit in the
   // interleaving window.
-  it("returns 410 when atomic UPDATE matches 0 rows (TOCTOU or maxViews)", async () => {
+  it("returns 410 SHARE_GONE when atomic UPDATE matches 0 rows (TOCTOU or maxViews)", async () => {
     mockPrismaPasswordShare.findUnique.mockResolvedValue(MOCK_SHARE);
     mockPrismaExecuteRaw.mockResolvedValue(0);
     const res = await GET(createContentRequest(), createParams({ id: SHARE_ID }));
     expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({ error: "SHARE_GONE" });
   });
 
   // FILE path mirrors the TOCTOU recheck but with a no-op SET (view_count
   // increment is owned by the download route). $executeRaw returning 0
   // simulates revocation/expiry/max-views in the interleaving window.
-  it("returns 410 for FILE share when atomic recheck matches 0 rows (TOCTOU or maxViews)", async () => {
+  it("returns 410 SHARE_GONE for FILE share when atomic recheck matches 0 rows (TOCTOU or maxViews)", async () => {
     mockPrismaPasswordShare.findUnique.mockResolvedValue({
       ...MOCK_SHARE,
       shareType: "FILE",
@@ -232,6 +233,7 @@ describe("GET /api/share-links/[id]/content", () => {
     mockPrismaExecuteRaw.mockResolvedValue(0);
     const res = await GET(createContentRequest(), createParams({ id: SHARE_ID }));
     expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({ error: "SHARE_GONE" });
   });
 
   // T1: verify the UPDATE SQL actually contains every TOCTOU predicate so a

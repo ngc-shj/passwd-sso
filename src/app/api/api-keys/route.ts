@@ -94,7 +94,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
   if (existingCount >= MAX_API_KEYS_PER_USER) {
-    return errorResponse(API_ERROR.API_KEY_LIMIT_EXCEEDED, 400);
+    return errorResponse(API_ERROR.API_KEY_LIMIT_EXCEEDED);
   }
 
   // Generate token: api_ + 43 chars base62 (256-bit entropy)
@@ -105,7 +105,7 @@ async function handlePOST(req: NextRequest) {
     .replace(/[_-]/g, "")
     .slice(0, API_KEY_TOKEN_LENGTH);
   if (base62.length < API_KEY_TOKEN_LENGTH) {
-    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 500);
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
   }
   const plaintext = `${API_KEY_PREFIX}${base62}`;
   const tokenHash = hashToken(plaintext);

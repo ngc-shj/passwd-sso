@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { unauthorized } from "@/lib/http/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
 
 export const runtime = "nodejs";
@@ -11,10 +11,7 @@ export const runtime = "nodejs";
 async function handleGET(_req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
   const userId = session.user.id;
 

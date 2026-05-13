@@ -340,8 +340,8 @@ describe("PATCH /api/tenant/policy", () => {
     const res = await PATCH(req);
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
-    expect(String(json.message ?? "")).toMatch(/vaultAutoLockMinutes/);
-    expect(String(json.message ?? "")).toMatch(/sessionIdleTimeoutMinutes/);
+    expect(String(json.details?.message ?? "")).toMatch(/vaultAutoLockMinutes/);
+    expect(String(json.details?.message ?? "")).toMatch(/sessionIdleTimeoutMinutes/);
   });
 
   it("returns 400 when vaultAutoLockMinutes exceeds extensionTokenIdleTimeoutMinutes", async () => {
@@ -361,7 +361,7 @@ describe("PATCH /api/tenant/policy", () => {
     const res = await PATCH(req);
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
-    expect(String(json.message ?? "")).toMatch(/extensionTokenIdleTimeoutMinutes/);
+    expect(String(json.details?.message ?? "")).toMatch(/extensionTokenIdleTimeoutMinutes/);
   });
 
   it("successfully updates all policy fields including access restriction", async () => {
@@ -543,7 +543,7 @@ describe("PATCH /api/tenant/policy", () => {
 
     expect(status).toBe(409);
     expect(json.error).toBe("SELF_LOCKOUT");
-    expect(json.message).toContain("could not be determined");
+    expect(json.details?.message).toContain("could not be determined");
   });
 
   it("allows save with confirmLockout when self-lockout detected", async () => {

@@ -43,10 +43,9 @@ async function handlePOST(request: NextRequest) {
   // Lockout check — before rate limiter and passphrase verification
   const lockoutStatus = await checkLockout(session.user.id);
   if (lockoutStatus.locked) {
-    return NextResponse.json(
-      { error: API_ERROR.ACCOUNT_LOCKED, lockedUntil: lockoutStatus.lockedUntil },
-      { status: 403 },
-    );
+    return errorResponse(API_ERROR.ACCOUNT_LOCKED, undefined, {
+      lockedUntil: lockoutStatus.lockedUntil,
+    });
   }
 
   const rateKey = `rl:vault_unlock:${session.user.id}`;
@@ -79,7 +78,7 @@ async function handlePOST(request: NextRequest) {
   );
 
   if (!user?.vaultSetupAt || !user.masterPasswordServerHash || !user.masterPasswordServerSalt) {
-    return errorResponse(API_ERROR.VAULT_NOT_SETUP, 404);
+    return errorResponse(API_ERROR.VAULT_NOT_SETUP);
   }
 
   // Verify: SHA-256(authHash + serverSalt) === stored serverHash
@@ -94,18 +93,17 @@ async function handlePOST(request: NextRequest) {
     if (failResult === null) {
       // lock_timeout: counter NOT incremented, temporary contention
       // Client should retry with Retry-After + random jitter (0-2s)
-      const res = NextResponse.json(
-        { error: API_ERROR.SERVICE_UNAVAILABLE },
-        { status: 503 },
+      return errorResponse(
+        API_ERROR.SERVICE_UNAVAILABLE,
+        undefined,
+        undefined,
+        { "Retry-After": "1" },
       );
-      res.headers.set("Retry-After", "1");
-      return res;
     }
     if (failResult.locked) {
-      return NextResponse.json(
-        { error: API_ERROR.ACCOUNT_LOCKED, lockedUntil: failResult.lockedUntil },
-        { status: 403 },
-      );
+      return errorResponse(API_ERROR.ACCOUNT_LOCKED, undefined, {
+        lockedUntil: failResult.lockedUntil,
+      });
     }
     return NextResponse.json({ valid: false }, { status: 401 });
   }

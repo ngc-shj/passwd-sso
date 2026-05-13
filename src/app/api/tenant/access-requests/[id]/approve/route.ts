@@ -10,7 +10,7 @@ import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { transition, AR_STATUS, AR_ACTOR } from "@/lib/access-request/access-request-state";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { SA_TOKEN_PREFIX, MAX_SA_TOKENS_PER_ACCOUNT } from "@/lib/constants/auth/service-account";
 import { parseSaTokenScopes } from "@/lib/auth/tokens/service-account-token";
@@ -71,10 +71,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   if (!request.serviceAccount.isActive) {
-    return NextResponse.json(
-      { error: API_ERROR.SA_NOT_FOUND, message: "Service account is inactive" },
-      { status: 409 },
-    );
+    return errorResponseWithMessage(API_ERROR.SA_INACTIVE, "Service account is inactive");
   }
 
   // Read tenant policy for JIT TTL bounds
@@ -150,22 +147,13 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     );
   } catch (err) {
     if (err instanceof Error && err.message === "Already processed or wrong tenant") {
-      return NextResponse.json(
-        { error: API_ERROR.CONFLICT },
-        { status: 409 },
-      );
+      return errorResponse(API_ERROR.CONFLICT);
     }
     if (err instanceof Error && err.message === "Token limit exceeded") {
-      return NextResponse.json(
-        { error: API_ERROR.SA_TOKEN_LIMIT_EXCEEDED },
-        { status: 409 },
-      );
+      return errorResponse(API_ERROR.SA_TOKEN_LIMIT_EXCEEDED);
     }
     if (err instanceof Error && err.message === "No valid scopes after re-validation") {
-      return NextResponse.json(
-        { error: API_ERROR.SA_INVALID_SCOPE, message: "No valid scopes remain after re-validation" },
-        { status: 400 },
-      );
+      return errorResponseWithMessage(API_ERROR.SA_INVALID_SCOPE, "No valid scopes remain after re-validation");
     }
     throw err;
   }

@@ -103,10 +103,17 @@ import { MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
 const fakeKey = { type: "secret" } as unknown as CryptoKey;
 
 /** Build a mock fetch response */
-function jsonResponse(data: unknown, status = 200): Response {
+function jsonResponse(
+  data: unknown,
+  status = 200,
+  headers: Record<string, string> = {},
+): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: {
+      get: (key: string) => headers[key.toLowerCase()] ?? headers[key] ?? null,
+    },
     json: () => Promise.resolve(data),
     text: () => Promise.resolve(JSON.stringify(data)),
   } as unknown as Response;
@@ -626,10 +633,11 @@ describe("useWatchtower", () => {
 
   // ─── 429 Rate limit handling ─────────────────────────────
 
-  it("handles 429 with retryAt by setting cooldown", async () => {
-    const retryAt = Date.now() + WATCHTOWER_COOLDOWN_MS;
+  it("handles 429 with Retry-After header by setting cooldown", async () => {
+    const before = Date.now();
+    const retryAfterSec = Math.ceil(WATCHTOWER_COOLDOWN_MS / 1000);
     fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ retryAt }, 429)
+      jsonResponse({}, 429, { "Retry-After": String(retryAfterSec) }),
     );
 
     const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
@@ -641,16 +649,18 @@ describe("useWatchtower", () => {
     // Report should remain null (analysis aborted)
     expect(result.current.report).toBeNull();
 
-    // localStorage should be updated with the derived startedAt
+    // localStorage anchor = (Date.now + Retry-After) - WATCHTOWER_COOLDOWN_MS,
+    // which should be ~ Date.now() at the moment of the call.
     const stored = window.localStorage.getItem("watchtower:lastAnalyzedAt");
     expect(stored).not.toBeNull();
     const storedNum = Number(stored);
-    expect(storedNum).toBe(retryAt - WATCHTOWER_COOLDOWN_MS);
+    expect(storedNum).toBeGreaterThanOrEqual(before - 1000);
+    expect(storedNum).toBeLessThanOrEqual(Date.now() + 1000);
   });
 
-  it("handles 429 without retryAt by using fallback timestamp", async () => {
+  it("handles 429 without Retry-After header by using fallback timestamp", async () => {
     fetchSpy.mockResolvedValueOnce(
-      jsonResponse({}, 429)
+      jsonResponse({}, 429),
     );
 
     const before = Date.now();
@@ -665,11 +675,12 @@ describe("useWatchtower", () => {
     expect(stored).toBeGreaterThanOrEqual(before);
   });
 
-  it("handles 429 with unparseable JSON body", async () => {
+  it("handles 429 with invalid Retry-After header value", async () => {
     fetchSpy.mockResolvedValueOnce({
       ok: false,
       status: 429,
-      json: () => Promise.reject(new Error("bad json")),
+      headers: { get: (_k: string) => "not-a-number" },
+      json: () => Promise.resolve({}),
     } as unknown as Response);
 
     const before = Date.now();
@@ -679,7 +690,7 @@ describe("useWatchtower", () => {
       await result.current.analyze();
     });
 
-    // Falls through to the else branch (no retryAt) → fallback timestamp
+    // Number("not-a-number") is NaN → falls through to fallback timestamp
     expect(result.current.report).toBeNull();
     const stored = Number(window.localStorage.getItem("watchtower:lastAnalyzedAt"));
     expect(stored).toBeGreaterThanOrEqual(before);

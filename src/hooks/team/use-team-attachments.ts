@@ -13,19 +13,18 @@ export function useTeamAttachments(open: boolean, teamId: string, entryId?: stri
     if (!open || !entryId) return;
 
     const url = apiPath.teamPasswordAttachments(teamId, entryId);
-    fetchApi(url)
-      .then((res) => {
+    (async () => {
+      try {
+        const res = await fetchApi(url);
         if (!res.ok) throw new Error(`${res.status}`);
-        return res.json();
-      })
-      .then((loaded: TeamAttachmentMeta[]) => {
+        const loaded: TeamAttachmentMeta[] = await res.json();
         setAttachments(loaded);
         setFetchError(null);
-      })
-      .catch((e: unknown) => {
+      } catch (e: unknown) {
         setAttachments([]);
         setFetchError(`Failed to load ${url}: ${e instanceof Error ? e.message : "unknown"}`);
-      });
+      }
+    })();
   }, [open, teamId, entryId]);
 
   return { attachments, setAttachments, fetchError };

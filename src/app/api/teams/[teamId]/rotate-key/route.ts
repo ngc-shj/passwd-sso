@@ -89,7 +89,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   );
 
   if (!team) {
-    return errorResponse(API_ERROR.TEAM_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.TEAM_NOT_FOUND);
   }
 
   const result = await parseBody(req, rotateKeySchema);
@@ -99,10 +99,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   // Validate version increment
   if (newTeamKeyVersion !== team.teamKeyVersion + 1) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: { expected: team.teamKeyVersion + 1 } },
-      { status: 409 }
-    );
+    return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH, undefined, {
+      details: { expected: team.teamKeyVersion + 1 },
+    });
   }
 
   // Interactive transaction with optimistic lock on teamKeyVersion (S-17)
@@ -226,10 +225,10 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     );
   } catch (e) {
     if (e instanceof Error && e.message === "TEAM_KEY_VERSION_CONFLICT") {
-      return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH, 409);
+      return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH);
     }
     if (e instanceof Error && e.message === "ENTRY_COUNT_MISMATCH") {
-      return errorResponse(API_ERROR.ENTRY_COUNT_MISMATCH, 400);
+      return errorResponse(API_ERROR.ENTRY_COUNT_MISMATCH);
     }
     if (e instanceof TxValidationError) {
       return validationError(e.details);

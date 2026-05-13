@@ -8,6 +8,7 @@
  */
 
 import { apiRequest } from "../lib/api-client.js";
+import { readMainApiErrorBody } from "../lib/api-error-body.js";
 import * as output from "../lib/output.js";
 
 interface ApiKeyEntry {
@@ -105,8 +106,8 @@ export async function apiKeyCreateCommand(opts: CreateOptions): Promise<void> {
   });
 
   if (!res.ok) {
-    const err = res.data as { error?: string };
-    output.error(`Failed to create API key: ${err.error ?? `HTTP ${res.status}`}`);
+    const err = readMainApiErrorBody(res.data);
+    output.error(`Failed to create API key: ${err?.error ?? `HTTP ${res.status}`}`);
     return;
   }
 
@@ -134,11 +135,11 @@ export async function apiKeyCreateCommand(opts: CreateOptions): Promise<void> {
 export async function apiKeyRevokeCommand(id: string, options: { json?: boolean } = {}): Promise<void> {
   const res = await apiRequest(`/api/api-keys/${encodeURIComponent(id)}`, { method: "DELETE" });
   if (!res.ok) {
-    const err = res.data as { error?: string };
+    const err = readMainApiErrorBody(res.data);
     if (options.json) {
-      output.json({ success: false, error: err.error ?? `HTTP ${res.status}` });
+      output.json({ success: false, error: err?.error ?? `HTTP ${res.status}` });
     } else {
-      output.error(`Failed to revoke API key: ${err.error ?? `HTTP ${res.status}`}`);
+      output.error(`Failed to revoke API key: ${err?.error ?? `HTTP ${res.status}`}`);
     }
     return;
   }

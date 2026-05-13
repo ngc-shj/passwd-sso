@@ -186,4 +186,28 @@ describe("GET /api/maintenance/audit-chain-verify", () => {
     // The early-exit path returns before the audit log call
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
+
+  // ─── Seed row missing (partial verification) ──────────────
+
+  it("returns 400 with AUDIT_CHAIN_SEED_NOT_FOUND when partial walk seed row is missing", async () => {
+    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
+    // Sequential mock returns:
+    //  1) anchor lookup → non-empty (anchorSeq = 10)
+    //  2) fromRows lookup → minSeq = 5 (triggers fromSeq > 1 branch)
+    //  3) seedRows lookup → empty array (seed row missing)
+    mockQueryRawUnsafe
+      .mockResolvedValueOnce([{ chain_seq: "10" }])
+      .mockResolvedValueOnce([{ chain_seq: "5" }])
+      .mockResolvedValueOnce([]);
+
+    const req = createRequest(
+      { tenantId: TENANT_ID, from: "2026-01-01T00:00:00Z" },
+      VALID_OP_TOKEN,
+    );
+    const res = await GET(req);
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("AUDIT_CHAIN_SEED_NOT_FOUND");
+  });
 });

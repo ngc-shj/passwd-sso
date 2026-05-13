@@ -13,7 +13,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { z } from "zod";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import {
   SCIM_TOKEN_EXPIRY_MIN_DAYS,
@@ -108,10 +108,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
   if (tokenCount >= 10) {
-    return NextResponse.json(
-      { error: API_ERROR.SCIM_TOKEN_LIMIT_EXCEEDED },
-      { status: 409 },
-    );
+    return errorResponse(API_ERROR.SCIM_TOKEN_LIMIT_EXCEEDED);
   }
 
   const plaintext = generateScimToken();

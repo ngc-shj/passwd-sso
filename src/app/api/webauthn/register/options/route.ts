@@ -5,7 +5,7 @@ import { getRedis } from "@/lib/redis";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { generateRegistrationOpts, derivePrfSalt } from "@/lib/auth/webauthn/webauthn-server";
 
@@ -19,10 +19,7 @@ const CHALLENGE_TTL_SECONDS = 300;
 async function handlePOST(_req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
   const userId = session.user.id;
 
@@ -33,10 +30,7 @@ async function handlePOST(_req: NextRequest) {
 
   const redis = getRedis();
   if (!redis) {
-    return NextResponse.json(
-      { error: API_ERROR.SERVICE_UNAVAILABLE },
-      { status: 503 },
-    );
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
   }
 
   // Fetch existing credentials to exclude re-registration

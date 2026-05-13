@@ -121,13 +121,20 @@ export default function TeamDashboardPage({
   const [teamFolders, setTeamFolders] = useState<FolderItem[]>([]);
   const [teamTags, setTeamTags] = useState<{ id: string; name: string; color?: string | null; parentId?: string | null }[]>([]);
   useEffect(() => {
-    Promise.all([
-      fetchApi(apiPath.teamFolders(teamId)).then((r) => r.ok ? r.json() : []),
-      fetchApi(apiPath.teamTags(teamId)).then((r) => r.ok ? r.json() : []),
-    ]).then(([f, tg]) => {
-      if (Array.isArray(f)) setTeamFolders(f);
-      if (Array.isArray(tg)) setTeamTags(tg);
-    }).catch(() => {});
+    (async () => {
+      try {
+        const [foldersRes, tagsRes] = await Promise.all([
+          fetchApi(apiPath.teamFolders(teamId)),
+          fetchApi(apiPath.teamTags(teamId)),
+        ]);
+        const f = foldersRes.ok ? await foldersRes.json() : [];
+        const tg = tagsRes.ok ? await tagsRes.json() : [];
+        if (Array.isArray(f)) setTeamFolders(f);
+        if (Array.isArray(tg)) setTeamTags(tg);
+      } catch {
+        // best-effort — leave folders/tags empty
+      }
+    })();
   }, [teamId]);
 
   // Reset selection mode when view changes (during render, not in effect)
@@ -416,7 +423,9 @@ export default function TeamDashboardPage({
   const createDetailFetcher = useCallback(
     (id: string, eType?: EntryTypeValue) => async (): Promise<InlineDetailData> => {
       const res = await fetchApi(apiPath.teamPasswordById(teamId, id));
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        throw new Error("Failed");
+      }
       const raw = await res.json();
       const blob = await decryptFullBlob(id, raw);
       return {
@@ -484,7 +493,9 @@ export default function TeamDashboardPage({
   const createPasswordFetcher = useCallback(
     (id: string) => async (): Promise<string> => {
       const res = await fetchApi(apiPath.teamPasswordById(teamId, id));
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        throw new Error("Failed");
+      }
       const raw = await res.json();
       const blob = await decryptFullBlob(id, raw);
       return (blob.password as string) ?? (blob.content as string) ?? "";
@@ -495,7 +506,9 @@ export default function TeamDashboardPage({
   const createUrlFetcher = useCallback(
     (id: string) => async (): Promise<string | null> => {
       const res = await fetchApi(apiPath.teamPasswordById(teamId, id));
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        throw new Error("Failed");
+      }
       const raw = await res.json();
       const blob = await decryptFullBlob(id, raw);
       return (blob.url as string) ?? null;

@@ -260,7 +260,9 @@ export function AttachmentSection({
       const res = await fetchApi(
         apiPath.passwordAttachmentById(entryId, attachment.id)
       );
-      if (!res.ok) throw new Error("Download failed");
+      if (!res.ok) {
+        throw new Error("Download failed");
+      }
 
       const data = (await res.json()) as AttachmentDownload;
 

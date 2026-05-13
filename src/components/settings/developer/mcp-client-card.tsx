@@ -37,6 +37,7 @@ import { toast } from "sonner";
 import { apiPath } from "@/lib/constants";
 import { MCP_SCOPES, LOOPBACK_REDIRECT_RE } from "@/lib/constants/auth/mcp";
 import { fetchApi } from "@/lib/url-helpers";
+import { readApiErrorBody, getApiErrorDetail } from "@/lib/http/read-api-error-body";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
@@ -71,9 +72,10 @@ interface ValidationTreeNode {
   items?: Array<ValidationTreeNode | undefined>;
 }
 
-interface ValidationErrorResponse {
-  error?: string;
-  details?: ValidationTreeNode;
+function isValidationProperties(
+  value: unknown,
+): value is Record<string, ValidationTreeNode | undefined> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function validateRedirectUris(uris: string[]): boolean {
@@ -214,13 +216,13 @@ const toastUpdateApiError = (errorCode: unknown) => {
         }),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => null) as ValidationErrorResponse | null;
-        if (data?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+        const body = await readApiErrorBody(res);
+        if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
           await inlineReauth.triggerOnStaleError();
-        } else if (res.status === 409 && data?.error === API_ERROR.MCP_CLIENT_NAME_CONFLICT) {
+        } else if (res.status === 409 && body?.error === API_ERROR.MCP_CLIENT_NAME_CONFLICT) {
           setCreateNameError(t("mcpNameConflict"));
-        } else if (res.status === 400 && data?.error === API_ERROR.VALIDATION_ERROR) {
-          const properties = data.details?.properties;
+        } else if (res.status === 400 && body?.error === API_ERROR.VALIDATION_ERROR) {
+          const properties = getApiErrorDetail(body, "properties", isValidationProperties);
           let handled = false;
           if (hasValidationErrors(properties?.name)) {
             setCreateNameError(t("mcpNameRequired"));
@@ -235,12 +237,12 @@ const toastUpdateApiError = (errorCode: unknown) => {
             handled = true;
           }
           if (!handled) {
-            toastCreateApiError(data?.error);
+            toastCreateApiError(body?.error);
           }
-        } else if (res.status === 422 && data?.error === API_ERROR.MCP_CLIENT_LIMIT_EXCEEDED) {
+        } else if (res.status === 422 && body?.error === API_ERROR.MCP_CLIENT_LIMIT_EXCEEDED) {
           toast.error(t("mcpLimitReached"));
         } else {
-          toastCreateApiError(data?.error);
+          toastCreateApiError(body?.error);
         }
         return;
       }
@@ -313,33 +315,33 @@ const toastUpdateApiError = (errorCode: unknown) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = await res.json().catch(() => null) as ValidationErrorResponse | null;
-      if (res.status === 409) {
-        setEditNameError(t("mcpNameConflict"));
-        return;
-      }
-      if (res.status === 400 && data?.error === "VALIDATION_ERROR") {
-        const properties = data.details?.properties;
-        let handled = false;
-        if (hasValidationErrors(properties?.name)) {
-          setEditNameError(t("mcpNameRequired"));
-          handled = true;
-        }
-        if (hasValidationErrors(properties?.redirectUris)) {
-          setEditUriError(t("mcpRedirectUriInvalid"));
-          handled = true;
-        }
-        if (hasValidationErrors(properties?.allowedScopes)) {
-          setEditScopeError(t("mcpScopeRequired"));
-          handled = true;
-        }
-        if (!handled) {
-          toastUpdateApiError(data?.error);
-        }
-        return;
-      }
       if (!res.ok) {
-        toastUpdateApiError(data?.error);
+        const body = await readApiErrorBody(res);
+        if (res.status === 409) {
+          setEditNameError(t("mcpNameConflict"));
+          return;
+        }
+        if (res.status === 400 && body?.error === API_ERROR.VALIDATION_ERROR) {
+          const properties = getApiErrorDetail(body, "properties", isValidationProperties);
+          let handled = false;
+          if (hasValidationErrors(properties?.name)) {
+            setEditNameError(t("mcpNameRequired"));
+            handled = true;
+          }
+          if (hasValidationErrors(properties?.redirectUris)) {
+            setEditUriError(t("mcpRedirectUriInvalid"));
+            handled = true;
+          }
+          if (hasValidationErrors(properties?.allowedScopes)) {
+            setEditScopeError(t("mcpScopeRequired"));
+            handled = true;
+          }
+          if (!handled) {
+            toastUpdateApiError(body?.error);
+          }
+          return;
+        }
+        toastUpdateApiError(body?.error);
         return;
       }
       toast.success(t("mcpUpdated"));

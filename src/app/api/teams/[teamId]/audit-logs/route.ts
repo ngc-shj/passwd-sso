@@ -11,7 +11,7 @@ import {
 } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
 import {
   VALID_ACTIONS,
   parseAuditLogParams,
@@ -43,7 +43,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   const { searchParams } = new URL(req.url);
   const { action, actions: actionsParam, from, to, cursor, limit } = parseAuditLogParams(searchParams);
   if (!isValidCursorId(cursor)) {
-    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+    return errorResponse(API_ERROR.INVALID_CURSOR);
   }
   const validActorType = parseActorType(searchParams);
 
@@ -61,10 +61,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     );
     if (actionFilter !== undefined) where.action = actionFilter;
   } catch (err) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: err },
-      { status: 400 }
-    );
+    return validationError(err as Record<string, unknown>);
   }
 
   const dateFilter = buildAuditLogDateFilter(from, to);
@@ -81,7 +78,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       }),
     );
   } catch {
-    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+    return errorResponse(API_ERROR.INVALID_CURSOR);
   }
 
   const { items, nextCursor } = paginateResult(logs, limit);

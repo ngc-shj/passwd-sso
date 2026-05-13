@@ -89,7 +89,9 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     setLoading(true);
     try {
       const res = await fetchApi(`${apiPath.teamPasswords(teamId)}?archived=true`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        return;
+      }
       const data = await res.json();
       if (!Array.isArray(data)) return;
 
@@ -306,7 +308,9 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     (entry: TeamArchivedEntry) =>
       async (): Promise<InlineDetailData> => {
         const res = await fetchApi(apiPath.teamPasswordById(teamId, entry.id));
-        if (!res.ok) throw new Error("Failed");
+        if (!res.ok) {
+          throw new Error("Failed");
+        }
         const raw = await res.json();
         const blob = await decryptFullBlob(entry.id, raw);
         return {
@@ -368,7 +372,9 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     (entry: TeamArchivedEntry) =>
       async (): Promise<string> => {
         const res = await fetchApi(apiPath.teamPasswordById(teamId, entry.id));
-        if (!res.ok) throw new Error("Failed");
+        if (!res.ok) {
+          throw new Error("Failed");
+        }
         const raw = await res.json();
         const blob = await decryptFullBlob(entry.id, raw);
         return (blob.password as string) ?? (blob.content as string) ?? "";
@@ -380,7 +386,9 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     (entry: TeamArchivedEntry) =>
       async (): Promise<string | null> => {
         const res = await fetchApi(apiPath.teamPasswordById(teamId, entry.id));
-        if (!res.ok) throw new Error("Failed");
+        if (!res.ok) {
+          throw new Error("Failed");
+        }
         const raw = await res.json();
         const blob = await decryptFullBlob(entry.id, raw);
         return (blob.url as string) ?? null;

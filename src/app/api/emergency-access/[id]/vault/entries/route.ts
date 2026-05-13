@@ -39,7 +39,7 @@ async function handleGET(
   }
 
   if (grant.status !== EA_STATUS.ACTIVATED) {
-    return errorResponse(API_ERROR.NOT_ACTIVATED, 403);
+    return errorResponse(API_ERROR.NOT_ACTIVATED);
   }
 
   // Fetch all non-deleted entries for the owner

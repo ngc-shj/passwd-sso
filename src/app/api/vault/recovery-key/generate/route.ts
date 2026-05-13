@@ -7,7 +7,7 @@ import { hmacVerifier, verifyPassphraseVerifier } from "@/lib/crypto/crypto-serv
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
@@ -40,10 +40,7 @@ const generateLimiter = createRateLimiter({
 async function handlePOST(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   const rateKey = `rl:recovery_key_gen:${session.user.id}`;
@@ -72,17 +69,11 @@ async function handlePOST(request: NextRequest) {
   );
 
   if (!user?.vaultSetupAt) {
-    return NextResponse.json(
-      { error: API_ERROR.VAULT_NOT_SETUP },
-      { status: 404 },
-    );
+    return errorResponse(API_ERROR.VAULT_NOT_SETUP);
   }
 
   if (!user.passphraseVerifierHmac) {
-    return NextResponse.json(
-      { error: API_ERROR.VERIFIER_NOT_SET },
-      { status: 409 },
-    );
+    return errorResponse(API_ERROR.VERIFIER_NOT_SET);
   }
 
   // Verify current passphrase via verifier (dual-version: verifies against stored pepper version)
@@ -99,10 +90,7 @@ async function handlePOST(request: NextRequest) {
         metadata: { storedVersion: user.passphraseVerifierVersion },
       });
     }
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_PASSPHRASE },
-      { status: 401 },
-    );
+    return errorResponse(API_ERROR.INVALID_PASSPHRASE);
   }
 
   // Store recovery key data

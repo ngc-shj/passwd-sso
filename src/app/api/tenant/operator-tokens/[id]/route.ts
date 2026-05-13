@@ -59,11 +59,11 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
 
   // 404 (NOT 403) on cross-tenant lookup miss to avoid token-id enumeration.
   if (!token || token.tenantId !== actor.tenantId) {
-    return errorResponse(API_ERROR.OPERATOR_TOKEN_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.OPERATOR_TOKEN_NOT_FOUND);
   }
 
   if (token.revokedAt) {
-    return errorResponse(API_ERROR.ALREADY_REVOKED, 409);
+    return errorResponse(API_ERROR.ALREADY_REVOKED);
   }
 
   await withTenantRls(prisma, actor.tenantId, async () =>

@@ -99,7 +99,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
   if (existing) {
-    return errorResponse(API_ERROR.SLUG_ALREADY_TAKEN, 409);
+    return errorResponse(API_ERROR.SLUG_ALREADY_TAKEN);
   }
 
   let team;
@@ -146,7 +146,7 @@ async function handlePOST(req: NextRequest) {
       return forbidden();
     }
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-      return errorResponse(API_ERROR.SLUG_ALREADY_TAKEN, 409);
+      return errorResponse(API_ERROR.SLUG_ALREADY_TAKEN);
     }
     throw e;
   }

@@ -12,10 +12,11 @@
 
 import { NextResponse } from "next/server";
 import { API_ERROR } from "../../http/api-error-codes";
+import { errorResponse } from "../../http/api-response";
 import { getAppOrigin } from "@/lib/url-helpers";
 
 const forbidden = (): NextResponse =>
-  NextResponse.json({ error: API_ERROR.INVALID_ORIGIN }, { status: 403 });
+  errorResponse(API_ERROR.INVALID_ORIGIN);
 
 /**
  * Assert that the request's Origin header matches the application URL.

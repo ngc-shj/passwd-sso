@@ -83,11 +83,8 @@ vi.mock("@/lib/scim/token-utils", () => ({
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: (t: string) => `hash:${t}`,
 }));
-vi.mock("@/lib/http/api-response", () => ({
-  unauthorized: () => new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401 }),
-  errorResponse: (msg: string, status: number, extra?: unknown) =>
-    new Response(JSON.stringify({ error: msg, ...extra }), { status }),
-  notFound: () => new Response(JSON.stringify({ error: "NOT_FOUND" }), { status: 404 }),
+vi.mock("@/lib/http/api-response", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/http/api-response")>()),
 }));
 
 import { GET, POST } from "@/app/api/tenant/scim-tokens/route";

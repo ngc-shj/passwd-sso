@@ -16,6 +16,8 @@ import { Loader2, UserPlus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 
 interface TenantMemberResult {
   userId: string;
@@ -51,23 +53,25 @@ export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: 
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
-      fetchApi(
-        `${apiPath.teamMembersSearch(teamId)}?q=${encodeURIComponent(addSearch.trim())}`,
-        { signal: controller.signal },
-      )
-        .then((r) => r.json())
-        .then((d) => {
+      (async () => {
+        try {
+          const res = await fetchApi(
+            `${apiPath.teamMembersSearch(teamId)}?q=${encodeURIComponent(addSearch.trim())}`,
+            { signal: controller.signal },
+          );
+          if (!res.ok) throw new Error(`${res.status}`);
+          const d = await res.json();
           if (!controller.signal.aborted) {
             setSearchResults(Array.isArray(d) ? d : []);
             setSearchLoading(false);
           }
-        })
-        .catch(() => {
+        } catch {
           if (!controller.signal.aborted) {
             setSearchResults([]);
             setSearchLoading(false);
           }
-        });
+        }
+      })();
     }, 300);
     return () => {
       clearTimeout(timer);
@@ -84,9 +88,9 @@ export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: 
         body: JSON.stringify({ userId, role: addRole }),
       });
       if (res.status === 409) {
-        const data = await res.json();
+        const body = await readApiErrorBody(res);
         toast.error(
-          data.error === "SCIM_MANAGED_MEMBER"
+          body?.error === API_ERROR.SCIM_MANAGED_MEMBER
             ? t("scimManagedCannotAdd")
             : t("alreadyMember"),
         );

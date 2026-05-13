@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { buildOpenApiSpec } from "@/lib/openapi-spec";
 import { authOrToken } from "@/lib/auth/session/auth-or-token";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { errorResponse } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 // GET /api/v1/openapi.json — OpenAPI 3.1 specification
 async function handleGET(req: NextRequest) {
@@ -11,10 +13,7 @@ async function handleGET(req: NextRequest) {
     // Require any valid auth (session, extension token, or API key)
     const result = await authOrToken(req);
     if (!result) {
-      return NextResponse.json(
-        { error: "UNAUTHORIZED" },
-        { status: 401, headers: { "Cache-Control": "no-store" } },
-      );
+      return errorResponse(API_ERROR.UNAUTHORIZED, undefined, undefined, { "Cache-Control": "no-store" });
     }
   }
 

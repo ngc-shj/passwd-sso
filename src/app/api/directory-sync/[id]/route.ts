@@ -8,7 +8,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -22,7 +21,7 @@ import {
 } from "@/lib/validations/common";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
-import { handleAuthError } from "@/lib/http/api-response";
+import { handleAuthError, unauthorized, notFound } from "@/lib/http/api-response";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -57,10 +56,7 @@ async function resolveAdminAndConfig(
 async function handleGET(req: NextRequest, ctx: RouteContext) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   const { id } = await ctx.params;
@@ -93,10 +89,7 @@ async function handleGET(req: NextRequest, ctx: RouteContext) {
   );
 
   if (!config) {
-    return NextResponse.json(
-      { error: API_ERROR.NOT_FOUND },
-      { status: 404 },
-    );
+    return notFound();
   }
 
   return NextResponse.json(config);
@@ -107,10 +100,7 @@ async function handleGET(req: NextRequest, ctx: RouteContext) {
 async function handlePUT(req: NextRequest, ctx: RouteContext) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   const { id } = await ctx.params;
@@ -122,10 +112,7 @@ async function handlePUT(req: NextRequest, ctx: RouteContext) {
     return handleAuthError(e);
   }
   if (!resolved) {
-    return NextResponse.json(
-      { error: API_ERROR.NOT_FOUND },
-      { status: 404 },
-    );
+    return notFound();
   }
 
   const { tenantId, config } = resolved;
@@ -192,10 +179,7 @@ async function handlePUT(req: NextRequest, ctx: RouteContext) {
 async function handleDELETE(req: NextRequest, ctx: RouteContext) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   const { id } = await ctx.params;
@@ -207,10 +191,7 @@ async function handleDELETE(req: NextRequest, ctx: RouteContext) {
     return handleAuthError(e);
   }
   if (!resolved) {
-    return NextResponse.json(
-      { error: API_ERROR.NOT_FOUND },
-      { status: 404 },
-    );
+    return notFound();
   }
 
   const { tenantId, config } = resolved;

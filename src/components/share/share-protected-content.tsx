@@ -36,7 +36,9 @@ async function tryFetchContent(
     const res = await fetchApi(`/api/share-links/${shareId}/content`, {
       headers: { Authorization: `Bearer ${tokenToUse}` },
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      return null;
+    }
     return (await res.json()) as ContentData;
   } catch {
     return null;

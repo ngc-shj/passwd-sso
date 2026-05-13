@@ -48,15 +48,15 @@ async function handlePOST(
   // Enforce invitation expiry regardless of auth method (session or token).
   // tokenExpiresAt is immutable post-creation, so checking it pre-CAS is safe.
   if (grant.tokenExpiresAt && grant.tokenExpiresAt < new Date()) {
-    return errorResponse(API_ERROR.INVITATION_EXPIRED, 410);
+    return errorResponse(API_ERROR.INVITATION_EXPIRED);
   }
 
   if (grant.granteeEmail.toLowerCase() !== session.user.email.toLowerCase()) {
-    return errorResponse(API_ERROR.NOT_AUTHORIZED_FOR_GRANT, 403);
+    return errorResponse(API_ERROR.NOT_AUTHORIZED_FOR_GRANT);
   }
 
   if (grant.ownerId === session.user.id) {
-    return errorResponse(API_ERROR.CANNOT_GRANT_SELF, 400);
+    return errorResponse(API_ERROR.CANNOT_GRANT_SELF);
   }
 
   const result = await parseBody(req, acceptEmergencyGrantByIdSchema);
@@ -97,7 +97,7 @@ async function handlePOST(
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!txResult.ok) {
-    return errorResponse(API_ERROR.GRANT_NOT_PENDING, 400);
+    return errorResponse(API_ERROR.GRANT_NOT_PENDING);
   }
 
   await logAuditAsync({
