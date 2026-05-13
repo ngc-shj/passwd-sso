@@ -78,40 +78,53 @@ export default function TeamMembersPage({
       : null;
 
   useEffect(() => {
-    fetchApi(API_PATH.AUTH_SESSION)
-      .then((r) => r.json())
-      .then((d) => setCurrentUserId(d?.user?.id ?? null))
-      .catch(() => {});
+    (async () => {
+      try {
+        const res = await fetchApi(API_PATH.AUTH_SESSION);
+        if (!res.ok) return;
+        const d = await res.json();
+        setCurrentUserId(d?.user?.id ?? null);
+      } catch {
+        // best-effort — leave currentUserId null
+      }
+    })();
   }, []);
 
   const fetchAll = () => {
-    fetchApi(apiPath.teamById(teamId))
-      .then((r) => {
-        if (!r.ok) throw new Error("Forbidden");
-        return r.json();
-      })
-      .then((d) => {
+    void (async () => {
+      try {
+        const res = await fetchApi(apiPath.teamById(teamId));
+        if (!res.ok) throw new Error("Forbidden");
+        const d = await res.json();
         setTeam(d);
         setLoadError(false);
-      })
-      .catch(() => {
+      } catch {
         setTeam(null);
         setLoadError(true);
-      });
+      }
+    })();
 
-    fetchApi(apiPath.teamMembers(teamId))
-      .then((r) => r.json())
-      .then((d) => {
+    void (async () => {
+      try {
+        const res = await fetchApi(apiPath.teamMembers(teamId));
+        if (!res.ok) return;
+        const d = await res.json();
         if (Array.isArray(d)) setMembers(d);
-      })
-      .catch(() => {});
+      } catch {
+        // best-effort
+      }
+    })();
 
-    fetchApi(apiPath.teamInvitations(teamId))
-      .then((r) => r.json())
-      .then((d) => {
+    void (async () => {
+      try {
+        const res = await fetchApi(apiPath.teamInvitations(teamId));
+        if (!res.ok) return;
+        const d = await res.json();
         if (Array.isArray(d)) setInvitations(d);
-      })
-      .catch(() => {});
+      } catch {
+        // best-effort
+      }
+    })();
   };
 
   useEffect(() => {

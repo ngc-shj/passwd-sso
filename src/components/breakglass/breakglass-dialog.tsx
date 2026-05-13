@@ -53,13 +53,18 @@ export function BreakGlassDialog({ onGrantCreated, trigger }: BreakGlassDialogPr
   useEffect(() => {
     if (!open) return;
     if (members.length > 0) return;
-    fetchApi(API_PATH.TENANT_MEMBERS)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
+    (async () => {
+      try {
+        const res = await fetchApi(API_PATH.TENANT_MEMBERS);
+        if (!res.ok) return;
+        const data = await res.json();
         if (Array.isArray(data)) {
           setMembers(data.filter((m: { deactivatedAt?: string | null }) => !m.deactivatedAt));
         }
-      });
+      } catch {
+        // best-effort — leave members empty
+      }
+    })();
   }, [open, members.length]);
 
   // Reset form state + member roster when dialog closes; the next open

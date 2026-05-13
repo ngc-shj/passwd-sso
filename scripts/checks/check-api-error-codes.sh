@@ -23,6 +23,9 @@
 #  (8) C4 client-side: UI / hook / page code MUST NOT call `res.json()` inside
 #      an `if (!res.ok)` block — wire shape access goes through
 #      `readApiErrorBody()` so non-canonical fields fail at compile time.
+#  (9) C4 client-side: UI / hook / page code MUST NOT use `.then((<r>) => <r>.json())`
+#      Response-chain form — it bypasses rule 8 (which only matches `await
+#      res.json()`). Convert to `await` form so the error-body gate covers it.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -215,6 +218,36 @@ c4_client_hits=$(
 if [ -n "$c4_client_hits" ]; then
   echo "FORBIDDEN: UI consumer reads error body via res.json() — use readApiErrorBody() helper (C4)"
   echo "$c4_client_hits"
+  violations=$((violations + 1))
+fi
+
+# (9) C4 client-side — `.then()` chain bypass detection. The canonical
+# error-body access path is `await readApiErrorBody(res)`; `.then()` chains
+# that pass the Response to a `.json()` call bypass Gate rule 8 (which only
+# matches `await res.json()`). Flag any `.then((<r>) => ...<r>.json()...)`
+# in UI / hook / page code.
+c9_hits=$(
+  find src/components src/hooks src/app \
+    \( -name '*.ts' -o -name '*.tsx' \) 2>/dev/null \
+    | grep -v '\.test\.' | grep -v '/__tests__/' \
+    | grep -vE '/app/api/' \
+    | xargs -r perl -ne '
+      # Reset line counter per file so reported line numbers are file-local.
+      if (eof) { close ARGV; }
+      if (/\.then\(\s*\(([a-zA-Z_]\w*)\)\s*=>/) {
+        my $v = $1;
+        # Single-line callback form: the .json() call appears on the same
+        # line as the .then(...). Multi-line callbacks (rare) escape this
+        # rule but are caught by Gate rule 8 once `await` form is required.
+        if (/\b\Q$v\E\.json\(/) {
+          print "$ARGV:$.: .then(($v) => $v.json()) bypass — convert to await form\n";
+        }
+      }
+    ' 2>/dev/null || true
+)
+if [ -n "$c9_hits" ]; then
+  echo "FORBIDDEN: .then() chain with .json() — use await form so readApiErrorBody gate covers it (C4)"
+  echo "$c9_hits"
   violations=$((violations + 1))
 fi
 

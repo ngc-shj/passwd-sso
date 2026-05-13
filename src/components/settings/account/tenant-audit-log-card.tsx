@@ -112,11 +112,16 @@ export function TenantAuditLogCard({ variant }: TenantAuditLogCardProps) {
 
   // Fetch teams list once on mount
   useEffect(() => {
-    fetchApi(API_PATH.TEAMS)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: { id: string; name: string }[]) => {
+    (async () => {
+      try {
+        const res = await fetchApi(API_PATH.TEAMS);
+        if (!res.ok) return;
+        const data: { id: string; name: string }[] = await res.json();
         if (Array.isArray(data)) setTeams(data);
-      });
+      } catch {
+        // best-effort — leave teams empty
+      }
+    })();
   }, []);
 
   const buildExtraParams = useCallback(() => {

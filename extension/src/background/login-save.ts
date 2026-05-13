@@ -8,6 +8,7 @@ import {
   buildPersonalEntryAAD,
 } from "../lib/crypto";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
+import { readApiErrorBody } from "../lib/api-error-body";
 import { normalizeErrorCode } from "../lib/error-utils";
 import { EXT_ENTRY_TYPE } from "../lib/constants";
 import type { DecryptedEntry } from "../types/messages";
@@ -166,8 +167,8 @@ export async function handleSaveLogin(
     });
 
     if (!res.ok) {
-      const json = await res.json().catch(() => ({}));
-      return { ok: false, error: (json as { error?: string }).error ?? "SAVE_FAILED" };
+      const body = await readApiErrorBody(res);
+      return { ok: false, error: body?.error ?? "SAVE_FAILED" };
     }
 
     deps.invalidateCache();
@@ -236,8 +237,8 @@ export async function handleUpdateLogin(
     });
 
     if (!putRes.ok) {
-      const json = await putRes.json().catch(() => ({}));
-      return { ok: false, error: (json as { error?: string }).error ?? "UPDATE_FAILED" };
+      const body = await readApiErrorBody(putRes);
+      return { ok: false, error: body?.error ?? "UPDATE_FAILED" };
     }
 
     deps.invalidateCache();

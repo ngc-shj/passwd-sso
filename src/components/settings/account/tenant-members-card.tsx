@@ -64,10 +64,16 @@ export function TenantMembersCard() {
   const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
-    fetchApi(API_PATH.AUTH_SESSION)
-      .then((r) => r.json())
-      .then((d) => setCurrentUserId(d?.user?.id ?? null))
-      .catch(() => {});
+    (async () => {
+      try {
+        const res = await fetchApi(API_PATH.AUTH_SESSION);
+        if (!res.ok) return;
+        const d = await res.json();
+        setCurrentUserId(d?.user?.id ?? null);
+      } catch {
+        // best-effort — leave currentUserId null
+      }
+    })();
   }, []);
 
   const fetchMembers = useCallback(async () => {

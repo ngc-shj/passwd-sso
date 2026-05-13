@@ -48,24 +48,21 @@ export default function TeamGeneralProfilePage({
   const hasChanges = useFormDirty(currentGeneral, initialGeneral);
   useBeforeUnloadGuard(hasChanges);
 
-  const fetchTeam = () => {
-    fetchApi(apiPath.teamById(teamId))
-      .then((r) => {
-        if (!r.ok) throw new Error("Forbidden");
-        return r.json();
-      })
-      .then((d) => {
-        const desc = d.description ?? "";
-        setTeam(d);
-        setName(d.name);
-        setDescription(desc);
-        setInitialGeneral({ name: d.name, description: desc });
-        setLoadError(false);
-      })
-      .catch(() => {
-        setTeam(null);
-        setLoadError(true);
-      });
+  const fetchTeam = async () => {
+    try {
+      const res = await fetchApi(apiPath.teamById(teamId));
+      if (!res.ok) throw new Error("Forbidden");
+      const d = await res.json();
+      const desc = d.description ?? "";
+      setTeam(d);
+      setName(d.name);
+      setDescription(desc);
+      setInitialGeneral({ name: d.name, description: desc });
+      setLoadError(false);
+    } catch {
+      setTeam(null);
+      setLoadError(true);
+    }
   };
 
   useEffect(() => {

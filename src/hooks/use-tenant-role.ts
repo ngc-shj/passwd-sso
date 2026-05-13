@@ -18,11 +18,21 @@ export function useTenantRole(): UseTenantRoleResult {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchApi(API_PATH.TENANT_ROLE)
-      .then((r) => r.json())
-      .then((d: { role: TenantRole | null }) => setRole(d.role))
-      .catch(() => setRole(null))
-      .finally(() => setLoading(false));
+    (async () => {
+      try {
+        const res = await fetchApi(API_PATH.TENANT_ROLE);
+        if (!res.ok) {
+          setRole(null);
+          return;
+        }
+        const data: { role: TenantRole | null } = await res.json();
+        setRole(data.role);
+      } catch {
+        setRole(null);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
   return {

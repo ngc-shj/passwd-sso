@@ -195,16 +195,18 @@ export function useWatchtower(
   // that already has the vault status, or in tests).
   useEffect(() => {
     if (policyProvidedRef.current || scope.type !== "personal" || !encryptionKey) return;
-    fetchApi(API_PATH.VAULT_STATUS)
-      .then((res) => res.ok ? res.json() : null)
-      .then((data) => {
+    (async () => {
+      try {
+        const res = await fetchApi(API_PATH.VAULT_STATUS);
+        if (!res.ok) return;
+        const data = await res.json();
         if (!data) return;
         setPasswordMaxAgeDays(data.passwordMaxAgeDays ?? null);
         setPasswordExpiryWarningDays(data.passwordExpiryWarningDays ?? 14);
-      })
-      .catch(() => {
+      } catch {
         // Ignore errors — policy-driven expiry is best-effort
-      });
+      }
+    })();
   }, [scope.type, encryptionKey]);
 
 

@@ -226,6 +226,7 @@ function setupAsFetchReady({
   mockFetch.mockImplementation((url: string) => {
     if (url === "/api/auth/session") {
       return Promise.resolve({
+        ok: true,
         json: () => Promise.resolve({ user: { id: currentUserId } }),
       });
     }

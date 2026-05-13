@@ -38,13 +38,18 @@ export default function AdminTenantTeamsPage() {
 
   const fetchTeams = () => {
     setLoading(true);
-    fetchApi(API_PATH.TEAMS)
-      .then((res) => res.json())
-      .then((data) => {
+    void (async () => {
+      try {
+        const res = await fetchApi(API_PATH.TEAMS);
+        if (!res.ok) return;
+        const data = await res.json();
         if (Array.isArray(data)) setTeams(data);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      } catch {
+        // best-effort — leave teams empty
+      } finally {
+        setLoading(false);
+      }
+    })();
   };
 
   const handleCreated = () => {

@@ -53,23 +53,25 @@ export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: 
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
-      fetchApi(
-        `${apiPath.teamMembersSearch(teamId)}?q=${encodeURIComponent(addSearch.trim())}`,
-        { signal: controller.signal },
-      )
-        .then((r) => r.json())
-        .then((d) => {
+      (async () => {
+        try {
+          const res = await fetchApi(
+            `${apiPath.teamMembersSearch(teamId)}?q=${encodeURIComponent(addSearch.trim())}`,
+            { signal: controller.signal },
+          );
+          if (!res.ok) throw new Error(`${res.status}`);
+          const d = await res.json();
           if (!controller.signal.aborted) {
             setSearchResults(Array.isArray(d) ? d : []);
             setSearchLoading(false);
           }
-        })
-        .catch(() => {
+        } catch {
           if (!controller.signal.aborted) {
             setSearchResults([]);
             setSearchLoading(false);
           }
-        });
+        }
+      })();
     }, 300);
     return () => {
       clearTimeout(timer);

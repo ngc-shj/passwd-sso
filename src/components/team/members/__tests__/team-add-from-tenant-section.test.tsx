@@ -96,6 +96,7 @@ describe("TeamAddFromTenantSection", () => {
     // Return search results on first call, success on second (POST)
     mockFetchApi
       .mockResolvedValueOnce({
+        ok: true,
         json: async () => [{ userId: "user-1", name: "Alice", email: "alice@example.com", image: null }],
         signal: { aborted: false },
       })

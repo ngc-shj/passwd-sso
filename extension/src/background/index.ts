@@ -15,6 +15,7 @@ import {
   type EncryptedData,
 } from "../lib/crypto";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
+import { readApiErrorBody } from "../lib/api-error-body";
 import {
   deriveEcdhWrappingKey,
   unwrapEcdhPrivateKey,
@@ -1302,8 +1303,8 @@ async function performAutofillForEntry(
     // Personal entry
     const res = await swFetch(extApiPath.passwordById(entryId));
     if (!res.ok) {
-      const json = await res.json().catch(() => ({}));
-      return { ok: false, error: json.error || "FETCH_FAILED" };
+      const body = await readApiErrorBody(res);
+      return { ok: false, error: body?.error || "FETCH_FAILED" };
     }
     const data = (await res.json()) as {
       encryptedBlob: { ciphertext: string; iv: string; authTag: string };
@@ -1718,11 +1719,11 @@ async function handleMessage(
       try {
         const res = await swFetch(EXT_API_PATH.VAULT_UNLOCK_DATA);
         if (!res.ok) {
-          const json = await res.json().catch(() => ({}));
+          const body = await readApiErrorBody(res);
           sendResponse({
             type: EXT_MSG.UNLOCK_VAULT,
             ok: false,
-            error: json.error || "UNLOCK_FAILED",
+            error: body?.error || "UNLOCK_FAILED",
           });
           return;
         }
@@ -1894,11 +1895,11 @@ async function handleMessage(
           // Personal entry
           const res = await swFetch(extApiPath.passwordById(message.entryId));
           if (!res.ok) {
-            const json = await res.json().catch(() => ({}));
+            const body = await readApiErrorBody(res);
             sendResponse({
               type: EXT_MSG.COPY_PASSWORD,
               password: null,
-              error: json.error || "FETCH_FAILED",
+              error: body?.error || "FETCH_FAILED",
             });
             return;
           }
@@ -1972,11 +1973,11 @@ async function handleMessage(
           // Personal entry
           const res = await swFetch(extApiPath.passwordById(message.entryId));
           if (!res.ok) {
-            const json = await res.json().catch(() => ({}));
+            const body = await readApiErrorBody(res);
             sendResponse({
               type: EXT_MSG.COPY_TOTP,
               code: null,
-              error: json.error || "FETCH_FAILED",
+              error: body?.error || "FETCH_FAILED",
             });
             return;
           }

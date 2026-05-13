@@ -121,13 +121,20 @@ export default function TeamDashboardPage({
   const [teamFolders, setTeamFolders] = useState<FolderItem[]>([]);
   const [teamTags, setTeamTags] = useState<{ id: string; name: string; color?: string | null; parentId?: string | null }[]>([]);
   useEffect(() => {
-    Promise.all([
-      fetchApi(apiPath.teamFolders(teamId)).then((r) => r.ok ? r.json() : []),
-      fetchApi(apiPath.teamTags(teamId)).then((r) => r.ok ? r.json() : []),
-    ]).then(([f, tg]) => {
-      if (Array.isArray(f)) setTeamFolders(f);
-      if (Array.isArray(tg)) setTeamTags(tg);
-    }).catch(() => {});
+    (async () => {
+      try {
+        const [foldersRes, tagsRes] = await Promise.all([
+          fetchApi(apiPath.teamFolders(teamId)),
+          fetchApi(apiPath.teamTags(teamId)),
+        ]);
+        const f = foldersRes.ok ? await foldersRes.json() : [];
+        const tg = tagsRes.ok ? await tagsRes.json() : [];
+        if (Array.isArray(f)) setTeamFolders(f);
+        if (Array.isArray(tg)) setTeamTags(tg);
+      } catch {
+        // best-effort — leave folders/tags empty
+      }
+    })();
   }, [teamId]);
 
   // Reset selection mode when view changes (during render, not in effect)

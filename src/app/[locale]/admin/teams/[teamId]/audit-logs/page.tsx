@@ -122,12 +122,16 @@ export default function TeamAdminAuditLogsPage({
   );
 
   useEffect(() => {
-    fetchApi(apiPath.teamPolicy(teamId))
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
+    (async () => {
+      try {
+        const res = await fetchApi(apiPath.teamPolicy(teamId));
+        if (!res.ok) return;
+        const data = await res.json();
         if (data && data.allowExport === false) setExportAllowed(false);
-      })
-      .catch(() => {});
+      } catch {
+        // best-effort — keep defaults
+      }
+    })();
   }, [teamId]);
 
   const audit = useAuditLogs({

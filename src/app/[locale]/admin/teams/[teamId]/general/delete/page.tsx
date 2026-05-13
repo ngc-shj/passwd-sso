@@ -49,13 +49,16 @@ export default function TeamGeneralDeletePage({
   useEffect(() => {
     setTeam(null);
     setLoadError(false);
-    fetchApi(apiPath.teamById(teamId))
-      .then((r) => {
-        if (!r.ok) throw new Error("Forbidden");
-        return r.json();
-      })
-      .then((d) => setTeam({ id: d.id, name: d.name, role: d.role }))
-      .catch(() => setLoadError(true));
+    (async () => {
+      try {
+        const res = await fetchApi(apiPath.teamById(teamId));
+        if (!res.ok) throw new Error("Forbidden");
+        const d = await res.json();
+        setTeam({ id: d.id, name: d.name, role: d.role });
+      } catch {
+        setLoadError(true);
+      }
+    })();
   }, [teamId]);
 
   const isOwner = team?.role === TEAM_ROLE.OWNER;
