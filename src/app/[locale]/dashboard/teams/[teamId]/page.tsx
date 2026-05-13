@@ -416,7 +416,9 @@ export default function TeamDashboardPage({
   const createDetailFetcher = useCallback(
     (id: string, eType?: EntryTypeValue) => async (): Promise<InlineDetailData> => {
       const res = await fetchApi(apiPath.teamPasswordById(teamId, id));
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        throw new Error("Failed");
+      }
       const raw = await res.json();
       const blob = await decryptFullBlob(id, raw);
       return {
@@ -484,7 +486,9 @@ export default function TeamDashboardPage({
   const createPasswordFetcher = useCallback(
     (id: string) => async (): Promise<string> => {
       const res = await fetchApi(apiPath.teamPasswordById(teamId, id));
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        throw new Error("Failed");
+      }
       const raw = await res.json();
       const blob = await decryptFullBlob(id, raw);
       return (blob.password as string) ?? (blob.content as string) ?? "";
@@ -495,7 +499,9 @@ export default function TeamDashboardPage({
   const createUrlFetcher = useCallback(
     (id: string) => async (): Promise<string | null> => {
       const res = await fetchApi(apiPath.teamPasswordById(teamId, id));
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        throw new Error("Failed");
+      }
       const raw = await res.json();
       const blob = await decryptFullBlob(id, raw);
       return (blob.url as string) ?? null;

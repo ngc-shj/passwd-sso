@@ -44,6 +44,7 @@ import { SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { FormDirtyBadge } from "@/components/settings/account/form-dirty-badge";
@@ -199,10 +200,10 @@ export function ServiceAccountCard() {
         }),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        if (res.status === 409 && data?.error === "SA_NAME_CONFLICT") {
+        const body = await readApiErrorBody(res);
+        if (res.status === 409 && body?.error === API_ERROR.SA_NAME_CONFLICT) {
           setCreateNameError(t("saNameConflict"));
-        } else if (res.status === 422 && data?.error === "SA_LIMIT_EXCEEDED") {
+        } else if (res.status === 422 && body?.error === API_ERROR.SA_LIMIT_EXCEEDED) {
           toast.error(t("saLimitReached"));
         } else {
           toast.error(t("saCreateFailed"));
@@ -335,8 +336,8 @@ export function ServiceAccountCard() {
         }
       );
       if (!res.ok) {
-        const errData = await res.json().catch(() => null);
-        const code = errData?.error;
+        const body = await readApiErrorBody(res);
+        const code = body?.error;
         if (code === API_ERROR.SESSION_STEP_UP_REQUIRED) {
           await inlineReauth.triggerOnStaleError();
         } else if (res.status === 409 && code === API_ERROR.SA_TOKEN_LIMIT_EXCEEDED) {

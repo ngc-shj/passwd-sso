@@ -446,6 +446,69 @@ Refactored the 2 UI consumers I migrated in Round 3:
 Wire shape: byte-identical across all changes. Internal representation: less
 boilerplate, single point of change for future shape evolution.
 
+---
+
+# Round 5 — UI consumer non-helper detection + 46-site migration
+
+User asked: "ヘルパーを使用していない[箇所に]気付けますか" — Can we detect places
+that bypass the typed helper?
+
+Audit found **46 sites** in UI / hook / page code that read `res.json()` inside
+an `if (!res.ok)` block, bypassing `readApiErrorBody()`. Each one was either:
+- A real F8-class regression vector (reading non-canonical body fields with no
+  type safety), or
+- A gate false-positive (single-line `if (!res.ok) throw;` causing the brace
+  tracker to scan into success-path `res.json()`).
+
+## Gate rule (8) added
+
+`scripts/checks/check-api-error-codes.sh` gained rule 8: detects `if (!res.ok)`
+blocks containing `await res.json()`. Stateful per-file line-counted perl
+scanner walks brace depth — works on the canonical block form. The rule fires
+on the false-positive shape (no braces around the single-statement if) too,
+which incidentally enforces a consistent code style.
+
+## 46-site migration (3 parallel sub-agents)
+
+**Batch A (14 files)** — share / vault / emergency-access / tags / extension /
+passwords. 3 genuine pattern-2 migrations (`body.error` branching via
+`readApiErrorBody`), 11 brace-only fixes.
+
+**Batch B (12 files)** — team / settings/developer. 6 genuine pattern-2 /
+pattern-3 migrations, 6 brace-only fixes.
+
+Notable bug fix discovered during Batch B: `mcp-client-card.tsx` edit handler
+unconditionally cast the success-response body to `ValidationErrorResponse`.
+Sub-agent moved the `readApiErrorBody` call inside the `!res.ok` branch — the
+correct shape.
+
+**Batch C (11 files)** — hooks / app pages. 5 genuine pattern-2 / pattern-3
+migrations, 6 brace-only fixes.
+
+## Detection summary post-Round-5
+
+Every class of API error envelope omission now has mechanical detection:
+
+| Class | Detection mechanism |
+|-------|---------------------|
+| Forbidden patterns (raw NextResponse.json, prose error, snake_case error, retired codes) | grep gate rules 1-5 |
+| Top-level body shape violations ({ message }, { result }, { hint }) | grep gate rule 6 |
+| String-typed details payload | grep gate rule 7 |
+| **UI consumer reads error body without typed helper** | grep gate rule 8 (Round 5) |
+| Wire shape type safety (server) | TypeScript via `Record<string, unknown>` on `validationError`, `MainApiErrorBody` shape |
+| UI consumer reads non-canonical field | TypeScript via `MainApiErrorBody.readonly` (no index signature) |
+
+A future PR that violates ANY of these gets immediate CI failure or compile
+error.
+
+## Round 5 Summary
+
+- 1 new gate rule (#8) covering UI bypass detection
+- 46 production sites migrated across 3 sub-agent batches
+- 1 latent bug discovered + fixed (mcp-client-card edit handler)
+- All 17 pre-pr.sh checks pass
+- Total detection layers: 8 grep rules + TypeScript types + 4 helpers (`errorResponse`, `errorResponseWithMessage`, `readApiErrorBody`, `getApiErrorMessage` / `getApiErrorDetail`)
+
 ## Round 1 Summary
 
 - Functionality: Critical 0 / Major 3 (F1, F2, F3) / Minor 3 (F4, F5, F6)

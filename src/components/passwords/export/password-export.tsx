@@ -67,7 +67,9 @@ function ExportPanelContent() {
         fetchApi(`${API_PATH.PASSWORDS}?include=blob`),
         fetchApi(API_PATH.FOLDERS),
       ]);
-      if (!res.ok) throw new Error("Failed to fetch");
+      if (!res.ok) {
+        throw new Error("Failed to fetch");
+      }
       const rawEntries = await res.json();
       const folders: FolderItem[] = foldersRes.ok ? await foldersRes.json() : [];
 

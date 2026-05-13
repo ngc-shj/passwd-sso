@@ -251,7 +251,9 @@ export function PasswordCard({
   const fetchDecryptedEntry = async (): Promise<{ entry: VaultEntryFull; raw: Record<string, unknown> }> => {
     if (!encryptionKey) throw new Error("Vault locked");
     const res = await fetchApi(apiPath.passwordById(id));
-    if (!res.ok) throw new Error("Failed to fetch");
+    if (!res.ok) {
+      throw new Error("Failed to fetch");
+    }
     const raw = await res.json();
     const aad = raw.aadVersion >= 1 && userId
       ? buildPersonalEntryAAD(userId, id)

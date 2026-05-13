@@ -41,7 +41,9 @@ export function TagInput({ selectedTags, onChange }: TagInputProps) {
   const fetchTags = useCallback(async () => {
     try {
       const res = await fetchApi(`${API_PATH.TAGS}?tree=true`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        return;
+      }
       const data = await res.json();
       if (Array.isArray(data)) setAllTags(data);
     } catch {

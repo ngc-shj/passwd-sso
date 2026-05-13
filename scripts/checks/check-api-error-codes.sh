@@ -20,6 +20,9 @@
 #      forbidden; wrap them inside `details: { ... }`. Multi-line aware.
 #  (7) C6: `details` MUST be an object (z.treeifyError tree shape), never a
 #      bare string literal. Multi-line aware.
+#  (8) C4 client-side: UI / hook / page code MUST NOT call `res.json()` inside
+#      an `if (!res.ok)` block — wire shape access goes through
+#      `readApiErrorBody()` so non-canonical fields fail at compile time.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -157,6 +160,50 @@ c6_hits=$(
 if [ -n "$c6_hits" ]; then
   echo "FORBIDDEN: string-typed details payload — wrap as { details: { message: \"...\" } } (C6)"
   echo "$c6_hits"
+  violations=$((violations + 1))
+fi
+
+# (8) C4 client-side — UI / hook / non-API page code must NOT call `res.json()`
+# inside an `if (!res.ok)` block. The wire shape (MainApiErrorBody) MUST be
+# accessed through `readApiErrorBody(res)` so accessing `body.message` or any
+# non-canonical field is a TypeScript compile error. Catches F8-class
+# regressions where the server moves a field under `details` but the consumer
+# still reads it directly. Multi-line aware.
+c4_client_hits=$(
+  while IFS= read -r f; do
+    # Two-stage detection: locate `if (!res.ok)` opens, then inspect the
+    # following block for `await res.json()`. Single-stage block-matching
+    # regex was unreliable; line-based scan with following-line lookahead
+    # is more robust.
+    perl -ne '
+      if (/^\s*if\s*\(\s*!(?:res|response)\.ok\s*\)/) {
+        $start = $.;
+        $in_block = 1;
+        $depth = 0;
+        $block = "";
+      }
+      if ($in_block) {
+        $block .= $_;
+        $depth += () = /\{/g;
+        $depth -= () = /\}/g;
+        if ($depth <= 0 && $block =~ /\{/) {
+          if ($block =~ /\bawait\s+(?:res|response)\.json\(/) {
+            print "$ARGV:$start: error-path res.json() bypass — use readApiErrorBody()\n";
+          }
+          $in_block = 0;
+        }
+      }
+    ' "$f"
+  done < <(
+    find src/components src/hooks src/app \
+      \( -name '*.ts' -o -name '*.tsx' \) 2>/dev/null \
+      | grep -v '\.test\.' | grep -v '/__tests__/' \
+      | grep -vE '/app/api/'
+  ) 2>/dev/null || true
+)
+if [ -n "$c4_client_hits" ]; then
+  echo "FORBIDDEN: UI consumer reads error body via res.json() — use readApiErrorBody() helper (C4)"
+  echo "$c4_client_hits"
   violations=$((violations + 1))
 fi
 

@@ -42,7 +42,9 @@ export function TeamTagInput({ teamId, selectedTags, onChange }: TeamTagInputPro
   const fetchTags = useCallback(async () => {
     try {
       const res = await fetchApi(`${apiPath.teamTags(teamId)}?tree=true`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        return;
+      }
       const data = await res.json();
       if (Array.isArray(data)) setAllTags(data);
     } catch {

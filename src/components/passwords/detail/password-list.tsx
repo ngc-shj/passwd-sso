@@ -128,7 +128,9 @@ export function PasswordList({
       if (archivedOnly) params.set("archived", "true");
 
       const res = await fetchApi(`${API_PATH.PASSWORDS}?${params}`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        return;
+      }
       const data = await res.json();
 
       // Decrypt overviews client-side (no search filtering here — done via useMemo)

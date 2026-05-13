@@ -18,6 +18,7 @@ import {
   hexEncode,
 } from "@/lib/crypto/crypto-client";
 import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { API_PATH } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -92,13 +93,13 @@ export default function RecoveryPage() {
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        if (err.error === "RECOVERY_KEY_NOT_SET") {
+        const body = await readApiErrorBody(res);
+        if (body?.error === "RECOVERY_KEY_NOT_SET") {
           setError(t("recoveryKeyNotSet"));
-        } else if (err.error === "INVALID_RECOVERY_KEY") {
+        } else if (body?.error === "INVALID_RECOVERY_KEY") {
           setError(t("invalidRecoveryKey"));
-        } else if (err.error) {
-          setError(tApi(apiErrorToI18nKey(err.error)));
+        } else if (body?.error) {
+          setError(tApi(apiErrorToI18nKey(body.error)));
         } else {
           setError(tApi("unknownError"));
         }
@@ -182,9 +183,9 @@ export default function RecoveryPage() {
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        if (err.error) {
-          setError(tApi(apiErrorToI18nKey(err.error)));
+        const body = await readApiErrorBody(res);
+        if (body?.error) {
+          setError(tApi(apiErrorToI18nKey(body.error)));
         } else {
           setError(tApi("unknownError"));
         }

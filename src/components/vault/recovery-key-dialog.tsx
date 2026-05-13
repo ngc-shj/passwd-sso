@@ -11,6 +11,7 @@ import {
   wrapSecretKeyWithRecovery,
 } from "@/lib/crypto/crypto-recovery";
 import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { API_PATH } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
@@ -71,8 +72,8 @@ export async function generateRecoveryKeyFlow(
     });
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      return { ok: false, errorCode: err.error ?? null };
+      const err = await readApiErrorBody(res);
+      return { ok: false, errorCode: err?.error ?? null };
     }
 
     const formattedKey = await formatRecoveryKey(recoveryKey);

@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault/vault-context";
 import { API_PATH } from "@/lib/constants/auth/api-path";
 import { fetchApi } from "@/lib/url-helpers";
+import { readApiErrorBody, getApiErrorMessage } from "@/lib/http/read-api-error-body";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
 import {
@@ -91,7 +92,9 @@ export function CreateDelegationDialog({
     setLoading(true);
     try {
       const res = await fetchApi(API_PATH.PASSWORDS);
-      if (!res.ok) return;
+      if (!res.ok) {
+        return;
+      }
       const data = await res.json();
 
       const decrypted: EntryItem[] = [];
@@ -209,8 +212,8 @@ export function CreateDelegationDialog({
         onOpenChange(false);
         onCreated();
       } else {
-        const err = await res.json().catch(() => ({}));
-        toast.error(err.error ?? "Failed to create delegation");
+        const message = getApiErrorMessage(await readApiErrorBody(res));
+        toast.error(message ?? "Failed to create delegation");
       }
     } catch {
       toast.error("Failed to create delegation");

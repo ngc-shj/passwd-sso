@@ -44,6 +44,7 @@ import { SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
@@ -167,13 +168,13 @@ export function AccessRequestCard() {
         }),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
+        const body = await readApiErrorBody(res);
         if (res.status === 404) {
           toast.error(t("arSaNotFound"));
         } else if (res.status === 400) {
           toast.error(t("arCreateValidationError"));
         } else {
-          const apiKey = tokenMintApiErrorKey(data?.error);
+          const apiKey = tokenMintApiErrorKey(body?.error);
           toast.error(apiKey ? tApi(apiKey) : t("arCreateFailed"));
         }
         return;
@@ -196,8 +197,8 @@ export function AccessRequestCard() {
         cache: "no-store",
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        const code = data?.error ?? "";
+        const body = await readApiErrorBody(res);
+        const code = body?.error ?? "";
         if (code === API_ERROR.SESSION_STEP_UP_REQUIRED) {
           // Remember which request the operator was trying to approve so the
           // post-reauth retry hits the same target.

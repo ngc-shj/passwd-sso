@@ -117,7 +117,9 @@ export function PasswordEditDialogLoader({
     async function load() {
       try {
         const res = await fetchApi(apiPath.passwordById(id));
-        if (!res.ok) throw new Error(td("notFound"));
+        if (!res.ok) {
+          throw new Error(td("notFound"));
+        }
         const raw = await res.json();
 
         const aad = raw.aadVersion >= 1 && userId

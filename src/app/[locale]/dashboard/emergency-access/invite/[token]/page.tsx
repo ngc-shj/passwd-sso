@@ -18,6 +18,7 @@ import {
 } from "@/lib/crypto/crypto-emergency";
 import { API_ERROR, eaErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { fetchApi } from "@/lib/url-helpers";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 
 export default function AcceptEmergencyInvitePage() {
   const t = useTranslations("EmergencyAccess");
@@ -70,12 +71,12 @@ export default function AcceptEmergencyInvitePage() {
       });
 
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
+        const body = await readApiErrorBody(res);
         // Token-based NOT_FOUND means invalid/expired invitation (better UX message)
-        if (data?.error === API_ERROR.NOT_FOUND) {
+        if (body?.error === API_ERROR.NOT_FOUND) {
           toast.error(t("invalidInvitation"));
         } else {
-          toast.error(t(eaErrorToI18nKey(data?.error)));
+          toast.error(t(eaErrorToI18nKey(body?.error)));
         }
         return;
       }
@@ -99,11 +100,11 @@ export default function AcceptEmergencyInvitePage() {
       });
 
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        if (data?.error === API_ERROR.NOT_FOUND) {
+        const body = await readApiErrorBody(res);
+        if (body?.error === API_ERROR.NOT_FOUND) {
           toast.error(t("invalidInvitation"));
         } else {
-          toast.error(t(eaErrorToI18nKey(data?.error)));
+          toast.error(t(eaErrorToI18nKey(body?.error)));
         }
         return;
       }

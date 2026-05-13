@@ -723,7 +723,9 @@ async function fetchPersonalWatchtowerEntries({
 }): Promise<DecryptedEntry[]> {
   if (!encryptionKey) return [];
   const res = await fetchApi(`${API_PATH.PASSWORDS}?include=blob`);
-  if (!res.ok) throw new Error("Failed to fetch passwords");
+  if (!res.ok) {
+    throw new Error("Failed to fetch passwords");
+  }
   const rawEntries = await res.json();
   const entries: DecryptedEntry[] = [];
 

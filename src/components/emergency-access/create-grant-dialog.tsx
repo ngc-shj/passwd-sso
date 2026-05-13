@@ -24,6 +24,7 @@ import {
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { eaErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 
@@ -56,8 +57,8 @@ export function CreateGrantDialog({ onCreated }: CreateGrantDialogProps) {
       });
 
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        toast.error(t(eaErrorToI18nKey(data?.error)));
+        const body = await readApiErrorBody(res);
+        toast.error(t(eaErrorToI18nKey(body?.error)));
         return;
       }
 
