@@ -878,3 +878,23 @@ Adjacent (Minor): `errorResponseWithMessage(API_ERROR.SA_NOT_FOUND, 410, ...)` t
 - Testing: Critical 0 / Major 1 (T1 fixed) / Minor 1 (T2 skipped per file convention)
 
 Total: Critical 0 / Major 1 / Minor 4. T1 + F1 + F3 fixed in Round 10; F2 deferred with explicit Anti-Deferral cost-justification + TODO marker; T2 skipped per file convention.
+
+### Tightening-only skip — Round 11 not required
+
+All Round 10 fixes meet the three-condition tightening-only skip criteria:
+
+1. **Prior round fix scope**: changes are bounded to `src/lib/http/read-api-error-body.test.ts` (new test file), `docs/api/error-handling.md` (doc-text only), and `src/app/s/[token]/download/route.ts` (added comment lines only — no executable change).
+2. **Inline minor**: a new test file with no production-code change, a doc-text revision, and 2 comment-only insertions. No observable-behavior changes.
+3. **No security-boundary touch**: none of the changes touch auth/authz, cryptographic-material handling, session lifecycle, identity-broker / federation trust, key custody, zero-trust / service-mesh policy, webhook signing-key rotation, secrets handling, audit logging, rate-limiting / authentication-failure paths, or input validation. The download route comment touches a 410-Gone TOCTOU code path — comment-only, identical execution semantics.
+
+Justification: every Round 10 finding scoped within Round 10 fix range, inline minor, no security-boundary touch. Round 11 review would re-litigate identical code with no new attack surface.
+
+Final state of branch (commits since round 9):
+- `eb964c74` simplify pass
+- `64ff6daa` Phase 2: default-status map (~454 sites) + 4 latent bug fixes
+- `abf5e246` SHARE_GONE / SA_INACTIVE codes — retire 4 overrides
+- `c5953407` consistency sweep: 1 UI regression + 2 production splits
+- `3d440438` helper unit tests + lint cleanup
+- `212ed0a4` review(10): T1 + F1 + F3 + Round 10 log
+
+Pre-pr: 19/19 ✓ throughout.
