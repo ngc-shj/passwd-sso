@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { API_PATH, VAULT_STATUS } from "@/lib/constants";
 import { useVault, VaultUnlockError } from "@/lib/vault/vault-context";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { formatLockedUntil } from "@/components/vault/vault-lock-screen";
 import { generateTeamSymmetricKey, createTeamKeyEscrow } from "@/lib/crypto/crypto-team";
@@ -182,8 +183,11 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
       }
 
       if (res.status === 400) {
-        const data = await res.json().catch(() => null);
-        if (data?.details?.properties?.slug?.errors?.length) {
+        const body = await readApiErrorBody(res);
+        const slugErrors = (
+          body?.details as { properties?: { slug?: { errors?: unknown[] } } } | undefined
+        )?.properties?.slug?.errors;
+        if (slugErrors?.length) {
           setSlugError(t("slugInvalidFormat"));
         } else {
           toast.error(t("validationError"));

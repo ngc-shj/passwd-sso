@@ -16,6 +16,8 @@ import { Loader2, UserPlus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 
 interface TenantMemberResult {
   userId: string;
@@ -84,9 +86,9 @@ export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: 
         body: JSON.stringify({ userId, role: addRole }),
       });
       if (res.status === 409) {
-        const data = await res.json();
+        const body = await readApiErrorBody(res);
         toast.error(
-          data.error === "SCIM_MANAGED_MEMBER"
+          body?.error === API_ERROR.SCIM_MANAGED_MEMBER
             ? t("scimManagedCannotAdd")
             : t("alreadyMember"),
         );

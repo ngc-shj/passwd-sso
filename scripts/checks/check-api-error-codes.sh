@@ -176,11 +176,21 @@ c4_client_hits=$(
     # regex was unreliable; line-based scan with following-line lookahead
     # is more robust.
     perl -ne '
-      if (/^\s*if\s*\(\s*!(?:res|response)\.ok\s*\)/) {
-        $start = $.;
-        $in_block = 1;
-        $depth = 0;
-        $block = "";
+      # Matches three error-path entry shapes:
+      #   if (!res.ok)              — generic error branch
+      #   if (res.status === 4xx)   — specific HTTP code branch (4xx / 5xx)
+      #   if (res.status >= 400)    — range error branch
+      # `} else if (...)` matches too. When already inside a tracked block,
+      # the else-if is treated as a continuation: depth-tracking absorbs it
+      # so the whole if-else chain is scanned as one block (a bypass in any
+      # branch fires once with the line of the opening `if`).
+      if (/^\s*(?:\}\s*else\s+)?if\s*\(\s*(?:!(?:res|response)\.ok|(?:res|response)\.status\s*===\s*[45]\d\d|(?:res|response)\.status\s*>=?\s*4\d\d)\s*\)/) {
+        if (!$in_block) {
+          $start = $.;
+          $in_block = 1;
+          $depth = 0;
+          $block = "";
+        }
       }
       if ($in_block) {
         $block .= $_;

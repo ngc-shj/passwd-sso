@@ -501,13 +501,88 @@ Every class of API error envelope omission now has mechanical detection:
 A future PR that violates ANY of these gets immediate CI failure or compile
 error.
 
-## Round 5 Summary
+## Round 5 helper-stage Summary
 
 - 1 new gate rule (#8) covering UI bypass detection
 - 46 production sites migrated across 3 sub-agent batches
 - 1 latent bug discovered + fixed (mcp-client-card edit handler)
 - All 17 pre-pr.sh checks pass
 - Total detection layers: 8 grep rules + TypeScript types + 4 helpers (`errorResponse`, `errorResponseWithMessage`, `readApiErrorBody`, `getApiErrorMessage` / `getApiErrorDetail`)
+
+---
+
+# Round 6 — Horizontal expansion: catch what Round 5 missed
+
+User asked: "横展開でバグがないか、漏れがないか改めて" — Sweep horizontally
+for bugs / omissions introduced or missed.
+
+The Round 5 gate (rule 8) only matched `if (!res.ok) { ... }` — it missed two
+adjacent shapes:
+
+1. **`if (res.status === Nxx)` direct status check** — also an error-path
+   gate that wraps `res.json()` body access. Found 4 sites:
+   - `src/components/breakglass/breakglass-dialog.tsx:102`
+   - `src/components/settings/developer/base-webhook-card.tsx:162`
+   - `src/components/team/management/team-create-dialog.tsx:184`
+   - `src/components/team/members/team-add-from-tenant-section.tsx:86`
+
+2. **else-if chain logic bug** in my own gate scanner — when the first
+   `if (...) {` block matched, then the chain continued with `} else if (...)`,
+   my stateful parser reset the block state at the second match BEFORE
+   running the json-bypass check on the first block. So `breakglass-dialog`
+   was silently un-flagged. Fixed by gating the reset on `$in_block` being
+   false (an else-if while already in a block is treated as continuation —
+   correct semantics since the whole chain is one error-handling structure).
+
+## Gate rule 8 extended
+
+Updated regex matches three error-path entry shapes:
+
+```perl
+if (/^\s*(?:\}\s*else\s+)?if\s*\(\s*(?:
+  !(?:res|response)\.ok |
+  (?:res|response)\.status\s*===\s*[45]\d\d |
+  (?:res|response)\.status\s*>=?\s*4\d\d
+)\s*\)/) {
+  # Only reset block-state on the FIRST `if` (else-if is continuation)
+  if (!$in_block) { $start = $.; ... }
+}
+```
+
+## 4 sites migrated
+
+| Site | Pattern | Migration |
+|------|---------|-----------|
+| breakglass-dialog.tsx:102 | reads `body.details.properties.targetUserId` + `body.error` for branching | `readApiErrorBody` + typed details narrowing |
+| base-webhook-card.tsx:162 | reads `body.details.properties.url.errors.length` | same |
+| team-create-dialog.tsx:184 | reads `body.details.properties.slug.errors.length` | same |
+| team-add-from-tenant-section.tsx:86 | reads `body.error === "SCIM_MANAGED_MEMBER"` for branching | `readApiErrorBody` + `API_ERROR.SCIM_MANAGED_MEMBER` typed constant |
+
+## Test fixture fix
+
+The shared `webhook-card-test-factory.tsx` (used by both `tenant-webhook-card.test.tsx`
+and `team-webhook-card.test.tsx`) returned a 400 mock body of
+`{ details: { properties: { url: { errors: ["invalid"] } } } }` — missing the
+`error` field. After Round 6 migration, the production code uses
+`readApiErrorBody(res)` which now requires `error` field to be a string
+(typed envelope discriminator). The mock was incomplete and the test failed
+post-migration. Fixed by adding `error: "VALIDATION_ERROR"` to the mock —
+which matches what the server actually emits.
+
+This is itself a **mock-reality divergence** (RT1) bug that the migration
+surfaced. The test was passing only because production silently accepted
+any shape with the right `details` keys; the typed helper made the
+contract explicit.
+
+## Round 6 Summary
+
+- 1 gate scanner logic bug fixed (else-if continuation handling)
+- 1 gate regex extension (`if (res.status === Nxx)` / `if (res.status >= 400)`)
+- 4 production sites migrated to typed helper
+- 1 test mock fixture corrected (RT1 mock-reality divergence)
+- All 17 pre-pr.sh checks pass
+
+Total UI consumer migrations across Rounds 5+6: **50 sites** (46 in R5 + 4 in R6).
 
 ## Round 1 Summary
 

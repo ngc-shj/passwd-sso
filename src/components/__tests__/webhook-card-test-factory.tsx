@@ -595,6 +595,7 @@ export function createWebhookCardTests(
             status: 400,
             json: () =>
               Promise.resolve({
+                error: "VALIDATION_ERROR",
                 details: { properties: { url: { errors: ["invalid"] } } },
               }),
           });
