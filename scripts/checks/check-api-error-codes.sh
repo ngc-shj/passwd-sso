@@ -20,12 +20,14 @@
 #      forbidden; wrap them inside `details: { ... }`. Multi-line aware.
 #  (7) C6: `details` MUST be an object (z.treeifyError tree shape), never a
 #      bare string literal. Multi-line aware.
-#  (8) C4 client-side: UI / hook / page code MUST NOT call `res.json()` inside
-#      an `if (!res.ok)` block — wire shape access goes through
-#      `readApiErrorBody()` so non-canonical fields fail at compile time.
-#  (9) C4 client-side: UI / hook / page code MUST NOT use `.then((<r>) => <r>.json())`
-#      Response-chain form — it bypasses rule 8 (which only matches `await
-#      res.json()`). Convert to `await` form so the error-body gate covers it.
+#  (8) C4 client-side: UI / hook / page / CLI / extension code MUST NOT call
+#      `res.json()` inside an `if (!res.ok)` / `if (res.status === Nxx)` /
+#      `if (res.status >= 4xx)` block — wire shape access goes through
+#      `readApiErrorBody()` (or its CLI/extension mirror) so non-canonical
+#      fields fail at compile time. Any variable name; block-form only.
+#  (9) C4 client-side: same scope — MUST NOT use `.then((<r>) => <r>.json())`
+#      Response-chain form. Convert to `await` form so rule 8 covers it.
+#      Includes `.js` files in extension/src/ (parallel content-script impl).
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -209,14 +211,23 @@ c4_client_hits=$(
       }
     ' "$f"
   done < <(
-    find src/components src/hooks src/app \
-      \( -name '*.ts' -o -name '*.tsx' \) 2>/dev/null \
+    # Scope: UI (components/hooks/app), CLI (cli/src), extension (extension/src)
+    # — every consumer surface that talks to the main API.
+    # Includes `.js` files in extension/src because extension content scripts
+    # are deployed as parallel `.js` (production) + `-lib.ts` (test) per the
+    # codebase convention (see `feedback_extension_parallel_impl`).
+    {
+      find src/components src/hooks src/app \
+        \( -name '*.ts' -o -name '*.tsx' \) 2>/dev/null
+      find cli/src extension/src \
+        \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' \) 2>/dev/null
+    } \
       | grep -v '\.test\.' | grep -v '/__tests__/' \
       | grep -vE '/app/api/'
   ) 2>/dev/null || true
 )
 if [ -n "$c4_client_hits" ]; then
-  echo "FORBIDDEN: UI consumer reads error body via res.json() — use readApiErrorBody() helper (C4)"
+  echo "FORBIDDEN: consumer reads error body via res.json() — use readApiErrorBody() helper (C4)"
   echo "$c4_client_hits"
   violations=$((violations + 1))
 fi
@@ -225,10 +236,14 @@ fi
 # error-body access path is `await readApiErrorBody(res)`; `.then()` chains
 # that pass the Response to a `.json()` call bypass Gate rule 8 (which only
 # matches `await res.json()`). Flag any `.then((<r>) => ...<r>.json()...)`
-# in UI / hook / page code.
+# in UI / hook / page / CLI / extension code (including `.js` content scripts).
 c9_hits=$(
-  find src/components src/hooks src/app \
-    \( -name '*.ts' -o -name '*.tsx' \) 2>/dev/null \
+  {
+    find src/components src/hooks src/app \
+      \( -name '*.ts' -o -name '*.tsx' \) 2>/dev/null
+    find cli/src extension/src \
+      \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' \) 2>/dev/null
+  } \
     | grep -v '\.test\.' | grep -v '/__tests__/' \
     | grep -vE '/app/api/' \
     | xargs -r perl -ne '
