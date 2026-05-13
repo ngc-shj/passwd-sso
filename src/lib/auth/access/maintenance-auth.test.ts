@@ -56,7 +56,10 @@ describe("requireMaintenanceOperator", () => {
     if (!result.ok) {
       expect(result.response.status).toBe(400);
       const body = await result.response.json();
-      expect(body.error).toContain("active tenant admin");
+      // Body conforms to C2/C4 envelope: error is the code,
+      // message is wrapped in `details: { message }` (C4 closed list).
+      expect(body.error).toBe("VALIDATION_ERROR");
+      expect(body.details?.message).toContain("active tenant admin");
     }
   });
 

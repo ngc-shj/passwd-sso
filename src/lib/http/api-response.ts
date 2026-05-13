@@ -3,6 +3,30 @@ import { z, type ZodError } from "zod";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { mapPrismaError } from "@/lib/prisma/prisma-error";
 
+/**
+ * Canonical wire shape of the Main API error envelope.
+ *
+ * See docs/api/error-handling.md § 3.1 / Contract C2 + C4 in the plan:
+ * `error` is always an `ApiErrorCode`. The closed list of body context
+ * fields is `details` (z.treeifyError tree OR `{ message: string }`-shaped
+ * object), `lockedUntil` (ISO 8601, `ACCOUNT_LOCKED` only), and
+ * `currentKeyVersion` (webauthn PRF CAS, `CONFLICT` only).
+ *
+ * Importantly: top-level `message` / `result` / `hint` / etc. are FORBIDDEN.
+ * The `readonly` modifier + absence of an index signature means accessing
+ * `body.message` (or any non-listed key) is a TypeScript error, catching
+ * F8-class UI consumer regressions at compile time.
+ *
+ * Use `readApiErrorBody(res)` from `@/lib/http/read-api-error-body` on
+ * client/UI sites to obtain a value of this type from a `Response`.
+ */
+export type MainApiErrorBody = {
+  readonly error: ApiErrorCode;
+  readonly details?: unknown;
+  readonly lockedUntil?: string | null;
+  readonly currentKeyVersion?: number;
+};
+
 // Avoid importing TeamAuthError/TenantAuthError directly to prevent circular
 // dependencies — both classes share the same { message: ApiErrorCode, status: number }
 // shape, so duck-typing is sufficient here.

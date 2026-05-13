@@ -295,6 +295,85 @@ Round 2 verified all Round 1 fixes are correct and complete EXCEPT it surfaced 2
 
 Per Step 3-8, all Critical/Major findings resolved. Round 3 not required — proceeding to final commit (Step 3-9).
 
+---
+
+# Round 3 — Comprehensive omission audit + mechanical detection hardening
+
+Round 3 was triggered by the user question: "抜け漏れないですかね。あったときに気づけないですかね"
+("Are there still omissions? And can we catch them when they occur?"). The
+answer to both was "yes" — the existing gate had blind spots, and we found 8
+additional bypass sites the previous rounds missed.
+
+## Audit findings (Round 3)
+
+### F9 — Major — 8 additional `NextResponse.json({error})` bypass sites outside main-API gate scope
+
+The Round 1+2 grep gate scanned only `src/app/api/` with single-line regex.
+The Round 3 enhanced gate (multi-line PCRE + extended scope to `src/app/s/`,
+`src/lib/`) caught 8 sites that bypassed the migration:
+
+- `src/app/s/[token]/download/route.ts:22` — RATE_LIMIT_EXCEEDED (missing Retry-After header)
+- `src/app/s/[token]/download/route.ts:73,80,86` — 3 sites (SHARE_PASSWORD_REQUIRED, UNAUTHORIZED×2)
+- `src/lib/auth/session/check-auth.ts:71,81,108` — 3 sites (EXTENSION_TOKEN_SCOPE_INSUFFICIENT, UNAUTHORIZED×2)
+- `src/lib/auth/access/maintenance-auth.ts:56` — RAW STRING error value (C2 violation: "operatorId is not an active tenant admin")
+- `src/lib/http/parse-body.ts:62` — INVALID_JSON bypass inside the parseBody helper
+
+All migrated to `errorResponse()`. maintenance-auth.ts converted from raw string
+to `VALIDATION_ERROR` with `details: { message }` wrap. Test assertion updated.
+
+## Mechanical detection hardening (Round 3)
+
+### Grep gate enhancements
+
+`scripts/checks/check-api-error-codes.sh` gained 3 new capabilities:
+
+1. **Multi-line PCRE detection** (via perl) — catches the F2/F7-class
+   string-typed `details: "..."` even when wrapped across multiple lines, and
+   the C12-class `NextResponse.json({ error: ... })` over multiple lines.
+2. **Extended scope** — now scans `src/app/api/`, `src/app/s/`, and `src/lib/`
+   (with explicit exclusion of the helper file `src/lib/http/api-response.ts`
+   that DEFINES `errorResponse`).
+3. **C4 closed-list enforcement (rule 6)** — `errorResponse(...)` MUST NOT
+   pass top-level body keys other than `details`, `lockedUntil`,
+   `currentKeyVersion`. Nested keys inside `details: { ... }` are NOT
+   enforced (developers free to shape the details object). Catches the F3
+   class of `{ message }` / `{ result }` / `{ hint }` regressions at CI time.
+4. **C6 string-details detection (rule 7)** — `errorResponse(..., { details: "..." })`
+   (string literal) is forbidden. The wrap must be `{ details: { message: "..." } }`
+   (object form, conforming to z.treeifyError tree shape).
+
+### Compile-time enforcement via `MainApiErrorBody` type + `readApiErrorBody` helper
+
+To close the F8-class UI consumer regression (where the wire shape moves a
+field but the consumer still reads the old field name), Round 3 introduces:
+
+1. **`MainApiErrorBody` type** in `src/lib/http/api-response.ts` — the canonical
+   `readonly` shape of the Main API error envelope. The absence of an index
+   signature means accessing `body.message` is a TypeScript compile error.
+2. **`readApiErrorBody(res)` helper** in `src/lib/http/read-api-error-body.ts`
+   — typed response parser. Forces UI consumers to use the typed envelope at
+   the parse boundary.
+3. **Migrated 2 known UI consumers** (the F1/F8 hot spots) to use the helper:
+   - `src/components/settings/security/tenant-session-policy-card.tsx` — F8 fix site
+   - `src/components/settings/developer/directory-sync-card.tsx` — F1 fix site
+4. **Documented** in `docs/api/error-handling.md` § 7 — usage example and
+   rationale (compile-time guard against future F8-class regressions).
+
+## Round 3 Summary
+
+- 8 additional Major findings (F9) — all resolved
+- 4 grep-gate enhancements — multi-line detection, scope extension, C4 enforcement, C6 enforcement
+- TypeScript + helper infrastructure for compile-time detection of UI consumer drift
+- pre-pr.sh ✓ 17/17
+
+All known classes of omission now have mechanical detection:
+- (a) **Forbidden patterns in production code**: grep gate (rules 1-7)
+- (b) **Top-level body shape violations**: grep gate rule 6
+- (c) **String-details payload**: grep gate rule 7
+- (d) **UI consumer accessing non-canonical body fields**: TypeScript compile error via `MainApiErrorBody` + `readApiErrorBody`
+
+Future PRs that violate these gain immediate CI/compile failures.
+
 ## Round 1 Summary
 
 - Functionality: Critical 0 / Major 3 (F1, F2, F3) / Minor 3 (F4, F5, F6)

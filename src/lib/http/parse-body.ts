@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { type ZodSchema } from "zod";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { zodValidationError } from "@/lib/http/api-response";
+import { errorResponse, zodValidationError } from "@/lib/http/api-response";
 
 /**
  * Parse and validate URL query parameters against a Zod schema.
@@ -58,10 +58,7 @@ export async function parseBody<T>(
   } catch {
     return {
       ok: false,
-      response: NextResponse.json(
-        { error: API_ERROR.INVALID_JSON },
-        { status: 400 },
-      ),
+      response: errorResponse(API_ERROR.INVALID_JSON, 400),
     };
   }
 

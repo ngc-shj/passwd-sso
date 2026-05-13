@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { authOrToken, hasUserId, type UserAuthResult } from "@/lib/auth/session/auth-or-token";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse } from "@/lib/http/api-response";
 import type { ExtensionTokenScope } from "@/lib/constants";
 import type { ApiKeyScope } from "@/lib/constants/auth/api-key";
 import type { McpScope } from "@/lib/constants/auth/mcp";
@@ -67,20 +68,14 @@ export async function checkAuth(
     if (authResult?.type === "scope_insufficient") {
       return {
         ok: false,
-        response: NextResponse.json(
-          { error: API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT },
-          { status: 403 },
-        ),
+        response: errorResponse(API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT, 403),
       };
     }
 
     if (!authResult || !hasUserId(authResult)) {
       return {
         ok: false,
-        response: NextResponse.json(
-          { error: API_ERROR.UNAUTHORIZED },
-          { status: 401 },
-        ),
+        response: errorResponse(API_ERROR.UNAUTHORIZED, 401),
       };
     }
 
@@ -104,10 +99,7 @@ export async function checkAuth(
   if (!session?.user?.id) {
     return {
       ok: false,
-      response: NextResponse.json(
-        { error: API_ERROR.UNAUTHORIZED },
-        { status: 401 },
-      ),
+      response: errorResponse(API_ERROR.UNAUTHORIZED, 401),
     };
   }
 

@@ -45,6 +45,7 @@ import {
 import { FolderSync, Loader2, Play, Plus, ScrollText, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { NAME_MAX_LENGTH } from "@/lib/validations";
 import { apiPath, API_PATH } from "@/lib/constants";
 import { formatDateTime, formatRelativeTime } from "@/lib/format/format-datetime";
@@ -282,12 +283,17 @@ export function DirectorySyncCard() {
       } else if (res.status === 409) {
         toast.error(t("syncConflict"));
       } else {
-        const data = await res.json().catch(() => ({}));
-        if (data?.details?.abortedSafety) {
-          toast.error(t("safetyGuardTriggered"));
-        } else {
-          toast.error(t("syncFailed"));
-        }
+        // C2/C4 envelope: SyncResult is wrapped under `details`.
+        // Typed `readApiErrorBody` makes the access path explicit and
+        // prevents future regressions where the wire shape moves again.
+        const body = await readApiErrorBody(res);
+        const abortedSafety =
+          body &&
+          typeof body.details === "object" &&
+          body.details !== null &&
+          "abortedSafety" in body.details &&
+          (body.details as { abortedSafety?: unknown }).abortedSafety === true;
+        toast.error(abortedSafety ? t("safetyGuardTriggered") : t("syncFailed"));
       }
     } catch {
       toast.error(t("syncFailed"));

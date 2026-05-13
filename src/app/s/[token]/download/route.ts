@@ -7,6 +7,7 @@ import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, rateLimited } from "@/lib/http/api-response";
 
 const downloadLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
@@ -18,8 +19,9 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   // Rate limit by IP
   const ip = extractClientIp(req) ?? "unknown";
-  if (!(await downloadLimiter.check(`rl:send_download:${rateLimitKeyFromIp(ip)}`)).allowed) {
-    return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
+  const rl = await downloadLimiter.check(`rl:send_download:${rateLimitKeyFromIp(ip)}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   // Validate token format (must be 64 hex chars)
@@ -68,23 +70,14 @@ export async function GET(req: NextRequest, { params }: Params) {
     if (share.accessPasswordHash) {
       const authHeader = req.headers.get("authorization");
       if (!authHeader?.startsWith("Bearer ")) {
-        return NextResponse.json(
-          { error: API_ERROR.SHARE_PASSWORD_REQUIRED },
-          { status: 401 },
-        );
+        return errorResponse(API_ERROR.SHARE_PASSWORD_REQUIRED, 401);
       }
       const accessToken = authHeader.slice(7);
       if (accessToken.length > 512) {
-        return NextResponse.json(
-          { error: API_ERROR.UNAUTHORIZED },
-          { status: 401 },
-        );
+        return errorResponse(API_ERROR.UNAUTHORIZED, 401);
       }
       if (!verifyShareAccessToken(accessToken, share.id)) {
-        return NextResponse.json(
-          { error: API_ERROR.UNAUTHORIZED },
-          { status: 401 },
-        );
+        return errorResponse(API_ERROR.UNAUTHORIZED, 401);
       }
 
       // Atomically increment viewCount for password-protected downloads.

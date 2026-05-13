@@ -406,6 +406,45 @@ Domain overrides go through the `overrides` parameter — manually constructed
 switch statements on the error code in component code are a forbidden pattern
 (see §9). The server returns codes only; the client translates.
 
+### Typed body access (`readApiErrorBody`)
+
+When a UI consumer needs to read **body fields** (not just the HTTP status), use
+`readApiErrorBody(res)` from `@/lib/http/read-api-error-body`. The helper returns
+`MainApiErrorBody | null` — a `readonly` shape that lists exactly the four
+permitted top-level fields (`error`, `details`, `lockedUntil`,
+`currentKeyVersion`). Accessing `body.message` or any other key triggers a
+TypeScript compile error.
+
+```ts
+import { fetchApi } from "@/lib/url-helpers";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+
+const res = await fetchApi("/api/tenant/policy", {
+  method: "PATCH",
+  body: JSON.stringify(policy),
+});
+
+if (!res.ok) {
+  const body = await readApiErrorBody(res);
+  // body.message  // TS error: Property 'message' does not exist on type ...
+  const inner =
+    body &&
+    typeof body.details === "object" &&
+    body.details !== null &&
+    "message" in body.details &&
+    typeof (body.details as { message?: unknown }).message === "string"
+      ? (body.details as { message: string }).message
+      : null;
+  toast.error(inner ?? t("genericFailure"));
+  return;
+}
+```
+
+This is the compile-time guard that prevents F8-class regressions
+(UI reading a top-level field that the server moved into `details`). Existing
+code that does `await res.json()` directly remains valid but loses the type
+safety; new code SHOULD prefer the helper.
+
 ## 8. Adding a new context field
 
 Body context fields are deliberately scarce. Before adding one:

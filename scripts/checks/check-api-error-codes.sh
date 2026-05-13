@@ -11,9 +11,15 @@
 #      (catches snake_case OAuth-style leakage into main API).
 #  (4) C11: retired internal-jargon code names must not reappear anywhere
 #      in `src/` (production or tests).
-#  (5) C12: bare `NextResponse.json({ error: ... })` in main-API routes —
-#      must go through `errorResponse()` helper. SCIM/OAuth envelopes
-#      and documented carve-outs are excluded.
+#  (5) C12: bare `NextResponse.json({ error: ... })` outside helper modules —
+#      must go through `errorResponse()` helper. SCIM/OAuth envelopes and
+#      documented carve-outs are excluded. Multi-line aware.
+#  (6) C4: closed-list body context fields — `errorResponse(...)` MUST NOT
+#      pass top-level body fields other than `details`, `lockedUntil`,
+#      `currentKeyVersion`. Top-level `message`, `result`, `hint`, etc. are
+#      forbidden; wrap them inside `details: { ... }`. Multi-line aware.
+#  (7) C6: `details` MUST be an object (z.treeifyError tree shape), never a
+#      bare string literal. Multi-line aware.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -31,7 +37,6 @@ if [ -n "$hits" ]; then
 fi
 
 # (2) C2 — uppercase-leading English-prose string as `error` value
-# Allowed: SCIM (RFC 7644 envelope), OAuth/MCP routes (RFC 6749 envelope).
 prose_hits=$(grep -RnE 'NextResponse\.json\(\s*\{\s*error:\s*"[A-Z][^"]*[[:space:]]' src/ \
   --include='*.ts' --include='*.tsx' \
   | grep -vE '/(scim|mcp)/' \
@@ -75,24 +80,83 @@ if [ -n "$retired_hits" ]; then
   violations=$((violations + 1))
 fi
 
-# (5) Post-C12 — bare `NextResponse.json({ error: ... })` in main-API routes.
-# Excludes SCIM/OAuth envelopes (own RFCs) and documented carve-outs:
-#  - maintenance/dcr-cleanup (410 Gone deprecated stub)
-#  - vault/delegation/check (CLI custom envelope)
-#  - admin/rotate-master-key (operator-only free-form)
-#  - mobile/.well-known/apple-app-site-association (Apple platform-mandated)
-c12_hits=$(grep -RnE 'NextResponse\.json\(\s*\{\s*[^}]*error:' src/app/api/ \
-  --include='*.ts' --include='*.tsx' \
-  | grep -v '\.test\.' | grep -v '/__tests__/' \
-  | grep -vE '/(scim|mcp)/' \
-  | grep -v 'maintenance/dcr-cleanup/route\.ts' \
-  | grep -v 'vault/delegation/check/route\.ts' \
-  | grep -v 'admin/rotate-master-key/route\.ts' \
-  | grep -v 'apple-app-site-association/route\.ts' \
-  || true)
+# (5) Post-C12 — bare `NextResponse.json({ error: ... })` outside helper modules.
+# Multi-line aware via perl. Excludes:
+#  - SCIM/OAuth envelopes (own RFCs)
+#  - Helper modules (`src/lib/http/api-response.ts` defines errorResponse itself;
+#    auth/session/csrf.ts was migrated in Round 2)
+#  - Documented carve-outs (dcr-cleanup stub, vault/delegation/check CLI envelope,
+#    admin/rotate-master-key, apple-app-site-association)
+c12_hits=$(
+  find src/app/api src/app/s src/lib \
+    -name '*.ts' -o -name '*.tsx' 2>/dev/null \
+    | grep -v '\.test\.' | grep -v '/__tests__/' \
+    | grep -vE '/(scim|mcp)/' \
+    | grep -vE '(maintenance/dcr-cleanup/route|vault/delegation/check/route|admin/rotate-master-key/route|apple-app-site-association/route|src/lib/http/api-response)\.ts$' \
+    | xargs -r perl -0777 -ne '
+      while (/NextResponse\.json\(\s*\{[\s\S]*?\berror\s*:/g) {
+        my $pos = pos($_);
+        my $line = (substr($_, 0, $pos) =~ tr/\n/\n/) + 1;
+        print "$ARGV:$line: " . substr($_, $-[0], 80) . "\n";
+      }
+    ' 2>/dev/null || true
+)
 if [ -n "$c12_hits" ]; then
   echo "FORBIDDEN: bare NextResponse.json({error:...}) — must use errorResponse() helper (C12)"
   echo "$c12_hits"
+  violations=$((violations + 1))
+fi
+
+# (6) C4 — closed-list body context fields. `errorResponse(...)` accepts only
+# `details`, `lockedUntil`, `currentKeyVersion` as top-level body keys.
+# Common violation: `{ message: ... }`, `{ result: ... }`, `{ hint: ... }`,
+# `{ reason: ... }`. Multi-line aware. Inner keys inside `details: { ... }`
+# are NOT enforced (developers are free to shape the details object).
+c4_hits=$(
+  find src/app/api src/app/s src/lib \
+    -name '*.ts' -o -name '*.tsx' 2>/dev/null \
+    | grep -v '\.test\.' | grep -v '/__tests__/' \
+    | grep -vE '/(scim|mcp)/' \
+    | xargs -r perl -0777 -ne '
+      while (/errorResponse\([^,]+,\s*\d+\s*,\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g) {
+        my $body = $1;
+        my $pos = pos($_);
+        my $line = (substr($_, 0, $pos) =~ tr/\n/\n/) + 1;
+        # Strip nested objects (e.g., details: { ... }) so we only inspect top-level keys.
+        my $top = $body;
+        $top =~ s/\{[^{}]*\}//g;
+        # Find top-level keys.
+        while ($top =~ /\b([a-zA-Z_]\w*)\s*:/g) {
+          my $key = $1;
+          next if $key eq "details" || $key eq "lockedUntil" || $key eq "currentKeyVersion";
+          print "$ARGV:$line: forbidden top-level body key \"$key\"\n";
+        }
+      }
+    ' 2>/dev/null || true
+)
+if [ -n "$c4_hits" ]; then
+  echo "FORBIDDEN: top-level body context field outside C4 closed list — wrap inside details: { ... }"
+  echo "$c4_hits"
+  violations=$((violations + 1))
+fi
+
+# (7) C6 — `details` MUST be an object, never a bare string literal.
+c6_hits=$(
+  find src/app/api src/app/s src/lib \
+    -name '*.ts' -o -name '*.tsx' 2>/dev/null \
+    | grep -v '\.test\.' | grep -v '/__tests__/' \
+    | grep -vE '/(scim|mcp)/' \
+    | xargs -r perl -0777 -ne '
+      while (/errorResponse\([^)]*?\bdetails:\s*"[^"]+"/g) {
+        my $pos = pos($_);
+        my $line = (substr($_, 0, $pos) =~ tr/\n/\n/) + 1;
+        print "$ARGV:$line: details must be an object (z.treeifyError tree), not a string\n";
+      }
+    ' 2>/dev/null || true
+)
+if [ -n "$c6_hits" ]; then
+  echo "FORBIDDEN: string-typed details payload — wrap as { details: { message: \"...\" } } (C6)"
+  echo "$c6_hits"
   violations=$((violations + 1))
 fi
 
