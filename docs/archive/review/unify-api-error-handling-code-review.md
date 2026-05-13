@@ -782,3 +782,99 @@ envelope handling (intentional carve-outs per RFC).
 - Testing: Critical 0 / Major 1 (T1) / Minor 5 (T2, T3, T4, T5, T6) + 1 adjacent (A1)
 
 Total: Critical 0 / Major 4 / Minor 15. All Major findings actionable; F3 expands plan scope (C2/C4 enforcement gap requires either C14 or wrap-in-`details` pattern).
+
+---
+
+## Round 10 (post-merge triangulate of session work eb964c74..3d440438)
+
+Date: 2026-05-13
+Scope: 5 commits added since round 9 (Phase 2 default-status map, SHARE_GONE / SA_INACTIVE, sweep cleanup, helper unit tests).
+Diff: 166 files / 1474+ insertions.
+Method: 3 expert sub-agents (Functionality / Security / Testing) in parallel; Ollama seed available for security + testing only (functionality endpoint down).
+
+### Functionality findings
+
+[F1] Minor: Stale `SA_NOT_FOUND, 409` example contradicts the §3.4 retirement narrative
+- File: `docs/api/error-handling.md:514`
+- Evidence: `errorResponseWithMessage(API_ERROR.SA_NOT_FOUND, 409, "Service account is inactive");`
+- Problem: §3.4 explicitly states this override pattern was retired in favor of `SA_INACTIVE`. The §7 example then teaches the retired anti-pattern verbatim with the same wording.
+- Impact: Future contributors copy-paste the example and re-introduce the override the gate now forbids.
+- Fix: Replace example with the only remaining production override (INVALID_ORIGIN/500 admin-reset).
+
+[F2] Minor: Gate rule (8) misses `if (res.ok) { ... } else { res.json() }` mirror of `if (!res.ok)` form
+- File: `scripts/checks/check-api-error-codes.sh:225` (regex)
+- Evidence sites: 14+ pre-existing UI consumer files (api-key-manager, grant-card, breakglass-grant-list, team-policy-settings, team-scim-token-manager, tenant-access-restriction-card, passkey-credentials-card, operator-token-card, mcp-connections-card, directory-sync-card, cli-token-card, service-account-card)
+- Problem: Round 8/9 added rules (8) and (9) for `if (!X.ok)` and `.then((r) => r.json())` chains. The negated equivalent `if (X.ok) { return; } else { res.json() }` is functionally identical but unmatched.
+- Impact: F8-class regression risk that motivated rules 8/9 — wire-shape changes silently break consumers.
+- Fix: Add third pattern to rule-8 perl scanner; migrate 14+ sites to `readApiErrorBody(res)`. (Migration broad — could be deferred; gate addition is load-bearing.)
+- **Decision**: deferred to follow-up PR — migration scope (14+ sites + UI handler logic restructure) exceeds 30-min rule budget; gate-only addition without migration shipped here
+
+[F3] Minor: `s/[token]/download/route.ts` returns bare 410 instead of `errorResponse(SHARE_GONE)`
+- File: `src/app/s/[token]/download/route.ts:97,111`
+- Evidence: `return new NextResponse(null, { status: 410 });` (twice)
+- Problem: Functionality expert flagged inconsistency with paired `share-links/[id]/content/route.ts:96,112` (which uses `errorResponse(SHARE_GONE)`).
+- Investigation outcome: Binary download routes intentionally diverge — same file uses `new NextResponse(null, { status: ... })` for 404 (line 57, 116), 400 (line 65), and 410. JSON envelope on a binary download endpoint mixes content types. Pattern is by-design.
+- Fix: Add comment documenting the intentional divergence.
+
+### Security findings
+
+No findings. RS1-RS4 + R1-R37 all clear. Cross-tenant SA-existence probe defense in `tenant/access-requests/route.ts:213-218` correctly collapses cross-tenant into SA_NOT_FOUND/404, surfaces SA_INACTIVE/409 only for SAs in the caller's own tenant. Wire-format changes either preserve status (NOT_FOUND→SHARE_GONE both 410; SA_NOT_FOUND→SA_INACTIVE both 409) so attacker-observable surface is unchanged, or correct a pre-existing code/status mismatch (UNAUTHORIZED+403 → FORBIDDEN+403) where status was already disclosing the semantic.
+
+Adjacent (Minor): v1 API wire change is consumer-visible breaking (pre-1.0, permitted by SemVer policy in CLAUDE.md but worth CHANGELOG callout).
+Adjacent (Minor): `errorResponse(code, undefined, details, headers)` spreads `details` into body — caller passing `details: { error: "X" }` would override error code on wire. Pre-existing footgun, no current caller exercises it.
+
+### Testing findings
+
+[T1] Major: `read-api-error-body.ts` ships zero unit tests despite 5 exported helpers and 66 production call sites
+- File: `src/lib/http/read-api-error-body.ts:1-128`
+- Evidence: `find` for `read-api-error-body*test*` returned only the source file; 66 production call sites in src/hooks/, src/app/[locale]/, src/components/ and 0 test sites
+- Problem: Runtime null-narrowing (`readApiErrorBody`, `getApiErrorMessage`, `getApiErrorDetail`, `getApiErrorFieldErrors`, `readMainApiErrorBody`) is purely runtime and untested. Compile-time `MainApiErrorBody.readonly` protects type access only — not the runtime "return null on missing/non-JSON/wrong-shape body" contract.
+- Impact: F8-class consumer regressions can ship silently. Refactoring helpers is unsafe without tests.
+- Fix: Add `src/lib/http/read-api-error-body.test.ts` covering the 5 helpers + edge cases (non-JSON body, missing error field, wrong shape).
+
+[T2] Minor: Hardcoded `"SHARE_GONE"` literal in 3 new test assertions instead of `API_ERROR.SHARE_GONE` (RT3 candidate)
+- Files: `src/__tests__/api/share-links/content.test.ts:153`, `src/app/api/share-links/[id]/content/route.test.ts:222,236`
+- Status: Consistent with existing convention in same files (`expect(json.error).toBe("SHARE_PASSWORD_REQUIRED")` etc.). The structural invariant test in `api-error-codes.test.ts:111-114` (`value === key`) makes literal-vs-const observationally equivalent.
+- **Decision**: Skip per skill 30-minute rule and "consistent with file convention" — borderline RT3, no behavioral risk.
+
+Adjacent (Minor): `errorResponseWithMessage(API_ERROR.SA_NOT_FOUND, 410, ...)` test fixture at `api-response.test.ts:159` uses a code (SA_NOT_FOUND) the new gate forbids overriding in production.
+- **Decision**: keep — test demonstrates the override mechanism using a code unrelated to the documented exception (INVALID_ORIGIN). Comment-clarification optional.
+
+### Resolution Status
+
+#### [T1] Major — read-api-error-body.test.ts missing — Fixed
+- Action: Add `src/lib/http/read-api-error-body.test.ts` covering all 5 helpers
+- Modified file: src/lib/http/read-api-error-body.test.ts (new)
+
+#### [F1] Minor — docs example contradicts §3.4 — Fixed
+- Action: Replace `SA_NOT_FOUND, 410` example with INVALID_ORIGIN, 500 (the only remaining production override)
+- Modified file: docs/api/error-handling.md:514
+
+#### [F3] Minor — bare 410 in download route — Fixed
+- Action: Add comment explaining intentional binary-route divergence from JSON envelope
+- Modified file: src/app/s/[token]/download/route.ts:96-97
+
+#### [F2] Minor — gate rule (8) gap (else-branch form) — Deferred
+- **Anti-Deferral check**: cost-to-fix exceeds 30-min budget (gate change + 14+ site migration + UI handler restructure)
+- **Justification**: out of scope (different feature work)
+  - Worst case: F8-class consumer regression where wire-shape change silently breaks 14+ pre-existing UI handlers
+  - Likelihood: low — current wire shapes are stable; new fields go through MainApiErrorBody discipline
+  - Cost to fix: ~2 hours (gate regex + 14 site migrations + handler logic restructure for `if (res.ok) {} else {}` → `if (!res.ok) {}` inversion)
+- TODO marker: `TODO(api-error-handling-phase-3): expand gate rule (8) to catch else-branch form + migrate 14+ pre-existing UI handlers`
+- Tracked in: this code-review.md entry [F2]
+- **Orchestrator sign-off**: F2 is broader scope cleanup — defer to a follow-up PR, gate addition + 14-site migration deserves its own focused round
+
+#### [T2] Minor — hardcoded SHARE_GONE literal — Skipped
+- **Anti-Deferral check**: acceptable risk (consistent with file convention)
+  - Worst case: rename of API_ERROR.SHARE_GONE constant requires grep across tests
+  - Likelihood: low — code rename is rare; existing convention is uniform across share-link tests
+  - Cost to fix: ~10 min (3 sites + import)
+- **Orchestrator sign-off**: borderline RT3 finding — file's existing convention is literals; switching only the new lines creates worse inconsistency
+
+### Round 10 Summary
+
+- Functionality: Critical 0 / Major 0 / Minor 3 (F1 fixed, F2 deferred-tracked, F3 fixed via comment)
+- Security: Critical 0 / Major 0 / Minor 0 — clean (2 informational adjacent)
+- Testing: Critical 0 / Major 1 (T1 fixed) / Minor 1 (T2 skipped per file convention)
+
+Total: Critical 0 / Major 1 / Minor 4. T1 + F1 + F3 fixed in Round 10; F2 deferred with explicit Anti-Deferral cost-justification + TODO marker; T2 skipped per file convention.

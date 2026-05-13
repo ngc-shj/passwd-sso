@@ -94,6 +94,11 @@ export async function GET(req: NextRequest, { params }: Params) {
           AND ("max_views" IS NULL OR "view_count" < "max_views")`;
 
       if (updated === 0) {
+        // Binary download route — return bare 410 (no JSON envelope) to keep
+        // response shape consistent with the file-payload responses below
+        // (NextResponse with binary body or empty body). The paired metadata
+        // route share-links/[id]/content emits errorResponse(SHARE_GONE) for
+        // the equivalent state since it is a JSON endpoint.
         return new NextResponse(null, { status: 410 });
       }
     } else {
@@ -108,6 +113,7 @@ export async function GET(req: NextRequest, { params }: Params) {
           AND ("max_views" IS NULL OR "view_count" < "max_views")`;
 
       if (updated === 0) {
+        // Bare 410 by design — see comment on the password-protected branch above.
         return new NextResponse(null, { status: 410 });
       }
     }

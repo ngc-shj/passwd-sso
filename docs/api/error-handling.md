@@ -508,11 +508,20 @@ return errorResponseWithMessage(
 ```
 
 The status defaults to `API_ERROR_STATUS[code]` (see §3.4). Pass an explicit
-status as the middle argument only for documented overrides:
+status as the middle argument only for documented overrides — currently the
+sole remaining override is `INVALID_ORIGIN` returning 500 in
+`vault/admin-reset` (where the route refuses Host-header fallback when
+APP_URL is unset, per CLAUDE.md "stricter route-level guard"):
 
 ```ts
-errorResponseWithMessage(API_ERROR.SA_NOT_FOUND, 409, "Service account is inactive");
+// Documented override — INVALID_ORIGIN defaults to 403; admin-reset returns 500.
+errorResponse(API_ERROR.INVALID_ORIGIN, 500);
 ```
+
+Earlier `SA_NOT_FOUND, 409` and `NOT_FOUND, 410` overrides were retired by
+introducing dedicated codes (`SA_INACTIVE`, `SHARE_GONE`) whose default
+status matches the semantic intent — do not re-introduce those override
+patterns; the gate rule (10) will flag them.
 
 For Zod / multi-field validation errors, use `validationError(treeOrObject)`
 directly (it takes `Record<string, unknown>` — strings would be a TypeScript
