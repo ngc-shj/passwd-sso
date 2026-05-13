@@ -206,7 +206,7 @@ export function AccessRequestCard() {
           await inlineReauth.triggerOnStaleError();
         } else if (res.status === 409 && code === API_ERROR.SA_TOKEN_LIMIT_EXCEEDED) {
           toast.error(t("arTokenLimitExceeded"));
-        } else if (res.status === 409 && code === API_ERROR.SA_NOT_FOUND) {
+        } else if (res.status === 409 && code === API_ERROR.SA_INACTIVE) {
           toast.error(t("arSaInactive"));
         } else if (res.status === 409) {
           toast.error(t("arAlreadyProcessed"));

@@ -359,7 +359,7 @@ describe("Scenario 3: Double approval prevention", () => {
 describe("Scenario 4: Inactive SA JIT rejection", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("creating request for inactive SA returns 404", async () => {
+  it("creating request for inactive SA returns 409 SA_INACTIVE", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
@@ -378,8 +378,8 @@ describe("Scenario 4: Inactive SA JIT rejection", () => {
     const res = await createAccessRequest(req);
     const { status, json } = await parseResponse(res);
 
-    expect(status).toBe(404);
-    expect(json.error).toBe("SA_NOT_FOUND");
+    expect(status).toBe(409);
+    expect(json.error).toBe("SA_INACTIVE");
   });
 
   it("approving request where SA became inactive returns 409", async () => {

@@ -156,8 +156,11 @@ async function handlePOST(req: NextRequest) {
         select: { isActive: true, createdById: true },
       }),
     BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
-    if (!sa || !sa.isActive) {
+    if (!sa) {
       return errorResponse(API_ERROR.SA_NOT_FOUND);
+    }
+    if (!sa.isActive) {
+      return errorResponse(API_ERROR.SA_INACTIVE);
     }
     userId = sa.createdById;
   } else {
@@ -204,8 +207,14 @@ async function handlePOST(req: NextRequest) {
         select: { id: true, tenantId: true, isActive: true },
       }),
     );
-    if (!sa || sa.tenantId !== tenantId || !sa.isActive) {
+    // Cross-tenant SAs are collapsed into SA_NOT_FOUND so callers cannot probe
+    // for SA existence in other tenants. Inactive SAs in the caller's own
+    // tenant return SA_INACTIVE since the SA is observably present.
+    if (!sa || sa.tenantId !== tenantId) {
       return errorResponse(API_ERROR.SA_NOT_FOUND);
+    }
+    if (!sa.isActive) {
+      return errorResponse(API_ERROR.SA_INACTIVE);
     }
   }
 

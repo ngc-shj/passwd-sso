@@ -258,7 +258,7 @@ describe("POST /api/tenant/access-requests", () => {
     expect(json.error).toBe("SA_NOT_FOUND");
   });
 
-  it("returns 404 for inactive service account", async () => {
+  it("returns 409 SA_INACTIVE for inactive service account", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
@@ -277,8 +277,8 @@ describe("POST /api/tenant/access-requests", () => {
     const res = await POST(req);
     const { status, json } = await parseResponse(res);
 
-    expect(status).toBe(404);
-    expect(json.error).toBe("SA_NOT_FOUND");
+    expect(status).toBe(409);
+    expect(json.error).toBe("SA_INACTIVE");
   });
 
   it("returns 401 for unauthenticated users", async () => {

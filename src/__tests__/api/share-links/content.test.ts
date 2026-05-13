@@ -142,7 +142,7 @@ describe("GET /api/share-links/[id]/content", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 410 when maxViews reached (atomic check)", async () => {
+  it("returns 410 SHARE_GONE when maxViews reached (atomic check)", async () => {
     mockFindUnique.mockResolvedValue(makeShare());
     mockExecuteRaw.mockResolvedValue(0); // No rows updated
 
@@ -150,6 +150,7 @@ describe("GET /api/share-links/[id]/content", () => {
     const res = await GET(req, createParams({ id: "share-1" }));
 
     expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({ error: "SHARE_GONE" });
   });
 
   it("returns decrypted data for server-encrypted share", async () => {
