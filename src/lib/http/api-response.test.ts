@@ -1,14 +1,19 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { TeamAuthError } from "@/lib/auth/access/team-auth";
 import {
   errorResponse,
+  errorResponseWithMessage,
   unauthorized,
   notFound,
   forbidden,
   validationError,
   zodValidationError,
   rateLimited,
+  prismaErrorResponse,
+  handleAuthError,
 } from "./api-response";
 
 describe("errorResponse", () => {
@@ -122,5 +127,148 @@ describe("preset helpers", () => {
       expect(body.details.properties.name).toHaveProperty("errors");
       expect(body.details.properties.age).toHaveProperty("errors");
     }
+  });
+});
+
+describe("errorResponseWithMessage", () => {
+  it("2-arg form derives status from API_ERROR_STATUS", async () => {
+    const res = errorResponseWithMessage(API_ERROR.NOT_FOUND, "missing entry");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({
+      error: "NOT_FOUND",
+      details: { message: "missing entry" },
+    });
+  });
+
+  it("2-arg form wraps message under details (C6 envelope)", async () => {
+    const res = errorResponseWithMessage(
+      API_ERROR.VALIDATION_ERROR,
+      "exceeded cap",
+    );
+    const body = await res.json();
+    // Per C6: free-form messages must be inside details, not top-level.
+    expect(body).toEqual({
+      error: "VALIDATION_ERROR",
+      details: { message: "exceeded cap" },
+    });
+    expect("message" in body).toBe(false);
+  });
+
+  it("3-arg form uses explicit status (override path)", async () => {
+    // SA_NOT_FOUND defaults to 404; this form lets a route override.
+    const res = errorResponseWithMessage(
+      API_ERROR.SA_NOT_FOUND,
+      410,
+      "Service account is permanently gone",
+    );
+    expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({
+      error: "SA_NOT_FOUND",
+      details: { message: "Service account is permanently gone" },
+    });
+  });
+
+  it("3-arg form preserves status when it equals the default (no auto-strip)", async () => {
+    // The helper does not silently drop matching status — that's the gate's job.
+    const res = errorResponseWithMessage(API_ERROR.NOT_FOUND, 404, "missing");
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("prismaErrorResponse", () => {
+  it("maps PrismaClientInitializationError to 503 SERVICE_UNAVAILABLE", async () => {
+    const err = new Prisma.PrismaClientInitializationError(
+      "DB connection failed",
+      "5.0.0",
+    );
+    const res = prismaErrorResponse(err);
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(503);
+    expect(await res!.json()).toEqual({ error: "SERVICE_UNAVAILABLE" });
+  });
+
+  it("maps P2002 unique-constraint violation to 409 CONFLICT", async () => {
+    const err = new Prisma.PrismaClientKnownRequestError(
+      "Unique constraint failed",
+      { code: "P2002", clientVersion: "5.0.0" },
+    );
+    const res = prismaErrorResponse(err);
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(409);
+    expect(await res!.json()).toEqual({ error: "CONFLICT" });
+  });
+
+  it("maps P2003 foreign-key violation to 409 CONFLICT", async () => {
+    const err = new Prisma.PrismaClientKnownRequestError("FK violation", {
+      code: "P2003",
+      clientVersion: "5.0.0",
+    });
+    const res = prismaErrorResponse(err);
+    expect(res!.status).toBe(409);
+  });
+
+  it("maps P2025 record-not-found to 404 NOT_FOUND", async () => {
+    const err = new Prisma.PrismaClientKnownRequestError("Record not found", {
+      code: "P2025",
+      clientVersion: "5.0.0",
+    });
+    const res = prismaErrorResponse(err);
+    expect(res).not.toBeNull();
+    expect(res!.status).toBe(404);
+    expect(await res!.json()).toEqual({ error: "NOT_FOUND" });
+  });
+
+  it("returns null for unrecognized Prisma error code (caller falls through)", () => {
+    const err = new Prisma.PrismaClientKnownRequestError("Some other error", {
+      code: "P9999",
+      clientVersion: "5.0.0",
+    });
+    expect(prismaErrorResponse(err)).toBeNull();
+  });
+
+  it("returns null for non-Prisma error", () => {
+    expect(prismaErrorResponse(new Error("boom"))).toBeNull();
+    expect(prismaErrorResponse("string error")).toBeNull();
+    expect(prismaErrorResponse(null)).toBeNull();
+    expect(prismaErrorResponse(undefined)).toBeNull();
+  });
+});
+
+describe("handleAuthError", () => {
+  it("converts TeamAuthError to errorResponse with its code/status", async () => {
+    const err = new TeamAuthError(API_ERROR.FORBIDDEN, 403);
+    const res = handleAuthError(err);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "FORBIDDEN" });
+  });
+
+  it("recognizes duck-typed AuthError shape (name + status)", async () => {
+    // handleAuthError uses duck-typing to avoid circular imports — any Error
+    // subclass named TeamAuthError or TenantAuthError with a numeric status
+    // is treated as an auth error.
+    const fake = new Error(API_ERROR.NOT_FOUND);
+    fake.name = "TenantAuthError";
+    (fake as Error & { status: number }).status = 404;
+    const res = handleAuthError(fake);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "NOT_FOUND" });
+  });
+
+  it("re-throws an Error whose name does not match either AuthError class", () => {
+    const generic = new Error("unrelated");
+    expect(() => handleAuthError(generic)).toThrow(generic);
+  });
+
+  it("re-throws an Error named TeamAuthError but missing the status field", () => {
+    // Status field is part of the contract; without it we cannot construct a
+    // valid response, so the error must propagate as a programmer bug.
+    const malformed = new Error(API_ERROR.FORBIDDEN);
+    malformed.name = "TeamAuthError";
+    expect(() => handleAuthError(malformed)).toThrow(malformed);
+  });
+
+  it("re-throws non-Error values unchanged", () => {
+    expect(() => handleAuthError("string")).toThrow("string");
+    expect(() => handleAuthError(42)).toThrow();
   });
 });

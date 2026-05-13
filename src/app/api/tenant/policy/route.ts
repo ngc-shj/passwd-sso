@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, errorResponseWithMessage, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
+import { errorResponseWithMessage, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { createRateLimiter } from "@/lib/security/rate-limit";

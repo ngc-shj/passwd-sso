@@ -19,8 +19,7 @@ import { AuditDeliveryTargetKind } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
-import { API_ERROR } from "@/lib/http/api-error-codes";
+import { handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
 import {
   MAX_AUDIT_DELIVERY_TARGETS,
   WEBHOOK_URL_MAX_LENGTH,

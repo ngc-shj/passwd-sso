@@ -3,7 +3,6 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
-import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import {
   TEAM_PERMISSION,
@@ -19,7 +18,7 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS } from "@/lib/constants";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
+import { handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
 import { MAX_WEBHOOKS, WEBHOOK_URL_MAX_LENGTH } from "@/lib/validations/common";
 import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE } from "@/lib/url/url-validation";
 
