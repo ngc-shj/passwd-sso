@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.4.48](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.47...passwd-sso-v0.4.48) (2026-05-13)
+
+
+### Bug Fixes
+
+* enable cross-tenant guest team admin operations ([#459](https://github.com/ngc-shj/passwd-sso/issues/459)) ([d78e01a](https://github.com/ngc-shj/passwd-sso/commit/d78e01a8c29f46f001dbbbcb4d14d86d6038e3ee))
+* **proxy:** correct port leak under tailscale serve ([#461](https://github.com/ngc-shj/passwd-sso/issues/461)) ([f26fdb8](https://github.com/ngc-shj/passwd-sso/commit/f26fdb82ff6cc4d2359b7716233956aa257a5584))
+
+
+### Code Refactoring
+
+* unify API error handling — 156-code map, 10-rule gate, ~454 sites ([#463](https://github.com/ngc-shj/passwd-sso/issues/463)) ([f6c0c52](https://github.com/ngc-shj/passwd-sso/commit/f6c0c5267e238267b8539a952adfc0374fa30f4e))
+* rebalance personal passkey sessions to AAL2 + unify inline-reauth UX ([#458](https://github.com/ngc-shj/passwd-sso/issues/458)) ([7ccfd48](https://github.com/ngc-shj/passwd-sso/commit/7ccfd48c8bc8e9269ec83195b1d5e80bec9adae9))
+* **settings:** unify developer-tools card layout via InactiveItemsSection helper ([#460](https://github.com/ngc-shj/passwd-sso/issues/460)) ([90902b6](https://github.com/ngc-shj/passwd-sso/commit/90902b64651ffded9d8481591329d035fac90a99))
+* **settings:** unify new-creation UI and scope token-mint errors ([#456](https://github.com/ngc-shj/passwd-sso/issues/456)) ([96d7b2a](https://github.com/ngc-shj/passwd-sso/commit/96d7b2af1a776fc90b8e97f3fdba1712a8e19e66))
+
+
+### Miscellaneous
+
+* **deps:** bump next from 16.2.3 to 16.2.6 ([#462](https://github.com/ngc-shj/passwd-sso/issues/462)) ([6f5ed58](https://github.com/ngc-shj/passwd-sso/commit/6f5ed584b60a3cfd0202721d074aa42bed9904f0))
+* **deps:** bump hono override to 4.12.18 to close 4 Dependabot alerts ([#464](https://github.com/ngc-shj/passwd-sso/issues/464)) ([47a442b](https://github.com/ngc-shj/passwd-sso/commit/47a442baafcbe0d8f47de73ffeed418e00e68d9d))
+
 ## [0.4.47](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.46...passwd-sso-v0.4.47) (2026-05-06)
 
 
