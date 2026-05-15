@@ -128,12 +128,14 @@ export default {
   cookies: {
     sessionToken: {
       name: useSecureCookies
-        ? "__Secure-authjs.session-token"
+        ? process.env.NEXT_PUBLIC_BASE_PATH
+          ? "__Secure-authjs.session-token"
+          : "__Host-authjs.session-token"
         : "authjs.session-token",
       options: {
         path: `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/`,
         httpOnly: true,
-        sameSite: "lax" as const,
+        sameSite: "strict" as const,
         secure: useSecureCookies,
       },
     },
