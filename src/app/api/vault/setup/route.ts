@@ -37,6 +37,8 @@ export const runtime = "nodejs";
 
 const setupLimiter = createRateLimiter({ windowMs: 5 * MS_PER_MINUTE, max: 5 });
 
+const MIN_ENTROPY_BITS = 40;
+
 const kdfParamsSchema = z.discriminatedUnion("kdfType", [
   z.object({
     kdfType: z.literal(0),
@@ -57,6 +59,7 @@ const setupSchema = z.object({
   accountSalt: hexSalt,
   authHash: hexHash,
   verifierHash: hexHash,
+  entropyBits: z.number().int().min(MIN_ENTROPY_BITS).optional(),
   verificationArtifact: verificationArtifactSchema,
   // ECDH key pair for team E2E encryption
   ecdhPublicKey: z.string().min(1),
@@ -100,6 +103,14 @@ async function handlePOST(request: NextRequest) {
   const result = await parseBody(request, setupSchema);
   if (!result.ok) return result.response;
   const data = result.data;
+
+  // Warn if client did not provide entropy estimate
+  if (data.entropyBits == null) {
+    getLogger().warn(
+      { userId: session.user.id },
+      "vault.setup.missing_entropy_bits",
+    );
+  }
 
   // Apply KDF defaults if client omits kdfParams
   const kdfType = data.kdfParams?.kdfType ?? 0;

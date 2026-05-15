@@ -4,6 +4,15 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { extractRequestMeta } from "@/lib/audit/audit";
 import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
 import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
+import { createRateLimiter } from "@/lib/security/rate-limit";
+import { extractClientIp } from "@/lib/auth/policy/ip-access";
+import { rateLimited } from "@/lib/http/api-response";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
+
+const oauthCallbackLimiter = createRateLimiter({
+  windowMs: 1 * MS_PER_MINUTE,
+  max: 60,
+});
 
 export const runtime = "nodejs";
 
@@ -42,6 +51,15 @@ function withAuthBasePath<H extends RouteHandler>(handler: H): H {
 
 function withSessionMeta<H extends RouteHandler>(handler: H): H {
   const wrapped = async (request: NextRequest, ...rest: unknown[]) => {
+    // Rate limit OAuth callbacks per client IP
+    if (request.method === "POST") {
+      const ip = extractClientIp(request) ?? "unknown";
+      const rl = await oauthCallbackLimiter.check(`rl:oauth_callback:${ip}`);
+      if (!rl.allowed) {
+        return rateLimited(rl.retryAfterMs) as unknown as Response;
+      }
+    }
+
     const meta = extractRequestMeta(request);
     return sessionMetaStorage.run(meta, () =>
       tenantClaimStorage.run({ tenantClaim: null }, () =>
