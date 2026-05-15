@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.49](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.48...passwd-sso-v0.4.49) (2026-05-15)
+
+
+### Bug Fixes
+
+* address OWASP Top 10 findings — rate-limit OAuth callbacks, guard CLI TLS, externalize docker-compose creds, harden session cookies ([#465](https://github.com/ngc-shj/passwd-sso/issues/465)) ([c14d4df](https://github.com/ngc-shj/passwd-sso/commit/c14d4dfc4258facd7593d9b0e32e9af173c7fbd2))
+
 ## [0.4.48](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.47...passwd-sso-v0.4.48) (2026-05-13)
 
 
