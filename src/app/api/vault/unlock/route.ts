@@ -9,7 +9,6 @@ import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { checkLockout, recordFailure, resetLockout } from "@/lib/auth/policy/account-lockout";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
@@ -49,9 +48,7 @@ async function handlePOST(request: NextRequest) {
     });
   }
 
-  const clientIp = extractClientIp(request);
-  const ipSuffix = clientIp ? `:${rateLimitKeyFromIp(clientIp)}` : "";
-  const rateKey = `rl:vault_unlock:${session.user.id}${ipSuffix}`;
+  const rateKey = `rl:vault_unlock:${session.user.id}`;
   const rl = await unlockLimiter.check(rateKey);
   if (!rl.allowed) {
     getLogger().warn({ userId: session.user.id }, "vault.unlock.rateLimited");

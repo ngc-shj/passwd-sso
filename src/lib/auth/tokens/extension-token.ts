@@ -212,7 +212,7 @@ export async function issueExtensionToken(params: {
       select: { extensionTokenIdleTimeoutMinutes: true },
     }),
   BYPASS_PURPOSE.TOKEN_LIFECYCLE);
-  const idleMinutes = tenant?.extensionTokenIdleTimeoutMinutes ?? 4320;
+  const idleMinutes = tenant?.extensionTokenIdleTimeoutMinutes ?? 10080;
   const expiresAt = new Date(now.getTime() + idleMinutes * MS_PER_MINUTE);
 
   const plaintext = generateShareToken();

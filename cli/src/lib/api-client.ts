@@ -16,11 +16,6 @@ let cachedClientId: string | null = null;
 
 export function setInsecure(enabled: boolean): void {
   if (enabled) {
-    if (process.env.NODE_ENV === "production") {
-      throw new Error(
-        "Refusing to disable TLS verification in production mode. Set NODE_ENV=development to proceed.",
-      );
-    }
     process.stderr.write(
       "WARNING: TLS certificate verification is disabled. Your credentials may be intercepted.\n",
     );

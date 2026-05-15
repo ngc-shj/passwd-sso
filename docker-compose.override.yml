@@ -26,8 +26,8 @@ services:
       # See docker-compose.yml app service for the .env vs .env.local note.
       - .env
     environment:
-      - OUTBOX_WORKER_DATABASE_URL=postgresql://passwd_outbox_worker:${DB_OUTBOX_WORKER_PASSWORD:-passwd_outbox_pass}@db:5432/passwd_sso
-      - DATABASE_URL=postgresql://passwd_app:${DB_APP_PASSWORD:-passwd_app_pass}@db:5432/passwd_sso
+      - OUTBOX_WORKER_DATABASE_URL=postgresql://passwd_outbox_worker:passwd_outbox_pass@db:5432/passwd_sso
+      - DATABASE_URL=postgresql://passwd_app:passwd_app_pass@db:5432/passwd_sso
     depends_on:
       db:
         condition: service_healthy
@@ -57,8 +57,8 @@ services:
       # See docker-compose.yml app service for the .env vs .env.local note.
       - .env
     environment:
-      - DCR_CLEANUP_DATABASE_URL=postgresql://passwd_dcr_cleanup_worker:${DB_DCR_CLEANUP_PASSWORD:-passwd_dcr_pass}@db:5432/passwd_sso
-      - DATABASE_URL=postgresql://passwd_app:${DB_APP_PASSWORD:-passwd_app_pass}@db:5432/passwd_sso
+      - DCR_CLEANUP_DATABASE_URL=postgresql://passwd_dcr_cleanup_worker:passwd_dcr_pass@db:5432/passwd_sso
+      - DATABASE_URL=postgresql://passwd_app:passwd_app_pass@db:5432/passwd_sso
     depends_on:
       db:
         condition: service_healthy
