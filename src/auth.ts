@@ -367,8 +367,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         requirePasskey = passkeyData.tenant?.requirePasskey ?? false;
         requirePasskeyEnabledAt = passkeyData.tenant?.requirePasskeyEnabledAt?.toISOString() ?? null;
         passkeyGracePeriodDays = passkeyData.tenant?.passkeyGracePeriodDays ?? null;
-      } catch {
-        // Non-critical: passkey enforcement data failure should not break session
+      } catch (err) {
+        // Non-critical for session establishment but DO surface to ops:
+        // a silent catch hid Redis/DB issues that mattered for tenants
+        // with requirePasskey enforcement (audit-trail gap → A09).
+        // tenantId is included so operators can group by affected tenant
+        // when a single tenant's data path is degraded.
+        getLogger().warn(
+          {
+            userId: user.id,
+            tenantId: (user as { tenantId?: string }).tenantId ?? null,
+            err,
+          },
+          "auth.session.passkey_data_fetch_failed",
+        );
       }
 
       return {
