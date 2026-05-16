@@ -20,6 +20,7 @@ import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { parseBody } from "@/lib/http/parse-body";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
 import {
@@ -124,19 +125,9 @@ async function handlePOST(req: NextRequest) {
   if (!auth.ok) return auth.response;
   const { tenantId, auditUserId, actorType } = auth.data;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return scimError(400, "Invalid JSON");
-  }
-
-  const parsed = scimUserSchema.safeParse(body);
-  if (!parsed.success) {
-    return scimError(400, parsed.error.issues.map((i) => i.message).join("; "));
-  }
-
-  const { userName, name, externalId, active } = parsed.data;
+  const bodyResult = await parseBody(req, scimUserSchema);
+  if (!bodyResult.ok) return bodyResult.response;
+  const { userName, name, externalId, active } = bodyResult.data;
 
   try {
     const created = await withTenantRls(prisma, tenantId, async () =>

@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const {
   mockTeamFindUnique,
   mockTeamFolderFindUnique,
+  mockTeamTagCount,
   mockTeamPasswordEntryCreate,
   mockTeamPasswordEntryUpdate,
   mockTeamPasswordEntryHistoryCreate,
@@ -12,6 +13,7 @@ const {
 } = vi.hoisted(() => {
   const mockTeamFindUnique = vi.fn();
   const mockTeamFolderFindUnique = vi.fn();
+  const mockTeamTagCount = vi.fn();
   const mockTeamPasswordEntryCreate = vi.fn();
   const mockTeamPasswordEntryUpdate = vi.fn();
   const mockTeamPasswordEntryHistoryCreate = vi.fn();
@@ -36,6 +38,7 @@ const {
   return {
     mockTeamFindUnique,
     mockTeamFolderFindUnique,
+    mockTeamTagCount,
     mockTeamPasswordEntryCreate,
     mockTeamPasswordEntryUpdate,
     mockTeamPasswordEntryHistoryCreate,
@@ -52,6 +55,9 @@ vi.mock("@/lib/prisma", () => ({
     },
     teamFolder: {
       findUnique: mockTeamFolderFindUnique,
+    },
+    teamTag: {
+      count: mockTeamTagCount,
     },
     teamPasswordEntry: {
       create: mockTeamPasswordEntryCreate,
@@ -244,6 +250,58 @@ describe("createTeamPassword", () => {
     expect(mockTeamFindUnique).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: TEAM_ID_UUID } })
     );
+  });
+
+  it("accepts tagIds that belong to the same team", async () => {
+    mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
+    mockTeamTagCount.mockResolvedValue(2);
+    const created = { id: "entry-1", tags: [] };
+    mockTeamPasswordEntryCreate.mockResolvedValue(created);
+
+    const result = await createTeamPassword(TEAM_ID, {
+      ...BASE_CREATE_INPUT,
+      tagIds: ["tag-1", "tag-2"],
+    });
+
+    expect(result).toBe(created);
+    expect(mockTeamTagCount).toHaveBeenCalledWith({
+      where: { id: { in: ["tag-1", "tag-2"] }, teamId: TEAM_ID },
+    });
+  });
+
+  it("accepts empty tagIds without calling teamTag.count", async () => {
+    mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
+    const created = { id: "entry-1", tags: [] };
+    mockTeamPasswordEntryCreate.mockResolvedValue(created);
+
+    await createTeamPassword(TEAM_ID, { ...BASE_CREATE_INPUT, tagIds: [] });
+
+    expect(mockTeamTagCount).not.toHaveBeenCalled();
+  });
+
+  it("accepts undefined tagIds without calling teamTag.count", async () => {
+    mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
+    const created = { id: "entry-1", tags: [] };
+    mockTeamPasswordEntryCreate.mockResolvedValue(created);
+
+    await createTeamPassword(TEAM_ID, BASE_CREATE_INPUT);
+
+    expect(mockTeamTagCount).not.toHaveBeenCalled();
+  });
+
+  it("rejects tagIds from another team in same tenant on create", async () => {
+    mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
+    mockTeamTagCount.mockResolvedValue(1); // only 1 of 2 tags belong to this team
+
+    const err = await createTeamPassword(TEAM_ID, {
+      ...BASE_CREATE_INPUT,
+      tagIds: ["tag-1", "tag-other-team"],
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(TeamPasswordServiceError);
+    expect(err.code).toBe("NOT_FOUND");
+    expect(err.statusHint).toBe(404);
+    expect(mockTeamPasswordEntryCreate).not.toHaveBeenCalled();
   });
 });
 
@@ -524,5 +582,108 @@ describe("updateTeamPassword", () => {
     const result = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input);
     expect(result).toBe(updated);
     expect(mockTeamPasswordEntryUpdate).toHaveBeenCalledOnce();
+  });
+
+  it("rejects tagIds from another team on update", async () => {
+    mockTeamTagCount.mockResolvedValue(0); // none of the tagIds belong to this team
+
+    const input: UpdateTeamPasswordInput = {
+      tagIds: ["tag-other-team"],
+      userId: USER_ID,
+      existingEntry: BASE_EXISTING_ENTRY,
+    };
+
+    const err = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input).catch((e) => e);
+
+    expect(err).toBeInstanceOf(TeamPasswordServiceError);
+    expect(err.code).toBe("NOT_FOUND");
+    expect(err.statusHint).toBe(404);
+    expect(mockTeamPasswordEntryUpdate).not.toHaveBeenCalled();
+  });
+
+  it("skips tagIds ownership check when tagIds is undefined on update", async () => {
+    mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
+
+    const input: UpdateTeamPasswordInput = {
+      isArchived: true,
+      userId: USER_ID,
+      existingEntry: BASE_EXISTING_ENTRY,
+    };
+
+    await updateTeamPassword(TEAM_ID, PASSWORD_ID, input);
+
+    expect(mockTeamTagCount).not.toHaveBeenCalled();
+  });
+
+  it("skips tagIds ownership check when tagIds is empty array on update", async () => {
+    mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
+
+    const input: UpdateTeamPasswordInput = {
+      tagIds: [],
+      userId: USER_ID,
+      existingEntry: BASE_EXISTING_ENTRY,
+    };
+
+    await updateTeamPassword(TEAM_ID, PASSWORD_ID, input);
+
+    expect(mockTeamTagCount).not.toHaveBeenCalled();
+  });
+
+  // C7: version metadata change without re-encryption
+  it("rejects itemKeyVersion change without encryptedBlob → 409 KEY_VERSION_WITHOUT_REENCRYPT", async () => {
+    const input: UpdateTeamPasswordInput = {
+      // No encryptedBlob — metadata-only update
+      itemKeyVersion: 1, // differs from existingEntry.itemKeyVersion (0)
+      userId: USER_ID,
+      existingEntry: { ...BASE_EXISTING_ENTRY, itemKeyVersion: 0 },
+    };
+
+    const err = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input).catch((e) => e);
+    expect(err).toBeInstanceOf(TeamPasswordServiceError);
+    expect(err.code).toBe("KEY_VERSION_WITHOUT_REENCRYPT");
+    expect(err.statusHint).toBe(409);
+  });
+
+  it("rejects teamKeyVersion change without encryptedBlob → 409", async () => {
+    const input: UpdateTeamPasswordInput = {
+      // No encryptedBlob — metadata-only update
+      teamKeyVersion: 5, // differs from existingEntry.teamKeyVersion (3)
+      userId: USER_ID,
+      existingEntry: BASE_EXISTING_ENTRY,
+    };
+
+    const err = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input).catch((e) => e);
+    expect(err).toBeInstanceOf(TeamPasswordServiceError);
+    expect(err.code).toBe("KEY_VERSION_WITHOUT_REENCRYPT");
+    expect(err.statusHint).toBe(409);
+  });
+
+  it("rejects aadVersion change without encryptedBlob → 409", async () => {
+    const input: UpdateTeamPasswordInput = {
+      // No encryptedBlob — metadata-only update
+      aadVersion: 1, // differs from existingEntry.aadVersion (1)… use 0 in existing to force mismatch
+      userId: USER_ID,
+      existingEntry: { ...BASE_EXISTING_ENTRY, aadVersion: 0 },
+    };
+
+    const err = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input).catch((e) => e);
+    expect(err).toBeInstanceOf(TeamPasswordServiceError);
+    expect(err.code).toBe("KEY_VERSION_WITHOUT_REENCRYPT");
+    expect(err.statusHint).toBe(409);
+  });
+
+  it("allows same itemKeyVersion without encryptedBlob → no error", async () => {
+    mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
+
+    const input: UpdateTeamPasswordInput = {
+      // No encryptedBlob — metadata-only update; itemKeyVersion matches existing
+      itemKeyVersion: 0, // same as existingEntry.itemKeyVersion (0)
+      userId: USER_ID,
+      existingEntry: BASE_EXISTING_ENTRY,
+    };
+
+    // Should not throw — same version is a no-op, not a change
+    const result = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input);
+    expect(result).toEqual({ id: PASSWORD_ID, tags: [] });
   });
 });

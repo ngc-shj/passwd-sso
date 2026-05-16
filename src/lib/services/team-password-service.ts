@@ -243,6 +243,15 @@ export async function createTeamPassword(
     throw new TeamPasswordServiceError(API_ERROR.FOLDER_NOT_FOUND, 400);
   }
 
+  if (tagIds?.length) {
+    const count = await prisma.teamTag.count({
+      where: { id: { in: tagIds }, teamId },
+    });
+    if (count !== tagIds.length) {
+      throw new TeamPasswordServiceError(API_ERROR.NOT_FOUND, 404);
+    }
+  }
+
   // Use client-provided ID (bound into AAD during encryption) or generate one
   const entryId = clientId ?? crypto.randomUUID();
 
@@ -361,6 +370,15 @@ export async function updateTeamPassword(
     throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_VERSION_DOWNGRADE, 400);
   }
 
+  // C7: any change to itemKeyVersion / teamKeyVersion / aadVersion requires re-encryption.
+  // Without encryptedBlob (isFullUpdate=false), changing these breaks AAD reconstruction.
+  const itemKeyVersionChanged = itemKeyVersion !== undefined && itemKeyVersion !== (existingEntry.itemKeyVersion ?? 0);
+  const teamKeyVersionChanged = teamKeyVersion !== undefined && teamKeyVersion !== existingEntry.teamKeyVersion;
+  const aadVersionChanged = aadVersion !== undefined && aadVersion !== existingEntry.aadVersion;
+  if ((itemKeyVersionChanged || teamKeyVersionChanged || aadVersionChanged) && !isFullUpdate) {
+    throw new TeamPasswordServiceError(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT, 409);
+  }
+
   // Upgrading v0→v>=1 requires encryptedItemKey; reusing v>=1 does not
   const existingVersion = existingEntry.itemKeyVersion ?? 0;
   if (
@@ -394,6 +412,15 @@ export async function updateTeamPassword(
 
   if (teamFolderId && (!folder || folder.teamId !== teamId)) {
     throw new TeamPasswordServiceError(API_ERROR.FOLDER_NOT_FOUND, 400);
+  }
+
+  if (tagIds !== undefined && tagIds.length > 0) {
+    const count = await prisma.teamTag.count({
+      where: { id: { in: tagIds }, teamId },
+    });
+    if (count !== tagIds.length) {
+      throw new TeamPasswordServiceError(API_ERROR.NOT_FOUND, 404);
+    }
   }
 
   const updateData: Record<string, unknown> = { updatedById: userId };

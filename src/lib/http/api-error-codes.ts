@@ -77,6 +77,7 @@ export const API_ERROR = {
   INVALID_ENCRYPTION_FORMAT: "INVALID_ENCRYPTION_FORMAT",
   ITEM_KEY_REQUIRED: "ITEM_KEY_REQUIRED",
   ITEM_KEY_VERSION_DOWNGRADE: "ITEM_KEY_VERSION_DOWNGRADE",
+  KEY_VERSION_WITHOUT_REENCRYPT: "KEY_VERSION_WITHOUT_REENCRYPT",
 
   // ── Teams ─────────────────────────────────────────────────
   SLUG_ALREADY_TAKEN: "SLUG_ALREADY_TAKEN",
@@ -328,6 +329,7 @@ export const API_ERROR_STATUS = {
   INVALID_ENCRYPTION_FORMAT: 400,
   ITEM_KEY_REQUIRED: 400,
   ITEM_KEY_VERSION_DOWNGRADE: 409,
+  KEY_VERSION_WITHOUT_REENCRYPT: 409,
 
   // ── Teams ─────────────────────────────────────────────────
   SLUG_ALREADY_TAKEN: 409,
@@ -519,7 +521,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   ATTACHMENT_KEY_MANIFEST_MISMATCH: "attachmentKeyManifestMismatch",
   ATTACHMENT_INCONSISTENT_VERSION: "attachmentInconsistentVersion",
   FILE_TOO_LARGE: "fileTooLarge",
-  PAYLOAD_TOO_LARGE: "fileTooLarge",
+  PAYLOAD_TOO_LARGE: "payloadTooLarge",
   MISSING_REQUIRED_FIELDS: "validationError",
   EXTENSION_NOT_ALLOWED: "extensionNotAllowed",
   CONTENT_TYPE_NOT_ALLOWED: "contentTypeNotAllowed",
@@ -528,6 +530,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   INVALID_ENCRYPTION_FORMAT: "invalidEncryptionFormat",
   ITEM_KEY_REQUIRED: "itemKeyRequired",
   ITEM_KEY_VERSION_DOWNGRADE: "itemKeyVersionDowngrade",
+  KEY_VERSION_WITHOUT_REENCRYPT: "keyVersionWithoutReencrypt",
   SLUG_ALREADY_TAKEN: "slugAlreadyTaken",
   TEAM_NOT_FOUND: "teamNotFound",
   MEMBER_NOT_FOUND: "memberNotFound",

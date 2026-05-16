@@ -68,6 +68,7 @@ async function handlePOST(req: NextRequest) {
   }
 
   // Parse and validate request body
+  // req.json bypass: RFC 7591 error format required ({ error: "invalid_request" } per RFC 6749 §5.2).
   let rawBody: unknown;
   try {
     rawBody = await req.json();

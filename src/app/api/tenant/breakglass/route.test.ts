@@ -314,7 +314,7 @@ describe("POST /api/tenant/breakglass", () => {
     const res = await POST(req);
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
-    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(json.error).toBe("INVALID_JSON");
   });
 
   it("returns 400 when targetUserId is missing", async () => {

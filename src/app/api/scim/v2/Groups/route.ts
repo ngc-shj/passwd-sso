@@ -12,6 +12,7 @@ import { scimGroupSchema } from "@/lib/scim/validations";
 import { TEAM_ROLE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { parseBody } from "@/lib/http/parse-body";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
 
 const SCIM_GROUP_ROLES: TeamRole[] = [
@@ -138,19 +139,9 @@ async function handlePOST(req: NextRequest) {
   if (!auth.ok) return auth.response;
   const { tenantId } = auth.data;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return scimError(400, "Invalid JSON");
-  }
-
-  const parsed = scimGroupSchema.safeParse(body);
-  if (!parsed.success) {
-    return scimError(400, parsed.error.issues.map((i) => i.message).join("; "));
-  }
-
-  const { displayName, externalId } = parsed.data;
+  const bodyResult = await parseBody(req, scimGroupSchema);
+  if (!bodyResult.ok) return bodyResult.response;
+  const { displayName, externalId } = bodyResult.data;
 
   if (!externalId || externalId.trim().length === 0) {
     return scimError(400, "externalId is required for tenant group mapping");

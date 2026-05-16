@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
 const {
-  mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaTeam, mockAuditLogCreate,
+  mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaTeam, mockPrismaTeamTag, mockAuditLogCreate,
   mockRequireTeamPermission,
   mockRequireTeamMember, mockHasTeamPermission, TeamAuthError,
   mockPrismaTransaction,
@@ -25,6 +25,7 @@ const {
     },
     mockPrismaTeamFolder: { findUnique: vi.fn() },
     mockPrismaTeam: { findUnique: vi.fn() },
+    mockPrismaTeamTag: { count: vi.fn().mockResolvedValue(0) },
     mockAuditLogCreate: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
     mockRequireTeamMember: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock("@/lib/prisma", () => ({
     teamPasswordEntry: mockPrismaTeamPasswordEntry,
     teamFolder: mockPrismaTeamFolder,
     team: mockPrismaTeam,
+    teamTag: mockPrismaTeamTag,
     auditLog: { create: mockAuditLogCreate },
     $transaction: mockPrismaTransaction,
   },
@@ -493,6 +495,8 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
 
   it("updates metadata only without history snapshot (Q-8)", async () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    // C5 guard: teamTag.count must match tagIds.length for same-team tag
+    mockPrismaTeamTag.count.mockResolvedValueOnce(1);
 
     const TAG_UUID = "00000000-0000-4000-a000-000000000041";
     const res = await PUT(

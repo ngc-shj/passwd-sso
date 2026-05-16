@@ -54,10 +54,13 @@ export async function checkAuth(
     );
   }
 
-  // Dev warning: allowTokens without scope means no scope validation
-  if (allowTokens && scope == null && process.env.NODE_ENV === "development") {
-    console.warn(
-      "checkAuth: allowTokens is true but no scope is set — tokens will be accepted without scope validation",
+  // Runtime guard (C1): allowTokens without scope is a security footgun — any
+  // bearer-token holder with a userId reaches the handler without scope check,
+  // mixing user-identity permissions with token-delegated permissions. Every
+  // caller MUST declare scope explicitly. Throw in all environments.
+  if (allowTokens && scope == null) {
+    throw new Error(
+      "checkAuth: allowTokens requires an explicit scope — token auth without scope validation is forbidden",
     );
   }
 

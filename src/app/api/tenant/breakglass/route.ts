@@ -13,7 +13,8 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { createNotification } from "@/lib/notification";
 import { createBreakglassGrantSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, forbidden, handleAuthError, rateLimited, unauthorized, validationError, zodValidationError } from "@/lib/http/api-response";
+import { errorResponse, forbidden, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
+import { parseBody } from "@/lib/http/parse-body";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/audit/notification";
 import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
@@ -45,19 +46,9 @@ async function handlePOST(req: NextRequest) {
   }
 
   // Parse and validate request body
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return validationError();
-  }
-
-  const parsed = createBreakglassGrantSchema.safeParse(body);
-  if (!parsed.success) {
-    return zodValidationError(parsed.error);
-  }
-
-  const { targetUserId, reason, incidentRef } = parsed.data;
+  const bodyResult = await parseBody(req, createBreakglassGrantSchema);
+  if (!bodyResult.ok) return bodyResult.response;
+  const { targetUserId, reason, incidentRef } = bodyResult.data;
 
   // Prevent self-access
   if (targetUserId === userId) {

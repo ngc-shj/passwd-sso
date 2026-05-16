@@ -14,6 +14,7 @@ import {
   BASE64_RE,
   CEK_WRAP_BASE64_MAX,
 } from "@/lib/validations/common";
+import { readJsonWithCap } from "@/lib/http/parse-body";
 import {
   applyAttachmentMigration,
   LegacyAttachmentInconsistentVersionError,
@@ -57,18 +58,15 @@ async function handlePUT(
     }
   }
 
-  // Parse JSON body
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
+  // Parse JSON body with stream-byte cap (authoritative guard; content-length pre-check above is advisory)
+  const bodyRead = await readJsonWithCap(req, ATTACHMENT_MIGRATE_PAYLOAD_MAX);
+  if (!bodyRead.ok) {
+    return errorResponse(bodyRead.tooLarge ? API_ERROR.PAYLOAD_TOO_LARGE : API_ERROR.INVALID_JSON);
+  }
+  if (typeof bodyRead.body !== "object" || bodyRead.body === null) {
     return errorResponse(API_ERROR.INVALID_JSON);
   }
-
-  if (typeof body !== "object" || body === null) {
-    return errorResponse(API_ERROR.INVALID_JSON);
-  }
-  const b = body as Record<string, unknown>;
+  const b = bodyRead.body as Record<string, unknown>;
 
   const oldEncryptedDataHash = b["oldEncryptedDataHash"];
   const encryptedData = b["encryptedData"];

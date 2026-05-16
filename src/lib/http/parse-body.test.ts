@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { parseBody } from "./parse-body";
+import { parseBody, readJsonWithCap } from "./parse-body";
 
 function jsonRequest(body: unknown): NextRequest {
   return new NextRequest("http://localhost:3000/api/test", {
@@ -109,6 +109,133 @@ describe("parseBody", () => {
       expect(result.response.status).toBe(400);
       const json = await result.response.json();
       expect(json.error).toBe("INVALID_JSON");
+    }
+  });
+
+  it("rejects request with content-length over default cap → 413 PAYLOAD_TOO_LARGE", async () => {
+    const defaultCap = 1_048_576; // MAX_JSON_BODY_BYTES
+    const req = new NextRequest("http://localhost:3000/api/test", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": String(defaultCap + 1),
+      },
+      body: JSON.stringify({ name: "Alice", age: 30 }),
+    });
+    const result = await parseBody(req, schema);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(413);
+      const json = await result.response.json();
+      expect(json.error).toBe("PAYLOAD_TOO_LARGE");
+    }
+  });
+
+  it("accepts request when content-length header is absent (stream still capped)", async () => {
+    // No Content-Length — stream cap still applies but small payload passes
+    const req = new NextRequest("http://localhost:3000/api/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Alice", age: 30 }),
+    });
+    const result = await parseBody(req, schema);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data).toEqual({ name: "Alice", age: 30 });
+    }
+  });
+
+  it("accepts request with content-length under cap", async () => {
+    const body = JSON.stringify({ name: "Alice", age: 30 });
+    const req = new NextRequest("http://localhost:3000/api/test", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": String(Buffer.byteLength(body)),
+      },
+      body,
+    });
+    const result = await parseBody(req, schema);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data).toEqual({ name: "Alice", age: 30 });
+    }
+  });
+
+  it("accepts large body when maxBytes override is set", async () => {
+    // Build a body larger than 1 MB (default cap) but under the override
+    const bigString = "x".repeat(2_000_000); // 2 MB string value
+    const largeSchema = z.object({ data: z.string() });
+    const bodyStr = JSON.stringify({ data: bigString });
+
+    const req = new NextRequest("http://localhost:3000/api/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: bodyStr,
+    });
+    const result = await parseBody(req, largeSchema, { maxBytes: 4 * 1024 * 1024 });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.data.length).toBe(2_000_000);
+    }
+  });
+
+  it("rejects large body without content-length via stream cap (chunked-TE bypass guard)", async () => {
+    // 2 MB body with no Content-Length header — stream cap must still fire
+    const bigString = "x".repeat(2_000_000);
+    const largeSchema = z.object({ data: z.string() });
+    const bodyStr = JSON.stringify({ data: bigString });
+
+    const req = new NextRequest("http://localhost:3000/api/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: bodyStr,
+    });
+    // Use default 1 MB cap — 2 MB body should be rejected
+    const result = await parseBody(req, largeSchema);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(413);
+      const json = await result.response.json();
+      expect(json.error).toBe("PAYLOAD_TOO_LARGE");
+    }
+  });
+});
+
+describe("readJsonWithCap", () => {
+  it("returns tooLarge when content-length exceeds cap", async () => {
+    const req = new NextRequest("http://localhost:3000/api/test", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": "1000",
+      },
+      body: JSON.stringify({ foo: "bar" }),
+    });
+    const result = await readJsonWithCap(req, 500);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.tooLarge).toBe(true);
+    }
+  });
+
+  it("returns parsed body when within cap", async () => {
+    const req = new NextRequest("http://localhost:3000/api/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ foo: "bar" }),
+    });
+    const result = await readJsonWithCap(req, 1024);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.body).toEqual({ foo: "bar" });
     }
   });
 });

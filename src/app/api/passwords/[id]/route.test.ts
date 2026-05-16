@@ -648,6 +648,62 @@ describe("PUT /api/passwords/[id]", () => {
     // $transaction should NOT have been called since no blob change
     expect(mockPrismaTransaction).not.toHaveBeenCalled();
   });
+
+  // C7: version metadata change without re-encryption
+  it("rejects aadVersion change without encryptedBlob → 409 KEY_VERSION_WITHOUT_REENCRYPT", async () => {
+    // ownedEntry has aadVersion=0; sending aadVersion=1 without blob should be rejected
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: { aadVersion: 1 },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("KEY_VERSION_WITHOUT_REENCRYPT");
+  });
+
+  it("rejects keyVersion change without encryptedBlob → 409 KEY_VERSION_WITHOUT_REENCRYPT", async () => {
+    // ownedEntry has keyVersion=1; sending keyVersion=2 without blob should be rejected
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: { keyVersion: 2 },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("KEY_VERSION_WITHOUT_REENCRYPT");
+  });
+
+  it("allows same aadVersion without encryptedBlob → no error", async () => {
+    // ownedEntry has aadVersion=0; sending aadVersion=0 is a no-op (same value)
+    // NOTE: aadVersion schema has min(1), so we simulate an entry with aadVersion=1
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue({ ...ownedEntry, aadVersion: 1 });
+    mockPrismaPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      encryptedOverview: "overview-cipher",
+      overviewIv: "overview-iv",
+      overviewAuthTag: "overview-tag",
+      keyVersion: 1,
+      aadVersion: 1,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: { aadVersion: 1 },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(200);
+  });
 });
 
 describe("DELETE /api/passwords/[id]", () => {

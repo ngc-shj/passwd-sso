@@ -4,6 +4,8 @@ import { handleMcpRequest } from "@/lib/mcp/server";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { BASE_PATH } from "@/lib/url-helpers";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { readJsonWithCap } from "@/lib/http/parse-body";
+import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 
 async function handlePOST(req: NextRequest) {
   // Validate MCP access token
@@ -24,10 +26,8 @@ async function handlePOST(req: NextRequest) {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
+  const read = await readJsonWithCap(req, MAX_JSON_BODY_BYTES);
+  if (!read.ok) {
     return NextResponse.json(
       { jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } },
       { status: 400 },
@@ -35,7 +35,7 @@ async function handlePOST(req: NextRequest) {
   }
 
   const ip = extractClientIp(req);
-  const response = await handleMcpRequest(body, tokenResult.data, ip);
+  const response = await handleMcpRequest(read.body, tokenResult.data, ip);
   return NextResponse.json(response);
 }
 

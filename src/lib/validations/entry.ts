@@ -12,6 +12,7 @@ import {
   CHARS_FIELD_MAX,
   HISTORY_BLOB_MAX,
   FILENAME_MAX_LENGTH,
+  TEAM_KEY_VERSION_MAX,
   asciiPrintable,
   encryptedFieldSchema,
   hexString,
@@ -57,7 +58,7 @@ export const createE2EPasswordSchema = z.object({
 export const updateE2EPasswordSchema = z.object({
   encryptedBlob: encryptedFieldSchema.optional(),
   encryptedOverview: encryptedFieldSchema.optional(),
-  keyVersion: z.number().int().min(1).optional(),
+  keyVersion: z.number().int().min(1).max(TEAM_KEY_VERSION_MAX).optional(),
   aadVersion: z.number().int().min(1).max(1).optional(),
   tagIds: z.array(z.string().uuid()).optional(),
   folderId: z.string().uuid().optional().nullable(),

@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID, randomBytes } from "node:crypto";
+import { z } from "zod";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, rateLimited } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { parseBody } from "@/lib/http/parse-body";
 import { assertOrigin } from "@/lib/auth/session/csrf";
 import { authorizeWebAuthn } from "@/lib/auth/webauthn/webauthn-authorize";
 import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit/audit";
@@ -54,24 +56,18 @@ async function handlePOST(req: NextRequest) {
   }
 
   // Parse request body
-  let body: { credentialResponse: string; challengeId: string };
-  try {
-    body = await req.json();
-  } catch {
-    return errorResponse(API_ERROR.INVALID_REQUEST);
-  }
-
-  if (
-    typeof body.credentialResponse !== "string" ||
-    typeof body.challengeId !== "string"
-  ) {
-    return errorResponse(API_ERROR.INVALID_REQUEST);
-  }
+  const passkeyVerifySchema = z.object({
+    credentialResponse: z.string(),
+    challengeId: z.string(),
+  });
+  const bodyResult = await parseBody(req, passkeyVerifySchema);
+  if (!bodyResult.ok) return bodyResult.response;
+  const { credentialResponse, challengeId } = bodyResult.data;
 
   // Verify WebAuthn authentication
   const user = await authorizeWebAuthn({
-    credentialResponse: body.credentialResponse,
-    challengeId: body.challengeId,
+    credentialResponse,
+    challengeId,
   });
 
   if (!user) {

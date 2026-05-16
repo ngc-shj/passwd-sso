@@ -102,11 +102,25 @@ async function handleGET(req: NextRequest) {
 // Supports two auth modes:
 // 1. SA token (Bearer sa_...) — SA self-service, serviceAccountId inferred from token
 // 2. Session (admin) — admin creates on behalf of SA, serviceAccountId in body
+// Any other token type (api_key, extension_token, mcp_token) is rejected with 401.
 async function handlePOST(req: NextRequest) {
-  const authResult = await authOrToken(req);
-  if (!authResult || authResult.type === "scope_insufficient" ||
-      authResult.type === "mcp_token") {
-    return unauthorized();
+  // Detect SA self-service by Bearer prefix before calling auth()
+  const bearerHeader = req.headers.get("authorization");
+  const isSaBearer = bearerHeader?.startsWith("Bearer sa_") ?? false;
+
+  let authResult: Awaited<ReturnType<typeof authOrToken>>;
+
+  if (isSaBearer) {
+    authResult = await authOrToken(req, SA_TOKEN_SCOPE.ACCESS_REQUEST_CREATE);
+    if (!authResult || authResult.type === "scope_insufficient") {
+      return errorResponse(API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT);
+    }
+    if (authResult.type !== "service_account") return unauthorized();
+  } else {
+    // Admin path: session only — all Bearer token types are rejected
+    const session = await auth();
+    if (!session?.user?.id) return unauthorized();
+    authResult = { type: "session", userId: session.user.id };
   }
 
   let tenantId: string;
@@ -164,8 +178,7 @@ async function handlePOST(req: NextRequest) {
     }
     userId = sa.createdById;
   } else {
-    // Admin path: session or API key auth
-    if (!("userId" in authResult)) return unauthorized();
+    // Admin path: session-only (enforced above; authResult.type === "session" here)
     userId = authResult.userId;
 
     let actor;
@@ -177,17 +190,7 @@ async function handlePOST(req: NextRequest) {
     tenantId = actor.tenantId;
 
     // Session reaches this handler via middleware which already enforces
-    // tenant IP restriction. API key / other token types bypass middleware
-    // access restriction and must be checked here.
-    if (authResult.type !== "session") {
-      const denied = await enforceAccessRestriction(
-        req,
-        userId,
-        tenantId,
-        resolveActorType(authResult),
-      );
-      if (denied) return denied;
-    }
+    // tenant IP restriction. No other token type can reach this branch.
 
     const rl = await accessRequestCreateLimiter.check(`rl:access_request_create:${tenantId}`);
     if (!rl.allowed) return rateLimited(rl.retryAfterMs);

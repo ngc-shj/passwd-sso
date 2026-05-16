@@ -11,7 +11,8 @@
     "vault:status": "保管庫のステータス確認",
     "vault:unlock-data": "暗号化された保管庫キーの取得",
     "passwords:read": "パスワードエントリの読み取り",
-    "passwords:write": "パスワードエントリの作成・更新・削除"
+    "passwords:write": "パスワードエントリの作成・更新・削除",
+    "delegation:check": "委任状態を確認"
   },
   "errors": {
     "missingParams": "必須パラメータが不足しています",

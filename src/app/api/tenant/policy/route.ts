@@ -18,6 +18,8 @@ import { TAILNET_NAME_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isValidCidr, extractClientIp } from "@/lib/auth/policy/ip-access";
+import { readJsonWithCap } from "@/lib/http/parse-body";
+import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 import { invalidateTenantPolicyCache, wouldIpBeAllowed } from "@/lib/auth/policy/access-restriction";
 import { invalidateLockoutThresholdCache } from "@/lib/auth/policy/account-lockout";
 import { invalidateSessionTimeoutCacheForTenant } from "@/lib/auth/session/session-timeout";
@@ -174,12 +176,9 @@ async function handlePATCH(req: NextRequest) {
     return handleAuthError(e);
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return validationError();
-  }
+  const bodyRead = await readJsonWithCap(req, MAX_JSON_BODY_BYTES);
+  if (!bodyRead.ok) return validationError();
+  const body = bodyRead.body as Record<string, unknown>;
   const {
     maxConcurrentSessions,
     sessionIdleTimeoutMinutes,

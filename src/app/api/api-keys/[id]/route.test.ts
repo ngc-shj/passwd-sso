@@ -68,17 +68,9 @@ describe("DELETE /api/api-keys/[id]", () => {
     expect(json.error).toBe("UNAUTHORIZED");
   });
 
-  it("returns 401 when auth type is api_key", async () => {
-    mockCheckAuth.mockResolvedValue({
-      ok: true,
-      auth: {
-        type: "api_key",
-        userId: "u1",
-        tenantId: "t1",
-        apiKeyId: "ak1",
-        scopes: ["passwords:read"],
-      },
-    });
+  it("returns 401 for non-session auth types (token/api_key/mcp/service_account)", async () => {
+    // checkAuth(req) is session-only after C2; all non-session auth types fail at the gate
+    mockCheckAuth.mockResolvedValue(authFail());
 
     const res = await DELETE(
       createRequest("DELETE", "http://localhost:3000/api/api-keys/key-1"),
@@ -109,26 +101,6 @@ describe("DELETE /api/api-keys/[id]", () => {
     expect(json.success).toBe(true);
   });
 
-  it("revokes API key for extension token auth", async () => {
-    mockCheckAuth.mockResolvedValue({
-      ok: true,
-      auth: { type: "token", userId: "u1", scopes: [] },
-    });
-    mockPrismaApiKey.findUnique.mockResolvedValue({
-      id: "key-1",
-      userId: "u1",
-      name: "Test",
-      revokedAt: null,
-    });
-    mockPrismaApiKey.update.mockResolvedValue({});
-
-    const res = await DELETE(
-      createRequest("DELETE", "http://localhost:3000/api/api-keys/key-1"),
-      createParams({ id: "key-1" }),
-    );
-    expect(res.status).toBe(200);
-  });
-
   it("returns 404 when key not found", async () => {
     mockCheckAuth.mockResolvedValue({
       ok: true,
@@ -143,17 +115,14 @@ describe("DELETE /api/api-keys/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("calls checkAuth with allowTokens and enforces access restriction", async () => {
+  it("calls checkAuth in session-only mode (no allowTokens option)", async () => {
     mockCheckAuth.mockResolvedValue(authFail());
 
     await DELETE(
       createRequest("DELETE", "http://localhost:3000/api/api-keys/key-1"),
       createParams({ id: "key-1" }),
     );
-    expect(mockCheckAuth).toHaveBeenCalledWith(
-      expect.any(NextRequest),
-      { allowTokens: true },
-    );
+    expect(mockCheckAuth).toHaveBeenCalledWith(expect.any(NextRequest));
   });
 
   it("returns 404 when key belongs to another user", async () => {

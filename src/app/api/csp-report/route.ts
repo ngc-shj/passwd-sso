@@ -1,10 +1,11 @@
-import { NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIpFromHeaders } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
-import { CSP_REPORT_RATE_MAX, RATE_WINDOW_MS } from "@/lib/validations/common.server";
+import { CSP_REPORT_RATE_MAX, MAX_JSON_BODY_BYTES, RATE_WINDOW_MS } from "@/lib/validations/common.server";
+import { readJsonWithCap } from "@/lib/http/parse-body";
 
 export const runtime = "nodejs";
 const cspLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: CSP_REPORT_RATE_MAX });
@@ -63,7 +64,7 @@ function sanitizeCspReport(body: unknown): Record<string, unknown> | undefined {
 
 // POST /api/csp-report
 // Receives CSP violation reports.
-async function handlePOST(request: Request) {
+async function handlePOST(request: NextRequest) {
   const rl = await checkIpRateLimit({
     ip: extractClientIpFromHeaders(request.headers),
     pathname: "/api/csp-report",
@@ -77,7 +78,8 @@ async function handlePOST(request: Request) {
     contentType.includes("application/csp-report") ||
     contentType.includes("application/reports+json")
   ) {
-    const body = await request.json().catch(() => null);
+    const read = await readJsonWithCap(request, MAX_JSON_BODY_BYTES);
+    const body = read.ok ? read.body : null;
     if (body) {
       const sanitized = sanitizeCspReport(body);
       if (sanitized) {

@@ -3,22 +3,18 @@ import { checkAuth } from "@/lib/auth/session/check-auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { errorResponse } from "@/lib/http/api-response";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
-// DELETE /api/api-keys/[id] — Revoke an API key (session or extension token, NOT API key)
+// DELETE /api/api-keys/[id] — Revoke an API key (session only)
 async function handleDELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const authed = await checkAuth(req, { allowTokens: true });
+  const authed = await checkAuth(req);
   if (!authed.ok) return authed.response;
-  // Only session and extension token can manage API keys
-  if (authed.auth.type === "api_key" || authed.auth.type === "mcp_token") {
-    return unauthorized();
-  }
   const { userId } = authed.auth;
 
   const { id } = await params;

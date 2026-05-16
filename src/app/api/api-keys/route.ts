@@ -6,7 +6,7 @@ import { hashToken } from "@/lib/crypto/crypto-server";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { apiKeyCreateSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, unauthorized, rateLimited } from "@/lib/http/api-response";
+import { errorResponse, rateLimited } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -24,14 +24,8 @@ const apiKeyCreateLimiter = createRateLimiter({ windowMs: MS_PER_HOUR, max: 5 })
 
 // GET /api/api-keys — List API keys for the current user
 async function handleGET(req: NextRequest) {
-  // Tenant IP restriction applies to all auth types (session + extension token)
-  // to prevent long-lived API-key issuance from outside the tenant network boundary.
-  const authed = await checkAuth(req, { allowTokens: true });
+  const authed = await checkAuth(req);
   if (!authed.ok) return authed.response;
-  // Only session and extension token can manage API keys
-  if (authed.auth.type === "api_key" || authed.auth.type === "mcp_token") {
-    return unauthorized();
-  }
   const { userId } = authed.auth;
 
   const keys = await withUserTenantRls(userId, async () =>
@@ -65,18 +59,12 @@ async function handleGET(req: NextRequest) {
   );
 }
 
-// POST /api/api-keys — Create a new API key (session or extension token, NOT API key)
+// POST /api/api-keys — Create a new API key (session only)
 async function handlePOST(req: NextRequest) {
-  const authed = await checkAuth(req, { allowTokens: true });
+  const authed = await checkAuth(req);
   if (!authed.ok) return authed.response;
-  // Only session and extension token can create API keys
-  if (authed.auth.type === "api_key" || authed.auth.type === "mcp_token") {
-    return unauthorized();
-  }
-  if (authed.auth.type === "session") {
-    const stepUpError = await requireRecentCurrentAuthMethod(req);
-    if (stepUpError) return stepUpError;
-  }
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
   const { userId } = authed.auth;
 
   const rl = await apiKeyCreateLimiter.check(`rl:api_key_create:${userId}`);

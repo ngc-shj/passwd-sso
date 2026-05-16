@@ -267,46 +267,12 @@ describe("checkAuth", () => {
   // ── allowTokens option ───────────────────────────────────
 
   describe("allowTokens option", () => {
-    it("enables token auth without scope when allowTokens is true", async () => {
-      mockAuthOrToken.mockResolvedValue({
-        type: "token",
-        userId: "user-6",
-        scopes: [],
-      });
-      // Suppress console.warn for this test
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-      const result = await checkAuth(makeRequest("ext_token"), {
-        allowTokens: true,
-      });
-
-      expect(result.ok).toBe(true);
-      expect(mockAuthOrToken).toHaveBeenCalledWith(
-        expect.any(NextRequest),
-        undefined,
+    it("throws Error when allowTokens is true without scope (C1 runtime guard)", async () => {
+      await expect(
+        checkAuth(makeRequest("ext_token"), { allowTokens: true }),
+      ).rejects.toThrow(
+        "checkAuth: allowTokens requires an explicit scope",
       );
-      warnSpy.mockRestore();
-    });
-
-    it("emits console.warn when allowTokens is true without scope in development", async () => {
-      const origEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = "development";
-      try {
-        mockAuthOrToken.mockResolvedValue({
-          type: "session",
-          userId: "user-7",
-        });
-        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-        await checkAuth(makeRequest(), { allowTokens: true });
-
-        expect(warnSpy).toHaveBeenCalledWith(
-          expect.stringContaining("allowTokens is true but no scope is set"),
-        );
-        warnSpy.mockRestore();
-      } finally {
-        process.env.NODE_ENV = origEnv;
-      }
     });
   });
 
@@ -343,25 +309,23 @@ describe("checkAuth", () => {
     });
   });
 
-  // ── allowTokens + skipAccessRestriction ──────────────────
+  // ── skipAccessRestriction with explicit scope ────────────
 
-  describe("allowTokens + skipAccessRestriction", () => {
-    it("allows token auth without access restriction check", async () => {
+  describe("skipAccessRestriction with scope", () => {
+    it("allows token auth without access restriction check when scope is set", async () => {
       mockAuthOrToken.mockResolvedValue({
         type: "token",
         userId: "user-8",
-        scopes: [],
+        scopes: [EXTENSION_TOKEN_SCOPE.PASSWORDS_READ],
       });
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       const result = await checkAuth(makeRequest("ext_token"), {
-        allowTokens: true,
+        scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ,
         skipAccessRestriction: true,
       });
 
       expect(result.ok).toBe(true);
       expect(mockEnforceAccessRestriction).not.toHaveBeenCalled();
-      warnSpy.mockRestore();
     });
   });
 });

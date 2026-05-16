@@ -282,9 +282,79 @@ describe("POST /api/tenant/access-requests", () => {
   });
 
   it("returns 401 for unauthenticated users", async () => {
+    mockAuth.mockResolvedValue(null);
     mockAuthOrToken.mockResolvedValue(null);
 
     const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      body: {
+        serviceAccountId: SA_ID,
+        requestedScope: ["passwords:read"],
+      },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(401);
+  });
+
+  it("rejects api_key from admin path (401)", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockAuthOrToken.mockResolvedValue({
+      type: "api_key",
+      userId: DEFAULT_SESSION.user.id,
+      tenantId: "tenant-1",
+      apiKeyId: "key-1",
+      scopes: [],
+    });
+
+    const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      headers: { Authorization: "Bearer api_somekey" },
+      body: {
+        serviceAccountId: SA_ID,
+        requestedScope: ["passwords:read"],
+      },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(401);
+  });
+
+  it("rejects extension_token from admin path (401)", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockAuthOrToken.mockResolvedValue({
+      type: "token",
+      userId: DEFAULT_SESSION.user.id,
+      tenantId: "tenant-1",
+      scopes: [],
+    });
+
+    const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      headers: { Authorization: "Bearer ext_sometoken" },
+      body: {
+        serviceAccountId: SA_ID,
+        requestedScope: ["passwords:read"],
+      },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(401);
+  });
+
+  it("rejects mcp_token from admin path (401)", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockAuthOrToken.mockResolvedValue({
+      type: "mcp_token",
+      userId: DEFAULT_SESSION.user.id,
+      tenantId: "tenant-1",
+      tokenId: "tok-mcp",
+      mcpClientId: "mcpc_abc",
+      scopes: [],
+    });
+
+    const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      headers: { Authorization: "Bearer mcp_sometoken" },
       body: {
         serviceAccountId: SA_ID,
         requestedScope: ["passwords:read"],
@@ -337,6 +407,7 @@ describe("POST /api/tenant/access-requests", () => {
     mockAccessRequestCreate.mockResolvedValue(created);
 
     const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      headers: { Authorization: "Bearer sa_sometoken" },
       body: {
         serviceAccountId: SA_ID,
         requestedScope: ["passwords:read"],
@@ -369,6 +440,7 @@ describe("POST /api/tenant/access-requests", () => {
     mockEnforceAccessRestriction.mockResolvedValueOnce(denied);
 
     const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      headers: { Authorization: "Bearer sa_sometoken" },
       body: { requestedScope: ["passwords:read"] },
     });
     const res = await POST(req);
@@ -379,15 +451,10 @@ describe("POST /api/tenant/access-requests", () => {
   });
 
   it("returns 403 when SA token lacks access-request:create scope", async () => {
-    mockAuthOrToken.mockResolvedValue({
-      type: "service_account",
-      serviceAccountId: SA_ID,
-      tenantId: "tenant-1",
-      tokenId: "tok-2",
-      scopes: ["passwords:read"],
-    });
+    mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
 
     const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      headers: { Authorization: "Bearer sa_sometoken" },
       body: {
         requestedScope: ["passwords:read"],
       },
@@ -423,6 +490,7 @@ describe("POST /api/tenant/access-requests", () => {
 
     // Body does NOT include serviceAccountId — SA path infers it from token
     const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      headers: { Authorization: "Bearer sa_sometoken" },
       body: {
         requestedScope: ["passwords:read"],
       },

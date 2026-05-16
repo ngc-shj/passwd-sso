@@ -11,7 +11,8 @@
     "vault:status": "Check vault status",
     "vault:unlock-data": "Retrieve encrypted vault key",
     "passwords:read": "Read password entries",
-    "passwords:write": "Create, update, and delete password entries"
+    "passwords:write": "Create, update, and delete password entries",
+    "delegation:check": "Check delegation status"
   },
   "errors": {
     "missingParams": "Missing required parameters",

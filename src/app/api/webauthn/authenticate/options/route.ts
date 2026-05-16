@@ -39,6 +39,7 @@ async function handlePOST(req: NextRequest) {
   }
 
   // Parse optional body for targeted credential test
+  // req.json bypass: optional-body semantics preserved; falls back to PRF-only mode on parse error.
   let targetCredentialId: string | undefined;
   try {
     const body = await req.json();

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockCheckAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaTeam, mockAuditLogCreate, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockWithBypassRls, mockLogAudit } = vi.hoisted(() => {
+const { mockAuth, mockCheckAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaTeam, mockPrismaTeamTag, mockAuditLogCreate, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockWithBypassRls, mockLogAudit } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -20,6 +20,7 @@ const { mockAuth, mockCheckAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFold
     },
     mockPrismaTeamFolder: { findUnique: vi.fn() },
     mockPrismaTeam: { findUnique: vi.fn() },
+    mockPrismaTeamTag: { count: vi.fn().mockResolvedValue(0) },
     mockAuditLogCreate: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
@@ -36,6 +37,7 @@ vi.mock("@/lib/prisma", () => ({
     teamPasswordEntry: mockPrismaTeamPasswordEntry,
     teamFolder: mockPrismaTeamFolder,
     team: mockPrismaTeam,
+    teamTag: mockPrismaTeamTag,
     auditLog: { create: mockAuditLogCreate },
   },
 }));
@@ -549,6 +551,8 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
       tags: [{ id: TAG_UUID, name: "Work", color: "#ff0000" }],
       createdAt: now,
     });
+    // C5 guard: teamTag.count must match tagIds.length for same-team tags
+    mockPrismaTeamTag.count.mockResolvedValueOnce(1);
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {

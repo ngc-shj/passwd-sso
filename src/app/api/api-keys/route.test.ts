@@ -87,28 +87,9 @@ describe("GET /api/api-keys", () => {
     expect(json.error).toBe("UNAUTHORIZED");
   });
 
-  it("returns 401 when auth type is api_key", async () => {
-    mockCheckAuth.mockResolvedValue({
-      ok: true,
-      auth: {
-        type: "api_key",
-        userId: "u1",
-        tenantId: "t1",
-        apiKeyId: "ak1",
-        scopes: ["passwords:read"],
-      },
-    });
-
-    const res = await GET(createRequest("GET", "http://localhost:3000/api/api-keys"));
-    expect(res.status).toBe(401);
-  });
-
-  it("returns 401 for service_account auth type", async () => {
-    // checkAuth rejects service_account internally (no userId)
-    mockCheckAuth.mockResolvedValue({
-      ok: false,
-      response: new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401 }),
-    });
+  it("returns 401 for non-session auth types (token/api_key/mcp/service_account)", async () => {
+    // checkAuth(req) is session-only after C2; all non-session auth types fail at the gate
+    mockCheckAuth.mockResolvedValue(authFail());
 
     const res = await GET(createRequest("GET", "http://localhost:3000/api/api-keys"));
     expect(res.status).toBe(401);
@@ -140,20 +121,7 @@ describe("GET /api/api-keys", () => {
     expect(json[0].scopes).toEqual(["passwords:read", "passwords:write"]);
   });
 
-  it("returns key list for extension token auth", async () => {
-    mockCheckAuth.mockResolvedValue({
-      ok: true,
-      auth: { type: "token", userId: "u2", scopes: [] },
-    });
-    mockPrismaApiKey.findMany.mockResolvedValue([]);
-
-    const res = await GET(createRequest("GET", "http://localhost:3000/api/api-keys"));
-    expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json).toEqual([]);
-  });
-
-  it("calls checkAuth with allowTokens and enforces access restriction", async () => {
+  it("calls checkAuth in session-only mode (no allowTokens option)", async () => {
     mockCheckAuth.mockResolvedValue({
       ok: true,
       auth: { type: "session", userId: "u1" },
@@ -161,10 +129,7 @@ describe("GET /api/api-keys", () => {
     mockPrismaApiKey.findMany.mockResolvedValue([]);
 
     await GET(createRequest("GET", "http://localhost:3000/api/api-keys"));
-    expect(mockCheckAuth).toHaveBeenCalledWith(
-      expect.any(NextRequest),
-      { allowTokens: true },
-    );
+    expect(mockCheckAuth).toHaveBeenCalledWith(expect.any(NextRequest));
   });
 });
 
@@ -189,17 +154,9 @@ describe("POST /api/api-keys", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns 401 when auth type is api_key", async () => {
-    mockCheckAuth.mockResolvedValue({
-      ok: true,
-      auth: {
-        type: "api_key",
-        userId: "u1",
-        tenantId: "t1",
-        apiKeyId: "ak1",
-        scopes: ["passwords:read"],
-      },
-    });
+  it("returns 401 for non-session auth types (token/api_key/mcp/service_account)", async () => {
+    // checkAuth(req) is session-only after C2; all non-session auth types fail at the gate
+    mockCheckAuth.mockResolvedValue(authFail());
 
     const res = await POST(
       createRequest("POST", "http://localhost:3000/api/api-keys", {
@@ -209,7 +166,7 @@ describe("POST /api/api-keys", () => {
     expect(res.status).toBe(401);
   });
 
-  it("calls checkAuth with allowTokens and enforces access restriction", async () => {
+  it("calls checkAuth in session-only mode (no allowTokens option)", async () => {
     mockCheckAuth.mockResolvedValue(authFail());
 
     await POST(
@@ -217,10 +174,7 @@ describe("POST /api/api-keys", () => {
         body: { name: "test", scope: ["passwords:read"] },
       }),
     );
-    expect(mockCheckAuth).toHaveBeenCalledWith(
-      expect.any(NextRequest),
-      { allowTokens: true },
-    );
+    expect(mockCheckAuth).toHaveBeenCalledWith(expect.any(NextRequest));
   });
 
   it("returns 400 on malformed JSON", async () => {
@@ -294,10 +248,10 @@ describe("POST /api/api-keys", () => {
     expect(mockPrismaApiKey.create).not.toHaveBeenCalled();
   });
 
-  it("skips session step-up for extension-token auth", async () => {
+  it("calls requireRecentCurrentAuthMethod unconditionally on session auth", async () => {
     mockCheckAuth.mockResolvedValue({
       ok: true,
-      auth: { type: "token", userId: "u2", scopes: [] },
+      auth: { type: "session", userId: "u1" },
     });
     mockPrismaApiKey.count.mockResolvedValue(0);
     mockPrismaApiKey.create.mockResolvedValue({
@@ -309,18 +263,13 @@ describe("POST /api/api-keys", () => {
       createdAt: new Date("2026-01-01"),
     });
 
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 30);
-
-    const res = await POST(
+    await POST(
       createRequest("POST", "http://localhost:3000/api/api-keys", {
-        body: { name: "Test", scope: ["passwords:read"], expiresAt: expiresAt.toISOString() },
+        body: { name: "Test", scope: ["passwords:read"] },
       }),
     );
 
-    expect(res.status).toBe(201);
-    expect(mockRequireRecentSession).not.toHaveBeenCalled();
-    expect(mockPrismaApiKey.create).toHaveBeenCalledTimes(1);
+    expect(mockRequireRecentSession).toHaveBeenCalledTimes(1);
   });
 
   it("creates API key for session auth", async () => {

@@ -10,7 +10,9 @@ async function handleGET(req: NextRequest) {
   const isPublic = process.env.OPENAPI_PUBLIC !== "false";
 
   if (!isPublic) {
-    // Require any valid auth (session, extension token, or API key)
+    // Intentional any-auth gate: this endpoint is a non-scoped resource — any valid
+    // auth token (session / extension / api_key / mcp / SA) is acceptable. NOT a
+    // scope-gated resource; do NOT pass a scope to authOrToken here.
     const result = await authOrToken(req);
     if (!result) {
       return errorResponse(API_ERROR.UNAUTHORIZED, undefined, undefined, { "Cache-Control": "no-store" });
