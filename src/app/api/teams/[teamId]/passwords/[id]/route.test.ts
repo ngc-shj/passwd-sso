@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 const {
-  mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaTeam, mockAuditLogCreate,
+  mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaTeam, mockPrismaTeamTag, mockAuditLogCreate,
   mockRequireTeamPermission,
   mockRequireTeamMember, mockHasTeamPermission, TeamAuthError,
   mockPrismaTransaction,
@@ -25,6 +26,7 @@ const {
     },
     mockPrismaTeamFolder: { findUnique: vi.fn() },
     mockPrismaTeam: { findUnique: vi.fn() },
+    mockPrismaTeamTag: { count: vi.fn().mockResolvedValue(0) },
     mockAuditLogCreate: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
     mockRequireTeamMember: vi.fn(),
@@ -41,6 +43,7 @@ vi.mock("@/lib/prisma", () => ({
     teamPasswordEntry: mockPrismaTeamPasswordEntry,
     teamFolder: mockPrismaTeamFolder,
     team: mockPrismaTeam,
+    teamTag: mockPrismaTeamTag,
     auditLog: { create: mockAuditLogCreate },
     $transaction: mockPrismaTransaction,
   },
@@ -472,7 +475,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     );
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toBe("FOLDER_NOT_FOUND");
+    expect(json.error).toBe(API_ERROR.FOLDER_NOT_FOUND);
   });
 
   it("returns 400 when teamFolderId does not exist in PUT", async () => {
@@ -488,11 +491,13 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     );
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toBe("FOLDER_NOT_FOUND");
+    expect(json.error).toBe(API_ERROR.FOLDER_NOT_FOUND);
   });
 
   it("updates metadata only without history snapshot (Q-8)", async () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    // C5 guard: teamTag.count must match tagIds.length for same-team tag
+    mockPrismaTeamTag.count.mockResolvedValueOnce(1);
 
     const TAG_UUID = "00000000-0000-4000-a000-000000000041";
     const res = await PUT(
@@ -513,6 +518,25 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
         }),
       }),
     );
+  });
+
+  it("returns 404 when tagIds belong to another team in same tenant (C5 negative)", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    // Explicit mock: teamTag.count returns 0 (count < tagIds.length → NOT_FOUND).
+    // vi.resetAllMocks() in beforeEach clears the hoisted default, so mockResolvedValueOnce(0) is load-bearing.
+    mockPrismaTeamTag.count.mockResolvedValueOnce(0);
+
+    const FOREIGN_TAG_UUID = "00000000-0000-4000-a000-000000000099";
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
+        body: { tagIds: [FOREIGN_TAG_UUID], isArchived: true },
+      }),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toBe("NOT_FOUND");
+    expect(txMock.teamPasswordEntry.update).not.toHaveBeenCalled();
   });
 
   it("updates requireReprompt and expiresAt as metadata-only (no history snapshot)", async () => {

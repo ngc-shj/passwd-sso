@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { updateE2EPasswordSchema } from "@/lib/validations";
-import { forbidden, notFound, rateLimited, validationError } from "@/lib/http/api-response";
+import { errorResponse, forbidden, notFound, rateLimited, validationError } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { checkAuth } from "@/lib/auth/session/check-auth";
 import { parseBody } from "@/lib/http/parse-body";
 import { createRateLimiter } from "@/lib/security/rate-limit";
@@ -171,6 +172,14 @@ async function handlePUT(
     updateData.overviewIv = encryptedOverview.iv;
     updateData.overviewAuthTag = encryptedOverview.authTag;
   }
+  // C7: keyVersion / aadVersion cannot change without re-encryption.
+  // If either differs from the stored value and encryptedBlob is absent, reject.
+  const keyVersionChanged = keyVersion !== undefined && keyVersion !== existing.keyVersion;
+  const aadVersionChanged = aadVersion !== undefined && aadVersion !== existing.aadVersion;
+  if ((keyVersionChanged || aadVersionChanged) && !encryptedBlob) {
+    return errorResponse(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
+  }
+
   if (keyVersion !== undefined) updateData.keyVersion = keyVersion;
   if (aadVersion !== undefined) updateData.aadVersion = aadVersion;
   if (folderId !== undefined) updateData.folderId = folderId;

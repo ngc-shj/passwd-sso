@@ -30,7 +30,6 @@ import {
   errorResponse,
   rateLimited,
   unauthorized,
-  zodValidationError,
 } from "@/lib/http/api-response";
 import { issueExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
@@ -38,6 +37,7 @@ import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { getLogger } from "@/lib/logger";
+import { parseBody } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -55,9 +55,8 @@ const ExchangeRequestSchema = z.object({
 
 async function handlePOST(req: NextRequest) {
   // Parse request body
-  const body = await req.json().catch(() => null);
-  const parsed = ExchangeRequestSchema.safeParse(body);
-  if (!parsed.success) {
+  const bodyResult = await parseBody(req, ExchangeRequestSchema);
+  if (!bodyResult.ok) {
     // No user context — pino-only logging (audit requires resolvable user/tenant)
     getLogger().warn(
       {
@@ -68,10 +67,10 @@ async function handlePOST(req: NextRequest) {
       },
       "extension token exchange failed: malformed body",
     );
-    return zodValidationError(parsed.error);
+    return bodyResult.response;
   }
 
-  const { code } = parsed.data;
+  const { code } = bodyResult.data;
 
   // Rate limit BEFORE DB lookup (keyed by client IP, no session available).
   // Compensating control: 256-bit code entropy makes brute force infeasible.

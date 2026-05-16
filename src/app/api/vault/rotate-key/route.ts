@@ -6,6 +6,7 @@ import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalida
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { readJsonWithCap } from "@/lib/http/parse-body";
 import { getLogger } from "@/lib/logger";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { z } from "zod";
@@ -105,14 +106,11 @@ async function handlePOST(request: NextRequest) {
     return rateLimited(rl.retryAfterMs);
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return errorResponse(API_ERROR.INVALID_JSON);
+  const bodyRead = await readJsonWithCap(request, 16 * 1024 * 1024);
+  if (!bodyRead.ok) {
+    return errorResponse(bodyRead.tooLarge ? API_ERROR.PAYLOAD_TOO_LARGE : API_ERROR.INVALID_JSON);
   }
-
-  const parsed = rotateKeySchema.safeParse(body);
+  const parsed = rotateKeySchema.safeParse(bodyRead.body);
   if (!parsed.success) {
     // Truncate verbose Zod errors — the schema has many potential issues
     // (entries array × many fields each) that would blow up the response.

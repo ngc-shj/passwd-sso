@@ -8,6 +8,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { scimParseBody } from "@/lib/scim/parse-body";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
 import {
   fetchScimGroup,
@@ -44,17 +45,8 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
   if (!auth.ok) return auth.response;
   const { tenantId, auditUserId, actorType: putActorType } = auth.data;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return scimError(400, "Invalid JSON");
-  }
-
-  const parsed = scimGroupSchema.safeParse(body);
-  if (!parsed.success) {
-    return scimError(400, parsed.error.issues.map((i) => i.message).join("; "));
-  }
+  const bodyResult = await scimParseBody(req, scimGroupSchema);
+  if (!bodyResult.ok) return bodyResult.response;
 
   const { id } = await params;
 
@@ -62,8 +54,8 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
   try {
     serviceResult = await withTenantRls(prisma, tenantId, () =>
       replaceScimGroup(tenantId, id, {
-        displayName: parsed.data.displayName,
-        memberUserIds: parsed.data.members.map((m) => m.value),
+        displayName: bodyResult.data.displayName,
+        memberUserIds: bodyResult.data.members.map((m) => m.value),
       }, getScimBaseUrl()),
     );
   } catch (e) {
@@ -105,21 +97,12 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
   if (!auth.ok) return auth.response;
   const { tenantId, auditUserId, actorType: patchActorType } = auth.data;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return scimError(400, "Invalid JSON");
-  }
-
-  const parsed = scimPatchOpSchema.safeParse(body);
-  if (!parsed.success) {
-    return scimError(400, parsed.error.issues.map((i) => i.message).join("; "));
-  }
+  const bodyResult = await scimParseBody(req, scimPatchOpSchema);
+  if (!bodyResult.ok) return bodyResult.response;
 
   let actions;
   try {
-    actions = parseGroupPatchOps(parsed.data.Operations);
+    actions = parseGroupPatchOps(bodyResult.data.Operations);
   } catch (e) {
     if (e instanceof PatchParseError) {
       return scimError(400, e.message);

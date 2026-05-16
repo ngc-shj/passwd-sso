@@ -26,8 +26,8 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import {
   errorResponse,
   rateLimited,
-  zodValidationError,
 } from "@/lib/http/api-response";
+import { parseBody } from "@/lib/http/parse-body";
 import { validateExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -91,12 +91,9 @@ async function handlePOST(req: NextRequest): Promise<Response> {
   const { userId, tenantId } = auth.data;
 
   // 2. Body validation. Reject any unknown field (Zod strict).
-  const body = await req.json().catch(() => null);
-  const parsed = ReportRequestSchema.safeParse(body);
-  if (!parsed.success) {
-    return zodValidationError(parsed.error);
-  }
-  const data = parsed.data;
+  const bodyResult = await parseBody(req, ReportRequestSchema);
+  if (!bodyResult.ok) return bodyResult.response;
+  const data = bodyResult.data;
 
   // 3. Rate-limit per (tenantId, deviceId). After auth so we know the tenant
   // bucket, before the audit emit so we don't burn an audit row on flood.

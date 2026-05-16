@@ -9,6 +9,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { scimParseBody } from "@/lib/scim/parse-body";
 import { prisma } from "@/lib/prisma";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
 import {
@@ -53,19 +54,9 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
   if (!auth.ok) return auth.response;
   const { tenantId, auditUserId, actorType: putActorType } = auth.data;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return scimError(400, "Invalid JSON");
-  }
-
-  const parsed = scimUserSchema.safeParse(body);
-  if (!parsed.success) {
-    return scimError(400, parsed.error.issues.map((i) => i.message).join("; "));
-  }
-
-  const { active, externalId, name } = parsed.data;
+  const bodyResult = await scimParseBody(req, scimUserSchema);
+  if (!bodyResult.ok) return bodyResult.response;
+  const { active, externalId, name } = bodyResult.data;
 
   const { id } = await params;
 
@@ -124,21 +115,12 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
   if (!auth.ok) return auth.response;
   const { tenantId, auditUserId, actorType: patchActorType } = auth.data;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return scimError(400, "Invalid JSON");
-  }
-
-  const parsed = scimPatchOpSchema.safeParse(body);
-  if (!parsed.success) {
-    return scimError(400, parsed.error.issues.map((i) => i.message).join("; "));
-  }
+  const bodyResult = await scimParseBody(req, scimPatchOpSchema);
+  if (!bodyResult.ok) return bodyResult.response;
 
   let patchOps;
   try {
-    patchOps = parseUserPatchOps(parsed.data.Operations);
+    patchOps = parseUserPatchOps(bodyResult.data.Operations);
   } catch (e) {
     if (e instanceof PatchParseError) {
       return scimError(400, e.message);

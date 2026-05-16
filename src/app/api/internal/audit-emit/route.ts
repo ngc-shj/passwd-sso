@@ -5,6 +5,7 @@ import { checkAuth } from "@/lib/auth/session/check-auth";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { parseBody } from "@/lib/http/parse-body";
 
 export const runtime = "nodejs";
 
@@ -57,19 +58,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({}, { status: 429 });
   }
 
-  let rawBody: unknown;
-  try {
-    rawBody = await request.json();
-  } catch {
-    return NextResponse.json({}, { status: 400 });
-  }
+  const bodyResult = await parseBody(request, bodySchema);
+  if (!bodyResult.ok) return NextResponse.json({}, { status: 400 });
 
-  const parsed = bodySchema.safeParse(rawBody);
-  if (!parsed.success) {
-    return NextResponse.json({}, { status: 400 });
-  }
-
-  const { action, metadata } = parsed.data;
+  const { action, metadata } = bodyResult.data;
 
   if (!ALLOWED_ACTIONS.has(action)) {
     return NextResponse.json({}, { status: 400 });

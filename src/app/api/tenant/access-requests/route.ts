@@ -16,7 +16,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { z } from "zod";
-import { SA_TOKEN_SCOPE, SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
+import { SA_TOKEN_PREFIX, SA_TOKEN_SCOPE, SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { MS_PER_HOUR, MS_PER_MINUTE } from "@/lib/constants/time";
 
 const accessRequestCreateLimiter = createRateLimiter({ windowMs: MS_PER_HOUR, max: 20 });
@@ -102,11 +102,25 @@ async function handleGET(req: NextRequest) {
 // Supports two auth modes:
 // 1. SA token (Bearer sa_...) — SA self-service, serviceAccountId inferred from token
 // 2. Session (admin) — admin creates on behalf of SA, serviceAccountId in body
+// Any other token type (api_key, extension_token, mcp_token) is rejected with 401.
 async function handlePOST(req: NextRequest) {
-  const authResult = await authOrToken(req);
-  if (!authResult || authResult.type === "scope_insufficient" ||
-      authResult.type === "mcp_token") {
-    return unauthorized();
+  // Detect SA self-service by Bearer prefix before calling auth()
+  const bearerHeader = req.headers.get("authorization");
+  const isSaBearer = bearerHeader?.startsWith(`Bearer ${SA_TOKEN_PREFIX}`) ?? false;
+
+  let authResult: Awaited<ReturnType<typeof authOrToken>>;
+
+  if (isSaBearer) {
+    authResult = await authOrToken(req, SA_TOKEN_SCOPE.ACCESS_REQUEST_CREATE);
+    if (!authResult || authResult.type === "scope_insufficient") {
+      return errorResponse(API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT);
+    }
+    if (authResult.type !== "service_account") return unauthorized();
+  } else {
+    // Admin path: session only — all Bearer token types are rejected
+    const session = await auth();
+    if (!session?.user?.id) return unauthorized();
+    authResult = { type: "session", userId: session.user.id };
   }
 
   let tenantId: string;
@@ -117,11 +131,8 @@ async function handlePOST(req: NextRequest) {
   let expiresInMinutes: number;
 
   if (authResult.type === "service_account") {
-    // SA self-service: requires access-request:create scope
-    if (!authResult.scopes.includes(SA_TOKEN_SCOPE.ACCESS_REQUEST_CREATE)) {
-      return errorResponse(API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT);
-    }
-
+    // SA self-service: scope was already validated by authOrToken(req, ACCESS_REQUEST_CREATE)
+    // at the SA-bearer branch above. No second-check needed.
     tenantId = authResult.tenantId;
     serviceAccountId = authResult.serviceAccountId;
 
@@ -164,8 +175,7 @@ async function handlePOST(req: NextRequest) {
     }
     userId = sa.createdById;
   } else {
-    // Admin path: session or API key auth
-    if (!("userId" in authResult)) return unauthorized();
+    // Admin path: session-only (enforced above; authResult.type === "session" here)
     userId = authResult.userId;
 
     let actor;
@@ -177,17 +187,7 @@ async function handlePOST(req: NextRequest) {
     tenantId = actor.tenantId;
 
     // Session reaches this handler via middleware which already enforces
-    // tenant IP restriction. API key / other token types bypass middleware
-    // access restriction and must be checked here.
-    if (authResult.type !== "session") {
-      const denied = await enforceAccessRestriction(
-        req,
-        userId,
-        tenantId,
-        resolveActorType(authResult),
-      );
-      if (denied) return denied;
-    }
+    // tenant IP restriction. No other token type can reach this branch.
 
     const rl = await accessRequestCreateLimiter.check(`rl:access_request_create:${tenantId}`);
     if (!rl.allowed) return rateLimited(rl.retryAfterMs);

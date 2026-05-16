@@ -346,6 +346,30 @@ describe("createTeamE2EPasswordSchema", () => {
     expect(result.success).toBe(false);
   });
 
+  it("rejects teamKeyVersion above TEAM_KEY_VERSION_MAX (S-1 / RS3)", () => {
+    const result = createTeamE2EPasswordSchema.safeParse({
+      ...valid(),
+      teamKeyVersion: 10_001,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects itemKeyVersion above TEAM_KEY_VERSION_MAX (S-1 / RS3)", () => {
+    const result = createTeamE2EPasswordSchema.safeParse({
+      ...valid(),
+      itemKeyVersion: 10_001,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects aadVersion above 1 (only protocol version 1 exists)", () => {
+    const result = createTeamE2EPasswordSchema.safeParse({
+      ...valid(),
+      aadVersion: 2,
+    });
+    expect(result.success).toBe(false);
+  });
+
   it("rejects non-UUID inside tagIds array", () => {
     const result = createTeamE2EPasswordSchema.safeParse({
       ...valid(),

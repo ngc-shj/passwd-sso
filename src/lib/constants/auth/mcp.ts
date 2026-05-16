@@ -12,6 +12,7 @@ export const MCP_SCOPE = {
   VAULT_UNLOCK_DATA: "vault:unlock-data",
   PASSWORDS_READ: "passwords:read",
   PASSWORDS_WRITE: "passwords:write",
+  DELEGATION_CHECK: "delegation:check",
 } as const;
 
 export type McpScope = (typeof MCP_SCOPE)[keyof typeof MCP_SCOPE];
@@ -28,6 +29,7 @@ export const MCP_SCOPE_RISK: Record<McpScope, ScopeRiskLevel> = {
   [MCP_SCOPE.VAULT_UNLOCK_DATA]: "use",
   [MCP_SCOPE.TEAM_CREDENTIALS_READ]: "use",
   [MCP_SCOPE.PASSWORDS_WRITE]: "write",
+  [MCP_SCOPE.DELEGATION_CHECK]: "use",
 };
 
 // OAuth 2.1 constants

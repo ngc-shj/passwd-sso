@@ -11,6 +11,7 @@ import { transition, AR_STATUS, AR_ACTOR } from "@/lib/access-request/access-req
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -34,6 +35,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   } catch (err) {
     return handleAuthError(err);
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   const rl = await denyLimiter.check(`rl:access_request_deny:${actor.tenantId}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);

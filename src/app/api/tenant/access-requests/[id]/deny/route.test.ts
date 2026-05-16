@@ -13,6 +13,7 @@ const {
   mockLogAudit,
   mockAccessRequestFindUnique,
   mockAccessRequestUpdateMany,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -20,6 +21,7 @@ const {
   mockLogAudit: vi.fn(),
   mockAccessRequestFindUnique: vi.fn(),
   mockAccessRequestUpdateMany: vi.fn(),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -56,6 +58,9 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
+}));
 
 import { POST } from "@/app/api/tenant/access-requests/[id]/deny/route";
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
@@ -72,7 +77,10 @@ const makeAccessRequest = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("POST /api/tenant/access-requests/[id]/deny", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRequireRecentSession.mockResolvedValue(null);
+  });
 
   it("denies pending request and returns success", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
@@ -201,5 +209,42 @@ describe("POST /api/tenant/access-requests/[id]/deny", () => {
     const { status } = await parseResponse(res);
 
     expect(status).toBe(403);
+  });
+
+  it("requires recent re-auth (403 without step-up)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/access-requests/${REQUEST_ID}/deny`,
+    );
+    const res = await POST(req, createParams({ id: REQUEST_ID }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockAccessRequestFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("deny succeeds when step-up satisfied", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAccessRequestFindUnique.mockResolvedValue(makeAccessRequest());
+    mockAccessRequestUpdateMany.mockResolvedValue({ count: 1 });
+
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/access-requests/${REQUEST_ID}/deny`,
+    );
+    const res = await POST(req, createParams({ id: REQUEST_ID }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(mockRequireRecentSession).toHaveBeenCalledOnce();
   });
 });

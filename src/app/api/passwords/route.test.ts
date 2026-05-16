@@ -658,8 +658,13 @@ describe("POST /api/passwords", () => {
       method: "POST",
       headers: {
         get: (key: string) => {
-          if (key.toLowerCase() === "x-passwd-sso-source") return "import";
-          if (key.toLowerCase() === "x-passwd-sso-filename") return "file\0name\x1f.csv";
+          const k = key.toLowerCase();
+          if (k === "x-passwd-sso-source") return "import";
+          if (k === "x-passwd-sso-filename") return "file\0name\x1f.csv";
+          // parseBody (post-C8) reads content-length as a cap pre-check;
+          // this hand-crafted mock skips the real NextRequest body stream,
+          // so the null-stream path requires an explicit content-length.
+          if (k === "content-length") return "100";
           return null;
         },
       },
@@ -694,8 +699,11 @@ describe("POST /api/passwords", () => {
       method: "POST",
       headers: {
         get: (key: string) => {
-          if (key.toLowerCase() === "x-passwd-sso-source") return "import";
-          if (key.toLowerCase() === "x-passwd-sso-filename") return "\0\x01\x02";
+          const k = key.toLowerCase();
+          if (k === "x-passwd-sso-source") return "import";
+          if (k === "x-passwd-sso-filename") return "\0\x01\x02";
+          // see comment in the prior test — null-stream path needs content-length
+          if (k === "content-length") return "100";
           return null;
         },
       },

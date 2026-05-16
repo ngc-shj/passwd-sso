@@ -24,7 +24,6 @@ export const EXTENSION_TOKEN_ROUTES: readonly string[] = [
   API_PATH.VAULT_UNLOCK_DATA,
   API_PATH.EXTENSION_TOKEN,         // DELETE (revoke) — validated by route handler
   API_PATH.EXTENSION_TOKEN_REFRESH, // POST (refresh) — validated by route handler
-  API_PATH.API_KEYS,                // API key management — validated by route handler via authOrToken
   API_PATH.TENANT_ACCESS_REQUESTS,  // SA self-service JIT — validated by route handler via authOrToken
   API_PATH.VAULT_DELEGATION,        // Delegation check — CLI agent uses Bearer for /check
 ];

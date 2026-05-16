@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
-const { mockAuth, mockCheckAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaTeam, mockAuditLogCreate, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockWithBypassRls, mockLogAudit } = vi.hoisted(() => {
+const { mockAuth, mockCheckAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaTeam, mockPrismaTeamTag, mockAuditLogCreate, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockWithBypassRls, mockLogAudit } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -20,6 +21,7 @@ const { mockAuth, mockCheckAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFold
     },
     mockPrismaTeamFolder: { findUnique: vi.fn() },
     mockPrismaTeam: { findUnique: vi.fn() },
+    mockPrismaTeamTag: { count: vi.fn().mockResolvedValue(0) },
     mockAuditLogCreate: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
@@ -36,6 +38,7 @@ vi.mock("@/lib/prisma", () => ({
     teamPasswordEntry: mockPrismaTeamPasswordEntry,
     teamFolder: mockPrismaTeamFolder,
     team: mockPrismaTeam,
+    teamTag: mockPrismaTeamTag,
     auditLog: { create: mockAuditLogCreate },
   },
 }));
@@ -549,6 +552,8 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
       tags: [{ id: TAG_UUID, name: "Work", color: "#ff0000" }],
       createdAt: now,
     });
+    // C5 guard: teamTag.count must match tagIds.length for same-team tags
+    mockPrismaTeamTag.count.mockResolvedValueOnce(1);
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
@@ -564,6 +569,24 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
         }),
       }),
     );
+  });
+
+  it("returns 404 when tagIds belong to another team in same tenant (C5 negative)", async () => {
+    const FOREIGN_TAG_UUID = "660e8400-e29b-41d4-a716-446655440099";
+    // Explicit mock: teamTag.count returns 0 (count < tagIds.length → NOT_FOUND).
+    // vi.resetAllMocks() in beforeEach clears the hoisted default, so mockResolvedValueOnce(0) is load-bearing.
+    mockPrismaTeamTag.count.mockResolvedValueOnce(0);
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
+        body: { ...validE2EBody, tagIds: [FOREIGN_TAG_UUID] },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toBe("NOT_FOUND");
+    expect(mockPrismaTeamPasswordEntry.create).not.toHaveBeenCalled();
   });
 
   it("creates entry with teamFolderId when folder belongs to same team", async () => {
@@ -602,7 +625,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     );
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toBe("FOLDER_NOT_FOUND");
+    expect(json.error).toBe(API_ERROR.FOLDER_NOT_FOUND);
   });
 
   it("returns 400 when teamFolderId does not exist", async () => {
@@ -617,7 +640,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     );
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toBe("FOLDER_NOT_FOUND");
+    expect(json.error).toBe(API_ERROR.FOLDER_NOT_FOUND);
   });
 
   it("creates entry with requireReprompt and expiresAt", async () => {

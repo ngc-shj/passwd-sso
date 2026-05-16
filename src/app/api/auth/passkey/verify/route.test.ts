@@ -321,8 +321,9 @@ describe("POST /api/auth/passkey/verify", () => {
     } as ConstructorParameters<typeof import("next/server").NextRequest>[1]);
     const { status, json } = await parseResponse(await POST(req));
 
+    // C8 migration: route now uses parseBody → INVALID_JSON for malformed body.
     expect(status).toBe(400);
-    expect(json.error).toBe("INVALID_REQUEST");
+    expect(json.error).toBe("INVALID_JSON");
   });
 
   it("returns 400 when credentialResponse is not a string", async () => {
@@ -332,8 +333,9 @@ describe("POST /api/auth/passkey/verify", () => {
     });
     const { status, json } = await parseResponse(await POST(req));
 
+    // C8 migration: Zod schema rejects non-string with VALIDATION_ERROR.
     expect(status).toBe(400);
-    expect(json.error).toBe("INVALID_REQUEST");
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 
   it("returns 401 when authorizeWebAuthn returns null", async () => {

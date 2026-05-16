@@ -134,22 +134,22 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(res.status).toBe(401);
   });
 
-  it("bypasses session check for Bearer + /api/api-keys", async () => {
+  it("does NOT bypass session check for Bearer + /api/api-keys (C2: session-only)", async () => {
     const res = await proxy(
       createApiRequest("/api/api-keys", { Authorization: "Bearer tok123" }),
       dummyOptions,
     );
-    expect(res.status).toBe(200);
-    expect(fetchSpy).not.toHaveBeenCalled();
+    // Post-C2: api-keys removed from EXTENSION_TOKEN_ROUTES. Bearer-only request
+    // (no session cookie) short-circuits to 401 without a session lookup.
+    expect(res.status).toBe(401);
   });
 
-  it("bypasses session check for Bearer + /api/api-keys/[id]", async () => {
+  it("does NOT bypass session check for Bearer + /api/api-keys/[id] (C2: session-only)", async () => {
     const res = await proxy(
       createApiRequest("/api/api-keys/key-1", { Authorization: "Bearer tok123" }),
       dummyOptions,
     );
-    expect(res.status).toBe(200);
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(res.status).toBe(401);
   });
 
   it("allows /api/v1/passwords without session (public API)", async () => {

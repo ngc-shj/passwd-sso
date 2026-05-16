@@ -2,6 +2,11 @@ import { MS_PER_MINUTE } from "../time";
 
 export const SA_TOKEN_PREFIX = "sa_";
 
+// NOTE: `delegation:check` is intentionally NOT a SA scope. The delegation lookup is
+// MCP-client-centric (joins mcpAccessToken.mcpClient). SA support requires a parallel
+// serviceAccountId-keyed delegation record AND a route branch using serviceAccountId
+// instead of userId. Adding `DELEGATION_CHECK` here without those changes produces a
+// silent 403 because the route's `hasUserId` gate rejects SA tokens.
 export const SA_TOKEN_SCOPE = {
   PASSWORDS_READ: "passwords:read",
   PASSWORDS_WRITE: "passwords:write",

@@ -57,6 +57,10 @@ describe("MCP_SCOPE_RISK", () => {
   it("passwords:write is risk level 'write'", () => {
     expect(MCP_SCOPE_RISK[MCP_SCOPE.PASSWORDS_WRITE]).toBe("write");
   });
+
+  it("delegation:check is risk level 'use'", () => {
+    expect(MCP_SCOPE_RISK[MCP_SCOPE.DELEGATION_CHECK]).toBe("use");
+  });
 });
 
 describe("MCP token constants", () => {

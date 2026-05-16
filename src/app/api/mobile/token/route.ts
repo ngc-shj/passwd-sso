@@ -34,8 +34,8 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import {
   errorResponse,
   rateLimited,
-  zodValidationError,
 } from "@/lib/http/api-response";
+import { parseBody } from "@/lib/http/parse-body";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
@@ -106,9 +106,8 @@ async function handlePOST(req: NextRequest): Promise<Response> {
   }
 
   // 2. Parse + validate body.
-  const body = await req.json().catch(() => null);
-  const parsed = TokenRequestSchema.safeParse(body);
-  if (!parsed.success) {
+  const bodyResult = await parseBody(req, TokenRequestSchema);
+  if (!bodyResult.ok) {
     getLogger().warn(
       {
         event: "mobile_token_failure",
@@ -117,10 +116,10 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       },
       "mobile token failed: malformed body",
     );
-    return zodValidationError(parsed.error);
+    return bodyResult.response;
   }
   const { code, code_verifier: codeVerifier, device_pubkey: devicePubkey } =
-    parsed.data;
+    bodyResult.data;
 
   // 3. Atomically consume the bridge code AND read the stored bindings in a
   // single round-trip. Prisma's `update` raises P2025 when the predicate

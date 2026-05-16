@@ -282,9 +282,36 @@ describe("POST /api/tenant/access-requests", () => {
   });
 
   it("returns 401 for unauthenticated users", async () => {
+    mockAuth.mockResolvedValue(null);
     mockAuthOrToken.mockResolvedValue(null);
 
     const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      body: {
+        serviceAccountId: SA_ID,
+        requestedScope: ["passwords:read"],
+      },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(401);
+  });
+
+  // Admin path is session-only (C3): any Bearer prefix other than "sa_" falls
+  // through to `auth()` and gets 401 when no session cookie is present. The
+  // specific bearer type (api_/ext_/mcp_) is irrelevant — the gate is "is this
+  // a session?" not "what token type?". `mockAuthOrToken` is NOT exercised on
+  // these paths; the SA-bearer detection runs only when the Authorization
+  // header starts with "Bearer sa_".
+  it.each([
+    { label: "api_key", prefix: "api_somekey" },
+    { label: "extension_token", prefix: "ext_sometoken" },
+    { label: "mcp_token", prefix: "mcp_sometoken" },
+  ])("returns 401 for non-SA bearer ($label) on admin path", async ({ prefix }) => {
+    mockAuth.mockResolvedValue(null);
+
+    const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      headers: { Authorization: `Bearer ${prefix}` },
       body: {
         serviceAccountId: SA_ID,
         requestedScope: ["passwords:read"],
@@ -337,6 +364,7 @@ describe("POST /api/tenant/access-requests", () => {
     mockAccessRequestCreate.mockResolvedValue(created);
 
     const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      headers: { Authorization: "Bearer sa_sometoken" },
       body: {
         serviceAccountId: SA_ID,
         requestedScope: ["passwords:read"],
@@ -369,6 +397,7 @@ describe("POST /api/tenant/access-requests", () => {
     mockEnforceAccessRestriction.mockResolvedValueOnce(denied);
 
     const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      headers: { Authorization: "Bearer sa_sometoken" },
       body: { requestedScope: ["passwords:read"] },
     });
     const res = await POST(req);
@@ -379,15 +408,10 @@ describe("POST /api/tenant/access-requests", () => {
   });
 
   it("returns 403 when SA token lacks access-request:create scope", async () => {
-    mockAuthOrToken.mockResolvedValue({
-      type: "service_account",
-      serviceAccountId: SA_ID,
-      tenantId: "tenant-1",
-      tokenId: "tok-2",
-      scopes: ["passwords:read"],
-    });
+    mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
 
     const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      headers: { Authorization: "Bearer sa_sometoken" },
       body: {
         requestedScope: ["passwords:read"],
       },
@@ -423,6 +447,7 @@ describe("POST /api/tenant/access-requests", () => {
 
     // Body does NOT include serviceAccountId — SA path infers it from token
     const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      headers: { Authorization: "Bearer sa_sometoken" },
       body: {
         requestedScope: ["passwords:read"],
       },

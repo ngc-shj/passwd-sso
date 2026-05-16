@@ -4,6 +4,8 @@ import { hashToken } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
+import { readJsonWithCap } from "@/lib/http/parse-body";
+import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 
 const revokeLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
 
@@ -37,15 +39,17 @@ export async function POST(req: NextRequest) {
   let body: Record<string, string>;
   const contentType = req.headers.get("content-type") ?? "";
 
-  try {
-    if (contentType.includes("application/x-www-form-urlencoded")) {
+  if (contentType.includes("application/x-www-form-urlencoded")) {
+    try {
       const text = await req.text();
       body = Object.fromEntries(new URLSearchParams(text));
-    } else {
-      body = (await req.json()) as Record<string, string>;
+    } catch {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }
-  } catch {
-    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  } else {
+    const read = await readJsonWithCap(req, MAX_JSON_BODY_BYTES);
+    if (!read.ok) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    body = read.body as Record<string, string>;
   }
 
   const token = body.token;

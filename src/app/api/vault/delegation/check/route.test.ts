@@ -92,22 +92,51 @@ describe("GET /api/vault/delegation/check", () => {
     expect(json.authorized).toBe(false);
   });
 
-  it("accepts Bearer token auth (extension token)", async () => {
-    mockAuthOrToken.mockResolvedValue({ type: "token", userId: "user-1", scopes: [] });
-    mockPrismaDelegationSession.findFirst.mockResolvedValue({
-      id: SESSION_ID,
-      expiresAt: EXPIRES_AT,
-      entryIds: [VALID_ENTRY_ID],
-    });
-
+  it("returns 403 scope_insufficient when mcp_token lacks delegation:check", async () => {
+    mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
     const res = await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
     const json = await res.json();
-    expect(json.authorized).toBe(true);
+    expect(json.authorized).toBe(false);
+  });
+
+  it("returns 403 when extension_token is used", async () => {
+    // extension tokens do not carry delegation:check scope; authOrToken returns scope_insufficient
+    mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
+    const res = await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.authorized).toBe(false);
+  });
+
+  it("returns 403 when api_key is used", async () => {
+    // api_keys do not carry delegation:check scope; authOrToken returns scope_insufficient
+    mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
+    const res = await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.authorized).toBe(false);
+  });
+
+  it("returns 403 when sa_token is used (intentionally unsupported)", async () => {
+    // SA tokens lack userId and are MCP-client-agnostic; delegation check is intentionally
+    // unsupported for SA tokens (follow-up PR required for parallel serviceAccountId lookup)
+    mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
+    const res = await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.authorized).toBe(false);
   });
 
   it("returns 403 when Bearer token is from outside tenant IP range", async () => {
-    mockAuthOrToken.mockResolvedValue({ type: "token", userId: "user-1", scopes: [] });
+    mockAuthOrToken.mockResolvedValue({
+      type: "mcp_token",
+      userId: "user-1",
+      tenantId: "tenant-1",
+      tokenId: "tok-1",
+      mcpClientId: "mcpc_abc",
+      scopes: ["delegation:check"],
+    });
     const denied = new Response(
       JSON.stringify({ error: "ACCESS_DENIED" }),
       { status: 403, headers: { "Content-Type": "application/json" } },
