@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.49](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.48...passwd-sso-v0.4.49) (2026-05-16)
+
+
+### Bug Fixes
+
+* OWASP Top 10 followup (A05/A07/A09) — centralize Redis fallback log throttle, sanitize audit-outbox `lastError`, warn-log passkey policy fetch failure, scope OAuth callback rate limit to `/api/auth/callback/*`, centralize session cookie naming with `__Host-` + `sameSite=strict`, fail-closed docker-compose DB passwords ([#468](https://github.com/ngc-shj/passwd-sso/issues/468)) ([a8e3a74](https://github.com/ngc-shj/passwd-sso/commit/a8e3a74bff7d6f56e9d127dd1c6a7a99c3a72f44))
+
+
+### Notes
+
+* PR [#465](https://github.com/ngc-shj/passwd-sso/issues/465) initially attempted these OWASP hardenings but was reverted via PR [#467](https://github.com/ngc-shj/passwd-sso/issues/467) after a post-merge review found 4 Critical + 13 Major defects (production-breaking session cookie name propagation gap, broken docker-compose env wiring, failing CI gate, etc.). The salvageable items were re-implemented correctly in PR [#468](https://github.com/ngc-shj/passwd-sso/issues/468). Items intentionally dropped: A02 (CLI TLS NODE_ENV guard — ineffective in practice), A07 (vault setup `entropyBits` validation — bypassable in zero-knowledge model). Rationale and the remaining tracked finding (A04/A07 passkey policy fail-OPEN) documented in [`docs/security/owasp-top10-2026-05.md`](https://github.com/ngc-shj/passwd-sso/blob/main/docs/security/owasp-top10-2026-05.md).
+
 ## [0.4.48](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.47...passwd-sso-v0.4.48) (2026-05-13)
 
 
