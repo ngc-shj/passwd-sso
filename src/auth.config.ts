@@ -9,6 +9,7 @@ import { magicLinkEmail } from "@/lib/email/templates/magic-link";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { getLogger } from "@/lib/logger";
+import { getSessionCookieName } from "@/lib/auth/session/cookie-name";
 
 // Rate limiters for magic link email (per-email address)
 const magicLinkEmailLimiter = createRateLimiter({
@@ -127,13 +128,19 @@ export default {
 
   cookies: {
     sessionToken: {
-      name: useSecureCookies
-        ? "__Secure-authjs.session-token"
-        : "authjs.session-token",
+      name: getSessionCookieName({
+        useSecureCookies,
+        basePath: process.env.NEXT_PUBLIC_BASE_PATH,
+      }),
       options: {
         path: `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/`,
         httpOnly: true,
-        sameSite: "lax" as const,
+        // strict: cookie is NOT sent on cross-site top-level navigations.
+        // Prevents login CSRF + minimizes session-cookie exfiltration via
+        // top-level GETs from third-party origins. Trade-off: external
+        // links into the app land unauthenticated until first same-site
+        // navigation — acceptable for this app's security posture.
+        sameSite: "strict" as const,
         secure: useSecureCookies,
       },
     },

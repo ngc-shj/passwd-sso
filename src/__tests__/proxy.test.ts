@@ -560,6 +560,29 @@ describe("extractSessionToken", () => {
     const cookie = "authjs.session-token=tok%2Fwith%3Dspecial%2Bchars; other=x";
     expect(_extractSessionToken(cookie)).toBe("tok%2Fwith%3Dspecial%2Bchars");
   });
+
+  // __Host-authjs.session-token is the cookie name Auth.js emits when
+  // useSecureCookies is true AND NEXT_PUBLIC_BASE_PATH is unset — the
+  // typical HTTPS-at-root production deployment. The post-merge review
+  // of PR #465 found the proxy's names array did NOT include __Host-,
+  // so every authenticated request in such deployments was treated as
+  // anonymous. These tests pin the contract.
+  it("extracts __Host-authjs.session-token value", () => {
+    const cookie = "__Host-authjs.session-token=host-token-abc";
+    expect(_extractSessionToken(cookie)).toBe("host-token-abc");
+  });
+
+  it("prefers __Host- when both __Host- and __Secure- are present", () => {
+    const cookie =
+      "__Host-authjs.session-token=host-tok; __Secure-authjs.session-token=secure-tok; authjs.session-token=plain-tok";
+    expect(_extractSessionToken(cookie)).toBe("host-tok");
+  });
+
+  it("falls through to __Secure- when only __Secure- + plain are present", () => {
+    const cookie =
+      "__Secure-authjs.session-token=secure-tok; authjs.session-token=plain-tok";
+    expect(_extractSessionToken(cookie)).toBe("secure-tok");
+  });
 });
 
 describe("proxy — access restriction", () => {

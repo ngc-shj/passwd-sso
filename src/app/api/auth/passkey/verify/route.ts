@@ -12,6 +12,7 @@ import { AUDIT_ACTION } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isHttps } from "@/lib/url-helpers";
+import { getSessionCookieName } from "@/lib/auth/session/cookie-name";
 import { revokeAllExtensionTokensForUser } from "@/lib/auth/tokens/extension-token";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
@@ -21,10 +22,12 @@ export const runtime = "nodejs";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
-// Cookie name must match auth.config.ts
-const SESSION_COOKIE_NAME = isHttps
-  ? "__Secure-authjs.session-token"
-  : "authjs.session-token";
+// Cookie name must match auth.config.ts — both paths use the shared
+// getSessionCookieName helper so the selection cannot drift.
+const SESSION_COOKIE_NAME = getSessionCookieName({
+  useSecureCookies: isHttps,
+  basePath: process.env.NEXT_PUBLIC_BASE_PATH,
+});
 
 // POST /api/auth/passkey/verify
 // Unauthenticated endpoint — verifies a passkey authentication response

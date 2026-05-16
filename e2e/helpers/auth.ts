@@ -6,11 +6,13 @@
  */
 import type { BrowserContext } from "@playwright/test";
 import { isHttps } from "../../src/lib/url-helpers";
+import { getSessionCookieName as resolveSessionCookieName } from "../../src/lib/auth/session/cookie-name";
 
 function getSessionCookieName(): string {
-  return isHttps
-    ? "__Secure-authjs.session-token"
-    : "authjs.session-token";
+  return resolveSessionCookieName({
+    useSecureCookies: isHttps,
+    basePath: process.env.NEXT_PUBLIC_BASE_PATH,
+  });
 }
 
 /**
