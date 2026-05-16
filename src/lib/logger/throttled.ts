@@ -1,6 +1,15 @@
 import { getLogger } from "@/lib/logger";
 
 /**
+ * Single throttle window used by every Redis-backed cache that uses
+ * createThrottledErrorLogger for its fallback path. Centralized so the
+ * forensic-responsiveness floor is uniform across session-cache, dpop
+ * caches, and the rate-limit Redis path — changing the value here updates
+ * all four call sites at once.
+ */
+export const REDIS_FALLBACK_LOG_THROTTLE_MS = 5_000;
+
+/**
  * Throttled error logger factory. The returned function emits at most one
  * log line per intervalMs. Used by Redis-backed caches that must not flood
  * logs during sustained outages.

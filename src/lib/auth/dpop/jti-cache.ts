@@ -1,5 +1,8 @@
 import { getRedis } from "@/lib/redis";
-import { createThrottledErrorLogger } from "@/lib/logger/throttled";
+import {
+  REDIS_FALLBACK_LOG_THROTTLE_MS,
+  createThrottledErrorLogger,
+} from "@/lib/logger/throttled";
 
 /**
  * RFC 9449 §11.1 — server-side `jti` uniqueness cache.
@@ -25,7 +28,7 @@ export interface JtiCache {
 const DEFAULT_TTL_MS = 60_000;
 
 const logRedisError = createThrottledErrorLogger(
-  30_000,
+  REDIS_FALLBACK_LOG_THROTTLE_MS,
   "dpop-jti-cache.redis.fallback",
 );
 
