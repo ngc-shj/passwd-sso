@@ -56,9 +56,13 @@ const SERVER_HASH = createHash("sha256")
   .update(AUTH_HASH + SERVER_SALT)
   .digest("hex");
 
-function makeUnlockRequest(authHash: string = AUTH_HASH) {
+function makeUnlockRequest(
+  authHash: string = AUTH_HASH,
+  opts: { headers?: Record<string, string> } = {},
+) {
   return createRequest("POST", "http://localhost:3000/api/vault/unlock", {
     body: { authHash },
+    headers: opts.headers,
   });
 }
 
@@ -196,12 +200,28 @@ describe("POST /api/vault/unlock", () => {
     );
   });
 
-  it("uses userId-only rate key (no IP)", async () => {
+  it("uses per-user rate key with no IP or other suffix (account-lockout is the per-user defense)", async () => {
+    // Design intent: vault unlock rate key MUST be `rl:vault_unlock:<userId>`
+    // exactly. An earlier change added an `:<ip>` suffix; the post-merge
+    // review of #465 reverted it because:
+    //   - per-user account-lockout (recordFailure / checkLockout) already
+    //     defends against credential brute-force per user
+    //   - adding IP made the rate-limit strictly weaker (IP rotation bypass)
+    //   - the lockout layer protects DoS-on-victim regardless of IP
+    // Strict-equal assertion (not stringContaining) so any future suffix
+    // re-introduction trips this test instead of silently passing.
     const userId = "test-user-rate";
     mockAuth.mockResolvedValue({ user: { id: userId } });
     mockRateLimiter.check.mockResolvedValue({ allowed: false });
-
-    await POST(makeUnlockRequest());
+    // Provide a real IP in headers so a regression that re-adds IP-binding
+    // would surface as a key suffix mismatch (the previous test fixture
+    // omitted IP, which made the assertion vacuously satisfiable).
+    await POST(
+      makeUnlockRequest(AUTH_HASH, {
+        headers: { "x-forwarded-for": "203.0.113.5" },
+      }),
+    );
+    expect(mockRateLimiter.check).toHaveBeenCalledTimes(1);
     expect(mockRateLimiter.check).toHaveBeenCalledWith(`rl:vault_unlock:${userId}`);
   });
 
