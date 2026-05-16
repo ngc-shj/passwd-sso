@@ -40,3 +40,16 @@ export const IOS_TOKEN_DEFAULT_SCOPES = [
  * per-family absolute lifetime (tenant.extensionTokenAbsoluteTimeoutMinutes).
  */
 export const EXTENSION_TOKEN_MAX_ACTIVE = 3;
+
+/**
+ * Default idle timeout in minutes used when `tenant.extensionTokenIdleTimeoutMinutes`
+ * is null. Single source of truth for the application-side fallback applied
+ * by `issueExtensionToken`, the refresh route, and the tenant-policy GET
+ * fallback. MUST stay in sync with the Prisma schema default
+ * (`extensionTokenIdleTimeoutMinutes Int @default(10080)`); the schema-default
+ * integration test in `session-timeout.integration.test.ts` asserts the
+ * round-trip.
+ *
+ * 10080 minutes = 7 days.
+ */
+export const DEFAULT_EXTENSION_IDLE_MINUTES = 10080;

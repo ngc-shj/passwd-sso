@@ -12,6 +12,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { TokenIssueResponseSchema } from "@/lib/validations/extension-token";
 import logger from "@/lib/logger";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { DEFAULT_EXTENSION_IDLE_MINUTES } from "@/lib/constants/auth/extension-token";
 
 export const runtime = "nodejs";
 
@@ -72,7 +73,7 @@ async function handlePOST(req: NextRequest) {
       },
     }),
   BYPASS_PURPOSE.TOKEN_LIFECYCLE);
-  const idleMinutes = tenant?.extensionTokenIdleTimeoutMinutes ?? 10080;
+  const idleMinutes = tenant?.extensionTokenIdleTimeoutMinutes ?? DEFAULT_EXTENSION_IDLE_MINUTES;
   const absoluteMinutes = tenant?.extensionTokenAbsoluteTimeoutMinutes ?? 43200;
 
   const now = new Date();

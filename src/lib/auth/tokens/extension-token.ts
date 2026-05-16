@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import {
   EXTENSION_TOKEN_SCOPE,
   EXTENSION_TOKEN_MAX_ACTIVE,
+  DEFAULT_EXTENSION_IDLE_MINUTES,
   type ExtensionTokenScope,
 } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -212,7 +213,7 @@ export async function issueExtensionToken(params: {
       select: { extensionTokenIdleTimeoutMinutes: true },
     }),
   BYPASS_PURPOSE.TOKEN_LIFECYCLE);
-  const idleMinutes = tenant?.extensionTokenIdleTimeoutMinutes ?? 10080;
+  const idleMinutes = tenant?.extensionTokenIdleTimeoutMinutes ?? DEFAULT_EXTENSION_IDLE_MINUTES;
   const expiresAt = new Date(now.getTime() + idleMinutes * MS_PER_MINUTE);
 
   const plaintext = generateShareToken();

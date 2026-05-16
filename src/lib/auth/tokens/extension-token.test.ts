@@ -65,6 +65,8 @@ import {
   hasScope,
   issueExtensionToken,
 } from "./extension-token";
+import { DEFAULT_EXTENSION_IDLE_MINUTES } from "@/lib/constants/auth/extension-token";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 // ─── parseScopes ─────────────────────────────────────────────
 
@@ -298,5 +300,29 @@ describe("issueExtensionToken", () => {
       scope: "passwords:read",
     });
     expect(mockTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to DEFAULT_EXTENSION_IDLE_MINUTES when tenant.extensionTokenIdleTimeoutMinutes is null", async () => {
+    // Drift detector: a regression that lowers / raises the application
+    // fallback (or copies the literal back into one of the call sites)
+    // would change the computed expiresAt and trip this assertion.
+    mockTenantFindUnique.mockResolvedValueOnce({ extensionTokenIdleTimeoutMinutes: null });
+
+    const before = Date.now();
+    await issueExtensionToken({
+      userId: "u1",
+      tenantId: "t1",
+      scope: "passwords:read",
+    });
+    const after = Date.now();
+
+    expect(mockCreate).toHaveBeenCalled();
+    const callArg = mockCreate.mock.calls[0]?.[0] as { data: { expiresAt: Date } };
+    const expiresAtMs = callArg.data.expiresAt.getTime();
+
+    // expiresAt MUST equal `now + DEFAULT_EXTENSION_IDLE_MINUTES min` (±a small
+    // wall-clock window for the time taken inside issueExtensionToken).
+    expect(expiresAtMs).toBeGreaterThanOrEqual(before + DEFAULT_EXTENSION_IDLE_MINUTES * MS_PER_MINUTE);
+    expect(expiresAtMs).toBeLessThanOrEqual(after + DEFAULT_EXTENSION_IDLE_MINUTES * MS_PER_MINUTE);
   });
 });

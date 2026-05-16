@@ -11,6 +11,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
+import { DEFAULT_EXTENSION_IDLE_MINUTES } from "@/lib/constants/auth/extension-token";
 import {
   createTestContext,
   setBypassRlsGucs,
@@ -52,7 +53,10 @@ describe("session timeout — integration", () => {
       });
       expect(row.sessionIdleTimeoutMinutes).toBe(480);
       expect(row.sessionAbsoluteTimeoutMinutes).toBe(43200);
-      expect(row.extensionTokenIdleTimeoutMinutes).toBe(10080);
+      // Drift detector: Prisma schema default MUST match the application
+      // fallback constant. If the schema default changes, update the
+      // constant in lockstep — this assertion will catch the divergence.
+      expect(row.extensionTokenIdleTimeoutMinutes).toBe(DEFAULT_EXTENSION_IDLE_MINUTES);
       expect(row.extensionTokenAbsoluteTimeoutMinutes).toBe(43200);
     });
 
