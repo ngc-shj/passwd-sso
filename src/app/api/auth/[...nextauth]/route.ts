@@ -5,10 +5,10 @@ import { extractRequestMeta } from "@/lib/audit/audit";
 import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
 import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
+import { extractClientIp } from "@/lib/auth/policy/ip-access";
+import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { rateLimited } from "@/lib/http/api-response";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
-import { getLogger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -67,13 +67,10 @@ function withSessionMeta<H extends RouteHandler>(handler: H): H {
 //     enterprise NAT egresses with bursty sign-out storms used to trip
 //     the previous unconditional POST gate.
 //
-// Per-client-IP keying via the shared rateLimitKeyFromIp (IPv6 → /64).
-// When the client IP cannot be determined (no socket IP and
-// TRUST_PROXY_HEADERS unset), the limiter is skipped with a warn log —
-// fail-open here is preferred over PR #465's shared "unknown" bucket,
-// which collapsed every IP-less request into a single global 60/min
-// cap and let one bad actor DoS legitimate callbacks elsewhere on the
-// fleet.
+// Per-client-IP keying delegated to the shared `checkIpRateLimit` helper
+// (`src/lib/security/ip-rate-limit.ts`) — single source of truth for the
+// IPv6 → /64 normalization and the null-IP fail-open + warn-log decision
+// that 9 other route handlers also use.
 const CALLBACK_RATE_LIMIT_WINDOW_MS = 1 * MS_PER_MINUTE;
 const CALLBACK_RATE_LIMIT_MAX = 60;
 
@@ -91,17 +88,12 @@ function withCallbackRateLimit<H extends RouteHandler>(handler: H): H {
     if (!isCallbackRoute(request.nextUrl.pathname)) {
       return handler(request, ...rest);
     }
-    const ip = extractClientIp(request);
-    if (ip == null) {
-      getLogger().warn(
-        { pathname: request.nextUrl.pathname, method: request.method },
-        "auth.callback.rate_limit_skipped_unknown_ip",
-      );
-      return handler(request, ...rest);
-    }
-    const rl = await callbackRateLimiter.check(
-      `rl:auth_callback:${rateLimitKeyFromIp(ip)}`,
-    );
+    const rl = await checkIpRateLimit({
+      ip: extractClientIp(request),
+      pathname: request.nextUrl.pathname,
+      scope: "auth_callback",
+      limiter: callbackRateLimiter,
+    });
     if (!rl.allowed) {
       return rateLimited(rl.retryAfterMs) as unknown as Response;
     }

@@ -5,7 +5,8 @@ import { decryptShareData } from "@/lib/crypto/crypto-server";
 import { verifyShareAccessToken } from "@/lib/auth/tokens/share-access-token";
 import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
+import { extractClientIp } from "@/lib/auth/policy/ip-access";
+import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, rateLimited, unauthorized, notFound } from "@/lib/http/api-response";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -18,8 +19,13 @@ type Params = { params: Promise<{ id: string }> };
 async function handleGET(req: NextRequest, { params }: Params) {
   const { id } = await params;
 
-  const ip = extractClientIp(req) ?? "unknown";
-  const rl = await contentLimiter.check(`rl:share_content:${rateLimitKeyFromIp(ip)}`);
+  const ip = extractClientIp(req);
+  const rl = await checkIpRateLimit({
+    ip,
+    pathname: req.nextUrl.pathname,
+    scope: "share_content",
+    limiter: contentLimiter,
+  });
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }
@@ -116,7 +122,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
     }
 
     // Record access log (must await inside withBypassRls transaction)
-    const accessIp = ip === "unknown" ? null : ip;
+    const accessIp = ip;  // extractClientIp returns null when IP is unavailable
+
     const ua = req.headers.get("user-agent");
     await prisma.shareAccessLog
       .create({

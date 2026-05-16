@@ -10,7 +10,8 @@ import { errorResponse, rateLimited } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import { assertOrigin } from "@/lib/auth/session/csrf";
 import { NIL_UUID } from "@/lib/constants/app";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
+import { extractClientIp } from "@/lib/auth/policy/ip-access";
+import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { generateAuthenticationOpts, derivePrfSalt } from "@/lib/auth/webauthn/webauthn-server";
 import { randomBytes } from "node:crypto";
 import { EMAIL_MAX_LENGTH } from "@/lib/validations/common";
@@ -59,8 +60,12 @@ async function handlePOST(req: NextRequest) {
   const originError = assertOrigin(req);
   if (originError) return originError;
 
-  const ip = extractClientIp(req) ?? "unknown";
-  const rl = await rateLimiter.check(`rl:webauthn_email_signin_opts:${rateLimitKeyFromIp(ip)}`);
+  const rl = await checkIpRateLimit({
+    ip: extractClientIp(req),
+    pathname: req.nextUrl.pathname,
+    scope: "webauthn_email_signin_opts",
+    limiter: rateLimiter,
+  });
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

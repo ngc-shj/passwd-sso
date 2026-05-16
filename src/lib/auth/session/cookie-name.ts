@@ -50,14 +50,19 @@ export const ALL_KNOWN_SESSION_COOKIE_NAMES = [
 ] as const;
 
 /**
- * `useSecureCookies` derivation from AUTH_URL / NEXTAUTH_URL.
- * Mirrors Auth.js's own derivation in `core/lib/cookie.ts` so callers
- * that are NOT inside the Auth.js config (e.g. the sessions list helper,
- * the passkey verify route) compute the same value.
+ * `useSecureCookies` derivation — single source of truth for every cookie
+ * write/read site (auth.config, passkey verify, sessions list helper, e2e
+ * helper). Evaluated at call time so per-test env stubs are honored.
  *
- * Falls back to `NODE_ENV === "production"` only when the URL is missing
- * or unparseable, which preserves the previous behavior of
- * `src/app/api/sessions/helpers.ts:isSecureCookie`.
+ * Mirrors Auth.js's own logic (`core/lib/cookie.ts`): URL parse of
+ * AUTH_URL / NEXTAUTH_URL, then `NODE_ENV === "production"` fallback when
+ * neither is set/parseable.
+ *
+ * Why a function (not a module-evaluated const): so unit tests that stub
+ * AUTH_URL after the module loads still see the stubbed value. The earlier
+ * `isHttps` (url-helpers.ts) is module-evaluated and therefore frozen at
+ * first import; that was the original cause of the cookie-write/read
+ * mismatch this helper exists to close.
  */
 export function isSecureCookieFromAuthUrl(): boolean {
   const authUrl = process.env.AUTH_URL || process.env.NEXTAUTH_URL || "";

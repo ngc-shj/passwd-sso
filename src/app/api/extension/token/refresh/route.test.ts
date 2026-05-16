@@ -21,7 +21,7 @@ const {
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockSessionFindFirst: vi.fn(),
   // Returns null for idle timeout to exercise the production fallback to
-  // DEFAULT_EXTENSION_IDLE_MINUTES — keeps the fixture decoupled from any
+  // EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT — keeps the fixture decoupled from any
   // future change to the constant. Existing tests only assert
   // `expiresAt` is defined, not its specific value.
   mockTenantFindUnique: vi.fn().mockResolvedValue({

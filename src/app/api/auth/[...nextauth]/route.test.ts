@@ -282,12 +282,14 @@ describe("withCallbackRateLimit", () => {
     expect(res.status).toBe(200);
     expect(inner).toHaveBeenCalledTimes(1);
     expect(mockRateLimitCheck).not.toHaveBeenCalled();
+    // The wrapper delegates to checkIpRateLimit, which logs with the
+    // shared message + { pathname, scope } shape (see ip-rate-limit.ts).
     expect(mockLoggerWarn).toHaveBeenCalledWith(
       expect.objectContaining({
         pathname: "/api/auth/callback/google",
-        method: "GET",
+        scope: "auth_callback",
       }),
-      "auth.callback.rate_limit_skipped_unknown_ip",
+      "rate_limit_skipped_unknown_ip",
     );
   });
 

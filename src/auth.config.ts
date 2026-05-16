@@ -3,13 +3,15 @@ import Google from "next-auth/providers/google";
 import Nodemailer from "next-auth/providers/nodemailer";
 import { API_PATH } from "@/lib/constants";
 import { parseAllowedGoogleDomains } from "@/lib/url/google-domain";
-import { isHttps } from "@/lib/url-helpers";
 import { sendEmail } from "@/lib/email";
 import { magicLinkEmail } from "@/lib/email/templates/magic-link";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { getLogger } from "@/lib/logger";
-import { getSessionCookieName } from "@/lib/auth/session/cookie-name";
+import {
+  getSessionCookieName,
+  isSecureCookieFromAuthUrl,
+} from "@/lib/auth/session/cookie-name";
 
 // Rate limiters for magic link email (per-email address)
 const magicLinkEmailLimiter = createRateLimiter({
@@ -20,7 +22,7 @@ const magicLinkEmailLimiter = createRateLimiter({
 const allowedGoogleDomains = parseAllowedGoogleDomains();
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 
-const useSecureCookies = isHttps;
+const useSecureCookies = isSecureCookieFromAuthUrl();
 
 export default {
   providers: [

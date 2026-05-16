@@ -75,7 +75,6 @@ export {
   EXTENSION_TOKEN_SCOPE_VALUES,
   EXTENSION_TOKEN_DEFAULT_SCOPES,
   EXTENSION_TOKEN_MAX_ACTIVE,
-  DEFAULT_EXTENSION_IDLE_MINUTES,
 } from "./auth/extension-token";
 export type { ExtensionTokenScope } from "./auth/extension-token";
 

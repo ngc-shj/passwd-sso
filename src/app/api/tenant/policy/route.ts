@@ -7,7 +7,12 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponseWithMessage, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
-import { DEFAULT_EXTENSION_IDLE_MINUTES } from "@/lib/constants/auth/extension-token";
+import {
+  SESSION_IDLE_TIMEOUT_DEFAULT,
+  SESSION_ABSOLUTE_TIMEOUT_DEFAULT,
+  EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
+  EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT,
+} from "@/lib/validations/common";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { TAILNET_NAME_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -115,10 +120,10 @@ async function handleGET(_req: NextRequest) {
 
   return NextResponse.json({
     maxConcurrentSessions: user?.tenant?.maxConcurrentSessions ?? null,
-    sessionIdleTimeoutMinutes: user?.tenant?.sessionIdleTimeoutMinutes ?? 480,
-    sessionAbsoluteTimeoutMinutes: user?.tenant?.sessionAbsoluteTimeoutMinutes ?? 43200,
-    extensionTokenIdleTimeoutMinutes: user?.tenant?.extensionTokenIdleTimeoutMinutes ?? DEFAULT_EXTENSION_IDLE_MINUTES,
-    extensionTokenAbsoluteTimeoutMinutes: user?.tenant?.extensionTokenAbsoluteTimeoutMinutes ?? 43200,
+    sessionIdleTimeoutMinutes: user?.tenant?.sessionIdleTimeoutMinutes ?? SESSION_IDLE_TIMEOUT_DEFAULT,
+    sessionAbsoluteTimeoutMinutes: user?.tenant?.sessionAbsoluteTimeoutMinutes ?? SESSION_ABSOLUTE_TIMEOUT_DEFAULT,
+    extensionTokenIdleTimeoutMinutes: user?.tenant?.extensionTokenIdleTimeoutMinutes ?? EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
+    extensionTokenAbsoluteTimeoutMinutes: user?.tenant?.extensionTokenAbsoluteTimeoutMinutes ?? EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT,
     vaultAutoLockMinutes: user?.tenant?.vaultAutoLockMinutes ?? null,
     allowAppSideAutofill: user?.tenant?.allowAppSideAutofill ?? false,
     allowedCidrs: user?.tenant?.allowedCidrs ?? [],

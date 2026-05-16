@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { extractClientIpFromHeaders, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
+import { extractClientIpFromHeaders } from "@/lib/auth/policy/ip-access";
+import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { CSP_REPORT_RATE_MAX, RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
@@ -63,8 +64,12 @@ function sanitizeCspReport(body: unknown): Record<string, unknown> | undefined {
 // POST /api/csp-report
 // Receives CSP violation reports.
 async function handlePOST(request: Request) {
-  const ip = extractClientIpFromHeaders(request.headers) ?? "unknown";
-  const rl = await cspLimiter.check(`rl:csp_report:${rateLimitKeyFromIp(ip)}`);
+  const rl = await checkIpRateLimit({
+    ip: extractClientIpFromHeaders(request.headers),
+    pathname: "/api/csp-report",
+    scope: "csp_report",
+    limiter: cspLimiter,
+  });
   if (!rl.allowed) return new NextResponse(null, { status: 204 });
 
   const contentType = request.headers.get("content-type") ?? "";

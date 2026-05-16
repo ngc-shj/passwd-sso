@@ -59,8 +59,8 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         allowed: false,
         retryAfterMs: ttl > 0 ? ttl : windowMs,
       };
-    } catch {
-      logRedisError();
+    } catch (err) {
+      logRedisError((err as { code?: string } | undefined)?.code);
       return null; // fallback to in-memory
     }
   }
@@ -71,7 +71,8 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
     try {
       await redis.del(key);
       return true;
-    } catch {
+    } catch (err) {
+      logRedisError((err as { code?: string } | undefined)?.code);
       return false;
     }
   }

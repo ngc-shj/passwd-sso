@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, parseResponse } from "../../helpers/request-builder";
-import { DEFAULT_EXTENSION_IDLE_MINUTES } from "@/lib/constants/auth/extension-token";
+import { EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT } from "@/lib/validations/common";
 
 const {
   mockAuth, mockRequireTenantPermission, mockUserFindUnique, mockTenantUpdate,
@@ -89,7 +89,7 @@ const FULL_POLICY_RESPONSE = {
   maxConcurrentSessions: null,
   sessionIdleTimeoutMinutes: 480,
   sessionAbsoluteTimeoutMinutes: 43200,
-  extensionTokenIdleTimeoutMinutes: DEFAULT_EXTENSION_IDLE_MINUTES,
+  extensionTokenIdleTimeoutMinutes: EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
   extensionTokenAbsoluteTimeoutMinutes: 43200,
   vaultAutoLockMinutes: null,
   allowedCidrs: [],
@@ -332,7 +332,7 @@ describe("PATCH /api/tenant/policy", () => {
       tailscaleEnabled: false,
       tailscaleTailnet: null,
       sessionIdleTimeoutMinutes: 10,
-      extensionTokenIdleTimeoutMinutes: DEFAULT_EXTENSION_IDLE_MINUTES,
+      extensionTokenIdleTimeoutMinutes: EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
       vaultAutoLockMinutes: null,
     });
     const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {

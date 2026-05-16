@@ -81,8 +81,8 @@ export function createJtiCache(options: { ttlMs?: number; now?: () => number } =
           // SET key 1 PX <ttl> NX → "OK" on first sight, null on replay.
           const result = await redis.set(key, "1", "PX", ttlMs, "NX");
           return result === null;
-        } catch {
-          logRedisError();
+        } catch (err) {
+          logRedisError((err as { code?: string } | undefined)?.code);
           // Fall through to in-memory fallback.
         }
       }

@@ -5,12 +5,14 @@
  * matching the naming convention in src/proxy.ts.
  */
 import type { BrowserContext } from "@playwright/test";
-import { isHttps } from "../../src/lib/url-helpers";
-import { getSessionCookieName as resolveSessionCookieName } from "../../src/lib/auth/session/cookie-name";
+import {
+  getSessionCookieName as resolveSessionCookieName,
+  isSecureCookieFromAuthUrl,
+} from "../../src/lib/auth/session/cookie-name";
 
 function getSessionCookieName(): string {
   return resolveSessionCookieName({
-    useSecureCookies: isHttps,
+    useSecureCookies: isSecureCookieFromAuthUrl(),
     basePath: process.env.NEXT_PUBLIC_BASE_PATH,
   });
 }
@@ -40,7 +42,10 @@ export async function injectSession(
       name: getSessionCookieName(),
       value: sessionToken,
       url: getCookieUrl(),
-      sameSite: "Lax",
+      // Match the production session cookie attribute set in auth.config.ts.
+      // Diverging from production lets a future cross-site E2E test pass
+      // while production would have dropped the cookie.
+      sameSite: "Strict",
       ...(isHttps && { secure: true }),
     },
   ]);

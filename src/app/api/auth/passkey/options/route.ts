@@ -5,7 +5,8 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, rateLimited } from "@/lib/http/api-response";
 import { assertOrigin } from "@/lib/auth/session/csrf";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
+import { extractClientIp } from "@/lib/auth/policy/ip-access";
+import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import {
   generateDiscoverableAuthOpts,
   derivePrfSalt,
@@ -25,8 +26,12 @@ async function handlePOST(req: NextRequest) {
   if (originError) return originError;
 
   // Rate limit by IP
-  const ip = extractClientIp(req) ?? "unknown";
-  const rl = await rateLimiter.check(`rl:webauthn_signin_opts:${rateLimitKeyFromIp(ip)}`);
+  const rl = await checkIpRateLimit({
+    ip: extractClientIp(req),
+    pathname: req.nextUrl.pathname,
+    scope: "webauthn_signin_opts",
+    limiter: rateLimiter,
+  });
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }
