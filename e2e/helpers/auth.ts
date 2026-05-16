@@ -46,7 +46,7 @@ export async function injectSession(
       // Diverging from production lets a future cross-site E2E test pass
       // while production would have dropped the cookie.
       sameSite: "Strict",
-      ...(isHttps && { secure: true }),
+      ...(isSecureCookieFromAuthUrl() && { secure: true }),
     },
   ]);
 }
