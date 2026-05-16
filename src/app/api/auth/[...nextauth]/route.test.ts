@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
 // Mock dependencies so route.ts can be imported without side-effects
@@ -17,6 +17,26 @@ vi.mock("@/lib/audit/audit", () => ({
 }));
 vi.mock("@/lib/auth/session/session-meta", () => ({
   sessionMetaStorage: { run: (_meta: unknown, fn: () => unknown) => fn() },
+}));
+
+// Controllable rate-limit mock used by the callback rate-limit tests.
+const mockRateLimitCheck = vi.fn();
+vi.mock("@/lib/security/rate-limit", () => ({
+  createRateLimiter: () => ({ check: mockRateLimitCheck }),
+}));
+
+const mockExtractClientIp = vi.fn();
+vi.mock("@/lib/auth/policy/ip-access", () => ({
+  extractClientIp: (req: NextRequest) => mockExtractClientIp(req),
+  // Identity transform so the assertion against the rate-key value is
+  // readable — the actual IPv6→/64 normalization is owned by
+  // ip-access.test.ts (do not duplicate that contract here).
+  rateLimitKeyFromIp: (ip: string) => ip,
+}));
+
+const mockLoggerWarn = vi.fn();
+vi.mock("@/lib/logger", () => ({
+  getLogger: () => ({ warn: mockLoggerWarn, error: vi.fn(), info: vi.fn() }),
 }));
 
 describe("withAuthBasePath", () => {
@@ -138,5 +158,154 @@ describe("withAuthBasePath", () => {
     const patchedUrl = new URL(inner.mock.calls[0][0].url);
     expect(patchedUrl.pathname).toBe("/passwd-sso/api/auth/signin");
     expect(patchedUrl.searchParams.get("callbackUrl")).toBe("/dashboard");
+  });
+});
+
+describe("isCallbackRoute", () => {
+  it("returns true for OAuth provider callback paths", async () => {
+    const { _isCallbackRoute } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    expect(_isCallbackRoute("/api/auth/callback/google")).toBe(true);
+    expect(_isCallbackRoute("/api/auth/callback/credentials")).toBe(true);
+    expect(_isCallbackRoute("/api/auth/callback/passkey")).toBe(true);
+  });
+
+  it("returns false for non-callback Auth.js paths", async () => {
+    const { _isCallbackRoute } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    expect(_isCallbackRoute("/api/auth/signin")).toBe(false);
+    expect(_isCallbackRoute("/api/auth/signin/google")).toBe(false);
+    expect(_isCallbackRoute("/api/auth/signout")).toBe(false);
+    expect(_isCallbackRoute("/api/auth/csrf")).toBe(false);
+    expect(_isCallbackRoute("/api/auth/session")).toBe(false);
+    expect(_isCallbackRoute("/api/auth/providers")).toBe(false);
+  });
+
+  it("requires the trailing slash to prevent prefix collision", async () => {
+    const { _isCallbackRoute } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    expect(_isCallbackRoute("/api/auth/callbackz")).toBe(false);
+    expect(_isCallbackRoute("/api/auth/callback")).toBe(false);
+  });
+});
+
+describe("withCallbackRateLimit", () => {
+  beforeEach(() => {
+    mockRateLimitCheck.mockReset();
+    mockExtractClientIp.mockReset();
+    mockLoggerWarn.mockReset();
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
+    mockExtractClientIp.mockReturnValue("203.0.113.5");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  function makeReq(pathname: string, method: "GET" | "POST" = "POST") {
+    return new NextRequest(`http://localhost:3000${pathname}`, { method });
+  }
+
+  it("skips the limiter and forwards the request when the path is not a callback", async () => {
+    const { _withCallbackRateLimit } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    const inner = vi.fn(async () => new Response("ok"));
+    const wrapped = _withCallbackRateLimit(inner);
+
+    const res = await wrapped(makeReq("/api/auth/signin"));
+
+    expect(res.status).toBe(200);
+    expect(inner).toHaveBeenCalledTimes(1);
+    expect(mockExtractClientIp).not.toHaveBeenCalled();
+    expect(mockRateLimitCheck).not.toHaveBeenCalled();
+  });
+
+  it("invokes the limiter with `rl:auth_callback:<ip>` and forwards on allowed", async () => {
+    const { _withCallbackRateLimit } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    const inner = vi.fn(async () => new Response("ok"));
+    const wrapped = _withCallbackRateLimit(inner);
+
+    const res = await wrapped(makeReq("/api/auth/callback/google", "GET"));
+
+    expect(res.status).toBe(200);
+    expect(inner).toHaveBeenCalledTimes(1);
+    expect(mockRateLimitCheck).toHaveBeenCalledTimes(1);
+    expect(mockRateLimitCheck).toHaveBeenCalledWith("rl:auth_callback:203.0.113.5");
+  });
+
+  it("returns 429 with Retry-After when the limiter denies (does NOT invoke handler)", async () => {
+    mockRateLimitCheck.mockResolvedValue({ allowed: false, retryAfterMs: 1500 });
+    const { _withCallbackRateLimit } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    const inner = vi.fn(async () => new Response("ok"));
+    const wrapped = _withCallbackRateLimit(inner);
+
+    const res = await wrapped(makeReq("/api/auth/callback/google", "POST"));
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("2"); // ceil(1500/1000)
+    expect(inner).not.toHaveBeenCalled();
+  });
+
+  it("covers both GET and POST callbacks (Google OIDC GET is not bypassed)", async () => {
+    const { _withCallbackRateLimit } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    const inner = vi.fn(async () => new Response("ok"));
+    const wrapped = _withCallbackRateLimit(inner);
+
+    await wrapped(makeReq("/api/auth/callback/google", "GET"));
+    await wrapped(makeReq("/api/auth/callback/saml", "POST"));
+
+    expect(mockRateLimitCheck).toHaveBeenCalledTimes(2);
+    expect(inner).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips the limiter and warn-logs when client IP cannot be determined", async () => {
+    mockExtractClientIp.mockReturnValue(null);
+    const { _withCallbackRateLimit } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    const inner = vi.fn(async () => new Response("ok"));
+    const wrapped = _withCallbackRateLimit(inner);
+
+    const res = await wrapped(makeReq("/api/auth/callback/google", "GET"));
+
+    expect(res.status).toBe(200);
+    expect(inner).toHaveBeenCalledTimes(1);
+    expect(mockRateLimitCheck).not.toHaveBeenCalled();
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pathname: "/api/auth/callback/google",
+        method: "GET",
+      }),
+      "auth.callback.rate_limit_skipped_unknown_ip",
+    );
+  });
+
+  it("partitions limiter buckets by client IP", async () => {
+    const { _withCallbackRateLimit } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    const inner = vi.fn(async () => new Response("ok"));
+    const wrapped = _withCallbackRateLimit(inner);
+
+    mockExtractClientIp.mockReturnValueOnce("203.0.113.5");
+    await wrapped(makeReq("/api/auth/callback/google"));
+    mockExtractClientIp.mockReturnValueOnce("198.51.100.7");
+    await wrapped(makeReq("/api/auth/callback/google"));
+
+    expect(mockRateLimitCheck.mock.calls.map((c) => c[0])).toEqual([
+      "rl:auth_callback:203.0.113.5",
+      "rl:auth_callback:198.51.100.7",
+    ]);
   });
 });
