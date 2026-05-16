@@ -18,7 +18,7 @@ services:
       # path through src/lib/load-env.ts.
       - .env
     environment:
-      - DATABASE_URL=postgresql://passwd_app:passwd_app_pass@db:5432/passwd_sso
+      - DATABASE_URL=postgresql://passwd_app:${PASSWD_APP_PASSWORD:?PASSWD_APP_PASSWORD is required}@db:5432/passwd_sso
       - JACKSON_URL=http://jackson:5225
       - REDIS_URL=redis://redis:6379
     depends_on:
@@ -35,10 +35,16 @@ services:
   db:
     image: postgres:16-alpine
     environment:
+      # SUPERUSER role for migrations + Jackson; bootstraps the postgres image.
       POSTGRES_USER: passwd_user
-      POSTGRES_PASSWORD: passwd_pass
+      POSTGRES_PASSWORD: ${PASSWD_SUPERUSER_PASSWORD:?PASSWD_SUPERUSER_PASSWORD is required}
       POSTGRES_DB: passwd_sso
-      PASSWD_APP_PASSWORD: passwd_app_pass
+      # Forwarded to infra/postgres/initdb/* scripts via \getenv so the
+      # least-privilege roles are created with the operator-supplied
+      # passwords on first boot.
+      PASSWD_APP_PASSWORD: ${PASSWD_APP_PASSWORD:?PASSWD_APP_PASSWORD is required}
+      PASSWD_OUTBOX_WORKER_PASSWORD: ${PASSWD_OUTBOX_WORKER_PASSWORD:?PASSWD_OUTBOX_WORKER_PASSWORD is required}
+      PASSWD_DCR_CLEANUP_WORKER_PASSWORD: ${PASSWD_DCR_CLEANUP_WORKER_PASSWORD:?PASSWD_DCR_CLEANUP_WORKER_PASSWORD is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/postgres/initdb:/docker-entrypoint-initdb.d:ro
@@ -58,7 +64,7 @@ services:
       JACKSON_API_KEYS: ${JACKSON_API_KEY:?JACKSON_API_KEY is required}
       DB_ENGINE: sql
       DB_TYPE: postgres
-      DB_URL: postgresql://passwd_user:passwd_pass@db:5432/jackson
+      DB_URL: postgresql://passwd_user:${PASSWD_SUPERUSER_PASSWORD:?PASSWD_SUPERUSER_PASSWORD is required}@db:5432/jackson
       NEXTAUTH_URL: http://localhost:5225
       EXTERNAL_URL: http://localhost:5225
       NEXTAUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
@@ -91,7 +97,7 @@ services:
     environment:
       # MIGRATION_DATABASE_URL is the canonical name for the SUPERUSER URL
       # used by Prisma CLI (see prisma.config.ts); matches .env.example.
-      - MIGRATION_DATABASE_URL=postgresql://passwd_user:passwd_pass@db:5432/passwd_sso
+      - MIGRATION_DATABASE_URL=postgresql://passwd_user:${PASSWD_SUPERUSER_PASSWORD:?PASSWD_SUPERUSER_PASSWORD is required}@db:5432/passwd_sso
     depends_on:
       db:
         condition: service_healthy

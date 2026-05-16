@@ -123,7 +123,34 @@ Set the following values:
 | `SHARE_MASTER_KEY` | Master key for organization vault encryption (256-bit hex) | `openssl rand -hex 32` |
 | `REDIS_URL` | Redis URL — REQUIRED in production (Zod schema enforces this for `NODE_ENV=production`). Backs the session cache (tombstone-based revocation propagation, PR #407) and shared rate limiting. Single-instance dev may omit it; the app falls back to in-memory caches with a logged warning. Set `HEALTH_REDIS_REQUIRED=true` to fail readiness probes when Redis is unreachable. | e.g., `redis://host:6379` |
 | `JACKSON_API_KEY` | API key for the SAML Jackson container — mapped to `JACKSON_API_KEYS` inside Jackson. Not in the Zod schema (external service credential). | `openssl rand -hex 24` |
-| `PASSWD_OUTBOX_WORKER_PASSWORD` | Password for the `passwd_outbox_worker` DB role (set during `initdb`). Required when running the audit-outbox-worker. Use `scripts/set-outbox-worker-password.sh` to rotate on existing clusters. | `openssl rand -hex 24` |
+| `PASSWD_SUPERUSER_PASSWORD` | Password for the `passwd_user` SUPERUSER DB role. Used by `docker-compose` (POSTGRES_PASSWORD bootstrap, jackson DB_URL, migrate URL). Container fails to start if unset. | `openssl rand -hex 24` |
+| `PASSWD_APP_PASSWORD` | Password for the `passwd_app` NOSUPERUSER DB role (Next.js runtime). Used by `docker-compose` for `DATABASE_URL` AND forwarded to `initdb` for role creation. Container fails to start if unset. | `openssl rand -hex 24` |
+| `PASSWD_OUTBOX_WORKER_PASSWORD` | Password for the `passwd_outbox_worker` DB role (set during `initdb`). Used by `docker-compose` to wire `OUTBOX_WORKER_DATABASE_URL`. Required when running the audit-outbox-worker. Use `scripts/set-outbox-worker-password.sh` to rotate on existing clusters. | `openssl rand -hex 24` |
+| `PASSWD_DCR_CLEANUP_WORKER_PASSWORD` | Password for the `passwd_dcr_cleanup_worker` DB role (set during `initdb`). Used by `docker-compose` to wire `DCR_CLEANUP_DATABASE_URL`. Required when running the dcr-cleanup-worker. Use `scripts/set-dcr-cleanup-worker-password.sh` to rotate on existing clusters. | `openssl rand -hex 24` |
+
+> **Upgrading from a pre-2026-05-16 deployment**: `docker-compose.yml` and
+> `docker-compose.override.yml` previously fell back to the public default
+> passwords (`passwd_pass`, `passwd_app_pass`, `passwd_outbox_pass`,
+> `passwd_dcr_pass`) when `PASSWD_*_PASSWORD` env vars were unset. The
+> defaults are now removed (fail-closed); `docker compose up` will refuse
+> to start if any of the four `PASSWD_*_PASSWORD` env vars is unset.
+>
+> Two migration paths for existing clusters:
+>
+> 1. **Preserve existing DB roles** (zero DB change): set each var in
+>    `.env` to the value the role was originally created with:
+>    ```sh
+>    PASSWD_SUPERUSER_PASSWORD=passwd_pass
+>    PASSWD_APP_PASSWORD=passwd_app_pass
+>    PASSWD_OUTBOX_WORKER_PASSWORD=passwd_outbox_pass
+>    PASSWD_DCR_CLEANUP_WORKER_PASSWORD=passwd_dcr_pass
+>    ```
+> 2. **Rotate to new passwords** (recommended): generate fresh values with
+>    `openssl rand -hex 24`, write them to `.env`, then `ALTER ROLE` each
+>    role to match. For the worker roles use the dedicated rotation scripts
+>    `scripts/set-outbox-worker-password.sh` and
+>    `scripts/set-dcr-cleanup-worker-password.sh`.
+>
 | `BLOB_BACKEND` | Attachment storage backend | `db`, `s3`, `azure`, or `gcs` |
 | `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` | Required if `BLOB_BACKEND=s3` | e.g., `ap-northeast-1`, bucket name |
 | `AZURE_STORAGE_ACCOUNT`, `AZURE_BLOB_CONTAINER` | Required if `BLOB_BACKEND=azure` | Azure Storage account / container |

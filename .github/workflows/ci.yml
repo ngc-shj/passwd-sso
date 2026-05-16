@@ -414,6 +414,10 @@ jobs:
         image: postgres:16-alpine
         env:
           POSTGRES_USER: passwd_user
+          # Literal value — must match env.PASSWD_SUPERUSER_PASSWORD below.
+          # services.<name>.env is evaluated before the job env block, so we
+          # cannot reference ${{ env.* }} here. CI is ephemeral; the literal
+          # is the same as the helpers.ts integration-test fallback.
           POSTGRES_PASSWORD: passwd_pass
           POSTGRES_DB: passwd_sso
         ports: ["5432:5432"]
@@ -423,6 +427,12 @@ jobs:
           --health-timeout 3s
           --health-retries 5
     env:
+      # CI is ephemeral; values match docker-compose dev fallbacks AND
+      # helpers.ts integration-test fallbacks. Names mirror the
+      # operator-facing vocabulary used by docker-compose so the
+      # password-by-role mapping is consistent across the repo.
+      PASSWD_SUPERUSER_PASSWORD: passwd_pass
+      PASSWD_APP_PASSWORD: passwd_app_pass
       DATABASE_URL: "postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso"
     steps:
       - uses: actions/checkout@v4
@@ -439,9 +449,9 @@ jobs:
 
       - name: Create app role and grant privileges
         run: |
-          psql postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso <<'SQL'
+          psql "postgresql://passwd_user:${PASSWD_SUPERUSER_PASSWORD}@localhost:5432/passwd_sso" <<SQL
             CREATE ROLE passwd_app WITH LOGIN NOSUPERUSER NOBYPASSRLS
-              NOCREATEDB NOCREATEROLE PASSWORD 'passwd_app_pass';
+              NOCREATEDB NOCREATEROLE PASSWORD '${PASSWD_APP_PASSWORD}';
             REVOKE CREATE ON SCHEMA public FROM PUBLIC;
             GRANT CONNECT ON DATABASE passwd_sso TO passwd_app;
             GRANT USAGE ON SCHEMA public TO passwd_app;
@@ -456,34 +466,34 @@ jobs:
       - name: Run migrations as SUPERUSER
         run: npx prisma migrate deploy
         env:
-          MIGRATION_DATABASE_URL: "postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso"
+          MIGRATION_DATABASE_URL: "postgresql://passwd_user:${{ env.PASSWD_SUPERUSER_PASSWORD }}@localhost:5432/passwd_sso"
 
       - name: Re-grant and seed test data
-        run: psql -v ON_ERROR_STOP=1 postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso -f scripts/rls-smoke-seed.sql
+        run: psql -v ON_ERROR_STOP=1 "postgresql://passwd_user:${PASSWD_SUPERUSER_PASSWORD}@localhost:5432/passwd_sso" -f scripts/rls-smoke-seed.sql
 
       - name: Verify RLS enforcement
         run: |
-          psql -v ON_ERROR_STOP=1 postgresql://passwd_app:passwd_app_pass@localhost:5432/passwd_sso -f scripts/rls-smoke-verify.sql
+          psql -v ON_ERROR_STOP=1 "postgresql://passwd_app:${PASSWD_APP_PASSWORD}@localhost:5432/passwd_sso" -f scripts/rls-smoke-verify.sql
           echo "✓ RLS enforcement verified: passwd_app cannot see seeded rows"
 
       - name: Cross-tenant seed (SUPERUSER)
-        run: psql -v ON_ERROR_STOP=1 postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso -f scripts/rls-cross-tenant-seed.sql
+        run: psql -v ON_ERROR_STOP=1 "postgresql://passwd_user:${PASSWD_SUPERUSER_PASSWORD}@localhost:5432/passwd_sso" -f scripts/rls-cross-tenant-seed.sql
 
       - name: Cross-tenant coverage check (SUPERUSER)
-        run: psql -v ON_ERROR_STOP=1 postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso -f scripts/rls-cross-tenant-coverage.sql
+        run: psql -v ON_ERROR_STOP=1 "postgresql://passwd_user:${PASSWD_SUPERUSER_PASSWORD}@localhost:5432/passwd_sso" -f scripts/rls-cross-tenant-coverage.sql
 
       - name: Cross-tenant RLS predicate verify (NOSUPERUSER)
         run: |
           EXPECTED_TABLES=$(awk 'NF && $1 !~ /^#/ {gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); print}' scripts/rls-cross-tenant-tables.manifest | paste -sd,)
           psql -v ON_ERROR_STOP=1 -v expected_tables="$EXPECTED_TABLES" \
-            postgresql://passwd_app:passwd_app_pass@localhost:5432/passwd_sso \
+            "postgresql://passwd_app:${PASSWD_APP_PASSWORD}@localhost:5432/passwd_sso" \
             -f scripts/rls-cross-tenant-verify.sql
 
       - name: Cross-tenant verify negative test (gate self-check)
         run: bash scripts/rls-cross-tenant-negative-test.sh
         env:
-          MIGRATION_DATABASE_URL: "postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso"
-          APP_DATABASE_URL: "postgresql://passwd_app:passwd_app_pass@localhost:5432/passwd_sso"
+          MIGRATION_DATABASE_URL: "postgresql://passwd_user:${{ env.PASSWD_SUPERUSER_PASSWORD }}@localhost:5432/passwd_sso"
+          APP_DATABASE_URL: "postgresql://passwd_app:${{ env.PASSWD_APP_PASSWORD }}@localhost:5432/passwd_sso"
   # ─── Container Scan (Trivy) ─────────────────────────────────
   container-scan:
     name: "Trivy: Container image scan"
