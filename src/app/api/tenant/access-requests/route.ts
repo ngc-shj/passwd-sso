@@ -16,7 +16,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { z } from "zod";
-import { SA_TOKEN_SCOPE, SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
+import { SA_TOKEN_PREFIX, SA_TOKEN_SCOPE, SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { MS_PER_HOUR, MS_PER_MINUTE } from "@/lib/constants/time";
 
 const accessRequestCreateLimiter = createRateLimiter({ windowMs: MS_PER_HOUR, max: 20 });
@@ -106,7 +106,7 @@ async function handleGET(req: NextRequest) {
 async function handlePOST(req: NextRequest) {
   // Detect SA self-service by Bearer prefix before calling auth()
   const bearerHeader = req.headers.get("authorization");
-  const isSaBearer = bearerHeader?.startsWith("Bearer sa_") ?? false;
+  const isSaBearer = bearerHeader?.startsWith(`Bearer ${SA_TOKEN_PREFIX}`) ?? false;
 
   let authResult: Awaited<ReturnType<typeof authOrToken>>;
 

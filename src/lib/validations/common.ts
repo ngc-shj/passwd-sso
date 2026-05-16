@@ -55,6 +55,14 @@ export const SCIM_TOKEN_EXPIRY_MIN_DAYS = 1;
 export const SCIM_TOKEN_EXPIRY_MAX_DAYS = 3650;
 export const SCIM_TOKEN_EXPIRY_DEFAULT_DAYS = 365;
 
+// ─── AAD Protocol Version ────────────────────────────────────
+// Current AAD format version (binds ciphertext to user/team/entry/keyVersion).
+// Bump when the AAD binary layout changes (also update the schema below and
+// any consumers, e.g. crypto-aad.ts). Bounded at the schema level so a client
+// cannot submit a future version the server does not know how to verify.
+export const AAD_VERSION_CURRENT = 1;
+export const aadVersionSchema = z.number().int().min(1).max(AAD_VERSION_CURRENT);
+
 // ─── Team Key Rotation ───────────────────────────────────────
 export const TEAM_KEY_VERSION_MIN = 2;
 export const TEAM_KEY_VERSION_MAX = 10_000;

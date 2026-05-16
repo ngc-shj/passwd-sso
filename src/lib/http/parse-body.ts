@@ -62,10 +62,13 @@ export async function readJsonWithCap(
   if (!reader) {
     // No body stream — this path is reachable only in test environments that
     // mock req.body=null or for GET/HEAD (no body). In production App Router
-    // POST handlers, req.body is always a ReadableStream. The content-length
-    // pre-check above (line 56-59) caps the no-stream fallback at maxBytes so
-    // even mocked-large bodies cannot bypass the cap if the test sets the
-    // content-length header.
+    // POST handlers, req.body is always a ReadableStream. Without a stream we
+    // cannot enforce the byte cap, so a missing content-length header here is
+    // treated as invalid input (fail-closed). Tests that mock req.body=null
+    // MUST set content-length, or the request is rejected.
+    if (!contentLength) {
+      return { ok: false, invalidJson: true };
+    }
     try {
       const body = await req.json();
       return { ok: true, body };

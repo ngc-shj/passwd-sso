@@ -91,6 +91,36 @@ export class TeamPasswordServiceError extends Error {
 }
 
 // ---------------------------------------------------------------------------
+// Ownership guards (shared by create + update paths)
+// ---------------------------------------------------------------------------
+
+/** Reject if the folder does not belong to the given team. No-op when teamFolderId is nullish. */
+function assertTeamFolderOwnership(
+  teamFolderId: string | null | undefined,
+  folder: { teamId: string } | null,
+  teamId: string,
+): void {
+  if (!teamFolderId) return;
+  if (!folder || folder.teamId !== teamId) {
+    throw new TeamPasswordServiceError(API_ERROR.FOLDER_NOT_FOUND, 400);
+  }
+}
+
+/** Reject if any tagId does not belong to the given team. No-op when tagIds is empty/undefined. */
+async function assertTeamTagsOwnership(
+  tagIds: string[] | undefined,
+  teamId: string,
+): Promise<void> {
+  if (!tagIds?.length) return;
+  const count = await prisma.teamTag.count({
+    where: { id: { in: tagIds }, teamId },
+  });
+  if (count !== tagIds.length) {
+    throw new TeamPasswordServiceError(API_ERROR.NOT_FOUND, 404);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // listTeamPasswords
 // ---------------------------------------------------------------------------
 
@@ -239,18 +269,8 @@ export async function createTeamPassword(
   // tenantId is resolved from the team record, not passed by caller
   const tenantId = team.tenantId;
 
-  if (teamFolderId && (!folder || folder.teamId !== teamId)) {
-    throw new TeamPasswordServiceError(API_ERROR.FOLDER_NOT_FOUND, 400);
-  }
-
-  if (tagIds?.length) {
-    const count = await prisma.teamTag.count({
-      where: { id: { in: tagIds }, teamId },
-    });
-    if (count !== tagIds.length) {
-      throw new TeamPasswordServiceError(API_ERROR.NOT_FOUND, 404);
-    }
-  }
+  assertTeamFolderOwnership(teamFolderId, folder, teamId);
+  await assertTeamTagsOwnership(tagIds, teamId);
 
   // Use client-provided ID (bound into AAD during encryption) or generate one
   const entryId = clientId ?? crypto.randomUUID();
@@ -410,18 +430,8 @@ export async function updateTeamPassword(
     throw new TeamPasswordServiceError(API_ERROR.TEAM_KEY_VERSION_MISMATCH, 409);
   }
 
-  if (teamFolderId && (!folder || folder.teamId !== teamId)) {
-    throw new TeamPasswordServiceError(API_ERROR.FOLDER_NOT_FOUND, 400);
-  }
-
-  if (tagIds !== undefined && tagIds.length > 0) {
-    const count = await prisma.teamTag.count({
-      where: { id: { in: tagIds }, teamId },
-    });
-    if (count !== tagIds.length) {
-      throw new TeamPasswordServiceError(API_ERROR.NOT_FOUND, 404);
-    }
-  }
+  assertTeamFolderOwnership(teamFolderId, folder, teamId);
+  await assertTeamTagsOwnership(tagIds, teamId);
 
   const updateData: Record<string, unknown> = { updatedById: userId };
 
