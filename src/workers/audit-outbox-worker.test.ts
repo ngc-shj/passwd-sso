@@ -1214,6 +1214,83 @@ describe("reaper — invoked on first loop tick", () => {
   }, 15000);
 });
 
+// ─── recordError — sanitize before persist ──────────────────────────────────
+
+describe("recordError — sanitizes error message before persisting", () => {
+  beforeEach(resetMocks);
+
+  it("passes raw err.message to sanitizeErrorForStorage and writes the sanitized form to UPDATE last_error", async () => {
+    // Override sanitize to return a recognizable marker; we then assert the
+    // marker reaches both the UPDATE statement and the dead-letter metadata.
+    const { sanitizeErrorForStorage } = await import("@/lib/http/external-http");
+    const sanitizeMock = sanitizeErrorForStorage as unknown as Mock;
+    sanitizeMock.mockReturnValueOnce("[SANITIZED]");
+
+    const row = makeRow({ attempt_count: 7, max_attempts: 8 });
+    mockQueryRawUnsafe.mockResolvedValueOnce([row]);
+
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    const RAW_MESSAGE = "request to https://upstream.example.com/api?token=secret123 failed";
+    let txCallCount = 0;
+    mockTransaction.mockImplementation(
+      async function (fn: TxFn) {
+        txCallCount++;
+        // tx 1 = claimBatch (returns [row])
+        // tx 2 = deliverRow — throw the raw URL-bearing message
+        // tx 3 = recordError (UPDATE to FAILED with sanitized msg)
+        // tx 4 = writeDirectAuditLog (DEAD_LETTER INSERT with sanitized msg)
+        // tx 5 = reapStuckRows
+        // tx 6 = purgeRetention
+        // tx 7 = next claimBatch — stop
+        if (txCallCount === 2) {
+          throw new Error(RAW_MESSAGE);
+        }
+        if (txCallCount === 7) {
+          worker.stop();
+          return [];
+        }
+        return fn({
+          $executeRaw: mockExecuteRaw,
+          $queryRawUnsafe: mockQueryRawUnsafe,
+          $executeRawUnsafe: mockExecuteRawUnsafe,
+          auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
+          auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
+        });
+      },
+    );
+
+    await worker.start();
+
+    // 1. sanitize was called with the raw error message exactly once
+    expect(sanitizeMock).toHaveBeenCalledWith(RAW_MESSAGE);
+
+    // 2. The UPDATE audit_outbox SET last_error = LEFT($2, 1024) statement
+    //    received the sanitized form (param at call[2]), not the raw message.
+    const updateCall = mockExecuteRawUnsafe.mock.calls.find(
+      (call) =>
+        typeof call[0] === "string" &&
+        call[0].includes("UPDATE audit_outbox") &&
+        call[0].includes("status = 'FAILED'"),
+    );
+    expect(updateCall).toBeDefined();
+    expect(updateCall?.[2]).toBe("[SANITIZED]");
+    expect(updateCall?.[2]).not.toContain("token=secret123");
+
+    // 3. The dead-letter INSERT metadata (param $6 at call[6]) contains
+    //    the sanitized form in lastError, not the raw secret.
+    const deadLetterInsert = mockExecuteRawUnsafe.mock.calls.find(
+      (call) =>
+        typeof call[0] === "string" &&
+        call[0].includes("INSERT INTO audit_logs") &&
+        call[3] === AUDIT_ACTION.AUDIT_OUTBOX_DEAD_LETTER,
+    );
+    expect(deadLetterInsert).toBeDefined();
+    const metadata = JSON.parse(deadLetterInsert![6] as string);
+    expect(metadata.lastError).toBe("[SANITIZED]");
+    expect(metadata.lastError).not.toContain("token=secret123");
+  }, 15000);
+});
+
 // ─── recordError — AUDIT_OUTBOX_DEAD_LETTER via writeDirectAuditLog ──────────
 
 describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () => {
