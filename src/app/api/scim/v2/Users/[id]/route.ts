@@ -9,7 +9,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { parseBody } from "@/lib/http/parse-body";
+import { scimParseBody } from "@/lib/scim/parse-body";
 import { prisma } from "@/lib/prisma";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
 import {
@@ -54,7 +54,7 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
   if (!auth.ok) return auth.response;
   const { tenantId, auditUserId, actorType: putActorType } = auth.data;
 
-  const bodyResult = await parseBody(req, scimUserSchema);
+  const bodyResult = await scimParseBody(req, scimUserSchema);
   if (!bodyResult.ok) return bodyResult.response;
   const { active, externalId, name } = bodyResult.data;
 
@@ -115,7 +115,7 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
   if (!auth.ok) return auth.response;
   const { tenantId, auditUserId, actorType: patchActorType } = auth.data;
 
-  const bodyResult = await parseBody(req, scimPatchOpSchema);
+  const bodyResult = await scimParseBody(req, scimPatchOpSchema);
   if (!bodyResult.ok) return bodyResult.response;
 
   let patchOps;

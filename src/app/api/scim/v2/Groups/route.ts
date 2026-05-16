@@ -12,7 +12,7 @@ import { scimGroupSchema } from "@/lib/scim/validations";
 import { TEAM_ROLE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { parseBody } from "@/lib/http/parse-body";
+import { scimParseBody } from "@/lib/scim/parse-body";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
 
 const SCIM_GROUP_ROLES: TeamRole[] = [
@@ -139,7 +139,7 @@ async function handlePOST(req: NextRequest) {
   if (!auth.ok) return auth.response;
   const { tenantId } = auth.data;
 
-  const bodyResult = await parseBody(req, scimGroupSchema);
+  const bodyResult = await scimParseBody(req, scimGroupSchema);
   if (!bodyResult.ok) return bodyResult.response;
   const { displayName, externalId } = bodyResult.data;
 

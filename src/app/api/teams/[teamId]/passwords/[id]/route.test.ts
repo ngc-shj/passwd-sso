@@ -519,6 +519,24 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     );
   });
 
+  it("returns 404 when tagIds belong to another team in same tenant (C5 negative)", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
+    // teamTag.count default mock returns 0 — simulates count !== tagIds.length
+    mockPrismaTeamTag.count.mockResolvedValueOnce(0);
+
+    const FOREIGN_TAG_UUID = "00000000-0000-4000-a000-000000000099";
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
+        body: { tagIds: [FOREIGN_TAG_UUID], isArchived: true },
+      }),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toBe("NOT_FOUND");
+    expect(txMock.teamPasswordEntry.update).not.toHaveBeenCalled();
+  });
+
   it("updates requireReprompt and expiresAt as metadata-only (no history snapshot)", async () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
 

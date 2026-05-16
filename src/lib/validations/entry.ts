@@ -42,7 +42,7 @@ export const createE2EPasswordSchema = z.object({
   id: z.string().uuid().optional(), // client-generated UUIDv4 (required for aadVersion >= 1)
   encryptedBlob: encryptedFieldSchema,
   encryptedOverview: encryptedFieldSchema,
-  keyVersion: z.number().int().min(1),
+  keyVersion: z.number().int().min(1).max(TEAM_KEY_VERSION_MAX),
   aadVersion: z.number().int().min(1).max(1).optional().default(1),
   tagIds: z.array(z.string().uuid()).optional(),
   folderId: z.string().uuid().optional().nullable(),

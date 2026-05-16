@@ -74,6 +74,7 @@ import {
   type CreateTeamPasswordInput,
   type UpdateTeamPasswordInput,
 } from "./team-password-service";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 const TEAM_ID = "team-1";
 const PASSWORD_ID = "entry-1";
@@ -640,7 +641,7 @@ describe("updateTeamPassword", () => {
 
     const err = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input).catch((e) => e);
     expect(err).toBeInstanceOf(TeamPasswordServiceError);
-    expect(err.code).toBe("KEY_VERSION_WITHOUT_REENCRYPT");
+    expect(err.code).toBe(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
     expect(err.statusHint).toBe(409);
   });
 
@@ -654,7 +655,7 @@ describe("updateTeamPassword", () => {
 
     const err = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input).catch((e) => e);
     expect(err).toBeInstanceOf(TeamPasswordServiceError);
-    expect(err.code).toBe("KEY_VERSION_WITHOUT_REENCRYPT");
+    expect(err.code).toBe(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
     expect(err.statusHint).toBe(409);
   });
 
@@ -668,7 +669,7 @@ describe("updateTeamPassword", () => {
 
     const err = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input).catch((e) => e);
     expect(err).toBeInstanceOf(TeamPasswordServiceError);
-    expect(err.code).toBe("KEY_VERSION_WITHOUT_REENCRYPT");
+    expect(err.code).toBe(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
     expect(err.statusHint).toBe(409);
   });
 

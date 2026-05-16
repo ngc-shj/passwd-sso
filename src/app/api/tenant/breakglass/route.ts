@@ -45,6 +45,15 @@ async function handlePOST(req: NextRequest) {
     return handleAuthError(err);
   }
 
+  // Rate limit BEFORE body parse so authenticated admins cannot trigger
+  // body-parse memory allocation on every call before hitting the 5/hour cap.
+  const rlResult = await breakglassRateLimiter.check(
+    `rl:breakglass:${userId}`,
+  );
+  if (!rlResult.allowed) {
+    return rateLimited(rlResult.retryAfterMs);
+  }
+
   // Parse and validate request body
   const bodyResult = await parseBody(req, createBreakglassGrantSchema);
   if (!bodyResult.ok) return bodyResult.response;
@@ -55,14 +64,6 @@ async function handlePOST(req: NextRequest) {
     return validationError({
       properties: { targetUserId: { errors: ["Cannot request access to your own logs"] } },
     });
-  }
-
-  // Rate limit: 5 per hour per admin
-  const rlResult = await breakglassRateLimiter.check(
-    `rl:breakglass:${userId}`,
-  );
-  if (!rlResult.allowed) {
-    return rateLimited(rlResult.retryAfterMs);
   }
 
   // Verify target, check duplicate, and create grant in a single transaction

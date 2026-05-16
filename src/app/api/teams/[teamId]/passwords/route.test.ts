@@ -570,6 +570,23 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     );
   });
 
+  it("returns 404 when tagIds belong to another team in same tenant (C5 negative)", async () => {
+    const FOREIGN_TAG_UUID = "660e8400-e29b-41d4-a716-446655440099";
+    // teamTag.count default mock returns 0 — simulates count !== tagIds.length
+    mockPrismaTeamTag.count.mockResolvedValueOnce(0);
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
+        body: { ...validE2EBody, tagIds: [FOREIGN_TAG_UUID] },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toBe("NOT_FOUND");
+    expect(mockPrismaTeamPasswordEntry.create).not.toHaveBeenCalled();
+  });
+
   it("creates entry with teamFolderId when folder belongs to same team", async () => {
     const FOLDER_UUID = "660e8400-e29b-41d4-a716-446655440011";
     mockPrismaTeamFolder.findUnique.mockResolvedValue({ teamId: TEAM_ID });

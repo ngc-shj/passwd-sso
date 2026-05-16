@@ -43,13 +43,13 @@ export async function GET(request: NextRequest) {
   const userId = authResult.userId;
 
   // Tenant network-boundary enforcement for non-session auth. Session
-  // already passed the middleware check; Bearer (extension / api_key /
-  // mcp_token) bypassed middleware and must be re-checked here.
+  // already passed the middleware check; the scope gate (C4) limits the
+  // reachable bearer types to mcp_token only — api_key / extension_token
+  // cannot carry `delegation:check` and are rejected upstream as
+  // `scope_insufficient` at line 36.
   if (authResult.type !== "session") {
     const tenantIdOverride =
-      authResult.type === "api_key" || authResult.type === "mcp_token"
-        ? authResult.tenantId
-        : undefined;
+      authResult.type === "mcp_token" ? authResult.tenantId : undefined;
     const denied = await enforceAccessRestriction(request, userId, tenantIdOverride);
     if (denied) return denied;
   }

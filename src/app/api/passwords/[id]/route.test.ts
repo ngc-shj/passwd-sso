@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 import { ENTRY_TYPE } from "@/lib/constants";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 const { mockCheckAuth, mockPrismaPasswordEntry, mockPrismaHistory, mockPrismaUser, mockPrismaFolder, mockPrismaTag, mockPrismaTransaction, mockAuditCreate, mockLogAudit, mockWithUserTenantRls, mockWithBypassRls, mockRateLimiterCheck } = vi.hoisted(() => ({
   mockCheckAuth: vi.fn(),
@@ -662,7 +663,7 @@ describe("PUT /api/passwords/[id]", () => {
     );
     const json = await res.json();
     expect(res.status).toBe(409);
-    expect(json.error).toBe("KEY_VERSION_WITHOUT_REENCRYPT");
+    expect(json.error).toBe(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
   });
 
   it("rejects keyVersion change without encryptedBlob → 409 KEY_VERSION_WITHOUT_REENCRYPT", async () => {
@@ -677,7 +678,7 @@ describe("PUT /api/passwords/[id]", () => {
     );
     const json = await res.json();
     expect(res.status).toBe(409);
-    expect(json.error).toBe("KEY_VERSION_WITHOUT_REENCRYPT");
+    expect(json.error).toBe(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
   });
 
   it("allows same aadVersion without encryptedBlob → no error", async () => {

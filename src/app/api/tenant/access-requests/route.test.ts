@@ -297,64 +297,21 @@ describe("POST /api/tenant/access-requests", () => {
     expect(status).toBe(401);
   });
 
-  it("rejects api_key from admin path (401)", async () => {
+  // Admin path is session-only (C3): any Bearer prefix other than "sa_" falls
+  // through to `auth()` and gets 401 when no session cookie is present. The
+  // specific bearer type (api_/ext_/mcp_) is irrelevant — the gate is "is this
+  // a session?" not "what token type?". `mockAuthOrToken` is NOT exercised on
+  // these paths; the SA-bearer detection runs only when the Authorization
+  // header starts with "Bearer sa_".
+  it.each([
+    { label: "api_key", prefix: "api_somekey" },
+    { label: "extension_token", prefix: "ext_sometoken" },
+    { label: "mcp_token", prefix: "mcp_sometoken" },
+  ])("returns 401 for non-SA bearer ($label) on admin path", async ({ prefix }) => {
     mockAuth.mockResolvedValue(null);
-    mockAuthOrToken.mockResolvedValue({
-      type: "api_key",
-      userId: DEFAULT_SESSION.user.id,
-      tenantId: "tenant-1",
-      apiKeyId: "key-1",
-      scopes: [],
-    });
 
     const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
-      headers: { Authorization: "Bearer api_somekey" },
-      body: {
-        serviceAccountId: SA_ID,
-        requestedScope: ["passwords:read"],
-      },
-    });
-    const res = await POST(req);
-    const { status } = await parseResponse(res);
-
-    expect(status).toBe(401);
-  });
-
-  it("rejects extension_token from admin path (401)", async () => {
-    mockAuth.mockResolvedValue(null);
-    mockAuthOrToken.mockResolvedValue({
-      type: "token",
-      userId: DEFAULT_SESSION.user.id,
-      tenantId: "tenant-1",
-      scopes: [],
-    });
-
-    const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
-      headers: { Authorization: "Bearer ext_sometoken" },
-      body: {
-        serviceAccountId: SA_ID,
-        requestedScope: ["passwords:read"],
-      },
-    });
-    const res = await POST(req);
-    const { status } = await parseResponse(res);
-
-    expect(status).toBe(401);
-  });
-
-  it("rejects mcp_token from admin path (401)", async () => {
-    mockAuth.mockResolvedValue(null);
-    mockAuthOrToken.mockResolvedValue({
-      type: "mcp_token",
-      userId: DEFAULT_SESSION.user.id,
-      tenantId: "tenant-1",
-      tokenId: "tok-mcp",
-      mcpClientId: "mcpc_abc",
-      scopes: [],
-    });
-
-    const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
-      headers: { Authorization: "Bearer mcp_sometoken" },
+      headers: { Authorization: `Bearer ${prefix}` },
       body: {
         serviceAccountId: SA_ID,
         requestedScope: ["passwords:read"],

@@ -20,7 +20,7 @@ import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { parseBody } from "@/lib/http/parse-body";
+import { scimParseBody } from "@/lib/scim/parse-body";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
 import {
@@ -125,7 +125,7 @@ async function handlePOST(req: NextRequest) {
   if (!auth.ok) return auth.response;
   const { tenantId, auditUserId, actorType } = auth.data;
 
-  const bodyResult = await parseBody(req, scimUserSchema);
+  const bodyResult = await scimParseBody(req, scimUserSchema);
   if (!bodyResult.ok) return bodyResult.response;
   const { userName, name, externalId, active } = bodyResult.data;
 

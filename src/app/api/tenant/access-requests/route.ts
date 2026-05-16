@@ -131,11 +131,8 @@ async function handlePOST(req: NextRequest) {
   let expiresInMinutes: number;
 
   if (authResult.type === "service_account") {
-    // SA self-service: requires access-request:create scope
-    if (!authResult.scopes.includes(SA_TOKEN_SCOPE.ACCESS_REQUEST_CREATE)) {
-      return errorResponse(API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT);
-    }
-
+    // SA self-service: scope was already validated by authOrToken(req, ACCESS_REQUEST_CREATE)
+    // at the SA-bearer branch above. No second-check needed.
     tenantId = authResult.tenantId;
     serviceAccountId = authResult.serviceAccountId;
 
