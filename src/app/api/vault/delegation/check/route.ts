@@ -46,7 +46,9 @@ export async function GET(request: NextRequest) {
   // already passed the middleware check; the scope gate (C4) limits the
   // reachable bearer types to mcp_token only — api_key / extension_token
   // cannot carry `delegation:check` and are rejected upstream as
-  // `scope_insufficient` at line 36.
+  // `scope_insufficient` at line 36. service_account tokens are rejected
+  // even earlier by the `hasUserId` gate at line 37-39 because SA tokens
+  // carry `serviceAccountId`, not `userId`.
   if (authResult.type !== "session") {
     const tenantIdOverride =
       authResult.type === "mcp_token" ? authResult.tenantId : undefined;

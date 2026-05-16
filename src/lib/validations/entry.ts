@@ -87,7 +87,7 @@ export const historyReencryptSchema = z.object({
   encryptedBlob: z.string().min(1).max(HISTORY_BLOB_MAX),
   blobIv: hexString(12),
   blobAuthTag: hexString(16),
-  keyVersion: z.number().int(),
+  keyVersion: z.number().int().min(1).max(TEAM_KEY_VERSION_MAX),
   oldBlobHash: hexString(32),
 });
 
@@ -95,8 +95,8 @@ export const teamHistoryReencryptSchema = z.object({
   encryptedBlob: z.string().min(1).max(HISTORY_BLOB_MAX),
   blobIv: hexString(12),
   blobAuthTag: hexString(16),
-  teamKeyVersion: z.number(),
-  itemKeyVersion: z.number().optional(),
+  teamKeyVersion: z.number().int().min(1).max(TEAM_KEY_VERSION_MAX),
+  itemKeyVersion: z.number().int().min(0).max(TEAM_KEY_VERSION_MAX).optional(),
   encryptedItemKey: z.string().optional(),
   itemKeyIv: hexString(12).optional(),
   itemKeyAuthTag: hexString(16).optional(),

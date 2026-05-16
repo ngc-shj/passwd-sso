@@ -121,4 +121,90 @@ All 8 findings (1 Major-F + 1 Major-T + 4 Minor-FS + 2 Minor-T) resolved.
 - `scripts/pre-pr.sh`: 18/18 checks pass.
 - R3 forbidden-pattern sweep: clean (verified end of Phase 2).
 
-Ready for Round 2 termination check or final commit.
+---
+
+# Round 2 — Incremental Verification
+Date: 2026-05-16
+Review round: 2
+
+## Changes from Previous Round
+Phase 3 Round 1 fixes (commit `c4adcd45`) reviewed by 3 expert sub-agents in incremental mode. All 8 R1 findings verified as correctly resolved with no regressions. Round 2 surfaced 1 Major + 5 Minor new findings (1 dedupe: T-N1 ≡ T-7).
+
+## New Round 2 Findings
+
+**[T-5] [Major]: `scimParseBody` helper has no unit tests — RFC 7644 compliance paths untested**
+- File: `src/lib/scim/parse-body.ts` (no test file)
+- 4 branches (success, 413, 400-invalid-JSON, 400-Zod) untested. A future refactor breaking SCIM format would not be caught.
+- Fix: created `src/lib/scim/parse-body.test.ts` with 5 tests covering all branches + maxBytes override.
+
+**[S-N1] [Minor]: RS3 sweep incomplete — 3 more write-path schemas missing `.max()`/`.int()` bounds**
+- Files: `src/lib/validations/team.ts:56` (`teamMemberKeySchema.keyVersion`), `src/lib/validations/entry.ts:90` (`historyReencryptSchema.keyVersion`), `:98-99` (`teamHistoryReencryptSchema.teamKeyVersion`/`itemKeyVersion`)
+- Pre-existing schemas not addressed by S-1 fix scope. Same RS3 vulnerability class.
+- Fix: added `.max(TEAM_KEY_VERSION_MAX)` to all 3 schemas + `.int()` to `teamHistoryReencryptSchema` fields.
+
+**[T-4] [Minor]: RT3 incomplete — 8 raw `"FOLDER_NOT_FOUND"` strings remain in files that now import `API_ERROR`**
+- Files: `src/app/api/teams/[teamId]/passwords/route.test.ts` (2), `[id]/route.test.ts` (2), `src/lib/services/team-password-service.test.ts` (4)
+- Inconsistency introduced by T-2 (KEY_VERSION fix imported API_ERROR but didn't migrate FOLDER_NOT_FOUND).
+- Fix: added `API_ERROR` imports where missing; replaced 8 raw strings with `API_ERROR.FOLDER_NOT_FOUND`.
+
+**[T-6] [Minor]: S-1 CREATE schema upper-bound enforcement is untested**
+- Files: `src/lib/validations/entry.test.ts`, `src/lib/validations/team.test.ts`
+- The Zod `.max()` bounds added by S-1 had no test asserting they actually fire.
+- Fix: added Zod-level tests (`rejects keyVersion above TEAM_KEY_VERSION_MAX`, `rejects teamKeyVersion above ...`, `rejects itemKeyVersion above ...`, `rejects aadVersion above 1`).
+
+**[F-N1] [Minor]: delegation/check comment omits `service_account` exclusion mechanism**
+- File: `src/app/api/vault/delegation/check/route.ts:45-49`
+- Comment named api_key / extension_token exclusion (via scope gate) but didn't mention SA tokens (rejected by `hasUserId` gate).
+- Fix: extended the comment to name the SA exclusion path.
+
+**[T-7] (≡ T-N1) [Minor]: T-1 PUT test comment claims "default mock returns 0" but `vi.resetAllMocks` clears defaults**
+- Files: both `route.test.ts` and `[id]/route.test.ts` C5 negative tests
+- Comment was inaccurate: the explicit `mockResolvedValueOnce(0)` is load-bearing, not redundant.
+- Fix: rewrote the comments to make load-bearing role explicit.
+
+## Adjacent Findings
+None.
+
+## Quality Warnings
+None.
+
+## Recurring Issue Check (Round 2)
+- **R36 (SCIM compliance)**: F-1 resolved. R2 verified no regression.
+- **RS3 (input validation max bounds)**: PARTIAL → resolved with S-N1 fix (3 more schemas bounded).
+- **RT3 (shared constants in tests)**: PARTIAL → resolved with T-4 fix (FOLDER_NOT_FOUND migration).
+- **RT1, RT2, RT4, RT5**: clean.
+- All other R1-R37 + RS1-RS4 + RT1-RT5: clean.
+
+## Resolution Status (Round 2)
+
+### T-5 — RESOLVED
+- Created `src/lib/scim/parse-body.test.ts` with 5 tests: success path, 400 invalid JSON, 400 Zod failure, 413 over-cap, maxBytes override accepts larger body. Assertions verify SCIM Error envelope shape (`schemas`, `status`, `detail`).
+- All 5 tests pass.
+
+### S-N1 — RESOLVED
+- `src/lib/validations/team.ts:56` `teamMemberKeySchema.keyVersion`: added `.max(TEAM_KEY_VERSION_MAX)`.
+- `src/lib/validations/entry.ts:90` `historyReencryptSchema.keyVersion`: added `.min(1).max(TEAM_KEY_VERSION_MAX)`.
+- `src/lib/validations/entry.ts:98-99` `teamHistoryReencryptSchema`: added `.int().min(1).max(TEAM_KEY_VERSION_MAX)` to `teamKeyVersion`, `.int().min(0).max(TEAM_KEY_VERSION_MAX)` to `itemKeyVersion`.
+
+### T-4 — RESOLVED
+- Added `import { API_ERROR } from "@/lib/http/api-error-codes"` to `src/app/api/teams/[teamId]/passwords/route.test.ts` and `[id]/route.test.ts` (were missing).
+- Replaced all 8 raw `"FOLDER_NOT_FOUND"` strings with `API_ERROR.FOLDER_NOT_FOUND` across 3 files.
+
+### T-6 — RESOLVED
+- `src/lib/validations/entry.test.ts`: added `rejects keyVersion above TEAM_KEY_VERSION_MAX` to `createE2EPasswordSchema` group.
+- `src/lib/validations/team.test.ts`: added 3 tests to `createTeamE2EPasswordSchema` group — `rejects teamKeyVersion above max`, `rejects itemKeyVersion above max`, `rejects aadVersion above 1`.
+
+### F-N1 — RESOLVED
+- Extended the comment at `src/app/api/vault/delegation/check/route.ts:45-49` to note that `service_account` tokens are excluded earlier by the `hasUserId` gate (line 37-39) because SA tokens carry `serviceAccountId` not `userId`.
+
+### T-7 — RESOLVED
+- Updated comments in both C5 negative tests to: `// Explicit mock: teamTag.count returns 0 (count < tagIds.length → NOT_FOUND).` + `// vi.resetAllMocks() in beforeEach clears the hoisted default, so mockResolvedValueOnce(0) is load-bearing.`
+
+---
+
+All 6 Round 2 findings resolved.
+- Full vitest: 10362 tests pass, 1 skipped (+9 from Round 2 additions).
+- `npx next build`: succeeds.
+- `scripts/pre-pr.sh`: 18/18 checks pass.
+
+Plan + Phase 2 + Phase 3 Round 1 + Round 2 — all findings closed.

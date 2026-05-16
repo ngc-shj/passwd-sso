@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 const { mockAuth, mockCheckAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaTeam, mockPrismaTeamTag, mockAuditLogCreate, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockWithBypassRls, mockLogAudit } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
@@ -572,7 +573,8 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
 
   it("returns 404 when tagIds belong to another team in same tenant (C5 negative)", async () => {
     const FOREIGN_TAG_UUID = "660e8400-e29b-41d4-a716-446655440099";
-    // teamTag.count default mock returns 0 — simulates count !== tagIds.length
+    // Explicit mock: teamTag.count returns 0 (count < tagIds.length → NOT_FOUND).
+    // vi.resetAllMocks() in beforeEach clears the hoisted default, so mockResolvedValueOnce(0) is load-bearing.
     mockPrismaTeamTag.count.mockResolvedValueOnce(0);
 
     const res = await POST(
@@ -623,7 +625,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     );
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toBe("FOLDER_NOT_FOUND");
+    expect(json.error).toBe(API_ERROR.FOLDER_NOT_FOUND);
   });
 
   it("returns 400 when teamFolderId does not exist", async () => {
@@ -638,7 +640,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
     );
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toBe("FOLDER_NOT_FOUND");
+    expect(json.error).toBe(API_ERROR.FOLDER_NOT_FOUND);
   });
 
   it("creates entry with requireReprompt and expiresAt", async () => {

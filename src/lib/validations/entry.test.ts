@@ -209,6 +209,14 @@ describe("createE2EPasswordSchema", () => {
     expect(result.success).toBe(false);
   });
 
+  it("rejects keyVersion above TEAM_KEY_VERSION_MAX (S-1 / RS3 — prevents PostgreSQL INT overflow)", () => {
+    const result = createE2EPasswordSchema.safeParse({
+      ...valid(),
+      keyVersion: 10_001,
+    });
+    expect(result.success).toBe(false);
+  });
+
   it("rejects when id is missing and aadVersion>=1", () => {
     const { id: _, ...rest } = valid();
     const result = createE2EPasswordSchema.safeParse({ ...rest, aadVersion: 1 });

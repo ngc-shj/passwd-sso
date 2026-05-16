@@ -53,7 +53,7 @@ export const teamMemberKeySchema = z.object({
   teamKeyAuthTag: hexAuthTag,
   ephemeralPublicKey: z.string().min(1).max(EPHEMERAL_PUBLIC_KEY_MAX),
   hkdfSalt: hexSalt,
-  keyVersion: z.number().int().min(1),
+  keyVersion: z.number().int().min(1).max(TEAM_KEY_VERSION_MAX),
   wrapVersion: z.number().int().min(1).max(1).default(1),
 });
 

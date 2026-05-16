@@ -187,7 +187,7 @@ describe("createTeamPassword", () => {
     }).catch((e) => e);
 
     expect(err).toBeInstanceOf(TeamPasswordServiceError);
-    expect(err.code).toBe("FOLDER_NOT_FOUND");
+    expect(err.code).toBe(API_ERROR.FOLDER_NOT_FOUND);
     expect(err.statusHint).toBe(400);
   });
 
@@ -201,7 +201,7 @@ describe("createTeamPassword", () => {
     }).catch((e) => e);
 
     expect(err).toBeInstanceOf(TeamPasswordServiceError);
-    expect(err.code).toBe("FOLDER_NOT_FOUND");
+    expect(err.code).toBe(API_ERROR.FOLDER_NOT_FOUND);
   });
 
   it("calls both team and folder queries (confirms parallel fetch)", async () => {
@@ -426,7 +426,7 @@ describe("updateTeamPassword", () => {
 
     const err = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input).catch((e) => e);
     expect(err).toBeInstanceOf(TeamPasswordServiceError);
-    expect(err.code).toBe("FOLDER_NOT_FOUND");
+    expect(err.code).toBe(API_ERROR.FOLDER_NOT_FOUND);
     expect(err.statusHint).toBe(400);
   });
 
@@ -441,7 +441,7 @@ describe("updateTeamPassword", () => {
 
     const err = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input).catch((e) => e);
     expect(err).toBeInstanceOf(TeamPasswordServiceError);
-    expect(err.code).toBe("FOLDER_NOT_FOUND");
+    expect(err.code).toBe(API_ERROR.FOLDER_NOT_FOUND);
   });
 
   it("creates a history snapshot when encryptedBlob changes", async () => {
