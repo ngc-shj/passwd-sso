@@ -1,9 +1,14 @@
 import { getRedis } from "@/lib/redis";
 import { RATE_LIMIT_MAP_MAX_SIZE } from "@/lib/validations/common.server";
-import { createThrottledErrorLogger } from "@/lib/logger/throttled";
+import {
+  REDIS_FALLBACK_LOG_THROTTLE_MS,
+  createThrottledErrorLogger,
+} from "@/lib/logger/throttled";
 
-// 30_000 ms: matches existing log-flood ceiling for Redis fallback events.
-const logRedisError = createThrottledErrorLogger(30_000, "rate-limit.redis.fallback");
+const logRedisError = createThrottledErrorLogger(
+  REDIS_FALLBACK_LOG_THROTTLE_MS,
+  "rate-limit.redis.fallback",
+);
 
 interface RateLimiterOptions {
   /** Time window in milliseconds */
@@ -54,8 +59,8 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         allowed: false,
         retryAfterMs: ttl > 0 ? ttl : windowMs,
       };
-    } catch {
-      logRedisError();
+    } catch (err) {
+      logRedisError((err as { code?: string } | undefined)?.code);
       return null; // fallback to in-memory
     }
   }
@@ -66,7 +71,8 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
     try {
       await redis.del(key);
       return true;
-    } catch {
+    } catch (err) {
+      logRedisError((err as { code?: string } | undefined)?.code);
       return false;
     }
   }

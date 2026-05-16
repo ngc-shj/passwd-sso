@@ -48,6 +48,70 @@ describe("auth.config basePath handling", () => {
   });
 });
 
+describe("auth.config session cookie attributes", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  // sameSite=strict is the explicit policy choice — guards against silent
+  // regression to `lax` (which would re-open the login-CSRF window).
+  it("sets sameSite=strict on the session cookie", async () => {
+    const config = (await import("@/auth.config")).default;
+    expect(config.cookies?.sessionToken?.options?.sameSite).toBe("strict");
+  });
+
+  it("sets httpOnly=true on the session cookie", async () => {
+    const config = (await import("@/auth.config")).default;
+    expect(config.cookies?.sessionToken?.options?.httpOnly).toBe(true);
+  });
+
+  // Matrix: AUTH_URL × NEXT_PUBLIC_BASE_PATH drives the cookie name.
+  // A regression that inlines the prefix-selection in auth.config.ts
+  // would trip whichever quadrant got missed.
+  it("uses __Host- when AUTH_URL is https AND basePath is empty", async () => {
+    vi.stubEnv("AUTH_URL", "https://example.com");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+    const config = (await import("@/auth.config")).default;
+    expect(config.cookies?.sessionToken?.name).toBe("__Host-authjs.session-token");
+  });
+
+  it("uses __Secure- when AUTH_URL is https AND basePath is set", async () => {
+    vi.stubEnv("AUTH_URL", "https://example.com");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/vault");
+    const config = (await import("@/auth.config")).default;
+    expect(config.cookies?.sessionToken?.name).toBe("__Secure-authjs.session-token");
+  });
+
+  it("uses plain name when AUTH_URL is http (any basePath)", async () => {
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+    const config = (await import("@/auth.config")).default;
+    expect(config.cookies?.sessionToken?.name).toBe("authjs.session-token");
+  });
+
+  it("uses plain name when AUTH_URL is http even with basePath", async () => {
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/vault");
+    const config = (await import("@/auth.config")).default;
+    expect(config.cookies?.sessionToken?.name).toBe("authjs.session-token");
+  });
+
+  // __Host- spec requires Path=/ — verify the coupling holds whenever
+  // the __Host- name is selected.
+  it("when __Host- name is selected, the cookie path is exactly '/'", async () => {
+    vi.stubEnv("AUTH_URL", "https://example.com");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+    const config = (await import("@/auth.config")).default;
+    expect(config.cookies?.sessionToken?.name).toBe("__Host-authjs.session-token");
+    expect(config.cookies?.sessionToken?.options?.path).toBe("/");
+  });
+});
+
 describe("auth.config Google domain validation", () => {
   beforeEach(() => {
     vi.resetModules();

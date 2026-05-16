@@ -40,3 +40,9 @@ export const IOS_TOKEN_DEFAULT_SCOPES = [
  * per-family absolute lifetime (tenant.extensionTokenAbsoluteTimeoutMinutes).
  */
 export const EXTENSION_TOKEN_MAX_ACTIVE = 3;
+
+// Idle-timeout default lives at src/lib/validations/common.ts as
+// EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT (alongside the session timeout
+// defaults). Import it from there — kept here as a doc-pointer so anyone
+// looking under constants/auth/ for the extension-token fallback finds
+// the right place.

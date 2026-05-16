@@ -5,7 +5,8 @@ import { verifyShareAccessSchema } from "@/lib/validations";
 import { hashToken, verifyAccessPassword } from "@/lib/crypto/crypto-server";
 import { createShareAccessToken } from "@/lib/auth/tokens/share-access-token";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
+import { extractClientIp } from "@/lib/auth/policy/ip-access";
+import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, rateLimited, notFound, validationError } from "@/lib/http/api-response";
@@ -20,7 +21,7 @@ const tokenLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
 // POST /api/share-links/verify-access — Verify access password for a share
 async function handlePOST(req: NextRequest) {
-  const ip = extractClientIp(req) ?? "unknown";
+  const ip = extractClientIp(req);
 
   const result = await parseBody(req, verifyShareAccessSchema);
   if (!result.ok) return result.response;
@@ -29,7 +30,13 @@ async function handlePOST(req: NextRequest) {
   const tokenHash = hashToken(token);
 
   // Rate limit by IP+tokenHash and by tokenHash globally
-  const ipRl = await ipLimiter.check(`rl:share_verify_ip:${rateLimitKeyFromIp(ip)}:${tokenHash}`);
+  const ipRl = await checkIpRateLimit({
+    ip,
+    pathname: req.nextUrl.pathname,
+    scope: "share_verify_ip",
+    keySuffix: tokenHash,
+    limiter: ipLimiter,
+  });
   if (!ipRl.allowed) {
     return rateLimited(ipRl.retryAfterMs);
   }

@@ -2,7 +2,8 @@ import { type NextRequest, NextResponse } from "next/server";
 import { revokeToken } from "@/lib/mcp/oauth-server";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
+import { extractClientIp } from "@/lib/auth/policy/ip-access";
+import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 
 const revokeLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
 
@@ -17,8 +18,12 @@ const revokeLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
  * Always returns 200 per RFC 7009 §2.2 (even for invalid tokens).
  */
 export async function POST(req: NextRequest) {
-  const ip = extractClientIp(req) ?? "unknown";
-  const rl = await revokeLimiter.check(`rl:mcp_revoke:${rateLimitKeyFromIp(ip)}`);
+  const rl = await checkIpRateLimit({
+    ip: extractClientIp(req),
+    pathname: req.nextUrl.pathname,
+    scope: "mcp_revoke",
+    limiter: revokeLimiter,
+  });
   if (!rl.allowed) {
     // Deliberate extension: RFC 7009 §2.2 says "always 200"; we return 429 +
     // { error: "rate_limited" } for abuse mitigation. See docs/api/error-handling.md

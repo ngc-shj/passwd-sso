@@ -61,6 +61,15 @@ jobs:
       # Round 4 T19 fix: DATABASE_URL inline from service — no secrets.
       # Fork PRs run unchanged (no secret access required).
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/passwd_test
+      # Names mirror docker-compose vocabulary so the password-by-role
+      # mapping is consistent across the repo. Values match the
+      # helpers.ts integration-test fallbacks (ephemeral CI credentials,
+      # service container destroyed per run; port 5432 binds to runner
+      # localhost only).
+      PASSWD_APP_PASSWORD: passwd_app_pass
+      PASSWD_OUTBOX_WORKER_PASSWORD: passwd_outbox_pass
+      PASSWD_DCR_CLEANUP_WORKER_PASSWORD: passwd_dcr_pass
+      PASSWD_ANCHOR_PUBLISHER_PASSWORD: passwd_anchor_publisher_pass
 
     steps:
       - uses: actions/checkout@v4
@@ -102,27 +111,27 @@ jobs:
         env:
           PGPASSWORD: postgres
         run: |
-          psql -h localhost -U postgres -d passwd_test <<'EOF'
+          psql -h localhost -U postgres -d passwd_test <<EOF
           -- Defense-in-depth: revoke default PUBLIC CREATE on the public schema
           -- (mirrors infra/postgres/initdb/02-create-app-role.sql:24).
           REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 
           -- passwd_outbox_worker: created by migration without password; set it now.
-          ALTER ROLE passwd_outbox_worker WITH LOGIN PASSWORD 'passwd_outbox_pass';
+          ALTER ROLE passwd_outbox_worker WITH LOGIN PASSWORD '${PASSWD_OUTBOX_WORKER_PASSWORD}';
 
           -- passwd_dcr_cleanup_worker: created by migration without password; set it now.
-          ALTER ROLE passwd_dcr_cleanup_worker WITH LOGIN PASSWORD 'passwd_dcr_pass';
+          ALTER ROLE passwd_dcr_cleanup_worker WITH LOGIN PASSWORD '${PASSWD_DCR_CLEANUP_WORKER_PASSWORD}';
 
           -- passwd_anchor_publisher: created by migration without password; set it now.
-          ALTER ROLE passwd_anchor_publisher WITH LOGIN PASSWORD 'passwd_anchor_publisher_pass';
+          ALTER ROLE passwd_anchor_publisher WITH LOGIN PASSWORD '${PASSWD_ANCHOR_PUBLISHER_PASSWORD}';
 
           -- passwd_app: not created by any migration (lives in initdb only).
           -- Replicate the role + grants the integration tests rely on.
-          DO $$ BEGIN
+          DO \$\$ BEGIN
             IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_app') THEN
-              CREATE ROLE passwd_app WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD 'passwd_app_pass';
+              CREATE ROLE passwd_app WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD '${PASSWD_APP_PASSWORD}';
             END IF;
-          END $$;
+          END \$\$;
           GRANT CONNECT ON DATABASE passwd_test TO passwd_app;
           GRANT USAGE ON SCHEMA public TO passwd_app;
           GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO passwd_app;

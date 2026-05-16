@@ -8,6 +8,7 @@ import { AUDIT_ACTION } from "../constants/audit/audit";
 import { MS_PER_DAY, MS_PER_MINUTE } from "../constants/time";
 import { applySecurityHeaders } from "./security-headers";
 import { getSessionInfo } from "./auth-gate";
+import { ALL_KNOWN_SESSION_COOKIE_NAMES } from "../auth/session/cookie-name";
 import { extractClientIp } from "../auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "../auth/policy/access-restriction";
 
@@ -119,15 +120,8 @@ export function recordPasskeyAuditEmit(userId: string, now: number): boolean {
 }
 
 function clearAuthSessionCookies(response: NextResponse, basePath: string = ""): void {
-  const authSessionCookieNames = [
-    "authjs.session-token",
-    "__Secure-authjs.session-token",
-    "next-auth.session-token",
-    "__Secure-next-auth.session-token",
-  ] as const;
-
   const cookiePath = `${basePath}/`;
-  for (const name of authSessionCookieNames) {
+  for (const name of ALL_KNOWN_SESSION_COOKIE_NAMES) {
     response.cookies.delete({ name, path: cookiePath });
   }
 }

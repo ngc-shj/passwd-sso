@@ -437,6 +437,10 @@ async function recordError(
   err: unknown,
 ): Promise<void> {
   const errorMsg = err instanceof Error ? err.message : String(err);
+  // Strip URL query params and credential patterns before persisting,
+  // matching the audit-delivery dead-letter path. last_error rows are
+  // long-lived (until retention purge) and feed the audit log.
+  const sanitizedError = sanitizeErrorForStorage(errorMsg);
   const newAttemptCount = row.attempt_count + 1;
   const isDead = newAttemptCount >= row.max_attempts;
   const backoffMs = withFullJitter(computeBackoffMs(newAttemptCount));
@@ -455,7 +459,7 @@ async function recordError(
                processing_started_at = NULL
            WHERE id = $3`,
           newAttemptCount,
-          errorMsg,
+          sanitizedError,
           row.id,
         );
       } else {
@@ -469,7 +473,7 @@ async function recordError(
            WHERE id = $4`,
           newAttemptCount,
           backoffSeconds,
-          errorMsg,
+          sanitizedError,
           row.id,
         );
       }
@@ -487,7 +491,7 @@ async function recordError(
       outboxId: row.id,
       action: parsePayloadAction(row.payload),
       attemptCount: newAttemptCount,
-      lastError: errorMsg.slice(0, 256),
+      lastError: sanitizedError.slice(0, 256),
     });
   }
 }

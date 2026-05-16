@@ -20,8 +20,12 @@ const {
   mockRevokeExtensionTokenFamily: vi.fn().mockResolvedValue({ rowsRevoked: 0 }),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockSessionFindFirst: vi.fn(),
+  // Returns null for idle timeout to exercise the production fallback to
+  // EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT — keeps the fixture decoupled from any
+  // future change to the constant. Existing tests only assert
+  // `expiresAt` is defined, not its specific value.
   mockTenantFindUnique: vi.fn().mockResolvedValue({
-    extensionTokenIdleTimeoutMinutes: 10080,
+    extensionTokenIdleTimeoutMinutes: null,
     extensionTokenAbsoluteTimeoutMinutes: 43200,
   }),
   mockExtTokenUpdateMany: vi.fn(),

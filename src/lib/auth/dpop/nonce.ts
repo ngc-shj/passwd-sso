@@ -1,6 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { getRedis } from "@/lib/redis";
-import { createThrottledErrorLogger } from "@/lib/logger/throttled";
+import {
+  REDIS_FALLBACK_LOG_THROTTLE_MS,
+  createThrottledErrorLogger,
+} from "@/lib/logger/throttled";
 
 /**
  * RFC 9449 §8 — DPoP-Nonce.
@@ -23,7 +26,7 @@ const KEY_CUR = "dpop:nonce:cur";
 const REDIS_TTL_SEC = Math.ceil((ROTATION_MS * 2) / 1000);
 
 const logRedisError = createThrottledErrorLogger(
-  30_000,
+  REDIS_FALLBACK_LOG_THROTTLE_MS,
   "dpop-nonce.redis.fallback",
 );
 
@@ -70,8 +73,8 @@ export function createDpopNonceService(
       if (set === "OK") return nonce;
       // Lost the race — re-read.
       return (await redis.get(KEY_CUR)) ?? nonce;
-    } catch {
-      logRedisError();
+    } catch (err) {
+      logRedisError((err as { code?: string } | undefined)?.code);
       return null;
     }
   }
@@ -81,8 +84,8 @@ export function createDpopNonceService(
     if (!redis) return;
     try {
       await redis.set(KEY_CUR, generateNonce(), "EX", REDIS_TTL_SEC);
-    } catch {
-      logRedisError();
+    } catch (err) {
+      logRedisError((err as { code?: string } | undefined)?.code);
     }
   }
 
@@ -114,8 +117,8 @@ export function createDpopNonceService(
             await rotateRedis();
           }
           return;
-        } catch {
-          logRedisError();
+        } catch (err) {
+          logRedisError((err as { code?: string } | undefined)?.code);
           // Fall through to in-memory rotation.
         }
       }

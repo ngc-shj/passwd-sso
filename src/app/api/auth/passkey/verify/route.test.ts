@@ -86,10 +86,6 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withBypassRls: mockWithBypassRls,
 }));
 
-vi.mock("@/lib/url-helpers", () => ({
-  isHttps: false,
-}));
-
 vi.mock("@/lib/http/with-request-log", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   withRequestLog: (fn: any) => fn,
@@ -307,7 +303,9 @@ describe("POST /api/auth/passkey/verify", () => {
 
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,
-      headers: { origin: "http://localhost:3000" },
+      // checkIpRateLimit fails-open when extractClientIp returns null; provide an
+      // IP so the limiter is actually consulted in this test.
+      headers: { origin: "http://localhost:3000", "x-forwarded-for": "203.0.113.5" },
     });
     const { status, json } = await parseResponse(await POST(req));
 

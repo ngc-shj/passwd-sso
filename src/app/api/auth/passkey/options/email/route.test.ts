@@ -255,7 +255,9 @@ describe("POST /api/auth/passkey/options/email", () => {
 
     const req = createRequest("POST", ROUTE_URL, {
       body: { email: "test@example.com" },
-      headers: { origin: "http://localhost:3000" },
+      // checkIpRateLimit fails-open when extractClientIp returns null; provide an
+      // IP so the limiter is actually consulted in this test.
+      headers: { origin: "http://localhost:3000", "x-forwarded-for": "203.0.113.5" },
     });
     const { status, json } = await parseResponse(await POST(req));
 

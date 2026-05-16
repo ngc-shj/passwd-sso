@@ -7,11 +7,15 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { assertOrigin } from "@/lib/auth/session/csrf";
 import { authorizeWebAuthn } from "@/lib/auth/webauthn/webauthn-authorize";
 import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit/audit";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
+import { extractClientIp } from "@/lib/auth/policy/ip-access";
+import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { isHttps } from "@/lib/url-helpers";
+import {
+  getSessionCookieName,
+  isSecureCookieFromAuthUrl,
+} from "@/lib/auth/session/cookie-name";
 import { revokeAllExtensionTokensForUser } from "@/lib/auth/tokens/extension-token";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
@@ -21,10 +25,13 @@ export const runtime = "nodejs";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
-// Cookie name must match auth.config.ts
-const SESSION_COOKIE_NAME = isHttps
-  ? "__Secure-authjs.session-token"
-  : "authjs.session-token";
+// Cookie name must match auth.config.ts — both paths use the shared
+// getSessionCookieName helper + isSecureCookieFromAuthUrl so the
+// selection cannot drift.
+const SESSION_COOKIE_NAME = getSessionCookieName({
+  useSecureCookies: isSecureCookieFromAuthUrl(),
+  basePath: process.env.NEXT_PUBLIC_BASE_PATH,
+});
 
 // POST /api/auth/passkey/verify
 // Unauthenticated endpoint — verifies a passkey authentication response
@@ -36,8 +43,12 @@ async function handlePOST(req: NextRequest) {
   if (originError) return originError;
 
   // Rate limit by IP
-  const ip = extractClientIp(req) ?? "unknown";
-  const rl = await rateLimiter.check(`rl:webauthn_signin_verify:${rateLimitKeyFromIp(ip)}`);
+  const rl = await checkIpRateLimit({
+    ip: extractClientIp(req),
+    pathname: req.nextUrl.pathname,
+    scope: "webauthn_signin_verify",
+    limiter: rateLimiter,
+  });
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }
@@ -173,7 +184,7 @@ async function handlePOST(req: NextRequest) {
     path: `${basePath}/`,
     httpOnly: true,
     sameSite: "lax",
-    secure: isHttps,
+    secure: isSecureCookieFromAuthUrl(),
     expires,
   });
 

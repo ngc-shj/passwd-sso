@@ -17,6 +17,7 @@ import {
   type SessionInfo,
 } from "@/lib/auth/session/session-cache";
 import { resolveUserTenantId } from "@/lib/tenant-context";
+import { ALL_KNOWN_SESSION_COOKIE_NAMES } from "@/lib/auth/session/cookie-name";
 
 export type { SessionInfo } from "@/lib/auth/session/session-cache";
 export { SESSION_CACHE_TTL_MS } from "@/lib/auth/session/session-cache";
@@ -24,11 +25,12 @@ export { SESSION_CACHE_TTL_MS } from "@/lib/auth/session/session-cache";
 /**
  * Extract the Auth.js session token value from the cookie header.
  * Returns empty string if no known session token cookie is present.
+ * Walks ALL_KNOWN_SESSION_COOKIE_NAMES so any of the three current-issue
+ * shapes (__Host- / __Secure- / plain) is recognized regardless of the
+ * deployment's useSecureCookies + basePath combination.
  */
 export function extractSessionToken(cookie: string): string {
-  // Cookie names used by Auth.js (dev and prod variants)
-  const names = ["__Secure-authjs.session-token", "authjs.session-token"];
-  for (const name of names) {
+  for (const name of ALL_KNOWN_SESSION_COOKIE_NAMES) {
     const prefix = `${name}=`;
     const idx = cookie.indexOf(prefix);
     if (idx !== -1) {

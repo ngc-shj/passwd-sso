@@ -94,40 +94,96 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
   },
   {
     type: "literal",
-    key: "PASSWD_OUTBOX_WORKER_PASSWORD",
+    key: "PASSWD_SUPERUSER_PASSWORD",
     justification:
-      "Consumed only by the one-shot provisioning script that sets the passwd_outbox_worker DB role password. " +
-      "Not read by any running process.",
+      "Password for the passwd_user SUPERUSER DB role. Consumed by docker-compose (POSTGRES_PASSWORD on db service, " +
+      "and DB URLs for jackson + migrate services). Not read by the Next.js app — runtime uses the passwd_app role.",
     consumers: [
-      "scripts/set-outbox-worker-password.sh",
+      "docker-compose.yml",
       "infra/postgres/initdb",
     ],
-    reviewedAt: "2026-04-24",
+    reviewedAt: "2026-05-16",
+    includeInExample: true,
+    requiredForConsumer: true,
+    description:
+      "Password for the passwd_user SUPERUSER DB role.\n" +
+      "Used by docker-compose to bootstrap the postgres image AND by\n" +
+      "the Prisma migrate / Jackson containers that need SUPERUSER access.\n" +
+      "Generate with: openssl rand -hex 24",
+    secret: true,
+  },
+  {
+    type: "literal",
+    key: "PASSWD_APP_PASSWORD",
+    justification:
+      "Password for the passwd_app NOSUPERUSER DB role used by the Next.js app at runtime. " +
+      "Consumed by docker-compose (PASSWD_APP_PASSWORD env on db service for initdb AND DATABASE_URL " +
+      "on app + worker services). Not read directly by any Next.js TS code — Prisma client receives the " +
+      "already-assembled DATABASE_URL.",
+    consumers: [
+      "docker-compose.yml",
+      "docker-compose.override.yml",
+      "infra/postgres/initdb",
+    ],
+    reviewedAt: "2026-05-16",
+    includeInExample: true,
+    requiredForConsumer: true,
+    description:
+      "Password for the passwd_app NOSUPERUSER DB role (runtime).\n" +
+      "Used by docker-compose to compose DATABASE_URL for the app +\n" +
+      "audit-outbox-worker + dcr-cleanup-worker containers, AND by\n" +
+      "infra/postgres/initdb on first boot to create the role.\n" +
+      "Generate with: openssl rand -hex 24",
+    secret: true,
+  },
+  {
+    type: "literal",
+    key: "PASSWD_OUTBOX_WORKER_PASSWORD",
+    justification:
+      "Password for the passwd_outbox_worker NOSUPERUSER DB role used by the audit-outbox drain worker. " +
+      "Consumed by docker-compose (PASSWD_OUTBOX_WORKER_PASSWORD env on db service for initdb AND " +
+      "OUTBOX_WORKER_DATABASE_URL on the worker service) AND by " +
+      "scripts/set-outbox-worker-password.sh for existing clusters.",
+    consumers: [
+      "scripts/set-outbox-worker-password.sh",
+      "docker-compose.yml",
+      "docker-compose.override.yml",
+      "infra/postgres/initdb",
+    ],
+    reviewedAt: "2026-05-16",
     includeInExample: true,
     requiredForConsumer: true,
     description:
       "Password for the passwd_outbox_worker least-privilege DB role.\n" +
-      "Consumed by infra/postgres/initdb on first boot AND by\n" +
-      "scripts/set-outbox-worker-password.sh for existing clusters.",
+      "Used by docker-compose to wire OUTBOX_WORKER_DATABASE_URL for\n" +
+      "the audit-outbox-worker container, AND by\n" +
+      "infra/postgres/initdb to create the role on first boot.\n" +
+      "Generate with: openssl rand -hex 24",
     secret: true,
   },
   {
     type: "literal",
     key: "PASSWD_DCR_CLEANUP_WORKER_PASSWORD",
     justification:
-      "Consumed only by the one-shot provisioning script that sets the passwd_dcr_cleanup_worker DB role password. " +
-      "Not read by any running process.",
+      "Password for the passwd_dcr_cleanup_worker NOSUPERUSER DB role used by the DCR cleanup worker. " +
+      "Consumed by docker-compose (PASSWD_DCR_CLEANUP_WORKER_PASSWORD env on db service for initdb AND " +
+      "DCR_CLEANUP_DATABASE_URL on the worker service) AND by " +
+      "scripts/set-dcr-cleanup-worker-password.sh for existing clusters.",
     consumers: [
       "scripts/set-dcr-cleanup-worker-password.sh",
+      "docker-compose.yml",
+      "docker-compose.override.yml",
       "infra/postgres/initdb",
     ],
-    reviewedAt: "2026-04-28",
+    reviewedAt: "2026-05-16",
     includeInExample: true,
     requiredForConsumer: true,
     description:
       "Password for the passwd_dcr_cleanup_worker least-privilege DB role.\n" +
-      "Consumed by infra/postgres/initdb on first boot AND by\n" +
-      "scripts/set-dcr-cleanup-worker-password.sh for existing clusters.",
+      "Used by docker-compose to wire DCR_CLEANUP_DATABASE_URL for\n" +
+      "the dcr-cleanup-worker container, AND by\n" +
+      "infra/postgres/initdb to create the role on first boot.\n" +
+      "Generate with: openssl rand -hex 24",
     secret: true,
   },
   {

@@ -9,6 +9,7 @@ import {
   EXTENSION_TOKEN_MAX_ACTIVE,
   type ExtensionTokenScope,
 } from "@/lib/constants";
+import { EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
@@ -212,7 +213,7 @@ export async function issueExtensionToken(params: {
       select: { extensionTokenIdleTimeoutMinutes: true },
     }),
   BYPASS_PURPOSE.TOKEN_LIFECYCLE);
-  const idleMinutes = tenant?.extensionTokenIdleTimeoutMinutes ?? 10080;
+  const idleMinutes = tenant?.extensionTokenIdleTimeoutMinutes ?? EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT;
   const expiresAt = new Date(now.getTime() + idleMinutes * MS_PER_MINUTE);
 
   const plaintext = generateShareToken();

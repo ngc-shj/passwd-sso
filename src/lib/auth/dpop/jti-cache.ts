@@ -1,5 +1,8 @@
 import { getRedis } from "@/lib/redis";
-import { createThrottledErrorLogger } from "@/lib/logger/throttled";
+import {
+  REDIS_FALLBACK_LOG_THROTTLE_MS,
+  createThrottledErrorLogger,
+} from "@/lib/logger/throttled";
 
 /**
  * RFC 9449 §11.1 — server-side `jti` uniqueness cache.
@@ -25,7 +28,7 @@ export interface JtiCache {
 const DEFAULT_TTL_MS = 60_000;
 
 const logRedisError = createThrottledErrorLogger(
-  30_000,
+  REDIS_FALLBACK_LOG_THROTTLE_MS,
   "dpop-jti-cache.redis.fallback",
 );
 
@@ -78,8 +81,8 @@ export function createJtiCache(options: { ttlMs?: number; now?: () => number } =
           // SET key 1 PX <ttl> NX → "OK" on first sight, null on replay.
           const result = await redis.set(key, "1", "PX", ttlMs, "NX");
           return result === null;
-        } catch {
-          logRedisError();
+        } catch (err) {
+          logRedisError((err as { code?: string } | undefined)?.code);
           // Fall through to in-memory fallback.
         }
       }

@@ -2,7 +2,10 @@ import * as crypto from "node:crypto";
 import type Redis from "ioredis";
 import { z } from "zod";
 import { getMasterKeyByVersion } from "@/lib/crypto/crypto-server";
-import { createThrottledErrorLogger } from "@/lib/logger/throttled";
+import {
+  REDIS_FALLBACK_LOG_THROTTLE_MS,
+  createThrottledErrorLogger,
+} from "@/lib/logger/throttled";
 import { getRedis } from "@/lib/redis";
 import {
   NEGATIVE_CACHE_TTL_MS,
@@ -84,7 +87,7 @@ export function hashSessionToken(token: string): string {
 
 // ─── Throttled logger (single instance, all ops) ────────────
 const logRedisError = createThrottledErrorLogger(
-  30_000,
+  REDIS_FALLBACK_LOG_THROTTLE_MS,
   "session-cache.redis.fallback",
 );
 
