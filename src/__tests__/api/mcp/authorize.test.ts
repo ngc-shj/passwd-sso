@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockMcpClientFindFirst, mockWithBypassRls, mockServerAppUrl, mockDetectLocale, mockRateLimiterCheck, mockRequireRecentSession } =
+const { mockAuth, mockMcpClientFindFirst, mockWithBypassRls, mockServerAppUrl, mockDetectLocale, mockRateLimiterCheck, mockRequireRecentSession, mockEmitFailClosed } =
   vi.hoisted(() => ({
     mockAuth: vi.fn(),
     mockMcpClientFindFirst: vi.fn(),
@@ -10,6 +10,7 @@ const { mockAuth, mockMcpClientFindFirst, mockWithBypassRls, mockServerAppUrl, m
     mockDetectLocale: vi.fn(() => "en"),
     mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
     mockRequireRecentSession: vi.fn().mockResolvedValue(null),
+    mockEmitFailClosed: vi.fn(),
   }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -31,6 +32,9 @@ vi.mock("@/i18n/locale-utils", () => ({
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
+}));
+vi.mock("@/lib/security/rate-limit-audit", () => ({
+  emitRateLimitFailClosed: mockEmitFailClosed,
 }));
 vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: () => "127.0.0.1",
@@ -324,6 +328,25 @@ describe("GET /api/mcp/authorize", () => {
       const json = await res.json();
       expect(json).toEqual({ error: "temporarily_unavailable" });
       expect("error_description" in json).toBe(false);
+    });
+
+    // T6 — pattern propagation: assert emitRateLimitFailClosed was invoked
+    // with the canonical args so the 41 routes following this template
+    // copy the right shape.
+    it("invokes emitRateLimitFailClosed with scope=mcp.authorize on redisErrored", async () => {
+      mockRateLimiterCheck.mockResolvedValueOnce({
+        allowed: false,
+        redisErrored: true,
+      });
+
+      await GET(createRequest("GET", authorizeUrl()));
+
+      expect(mockEmitFailClosed).toHaveBeenCalledTimes(1);
+      expect(mockEmitFailClosed).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope: "mcp.authorize",
+        }),
+      );
     });
   });
 });

@@ -88,7 +88,7 @@ Suggested alertmanager / log-based rules. Tune `N` / `M` to your traffic baselin
 - alert: RateLimitFailClosedSpike
   expr: |
     sum(rate(http_requests_total{
-      route=~"/api/(vault|auth/passkey|webauthn|share-links/verify-access|api-keys|tenant/access-requests|mcp|extension|mobile|share-links/.*/content|emergency-access/accept|teams/invitations/accept)/.*",
+      route=~"/api/(vault|auth/passkey|webauthn|share-links/verify-access|api-keys|tenant/access-requests|tenant/members/.*/reset-vault/.*/approve|mcp|extension|mobile|share-links/.*/content|emergency-access/accept|teams/invitations/accept)/.*",
       status="503"
     }[2m])) > 5
   for: 2m

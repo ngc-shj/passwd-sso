@@ -26,6 +26,7 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import { getLogger } from "@/lib/logger";
 import { RATE_LIMIT_MAP_MAX_SIZE } from "@/lib/validations/common.server";
+import { resolveUserTenantId } from "@/lib/tenant-context";
 
 const THROTTLE_WINDOW_MS = 5 * 60 * 1000; // 5 min
 const SCOPE_RE = /^[a-z][a-z0-9_]{0,31}(\.[a-z][a-z0-9_]{0,31}){0,2}$/;
@@ -109,8 +110,25 @@ export async function emitRateLimitFailClosed(args: EmitArgs): Promise<void> {
       return;
     }
 
-    // Pre-auth (no resolvable tenant) → skip audit emission, warn log only.
-    if (args.tenantId == null) {
+    // Tenant resolution: caller passes tenantId when known directly (e.g.,
+    // resolved from a share record or already in scope). When tenantId is
+    // null AND userId is present (post-auth route), resolve here via the
+    // tenantMember table. Fire-and-forget context — DB latency does NOT
+    // block the 503 hot path because callers `void` this helper.
+    //
+    // If tenantId remains null after this attempt (pre-auth route OR
+    // resolution failure), fall back to the warn-log-only path (no
+    // dead-letter row, no DB write).
+    let tenantId = args.tenantId ?? null;
+    if (tenantId == null && args.userId != null) {
+      try {
+        tenantId = await resolveUserTenantId(args.userId);
+      } catch {
+        tenantId = null; // resolution failed — fall back to warn-log
+      }
+    }
+
+    if (tenantId == null) {
       getLogger().warn(
         { scope: args.scope, ipBucket },
         "rate-limit.fail_closed.pre_auth_skip",
@@ -123,7 +141,7 @@ export async function emitRateLimitFailClosed(args: EmitArgs): Promise<void> {
       args.userId != null ? ACTOR_TYPE.HUMAN : ACTOR_TYPE.ANONYMOUS;
 
     await logAuditAsync({
-      ...tenantAuditBase(args.req, actorUserId, args.tenantId),
+      ...tenantAuditBase(args.req, actorUserId, tenantId),
       scope: AUDIT_SCOPE.TENANT,
       actorType,
       action: AUDIT_ACTION.RATE_LIMIT_FAIL_CLOSED,

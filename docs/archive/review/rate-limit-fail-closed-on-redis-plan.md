@@ -239,7 +239,7 @@ export function __getThrottleStateForTests(): { size: number; has(key: string): 
 - I3.4: Scope: always `AUDIT_SCOPE.TENANT`. Plan does NOT emit PERSONAL audit rows. (F7)
 - I3.5: ActorType: `ACTOR_TYPE.ANONYMOUS` when `userId` is null; `ACTOR_TYPE.HUMAN` when present. **NEVER `SYSTEM`** (S1; matches established pattern in `share-links/verify-access/route.ts:84-107`).
 - I3.6: When `userId` is null, `userId` field passed to logger is `ANONYMOUS_ACTOR_ID` sentinel.
-- I3.7: When `tenantId` is null/undefined, **skip the audit emission entirely** and instead write a single throttled warn log (`rate-limit.fail_closed.pre_auth_skip`). Avoids `logAuditAsync` dead-letter and avoids adding DB latency to the fast-fail 503 path. (F8 resolution.)
+- I3.7: When `tenantId` is null AND `userId` is non-null, the helper attempts `resolveUserTenantId(userId)` (cheap indexed tenantMember lookup, wrapped in withBypassRls) to derive tenantId. If resolution succeeds, audit emission proceeds normally. If resolution fails (returns null OR throws) OR userId is also null, the helper skips audit emission and writes a single throttled warn log (`rate-limit.fail_closed.pre_auth_skip`). The DB lookup runs INSIDE the fire-and-forget helper — callers `void emitRateLimitFailClosed(...)`, so the lookup does NOT block the 503 hot path. (F8 resolution + Phase 3 F1/S1 fix — recovers post-auth audit observability for routes that have userId but don't carry tenantId at the limiter-check point.)
 - I3.8: `targetType`: `AUDIT_TARGET_TYPE.RATE_LIMITER` (new const value). `targetId`: the `scope` string. Enables SIEM grouping. (S7)
 - I3.9: Metadata: `{ scope, ip, ipBucket }`. `ip` is raw client IP (matches `share-links/verify-access:99` precedent for SIEM continuity); `ipBucket` is `rateLimitKeyFromIp(ip)` normalised key (IPv6 /64 etc.). (S10)
 - I3.10: scope arg MUST match regex `/^[a-z][a-z0-9_]{0,31}(\.[a-z][a-z0-9_]{0,31}){0,2}$/`. Reject mismatched scope by warn-log + skip emission (do not throw — fail-safe). (S3)
@@ -256,7 +256,7 @@ export function __getThrottleStateForTests(): { size: number; has(key: string): 
 - AC3.3: When `logAuditAsync` rejects, the helper still resolves (does not propagate).
 - AC3.4: When `userId` is null, actorType is `ACTOR_TYPE.ANONYMOUS` and userId field is `ANONYMOUS_ACTOR_ID`.
 - AC3.5: Metadata contains `scope`, `ip`, `ipBucket`. Does NOT contain raw email, token fragments, or other sensitive fields.
-- AC3.6: When `tenantId` is null/undefined, `logAuditAsync` is NOT called; a throttled warn log fires instead.
+- AC3.6 (Phase 3 F1/S1 fix — updated): When `userId` is null AND `tenantId` is null (true pre-auth, e.g., passkey options), `logAuditAsync` is NOT called; a throttled warn log fires instead. When `userId` is present AND `tenantId` is null (post-auth route that doesn't carry tenantId at the limiter-check point), the helper attempts `resolveUserTenantId(userId)`: success → audit emission proceeds; null/throw → fall back to warn-log. When `tenantId` is provided directly by the caller, no DB lookup is attempted.
 - AC3.7: scope arg failing the regex skips emission and logs a warn; helper still resolves.
 - AC3.8 (T16/T18 — corrected to actually exercise LRU eviction): Under sustained pressure (>10_000 distinct keys — i.e., over the `RATE_LIMIT_MAP_MAX_SIZE` cap), oldest entries are evicted (LRU); recently-touched legitimate-user state is preserved. Test pattern: (1) inject the `t0_key` first; (2) inject 10_001 distinct synthetic `(scope, key)` pairs in order; (3) BETWEEN each batch of ~100 synthetic inserts, re-touch `t0_key` (to mark it recently-used); (4) assert `__getThrottleStateForTests().has(t0_key) === true` AND `__getThrottleStateForTests().has(first_synthetic_key) === false` — proves eviction fired AND was LRU-ordered. A clear-all-on-full implementation (the S4 anti-pattern) would fail this test because `t0_key` would be wiped along with everything else on the 10_001st insert.
 
@@ -425,7 +425,7 @@ Route table (NN = canonical envelope `serviceUnavailable()`; OA = OAuth envelope
 - AC5.2: `npx prisma generate` regenerates Prisma Client with new enum value.
 - AC5.3: `npx vitest run` passes including `audit-action-group-coverage.test.ts` and any other exhaustive-enum tests.
 - AC5.4 (T5 + T13 split): two acceptance criteria covering the write half and the drain half:
-  - **AC5.4a (write — committed in this PR)**: integration test `src/__tests__/integration/rate-limit-fail-closed.integration.test.ts` exercises `emitRateLimitFailClosed` against the real DB and asserts a row appears in `audit_outbox` with `status='PENDING'`, `action='RATE_LIMIT_FAIL_CLOSED'`, `metadata` containing scope/ip/ipBucket, plus the correct `actorType`/`tenantId` per the test scenario. Does NOT mock `logAuditAsync` (uses the real path). Mocks `getRedis` to force the redisErrored branch.
+  - **AC5.4a (write — committed in this PR)**: integration test `src/__tests__/db-integration/rate-limit-fail-closed.integration.test.ts` exercises `emitRateLimitFailClosed` against the real DB and asserts a row appears in `audit_outbox` with `status='PENDING'`, `action='RATE_LIMIT_FAIL_CLOSED'`, `metadata` containing scope/ip/ipBucket, plus the correct `actorType`/`tenantId` per the test scenario. Does NOT mock `logAuditAsync` (uses the real path). Mocks `getRedis` to force the redisErrored branch.
   - **AC5.4b (drain — manual test, NOT new automated test)**: drain-side verification is covered by the **Manual test plan Scenario A SQL query** which queries `audit_logs` (the drained table, not `audit_outbox`). This requires the operator to have started the outbox worker via `npm run worker:audit-outbox` per pre-conditions. Rationale: confirmed at plan revision that `src/__tests__/integration/` currently has 4 tests (audit-and-isolation, jit-workflow, mcp-oauth-flow, sa-lifecycle) and **none drain the outbox** — so AC5.4b would require building new test infrastructure (spawning a worker subprocess from vitest, etc.). Defer to a follow-up PR; in v1, manual-test Scenario A is the drain proof. AC5.4a alone is sufficient to prove the Prisma enum acceptance (T13 resolution accepts this trade-off rather than building cross-process worker test infra in this PR).
 - AC5.5 (T11): `git status prisma/migrations/` after `npm run db:migrate` shows the new migration committed alongside the schema change.
 
@@ -476,7 +476,7 @@ Route table (NN = canonical envelope `serviceUnavailable()`; OA = OAuth envelope
 
 ### Integration
 
-- `src/__tests__/integration/rate-limit-fail-closed.integration.test.ts` (new, AC5.4) — happy-path round-trip of `emitRateLimitFailClosed` to audit_logs via outbox.
+- `src/__tests__/db-integration/rate-limit-fail-closed.integration.test.ts` (new, AC5.4) — happy-path round-trip of `emitRateLimitFailClosed` to audit_logs via outbox.
 - Existing integration tests under `src/__tests__/integration/` (vault unlock, passkey, MCP flows) continue to pass through normal Redis path; no regression expected.
 
 ### Schema migration verification (per memory `feedback_run_migration_on_dev_db.md`)
@@ -602,9 +602,17 @@ File: `docs/archive/review/rate-limit-fail-closed-on-redis-manual-test.md` (crea
 
 LRU eviction (I3.2) keeps map within `RATE_LIMIT_MAP_MAX_SIZE = 10_000`. Botnet-style flooding is bounded by the cap; legitimate state is preserved (S4 fix).
 
-### Considerations-2: pre-auth audit emission resolution
+### Considerations-2: tenant resolution + pre-auth fallback
 
-Pre-auth routes pass `tenantId=null` → I3.7 skips audit emission entirely; warn-log fires. Avoids `logAuditAsync` dead-letter and DB latency on the 503 path. Operations runbook (C6 §5) documents this.
+Two cases for the audit emission decision (set in `emitRateLimitFailClosed`):
+
+1. **Caller passes tenantId** (e.g., `vault/delegation` already resolves it; `share-links/verify-access tokenLimiter` derives it from the share record): helper uses the provided value, no DB lookup.
+2. **Caller passes `tenantId: null`** but provides `userId`: helper invokes `resolveUserTenantId(userId)` (tenantMember PK-indexed lookup, withBypassRls). Success → audit row emitted. Resolution failure (null OR throw) → warn-log only.
+3. **Caller passes both `userId: null` and `tenantId: null`** (true pre-auth, e.g., passkey/options): no lookup attempted, warn-log only.
+
+Why this is safe on the 503 hot path: callers `void emitRateLimitFailClosed(...)`, so the await on `resolveUserTenantId` does NOT block the response. The DB lookup costs ~1ms async, not blocking. (Phase 3 F1/S1 fix supersedes the prior "skip-on-null-tenant" design that silently downgraded 23 post-auth routes to warn-log-only.)
+
+Operations runbook (C6 §5) updated: post-auth routes WILL produce audit rows; pre-auth and resolution-failed routes appear only in the `rate-limit.fail_closed.pre_auth_skip` warn-log stream.
 
 ### Considerations-3: webhook fan-out during Redis outage — SUPPRESSED
 

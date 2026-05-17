@@ -80,4 +80,27 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
+# AC4.4 / AC4.5 — limiter / branch count parity. Plan locks 46 limiter
+# instantiations across 42 route files (4 files have 2 limiters each).
+# A future PR that silently drops a limiter from one of the double-limiter
+# files would leave the file-count gate above passing (still 42 files) but
+# break the per-limiter coverage. Per-line grep guards against this.
+EXPECTED_LIMITER_COUNT=46
+limiter_count=$(grep -rh 'failClosedOnRedisError: true' "$REPO_ROOT/src/app/api" | wc -l)
+if [ "$limiter_count" -ne "$EXPECTED_LIMITER_COUNT" ]; then
+  echo "AC4.4 FAIL: expected $EXPECTED_LIMITER_COUNT 'failClosedOnRedisError: true' instantiations; found $limiter_count"
+  echo "If you intentionally added/removed an opt-in limiter, update EXPECTED_LIMITER_COUNT in this script AND the plan's C4 table."
+  exit 1
+fi
+
+# AC4.5 — at least one `rl.redisErrored` branch per limiter. The two routes
+# with the same limiter checked at multiple sites (tenant/access-requests,
+# mcp/token) push the branch count to 48; that's the documented deviation.
+EXPECTED_MIN_BRANCH_COUNT=46
+branch_count=$(grep -rh '\.redisErrored' "$REPO_ROOT/src/app/api" | wc -l)
+if [ "$branch_count" -lt "$EXPECTED_MIN_BRANCH_COUNT" ]; then
+  echo "AC4.5 FAIL: expected at least $EXPECTED_MIN_BRANCH_COUNT '*.redisErrored' branches; found $branch_count"
+  exit 1
+fi
+
 exit 0

@@ -23,11 +23,13 @@ async function importEmitter() {
 }
 
 function makeReq(ip = "203.0.113.50"): NextRequest {
+  // T4 — set BOTH the XFF header AND request.ip so extractClientIp returns
+  // the test IP regardless of TRUST_PROXY_HEADERS env state. The XFF path
+  // is gated by TRUST_PROXY_HEADERS; setting request.ip ensures the socket
+  // fallback path produces the same IP — hermetic against env config drift.
   return {
     headers: new Headers({ "x-forwarded-for": ip }),
-    // extractClientIp() also checks request.ip on Edge runtime; node runtime
-    // takes the header path. The integration tests run in node — header
-    // suffices.
+    ip,
   } as unknown as NextRequest;
 }
 

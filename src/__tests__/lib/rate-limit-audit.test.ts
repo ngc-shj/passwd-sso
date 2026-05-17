@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextRequest } from "next/server";
 
-const { mockLogAuditAsync, mockWarn, mockError } = vi.hoisted(() => ({
+const { mockLogAuditAsync, mockWarn, mockError, mockResolveUserTenantId } = vi.hoisted(() => ({
   mockLogAuditAsync: vi.fn(),
   mockWarn: vi.fn(),
   mockError: vi.fn(),
+  mockResolveUserTenantId: vi.fn(),
 }));
 
 vi.mock("@/lib/audit/audit", () => ({
@@ -27,6 +28,10 @@ vi.mock("@/lib/auth/policy/ip-access", () => ({
   rateLimitKeyFromIp: (ip: string) => ip,
 }));
 
+vi.mock("@/lib/tenant-context", () => ({
+  resolveUserTenantId: mockResolveUserTenantId,
+}));
+
 import {
   __getThrottleStateForTests,
   __resetThrottleForTests,
@@ -43,6 +48,8 @@ beforeEach(() => {
   mockLogAuditAsync.mockResolvedValue(undefined);
   mockWarn.mockReset();
   mockError.mockReset();
+  mockResolveUserTenantId.mockReset();
+  mockResolveUserTenantId.mockResolvedValue(null); // default: pre-auth/unresolvable
 });
 
 afterEach(() => {
@@ -132,8 +139,8 @@ describe("emitRateLimitFailClosed", () => {
     expect(Object.keys(call.metadata).sort()).toEqual(["ip", "ipBucket", "scope"]);
   });
 
-  // AC3.6
-  it("when tenantId is null, skips logAuditAsync and emits warn log", async () => {
+  // AC3.6 — true pre-auth (userId null AND no tenant): warn-log only
+  it("when userId is null AND tenantId is null, skips logAuditAsync and emits warn log", async () => {
     await emitRateLimitFailClosed({
       req: fakeReq(),
       scope: "auth.passkey_options",
@@ -141,14 +148,80 @@ describe("emitRateLimitFailClosed", () => {
       tenantId: null,
     });
     expect(mockLogAuditAsync).not.toHaveBeenCalled();
+    expect(mockResolveUserTenantId).not.toHaveBeenCalled(); // userId null → no resolution attempt
     expect(mockWarn).toHaveBeenCalledWith(
       expect.objectContaining({ scope: "auth.passkey_options" }),
       "rate-limit.fail_closed.pre_auth_skip",
     );
   });
 
-  // AC3.7 — invalid scope regex → fail-safe (warn + drop)
-  it("scope failing the regex is dropped with a warn (no throw, no emit)", async () => {
+  // F1/S1 fix — post-auth path: tenantId not provided but userId is → resolve via tenant-context
+  it("when userId present and tenantId null, resolves tenantId from userId and emits audit", async () => {
+    mockResolveUserTenantId.mockResolvedValue("tenant-resolved");
+    await emitRateLimitFailClosed({
+      req: fakeReq(),
+      scope: "vault.unlock",
+      userId: "user-1",
+      tenantId: null,
+    });
+    expect(mockResolveUserTenantId).toHaveBeenCalledWith("user-1");
+    expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
+    const call = mockLogAuditAsync.mock.calls[0]?.[0];
+    expect(call).toMatchObject({
+      action: "RATE_LIMIT_FAIL_CLOSED",
+      actorType: "HUMAN",
+      userId: "user-1",
+      tenantId: "tenant-resolved",
+    });
+  });
+
+  // F1/S1 fix — post-auth fallback: tenant resolution returns null → fall back to warn-log
+  it("falls back to warn-log when tenant resolution returns null", async () => {
+    mockResolveUserTenantId.mockResolvedValue(null);
+    await emitRateLimitFailClosed({
+      req: fakeReq(),
+      scope: "vault.unlock",
+      userId: "orphan-user",
+      tenantId: null,
+    });
+    expect(mockResolveUserTenantId).toHaveBeenCalledWith("orphan-user");
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
+    expect(mockWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: "vault.unlock" }),
+      "rate-limit.fail_closed.pre_auth_skip",
+    );
+  });
+
+  // F1/S1 fix — resolution throws → fall back to warn-log (never propagates)
+  it("falls back to warn-log when tenant resolution throws", async () => {
+    mockResolveUserTenantId.mockRejectedValueOnce(new Error("DB down"));
+    await emitRateLimitFailClosed({
+      req: fakeReq(),
+      scope: "vault.unlock",
+      userId: "user-1",
+      tenantId: null,
+    });
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
+    expect(mockWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: "vault.unlock" }),
+      "rate-limit.fail_closed.pre_auth_skip",
+    );
+  });
+
+  // Caller already knows tenantId → no DB lookup attempted
+  it("does not call resolveUserTenantId when caller provides tenantId directly", async () => {
+    await emitRateLimitFailClosed({
+      req: fakeReq(),
+      scope: "vault.delegation",
+      userId: "user-1",
+      tenantId: "tenant-from-caller",
+    });
+    expect(mockResolveUserTenantId).not.toHaveBeenCalled();
+    expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
+  });
+
+  // AC3.7 — invalid scope regex → fail-safe (warn + drop) + throttle map stays clean
+  it("scope failing the regex is dropped with a warn (no throw, no emit, throttle untouched)", async () => {
     await emitRateLimitFailClosed({
       req: fakeReq(),
       scope: "Invalid Scope With Spaces",
@@ -160,6 +233,8 @@ describe("emitRateLimitFailClosed", () => {
       { scope: "Invalid Scope With Spaces" },
       "rate-limit.fail_closed.invalid_scope",
     );
+    // T5 — verify invalid-scope path does NOT pollute the throttle map
+    expect(__getThrottleStateForTests().size).toBe(0);
   });
 
   it("scope regex accepts dotted lower-snake (e.g. mcp.token_refresh)", async () => {
