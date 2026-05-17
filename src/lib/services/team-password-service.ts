@@ -112,10 +112,14 @@ async function assertTeamTagsOwnership(
   teamId: string,
 ): Promise<void> {
   if (!tagIds?.length) return;
+  // Normalize: a caller-supplied duplicate (e.g. ["t1","t1"]) should not
+  // count as a missing tag. teamTag.count returns distinct row count, so
+  // compare against the deduped input length, not the raw array length.
+  const uniqueTagIds = [...new Set(tagIds)];
   const count = await prisma.teamTag.count({
-    where: { id: { in: tagIds }, teamId },
+    where: { id: { in: uniqueTagIds }, teamId },
   });
-  if (count !== tagIds.length) {
+  if (count !== uniqueTagIds.length) {
     throw new TeamPasswordServiceError(API_ERROR.NOT_FOUND, 404);
   }
 }
@@ -405,6 +409,22 @@ export async function updateTeamPassword(
     itemKeyVersion !== undefined &&
     itemKeyVersion >= 1 &&
     existingVersion < 1 &&
+    !encryptedItemKey
+  ) {
+    throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_REQUIRED, 400);
+  }
+
+  // Re-wrap requirement: buildItemKeyWrapAAD binds the encryptedItemKey to
+  // teamKeyVersion. If teamKeyVersion changes (rotation) and the entry holds
+  // a wrapped item key (effective itemKeyVersion >= 1), the encryptedItemKey
+  // MUST be re-wrapped with the new team key — otherwise the existing wrap's
+  // AAD no longer matches and the item key (and thus the entry) becomes
+  // undecryptable.
+  const effectiveItemKeyVersion = itemKeyVersion ?? existingVersion;
+  if (
+    isFullUpdate &&
+    teamKeyVersionChanged &&
+    effectiveItemKeyVersion >= 1 &&
     !encryptedItemKey
   ) {
     throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_REQUIRED, 400);

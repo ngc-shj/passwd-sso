@@ -77,6 +77,13 @@ export async function GET(request: NextRequest) {
 
   const { clientId, entryId } = parsed.data;
 
+  // Intra-user IDOR guard: an MCP token may only check its own client's
+  // delegation. Without this, a user-X token issued for client A could
+  // probe delegation state of the same user's other MCP client B.
+  if (authResult.type === "mcp_token" && authResult.mcpClientId !== clientId) {
+    return NextResponse.json({ authorized: false, reason: "unauthorized" }, { status: 403 });
+  }
+
   // Find active delegation session via MCP client's public clientId
   const { prisma } = await import("@/lib/prisma");
   const { withBypassRls, BYPASS_PURPOSE } = await import("@/lib/tenant-rls");
@@ -86,6 +93,10 @@ export async function GET(request: NextRequest) {
       where: {
         userId,
         mcpAccessToken: {
+          // When auth is MCP token, also bind the lookup to the calling
+          // token's tokenId — defense-in-depth on top of the clientId
+          // equality check above.
+          ...(authResult.type === "mcp_token" ? { tokenId: authResult.tokenId } : {}),
           mcpClient: { clientId },
         },
         revokedAt: null,
