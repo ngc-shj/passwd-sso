@@ -3,7 +3,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, serviceUnavailable, unauthorized } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { INVITATION_STATUS } from "@/lib/constants";
 import { withUserTenantRls, withTeamTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
@@ -12,7 +13,11 @@ import { parseBody } from "@/lib/http/parse-body";
 import { invitationAcceptSchema } from "@/lib/validations";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
-const acceptLimiter = createRateLimiter({ windowMs: 5 * MS_PER_MINUTE, max: 10 });
+const acceptLimiter = createRateLimiter({
+  windowMs: 5 * MS_PER_MINUTE,
+  max: 10,
+  failClosedOnRedisError: true,
+});
 
 // POST /api/teams/invitations/accept — Accept an invitation by token
 async function handlePOST(req: NextRequest) {
@@ -22,6 +27,15 @@ async function handlePOST(req: NextRequest) {
   }
 
   const rl = await acceptLimiter.check(`rl:invite_accept:${session.user.id}`);
+  if (rl.redisErrored) {
+    void emitRateLimitFailClosed({
+      req,
+      scope: "teams.invitation_accept_token",
+      userId: session.user.id,
+      tenantId: null,
+    });
+    return serviceUnavailable();
+  }
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

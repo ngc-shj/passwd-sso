@@ -163,6 +163,101 @@ describe("createRateLimiter — Redis pipeline", () => {
   });
 });
 
+// ── failClosedOnRedisError opt-in ────────────────────────────────────
+describe("createRateLimiter — failClosedOnRedisError", () => {
+  const mockExec = vi.fn();
+  const mockPexpire = vi.fn().mockReturnThis();
+  const mockIncr = vi.fn().mockReturnThis();
+  const mockPttl = vi.fn().mockReturnThis();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("REDIS_URL", "redis://localhost:6379");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    (globalThis as Record<string, unknown>).redisClient = undefined;
+  });
+
+  function injectFakeRedis(overrides?: { exec?: ReturnType<typeof vi.fn> }) {
+    const exec = overrides?.exec ?? mockExec;
+    const pipeline = vi.fn(() => ({
+      incr: mockIncr,
+      pexpire: mockPexpire,
+      pttl: mockPttl,
+      exec,
+    }));
+    const fakeRedis = { pipeline };
+    (globalThis as Record<string, unknown>).redisClient = fakeRedis;
+    return { pipeline, exec };
+  }
+
+  // AC1.2 — pipeline exec rejecting returns redisErrored: true; no in-memory fallback
+  it("returns { allowed: false, redisErrored: true } when pipeline exec rejects", async () => {
+    injectFakeRedis();
+    mockExec.mockRejectedValue(new Error("Redis down"));
+
+    const limiter = createRateLimiter({
+      windowMs: 60_000,
+      max: 3,
+      failClosedOnRedisError: true,
+    });
+
+    // Call check() many times; would have allowed if in-memory fallback ran
+    for (let i = 0; i < 10; i++) {
+      const result = await limiter.check(`fail-closed-key-${i}`);
+      expect(result.allowed).toBe(false);
+      expect(result.redisErrored).toBe(true);
+      expect(result.retryAfterMs).toBeUndefined();
+    }
+  });
+
+  // AC1.3 — getRedis() returns null (no REDIS_URL) → redisErrored: true
+  it("returns { allowed: false, redisErrored: true } when getRedis returns null", async () => {
+    vi.unstubAllEnvs();
+    vi.stubEnv("REDIS_URL", "");
+    (globalThis as Record<string, unknown>).redisClient = undefined;
+
+    const limiter = createRateLimiter({
+      windowMs: 60_000,
+      max: 3,
+      failClosedOnRedisError: true,
+    });
+
+    const result = await limiter.check("no-redis-key");
+    expect(result.allowed).toBe(false);
+    expect(result.redisErrored).toBe(true);
+  });
+
+  // AC1.4 — clear() asymmetry: still attempts in-memory cleanup
+  it("clear() does not throw when Redis is down (best-effort in-memory)", async () => {
+    injectFakeRedis();
+    mockExec.mockRejectedValue(new Error("Redis down"));
+
+    const limiter = createRateLimiter({
+      windowMs: 60_000,
+      max: 3,
+      failClosedOnRedisError: true,
+    });
+
+    // clearRedis path: redis.del() may also fail; clear() must swallow
+    await expect(limiter.clear("any-key")).resolves.toBeUndefined();
+  });
+
+  // Backward compatibility: default option (false) preserves in-memory fallback
+  it("default failClosedOnRedisError=false preserves in-memory fallback (AC1.1 regression guard)", async () => {
+    injectFakeRedis();
+    mockExec.mockRejectedValue(new Error("Redis down"));
+
+    const limiter = createRateLimiter({ windowMs: 60_000, max: 3 });
+    const result = await limiter.check("default-mode-key");
+
+    expect(result.allowed).toBe(true);
+    expect(result.redisErrored).toBeUndefined();
+  });
+});
+
 describe("validateRedisConfig", () => {
   afterEach(() => {
     vi.unstubAllEnvs();

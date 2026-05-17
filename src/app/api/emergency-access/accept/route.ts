@@ -9,7 +9,8 @@ import { sendEmail } from "@/lib/email";
 import { emergencyGrantAcceptedEmail } from "@/lib/email/templates/emergency-access";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, rateLimited, unauthorized, notFound } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, serviceUnavailable, unauthorized, notFound } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { EA_STATUS, EA_ACTOR, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
@@ -17,7 +18,11 @@ import { parseBody } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
-const acceptLimiter = createRateLimiter({ windowMs: 5 * MS_PER_MINUTE, max: 10 });
+const acceptLimiter = createRateLimiter({
+  windowMs: 5 * MS_PER_MINUTE,
+  max: 10,
+  failClosedOnRedisError: true,
+});
 
 // POST /api/emergency-access/accept — Accept an emergency access invitation
 async function handlePOST(req: NextRequest) {
@@ -27,6 +32,15 @@ async function handlePOST(req: NextRequest) {
   }
 
   const rl = await acceptLimiter.check(`rl:ea_accept:${session.user.id}`);
+  if (rl.redisErrored) {
+    void emitRateLimitFailClosed({
+      req,
+      scope: "emergency_access.accept_token",
+      userId: session.user.id,
+      tenantId: null,
+    });
+    return serviceUnavailable();
+  }
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

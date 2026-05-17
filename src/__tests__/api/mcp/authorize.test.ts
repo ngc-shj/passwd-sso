@@ -300,4 +300,30 @@ describe("GET /api/mcp/authorize", () => {
       expect(jsonNotFound).toEqual(jsonMismatch);
     });
   });
+
+  // AC4.1 / AC4.4 / AC4.5 — proof-of-pattern fail-closed test (plan
+  // rate-limit-fail-closed-on-redis). The 41 other opt-in routes have
+  // their fail-closed test case tracked in
+  // scripts/checks/fail-closed-test-debt.txt and will be authored in
+  // follow-up PRs (one debt-list entry removed per PR).
+  describe("redisErrored fail-closed (rate-limiter Redis unavailable)", () => {
+    beforeEach(() => {
+      mockAuth.mockResolvedValue(null); // pre-auth path is fine for limiter check
+    });
+
+    it("returns 503 + Retry-After: 30 + body { error: temporarily_unavailable } on redisErrored", async () => {
+      mockRateLimiterCheck.mockResolvedValueOnce({
+        allowed: false,
+        redisErrored: true,
+      });
+
+      const res = await GET(createRequest("GET", authorizeUrl()));
+
+      expect(res.status).toBe(503);
+      expect(res.headers.get("Retry-After")).toBe("30");
+      const json = await res.json();
+      expect(json).toEqual({ error: "temporarily_unavailable" });
+      expect("error_description" in json).toBe(false);
+    });
+  });
 });

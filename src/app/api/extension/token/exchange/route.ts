@@ -29,8 +29,10 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import {
   errorResponse,
   rateLimited,
+  serviceUnavailable,
   unauthorized,
 } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { issueExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
@@ -47,6 +49,7 @@ export const runtime = "nodejs";
 const exchangeLimiter = createRateLimiter({
   windowMs: 15 * MS_PER_MINUTE,
   max: 10,
+  failClosedOnRedisError: true,
 });
 
 const ExchangeRequestSchema = z.object({
@@ -81,6 +84,15 @@ async function handlePOST(req: NextRequest) {
     scope: "ext_exchange",
     limiter: exchangeLimiter,
   });
+  if (rl.redisErrored) {
+    void emitRateLimitFailClosed({
+      req,
+      scope: "extension.token_exchange",
+      userId: null,
+      tenantId: null,
+    });
+    return serviceUnavailable();
+  }
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

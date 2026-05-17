@@ -5,7 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited, unauthorized, errorResponse, forbidden, notFound } from "@/lib/http/api-response";
+import { rateLimited, serviceUnavailable, unauthorized, errorResponse, forbidden, notFound } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
@@ -17,10 +18,15 @@ import {
   PRF_ENCRYPTED_KEY_MAX_LENGTH,
 } from "@/lib/validations/common";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/types";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
-const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
+const rateLimiter = createRateLimiter({
+  windowMs: MS_PER_MINUTE,
+  max: 10,
+  failClosedOnRedisError: true,
+});
 
 const rebootstrapSchema = z.object({
   // WebAuthn assertion proving the caller currently holds the authenticator.
@@ -76,6 +82,15 @@ async function handlePOST(
   const { id: credentialRowId } = await params;
 
   const rl = await rateLimiter.check(`rl:webauthn_prf_rebootstrap:${userId}`);
+  if (rl.redisErrored) {
+    void emitRateLimitFailClosed({
+      req: request,
+      scope: "webauthn.prf",
+      userId,
+      tenantId: null,
+    });
+    return serviceUnavailable();
+  }
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

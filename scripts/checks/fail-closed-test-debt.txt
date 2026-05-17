@@ -1,0 +1,60 @@
+# Fail-closed test debt allowlist (AC4.3 — plan rate-limit-fail-closed-on-redis)
+#
+# Routes in this file have `failClosedOnRedisError: true` on at least one
+# rate-limiter but do NOT yet have a test case asserting the route returns
+# the correct 503 envelope when the limiter returns `{ redisErrored: true }`.
+#
+# `scripts/checks/check-fail-closed-routes-have-test.sh` is the CI gate:
+#   - Routes with `failClosedOnRedisError: true` MUST have a sibling test
+#     containing the literal token `redisErrored`, OR appear in this file.
+#   - Adding a new opt-in route without test or allowlist entry fails CI.
+#   - Future PRs that author the fail-closed test MUST also remove the
+#     route's entry from this file (atomic "test added + debt removed").
+#
+# Single route — `mcp/authorize` — has its fail-closed test case in the
+# initial PR (src/__tests__/api/mcp/authorize.test.ts). All other 41
+# opt-in route files are listed below pending follow-up coverage.
+#
+# Format: one route path per line, relative to repo root, sorted.
+
+src/app/api/api-keys/route.ts
+src/app/api/auth/passkey/options/email/route.ts
+src/app/api/auth/passkey/options/route.ts
+src/app/api/auth/passkey/reauth/options/route.ts
+src/app/api/auth/passkey/reauth/verify/route.ts
+src/app/api/auth/passkey/verify/route.ts
+src/app/api/emergency-access/accept/route.ts
+src/app/api/extension/bridge-code/route.ts
+src/app/api/extension/token/exchange/route.ts
+src/app/api/extension/token/refresh/route.ts
+src/app/api/extension/token/route.ts
+src/app/api/mcp/register/route.ts
+src/app/api/mcp/revoke/route.ts
+src/app/api/mcp/token/route.ts
+src/app/api/mobile/token/refresh/route.ts
+src/app/api/mobile/token/route.ts
+src/app/api/share-links/[id]/content/route.ts
+src/app/api/share-links/verify-access/route.ts
+src/app/api/teams/invitations/accept/route.ts
+src/app/api/tenant/access-requests/[id]/approve/route.ts
+src/app/api/tenant/access-requests/[id]/deny/route.ts
+src/app/api/tenant/access-requests/route.ts
+src/app/api/tenant/members/[userId]/reset-vault/[resetId]/approve/route.ts
+src/app/api/vault/admin-reset/route.ts
+src/app/api/vault/change-passphrase/route.ts
+src/app/api/vault/delegation/check/route.ts
+src/app/api/vault/delegation/route.ts
+src/app/api/vault/recovery-key/generate/route.ts
+src/app/api/vault/recovery-key/recover/route.ts
+src/app/api/vault/reset/route.ts
+src/app/api/vault/rotate-key/data/route.ts
+src/app/api/vault/rotate-key/route.ts
+src/app/api/vault/setup/route.ts
+src/app/api/vault/unlock/data/route.ts
+src/app/api/vault/unlock/route.ts
+src/app/api/webauthn/authenticate/options/route.ts
+src/app/api/webauthn/authenticate/verify/route.ts
+src/app/api/webauthn/credentials/[id]/prf/options/route.ts
+src/app/api/webauthn/credentials/[id]/prf/route.ts
+src/app/api/webauthn/register/options/route.ts
+src/app/api/webauthn/register/verify/route.ts

@@ -34,7 +34,9 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import {
   errorResponse,
   rateLimited,
+  serviceUnavailable,
 } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
@@ -58,6 +60,7 @@ export const runtime = "nodejs";
 const tokenLimiter = createRateLimiter({
   windowMs: 15 * MS_PER_MINUTE,
   max: 10,
+  failClosedOnRedisError: true,
 });
 
 const TokenRequestSchema = z
@@ -101,6 +104,15 @@ async function handlePOST(req: NextRequest): Promise<Response> {
   const rl = await tokenLimiter.check(
     `rl:mobile_token:${rateLimitKeyFromIp(clientIp ?? "unknown")}`,
   );
+  if (rl.redisErrored) {
+    void emitRateLimitFailClosed({
+      req,
+      scope: "mobile.token",
+      userId: null,
+      tenantId: null,
+    });
+    return serviceUnavailable();
+  }
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

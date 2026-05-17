@@ -13,13 +13,18 @@ import { AUDIT_ACTION, AUDIT_TARGET_TYPE, AR_STATUS } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, rateLimited, serviceUnavailable, unauthorized } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { z } from "zod";
 import { SA_TOKEN_PREFIX, SA_TOKEN_SCOPE, SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { MS_PER_HOUR, MS_PER_MINUTE } from "@/lib/constants/time";
 
-const accessRequestCreateLimiter = createRateLimiter({ windowMs: MS_PER_HOUR, max: 20 });
+const accessRequestCreateLimiter = createRateLimiter({
+  windowMs: MS_PER_HOUR,
+  max: 20,
+  failClosedOnRedisError: true,
+});
 
 export const runtime = "nodejs";
 
@@ -151,6 +156,15 @@ async function handlePOST(req: NextRequest) {
     if (denied) return denied;
 
     const rl = await accessRequestCreateLimiter.check(`rl:access_request_create:sa:${serviceAccountId}`);
+    if (rl.redisErrored) {
+      void emitRateLimitFailClosed({
+        req,
+        scope: "access_request.create",
+        userId: null,
+        tenantId,
+      });
+      return serviceUnavailable();
+    }
     if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
     const result = await parseBody(req, saCreateSchema);
@@ -190,6 +204,15 @@ async function handlePOST(req: NextRequest) {
     // tenant IP restriction. No other token type can reach this branch.
 
     const rl = await accessRequestCreateLimiter.check(`rl:access_request_create:${tenantId}`);
+    if (rl.redisErrored) {
+      void emitRateLimitFailClosed({
+        req,
+        scope: "access_request.create",
+        userId,
+        tenantId,
+      });
+      return serviceUnavailable();
+    }
     if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
     const result = await parseBody(req, adminCreateSchema);

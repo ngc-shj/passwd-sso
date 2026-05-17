@@ -59,4 +59,16 @@ describe("checkIpRateLimit", () => {
       "rate_limit_skipped_unknown_ip",
     );
   });
+
+  // AC1.5 — wrapper propagates redisErrored from inner limiter
+  it("propagates redisErrored: true from the inner limiter to the caller", async () => {
+    const check = vi.fn().mockResolvedValue({ allowed: false, redisErrored: true });
+    const res = await checkIpRateLimit({
+      ip: "203.0.113.5",
+      pathname: "/api/x",
+      scope: "test_scope",
+      limiter: { check },
+    });
+    expect(res).toEqual({ allowed: false, redisErrored: true });
+  });
 });

@@ -186,6 +186,12 @@ export const AUDIT_ACTION = {
   MOBILE_TOKEN_REPLAY_DETECTED: "MOBILE_TOKEN_REPLAY_DETECTED",
   MOBILE_CACHE_ROLLBACK_REJECTED: "MOBILE_CACHE_ROLLBACK_REJECTED",
   MOBILE_CACHE_FLAG_FORGED: "MOBILE_CACHE_FLAG_FORGED",
+  // Emitted by opt-in rate-limiters (failClosedOnRedisError: true) when
+  // Redis is unavailable AND the caller's 503 response was sent. Audit
+  // emission is throttled per (scope, userId|ipBucket) per 5 min; pre-auth
+  // routes with no resolvable tenantId skip the audit row and emit a warn
+  // log only. See docs/operations/runbook-redis-outage.md.
+  RATE_LIMIT_FAIL_CLOSED: "RATE_LIMIT_FAIL_CLOSED",
 } as const satisfies Record<AuditAction, AuditAction>;
 
 export type AuditScopeValue =
@@ -356,6 +362,7 @@ export const AUDIT_ACTION_VALUES = [
   AUDIT_ACTION.MOBILE_TOKEN_REPLAY_DETECTED,
   AUDIT_ACTION.MOBILE_CACHE_ROLLBACK_REJECTED,
   AUDIT_ACTION.MOBILE_CACHE_FLAG_FORGED,
+  AUDIT_ACTION.RATE_LIMIT_FAIL_CLOSED,
 ] as const;
 
 export const AUDIT_ACTION_GROUP = {
@@ -674,6 +681,7 @@ export const AUDIT_ACTION_GROUPS_TENANT: Record<string, AuditAction[]> = {
     AUDIT_ACTION.AUDIT_ANCHOR_PUBLISH_PAUSED,
     AUDIT_ACTION.AUDIT_ANCHOR_KEY_ROTATED,
     AUDIT_ACTION.AUDIT_CHAIN_VERIFY,
+    AUDIT_ACTION.RATE_LIMIT_FAIL_CLOSED,
   ],
   [AUDIT_ACTION_GROUP.AUDIT_DELIVERY_TARGET]: [
     AUDIT_ACTION.AUDIT_DELIVERY_TARGET_CREATE,
@@ -823,6 +831,12 @@ export const WEBHOOK_DISPATCH_SUPPRESS: ReadonlySet<string> = new Set([
   AUDIT_ACTION.AUDIT_DELIVERY_TARGET_CREATE,
   AUDIT_ACTION.AUDIT_DELIVERY_TARGET_DEACTIVATE,
   AUDIT_ACTION.AUDIT_DELIVERY_TARGET_REACTIVATE,
+  // Suppress webhook fan-out for rate-limit fail-closed events: during a
+  // Redis outage the audit emission is throttled per (scope, actor-key) per
+  // 5 min, but a botnet across many IPs could still produce a webhook storm
+  // that masks unrelated incidents. Operators monitor this class via SIEM
+  // / log alerts on `audit.RATE_LIMIT_FAIL_CLOSED` directly, not webhooks.
+  AUDIT_ACTION.RATE_LIMIT_FAIL_CLOSED,
 ]);
 
 // --- Audit anchor publisher ---

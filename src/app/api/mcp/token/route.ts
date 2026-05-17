@@ -8,6 +8,8 @@ import {
   exchangeRefreshToken,
 } from "@/lib/mcp/oauth-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { oauthTemporarilyUnavailable } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
@@ -17,9 +19,18 @@ import {
   FAMILY_REVOKED_REASON,
 } from "@/lib/constants/auth/mcp";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
-const tokenRateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
-const ipRateLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
+const tokenRateLimiter = createRateLimiter({
+  windowMs: MS_PER_MINUTE,
+  max: 10,
+  failClosedOnRedisError: true,
+});
+const ipRateLimiter = createRateLimiter({
+  windowMs: MS_PER_MINUTE,
+  max: 30,
+  failClosedOnRedisError: true,
+});
 
 async function handlePOST(req: NextRequest) {
   let body: Record<string, string>;
@@ -44,6 +55,15 @@ async function handlePOST(req: NextRequest) {
   const ip = extractClientIp(req);
   if (ip) {
     const ipRl = await ipRateLimiter.check(`rl:mcp:token:ip:${rateLimitKeyFromIp(ip)}`);
+    if (ipRl.redisErrored) {
+      void emitRateLimitFailClosed({
+        req,
+        scope: "mcp.token_ip",
+        userId: null,
+        tenantId: null,
+      });
+      return oauthTemporarilyUnavailable();
+    }
     if (!ipRl.allowed) {
       const retryAfter = Math.ceil((ipRl.retryAfterMs ?? 60_000) / 1000);
       return NextResponse.json(
@@ -62,6 +82,15 @@ async function handlePOST(req: NextRequest) {
     }
 
     const rl = await tokenRateLimiter.check(`mcp:token:${client_id}`);
+    if (rl.redisErrored) {
+      void emitRateLimitFailClosed({
+        req,
+        scope: "mcp.token",
+        userId: null,
+        tenantId: null,
+      });
+      return oauthTemporarilyUnavailable();
+    }
     if (!rl.allowed) {
       const retryAfter = Math.ceil((rl.retryAfterMs ?? 60_000) / 1000);
       return NextResponse.json(
@@ -111,6 +140,15 @@ async function handlePOST(req: NextRequest) {
     }
 
     const clientRl = await tokenRateLimiter.check(`mcp:token:${clientIdValue}`);
+    if (clientRl.redisErrored) {
+      void emitRateLimitFailClosed({
+        req,
+        scope: "mcp.token",
+        userId: null,
+        tenantId: null,
+      });
+      return oauthTemporarilyUnavailable();
+    }
     if (!clientRl.allowed) {
       const retryAfter = Math.ceil((clientRl.retryAfterMs ?? 60_000) / 1000);
       return NextResponse.json(

@@ -6,7 +6,8 @@ import { hashToken } from "@/lib/crypto/crypto-server";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { apiKeyCreateSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, rateLimited } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, serviceUnavailable } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -20,7 +21,11 @@ import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { MS_PER_HOUR } from "@/lib/constants/time";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 
-const apiKeyCreateLimiter = createRateLimiter({ windowMs: MS_PER_HOUR, max: 5 });
+const apiKeyCreateLimiter = createRateLimiter({
+  windowMs: MS_PER_HOUR,
+  max: 5,
+  failClosedOnRedisError: true,
+});
 
 // GET /api/api-keys — List API keys for the current user
 async function handleGET(req: NextRequest) {
@@ -68,6 +73,15 @@ async function handlePOST(req: NextRequest) {
   const { userId } = authed.auth;
 
   const rl = await apiKeyCreateLimiter.check(`rl:api_key_create:${userId}`);
+  if (rl.redisErrored) {
+    void emitRateLimitFailClosed({
+      req,
+      scope: "apikey.create",
+      userId,
+      tenantId: null,
+    });
+    return serviceUnavailable();
+  }
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
   const result = await parseBody(req, apiKeyCreateSchema);

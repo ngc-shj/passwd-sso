@@ -18,8 +18,14 @@ import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
-const checkRateLimiter = createRateLimiter({ windowMs: 60_000, max: 120 });
+const checkRateLimiter = createRateLimiter({
+  windowMs: MS_PER_MINUTE,
+  max: 120,
+  failClosedOnRedisError: true,
+});
 
 const checkParamsSchema = z.object({
   clientId: z.string().startsWith(MCP_CLIENT_ID_PREFIX).max(100),
@@ -58,6 +64,20 @@ export async function GET(request: NextRequest) {
 
   // Rate limit per user
   const rl = await checkRateLimiter.check(`delegation:check:${userId}`);
+  if (rl.redisErrored) {
+    const tenantIdForAudit =
+      authResult.type === "mcp_token" ? authResult.tenantId : null;
+    void emitRateLimitFailClosed({
+      req: request,
+      scope: "vault.delegation_check",
+      userId,
+      tenantId: tenantIdForAudit,
+    });
+    return NextResponse.json(
+      { authorized: false, reason: "service_unavailable" },
+      { status: 503, headers: { "Retry-After": "30" } },
+    );
+  }
   if (!rl.allowed) {
     return NextResponse.json(
       { authorized: false, reason: "rate_limit" },

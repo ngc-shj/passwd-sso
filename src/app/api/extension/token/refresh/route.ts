@@ -3,7 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, serviceUnavailable, unauthorized } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { validateExtensionToken, revokeExtensionTokenFamily } from "@/lib/auth/tokens/extension-token";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -22,6 +23,7 @@ export const runtime = "nodejs";
 const refreshLimiter = createRateLimiter({
   windowMs: 15 * MS_PER_MINUTE,
   max: 20,
+  failClosedOnRedisError: true,
 });
 
 /**
@@ -47,6 +49,15 @@ async function handlePOST(req: NextRequest) {
   if (denied) return denied;
 
   const rl = await refreshLimiter.check(`rl:ext_refresh:${userId}`);
+  if (rl.redisErrored) {
+    void emitRateLimitFailClosed({
+      req,
+      scope: "extension.token_refresh",
+      userId,
+      tenantId,
+    });
+    return serviceUnavailable();
+  }
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

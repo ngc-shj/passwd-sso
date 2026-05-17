@@ -5,15 +5,21 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, rateLimited, unauthorized, notFound } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, serviceUnavailable, unauthorized, notFound } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { assertOrigin } from "@/lib/auth/session/csrf";
 import { generateAuthenticationOpts, WEBAUTHN_CHALLENGE_TTL_SECONDS } from "@/lib/auth/webauthn/webauthn-server";
 import { getRedis } from "@/lib/redis";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
-const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
+const rateLimiter = createRateLimiter({
+  windowMs: MS_PER_MINUTE,
+  max: 10,
+  failClosedOnRedisError: true,
+});
 
 async function handlePOST(req: NextRequest) {
   const originError = assertOrigin(req);
@@ -25,6 +31,15 @@ async function handlePOST(req: NextRequest) {
   }
 
   const rl = await rateLimiter.check(`rl:webauthn_reauth_opts:${session.user.id}`);
+  if (rl.redisErrored) {
+    void emitRateLimitFailClosed({
+      req,
+      scope: "auth.passkey_reauth_options",
+      userId: session.user.id,
+      tenantId: null,
+    });
+    return serviceUnavailable();
+  }
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

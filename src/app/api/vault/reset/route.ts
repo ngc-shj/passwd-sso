@@ -4,7 +4,8 @@ import { auth } from "@/auth";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, serviceUnavailable, unauthorized } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
@@ -25,6 +26,7 @@ const resetSchema = z.object({
 const resetLimiter = createRateLimiter({
   windowMs: 15 * MS_PER_MINUTE,
   max: 3,
+  failClosedOnRedisError: true,
 });
 
 /**
@@ -39,6 +41,15 @@ async function handlePOST(request: NextRequest) {
 
   const rateKey = `rl:vault_reset:${session.user.id}`;
   const rl = await resetLimiter.check(rateKey);
+  if (rl.redisErrored) {
+    void emitRateLimitFailClosed({
+      req: request,
+      scope: "vault.reset",
+      userId: session.user.id,
+      tenantId: null,
+    });
+    return serviceUnavailable();
+  }
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

@@ -11,7 +11,8 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, serviceUnavailable, unauthorized } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -30,6 +31,7 @@ const changePassphraseSchema = z.object({
 const changeLimiter = createRateLimiter({
   windowMs: 15 * MS_PER_MINUTE,
   max: 3,
+  failClosedOnRedisError: true,
 });
 
 /**
@@ -49,6 +51,15 @@ async function handlePOST(request: NextRequest) {
 
   const rateKey = `rl:vault_change_pass:${session.user.id}`;
   const rl = await changeLimiter.check(rateKey);
+  if (rl.redisErrored) {
+    void emitRateLimitFailClosed({
+      req: request,
+      scope: "vault.change_passphrase",
+      userId: session.user.id,
+      tenantId: null,
+    });
+    return serviceUnavailable();
+  }
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

@@ -5,8 +5,10 @@ import { getRedis } from "@/lib/redis";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, rateLimited, unauthorized, notFound } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, serviceUnavailable, unauthorized, notFound } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 import {
   generateAuthenticationOpts,
   WEBAUTHN_CHALLENGE_TTL_SECONDS,
@@ -14,7 +16,11 @@ import {
 
 export const runtime = "nodejs";
 
-const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
+const rateLimiter = createRateLimiter({
+  windowMs: MS_PER_MINUTE,
+  max: 10,
+  failClosedOnRedisError: true,
+});
 
 /**
  * POST /api/webauthn/credentials/[id]/prf/options
@@ -34,7 +40,7 @@ const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
  * options endpoint so both flows tune in lockstep.
  */
 async function handlePOST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await auth();
@@ -45,6 +51,15 @@ async function handlePOST(
   const { id } = await params;
 
   const rl = await rateLimiter.check(`rl:webauthn_prf_rebootstrap_opts:${userId}`);
+  if (rl.redisErrored) {
+    void emitRateLimitFailClosed({
+      req,
+      scope: "webauthn.prf_options",
+      userId,
+      tenantId: null,
+    });
+    return serviceUnavailable();
+  }
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

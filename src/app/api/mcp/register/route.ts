@@ -6,6 +6,8 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
+import { oauthTemporarilyUnavailable } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
@@ -24,6 +26,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 const dcrRateLimiter = createRateLimiter({
   windowMs: DCR_RATE_LIMIT_WINDOW_MS,
   max: DCR_RATE_LIMIT_MAX,
+  failClosedOnRedisError: true,
 });
 
 const dcrSchema = z.object({
@@ -59,6 +62,15 @@ async function handlePOST(req: NextRequest) {
   const rl = await dcrRateLimiter.check(
     `rl:mcp:dcr:${rateLimitKeyFromIp(ip ?? "unknown")}`,
   );
+  if (rl.redisErrored) {
+    void emitRateLimitFailClosed({
+      req,
+      scope: "mcp.dcr_register",
+      userId: null,
+      tenantId: null,
+    });
+    return oauthTemporarilyUnavailable();
+  }
   if (!rl.allowed) {
     const retryAfter = Math.ceil((rl.retryAfterMs ?? DCR_RATE_LIMIT_WINDOW_MS) / 1000);
     return NextResponse.json(

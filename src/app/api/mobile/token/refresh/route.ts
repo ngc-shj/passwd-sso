@@ -37,9 +37,11 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import {
   errorResponse,
   rateLimited,
+  serviceUnavailable,
   zodValidationError,
   unauthorized,
 } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
@@ -61,6 +63,7 @@ export const runtime = "nodejs";
 const refreshLimiter = createRateLimiter({
   windowMs: 15 * MS_PER_MINUTE,
   max: 20,
+  failClosedOnRedisError: true,
 });
 
 const RefreshRequestSchema = z
@@ -155,6 +158,15 @@ async function handlePOST(req: NextRequest): Promise<Response> {
   // a stolen refresh token would have to know a valid token-hash to even
   // surface a userId, so leakage of "this token exists" is acceptable.
   const rl = await refreshLimiter.check(`rl:mobile_refresh:${oldRow.userId}`);
+  if (rl.redisErrored) {
+    void emitRateLimitFailClosed({
+      req,
+      scope: "mobile.token_refresh",
+      userId: oldRow.userId,
+      tenantId: oldRow.tenantId,
+    });
+    return serviceUnavailable();
+  }
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

@@ -11,7 +11,8 @@ import { getLogger } from "@/lib/logger";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, rateLimited, unauthorized, validationError, zodValidationError } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, serviceUnavailable, unauthorized, validationError, zodValidationError } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import {
   hexIv,
   hexAuthTag,
@@ -39,7 +40,11 @@ import {
 
 export const runtime = "nodejs";
 
-const rotateLimiter = createRateLimiter({ windowMs: 15 * MS_PER_MINUTE, max: 3 });
+const rotateLimiter = createRateLimiter({
+  windowMs: 15 * MS_PER_MINUTE,
+  max: 3,
+  failClosedOnRedisError: true,
+});
 
 const attachmentCekRewrapSchema = z.object({
   id: z.string().uuid(),
@@ -102,6 +107,15 @@ async function handlePOST(request: NextRequest) {
   }
 
   const rl = await rotateLimiter.check(`rl:vault_rotate:${session.user.id}`);
+  if (rl.redisErrored) {
+    void emitRateLimitFailClosed({
+      req: request,
+      scope: "vault.rotate_key",
+      userId: session.user.id,
+      tenantId: null,
+    });
+    return serviceUnavailable();
+  }
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

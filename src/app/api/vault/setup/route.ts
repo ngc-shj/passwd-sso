@@ -12,7 +12,8 @@ import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, serviceUnavailable, unauthorized } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import {
   hexIv,
@@ -35,7 +36,11 @@ import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
-const setupLimiter = createRateLimiter({ windowMs: 5 * MS_PER_MINUTE, max: 5 });
+const setupLimiter = createRateLimiter({
+  windowMs: 5 * MS_PER_MINUTE,
+  max: 5,
+  failClosedOnRedisError: true,
+});
 
 const kdfParamsSchema = z.discriminatedUnion("kdfType", [
   z.object({
@@ -79,6 +84,15 @@ async function handlePOST(request: NextRequest) {
   }
 
   const rl = await setupLimiter.check(`rl:vault_setup:${session.user.id}`);
+  if (rl.redisErrored) {
+    void emitRateLimitFailClosed({
+      req: request,
+      scope: "vault.setup",
+      userId: session.user.id,
+      tenantId: null,
+    });
+    return serviceUnavailable();
+  }
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

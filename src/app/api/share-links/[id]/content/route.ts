@@ -8,10 +8,16 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, rateLimited, unauthorized, notFound } from "@/lib/http/api-response";
+import { errorResponse, rateLimited, serviceUnavailable, unauthorized, notFound } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
-const contentLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
+const contentLimiter = createRateLimiter({
+  windowMs: MS_PER_MINUTE,
+  max: 20,
+  failClosedOnRedisError: true,
+});
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -26,6 +32,15 @@ async function handleGET(req: NextRequest, { params }: Params) {
     scope: "share_content",
     limiter: contentLimiter,
   });
+  if (rl.redisErrored) {
+    void emitRateLimitFailClosed({
+      req,
+      scope: "share.content",
+      userId: null,
+      tenantId: null,
+    });
+    return serviceUnavailable();
+  }
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }
