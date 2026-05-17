@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.50](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.49...passwd-sso-v0.4.50) (2026-05-17)
+
+
+### Features
+
+* **security:** add fail-closed rate-limit on Redis errors for auth/credential boundaries ([#473](https://github.com/ngc-shj/passwd-sso/issues/473)) ([0d7dc04](https://github.com/ngc-shj/passwd-sso/commit/0d7dc04d5f9e99ddf311f44f5f88707bef23aa02))
+
+
+### Bug Fixes
+
+* **security:** close Bearer-token scope boundary gaps (OWASP A01/A04/A07) ([#470](https://github.com/ngc-shj/passwd-sso/issues/470)) ([a354a8b](https://github.com/ngc-shj/passwd-sso/commit/a354a8b968e520c89baef36a81b4519ffa5d8f80))
+* **security:** close PR [#470](https://github.com/ngc-shj/passwd-sso/issues/470) followup gaps (intra-user IDOR + AAD re-wrap + 2 minor) ([#472](https://github.com/ngc-shj/passwd-sso/issues/472)) ([5ecacce](https://github.com/ngc-shj/passwd-sso/commit/5ecacced7a10320704e6b41db40c50700f7fde57))
+
 ## [0.4.49](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.48...passwd-sso-v0.4.49) (2026-05-16)
 
 
