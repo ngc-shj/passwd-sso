@@ -235,6 +235,7 @@
   "MOBILE_TOKEN_REPLAY_DETECTED": "モバイルトークンのリプレイを検出",
   "MOBILE_CACHE_ROLLBACK_REJECTED": "モバイルキャッシュのロールバックを拒否",
   "MOBILE_CACHE_FLAG_FORGED": "モバイルキャッシュフラグの改ざんを検出",
+  "RATE_LIMIT_FAIL_CLOSED": "レート制限フェイルクローズ（Redis 障害）",
   "AUDIT_OUTBOX_REAPED": "送信キュー滞留行をリセット",
   "AUDIT_OUTBOX_DEAD_LETTER": "送信キュー行をデッドレター化",
   "AUDIT_OUTBOX_RETENTION_PURGED": "送信キュー保持期限パージを実行",

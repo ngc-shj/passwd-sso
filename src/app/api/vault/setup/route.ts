@@ -12,7 +12,8 @@ import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import {
   hexIv,
@@ -35,7 +36,11 @@ import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
-const setupLimiter = createRateLimiter({ windowMs: 5 * MS_PER_MINUTE, max: 5 });
+const setupLimiter = createRateLimiter({
+  windowMs: 5 * MS_PER_MINUTE,
+  max: 5,
+  failClosedOnRedisError: true,
+});
 
 const kdfParamsSchema = z.discriminatedUnion("kdfType", [
   z.object({
@@ -78,10 +83,14 @@ async function handlePOST(request: NextRequest) {
     return unauthorized();
   }
 
-  const rl = await setupLimiter.check(`rl:vault_setup:${session.user.id}`);
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req: request,
+    limiter: setupLimiter,
+    key: `rl:vault_setup:${session.user.id}`,
+    scope: "vault.setup",
+    userId: session.user.id,
+  });
+  if (blocked) return blocked;
 
   // Prevent re-setup
   const existingUser = await withUserTenantRls(session.user.id, async () =>

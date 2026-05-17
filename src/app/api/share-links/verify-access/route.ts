@@ -9,15 +9,25 @@ import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, rateLimited, notFound, validationError } from "@/lib/http/api-response";
+import { errorResponse, notFound, validationError } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
-const ipLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
-const tokenLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
+const ipLimiter = createRateLimiter({
+  windowMs: MS_PER_MINUTE,
+  max: 5,
+  failClosedOnRedisError: true,
+});
+const tokenLimiter = createRateLimiter({
+  windowMs: MS_PER_MINUTE,
+  max: 20,
+  failClosedOnRedisError: true,
+});
 
 // POST /api/share-links/verify-access — Verify access password for a share
 async function handlePOST(req: NextRequest) {
@@ -37,13 +47,21 @@ async function handlePOST(req: NextRequest) {
     keySuffix: tokenHash,
     limiter: ipLimiter,
   });
-  if (!ipRl.allowed) {
-    return rateLimited(ipRl.retryAfterMs);
-  }
-  const tokenRl = await tokenLimiter.check(`rl:share_verify_token:${tokenHash}`);
-  if (!tokenRl.allowed) {
-    return rateLimited(tokenRl.retryAfterMs);
-  }
+  const ipBlocked = await checkRateLimitOrFail({
+    req,
+    result: ipRl,
+    scope: "share.verify_access_ip",
+    userId: null,
+  });
+  if (ipBlocked) return ipBlocked;
+  const tokenBlocked = await checkRateLimitOrFail({
+    req,
+    limiter: tokenLimiter,
+    key: `rl:share_verify_token:${tokenHash}`,
+    scope: "share.verify_access_token",
+    userId: null,
+  });
+  if (tokenBlocked) return tokenBlocked;
 
   const share = await withBypassRls(prisma, () =>
     prisma.passwordShare.findUnique({

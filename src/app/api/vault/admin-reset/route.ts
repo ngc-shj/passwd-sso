@@ -11,7 +11,8 @@ import { executeVaultReset } from "@/lib/vault/vault-reset";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, forbidden, notFound, unauthorized, rateLimited } from "@/lib/http/api-response";
+import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -20,7 +21,11 @@ import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
 
 export const runtime = "nodejs";
 
-const vaultAdminResetLimiter = createRateLimiter({ windowMs: 15 * MS_PER_MINUTE, max: 3 });
+const vaultAdminResetLimiter = createRateLimiter({
+  windowMs: 15 * MS_PER_MINUTE,
+  max: 3,
+  failClosedOnRedisError: true,
+});
 
 const CONFIRMATION_TOKEN = VAULT_CONFIRMATION_PHRASE.DELETE_VAULT;
 
@@ -46,8 +51,14 @@ async function handlePOST(req: NextRequest) {
   }
 
   const userId = session.user.id;
-  const rl = await vaultAdminResetLimiter.check(`rl:vault_admin_reset:${userId}`);
-  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: vaultAdminResetLimiter,
+    key: `rl:vault_admin_reset:${userId}`,
+    scope: "vault.admin_reset",
+    userId,
+  });
+  if (blocked) return blocked;
 
   const result = await parseBody(req, adminResetSchema);
   if (!result.ok) return result.response;

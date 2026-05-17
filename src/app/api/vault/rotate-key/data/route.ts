@@ -4,7 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { rateLimited, unauthorized } from "@/lib/http/api-response";
+import { unauthorized } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { ATTACHMENT_MANIFEST_CAP } from "@/lib/validations/common";
 
@@ -12,7 +13,11 @@ export const runtime = "nodejs";
 
 // Same config as rotateLimiter in parent route — shared key space ensures
 // the two endpoints count against the same budget per user.
-const rotateLimiter = createRateLimiter({ windowMs: 15 * MS_PER_MINUTE, max: 3 });
+const rotateLimiter = createRateLimiter({
+  windowMs: 15 * MS_PER_MINUTE,
+  max: 3,
+  failClosedOnRedisError: true,
+});
 
 /**
  * GET /api/vault/rotate-key/data
@@ -21,16 +26,20 @@ const rotateLimiter = createRateLimiter({ windowMs: 15 * MS_PER_MINUTE, max: 3 }
  * rows for the authenticated user, plus ECDH private key fields, mode-2
  * attachment CEK data for rewrapping, and mode-0 attachment IDs for migration.
  */
-async function handleGET(_request: NextRequest) {
+async function handleGET(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
   }
 
-  const rl = await rotateLimiter.check(`rl:vault_rotate:${session.user.id}`);
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req: request,
+    limiter: rotateLimiter,
+    key: `rl:vault_rotate:${session.user.id}`,
+    scope: "vault.rotate_key_data",
+    userId: session.user.id,
+  });
+  if (blocked) return blocked;
 
   const userId = session.user.id;
 

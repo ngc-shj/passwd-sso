@@ -3,7 +3,8 @@ import { randomUUID, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, rateLimited } from "@/lib/http/api-response";
+import { errorResponse } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { assertOrigin } from "@/lib/auth/session/csrf";
@@ -25,7 +26,11 @@ import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
-const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
+const rateLimiter = createRateLimiter({
+  windowMs: MS_PER_MINUTE,
+  max: 10,
+  failClosedOnRedisError: true,
+});
 
 // Cookie name must match auth.config.ts — both paths use the shared
 // getSessionCookieName helper + isSecureCookieFromAuthUrl so the
@@ -51,9 +56,13 @@ async function handlePOST(req: NextRequest) {
     scope: "webauthn_signin_verify",
     limiter: rateLimiter,
   });
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    result: rl,
+    scope: "auth.passkey_verify",
+    userId: null,
+  });
+  if (blocked) return blocked;
 
   // Parse request body
   const passkeyVerifySchema = z.object({

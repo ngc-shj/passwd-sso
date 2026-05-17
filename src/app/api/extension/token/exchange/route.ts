@@ -28,9 +28,9 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import {
   errorResponse,
-  rateLimited,
   unauthorized,
 } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { issueExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
@@ -47,6 +47,7 @@ export const runtime = "nodejs";
 const exchangeLimiter = createRateLimiter({
   windowMs: 15 * MS_PER_MINUTE,
   max: 10,
+  failClosedOnRedisError: true,
 });
 
 const ExchangeRequestSchema = z.object({
@@ -81,9 +82,13 @@ async function handlePOST(req: NextRequest) {
     scope: "ext_exchange",
     limiter: exchangeLimiter,
   });
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    result: rl,
+    scope: "extension.token_exchange",
+    userId: null,
+  });
+  if (blocked) return blocked;
 
   // Atomic consume: single UPDATE with affected-rows check
   const codeHash = hashToken(code);

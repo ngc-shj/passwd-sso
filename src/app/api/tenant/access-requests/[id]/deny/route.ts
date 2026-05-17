@@ -9,15 +9,21 @@ import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { transition, AR_STATUS, AR_ACTOR } from "@/lib/access-request/access-request-state";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 type Params = { params: Promise<{ id: string }> };
 
 export const runtime = "nodejs";
 
-const denyLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
+const denyLimiter = createRateLimiter({
+  windowMs: MS_PER_MINUTE,
+  max: 10,
+  failClosedOnRedisError: true,
+});
 
 // POST /api/tenant/access-requests/[id]/deny — Deny an access request
 async function handlePOST(req: NextRequest, { params }: Params) {
@@ -39,8 +45,15 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 
-  const rl = await denyLimiter.check(`rl:access_request_deny:${actor.tenantId}`);
-  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: denyLimiter,
+    key: `rl:access_request_deny:${actor.tenantId}`,
+    scope: "access_request.deny",
+    userId: session.user.id,
+    tenantId: actor.tenantId,
+  });
+  if (blocked) return blocked;
 
   const { id: requestId } = await params;
 

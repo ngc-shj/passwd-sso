@@ -6,7 +6,8 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, rateLimited } from "@/lib/http/api-response";
+import { errorResponse } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { assertOrigin } from "@/lib/auth/session/csrf";
 import { NIL_UUID } from "@/lib/constants/app";
@@ -16,10 +17,15 @@ import { generateAuthenticationOpts, derivePrfSalt } from "@/lib/auth/webauthn/w
 import { randomBytes } from "node:crypto";
 import { EMAIL_MAX_LENGTH } from "@/lib/validations/common";
 import { PASSKEY_DUMMY_CREDENTIALS_MAX } from "@/lib/validations/common.server";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
-const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
+const rateLimiter = createRateLimiter({
+  windowMs: MS_PER_MINUTE,
+  max: 10,
+  failClosedOnRedisError: true,
+});
 
 const CHALLENGE_TTL_SECONDS = 300;
 
@@ -66,9 +72,13 @@ async function handlePOST(req: NextRequest) {
     scope: "webauthn_email_signin_opts",
     limiter: rateLimiter,
   });
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    result: rl,
+    scope: "auth.passkey_options_email",
+    userId: null,
+  });
+  if (blocked) return blocked;
 
   const redis = getRedis();
   if (!redis) {

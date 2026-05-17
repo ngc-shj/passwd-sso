@@ -8,6 +8,7 @@ import {
   exchangeRefreshToken,
 } from "@/lib/mcp/oauth-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
@@ -17,9 +18,18 @@ import {
   FAMILY_REVOKED_REASON,
 } from "@/lib/constants/auth/mcp";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
-const tokenRateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
-const ipRateLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
+const tokenRateLimiter = createRateLimiter({
+  windowMs: MS_PER_MINUTE,
+  max: 10,
+  failClosedOnRedisError: true,
+});
+const ipRateLimiter = createRateLimiter({
+  windowMs: MS_PER_MINUTE,
+  max: 30,
+  failClosedOnRedisError: true,
+});
 
 async function handlePOST(req: NextRequest) {
   let body: Record<string, string>;
@@ -43,14 +53,26 @@ async function handlePOST(req: NextRequest) {
   // IP rate limit applies to all grant types
   const ip = extractClientIp(req);
   if (ip) {
-    const ipRl = await ipRateLimiter.check(`rl:mcp:token:ip:${rateLimitKeyFromIp(ip)}`);
-    if (!ipRl.allowed) {
-      const retryAfter = Math.ceil((ipRl.retryAfterMs ?? 60_000) / 1000);
-      return NextResponse.json(
-        { error: "slow_down" },
-        { status: 429, headers: { "Retry-After": String(retryAfter) } },
-      );
-    }
+    const blocked = await checkRateLimitOrFail({
+      req,
+      limiter: ipRateLimiter,
+      key: `rl:mcp:token:ip:${rateLimitKeyFromIp(ip)}`,
+      scope: "mcp.token_ip",
+      userId: null,
+      envelope: "oauth",
+      rateLimitedEnvelope: (retryAfterMs) =>
+        NextResponse.json(
+          { error: "slow_down" },
+          {
+            status: 429,
+            headers:
+              retryAfterMs != null && retryAfterMs > 0
+                ? { "Retry-After": String(Math.ceil(retryAfterMs / 1000)) }
+                : {},
+          },
+        ),
+    });
+    if (blocked) return blocked;
   }
 
   if (grantType === "authorization_code") {
@@ -61,14 +83,26 @@ async function handlePOST(req: NextRequest) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }
 
-    const rl = await tokenRateLimiter.check(`mcp:token:${client_id}`);
-    if (!rl.allowed) {
-      const retryAfter = Math.ceil((rl.retryAfterMs ?? 60_000) / 1000);
-      return NextResponse.json(
-        { error: "slow_down" },
-        { status: 429, headers: { "Retry-After": String(retryAfter) } },
-      );
-    }
+    const blocked = await checkRateLimitOrFail({
+      req,
+      limiter: tokenRateLimiter,
+      key: `mcp:token:${client_id}`,
+      scope: "mcp.token",
+      userId: null,
+      envelope: "oauth",
+      rateLimitedEnvelope: (retryAfterMs) =>
+        NextResponse.json(
+          { error: "slow_down" },
+          {
+            status: 429,
+            headers:
+              retryAfterMs != null && retryAfterMs > 0
+                ? { "Retry-After": String(Math.ceil(retryAfterMs / 1000)) }
+                : {},
+          },
+        ),
+    });
+    if (blocked) return blocked;
 
     const clientSecretHash = client_secret ? hashToken(client_secret) : "";
 
@@ -110,14 +144,26 @@ async function handlePOST(req: NextRequest) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }
 
-    const clientRl = await tokenRateLimiter.check(`mcp:token:${clientIdValue}`);
-    if (!clientRl.allowed) {
-      const retryAfter = Math.ceil((clientRl.retryAfterMs ?? 60_000) / 1000);
-      return NextResponse.json(
-        { error: "slow_down" },
-        { status: 429, headers: { "Retry-After": String(retryAfter) } },
-      );
-    }
+    const blocked = await checkRateLimitOrFail({
+      req,
+      limiter: tokenRateLimiter,
+      key: `mcp:token:${clientIdValue}`,
+      scope: "mcp.token",
+      userId: null,
+      envelope: "oauth",
+      rateLimitedEnvelope: (retryAfterMs) =>
+        NextResponse.json(
+          { error: "slow_down" },
+          {
+            status: 429,
+            headers:
+              retryAfterMs != null && retryAfterMs > 0
+                ? { "Retry-After": String(Math.ceil(retryAfterMs / 1000)) }
+                : {},
+          },
+        ),
+    });
+    if (blocked) return blocked;
 
     const result = await exchangeRefreshToken({
       refreshToken: refreshTokenValue,

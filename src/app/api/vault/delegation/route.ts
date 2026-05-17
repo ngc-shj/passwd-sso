@@ -16,7 +16,8 @@ import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/a
 import { AUDIT_ACTION } from "@/lib/constants";
 import { MCP_SCOPE } from "@/lib/constants/auth/mcp";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, unauthorized, rateLimited } from "@/lib/http/api-response";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -36,6 +37,7 @@ export const runtime = "nodejs";
 const delegationRateLimiter = createRateLimiter({
   windowMs: 15 * MS_PER_MINUTE,
   max: 10,
+  failClosedOnRedisError: true,
 });
 
 const createDelegationSchema = z.object({
@@ -69,10 +71,15 @@ async function handlePOST(request: NextRequest) {
   }
 
   // Rate limit
-  const rateLimitResult = await delegationRateLimiter.check(`delegation:create:${userId}`);
-  if (!rateLimitResult.allowed) {
-    return rateLimited(rateLimitResult.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req: request,
+    limiter: delegationRateLimiter,
+    key: `delegation:create:${userId}`,
+    scope: "vault.delegation",
+    userId,
+    tenantId,
+  });
+  if (blocked) return blocked;
 
   const result = await parseBody(request, createDelegationSchema);
   if (!result.ok) return result.response;

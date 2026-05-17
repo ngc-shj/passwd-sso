@@ -7,7 +7,8 @@ import { hmacVerifier, verifyPassphraseVerifier as verifyHmac } from "@/lib/cryp
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
@@ -45,10 +46,12 @@ const recoverSchema = z.discriminatedUnion("step", [verifySchema, resetSchema]);
 const verifyLimiter = createRateLimiter({
   windowMs: 15 * MS_PER_MINUTE,
   max: 5,
+  failClosedOnRedisError: true,
 });
 const resetLimiter = createRateLimiter({
   windowMs: 15 * MS_PER_MINUTE,
   max: 3,
+  failClosedOnRedisError: true,
 });
 
 /**
@@ -68,12 +71,24 @@ async function handlePOST(request: NextRequest) {
 
   // Per-step rate limiting
   if (result.data.step === "verify") {
-    const rl = await verifyLimiter.check(`rl:recovery_verify:${userId}`);
-    if (!rl.allowed) return rateLimited(rl.retryAfterMs);
+    const blocked = await checkRateLimitOrFail({
+      req: request,
+      limiter: verifyLimiter,
+      key: `rl:recovery_verify:${userId}`,
+      scope: "vault.recovery_recover_verify",
+      userId,
+    });
+    if (blocked) return blocked;
     return handleVerify(result.data, userId, request);
   } else {
-    const rl = await resetLimiter.check(`rl:recovery_reset:${userId}`);
-    if (!rl.allowed) return rateLimited(rl.retryAfterMs);
+    const blocked = await checkRateLimitOrFail({
+      req: request,
+      limiter: resetLimiter,
+      key: `rl:recovery_reset:${userId}`,
+      scope: "vault.recovery_recover_reset",
+      userId,
+    });
+    if (blocked) return blocked;
     const response = await handleReset(result.data, userId, request);
     // Clear reset limiter on success
     if (response.status === 200) {

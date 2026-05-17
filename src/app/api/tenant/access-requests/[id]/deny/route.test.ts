@@ -61,6 +61,16 @@ vi.mock("@/lib/http/with-request-log", () => ({
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
+vi.mock("@/lib/security/rate-limit", () => ({
+  createRateLimiter: () => ({
+    check: vi.fn().mockResolvedValue({ allowed: true }),
+    clear: vi.fn(),
+  }),
+}));
+vi.mock("@/lib/security/rate-limit-audit", () => ({
+  emitRateLimitFailClosed: vi.fn(),
+  checkRateLimitOrFail: vi.fn().mockResolvedValue(null),
+}));
 
 import { POST } from "@/app/api/tenant/access-requests/[id]/deny/route";
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";

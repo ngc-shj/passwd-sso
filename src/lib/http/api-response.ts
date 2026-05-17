@@ -148,6 +148,48 @@ export const rateLimited = (retryAfterMs?: number) => {
   );
 };
 
+const DEFAULT_SERVICE_UNAVAILABLE_RETRY_AFTER_SEC = 30;
+
+// 503 envelopes ALWAYS set Retry-After (operator playbook requires a back-off
+// hint on service-unavailable; 429 may omit when the limiter cannot compute).
+// retryAfterMs of 0 / null / undefined → use the 30 s default, not "no header".
+function retryAfterSecondsOrDefault(retryAfterMs?: number): string {
+  const sec =
+    retryAfterMs != null && retryAfterMs > 0
+      ? Math.ceil(retryAfterMs / 1000)
+      : DEFAULT_SERVICE_UNAVAILABLE_RETRY_AFTER_SEC;
+  return String(sec);
+}
+
+/**
+ * Canonical 503 envelope for opt-in rate-limiter fail-closed routes.
+ *
+ * Body shape is the minimal canonical envelope `{ error: "SERVICE_UNAVAILABLE" }`
+ * (no internal failure-mode tokens leaked).
+ */
+export const serviceUnavailable = (retryAfterMs?: number) =>
+  errorResponse(API_ERROR.SERVICE_UNAVAILABLE, undefined, undefined, {
+    "Retry-After": retryAfterSecondsOrDefault(retryAfterMs),
+  });
+
+/**
+ * RFC 6749 §5.2 OAuth 503 envelope. Used by `/api/mcp/*` routes
+ * (OAuth Authorization Server, Dynamic Client Registration, token revocation)
+ * where clients parse the OAuth-standard `error` vocabulary; the canonical
+ * `serviceUnavailable()` envelope would not match RFC 6749 error grammar.
+ *
+ * No `error_description` field — see plan C2b, S12: drop the leakage surface;
+ * a future caller MUST NOT pass interpolated error strings here.
+ */
+export const oauthTemporarilyUnavailable = (retryAfterMs?: number) =>
+  NextResponse.json(
+    { error: "temporarily_unavailable" },
+    {
+      status: 503,
+      headers: { "Retry-After": retryAfterSecondsOrDefault(retryAfterMs) },
+    },
+  );
+
 /**
  * Convert a Prisma error to a standardized NextResponse.
  * Returns null if the error is not a recognized Prisma error,

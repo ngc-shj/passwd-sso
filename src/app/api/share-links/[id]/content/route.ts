@@ -8,10 +8,16 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, rateLimited, unauthorized, notFound } from "@/lib/http/api-response";
+import { errorResponse, unauthorized, notFound } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
-const contentLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
+const contentLimiter = createRateLimiter({
+  windowMs: MS_PER_MINUTE,
+  max: 20,
+  failClosedOnRedisError: true,
+});
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -26,9 +32,13 @@ async function handleGET(req: NextRequest, { params }: Params) {
     scope: "share_content",
     limiter: contentLimiter,
   });
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    result: rl,
+    scope: "share.content",
+    userId: null,
+  });
+  if (blocked) return blocked;
 
   // Extract access token from Authorization header
   const authHeader = req.headers.get("authorization");

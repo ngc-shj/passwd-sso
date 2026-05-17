@@ -6,8 +6,14 @@ import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { readJsonWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
-const revokeLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
+const revokeLimiter = createRateLimiter({
+  windowMs: MS_PER_MINUTE,
+  max: 30,
+  failClosedOnRedisError: true,
+});
 
 /**
  * POST /api/mcp/revoke — OAuth 2.0 Token Revocation (RFC 7009)
@@ -26,15 +32,26 @@ export async function POST(req: NextRequest) {
     scope: "mcp_revoke",
     limiter: revokeLimiter,
   });
-  if (!rl.allowed) {
-    // Deliberate extension: RFC 7009 §2.2 says "always 200"; we return 429 +
-    // { error: "rate_limited" } for abuse mitigation. See docs/api/error-handling.md
-    // § "Extensions to RFC 6749".
-    return NextResponse.json(
-      { error: "rate_limited" },
-      { status: 429, headers: { "Retry-After": String(Math.ceil((rl.retryAfterMs ?? 60_000) / 1000)) } },
-    );
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    result: rl,
+    scope: "mcp.revoke",
+    userId: null,
+    envelope: "oauth",
+    rateLimitedEnvelope: (retryAfterMs) =>
+      NextResponse.json(
+        { error: "rate_limited" },
+        {
+          status: 429,
+          // Default 60 s when retryAfterMs is null/undefined — preserves the
+          // pre-migration contract (see route.test.ts: "defaulting to 60").
+          headers: {
+            "Retry-After": String(Math.ceil((retryAfterMs ?? 60_000) / 1000)),
+          },
+        },
+      ),
+  });
+  if (blocked) return blocked;
 
   let body: Record<string, string>;
   const contentType = req.headers.get("content-type") ?? "";

@@ -5,7 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
+import { errorResponse, unauthorized, validationError } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { assertOrigin } from "@/lib/auth/session/csrf";
 import { parseBody } from "@/lib/http/parse-body";
@@ -14,10 +15,15 @@ import { verifyAuthenticationAssertion } from "@/lib/auth/webauthn/webauthn-serv
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/types";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
-const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
+const rateLimiter = createRateLimiter({
+  windowMs: MS_PER_MINUTE,
+  max: 10,
+  failClosedOnRedisError: true,
+});
 const challengeIdSchema = /^[0-9a-f]{32}$/;
 
 const requestSchema = z.object({
@@ -39,10 +45,14 @@ async function handlePOST(req: NextRequest) {
     return unauthorized();
   }
 
-  const rl = await rateLimiter.check(`rl:webauthn_reauth_verify:${session.user.id}`);
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: rateLimiter,
+    key: `rl:webauthn_reauth_verify:${session.user.id}`,
+    scope: "auth.passkey_reauth_verify",
+    userId: session.user.id,
+  });
+  if (blocked) return blocked;
 
   const result = await parseBody(req, requestSchema);
   if (!result.ok) return result.response;

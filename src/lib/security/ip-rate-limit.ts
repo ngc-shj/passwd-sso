@@ -16,17 +16,19 @@
  *   - When the client IP is present, key per-IP via
  *     `rateLimitKeyFromIp` (IPv6 → /64 normalization).
  *
- * Returns the same `{ allowed, retryAfterMs? }` shape as the underlying
- * limiter so call sites do not need a different branch for the
- * fail-open path.
+ * Returns `RateLimitResult` (including the optional `redisErrored` field
+ * propagated from `failClosedOnRedisError: true` limiters) so opt-in
+ * call sites can branch on the fail-closed signal at the route handler.
  */
 
 import { getLogger } from "@/lib/logger";
 import { rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
+import type { RateLimiter, RateLimitResult } from "@/lib/security/rate-limit";
 
-interface RateLimitProbe {
-  check: (key: string) => Promise<{ allowed: boolean; retryAfterMs?: number }>;
-}
+// Subset of RateLimiter the wrapper actually needs. Pulled from the canonical
+// type so the result-shape (including the optional `redisErrored` flag) stays
+// in lockstep automatically — no parallel inline interface to drift.
+type RateLimitProbe = Pick<RateLimiter, "check">;
 
 interface CheckIpRateLimitArgs {
   /** Result of extractClientIp / extractClientIpFromHeaders — null when the IP cannot be determined. */
@@ -47,7 +49,7 @@ interface CheckIpRateLimitArgs {
 
 export async function checkIpRateLimit(
   args: CheckIpRateLimitArgs,
-): Promise<{ allowed: boolean; retryAfterMs?: number }> {
+): Promise<RateLimitResult> {
   if (args.ip == null) {
     getLogger().warn(
       { pathname: args.pathname, scope: args.scope },

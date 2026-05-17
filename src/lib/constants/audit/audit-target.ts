@@ -22,6 +22,10 @@ export const AUDIT_TARGET_TYPE = {
   MCP_CLIENT: "McpClient",
   EXTENSION_TOKEN: "ExtensionToken",
   OPERATOR_TOKEN: "OperatorToken",
+  // Identifies the rate-limit scope (e.g. "vault.unlock") on a
+  // RATE_LIMIT_FAIL_CLOSED audit row, so SIEM can group fail-closed
+  // events by limiter without parsing metadata.scope.
+  RATE_LIMITER: "RateLimiter",
 } as const;
 
 export type AuditTargetType =

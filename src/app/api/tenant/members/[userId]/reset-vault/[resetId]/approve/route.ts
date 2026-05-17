@@ -27,9 +27,9 @@ import {
   forbidden,
   handleAuthError,
   notFound,
-  rateLimited,
   unauthorized,
 } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { decryptResetToken } from "@/lib/vault/admin-reset-token-crypto";
 import {
@@ -46,6 +46,7 @@ export const runtime = "nodejs";
 const approveLimiter = createRateLimiter({
   windowMs: 15 * MS_PER_MINUTE,
   max: 10,
+  failClosedOnRedisError: true,
 });
 
 // Per-target approve rate limiter (24h window) — caps repeated approval
@@ -53,6 +54,7 @@ const approveLimiter = createRateLimiter({
 const approveTargetLimiter = createRateLimiter({
   windowMs: MS_PER_DAY,
   max: 5,
+  failClosedOnRedisError: true,
 });
 
 // POST /api/tenant/members/[userId]/reset-vault/[resetId]/approve
@@ -151,12 +153,22 @@ async function handlePOST(
     approveLimiter.check(`rl:admin-reset:approve:${session.user.id}`),
     approveTargetLimiter.check(`rl:admin-reset:approve:target:${targetUserId}`),
   ]);
-  if (!actorResult.allowed || !targetResult.allowed) {
-    const retryAfterMs = !actorResult.allowed
-      ? actorResult.retryAfterMs
-      : targetResult.retryAfterMs;
-    return rateLimited(retryAfterMs);
-  }
+  const actorBlocked = await checkRateLimitOrFail({
+    req,
+    result: actorResult,
+    scope: "vault.admin_reset_approve",
+    userId: session.user.id,
+    tenantId: actor.tenantId,
+  });
+  if (actorBlocked) return actorBlocked;
+  const targetBlocked = await checkRateLimitOrFail({
+    req,
+    result: targetResult,
+    scope: "vault.admin_reset_approve_target",
+    userId: session.user.id,
+    tenantId: actor.tenantId,
+  });
+  if (targetBlocked) return targetBlocked;
 
   // Decrypt FIRST (F7) — a key-rotation gap during the approval window must
   // not leave a phantom approval. On failure, leave the row UNCHANGED and

@@ -10,28 +10,44 @@ const logRedisError = createThrottledErrorLogger(
   "rate-limit.redis.fallback",
 );
 
-interface RateLimiterOptions {
+export interface RateLimiterOptions {
   /** Time window in milliseconds */
   windowMs: number;
   /** Maximum requests allowed within the window */
   max: number;
+  /**
+   * When true, Redis errors (null from getRedis() or pipeline exec failure)
+   * cause check() to return { allowed: false, redisErrored: true } instead
+   * of falling back to the in-memory Map. Caller MUST translate this to a
+   * 503 response (route-specific envelope). Default: false (preserves the
+   * current fail-open in-memory fallback for non-opt-in call sites).
+   */
+  failClosedOnRedisError?: boolean;
 }
 
-interface RateLimitResult {
+export interface RateLimitResult {
   allowed: boolean;
   /** Milliseconds until the rate limit resets (present when rate-limited) */
   retryAfterMs?: number;
+  /**
+   * True ONLY when failClosedOnRedisError=true triggered fail-closed.
+   * Always absent (not even false) when option is false.
+   * Caller branches:
+   *   redisErrored===true       → 503 (route-specific envelope)
+   *   !allowed && !redisErrored → 429
+   */
+  redisErrored?: true;
 }
 
-interface RateLimiter {
-  /** Returns { allowed, retryAfterMs? } */
+export interface RateLimiter {
+  /** Returns { allowed, retryAfterMs?, redisErrored? } */
   check(key: string): Promise<RateLimitResult>;
   /** Clear the counter for a key (e.g. on successful auth) */
   clear(key: string): Promise<void>;
 }
 
 export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
-  const { windowMs, max } = options;
+  const { windowMs, max, failClosedOnRedisError = false } = options;
   const store = new Map<string, { resetAt: number; count: number }>();
 
   async function checkRedis(key: string): Promise<RateLimitResult | null> {
@@ -61,7 +77,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
       };
     } catch (err) {
       logRedisError((err as { code?: string } | undefined)?.code);
-      return null; // fallback to in-memory
+      return null; // signal upstream — caller decides fail-open vs fail-closed
     }
   }
 
@@ -106,11 +122,16 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
     async check(key: string): Promise<RateLimitResult> {
       const redisResult = await checkRedis(key);
       if (redisResult !== null) return redisResult;
+      // Redis returned null (no client / pipeline failure).
+      if (failClosedOnRedisError) {
+        return { allowed: false, redisErrored: true };
+      }
       return checkMemory(key);
     },
     async clear(key: string): Promise<void> {
       const cleared = await clearRedis(key);
       if (!cleared) {
+        // Best-effort in-memory cleanup even in fail-closed mode (orphan-avoidance).
         store.delete(key);
       }
     },

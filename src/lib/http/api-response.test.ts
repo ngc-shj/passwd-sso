@@ -12,6 +12,8 @@ import {
   validationError,
   zodValidationError,
   rateLimited,
+  serviceUnavailable,
+  oauthTemporarilyUnavailable,
   prismaErrorResponse,
   handleAuthError,
 } from "./api-response";
@@ -74,6 +76,55 @@ describe("rateLimited", () => {
   it("omits Retry-After header when retryAfterMs is 0", async () => {
     const res = rateLimited(0);
     expect(res.headers.get("Retry-After")).toBeNull();
+  });
+});
+
+describe("serviceUnavailable", () => {
+  // AC2.1
+  it("returns 503 with default Retry-After: 30 when retryAfterMs omitted", async () => {
+    const res = serviceUnavailable();
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("30");
+    expect(await res.json()).toEqual({ error: "SERVICE_UNAVAILABLE" });
+  });
+
+  // AC2.2
+  it("sets Retry-After from retryAfterMs (rounds up)", async () => {
+    const res = serviceUnavailable(15_000);
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("15");
+  });
+
+  // AC2.3 — semantic divergence from rateLimited(0): 503 ALWAYS has Retry-After
+  it("returns Retry-After: 30 when retryAfterMs is 0 (divergence from rateLimited)", async () => {
+    const res = serviceUnavailable(0);
+    expect(res.headers.get("Retry-After")).toBe("30");
+  });
+
+  // AC2.4 — body is exactly the minimal canonical envelope
+  it("body contains no extra fields beyond { error: SERVICE_UNAVAILABLE }", async () => {
+    const res = serviceUnavailable();
+    const body = await res.json();
+    expect(Object.keys(body)).toEqual(["error"]);
+  });
+});
+
+describe("oauthTemporarilyUnavailable", () => {
+  // AC2b.1
+  it("returns 503 with body { error: temporarily_unavailable } + Retry-After: 30", async () => {
+    const res = oauthTemporarilyUnavailable();
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("30");
+    expect(await res.json()).toEqual({ error: "temporarily_unavailable" });
+  });
+
+  // AC2b.2
+  it("body MUST NOT contain error_description (information-disclosure surface dropped)", async () => {
+    const res = oauthTemporarilyUnavailable(15_000);
+    expect(res.headers.get("Retry-After")).toBe("15");
+    const body = await res.json();
+    expect(body).toEqual({ error: "temporarily_unavailable" });
+    expect("error_description" in body).toBe(false);
   });
 });
 

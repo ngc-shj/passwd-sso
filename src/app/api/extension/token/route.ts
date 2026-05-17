@@ -3,7 +3,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { issueExtensionToken, validateExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -23,6 +24,7 @@ export const runtime = "nodejs";
 const tokenLimiter = createRateLimiter({
   windowMs: 15 * MS_PER_MINUTE,
   max: 10,
+  failClosedOnRedisError: true,
 });
 
 /**
@@ -39,10 +41,14 @@ async function handlePOST(req: NextRequest) {
   const stepUpError = await requireRecentSession(req);
   if (stepUpError) return stepUpError;
 
-  const rl = await tokenLimiter.check(`rl:ext_token:${session.user.id}`);
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: tokenLimiter,
+    key: `rl:ext_token:${session.user.id}`,
+    scope: "extension.token",
+    userId: session.user.id,
+  });
+  if (blocked) return blocked;
 
   // Migration metric (Step 11): emit a counter so we can track when the legacy
   // direct-issuance endpoint stops being called and the bridge code flow has

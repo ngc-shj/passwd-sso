@@ -36,10 +36,10 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import {
   errorResponse,
-  rateLimited,
   zodValidationError,
   unauthorized,
 } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
@@ -61,6 +61,7 @@ export const runtime = "nodejs";
 const refreshLimiter = createRateLimiter({
   windowMs: 15 * MS_PER_MINUTE,
   max: 20,
+  failClosedOnRedisError: true,
 });
 
 const RefreshRequestSchema = z
@@ -154,10 +155,15 @@ async function handlePOST(req: NextRequest): Promise<Response> {
   // Per-userId rate limit (only after we know the user). A stranger holding
   // a stolen refresh token would have to know a valid token-hash to even
   // surface a userId, so leakage of "this token exists" is acceptable.
-  const rl = await refreshLimiter.check(`rl:mobile_refresh:${oldRow.userId}`);
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: refreshLimiter,
+    key: `rl:mobile_refresh:${oldRow.userId}`,
+    scope: "mobile.token_refresh",
+    userId: oldRow.userId,
+    tenantId: oldRow.tenantId,
+  });
+  if (blocked) return blocked;
 
   // Verify DPoP proof. `ath` = SHA-256(refresh_token), `cnf.jkt` = row's cnfJkt.
   const expectedAth = computeAth(bodyRefreshToken);

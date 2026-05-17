@@ -11,7 +11,8 @@ import { getLogger } from "@/lib/logger";
 import { checkLockout, recordFailure, resetLockout } from "@/lib/auth/policy/account-lockout";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { hexHash } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -26,6 +27,7 @@ const unlockSchema = z.object({
 const unlockLimiter = createRateLimiter({
   windowMs: 5 * MS_PER_MINUTE,
   max: 5,
+  failClosedOnRedisError: true,
 });
 
 /**
@@ -49,11 +51,14 @@ async function handlePOST(request: NextRequest) {
   }
 
   const rateKey = `rl:vault_unlock:${session.user.id}`;
-  const rl = await unlockLimiter.check(rateKey);
-  if (!rl.allowed) {
-    getLogger().warn({ userId: session.user.id }, "vault.unlock.rateLimited");
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req: request,
+    limiter: unlockLimiter,
+    key: rateKey,
+    scope: "vault.unlock",
+    userId: session.user.id,
+  });
+  if (blocked) return blocked;
 
   const result = await parseBody(request, unlockSchema);
   if (!result.ok) return result.response;
