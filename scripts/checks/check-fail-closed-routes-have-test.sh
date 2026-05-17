@@ -93,13 +93,16 @@ if [ "$limiter_count" -ne "$EXPECTED_LIMITER_COUNT" ]; then
   exit 1
 fi
 
-# AC4.5 — at least one `rl.redisErrored` branch per limiter. The two routes
-# with the same limiter checked at multiple sites (tenant/access-requests,
-# mcp/token) push the branch count to 48; that's the documented deviation.
-EXPECTED_MIN_BRANCH_COUNT=46
-branch_count=$(grep -rh '\.redisErrored' "$REPO_ROOT/src/app/api" | wc -l)
-if [ "$branch_count" -lt "$EXPECTED_MIN_BRANCH_COUNT" ]; then
-  echo "AC4.5 FAIL: expected at least $EXPECTED_MIN_BRANCH_COUNT '*.redisErrored' branches; found $branch_count"
+# AC4.5 — at least one `checkRateLimitOrFail` callsite per limiter. The two
+# routes with the same limiter checked at multiple sites (tenant/access-requests,
+# mcp/token) push the callsite count above the limiter count; that's the
+# documented deviation. After the helper migration the raw `.redisErrored`
+# branches no longer appear in route handlers — the inline check is hidden
+# behind `checkRateLimitOrFail()` so we gate on the helper callsite count.
+EXPECTED_MIN_CALLSITE_COUNT=46
+callsite_count=$(grep -rh 'checkRateLimitOrFail(' "$REPO_ROOT/src/app/api" | wc -l)
+if [ "$callsite_count" -lt "$EXPECTED_MIN_CALLSITE_COUNT" ]; then
+  echo "AC4.5 FAIL: expected at least $EXPECTED_MIN_CALLSITE_COUNT 'checkRateLimitOrFail(' callsites; found $callsite_count"
   exit 1
 fi
 

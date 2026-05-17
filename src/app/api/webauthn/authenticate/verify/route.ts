@@ -6,8 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, rateLimited, serviceUnavailable, unauthorized } from "@/lib/http/api-response";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { verifyAuthenticationAssertion } from "@/lib/auth/webauthn/webauthn-server";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/types";
@@ -33,19 +33,14 @@ async function handlePOST(req: NextRequest) {
   }
   const userId = session.user.id;
 
-  const rl = await rateLimiter.check(`rl:webauthn_auth_verify:${userId}`);
-  if (rl.redisErrored) {
-    void emitRateLimitFailClosed({
-      req,
-      scope: "webauthn.auth_verify",
-      userId,
-      tenantId: null,
-    });
-    return serviceUnavailable();
-  }
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: rateLimiter,
+    key: `rl:webauthn_auth_verify:${userId}`,
+    scope: "webauthn.auth_verify",
+    userId,
+  });
+  if (blocked) return blocked;
 
   const result = await parseBody(req, verifyAuthenticationSchema);
   if (!result.ok) return result.response;

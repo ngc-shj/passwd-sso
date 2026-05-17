@@ -18,7 +18,7 @@ import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 const checkRateLimiter = createRateLimiter({
@@ -63,27 +63,36 @@ export async function GET(request: NextRequest) {
   }
 
   // Rate limit per user
-  const rl = await checkRateLimiter.check(`delegation:check:${userId}`);
-  if (rl.redisErrored) {
-    const tenantIdForAudit =
-      authResult.type === "mcp_token" ? authResult.tenantId : null;
-    void emitRateLimitFailClosed({
-      req: request,
-      scope: "vault.delegation_check",
-      userId,
-      tenantId: tenantIdForAudit,
-    });
-    return NextResponse.json(
-      { authorized: false, reason: "service_unavailable" },
-      { status: 503, headers: { "Retry-After": "30" } },
-    );
-  }
-  if (!rl.allowed) {
-    return NextResponse.json(
-      { authorized: false, reason: "rate_limit" },
-      { status: 429, headers: { "Retry-After": String(Math.ceil((rl.retryAfterMs ?? 60000) / 1000)) } },
-    );
-  }
+  const tenantIdForAudit =
+    authResult.type === "mcp_token" ? authResult.tenantId : null;
+  const blocked = await checkRateLimitOrFail({
+    req: request,
+    limiter: checkRateLimiter,
+    key: `delegation:check:${userId}`,
+    scope: "vault.delegation_check",
+    userId,
+    tenantId: tenantIdForAudit,
+    envelope: () =>
+      NextResponse.json(
+        { authorized: false, reason: "service_unavailable" },
+        { status: 503, headers: { "Retry-After": "30" } },
+      ),
+    rateLimitedEnvelope: (retryAfterMs) =>
+      NextResponse.json(
+        { authorized: false, reason: "rate_limit" },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(
+              retryAfterMs != null && retryAfterMs > 0
+                ? Math.ceil(retryAfterMs / 1000)
+                : 30,
+            ),
+          },
+        },
+      ),
+  });
+  if (blocked) return blocked;
 
   // Parse query params
   const url = new URL(request.url);

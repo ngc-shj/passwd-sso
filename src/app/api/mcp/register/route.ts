@@ -6,8 +6,7 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
-import { oauthTemporarilyUnavailable } from "@/lib/http/api-response";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
@@ -59,25 +58,17 @@ const dcrSchema = z.object({
 async function handlePOST(req: NextRequest) {
   // Rate limit by client IP (/64 prefix for IPv6)
   const ip = extractClientIp(req);
-  const rl = await dcrRateLimiter.check(
-    `rl:mcp:dcr:${rateLimitKeyFromIp(ip ?? "unknown")}`,
-  );
-  if (rl.redisErrored) {
-    void emitRateLimitFailClosed({
-      req,
-      scope: "mcp.dcr_register",
-      userId: null,
-      tenantId: null,
-    });
-    return oauthTemporarilyUnavailable();
-  }
-  if (!rl.allowed) {
-    const retryAfter = Math.ceil((rl.retryAfterMs ?? DCR_RATE_LIMIT_WINDOW_MS) / 1000);
-    return NextResponse.json(
-      { error: "rate_limit_exceeded" },
-      { status: 429, headers: { "Retry-After": String(retryAfter) } },
-    );
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: dcrRateLimiter,
+    key: `rl:mcp:dcr:${rateLimitKeyFromIp(ip ?? "unknown")}`,
+    scope: "mcp.dcr_register",
+    userId: null,
+    envelope: "oauth",
+    rateLimitedEnvelope: () =>
+      NextResponse.json({ error: "rate_limit_exceeded" }, { status: 429 }),
+  });
+  if (blocked) return blocked;
 
   // Parse and validate request body
   // req.json bypass: RFC 7591 error format required ({ error: "invalid_request" } per RFC 6749 §5.2).

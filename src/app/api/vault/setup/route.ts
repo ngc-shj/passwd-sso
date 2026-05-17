@@ -12,8 +12,8 @@ import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, rateLimited, serviceUnavailable, unauthorized } from "@/lib/http/api-response";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import {
   hexIv,
@@ -83,19 +83,14 @@ async function handlePOST(request: NextRequest) {
     return unauthorized();
   }
 
-  const rl = await setupLimiter.check(`rl:vault_setup:${session.user.id}`);
-  if (rl.redisErrored) {
-    void emitRateLimitFailClosed({
-      req: request,
-      scope: "vault.setup",
-      userId: session.user.id,
-      tenantId: null,
-    });
-    return serviceUnavailable();
-  }
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req: request,
+    limiter: setupLimiter,
+    key: `rl:vault_setup:${session.user.id}`,
+    scope: "vault.setup",
+    userId: session.user.id,
+  });
+  if (blocked) return blocked;
 
   // Prevent re-setup
   const existingUser = await withUserTenantRls(session.user.id, async () =>

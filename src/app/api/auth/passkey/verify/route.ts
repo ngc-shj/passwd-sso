@@ -3,8 +3,8 @@ import { randomUUID, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, rateLimited, serviceUnavailable } from "@/lib/http/api-response";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { errorResponse } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { assertOrigin } from "@/lib/auth/session/csrf";
@@ -56,18 +56,13 @@ async function handlePOST(req: NextRequest) {
     scope: "webauthn_signin_verify",
     limiter: rateLimiter,
   });
-  if (rl.redisErrored) {
-    void emitRateLimitFailClosed({
-      req,
-      scope: "auth.passkey_verify",
-      userId: null,
-      tenantId: null,
-    });
-    return serviceUnavailable();
-  }
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    result: rl,
+    scope: "auth.passkey_verify",
+    userId: null,
+  });
+  if (blocked) return blocked;
 
   // Parse request body
   const passkeyVerifySchema = z.object({

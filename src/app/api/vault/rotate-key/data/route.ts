@@ -4,8 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { rateLimited, serviceUnavailable, unauthorized } from "@/lib/http/api-response";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { unauthorized } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { ATTACHMENT_MANIFEST_CAP } from "@/lib/validations/common";
 
@@ -32,19 +32,14 @@ async function handleGET(request: NextRequest) {
     return unauthorized();
   }
 
-  const rl = await rotateLimiter.check(`rl:vault_rotate:${session.user.id}`);
-  if (rl.redisErrored) {
-    void emitRateLimitFailClosed({
-      req: request,
-      scope: "vault.rotate_key_data",
-      userId: session.user.id,
-      tenantId: null,
-    });
-    return serviceUnavailable();
-  }
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req: request,
+    limiter: rotateLimiter,
+    key: `rl:vault_rotate:${session.user.id}`,
+    scope: "vault.rotate_key_data",
+    userId: session.user.id,
+  });
+  if (blocked) return blocked;
 
   const userId = session.user.id;
 

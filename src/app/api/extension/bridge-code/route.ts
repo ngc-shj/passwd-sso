@@ -13,8 +13,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { rateLimited, serviceUnavailable, unauthorized } from "@/lib/http/api-response";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { unauthorized } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit/audit";
@@ -47,19 +47,14 @@ async function handlePOST(req: NextRequest) {
   if (stepUpError) return stepUpError;
 
   // Per-user rate limit (matches existing tokenLimiter on POST /api/extension/token)
-  const rl = await bridgeCodeLimiter.check(`rl:ext_bridge:${session.user.id}`);
-  if (rl.redisErrored) {
-    void emitRateLimitFailClosed({
-      req,
-      scope: "extension.bridge_code",
-      userId: session.user.id,
-      tenantId: null,
-    });
-    return serviceUnavailable();
-  }
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: bridgeCodeLimiter,
+    key: `rl:ext_bridge:${session.user.id}`,
+    scope: "extension.bridge_code",
+    userId: session.user.id,
+  });
+  if (blocked) return blocked;
 
   // Resolve tenant via existing RLS pattern (signature: 2 args)
   const userId = session.user.id;

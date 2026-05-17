@@ -7,8 +7,7 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import { requireRecentSession } from "@/lib/auth/session/step-up";
-import { oauthTemporarilyUnavailable } from "@/lib/http/api-response";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 const authorizeLimiter = createRateLimiter({
@@ -37,19 +36,17 @@ async function validateOAuthRequest(clientId: string | null, redirectUri: string
 export async function GET(req: NextRequest) {
   // Rate limit by IP to prevent brute-force client_id enumeration
   const ip = extractClientIp(req);
-  const rl = await authorizeLimiter.check(`rl:mcp_authz:${rateLimitKeyFromIp(ip ?? "unknown")}`);
-  if (rl.redisErrored) {
-    void emitRateLimitFailClosed({
-      req,
-      scope: "mcp.authorize",
-      userId: null,
-      tenantId: null,
-    });
-    return oauthTemporarilyUnavailable();
-  }
-  if (!rl.allowed) {
-    return NextResponse.json({ error: "rate_limit_exceeded" }, { status: 429 });
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: authorizeLimiter,
+    key: `rl:mcp_authz:${rateLimitKeyFromIp(ip ?? "unknown")}`,
+    scope: "mcp.authorize",
+    userId: null,
+    envelope: "oauth",
+    rateLimitedEnvelope: () =>
+      NextResponse.json({ error: "rate_limit_exceeded" }, { status: 429 }),
+  });
+  if (blocked) return blocked;
 
   const session = await auth();
   if (!session?.user?.id) {

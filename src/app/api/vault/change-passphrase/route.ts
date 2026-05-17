@@ -11,8 +11,8 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
-import { errorResponse, rateLimited, serviceUnavailable, unauthorized } from "@/lib/http/api-response";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -49,20 +49,14 @@ async function handlePOST(request: NextRequest) {
     return unauthorized();
   }
 
-  const rateKey = `rl:vault_change_pass:${session.user.id}`;
-  const rl = await changeLimiter.check(rateKey);
-  if (rl.redisErrored) {
-    void emitRateLimitFailClosed({
-      req: request,
-      scope: "vault.change_passphrase",
-      userId: session.user.id,
-      tenantId: null,
-    });
-    return serviceUnavailable();
-  }
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req: request,
+    limiter: changeLimiter,
+    key: `rl:vault_change_pass:${session.user.id}`,
+    scope: "vault.change_passphrase",
+    userId: session.user.id,
+  });
+  if (blocked) return blocked;
 
   const result = await parseBody(request, changePassphraseSchema);
   if (!result.ok) return result.response;

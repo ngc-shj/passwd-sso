@@ -9,8 +9,8 @@ import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, rateLimited, serviceUnavailable, notFound, validationError } from "@/lib/http/api-response";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { errorResponse, notFound, validationError } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
@@ -47,31 +47,21 @@ async function handlePOST(req: NextRequest) {
     keySuffix: tokenHash,
     limiter: ipLimiter,
   });
-  if (ipRl.redisErrored) {
-    void emitRateLimitFailClosed({
-      req,
-      scope: "share.verify_access_ip",
-      userId: null,
-      tenantId: null,
-    });
-    return serviceUnavailable();
-  }
-  if (!ipRl.allowed) {
-    return rateLimited(ipRl.retryAfterMs);
-  }
-  const tokenRl = await tokenLimiter.check(`rl:share_verify_token:${tokenHash}`);
-  if (tokenRl.redisErrored) {
-    void emitRateLimitFailClosed({
-      req,
-      scope: "share.verify_access_token",
-      userId: null,
-      tenantId: null,
-    });
-    return serviceUnavailable();
-  }
-  if (!tokenRl.allowed) {
-    return rateLimited(tokenRl.retryAfterMs);
-  }
+  const ipBlocked = await checkRateLimitOrFail({
+    req,
+    result: ipRl,
+    scope: "share.verify_access_ip",
+    userId: null,
+  });
+  if (ipBlocked) return ipBlocked;
+  const tokenBlocked = await checkRateLimitOrFail({
+    req,
+    limiter: tokenLimiter,
+    key: `rl:share_verify_token:${tokenHash}`,
+    scope: "share.verify_access_token",
+    userId: null,
+  });
+  if (tokenBlocked) return tokenBlocked;
 
   const share = await withBypassRls(prisma, () =>
     prisma.passwordShare.findUnique({

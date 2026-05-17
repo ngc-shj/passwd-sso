@@ -11,8 +11,8 @@ import { getLogger } from "@/lib/logger";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, rateLimited, serviceUnavailable, unauthorized, validationError, zodValidationError } from "@/lib/http/api-response";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { errorResponse, unauthorized, validationError, zodValidationError } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import {
   hexIv,
   hexAuthTag,
@@ -106,19 +106,14 @@ async function handlePOST(request: NextRequest) {
     return unauthorized();
   }
 
-  const rl = await rotateLimiter.check(`rl:vault_rotate:${session.user.id}`);
-  if (rl.redisErrored) {
-    void emitRateLimitFailClosed({
-      req: request,
-      scope: "vault.rotate_key",
-      userId: session.user.id,
-      tenantId: null,
-    });
-    return serviceUnavailable();
-  }
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req: request,
+    limiter: rotateLimiter,
+    key: `rl:vault_rotate:${session.user.id}`,
+    scope: "vault.rotate_key",
+    userId: session.user.id,
+  });
+  if (blocked) return blocked;
 
   const bodyRead = await readJsonWithCap(request, 16 * 1024 * 1024);
   if (!bodyRead.ok) {

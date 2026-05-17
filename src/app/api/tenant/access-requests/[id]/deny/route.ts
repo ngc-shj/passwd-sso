@@ -9,8 +9,8 @@ import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { transition, AR_STATUS, AR_ACTOR } from "@/lib/access-request/access-request-state";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError, notFound, rateLimited, serviceUnavailable, unauthorized } from "@/lib/http/api-response";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -45,17 +45,15 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 
-  const rl = await denyLimiter.check(`rl:access_request_deny:${actor.tenantId}`);
-  if (rl.redisErrored) {
-    void emitRateLimitFailClosed({
-      req,
-      scope: "access_request.deny",
-      userId: session.user.id,
-      tenantId: actor.tenantId,
-    });
-    return serviceUnavailable();
-  }
-  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: denyLimiter,
+    key: `rl:access_request_deny:${actor.tenantId}`,
+    scope: "access_request.deny",
+    userId: session.user.id,
+    tenantId: actor.tenantId,
+  });
+  if (blocked) return blocked;
 
   const { id: requestId } = await params;
 

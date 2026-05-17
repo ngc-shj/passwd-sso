@@ -5,8 +5,8 @@ import { getRedis } from "@/lib/redis";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, errorResponseWithMessage, rateLimited, serviceUnavailable, unauthorized } from "@/lib/http/api-response";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { errorResponse, errorResponseWithMessage, unauthorized } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import {
@@ -34,19 +34,14 @@ async function handlePOST(req: NextRequest) {
   }
   const userId = session.user.id;
 
-  const rl = await rateLimiter.check(`rl:webauthn_auth_opts:${userId}`);
-  if (rl.redisErrored) {
-    void emitRateLimitFailClosed({
-      req,
-      scope: "webauthn.auth_options",
-      userId,
-      tenantId: null,
-    });
-    return serviceUnavailable();
-  }
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: rateLimiter,
+    key: `rl:webauthn_auth_opts:${userId}`,
+    scope: "webauthn.auth_options",
+    userId,
+  });
+  if (blocked) return blocked;
 
   const redis = getRedis();
   if (!redis) {

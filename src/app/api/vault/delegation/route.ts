@@ -16,8 +16,8 @@ import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/a
 import { AUDIT_ACTION } from "@/lib/constants";
 import { MCP_SCOPE } from "@/lib/constants/auth/mcp";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, unauthorized, rateLimited, serviceUnavailable } from "@/lib/http/api-response";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -71,19 +71,15 @@ async function handlePOST(request: NextRequest) {
   }
 
   // Rate limit
-  const rateLimitResult = await delegationRateLimiter.check(`delegation:create:${userId}`);
-  if (rateLimitResult.redisErrored) {
-    void emitRateLimitFailClosed({
-      req: request,
-      scope: "vault.delegation",
-      userId,
-      tenantId,
-    });
-    return serviceUnavailable();
-  }
-  if (!rateLimitResult.allowed) {
-    return rateLimited(rateLimitResult.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req: request,
+    limiter: delegationRateLimiter,
+    key: `delegation:create:${userId}`,
+    scope: "vault.delegation",
+    userId,
+    tenantId,
+  });
+  if (blocked) return blocked;
 
   const result = await parseBody(request, createDelegationSchema);
   if (!result.ok) return result.response;

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextResponse } from "next/server";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockMcpClientFindFirst, mockWithBypassRls, mockServerAppUrl, mockDetectLocale, mockRateLimiterCheck, mockRequireRecentSession, mockEmitFailClosed } =
+const { mockAuth, mockMcpClientFindFirst, mockWithBypassRls, mockServerAppUrl, mockDetectLocale, mockRateLimiterCheck, mockRequireRecentSession, mockEmitFailClosed, mockCheckRateLimitOrFail } =
   vi.hoisted(() => ({
     mockAuth: vi.fn(),
     mockMcpClientFindFirst: vi.fn(),
@@ -11,6 +12,9 @@ const { mockAuth, mockMcpClientFindFirst, mockWithBypassRls, mockServerAppUrl, m
     mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
     mockRequireRecentSession: vi.fn().mockResolvedValue(null),
     mockEmitFailClosed: vi.fn(),
+    // Default: helper returns null → route proceeds. Per-test overrides set
+    // it to return a response when the test exercises the rate-limited path.
+    mockCheckRateLimitOrFail: vi.fn().mockResolvedValue(null),
   }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -35,6 +39,7 @@ vi.mock("@/lib/security/rate-limit", () => ({
 }));
 vi.mock("@/lib/security/rate-limit-audit", () => ({
   emitRateLimitFailClosed: mockEmitFailClosed,
+  checkRateLimitOrFail: mockCheckRateLimitOrFail,
 }));
 vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: () => "127.0.0.1",
@@ -315,11 +320,16 @@ describe("GET /api/mcp/authorize", () => {
       mockAuth.mockResolvedValue(null); // pre-auth path is fine for limiter check
     });
 
-    it("returns 503 + Retry-After: 30 + body { error: temporarily_unavailable } on redisErrored", async () => {
-      mockRateLimiterCheck.mockResolvedValueOnce({
-        allowed: false,
-        redisErrored: true,
-      });
+    it("returns 503 + Retry-After: 30 + body { error: temporarily_unavailable } when helper returns the OAuth 503 envelope", async () => {
+      // Helper handles emit + envelope internally; route just returns
+      // whatever the helper hands back. Stub the helper to return the
+      // canonical OAuth 503 we'd see in production under Redis-outage.
+      mockCheckRateLimitOrFail.mockResolvedValueOnce(
+        NextResponse.json(
+          { error: "temporarily_unavailable" },
+          { status: 503, headers: { "Retry-After": "30" } },
+        ),
+      );
 
       const res = await GET(createRequest("GET", authorizeUrl()));
 
@@ -330,21 +340,17 @@ describe("GET /api/mcp/authorize", () => {
       expect("error_description" in json).toBe(false);
     });
 
-    // T6 — pattern propagation: assert emitRateLimitFailClosed was invoked
-    // with the canonical args so the 41 routes following this template
-    // copy the right shape.
-    it("invokes emitRateLimitFailClosed with scope=mcp.authorize on redisErrored", async () => {
-      mockRateLimiterCheck.mockResolvedValueOnce({
-        allowed: false,
-        redisErrored: true,
-      });
-
+    // Pattern propagation: assert the route invokes the helper with the
+    // canonical args (scope, envelope, rateLimitedEnvelope) so the 41
+    // routes following this template copy the right shape.
+    it("invokes checkRateLimitOrFail with scope=mcp.authorize and envelope=oauth", async () => {
       await GET(createRequest("GET", authorizeUrl()));
 
-      expect(mockEmitFailClosed).toHaveBeenCalledTimes(1);
-      expect(mockEmitFailClosed).toHaveBeenCalledWith(
+      expect(mockCheckRateLimitOrFail).toHaveBeenCalledTimes(1);
+      expect(mockCheckRateLimitOrFail).toHaveBeenCalledWith(
         expect.objectContaining({
           scope: "mcp.authorize",
+          envelope: "oauth",
         }),
       );
     });

@@ -83,6 +83,7 @@ vi.mock("@/lib/security/rate-limit", () => ({
 }));
 vi.mock("@/lib/security/rate-limit-audit", () => ({
   emitRateLimitFailClosed: vi.fn(),
+  checkRateLimitOrFail: vi.fn().mockResolvedValue(null),
 }));
 
 import { POST } from "@/app/api/tenant/access-requests/[id]/approve/route";

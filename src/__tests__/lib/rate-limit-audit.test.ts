@@ -35,8 +35,11 @@ vi.mock("@/lib/tenant-context", () => ({
 import {
   __getThrottleStateForTests,
   __resetThrottleForTests,
+  checkRateLimitOrFail,
   emitRateLimitFailClosed,
 } from "@/lib/security/rate-limit-audit";
+import { NextResponse } from "next/server";
+import type { RateLimiter } from "@/lib/security/rate-limit";
 
 function fakeReq(): NextRequest {
   return { headers: new Headers() } as unknown as NextRequest;
@@ -296,6 +299,126 @@ describe("emitRateLimitFailClosed", () => {
     expect(__getThrottleStateForTests().has("rlfc:vault.unlock:user-0")).toBe(false);
     // Cap respected
     expect(__getThrottleStateForTests().size).toBeLessThanOrEqual(10_000);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+// checkRateLimitOrFail — convenience wrapper
+// ────────────────────────────────────────────────────────────────────
+
+function makeLimiter(result: {
+  allowed: boolean;
+  retryAfterMs?: number;
+  redisErrored?: true;
+}): RateLimiter {
+  return {
+    check: vi.fn().mockResolvedValue(result),
+    clear: vi.fn(),
+  };
+}
+
+describe("checkRateLimitOrFail", () => {
+  beforeEach(() => {
+    __resetThrottleForTests();
+    mockLogAuditAsync.mockReset();
+    mockResolveUserTenantId.mockReset();
+  });
+
+  it("returns null when limiter allows the request", async () => {
+    const result = await checkRateLimitOrFail({
+      req: fakeReq(),
+      limiter: makeLimiter({ allowed: true }),
+      key: "rl:test:1",
+      scope: "vault.unlock",
+      userId: "user-1",
+      tenantId: "tenant-1",
+    });
+    expect(result).toBeNull();
+  });
+
+  it("returns 429 with Retry-After when limiter denies (rate-limited)", async () => {
+    const result = await checkRateLimitOrFail({
+      req: fakeReq(),
+      limiter: makeLimiter({ allowed: false, retryAfterMs: 1500 }),
+      key: "rl:test:1",
+      scope: "vault.unlock",
+      userId: "user-1",
+      tenantId: "tenant-1",
+    });
+    expect(result).not.toBeNull();
+    expect(result?.status).toBe(429);
+    expect(result?.headers.get("Retry-After")).toBe("2");
+    const body = await result?.json();
+    expect(body).toEqual({ error: "RATE_LIMIT_EXCEEDED" });
+  });
+
+  it("returns 503 canonical envelope by default on redisErrored", async () => {
+    mockResolveUserTenantId.mockResolvedValue("tenant-from-resolve");
+    const result = await checkRateLimitOrFail({
+      req: fakeReq(),
+      limiter: makeLimiter({ allowed: false, redisErrored: true }),
+      key: "rl:test:1",
+      scope: "vault.unlock",
+      userId: "user-1",
+      tenantId: null,
+    });
+    expect(result?.status).toBe(503);
+    expect(result?.headers.get("Retry-After")).toBe("30");
+    const body = await result?.json();
+    expect(body).toEqual({ error: "SERVICE_UNAVAILABLE" });
+    // Audit emission was triggered internally
+    expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns RFC 6749 envelope when envelope='oauth'", async () => {
+    const result = await checkRateLimitOrFail({
+      req: fakeReq(),
+      limiter: makeLimiter({ allowed: false, redisErrored: true }),
+      key: "rl:test:1",
+      scope: "mcp.token",
+      userId: null,
+      tenantId: null,
+      envelope: "oauth",
+    });
+    expect(result?.status).toBe(503);
+    expect(result?.headers.get("Retry-After")).toBe("30");
+    const body = await result?.json();
+    expect(body).toEqual({ error: "temporarily_unavailable" });
+  });
+
+  it("returns caller-supplied custom shape when envelope is a function", async () => {
+    const result = await checkRateLimitOrFail({
+      req: fakeReq(),
+      limiter: makeLimiter({ allowed: false, redisErrored: true }),
+      key: "rl:test:1",
+      scope: "vault.delegation_check",
+      userId: "user-1",
+      tenantId: "tenant-1",
+      envelope: () =>
+        NextResponse.json(
+          { authorized: false, reason: "service_unavailable" },
+          { status: 503, headers: { "Retry-After": "30" } },
+        ),
+    });
+    expect(result?.status).toBe(503);
+    expect(result?.headers.get("Retry-After")).toBe("30");
+    const body = await result?.json();
+    expect(body).toEqual({ authorized: false, reason: "service_unavailable" });
+  });
+
+  it("redisErrored has precedence over !allowed — never returns 429 when both are signaled", async () => {
+    // The limiter contract specifies redisErrored implies !allowed; the
+    // helper must short-circuit to 503, never fall through to 429.
+    const result = await checkRateLimitOrFail({
+      req: fakeReq(),
+      limiter: makeLimiter({ allowed: false, redisErrored: true, retryAfterMs: 9999 }),
+      key: "rl:test:1",
+      scope: "vault.unlock",
+      userId: "user-1",
+      tenantId: "tenant-1",
+    });
+    expect(result?.status).toBe(503);
+    expect(result?.headers.get("Retry-After")).toBe("30"); // not "10" (retryAfterMs ignored)
   });
 });
 

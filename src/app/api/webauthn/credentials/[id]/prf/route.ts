@@ -5,8 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited, serviceUnavailable, unauthorized, errorResponse, forbidden, notFound } from "@/lib/http/api-response";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { unauthorized, errorResponse, forbidden, notFound } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
@@ -81,19 +81,14 @@ async function handlePOST(
   const userId = session.user.id;
   const { id: credentialRowId } = await params;
 
-  const rl = await rateLimiter.check(`rl:webauthn_prf_rebootstrap:${userId}`);
-  if (rl.redisErrored) {
-    void emitRateLimitFailClosed({
-      req: request,
-      scope: "webauthn.prf",
-      userId,
-      tenantId: null,
-    });
-    return serviceUnavailable();
-  }
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req: request,
+    limiter: rateLimiter,
+    key: `rl:webauthn_prf_rebootstrap:${userId}`,
+    scope: "webauthn.prf",
+    userId,
+  });
+  if (blocked) return blocked;
 
   const result = await parseBody(request, rebootstrapSchema);
   if (!result.ok) return result.response;

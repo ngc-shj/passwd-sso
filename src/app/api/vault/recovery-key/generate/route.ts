@@ -7,8 +7,8 @@ import { hmacVerifier, verifyPassphraseVerifier } from "@/lib/crypto/crypto-serv
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, rateLimited, serviceUnavailable, unauthorized } from "@/lib/http/api-response";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
@@ -45,20 +45,14 @@ async function handlePOST(request: NextRequest) {
     return unauthorized();
   }
 
-  const rateKey = `rl:recovery_key_gen:${session.user.id}`;
-  const rl = await generateLimiter.check(rateKey);
-  if (rl.redisErrored) {
-    void emitRateLimitFailClosed({
-      req: request,
-      scope: "vault.recovery_generate",
-      userId: session.user.id,
-      tenantId: null,
-    });
-    return serviceUnavailable();
-  }
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req: request,
+    limiter: generateLimiter,
+    key: `rl:recovery_key_gen:${session.user.id}`,
+    scope: "vault.recovery_generate",
+    userId: session.user.id,
+  });
+  if (blocked) return blocked;
 
   const result = await parseBody(request, generateSchema);
   if (!result.ok) return result.response;

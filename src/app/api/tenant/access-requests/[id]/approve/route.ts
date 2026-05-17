@@ -10,8 +10,8 @@ import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { transition, AR_STATUS, AR_ACTOR } from "@/lib/access-request/access-request-state";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, errorResponseWithMessage, handleAuthError, notFound, rateLimited, serviceUnavailable, unauthorized } from "@/lib/http/api-response";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { errorResponse, errorResponseWithMessage, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { SA_TOKEN_PREFIX, MAX_SA_TOKENS_PER_ACCOUNT } from "@/lib/constants/auth/service-account";
 import { parseSaTokenScopes } from "@/lib/auth/tokens/service-account-token";
@@ -52,17 +52,15 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 
-  const rl = await approveLimiter.check(`rl:access_request_approve:${actor.tenantId}`);
-  if (rl.redisErrored) {
-    void emitRateLimitFailClosed({
-      req,
-      scope: "access_request.approve",
-      userId: session.user.id,
-      tenantId: actor.tenantId,
-    });
-    return serviceUnavailable();
-  }
-  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: approveLimiter,
+    key: `rl:access_request_approve:${actor.tenantId}`,
+    scope: "access_request.approve",
+    userId: session.user.id,
+    tenantId: actor.tenantId,
+  });
+  if (blocked) return blocked;
 
   const { id: requestId } = await params;
 

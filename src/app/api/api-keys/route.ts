@@ -6,8 +6,8 @@ import { hashToken } from "@/lib/crypto/crypto-server";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { apiKeyCreateSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, rateLimited, serviceUnavailable } from "@/lib/http/api-response";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { errorResponse } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -72,17 +72,14 @@ async function handlePOST(req: NextRequest) {
   if (stepUpError) return stepUpError;
   const { userId } = authed.auth;
 
-  const rl = await apiKeyCreateLimiter.check(`rl:api_key_create:${userId}`);
-  if (rl.redisErrored) {
-    void emitRateLimitFailClosed({
-      req,
-      scope: "apikey.create",
-      userId,
-      tenantId: null,
-    });
-    return serviceUnavailable();
-  }
-  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: apiKeyCreateLimiter,
+    key: `rl:api_key_create:${userId}`,
+    scope: "apikey.create",
+    userId,
+  });
+  if (blocked) return blocked;
 
   const result = await parseBody(req, apiKeyCreateSchema);
   if (!result.ok) return result.response;

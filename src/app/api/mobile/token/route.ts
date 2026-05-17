@@ -33,10 +33,8 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import {
   errorResponse,
-  rateLimited,
-  serviceUnavailable,
 } from "@/lib/http/api-response";
-import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
@@ -101,21 +99,14 @@ function devicePubkeyFingerprint(devicePubkey: string): string {
 async function handlePOST(req: NextRequest): Promise<Response> {
   // 1. Rate limit BEFORE DB lookup. Keyed by client IP.
   const clientIp = extractClientIp(req);
-  const rl = await tokenLimiter.check(
-    `rl:mobile_token:${rateLimitKeyFromIp(clientIp ?? "unknown")}`,
-  );
-  if (rl.redisErrored) {
-    void emitRateLimitFailClosed({
-      req,
-      scope: "mobile.token",
-      userId: null,
-      tenantId: null,
-    });
-    return serviceUnavailable();
-  }
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: tokenLimiter,
+    key: `rl:mobile_token:${rateLimitKeyFromIp(clientIp ?? "unknown")}`,
+    scope: "mobile.token",
+    userId: null,
+  });
+  if (blocked) return blocked;
 
   // 2. Parse + validate body.
   const bodyResult = await parseBody(req, TokenRequestSchema);

@@ -17,7 +17,7 @@
  * throttle-key bypass via newline / tab / control-char injection.
  */
 
-import type { NextRequest } from "next/server";
+import type { NextRequest, NextResponse } from "next/server";
 import { ACTOR_TYPE, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
@@ -27,6 +27,17 @@ import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access
 import { getLogger } from "@/lib/logger";
 import { RATE_LIMIT_MAP_MAX_SIZE } from "@/lib/validations/common.server";
 import { resolveUserTenantId } from "@/lib/tenant-context";
+import {
+  rateLimited,
+  serviceUnavailable,
+  oauthTemporarilyUnavailable,
+} from "@/lib/http/api-response";
+import type { RateLimiter, RateLimitResult } from "@/lib/security/rate-limit";
+
+export type FailClosedEnvelope =
+  | "canonical"
+  | "oauth"
+  | (() => NextResponse);
 
 const THROTTLE_WINDOW_MS = 5 * 60 * 1000; // 5 min
 const SCOPE_RE = /^[a-z][a-z0-9_]{0,31}(\.[a-z][a-z0-9_]{0,31}){0,2}$/;
@@ -164,6 +175,86 @@ export async function emitRateLimitFailClosed(args: EmitArgs): Promise<void> {
       // Even logger may fail under extreme pressure; swallow.
     }
   }
+}
+
+// ── Convenience wrapper: limiter check + 503/429 envelope ────────────
+
+/**
+ * Check the rate-limiter and translate the result to an early-return
+ * `NextResponse` when the request should be blocked.
+ *
+ * Returns:
+ * - `NextResponse` (503) when the limiter signals `redisErrored: true` —
+ *   audit emission (post-auth) or warn log (pre-auth) is fired internally.
+ * - `NextResponse` (429) when the limiter is over its `max` for the window.
+ * - `null` when the caller should proceed.
+ *
+ * Usage:
+ * ```ts
+ * const blocked = await checkRateLimitOrFail({
+ *   req, limiter: unlockLimiter, key: `rl:vault_unlock:${userId}`,
+ *   scope: "vault.unlock", userId, tenantId: null,
+ * });
+ * if (blocked) return blocked;
+ * ```
+ *
+ * The `envelope` arg selects the 503 body shape:
+ * - `"canonical"` (default): `{ error: "SERVICE_UNAVAILABLE" }`
+ * - `"oauth"`: `{ error: "temporarily_unavailable" }` (RFC 6749, used by `/api/mcp/*`)
+ * - function: caller-provided factory for routes that preserve a bespoke
+ *   shape (currently only `vault/delegation/check` returns
+ *   `{ authorized: false, reason: "service_unavailable" }`).
+ */
+type CheckRateLimitOrFailArgs = {
+  req: NextRequest;
+  scope: string;
+  userId: string | null;
+  tenantId?: string | null;
+  envelope?: FailClosedEnvelope;
+  /**
+   * 429 envelope override. Used by routes whose pre-existing 429 contract
+   * differs from canonical `RATE_LIMIT_EXCEEDED` — e.g. OAuth/RFC 6749 routes
+   * (`/api/mcp/*`) return `{error:"slow_down"|"rate_limit_exceeded"|...}`,
+   * `vault/delegation/check` returns `{authorized:false,reason:"rate_limit"}`,
+   * `mcp/revoke` returns `{error:"rate_limited"}`. When provided, called with
+   * the limiter's `retryAfterMs` instead of the canonical `rateLimited()`.
+   * The 503 path is governed by `envelope`, not this arg.
+   */
+  rateLimitedEnvelope?: (retryAfterMs?: number) => NextResponse;
+} & (
+  | { limiter: RateLimiter; key: string; result?: never }
+  // Pre-computed result form, for callers that go through a wrapper like
+  // `checkIpRateLimit` (which already calls `limiter.check` internally and
+  // owns the IP-based key composition).
+  | { result: RateLimitResult; limiter?: never; key?: never }
+);
+
+export async function checkRateLimitOrFail(
+  args: CheckRateLimitOrFailArgs,
+): Promise<NextResponse | null> {
+  const rl =
+    args.result !== undefined ? args.result : await args.limiter.check(args.key);
+
+  if (rl.redisErrored) {
+    void emitRateLimitFailClosed({
+      req: args.req,
+      scope: args.scope,
+      userId: args.userId,
+      tenantId: args.tenantId ?? null,
+    });
+    const envelope = args.envelope ?? "canonical";
+    if (envelope === "oauth") return oauthTemporarilyUnavailable();
+    if (typeof envelope === "function") return envelope();
+    return serviceUnavailable();
+  }
+
+  if (!rl.allowed) {
+    return args.rateLimitedEnvelope != null
+      ? args.rateLimitedEnvelope(rl.retryAfterMs)
+      : rateLimited(rl.retryAfterMs);
+  }
+
+  return null;
 }
 
 // ── Test-only exports ────────────────────────────────────────────────
