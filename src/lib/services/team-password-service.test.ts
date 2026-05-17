@@ -300,9 +300,30 @@ describe("createTeamPassword", () => {
     }).catch((e) => e);
 
     expect(err).toBeInstanceOf(TeamPasswordServiceError);
-    expect(err.code).toBe("NOT_FOUND");
+    expect(err.code).toBe(API_ERROR.NOT_FOUND);
     expect(err.statusHint).toBe(404);
     expect(mockTeamPasswordEntryCreate).not.toHaveBeenCalled();
+  });
+
+  it("accepts duplicate tagIds — deduplicates before comparing to teamTag.count", async () => {
+    // A client may legitimately send ["tag-1","tag-1"] (e.g. UI bug); without
+    // dedup the count check would fail spuriously because teamTag.count returns
+    // distinct rows (1) while the raw input length is 2.
+    mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
+    mockTeamTagCount.mockResolvedValue(1);
+    const created = { id: "entry-1", tags: [] };
+    mockTeamPasswordEntryCreate.mockResolvedValue(created);
+
+    const result = await createTeamPassword(TEAM_ID, {
+      ...BASE_CREATE_INPUT,
+      tagIds: ["tag-1", "tag-1"],
+    });
+
+    expect(result).toBe(created);
+    // count must be queried with the deduped IDs ([tag-1]), not the raw input
+    expect(mockTeamTagCount).toHaveBeenCalledWith({
+      where: { id: { in: ["tag-1"] }, teamId: TEAM_ID },
+    });
   });
 });
 
@@ -558,8 +579,55 @@ describe("updateTeamPassword", () => {
 
     const err = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input).catch((e) => e);
     expect(err).toBeInstanceOf(TeamPasswordServiceError);
-    expect(err.code).toBe("ITEM_KEY_REQUIRED");
+    expect(err.code).toBe(API_ERROR.ITEM_KEY_REQUIRED);
     expect(err.statusHint).toBe(400);
+  });
+
+  it("throws ITEM_KEY_REQUIRED when teamKeyVersion changes with itemKeyVersion>=1 but no encryptedItemKey (re-wrap required)", async () => {
+    // buildItemKeyWrapAAD binds the wrapped item key to teamKeyVersion. When
+    // teamKeyVersion rotates from 3 → 4 and the entry holds an item key
+    // (itemKeyVersion=1), the wrapped key MUST be re-wrapped with the new
+    // team key — otherwise the AAD no longer matches and the entry breaks.
+    const input: UpdateTeamPasswordInput = {
+      encryptedBlob: ENCRYPTED_BLOB,
+      encryptedOverview: ENCRYPTED_OVERVIEW,
+      aadVersion: 1,
+      teamKeyVersion: 4, // rotated from existing 3
+      itemKeyVersion: 1, // unchanged from existing
+      // encryptedItemKey deliberately absent
+      userId: USER_ID,
+      existingEntry: { ...BASE_EXISTING_ENTRY, teamKeyVersion: 3, itemKeyVersion: 1 },
+    };
+    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 4 });
+
+    const err = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input).catch((e) => e);
+    expect(err).toBeInstanceOf(TeamPasswordServiceError);
+    expect(err.code).toBe(API_ERROR.ITEM_KEY_REQUIRED);
+    expect(err.statusHint).toBe(400);
+    expect(mockTeamPasswordEntryUpdate).not.toHaveBeenCalled();
+  });
+
+  it("succeeds when teamKeyVersion change is paired with new encryptedItemKey re-wrap", async () => {
+    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 4 });
+    mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
+    mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([{ id: "h-1" }]);
+    const updated = { id: PASSWORD_ID, tags: [] };
+    mockTeamPasswordEntryUpdate.mockResolvedValue(updated);
+
+    const input: UpdateTeamPasswordInput = {
+      encryptedBlob: ENCRYPTED_BLOB,
+      encryptedOverview: ENCRYPTED_OVERVIEW,
+      aadVersion: 1,
+      teamKeyVersion: 4,
+      itemKeyVersion: 1,
+      encryptedItemKey: ENCRYPTED_ITEM_KEY, // re-wrap supplied
+      userId: USER_ID,
+      existingEntry: { ...BASE_EXISTING_ENTRY, teamKeyVersion: 3, itemKeyVersion: 1 },
+    };
+
+    const result = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input);
+    expect(result).toBe(updated);
+    expect(mockTeamPasswordEntryUpdate).toHaveBeenCalledOnce();
   });
 
   it("succeeds when upgrading v0→v1 and encryptedItemKey is provided", async () => {

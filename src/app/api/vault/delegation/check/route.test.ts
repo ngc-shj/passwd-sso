@@ -134,7 +134,9 @@ describe("GET /api/vault/delegation/check", () => {
       userId: "user-1",
       tenantId: "tenant-1",
       tokenId: "tok-1",
-      mcpClientId: "mcpc_abc",
+      // Token must own the queried clientId — intra-user IDOR guard runs
+      // AFTER enforceAccessRestriction, so we still need IP-range denial first.
+      mcpClientId: VALID_CLIENT_ID,
       scopes: ["delegation:check"],
     });
     const denied = new Response(
@@ -149,6 +151,28 @@ describe("GET /api/vault/delegation/check", () => {
     // Must not look up delegation or log audit when IP is denied
     expect(mockPrismaDelegationSession.findFirst).not.toHaveBeenCalled();
     expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 when MCP token's mcpClientId does not match query clientId (intra-user IDOR guard)", async () => {
+    // Token issued for one MCP client cannot query delegation state of another
+    // MCP client owned by the same user.
+    const OTHER_CLIENT_ID = "mcpc_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    mockAuthOrToken.mockResolvedValue({
+      type: "mcp_token",
+      userId: "user-1",
+      tenantId: "tenant-1",
+      tokenId: "tok-1",
+      mcpClientId: OTHER_CLIENT_ID,
+      scopes: ["delegation:check"],
+    });
+
+    const res = await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
+
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.authorized).toBe(false);
+    // Lookup MUST NOT run — guard fires before the DB query
+    expect(mockPrismaDelegationSession.findFirst).not.toHaveBeenCalled();
   });
 
   it("returns 429 when rate limited", async () => {

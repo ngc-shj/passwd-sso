@@ -7,14 +7,19 @@ import { errorResponse } from "@/lib/http/api-response";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 
-// DELETE /api/api-keys/[id] — Revoke an API key (session only)
+// DELETE /api/api-keys/[id] — Revoke an API key (session only + step-up)
 async function handleDELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const authed = await checkAuth(req);
   if (!authed.ok) return authed.response;
+  // Step-up parity with POST: API-key revocation is a management op affecting
+  // availability, so require the same recent re-auth bar as issuance.
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
   const { userId } = authed.auth;
 
   const { id } = await params;
