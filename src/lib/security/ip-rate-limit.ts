@@ -23,11 +23,12 @@
 
 import { getLogger } from "@/lib/logger";
 import { rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
-import type { RateLimitResult } from "@/lib/security/rate-limit";
+import type { RateLimiter, RateLimitResult } from "@/lib/security/rate-limit";
 
-interface RateLimitProbe {
-  check: (key: string) => Promise<RateLimitResult>;
-}
+// Subset of RateLimiter the wrapper actually needs. Pulled from the canonical
+// type so the result-shape (including the optional `redisErrored` flag) stays
+// in lockstep automatically — no parallel inline interface to drift.
+type RateLimitProbe = Pick<RateLimiter, "check">;
 
 interface CheckIpRateLimitArgs {
   /** Result of extractClientIp / extractClientIpFromHeaders — null when the IP cannot be determined. */
