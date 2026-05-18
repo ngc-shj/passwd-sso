@@ -1487,6 +1487,10 @@ model TeamWebhook {
   secretIv         String    @map("secret_iv") @db.VarChar(24)
   secretAuthTag    String    @map("secret_auth_tag") @db.VarChar(32)
   masterKeyVersion Int       @default(1) @map("master_key_version")
+  // v1: AES-GCM with no AAD (legacy). v2: AAD bound to
+  // ("TeamWebhook" | version | webhookId | tenantId | teamId).
+  // See buildWebhookSecretAAD in src/lib/crypto/webhook-aad.ts.
+  secretAadVersion Int       @default(1) @map("secret_aad_version")
   events           String[]
   isActive         Boolean   @default(true) @map("is_active")
   lastError        String?   @map("last_error") @db.Text
@@ -1512,6 +1516,10 @@ model TenantWebhook {
   secretIv         String    @map("secret_iv") @db.VarChar(24)
   secretAuthTag    String    @map("secret_auth_tag") @db.VarChar(32)
   masterKeyVersion Int       @default(1) @map("master_key_version")
+  // v1: AES-GCM with no AAD (legacy). v2: AAD bound to
+  // ("TenantWebhook" | version | webhookId | tenantId).
+  // See buildWebhookSecretAAD in src/lib/crypto/webhook-aad.ts.
+  secretAadVersion Int       @default(1) @map("secret_aad_version")
   events           String[]
   isActive         Boolean   @default(true) @map("is_active")
   lastError        String?   @map("last_error") @db.Text
