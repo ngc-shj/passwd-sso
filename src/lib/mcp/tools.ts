@@ -14,7 +14,9 @@ import {
   findActiveDelegationSession,
   fetchDelegationEntry,
   getDelegatedEntryIdsForSession,
-  type DelegationMetadata,
+  toAgentFacing,
+  USER_SUPPLIED_METADATA_WARNING,
+  type AgentFacingDelegationEntry,
 } from "@/lib/auth/access/delegation";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, ACTOR_TYPE } from "@/lib/constants/audit/audit";
@@ -26,9 +28,10 @@ export const MCP_TOOLS = [
   {
     name: "list_credentials",
     description:
-      "List delegated credential entries. Returns metadata only (title, username, urlHost, tags) " +
+      "List delegated credential entries. Returns metadata only (title, username, urlHost) " +
       "for entries the user has pre-approved via the vault UI. " +
-      "Requires credentials:list scope and an active delegation session.",
+      USER_SUPPLIED_METADATA_WARNING +
+      " Requires credentials:list scope and an active delegation session.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -43,7 +46,8 @@ export const MCP_TOOLS = [
     description:
       "Search delegated credential entries by keyword. Searches title and username fields " +
       "of delegated entries. Returns metadata only (no secrets). " +
-      "Requires credentials:list scope and an active delegation session.",
+      USER_SUPPLIED_METADATA_WARNING +
+      " Requires credentials:list scope and an active delegation session.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -149,11 +153,13 @@ export async function toolListCredentials(
   // Get all delegated entry IDs from Redis index (uses session.id directly — no double DB lookup)
   const delegatedIds = await getDelegatedEntryIdsForSession(token.userId!, session.id).catch(() => new Set<string>());
 
-  // Fetch metadata for each delegated entry
-  const entries: DelegationMetadata[] = [];
+  // Fetch metadata for each delegated entry. The projector strips `tags` and
+  // stamps `metadataProvenance: "user-supplied"` BEFORE the entries leave the
+  // server boundary — agents never see the full DelegationMetadata shape.
+  const entries: AgentFacingDelegationEntry[] = [];
   for (const entryId of delegatedIds) {
     const entry = await fetchDelegationEntry(token.userId!, session.id, entryId);
-    if (entry) entries.push(entry);
+    if (entry) entries.push(toAgentFacing(entry));
   }
 
   // Apply pagination
@@ -185,13 +191,16 @@ export async function toolSearchCredentials(
 
   const delegatedIds = await getDelegatedEntryIdsForSession(token.userId!, session.id).catch(() => new Set<string>());
 
-  const entries: DelegationMetadata[] = [];
+  // Fetch + project to agent-facing shape. Filtering happens on the projected
+  // shape; `tags` is intentionally not searchable (would extend attack surface
+  // beyond title/username for a compromised browser).
+  const entries: AgentFacingDelegationEntry[] = [];
   for (const entryId of delegatedIds) {
     const entry = await fetchDelegationEntry(token.userId!, session.id, entryId);
-    if (entry) entries.push(entry);
+    if (entry) entries.push(toAgentFacing(entry));
   }
 
-  // Filter by query if provided — search only title and username (no secret fields)
+  // Filter by query if provided — search only title and username (no secret fields).
   const filtered = query
     ? entries.filter((e) => {
         const q = query.toLowerCase();

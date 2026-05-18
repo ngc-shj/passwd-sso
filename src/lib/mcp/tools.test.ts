@@ -10,7 +10,8 @@ const { mockLogAudit } = vi.hoisted(() => ({
   mockLogAudit: vi.fn(),
 }));
 
-vi.mock("@/lib/auth/access/delegation", () => ({
+vi.mock("@/lib/auth/access/delegation", async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
   findActiveDelegationSession: mockFindActiveDelegationSession,
   fetchDelegationEntry: mockFetchDelegationEntry,
   getDelegatedEntryIdsForSession: mockGetDelegatedEntryIdsForSession,
@@ -26,7 +27,8 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withBypassRls: vi.fn((_prisma: unknown, fn: () => unknown) => fn()),
 }));
 
-import { toolListCredentials, toolSearchCredentials } from "./tools";
+import { toolListCredentials, toolSearchCredentials, MCP_TOOLS } from "./tools";
+import { USER_SUPPLIED_METADATA_WARNING } from "@/lib/auth/access/delegation";
 import type { McpTokenData } from "@/lib/mcp/oauth-server";
 
 const makeToken = (overrides?: Partial<McpTokenData>): McpTokenData => ({
@@ -50,6 +52,22 @@ const ENTRY_2 = { id: ENTRY_ID_2, title: "AWS Console", username: "bob", urlHost
 
 // ─── toolListCredentials ─────────────────────────────────────
 
+describe("MCP_TOOLS descriptions (C4 I-C4-3)", () => {
+  it("list_credentials description includes the user-supplied metadata warning", () => {
+    const tool = MCP_TOOLS.find((t) => t.name === "list_credentials");
+    expect(tool).toBeDefined();
+    expect(tool!.description).toContain(USER_SUPPLIED_METADATA_WARNING);
+    // Tags should not be advertised as a returned field anymore.
+    expect(tool!.description).not.toMatch(/\btags\b/);
+  });
+
+  it("search_credentials description includes the user-supplied metadata warning", () => {
+    const tool = MCP_TOOLS.find((t) => t.name === "search_credentials");
+    expect(tool).toBeDefined();
+    expect(tool!.description).toContain(USER_SUPPLIED_METADATA_WARNING);
+  });
+});
+
 describe("toolListCredentials", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -67,7 +85,7 @@ describe("toolListCredentials", () => {
     expect(result.error?.message).toContain("No active delegation session");
   });
 
-  it("returns all delegated entries with pagination metadata", async () => {
+  it("returns all delegated entries with pagination metadata and agent-facing shape", async () => {
     mockFindActiveDelegationSession.mockResolvedValueOnce(SESSION);
     mockGetDelegatedEntryIdsForSession.mockResolvedValueOnce(new Set([ENTRY_ID_1]));
     mockFetchDelegationEntry.mockResolvedValueOnce(ENTRY_1);
@@ -76,12 +94,18 @@ describe("toolListCredentials", () => {
     expect(result.result).toBeDefined();
     expect(result.result?.entries).toHaveLength(1);
     expect(result.result?.total).toBe(1);
-    // Verify metadata-only: no secret fields in the returned entries
+    // Verify projector applied: agent-facing shape with provenance label,
+    // no secret fields, no tags (C4 I-C4-1, I-C4-2).
     if ("result" in result && result.result) {
       const entry = result.result.entries[0] as unknown as Record<string, unknown>;
       expect(entry).not.toHaveProperty("password");
       expect(entry).not.toHaveProperty("notes");
       expect(entry).not.toHaveProperty("url");
+      expect(entry).not.toHaveProperty("tags");
+      expect(entry.metadataProvenance).toBe("user-supplied");
+      expect(Object.keys(entry).sort()).toEqual(
+        ["id", "metadataProvenance", "title", "urlHost", "username"].sort(),
+      );
     }
   });
 

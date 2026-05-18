@@ -30,6 +30,7 @@ import {
   storeDelegationEntries,
   evictDelegationRedisKeys,
   revokeAllDelegationSessions,
+  isSafeMetadataString,
 } from "@/lib/auth/access/delegation";
 import type { DelegationMetadata } from "@/lib/auth/access/delegation";
 
@@ -41,6 +42,17 @@ const delegationRateLimiter = createRateLimiter({
   failClosedOnRedisError: true,
 });
 
+// C4 (D-4 + S10): sanitize at the storage boundary. Reject ASCII control
+// chars, Unicode bidi overrides, line/paragraph separators, and zero-width
+// chars in display fields — these enable prompt-injection and homoglyph
+// attacks on AI agents that consume the metadata downstream.
+const safeStringMax200 = z
+  .string()
+  .max(200)
+  .refine(isSafeMetadataString, {
+    message: "must not contain control or bidi-override characters",
+  });
+
 const createDelegationSchema = z.object({
   mcpTokenId: z.string().uuid(),
   ttlSeconds: z.number().int().min(DELEGATION_MIN_TTL_SEC).max(DELEGATION_MAX_TTL_SEC).optional(),
@@ -49,10 +61,16 @@ const createDelegationSchema = z.object({
     .array(
       z.object({
         id: z.string().uuid(),
-        title: z.string().max(200),
-        username: z.string().max(200).nullish(),
-        urlHost: z.string().max(200).nullish(),
-        tags: z.array(z.string()).max(20).nullish(),
+        title: safeStringMax200,
+        username: safeStringMax200.nullish(),
+        urlHost: safeStringMax200.nullish(),
+        // Tag values are whitelist-restricted; the agent-facing projector
+        // drops the field entirely (per I-C4-2), but the storage layer
+        // still validates so future non-agent consumers can rely on it.
+        tags: z
+          .array(z.string().regex(/^[A-Za-z0-9_\-]{1,40}$/))
+          .max(20)
+          .nullish(),
       }),
     )
     .min(1)
