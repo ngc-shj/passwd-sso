@@ -292,6 +292,11 @@ describe("POST /api/mcp/register", () => {
 
     expect(status).toBe(503);
     expect(json.error).toBe("temporarily_unavailable");
+    // C3 acceptance: 503 body must include the literal "dcr-cleanup-worker"
+    // so an operator hitting registration outages knows which process to
+    // check. Tests pin the literal because the C3 removal of the
+    // probabilistic cleanup made the worker the sole cleanup path.
+    expect(json.error_description).toContain("dcr-cleanup-worker");
   });
 
   it("returns 400 when request body is invalid JSON", async () => {

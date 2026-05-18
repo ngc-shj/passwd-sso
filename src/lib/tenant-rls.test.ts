@@ -130,3 +130,99 @@ describe("withBypassRls", () => {
     expect(mockExecuteRaw).toHaveBeenCalled();
   });
 });
+
+// ─── C1: Nesting guards (both directions) ────────────────────
+//
+// AsyncLocalStorage does NOT roll back PostgreSQL GUCs, and the Prisma
+// Proxy folds nested $transaction into the outer tx, so set_config(..., true)
+// from either direction would silently persist for the outer transaction's
+// remainder. The guards reject nesting BEFORE prisma.$transaction is called,
+// so no DB statement runs. The tests assert both directions and assert that
+// $transaction / $executeRaw on the INNER call were never invoked.
+
+describe("RLS nesting guards (C1)", () => {
+  it("rejects withTenantRls inside withBypassRls — INVALID_RLS_NESTING", async () => {
+    const { prisma, mockTx } = makeMockPrisma();
+    const innerTransaction = vi.fn();
+
+    await expect(
+      withBypassRls(
+        prisma,
+        async () => {
+          // Snapshot $transaction / $executeRaw call counts BEFORE the inner
+          // attempt, so we can assert no inner DB statement fired.
+          const outerTxCallsBefore = (prisma.$transaction as ReturnType<typeof vi.fn>).mock.calls.length;
+          const outerExecBefore = mockTx.$executeRaw.mock.calls.length;
+
+          // Inner attempt MUST throw synchronously (before $transaction).
+          await withTenantRls(prisma, "tenant-inner", async () => {
+            innerTransaction(); // should never run
+            return undefined;
+          });
+
+          // Unreachable; this line exists so the catch above is the only exit.
+          throw new Error("unexpected: inner call did not throw");
+        },
+        BYPASS_PURPOSE.AUDIT_WRITE,
+      ),
+    ).rejects.toThrow(/INVALID_RLS_NESTING/);
+
+    // The inner callback's body must NEVER have run.
+    expect(innerTransaction).not.toHaveBeenCalled();
+
+    // The outer $transaction was called exactly once (for the outer
+    // withBypassRls itself); the inner withTenantRls did not invoke it again
+    // because the guard threw before reaching prisma.$transaction.
+    expect((prisma.$transaction as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+
+    // The inner set_config('app.tenant_id', ...) must NOT have fired.
+    // mockTx.$executeRaw is invoked only by withBypassRls's own set_config
+    // calls (bypass_rls + bypass_purpose + tenant_id). If the inner guard
+    // had been bypassed, we'd see an additional invocation with the inner
+    // tenant id literal in the args. Assert no call contains "tenant-inner".
+    for (const call of mockTx.$executeRaw.mock.calls) {
+      const flatArgs = JSON.stringify(call);
+      expect(flatArgs).not.toMatch(/tenant-inner/);
+    }
+  });
+
+  it("rejects withBypassRls inside withTenantRls — INVALID_RLS_NESTING", async () => {
+    const { prisma, mockTx } = makeMockPrisma();
+    const innerTransaction = vi.fn();
+
+    await expect(
+      withTenantRls(prisma, "tenant-outer", async () => {
+        await withBypassRls(
+          prisma,
+          async () => {
+            innerTransaction(); // should never run
+            return undefined;
+          },
+          BYPASS_PURPOSE.AUDIT_WRITE,
+        );
+        throw new Error("unexpected: inner call did not throw");
+      }),
+    ).rejects.toThrow(/INVALID_RLS_NESTING/);
+
+    expect(innerTransaction).not.toHaveBeenCalled();
+    // Outer $transaction fires exactly once; inner withBypassRls throws
+    // synchronously before its $transaction call.
+    expect((prisma.$transaction as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+
+    // The inner set_config('app.bypass_rls', 'on', ...) must NOT have fired.
+    for (const call of mockTx.$executeRaw.mock.calls) {
+      const flatArgs = JSON.stringify(call);
+      expect(flatArgs).not.toMatch(/bypass_rls.*on/);
+    }
+  });
+
+  it("does NOT reject sequential calls — guard only fires on active nesting", async () => {
+    const { prisma } = makeMockPrisma();
+    await withBypassRls(prisma, async () => undefined, BYPASS_PURPOSE.AUDIT_WRITE);
+    // After the first call exits, context is cleared. Second call must
+    // succeed without throwing INVALID_RLS_NESTING.
+    await expect(
+      withTenantRls(prisma, "tenant-x", async () => "ok"),
+    ).resolves.toBe("ok");
+  });
+});
