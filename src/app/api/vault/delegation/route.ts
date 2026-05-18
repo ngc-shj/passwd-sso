@@ -12,6 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { getLogger } from "@/lib/logger";
 import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { MCP_SCOPE } from "@/lib/constants/auth/mcp";
@@ -149,7 +150,10 @@ async function handlePOST(request: NextRequest) {
     return errorResponse(API_ERROR.DELEGATION_ENTRIES_NOT_FOUND);
   }
 
-  // Auto-revoke existing delegation for this token (one-active-per-token)
+  // Look up existing delegation for this token (one-active-per-token).
+  // Revoking is DEFERRED to AFTER the new session's Redis store succeeds
+  // (C5) to prevent transient Redis failures from killing the user's
+  // currently-active delegation alongside the new one.
   const existingSession = await withBypassRls(prisma, () =>
     prisma.delegationSession.findFirst({
       where: {
@@ -162,17 +166,7 @@ async function handlePOST(request: NextRequest) {
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
-  if (existingSession) {
-    await evictDelegationRedisKeys(userId, existingSession.id).catch(() => {});
-    await withBypassRls(prisma, () =>
-      prisma.delegationSession.updateMany({
-        where: { id: existingSession.id, revokedAt: null },
-        data: { revokedAt: new Date() },
-      }),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
-  }
-
-  // Create delegation session
+  // Step 1: Create new delegation session in DB.
   const expiresAt = new Date(Date.now() + effectiveTtl * 1000);
   const delegationSession = await withBypassRls(prisma, () =>
     prisma.delegationSession.create({
@@ -187,7 +181,9 @@ async function handlePOST(request: NextRequest) {
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
-  // Store metadata entries in Redis — rollback DB session on failure
+  // Step 2: Store metadata entries in Redis. On failure, roll back via
+  // deleteMany (idempotent — avoids P2025 if a concurrent vault-lock fired).
+  // Existing session is left untouched on rollback.
   try {
     await storeDelegationEntries(
       userId,
@@ -195,16 +191,22 @@ async function handlePOST(request: NextRequest) {
       metadataEntries,
       effectiveTtl * 1000,
     );
-  } catch {
+  } catch (err) {
+    getLogger().warn(
+      { err, sessionId: delegationSession.id, userId },
+      "delegation.create.redis_store_failed",
+    );
     await withBypassRls(prisma, () =>
-      prisma.delegationSession.delete({ where: { id: delegationSession.id } }),
+      prisma.delegationSession.deleteMany({
+        where: { id: delegationSession.id, revokedAt: null },
+      }),
     BYPASS_PURPOSE.CROSS_TENANT_LOOKUP).catch(() => {});
     return errorResponse(API_ERROR.DELEGATION_STORE_FAILED);
   }
 
-  // Audit log — both personal and tenant scope (no plaintext in metadata!)
-  // tenantId is preserved on the PERSONAL emit (helper does not set it for personal scope,
-  // but downstream JSON log + test assertions require the field — see plan Pattern 5).
+  // Step 3: Audit log — UNCONDITIONAL after step-2 success. Subsequent
+  // step-4/5 failures (Redis evict, DB revoke of old session) are
+  // best-effort cleanup and must not affect the audit guarantee (I-C5-3).
   const auditBody = {
     action: AUDIT_ACTION.DELEGATION_CREATE,
     targetId: delegationSession.id,
@@ -214,6 +216,34 @@ async function handlePOST(request: NextRequest) {
     logAuditAsync({ ...personalAuditBase(request, userId), tenantId, ...auditBody }),
     logAuditAsync({ ...tenantAuditBase(request, userId, tenantId), ...auditBody }),
   ]);
+
+  // Step 4 + 5: Best-effort cleanup of the existing session. Both wrapped
+  // in try/catch with warn-only logging so a Redis or DB transient does not
+  // surface as a 500 to the caller. delegation/check uses orderBy createdAt
+  // desc (I-C5-2) so the new session is preferred during any overlap.
+  if (existingSession) {
+    try {
+      await evictDelegationRedisKeys(userId, existingSession.id);
+    } catch (err) {
+      getLogger().warn(
+        { err, oldSessionId: existingSession.id, userId },
+        "delegation.create.evict_old_redis_failed",
+      );
+    }
+    try {
+      await withBypassRls(prisma, () =>
+        prisma.delegationSession.updateMany({
+          where: { id: existingSession.id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        }),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+    } catch (err) {
+      getLogger().warn(
+        { err, oldSessionId: existingSession.id, userId },
+        "delegation.create.revoke_old_db_failed",
+      );
+    }
+  }
 
   return NextResponse.json({
     delegationSessionId: delegationSession.id,

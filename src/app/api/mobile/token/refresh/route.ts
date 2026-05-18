@@ -129,7 +129,6 @@ async function handlePOST(req: NextRequest): Promise<Response> {
           familyId: true,
           familyCreatedAt: true,
           revokedAt: true,
-          devicePubkey: true,
           clientKind: true,
         },
       }),
@@ -138,15 +137,15 @@ async function handlePOST(req: NextRequest): Promise<Response> {
   if (!oldRow || oldRow.clientKind !== "IOS_APP") {
     return unauthorized();
   }
-  if (!oldRow.cnfJkt || !oldRow.devicePubkey) {
-    // Defensive — IOS_APP rows MUST have these set. If we ever read a
-    // row without them, something else has corrupted state.
+  if (!oldRow.cnfJkt) {
+    // Defensive — IOS_APP rows MUST have cnfJkt set. If we ever read a
+    // row without it, something else has corrupted state.
     getLogger().error(
       {
         event: "mobile_token_refresh_missing_binding",
         tokenId: oldRow.id,
       },
-      "IOS_APP token row missing cnfJkt/devicePubkey",
+      "IOS_APP token row missing cnfJkt",
     );
     return errorResponse(API_ERROR.MOBILE_REFRESH_TOKEN_REVOKED);
   }
@@ -195,9 +194,9 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       familyCreatedAt: oldRow.familyCreatedAt,
       revokedAt: oldRow.revokedAt,
       tokenHash: oldRow.tokenHash,
-      devicePubkey: oldRow.devicePubkey,
     },
-    devicePubkey: oldRow.devicePubkey,
+    // cnfJkt IS the device-key thumbprint — same value threaded through.
+    deviceJkt: oldRow.cnfJkt,
     cnfJkt: oldRow.cnfJkt,
   });
 

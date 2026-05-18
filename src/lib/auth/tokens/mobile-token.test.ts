@@ -100,8 +100,11 @@ import {
 const USER_ID = "00000000-0000-4000-8000-000000000001";
 const TENANT_ID = "00000000-0000-4000-8000-000000000002";
 const FAMILY_ID = "00000000-0000-4000-8000-000000000003";
-const DEVICE_PUBKEY = "MFkwEw…fakeDER…AQAB";
-const CNF_JKT = "abc123fakeJktThumbprint";
+// RFC 7638 JWK thumbprint shape (43 base64url chars). The deviceJkt and
+// cnfJkt fields are conceptually the same value — both represent the
+// device's public-key thumbprint.
+const DEVICE_JKT = "a".repeat(43);
+const CNF_JKT = DEVICE_JKT;
 
 function setupTransactionPassthrough() {
   mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
@@ -141,11 +144,11 @@ beforeEach(() => {
 // ─── issueIosToken ───────────────────────────────────────────
 
 describe("issueIosToken", () => {
-  it("creates an IOS_APP row with cnfJkt + devicePubkey + IOS scopes", async () => {
+  it("creates an IOS_APP row with cnfJkt + IOS scopes (deviceJkt is bound via cnfJkt)", async () => {
     const result = await issueIosToken({
       userId: USER_ID,
       tenantId: TENANT_ID,
-      devicePubkey: DEVICE_PUBKEY,
+      deviceJkt: DEVICE_JKT,
       cnfJkt: CNF_JKT,
       ip: "1.2.3.4",
       userAgent: "TestAgent/1.0",
@@ -158,19 +161,20 @@ describe("issueIosToken", () => {
     expect(result.tokenId).toBe("row-access-1");
     expect(result.expiresAt).toBeInstanceOf(Date);
 
-    // First .create call = access row.
+    // First .create call = access row. The legacy `devicePubkey` column is
+    // no longer populated — cnfJkt is the device-binding source of truth.
     expect(mockExtCreate).toHaveBeenCalledTimes(2);
     const accessCall = mockExtCreate.mock.calls[0][0];
     expect(accessCall.data).toMatchObject({
       userId: USER_ID,
       tenantId: TENANT_ID,
       clientKind: "IOS_APP",
-      devicePubkey: DEVICE_PUBKEY,
       cnfJkt: CNF_JKT,
       lastUsedIp: "1.2.3.4",
       lastUsedUserAgent: "TestAgent/1.0",
       scope: "passwords:read,passwords:write,vault:unlock-data",
     });
+    expect(accessCall.data.devicePubkey).toBeUndefined();
 
     const refreshCall = mockExtCreate.mock.calls[1][0];
     expect(refreshCall.data.clientKind).toBe("IOS_APP");
@@ -181,7 +185,7 @@ describe("issueIosToken", () => {
     const result = await issueIosToken({
       userId: USER_ID,
       tenantId: TENANT_ID,
-      devicePubkey: DEVICE_PUBKEY,
+      deviceJkt: DEVICE_JKT,
       cnfJkt: CNF_JKT,
     });
     expect(result.familyId).toBeTruthy();
@@ -200,7 +204,7 @@ describe("issueIosToken", () => {
     await issueIosToken({
       userId: USER_ID,
       tenantId: TENANT_ID,
-      devicePubkey: DEVICE_PUBKEY,
+      deviceJkt: DEVICE_JKT,
       cnfJkt: CNF_JKT,
       familyId: FAMILY_ID,
       familyCreatedAt: existingFamilyCreatedAt,
@@ -219,7 +223,7 @@ describe("issueIosToken", () => {
     await issueIosToken({
       userId: USER_ID,
       tenantId: TENANT_ID,
-      devicePubkey: DEVICE_PUBKEY,
+      deviceJkt: DEVICE_JKT,
       cnfJkt: CNF_JKT,
     });
 
@@ -369,7 +373,7 @@ describe("refreshIosToken", () => {
     familyCreatedAt: new Date(Date.now() - 60_000),
     revokedAt: null as Date | null,
     tokenHash: "hashed_old_refresh",
-    devicePubkey: DEVICE_PUBKEY,
+    deviceJkt: DEVICE_JKT,
   };
 
   function makeReq() {
@@ -387,7 +391,7 @@ describe("refreshIosToken", () => {
       req: makeReq(),
       bodyBytes: new TextEncoder().encode(JSON.stringify({ refresh: "x" })),
       oldRow: baseRow,
-      devicePubkey: DEVICE_PUBKEY,
+      deviceJkt: DEVICE_JKT,
       cnfJkt: CNF_JKT,
     });
 
@@ -433,7 +437,7 @@ describe("refreshIosToken", () => {
       req: makeReq(),
       bodyBytes: body,
       oldRow: baseRow,
-      devicePubkey: DEVICE_PUBKEY,
+      deviceJkt: DEVICE_JKT,
       cnfJkt: CNF_JKT,
     });
     expect(first.ok).toBe(true);
@@ -446,7 +450,7 @@ describe("refreshIosToken", () => {
       req: makeReq(),
       bodyBytes: body,
       oldRow: { ...baseRow, revokedAt: new Date() },
-      devicePubkey: DEVICE_PUBKEY,
+      deviceJkt: DEVICE_JKT,
       cnfJkt: CNF_JKT,
     });
 
@@ -464,7 +468,7 @@ describe("refreshIosToken", () => {
       req: makeReq(),
       bodyBytes: new TextEncoder().encode("DIFFERENT"),
       oldRow: { ...baseRow, revokedAt: new Date() },
-      devicePubkey: DEVICE_PUBKEY,
+      deviceJkt: DEVICE_JKT,
       cnfJkt: CNF_JKT,
     });
 
@@ -488,7 +492,7 @@ describe("refreshIosToken", () => {
           familyId: FAMILY_ID,
           replayKind: "refresh_token_reuse",
           sameDeviceKey: true,
-          devicePubkeyFingerprint: expect.any(String),
+          deviceJktFingerprint: expect.any(String),
         }),
       }),
     );
@@ -499,7 +503,7 @@ describe("refreshIosToken", () => {
       req: makeReq(),
       bodyBytes: new TextEncoder().encode("X"),
       oldRow: { ...baseRow, revokedAt: new Date() },
-      devicePubkey: "OTHER_DEVICE_PUBKEY",
+      deviceJkt: "b".repeat(43),
       cnfJkt: "OTHER_JKT",
     });
 
@@ -522,7 +526,7 @@ describe("refreshIosToken", () => {
       req: makeReq(),
       bodyBytes: body,
       oldRow: baseRow,
-      devicePubkey: DEVICE_PUBKEY,
+      deviceJkt: DEVICE_JKT,
       cnfJkt: CNF_JKT,
       now: () => baseNow,
     });
@@ -534,7 +538,7 @@ describe("refreshIosToken", () => {
       req: makeReq(),
       bodyBytes: body,
       oldRow: { ...baseRow, revokedAt: new Date(baseNow) },
-      devicePubkey: DEVICE_PUBKEY,
+      deviceJkt: DEVICE_JKT,
       cnfJkt: CNF_JKT,
       now: () => baseNow + REFRESH_REPLAY_GRACE_MS + 1,
     });
@@ -549,7 +553,7 @@ describe("refreshIosToken", () => {
       req: makeReq(),
       bodyBytes: new TextEncoder().encode("x"),
       oldRow: { ...baseRow, familyCreatedAt: ancient },
-      devicePubkey: DEVICE_PUBKEY,
+      deviceJkt: DEVICE_JKT,
       cnfJkt: CNF_JKT,
     });
 

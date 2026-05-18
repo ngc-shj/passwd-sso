@@ -10,7 +10,7 @@
  *   1. Verifies an Auth.js session is active (the user is signed in).
  *   2. Validates the four required query params.
  *   3. Persists a single-use bridge code (60s TTL) bound to {userId, tenantId,
- *      state, code_challenge, device_pubkey}.
+ *      state, code_challenge, device_jkt}.
  *   4. Redirects (302) to the canonical Universal-Link URL
  *      `<self-origin>/api/mobile/authorize/redirect?code=<bridge>&state=<state>`.
  *
@@ -43,16 +43,18 @@ export const runtime = "nodejs";
 
 // base64url-no-padding regex; accept lengths used by the iOS host app.
 // state: 32 random bytes → 43 chars; code_challenge: 32-byte SHA-256 → 43 chars;
-// device_pubkey: P-256 SubjectPublicKeyInfo DER (~91 bytes) → ~122 chars.
-// We enforce a generous upper bound rather than exact lengths so the server
-// stays decoupled from a specific encoding choice on the client.
+// device_jkt: RFC 7638 JWK thumbprint, SHA-256 over P-256 JCS → exactly 43 chars
+// (base64url unpadded). Exact-length match is the shape gate; the semantic
+// binding is enforced at /api/mobile/token by comparing stored.deviceJkt to
+// the DPoP proof's own jwkThumbprint output (verify.ts:219).
 const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
+const JWK_THUMBPRINT_RE = /^[A-Za-z0-9_-]{43}$/;
 
 const AuthorizeQuerySchema = z.object({
   client_kind: z.literal("ios"),
   state: z.string().min(43).max(64).regex(BASE64URL_RE),
   code_challenge: z.string().min(43).max(64).regex(BASE64URL_RE),
-  device_pubkey: z.string().min(64).max(512).regex(BASE64URL_RE),
+  device_jkt: z.string().regex(JWK_THUMBPRINT_RE),
 });
 
 async function handleGET(req: NextRequest): Promise<Response> {
@@ -71,12 +73,12 @@ async function handleGET(req: NextRequest): Promise<Response> {
     client_kind: url.searchParams.get("client_kind"),
     state: url.searchParams.get("state"),
     code_challenge: url.searchParams.get("code_challenge"),
-    device_pubkey: url.searchParams.get("device_pubkey"),
+    device_jkt: url.searchParams.get("device_jkt"),
   });
   if (!parsed.success) {
     return zodValidationError(parsed.error);
   }
-  const { state, code_challenge: codeChallenge, device_pubkey: devicePubkey } =
+  const { state, code_challenge: codeChallenge, device_jkt: deviceJkt } =
     parsed.data;
 
   // 3. Resolve the user's tenant via the RLS wrapper's tenantId callback —
@@ -99,7 +101,7 @@ async function handleGET(req: NextRequest): Promise<Response> {
             tenantId,
             state,
             codeChallenge,
-            devicePubkey,
+            deviceJkt,
             expiresAt,
             ip: meta.ip,
             userAgent: meta.userAgent,

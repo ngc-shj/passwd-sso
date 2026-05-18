@@ -9,7 +9,6 @@ const {
   mockCheck,
   mockRefreshIosToken,
   mockVerifyDpop,
-  mockGetDpopNonceService,
 } = vi.hoisted(() => ({
   mockExtensionTokenFindUnique: vi.fn(),
   mockWithBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),

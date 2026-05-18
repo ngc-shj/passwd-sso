@@ -43,8 +43,13 @@ export const REFRESH_REPLAY_GRACE_MS = 5_000;
 export interface IssueIosTokenParams {
   userId: string;
   tenantId: string;
-  /** Base64url-encoded SubjectPublicKeyInfo (DER) of the device public key. */
-  devicePubkey: string;
+  /**
+   * RFC 7638 JWK thumbprint (P-256, base64url, 43 chars). Bound to the proof
+   * via DPoP's `cnf.jkt` and to the row's `cnf_jkt` column. Replaces the
+   * former `devicePubkey` (base64url SPKI-DER) which was structurally
+   * incompatible with the DPoP verifier's JWK-thumbprint output.
+   */
+  deviceJkt: string;
   /** SHA-256 thumbprint of the JWK (RFC 7638), base64url. */
   cnfJkt: string;
   /** Present on refresh-rotation; absent on initial exchange. */
@@ -89,13 +94,18 @@ export async function issueIosToken(
   const {
     userId,
     tenantId,
-    devicePubkey,
+    deviceJkt,
     cnfJkt,
     familyId: existingFamilyId,
     familyCreatedAt: existingFamilyCreatedAt,
     ip,
     userAgent,
   } = params;
+  // The legacy `devicePubkey` column is retained as nullable but we no longer
+  // populate it for new iOS rows — `cnfJkt` is the single source of truth for
+  // the device-key binding. Refresh-time "sameDeviceKey" forensics compare
+  // cnfJkt across rotations instead.
+  void deviceJkt; // expose the binding via cnfJkt below; retained in params API for clarity
 
   const now = new Date();
   const familyId = existingFamilyId ?? randomUUID();
@@ -143,7 +153,7 @@ export async function issueIosToken(
           familyId,
           familyCreatedAt,
           clientKind: "IOS_APP",
-          devicePubkey,
+          // devicePubkey: omitted — cnfJkt is the device-binding SoT.
           cnfJkt,
           lastUsedIp: ip ?? null,
           lastUsedUserAgent: userAgent ?? null,
@@ -164,7 +174,7 @@ export async function issueIosToken(
           familyId,
           familyCreatedAt,
           clientKind: "IOS_APP",
-          devicePubkey,
+          // devicePubkey: omitted — cnfJkt is the device-binding SoT.
           cnfJkt,
           lastUsedIp: ip ?? null,
           lastUsedUserAgent: userAgent ?? null,
@@ -336,10 +346,9 @@ export interface RefreshIosTokenParams {
     revokedAt: Date | null;
     /** SHA-256 of the plaintext refresh token (used as cache key). */
     tokenHash: string;
-    devicePubkey: string | null;
   };
-  /** Device public key + thumbprint to thread through to the new row. */
-  devicePubkey: string;
+  /** RFC 7638 JWK thumbprint of the device key, threaded into the new row. */
+  deviceJkt: string;
   cnfJkt: string;
   /** "now" injection point for tests. */
   now?: () => number;
@@ -368,7 +377,7 @@ export type RefreshIosTokenResult =
 export async function refreshIosToken(
   params: RefreshIosTokenParams,
 ): Promise<RefreshIosTokenResult> {
-  const { req, bodyBytes, oldRow, devicePubkey, cnfJkt } = params;
+  const { req, bodyBytes, oldRow, deviceJkt, cnfJkt } = params;
   const now = params.now ? params.now() : Date.now();
   const bodyHash = sha256Hex(bodyBytes);
   const cacheKey = rotationKey(oldRow.tokenHash);
@@ -396,7 +405,7 @@ export async function refreshIosToken(
       req,
       oldRow,
       replayKind: "refresh_token_reuse",
-      sameDeviceKey: oldRow.devicePubkey === devicePubkey,
+      sameDeviceKey: oldRow.cnfJkt === cnfJkt,
     });
     return { ok: false, error: "REFRESH_REPLAY_DETECTED" };
   }
@@ -427,7 +436,7 @@ export async function refreshIosToken(
   const issued = await issueIosToken({
     userId: oldRow.userId,
     tenantId: oldRow.tenantId,
-    devicePubkey,
+    deviceJkt,
     cnfJkt,
     familyId: oldRow.familyId,
     familyCreatedAt: oldRow.familyCreatedAt,
@@ -458,7 +467,7 @@ export async function refreshIosToken(
     targetId: issued.tokenId,
     metadata: {
       familyId: oldRow.familyId,
-      sameDeviceKey: oldRow.devicePubkey === devicePubkey,
+      sameDeviceKey: oldRow.cnfJkt === cnfJkt,
     },
   });
 
@@ -474,7 +483,7 @@ export type ReplayKind =
 
 interface EmitReplayParams {
   req: NextRequest;
-  oldRow: IosTokenRow & { devicePubkey: string | null };
+  oldRow: IosTokenRow;
   replayKind: ReplayKind;
   sameDeviceKey: boolean;
   /** Optional clock-skew metric (ms) for SIEM forensics. */
@@ -483,8 +492,10 @@ interface EmitReplayParams {
 
 async function emitReplayDetected(params: EmitReplayParams): Promise<void> {
   const { req, oldRow, replayKind, sameDeviceKey, clockSkewMs } = params;
-  const fingerprint = oldRow.devicePubkey
-    ? createHash("sha256").update(oldRow.devicePubkey).digest("hex").slice(0, 16)
+  // First 16 hex chars of SHA-256(cnfJkt) — opaque-enough for SIEM
+  // forensics without exposing the full jkt in audit metadata.
+  const fingerprint = oldRow.cnfJkt
+    ? createHash("sha256").update(oldRow.cnfJkt).digest("hex").slice(0, 16)
     : null;
   await logAuditAsync({
     ...personalAuditBase(req, oldRow.userId),
@@ -494,7 +505,7 @@ async function emitReplayDetected(params: EmitReplayParams): Promise<void> {
     targetId: oldRow.familyId,
     metadata: {
       familyId: oldRow.familyId,
-      devicePubkeyFingerprint: fingerprint,
+      deviceJktFingerprint: fingerprint,
       replayKind,
       sameDeviceKey,
       ...(typeof clockSkewMs === "number" ? { clockSkewMs } : {}),

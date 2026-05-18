@@ -258,7 +258,11 @@ model MobileBridgeCode {
   tenantId      String    @map("tenant_id") @db.Uuid
   state         String    @db.VarChar(64)
   codeChallenge String    @map("code_challenge") @db.VarChar(64)
-  devicePubkey  String    @map("device_pubkey") @db.Text
+  // RFC 7638 JWK thumbprint (P-256, base64url, no padding = 43 chars).
+  // Replaces the prior base64url(SPKI-DER) `devicePubkey` field — SHA-256 of
+  // the SPKI string was never equal to the JWK thumbprint computed by the
+  // DPoP verifier, so the cnf-binding could not succeed in production.
+  deviceJkt     String    @map("device_jkt") @db.VarChar(43)
   expiresAt     DateTime  @map("expires_at") @db.Timestamptz(3)
   usedAt        DateTime? @map("used_at") @db.Timestamptz(3)
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
