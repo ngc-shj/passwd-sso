@@ -29,9 +29,9 @@ async function handleGET(req: NextRequest) {
     return handleAuthError(err);
   }
 
-  const [members, pendingCounts] = await withTenantRls(prisma, actor.tenantId, async () =>
+  const [members, pendingCounts] = await withTenantRls(prisma, actor.tenantId, async (tx) =>
     Promise.all([
-      prisma.tenantMember.findMany({
+      tx.tenantMember.findMany({
         where: { tenantId: actor.tenantId },
         select: {
           id: true,
@@ -51,7 +51,7 @@ async function handleGET(req: NextRequest) {
         orderBy: { createdAt: "asc" },
       }),
       // Includes pending_approval AND approved (not yet executed) per dual-approval plan
-      prisma.adminVaultReset.groupBy({
+      tx.adminVaultReset.groupBy({
         by: ["targetUserId"],
         where: {
           tenantId: actor.tenantId,

@@ -122,7 +122,7 @@ async function handleGET(req: NextRequest) {
   // Read the anchor row to get the snapshot upper bound
   const anchors = await withBypassRls(
     prisma,
-    async () =>
+    async (tx) =>
       prisma.$queryRawUnsafe<AnchorRow[]>(
         `SELECT chain_seq FROM audit_chain_anchors WHERE tenant_id = $1`,
         tenantId,
@@ -141,7 +141,7 @@ async function handleGET(req: NextRequest) {
   if (from) {
     const fromRows = await withBypassRls(
       prisma,
-      async () =>
+      async (tx) =>
         prisma.$queryRawUnsafe<SeqBoundRow[]>(
           `SELECT MIN(chain_seq) AS chain_seq
            FROM audit_logs
@@ -164,7 +164,7 @@ async function handleGET(req: NextRequest) {
   if (to) {
     const toRows = await withBypassRls(
       prisma,
-      async () =>
+      async (tx) =>
         prisma.$queryRawUnsafe<SeqBoundRow[]>(
           `SELECT MAX(chain_seq) AS chain_seq
            FROM audit_logs
@@ -187,7 +187,7 @@ async function handleGET(req: NextRequest) {
   if (fromSeq > 1) {
     const seedRows = await withBypassRls(
       prisma,
-      async () =>
+      async (tx) =>
         prisma.$queryRawUnsafe<{ event_hash: Uint8Array }[]>(
           `SELECT event_hash
            FROM audit_logs
@@ -215,7 +215,7 @@ async function handleGET(req: NextRequest) {
 
   const rows = await withBypassRls(
     prisma,
-    async () =>
+    async (tx) =>
       prisma.$queryRawUnsafe<ChainRowRaw[]>(
         `SELECT id, tenant_id, created_at,
                 chain_seq, event_hash, chain_prev_hash, metadata

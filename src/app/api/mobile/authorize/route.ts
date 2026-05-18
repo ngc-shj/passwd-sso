@@ -93,8 +93,8 @@ async function handleGET(req: NextRequest): Promise<Response> {
   await withUserTenantRls(userId, async (tenantId) =>
     withBypassRls(
       prisma,
-      async () =>
-        prisma.mobileBridgeCode.create({
+      async (tx) =>
+        tx.mobileBridgeCode.create({
           data: {
             codeHash,
             userId,

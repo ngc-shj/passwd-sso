@@ -77,8 +77,8 @@ export async function validateApiKey(
 
   const tokenHash = hashToken(plaintext);
 
-  const key = await withBypassRls(prisma, async () =>
-    prisma.apiKey.findUnique({
+  const key = await withBypassRls(prisma, async (tx) =>
+    tx.apiKey.findUnique({
       where: { tokenHash },
       select: {
         id: true,
@@ -102,8 +102,8 @@ export async function validateApiKey(
   }
 
   // Best-effort lastUsedAt update (non-blocking)
-  void withBypassRls(prisma, async () =>
-    prisma.apiKey.update({
+  void withBypassRls(prisma, async (tx) =>
+    tx.apiKey.update({
       where: { id: key.id },
       data: { lastUsedAt: new Date() },
     }),

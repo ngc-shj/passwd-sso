@@ -178,7 +178,7 @@ describe("GET /api/tenant/policy", () => {
     mockPrismaUserFindUnique.mockResolvedValue({
       tenant: { ...BASE_POLICY },
     });
-    mockWithBypassRls.mockImplementation((_p: unknown, fn: () => unknown) => fn());
+    mockWithBypassRls.mockImplementation((p: unknown, fn: (tx: unknown) => unknown) => fn(p));
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -229,7 +229,7 @@ describe("PATCH /api/tenant/policy", () => {
       passkeyGracePeriodDays: null,
     });
     mockPrismaSessionFindMany.mockResolvedValue([]);
-    mockWithBypassRls.mockImplementation((_p: unknown, fn: () => unknown) => fn());
+    mockWithBypassRls.mockImplementation((p: unknown, fn: (tx: unknown) => unknown) => fn(p));
     // Serializable transaction wrapping cascade-clamp + tenant.update
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({

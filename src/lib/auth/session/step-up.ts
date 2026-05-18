@@ -32,8 +32,8 @@ export async function requireRecentSession(
 
   const sessionRow = await withBypassRls(
     prisma,
-    async () =>
-      prisma.session.findUnique({
+    async (tx) =>
+      tx.session.findUnique({
         where: { sessionToken },
         select: { createdAt: true },
       }),

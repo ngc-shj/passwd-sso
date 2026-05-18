@@ -32,7 +32,7 @@ const {
   mockAuditCreate: vi.fn(),
   mockLogAudit: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockRateLimiterCheck: vi.fn(),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));

@@ -115,8 +115,8 @@ async function handlePOST(req: NextRequest): Promise<Response> {
   const refreshHash = hashToken(bodyRefreshToken);
   const oldRow = await withBypassRls(
     prisma,
-    async () =>
-      prisma.extensionToken.findUnique({
+    async (tx) =>
+      tx.extensionToken.findUnique({
         where: { tokenHash: refreshHash },
         select: {
           id: true,

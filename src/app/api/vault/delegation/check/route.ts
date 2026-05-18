@@ -117,8 +117,8 @@ export async function GET(request: NextRequest) {
   const { prisma } = await import("@/lib/prisma");
   const { withBypassRls, BYPASS_PURPOSE } = await import("@/lib/tenant-rls");
 
-  const session = await withBypassRls(prisma, () =>
-    prisma.delegationSession.findFirst({
+  const session = await withBypassRls(prisma, (tx) =>
+    tx.delegationSession.findFirst({
       where: {
         userId,
         mcpAccessToken: {

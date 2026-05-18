@@ -69,8 +69,8 @@ export async function validateScimToken(
 
   const tokenHash = hashToken(plaintext);
 
-  const token = await withBypassRls(prisma, async () =>
-    prisma.scimToken.findUnique({
+  const token = await withBypassRls(prisma, async (tx) =>
+    tx.scimToken.findUnique({
       where: { tokenHash },
       select: {
         id: true,
@@ -100,8 +100,8 @@ export async function validateScimToken(
   const now = Date.now();
   const lastUsed = token.lastUsedAt?.getTime() ?? 0;
   if (now - lastUsed >= LAST_USED_AT_THROTTLE_MS) {
-    void withBypassRls(prisma, async () => {
-      await prisma.scimToken.update({
+    void withBypassRls(prisma, async (tx) => {
+      await tx.scimToken.update({
         where: { id: token.id },
         data: { lastUsedAt: new Date(now) },
       });

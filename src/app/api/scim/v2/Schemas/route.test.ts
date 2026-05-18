@@ -7,7 +7,7 @@ const { mockValidateScimToken, mockCheckScimRateLimit, mockEnforceAccessRestrict
   mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 const { mockWithTenantRls } = vi.hoisted(() => ({
-  mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
+  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
 vi.mock("@/lib/auth/tokens/scim-token", () => ({

@@ -87,7 +87,7 @@ const {
 
   return {
     mockPrisma,
-    mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+    mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
     mockExtractTenantClaimValue: vi.fn(),
     mockSlugifyTenant: vi.fn(),
     mockTenantClaimStore: { tenantClaim: null as string | null },

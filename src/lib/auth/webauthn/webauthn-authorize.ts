@@ -79,8 +79,8 @@ export async function authorizeWebAuthn(
   if (!responseCredentialId) return null;
 
   // 3. Look up credential via withBypassRls (cross-tenant)
-  const storedCredential = await withBypassRls(prisma, async () =>
-    prisma.webAuthnCredential.findFirst({
+  const storedCredential = await withBypassRls(prisma, async (tx) =>
+    tx.webAuthnCredential.findFirst({
       where: { credentialId: responseCredentialId },
       include: {
         user: { select: { id: true, email: true, name: true } },
@@ -134,7 +134,7 @@ export async function authorizeWebAuthn(
   // 6. CAS counter update (prevents replay/clone attacks)
   // last_used_device is set to NULL here; device info is captured
   // by session metadata when Auth.js creates the session.
-  const updatedRows = await withBypassRls(prisma, async () =>
+  const updatedRows = await withBypassRls(prisma, async (tx) =>
     prisma.$executeRaw`
       UPDATE "webauthn_credentials"
       SET counter = ${BigInt(newCounter)},

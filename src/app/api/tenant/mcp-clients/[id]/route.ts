@@ -47,8 +47,8 @@ async function handleGET(
     return handleAuthError(err);
   }
 
-  const client = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.mcpClient.findFirst({
+  const client = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.mcpClient.findFirst({
       where: { id, tenantId: actor.tenantId },
       select: {
         id: true,
@@ -83,8 +83,8 @@ async function handlePUT(
     return handleAuthError(err);
   }
 
-  const existing = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.mcpClient.findFirst({ where: { id, tenantId: actor.tenantId } }),
+  const existing = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.mcpClient.findFirst({ where: { id, tenantId: actor.tenantId } }),
   );
   if (!existing) return notFound();
 
@@ -99,8 +99,8 @@ async function handlePUT(
 
   let updated;
   try {
-    updated = await withTenantRls(prisma, actor.tenantId, async () =>
-      prisma.mcpClient.update({
+    updated = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+      tx.mcpClient.update({
         where: { id },
         data: updateData,
         select: { id: true, clientId: true, name: true, redirectUris: true, allowedScopes: true, isActive: true, isDcr: true, updatedAt: true },
@@ -149,13 +149,13 @@ async function handleDELETE(
     return handleAuthError(err);
   }
 
-  const existing = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.mcpClient.findFirst({ where: { id, tenantId: actor.tenantId } }),
+  const existing = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.mcpClient.findFirst({ where: { id, tenantId: actor.tenantId } }),
   );
   if (!existing) return notFound();
 
-  await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.mcpClient.delete({ where: { id, tenantId: actor.tenantId } }),
+  await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.mcpClient.delete({ where: { id, tenantId: actor.tenantId } }),
   );
 
   await logAuditAsync({

@@ -60,7 +60,7 @@ describe("GET /api/teams", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "session", userId: "test-user-id" } });
-    mockWithBypassRls.mockImplementation(async (_prisma: unknown, fn: () => unknown) => fn());
+    mockWithBypassRls.mockImplementation(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma));
     mockResolveUserTenantIdFromClient.mockResolvedValue("tenant-1");
   });
 

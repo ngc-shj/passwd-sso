@@ -23,8 +23,8 @@ async function handleGET(_req: NextRequest) {
     return errorResponse(API_ERROR.NO_TENANT);
   }
 
-  const clients = await withBypassRls(prisma, () =>
-    prisma.mcpClient.findMany({
+  const clients = await withBypassRls(prisma, (tx) =>
+    tx.mcpClient.findMany({
       where: { tenantId, isActive: true },
       select: {
         id: true,
@@ -84,7 +84,7 @@ async function handleDELETE(_req: NextRequest) {
 
   const { revokedCount, delegationSessionIds } = await withBypassRls(
     prisma,
-    async () => {
+    async (tx) => {
       const result = await prisma.$transaction(async (tx) => {
         // 1. Find all active tokens for this user (inside transaction for consistency)
         const activeTokens = await tx.mcpAccessToken.findMany({

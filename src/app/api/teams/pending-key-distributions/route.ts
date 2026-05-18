@@ -16,8 +16,8 @@ async function handleGET() {
   }
 
   // Find teams where the user is OWNER or ADMIN and team is E2E-enabled
-  const adminMemberships = await withBypassRls(prisma, async () =>
-    prisma.teamMember.findMany({
+  const adminMemberships = await withBypassRls(prisma, async (tx) =>
+    tx.teamMember.findMany({
       where: {
         userId: session.user.id,
         role: { in: [TEAM_ROLE.OWNER, TEAM_ROLE.ADMIN] },
@@ -34,8 +34,8 @@ async function handleGET() {
   const teamIds = adminMemberships.map((m) => m.teamId);
 
   // Find members who need key distribution
-  const pendingMembers = await withBypassRls(prisma, async () =>
-    prisma.teamMember.findMany({
+  const pendingMembers = await withBypassRls(prisma, async (tx) =>
+    tx.teamMember.findMany({
       where: {
         teamId: { in: teamIds },
         keyDistributed: false,

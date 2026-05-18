@@ -65,8 +65,8 @@ async function handleGET(
   }
 
   // Find grant — must belong to this tenant and be requested by the caller
-  const grant = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.personalLogAccessGrant.findFirst({
+  const grant = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.personalLogAccessGrant.findFirst({
       where: {
         id: grantId,
         tenantId: actor.tenantId,
@@ -97,8 +97,8 @@ async function handleGET(
       expireAuditCache.add(grantId); // Mark immediately to prevent duplicate dispatch
       void (async () => {
         try {
-          await withTenantRls(prisma, actor.tenantId, async () =>
-            prisma.auditLog.create({
+          await withTenantRls(prisma, actor.tenantId, async (tx) =>
+            tx.auditLog.create({
               data: {
                 scope: AUDIT_SCOPE.TENANT,
                 action: AUDIT_ACTION.PERSONAL_LOG_ACCESS_EXPIRE,
@@ -127,8 +127,8 @@ async function handleGET(
   }
 
   // Verify target user is still an active tenant member
-  const targetMember = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.tenantMember.findFirst({
+  const targetMember = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.tenantMember.findFirst({
       where: {
         userId: grant.targetUserId,
         tenantId: actor.tenantId,
@@ -150,8 +150,8 @@ async function handleGET(
   const { ip, userAgent } = extractRequestMeta(req);
   if (Date.now() - lastViewTs > VIEW_AUDIT_DEDUP_MS) {
     try {
-      await withTenantRls(prisma, actor.tenantId, async () =>
-        prisma.auditLog.create({
+      await withTenantRls(prisma, actor.tenantId, async (tx) =>
+        tx.auditLog.create({
           data: {
             scope: AUDIT_SCOPE.TENANT,
             action: AUDIT_ACTION.PERSONAL_LOG_ACCESS_VIEW,
@@ -204,8 +204,8 @@ async function handleGET(
 
   let logs;
   try {
-    logs = await withTenantRls(prisma, actor.tenantId, async () =>
-      prisma.auditLog.findMany({
+    logs = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+      tx.auditLog.findMany({
         where,
         orderBy: { createdAt: "desc" },
         take: limit + 1,

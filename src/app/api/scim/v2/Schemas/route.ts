@@ -11,7 +11,7 @@ async function handleGET(req: NextRequest) {
   if (!auth.ok) return auth.response;
   const { tenantId } = auth.data;
 
-  return withTenantRls(prisma, tenantId, async () =>
+  return withTenantRls(prisma, tenantId, async (tx) =>
     scimResponse([
       {
         schemas: ["urn:ietf:params:scim:schemas:core:2.0:Schema"],

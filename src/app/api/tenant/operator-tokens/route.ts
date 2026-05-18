@@ -82,8 +82,8 @@ async function handleGET(req: NextRequest) {
   const rl = await listTokenLimiter.check(`rl:op_token_list:${session.user.id}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
-  const tokens = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.operatorToken.findMany({
+  const tokens = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.operatorToken.findMany({
       where: { tenantId: actor.tenantId },
       select: {
         id: true,
@@ -137,8 +137,8 @@ async function handlePOST(req: NextRequest) {
   if (!result.ok) return result.response;
 
   // Cap active tokens per tenant
-  const tokenCount = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.operatorToken.count({
+  const tokenCount = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.operatorToken.count({
       where: {
         tenantId: actor.tenantId,
         revokedAt: null,
@@ -160,8 +160,8 @@ async function handlePOST(req: NextRequest) {
   // Server hard-codes subjectUserId = createdByUserId = session.userId.
   // The Zod schema is `.strict()` so a body-injected subjectUserId is rejected
   // before reaching this point.
-  const token = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.operatorToken.create({
+  const token = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.operatorToken.create({
       data: {
         tenantId: actor.tenantId,
         tokenHash,

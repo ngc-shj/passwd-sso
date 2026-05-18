@@ -6,7 +6,7 @@ const { mockAuth, mockPrismaGrant, mockPrismaUser, mockSendEmail, mockWithBypass
   mockPrismaGrant: { findUnique: vi.fn(), updateMany: vi.fn() },
   mockPrismaUser: { findUnique: vi.fn() },
   mockSendEmail: vi.fn(),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));

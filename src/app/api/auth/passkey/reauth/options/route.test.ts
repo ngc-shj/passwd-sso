@@ -75,7 +75,7 @@ describe("POST /api/auth/passkey/reauth/options", () => {
       rpId: "localhost",
     });
     mockWithBypassRls.mockImplementation(
-      (_prisma: unknown, fn: () => unknown, _purpose: string) => fn(),
+      (prisma: unknown, fn: (tx: unknown) => unknown, _purpose: string) => fn(prisma),
     );
   });
 

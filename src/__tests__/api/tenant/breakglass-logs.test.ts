@@ -18,7 +18,7 @@ const {
   mockMemberFindFirst: vi.fn(),
   mockAuditLogCreate: vi.fn(),
   mockAuditLogFindMany: vi.fn(),
-  mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: unknown, fn: () => unknown) => fn()),
+  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockExtractRequestMeta: vi.fn().mockReturnValue({ ip: "127.0.0.1", userAgent: "test-agent" }),
 }));
 

@@ -35,7 +35,7 @@ async function handleGET(req: NextRequest) {
   if (!auth.ok) return auth.response;
   const { tenantId } = auth.data;
 
-  return withTenantRls(prisma, tenantId, async () => {
+  return withTenantRls(prisma, tenantId, async (tx) => {
     const url = req.nextUrl;
     const startIndex = Math.max(1, parseInt(url.searchParams.get("startIndex") ?? "1", 10) || 1);
     const count = Math.min(SCIM_PAGE_COUNT_MAX, Math.max(SCIM_PAGE_COUNT_MIN, parseInt(url.searchParams.get("count") ?? String(SCIM_PAGE_COUNT_DEFAULT), 10) || SCIM_PAGE_COUNT_DEFAULT));
@@ -55,7 +55,7 @@ async function handleGET(req: NextRequest) {
         }
 
         if (extIdValue !== null) {
-          const mapping = await prisma.scimExternalMapping.findFirst({
+          const mapping = await tx.scimExternalMapping.findFirst({
             where: {
               tenantId,
               externalId: extIdValue,
@@ -79,7 +79,7 @@ async function handleGET(req: NextRequest) {
     }
 
     const [members, totalResults] = await Promise.all([
-      prisma.tenantMember.findMany({
+      tx.tenantMember.findMany({
         where: prismaWhere,
         include: {
           user: { select: { id: true, email: true, name: true } },
@@ -88,13 +88,13 @@ async function handleGET(req: NextRequest) {
         take: count,
         orderBy: { createdAt: "asc" },
       }),
-      prisma.tenantMember.count({ where: prismaWhere }),
+      tx.tenantMember.count({ where: prismaWhere }),
     ]);
 
     const baseUrl = getScimBaseUrl();
 
     const userIds = members.map((m) => m.userId);
-    const mappings = await prisma.scimExternalMapping.findMany({
+    const mappings = await tx.scimExternalMapping.findMany({
       where: {
         tenantId,
         resourceType: "User",
@@ -130,7 +130,7 @@ async function handlePOST(req: NextRequest) {
   const { userName, name, externalId, active } = bodyResult.data;
 
   try {
-    const created = await withTenantRls(prisma, tenantId, async () =>
+    const created = await withTenantRls(prisma, tenantId, async (tx) =>
       prisma.$transaction(async (tx) => {
         let user = await tx.user.findUnique({ where: { email: userName } });
         if (!user) {

@@ -61,8 +61,8 @@ async function handleGET(_req: NextRequest) {
     return handleAuthError(e);
   }
 
-  const rows = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.auditDeliveryTarget.findMany({
+  const rows = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.auditDeliveryTarget.findMany({
       where: { tenantId: actor.tenantId },
       select: {
         id: true,
@@ -144,8 +144,8 @@ async function handlePOST(req: NextRequest) {
   const { data } = result;
 
   // Check delivery target count limit (all targets, regardless of isActive)
-  const existingCount = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.auditDeliveryTarget.count({ where: { tenantId: actor.tenantId } }),
+  const existingCount = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.auditDeliveryTarget.count({ where: { tenantId: actor.tenantId } }),
   );
   if (existingCount >= MAX_AUDIT_DELIVERY_TARGETS) {
     return validationError({
@@ -169,8 +169,8 @@ async function handlePOST(req: NextRequest) {
   ]);
   const encrypted = encryptServerData(configJson, masterKey, aad);
 
-  const target = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.auditDeliveryTarget.create({
+  const target = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.auditDeliveryTarget.create({
       data: {
         id: targetId,
         tenantId: actor.tenantId,

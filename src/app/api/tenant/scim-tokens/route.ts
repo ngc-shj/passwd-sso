@@ -52,8 +52,8 @@ async function handleGET(req: NextRequest) {
     return handleAuthError(err);
   }
 
-  const tokens = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.scimToken.findMany({
+  const tokens = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.scimToken.findMany({
       where: { tenantId: actor.tenantId },
       select: {
         id: true,
@@ -98,8 +98,8 @@ async function handlePOST(req: NextRequest) {
   if (!result.ok) return result.response;
 
   // Limit active (non-revoked, non-expired) tokens per tenant (max 10)
-  const tokenCount = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.scimToken.count({
+  const tokenCount = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.scimToken.count({
       where: {
         tenantId: actor.tenantId,
         revokedAt: null,
@@ -118,8 +118,8 @@ async function handlePOST(req: NextRequest) {
     ? new Date(Date.now() + result.data.expiresInDays * MS_PER_DAY)
     : null;
 
-  const token = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.scimToken.create({
+  const token = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.scimToken.create({
       data: {
         tenantId: actor.tenantId,
         tokenHash,

@@ -108,8 +108,8 @@ async function handlePOST(request: NextRequest) {
   const metadataEntries: DelegationMetadata[] = entries;
 
   // Verify MCP token belongs to this user's tenant, not expired/revoked, has decrypt scope
-  const mcpToken = await withBypassRls(prisma, () =>
-    prisma.mcpAccessToken.findFirst({
+  const mcpToken = await withBypassRls(prisma, (tx) =>
+    tx.mcpAccessToken.findFirst({
       where: {
         id: mcpTokenId,
         tenantId,
@@ -134,8 +134,8 @@ async function handlePOST(request: NextRequest) {
   }
 
   // Check tenant policy for TTL
-  const tenant = await withBypassRls(prisma, () =>
-    prisma.tenant.findUnique({
+  const tenant = await withBypassRls(prisma, (tx) =>
+    tx.tenant.findUnique({
       where: { id: tenantId },
       select: {
         delegationDefaultTtlSec: true,
@@ -150,8 +150,8 @@ async function handlePOST(request: NextRequest) {
 
   // Verify entry ownership (userId + tenantId)
   const entryIds = metadataEntries.map((e) => e.id);
-  const ownedEntries = await withBypassRls(prisma, () =>
-    prisma.passwordEntry.findMany({
+  const ownedEntries = await withBypassRls(prisma, (tx) =>
+    tx.passwordEntry.findMany({
       where: {
         id: { in: entryIds },
         userId,
@@ -172,8 +172,8 @@ async function handlePOST(request: NextRequest) {
   // Revoking is DEFERRED to AFTER the new session's Redis store succeeds
   // (C5) to prevent transient Redis failures from killing the user's
   // currently-active delegation alongside the new one.
-  const existingSession = await withBypassRls(prisma, () =>
-    prisma.delegationSession.findFirst({
+  const existingSession = await withBypassRls(prisma, (tx) =>
+    tx.delegationSession.findFirst({
       where: {
         userId,
         mcpTokenId,
@@ -186,8 +186,8 @@ async function handlePOST(request: NextRequest) {
 
   // Step 1: Create new delegation session in DB.
   const expiresAt = new Date(Date.now() + effectiveTtl * 1000);
-  const delegationSession = await withBypassRls(prisma, () =>
-    prisma.delegationSession.create({
+  const delegationSession = await withBypassRls(prisma, (tx) =>
+    tx.delegationSession.create({
       data: {
         tenantId,
         userId,
@@ -214,8 +214,8 @@ async function handlePOST(request: NextRequest) {
       { err, sessionId: delegationSession.id, userId },
       "delegation.create.redis_store_failed",
     );
-    await withBypassRls(prisma, () =>
-      prisma.delegationSession.deleteMany({
+    await withBypassRls(prisma, (tx) =>
+      tx.delegationSession.deleteMany({
         where: { id: delegationSession.id, revokedAt: null },
       }),
     BYPASS_PURPOSE.CROSS_TENANT_LOOKUP).catch(() => {});
@@ -249,8 +249,8 @@ async function handlePOST(request: NextRequest) {
       );
     }
     try {
-      await withBypassRls(prisma, () =>
-        prisma.delegationSession.updateMany({
+      await withBypassRls(prisma, (tx) =>
+        tx.delegationSession.updateMany({
           where: { id: existingSession.id, revokedAt: null },
           data: { revokedAt: new Date() },
         }),
@@ -282,8 +282,8 @@ async function handleGET(_request: NextRequest) {
     return errorResponse(API_ERROR.NO_TENANT);
   }
 
-  const sessions = await withBypassRls(prisma, () =>
-    prisma.delegationSession.findMany({
+  const sessions = await withBypassRls(prisma, (tx) =>
+    tx.delegationSession.findMany({
       where: {
         userId,
         tenantId,
@@ -310,8 +310,8 @@ async function handleGET(_request: NextRequest) {
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   // Also return available MCP tokens with delegation-relevant scopes
-  const availableTokens = await withBypassRls(prisma, () =>
-    prisma.mcpAccessToken.findMany({
+  const availableTokens = await withBypassRls(prisma, (tx) =>
+    tx.mcpAccessToken.findMany({
       where: {
         userId,
         tenantId,

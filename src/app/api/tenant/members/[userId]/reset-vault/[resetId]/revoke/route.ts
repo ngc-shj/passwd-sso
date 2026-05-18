@@ -58,8 +58,8 @@ async function handlePOST(
   const existingApprovedAt: Date | null | undefined = await withTenantRls(
     prisma,
     actor.tenantId,
-    async () => {
-      const existing = await prisma.adminVaultReset.findUnique({
+    async (tx) => {
+      const existing = await tx.adminVaultReset.findUnique({
         where: { id: resetId },
         select: { approvedAt: true, tenantId: true, targetUserId: true },
       });
@@ -82,8 +82,8 @@ async function handlePOST(
   // state. NULL out `encryptedToken` so the at-rest plaintext token cannot
   // be redeemed even if the row is later read with elevated privileges.
   const now = new Date();
-  const result = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.adminVaultReset.updateMany({
+  const result = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.adminVaultReset.updateMany({
       where: {
         id: resetId,
         tenantId: actor.tenantId,
@@ -122,8 +122,8 @@ async function handlePOST(
   }
 
   // Fetch target user for notification + email
-  const targetUser = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.tenantMember.findFirst({
+  const targetUser = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.tenantMember.findFirst({
       where: {
         tenantId: actor.tenantId,
         userId: targetUserId,

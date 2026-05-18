@@ -18,7 +18,7 @@ const {
   mockExtUpdate: vi.fn(),
   mockExtUpdateMany: vi.fn(),
   mockTransaction: vi.fn(),
-  mockWithBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
   mockWithUserTenantRls: vi.fn(async (_u: string, fn: () => unknown) => fn()),
 }));
 

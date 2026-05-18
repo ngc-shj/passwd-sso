@@ -86,14 +86,14 @@ function setupBypassRls(data: {
     user: { email: string | null; locale: string | null };
   }>;
 } | null) {
-  mockWithBypassRls.mockImplementation(async (_prisma: unknown, fn: () => Promise<unknown>) => {
+  mockWithBypassRls.mockImplementation(async (prisma: unknown, fn: (tx: unknown) => Promise<unknown>) => {
     // Execute the callback but return our controlled data
     // This simulates withBypassRls running the callback inside a transaction
     mockPrismaUser.findUnique.mockResolvedValue(
       data ? { email: data.userEmail, tenantId: data.tenantId } : null,
     );
     mockPrismaTenantMember.findMany.mockResolvedValue(data?.admins ?? []);
-    return fn();
+    return fn(prisma);
   });
 }
 

@@ -207,8 +207,8 @@ async function dispatchToWebhooks(
  */
 export function dispatchWebhook(event: TeamWebhookEvent): void {
   void (async () => {
-    const rows = await withBypassRls(prisma, async () =>
-      prisma.teamWebhook.findMany({
+    const rows = await withBypassRls(prisma, async (tx) =>
+      tx.teamWebhook.findMany({
         where: {
           teamId: event.teamId,
           isActive: true,
@@ -243,8 +243,8 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
       webhooks,
       payload,
       async (id) => {
-        await withBypassRls(prisma, async () =>
-          prisma.teamWebhook.update({
+        await withBypassRls(prisma, async (tx) =>
+          tx.teamWebhook.update({
             where: { id },
             data: {
               lastDeliveredAt: new Date(),
@@ -255,8 +255,8 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
         BYPASS_PURPOSE.WEBHOOK_DISPATCH);
       },
       async (id, newFailCount, url) => {
-        await withBypassRls(prisma, async () => {
-          await prisma.teamWebhook.update({
+        await withBypassRls(prisma, async (tx) => {
+          await tx.teamWebhook.update({
             where: { id },
             data: {
               failCount: newFailCount,
@@ -294,8 +294,8 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
  */
 export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
   void (async () => {
-    const rows = await withBypassRls(prisma, async () =>
-      prisma.tenantWebhook.findMany({
+    const rows = await withBypassRls(prisma, async (tx) =>
+      tx.tenantWebhook.findMany({
         where: {
           tenantId: event.tenantId,
           isActive: true,
@@ -329,8 +329,8 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
       webhooks,
       payload,
       async (id) => {
-        await withBypassRls(prisma, async () =>
-          prisma.tenantWebhook.update({
+        await withBypassRls(prisma, async (tx) =>
+          tx.tenantWebhook.update({
             where: { id },
             data: {
               lastDeliveredAt: new Date(),
@@ -341,8 +341,8 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
         BYPASS_PURPOSE.WEBHOOK_DISPATCH);
       },
       async (id, newFailCount, url) => {
-        await withBypassRls(prisma, async () => {
-          await prisma.tenantWebhook.update({
+        await withBypassRls(prisma, async (tx) => {
+          await tx.tenantWebhook.update({
             where: { id },
             data: {
               failCount: newFailCount,

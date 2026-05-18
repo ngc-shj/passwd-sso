@@ -79,8 +79,8 @@ async function handlePOST(req: NextRequest) {
 
   // Atomic: enforce BRIDGE_CODE_MAX_ACTIVE per user (revoke oldest unused)
   // and create the new code in a single withBypassRls / $transaction.
-  await withBypassRls(prisma, async () => {
-    const active = await prisma.extensionBridgeCode.findMany({
+  await withBypassRls(prisma, async (tx) => {
+    const active = await tx.extensionBridgeCode.findMany({
       where: { userId, usedAt: null, expiresAt: { gt: now } },
       orderBy: { createdAt: "asc" },
       select: { id: true },
@@ -88,12 +88,12 @@ async function handlePOST(req: NextRequest) {
     const overflow = active.length + 1 - BRIDGE_CODE_MAX_ACTIVE;
     if (overflow > 0) {
       const toRevoke = active.slice(0, overflow).map((r) => r.id);
-      await prisma.extensionBridgeCode.updateMany({
+      await tx.extensionBridgeCode.updateMany({
         where: { id: { in: toRevoke } },
         data: { usedAt: now },
       });
     }
-    await prisma.extensionBridgeCode.create({
+    await tx.extensionBridgeCode.create({
       data: {
         codeHash,
         userId,

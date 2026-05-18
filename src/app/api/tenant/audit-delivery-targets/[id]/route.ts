@@ -39,8 +39,8 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
   if (!result.ok) return result.response;
   const { data } = result;
 
-  const target = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.auditDeliveryTarget.findFirst({
+  const target = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.auditDeliveryTarget.findFirst({
       where: { id, tenantId: actor.tenantId },
       select: { id: true, kind: true, isActive: true },
     }),
@@ -55,8 +55,8 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
     return NextResponse.json({ success: true, target: { id, kind: target.kind, isActive: target.isActive } });
   }
 
-  const updated = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.auditDeliveryTarget.update({
+  const updated = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.auditDeliveryTarget.update({
       where: { id, tenantId: actor.tenantId },
       data: { isActive: data.isActive },
     }),

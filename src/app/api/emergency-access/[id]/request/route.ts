@@ -33,8 +33,8 @@ async function handlePOST(
 
   const { id } = await params;
 
-  const grant = await withBypassRls(prisma, async () =>
-    prisma.emergencyAccessGrant.findUnique({
+  const grant = await withBypassRls(prisma, async (tx) =>
+    tx.emergencyAccessGrant.findUnique({
       where: { id },
       select: { granteeId: true, ownerId: true, waitDays: true },
     }),
@@ -49,7 +49,7 @@ async function handlePOST(
 
   // Atomic compare-and-swap on status: prevents concurrent transitions that
   // would otherwise race past the optimistic canTransition check.
-  const transitionResult = await withBypassRls(prisma, async () =>
+  const transitionResult = await withBypassRls(prisma, async (tx) =>
     transition({
       db: prisma,
       where: { id, granteeId: session.user.id },
@@ -72,14 +72,14 @@ async function handlePOST(
   });
 
   const [owner, grantee] = await Promise.all([
-    withBypassRls(prisma, async () =>
-      prisma.user.findUnique({
+    withBypassRls(prisma, async (tx) =>
+      tx.user.findUnique({
         where: { id: grant.ownerId },
         select: { email: true, name: true, locale: true },
       }),
     BYPASS_PURPOSE.CROSS_TENANT_LOOKUP),
-    withBypassRls(prisma, async () =>
-      prisma.user.findUnique({
+    withBypassRls(prisma, async (tx) =>
+      tx.user.findUnique({
         where: { id: session.user.id },
         select: { name: true, email: true },
       }),

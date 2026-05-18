@@ -52,8 +52,8 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   if (!result.ok) return result.response;
 
   // Look up target with explicit tenantId filter (defense-in-depth)
-  const target = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.tenantMember.findFirst({
+  const target = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.tenantMember.findFirst({
       where: {
         userId,
         tenantId: actor.tenantId,
@@ -73,9 +73,9 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 
   // Ownership transfer
   if (result.data.role === TENANT_ROLE.OWNER) {
-    const updated = await withTenantRls(prisma, actor.tenantId, async () => {
+    const updated = await withTenantRls(prisma, actor.tenantId, async (tx) => {
       // Re-verify actor is still OWNER inside RLS scope
-      const currentActor = await prisma.tenantMember.findFirst({
+      const currentActor = await tx.tenantMember.findFirst({
         where: { userId: session.user!.id, tenantId: actor.tenantId, role: TENANT_ROLE.OWNER },
       });
       if (!currentActor) {
@@ -83,13 +83,13 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       }
 
       // Demote actor first (avoid transient dual-OWNER)
-      await prisma.tenantMember.update({
+      await tx.tenantMember.update({
         where: { id: currentActor.id },
         data: { role: TENANT_ROLE.ADMIN },
       });
 
       // Promote target to OWNER
-      return prisma.tenantMember.update({
+      return tx.tenantMember.update({
         where: { id: target.id },
         data: { role: TENANT_ROLE.OWNER },
         include: {
@@ -126,8 +126,8 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   }
 
   // Update role
-  const updated = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.tenantMember.update({
+  const updated = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.tenantMember.update({
       where: { id: target.id },
       data: { role: result.data.role },
       include: {

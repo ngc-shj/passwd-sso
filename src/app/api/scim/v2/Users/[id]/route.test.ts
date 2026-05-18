@@ -23,7 +23,7 @@ const {
   mockScimExternalMapping: { findFirst: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
   mockTeamMemberKey: { deleteMany: vi.fn() },
   mockTransaction: vi.fn(),
-  mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
+  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockInvalidateUserSessions: vi.fn().mockResolvedValue({ sessions: 1, extensionTokens: 0, apiKeys: 0 }),
   mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));

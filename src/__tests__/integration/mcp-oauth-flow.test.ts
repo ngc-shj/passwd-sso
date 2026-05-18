@@ -53,7 +53,7 @@ const {
   return {
     mockAuth: vi.fn(),
     mockRequireTenantPermission: vi.fn(),
-    mockWithBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
+    mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
     mockLogAudit: vi.fn(),
     mockMcpClientFindMany: vi.fn(),
     mockMcpClientCount: vi.fn(),
@@ -123,7 +123,7 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
-  withTenantRls: vi.fn(async (_prisma: unknown, _tenantId: unknown, fn: () => unknown) => fn()),
+  withTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
 vi.mock("@/lib/audit/audit", () => ({
@@ -147,7 +147,8 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
 }));
 
-vi.mock("@/lib/auth/access/delegation", () => ({
+vi.mock("@/lib/auth/access/delegation", async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
   findActiveDelegationSession: mockFindActiveDelegationSession,
   fetchDelegationEntry: mockFetchDelegationEntry,
   getDelegatedEntryIdsForSession: mockGetDelegatedEntryIdsForSession,

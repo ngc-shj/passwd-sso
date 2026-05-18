@@ -29,8 +29,8 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     return handleAuthError(e);
   }
 
-  const webhook = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.tenantWebhook.findFirst({
+  const webhook = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.tenantWebhook.findFirst({
       where: { id: webhookId, tenantId: actor.tenantId },
       select: { id: true, url: true },
     }),
@@ -40,8 +40,8 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     return notFound();
   }
 
-  await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.tenantWebhook.delete({ where: { id: webhookId, tenantId: actor.tenantId } }),
+  await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.tenantWebhook.delete({ where: { id: webhookId, tenantId: actor.tenantId } }),
   );
 
   await logAuditAsync({

@@ -57,10 +57,10 @@ export function createNotification(params: CreateNotificationParams): void {
   const safeMetadata = sanitizeNotificationMetadata(metadata);
 
   void (async () => {
-    await withBypassRls(prisma, async () => {
+    await withBypassRls(prisma, async (tx) => {
       let resolvedTenantId = tenantId ?? null;
       if (!resolvedTenantId) {
-        const user = await prisma.user.findUnique({
+        const user = await tx.user.findUnique({
           where: { id: userId },
           select: { tenantId: true },
         });
@@ -68,14 +68,14 @@ export function createNotification(params: CreateNotificationParams): void {
       }
       if (!resolvedTenantId) return;
 
-      await prisma.notification.create({
+      await tx.notification.create({
         data: {
           userId,
           tenantId: resolvedTenantId,
           type,
           title: title.slice(0, NOTIFICATION_TITLE_MAX),
           body: body.slice(0, NOTIFICATION_BODY_MAX),
-          metadata: (safeMetadata ?? undefined) as Parameters<typeof prisma.notification.create>[0]["data"]["metadata"],
+          metadata: (safeMetadata ?? undefined) as Parameters<typeof tx.notification.create>[0]["data"]["metadata"],
         },
       });
     }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);

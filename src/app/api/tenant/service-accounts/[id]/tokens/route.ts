@@ -45,8 +45,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
 
-  const sa = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.serviceAccount.findUnique({
+  const sa = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.serviceAccount.findUnique({
       where: { id },
       select: { id: true, tenantId: true },
     }),
@@ -56,8 +56,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
     return notFound();
   }
 
-  const tokens = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.serviceAccountToken.findMany({
+  const tokens = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.serviceAccountToken.findMany({
       where: { serviceAccountId: id },
       select: {
         id: true,
@@ -98,8 +98,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
 
-  const sa = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.serviceAccount.findUnique({
+  const sa = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.serviceAccount.findUnique({
       where: { id },
       select: { id: true, tenantId: true, isActive: true, tenant: { select: { saTokenMaxExpiryDays: true } } },
     }),
@@ -133,7 +133,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   let token;
   try {
-    token = await withTenantRls(prisma, actor.tenantId, async () =>
+    token = await withTenantRls(prisma, actor.tenantId, async (tx) =>
       prisma.$transaction(async (tx) => {
         const activeTokenCount = await tx.serviceAccountToken.count({
           where: { serviceAccountId: id, revokedAt: null },

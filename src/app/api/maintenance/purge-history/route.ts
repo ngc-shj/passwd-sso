@@ -66,8 +66,8 @@ async function handlePOST(req: NextRequest) {
   };
 
   if (dryRun) {
-    const matched = await withBypassRls(prisma, async () =>
-      prisma.passwordEntryHistory.count({ where: whereClause }),
+    const matched = await withBypassRls(prisma, async (tx) =>
+      tx.passwordEntryHistory.count({ where: whereClause }),
     BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
     await logAuditAsync({
       ...tenantAuditBase(req, auth.subjectUserId, auth.tenantId),
@@ -86,8 +86,8 @@ async function handlePOST(req: NextRequest) {
     return NextResponse.json({ purged: 0, matched, dryRun: true });
   }
 
-  const deleted = await withBypassRls(prisma, async () =>
-    prisma.passwordEntryHistory.deleteMany({ where: whereClause }),
+  const deleted = await withBypassRls(prisma, async (tx) =>
+    tx.passwordEntryHistory.deleteMany({ where: whereClause }),
   BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
 
   await logAuditAsync({

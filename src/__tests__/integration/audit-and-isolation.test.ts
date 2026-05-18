@@ -19,7 +19,7 @@ const {
   mockLogAudit: vi.fn(),
   mockAuditInfo: vi.fn(),
   mockUserFindUnique: vi.fn(),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockValidateServiceAccountToken: vi.fn(),
   mockAuth: vi.fn(),
 }));

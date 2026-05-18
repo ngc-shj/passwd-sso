@@ -245,8 +245,8 @@ export async function findActiveDelegationSession(
   userId: string,
   mcpTokenId: string,
 ): Promise<{ id: string; expiresAt: Date } | null> {
-  return withBypassRls(prisma, () =>
-    prisma.delegationSession.findFirst({
+  return withBypassRls(prisma, (tx) =>
+    tx.delegationSession.findFirst({
       where: {
         userId,
         mcpTokenId,
@@ -264,8 +264,8 @@ export async function revokeAllDelegationSessions(
   tenantId?: string,
   reason?: string,
 ): Promise<number> {
-  const sessions = await withBypassRls(prisma, () =>
-    prisma.delegationSession.findMany({
+  const sessions = await withBypassRls(prisma, (tx) =>
+    tx.delegationSession.findMany({
       where: {
         userId,
         revokedAt: null,
@@ -284,8 +284,8 @@ export async function revokeAllDelegationSessions(
 
   // Bulk update DB — constrained to findMany IDs to avoid TOCTOU
   const sessionIds = sessions.map((s) => s.id);
-  const result = await withBypassRls(prisma, () =>
-    prisma.delegationSession.updateMany({
+  const result = await withBypassRls(prisma, (tx) =>
+    tx.delegationSession.updateMany({
       where: {
         id: { in: sessionIds },
         userId,
@@ -317,8 +317,8 @@ export async function revokeDelegationSession(
   tenantId: string,
 ): Promise<boolean> {
   // DB first, then Redis — failed DB leaves Redis intact (safer failure mode)
-  const result = await withBypassRls(prisma, () =>
-    prisma.delegationSession.updateMany({
+  const result = await withBypassRls(prisma, (tx) =>
+    tx.delegationSession.updateMany({
       where: {
         id: sessionId,
         userId,

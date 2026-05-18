@@ -49,7 +49,7 @@ vi.mock("@/lib/crypto/crypto-server", async () => {
 
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 vi.mock("@/lib/redis", () => ({ getRedis: vi.fn(() => null) }));
-vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withBypassRls: vi.fn((_p: unknown, fn: () => unknown) => fn()) }));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withBypassRls: vi.fn((p: unknown, fn: (tx: unknown) => unknown) => fn(p)) }));
 vi.mock("@/lib/audit/audit", () => ({ logAuditAsync: vi.fn() }));
 
 describe("delegation", () => {

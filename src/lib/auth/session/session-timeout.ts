@@ -68,8 +68,8 @@ export async function resolveEffectiveSessionTimeouts(
   // Fetch user's tenant policy + team policies in one round trip
   const user = await withBypassRls(
     prisma,
-    async () =>
-      prisma.user.findUnique({
+    async (tx) =>
+      tx.user.findUnique({
         where: { id: userId },
         select: {
           tenantId: true,

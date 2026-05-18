@@ -79,8 +79,8 @@ async function handleGET(_req: NextRequest) {
     return handleAuthError(e);
   }
 
-  const user = await withBypassRls(prisma, async () =>
-    prisma.user.findUnique({
+  const user = await withBypassRls(prisma, async (tx) =>
+    tx.user.findUnique({
       where: { id: session.user.id },
       select: { tenant: { select: {
         maxConcurrentSessions: true,
@@ -582,8 +582,8 @@ async function handlePATCH(req: NextRequest) {
     ((allowedCidrs !== undefined || tailscaleEnabled !== undefined) && !confirmLockout);
 
   const currentTenant = needsCurrentState
-    ? await withBypassRls(prisma, async () =>
-        prisma.tenant.findUnique({
+    ? await withBypassRls(prisma, async (tx) =>
+        tx.tenant.findUnique({
           where: { id: membership.tenantId },
           select: {
             tailscaleTailnet: true,
@@ -845,7 +845,7 @@ async function handlePATCH(req: NextRequest) {
   const clampAbsoluteTo = typeof sessionAbsoluteTimeoutMinutes === "number" ? sessionAbsoluteTimeoutMinutes : null;
   const clampedTeams: Array<{ teamId: string; field: string; previousValue: number; newValue: number }> = [];
 
-  const updated = await withBypassRls(prisma, async () =>
+  const updated = await withBypassRls(prisma, async (tx) =>
     prisma.$transaction(async (tx) => {
       if (clampIdleTo !== null) {
         const affected = await tx.teamPolicy.findMany({

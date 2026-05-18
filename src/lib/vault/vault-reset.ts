@@ -37,16 +37,16 @@ export async function executeVaultReset(
   // Count data being deleted for audit metadata
   const [deletedEntries, deletedAttachments] = await withBypassRls(
     prisma,
-    async () =>
+    async (tx) =>
       Promise.all([
-        prisma.passwordEntry.count({ where: { userId: targetUserId } }),
-        prisma.attachment.count({ where: { createdById: targetUserId } }),
+        tx.passwordEntry.count({ where: { userId: targetUserId } }),
+        tx.attachment.count({ where: { createdById: targetUserId } }),
       ]),
     BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
   );
 
   // Single transaction: delete all vault data (callback form required for bulkTransition — S4).
-  await withBypassRls(prisma, async () =>
+  await withBypassRls(prisma, async (tx) =>
     prisma.$transaction(async (tx) => {
       // Attachments (bytea stored directly in DB, no external storage)
       await tx.attachment.deleteMany({ where: { createdById: targetUserId } });

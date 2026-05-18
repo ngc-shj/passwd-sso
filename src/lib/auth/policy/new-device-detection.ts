@@ -39,8 +39,8 @@ export async function checkNewDeviceAndNotify(
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    const recentSessions = await withBypassRls(prisma, async () =>
-      prisma.session.findMany({
+    const recentSessions = await withBypassRls(prisma, async (tx) =>
+      tx.session.findMany({
         where: {
           userId,
           createdAt: { gte: thirtyDaysAgo },
@@ -73,8 +73,8 @@ export async function checkNewDeviceAndNotify(
     if (isKnown) return;
 
     // New device detected — notify user
-    const user = await withBypassRls(prisma, async () =>
-      prisma.user.findUnique({
+    const user = await withBypassRls(prisma, async (tx) =>
+      tx.user.findUnique({
         where: { id: userId },
         select: { email: true, locale: true },
       }),

@@ -30,7 +30,7 @@ const {
       create: vi.fn(),
     },
     mockRequireTenantPermission: vi.fn(),
-    mockWithTenantRls: vi.fn((_p: unknown, _t: unknown, fn: () => unknown) => fn()),
+    mockWithTenantRls: vi.fn((p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(p)),
     mockLogAudit: vi.fn(),
     mockHashToken: vi.fn((t: string) => `hashed:${t}`),
     mockGenerateScimToken: vi.fn(() => "scim_test_plaintext_token"),

@@ -36,8 +36,8 @@ export async function requireMaintenanceOperator(
 ): Promise<{ ok: true; operator: MaintenanceOperator } | { ok: false; response: NextResponse }> {
   const membership = await withBypassRls(
     prisma,
-    async () =>
-      prisma.tenantMember.findFirst({
+    async (tx) =>
+      tx.tenantMember.findFirst({
         where: {
           userId: operatorId,
           ...(options.tenantId !== undefined ? { tenantId: options.tenantId } : {}),

@@ -23,7 +23,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   decryptShareBinary: mockDecryptShareBinary,
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
-  withBypassRls: (_prisma: unknown, fn: () => unknown) => fn(),
+  withBypassRls: (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),

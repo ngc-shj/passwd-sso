@@ -35,8 +35,8 @@ async function handleGET(req: NextRequest) {
     return rateLimited(rl.retryAfterMs);
   }
 
-  const tags = await withTenantRls(prisma, tenantId, async () =>
-    prisma.tag.findMany({
+  const tags = await withTenantRls(prisma, tenantId, async (tx) =>
+    tx.tag.findMany({
       where: { userId },
       orderBy: { name: "asc" },
       include: {

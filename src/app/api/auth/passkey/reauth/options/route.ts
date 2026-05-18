@@ -50,8 +50,8 @@ async function handlePOST(req: NextRequest) {
 
   const allowCredentials = await withBypassRls(
     prisma,
-    () =>
-      prisma.webAuthnCredential.findMany({
+    (tx) =>
+      tx.webAuthnCredential.findMany({
         where: { userId: session.user.id },
         select: { credentialId: true, transports: true },
       }),

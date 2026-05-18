@@ -125,7 +125,7 @@ async function handlePOST(req: NextRequest) {
   // Count + create atomically with bypass RLS (no tenant context for DCR)
   let client: { id: string; clientId: string; createdAt: Date };
   try {
-    client = await withBypassRls(prisma, async () =>
+    client = await withBypassRls(prisma, async (tx) =>
       prisma.$transaction(async (tx) => {
         // Global cap: reject if too many unclaimed DCR clients exist
         const unclaimedCount = await tx.mcpClient.count({

@@ -29,8 +29,8 @@ async function handleGET(
 
   const { id } = await params;
 
-  const grant = await withBypassRls(prisma, async () =>
-    prisma.emergencyAccessGrant.findUnique({
+  const grant = await withBypassRls(prisma, async (tx) =>
+    tx.emergencyAccessGrant.findUnique({
       where: { id },
       include: {
         granteeKeyPair: true,
@@ -50,7 +50,7 @@ async function handleGET(
   if (grant.status === EA_STATUS.REQUESTED && grant.waitExpiresAt && grant.waitExpiresAt <= new Date()) {
     const result = await withBypassRls(
       prisma,
-      async () =>
+      async (tx) =>
         autoPromoteIfElapsed({
           granteeId: session.user.id,
           grantId: id,

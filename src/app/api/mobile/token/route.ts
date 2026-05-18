@@ -120,8 +120,8 @@ async function handlePOST(req: NextRequest): Promise<Response> {
   const now = new Date();
   const stored = await withBypassRls(
     prisma,
-    async () =>
-      prisma.mobileBridgeCode.findUnique({
+    async (tx) =>
+      tx.mobileBridgeCode.findUnique({
         where: { codeHash },
         select: {
           userId: true,

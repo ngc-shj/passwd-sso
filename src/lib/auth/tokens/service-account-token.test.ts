@@ -77,7 +77,7 @@ describe("validateServiceAccountToken", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockHashToken.mockReturnValue("hashed_token");
-    mockWithBypassRls.mockImplementation((_p: unknown, fn: () => unknown) => fn());
+    mockWithBypassRls.mockImplementation((p: unknown, fn: (tx: unknown) => unknown) => fn(p));
   });
 
   it("returns INVALID_TOKEN_TYPE when no Authorization header", async () => {

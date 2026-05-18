@@ -11,7 +11,7 @@ const {
   mockSessionFindMany: vi.fn(),
   mockUserFindUnique: vi.fn(),
   mockWithBypassRls: vi.fn(
-    async (_prisma: unknown, fn: () => unknown) => fn(),
+    async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
   ),
   mockSendEmail: vi.fn(),
   mockCreateNotification: vi.fn(),

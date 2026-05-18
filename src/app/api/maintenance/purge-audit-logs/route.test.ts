@@ -19,7 +19,7 @@ const {
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockLogAudit: vi.fn(),
   mockWithBypassRls: vi.fn(
-    async (_prisma: unknown, fn: () => unknown, _purpose?: unknown) => fn(),
+    async (prisma: unknown, fn: (tx: unknown) => unknown, _purpose?: unknown) => fn(prisma),
   ),
 }));
 

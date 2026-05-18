@@ -11,7 +11,7 @@ const {
   mockVerifyDpop,
 } = vi.hoisted(() => ({
   mockExtensionTokenFindUnique: vi.fn(),
-  mockWithBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockRefreshIosToken: vi.fn(),
   mockVerifyDpop: vi.fn(),
@@ -133,7 +133,7 @@ describe("POST /api/mobile/token/refresh", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCheck.mockResolvedValue({ allowed: true });
-    mockWithBypassRls.mockImplementation(async (_p: unknown, fn: () => unknown) => fn());
+    mockWithBypassRls.mockImplementation(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p));
     mockExtensionTokenFindUnique.mockResolvedValue(existingRow());
     mockVerifyDpop.mockResolvedValue(happyDpop());
     mockRefreshIosToken.mockResolvedValue({

@@ -38,8 +38,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
 
-  const sa = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.serviceAccount.findUnique({
+  const sa = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.serviceAccount.findUnique({
       where: { id },
       select: {
         id: true,
@@ -87,8 +87,8 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
 
-  const existing = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.serviceAccount.findUnique({
+  const existing = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.serviceAccount.findUnique({
       where: { id },
       select: { id: true, tenantId: true },
     }),
@@ -103,8 +103,8 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 
   let sa;
   try {
-    sa = await withTenantRls(prisma, actor.tenantId, async () =>
-      prisma.serviceAccount.update({
+    sa = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+      tx.serviceAccount.update({
         where: { id },
         data: {
           ...(result.data.name !== undefined && { name: result.data.name }),
@@ -164,8 +164,8 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
 
-  const sa = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.serviceAccount.findUnique({
+  const sa = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.serviceAccount.findUnique({
       where: { id },
       select: { id: true, tenantId: true },
     }),
@@ -176,8 +176,8 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   }
 
   // Hard-delete: cascade removes tokens and access requests automatically
-  await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.serviceAccount.delete({
+  await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.serviceAccount.delete({
       where: { id },
     }),
   );

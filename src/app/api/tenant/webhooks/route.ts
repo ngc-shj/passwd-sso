@@ -50,8 +50,8 @@ async function handleGET(_req: NextRequest) {
     return handleAuthError(e);
   }
 
-  const webhooks = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.tenantWebhook.findMany({
+  const webhooks = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.tenantWebhook.findMany({
       where: { tenantId: actor.tenantId },
       select: {
         id: true,
@@ -90,8 +90,8 @@ async function handlePOST(req: NextRequest) {
   const { data } = result;
 
   // Check webhook count limit
-  const existingCount = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.tenantWebhook.count({ where: { tenantId: actor.tenantId } }),
+  const existingCount = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.tenantWebhook.count({ where: { tenantId: actor.tenantId } }),
   );
   if (existingCount >= MAX_WEBHOOKS) {
     return validationError({
@@ -114,8 +114,8 @@ async function handlePOST(req: NextRequest) {
   });
   const encrypted = encryptServerData(plainSecret, masterKey, aad);
 
-  const webhook = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.tenantWebhook.create({
+  const webhook = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.tenantWebhook.create({
       data: {
         id: webhookId,
         tenantId: actor.tenantId,

@@ -19,7 +19,12 @@ const {
   mockMobileBridgeCodeFindUnique: vi.fn(),
   mockMobileBridgeCodeUpdateMany: vi.fn(),
   mockWithBypassRls: vi.fn(
-    async (_p: unknown, fn: (tx: unknown) => unknown) => fn({}),
+    async (_p: unknown, fn: (tx: unknown) => unknown) => fn({
+      mobileBridgeCode: {
+        findUnique: mockMobileBridgeCodeFindUnique,
+        updateMany: mockMobileBridgeCodeUpdateMany,
+      },
+    }),
   ),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockIssueIosToken: vi.fn(),
@@ -156,7 +161,12 @@ describe("POST /api/mobile/token", () => {
     mockCheck.mockResolvedValue({ allowed: true });
     mockExtractClientIp.mockReturnValue("1.2.3.4");
     mockWithBypassRls.mockImplementation(
-      async (_p: unknown, fn: (tx: unknown) => unknown) => fn({}),
+      async (_p: unknown, fn: (tx: unknown) => unknown) => fn({
+      mobileBridgeCode: {
+        findUnique: mockMobileBridgeCodeFindUnique,
+        updateMany: mockMobileBridgeCodeUpdateMany,
+      },
+    }),
     );
     mockMobileBridgeCodeFindUnique.mockResolvedValue(freshBridgeRow());
     mockMobileBridgeCodeUpdateMany.mockResolvedValue({ count: 1 });

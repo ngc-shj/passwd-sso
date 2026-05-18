@@ -24,7 +24,7 @@ const {
   mockUserFindUnique: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockLogAudit: vi.fn(),
   mockExtractClientIp: vi.fn(() => "1.2.3.4"),
   mockRequireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
@@ -91,7 +91,7 @@ describe("POST /api/extension/bridge-code", () => {
     vi.clearAllMocks();
     mockCheck.mockResolvedValue({ allowed: true });
     mockExtractClientIp.mockReturnValue("1.2.3.4");
-    mockWithBypassRls.mockImplementation(async (_p, fn) => fn());
+    mockWithBypassRls.mockImplementation(async (p, fn) => fn(p));
     mockWithUserTenantRls.mockImplementation(async (_u, fn) => fn());
     mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockBridgeCodeFindMany.mockResolvedValue([]);

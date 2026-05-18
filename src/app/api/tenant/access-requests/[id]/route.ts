@@ -32,8 +32,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
 
-  const accessRequest = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.accessRequest.findUnique({
+  const accessRequest = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.accessRequest.findUnique({
       where: { id },
       select: {
         id: true,

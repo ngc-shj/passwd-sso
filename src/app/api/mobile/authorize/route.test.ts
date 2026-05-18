@@ -13,7 +13,7 @@ const {
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockMobileBridgeCodeCreate: vi.fn(),
-  mockWithBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
   mockWithUserTenantRls: vi.fn(
     async (_u: string, fn: (tenantId: string) => unknown) =>
       fn("22222222-2222-2222-2222-222222222222"),
@@ -59,11 +59,14 @@ vi.mock("@/lib/auth/session/step-up", () => ({
 
 import { GET } from "./route";
 
+// C6: device_jkt is the RFC 7638 JWK thumbprint (43 base64url chars). The
+// legacy device_pubkey field (base64url SPKI-DER) was removed because the
+// server's SHA-256(SPKI) was never equal to the verifier's JWK thumbprint.
 const VALID = {
   client_kind: "ios",
   state: "Vp8XR_zg2v9MhUv8tRgHqf-RJfuJ_kqJUYHOG-WEyT0",
   code_challenge: "Z9wHNpVlwKmGM57J7TmKEXJlhhPYiqVdNNgF1MIv7DM",
-  device_pubkey: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEhVc7n3kP4cFE_UxRIm2Ki5FNpYlF1JKoYJYgTEbZBuDKaW6BBwQuP-y_3R5_uA0iJZ-vQGRT-rqr_MQ7H4cQ-A",
+  device_jkt: "Z9wHNpVlwKmGM57J7TmKEXJlhhPYiqVdNNgF1MIv7DM",
 };
 
 function buildUrl(params: Partial<typeof VALID>): string {
@@ -79,7 +82,7 @@ describe("GET /api/mobile/authorize", () => {
     vi.clearAllMocks();
     mockGetAppOrigin.mockReturnValue("https://example.test");
     mockAuth.mockResolvedValue({ user: { id: "11111111-1111-1111-1111-111111111111" } });
-    mockWithBypassRls.mockImplementation(async (_p: unknown, fn: () => unknown) => fn());
+    mockWithBypassRls.mockImplementation(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p));
     mockWithUserTenantRls.mockImplementation(
       async (_u: string, fn: (tenantId: string) => unknown) =>
         fn("22222222-2222-2222-2222-222222222222"),
@@ -103,7 +106,7 @@ describe("GET /api/mobile/authorize", () => {
       tenantId: "22222222-2222-2222-2222-222222222222",
       state: VALID.state,
       codeChallenge: VALID.code_challenge,
-      devicePubkey: VALID.device_pubkey,
+      deviceJkt: VALID.device_jkt,
     });
   });
 
@@ -151,9 +154,14 @@ describe("GET /api/mobile/authorize", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns 400 when device_pubkey is missing", async () => {
-    const params = { ...VALID, device_pubkey: undefined };
+  it("returns 400 when device_jkt is missing", async () => {
+    const params = { ...VALID, device_jkt: undefined };
     const res = await GET(createRequest("GET", buildUrl(params)));
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when device_jkt is not exactly 43 base64url chars (C6 shape gate)", async () => {
+    const res = await GET(createRequest("GET", buildUrl({ ...VALID, device_jkt: "tooshort" })));
     expect(res.status).toBe(400);
   });
 

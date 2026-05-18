@@ -50,8 +50,8 @@ async function handleGET(req: NextRequest) {
 
   // Validate teamId belongs to this tenant (prevent cross-tenant oracle)
   if (teamIdParam) {
-    const team = await withTenantRls(prisma, actor.tenantId, async () =>
-      prisma.team.findFirst({
+    const team = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+      tx.team.findFirst({
         where: { id: teamIdParam, tenantId: actor.tenantId },
         select: { id: true },
       }),
@@ -98,8 +98,8 @@ async function handleGET(req: NextRequest) {
 
   let logs;
   try {
-    logs = await withTenantRls(prisma, actor.tenantId, async () =>
-      prisma.auditLog.findMany({
+    logs = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+      tx.auditLog.findMany({
         where,
         select: {
           id: true,

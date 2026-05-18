@@ -80,8 +80,8 @@ async function handlePOST(req: NextRequest) {
   });
 
   // Best-effort: look up grantee's locale (bypass RLS — grantee may be in another tenant)
-  const granteeUser = await withBypassRls(prisma, async () =>
-    prisma.user.findFirst({
+  const granteeUser = await withBypassRls(prisma, async (tx) =>
+    tx.user.findFirst({
       where: { email: { equals: granteeEmail, mode: "insensitive" } },
       select: { locale: true },
     }),
@@ -111,8 +111,8 @@ async function handleGET() {
   const sessionEmail = session.user.email;
 
   // Bypass RLS: grants span owner/grantee tenants
-  const grants = await withBypassRls(prisma, async () =>
-    prisma.emergencyAccessGrant.findMany({
+  const grants = await withBypassRls(prisma, async (tx) =>
+    tx.emergencyAccessGrant.findMany({
       where: {
         OR: [
           { ownerId: session.user.id },

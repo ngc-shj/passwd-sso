@@ -14,7 +14,7 @@ const {
   mockScimGroupMapping: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn() },
   mockTeam: { findUnique: vi.fn(), findFirst: vi.fn() },
   mockTeamMember: { findMany: vi.fn() },
-  mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
+  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
 vi.mock("@/lib/auth/tokens/scim-token", () => ({ validateScimToken: mockValidateScimToken }));

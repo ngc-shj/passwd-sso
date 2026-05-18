@@ -59,8 +59,8 @@ async function handleGET(
 
   const { id } = await params;
 
-  const entry = await withTenantRls(prisma, tenantId, async () =>
-    prisma.passwordEntry.findUnique({
+  const entry = await withTenantRls(prisma, tenantId, async (tx) =>
+    tx.passwordEntry.findUnique({
       where: { id },
       include: { tags: { select: { id: true } } },
     }),
@@ -114,8 +114,8 @@ async function handlePUT(
 
   const { id } = await params;
 
-  const existing = await withTenantRls(prisma, tenantId, async () =>
-    prisma.passwordEntry.findUnique({
+  const existing = await withTenantRls(prisma, tenantId, async (tx) =>
+    tx.passwordEntry.findUnique({
       where: { id },
       select: {
         userId: true,
@@ -140,8 +140,8 @@ async function handlePUT(
 
   // Verify folder ownership
   if (folderId) {
-    const folder = await withTenantRls(prisma, tenantId, async () =>
-      prisma.folder.findFirst({ where: { id: folderId, userId } }),
+    const folder = await withTenantRls(prisma, tenantId, async (tx) =>
+      tx.folder.findFirst({ where: { id: folderId, userId } }),
     );
     if (!folder) {
       return validationError({ message: "Invalid folderId" });
@@ -150,8 +150,8 @@ async function handlePUT(
 
   // Verify tag ownership
   if (tagIds?.length) {
-    const ownedCount = await withTenantRls(prisma, tenantId, async () =>
-      prisma.tag.count({ where: { id: { in: tagIds }, userId } }),
+    const ownedCount = await withTenantRls(prisma, tenantId, async (tx) =>
+      tx.tag.count({ where: { id: { in: tagIds }, userId } }),
     );
     if (ownedCount !== tagIds.length) {
       return validationError({ message: "Invalid tagIds" });
@@ -183,7 +183,7 @@ async function handlePUT(
   }
 
   // Snapshot history and update entry in a single transaction
-  const updated = await withTenantRls(prisma, tenantId, async () =>
+  const updated = await withTenantRls(prisma, tenantId, async (tx) =>
     prisma.$transaction(async (tx) => {
       if (encryptedBlob) {
         await tx.passwordEntryHistory.create({
@@ -263,8 +263,8 @@ async function handleDELETE(
   const { searchParams } = new URL(req.url);
   const permanent = searchParams.get("permanent") === "true";
 
-  const existing = await withTenantRls(prisma, tenantId, async () =>
-    prisma.passwordEntry.findUnique({ where: { id }, select: { userId: true } }),
+  const existing = await withTenantRls(prisma, tenantId, async (tx) =>
+    tx.passwordEntry.findUnique({ where: { id }, select: { userId: true } }),
   );
 
   if (!existing || existing.userId !== userId) {
@@ -272,12 +272,12 @@ async function handleDELETE(
   }
 
   if (permanent) {
-    await withTenantRls(prisma, tenantId, async () =>
-      prisma.passwordEntry.delete({ where: { id } }),
+    await withTenantRls(prisma, tenantId, async (tx) =>
+      tx.passwordEntry.delete({ where: { id } }),
     );
   } else {
-    await withTenantRls(prisma, tenantId, async () =>
-      prisma.passwordEntry.update({
+    await withTenantRls(prisma, tenantId, async (tx) =>
+      tx.passwordEntry.update({
         where: { id },
         data: { deletedAt: new Date() },
       }),

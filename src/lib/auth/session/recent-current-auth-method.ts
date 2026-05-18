@@ -34,8 +34,8 @@ export async function requireRecentCurrentAuthMethod(
 
   const sessionRow = await withBypassRls(
     prisma,
-    async () =>
-      prisma.session.findUnique({
+    async (tx) =>
+      tx.session.findUnique({
         where: { sessionToken },
         select: { provider: true },
       }),

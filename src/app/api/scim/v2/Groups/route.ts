@@ -75,10 +75,10 @@ async function handleGET(req: NextRequest) {
   if (!auth.ok) return auth.response;
   const { tenantId } = auth.data;
 
-  return withTenantRls(prisma, tenantId, async () => {
+  return withTenantRls(prisma, tenantId, async (tx) => {
     const baseUrl = getScimBaseUrl();
 
-    const mappings = await prisma.scimGroupMapping.findMany({
+    const mappings = await tx.scimGroupMapping.findMany({
       where: { tenantId },
       select: {
         externalGroupId: true,
@@ -92,7 +92,7 @@ async function handleGET(req: NextRequest) {
     // Batch-load team members for all mappings in one query, then group in-memory
     const teamIds = Array.from(new Set(mappings.map((m) => m.teamId)));
     const roles = Array.from(new Set(mappings.map((m) => m.role)));
-    const allMembers = teamIds.length === 0 ? [] : await prisma.teamMember.findMany({
+    const allMembers = teamIds.length === 0 ? [] : await tx.teamMember.findMany({
       where: { teamId: { in: teamIds }, role: { in: roles }, deactivatedAt: null },
       include: { user: { select: { id: true, email: true } } },
     });
@@ -147,14 +147,14 @@ async function handlePOST(req: NextRequest) {
     return scimError(400, "externalId is required for tenant group mapping");
   }
 
-  return withTenantRls(prisma, tenantId, async () => {
+  return withTenantRls(prisma, tenantId, async (tx) => {
     // Resolve team from displayName slug: "<teamSlug>:<ROLE>"
     const separator = displayName.indexOf(":");
     if (separator < 1) {
       return scimError(400, "displayName must be in the format '<teamSlug>:<ROLE>'");
     }
     const slugPart = displayName.slice(0, separator).trim();
-    const team = await prisma.team.findFirst({
+    const team = await tx.team.findFirst({
       where: { slug: slugPart, tenantId },
       select: { id: true, slug: true },
     });
@@ -167,7 +167,7 @@ async function handlePOST(req: NextRequest) {
       return scimError(400, "displayName must be in the format '<teamSlug>:<ROLE>'");
     }
 
-    const existing = await prisma.scimGroupMapping.findUnique({
+    const existing = await tx.scimGroupMapping.findUnique({
       where: {
         tenantId_externalGroupId: {
           tenantId,
@@ -186,7 +186,7 @@ async function handlePOST(req: NextRequest) {
     }
 
     if (!existing) {
-      await prisma.scimGroupMapping.create({
+      await tx.scimGroupMapping.create({
         data: {
           tenantId,
           teamId: team.id,

@@ -33,14 +33,14 @@ export async function notifyAdminsOfLockout(
 ): Promise<void> {
   try {
     // Single transaction to avoid TOCTOU between user lookup and admin lookup
-    const data = await withBypassRls(prisma, async () => {
-      const user = await prisma.user.findUnique({
+    const data = await withBypassRls(prisma, async (tx) => {
+      const user = await tx.user.findUnique({
         where: { id: params.userId },
         select: { email: true, tenantId: true },
       });
       if (!user?.tenantId) return null;
 
-      const admins = await prisma.tenantMember.findMany({
+      const admins = await tx.tenantMember.findMany({
         where: {
           tenantId: user.tenantId,
           role: { in: [TENANT_ROLE.OWNER, TENANT_ROLE.ADMIN] },

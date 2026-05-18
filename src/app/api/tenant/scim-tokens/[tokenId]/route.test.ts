@@ -24,7 +24,7 @@ const {
       update: vi.fn(),
     },
     mockRequireTenantPermission: vi.fn(),
-    mockWithTenantRls: vi.fn((_p: unknown, _t: unknown, fn: () => unknown) => fn()),
+    mockWithTenantRls: vi.fn((p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(p)),
     mockLogAudit: vi.fn(),
     TenantAuthError: _TenantAuthError,
   };

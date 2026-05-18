@@ -38,7 +38,7 @@ vi.mock("@/lib/auth/policy/ip-access", () => ({
   rateLimitKeyFromIp: (ip: string) => ip,
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
-  withBypassRls: (_prisma: unknown, fn: () => unknown) => fn(),
+  withBypassRls: (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
 }));
 
 import { GET } from "@/app/api/share-links/[id]/content/route";

@@ -10,7 +10,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 vi.mock("@/lib/tenant-rls", () => ({
-  withBypassRls: vi.fn(async (_p: unknown, fn: () => Promise<unknown>) => fn()),
+  withBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => Promise<unknown>) => fn(p)),
   BYPASS_PURPOSE: { AUDIT_WRITE: "audit_write" },
 }));
 

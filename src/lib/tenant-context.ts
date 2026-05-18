@@ -20,14 +20,14 @@ export async function resolveUserTenantIdFromClient(
 }
 
 export async function resolveUserTenantId(userId: string): Promise<string | null> {
-  return withBypassRls(prisma, async () =>
+  return withBypassRls(prisma, async (tx) =>
     resolveUserTenantIdFromClient(prisma, userId),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 }
 
 export async function resolveTeamTenantId(teamId: string): Promise<string | null> {
-  return withBypassRls(prisma, async () => {
-    const team = await prisma.team.findUnique({
+  return withBypassRls(prisma, async (tx) => {
+    const team = await tx.team.findUnique({
       where: { id: teamId },
       select: { tenantId: true },
     });
@@ -51,7 +51,7 @@ export async function withUserTenantRls<T>(
   if (!tenantId) {
     throw new Error("TENANT_NOT_RESOLVED");
   }
-  return withTenantRls(prisma, tenantId, () => (fn as (tenantId: string) => Promise<T>)(tenantId));
+  return withTenantRls(prisma, tenantId, (tx) => (fn as (tenantId: string) => Promise<T>)(tenantId));
 }
 
 export async function withTeamTenantRls<T>(
@@ -70,5 +70,5 @@ export async function withTeamTenantRls<T>(
   if (!tenantId) {
     throw new Error("TENANT_NOT_RESOLVED");
   }
-  return withTenantRls(prisma, tenantId, () => (fn as (tenantId: string) => Promise<T>)(tenantId));
+  return withTenantRls(prisma, tenantId, (tx) => (fn as (tenantId: string) => Promise<T>)(tenantId));
 }

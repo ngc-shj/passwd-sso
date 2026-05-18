@@ -87,8 +87,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
     : [];
 
   const publicKeys = memberKeys.length > 0
-    ? await withBypassRls(prisma, async () =>
-        prisma.user.findMany({
+    ? await withBypassRls(prisma, async (tx) =>
+        tx.user.findMany({
           where: { id: { in: memberKeys.map((mk) => mk.userId) } },
           select: { id: true, ecdhPublicKey: true },
         }),

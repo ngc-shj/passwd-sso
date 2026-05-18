@@ -64,8 +64,8 @@ async function handlePOST(
   const granteeId = grant.granteeId;
   if (granteeId) {
     // Bypass RLS: grantee may be in a different tenant
-    const grantee = await withBypassRls(prisma, async () =>
-      prisma.user.findUnique({
+    const grantee = await withBypassRls(prisma, async (tx) =>
+      tx.user.findUnique({
         where: { id: granteeId },
         select: { email: true, name: true, locale: true },
       }),

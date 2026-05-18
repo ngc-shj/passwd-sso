@@ -83,15 +83,15 @@ async function handlePOST(
 
   // Find the reset record; verify scope. Done before role check so the
   // 404/403 boundary is consistent with the revoke endpoint pattern.
-  const resetRecord = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.adminVaultReset.findFirst({
+  const resetRecord = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.adminVaultReset.findFirst({
       where: { id: resetId, tenantId: actor.tenantId, targetUserId },
     }),
   );
   if (!resetRecord) return notFound();
 
-  const targetMember = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.tenantMember.findFirst({
+  const targetMember = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.tenantMember.findFirst({
       where: {
         tenantId: actor.tenantId,
         userId: targetUserId,
@@ -216,8 +216,8 @@ async function handlePOST(
     Math.min(ttlCap.getTime(), now.getTime() + EXECUTE_TTL_MS),
   );
 
-  const result = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.adminVaultReset.updateMany({
+  const result = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.adminVaultReset.updateMany({
       where: {
         id: resetId,
         tenantId: actor.tenantId,

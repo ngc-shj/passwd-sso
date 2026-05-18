@@ -10,7 +10,7 @@ const {
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindFirst: vi.fn(),
-  mockWithBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
   mockExtractClientIp: vi.fn(() => "203.0.113.10"),
   mockCheckRateLimit: vi.fn().mockResolvedValue({ allowed: true }),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
@@ -73,7 +73,7 @@ describe("GET /api/mcp/authorize", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockFindFirst.mockResolvedValue(VALID_CLIENT);
-    mockWithBypassRls.mockImplementation(async (_p: unknown, fn: () => unknown) => fn());
+    mockWithBypassRls.mockImplementation(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p));
     mockCheckRateLimit.mockResolvedValue({ allowed: true });
     mockRequireRecentSession.mockResolvedValue(null);
   });

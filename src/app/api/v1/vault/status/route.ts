@@ -37,8 +37,8 @@ async function handleGET(req: NextRequest) {
     return NextResponse.json({ initialized: false, keyVersion: null });
   }
 
-  const user = await withTenantRls(prisma, tenantId, async () =>
-    prisma.user.findUnique({
+  const user = await withTenantRls(prisma, tenantId, async (tx) =>
+    tx.user.findUnique({
       where: { id: userId },
       select: {
         encryptedSecretKey: true,

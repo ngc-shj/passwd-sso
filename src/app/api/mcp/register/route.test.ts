@@ -12,7 +12,7 @@ const {
 } = vi.hoisted(() => {
   const mockCount = vi.fn();
   const mockCreate = vi.fn();
-  const mockWithBypassRls = vi.fn(async (_p: unknown, fn: () => unknown) => fn());
+  const mockWithBypassRls = vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p));
   return {
     mockPrismaCount: mockCount,
     mockPrismaCreate: mockCreate,
@@ -84,7 +84,7 @@ describe("POST /api/mcp/register", () => {
     mockPrismaCount.mockResolvedValue(0);
     mockPrismaCreate.mockResolvedValue(MOCK_CREATED_CLIENT);
     // withBypassRls executes the callback inline; first call is count, second is create
-    mockWithBypassRls.mockImplementation(async (_p: unknown, fn: () => unknown) => fn());
+    mockWithBypassRls.mockImplementation(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p));
   });
 
   it("returns 201 with client credentials on valid registration", async () => {

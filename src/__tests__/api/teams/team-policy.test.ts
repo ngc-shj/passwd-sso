@@ -61,7 +61,7 @@ vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
-  withBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
+  withBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
 }));
 vi.mock("@/lib/auth/session/session-timeout", () => ({
   invalidateSessionTimeoutCacheForTenant: vi.fn(),

@@ -44,8 +44,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Validate client (must happen before redirect to prevent open redirect)
-  const foundClient = await withBypassRls(prisma, async () =>
-    prisma.mcpClient.findFirst({ where: { clientId, isActive: true } }),
+  const foundClient = await withBypassRls(prisma, async (tx) =>
+    tx.mcpClient.findFirst({ where: { clientId, isActive: true } }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!foundClient) {
@@ -58,8 +58,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Tenant check
-  const userRecord = await withBypassRls(prisma, async () =>
-    prisma.user.findUnique({
+  const userRecord = await withBypassRls(prisma, async (tx) =>
+    tx.user.findUnique({
       where: { id: session.user.id },
       select: { tenantId: true },
     }),
@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
     const clientIdDb = foundClient.id;
     const clientName = foundClient.name;
 
-    const claimResult = await withBypassRls(prisma, async () =>
+    const claimResult = await withBypassRls(prisma, async (tx) =>
       prisma.$transaction(async (tx) => {
         const tenantClientCount = await tx.mcpClient.count({
           where: { tenantId: userTenantId },
@@ -142,8 +142,8 @@ export async function POST(req: NextRequest) {
       );
     }
     if (claimResult.error === "already_claimed") {
-      const refetched = await withBypassRls(prisma, async () =>
-        prisma.mcpClient.findUnique({ where: { id: clientIdDb } }),
+      const refetched = await withBypassRls(prisma, async (tx) =>
+        tx.mcpClient.findUnique({ where: { id: clientIdDb } }),
       BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
       if (!refetched || refetched.tenantId !== userTenantId) {
         return NextResponse.json({ error: "access_denied" }, { status: 403 });

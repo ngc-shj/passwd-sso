@@ -28,10 +28,10 @@ async function handleGET(request: NextRequest) {
   }
 
   try {
-    const data = await withBypassRls(prisma, async () => {
+    const data = await withBypassRls(prisma, async (tx) => {
       const [credCount, user] = await Promise.all([
-        prisma.webAuthnCredential.count({ where: { userId } }),
-        prisma.user.findUnique({
+        tx.webAuthnCredential.count({ where: { userId } }),
+        tx.user.findUnique({
           where: { id: userId },
           select: {
             tenant: {

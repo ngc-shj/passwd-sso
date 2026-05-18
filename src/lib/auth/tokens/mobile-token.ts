@@ -271,8 +271,8 @@ export async function validateIosTokenDpop(
   // Best-effort `lastUsedIp` / `lastUsedUserAgent` update. Fire-and-forget.
   const ip = extractClientIp(req);
   const userAgent = req.headers.get("user-agent")?.slice(0, 512) ?? null;
-  void withBypassRls(prisma, async () =>
-    prisma.extensionToken.update({
+  void withBypassRls(prisma, async (tx) =>
+    tx.extensionToken.update({
       where: { id: row.id },
       data: {
         lastUsedAt: new Date(),

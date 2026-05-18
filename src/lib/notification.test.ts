@@ -12,7 +12,7 @@ const {
     create: vi.fn(),
   },
   mockWithBypassRls: vi.fn(
-    async (_client: unknown, fn: () => unknown) => fn(),
+    async (client: unknown, fn: (tx: unknown) => unknown) => fn(client),
   ),
 }));
 

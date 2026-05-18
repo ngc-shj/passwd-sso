@@ -16,7 +16,7 @@ const {
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
   mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   MockTeamAuthError: class MockTeamAuthError extends Error {
     status: number;
     constructor(message: string, status = 403) {

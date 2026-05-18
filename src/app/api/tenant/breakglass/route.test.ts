@@ -27,7 +27,7 @@ const {
   return {
     mockAuth: vi.fn(),
     mockRequireTenantPermission: vi.fn(),
-    mockWithTenantRls: vi.fn(async (_p: unknown, _t: unknown, fn: () => unknown) => fn()),
+    mockWithTenantRls: vi.fn(async (p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(p)),
     mockLogAudit: vi.fn(),
     mockRateLimiterCheck: vi.fn(),
     mockGrantFindMany: vi.fn(),
@@ -258,7 +258,7 @@ describe("POST /api/tenant/breakglass", () => {
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockRateLimiterCheck.mockResolvedValue({ allowed: true });
     // withTenantRls: first call finds member, second returns no duplicate, third creates grant
-    mockWithTenantRls.mockImplementation(async (_p: unknown, _t: unknown, fn: () => unknown) => fn());
+    mockWithTenantRls.mockImplementation(async (p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(p));
     mockTenantMemberFindFirst.mockResolvedValue(TARGET_MEMBER);
     mockGrantFindFirst.mockResolvedValue(null); // no duplicate
     mockGrantCreate.mockResolvedValue(createdGrant);

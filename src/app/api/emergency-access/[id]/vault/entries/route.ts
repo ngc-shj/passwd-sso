@@ -28,8 +28,8 @@ async function handleGET(
 
   const { id } = await params;
 
-  const grant = await withBypassRls(prisma, async () =>
-    prisma.emergencyAccessGrant.findUnique({
+  const grant = await withBypassRls(prisma, async (tx) =>
+    tx.emergencyAccessGrant.findUnique({
       where: { id },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
@@ -43,8 +43,8 @@ async function handleGET(
   }
 
   // Fetch all non-deleted entries for the owner
-  const entries = await withBypassRls(prisma, async () =>
-    prisma.passwordEntry.findMany({
+  const entries = await withBypassRls(prisma, async (tx) =>
+    tx.passwordEntry.findMany({
       where: {
         userId: grant.ownerId,
         deletedAt: null,

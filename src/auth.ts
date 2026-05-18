@@ -63,7 +63,7 @@ export async function ensureTenantMembershipForSignIn(
     return true;
   }
 
-  const tenant = await withBypassRls(prisma, async () => {
+  const tenant = await withBypassRls(prisma, async (tx) => {
     const found = await findOrCreateSsoTenant(tenantClaim);
 
     if (!found) return null;
@@ -72,7 +72,7 @@ export async function ensureTenantMembershipForSignIn(
 
     // Single-tenant sign-in policy: reject cross-tenant login.
     if (existingTenantId && existingTenantId !== found.id) {
-      const existingTenant = await prisma.tenant.findUnique({
+      const existingTenant = await tx.tenant.findUnique({
         where: { id: existingTenantId },
         select: { isBootstrap: true },
       });
@@ -208,7 +208,7 @@ export async function ensureTenantMembershipForSignIn(
       }
     }
 
-    await prisma.tenantMember.upsert({
+    await tx.tenantMember.upsert({
       where: {
         tenantId_userId: {
           tenantId: found.id,
@@ -271,8 +271,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // Nodemailer requires email by definition. Block null-email as a safeguard.
         if (!params.user?.email) return false;
 
-        const existingUser = await withBypassRls(prisma, async () =>
-          prisma.user.findUnique({
+        const existingUser = await withBypassRls(prisma, async (tx) =>
+          tx.user.findUnique({
             where: { email: params.user.email! },
             select: {
               id: true,
@@ -291,8 +291,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       let userId: string | null = null;
       const lookupEmail = params.user?.email;
       if (lookupEmail) {
-        const existing = await withBypassRls(prisma, async () =>
-          prisma.user.findUnique({
+        const existing = await withBypassRls(prisma, async (tx) =>
+          tx.user.findUnique({
             where: { email: lookupEmail },
             select: { id: true },
           }),
@@ -344,10 +344,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       let requirePasskeyEnabledAt: string | null = null;
       let passkeyGracePeriodDays: number | null = null;
       try {
-        const passkeyData = await withBypassRls(prisma, async () => {
+        const passkeyData = await withBypassRls(prisma, async (tx) => {
           const [credCount, tenant] = await Promise.all([
-            prisma.webAuthnCredential.count({ where: { userId: user.id } }),
-            prisma.user.findUnique({
+            tx.webAuthnCredential.count({ where: { userId: user.id } }),
+            tx.user.findUnique({
               where: { id: user.id },
               select: {
                 tenant: {

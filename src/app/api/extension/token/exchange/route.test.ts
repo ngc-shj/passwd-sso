@@ -25,7 +25,7 @@ const {
   mockExtensionTokenUpdateMany: vi.fn(),
   mockTransaction: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
   mockWarn: vi.fn(),
@@ -97,7 +97,7 @@ describe("POST /api/extension/token/exchange", () => {
     // Re-establish defaults that vi.clearAllMocks resets
     mockCheck.mockResolvedValue({ allowed: true });
     mockExtractClientIp.mockReturnValue("1.2.3.4");
-    mockWithBypassRls.mockImplementation(async (_p, fn) => fn());
+    mockWithBypassRls.mockImplementation(async (p, fn) => fn(p));
     mockWithUserTenantRls.mockImplementation(async (_u, fn) => fn());
     // The shared issueExtensionToken helper internally calls $transaction.
     // Provide a default that runs the callback against the mocked Prisma surface.

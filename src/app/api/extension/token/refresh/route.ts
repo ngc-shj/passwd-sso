@@ -74,8 +74,8 @@ async function handlePOST(req: NextRequest) {
   }
 
   // Read tenant extension-token TTL policy
-  const tenant = await withBypassRls(prisma, async () =>
-    prisma.tenant.findUnique({
+  const tenant = await withBypassRls(prisma, async (tx) =>
+    tx.tenant.findUnique({
       where: { id: activeSession.tenantId },
       select: {
         extensionTokenIdleTimeoutMinutes: true,

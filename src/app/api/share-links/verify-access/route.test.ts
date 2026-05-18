@@ -14,7 +14,7 @@ const {
 } = vi.hoisted(() => {
   return {
     mockPasswordShareFindUnique: vi.fn(),
-    mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+    mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
     mockHashToken: vi.fn((t: string) => `hashed_${t}`),
     mockVerifyAccessPassword: vi.fn(),
     mockCreateShareAccessToken: vi.fn().mockReturnValue("access-token-xyz"),

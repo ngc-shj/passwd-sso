@@ -64,8 +64,8 @@ async function getTenantAccessPolicy(
     }
   }
 
-  const tenant = await withBypassRls(prisma, async () =>
-    prisma.tenant.findUnique({
+  const tenant = await withBypassRls(prisma, async (tx) =>
+    tx.tenant.findUnique({
       where: { id: tenantId },
       select: {
         allowedCidrs: true,

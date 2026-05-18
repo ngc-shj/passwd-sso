@@ -24,8 +24,8 @@ export async function fetchAuditUserMap(
   if (uniqueIds.length === 0) return new Map();
   const users = await withBypassRls(
     prisma,
-    () =>
-      prisma.user.findMany({
+    (tx) =>
+      tx.user.findMany({
         where: { id: { in: uniqueIds } },
         select: { id: true, name: true, email: true, image: true },
       }),
