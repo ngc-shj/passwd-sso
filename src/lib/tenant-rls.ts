@@ -33,8 +33,17 @@ export function isBypassRlsActive(): boolean {
 export async function withTenantRls<T>(
   prisma: PrismaClient,
   tenantId: string,
-  fn: ((tx: Prisma.TransactionClient) => Promise<T>) | (() => Promise<T>),
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
 ): Promise<T> {
+  // Symmetric nesting guard: AsyncLocalStorage does NOT roll back PostgreSQL
+  // GUCs, and the Prisma Proxy folds nested $transaction into the outer tx,
+  // so set_config() from either direction persists for the outer transaction's
+  // remainder. Rejecting nesting in both directions is the only correct fix.
+  if (getTenantRlsContext()?.bypass === true) {
+    throw new Error(
+      "INVALID_RLS_NESTING: withTenantRls inside withBypassRls is forbidden",
+    );
+  }
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
     return tenantRlsStorage.run({ tx, tenantId, bypass: false }, () => fn(tx));
@@ -44,9 +53,14 @@ export async function withTenantRls<T>(
 
 export async function withBypassRls<T>(
   prisma: PrismaClient,
-  fn: ((tx: Prisma.TransactionClient) => Promise<T>) | (() => Promise<T>),
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
   purpose: BypassPurpose,
 ): Promise<T> {
+  if (getTenantRlsContext()?.bypass === false) {
+    throw new Error(
+      "INVALID_RLS_NESTING: withBypassRls inside withTenantRls is forbidden",
+    );
+  }
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
     await tx.$executeRaw`SELECT set_config('app.bypass_purpose', ${purpose}, true)`;

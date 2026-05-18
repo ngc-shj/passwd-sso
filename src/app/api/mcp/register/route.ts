@@ -154,20 +154,15 @@ async function handlePOST(req: NextRequest) {
   } catch (err) {
     if (err instanceof CapExceededError) {
       return NextResponse.json(
-        { error: "temporarily_unavailable", error_description: "Global DCR client cap reached" },
+        {
+          error: "temporarily_unavailable",
+          error_description:
+            "Global DCR client cap reached — ensure dcr-cleanup-worker is running.",
+        },
         { status: 503 },
       );
     }
     throw err;
-  }
-
-  // Piggyback cleanup: probabilistically delete expired unclaimed clients (~10% of requests)
-  if (Math.random() < 0.1) {
-    prisma.mcpClient
-      .deleteMany({
-        where: { isDcr: true, tenantId: null, dcrExpiresAt: { lt: new Date() } },
-      })
-      .catch(() => {}); // fire-and-forget
   }
 
   // Audit log — system-level, no tenant or user context

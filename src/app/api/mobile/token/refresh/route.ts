@@ -50,7 +50,6 @@ import {
   computeAth,
 } from "@/lib/auth/dpop/verify";
 import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
-import { getDpopNonceService } from "@/lib/auth/dpop/nonce";
 import {
   refreshIosToken,
   IOS_TOKEN_IDLE_TIMEOUT_MS,
@@ -211,10 +210,6 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     }
   }
 
-  const nonceService = getDpopNonceService();
-  void nonceService.rotateIfDue().catch(() => {});
-  const nonce = await nonceService.current();
-
   return NextResponse.json(
     {
       access_token: result.token.accessToken,
@@ -224,7 +219,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     },
     {
       status: 200,
-      headers: { "DPoP-Nonce": nonce, "Cache-Control": "no-store" },
+      headers: { "Cache-Control": "no-store" },
     },
   );
 }

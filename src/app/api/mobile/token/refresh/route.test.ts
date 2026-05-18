@@ -16,11 +16,6 @@ const {
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockRefreshIosToken: vi.fn(),
   mockVerifyDpop: vi.fn(),
-  mockGetDpopNonceService: vi.fn(() => ({
-    current: vi.fn().mockResolvedValue("nonce-current"),
-    rotateIfDue: vi.fn().mockResolvedValue(undefined),
-    isAccepted: vi.fn().mockResolvedValue(true),
-  })),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -60,11 +55,6 @@ vi.mock("@/lib/auth/dpop/verify", async (importOriginal) => ({
 
 vi.mock("@/lib/auth/dpop/jti-cache", () => ({
   getJtiCache: () => ({ hasOrRecord: vi.fn().mockResolvedValue(false) }),
-}));
-
-vi.mock("@/lib/auth/dpop/nonce", async (importOriginal) => ({
-  ...((await importOriginal()) as Record<string, unknown>),
-  getDpopNonceService: mockGetDpopNonceService,
 }));
 
 vi.mock("@/lib/url-helpers", () => ({
@@ -170,7 +160,7 @@ describe("POST /api/mobile/token/refresh", () => {
       expires_in: 86_400,
       token_type: "DPoP",
     });
-    expect(res.headers.get("dpop-nonce")).toBe("nonce-current");
+    expect(res.headers.get("dpop-nonce")).toBeNull();
   });
 
   it("returns 401 with REPLAY_DETECTED code when refreshIosToken signals replay", async () => {

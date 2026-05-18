@@ -15,7 +15,7 @@
  *      registered at `/api/mobile/authorize`). No `ath` is required at this
  *      step because the client doesn't yet have an access token.
  *   6. Calls `issueIosToken()` to mint the access+refresh pair, stamps a
- *      fresh `DPoP-Nonce` on the response, and audits `MOBILE_TOKEN_ISSUED`.
+ *      and audits `MOBILE_TOKEN_ISSUED`. JTI cache provides replay defense.
  *
  * Compensating controls (no Auth.js session, no Origin check):
  *   - 256-bit single-use bridge code with 60s TTL.
@@ -46,7 +46,6 @@ import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
 import { verifyDpopProof } from "@/lib/auth/dpop/verify";
 import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
-import { getDpopNonceService } from "@/lib/auth/dpop/nonce";
 import {
   issueIosToken,
   IOS_TOKEN_IDLE_TIMEOUT_MS,
@@ -255,12 +254,10 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     },
   });
 
-  // 8. Stamp DPoP-Nonce on the response (RFC 9449 §8 — clients MUST echo on
-  // subsequent calls). Best-effort rotation tick.
-  const nonceService = getDpopNonceService();
-  void nonceService.rotateIfDue().catch(() => {});
-  const nonce = await nonceService.current();
-
+  // Replay protection is provided by the JTI cache (per-jkt, TTL-bounded).
+  // The previous DPoP-Nonce emission was removed because the verifier passed
+  // expectedNonce: null, making the emit-without-verify pattern a spec/impl
+  // inconsistency without security benefit.
   return NextResponse.json(
     {
       access_token: issued.accessToken,
@@ -270,7 +267,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     },
     {
       status: 200,
-      headers: { "DPoP-Nonce": nonce, "Cache-Control": "no-store" },
+      headers: { "Cache-Control": "no-store" },
     },
   );
 }

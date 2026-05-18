@@ -23,11 +23,6 @@ const {
   mockVerifyDpop: vi.fn(),
   mockVerifyPkceS256: vi.fn(),
   mockLogAuditAsync: vi.fn(),
-  mockGetDpopNonceService: vi.fn(() => ({
-    current: vi.fn().mockResolvedValue("nonce-current"),
-    rotateIfDue: vi.fn().mockResolvedValue(undefined),
-    isAccepted: vi.fn().mockResolvedValue(true),
-  })),
   mockExtractClientIp: vi.fn(() => "1.2.3.4"),
   mockWarn: vi.fn(),
   mockError: vi.fn(),
@@ -72,11 +67,6 @@ vi.mock("@/lib/auth/dpop/verify", async (importOriginal) => ({
 
 vi.mock("@/lib/auth/dpop/jti-cache", () => ({
   getJtiCache: () => ({ hasOrRecord: vi.fn().mockResolvedValue(false) }),
-}));
-
-vi.mock("@/lib/auth/dpop/nonce", async (importOriginal) => ({
-  ...((await importOriginal()) as Record<string, unknown>),
-  getDpopNonceService: mockGetDpopNonceService,
 }));
 
 vi.mock("@/lib/mcp/oauth-server", async (importOriginal) => ({
@@ -178,7 +168,7 @@ describe("POST /api/mobile/token", () => {
       expires_in: 86_400,
       token_type: "DPoP",
     });
-    expect(res.headers.get("dpop-nonce")).toBe("nonce-current");
+    expect(res.headers.get("dpop-nonce")).toBeNull();
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(mockIssueIosToken).toHaveBeenCalledWith(
       expect.objectContaining({
