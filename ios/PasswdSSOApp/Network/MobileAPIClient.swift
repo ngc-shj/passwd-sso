@@ -110,7 +110,7 @@ public actor MobileAPIClient {
   public func exchangeBridgeCode(
     code: String,
     codeVerifier: String,
-    devicePubkey: String
+    deviceJkt: String
   ) async throws -> TokenExchangeResponse {
     let tokenURL = serverURL.appending(path: "/api/mobile/token", directoryHint: .notDirectory)
     let htu = canonicalHTU(url: tokenURL)
@@ -131,7 +131,7 @@ public actor MobileAPIClient {
     let body: [String: String] = [
       "code": code,
       "code_verifier": codeVerifier,
-      "device_pubkey": devicePubkey,
+      "device_jkt": deviceJkt,
     ]
     let bodyData = try JSONEncoder().encode(body)
 

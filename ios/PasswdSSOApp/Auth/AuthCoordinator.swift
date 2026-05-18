@@ -38,7 +38,7 @@ private struct WebAuthParams: Sendable {
 
 /// Orchestrates the iOS host-app authentication flow:
 ///   1. Generate/reuse the Secure Enclave DPoP key.
-///   2. Build PKCE state, challenge, and device_pubkey (SPKI-DER).
+///   2. Build PKCE state, challenge, and device_jkt (RFC 7638 JWK thumbprint).
 ///   3. Open ASWebAuthenticationSession → receive redirect with bridge code.
 ///   4. POST /api/mobile/token with DPoP proof → store token pair.
 ///
@@ -68,14 +68,18 @@ public actor AuthCoordinator {
   ) async throws -> TokenPair {
     let privateKey = try getOrCreateDPoPKey()
     let jwk = try exportPublicKeyJWK(key: privateKey)
-    let devicePubkey = try devicePubkeyBase64(key: privateKey)
+    // C6 protocol switch: send the RFC 7638 JWK thumbprint (43 chars
+    // base64url) instead of the legacy base64url(SPKI-DER) `device_pubkey`.
+    // The server's DPoP verifier computes the same thumbprint from
+    // proof.header.jwk, so cnf-binding works end-to-end.
+    let deviceJkt = try computeJWKThumbprint(jwk: jwk)
 
     let (codeVerifier, codeChallenge, state) = try generatePKCEAndState()
 
     let authorizeURL = try buildAuthorizeURL(
       codeChallenge: codeChallenge,
       state: state,
-      devicePubkey: devicePubkey
+      deviceJkt: deviceJkt
     )
 
     guard let host = serverConfig.baseURL.host else {
@@ -108,7 +112,7 @@ public actor AuthCoordinator {
       tokenResponse = try await apiClient.exchangeBridgeCode(
         code: code,
         codeVerifier: codeVerifier,
-        devicePubkey: devicePubkey
+        deviceJkt: deviceJkt
       )
     } catch let apiError as MobileAPIError {
       throw AuthError.tokenExchangeFailed(apiError)
@@ -257,23 +261,10 @@ public actor AuthCoordinator {
     return (verifier, challenge, state)
   }
 
-  /// Export the public key as base64url(SPKI-DER) for the authorize / token calls.
-  private func devicePubkeyBase64(key: SecKey) throws -> String {
-    guard let publicKey = SecKeyCopyPublicKey(key) else {
-      throw AuthError.keyGenerationFailed
-    }
-    var error: Unmanaged<CFError>?
-    guard let rawPoint = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
-      throw AuthError.keyGenerationFailed
-    }
-    let spki = try encodeP256SPKI(uncompressedPoint: rawPoint)
-    return base64URLEncode(spki)
-  }
-
   private func buildAuthorizeURL(
     codeChallenge: String,
     state: String,
-    devicePubkey: String
+    deviceJkt: String
   ) throws -> URL {
     var components = URLComponents(
       url: serverConfig.baseURL.appending(
@@ -286,7 +277,7 @@ public actor AuthCoordinator {
       URLQueryItem(name: "client_kind", value: "ios"),
       URLQueryItem(name: "state", value: state),
       URLQueryItem(name: "code_challenge", value: codeChallenge),
-      URLQueryItem(name: "device_pubkey", value: devicePubkey),
+      URLQueryItem(name: "device_jkt", value: deviceJkt),
     ]
     guard let url = components.url else { throw AuthError.webAuthFailed("invalid authorize URL") }
     return url
