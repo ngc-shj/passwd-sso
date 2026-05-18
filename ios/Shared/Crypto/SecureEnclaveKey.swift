@@ -116,6 +116,12 @@ public func exportPublicKeyJWK(key: SecKey) throws -> [String: String] {
 }
 
 /// RFC 7638 JWK thumbprint: SHA-256 of canonical JSON (alphabetical keys), base64url no padding.
+///
+/// MIRROR: TypeScript counterpart in src/lib/auth/dpop/verify.ts::jwkThumbprint.
+/// Any change to the canonical-JSON key order (crv, kty, x, y) MUST land in
+/// BOTH implementations — drift will silently break iOS auth because the
+/// device_jkt computed here will no longer match the thumbprint derived
+/// server-side from the proof header.
 public func computeJWKThumbprint(jwk: [String: String]) throws -> String {
   guard let crv = jwk["crv"], let kty = jwk["kty"], let x = jwk["x"], let y = jwk["y"] else {
     throw SecureEnclaveKeyError.jwkThumbprintFailed

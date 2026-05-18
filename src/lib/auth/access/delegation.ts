@@ -17,8 +17,8 @@ import {
   getMasterKeyByVersion,
 } from "@/lib/crypto/crypto-server";
 import type { ServerEncryptedData } from "@/lib/crypto/crypto-server";
-import { logAuditAsync } from "@/lib/audit/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
+import { logAuditAsyncBothScopes } from "@/lib/audit/audit";
+import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 
 // ─── Constants ─────────────────────────────────────────────────
 
@@ -296,16 +296,12 @@ export async function revokeAllDelegationSessions(
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (result.count > 0 && tenantId) {
-    const auditBase = {
+    await logAuditAsyncBothScopes({
       action: AUDIT_ACTION.DELEGATION_REVOKE,
       userId,
       tenantId,
       metadata: { revokedCount: result.count, reason: reason ?? "manual" },
-    };
-    await Promise.all([
-      logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL }),
-      logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT }),
-    ]);
+    });
   }
 
   return result.count;
@@ -332,17 +328,13 @@ export async function revokeDelegationSession(
   await evictDelegationRedisKeys(userId, sessionId).catch(() => {});
 
   if (result.count > 0) {
-    const auditBase = {
+    await logAuditAsyncBothScopes({
       action: AUDIT_ACTION.DELEGATION_REVOKE,
       userId,
       tenantId,
       targetId: sessionId,
       metadata: { reason: "manual" },
-    };
-    await Promise.all([
-      logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL }),
-      logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT }),
-    ]);
+    });
   }
 
   return result.count > 0;

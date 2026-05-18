@@ -274,6 +274,24 @@ export async function logAuditAsync(params: AuditLogParams): Promise<void> {
 }
 
 /**
+ * Emit the same audit entry under BOTH the PERSONAL and TENANT scopes.
+ * Used by features (delegation, MCP tool access) that need a record on
+ * both the per-user and per-tenant audit surfaces. The caller supplies
+ * the entry WITHOUT a `scope` field; this helper fan-outs to both.
+ *
+ * The two emissions are run in parallel via Promise.all. logAuditAsync
+ * never throws, so neither does this.
+ */
+export async function logAuditAsyncBothScopes(
+  base: Omit<AuditLogParams, "scope">,
+): Promise<void> {
+  await Promise.all([
+    logAuditAsync({ ...base, scope: AUDIT_SCOPE.PERSONAL }),
+    logAuditAsync({ ...base, scope: AUDIT_SCOPE.TENANT }),
+  ]);
+}
+
+/**
  * Enqueue many audit events in a single DB transaction.
  * Prefer over a loop of logAuditAsync() for bulk operations.
  *

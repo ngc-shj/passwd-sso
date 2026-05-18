@@ -128,6 +128,12 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditAsyncBothScopes: vi.fn(async (base: Record<string, unknown>) => {
+    await Promise.all([
+      mockLogAudit({ ...base, scope: "PERSONAL" }),
+      mockLogAudit({ ...base, scope: "TENANT" }),
+    ]);
+  }),
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({
     scope: "TENANT",

@@ -17,7 +17,18 @@ vi.mock("@/lib/auth/access/delegation", async (importOriginal) => ({
   getDelegatedEntryIdsForSession: mockGetDelegatedEntryIdsForSession,
 }));
 
-vi.mock("@/lib/audit/audit", () => ({ logAuditAsync: mockLogAudit }));
+vi.mock("@/lib/audit/audit", () => ({
+  logAuditAsync: mockLogAudit,
+  // Mirror the production fan-out: emit both PERSONAL and TENANT events
+  // so the test continues to assert dual emission (existing test counts
+  // mockLogAudit invocations as 2 per call).
+  logAuditAsyncBothScopes: vi.fn(async (base: Record<string, unknown>) => {
+    await Promise.all([
+      mockLogAudit({ ...base, scope: "PERSONAL" }),
+      mockLogAudit({ ...base, scope: "TENANT" }),
+    ]);
+  }),
+}));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {},
