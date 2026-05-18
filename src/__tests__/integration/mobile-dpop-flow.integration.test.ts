@@ -12,7 +12,7 @@
  * test doubles — the unit under test is the production verifier.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from "vitest";
 import { randomUUID, randomBytes, createHash } from "node:crypto";
 import { textEncode } from "@/lib/crypto/crypto-utils";
 import { jwkThumbprint } from "@/lib/auth/dpop/verify";
@@ -20,8 +20,14 @@ import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 
 // Real verifyDpopProof — intentionally NOT mocked.
-// Supporting infra:
-process.env.APP_URL = process.env.APP_URL ?? "https://app.example.test";
+// Set APP_URL via vi.stubEnv (project convention — pre-pr.sh gate forbids
+// direct process.env mutation in tests).
+beforeAll(() => {
+  vi.stubEnv("APP_URL", process.env.APP_URL ?? "https://app.example.test");
+});
+afterAll(() => {
+  vi.unstubAllEnvs();
+});
 
 const {
   mockMobileBridgeCodeFindUnique,

@@ -76,7 +76,7 @@ const RESET_RECORD = {
 describe("POST /api/vault/admin-reset", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.APP_URL = "http://localhost:3000";
+    vi.stubEnv("APP_URL", "http://localhost:3000");
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockAdminVaultResetFindUnique.mockResolvedValue(RESET_RECORD);
     mockExecuteVaultReset.mockResolvedValue({ deletedEntries: 3, deletedAttachments: 1 });
