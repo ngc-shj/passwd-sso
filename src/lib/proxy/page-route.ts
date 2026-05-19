@@ -8,7 +8,10 @@ import { AUDIT_ACTION } from "../constants/audit/audit";
 import { MS_PER_DAY, MS_PER_MINUTE } from "../constants/time";
 import { applySecurityHeaders } from "./security-headers";
 import { getSessionInfo } from "./auth-gate";
-import { ALL_KNOWN_SESSION_COOKIE_NAMES } from "../auth/session/cookie-name";
+import {
+  ALL_KNOWN_SESSION_COOKIE_NAMES,
+  isSecureCookieFromAuthUrl,
+} from "../auth/session/cookie-name";
 import { extractClientIp } from "../auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "../auth/policy/access-restriction";
 
@@ -121,8 +124,20 @@ export function recordPasskeyAuditEmit(userId: string, now: number): boolean {
 
 function clearAuthSessionCookies(response: NextResponse, basePath: string = ""): void {
   const cookiePath = `${basePath}/`;
+  // Mirror the set-time attributes. The `__Secure-` / `__Host-` prefixes
+  // require the Secure attribute on Set-Cookie per RFC 6265bis §4.1.3.1/3.2,
+  // so a bare-options delete is silently ignored by browsers for the
+  // prefixed names and the cookie persists. Call `isSecureCookieFromAuthUrl()`
+  // at delete-time (not module-evaluated) so test env stubs are honored.
+  const useSecureCookies = isSecureCookieFromAuthUrl();
   for (const name of ALL_KNOWN_SESSION_COOKIE_NAMES) {
-    response.cookies.delete({ name, path: cookiePath });
+    response.cookies.delete({
+      name,
+      path: cookiePath,
+      secure: useSecureCookies,
+      httpOnly: true,
+      sameSite: "lax",
+    });
   }
 }
 
