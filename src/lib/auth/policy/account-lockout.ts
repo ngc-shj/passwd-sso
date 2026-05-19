@@ -59,8 +59,8 @@ async function getLockoutThresholds(tenantId: string): Promise<LockoutThreshold[
   try {
     const tenant = await withBypassRls(
       prisma,
-      () =>
-        prisma.tenant.findUnique({
+      (tx) =>
+        tx.tenant.findUnique({
           where: { id: tenantId },
           select: {
             lockoutThreshold1: true,
@@ -124,8 +124,8 @@ export interface RecordFailureResult {
  */
 export async function checkLockout(userId: string): Promise<LockoutStatus> {
   // withBypassRls required: called outside tenant RLS context (pre-unlock check)
-  const user = await withBypassRls(prisma, async () =>
-    prisma.user.findUnique({
+  const user = await withBypassRls(prisma, async (tx) =>
+    tx.user.findUnique({
       where: { id: userId },
       select: { accountLockedUntil: true },
     }),
@@ -173,7 +173,7 @@ export async function recordFailure(
   if (!resolvedTenantId) {
     const userRow = await withBypassRls(
       prisma,
-      () => prisma.user.findUnique({ where: { id: userId }, select: { tenantId: true } }),
+      (tx) => tx.user.findUnique({ where: { id: userId }, select: { tenantId: true } }),
       BYPASS_PURPOSE.AUTH_FLOW,
     );
     resolvedTenantId = userRow?.tenantId;
@@ -187,7 +187,7 @@ export async function recordFailure(
   try {
     // withBypassRls required: called outside tenant RLS context (post-auth side effect).
     // The prisma proxy re-uses the bypass transaction for nested $transaction calls.
-    const result = await withBypassRls(prisma, async () =>
+    const result = await withBypassRls(prisma, async (tx) =>
       prisma.$transaction(async (tx) => {
       // Set lock_timeout to prevent indefinite waits
       await tx.$executeRaw`SET LOCAL lock_timeout = '200ms'`;
@@ -394,8 +394,8 @@ export async function recordFailure(
 export async function resetLockout(userId: string): Promise<void> {
   try {
     // withBypassRls required: called outside tenant RLS context (post-auth side effect)
-    await withBypassRls(prisma, async () =>
-      prisma.user.update({
+    await withBypassRls(prisma, async (tx) =>
+      tx.user.update({
         where: { id: userId },
         data: {
           failedUnlockAttempts: 0,

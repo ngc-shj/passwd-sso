@@ -16,7 +16,7 @@ const {
   mockMcpAccessToken: { updateMany: vi.fn() },
   mockMcpRefreshToken: { updateMany: vi.fn() },
   mockDelegationSession: { updateMany: vi.fn() },
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockInvalidateCachedSessions: vi
     .fn<(tokens: ReadonlyArray<string>) => Promise<{ total: number; failed: number }>>()
     .mockResolvedValue({ total: 0, failed: 0 }),

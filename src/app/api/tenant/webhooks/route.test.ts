@@ -16,7 +16,7 @@ const {
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
-  mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: unknown, fn: () => unknown) => fn()),
+  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockLogAudit: vi.fn(),
   mockTenantWebhookFindMany: vi.fn(),
   mockTenantWebhookCount: vi.fn(),
@@ -75,7 +75,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 import { GET, POST } from "@/app/api/tenant/webhooks/route";
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 
-const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
+const ACTOR = { tenantId: "22222222-2222-4222-8222-222222222222", role: "ADMIN" };
 
 /**
  * Fields returned by Prisma after applying the `select` in handleGET.
@@ -178,7 +178,7 @@ describe("POST /api/tenant/webhooks", () => {
       events: ["ADMIN_VAULT_RESET_INITIATE"],
       isActive: true,
       createdAt: new Date(),
-      tenantId: "tenant-1",
+      tenantId: "22222222-2222-4222-8222-222222222222",
       secretEncrypted: "encrypted",
       secretIv: "iv123456789012",
       secretAuthTag: "authtag1234567890123456789012",
@@ -210,7 +210,7 @@ describe("POST /api/tenant/webhooks", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "TENANT_WEBHOOK_CREATE",
-        tenantId: "tenant-1",
+        tenantId: "22222222-2222-4222-8222-222222222222",
       }),
     );
   });

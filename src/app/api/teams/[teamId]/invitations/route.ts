@@ -92,8 +92,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   // different home tenant are still recognized as already-added team members.
   // Only id is needed downstream — fetching the full row would expose
   // private-key-encryption material across tenants if the row leaks via logs.
-  const existingUserPromise = withBypassRls(prisma, () =>
-    prisma.user.findUnique({ where: { email }, select: { id: true } }),
+  const existingUserPromise = withBypassRls(prisma, (tx) =>
+    tx.user.findUnique({ where: { email }, select: { id: true } }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   const [[existingInv, team], existingUser] = await Promise.all([

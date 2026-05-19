@@ -87,8 +87,8 @@ export async function validateOperatorToken(
 
   const token = await withBypassRls(
     prisma,
-    async () =>
-      prisma.operatorToken.findUnique({
+    async (tx) =>
+      tx.operatorToken.findUnique({
         where: { tokenHash },
         select: {
           id: true,
@@ -120,8 +120,8 @@ export async function validateOperatorToken(
   if (shouldUpdate) {
     void withBypassRls(
       prisma,
-      async () =>
-        prisma.operatorToken.update({
+      async (tx) =>
+        tx.operatorToken.update({
           where: { id: token.id },
           data: { lastUsedAt: new Date() },
         }),

@@ -40,6 +40,8 @@ vi.mock("@/lib/prisma", () => ({
     user: mockPrismaUser,
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({
       $executeRaw: vi.fn().mockResolvedValue(undefined),
+      auditLog: mockPrismaAuditLog,
+      user: mockPrismaUser,
     })),
   },
 }));

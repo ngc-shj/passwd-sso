@@ -74,8 +74,8 @@ async function handleGET(req: NextRequest) {
     : undefined;
   const serviceAccountId = searchParams.get("serviceAccountId") ?? undefined;
 
-  const accessRequests = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.accessRequest.findMany({
+  const accessRequests = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.accessRequest.findMany({
       where: {
         tenantId: actor.tenantId,
         ...(validatedStatus !== undefined && { status: validatedStatus }),
@@ -173,8 +173,8 @@ async function handlePOST(req: NextRequest) {
     expiresInMinutes = result.data.expiresInMinutes;
 
     // Verify SA is active
-    const sa = await withBypassRls(prisma, async () =>
-      prisma.serviceAccount.findUnique({
+    const sa = await withBypassRls(prisma, async (tx) =>
+      tx.serviceAccount.findUnique({
         where: { id: serviceAccountId },
         select: { isActive: true, createdById: true },
       }),
@@ -220,8 +220,8 @@ async function handlePOST(req: NextRequest) {
     expiresInMinutes = result.data.expiresInMinutes;
 
     // Validate SA exists and belongs to this tenant
-    const sa = await withTenantRls(prisma, tenantId, async () =>
-      prisma.serviceAccount.findUnique({
+    const sa = await withTenantRls(prisma, tenantId, async (tx) =>
+      tx.serviceAccount.findUnique({
         where: { id: serviceAccountId },
         select: { id: true, tenantId: true, isActive: true },
       }),
@@ -239,8 +239,8 @@ async function handlePOST(req: NextRequest) {
 
   const expiresAt = new Date(Date.now() + expiresInMinutes * MS_PER_MINUTE);
 
-  const accessRequest = await withBypassRls(prisma, async () =>
-    prisma.accessRequest.create({
+  const accessRequest = await withBypassRls(prisma, async (tx) =>
+    tx.accessRequest.create({
       data: {
         tenantId,
         serviceAccountId,

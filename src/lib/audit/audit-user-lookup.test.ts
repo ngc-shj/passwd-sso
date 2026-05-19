@@ -11,7 +11,7 @@ vi.mock("@/lib/prisma", () => ({
 // Pass-through: the helper uses withBypassRls for RLS scoping; for unit tests
 // we let the inner function run directly so we can observe the prisma call.
 vi.mock("@/lib/tenant-rls", () => ({
-  withBypassRls: vi.fn(async (_prisma: unknown, fn: () => Promise<unknown>) => fn()),
+  withBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => Promise<unknown>) => fn(prisma)),
   BYPASS_PURPOSE: { AUDIT_WRITE: "audit_write" },
 }));
 

@@ -7,7 +7,7 @@ const { mockAuth, mockPrismaGrant, mockWithBypassRls, mockLogAuditAsync, mockPer
     findUnique: vi.fn(),
     updateMany: vi.fn(),
   },
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockLogAuditAsync: vi.fn(),
   mockPersonalAuditBase: vi.fn((_, userId: string) => ({ scope: "PERSONAL", userId })),
 }));

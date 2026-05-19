@@ -10,6 +10,7 @@ const {
   mockFetch,
   mockResolve4,
   mockResolve6,
+  mockLoggerError,
 } = vi.hoisted(() => ({
   mockPrismaTeamWebhook: {
     findMany: vi.fn(),
@@ -20,7 +21,7 @@ const {
     update: vi.fn(),
   },
   mockWithBypassRls: vi.fn(
-    async (_prisma: unknown, fn: () => unknown) => fn(),
+    async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
   ),
   mockLogAudit: vi.fn(),
   mockGetMasterKeyByVersion: vi.fn(() => Buffer.alloc(32)),
@@ -28,6 +29,8 @@ const {
   mockFetch: vi.fn(),
   mockResolve4: vi.fn(async () => ["93.184.216.34"]),
   mockResolve6: vi.fn(async () => []),
+  // Stable reference so T5 can assert error log was emitted on decrypt throw.
+  mockLoggerError: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -58,10 +61,10 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 }));
 vi.mock("@/lib/logger", () => ({
   default: {
-    child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+    child: () => ({ info: vi.fn(), warn: vi.fn(), error: mockLoggerError }),
   },
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
-  getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+  getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: mockLoggerError }),
 }));
 
 vi.mock("node:dns/promises", () => ({
@@ -85,6 +88,7 @@ const WEBHOOK = {
   secretIv: "iv123456789012",
   secretAuthTag: "authtag1234567890123456789012",
   masterKeyVersion: 1,
+  secretAadVersion: 1, // legacy no-AAD; v2 AAD path is exercised in webhook-aad.test.ts
   events: ["ENTRY_CREATE"],
   isActive: true,
   lastError: null,
@@ -110,6 +114,7 @@ const TENANT_WEBHOOK = {
   secretIv: "iv123456789012",
   secretAuthTag: "authtag1234567890123456789012",
   masterKeyVersion: 1,
+  secretAadVersion: 1,
   events: ["ADMIN_VAULT_RESET_INITIATE"],
   isActive: true,
   lastError: null,
@@ -135,6 +140,37 @@ describe("dispatchWebhook", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("swallows decryptServerData throw and skips delivery (C9 T5 — row-swap defense)", async () => {
+    // A v2 row whose ciphertext was tampered with (or a v2→v1 downgrade
+    // attempt) causes AES-GCM auth-tag mismatch. The dispatcher MUST
+    // catch this and skip delivery — never emit a signature header, never
+    // call outbound fetch. This is the load-bearing assertion for the
+    // S8/S9 defense: a successful AAD mismatch detection at the crypto
+    // layer is only useful if the dispatcher converts it into a silent
+    // skip rather than letting it escape (500) or fall back to a default.
+    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+    mockDecryptServerData.mockImplementationOnce(() => {
+      throw new Error("Unsupported state or unable to authenticate data");
+    });
+
+    dispatchWebhook(EVENT);
+    await vi.advanceTimersByTimeAsync(100);
+
+    // Outbound HTTP MUST NOT have fired.
+    expect(mockFetch).not.toHaveBeenCalled();
+    // Logger captured the decryption failure with the documented key shape.
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        webhookId: WEBHOOK.id,
+        masterKeyVersion: WEBHOOK.masterKeyVersion,
+      }),
+      expect.stringContaining("webhook secret decryption failed"),
+    );
+    // No update path was taken — the row remains untouched, no
+    // lastDeliveredAt / lastFailedAt / failCount mutation.
+    expect(mockPrismaTeamWebhook.update).not.toHaveBeenCalled();
   });
 
   it("delivers successfully and updates lastDeliveredAt", async () => {

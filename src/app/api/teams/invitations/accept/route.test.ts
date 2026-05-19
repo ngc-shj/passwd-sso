@@ -17,7 +17,7 @@ const { mockAuth, mockPrismaTeamInvitation, mockPrismaTeamMember, mockPrismaUser
   mockRateLimiter: { check: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));

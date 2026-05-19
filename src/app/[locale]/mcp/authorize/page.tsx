@@ -38,8 +38,8 @@ export default async function McpConsentPage({
   }
 
   // Look up client (bypass RLS — DCR clients may not have a tenant yet)
-  const client = await withBypassRls(prisma, async () =>
-    prisma.mcpClient.findFirst({ where: { clientId, isActive: true } }),
+  const client = await withBypassRls(prisma, async (tx) =>
+    tx.mcpClient.findFirst({ where: { clientId, isActive: true } }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!client) {
@@ -61,8 +61,8 @@ export default async function McpConsentPage({
 
   // Tenant check for non-DCR (admin-created) clients
   if (client.tenantId) {
-    const userRecord = await withBypassRls(prisma, async () =>
-      prisma.user.findUnique({
+    const userRecord = await withBypassRls(prisma, async (tx) =>
+      tx.user.findUnique({
         where: { id: session.user.id },
         select: { tenantId: true },
       }),

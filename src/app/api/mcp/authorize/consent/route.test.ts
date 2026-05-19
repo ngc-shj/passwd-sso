@@ -14,7 +14,7 @@ const {
   mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockWithBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
   mockFindFirst: vi.fn(),
   mockFindUnique: vi.fn(),
   mockCreateAuthorizationCode: vi.fn(),
@@ -126,7 +126,7 @@ describe("POST /api/mcp/authorize/consent", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue(VALID_SESSION);
     // withBypassRls: always execute callback (may be called 2+ times for claiming)
-    mockWithBypassRls.mockImplementation(async (_p: unknown, fn: () => unknown) => fn());
+    mockWithBypassRls.mockImplementation(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p));
     mockFindFirst.mockResolvedValue(VALID_CLIENT);
     mockFindUnique.mockResolvedValue(VALID_USER);
     mockTxFindFirst.mockResolvedValue(null); // default: no existing same-name client

@@ -12,7 +12,7 @@ const {
   mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockTagFindMany: vi.fn(),
-  mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: unknown, fn: () => unknown) => fn()),
+  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
 vi.mock("@/lib/auth/tokens/api-key", () => ({ validateApiKeyOnly: mockValidateApiKeyOnly }));

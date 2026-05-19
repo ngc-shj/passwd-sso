@@ -50,8 +50,8 @@ export function createCustomAdapter(): Adapter {
     // Override every base method that touches RLS-protected tables.
 
     async getUser(id: string): Promise<AdapterUser | null> {
-      const user = await withBypassRls(prisma, async () =>
-        prisma.user.findUnique({
+      const user = await withBypassRls(prisma, async (tx) =>
+        tx.user.findUnique({
           where: { id },
           select: { id: true, name: true, email: true, image: true, emailVerified: true },
         }),
@@ -61,8 +61,8 @@ export function createCustomAdapter(): Adapter {
     },
 
     async getUserByEmail(email: string): Promise<AdapterUser | null> {
-      const user = await withBypassRls(prisma, async () =>
-        prisma.user.findUnique({
+      const user = await withBypassRls(prisma, async (tx) =>
+        tx.user.findUnique({
           where: { email },
           select: { id: true, name: true, email: true, image: true, emailVerified: true },
         }),
@@ -76,8 +76,8 @@ export function createCustomAdapter(): Adapter {
     ) {
       // RLS requires tenant_id context; during OAuth callback no user is
       // identified yet, so bypass RLS to avoid "invalid uuid: ''" cast error.
-      const account = await withBypassRls(prisma, async () =>
-        prisma.account.findUnique({
+      const account = await withBypassRls(prisma, async (tx) =>
+        tx.account.findUnique({
           where: {
             provider_providerAccountId: {
               provider: providerAccountId.provider,
@@ -110,8 +110,8 @@ export function createCustomAdapter(): Adapter {
     async getSessionAndUser(
       sessionToken: string,
     ): Promise<{ session: AdapterSession; user: AdapterUser } | null> {
-      const result = await withBypassRls(prisma, async () =>
-        prisma.session.findUnique({
+      const result = await withBypassRls(prisma, async (tx) =>
+        tx.session.findUnique({
           where: { sessionToken },
           select: {
             sessionToken: true,
@@ -154,7 +154,7 @@ export function createCustomAdapter(): Adapter {
       // If present, place user directly into the SSO tenant.
       const pendingClaim = tenantClaimStorage.getStore()?.tenantClaim ?? null;
 
-      const created = await withBypassRls(prisma, async () => {
+      const created = await withBypassRls(prisma, async (tx) => {
         // Resolve SSO tenant inside withBypassRls (no nesting)
         let ssoTenant: { id: string } | null = null;
         if (pendingClaim) {
@@ -216,7 +216,7 @@ export function createCustomAdapter(): Adapter {
     async linkAccount(
       account: AdapterAccount,
     ): Promise<void> {
-      await withBypassRls(prisma, async () => {
+      await withBypassRls(prisma, async (tx) => {
         const tenantId = await resolveTenantIdForUser(account.userId);
 
         // Envelope-encrypt the OAuth provider tokens at rest. AAD binds the
@@ -236,7 +236,7 @@ export function createCustomAdapter(): Adapter {
           },
         );
 
-        await prisma.account.create({
+        await tx.account.create({
           data: {
             userId: account.userId,
             tenantId,
@@ -271,7 +271,7 @@ export function createCustomAdapter(): Adapter {
         evicted: { id: string; sessionToken: string; ipAddress: string | null; userAgent: string | null }[];
       } | null = null;
 
-      const created = await withBypassRls(prisma, async () => {
+      const created = await withBypassRls(prisma, async (tx) => {
         const tenantId = await resolveTenantIdForUser(session.userId);
 
         // Serializable prevents TOCTOU in concurrent session counting
@@ -398,8 +398,8 @@ export function createCustomAdapter(): Adapter {
 
     async updateUser(data: Partial<AdapterUser> & Pick<AdapterUser, "id">): Promise<AdapterUser> {
       const { id, ...rest } = data;
-      const updated = await withBypassRls(prisma, async () =>
-        prisma.user.update({
+      const updated = await withBypassRls(prisma, async (tx) =>
+        tx.user.update({
           where: { id },
           data: rest,
           select: { id: true, name: true, email: true, image: true, emailVerified: true },
@@ -410,16 +410,16 @@ export function createCustomAdapter(): Adapter {
     },
 
     async deleteUser(userId: string) {
-      await withBypassRls(prisma, async () => {
+      await withBypassRls(prisma, async (tx) => {
         // SELECT session tokens BEFORE the cascade-delete fires. After
         // user.delete commits, the Postgres cascade removes Session rows
         // (auth-cascade), but does NOT invoke the per-row deleteSession
         // adapter — so we collect tokens up-front and invalidate manually.
-        const targetSessions = await prisma.session.findMany({
+        const targetSessions = await tx.session.findMany({
           where: { userId },
           select: { sessionToken: true },
         });
-        await prisma.user.delete({ where: { id: userId } });
+        await tx.user.delete({ where: { id: userId } });
         if (targetSessions.length > 0) {
           await invalidateCachedSessions(
             targetSessions.map((s) => s.sessionToken),
@@ -429,8 +429,8 @@ export function createCustomAdapter(): Adapter {
     },
 
     async unlinkAccount(providerAccountId: Pick<AdapterAccount, "provider" | "providerAccountId">) {
-      await withBypassRls(prisma, async () =>
-        prisma.account.delete({
+      await withBypassRls(prisma, async (tx) =>
+        tx.account.delete({
           where: {
             provider_providerAccountId: {
               provider: providerAccountId.provider,
@@ -442,8 +442,8 @@ export function createCustomAdapter(): Adapter {
     },
 
     async deleteSession(sessionToken: string) {
-      await withBypassRls(prisma, async () =>
-        prisma.session.delete({ where: { sessionToken } }),
+      await withBypassRls(prisma, async (tx) =>
+        tx.session.delete({ where: { sessionToken } }),
       BYPASS_PURPOSE.AUTH_FLOW);
       // R3: invalidation runs only if the delete didn't throw — preserves
       // the "DB write commits before cache evict" invariant.
@@ -454,8 +454,8 @@ export function createCustomAdapter(): Adapter {
       type FieldName = "refresh_token" | "access_token" | "id_token";
       const tamperFindings: Array<{ field: FieldName; errClass: string }> = [];
 
-      const account = await withBypassRls(prisma, async () =>
-        prisma.account.findFirst({
+      const account = await withBypassRls(prisma, async (tx) =>
+        tx.account.findFirst({
           where: { providerAccountId, provider },
           select: {
             id: true,
@@ -559,8 +559,8 @@ export function createCustomAdapter(): Adapter {
     ): Promise<AdapterSession | null | undefined> {
       try {
         // Read current session (provider included for provenance-aware resolution)
-        const current = await withBypassRls(prisma, async () =>
-          prisma.session.findUnique({
+        const current = await withBypassRls(prisma, async (tx) =>
+          tx.session.findUnique({
             where: { sessionToken: session.sessionToken },
             select: {
               userId: true,
@@ -585,8 +585,8 @@ export function createCustomAdapter(): Adapter {
 
         // Idle timeout: rolling; measured from lastActiveAt.
         if (now > idleDeadlineMs) {
-          await withBypassRls(prisma, async () =>
-            prisma.session.delete({
+          await withBypassRls(prisma, async (tx) =>
+            tx.session.delete({
               where: { sessionToken: session.sessionToken },
             }),
           BYPASS_PURPOSE.AUTH_FLOW);
@@ -597,8 +597,8 @@ export function createCustomAdapter(): Adapter {
         // Absolute cap: non-rolling; measured from createdAt. Enforced
         // independently of activity per OWASP ASVS 5.0 V7.3.2.
         if (now > absoluteDeadlineMs) {
-          await withBypassRls(prisma, async () =>
-            prisma.session.delete({
+          await withBypassRls(prisma, async (tx) =>
+            tx.session.delete({
               where: { sessionToken: session.sessionToken },
             }),
           BYPASS_PURPOSE.AUTH_FLOW);
@@ -621,8 +621,8 @@ export function createCustomAdapter(): Adapter {
           Math.min(now + resolved.idleMinutes * MS_PER_MINUTE, absoluteDeadlineMs),
         );
 
-        const updated = await withBypassRls(prisma, async () =>
-          prisma.session.update({
+        const updated = await withBypassRls(prisma, async (tx) =>
+          tx.session.update({
             where: { sessionToken: session.sessionToken },
             data: {
               expires: effectiveExpires,

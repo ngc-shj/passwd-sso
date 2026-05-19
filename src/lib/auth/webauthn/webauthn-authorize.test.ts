@@ -100,7 +100,7 @@ describe("authorizeWebAuthn", () => {
 
     // Default: withBypassRls calls the callback directly
     mockWithBypassRls.mockImplementation(
-      (_prisma: unknown, fn: () => unknown) => fn(),
+      (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
     );
 
     mockPrismaFindFirst.mockResolvedValue(mockStoredCredential);

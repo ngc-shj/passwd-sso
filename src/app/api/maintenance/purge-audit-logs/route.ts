@@ -40,8 +40,8 @@ async function purgeForTenant(
   retentionDays: number,
   dryRun: boolean,
 ): Promise<number> {
-  const tenant = await withBypassRls(prisma, async () =>
-    prisma.tenant.findUnique({
+  const tenant = await withBypassRls(prisma, async (tx) =>
+    tx.tenant.findUnique({
       where: { id: tenantId },
       select: { auditLogRetentionDays: true },
     }),
@@ -60,14 +60,14 @@ async function purgeForTenant(
   );
 
   if (dryRun) {
-    return withBypassRls(prisma, async () =>
-      prisma.auditLog.count({
+    return withBypassRls(prisma, async (tx) =>
+      tx.auditLog.count({
         where: { tenantId, createdAt: { lt: tenantCutoff } },
       }),
     BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
   }
-  const result = await withBypassRls(prisma, async () =>
-    prisma.auditLog.deleteMany({
+  const result = await withBypassRls(prisma, async (tx) =>
+    tx.auditLog.deleteMany({
       where: { tenantId, createdAt: { lt: tenantCutoff } },
     }),
   BYPASS_PURPOSE.SYSTEM_MAINTENANCE);

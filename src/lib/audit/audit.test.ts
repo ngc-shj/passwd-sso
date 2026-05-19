@@ -10,7 +10,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 vi.mock("@/lib/tenant-rls", () => ({
-  withBypassRls: vi.fn(async (_p: unknown, fn: () => Promise<unknown>) => fn()),
+  withBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => Promise<unknown>) => fn(p)),
   BYPASS_PURPOSE: { AUDIT_WRITE: "audit_write" },
 }));
 
@@ -59,6 +59,7 @@ import {
   sanitizeMetadata,
   resolveActorType,
   logAuditAsync,
+  logAuditAsyncBothScopes,
   logAuditBulkAsync,
   logAuditInTx,
   extractRequestMeta,
@@ -360,6 +361,74 @@ describe("logAuditAsync", () => {
     });
     await expect(logAuditAsync(baseParams)).resolves.toBeUndefined();
     expect(mockedEnqueue).toHaveBeenCalledOnce();
+  });
+});
+
+describe("logAuditAsyncBothScopes", () => {
+  it("emits exactly two outbox entries — one PERSONAL, one TENANT", async () => {
+    await logAuditAsyncBothScopes({
+      action: AUDIT_ACTION.AUTH_LOGIN,
+      userId: USER_A,
+      tenantId: TENANT_A,
+    });
+    expect(mockedEnqueue).toHaveBeenCalledTimes(2);
+    const scopes = mockedEnqueue.mock.calls.map((c) => c[1].scope);
+    // Order is non-deterministic under Promise.all but the SET must equal
+    // {PERSONAL, TENANT}.
+    expect(new Set(scopes)).toEqual(
+      new Set([AUDIT_SCOPE.PERSONAL, AUDIT_SCOPE.TENANT]),
+    );
+  });
+
+  it("propagates the shared base fields to both scope emissions", async () => {
+    await logAuditAsyncBothScopes({
+      action: AUDIT_ACTION.AUTH_LOGIN,
+      userId: USER_A,
+      tenantId: TENANT_A,
+      metadata: { ip: "1.2.3.4" },
+      targetId: "target-x",
+    });
+    expect(mockedEnqueue).toHaveBeenCalledTimes(2);
+    for (const [, payload] of mockedEnqueue.mock.calls) {
+      expect(payload.action).toBe(AUDIT_ACTION.AUTH_LOGIN);
+      expect(payload.userId).toBe(USER_A);
+      expect(payload.targetId).toBe("target-x");
+      expect(payload.metadata).toEqual({ ip: "1.2.3.4" });
+    }
+  });
+
+  it("does not throw when one inner emission's enqueue rejects (fan-out is fail-safe)", async () => {
+    // First call (PERSONAL) succeeds, second (TENANT) rejects. logAuditAsync
+    // never throws, so logAuditAsyncBothScopes never throws either.
+    mockedEnqueue
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("DB down for TENANT"));
+    await expect(
+      logAuditAsyncBothScopes({
+        action: AUDIT_ACTION.AUTH_LOGIN,
+        userId: USER_A,
+        tenantId: TENANT_A,
+      }),
+    ).resolves.toBeUndefined();
+    // Dead-letter path fires for the failed emission.
+    expect(deadLetterWarnSpy).toHaveBeenCalledOnce();
+  });
+
+  it("runs the two emissions in parallel (Promise.all, not sequential)", async () => {
+    // Capture invocation order via mock.invocationCallOrder. Both calls land
+    // before either resolves because mockedEnqueue is synchronously resolved.
+    await logAuditAsyncBothScopes({
+      action: AUDIT_ACTION.AUTH_LOGIN,
+      userId: USER_A,
+      tenantId: TENANT_A,
+    });
+    expect(mockedEnqueue).toHaveBeenCalledTimes(2);
+    // Both calls were initiated within the same microtask flush — sequential
+    // awaits would interleave dead-letter or other side effects, but here
+    // the only synchronous side effect is enqueue itself.
+    const [order1, order2] = mockedEnqueue.mock.invocationCallOrder;
+    // Strict adjacency: no other tracked mock invocation between them.
+    expect(Math.abs(order2 - order1)).toBe(1);
   });
 });
 

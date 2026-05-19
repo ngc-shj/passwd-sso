@@ -81,8 +81,8 @@ async function writeSyncError(
   error: unknown,
 ): Promise<void> {
   try {
-    await withTenantRls(prisma, tenantId, () =>
-      prisma.directorySyncConfig.update({
+    await withTenantRls(prisma, tenantId, (tx) =>
+      tx.directorySyncConfig.update({
         where: { id: configId },
         data: {
           status: "ERROR",
@@ -169,8 +169,8 @@ export async function runDirectorySync(
     );
 
     // Check for stale RUNNING state before CAS to detect stale-reset
-    const preCheck = await withTenantRls(prisma, tenantId, () =>
-      prisma.directorySyncConfig.findFirst({
+    const preCheck = await withTenantRls(prisma, tenantId, (tx) =>
+      tx.directorySyncConfig.findFirst({
         where: { id: configId, tenantId },
         select: { status: true, lastSyncAt: true },
       }),
@@ -180,7 +180,7 @@ export async function runDirectorySync(
       preCheck.lastSyncAt &&
       preCheck.lastSyncAt < staleThreshold;
 
-    const updated = await withTenantRls(prisma, tenantId, () =>
+    const updated = await withTenantRls(prisma, tenantId, (tx) =>
       prisma.$executeRaw`
         UPDATE "directory_sync_configs"
         SET status = 'RUNNING'::"DirectorySyncStatus",
@@ -250,8 +250,8 @@ export async function runDirectorySync(
 
   try {
     // 2. Load config and decrypt credentials
-    const config = await withTenantRls(prisma, tenantId, () =>
-      prisma.directorySyncConfig.findUnique({
+    const config = await withTenantRls(prisma, tenantId, (tx) =>
+      tx.directorySyncConfig.findUnique({
         where: { id: configId },
         select: {
           provider: true,
@@ -290,13 +290,13 @@ export async function runDirectorySync(
     const [existingMappings, existingMembers] = await withTenantRls(
       prisma,
       tenantId,
-      () =>
+      (tx) =>
         Promise.all([
-          prisma.scimExternalMapping.findMany({
+          tx.scimExternalMapping.findMany({
             where: { tenantId, resourceType: "User" },
             select: { externalId: true, internalId: true },
           }),
-          prisma.tenantMember.findMany({
+          tx.tenantMember.findMany({
             where: { tenantId },
             select: {
               id: true,
@@ -365,8 +365,8 @@ export async function runDirectorySync(
       const msg = `Safety guard: ${toDeactivate.length} deactivations would exceed 20% of ${activeCount} active users. Use force=true to override.`;
 
       // Create log entry for the aborted sync
-      const log = await withTenantRls(prisma, tenantId, () =>
-        prisma.directorySyncLog.create({
+      const log = await withTenantRls(prisma, tenantId, (tx) =>
+        tx.directorySyncLog.create({
           data: {
             configId,
             tenantId,
@@ -384,8 +384,8 @@ export async function runDirectorySync(
       );
 
       // Reset config status
-      await withTenantRls(prisma, tenantId, () =>
-        prisma.directorySyncConfig.update({
+      await withTenantRls(prisma, tenantId, (tx) =>
+        tx.directorySyncConfig.update({
           where: { id: configId },
           data: {
             status: "ERROR",
@@ -409,7 +409,7 @@ export async function runDirectorySync(
 
     // 7. Apply changes (if not dryRun)
     if (!dryRun) {
-      await withTenantRls(prisma, tenantId, () =>
+      await withTenantRls(prisma, tenantId, (tx) =>
         prisma.$transaction(async (tx) => {
           // Create new users
           // Batch pre-fetch: all users by email for toCreate
@@ -548,8 +548,8 @@ export async function runDirectorySync(
     const completedAt = new Date();
     const stats = { usersCreated, usersUpdated, usersDeactivated, groupsUpdated };
 
-    const log = await withTenantRls(prisma, tenantId, () =>
-      prisma.directorySyncLog.create({
+    const log = await withTenantRls(prisma, tenantId, (tx) =>
+      tx.directorySyncLog.create({
         data: {
           configId,
           tenantId,
@@ -570,8 +570,8 @@ export async function runDirectorySync(
       completedAt.getTime() + (config.syncIntervalMinutes ?? 60) * MS_PER_MINUTE,
     );
 
-    await withTenantRls(prisma, tenantId, () =>
-      prisma.directorySyncConfig.update({
+    await withTenantRls(prisma, tenantId, (tx) =>
+      tx.directorySyncConfig.update({
         where: { id: configId },
         data: {
           status: "SUCCESS",
@@ -599,8 +599,8 @@ export async function runDirectorySync(
     // Create error log
     let logId: string | undefined;
     try {
-      const log = await withTenantRls(prisma, tenantId, () =>
-        prisma.directorySyncLog.create({
+      const log = await withTenantRls(prisma, tenantId, (tx) =>
+        tx.directorySyncLog.create({
           data: {
             configId,
             tenantId,

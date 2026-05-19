@@ -53,8 +53,8 @@ async function handleGET(req: NextRequest) {
   const archivedOnly = searchParams.get("archived") === "true";
   const folderId = searchParams.get("folder");
 
-  const passwords = await withTenantRls(prisma, tenantId, async () =>
-    prisma.passwordEntry.findMany({
+  const passwords = await withTenantRls(prisma, tenantId, async (tx) =>
+    tx.passwordEntry.findMany({
       where: {
         userId,
         ...(trashOnly
@@ -134,18 +134,18 @@ async function handlePOST(req: NextRequest) {
 
   const { id: clientId, encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, folderId, isFavorite, entryType, requireReprompt, expiresAt } = result.data;
 
-  const createResult = await withTenantRls(prisma, tenantId, async () => {
+  const createResult = await withTenantRls(prisma, tenantId, async (tx) => {
     if (folderId) {
-      const folder = await prisma.folder.findFirst({ where: { id: folderId, userId } });
+      const folder = await tx.folder.findFirst({ where: { id: folderId, userId } });
       if (!folder) return { error: "INVALID_FOLDER" as const };
     }
 
     if (tagIds?.length) {
-      const ownedCount = await prisma.tag.count({ where: { id: { in: tagIds }, userId } });
+      const ownedCount = await tx.tag.count({ where: { id: { in: tagIds }, userId } });
       if (ownedCount !== tagIds.length) return { error: "INVALID_TAGS" as const };
     }
 
-    const entry = await prisma.passwordEntry.create({
+    const entry = await tx.passwordEntry.create({
       data: {
         ...(clientId ? { id: clientId } : {}),
         ...toBlobColumns(encryptedBlob),

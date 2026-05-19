@@ -93,8 +93,8 @@ export async function createAuthorizationCode(
   const codeHash = hashToken(plainCode);
   const expiresAt = new Date(Date.now() + MCP_CODE_EXPIRY_SEC * 1000);
 
-  await withBypassRls(prisma, async () =>
-    prisma.mcpAuthorizationCode.create({
+  await withBypassRls(prisma, async (tx) =>
+    tx.mcpAuthorizationCode.create({
       data: {
         codeHash,
         clientId: params.clientId,
@@ -150,7 +150,7 @@ export async function exchangeCodeForToken(
 ): Promise<TokenExchangeOutcome> {
   const codeHash = hashToken(params.code);
 
-  const result = await withBypassRls(prisma, async () =>
+  const result = await withBypassRls(prisma, async (tx) =>
     prisma.$transaction(async (tx) => {
       const authCode = await tx.mcpAuthorizationCode.findUnique({
         where: { codeHash },
@@ -268,8 +268,8 @@ export async function createRefreshToken(params: {
   const familyId = params.familyId ?? randomUUID();
   const expiresAt = new Date(Date.now() + MCP_REFRESH_TOKEN_EXPIRY_SEC * 1000);
 
-  await withBypassRls(prisma, async () => {
-    await prisma.mcpRefreshToken.create({
+  await withBypassRls(prisma, async (tx) => {
+    await tx.mcpRefreshToken.create({
       data: {
         tokenHash,
         familyId,
@@ -551,8 +551,8 @@ export async function validateMcpToken(
 
   const tokenHash = hashToken(token);
 
-  const record = await withBypassRls(prisma, async () =>
-    prisma.mcpAccessToken.findUnique({
+  const record = await withBypassRls(prisma, async (tx) =>
+    tx.mcpAccessToken.findUnique({
       where: { tokenHash },
       select: {
         id: true,
@@ -578,8 +578,8 @@ export async function validateMcpToken(
     !record.lastUsedAt ||
     Date.now() - record.lastUsedAt.getTime() > MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS;
   if (shouldUpdate) {
-    void withBypassRls(prisma, () =>
-      prisma.mcpAccessToken.update({
+    void withBypassRls(prisma, (tx) =>
+      tx.mcpAccessToken.update({
         where: { id: record.id },
         data: { lastUsedAt: new Date() },
       }),
@@ -620,7 +620,7 @@ export async function revokeToken(params: {
 }): Promise<void> {
   const tokenHash = hashToken(params.token);
 
-  await withBypassRls(prisma, async () =>
+  await withBypassRls(prisma, async (tx) =>
     prisma.$transaction(async (tx) => {
       // Try refresh token first (if hint says so or no hint)
       if (params.tokenTypeHint !== "access_token") {

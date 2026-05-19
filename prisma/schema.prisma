@@ -258,7 +258,11 @@ model MobileBridgeCode {
   tenantId      String    @map("tenant_id") @db.Uuid
   state         String    @db.VarChar(64)
   codeChallenge String    @map("code_challenge") @db.VarChar(64)
-  devicePubkey  String    @map("device_pubkey") @db.Text
+  // RFC 7638 JWK thumbprint (P-256, base64url, no padding = 43 chars).
+  // Replaces the prior base64url(SPKI-DER) `devicePubkey` field — SHA-256 of
+  // the SPKI string was never equal to the JWK thumbprint computed by the
+  // DPoP verifier, so the cnf-binding could not succeed in production.
+  deviceJkt     String    @map("device_jkt") @db.VarChar(43)
   expiresAt     DateTime  @map("expires_at") @db.Timestamptz(3)
   usedAt        DateTime? @map("used_at") @db.Timestamptz(3)
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -1483,6 +1487,10 @@ model TeamWebhook {
   secretIv         String    @map("secret_iv") @db.VarChar(24)
   secretAuthTag    String    @map("secret_auth_tag") @db.VarChar(32)
   masterKeyVersion Int       @default(1) @map("master_key_version")
+  // v1: AES-GCM with no AAD (legacy). v2: AAD bound to
+  // ("TeamWebhook" | version | webhookId | tenantId | teamId).
+  // See buildWebhookSecretAAD in src/lib/crypto/webhook-aad.ts.
+  secretAadVersion Int       @default(1) @map("secret_aad_version")
   events           String[]
   isActive         Boolean   @default(true) @map("is_active")
   lastError        String?   @map("last_error") @db.Text
@@ -1508,6 +1516,10 @@ model TenantWebhook {
   secretIv         String    @map("secret_iv") @db.VarChar(24)
   secretAuthTag    String    @map("secret_auth_tag") @db.VarChar(32)
   masterKeyVersion Int       @default(1) @map("master_key_version")
+  // v1: AES-GCM with no AAD (legacy). v2: AAD bound to
+  // ("TenantWebhook" | version | webhookId | tenantId).
+  // See buildWebhookSecretAAD in src/lib/crypto/webhook-aad.ts.
+  secretAadVersion Int       @default(1) @map("secret_aad_version")
   events           String[]
   isActive         Boolean   @default(true) @map("is_active")
   lastError        String?   @map("last_error") @db.Text

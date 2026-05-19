@@ -167,9 +167,9 @@ export function buildOutboxPayload(params: AuditLogParams): AuditOutboxPayload {
 async function resolveTenantId(params: AuditLogParams): Promise<string | null> {
   if (params.tenantId) return params.tenantId;
 
-  return withBypassRls(prisma, async () => {
+  return withBypassRls(prisma, async (tx) => {
     if (params.teamId) {
-      const team = await prisma.team.findUnique({
+      const team = await tx.team.findUnique({
         where: { id: params.teamId },
         select: { tenantId: true },
       });
@@ -179,7 +179,7 @@ async function resolveTenantId(params: AuditLogParams): Promise<string | null> {
     // Defense-in-depth: userId is typed as string, but sentinel UUIDs and
     // real user UUIDs must pass UUID_RE before hitting the DB lookup.
     if (UUID_RE.test(params.userId)) {
-      const user = await prisma.user.findUnique({
+      const user = await tx.user.findUnique({
         where: { id: params.userId },
         select: { tenantId: true },
       });
@@ -271,6 +271,24 @@ export async function logAuditAsync(params: AuditLogParams): Promise<void> {
       "audit.dead_letter",
     );
   }
+}
+
+/**
+ * Emit the same audit entry under BOTH the PERSONAL and TENANT scopes.
+ * Used by features (delegation, MCP tool access) that need a record on
+ * both the per-user and per-tenant audit surfaces. The caller supplies
+ * the entry WITHOUT a `scope` field; this helper fan-outs to both.
+ *
+ * The two emissions are run in parallel via Promise.all. logAuditAsync
+ * never throws, so neither does this.
+ */
+export async function logAuditAsyncBothScopes(
+  base: Omit<AuditLogParams, "scope">,
+): Promise<void> {
+  await Promise.all([
+    logAuditAsync({ ...base, scope: AUDIT_SCOPE.PERSONAL }),
+    logAuditAsync({ ...base, scope: AUDIT_SCOPE.TENANT }),
+  ]);
 }
 
 /**

@@ -45,8 +45,8 @@ async function handlePOST(req: NextRequest) {
   const { token, granteePublicKey, encryptedPrivateKey } = result.data;
 
   // Hash the token for DB lookup (DB stores only the hash)
-  const grant = await withBypassRls(prisma, async () =>
-    prisma.emergencyAccessGrant.findUnique({
+  const grant = await withBypassRls(prisma, async (tx) =>
+    tx.emergencyAccessGrant.findUnique({
       where: { tokenHash: hashToken(token) },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
@@ -70,7 +70,7 @@ async function handlePOST(req: NextRequest) {
 
   // Atomic compare-and-swap: only transitions a still-PENDING row, and only
   // creates the escrow key pair if the transition actually fired.
-  const txResult = await withBypassRls(prisma, async () =>
+  const txResult = await withBypassRls(prisma, async (tx) =>
     prisma.$transaction(async (tx) => {
       // C6 (early-return variant): if transition() reports !ok, the surrounding
       // tx commits but nothing follows the early return inside this callback,
@@ -111,8 +111,8 @@ async function handlePOST(req: NextRequest) {
     metadata: { ownerId: grant.ownerId },
   });
 
-  const owner = await withBypassRls(prisma, async () =>
-    prisma.user.findUnique({
+  const owner = await withBypassRls(prisma, async (tx) =>
+    tx.user.findUnique({
       where: { id: grant.ownerId },
       select: { email: true, name: true, locale: true },
     }),

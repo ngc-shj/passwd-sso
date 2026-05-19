@@ -97,8 +97,8 @@ async function handlePOST(req: NextRequest) {
   // Look up user and their credentials (cross-tenant, unauthenticated)
   let allowCredentials: Array<{ credentialId: string; transports: string[] }>;
 
-  const user = await withBypassRls(prisma, async () =>
-    prisma.user.findFirst({
+  const user = await withBypassRls(prisma, async (tx) =>
+    tx.user.findFirst({
       where: { email },
       select: {
         id: true,
@@ -110,8 +110,8 @@ async function handlePOST(req: NextRequest) {
   // SSO tenant users are rejected by the verify route's tenant guard,
   // so treat them the same as "not found" to avoid leaking info.
   if (user && (user.tenant === null || user.tenant.isBootstrap)) {
-    const credentials = await withBypassRls(prisma, async () =>
-      prisma.webAuthnCredential.findMany({
+    const credentials = await withBypassRls(prisma, async (tx) =>
+      tx.webAuthnCredential.findMany({
         where: { userId: user.id },
         select: { credentialId: true, transports: true },
       }),
@@ -122,8 +122,8 @@ async function handlePOST(req: NextRequest) {
     // Timing mitigation: run a dummy DB query so the response time is
     // indistinguishable from the real-user path (prevents user enumeration
     // via timing oracle).
-    await withBypassRls(prisma, async () =>
-      prisma.webAuthnCredential.findMany({
+    await withBypassRls(prisma, async (tx) =>
+      tx.webAuthnCredential.findMany({
         where: { userId: NIL_UUID },
         select: { credentialId: true, transports: true },
         take: PASSKEY_DUMMY_CREDENTIALS_MAX,

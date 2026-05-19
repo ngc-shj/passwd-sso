@@ -89,8 +89,8 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   if (!result.ok) return result.response;
 
   // Enforce `team value <= tenant value` for session timeouts.
-  const teamTenant = await withBypassRls(prisma, async () =>
-    prisma.team.findUnique({
+  const teamTenant = await withBypassRls(prisma, async (tx) =>
+    tx.team.findUnique({
       where: { id: teamId },
       select: {
         tenantId: true,

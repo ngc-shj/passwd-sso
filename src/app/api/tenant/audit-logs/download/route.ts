@@ -100,8 +100,8 @@ async function handleGET(req: NextRequest) {
   const stream = buildAuditLogStream({
     format,
     fetchBatch: ({ take, cursorId }) =>
-      withTenantRls(prisma, tenantId, async () =>
-        prisma.auditLog.findMany({
+      withTenantRls(prisma, tenantId, async (tx) =>
+        tx.auditLog.findMany({
           where,
           orderBy: { createdAt: "asc" },
           take,

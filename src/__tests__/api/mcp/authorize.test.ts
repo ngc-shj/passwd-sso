@@ -6,7 +6,7 @@ const { mockAuth, mockMcpClientFindFirst, mockWithBypassRls, mockServerAppUrl, m
   vi.hoisted(() => ({
     mockAuth: vi.fn(),
     mockMcpClientFindFirst: vi.fn(),
-    mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+    mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
     mockServerAppUrl: vi.fn((path: string) => `http://localhost:3000${path}`),
     mockDetectLocale: vi.fn(() => "en"),
     mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),

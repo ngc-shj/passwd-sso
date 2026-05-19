@@ -87,8 +87,8 @@ async function handlePOST(req: NextRequest) {
   // Revoke old-version shares across ALL tenants (master key is system-wide)
   let revokedShares = 0;
   if (revokeShares) {
-    const shareResult = await withBypassRls(prisma, async () =>
-      prisma.passwordShare.updateMany({
+    const shareResult = await withBypassRls(prisma, async (tx) =>
+      tx.passwordShare.updateMany({
         where: {
           masterKeyVersion: { lt: targetVersion },
           revokedAt: null,

@@ -115,7 +115,7 @@ final class MobileAPIClientTests: XCTestCase {
     _ = try await client.exchangeBridgeCode(
       code: "aabbcc",
       codeVerifier: "verifier123",
-      devicePubkey: "spkiBase64"
+      deviceJkt: "spkiBase64"
     )
 
     let req = try XCTUnwrap(capturedRequest)
@@ -125,7 +125,7 @@ final class MobileAPIClientTests: XCTestCase {
 
     XCTAssertEqual(body["code"], "aabbcc")
     XCTAssertEqual(body["code_verifier"], "verifier123")
-    XCTAssertEqual(body["device_pubkey"], "spkiBase64")
+    XCTAssertEqual(body["device_jkt"], "spkiBase64")
   }
 
   func testExchangeBridgeCode_dpopHeaderIsSet() async throws {
@@ -148,7 +148,7 @@ final class MobileAPIClientTests: XCTestCase {
     _ = try await client.exchangeBridgeCode(
       code: "code",
       codeVerifier: "verifier",
-      devicePubkey: "pubkey"
+      deviceJkt: "pubkey"
     )
 
     let req = try XCTUnwrap(capturedRequest)
@@ -172,7 +172,7 @@ final class MobileAPIClientTests: XCTestCase {
     )
 
     let response = try await client.exchangeBridgeCode(
-      code: "code", codeVerifier: "verifier", devicePubkey: "pubkey")
+      code: "code", codeVerifier: "verifier", deviceJkt: "pubkey")
 
     XCTAssertEqual(response.accessToken, "acc_stored")
     XCTAssertEqual(response.refreshToken, "ref_stored")
@@ -193,7 +193,7 @@ final class MobileAPIClientTests: XCTestCase {
       urlSession: session
     )
 
-    _ = try await client.exchangeBridgeCode(code: "code", codeVerifier: "verifier", devicePubkey: "pub")
+    _ = try await client.exchangeBridgeCode(code: "code", codeVerifier: "verifier", deviceJkt: "pub")
 
     let nonce = try XCTUnwrap(try tokenStore.loadNonce())
     XCTAssertEqual(nonce, "server-nonce-1")
@@ -223,7 +223,7 @@ final class MobileAPIClientTests: XCTestCase {
       urlSession: session
     )
 
-    _ = try await client.exchangeBridgeCode(code: "code", codeVerifier: "verifier", devicePubkey: "pub")
+    _ = try await client.exchangeBridgeCode(code: "code", codeVerifier: "verifier", deviceJkt: "pub")
     XCTAssertEqual(callCount, 2, "Client should retry exactly once after 401+nonce")
   }
 
@@ -242,7 +242,7 @@ final class MobileAPIClientTests: XCTestCase {
     )
 
     do {
-      _ = try await client.exchangeBridgeCode(code: "code", codeVerifier: "verifier", devicePubkey: "pub")
+      _ = try await client.exchangeBridgeCode(code: "code", codeVerifier: "verifier", deviceJkt: "pub")
       XCTFail("Expected rateLimited error")
     } catch MobileAPIError.rateLimited {
       // Expected.
@@ -264,7 +264,7 @@ final class MobileAPIClientTests: XCTestCase {
     )
 
     do {
-      _ = try await client.exchangeBridgeCode(code: "bad", codeVerifier: "ver", devicePubkey: "pub")
+      _ = try await client.exchangeBridgeCode(code: "bad", codeVerifier: "ver", deviceJkt: "pub")
       XCTFail("Expected bridgeCodeInvalid error")
     } catch MobileAPIError.bridgeCodeInvalid {
       // Expected.

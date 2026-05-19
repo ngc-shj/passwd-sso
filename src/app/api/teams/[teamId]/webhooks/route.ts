@@ -14,7 +14,11 @@ import {
   getMasterKeyByVersion,
   encryptServerData,
 } from "@/lib/crypto/crypto-server";
-import { randomBytes } from "node:crypto";
+import {
+  buildWebhookSecretAAD,
+  WEBHOOK_SECRET_AAD_VERSION_CURRENT,
+} from "@/lib/crypto/webhook-aad";
+import { randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS } from "@/lib/constants";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -97,15 +101,25 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     });
   }
 
-  // Generate HMAC secret and encrypt it
+  // Pre-allocate the webhook id so the AAD can bind to it BEFORE the row is
+  // written (see C9 design — AAD includes webhookId).
+  const webhookId = randomUUID();
   const plainSecret = randomBytes(32).toString("hex");
   const version = getCurrentMasterKeyVersion();
   const masterKey = getMasterKeyByVersion(version);
-  const encrypted = encryptServerData(plainSecret, masterKey);
 
-  const webhook = await withTeamTenantRls(teamId, async (tenantId) =>
-    prisma.teamWebhook.create({
+  const webhook = await withTeamTenantRls(teamId, async (tenantId) => {
+    const aad = buildWebhookSecretAAD({
+      tableName: "TeamWebhook",
+      version: WEBHOOK_SECRET_AAD_VERSION_CURRENT,
+      webhookId,
+      tenantId,
+      teamId,
+    });
+    const encrypted = encryptServerData(plainSecret, masterKey, aad);
+    return prisma.teamWebhook.create({
       data: {
+        id: webhookId,
         teamId,
         tenantId,
         url: data.url,
@@ -113,10 +127,11 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         secretIv: encrypted.iv,
         secretAuthTag: encrypted.authTag,
         masterKeyVersion: version,
+        secretAadVersion: WEBHOOK_SECRET_AAD_VERSION_CURRENT,
         events: data.events,
       },
-    }),
-  );
+    });
+  });
 
   await logAuditAsync({
     ...teamAuditBase(req, session.user.id, teamId),

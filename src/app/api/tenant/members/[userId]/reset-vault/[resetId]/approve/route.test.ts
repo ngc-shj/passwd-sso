@@ -43,7 +43,7 @@ const {
     mockResolveUserLocale: vi.fn(),
     mockRequireTenantPermission: vi.fn(),
     mockIsTenantRoleAbove: vi.fn(),
-    mockWithTenantRls: vi.fn((_p: unknown, _t: unknown, fn: () => unknown) => fn()),
+    mockWithTenantRls: vi.fn((p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(p)),
     mockNotificationTitle: vi.fn(),
     mockNotificationBody: vi.fn(),
     mockDecryptResetToken: vi.fn(),
@@ -91,7 +91,7 @@ vi.mock("@/lib/auth/access/tenant-role-hierarchy", () => ({
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
-  withBypassRls: vi.fn((_p: unknown, fn: () => unknown) => fn()),
+  withBypassRls: vi.fn((p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
 }));
 vi.mock("@/lib/notification/notification-messages", () => ({
   notificationTitle: mockNotificationTitle,

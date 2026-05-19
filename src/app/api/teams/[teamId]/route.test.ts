@@ -32,7 +32,7 @@ const {
     mockRequireTeamMember: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1")),
-    mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
+    mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => fn(prisma)),
     TeamAuthError: _TeamAuthError,
   };
 });

@@ -35,7 +35,7 @@ vi.mock("@/lib/vault/vault-reset", () => ({
   executeVaultReset: mockExecuteVaultReset,
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
-  withBypassRls: vi.fn((_prisma: unknown, fn: () => unknown) => fn()),
+  withBypassRls: vi.fn((prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({
@@ -76,7 +76,7 @@ const RESET_RECORD = {
 describe("POST /api/vault/admin-reset", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.APP_URL = "http://localhost:3000";
+    vi.stubEnv("APP_URL", "http://localhost:3000");
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockAdminVaultResetFindUnique.mockResolvedValue(RESET_RECORD);
     mockExecuteVaultReset.mockResolvedValue({ deletedEntries: 3, deletedAttachments: 1 });

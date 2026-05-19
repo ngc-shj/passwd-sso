@@ -31,7 +31,7 @@ const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMem
   mockSessionMetaGetStore: vi.fn(),
   mockTenantClaimStoreGetStore: vi.fn(),
   mockFindOrCreateSsoTenant: vi.fn(),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockTxSession: {
     create: vi.fn(),
     findMany: vi.fn(),

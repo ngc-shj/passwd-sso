@@ -20,7 +20,7 @@ const {
   mockFolderFindFirst: vi.fn(),
   mockTagCount: vi.fn(),
   mockLogAudit: vi.fn(),
-  mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: unknown, fn: () => unknown) => fn()),
+  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
 vi.mock("@/lib/auth/tokens/api-key", () => ({ validateApiKeyOnly: mockValidateApiKeyOnly }));

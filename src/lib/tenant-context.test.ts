@@ -39,11 +39,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Default: withBypassRls executes the callback directly
   mockWithBypassRls.mockImplementation(
-    (_prisma: unknown, fn: () => unknown) => fn(),
+    (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
   );
   // Default: withTenantRls executes the callback directly
   mockWithTenantRls.mockImplementation(
-    (_prisma: unknown, _tenantId: unknown, fn: () => unknown) => fn(),
+    (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
   );
 });
 

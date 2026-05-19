@@ -8,7 +8,7 @@ const { mockFindUnique, mockUpdate } = vi.hoisted(() => ({
   mockUpdate: vi.fn(),
 }));
 const { mockWithBypassRls } = vi.hoisted(() => ({
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 const {
   mockFindMany,

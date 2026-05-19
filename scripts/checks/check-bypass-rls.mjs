@@ -150,6 +150,14 @@ const BYPASS_CALL_RE = /withBypassRls\s*\(/;
 // Regex to verify BYPASS_PURPOSE constant is used (not a string literal).
 const BYPASS_PURPOSE_RE = /BYPASS_PURPOSE\.\w+/;
 
+// C2 (per plan): production callsites of with(Bypass|Tenant)Rls MUST use
+// the (tx) => tx.x form, NOT () => prisma.x. The bare-prisma form works only
+// via the Prisma proxy's AsyncLocalStorage injection; it brittle-fails in
+// tests that inject a raw PrismaClient or use a DI wrapper.
+// Pattern matches the closing-paren-then-fat-arrow shape: `, () =>`.
+const TX_LESS_CALLBACK_RE =
+  /with(?:Bypass|Tenant)Rls\([\s\S]*?,\s*(?:async\s+)?\(\)\s*=>/m;
+
 function getSourceFiles() {
   const files = [];
   for (const entry of readdirSync("src", { recursive: true, withFileTypes: true })) {
@@ -164,6 +172,7 @@ function getSourceFiles() {
 const fileViolations = [];
 const modelViolations = [];
 const purposeViolations = [];
+const txLessViolations = [];
 
 for (const file of getSourceFiles()) {
   // Skip test files — they mock withBypassRls, not call it for real
@@ -196,6 +205,13 @@ for (const file of getSourceFiles()) {
     // Scan forward from the call site
     const end = Math.min(i + SCAN_RADIUS, lines.length);
 
+    // Check 3a: tx-less callback (C2) — match the call site + a few lines
+    // forward in case the `() =>` lands on the next line.
+    const window = lines.slice(i, end).join("\n");
+    if (TX_LESS_CALLBACK_RE.test(window)) {
+      txLessViolations.push({ file, line: i + 1 });
+    }
+
     // Check 3b: model allowlist (skip for wildcard files)
     if (!allowedSet) continue;
     for (let j = i; j < end; j++) {
@@ -208,6 +224,23 @@ for (const file of getSourceFiles()) {
           modelViolations.push({ file, line: j + 1, model });
         }
       }
+    }
+  }
+}
+
+// Scan ALL production files (not just allowlisted ones) for withTenantRls
+// tx-less callbacks — withTenantRls has no per-file allowlist but the
+// signature discipline still applies.
+for (const file of getSourceFiles()) {
+  if (file.includes(".test.") || file.includes("__tests__")) continue;
+  const content = readFileSync(file, "utf8");
+  if (!/withTenantRls\s*\(/.test(content)) continue;
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (!/withTenantRls\s*\(/.test(lines[i])) continue;
+    const window = lines.slice(i, Math.min(i + SCAN_RADIUS, lines.length)).join("\n");
+    if (TX_LESS_CALLBACK_RE.test(window)) {
+      txLessViolations.push({ file, line: i + 1 });
     }
   }
 }
@@ -254,6 +287,26 @@ if (purposeViolations.length > 0) {
   );
   console.error("");
   for (const { file, line } of purposeViolations) {
+    console.error(`  ${file}:${line}`);
+  }
+}
+
+if (txLessViolations.length > 0) {
+  failed = true;
+  if (fileViolations.length > 0 || modelViolations.length > 0 || purposeViolations.length > 0) {
+    console.error("");
+  }
+  console.error(
+    "with(Bypass|Tenant)Rls callback uses tx-less form `() => ...`.",
+  );
+  console.error(
+    "Use `(tx) => tx.x.method(...)` instead. The bare-prisma form depends on",
+  );
+  console.error(
+    "the Prisma proxy's AsyncLocalStorage injection and breaks under DI / raw client.",
+  );
+  console.error("");
+  for (const { file, line } of txLessViolations) {
     console.error(`  ${file}:${line}`);
   }
 }

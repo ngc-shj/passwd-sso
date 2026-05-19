@@ -23,7 +23,7 @@ const {
   },
   mockRequireTeamPermission: vi.fn(),
   mockWithTeamTenantRls: vi.fn(
-    async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1"),
+    async (_teamId: string, fn: (tenantId: string) => unknown) => fn("22222222-2222-4222-8222-222222222222"),
   ),
   mockLogAudit: vi.fn(),
   mockEncryptServerData: vi.fn(() => ({
@@ -78,7 +78,7 @@ import { GET, POST } from "./route";
 
 type Params = { params: Promise<{ teamId: string }> };
 
-function teamParams(teamId: string = "team-1"): Params {
+function teamParams(teamId: string = "33333333-3333-4333-8333-333333333333"): Params {
   return createParams({ teamId });
 }
 
@@ -91,7 +91,7 @@ describe("GET /api/teams/[teamId]/webhooks", () => {
 
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
-    const req = createRequest("GET", "http://localhost:3000/api/teams/team-1/webhooks");
+    const req = createRequest("GET", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks");
     const { status } = await parseResponse(await GET(req, teamParams()));
     expect(status).toBe(401);
   });
@@ -101,7 +101,7 @@ describe("GET /api/teams/[teamId]/webhooks", () => {
     mockRequireTeamPermission.mockRejectedValue(
       new TeamAuthError("Forbidden", 403),
     );
-    const req = createRequest("GET", "http://localhost:3000/api/teams/team-1/webhooks");
+    const req = createRequest("GET", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks");
     const { status } = await parseResponse(await GET(req, teamParams()));
     expect(status).toBe(403);
   });
@@ -121,7 +121,7 @@ describe("GET /api/teams/[teamId]/webhooks", () => {
       },
     ]);
 
-    const req = createRequest("GET", "http://localhost:3000/api/teams/team-1/webhooks");
+    const req = createRequest("GET", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks");
     const { status, json } = await parseResponse(await GET(req, teamParams()));
     expect(status).toBe(200);
     expect(json.webhooks).toHaveLength(1);
@@ -145,7 +145,7 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
   });
 
   it("creates a webhook and returns secret", async () => {
-    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks", {
       body: {
         url: "https://example.com/hook",
         events: ["ENTRY_CREATE"],
@@ -159,7 +159,7 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
   });
 
   it("returns 400 on invalid URL", async () => {
-    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks", {
       body: {
         url: "not-a-url",
         events: ["ENTRY_CREATE"],
@@ -170,7 +170,7 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
   });
 
   it("rejects http:// URLs (requires HTTPS)", async () => {
-    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks", {
       body: {
         url: "http://example.com/hook",
         events: ["ENTRY_CREATE"],
@@ -181,7 +181,7 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
   });
 
   it("rejects localhost URLs", async () => {
-    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks", {
       body: {
         url: "https://localhost/hook",
         events: ["ENTRY_CREATE"],
@@ -192,7 +192,7 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
   });
 
   it("rejects IP address URLs", async () => {
-    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks", {
       body: {
         url: "https://127.0.0.1/hook",
         events: ["ENTRY_CREATE"],
@@ -204,7 +204,7 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
 
   it("returns 400 when webhook limit is reached", async () => {
     mockPrismaTeamWebhook.count.mockResolvedValue(5);
-    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks", {
       body: {
         url: "https://example.com/hook",
         events: ["ENTRY_CREATE"],
@@ -215,7 +215,7 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
   });
 
   it("records WEBHOOK_CREATE audit event", async () => {
-    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks", {
       body: {
         url: "https://example.com/hook",
         events: ["ENTRY_CREATE"],
@@ -234,7 +234,7 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
     mockRequireTeamPermission.mockRejectedValue(
       new TeamAuthError("Forbidden", 403),
     );
-    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks", {
       body: {
         url: "https://example.com/hook",
         events: ["ENTRY_CREATE"],
@@ -245,7 +245,7 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
   });
 
   it("returns 400 when events array is empty", async () => {
-    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks", {
       body: {
         url: "https://example.com/hook",
         events: [],
@@ -256,7 +256,7 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
   });
 
   it("returns 400 for invalid event name", async () => {
-    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks", {
       body: {
         url: "https://example.com/hook",
         events: ["INVALID_EVENT"],
@@ -267,7 +267,7 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
   });
 
   it("returns 400 for personal/tenant-scoped event not in team allowlist", async () => {
-    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks", {
       body: {
         url: "https://example.com/hook",
         events: ["AUTH_LOGIN"],
@@ -278,7 +278,7 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
   });
 
   it("returns 400 for group name used as event", async () => {
-    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks", {
       body: {
         url: "https://example.com/hook",
         events: ["group:webhook"],
@@ -311,7 +311,7 @@ describe("GET /api/teams/[teamId]/webhooks — response shape", () => {
       },
     ]);
 
-    const req = createRequest("GET", "http://localhost:3000/api/teams/team-1/webhooks");
+    const req = createRequest("GET", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks");
     const { json } = await parseResponse(await GET(req, teamParams()));
     const webhook = json.webhooks[0];
     expect(webhook).not.toHaveProperty("secret");

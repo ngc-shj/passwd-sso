@@ -137,8 +137,8 @@ export async function checkTeamAccessRestriction(teamId: string, clientIp: strin
     if (tenantId) {
       const tenant = await withBypassRls(
         prisma,
-        async () =>
-          prisma.tenant.findUnique({
+        async (tx) =>
+          tx.tenant.findUnique({
             where: { id: tenantId },
             select: { allowedCidrs: true },
           }),

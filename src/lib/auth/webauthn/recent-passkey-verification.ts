@@ -36,8 +36,8 @@ export async function requireRecentPasskeyVerification(
 
   const sessionRow = await withBypassRls(
     prisma,
-    async () =>
-      prisma.session.findUnique({
+    async (tx) =>
+      tx.session.findUnique({
         where: { sessionToken },
         select: { passkeyVerifiedAt: true },
       }),
@@ -65,8 +65,8 @@ export async function markCurrentSessionPasskeyVerified(
 ): Promise<void> {
   await withBypassRls(
     prisma,
-    async () =>
-      prisma.session.update({
+    async (tx) =>
+      tx.session.update({
         where: { sessionToken },
         data: { passkeyVerifiedAt: verifiedAt },
       }),

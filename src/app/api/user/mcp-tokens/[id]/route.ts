@@ -24,8 +24,8 @@ async function handleDELETE(
   }
   const { id } = await params;
 
-  const result = await withBypassRls(prisma, async () => {
-    const token = await prisma.mcpAccessToken.findFirst({
+  const result = await withBypassRls(prisma, async (tx) => {
+    const token = await tx.mcpAccessToken.findFirst({
       where: { id, userId, tenantId, revokedAt: null },
       select: { id: true },
     });

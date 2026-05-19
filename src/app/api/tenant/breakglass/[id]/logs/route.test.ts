@@ -24,7 +24,7 @@ const {
   return {
     mockAuth: vi.fn(),
     mockRequireTenantPermission: vi.fn(),
-    mockWithTenantRls: vi.fn(async (_p: unknown, _t: unknown, fn: () => unknown) => fn()),
+    mockWithTenantRls: vi.fn(async (p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(p)),
     mockGrantFindFirst: vi.fn(),
     mockTenantMemberFindFirst: vi.fn(),
     mockAuditLogCreate: vi.fn(),
@@ -56,6 +56,10 @@ vi.mock("@/lib/prisma", () => ({
     },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({
       $executeRaw: vi.fn().mockResolvedValue(undefined),
+      personalLogAccessGrant: { findFirst: mockGrantFindFirst },
+      tenantMember: { findFirst: mockTenantMemberFindFirst },
+      auditLog: { create: mockAuditLogCreate, findMany: mockAuditLogFindMany },
+      user: { findMany: mockUserFindMany },
     })),
   },
 }));

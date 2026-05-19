@@ -63,8 +63,8 @@ async function handlePOST(req: NextRequest) {
   });
   if (tokenBlocked) return tokenBlocked;
 
-  const share = await withBypassRls(prisma, () =>
-    prisma.passwordShare.findUnique({
+  const share = await withBypassRls(prisma, (tx) =>
+    tx.passwordShare.findUnique({
       where: { tokenHash },
       select: {
         id: true,

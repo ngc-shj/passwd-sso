@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const { mockAuth, mockPrismaTeamMember, mockWithBypassRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTeamMember: { findMany: vi.fn() },
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));

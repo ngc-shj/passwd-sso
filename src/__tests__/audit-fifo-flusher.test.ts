@@ -42,7 +42,7 @@ vi.mock("@/lib/audit/audit-logger", async (importOriginal) => {
 
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
-  withBypassRls: (_prisma: unknown, fn: () => unknown, _purpose: unknown) => fn(),
+  withBypassRls: (prisma: unknown, fn: (tx: unknown) => unknown, _purpose: unknown) => fn(prisma),
 }));
 
 vi.mock("@/lib/logger", () => ({

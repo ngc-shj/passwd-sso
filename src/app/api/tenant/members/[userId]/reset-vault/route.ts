@@ -77,8 +77,8 @@ async function handlePOST(
   }
 
   // Find the target member in same tenant
-  const targetMember = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.tenantMember.findFirst({
+  const targetMember = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.tenantMember.findFirst({
       where: {
         tenantId: actor.tenantId,
         userId: targetUserId,
@@ -119,8 +119,8 @@ async function handlePOST(
   }
 
   // Check pending resets limit
-  const pendingCount = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.adminVaultReset.count({
+  const pendingCount = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.adminVaultReset.count({
       where: {
         targetUserId,
         executedAt: null,
@@ -147,8 +147,8 @@ async function handlePOST(
     targetEmailAtInitiate,
   });
 
-  const resetRecord = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.adminVaultReset.create({
+  const resetRecord = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.adminVaultReset.create({
       data: {
         id,
         tenantId: actor.tenantId,
@@ -177,8 +177,8 @@ async function handlePOST(
   // Notify OTHER eligible admins (FR8 + S6).
   // Recipient set: same-tenant admins who could approve — i.e., a different
   // user, currently active, with role strictly above the target's role.
-  const otherAdmins = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.tenantMember.findMany({
+  const otherAdmins = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.tenantMember.findMany({
       where: {
         tenantId: actor.tenantId,
         userId: { not: session.user.id },

@@ -95,8 +95,8 @@ async function handlePOST(req: NextRequest) {
   const now = new Date();
   const result = await withBypassRls(
     prisma,
-    async () =>
-      prisma.extensionBridgeCode.updateMany({
+    async (tx) =>
+      tx.extensionBridgeCode.updateMany({
         where: {
           codeHash,
           usedAt: null,
@@ -126,8 +126,8 @@ async function handlePOST(req: NextRequest) {
   // (P1-S1: server-side resolution, never from client input).
   const consumed = await withBypassRls(
     prisma,
-    async () =>
-      prisma.extensionBridgeCode.findUnique({
+    async (tx) =>
+      tx.extensionBridgeCode.findUnique({
         where: { codeHash },
         select: { userId: true, tenantId: true, scope: true },
       }),

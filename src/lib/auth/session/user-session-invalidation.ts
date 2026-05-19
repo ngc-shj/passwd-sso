@@ -75,10 +75,10 @@ export async function invalidateUserSessions(
   const tenantFilter = allTenants ? {} : { tenantId: options.tenantId };
   const now = new Date();
 
-  return withBypassRls(prisma, async () => {
+  return withBypassRls(prisma, async (tx) => {
     // SELECT tokens before deleteMany so we can invalidate the cache after
     // the DB delete commits (R3 / S-6 sequencing).
-    const targetSessions = await prisma.session.findMany({
+    const targetSessions = await tx.session.findMany({
       where: { userId, ...tenantFilter },
       select: { sessionToken: true },
     });
@@ -91,26 +91,26 @@ export async function invalidateUserSessions(
       mcpRefreshTokensResult,
       delegationSessionsResult,
     ] = await Promise.all([
-      prisma.session.deleteMany({
+      tx.session.deleteMany({
         where: { userId, ...tenantFilter },
       }),
-      prisma.extensionToken.updateMany({
+      tx.extensionToken.updateMany({
         where: { userId, revokedAt: null, ...tenantFilter },
         data: { revokedAt: now },
       }),
-      prisma.apiKey.updateMany({
+      tx.apiKey.updateMany({
         where: { userId, revokedAt: null, ...tenantFilter },
         data: { revokedAt: now },
       }),
-      prisma.mcpAccessToken.updateMany({
+      tx.mcpAccessToken.updateMany({
         where: { userId, revokedAt: null, ...tenantFilter },
         data: { revokedAt: now },
       }),
-      prisma.mcpRefreshToken.updateMany({
+      tx.mcpRefreshToken.updateMany({
         where: { userId, revokedAt: null, ...tenantFilter },
         data: { revokedAt: now },
       }),
-      prisma.delegationSession.updateMany({
+      tx.delegationSession.updateMany({
         where: { userId, revokedAt: null, ...tenantFilter },
         data: { revokedAt: now },
       }),
@@ -157,8 +157,8 @@ export async function invalidateUserSessions(
 export async function invalidateTenantSessionsCache(
   tenantId: string,
 ): Promise<{ totalSessions: number; cacheTombstoneFailures: number }> {
-  const targetSessions = await withBypassRls(prisma, () =>
-    prisma.session.findMany({
+  const targetSessions = await withBypassRls(prisma, (tx) =>
+    tx.session.findMany({
       where: { tenantId, expires: { gt: new Date() } },
       select: { sessionToken: true },
     }),

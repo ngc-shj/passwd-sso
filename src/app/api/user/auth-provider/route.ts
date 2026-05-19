@@ -17,8 +17,8 @@ async function handleGET() {
   }
 
   try {
-    const accounts = await withBypassRls(prisma, () =>
-      prisma.account.findMany({
+    const accounts = await withBypassRls(prisma, (tx) =>
+      tx.account.findMany({
         where: { userId: session.user.id },
         select: { provider: true },
       }),

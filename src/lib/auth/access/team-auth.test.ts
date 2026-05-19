@@ -32,7 +32,7 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 
 vi.mock("@/lib/tenant-rls", () => ({
-  withBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  withBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   BYPASS_PURPOSE: { CROSS_TENANT_LOOKUP: "CROSS_TENANT_LOOKUP" },
 }));
 

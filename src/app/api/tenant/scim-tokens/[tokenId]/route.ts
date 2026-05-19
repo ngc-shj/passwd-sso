@@ -33,8 +33,8 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
 
   const { tokenId } = await params;
 
-  const token = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.scimToken.findUnique({
+  const token = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.scimToken.findUnique({
       where: { id: tokenId },
       select: { id: true, tenantId: true, revokedAt: true },
     }),
@@ -48,8 +48,8 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     return errorResponse(API_ERROR.ALREADY_REVOKED);
   }
 
-  await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.scimToken.update({
+  await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.scimToken.update({
       where: { id: tokenId },
       data: { revokedAt: new Date() },
     }),

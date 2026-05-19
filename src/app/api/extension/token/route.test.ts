@@ -29,7 +29,7 @@ const {
   mockTransaction: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));

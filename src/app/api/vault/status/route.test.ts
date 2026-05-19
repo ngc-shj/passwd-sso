@@ -6,7 +6,7 @@ const { mockCheckAuth, mockPrismaUser, mockWithUserTenantRls, mockWithTenantRls 
   mockCheckAuth: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-  mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
+  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 vi.mock("@/lib/auth/session/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/prisma", () => ({

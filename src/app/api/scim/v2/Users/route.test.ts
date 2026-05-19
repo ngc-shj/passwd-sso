@@ -19,7 +19,7 @@ const {
   mockUser: { findUnique: vi.fn(), create: vi.fn() },
   mockScimExternalMapping: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
   mockTransaction: vi.fn(),
-  mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
+  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
 vi.mock("@/lib/auth/tokens/scim-token", () => ({ validateScimToken: mockValidateScimToken }));
@@ -68,7 +68,7 @@ function makeReq(options: { searchParams?: Record<string, string>; body?: unknow
 describe("GET /api/scim/v2/Users", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.AUTH_URL = "http://localhost:3000";
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
   });
@@ -187,7 +187,7 @@ describe("GET /api/scim/v2/Users", () => {
 describe("POST /api/scim/v2/Users", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.AUTH_URL = "http://localhost:3000";
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
   });

@@ -15,7 +15,11 @@ import {
   getMasterKeyByVersion,
   encryptServerData,
 } from "@/lib/crypto/crypto-server";
-import { randomBytes } from "node:crypto";
+import {
+  buildWebhookSecretAAD,
+  WEBHOOK_SECRET_AAD_VERSION_CURRENT,
+} from "@/lib/crypto/webhook-aad";
+import { randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
@@ -46,8 +50,8 @@ async function handleGET(_req: NextRequest) {
     return handleAuthError(e);
   }
 
-  const webhooks = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.tenantWebhook.findMany({
+  const webhooks = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.tenantWebhook.findMany({
       where: { tenantId: actor.tenantId },
       select: {
         id: true,
@@ -86,8 +90,8 @@ async function handlePOST(req: NextRequest) {
   const { data } = result;
 
   // Check webhook count limit
-  const existingCount = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.tenantWebhook.count({ where: { tenantId: actor.tenantId } }),
+  const existingCount = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.tenantWebhook.count({ where: { tenantId: actor.tenantId } }),
   );
   if (existingCount >= MAX_WEBHOOKS) {
     return validationError({
@@ -95,21 +99,32 @@ async function handlePOST(req: NextRequest) {
     });
   }
 
-  // Generate HMAC secret and encrypt it
+  // Pre-allocate the webhook id so the AAD can bind to it BEFORE the row is
+  // written. Without this, AAD construction would have a chicken-and-egg
+  // dependency on the create() call's returned id.
+  const webhookId = randomUUID();
   const plainSecret = randomBytes(32).toString("hex");
   const version = getCurrentMasterKeyVersion();
   const masterKey = getMasterKeyByVersion(version);
-  const encrypted = encryptServerData(plainSecret, masterKey);
+  const aad = buildWebhookSecretAAD({
+    tableName: "TenantWebhook",
+    version: WEBHOOK_SECRET_AAD_VERSION_CURRENT,
+    webhookId,
+    tenantId: actor.tenantId,
+  });
+  const encrypted = encryptServerData(plainSecret, masterKey, aad);
 
-  const webhook = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.tenantWebhook.create({
+  const webhook = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.tenantWebhook.create({
       data: {
+        id: webhookId,
         tenantId: actor.tenantId,
         url: data.url,
         secretEncrypted: encrypted.ciphertext,
         secretIv: encrypted.iv,
         secretAuthTag: encrypted.authTag,
         masterKeyVersion: version,
+        secretAadVersion: WEBHOOK_SECRET_AAD_VERSION_CURRENT,
         events: data.events,
       },
     }),

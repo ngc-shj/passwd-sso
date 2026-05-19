@@ -26,7 +26,7 @@ const { mockAuth, mockCheckAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFold
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
-    mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+    mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
     mockLogAudit: vi.fn(),
   };
 });

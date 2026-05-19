@@ -24,7 +24,7 @@ const {
     mockRequireTenantPermission: vi.fn(),
     TenantAuthError: _TenantAuthError,
     mockWithTenantRls: vi.fn(
-      async (_prisma: unknown, _tenantId: unknown, fn: () => unknown) => fn(),
+      async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
     ),
     mockLogAudit: vi.fn(),
     mockDownloadLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),

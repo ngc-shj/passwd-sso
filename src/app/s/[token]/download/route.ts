@@ -38,8 +38,8 @@ export async function GET(req: NextRequest, { params }: Params) {
   const tokenHash = hashToken(token);
 
   // All DB access must bypass RLS (unauthenticated public endpoint)
-  return withBypassRls(prisma, async () => {
-    const share = await prisma.passwordShare.findUnique({
+  return withBypassRls(prisma, async (tx) => {
+    const share = await tx.passwordShare.findUnique({
       where: { tokenHash },
       select: {
         id: true,
@@ -132,7 +132,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     const accessIp = ip;  // extractClientIp returns null when IP is unavailable
 
     const ua = req.headers.get("user-agent");
-    await prisma.shareAccessLog
+    await tx.shareAccessLog
       .create({
         data: {
           shareId: share.id,

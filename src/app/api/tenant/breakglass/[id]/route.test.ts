@@ -23,7 +23,7 @@ const {
   return {
     mockAuth: vi.fn(),
     mockRequireTenantPermission: vi.fn(),
-    mockWithTenantRls: vi.fn(async (_p: unknown, _t: unknown, fn: () => unknown) => fn()),
+    mockWithTenantRls: vi.fn(async (p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(p)),
     mockLogAudit: vi.fn(),
     mockGrantFindFirst: vi.fn(),
     mockGrantUpdateMany: vi.fn(),

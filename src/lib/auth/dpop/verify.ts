@@ -215,7 +215,15 @@ export function computeAth(accessToken: string): string {
   return createHash("sha256").update(accessToken).digest("base64url");
 }
 
-/** RFC 7638 §3 thumbprint for a P-256 EC JWK. base64url(SHA-256(JCS(jwk))). */
+/**
+ * RFC 7638 §3 thumbprint for a P-256 EC JWK. base64url(SHA-256(JCS(jwk))).
+ *
+ * MIRROR: Swift counterpart in ios/Shared/Crypto/SecureEnclaveKey.swift::
+ * computeJWKThumbprint. Any change to the canonical-JSON key order (crv,
+ * kty, x, y) MUST land in BOTH implementations — drift will silently
+ * break iOS auth because the device_jkt sent on the wire will no longer
+ * equal the thumbprint computed from the proof header here.
+ */
 export function jwkThumbprint(jwk: DpopJwk): string {
   // Required-member ordering for EC keys is exactly: crv, kty, x, y.
   const canonical = JSON.stringify({

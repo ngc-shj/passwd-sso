@@ -1,33 +1,36 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
 const {
-  mockMobileBridgeCodeUpdate,
+  mockMobileBridgeCodeFindUnique,
+  mockMobileBridgeCodeUpdateMany,
   mockWithBypassRls,
   mockCheck,
   mockIssueIosToken,
   mockVerifyDpop,
   mockVerifyPkceS256,
   mockLogAuditAsync,
-  mockGetDpopNonceService,
   mockExtractClientIp,
   mockWarn,
   mockError,
 } = vi.hoisted(() => ({
-  mockMobileBridgeCodeUpdate: vi.fn(),
-  mockWithBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
+  mockMobileBridgeCodeFindUnique: vi.fn(),
+  mockMobileBridgeCodeUpdateMany: vi.fn(),
+  mockWithBypassRls: vi.fn(
+    async (_p: unknown, fn: (tx: unknown) => unknown) => fn({
+      mobileBridgeCode: {
+        findUnique: mockMobileBridgeCodeFindUnique,
+        updateMany: mockMobileBridgeCodeUpdateMany,
+      },
+    }),
+  ),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockIssueIosToken: vi.fn(),
   mockVerifyDpop: vi.fn(),
   mockVerifyPkceS256: vi.fn(),
   mockLogAuditAsync: vi.fn(),
-  mockGetDpopNonceService: vi.fn(() => ({
-    current: vi.fn().mockResolvedValue("nonce-current"),
-    rotateIfDue: vi.fn().mockResolvedValue(undefined),
-    isAccepted: vi.fn().mockResolvedValue(true),
-  })),
   mockExtractClientIp: vi.fn(() => "1.2.3.4"),
   mockWarn: vi.fn(),
   mockError: vi.fn(),
@@ -36,7 +39,8 @@ const {
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     mobileBridgeCode: {
-      update: mockMobileBridgeCodeUpdate,
+      findUnique: mockMobileBridgeCodeFindUnique,
+      updateMany: mockMobileBridgeCodeUpdateMany,
     },
   },
 }));
@@ -74,11 +78,6 @@ vi.mock("@/lib/auth/dpop/jti-cache", () => ({
   getJtiCache: () => ({ hasOrRecord: vi.fn().mockResolvedValue(false) }),
 }));
 
-vi.mock("@/lib/auth/dpop/nonce", async (importOriginal) => ({
-  ...((await importOriginal()) as Record<string, unknown>),
-  getDpopNonceService: mockGetDpopNonceService,
-}));
-
 vi.mock("@/lib/mcp/oauth-server", async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
   verifyPkceS256: mockVerifyPkceS256,
@@ -113,8 +112,8 @@ import { POST } from "./route";
 
 const VALID_CODE = "f".repeat(64);
 const VALID_VERIFIER = "v".repeat(43);
-const VALID_DEVICE_PUBKEY =
-  "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEhVc7n3kP4cFE_UxRIm2Ki5FNpYlF1JKoYJYgTEbZBuDKaW6BBwQuP-y_3R5_uA0iJZ-vQGRT-rqr_MQ7H4cQ-A";
+// RFC 7638 JWK thumbprint: 43 base64url chars (SHA-256 unpadded).
+const VALID_DEVICE_JKT = "a".repeat(43);
 const USER_ID = "11111111-1111-1111-1111-111111111111";
 const TENANT_ID = "22222222-2222-2222-2222-222222222222";
 const TOKEN_ID = "33333333-3333-4333-8333-333333333333";
@@ -123,7 +122,7 @@ function buildBody(overrides: Record<string, unknown> = {}) {
   return {
     code: VALID_CODE,
     code_verifier: VALID_VERIFIER,
-    device_pubkey: VALID_DEVICE_PUBKEY,
+    device_jkt: VALID_DEVICE_JKT,
     ...overrides,
   };
 }
@@ -135,10 +134,23 @@ function makeReq(body: unknown = buildBody(), headers: Record<string, string> = 
   });
 }
 
+function freshBridgeRow(overrides: Record<string, unknown> = {}) {
+  return {
+    userId: USER_ID,
+    tenantId: TENANT_ID,
+    state: "state-value",
+    codeChallenge: "challenge-value",
+    deviceJkt: VALID_DEVICE_JKT,
+    usedAt: null,
+    expiresAt: new Date(Date.now() + 60_000),
+    ...overrides,
+  };
+}
+
 function happyDpop(): { ok: true; jkt: string; claims: Record<string, unknown> } {
   return {
     ok: true,
-    jkt: "thumbprint-jkt-1",
+    jkt: VALID_DEVICE_JKT,
     claims: { jti: "j1", htm: "POST", htu: "https://example.test/api/mobile/token", iat: 1 },
   };
 }
@@ -148,14 +160,16 @@ describe("POST /api/mobile/token", () => {
     vi.clearAllMocks();
     mockCheck.mockResolvedValue({ allowed: true });
     mockExtractClientIp.mockReturnValue("1.2.3.4");
-    mockWithBypassRls.mockImplementation(async (_p: unknown, fn: () => unknown) => fn());
-    mockMobileBridgeCodeUpdate.mockResolvedValue({
-      userId: USER_ID,
-      tenantId: TENANT_ID,
-      state: "state-value",
-      codeChallenge: "challenge-value",
-      devicePubkey: VALID_DEVICE_PUBKEY,
-    });
+    mockWithBypassRls.mockImplementation(
+      async (_p: unknown, fn: (tx: unknown) => unknown) => fn({
+      mobileBridgeCode: {
+        findUnique: mockMobileBridgeCodeFindUnique,
+        updateMany: mockMobileBridgeCodeUpdateMany,
+      },
+    }),
+    );
+    mockMobileBridgeCodeFindUnique.mockResolvedValue(freshBridgeRow());
+    mockMobileBridgeCodeUpdateMany.mockResolvedValue({ count: 1 });
     mockVerifyPkceS256.mockReturnValue(true);
     mockVerifyDpop.mockResolvedValue(happyDpop());
     mockIssueIosToken.mockResolvedValue({
@@ -178,14 +192,14 @@ describe("POST /api/mobile/token", () => {
       expires_in: 86_400,
       token_type: "DPoP",
     });
-    expect(res.headers.get("dpop-nonce")).toBe("nonce-current");
+    expect(res.headers.get("dpop-nonce")).toBeNull();
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(mockIssueIosToken).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: USER_ID,
         tenantId: TENANT_ID,
-        devicePubkey: VALID_DEVICE_PUBKEY,
-        cnfJkt: "thumbprint-jkt-1",
+        deviceJkt: VALID_DEVICE_JKT,
+        cnfJkt: VALID_DEVICE_JKT,
       }),
     );
     expect(mockLogAuditAsync).toHaveBeenCalledWith(
@@ -196,10 +210,28 @@ describe("POST /api/mobile/token", () => {
         targetId: TOKEN_ID,
       }),
     );
+    // CAS is the authoritative consumption step.
+    expect(mockMobileBridgeCodeUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ usedAt: null }),
+        data: expect.objectContaining({ usedAt: expect.any(Date) }),
+      }),
+    );
   });
 
-  it("returns 400 when the bridge code is unknown or already used", async () => {
-    mockMobileBridgeCodeUpdate.mockRejectedValueOnce({ code: "P2025" });
+  it("returns the SAME MOBILE_BRIDGE_CODE_INVALID error when the code is unknown (S7 uniform error)", async () => {
+    mockMobileBridgeCodeFindUnique.mockResolvedValueOnce(null);
+    const res = await POST(makeReq());
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("MOBILE_BRIDGE_CODE_INVALID");
+    expect(mockIssueIosToken).not.toHaveBeenCalled();
+    // CAS must NOT have been attempted when row was missing.
+    expect(mockMobileBridgeCodeUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns MOBILE_BRIDGE_CODE_INVALID on CAS race-lost (count===0)", async () => {
+    mockMobileBridgeCodeUpdateMany.mockResolvedValueOnce({ count: 0 });
     const res = await POST(makeReq());
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -207,55 +239,39 @@ describe("POST /api/mobile/token", () => {
     expect(mockIssueIosToken).not.toHaveBeenCalled();
   });
 
-  it("rejects a replayed bridge code (1st 200, 2nd 400)", async () => {
-    mockMobileBridgeCodeUpdate
-      .mockResolvedValueOnce({
-        userId: USER_ID,
-        tenantId: TENANT_ID,
-        state: "state-value",
-        codeChallenge: "challenge-value",
-        devicePubkey: VALID_DEVICE_PUBKEY,
-      })
-      .mockRejectedValueOnce({ code: "P2025" });
-    const first = await POST(makeReq());
-    const second = await POST(makeReq());
-    expect(first.status).toBe(200);
-    expect(second.status).toBe(400);
-  });
-
-  it("returns 400 when PKCE verification fails", async () => {
+  it("returns MOBILE_BRIDGE_CODE_INVALID (NOT a separate code) when PKCE verification fails — S7 uniform error", async () => {
     mockVerifyPkceS256.mockReturnValue(false);
     const res = await POST(makeReq());
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
-    expect(json.error).toBe("MOBILE_PKCE_MISMATCH");
+    expect(json.error).toBe("MOBILE_BRIDGE_CODE_INVALID");
     expect(mockIssueIosToken).not.toHaveBeenCalled();
+    // C7: PKCE failure must NOT consume the bridge code (legitimate client can retry).
+    expect(mockMobileBridgeCodeUpdateMany).not.toHaveBeenCalled();
   });
 
-  it("returns 400 when device_pubkey does not match the stored value", async () => {
-    mockMobileBridgeCodeUpdate.mockResolvedValueOnce({
-      userId: USER_ID,
-      tenantId: TENANT_ID,
-      state: "s",
-      codeChallenge: "c",
-      devicePubkey: "different-pubkey",
-    });
+  it("returns MOBILE_BRIDGE_CODE_INVALID (NOT a separate code) when device_jkt does not match — S7 uniform error", async () => {
+    mockMobileBridgeCodeFindUnique.mockResolvedValueOnce(
+      freshBridgeRow({ deviceJkt: "b".repeat(43) }),
+    );
     const res = await POST(makeReq());
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
-    expect(json.error).toBe("MOBILE_DEVICE_PUBKEY_MISMATCH");
+    expect(json.error).toBe("MOBILE_BRIDGE_CODE_INVALID");
+    expect(mockMobileBridgeCodeUpdateMany).not.toHaveBeenCalled();
   });
 
-  it("returns 401 when DPoP signature verification fails", async () => {
+  it("returns MOBILE_BRIDGE_CODE_INVALID (NOT a separate code) when DPoP signature verification fails — S7 uniform error", async () => {
     mockVerifyDpop.mockResolvedValueOnce({ ok: false, error: "DPOP_SIG_INVALID" });
     const res = await POST(makeReq());
     const { status, json } = await parseResponse(res);
-    expect(status).toBe(401);
-    expect(json.error).toBe("MOBILE_TOKEN_BINDING_INVALID");
+    expect(status).toBe(400);
+    expect(json.error).toBe("MOBILE_BRIDGE_CODE_INVALID");
     expect(mockIssueIosToken).not.toHaveBeenCalled();
+    expect(mockMobileBridgeCodeUpdateMany).not.toHaveBeenCalled();
   });
 
-  it("returns 401 when DPoP header is missing", async () => {
+  it("returns MOBILE_BRIDGE_CODE_INVALID when DPoP header is missing — S7 uniform error", async () => {
     mockVerifyDpop.mockResolvedValueOnce({ ok: false, error: "DPOP_HEADER_MISSING" });
     const res = await POST(
       createRequest("POST", "https://example.test/api/mobile/token", {
@@ -264,8 +280,8 @@ describe("POST /api/mobile/token", () => {
       }),
     );
     const { status, json } = await parseResponse(res);
-    expect(status).toBe(401);
-    expect(json.error).toBe("MOBILE_TOKEN_BINDING_INVALID");
+    expect(status).toBe(400);
+    expect(json.error).toBe("MOBILE_BRIDGE_CODE_INVALID");
   });
 
   it("returns 400 on unknown body field (Zod strict)", async () => {
@@ -277,7 +293,25 @@ describe("POST /api/mobile/token", () => {
   });
 
   it("returns 400 when the body is malformed (wrong code length)", async () => {
-    const res = await POST(makeReq({ code: "tooshort", code_verifier: VALID_VERIFIER, device_pubkey: VALID_DEVICE_PUBKEY }));
+    const res = await POST(makeReq({ code: "tooshort", code_verifier: VALID_VERIFIER, device_jkt: VALID_DEVICE_JKT }));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
+  it("returns 400 when device_jkt is not exactly 43 chars (Zod shape gate)", async () => {
+    const res = await POST(
+      makeReq({ code: VALID_CODE, code_verifier: VALID_VERIFIER, device_jkt: "a".repeat(42) }),
+    );
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
+  it("returns 400 with VALIDATION_ERROR when legacy device_pubkey is sent (T14)", async () => {
+    const res = await POST(
+      makeReq({ code: VALID_CODE, code_verifier: VALID_VERIFIER, device_pubkey: "legacy-spki" }),
+    );
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
     expect(json.error).toBe("VALIDATION_ERROR");

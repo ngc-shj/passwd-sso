@@ -67,7 +67,7 @@ async function handlePOST(req: NextRequest) {
   const verifiedAt = new Date();
   const verification = await withBypassRls(
     prisma,
-    () =>
+    (tx) =>
       prisma.$transaction(async (tx) => {
         const assertion = await verifyAuthenticationAssertion(
           tx,

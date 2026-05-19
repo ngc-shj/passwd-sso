@@ -36,8 +36,8 @@ async function handleDELETE(
   }
 
   // Find the grant within tenant RLS scope
-  const grant = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.personalLogAccessGrant.findFirst({
+  const grant = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.personalLogAccessGrant.findFirst({
       where: {
         id,
         tenantId: actor.tenantId,
@@ -69,8 +69,8 @@ async function handleDELETE(
   }
 
   // Atomic revoke
-  const result = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.personalLogAccessGrant.updateMany({
+  const result = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.personalLogAccessGrant.updateMany({
       where: {
         id,
         tenantId: actor.tenantId,

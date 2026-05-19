@@ -80,8 +80,8 @@ export async function validateServiceAccountToken(
 
   const tokenHash = hashToken(plaintext);
 
-  const token = await withBypassRls(prisma, async () =>
-    prisma.serviceAccountToken.findUnique({
+  const token = await withBypassRls(prisma, async (tx) =>
+    tx.serviceAccountToken.findUnique({
       where: { tokenHash },
       select: {
         id: true,
@@ -116,8 +116,8 @@ export async function validateServiceAccountToken(
     !token.lastUsedAt ||
     Date.now() - token.lastUsedAt.getTime() > SA_TOKEN_LAST_USED_THROTTLE_MS;
   if (shouldUpdate) {
-    void withBypassRls(prisma, async () =>
-      prisma.serviceAccountToken.update({
+    void withBypassRls(prisma, async (tx) =>
+      tx.serviceAccountToken.update({
         where: { id: token.id },
         data: { lastUsedAt: new Date() },
       }),

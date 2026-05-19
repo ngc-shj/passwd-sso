@@ -11,7 +11,7 @@ const {
 } = vi.hoisted(() => ({
   mockCheckAuth: vi.fn(),
   mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockWebAuthnCredentialCount: vi.fn(),
   mockUserFindUnique: vi.fn(),
 }));

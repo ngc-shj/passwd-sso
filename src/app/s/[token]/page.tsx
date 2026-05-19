@@ -36,8 +36,8 @@ export default async function SharePage({ params }: Props) {
   const tokenHash = hashToken(token);
 
   // All DB access must bypass RLS (unauthenticated public endpoint)
-  return withBypassRls(prisma, async () => {
-    const share = await prisma.passwordShare.findUnique({
+  return withBypassRls(prisma, async (tx) => {
+    const share = await tx.passwordShare.findUnique({
       where: { tokenHash },
       select: {
         id: true,
@@ -124,7 +124,7 @@ export default async function SharePage({ params }: Props) {
     // Record access log (must await inside withBypassRls transaction)
     const ip = clientIp === "unknown" ? null : clientIp;
     const ua = headersList.get("user-agent");
-    await prisma.shareAccessLog
+    await tx.shareAccessLog
       .create({
         data: {
           shareId: share.id,

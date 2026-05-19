@@ -88,8 +88,8 @@ async function handlePOST(req: NextRequest) {
   // because passkey sign-in is restricted to bootstrap-tenant users only (the sign-in
   // page hides the passkey button when SSO is configured). We don't need tenant claim
   // extraction, cross-tenant migration, or membership upsert here.
-  const existingUser = await withBypassRls(prisma, async () =>
-    prisma.user.findUnique({
+  const existingUser = await withBypassRls(prisma, async (tx) =>
+    tx.user.findUnique({
       where: { email: user.email },
       select: { tenantId: true, tenant: { select: { isBootstrap: true } } },
     }),
@@ -112,7 +112,7 @@ async function handlePOST(req: NextRequest) {
   // new one. Passkey sign-in requires physical device possession, so this
   // aggressive rotation is acceptable for a password manager.
   let evictedTokens: string[] = [];
-  const evictedCount = await withBypassRls(prisma, async () => {
+  const evictedCount = await withBypassRls(prisma, async (tx) => {
     const result = await prisma.$transaction(async (tx) => {
       // SELECT tokens to invalidate before deleteMany — same tx so the read
       // sees only currently-live sessions (R3 / S-6 sequencing).

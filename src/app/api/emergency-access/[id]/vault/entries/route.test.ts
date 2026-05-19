@@ -9,7 +9,7 @@ const { mockAuth, mockPrismaGrant, mockPrismaEntry, mockWithBypassRls } = vi.hoi
   mockPrismaEntry: {
     findMany: vi.fn(),
   },
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));

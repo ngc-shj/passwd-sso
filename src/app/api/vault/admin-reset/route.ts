@@ -72,8 +72,8 @@ async function handlePOST(req: NextRequest) {
   // Verify token
   const tokenHash = createHash("sha256").update(token).digest("hex");
 
-  const resetRecord = await withBypassRls(prisma, async () =>
-    prisma.adminVaultReset.findUnique({
+  const resetRecord = await withBypassRls(prisma, async (tx) =>
+    tx.adminVaultReset.findUnique({
       where: { tokenHash },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
@@ -108,8 +108,8 @@ async function handlePOST(req: NextRequest) {
   // vault data. This ensures a concurrent revoke cannot succeed after data
   // deletion has already started. NULL `encryptedToken` so the at-rest
   // ciphertext cannot be replayed even with elevated DB access.
-  const atomicResult = await withBypassRls(prisma, async () =>
-    prisma.adminVaultReset.updateMany({
+  const atomicResult = await withBypassRls(prisma, async (tx) =>
+    tx.adminVaultReset.updateMany({
       where: {
         id: resetRecord.id,
         approvedAt: { not: null },

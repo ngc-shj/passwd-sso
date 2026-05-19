@@ -21,8 +21,8 @@ async function validateOAuthRequest(clientId: string | null, redirectUri: string
   if (!clientId || !redirectUri) return false;
   const client = await withBypassRls(
     prisma,
-    async () =>
-      prisma.mcpClient.findFirst({
+    async (tx) =>
+      tx.mcpClient.findFirst({
         where: { clientId },
         select: { redirectUris: true },
       }),

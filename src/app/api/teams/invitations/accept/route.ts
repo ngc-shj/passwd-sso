@@ -41,8 +41,8 @@ async function handlePOST(req: NextRequest) {
   const { token } = result.data;
 
   // Invitation lookup must bypass RLS: the invitee is not yet in the team's tenant
-  const invitation = await withBypassRls(prisma, async () =>
-    prisma.teamInvitation.findUnique({
+  const invitation = await withBypassRls(prisma, async (tx) =>
+    tx.teamInvitation.findUnique({
       where: { token },
       include: { team: { select: { id: true, name: true, slug: true, tenantId: true } } },
     }),

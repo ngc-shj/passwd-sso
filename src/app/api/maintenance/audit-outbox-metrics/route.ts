@@ -50,7 +50,7 @@ async function handleGET(req: NextRequest) {
   // Scope aggregates to the operator-token's bound tenant. Without the
   // WHERE filter, queue depth and failure counts of every other tenant
   // leak through this endpoint.
-  const rows = await withBypassRls(prisma, async () =>
+  const rows = await withBypassRls(prisma, async (tx) =>
     prisma.$queryRaw<MetricsRow[]>`
       SELECT
         COUNT(*) FILTER (WHERE status = 'PENDING')    AS pending,

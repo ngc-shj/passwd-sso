@@ -12,7 +12,7 @@ const {
 } = vi.hoisted(() => {
   const mockCount = vi.fn();
   const mockCreate = vi.fn();
-  const mockWithBypassRls = vi.fn(async (_p: unknown, fn: () => unknown) => fn());
+  const mockWithBypassRls = vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p));
   return {
     mockPrismaCount: mockCount,
     mockPrismaCreate: mockCreate,
@@ -84,7 +84,7 @@ describe("POST /api/mcp/register", () => {
     mockPrismaCount.mockResolvedValue(0);
     mockPrismaCreate.mockResolvedValue(MOCK_CREATED_CLIENT);
     // withBypassRls executes the callback inline; first call is count, second is create
-    mockWithBypassRls.mockImplementation(async (_p: unknown, fn: () => unknown) => fn());
+    mockWithBypassRls.mockImplementation(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p));
   });
 
   it("returns 201 with client credentials on valid registration", async () => {
@@ -292,6 +292,11 @@ describe("POST /api/mcp/register", () => {
 
     expect(status).toBe(503);
     expect(json.error).toBe("temporarily_unavailable");
+    // C3 acceptance: 503 body must include the literal "dcr-cleanup-worker"
+    // so an operator hitting registration outages knows which process to
+    // check. Tests pin the literal because the C3 removal of the
+    // probabilistic cleanup made the worker the sole cleanup path.
+    expect(json.error_description).toContain("dcr-cleanup-worker");
   });
 
   it("returns 400 when request body is invalid JSON", async () => {

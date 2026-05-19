@@ -21,9 +21,9 @@ async function handleGET(req: NextRequest) {
   if (!authed.ok) return authed.response;
   const { userId } = authed.auth;
 
-  const { userTenantId, memberships } = await withBypassRls(prisma, async () => {
+  const { userTenantId, memberships } = await withBypassRls(prisma, async (tx) => {
     const uid = await resolveUserTenantIdFromClient(prisma, userId);
-    const data = await prisma.teamMember.findMany({
+    const data = await tx.teamMember.findMany({
       where: { userId, deactivatedAt: null },
       include: {
         team: {

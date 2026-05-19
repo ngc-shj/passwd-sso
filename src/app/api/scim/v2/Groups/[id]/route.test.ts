@@ -25,7 +25,7 @@ const {
   },
   mockTenantMember: { findUnique: vi.fn(), findMany: vi.fn() },
   mockTransaction: vi.fn(),
-  mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
+  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
 vi.mock("@/lib/auth/tokens/scim-token", () => ({ validateScimToken: mockValidateScimToken }));
@@ -80,7 +80,7 @@ function makeReq(options: { method?: string; body?: unknown } = {}) {
 describe("GET /api/scim/v2/Groups/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.AUTH_URL = "http://localhost:3000";
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
   });
@@ -134,7 +134,7 @@ describe("GET /api/scim/v2/Groups/[id]", () => {
 describe("PATCH /api/scim/v2/Groups/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.AUTH_URL = "http://localhost:3000";
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
     mockScimGroupMapping.findUnique.mockResolvedValue(mapping);
@@ -363,7 +363,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
 describe("PUT /api/scim/v2/Groups/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.AUTH_URL = "http://localhost:3000";
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
     mockScimGroupMapping.findUnique.mockResolvedValue(mapping);
@@ -543,7 +543,7 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
 describe("DELETE /api/scim/v2/Groups/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.AUTH_URL = "http://localhost:3000";
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
   });

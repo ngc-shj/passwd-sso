@@ -14,10 +14,12 @@ import {
   findActiveDelegationSession,
   fetchDelegationEntry,
   getDelegatedEntryIdsForSession,
-  type DelegationMetadata,
+  toAgentFacing,
+  USER_SUPPLIED_METADATA_WARNING,
+  type AgentFacingDelegationEntry,
 } from "@/lib/auth/access/delegation";
-import { logAuditAsync } from "@/lib/audit/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE, ACTOR_TYPE } from "@/lib/constants/audit/audit";
+import { logAuditAsyncBothScopes } from "@/lib/audit/audit";
+import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
 
 // ─── Tool definitions ─────────────────────────────────────────
@@ -26,9 +28,10 @@ export const MCP_TOOLS = [
   {
     name: "list_credentials",
     description:
-      "List delegated credential entries. Returns metadata only (title, username, urlHost, tags) " +
+      "List delegated credential entries. Returns metadata only (title, username, urlHost) " +
       "for entries the user has pre-approved via the vault UI. " +
-      "Requires credentials:list scope and an active delegation session.",
+      USER_SUPPLIED_METADATA_WARNING +
+      " Requires credentials:list scope and an active delegation session.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -43,7 +46,8 @@ export const MCP_TOOLS = [
     description:
       "Search delegated credential entries by keyword. Searches title and username fields " +
       "of delegated entries. Returns metadata only (no secrets). " +
-      "Requires credentials:list scope and an active delegation session.",
+      USER_SUPPLIED_METADATA_WARNING +
+      " Requires credentials:list scope and an active delegation session.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -98,6 +102,28 @@ async function getSession(token: McpTokenData) {
   return { session };
 }
 
+/**
+ * Fetch all delegated entries for a session and project them to the
+ * agent-facing shape (drops `tags`, stamps `metadataProvenance`).
+ * Concurrent fetches collapse N sequential Redis round-trips into a
+ * single pipelined batch — DELEGATION_MAX_ENTRIES is 20 so the typical
+ * win is ~20× wall-time reduction.
+ */
+async function fetchAgentFacingEntries(
+  userId: string,
+  sessionId: string,
+  entryIds: Iterable<string>,
+): Promise<AgentFacingDelegationEntry[]> {
+  const raw = await Promise.all(
+    [...entryIds].map((id) => fetchDelegationEntry(userId, sessionId, id)),
+  );
+  const result: AgentFacingDelegationEntry[] = [];
+  for (const entry of raw) {
+    if (entry) result.push(toAgentFacing(entry));
+  }
+  return result;
+}
+
 async function auditDelegationAccess(
   token: McpTokenData,
   tool: "list" | "search",
@@ -105,7 +131,7 @@ async function auditDelegationAccess(
   ip?: string | null,
   extra?: { entryCount?: number; query?: string },
 ) {
-  const auditBase = {
+  await logAuditAsyncBothScopes({
     action: AUDIT_ACTION.DELEGATION_READ,
     userId: token.userId!,
     actorType: ACTOR_TYPE.MCP_AGENT,
@@ -119,11 +145,7 @@ async function auditDelegationAccess(
       ...(extra?.query ? { query: extra.query } : {}),
     },
     ip: ip ?? undefined,
-  };
-  await Promise.all([
-    logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL }),
-    logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT }),
-  ]);
+  });
 }
 
 // ─── Tool handlers ────────────────────────────────────────────
@@ -149,12 +171,10 @@ export async function toolListCredentials(
   // Get all delegated entry IDs from Redis index (uses session.id directly — no double DB lookup)
   const delegatedIds = await getDelegatedEntryIdsForSession(token.userId!, session.id).catch(() => new Set<string>());
 
-  // Fetch metadata for each delegated entry
-  const entries: DelegationMetadata[] = [];
-  for (const entryId of delegatedIds) {
-    const entry = await fetchDelegationEntry(token.userId!, session.id, entryId);
-    if (entry) entries.push(entry);
-  }
+  // Fetch + project (parallel). Projector strips `tags` and stamps
+  // `metadataProvenance: "user-supplied"` at the server boundary — agents
+  // never see the full DelegationMetadata shape.
+  const entries = await fetchAgentFacingEntries(token.userId!, session.id, delegatedIds);
 
   // Apply pagination
   const paginated = entries.slice(offset, offset + limit);
@@ -185,13 +205,12 @@ export async function toolSearchCredentials(
 
   const delegatedIds = await getDelegatedEntryIdsForSession(token.userId!, session.id).catch(() => new Set<string>());
 
-  const entries: DelegationMetadata[] = [];
-  for (const entryId of delegatedIds) {
-    const entry = await fetchDelegationEntry(token.userId!, session.id, entryId);
-    if (entry) entries.push(entry);
-  }
+  // Fetch + project (parallel). Filtering happens on the projected shape;
+  // `tags` is intentionally not searchable (would extend attack surface
+  // beyond title/username for a compromised browser).
+  const entries = await fetchAgentFacingEntries(token.userId!, session.id, delegatedIds);
 
-  // Filter by query if provided — search only title and username (no secret fields)
+  // Filter by query if provided — search only title and username (no secret fields).
   const filtered = query
     ? entries.filter((e) => {
         const q = query.toLowerCase();

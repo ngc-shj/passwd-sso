@@ -65,8 +65,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const { id: requestId } = await params;
 
   // Fetch the access request to get serviceAccountId and requestedScope
-  const request = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.accessRequest.findUnique({
+  const request = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.accessRequest.findUnique({
       where: { id: requestId },
       select: {
         id: true,
@@ -88,8 +88,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   // Read tenant policy for JIT TTL bounds
-  const tenant = await withBypassRls(prisma, async () =>
-    prisma.tenant.findUnique({
+  const tenant = await withBypassRls(prisma, async (tx) =>
+    tx.tenant.findUnique({
       where: { id: actor.tenantId },
       select: { jitTokenDefaultTtlSec: true, jitTokenMaxTtlSec: true },
     }),
@@ -101,7 +101,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   let result: { plaintext: string; expiresAt: Date; tokenId: string };
   try {
-    result = await withTenantRls(prisma, actor.tenantId, async () =>
+    result = await withTenantRls(prisma, actor.tenantId, async (tx) =>
     prisma.$transaction(async (tx) => {
       // Enforce token limit per SA
       const activeTokenCount = await tx.serviceAccountToken.count({

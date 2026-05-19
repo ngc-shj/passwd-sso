@@ -32,7 +32,7 @@ const {
   mockExtTokenCreate: vi.fn(),
   mockTransaction: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-  mockWithBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
   mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
 }));
 

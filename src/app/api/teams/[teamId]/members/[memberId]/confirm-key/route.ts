@@ -52,8 +52,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
   }
 
-  const targetUser = await withBypassRls(prisma, async () =>
-    prisma.user.findUnique({
+  const targetUser = await withBypassRls(prisma, async (tx) =>
+    tx.user.findUnique({
       where: { id: targetMember.userId },
       select: { ecdhPublicKey: true },
     }),

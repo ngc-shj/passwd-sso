@@ -14,7 +14,7 @@ const {
   mockPrismaPasswordShare: { findUnique: vi.fn() },
   mockPrismaShareAccessLog: { create: vi.fn().mockResolvedValue({}) },
   mockPrismaExecuteRaw: vi.fn().mockResolvedValue(1),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockVerifyShareAccessToken: vi.fn().mockReturnValue(true),
   mockDecryptShareData: vi.fn(),
   mockExtractClientIp: vi.fn().mockReturnValue("1.2.3.4"),

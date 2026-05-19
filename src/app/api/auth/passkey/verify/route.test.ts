@@ -129,7 +129,7 @@ describe("POST /api/auth/passkey/verify", () => {
 
     // withBypassRls: call the callback directly
     mockWithBypassRls.mockImplementation(
-      (_prisma: unknown, fn: () => unknown) => fn(),
+      (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
     );
 
     // SSO tenant guard: user is in bootstrap tenant (allowed)

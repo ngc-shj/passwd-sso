@@ -39,8 +39,8 @@ async function handleGET(req: NextRequest) {
     return handleAuthError(err);
   }
 
-  const accounts = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.serviceAccount.findMany({
+  const accounts = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.serviceAccount.findMany({
       where: { tenantId: actor.tenantId },
       select: {
         id: true,
@@ -88,8 +88,8 @@ async function handlePOST(req: NextRequest) {
   const result = await parseBody(req, serviceAccountCreateSchema);
   if (!result.ok) return result.response;
 
-  const count = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.serviceAccount.count({
+  const count = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.serviceAccount.count({
       where: { tenantId: actor.tenantId, isActive: true },
     }),
   );
@@ -99,8 +99,8 @@ async function handlePOST(req: NextRequest) {
 
   let sa;
   try {
-    sa = await withTenantRls(prisma, actor.tenantId, async () =>
-      prisma.serviceAccount.create({
+    sa = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+      tx.serviceAccount.create({
         data: {
           tenantId: actor.tenantId,
           name: result.data.name,

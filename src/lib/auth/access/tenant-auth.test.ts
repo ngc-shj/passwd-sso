@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { mockFindFirst, mockWithBypassRls } = vi.hoisted(() => ({
   mockFindFirst: vi.fn(),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -148,7 +148,7 @@ describe("getTenantMembership", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockWithBypassRls.mockImplementation(
-      async (_prisma: unknown, fn: () => unknown) => fn(),
+      async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
     );
   });
 
@@ -197,7 +197,7 @@ describe("requireTenantMember", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockWithBypassRls.mockImplementation(
-      async (_prisma: unknown, fn: () => unknown) => fn(),
+      async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
     );
   });
 
@@ -256,7 +256,7 @@ describe("requireTenantPermission", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockWithBypassRls.mockImplementation(
-      async (_prisma: unknown, fn: () => unknown) => fn(),
+      async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
     );
   });
 

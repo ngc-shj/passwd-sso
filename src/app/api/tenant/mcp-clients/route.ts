@@ -44,8 +44,8 @@ async function handleGET(_req: NextRequest) {
     return handleAuthError(err);
   }
 
-  const clients = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.mcpClient.findMany({
+  const clients = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.mcpClient.findMany({
       where: { tenantId: actor.tenantId },
       select: {
         id: true,
@@ -70,8 +70,8 @@ async function handleGET(_req: NextRequest) {
   // Batch-fetch connected user names
   const allUserIds = [...new Set(clients.flatMap((c) => c.accessTokens.map((t) => t.userId!)))];
   const users = allUserIds.length > 0
-    ? await withTenantRls(prisma, actor.tenantId, () =>
-        prisma.user.findMany({
+    ? await withTenantRls(prisma, actor.tenantId, (tx) =>
+        tx.user.findMany({
           where: { id: { in: allUserIds } },
           select: { id: true, name: true, email: true },
         }),
@@ -118,16 +118,16 @@ async function handlePOST(req: NextRequest) {
   const { name, redirectUris, allowedScopes } = result.data;
 
   // Enforce tenant limit
-  const count = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.mcpClient.count({ where: { tenantId: actor.tenantId } }),
+  const count = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.mcpClient.count({ where: { tenantId: actor.tenantId } }),
   );
   if (count >= MAX_MCP_CLIENTS_PER_TENANT) {
     return errorResponseWithMessage(API_ERROR.MCP_CLIENT_LIMIT_EXCEEDED, `Maximum ${MAX_MCP_CLIENTS_PER_TENANT} MCP clients per tenant`);
   }
 
   // Check name uniqueness
-  const existing = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.mcpClient.findFirst({ where: { tenantId: actor.tenantId, name } }),
+  const existing = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.mcpClient.findFirst({ where: { tenantId: actor.tenantId, name } }),
   );
   if (existing) {
     return errorResponse(API_ERROR.MCP_CLIENT_NAME_CONFLICT);
@@ -138,8 +138,8 @@ async function handlePOST(req: NextRequest) {
   const clientSecret = randomBytes(32).toString("base64url");
   const clientSecretHash = hashToken(clientSecret);
 
-  const client = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.mcpClient.create({
+  const client = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.mcpClient.create({
       data: {
         tenantId: actor.tenantId,
         clientId,

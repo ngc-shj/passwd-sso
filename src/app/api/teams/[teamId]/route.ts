@@ -140,8 +140,8 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
 
   try {
     await withTeamTenantRls(teamId, async (tenantId) =>
-      withTenantRls(prisma, tenantId, async () =>
-        prisma.team.delete({ where: { id: teamId } }),
+      withTenantRls(prisma, tenantId, async (tx) =>
+        tx.team.delete({ where: { id: teamId } }),
       ),
     );
   } catch (e) {

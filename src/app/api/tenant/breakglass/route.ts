@@ -86,8 +86,8 @@ async function handlePOST(req: NextRequest) {
 
   let result: GrantResult;
   try {
-    result = await withTenantRls(prisma, actor.tenantId, async () => {
-      const member = await prisma.tenantMember.findFirst({
+    result = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      const member = await tx.tenantMember.findFirst({
         where: {
           userId: targetUserId,
           tenantId: actor.tenantId,
@@ -101,7 +101,7 @@ async function handlePOST(req: NextRequest) {
       if (!member) return { status: "no_member" as const };
 
       const now = new Date();
-      const duplicate = await prisma.personalLogAccessGrant.findFirst({
+      const duplicate = await tx.personalLogAccessGrant.findFirst({
         where: {
           requesterId: userId,
           targetUserId,
@@ -115,7 +115,7 @@ async function handlePOST(req: NextRequest) {
       if (duplicate) return { status: "duplicate" as const };
 
       const expiresAt = new Date(now.getTime() + MS_PER_DAY);
-      const grant = await prisma.personalLogAccessGrant.create({
+      const grant = await tx.personalLogAccessGrant.create({
         data: {
           tenantId: actor.tenantId,
           requesterId: userId,
@@ -209,8 +209,8 @@ async function handleGET(_req: NextRequest) {
     return handleAuthError(err);
   }
 
-  const grants = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.personalLogAccessGrant.findMany({
+  const grants = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.personalLogAccessGrant.findMany({
       where: { tenantId: actor.tenantId },
       include: {
         requester: { select: { id: true, name: true, email: true, image: true } },

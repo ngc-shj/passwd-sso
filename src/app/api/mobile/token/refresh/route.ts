@@ -50,7 +50,6 @@ import {
   computeAth,
 } from "@/lib/auth/dpop/verify";
 import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
-import { getDpopNonceService } from "@/lib/auth/dpop/nonce";
 import {
   refreshIosToken,
   IOS_TOKEN_IDLE_TIMEOUT_MS,
@@ -116,8 +115,8 @@ async function handlePOST(req: NextRequest): Promise<Response> {
   const refreshHash = hashToken(bodyRefreshToken);
   const oldRow = await withBypassRls(
     prisma,
-    async () =>
-      prisma.extensionToken.findUnique({
+    async (tx) =>
+      tx.extensionToken.findUnique({
         where: { tokenHash: refreshHash },
         select: {
           id: true,
@@ -130,7 +129,6 @@ async function handlePOST(req: NextRequest): Promise<Response> {
           familyId: true,
           familyCreatedAt: true,
           revokedAt: true,
-          devicePubkey: true,
           clientKind: true,
         },
       }),
@@ -139,15 +137,15 @@ async function handlePOST(req: NextRequest): Promise<Response> {
   if (!oldRow || oldRow.clientKind !== "IOS_APP") {
     return unauthorized();
   }
-  if (!oldRow.cnfJkt || !oldRow.devicePubkey) {
-    // Defensive — IOS_APP rows MUST have these set. If we ever read a
-    // row without them, something else has corrupted state.
+  if (!oldRow.cnfJkt) {
+    // Defensive — IOS_APP rows MUST have cnfJkt set. If we ever read a
+    // row without it, something else has corrupted state.
     getLogger().error(
       {
         event: "mobile_token_refresh_missing_binding",
         tokenId: oldRow.id,
       },
-      "IOS_APP token row missing cnfJkt/devicePubkey",
+      "IOS_APP token row missing cnfJkt",
     );
     return errorResponse(API_ERROR.MOBILE_REFRESH_TOKEN_REVOKED);
   }
@@ -196,9 +194,9 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       familyCreatedAt: oldRow.familyCreatedAt,
       revokedAt: oldRow.revokedAt,
       tokenHash: oldRow.tokenHash,
-      devicePubkey: oldRow.devicePubkey,
     },
-    devicePubkey: oldRow.devicePubkey,
+    // cnfJkt IS the device-key thumbprint — same value threaded through.
+    deviceJkt: oldRow.cnfJkt,
     cnfJkt: oldRow.cnfJkt,
   });
 
@@ -211,10 +209,6 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     }
   }
 
-  const nonceService = getDpopNonceService();
-  void nonceService.rotateIfDue().catch(() => {});
-  const nonce = await nonceService.current();
-
   return NextResponse.json(
     {
       access_token: result.token.accessToken,
@@ -224,7 +218,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     },
     {
       status: 200,
-      headers: { "DPoP-Nonce": nonce, "Cache-Control": "no-store" },
+      headers: { "Cache-Control": "no-store" },
     },
   );
 }

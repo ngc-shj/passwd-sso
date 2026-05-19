@@ -7,15 +7,18 @@
  *
  *   1. Rate-limits per client IP (no session is available at this point).
  *   2. Validates the body shape.
- *   3. Atomically consumes the bridge code (single UPDATE + count check).
- *   4. Verifies the PKCE challenge (S256) and the client-supplied
- *      `device_pubkey` matches the value stored at authorize.
- *   5. Verifies the DPoP proof. The proof MUST be signed by the same key
- *      whose JWK thumbprint matches `device_pubkey` (i.e. the key the user
- *      registered at `/api/mobile/authorize`). No `ath` is required at this
+ *   3. Reads the bridge code (no consumption yet) and verifies the PKCE
+ *      challenge (S256), the client-supplied `device_jkt` against the value
+ *      stored at authorize, and the DPoP proof. All failures return the
+ *      same MOBILE_BRIDGE_CODE_INVALID error (uniform — closes the validity
+ *      oracle); only after every check passes does step 7 CAS-consume the
+ *      bridge code (sets `used_at`). PKCE/DPoP failures leave `used_at`
+ *      null so the legitimate client can retry within TTL.
+ *   4. The DPoP proof MUST be signed by the same key whose RFC 7638 JWK
+ *      thumbprint equals `stored.deviceJkt`. No `ath` required at this
  *      step because the client doesn't yet have an access token.
- *   6. Calls `issueIosToken()` to mint the access+refresh pair, stamps a
- *      fresh `DPoP-Nonce` on the response, and audits `MOBILE_TOKEN_ISSUED`.
+ *   5. Calls `issueIosToken()` to mint the access+refresh pair, and
+ *      audits `MOBILE_TOKEN_ISSUED`. JTI cache provides replay defense.
  *
  * Compensating controls (no Auth.js session, no Origin check):
  *   - 256-bit single-use bridge code with 60s TTL.
@@ -26,7 +29,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
@@ -46,7 +49,6 @@ import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
 import { verifyDpopProof } from "@/lib/auth/dpop/verify";
 import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
-import { getDpopNonceService } from "@/lib/auth/dpop/nonce";
 import {
   issueIosToken,
   IOS_TOKEN_IDLE_TIMEOUT_MS,
@@ -69,11 +71,8 @@ const TokenRequestSchema = z
       .min(43)
       .max(128)
       .regex(/^[A-Za-z0-9_-]+$/),
-    device_pubkey: z
-      .string()
-      .min(64)
-      .max(512)
-      .regex(/^[A-Za-z0-9_-]+$/),
+    // RFC 7638 JWK thumbprint — exactly 43 base64url chars.
+    device_jkt: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   })
   .strict();
 
@@ -81,19 +80,6 @@ function safeStringEqual(a: string, b: string): boolean {
   if (a.length === 0 || b.length === 0) return false;
   if (a.length !== b.length) return false;
   return timingSafeEqual(Buffer.from(a), Buffer.from(b));
-}
-
-/**
- * Recompute the JWK thumbprint expected for a given client-supplied
- * `device_pubkey`. The iOS app supplies the pubkey as base64url(SPKI-DER).
- * The DPoP proof carries the same key as a JWK in its header — we extract
- * the JWK's thumbprint via `verifyDpopProof` and compare to the thumbprint
- * SHA-256(device_pubkey) here. This anchors the proof to the registered key
- * even if the SPKI encoding differs, by hashing the client-supplied bytes
- * once on registration AND once at exchange.
- */
-function devicePubkeyFingerprint(devicePubkey: string): string {
-  return createHash("sha256").update(devicePubkey).digest("base64url");
 }
 
 async function handlePOST(req: NextRequest): Promise<Response> {
@@ -121,65 +107,60 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     );
     return bodyResult.response;
   }
-  const { code, code_verifier: codeVerifier, device_pubkey: devicePubkey } =
+  const { code, code_verifier: codeVerifier, device_jkt: deviceJkt } =
     bodyResult.data;
 
-  // 3. Atomically consume the bridge code AND read the stored bindings in a
-  // single round-trip. Prisma's `update` raises P2025 when the predicate
-  // matches no row, which we map to "code unknown / expired / already used".
+  // 3. Read the bridge code WITHOUT consuming it (CAS pattern per C7).
+  // Consumption happens after all binding checks pass — failures leave the
+  // code unused so the legitimate client can retry within TTL. ALL failure
+  // paths return the SAME MOBILE_BRIDGE_CODE_INVALID error to close the
+  // bridge-code validity oracle (per S7); internal logging differentiates
+  // for operator debugging.
   const codeHash = hashToken(code);
   const now = new Date();
   const stored = await withBypassRls(
     prisma,
-    async () =>
-      prisma.mobileBridgeCode
-        .update({
-          where: { codeHash, usedAt: null, expiresAt: { gt: now } },
-          data: { usedAt: now },
-          select: {
-            userId: true,
-            tenantId: true,
-            state: true,
-            codeChallenge: true,
-            devicePubkey: true,
-          },
-        })
-        .catch((err: unknown) => {
-          if (
-            err &&
-            typeof err === "object" &&
-            "code" in err &&
-            err.code === "P2025"
-          ) {
-            return null;
-          }
-          throw err;
-        }),
+    async (tx) =>
+      tx.mobileBridgeCode.findUnique({
+        where: { codeHash },
+        select: {
+          userId: true,
+          tenantId: true,
+          state: true,
+          codeChallenge: true,
+          deviceJkt: true,
+          usedAt: true,
+          expiresAt: true,
+        },
+      }),
     BYPASS_PURPOSE.TOKEN_LIFECYCLE,
   );
+  // In-memory freshness check (informational — CAS at step 7 is authoritative).
+  // We still verify subsequent bindings even when stored looks "stale" because
+  // the CAS will reject and we want failure paths to be timing-uniform.
+  const looksFresh =
+    stored !== null &&
+    stored.usedAt === null &&
+    stored.expiresAt.getTime() > now.getTime();
   if (!stored) {
     getLogger().warn(
-      {
-        event: "mobile_token_failure",
-        reason: "bridge_code_invalid",
-        ip: clientIp,
-      },
-      "mobile token failed: bridge code unknown, expired, or already consumed",
+      { event: "mobile_token_failure", reason: "bridge_code_unknown", ip: clientIp },
+      "mobile token failed: bridge code unknown",
     );
     return errorResponse(API_ERROR.MOBILE_BRIDGE_CODE_INVALID);
   }
 
-  // 4. Verify device_pubkey binding (constant-time).
-  if (!safeStringEqual(stored.devicePubkey, devicePubkey)) {
+  // 4. Verify device_jkt binding (constant-time). Uniform error per S7.
+  if (!safeStringEqual(stored.deviceJkt, deviceJkt)) {
     getLogger().warn(
       {
         event: "mobile_token_failure",
-        reason: "device_pubkey_mismatch",
+        reason: "device_jkt_mismatch",
         userId: stored.userId,
       },
-      "mobile token failed: device_pubkey mismatch",
+      "mobile token failed: device_jkt mismatch",
     );
-    return errorResponse(API_ERROR.MOBILE_DEVICE_PUBKEY_MISMATCH);
+    return errorResponse(API_ERROR.MOBILE_BRIDGE_CODE_INVALID);
   }
 
   // 5. PKCE: stored.codeChallenge must equal base64url(SHA-256(code_verifier)).
@@ -192,17 +173,17 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       },
       "mobile token failed: PKCE challenge did not match",
     );
-    return errorResponse(API_ERROR.MOBILE_PKCE_MISMATCH);
+    return errorResponse(API_ERROR.MOBILE_BRIDGE_CODE_INVALID);
   }
 
   // 6. Verify DPoP proof. No `ath` at this step (no access token yet); the
-  // proof's JWK thumbprint MUST equal the fingerprint of the registered key.
-  const expectedCnfJkt = devicePubkeyFingerprint(devicePubkey);
+  // proof's JWK thumbprint MUST equal the stored deviceJkt. Uniform error
+  // per S7.
   const dpopHeader = req.headers.get("dpop");
   const dpopResult = await verifyDpopProof(dpopHeader, {
     expectedHtm: "POST",
     expectedHtu: canonicalHtu({ route: "/api/mobile/token" }),
-    expectedCnfJkt,
+    expectedCnfJkt: stored.deviceJkt,
     expectedNonce: null,
     jtiCache: getJtiCache(),
   });
@@ -216,17 +197,40 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       },
       "mobile token failed: DPoP verification failed",
     );
-    return errorResponse(API_ERROR.MOBILE_TOKEN_BINDING_INVALID);
+    return errorResponse(API_ERROR.MOBILE_BRIDGE_CODE_INVALID);
   }
 
-  // 7. Issue the token pair. cnfJkt is the verifier-computed thumbprint of
-  // the proof's own JWK — same value as `expectedCnfJkt` post-verify.
+  // 7. CAS-consume the bridge code. count===0 means lost a race or the row
+  // was used/expired between steps 3 and 7.
+  const cas = await withBypassRls(
+    prisma,
+    async (tx) =>
+      tx.mobileBridgeCode.updateMany({
+        where: { codeHash, usedAt: null, expiresAt: { gt: now } },
+        data: { usedAt: now },
+      }),
+    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+  );
+  if (cas.count === 0) {
+    getLogger().warn(
+      {
+        event: "mobile_token_failure",
+        reason: looksFresh ? "cas_race_lost" : "bridge_code_stale",
+        userId: stored.userId,
+      },
+      "mobile token failed: bridge code CAS-consume returned 0",
+    );
+    return errorResponse(API_ERROR.MOBILE_BRIDGE_CODE_INVALID);
+  }
+
+  // 8. Issue the token pair. cnfJkt is the verifier-computed thumbprint of
+  // the proof's own JWK — same value as stored.deviceJkt post-verify.
   let issued: Awaited<ReturnType<typeof issueIosToken>>;
   try {
     issued = await issueIosToken({
       userId: stored.userId,
       tenantId: stored.tenantId,
-      devicePubkey,
+      deviceJkt: stored.deviceJkt,
       cnfJkt: dpopResult.jkt,
       ip: clientIp,
       userAgent: req.headers.get("user-agent"),
@@ -255,12 +259,10 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     },
   });
 
-  // 8. Stamp DPoP-Nonce on the response (RFC 9449 §8 — clients MUST echo on
-  // subsequent calls). Best-effort rotation tick.
-  const nonceService = getDpopNonceService();
-  void nonceService.rotateIfDue().catch(() => {});
-  const nonce = await nonceService.current();
-
+  // Replay protection is provided by the JTI cache (per-jkt, TTL-bounded).
+  // The previous DPoP-Nonce emission was removed because the verifier passed
+  // expectedNonce: null, making the emit-without-verify pattern a spec/impl
+  // inconsistency without security benefit.
   return NextResponse.json(
     {
       access_token: issued.accessToken,
@@ -270,7 +272,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     },
     {
       status: 200,
-      headers: { "DPoP-Nonce": nonce, "Cache-Control": "no-store" },
+      headers: { "Cache-Control": "no-store" },
     },
   );
 }

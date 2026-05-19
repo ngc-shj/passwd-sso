@@ -93,8 +93,8 @@ export async function validateExtensionToken(
 
   const tokenHash = hashToken(plaintext);
 
-  const token = await withBypassRls(prisma, async () =>
-    prisma.extensionToken.findUnique({
+  const token = await withBypassRls(prisma, async (tx) =>
+    tx.extensionToken.findUnique({
       where: { tokenHash },
       select: {
         id: true,
@@ -158,8 +158,8 @@ export async function validateExtensionToken(
 
   // ── BROWSER_EXTENSION (default): unchanged ─────────────────
   // Best-effort lastUsedAt update (non-blocking).
-  void withBypassRls(prisma, async () =>
-    prisma.extensionToken.update({
+  void withBypassRls(prisma, async (tx) =>
+    tx.extensionToken.update({
       where: { id: token.id },
       data: { lastUsedAt: new Date() },
     }),
@@ -207,8 +207,8 @@ export async function issueExtensionToken(params: {
 
   // Read tenant extension-token idle TTL. Fall back to the policy ceiling if
   // the tenant row is missing (defensive — should not happen in practice).
-  const tenant = await withBypassRls(prisma, async () =>
-    prisma.tenant.findUnique({
+  const tenant = await withBypassRls(prisma, async (tx) =>
+    tx.tenant.findUnique({
       where: { id: tenantId },
       select: { extensionTokenIdleTimeoutMinutes: true },
     }),
@@ -285,8 +285,8 @@ export async function revokeExtensionTokenFamily(params: {
   const { familyId, userId, tenantId, reason } = params;
   const now = new Date();
 
-  const result = await withBypassRls(prisma, async () =>
-    prisma.extensionToken.updateMany({
+  const result = await withBypassRls(prisma, async (tx) =>
+    tx.extensionToken.updateMany({
       where: { familyId, revokedAt: null },
       data: { revokedAt: now },
     }),
@@ -324,8 +324,8 @@ export async function revokeAllExtensionTokensForUser(params: {
   const { userId, tenantId, reason } = params;
 
   // familyId is NOT NULL post-Batch-D migration — no legacy-null branch needed.
-  const activeFamilies = await withBypassRls(prisma, async () =>
-    prisma.extensionToken.findMany({
+  const activeFamilies = await withBypassRls(prisma, async (tx) =>
+    tx.extensionToken.findMany({
       where: { userId, revokedAt: null },
       select: { familyId: true },
       distinct: ["familyId"],

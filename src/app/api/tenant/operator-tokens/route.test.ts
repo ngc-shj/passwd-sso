@@ -28,7 +28,7 @@ const {
       count: vi.fn(),
       create: vi.fn(),
     },
-    mockWithTenantRls: vi.fn(async (_p: unknown, _t: unknown, fn: () => unknown) => fn()),
+    mockWithTenantRls: vi.fn(async (p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(p)),
     mockLogAudit: vi.fn(),
     mockHashToken: vi.fn((t: string) => `hashed:${t}`),
     mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),

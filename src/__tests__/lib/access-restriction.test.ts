@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { mockTenantFindUnique, mockWithBypassRls, mockLogAudit, mockVerifyTailscalePeer, mockResolveUserTenantId } = vi.hoisted(() => ({
   mockTenantFindUnique: vi.fn(),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockLogAudit: vi.fn(),
   mockVerifyTailscalePeer: vi.fn().mockResolvedValue(false),
   mockResolveUserTenantId: vi.fn().mockResolvedValue("tenant1"),

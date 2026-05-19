@@ -44,6 +44,8 @@ export interface TenantWebhookEvent {
 /** @deprecated Use TeamWebhookEvent instead */
 export type WebhookEvent = TeamWebhookEvent;
 
+import { buildWebhookSecretAAD } from "@/lib/crypto/webhook-aad";
+
 interface WebhookRecord {
   id: string;
   url: string;
@@ -51,6 +53,14 @@ interface WebhookRecord {
   secretIv: string;
   secretAuthTag: string;
   masterKeyVersion: number;
+  /** v1 = legacy no-AAD; v2 = AAD bound to (table, version, ids). */
+  secretAadVersion: number;
+  /** Required for both kinds. */
+  tenantId: string;
+  /** Identifies the AAD construction path. */
+  kind: "TenantWebhook" | "TeamWebhook";
+  /** Present only for kind === "TeamWebhook". */
+  teamId?: string | null;
   failCount: number;
 }
 
@@ -120,6 +130,19 @@ async function deliverSingleWebhook(
     let secret: string;
     try {
       const masterKey = getMasterKeyByVersion(webhook.masterKeyVersion);
+      // v1 = legacy no-AAD; v2 = AAD-bound. The aadVersion column is
+      // bound INTO the AAD on writes (per S9), so a v2→v1 downgrade
+      // attack by flipping the column produces a tag mismatch here.
+      const aad =
+        webhook.secretAadVersion >= 2
+          ? buildWebhookSecretAAD({
+              tableName: webhook.kind,
+              version: webhook.secretAadVersion,
+              webhookId: webhook.id,
+              tenantId: webhook.tenantId,
+              teamId: webhook.kind === "TeamWebhook" ? webhook.teamId ?? null : undefined,
+            })
+          : undefined;
       secret = decryptServerData(
         {
           ciphertext: webhook.secretEncrypted,
@@ -127,9 +150,18 @@ async function deliverSingleWebhook(
           authTag: webhook.secretAuthTag,
         },
         masterKey,
+        aad,
       );
     } catch (err) {
-      getLogger().error({ webhookId: webhook.id, masterKeyVersion: webhook.masterKeyVersion, err }, "webhook secret decryption failed");
+      getLogger().error(
+        {
+          webhookId: webhook.id,
+          masterKeyVersion: webhook.masterKeyVersion,
+          secretAadVersion: webhook.secretAadVersion,
+          err,
+        },
+        "webhook secret decryption failed",
+      );
       return;
     }
 
@@ -175,8 +207,8 @@ async function dispatchToWebhooks(
  */
 export function dispatchWebhook(event: TeamWebhookEvent): void {
   void (async () => {
-    const webhooks = await withBypassRls(prisma, async () =>
-      prisma.teamWebhook.findMany({
+    const rows = await withBypassRls(prisma, async (tx) =>
+      tx.teamWebhook.findMany({
         where: {
           teamId: event.teamId,
           isActive: true,
@@ -185,7 +217,21 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
       }),
     BYPASS_PURPOSE.WEBHOOK_DISPATCH);
 
-    if (webhooks.length === 0) return;
+    if (rows.length === 0) return;
+
+    const webhooks: WebhookRecord[] = rows.map((r) => ({
+      id: r.id,
+      url: r.url,
+      secretEncrypted: r.secretEncrypted,
+      secretIv: r.secretIv,
+      secretAuthTag: r.secretAuthTag,
+      masterKeyVersion: r.masterKeyVersion,
+      secretAadVersion: r.secretAadVersion,
+      tenantId: r.tenantId,
+      kind: "TeamWebhook",
+      teamId: r.teamId,
+      failCount: r.failCount,
+    }));
 
     const sanitizedEvent = {
       ...event,
@@ -197,8 +243,8 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
       webhooks,
       payload,
       async (id) => {
-        await withBypassRls(prisma, async () =>
-          prisma.teamWebhook.update({
+        await withBypassRls(prisma, async (tx) =>
+          tx.teamWebhook.update({
             where: { id },
             data: {
               lastDeliveredAt: new Date(),
@@ -209,8 +255,8 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
         BYPASS_PURPOSE.WEBHOOK_DISPATCH);
       },
       async (id, newFailCount, url) => {
-        await withBypassRls(prisma, async () => {
-          await prisma.teamWebhook.update({
+        await withBypassRls(prisma, async (tx) => {
+          await tx.teamWebhook.update({
             where: { id },
             data: {
               failCount: newFailCount,
@@ -248,8 +294,8 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
  */
 export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
   void (async () => {
-    const webhooks = await withBypassRls(prisma, async () =>
-      prisma.tenantWebhook.findMany({
+    const rows = await withBypassRls(prisma, async (tx) =>
+      tx.tenantWebhook.findMany({
         where: {
           tenantId: event.tenantId,
           isActive: true,
@@ -258,7 +304,20 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
       }),
     BYPASS_PURPOSE.WEBHOOK_DISPATCH);
 
-    if (webhooks.length === 0) return;
+    if (rows.length === 0) return;
+
+    const webhooks: WebhookRecord[] = rows.map((r) => ({
+      id: r.id,
+      url: r.url,
+      secretEncrypted: r.secretEncrypted,
+      secretIv: r.secretIv,
+      secretAuthTag: r.secretAuthTag,
+      masterKeyVersion: r.masterKeyVersion,
+      secretAadVersion: r.secretAadVersion,
+      tenantId: r.tenantId,
+      kind: "TenantWebhook",
+      failCount: r.failCount,
+    }));
 
     const sanitizedEvent = {
       ...event,
@@ -270,8 +329,8 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
       webhooks,
       payload,
       async (id) => {
-        await withBypassRls(prisma, async () =>
-          prisma.tenantWebhook.update({
+        await withBypassRls(prisma, async (tx) =>
+          tx.tenantWebhook.update({
             where: { id },
             data: {
               lastDeliveredAt: new Date(),
@@ -282,8 +341,8 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
         BYPASS_PURPOSE.WEBHOOK_DISPATCH);
       },
       async (id, newFailCount, url) => {
-        await withBypassRls(prisma, async () => {
-          await prisma.tenantWebhook.update({
+        await withBypassRls(prisma, async (tx) => {
+          await tx.tenantWebhook.update({
             where: { id },
             data: {
               failCount: newFailCount,

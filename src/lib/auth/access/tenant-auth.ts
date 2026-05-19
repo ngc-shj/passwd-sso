@@ -74,8 +74,8 @@ export { isTenantAdminRole } from "@/lib/constants";
  * (this function is used to resolve it).
  */
 export async function getTenantMembership(userId: string) {
-  return withBypassRls(prisma, async () =>
-    prisma.tenantMember.findFirst({
+  return withBypassRls(prisma, async (tx) =>
+    tx.tenantMember.findFirst({
       where: { userId, deactivatedAt: null },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);

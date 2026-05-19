@@ -82,7 +82,7 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
       },
     });
     mockWithBypassRls.mockImplementation(
-      (_prisma: unknown, fn: () => unknown, _purpose: string) => fn(),
+      (prisma: unknown, fn: (tx: unknown) => unknown, _purpose: string) => fn(prisma),
     );
     mockPrismaTransaction.mockImplementation(
       async (fn: (tx: unknown) => unknown) => fn({

@@ -58,8 +58,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const { id: requestId } = await params;
 
   // Verify the access request exists and belongs to this tenant
-  const request = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.accessRequest.findUnique({
+  const request = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.accessRequest.findUnique({
       where: { id: requestId },
       select: { id: true, tenantId: true, serviceAccountId: true },
     }),
@@ -70,7 +70,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   // Optimistic lock: only update if still PENDING and belongs to this tenant
-  const transitionResult = await withTenantRls(prisma, actor.tenantId, async () =>
+  const transitionResult = await withTenantRls(prisma, actor.tenantId, async (tx) =>
     transition({
       db: prisma,
       where: { id: requestId, tenantId: actor.tenantId },

@@ -49,16 +49,16 @@ export async function buildTeamMemberDisplayItems(
     return [];
   }
 
-  const [users, userTenants] = await withBypassRls(prisma, async () =>
+  const [users, userTenants] = await withBypassRls(prisma, async (tx) =>
     Promise.all([
-      prisma.user.findMany({
+      tx.user.findMany({
         where: { id: { in: userIds } },
         select: { id: true, name: true, email: true, image: true },
       }),
       // The single-active-tenant invariant is enforced at the write boundary
       // (`resolveUserTenantIdFromClient`) — order by `createdAt` to keep the
       // chosen membership stable if the invariant is ever transiently violated.
-      prisma.tenantMember.findMany({
+      tx.tenantMember.findMany({
         where: { userId: { in: userIds }, deactivatedAt: null },
         select: { userId: true, tenant: { select: { name: true } } },
         orderBy: { createdAt: "asc" },

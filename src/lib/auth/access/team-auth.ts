@@ -150,9 +150,9 @@ export type AdminTeamMembership = Awaited<
  * layout that does not yet know the tenant context.
  */
 export async function getAdminTeamMemberships(userId: string) {
-  return withBypassRls(prisma, async () => {
+  return withBypassRls(prisma, async (tx) => {
     const userTenantId = await resolveUserTenantIdFromClient(prisma, userId);
-    const memberships = await prisma.teamMember.findMany({
+    const memberships = await tx.teamMember.findMany({
       where: {
         userId,
         role: { in: [TEAM_ROLE.ADMIN, TEAM_ROLE.OWNER] },

@@ -45,8 +45,8 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
 
   const { id } = await params;
 
-  const token = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.operatorToken.findUnique({
+  const token = await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.operatorToken.findUnique({
       where: { id },
       select: {
         id: true,
@@ -66,8 +66,8 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     return errorResponse(API_ERROR.ALREADY_REVOKED);
   }
 
-  await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.operatorToken.update({
+  await withTenantRls(prisma, actor.tenantId, async (tx) =>
+    tx.operatorToken.update({
       where: { id },
       data: { revokedAt: new Date() },
     }),
