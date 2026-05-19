@@ -59,7 +59,7 @@ diff.
 
 **Note on path-policy consistency**: the passkey-verify route handler
 ([src/app/api/auth/passkey/verify/route.ts](src/app/api/auth/passkey/verify/route.ts)) already issues
-its session-creation cookie with `SameSite=Lax` today. PR #468 modified the Auth.js-driven sessionToken
+its session-creation cookie with `SameSite=Lax` today. PR `#468` modified the Auth.js-driven sessionToken
 in `auth.config.ts` only; it did not touch the passkey-verify path, which has continued to ship under
 `SameSite=Lax` without incident. Reverting `auth.config.ts` to `Lax` restores cookie-policy parity
 between the two session-creation paths.
@@ -228,12 +228,12 @@ created at Phase 2):
       device-pubkey supplied by the iOS host app. Attacker cannot fabricate a valid handshake without
       controlling the iOS app, but a click-jack could create a bridge code redeemable by an attacker-
       registered device. **Existing mitigation**: `requireRecentSession` step-up. **Severity under Lax**:
-      Major surface increase that pre-existed PR #468 — the iOS pairing flow was already shipped under
-      `SameSite=Lax` before PR #468 and has not had a reported incident.
+      Major surface increase that pre-existed PR `#468` — the iOS pairing flow was already shipped under
+      `SameSite=Lax` before PR `#468` and has not had a reported incident.
     - `src/app/api/mcp/authorize/route.ts` — OAuth 2.1 authorization endpoint. Per RFC 6749 §3.1, the
       authorization endpoint MUST accept GET. Defense relies on PKCE + the consent step.
   - **Pre-existing posture**: every GET-mutation surface enumerated above shipped in production for the
-    entire lifetime of this project until PR #468 (May 16, 2026, three days ago) tightened cookies to
+    entire lifetime of this project until PR `#468` (May 16, 2026, three days ago) tightened cookies to
     `Strict`. Reverting to `Lax` restores the pre-existing posture; we are not introducing a new
     surface, we are restoring a state that ran without incident.
   - **Out-of-scope follow-up**: a dedicated audit converting GET-mutation handlers to require a CSRF
@@ -251,7 +251,7 @@ created at Phase 2):
   So C2 covers the full project surface.
 - Rotating the existing cookies in user browsers — they will be replaced on the next sign-in.
 - Mutating-GET endpoint CSRF hardening (URL-bound token / Origin-via-Sec-Fetch-Site / convert to POST).
-  Pre-existing surface that PR #468 attempted to mitigate as a side effect via `Strict`. Restoring
+  Pre-existing surface that PR `#468` attempted to mitigate as a side effect via `Strict`. Restoring
   `Lax` returns the surface to its pre-PR-#468 state. Follow-up tracked as a separate Minor.
 
 ## User operation scenarios

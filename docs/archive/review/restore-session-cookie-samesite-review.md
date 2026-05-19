@@ -10,21 +10,21 @@ Initial review.
 
 Round 1 findings addressed via plan amendments:
 - F-TEST-C1 (Critical) → C1 contract amended to include `src/auth.config.test.ts` flip + forbidden-pattern
-- F-TEST-M1 → Test #1 now ships explicit `headers.getSetCookie()` assertion shape
-- F-TEST-M2 → Test #1 specifies reuse of `handlePageRoute` integration pattern, no export of private function
+- F-TEST-M1 → Test `#1` now ships explicit `headers.getSetCookie()` assertion shape
+- F-TEST-M2 → Test `#1` specifies reuse of `handlePageRoute` integration pattern, no export of private function
 - F-TEST-M3 → Test asserts Secure + HttpOnly + SameSite=lax + Max-Age=0/Expires
-- F-TEST-M4 → New test #2 covers `AUTH_URL=http://localhost` (no-Secure branch)
+- F-TEST-M4 → New test `#2` covers `AUTH_URL=http://localhost` (no-Secure branch)
 - F-FUNC-01 → C2 invariant: call-time evaluation of `isSecureCookieFromAuthUrl()`
 - F-FUNC-02 → Note added (passkey-verify already uses Lax)
 - F-FUNC-03 / F-TEST-MIN3 → Plan now standardizes on existing `auth.config.test.ts`
 - F-SEC-F6 → C1 invariant: other Auth.js cookies retain defaults
-- F-SEC-F7 → Test #3 extends to httpOnly assertion
-- F-SEC-F8 → Test #1 iterates over all 5 cookie names
+- F-SEC-F7 → Test `#3` extends to httpOnly assertion
+- F-SEC-F8 → Test `#1` iterates over all 5 cookie names
 - F-TEST-MIN1 (RT3) → Test derives name via `getSessionCookieName()`
 - F-TEST-MIN2 → Manual step 5b added
 
 Round 2 local LLM pre-review surfaced one repeat (CSRF GET surface — already covered by plan's
-"Known risks" section, accepted as pre-PR-#468 restoration) and two non-findings (shared-utility
+"Known risks" section, accepted as pre-PR-`#468` restoration) and two non-findings (shared-utility
 inventory false positive; SameSite-constant extraction is YAGNI for a single use). Closing review
 without invoking expert sub-agents a second time; the addressed Critical and Majors are concrete
 plan amendments, not speculative concerns.
@@ -39,10 +39,10 @@ plan amendments, not speculative concerns.
 ### F-FUNC-02 [Minor]
 - Problem: Plan does not note that `src/app/api/auth/passkey/verify/route.ts:191` already issues `SameSite=Lax` for the session cookie, proving the proposed posture is the same as what runs today on the passkey flow.
 - Impact: Documentation completeness only.
-- Action: Add a note confirming the passkey-verify path was unaffected by PR #468.
+- Action: Add a note confirming the passkey-verify path was unaffected by PR `#468`.
 
 ### F-FUNC-03 [Minor]
-- Problem: Test #2 should reference the existing `src/auth.config.test.ts` rather than create a new spec.
+- Problem: Test `#2` should reference the existing `src/auth.config.test.ts` rather than create a new spec.
 - Action: Extend the existing test file (overlaps with F-TEST-C1).
 
 ## Security Findings
@@ -69,26 +69,26 @@ plan amendments, not speculative concerns.
 - Action: Add a one-line invariant to C1 acceptance criteria.
 
 ### F-SEC-F7 [Minor]
-- Problem: Test #2 should additionally lock `httpOnly === true`, `path` (basePath-prefixed), and `secure` consistency.
-- Action: Extend Test #2 to assert all four cookie attributes.
+- Problem: Test `#2` should additionally lock `httpOnly === true`, `path` (basePath-prefixed), and `secure` consistency.
+- Action: Extend Test `#2` to assert all four cookie attributes.
 
 ### F-SEC-F8 [Minor]
-- Problem: Test #1 only verifies "at least one known cookie name carries Secure." Iterate over all 5 entries in `ALL_KNOWN_SESSION_COOKIE_NAMES`.
+- Problem: Test `#1` only verifies "at least one known cookie name carries Secure." Iterate over all 5 entries in `ALL_KNOWN_SESSION_COOKIE_NAMES`.
 - Action: Loop the assertion.
 
 ## Testing Findings
 
 ### F-TEST-C1 [Critical]
-- Problem: Existing `src/auth.config.test.ts:63-66` already asserts `sameSite === "strict"`. Plan's test #2 proposes a NEW file but does not mention the existing test — which WILL FAIL after C1 change.
+- Problem: Existing `src/auth.config.test.ts:63-66` already asserts `sameSite === "strict"`. Plan's test `#2` proposes a NEW file but does not mention the existing test — which WILL FAIL after C1 change.
 - Impact: CI blocked; duplicate tests would mask regressions.
-- Action: Update plan test #2 — modify the EXISTING `src/auth.config.test.ts` describe block. Flip `strict` → `lax`. Do NOT create new file. Add to C1: `src/auth.config.test.ts` must no longer contain `.toBe("strict")` on the sameSite line.
+- Action: Update plan test `#2` — modify the EXISTING `src/auth.config.test.ts` describe block. Flip `strict` → `lax`. Do NOT create new file. Add to C1: `src/auth.config.test.ts` must no longer contain `.toBe("strict")` on the sameSite line.
 
 ### F-TEST-M1 [Major]
-- Problem: Test #1 lacks assertion shape; `response.cookies.get(name)` after delete returns undefined regardless of Secure flag — risk of vacuous pass.
+- Problem: Test `#1` lacks assertion shape; `response.cookies.get(name)` after delete returns undefined regardless of Secure flag — risk of vacuous pass.
 - Action: Specify in plan: use `response.headers.getSetCookie()`, find the line starting with the cookie name, regex-assert `Secure`, `HttpOnly`, `SameSite=lax`, and `Max-Age=0` / `Expires=Thu, 01 Jan 1970`.
 
 ### F-TEST-M2 [Major]
-- Problem: Test #1 must exercise production call path (RT5). `clearAuthSessionCookies` is module-private — exporting it breaks encapsulation. Test must go through `handlePageRoute`. Env stub timing matters (must be before module import OR via env at call time).
+- Problem: Test `#1` must exercise production call path (RT5). `clearAuthSessionCookies` is module-private — exporting it breaks encapsulation. Test must go through `handlePageRoute`. Env stub timing matters (must be before module import OR via env at call time).
 - Action: Specify: reuse "redirects /dashboard without session to signin" pattern. Stub `AUTH_URL` BEFORE `handlePageRoute`. Do NOT export `clearAuthSessionCookies`. Confirm `isSecureCookieFromAuthUrl()` reads env at call time.
 
 ### F-TEST-M3 [Major]
