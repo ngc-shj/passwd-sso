@@ -107,9 +107,13 @@ INSERT INTO folders (id, tenant_id, user_id, name, updated_at) VALUES
   ('00000000-0000-0000-0000-0000000000A8', '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', 'rls-x-a-folder', NOW()),
   ('00000000-0000-0000-0000-0000000000B8', '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B1', 'rls-x-b-folder', NOW());
 
-INSERT INTO mobile_bridge_codes (id, tenant_id, user_id, code_hash, state, code_challenge, device_pubkey, expires_at) VALUES
-  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', md5('rls-x-a-mb')::text, 'state-a', md5('rls-x-a-mbc')::text, 'pubkey-a', NOW() + interval '1 hour'),
-  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B1', md5('rls-x-b-mb')::text, 'state-b', md5('rls-x-b-mbc')::text, 'pubkey-b', NOW() + interval '1 hour');
+-- device_jkt is the RFC 7638 JWK thumbprint (43 base64url chars). Replaced
+-- the legacy device_pubkey (base64url SPKI-DER) per C6 — the previous
+-- design's SHA-256(SPKI) was never equal to the DPoP verifier's RFC 7638
+-- thumbprint, so the binding could not succeed in production.
+INSERT INTO mobile_bridge_codes (id, tenant_id, user_id, code_hash, state, code_challenge, device_jkt, expires_at) VALUES
+  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', md5('rls-x-a-mb')::text, 'state-a', md5('rls-x-a-mbc')::text, repeat('a', 43), NOW() + interval '1 hour'),
+  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B1', md5('rls-x-b-mb')::text, 'state-b', md5('rls-x-b-mbc')::text, repeat('b', 43), NOW() + interval '1 hour');
 
 INSERT INTO notifications (id, tenant_id, user_id, type, title, body) VALUES
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', 'SECURITY_ALERT', 'rls-x-a', 'rls-x-a body'),
