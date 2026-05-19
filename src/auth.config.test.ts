@@ -58,11 +58,14 @@ describe("auth.config session cookie attributes", () => {
     vi.unstubAllEnvs();
   });
 
-  // sameSite=strict is the explicit policy choice — guards against silent
-  // regression to `lax` (which would re-open the login-CSRF window).
-  it("sets sameSite=strict on the session cookie", async () => {
+  // sameSite=lax is the explicit policy choice — guards against silent
+  // regression to `strict` (which would suppress the session cookie on the
+  // OAuth callback redirect chain, bouncing users to /auth/signin on
+  // first hit after sign-in). Login CSRF is defended by Auth.js's `state`
+  // cookie + PKCE on OAuth and by the proxy CSRF gate on POST/PUT/PATCH/DELETE.
+  it("sets sameSite=lax on the session cookie", async () => {
     const config = (await import("@/auth.config")).default;
-    expect(config.cookies?.sessionToken?.options?.sameSite).toBe("strict");
+    expect(config.cookies?.sessionToken?.options?.sameSite).toBe("lax");
   });
 
   it("sets httpOnly=true on the session cookie", async () => {

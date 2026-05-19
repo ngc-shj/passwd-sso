@@ -137,12 +137,14 @@ export default {
       options: {
         path: `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/`,
         httpOnly: true,
-        // strict: cookie is NOT sent on cross-site top-level navigations.
-        // Prevents login CSRF + minimizes session-cookie exfiltration via
-        // top-level GETs from third-party origins. Trade-off: external
-        // links into the app land unauthenticated until first same-site
-        // navigation — acceptable for this app's security posture.
-        sameSite: "strict" as const,
+        // lax: the OAuth callback redirect chain is treated by browsers
+        // as cross-site-initiated, so strict suppresses the just-issued
+        // cookie on the first hit to the post-callback destination and
+        // bounces users back to /auth/signin. Login CSRF is defended by
+        // Auth.js's `state` cookie + PKCE on OAuth and by the proxy CSRF
+        // gate (Origin-header check on POST/PUT/PATCH/DELETE for
+        // cookie-bearing mutating requests, src/lib/proxy/csrf-gate.ts).
+        sameSite: "lax" as const,
         secure: useSecureCookies,
       },
     },

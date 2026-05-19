@@ -121,6 +121,56 @@ describe("handlePageRoute — protected routes auth check", () => {
     expect(location).toContain("callbackUrl=");
   });
 
+  it("emits Set-Cookie deletions with full attribute set (Secure on https)", async () => {
+    vi.stubEnv("AUTH_URL", "https://example.com");
+    const res = await handlePageRoute(
+      makePageRequest("/ja/dashboard/passwords"),
+      dummyOptions,
+    );
+    const headers = res.headers.getSetCookie();
+    // ALL_KNOWN_SESSION_COOKIE_NAMES has 5 entries — every one must be emitted.
+    const names = [
+      "__Host-authjs.session-token",
+      "__Secure-authjs.session-token",
+      "authjs.session-token",
+      "__Secure-next-auth.session-token",
+      "next-auth.session-token",
+    ];
+    for (const name of names) {
+      const line = headers.find((h) => h.startsWith(`${name}=`));
+      expect(line, `Set-Cookie for ${name} not emitted`).toBeDefined();
+      // RFC 6265bis §4.1.3.1/§4.1.3.2 require Secure on `__Secure-` / `__Host-`
+      // cookies; without it the browser silently rejects the Set-Cookie and the
+      // cookie persists — the masking bug this contract fixes.
+      expect(line, `${name} missing Secure`).toMatch(/;\s*Secure/i);
+      expect(line, `${name} missing HttpOnly`).toMatch(/;\s*HttpOnly/i);
+      expect(line, `${name} missing SameSite=lax`).toMatch(/;\s*SameSite=lax/i);
+      // Deletion marker — Max-Age=0 or epoch Expires.
+      expect(line, `${name} not a deletion`).toMatch(
+        /Max-Age=0|Expires=Thu,\s*01\s*Jan\s*1970/i,
+      );
+    }
+  });
+
+  it("does NOT add Secure to deletion when AUTH_URL is http (dev)", async () => {
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
+    const res = await handlePageRoute(
+      makePageRequest("/ja/dashboard/passwords"),
+      dummyOptions,
+    );
+    const headers = res.headers.getSetCookie();
+    // Proves the `useSecureCookies` plumbing is live, not hardcoded.
+    // A hardcoded `secure: true` would pass the https test above but break
+    // dev logout / redirect-clear here. Use the unprefixed name (the only
+    // legal one when useSecureCookies=false; prefixed forms emit but are
+    // browser-rejected, which is correct).
+    const line = headers.find((h) => h.startsWith("authjs.session-token="));
+    expect(line).toBeDefined();
+    expect(line).not.toMatch(/;\s*Secure/i);
+    expect(line).toMatch(/;\s*HttpOnly/i);
+    expect(line).toMatch(/;\s*SameSite=lax/i);
+  });
+
   it("allows /dashboard with valid session (returns intl response with security headers)", async () => {
     mockValidSession(fetchSpy);
     const res = await handlePageRoute(
