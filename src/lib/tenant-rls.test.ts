@@ -145,14 +145,19 @@ describe("RLS nesting guards (C1)", () => {
     const { prisma, mockTx } = makeMockPrisma();
     const innerTransaction = vi.fn();
 
+    // Hoisted to the outer scope so the post-throw assertions can read them.
+    // Assigned inside withBypassRls's callback, after its own set_config calls
+    // have fired — i.e. the snapshot captures the state immediately before the
+    // inner withTenantRls attempt.
+    let outerTxCallsBefore = -1;
+    let outerExecBefore = -1;
+
     await expect(
       withBypassRls(
         prisma,
         async () => {
-          // Snapshot $transaction / $executeRaw call counts BEFORE the inner
-          // attempt, so we can assert no inner DB statement fired.
-          const outerTxCallsBefore = (prisma.$transaction as ReturnType<typeof vi.fn>).mock.calls.length;
-          const outerExecBefore = mockTx.$executeRaw.mock.calls.length;
+          outerTxCallsBefore = (prisma.$transaction as ReturnType<typeof vi.fn>).mock.calls.length;
+          outerExecBefore = mockTx.$executeRaw.mock.calls.length;
 
           // Inner attempt MUST throw synchronously (before $transaction).
           await withTenantRls(prisma, "tenant-inner", async () => {
@@ -170,20 +175,17 @@ describe("RLS nesting guards (C1)", () => {
     // The inner callback's body must NEVER have run.
     expect(innerTransaction).not.toHaveBeenCalled();
 
-    // The outer $transaction was called exactly once (for the outer
-    // withBypassRls itself); the inner withTenantRls did not invoke it again
-    // because the guard threw before reaching prisma.$transaction.
-    expect((prisma.$transaction as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+    // No additional $transaction call fired between the snapshot and now —
+    // the inner withTenantRls's guard threw before reaching prisma.$transaction.
+    expect((prisma.$transaction as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
+      outerTxCallsBefore,
+    );
 
-    // The inner set_config('app.tenant_id', ...) must NOT have fired.
-    // mockTx.$executeRaw is invoked only by withBypassRls's own set_config
-    // calls (bypass_rls + bypass_purpose + tenant_id). If the inner guard
-    // had been bypassed, we'd see an additional invocation with the inner
-    // tenant id literal in the args. Assert no call contains "tenant-inner".
-    for (const call of mockTx.$executeRaw.mock.calls) {
-      const flatArgs = JSON.stringify(call);
-      expect(flatArgs).not.toMatch(/tenant-inner/);
-    }
+    // No additional $executeRaw call fired either. mockTx.$executeRaw is
+    // invoked only by withBypassRls's own set_config calls (bypass_rls +
+    // bypass_purpose + tenant_id); if the inner guard had been bypassed we'd
+    // see an additional invocation with the inner tenant id literal.
+    expect(mockTx.$executeRaw.mock.calls.length).toBe(outerExecBefore);
   });
 
   it("rejects withBypassRls inside withTenantRls — INVALID_RLS_NESTING", async () => {

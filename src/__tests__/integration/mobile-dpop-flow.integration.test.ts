@@ -207,7 +207,6 @@ describe("POST /api/mobile/token — real-key DPoP (C10 sentinel for C6)", () =>
     // this test fails. Drift was the entire C6 bug class.
     const kp = await generateKeypair();
     const codePlain = randomBytes(32).toString("hex");
-    const codeHash = createHash("sha256").update(codePlain).digest("hex");
 
     mockMobileBridgeCodeFindUnique.mockResolvedValueOnce({
       userId: USER_ID,
