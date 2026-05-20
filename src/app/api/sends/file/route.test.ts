@@ -213,4 +213,105 @@ describe("POST /api/sends/file", () => {
     expect(mockAggregate).toHaveBeenCalledOnce();
     expect(mockUserFindUnique).toHaveBeenCalledOnce();
   });
+
+  // H5 regression tests — the magic-byte gate previously accepted any file
+  // whose declared Content-Type was application/octet-stream, including
+  // SVG/HTML/JS payloads. Defense-in-depth: also deny by filename extension
+  // so a renamed .html → .txt can't smuggle markup through the text/* path.
+
+  it("rejects SVG declared as application/octet-stream (magic-byte denylist)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    // file-type detects the real bytes as image/svg+xml even though the
+    // client labeled them as octet-stream.
+    mockFileTypeFromBuffer.mockResolvedValueOnce({ mime: "image/svg+xml", ext: "svg" });
+
+    const svgBytes = new TextEncoder().encode("<svg><script>alert(1)</script></svg>");
+    const file = new File([svgBytes], "image.bin", {
+      type: "application/octet-stream",
+    });
+    const fd = createFormData({ file });
+    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("SEND_FILE_TYPE_NOT_ALLOWED");
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects HTML by filename extension even when bytes have no signature", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    // Plain-text HTML has no file-type magic — detected stays undefined.
+    mockFileTypeFromBuffer.mockResolvedValueOnce(undefined);
+
+    const html = new TextEncoder().encode("<html><script>alert(1)</script></html>");
+    const file = new File([html], "page.html", { type: "text/plain" });
+    const fd = createFormData({ file });
+    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("SEND_FILE_TYPE_NOT_ALLOWED");
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("stores the magic-byte MIME, not the client-declared type, when they match", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFileTypeFromBuffer.mockResolvedValueOnce({ mime: "image/png", ext: "png" });
+    const expiresAt = new Date(Date.now() + 86400_000);
+    mockCreate.mockResolvedValue({ id: "share-mime", expiresAt });
+
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const file = new File([png], "image.png", { type: "image/png" });
+    const fd = createFormData({ file });
+    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    await POST(req as never);
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ sendContentType: "image/png" }),
+      }),
+    );
+  });
+
+  it("rejects when declared MIME mismatches the magic-byte MIME (strict consistency)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFileTypeFromBuffer.mockResolvedValueOnce({ mime: "image/png", ext: "png" });
+
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    // A real PNG is being labeled as something else by the client — refuse,
+    // both to flag tampering and to avoid storing a misleading content-type.
+    const file = new File([png], "image.png", { type: "image/jpeg" });
+    const fd = createFormData({ file });
+    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("SEND_FILE_TYPE_NOT_ALLOWED");
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("falls back sendContentType to application/octet-stream for unsigned text files (does NOT trust client-declared type)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    // file-type returns undefined for unsigned text — server must NOT
+    // store the client-supplied content-type as authoritative.
+    mockFileTypeFromBuffer.mockResolvedValueOnce(undefined);
+    const expiresAt = new Date(Date.now() + 86400_000);
+    mockCreate.mockResolvedValue({ id: "share-text", expiresAt });
+
+    const file = new File(["hello"], "notes.txt", { type: "text/plain" });
+    const fd = createFormData({ file });
+    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    await POST(req as never);
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          sendContentType: "application/octet-stream",
+        }),
+      }),
+    );
+  });
 });
