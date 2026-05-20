@@ -5,6 +5,30 @@
 // Pre-compute static CSP parts at module init time to avoid per-request work.
 // Only the nonce value is injected per-request.
 const _isProd = process.env.NODE_ENV === "production";
+
+/**
+ * L2: Narrow Sentry's connect-src from `https://*.ingest.us.sentry.io
+ * https://*.ingest.sentry.io` (whole infra) to the specific org-ingest
+ * host derived from the DSN. The DSN format is
+ *   https://<publicKey>@<host>/<projectId>
+ * where <host> is org-specific (e.g. `o123456.ingest.us.sentry.io`).
+ * Falling back to the broad wildcard is acceptable when the DSN is
+ * unparseable — fail-open is safer than CSP-blocking error reports —
+ * but we log so misconfig is visible.
+ */
+function sentryConnectSrc(): string {
+  const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
+  if (!dsn) return "";
+  try {
+    const u = new URL(dsn);
+    // Org-specific host like o123.ingest.us.sentry.io — exact, no wildcard.
+    return ` https://${u.hostname}`;
+  } catch {
+    // Malformed DSN — keep Sentry working with the broad pattern but
+    // accept the wider CSP surface as a deliberate fail-open.
+    return " https://*.ingest.us.sentry.io https://*.ingest.sentry.io";
+  }
+}
 // Safety guard: in production, never allow CSP_MODE=dev to downgrade the CSP.
 // Ops mistakes (wrong .env.production, Docker env, etc.) must not silently
 // disable strict-dynamic + nonce in prod. Only "strict" is accepted in prod.
@@ -29,7 +53,7 @@ const _styleSuffix = _cspMode === "dev" ? "" : "'";
 const _staticDirectives = [
   "img-src 'self' data: https:",
   "font-src 'self'",
-  `connect-src 'self'${process.env.NEXT_PUBLIC_SENTRY_DSN ? " https://*.ingest.us.sentry.io https://*.ingest.sentry.io" : ""}`,
+  `connect-src 'self'${sentryConnectSrc()}`,
   "object-src 'none'",
   "base-uri 'self'",
   // OAuth consent form-POSTs back to /api/mcp/authorize/consent which then
