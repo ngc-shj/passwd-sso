@@ -5,8 +5,13 @@
  *
  * Note:
  * - Team vault encryption is E2E-only; server-side team key re-wrap is removed.
- * - This endpoint validates the target master key version and optionally
- *   revokes old-version PasswordShare rows.
+ * - This endpoint validates the target master key version and revokes
+ *   old-version PasswordShare rows. `revokeShares` defaults to **true** —
+ *   the entire reason an operator runs a rotation is usually that the old
+ *   key may be compromised, so leaving stale share rows decryptable by the
+ *   old key defeats the purpose. Callers must explicitly pass `false` to
+ *   opt out (e.g. for a rehearsal / dry-run); the choice is reflected in
+ *   the audit metadata so post-incident review can flag bypasses.
  * Authenticated via per-operator op_* token (mint via /dashboard/tenant/operator-tokens).
  *
  * Body: { targetVersion: number, revokeShares?: boolean }
@@ -34,7 +39,10 @@ const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });
 
 const bodySchema = z.object({
   targetVersion: z.number().int().min(MASTER_KEY_VERSION_MIN).max(MASTER_KEY_VERSION_MAX),
-  revokeShares: z.boolean().default(false),
+  // SECURITY: defaults to true so an operator who forgets the flag during a
+  // compromise-response rotation still revokes old-version shares. Pass
+  // `false` explicitly only for a dry-run / rehearsal.
+  revokeShares: z.boolean().default(true),
 });
 
 async function handlePOST(req: NextRequest) {
@@ -109,6 +117,10 @@ async function handlePOST(req: NextRequest) {
       tokenId: auth.tokenId,
       targetVersion,
       revokedShares,
+      // Flag explicit opt-outs so post-incident review can detect a rotation
+      // that left old-version shares decryptable by the (potentially leaked)
+      // previous key.
+      shareRevocationSkipped: !revokeShares,
     },
   });
 
