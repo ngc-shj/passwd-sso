@@ -164,4 +164,25 @@ describe("POST /api/csp-report", () => {
     expect(res.status).toBe(204);
     expect(mockWarn).not.toHaveBeenCalled();
   });
+
+  // L1 regression: bound each emitted field at 2 KB so one chatty page
+  // can't bloat downstream log shipping / storage. Without this cap, the
+  // outer MAX_JSON_BODY_BYTES envelope still permits a single huge
+  // document-uri to enlarge every log row that quotes it.
+  it("L1: caps document-uri to 2 KB to prevent log-row bloat", async () => {
+    const longPath = "/" + "x".repeat(5_000);
+    const res = await POST(
+      createCspRequest({
+        "csp-report": {
+          "document-uri": `https://app.example.com${longPath}`,
+          "blocked-uri": "inline",
+          "violated-directive": "default-src",
+        },
+      }),
+    );
+    expect(res.status).toBe(204);
+    const logged = mockWarn.mock.calls[0][0].cspReport;
+    expect(logged["document-uri"].length).toBeLessThanOrEqual(2_048);
+    expect(logged["document-uri"].startsWith("https://app.example.com/")).toBe(true);
+  });
 });
