@@ -83,6 +83,7 @@ async function handlePOST(request: NextRequest) {
       invalidatedMcpAccessTokens: invalidationResult.mcpAccessTokens,
       invalidatedMcpRefreshTokens: invalidationResult.mcpRefreshTokens,
       invalidatedDelegationSessions: invalidationResult.delegationSessions,
+      invalidatedOperatorTokens: invalidationResult.operatorTokens,
       cacheTombstoneFailures: invalidationResult.cacheTombstoneFailures,
     },
   });

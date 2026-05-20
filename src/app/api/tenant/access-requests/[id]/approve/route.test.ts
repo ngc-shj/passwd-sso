@@ -99,6 +99,10 @@ const makeAccessRequest = (overrides: Record<string, unknown> = {}) => ({
   serviceAccountId: SA_ID,
   requestedScope: "passwords:read",
   status: "PENDING",
+  // C1: approve handler now enforces expiresAt. Default fixtures use a
+  // future deadline so non-expiry scenarios still succeed; expiry tests
+  // override with a past Date explicitly.
+  expiresAt: new Date(Date.now() + 60 * 60 * 1000),
   serviceAccount: { isActive: true },
   ...overrides,
 });
@@ -354,5 +358,28 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("SA_INVALID_SCOPE");
+  });
+
+  // C1 regression: state-machine transition() gates only on status=PENDING,
+  // not on the request's own expiresAt deadline. An admin must not be able to
+  // resurrect a stale PENDING request and issue a fresh short-lived token.
+  it("returns 410 SA_ACCESS_REQUEST_EXPIRED for a PENDING request past expiresAt", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAccessRequestFindUnique.mockResolvedValue(
+      makeAccessRequest({ expiresAt: new Date(Date.now() - 60_000) }),
+    );
+
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/access-requests/${REQUEST_ID}/approve`,
+    );
+    const res = await POST(req, createParams({ id: REQUEST_ID }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(410);
+    expect(json.error).toBe("SA_ACCESS_REQUEST_EXPIRED");
+    // The transaction that would issue the JIT token MUST NOT have started.
+    expect(mockPrismaTransaction).not.toHaveBeenCalled();
   });
 });

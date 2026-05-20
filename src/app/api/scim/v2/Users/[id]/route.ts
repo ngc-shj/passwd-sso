@@ -6,7 +6,10 @@ import { parseUserPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
+import {
+  invalidateUserSessions,
+  type InvalidateUserSessionsResult,
+} from "@/lib/auth/session/user-session-invalidation";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { scimParseBody } from "@/lib/scim/parse-body";
@@ -80,7 +83,7 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
   const { resource, userId, auditAction, needsSessionInvalidation } = serviceResult;
 
   // Session invalidation on deactivation (fail-open)
-  let invalidationCounts: { sessions: number; extensionTokens: number; apiKeys: number } | undefined;
+  let invalidationCounts: InvalidateUserSessionsResult | undefined;
   let sessionInvalidationFailed = false;
   if (needsSessionInvalidation) {
     try {
@@ -147,7 +150,7 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
   const { resource, userId, auditAction, needsSessionInvalidation } = serviceResult;
 
   // Session invalidation on deactivation (fail-open)
-  let patchInvalidationCounts: { sessions: number; extensionTokens: number; apiKeys: number } | undefined;
+  let patchInvalidationCounts: InvalidateUserSessionsResult | undefined;
   let patchSessionInvalidationFailed = false;
   if (needsSessionInvalidation) {
     try {
@@ -203,7 +206,7 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
   const { userId, userEmail, needsSessionInvalidation } = serviceResult;
 
   // Session invalidation after deletion (fail-open)
-  let deleteInvalidationCounts: { sessions: number; extensionTokens: number; apiKeys: number } | undefined;
+  let deleteInvalidationCounts: InvalidateUserSessionsResult | undefined;
   let deleteSessionInvalidationFailed = false;
   if (needsSessionInvalidation) {
     try {

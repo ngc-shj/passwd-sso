@@ -11,7 +11,10 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
+import {
+  invalidateUserSessions,
+  type InvalidateUserSessionsResult,
+} from "@/lib/auth/session/user-session-invalidation";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
@@ -197,7 +200,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   );
 
   // Session/token invalidation — outside transaction (fail-open)
-  let invalidationCounts: { sessions: number; extensionTokens: number; apiKeys: number } | undefined;
+  let invalidationCounts: InvalidateUserSessionsResult | undefined;
   let sessionInvalidationFailed = false;
   try {
     invalidationCounts = await invalidateUserSessions(target.userId, {

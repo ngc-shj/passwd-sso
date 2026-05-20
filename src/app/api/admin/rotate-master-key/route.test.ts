@@ -195,10 +195,13 @@ describe("POST /api/admin/rotate-master-key", () => {
 
   // ─── Success ──────────────────────────────────────────────
 
-  it("returns 200 with targetVersion and revokedShares=0 when no shares to revoke", async () => {
+  it("returns 200 with revokedShares=0 when revokeShares=false and audit flags the bypass", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
 
-    const req = createRequest({ targetVersion: 2 }, VALID_OP_TOKEN);
+    // H3: revokeShares now defaults to true. To exercise the no-revoke path
+    // we must opt out explicitly, and the audit must surface that fact via
+    // shareRevocationSkipped so post-incident review can flag bypasses.
+    const req = createRequest({ targetVersion: 2, revokeShares: false }, VALID_OP_TOKEN);
     const res = await POST(req);
     expect(res.status).toBe(200);
 
@@ -218,6 +221,7 @@ describe("POST /api/admin/rotate-master-key", () => {
           tokenId: TOKEN_ID,
           targetVersion: 2,
           revokedShares: 0,
+          shareRevocationSkipped: true,
         }),
       }),
     );
@@ -247,6 +251,11 @@ describe("POST /api/admin/rotate-master-key", () => {
         }),
       }),
     );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ shareRevocationSkipped: false }),
+      }),
+    );
   });
 
   it("does not call shareUpdateMany when revokeShares is false", async () => {
@@ -257,5 +266,32 @@ describe("POST /api/admin/rotate-master-key", () => {
     expect(res.status).toBe(200);
 
     expect(mockShareUpdateMany).not.toHaveBeenCalled();
+  });
+
+  // H3 regression: an operator who omits revokeShares during a
+  // compromise-response rotation must NOT silently leave old shares
+  // decryptable. The default flipped from false → true; the audit reflects
+  // shareRevocationSkipped=false so a reviewer can see the rotation
+  // completed its full intent.
+  it("defaults revokeShares to TRUE when body omits the flag (H3 regression)", async () => {
+    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
+    mockShareUpdateMany.mockResolvedValue({ count: 7 });
+
+    const req = createRequest({ targetVersion: 2 }, VALID_OP_TOKEN);
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.revokedShares).toBe(7);
+
+    expect(mockShareUpdateMany).toHaveBeenCalledTimes(1);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          revokedShares: 7,
+          shareRevocationSkipped: false,
+        }),
+      }),
+    );
   });
 });
