@@ -75,13 +75,33 @@ function computeHmac(secret: string, payload: string): string {
   return createHmac("sha256", secret).update(payload, "utf8").digest("hex");
 }
 
+/**
+ * Compute Stripe-style timestamped signature: HMAC-SHA256 over `${ts}.${body}`.
+ * Binding the timestamp into the signed string prevents an attacker from
+ * stripping/forging the X-Webhook-Timestamp header — any change to ts changes
+ * the signature too. Receivers verify by checking (now - ts) < window AND
+ * recomputing v1 over the same `${ts}.${body}` concatenation.
+ */
+function computeTimestampedHmac(secret: string, timestamp: string, payload: string): string {
+  return createHmac("sha256", secret).update(`${timestamp}.${payload}`, "utf8").digest("hex");
+}
+
 /** Recursively strip keys in EXTERNAL_DELIVERY_METADATA_BLOCKLIST. */
 const sanitizeWebhookData = sanitizeForExternalDelivery;
+
+interface SignatureHeaders {
+  /** Legacy: HMAC-SHA256(secret, body) hex. Receivers should migrate to v1. */
+  legacySignature: string;
+  /** Stripe-style: HMAC-SHA256(secret, `${ts}.${body}`) hex. */
+  v1Signature: string;
+  /** ISO-8601 UTC timestamp matching event.timestamp. */
+  timestamp: string;
+}
 
 async function deliverWithRetry(
   url: string,
   payload: string,
-  signature: string,
+  signatures: SignatureHeaders,
 ): Promise<boolean> {
   const hostname = new URL(url).hostname;
 
@@ -98,7 +118,15 @@ async function deliverWithRetry(
         headers: {
           "Content-Type": "application/json",
           "User-Agent": USER_AGENT,
-          "X-Signature": `sha256=${signature}`,
+          // Legacy header — kept for backward compatibility. Will be removed
+          // in a future major version. New receivers should use the v1 below.
+          "X-Signature": `sha256=${signatures.legacySignature}`,
+          // Stripe-style timestamped signature. Receivers MUST:
+          //   1. Reject if Math.abs(now - parseISO(X-Webhook-Timestamp)) > 5min
+          //   2. Recompute HMAC over `${X-Webhook-Timestamp}.${body}` and
+          //      constant-time compare to the v1 hex in X-Webhook-Signature.
+          "X-Webhook-Timestamp": signatures.timestamp,
+          "X-Webhook-Signature": `t=${signatures.timestamp},v1=${signatures.v1Signature}`,
         },
         body: payload,
         signal: AbortSignal.timeout(10_000),
@@ -123,6 +151,7 @@ async function deliverWithRetry(
 async function deliverSingleWebhook(
   webhook: WebhookRecord,
   payload: string,
+  timestamp: string,
   onSuccess: (id: string) => Promise<void>,
   onFailure: (id: string, failCount: number, url: string) => Promise<void>,
 ): Promise<void> {
@@ -165,8 +194,12 @@ async function deliverSingleWebhook(
       return;
     }
 
-    const signature = computeHmac(secret, payload);
-    const ok = await deliverWithRetry(webhook.url, payload, signature);
+    const signatures: SignatureHeaders = {
+      legacySignature: computeHmac(secret, payload),
+      v1Signature: computeTimestampedHmac(secret, timestamp, payload),
+      timestamp,
+    };
+    const ok = await deliverWithRetry(webhook.url, payload, signatures);
 
     if (ok) {
       await onSuccess(webhook.id);
@@ -186,6 +219,7 @@ async function deliverSingleWebhook(
 async function dispatchToWebhooks(
   webhooks: WebhookRecord[],
   payload: string,
+  timestamp: string,
   onSuccess: (id: string) => Promise<void>,
   onFailure: (id: string, failCount: number, url: string) => Promise<void>,
 ): Promise<void> {
@@ -193,7 +227,7 @@ async function dispatchToWebhooks(
     const chunk = webhooks.slice(i, i + WEBHOOK_CONCURRENCY);
     await Promise.allSettled(
       chunk.map((webhook) =>
-        deliverSingleWebhook(webhook, payload, onSuccess, onFailure),
+        deliverSingleWebhook(webhook, payload, timestamp, onSuccess, onFailure),
       ),
     );
   }
@@ -242,6 +276,7 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
     await dispatchToWebhooks(
       webhooks,
       payload,
+      event.timestamp,
       async (id) => {
         await withBypassRls(prisma, async (tx) =>
           tx.teamWebhook.update({
@@ -328,6 +363,7 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
     await dispatchToWebhooks(
       webhooks,
       payload,
+      event.timestamp,
       async (id) => {
         await withBypassRls(prisma, async (tx) =>
           tx.tenantWebhook.update({
