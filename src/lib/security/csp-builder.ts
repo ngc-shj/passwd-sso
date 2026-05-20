@@ -63,11 +63,32 @@ export function buildCspHeader(nonce: string): string {
   //   non-prod NODE_ENV — strict mode approximates prod CSP and prod has no
   //   need for 'unsafe-eval' (Turbopack dev overlay uses eval() and will be
   //   blocked, but in that case the caller should use dev mode instead).
+  //
+  // M2 NOTE on 'wasm-unsafe-eval' in strict mode: this is required by
+  // argon2-browser (src/lib/crypto/crypto-client.ts → argon2idHash), which
+  // is the load-bearing KDF for the vault wrapping key. Removing it breaks
+  // vault setup / unlock entirely. The residual risk — XSS payload could
+  // compile a WebAssembly module bypassing strict-dynamic — is accepted in
+  // threat-model.md §5.7. Mitigations in place:
+  //   - 'unsafe-eval' (legacy JS eval) is NOT permitted in strict mode.
+  //   - 'strict-dynamic' still constrains which scripts can boot in the
+  //     first place; an XSS must clear that gate before it can even attempt
+  //     to instantiate WASM.
+  //   - 'worker-src 'self'' (below) blocks loading worker scripts from any
+  //     other origin, so even WASM-in-Worker payloads must originate from
+  //     this app's served bundles.
+  // If argon2-browser is ever replaced with a non-WASM Argon2id (or with
+  // PBKDF2-via-WebCrypto, accepting the memory-hardness loss), this string
+  // should drop 'wasm-unsafe-eval'.
   const scriptSrc = _cspMode === "dev"
     ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'"
     : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'`;
   const styleSrc = _cspMode === "dev"
     ? _stylePrefix
     : `${_stylePrefix}${nonce}${_styleSuffix}`;
-  return `default-src 'self'; ${scriptSrc}; ${styleSrc}; ${_staticDirectives}`;
+  // worker-src defaults to child-src which defaults to default-src. Pin it
+  // explicitly to 'self' so a future change to default-src can't accidentally
+  // widen where workers can load from — relevant because WASM compilation
+  // can happen inside a Worker context and we want both paths constrained.
+  return `default-src 'self'; ${scriptSrc}; ${styleSrc}; worker-src 'self'; ${_staticDirectives}`;
 }

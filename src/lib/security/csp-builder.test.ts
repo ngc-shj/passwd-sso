@@ -109,6 +109,9 @@ describe("csp-builder", () => {
       expect(header).toContain("base-uri 'self'");
       expect(header).toContain("frame-ancestors 'none'");
       expect(header).toContain("upgrade-insecure-requests");
+      // M2 defense-in-depth: pin worker-src so a future default-src widen
+      // can't accidentally let WASM-in-Worker load cross-origin.
+      expect(header).toContain("worker-src 'self'");
     });
 
     it("form-action allows self plus loopback wildcards (RFC 8252)", async () => {
