@@ -133,6 +133,42 @@ describe("resolveAndValidateIps", () => {
     ).rejects.toThrow("Private IP rejected");
   });
 
+  // M3 regression — non-canonical IPv4 literals that an attacker might use
+  // to dodge a naive `/^[\d.]+$/` check. Node's URL parser canonicalizes
+  // these to dotted-quad before parsed.hostname is read, so isPrivateIp
+  // catches the loopback variants directly. The hex / 32-bit-decimal /
+  // octal forms are exercised here to PIN THE BEHAVIOR — if a future Node
+  // upgrade ever stops canonicalizing them, the defense-in-depth
+  // `net.isIP()` check kicks in and these tests should switch to asserting
+  // "Malformed IP literal rejected" instead.
+  it("M3: octal IPv4 literal (0177.0.0.1) is canonicalized to 127.0.0.1 and rejected as private", async () => {
+    await expect(
+      resolveAndValidateIps("https://0177.0.0.1/path"),
+    ).rejects.toThrow("Private IP rejected");
+    expect(mockResolve4).not.toHaveBeenCalled();
+  });
+
+  it("M3: hex IPv4 literal (0x7f.0.0.1) is canonicalized and rejected as private", async () => {
+    await expect(
+      resolveAndValidateIps("https://0x7f.0.0.1/path"),
+    ).rejects.toThrow("Private IP rejected");
+    expect(mockResolve4).not.toHaveBeenCalled();
+  });
+
+  it("M3: 32-bit decimal IPv4 literal (2130706433) is canonicalized and rejected as private", async () => {
+    await expect(
+      resolveAndValidateIps("https://2130706433/path"),
+    ).rejects.toThrow("Private IP rejected");
+    expect(mockResolve4).not.toHaveBeenCalled();
+  });
+
+  it("M3: partial IPv4 form (127.1) is canonicalized to 127.0.0.1 and rejected as private", async () => {
+    await expect(
+      resolveAndValidateIps("https://127.1/path"),
+    ).rejects.toThrow("Private IP rejected");
+    expect(mockResolve4).not.toHaveBeenCalled();
+  });
+
   it("hostname resolving to public IP returns IPs", async () => {
     mockResolve4.mockResolvedValue(["93.184.216.34"]);
     mockResolve6.mockResolvedValue([]);
