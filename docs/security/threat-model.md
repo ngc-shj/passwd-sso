@@ -2,7 +2,7 @@
 
 This document presents a systematic STRIDE-based threat analysis for passwd-sso.
 
-Last updated: 2026-04-28
+Last updated: 2026-05-21
 
 ---
 
@@ -168,3 +168,5 @@ TB7: Extension Passkey Provider (MAIN world <-> content script <-> Service Worke
 4. **Compromised IdP**: A compromised Google/SAML identity provider could issue valid authentication tokens. Mitigated by vault passphrase requirement (IdP compromise alone does not decrypt vault data).
 
 5. **Offline brute force against exported data**: An attacker with a database dump can attempt offline brute force against PBKDF2/Argon2id-protected wrapping keys. Mitigated by high iteration counts and memory-hard KDF (Argon2id).
+
+6. **Travel Mode is a client-side UX hint, NOT a security boundary**: `User.travelModeActive` only signals the client to apply `filterTravelSafe()` in `src/lib/auth/policy/travel-mode.ts`. The per-entry `travelSafe` flag is stored INSIDE the E2E-encrypted blob, so the server cannot enforce filtering — `/api/passwords` returns every encrypted entry regardless of the user's travel-mode state. An attacker who obtains a valid session token (device seizure at a border, exported extension token, etc.) can still call the API directly, retrieve every ciphertext, and decrypt anything for which they can compel the passphrase. Travel Mode is therefore useful for in-app discoverability only ("hide sensitive accounts from the picker while traveling"), and MUST NOT be relied on as a defense against compelled access or stolen credentials. Promoting Travel Mode to a real boundary would require either (a) moving `travelSafe` to a non-encrypted column — leaking which entries the user has marked sensitive, or (b) refusing all entry-list responses while `travelModeActive=true` — breaking the in-app UX during travel. Both have substantial UX/privacy costs; the current accepted posture is to keep Travel Mode as a client-side hint and document the limitation here (audit finding H1, 2026-05).
