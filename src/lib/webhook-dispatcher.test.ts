@@ -212,6 +212,32 @@ describe("dispatchWebhook", () => {
     expect(opts.headers["X-Signature"]).toBe(`sha256=${expectedHmac}`);
   });
 
+  // H2 regression: receivers need the timestamp out-of-band (header, not body)
+  // to enforce a freshness window before they spend CPU parsing the JSON, and
+  // the timestamp must be bound into a separate signature so an attacker can't
+  // strip the X-Webhook-Timestamp header without invalidating the HMAC.
+  it("emits Stripe-style X-Webhook-Timestamp + X-Webhook-Signature bound to t.body", async () => {
+    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+    mockFetch.mockResolvedValue({ ok: true });
+
+    dispatchWebhook(EVENT);
+    await vi.advanceTimersByTimeAsync(100);
+
+    const payload = JSON.stringify(EVENT);
+    const expectedV1 = createHmac("sha256", "test-hmac-secret")
+      .update(`${EVENT.timestamp}.${payload}`, "utf8")
+      .digest("hex");
+
+    const [, opts] = mockFetch.mock.calls[0];
+    expect(opts.headers["X-Webhook-Timestamp"]).toBe(EVENT.timestamp);
+    expect(opts.headers["X-Webhook-Signature"]).toBe(
+      `t=${EVENT.timestamp},v1=${expectedV1}`,
+    );
+    // Backward-compat header must still be present so existing receivers
+    // keep verifying. Removal is a separate breaking change.
+    expect(opts.headers["X-Signature"]).toMatch(/^sha256=/);
+  });
+
   it("retries and updates failCount on persistent failure", async () => {
     mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
     mockFetch.mockResolvedValue({ ok: false, status: 500 });

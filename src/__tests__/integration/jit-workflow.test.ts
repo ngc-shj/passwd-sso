@@ -172,6 +172,7 @@ describe("Scenario 1: Full JIT workflow", () => {
       serviceAccountId: SA_ID,
       requestedScope: "passwords:read,passwords:list",
       status: "PENDING",
+      expiresAt: new Date(Date.now() + MS_PER_HOUR),
       serviceAccount: { isActive: true },
     });
     mockTenantFindUnique.mockResolvedValue(null); // use defaults
@@ -291,6 +292,7 @@ describe("Scenario 3: Double approval prevention", () => {
       serviceAccountId: SA_ID,
       requestedScope: "passwords:read",
       status: "PENDING",
+      expiresAt: new Date(Date.now() + MS_PER_HOUR),
       serviceAccount: { isActive: true },
     });
     mockTenantFindUnique.mockResolvedValue(null);
@@ -393,6 +395,7 @@ describe("Scenario 4: Inactive SA JIT rejection", () => {
       serviceAccountId: SA_ID,
       requestedScope: "passwords:read",
       status: "PENDING",
+      expiresAt: new Date(Date.now() + MS_PER_HOUR),
       serviceAccount: { isActive: false },
     });
 
@@ -405,5 +408,69 @@ describe("Scenario 4: Inactive SA JIT rejection", () => {
 
     expect(status).toBe(409);
     expect(json.error).toBe("SA_INACTIVE");
+  });
+});
+
+describe("Scenario 5: Expired access request rejection (regression)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  // A stale PENDING request whose expiresAt has already passed must NOT be
+  // approvable. The state-machine transition() gates only on status, so without
+  // an explicit expiry check an admin could revive a stale request and issue a
+  // fresh JIT token long after the requester's intent has expired.
+  it("approving an expired PENDING request returns 410 SA_ACCESS_REQUEST_EXPIRED", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAccessRequestFindUnique.mockResolvedValue({
+      id: REQUEST_ID,
+      tenantId: "a0000000-0000-4000-8000-000000000001",
+      serviceAccountId: SA_ID,
+      requestedScope: "passwords:read",
+      status: "PENDING",
+      // Expired 1 minute ago — must be rejected even though status is PENDING.
+      expiresAt: new Date(Date.now() - 60_000),
+      serviceAccount: { isActive: true },
+    });
+
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/access-requests/${REQUEST_ID}/approve`,
+    );
+    const res = await approveAccessRequest(req, createParams({ id: REQUEST_ID }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(410);
+    expect(json.error).toBe("SA_ACCESS_REQUEST_EXPIRED");
+    // Must NOT have started the issue-token transaction.
+    expect(mockPrismaTransaction).not.toHaveBeenCalled();
+  });
+
+  it("approving at exactly expiresAt is rejected (boundary)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    mockAccessRequestFindUnique.mockResolvedValue({
+      id: REQUEST_ID,
+      tenantId: "a0000000-0000-4000-8000-000000000001",
+      serviceAccountId: SA_ID,
+      requestedScope: "passwords:read",
+      status: "PENDING",
+      expiresAt: new Date(now), // exactly now
+      serviceAccount: { isActive: true },
+    });
+
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/access-requests/${REQUEST_ID}/approve`,
+    );
+    const res = await approveAccessRequest(req, createParams({ id: REQUEST_ID }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(410);
+    expect(json.error).toBe("SA_ACCESS_REQUEST_EXPIRED");
+    vi.restoreAllMocks();
   });
 });

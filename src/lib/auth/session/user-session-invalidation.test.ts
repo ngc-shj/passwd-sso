@@ -7,6 +7,7 @@ const {
   mockMcpAccessToken,
   mockMcpRefreshToken,
   mockDelegationSession,
+  mockOperatorToken,
   mockWithBypassRls,
   mockInvalidateCachedSessions,
 } = vi.hoisted(() => ({
@@ -16,6 +17,7 @@ const {
   mockMcpAccessToken: { updateMany: vi.fn() },
   mockMcpRefreshToken: { updateMany: vi.fn() },
   mockDelegationSession: { updateMany: vi.fn() },
+  mockOperatorToken: { updateMany: vi.fn() },
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockInvalidateCachedSessions: vi
     .fn<(tokens: ReadonlyArray<string>) => Promise<{ total: number; failed: number }>>()
@@ -30,6 +32,7 @@ vi.mock("@/lib/prisma", () => ({
     mcpAccessToken: mockMcpAccessToken,
     mcpRefreshToken: mockMcpRefreshToken,
     delegationSession: mockDelegationSession,
+    operatorToken: mockOperatorToken,
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -61,9 +64,10 @@ describe("invalidateUserSessions", () => {
     mockMcpAccessToken.updateMany.mockResolvedValue({ count: 4 });
     mockMcpRefreshToken.updateMany.mockResolvedValue({ count: 5 });
     mockDelegationSession.updateMany.mockResolvedValue({ count: 6 });
+    mockOperatorToken.updateMany.mockResolvedValue({ count: 7 });
   });
 
-  it("deletes sessions, revokes extension tokens, API keys, MCP access/refresh tokens, and delegation sessions", async () => {
+  it("deletes sessions, revokes extension tokens, API keys, MCP access/refresh tokens, delegation sessions, and operator tokens", async () => {
     const result = await invalidateUserSessions("user-1", { tenantId: "tenant-1" });
 
     expect(mockSession.deleteMany).toHaveBeenCalledWith({
@@ -89,6 +93,14 @@ describe("invalidateUserSessions", () => {
       where: { userId: "user-1", revokedAt: null, tenantId: "tenant-1" },
       data: { revokedAt: expect.any(Date) },
     });
+    // H4: OperatorToken uses subjectUserId (NOT userId) as the bound column.
+    // Without this revoke, a compromised admin's op_* tokens survive the
+    // session-invalidation that was supposed to lock them out, and they can
+    // still call rotate-master-key / purge-audit-logs / purge-history.
+    expect(mockOperatorToken.updateMany).toHaveBeenCalledWith({
+      where: { subjectUserId: "user-1", revokedAt: null, tenantId: "tenant-1" },
+      data: { revokedAt: expect.any(Date) },
+    });
     expect(result).toEqual({
       sessions: 2,
       extensionTokens: 1,
@@ -96,6 +108,7 @@ describe("invalidateUserSessions", () => {
       mcpAccessTokens: 4,
       mcpRefreshTokens: 5,
       delegationSessions: 6,
+      operatorTokens: 7,
       cacheTombstoneFailures: 0,
     });
   });
@@ -123,6 +136,11 @@ describe("invalidateUserSessions", () => {
         data: { revokedAt: expect.any(Date) },
       });
     }
+    // OperatorToken keys on subjectUserId instead of userId.
+    expect(mockOperatorToken.updateMany).toHaveBeenCalledWith({
+      where: { subjectUserId: "user-1", revokedAt: null, tenantId: "tenant-2" },
+      data: { revokedAt: expect.any(Date) },
+    });
   });
 
   it("propagates error when a database operation fails", async () => {
@@ -200,6 +218,10 @@ describe("invalidateUserSessions", () => {
         data: { revokedAt: expect.any(Date) },
       });
     }
+    expect(mockOperatorToken.updateMany).toHaveBeenCalledWith({
+      where: { subjectUserId: "user-1", revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
 
     // All cross-tenant tokens are tombstoned.
     expectInvalidatedAfterCommit(mockInvalidateCachedSessions, [
@@ -214,6 +236,7 @@ describe("invalidateUserSessions", () => {
       mcpAccessTokens: 4,
       mcpRefreshTokens: 5,
       delegationSessions: 6,
+      operatorTokens: 7,
       cacheTombstoneFailures: 0,
     });
   });

@@ -36,6 +36,7 @@ export type InvalidateUserSessionsResult = {
   mcpAccessTokens: number;
   mcpRefreshTokens: number;
   delegationSessions: number;
+  operatorTokens: number;
   cacheTombstoneFailures: number;
 };
 
@@ -48,14 +49,27 @@ export type InvalidateUserSessionsResult = {
  *   - Session (DB row delete + cache tombstone)
  *   - ExtensionToken / ApiKey (revokedAt set)
  *   - McpAccessToken / McpRefreshToken / DelegationSession (revokedAt set)
+ *   - OperatorToken where subjectUserId === userId (revokedAt set)
  *
  * Why MCP tokens are included: a user who minted `mcp_*` tokens for AI
  * agents holds tokens that authenticate AS that user with credentials:list /
  * credentials:use scope. After a vault reset (or member removal) these
  * tokens must die — otherwise an attacker holding the token could re-attack
- * the freshly-set-up vault. WebAuthnCredential is intentionally NOT
- * revoked — it is the user's re-authentication path back into a fresh
- * vault setup.
+ * the freshly-set-up vault.
+ *
+ * Why OperatorToken (subjectUserId) is included: op_* tokens authenticate
+ * AS their subject user with maintenance scope (rotate-master-key,
+ * purge-audit-logs, purge-history). A compromised admin whose sessions are
+ * revoked but whose op_* tokens survive can still erase audit evidence and
+ * trigger destructive maintenance — exactly the attack path the
+ * invalidation is supposed to close. We do NOT revoke tokens by
+ * createdByUserId: those authenticate as someone else (their automation
+ * subject) and revoking would orphan unrelated operators' tokens. The
+ * audit trail of who created the surviving token is still preserved via
+ * the OperatorToken.createdByUserId column.
+ *
+ * WebAuthnCredential is intentionally NOT revoked — it is the user's
+ * re-authentication path back into a fresh vault setup.
  *
  * Uses withBypassRls() scoped to the target userId WHERE clause.
  */
@@ -90,6 +104,7 @@ export async function invalidateUserSessions(
       mcpAccessTokensResult,
       mcpRefreshTokensResult,
       delegationSessionsResult,
+      operatorTokensResult,
     ] = await Promise.all([
       tx.session.deleteMany({
         where: { userId, ...tenantFilter },
@@ -114,6 +129,13 @@ export async function invalidateUserSessions(
         where: { userId, revokedAt: null, ...tenantFilter },
         data: { revokedAt: now },
       }),
+      // OperatorToken uses subjectUserId (not userId) as the "authenticates
+      // as" column. Same tenantFilter semantics — all-tenants for vault
+      // reset, single-tenant for member removal.
+      tx.operatorToken.updateMany({
+        where: { subjectUserId: userId, revokedAt: null, ...tenantFilter },
+        data: { revokedAt: now },
+      }),
     ]);
 
     let cacheTombstoneFailures = 0;
@@ -131,6 +153,7 @@ export async function invalidateUserSessions(
       mcpAccessTokens: mcpAccessTokensResult.count,
       mcpRefreshTokens: mcpRefreshTokensResult.count,
       delegationSessions: delegationSessionsResult.count,
+      operatorTokens: operatorTokensResult.count,
       cacheTombstoneFailures,
     };
   }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);

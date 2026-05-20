@@ -65,7 +65,11 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/auth/passkey/options/email/route.ts", ["user", "webAuthnCredential"]],
   ["src/app/api/auth/passkey/reauth/options/route.ts", ["webAuthnCredential"]],
   ["src/app/api/auth/passkey/reauth/verify/route.ts", ["webAuthnCredential", "session"]],
-  ["src/lib/auth/session/user-session-invalidation.ts", ["session", "extensionToken", "apiKey"]],
+  ["src/lib/auth/session/user-session-invalidation.ts", [
+    "session", "extensionToken", "apiKey",
+    "mcpAccessToken", "mcpRefreshToken", "delegationSession",
+    "operatorToken",
+  ]],
   ["src/app/api/tenant/policy/route.ts", ["user", "tenant", "teamPolicy"]],
   ["src/lib/auth/policy/access-restriction.ts", ["tenant"]],
   ["src/lib/team/team-policy.ts", ["teamMember", "teamPolicy", "tenant"]],

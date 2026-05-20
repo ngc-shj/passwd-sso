@@ -203,6 +203,7 @@ export const API_ERROR = {
   SA_TOKEN_LIMIT_EXCEEDED: "SA_TOKEN_LIMIT_EXCEEDED",
   SA_TOKEN_NOT_FOUND: "SA_TOKEN_NOT_FOUND",
   SA_TOKEN_ALREADY_REVOKED: "SA_TOKEN_ALREADY_REVOKED",
+  SA_ACCESS_REQUEST_EXPIRED: "SA_ACCESS_REQUEST_EXPIRED",
 
   // ── MCP Clients ──────────────────────────────────────────
   MCP_CLIENT_NAME_CONFLICT: "MCP_CLIENT_NAME_CONFLICT",
@@ -458,6 +459,7 @@ export const API_ERROR_STATUS = {
   SA_TOKEN_LIMIT_EXCEEDED: 409,
   SA_TOKEN_NOT_FOUND: 404,
   SA_TOKEN_ALREADY_REVOKED: 409,
+  SA_ACCESS_REQUEST_EXPIRED: 410,
 
   // ── MCP Clients ───────────────────────────────────────────
   // 422 chosen over 409 for tenant-quota rejection; UI consumer at
@@ -635,6 +637,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   SA_TOKEN_LIMIT_EXCEEDED: "saTokenLimitExceeded",
   SA_TOKEN_NOT_FOUND: "saTokenNotFound",
   SA_TOKEN_ALREADY_REVOKED: "saTokenAlreadyRevoked",
+  SA_ACCESS_REQUEST_EXPIRED: "saAccessRequestExpired",
   MCP_CLIENT_NAME_CONFLICT: "mcpClientNameConflict",
   MCP_CLIENT_LIMIT_EXCEEDED: "mcpClientLimitExceeded",
   MCP_TOKEN_NOT_FOUND: "mcpTokenNotFound",

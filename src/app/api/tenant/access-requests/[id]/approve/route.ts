@@ -74,6 +74,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         serviceAccountId: true,
         requestedScope: true,
         status: true,
+        expiresAt: true,
         serviceAccount: { select: { isActive: true } },
       },
     }),
@@ -81,6 +82,14 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   if (!request || request.tenantId !== actor.tenantId) {
     return notFound();
+  }
+
+  // Reject approval of expired requests — the state-machine transition() only
+  // gates on status (PENDING), not on the request's own deadline. Without this
+  // check, an admin could revive a stale request and issue a fresh JIT token
+  // long after the requester's intent has expired.
+  if (request.expiresAt.getTime() <= Date.now()) {
+    return errorResponse(API_ERROR.SA_ACCESS_REQUEST_EXPIRED);
   }
 
   if (!request.serviceAccount.isActive) {

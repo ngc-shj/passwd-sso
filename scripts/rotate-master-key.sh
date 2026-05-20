@@ -12,7 +12,9 @@
 #   ADMIN_API_TOKEN  (required) Per-operator op_* bearer token (op_<43-base64url>)
 #   TARGET_VERSION   (required) Target key version (must match SHARE_MASTER_KEY_CURRENT_VERSION)
 #   APP_URL          (optional) Application URL (default: http://localhost:3000)
-#   REVOKE_SHARES    (optional) Revoke shares encrypted with older versions (default: false)
+#   REVOKE_SHARES    (optional) Revoke shares encrypted with older versions (default: true)
+#                    Set to "false" only for a dry-run / rehearsal — the
+#                    audit log will flag the bypass as shareRevocationSkipped.
 #   INSECURE         (optional) Skip TLS certificate verification (default: false)
 #
 # Exit codes:
@@ -24,7 +26,7 @@ set -euo pipefail
 APP_URL="${APP_URL:-http://localhost:3000}"
 ADMIN_API_TOKEN="${ADMIN_API_TOKEN:-}"
 TARGET_VERSION="${TARGET_VERSION:-}"
-REVOKE_SHARES="${REVOKE_SHARES:-false}"
+REVOKE_SHARES="${REVOKE_SHARES:-true}"
 
 if ! [[ "$ADMIN_API_TOKEN" =~ ^op_[A-Za-z0-9_-]{43}$ ]]; then
   echo "[ERROR] ADMIN_API_TOKEN must be op_<43-base64url> (mint via /dashboard/tenant/operator-tokens)" >&2

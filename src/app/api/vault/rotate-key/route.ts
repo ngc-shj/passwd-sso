@@ -256,6 +256,7 @@ async function handlePOST(request: NextRequest) {
       invalidatedMcpAccessTokens: invalidationResult?.mcpAccessTokens ?? null,
       invalidatedMcpRefreshTokens: invalidationResult?.mcpRefreshTokens ?? null,
       invalidatedDelegationSessions: invalidationResult?.delegationSessions ?? null,
+      invalidatedOperatorTokens: invalidationResult?.operatorTokens ?? null,
       cacheTombstoneFailures: invalidationResult?.cacheTombstoneFailures ?? null,
     },
   });
