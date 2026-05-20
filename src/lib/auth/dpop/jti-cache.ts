@@ -9,6 +9,17 @@ import {
  *
  * Window:  TTL 60s = 2 × the iat skew window (30s).
  *          A jti seen within TTL is a replay → reject.
+ *
+ *          INVARIANT: TTL must be ≥ 2 × iat skew. The iat check accepts
+ *          `|now - iat| ≤ skew`, so a single proof is valid for at most
+ *          2 × skew wall-clock seconds. If TTL < 2 × skew, there exists
+ *          a window where the iat check still passes but the jti cache
+ *          has already expired — exactly the replay path the cache is
+ *          supposed to close. The two values live in different files
+ *          (verify.ts DEFAULT_SKEW_SECONDS, jti-cache.ts DEFAULT_TTL_MS)
+ *          so a one-sided edit could silently break the invariant. The
+ *          ratio check at module load below catches that.
+ *
  * Scope:   per `jkt` (DPoP public-key thumbprint) so that one device's
  *          jti space can never collide with another.
  * Storage: Redis with `SET key 1 PX 60000 NX`. NX ensures atomic
@@ -26,6 +37,22 @@ export interface JtiCache {
 
 // Default 60s — RFC 9449 §11.1 guidance (2 × 30s skew window).
 const DEFAULT_TTL_MS = 60_000;
+
+// Compile-time-equivalent assert that the jti TTL fully covers the iat
+// window. Re-imported value (not a literal) so a future bump of
+// DEFAULT_SKEW_SECONDS forces re-evaluation here.
+import { DPOP_DEFAULT_SKEW_SECONDS } from "./verify";
+if (DEFAULT_TTL_MS < DPOP_DEFAULT_SKEW_SECONDS * 2 * 1000) {
+  // Fail-fast on a misconfiguration that opens a silent replay window.
+  // The iat check accepts |now-iat| ≤ skew, so a proof is acceptable
+  // for 2 × skew wall-clock seconds; the jti cache MUST outlive that.
+  throw new Error(
+    `[dpop-jti-cache] invariant violated: DEFAULT_TTL_MS (${DEFAULT_TTL_MS}ms) ` +
+      `must be >= 2 × DPOP_DEFAULT_SKEW_SECONDS (${DPOP_DEFAULT_SKEW_SECONDS}s × 2 = ${DPOP_DEFAULT_SKEW_SECONDS * 2 * 1000}ms); ` +
+      `otherwise a captured proof can be replayed after the cache expires ` +
+      `but while iat is still in range.`,
+  );
+}
 
 const logRedisError = createThrottledErrorLogger(
   REDIS_FALLBACK_LOG_THROTTLE_MS,
