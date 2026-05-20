@@ -109,6 +109,9 @@ describe("csp-builder", () => {
       expect(header).toContain("base-uri 'self'");
       expect(header).toContain("frame-ancestors 'none'");
       expect(header).toContain("upgrade-insecure-requests");
+      // M2 defense-in-depth: pin worker-src so a future default-src widen
+      // can't accidentally let WASM-in-Worker load cross-origin.
+      expect(header).toContain("worker-src 'self'");
     });
 
     it("form-action allows self plus loopback wildcards (RFC 8252)", async () => {
@@ -136,8 +139,31 @@ describe("csp-builder", () => {
       expect(header).not.toContain("ingest");
     });
 
-    it("connect-src includes Sentry ingest hosts when DSN is set", async () => {
+    // L2: narrow connect-src from `https://*.ingest.{us.,}sentry.io`
+    // (whole Sentry infrastructure) to the exact org-ingest host derived
+    // from the DSN. A compromised or attacker-registered sibling
+    // subdomain of sentry.io is now blocked by CSP.
+    it("L2: connect-src pins to the DSN's exact ingest host (no wildcard)", async () => {
       vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", "https://abc@o123.ingest.sentry.io/1");
+      const { buildCspHeader } = await import("./csp-builder");
+      const header = buildCspHeader("nonce");
+      expect(header).toContain("https://o123.ingest.sentry.io");
+      expect(header).not.toContain("*.ingest");
+    });
+
+    it("L2: works for the us regional ingest host", async () => {
+      vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", "https://abc@o456.ingest.us.sentry.io/2");
+      const { buildCspHeader } = await import("./csp-builder");
+      const header = buildCspHeader("nonce");
+      expect(header).toContain("https://o456.ingest.us.sentry.io");
+      expect(header).not.toContain("*.ingest");
+    });
+
+    it("L2: falls back to broad wildcard on malformed DSN (fail-open)", async () => {
+      // A malformed DSN must not silently disable Sentry — the operator
+      // would notice broken error capture and miss real prod issues. The
+      // wider CSP surface is the accepted fail-open.
+      vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", "not-a-valid-url");
       const { buildCspHeader } = await import("./csp-builder");
       const header = buildCspHeader("nonce");
       expect(header).toContain("https://*.ingest.us.sentry.io");

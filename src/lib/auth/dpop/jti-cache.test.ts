@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createJtiCache } from "./jti-cache";
+import { createJtiCache, DPOP_DEFAULT_JTI_TTL_MS } from "./jti-cache";
+import { DPOP_DEFAULT_SKEW_SECONDS } from "./verify";
 
 // Force the in-memory fallback path: getRedis() returns null when
 // REDIS_URL is unset. setup.ts does not set it, but make it explicit
@@ -70,5 +71,20 @@ describe("createJtiCache - separate instances do not cross-pollute", () => {
     // Each independently rejects on second sight.
     expect(await a.hasOrRecord("jkt", "jti-x")).toBe(true);
     expect(await b.hasOrRecord("jkt", "jti-x")).toBe(true);
+  });
+});
+
+// M4 invariant — the jti cache TTL must fully cover the iat skew window.
+// The iat check accepts |now - iat| ≤ skew, so a single proof is acceptable
+// for 2 × skew seconds; the jti cache must outlive that or a captured proof
+// can be replayed after the cache expires but while iat is still in range.
+// A runtime check at module load would be dead-code per CodeQL because both
+// constants are literals — this test is the guardrail that survives the
+// static analyzer.
+describe("DPoP jti-cache TTL invariant (M4)", () => {
+  it("DPOP_DEFAULT_JTI_TTL_MS >= 2 × DPOP_DEFAULT_SKEW_SECONDS so the cache outlives the iat window", () => {
+    expect(DPOP_DEFAULT_JTI_TTL_MS).toBeGreaterThanOrEqual(
+      DPOP_DEFAULT_SKEW_SECONDS * 2 * 1000,
+    );
   });
 });

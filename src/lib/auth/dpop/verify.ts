@@ -101,7 +101,10 @@ interface DpopJwk {
   y: string;
 }
 
-const DEFAULT_SKEW_SECONDS = 30;
+// Exported (not local const) so the jti cache's TTL invariant assert can
+// pin against the same value. See jti-cache.ts module-load check.
+export const DPOP_DEFAULT_SKEW_SECONDS = 30;
+const DEFAULT_SKEW_SECONDS = DPOP_DEFAULT_SKEW_SECONDS;
 
 // ─── Public entry point ───────────────────────────────────────
 

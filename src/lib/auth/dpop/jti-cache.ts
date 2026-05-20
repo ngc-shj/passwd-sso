@@ -9,6 +9,17 @@ import {
  *
  * Window:  TTL 60s = 2 × the iat skew window (30s).
  *          A jti seen within TTL is a replay → reject.
+ *
+ *          INVARIANT: TTL must be ≥ 2 × iat skew. The iat check accepts
+ *          `|now - iat| ≤ skew`, so a single proof is valid for at most
+ *          2 × skew wall-clock seconds. If TTL < 2 × skew, there exists
+ *          a window where the iat check still passes but the jti cache
+ *          has already expired — exactly the replay path the cache is
+ *          supposed to close. The two values live in different files
+ *          (verify.ts DEFAULT_SKEW_SECONDS, jti-cache.ts DEFAULT_TTL_MS)
+ *          so a one-sided edit could silently break the invariant. The
+ *          ratio check at module load below catches that.
+ *
  * Scope:   per `jkt` (DPoP public-key thumbprint) so that one device's
  *          jti space can never collide with another.
  * Storage: Redis with `SET key 1 PX 60000 NX`. NX ensures atomic
@@ -25,7 +36,16 @@ export interface JtiCache {
 }
 
 // Default 60s — RFC 9449 §11.1 guidance (2 × 30s skew window).
-const DEFAULT_TTL_MS = 60_000;
+// M4 invariant: DPOP_DEFAULT_JTI_TTL_MS >= DPOP_DEFAULT_SKEW_SECONDS * 2_000.
+// The iat check accepts |now - iat| ≤ skew, so a single proof is acceptable
+// for 2 × skew wall-clock seconds; the jti cache MUST outlive that window
+// or a captured proof can be replayed after the cache expires but while
+// iat is still in range. Enforced by the
+// "DEFAULT_TTL_MS >= 2 × DPOP_DEFAULT_SKEW_SECONDS" test in
+// `jti-cache.test.ts` — CI fails if a future edit breaks the relationship.
+// Exported so the test can reference the same source of truth as production.
+export const DPOP_DEFAULT_JTI_TTL_MS = 60_000;
+const DEFAULT_TTL_MS = DPOP_DEFAULT_JTI_TTL_MS;
 
 const logRedisError = createThrottledErrorLogger(
   REDIS_FALLBACK_LOG_THROTTLE_MS,

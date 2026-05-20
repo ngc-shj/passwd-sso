@@ -10,6 +10,15 @@ import { ShareProtectedContent } from "@/components/share/share-protected-conten
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIpFromHeaders, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
+import {
+  createThrottledErrorLogger,
+  REDIS_FALLBACK_LOG_THROTTLE_MS,
+} from "@/lib/logger/throttled";
+
+const logShareAccessLogFailure = createThrottledErrorLogger(
+  REDIS_FALLBACK_LOG_THROTTLE_MS,
+  "share-access-log.write.fallback",
+);
 
 const sharePageLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
@@ -133,7 +142,10 @@ export default async function SharePage({ params }: Props) {
           userAgent: ua?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
         },
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        const code = (err as { code?: string } | undefined)?.code;
+        logShareAccessLogFailure(code);
+      });
 
     // E2E share (team entries): client-side decryption via URL fragment key
     if (share.masterKeyVersion === 0) {

@@ -17,6 +17,7 @@ Language policy:
 | [session-timeout-design.md](session-timeout-design.md) | Session-lifetime model (web / team / extension) |
 | [cors-policy.md](cors-policy.md) | CORS policy |
 | [license-policy.md](license-policy.md) | Dependency license policy |
+| [dependency-cve-response.md](dependency-cve-response.md) | Runbook for CVE alerts in transitive deps (override pattern) |
 | [security-review.md](security-review.md) | Security review checklist |
 | [policy-enforcement.md](policy-enforcement.md) | Security policy field enforcement matrix (tenant/team) |
 | [vulnerability-triage.md](vulnerability-triage.md) | Vulnerability classification, triage workflow, and escalation path |

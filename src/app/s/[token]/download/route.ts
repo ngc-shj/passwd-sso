@@ -9,8 +9,17 @@ import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, rateLimited } from "@/lib/http/api-response";
+import {
+  createThrottledErrorLogger,
+  REDIS_FALLBACK_LOG_THROTTLE_MS,
+} from "@/lib/logger/throttled";
 
 const downloadLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
+
+const logShareAccessLogFailure = createThrottledErrorLogger(
+  REDIS_FALLBACK_LOG_THROTTLE_MS,
+  "share-access-log.write.fallback",
+);
 
 type Params = { params: Promise<{ token: string }> };
 
@@ -141,7 +150,10 @@ export async function GET(req: NextRequest, { params }: Params) {
           userAgent: ua?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
         },
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        const code = (err as { code?: string } | undefined)?.code;
+        logShareAccessLogFailure(code);
+      });
 
     // Decrypt file
     const decrypted = decryptShareBinary({

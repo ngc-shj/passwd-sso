@@ -51,7 +51,18 @@ export const SCIM_PAGE_COUNT_DEFAULT = 100;
 // ─── Session Cache ──────────────────────────────────────────
 export const SESSION_CACHE_TTL_MS = 30_000;          // 30 s — positive cache ceiling
 export const NEGATIVE_CACHE_TTL_MS = 5_000;          // 5 s — short-TTL negative cache (S-Req-6)
-export const TOMBSTONE_TTL_MS = 5_000;               // 5 s — populate-after-invalidate guard
+// M1 invariant: tombstones MUST outlive any positive cache they need to
+// suppress. When TOMBSTONE_TTL_MS < SESSION_CACHE_TTL_MS, a Redis tombstone
+// write that lands later than the positive cache expiry (e.g. the tombstone
+// hits a Redis blip and is rewritten on retry) creates a window where the
+// stale positive entry is served — for up to (SESSION_CACHE_TTL_MS -
+// TOMBSTONE_TTL_MS) seconds — even though the DB-side delete committed.
+// Keep tombstone TTL >= positive cache TTL so the suppression strictly
+// outlasts the data it is suppressing. Enforced by the
+// "TOMBSTONE_TTL_MS >= SESSION_CACHE_TTL_MS" test in
+// `src/lib/validations/common.server.test.ts` — CI fails if a future edit
+// breaks the relationship.
+export const TOMBSTONE_TTL_MS = 30_000;              // 30 s — populate-after-invalidate guard
 export const SESSION_CACHE_KEY_PREFIX = "sess:cache:";
 
 // ─── Webhook Dispatcher ─────────────────────────────────────

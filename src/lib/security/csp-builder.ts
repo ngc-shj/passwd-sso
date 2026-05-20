@@ -5,6 +5,30 @@
 // Pre-compute static CSP parts at module init time to avoid per-request work.
 // Only the nonce value is injected per-request.
 const _isProd = process.env.NODE_ENV === "production";
+
+/**
+ * L2: Narrow Sentry's connect-src from `https://*.ingest.us.sentry.io
+ * https://*.ingest.sentry.io` (whole infra) to the specific org-ingest
+ * host derived from the DSN. The DSN format is
+ *   https://<publicKey>@<host>/<projectId>
+ * where <host> is org-specific (e.g. `o123456.ingest.us.sentry.io`).
+ * Falling back to the broad wildcard is acceptable when the DSN is
+ * unparseable — fail-open is safer than CSP-blocking error reports —
+ * but we log so misconfig is visible.
+ */
+function sentryConnectSrc(): string {
+  const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
+  if (!dsn) return "";
+  try {
+    const u = new URL(dsn);
+    // Org-specific host like o123.ingest.us.sentry.io — exact, no wildcard.
+    return ` https://${u.hostname}`;
+  } catch {
+    // Malformed DSN — keep Sentry working with the broad pattern but
+    // accept the wider CSP surface as a deliberate fail-open.
+    return " https://*.ingest.us.sentry.io https://*.ingest.sentry.io";
+  }
+}
 // Safety guard: in production, never allow CSP_MODE=dev to downgrade the CSP.
 // Ops mistakes (wrong .env.production, Docker env, etc.) must not silently
 // disable strict-dynamic + nonce in prod. Only "strict" is accepted in prod.
@@ -29,7 +53,7 @@ const _styleSuffix = _cspMode === "dev" ? "" : "'";
 const _staticDirectives = [
   "img-src 'self' data: https:",
   "font-src 'self'",
-  `connect-src 'self'${process.env.NEXT_PUBLIC_SENTRY_DSN ? " https://*.ingest.us.sentry.io https://*.ingest.sentry.io" : ""}`,
+  `connect-src 'self'${sentryConnectSrc()}`,
   "object-src 'none'",
   "base-uri 'self'",
   // OAuth consent form-POSTs back to /api/mcp/authorize/consent which then
@@ -63,11 +87,32 @@ export function buildCspHeader(nonce: string): string {
   //   non-prod NODE_ENV — strict mode approximates prod CSP and prod has no
   //   need for 'unsafe-eval' (Turbopack dev overlay uses eval() and will be
   //   blocked, but in that case the caller should use dev mode instead).
+  //
+  // M2 NOTE on 'wasm-unsafe-eval' in strict mode: this is required by
+  // argon2-browser (src/lib/crypto/crypto-client.ts → argon2idHash), which
+  // is the load-bearing KDF for the vault wrapping key. Removing it breaks
+  // vault setup / unlock entirely. The residual risk — XSS payload could
+  // compile a WebAssembly module bypassing strict-dynamic — is accepted in
+  // threat-model.md §5.7. Mitigations in place:
+  //   - 'unsafe-eval' (legacy JS eval) is NOT permitted in strict mode.
+  //   - 'strict-dynamic' still constrains which scripts can boot in the
+  //     first place; an XSS must clear that gate before it can even attempt
+  //     to instantiate WASM.
+  //   - 'worker-src 'self'' (below) blocks loading worker scripts from any
+  //     other origin, so even WASM-in-Worker payloads must originate from
+  //     this app's served bundles.
+  // If argon2-browser is ever replaced with a non-WASM Argon2id (or with
+  // PBKDF2-via-WebCrypto, accepting the memory-hardness loss), this string
+  // should drop 'wasm-unsafe-eval'.
   const scriptSrc = _cspMode === "dev"
     ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'"
     : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'`;
   const styleSrc = _cspMode === "dev"
     ? _stylePrefix
     : `${_stylePrefix}${nonce}${_styleSuffix}`;
-  return `default-src 'self'; ${scriptSrc}; ${styleSrc}; ${_staticDirectives}`;
+  // worker-src defaults to child-src which defaults to default-src. Pin it
+  // explicitly to 'self' so a future change to default-src can't accidentally
+  // widen where workers can load from — relevant because WASM compilation
+  // can happen inside a Worker context and we want both paths constrained.
+  return `default-src 'self'; ${scriptSrc}; ${styleSrc}; worker-src 'self'; ${_staticDirectives}`;
 }

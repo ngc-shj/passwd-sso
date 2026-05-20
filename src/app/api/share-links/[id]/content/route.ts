@@ -12,6 +12,19 @@ import { errorResponse, unauthorized, notFound } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import {
+  createThrottledErrorLogger,
+  REDIS_FALLBACK_LOG_THROTTLE_MS,
+} from "@/lib/logger/throttled";
+
+// M5: Share access logging is best-effort (fire-and-forget) so a DB blip
+// can't deny the recipient their content, but silent failures used to be
+// invisible. Surface them via a throttled error logger so an unhealthy
+// outbox doesn't flood logs but a sustained outage IS observable.
+const logShareAccessLogFailure = createThrottledErrorLogger(
+  REDIS_FALLBACK_LOG_THROTTLE_MS,
+  "share-access-log.write.fallback",
+);
 
 const contentLimiter = createRateLimiter({
   windowMs: MS_PER_MINUTE,
@@ -144,7 +157,13 @@ async function handleGET(req: NextRequest, { params }: Params) {
           userAgent: ua?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
         },
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        // Best-effort: don't fail the recipient's read because the audit
+        // log write hiccuped. Surface via throttled logger so a sustained
+        // outage is observable without flooding (M5).
+        const code = (err as { code?: string } | undefined)?.code;
+        logShareAccessLogFailure(code);
+      });
 
     // E2E share: return encrypted data for client-side decryption
     if (share.masterKeyVersion === 0) {

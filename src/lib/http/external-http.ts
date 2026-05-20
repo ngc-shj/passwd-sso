@@ -10,6 +10,7 @@
  */
 
 import { resolve4, resolve6 } from "node:dns/promises";
+import { isIP as netIsIP } from "node:net";
 import { Agent as UndiciAgent } from "undici";
 import { isIpInCidr } from "@/lib/auth/policy/ip-access";
 import { METADATA_BLOCKLIST } from "@/lib/audit/audit-logger";
@@ -96,10 +97,35 @@ export async function resolveAndValidateIps(url: string): Promise<string[]> {
 
   const hostname = parsed.hostname;
 
-  // Already an IP literal — check directly
-  if (/^[\d.]+$/.test(hostname) || hostname.includes(":")) {
-    if (isPrivateIp(hostname)) throw new Error(`Private IP rejected: ${hostname}`);
+  // M3 defense-in-depth: IP-literal detection goes through net.isIP() so
+  // we accept only the canonical RFC 3986 / RFC 5952 form. Node's URL
+  // parser already canonicalizes octal (`0177.0.0.1`), hex (`0x7f.0.0.1`),
+  // 32-bit decimal (`2130706433`), and short forms (`127.1`) to dotted-
+  // quad BEFORE parsed.hostname is set, so the SSRF check sees the
+  // canonical form and isPrivateIp catches loopback variants correctly.
+  // The defensive netIsIP-then-malformed-reject path below is here in
+  // case (a) a future Node release loosens that canonicalization, or
+  // (b) this module is ported to a runtime whose URL parser is more
+  // permissive. Loose `/^[\d.]+$/` would have been a false sense of
+  // safety; net.isIP() is the authoritative check.
+  //
+  // Note on bracketed IPv6: Node's URL parser keeps the surrounding
+  // brackets on hostname for `[::1]`-style literals; strip them before
+  // net.isIP() so we still recognize the form.
+  const ipForCheck = hostname.startsWith("[") && hostname.endsWith("]")
+    ? hostname.slice(1, -1)
+    : hostname;
+  const ipVersion = netIsIP(ipForCheck);
+  if (ipVersion !== 0) {
+    if (isPrivateIp(ipForCheck)) throw new Error(`Private IP rejected: ${hostname}`);
     return [hostname];
+  }
+  if (/^[\d.]+$/.test(hostname)) {
+    // Hostname looks like an IPv4 literal but failed net.isIP() — octal,
+    // zero-padded, or partial form (`010.0.0.1`, `0177.0.0.1`, `127.1`
+    // when not pre-canonicalized by the URL parser). Refuse rather than
+    // gamble on DNS or undici's parsing.
+    throw new Error(`Malformed IP literal rejected: ${hostname}`);
   }
 
   const ips: string[] = [];
