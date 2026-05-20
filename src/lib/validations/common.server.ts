@@ -58,20 +58,12 @@ export const NEGATIVE_CACHE_TTL_MS = 5_000;          // 5 s — short-TTL negati
 // stale positive entry is served — for up to (SESSION_CACHE_TTL_MS -
 // TOMBSTONE_TTL_MS) seconds — even though the DB-side delete committed.
 // Keep tombstone TTL >= positive cache TTL so the suppression strictly
-// outlasts the data it is suppressing. Asserted at module load below.
+// outlasts the data it is suppressing. Enforced by the
+// "TOMBSTONE_TTL_MS >= SESSION_CACHE_TTL_MS" test in
+// `src/lib/validations/common.server.test.ts` — CI fails if a future edit
+// breaks the relationship.
 export const TOMBSTONE_TTL_MS = 30_000;              // 30 s — populate-after-invalidate guard
 export const SESSION_CACHE_KEY_PREFIX = "sess:cache:";
-
-if (TOMBSTONE_TTL_MS < SESSION_CACHE_TTL_MS) {
-  // Fail-fast on a misconfiguration that would silently leak stale sessions
-  // after role removal / vault reset. Catching this at startup is far cheaper
-  // than chasing a "phantom-membership for ~30 s after revoke" incident.
-  throw new Error(
-    `[session-cache] invariant violated: TOMBSTONE_TTL_MS (${TOMBSTONE_TTL_MS}) ` +
-      `must be >= SESSION_CACHE_TTL_MS (${SESSION_CACHE_TTL_MS}); ` +
-      `otherwise tombstones expire before the cache entries they suppress.`,
-  );
-}
 
 // ─── Webhook Dispatcher ─────────────────────────────────────
 export const WEBHOOK_CONCURRENCY = 5;

@@ -36,23 +36,16 @@ export interface JtiCache {
 }
 
 // Default 60s — RFC 9449 §11.1 guidance (2 × 30s skew window).
-const DEFAULT_TTL_MS = 60_000;
-
-// Compile-time-equivalent assert that the jti TTL fully covers the iat
-// window. Re-imported value (not a literal) so a future bump of
-// DEFAULT_SKEW_SECONDS forces re-evaluation here.
-import { DPOP_DEFAULT_SKEW_SECONDS } from "./verify";
-if (DEFAULT_TTL_MS < DPOP_DEFAULT_SKEW_SECONDS * 2 * 1000) {
-  // Fail-fast on a misconfiguration that opens a silent replay window.
-  // The iat check accepts |now-iat| ≤ skew, so a proof is acceptable
-  // for 2 × skew wall-clock seconds; the jti cache MUST outlive that.
-  throw new Error(
-    `[dpop-jti-cache] invariant violated: DEFAULT_TTL_MS (${DEFAULT_TTL_MS}ms) ` +
-      `must be >= 2 × DPOP_DEFAULT_SKEW_SECONDS (${DPOP_DEFAULT_SKEW_SECONDS}s × 2 = ${DPOP_DEFAULT_SKEW_SECONDS * 2 * 1000}ms); ` +
-      `otherwise a captured proof can be replayed after the cache expires ` +
-      `but while iat is still in range.`,
-  );
-}
+// M4 invariant: DPOP_DEFAULT_JTI_TTL_MS >= DPOP_DEFAULT_SKEW_SECONDS * 2_000.
+// The iat check accepts |now - iat| ≤ skew, so a single proof is acceptable
+// for 2 × skew wall-clock seconds; the jti cache MUST outlive that window
+// or a captured proof can be replayed after the cache expires but while
+// iat is still in range. Enforced by the
+// "DEFAULT_TTL_MS >= 2 × DPOP_DEFAULT_SKEW_SECONDS" test in
+// `jti-cache.test.ts` — CI fails if a future edit breaks the relationship.
+// Exported so the test can reference the same source of truth as production.
+export const DPOP_DEFAULT_JTI_TTL_MS = 60_000;
+const DEFAULT_TTL_MS = DPOP_DEFAULT_JTI_TTL_MS;
 
 const logRedisError = createThrottledErrorLogger(
   REDIS_FALLBACK_LOG_THROTTLE_MS,

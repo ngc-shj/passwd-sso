@@ -22,6 +22,8 @@ import {
   NOTIFICATION_BELL_LIMIT,
   PASSKEY_DUMMY_CREDENTIALS_MAX,
   PASSWORD_HISTORY_SNIPPET_LENGTH,
+  SESSION_CACHE_TTL_MS,
+  TOMBSTONE_TTL_MS,
 } from "@/lib/validations/common.server";
 
 // ─── KDF constants ───────────────────────────────────────────
@@ -115,6 +117,18 @@ describe("Network field lengths", () => {
 });
 
 // ─── Query limit constants ────────────────────────────────────
+
+// M1 invariant — tombstones must outlive the positive cache entries they
+// suppress, otherwise a Redis tombstone-write that lands late opens a
+// stale-cache window after role removal / vault reset. The constants live
+// next to each other in common.server.ts; this test is the load-bearing
+// guardrail because a runtime comparison of two `const` literals is
+// dead-code per CodeQL (and was correctly flagged on PR #481).
+describe("Session cache TTL invariants (M1)", () => {
+  it("TOMBSTONE_TTL_MS >= SESSION_CACHE_TTL_MS so suppression strictly outlasts positive cache", () => {
+    expect(TOMBSTONE_TTL_MS).toBeGreaterThanOrEqual(SESSION_CACHE_TTL_MS);
+  });
+});
 
 describe("Query limit constants are positive numbers", () => {
   it.each([
