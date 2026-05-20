@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.51](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.50...passwd-sso-v0.4.51) (2026-05-20)
+
+
+### Bug Fixes
+
+* **auth:** restore SameSite=Lax on session cookie to unblock OAuth sign-in ([#477](https://github.com/ngc-shj/passwd-sso/issues/477)) ([0643b7a](https://github.com/ngc-shj/passwd-sso/commit/0643b7a8136c582a9b2648e499278e6e3103a174))
+* **security:** clear GitHub security advisories (brace-expansion DoS + 3 CodeQL findings) ([#478](https://github.com/ngc-shj/passwd-sso/issues/478)) ([aacd5fa](https://github.com/ngc-shj/passwd-sso/commit/aacd5fa7cbfa35fbee1e27e25e2e11c347787d63))
+* **security:** harden RLS/delegation/mobile-DPoP/webhook boundaries (10 contracts) ([#475](https://github.com/ngc-shj/passwd-sso/issues/475)) ([ab1b168](https://github.com/ngc-shj/passwd-sso/commit/ab1b1689963b69871c51a135dbeb47e6058502e2))
+
 ## [0.4.50](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.49...passwd-sso-v0.4.50) (2026-05-17)
 
 
