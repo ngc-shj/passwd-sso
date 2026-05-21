@@ -93,3 +93,29 @@ Strip the following fields before storage if your SIEM doesn't
 support hashed identifiers — they are already PII-safe but
 duplicate-data concerns may apply:
 - `identifierHash` (16-hex from auth-failure events)
+
+## External Timestamp Anchors (A09-5)
+
+Audit chain integrity uses the DB clock for `created_at`. A
+compromised DB could rewrite history with consistent timestamps.
+Defense-in-depth: publish the periodic chain anchor to a third-
+party timestamping service so any forged chain past the publish
+point can be disproven by the external record.
+
+The anchor publisher (`src/lib/audit/anchor-manifest.ts`) emits a
+signed manifest at the configured cadence. Routing options to add
+in operator config:
+
+- **Sigstore Rekor** (free, public log): POST the anchor digest
+  to `https://rekor.sigstore.dev/api/v1/log/entries`.
+- **Public NTS / NTP-signed** timestamp (e.g., Cloudflare time):
+  embed an NTS timestamp in the manifest before signing.
+- **AWS QLDB** or **Azure Confidential Ledger**: append-only ledger
+  with cryptographic verification, customer-managed.
+- **Internal SIEM** that uses a separate clock source: forward the
+  manifest event via the standard pino → SIEM path and require the
+  SIEM to record its own ingest timestamp.
+
+Operators MUST pick at least one external destination before
+treating the audit chain as evidentiary. Without external anchoring
+the chain detects tampering within the database boundary only.

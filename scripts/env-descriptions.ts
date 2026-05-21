@@ -157,7 +157,11 @@ export const descriptions: Record<
     order: 3,
     description:
       "Comma-separated list of Google Workspace domains allowed to sign in.\n" +
-      "Leave empty to allow any Google account.",
+      "Leave empty to allow any Google account.\n" +
+      "SECURITY NOTE: leaving this empty enables Account Linking — if an " +
+      "attacker holds a Google account with the same email as an existing " +
+      "user, they can hijack the account via OAuth callback. Set this to " +
+      "the IdP-controlled domains in production to lock down the attack.",
     example: "example.com,partner.example.com",
   },
   AUTH_JACKSON_ID: {

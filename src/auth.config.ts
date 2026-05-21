@@ -146,6 +146,16 @@ export default {
         // cookie-bearing mutating requests, src/lib/proxy/csrf-gate.ts).
         sameSite: "lax" as const,
         secure: useSecureCookies,
+        // A07-6 (CHIPS): partitioned cookies are isolated per top-level
+        // site context. Opt-in via env because the app does NOT use
+        // third-party iframes today; partitioned has no effect outside
+        // iframe contexts but bumps the browser-side defense ceiling if
+        // a future embed path is added. Requires Secure (already set
+        // when useSecureCookies). Browsers without CHIPS support ignore
+        // the flag silently.
+        ...(useSecureCookies && process.env.COOKIE_PARTITIONED === "true"
+          ? { partitioned: true as const }
+          : {}),
       },
     },
   },
