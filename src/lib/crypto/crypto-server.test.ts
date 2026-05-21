@@ -21,12 +21,8 @@ import {
 import { randomBytes } from "node:crypto";
 
 describe("crypto-server", () => {
-  const originalMasterKey = process.env.SHARE_MASTER_KEY;
-
-  afterAll(() => {
-    // Restore original env
-    process.env.SHARE_MASTER_KEY = originalMasterKey;
-  });
+  // Pre-pr hygiene: vi.stubEnv is auto-unstubbed in tests/setup.ts afterEach.
+  // No manual restore needed.
 
   describe("encryptServerData / decryptServerData", () => {
     it("roundtrips correctly", () => {
@@ -190,17 +186,17 @@ describe("crypto-server", () => {
     });
 
     it("getCurrentMasterKeyVersion reads env", () => {
-      process.env.SHARE_MASTER_KEY_CURRENT_VERSION = "2";
+      vi.stubEnv("SHARE_MASTER_KEY_CURRENT_VERSION", "2");
       expect(getCurrentMasterKeyVersion()).toBe(2);
     });
 
     it("getCurrentMasterKeyVersion throws for invalid value", () => {
-      process.env.SHARE_MASTER_KEY_CURRENT_VERSION = "abc";
+      vi.stubEnv("SHARE_MASTER_KEY_CURRENT_VERSION", "abc");
       expect(() => getCurrentMasterKeyVersion()).toThrow("positive integer");
     });
 
     it("getCurrentMasterKeyVersion throws for zero", () => {
-      process.env.SHARE_MASTER_KEY_CURRENT_VERSION = "0";
+      vi.stubEnv("SHARE_MASTER_KEY_CURRENT_VERSION", "0");
       expect(() => getCurrentMasterKeyVersion()).toThrow("positive integer");
     });
 
@@ -218,13 +214,13 @@ describe("crypto-server", () => {
 
     it("getMasterKeyByVersion V1 falls back to SHARE_MASTER_KEY", () => {
       delete process.env.SHARE_MASTER_KEY_V1;
-      process.env.SHARE_MASTER_KEY = V1_KEY;
+      vi.stubEnv("SHARE_MASTER_KEY", V1_KEY);
       const key = getMasterKeyByVersion(1);
       expect(key.toString("hex")).toBe(V1_KEY);
     });
 
     it("getMasterKeyByVersion V1 prefers SHARE_MASTER_KEY_V1", () => {
-      process.env.SHARE_MASTER_KEY = V1_KEY;
+      vi.stubEnv("SHARE_MASTER_KEY", V1_KEY);
       process.env.SHARE_MASTER_KEY_V1 = V2_KEY; // different key
       const key = getMasterKeyByVersion(1);
       expect(key.toString("hex")).toBe(V2_KEY);
@@ -245,7 +241,7 @@ describe("crypto-server", () => {
     });
 
     it("getMasterKeyByVersion throws for invalid hex", () => {
-      process.env.SHARE_MASTER_KEY = "abcd";
+      vi.stubEnv("SHARE_MASTER_KEY", "abcd");
       delete process.env.SHARE_MASTER_KEY_V1;
       expect(() => getMasterKeyByVersion(1)).toThrow(
         "Master key for version 1 not found or invalid"
@@ -254,7 +250,7 @@ describe("crypto-server", () => {
 
     it("encryptShareData returns masterKeyVersion matching current", () => {
       process.env.SHARE_MASTER_KEY_V2 = V2_KEY;
-      process.env.SHARE_MASTER_KEY_CURRENT_VERSION = "2";
+      vi.stubEnv("SHARE_MASTER_KEY_CURRENT_VERSION", "2");
       const encrypted = encryptShareData("test");
       expect(encrypted.masterKeyVersion).toBe(2);
     });
@@ -389,18 +385,18 @@ describe("crypto-server", () => {
   describe("hmacVerifier — getVerifierPepper env handling", () => {
     it("uses VERIFIER_PEPPER_KEY when set", () => {
       const saved = process.env.VERIFIER_PEPPER_KEY;
-      process.env.VERIFIER_PEPPER_KEY = "b".repeat(64);
+      vi.stubEnv("VERIFIER_PEPPER_KEY", "b".repeat(64));
 
       const result = hmacVerifier("a".repeat(64));
       expect(result).toHaveLength(64);
 
       // Change pepper → different HMAC
-      process.env.VERIFIER_PEPPER_KEY = "c".repeat(64);
+      vi.stubEnv("VERIFIER_PEPPER_KEY", "c".repeat(64));
       const result2 = hmacVerifier("a".repeat(64));
       expect(result).not.toBe(result2);
 
       if (saved) {
-        process.env.VERIFIER_PEPPER_KEY = saved;
+        vi.stubEnv("VERIFIER_PEPPER_KEY", saved);
       } else {
         delete process.env.VERIFIER_PEPPER_KEY;
       }
@@ -408,14 +404,14 @@ describe("crypto-server", () => {
 
     it("throws when VERIFIER_PEPPER_KEY is invalid hex", () => {
       const saved = process.env.VERIFIER_PEPPER_KEY;
-      process.env.VERIFIER_PEPPER_KEY = "not-valid-hex";
+      vi.stubEnv("VERIFIER_PEPPER_KEY", "not-valid-hex");
 
       expect(() => hmacVerifier("a".repeat(64))).toThrow(
         "VERIFIER_PEPPER_KEY must be a 64-char hex string"
       );
 
       if (saved) {
-        process.env.VERIFIER_PEPPER_KEY = saved;
+        vi.stubEnv("VERIFIER_PEPPER_KEY", saved);
       } else {
         delete process.env.VERIFIER_PEPPER_KEY;
       }
@@ -433,7 +429,7 @@ describe("crypto-server", () => {
 
       (process.env as Record<string, string | undefined>).NODE_ENV = savedEnv;
       if (savedPepper) {
-        process.env.VERIFIER_PEPPER_KEY = savedPepper;
+        vi.stubEnv("VERIFIER_PEPPER_KEY", savedPepper);
       }
     });
 
@@ -446,7 +442,7 @@ describe("crypto-server", () => {
       expect(result).toHaveLength(64);
 
       if (savedPepper) {
-        process.env.VERIFIER_PEPPER_KEY = savedPepper;
+        vi.stubEnv("VERIFIER_PEPPER_KEY", savedPepper);
       }
     });
   });
