@@ -39,6 +39,10 @@ vi.mock("@/lib/logger", () => ({
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
+vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
+  invalidateUserSessions: vi.fn().mockResolvedValue({ sessions: 0, extensionTokens: 0, apiKeys: 0, mcpAccessTokens: 0, mcpRefreshTokens: 0, delegationSessions: 0, operatorTokens: 0, cacheTombstoneFailures: 0 }),
+}));
+
 import { POST } from "./route";
 
 const validBody = {

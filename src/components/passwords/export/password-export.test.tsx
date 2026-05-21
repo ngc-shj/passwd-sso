@@ -268,7 +268,7 @@ describe("ExportPagePanel — happy path", () => {
     });
 
     // AAD shape: built with (userId, entryId)
-    expect(mockBuildPersonalEntryAAD).toHaveBeenCalledWith("user-1", "entry-1");
+    expect(mockBuildPersonalEntryAAD).toHaveBeenCalledWith("user-1", "entry-1", "blob");
     // The decryptData call's third arg should be the built AAD
     expect(mockDecryptData.mock.calls[0][2]).toBe("aad");
 

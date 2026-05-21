@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockRunHealthChecks } = vi.hoisted(() => ({
-  mockRunHealthChecks: vi.fn(),
+const { mockRunReadinessChecks } = vi.hoisted(() => ({
+  mockRunReadinessChecks: vi.fn(),
 }));
 
+// C20: /ready now uses runReadinessChecks (excludes auditOutbox); the
+// fuller runHealthChecks remains for non-readiness paths.
 vi.mock("@/lib/health", () => ({
-  runHealthChecks: mockRunHealthChecks,
+  runReadinessChecks: mockRunReadinessChecks,
 }));
 
 vi.mock("@/lib/logger", () => {
@@ -39,64 +41,32 @@ function createRequest() {
   });
 }
 
-function healthyResponse() {
-  return {
-    status: "healthy" as const,
-    timestamp: "2026-02-16T00:00:00.000Z",
-    checks: {
-      database: { status: "pass" as const, responseTimeMs: 5 },
-      redis: { status: "pass" as const, responseTimeMs: 2 },
-    },
-  };
-}
-
 describe("GET /api/health/ready", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("returns 200 with healthy status", async () => {
-    mockRunHealthChecks.mockResolvedValue(healthyResponse());
+  it("returns 200 with status=healthy only (body minimized per C20)", async () => {
+    mockRunReadinessChecks.mockResolvedValue({ status: "healthy" });
     const res = await GET(createRequest());
     expect(res.status).toBe(200);
     const body = await res.json();
+    // C20: body is { status } only — no checks subobject, no timestamp.
+    expect(Object.keys(body).sort()).toEqual(["status"]);
     expect(body.status).toBe("healthy");
-    expect(body.checks.database.status).toBe("pass");
-    expect(body.checks.redis.status).toBe("pass");
   });
 
   it("returns 503 when unhealthy", async () => {
-    mockRunHealthChecks.mockResolvedValue({
-      ...healthyResponse(),
-      status: "unhealthy",
-      checks: {
-        database: { status: "fail", responseTimeMs: 3000 },
-        redis: { status: "pass", responseTimeMs: 2 },
-      },
-    });
+    mockRunReadinessChecks.mockResolvedValue({ status: "unhealthy" });
     const res = await GET(createRequest());
     expect(res.status).toBe(503);
     const body = await res.json();
+    expect(Object.keys(body).sort()).toEqual(["status"]);
     expect(body.status).toBe("unhealthy");
   });
 
-  it("returns 200 when degraded", async () => {
-    mockRunHealthChecks.mockResolvedValue({
-      ...healthyResponse(),
-      status: "degraded",
-      checks: {
-        database: { status: "pass", responseTimeMs: 5 },
-        redis: { status: "warn", responseTimeMs: 3000 },
-      },
-    });
-    const res = await GET(createRequest());
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.status).toBe("degraded");
-  });
-
   it("sets Cache-Control: no-store header", async () => {
-    mockRunHealthChecks.mockResolvedValue(healthyResponse());
+    mockRunReadinessChecks.mockResolvedValue({ status: "healthy" });
     const res = await GET(createRequest());
     expect(res.headers.get("Cache-Control")).toBe("no-store");
   });

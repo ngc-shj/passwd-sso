@@ -87,7 +87,7 @@ describe("TrashList", () => {
     });
 
     // §Sec-1: assert AAD constructed with (userId, entryId) shape
-    expect(mockBuildAAD).toHaveBeenCalledWith("user-1", "entry-1");
+    expect(mockBuildAAD).toHaveBeenCalledWith("user-1", "entry-1", "overview");
     // assert mock was called (S104)
     expect(mockDecryptData).toHaveBeenCalled();
     // §Sec-1: encrypted blob argument is shape { ciphertext, iv, authTag }

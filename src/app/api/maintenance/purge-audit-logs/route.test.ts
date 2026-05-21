@@ -5,6 +5,7 @@ const {
   mockVerifyAdminToken,
   mockDeleteMany,
   mockCount,
+  mockQueryRaw,
   mockRequireMaintenanceOperator,
   mockTenantFindUnique,
   mockCheck,
@@ -14,6 +15,9 @@ const {
   mockVerifyAdminToken: vi.fn(),
   mockDeleteMany: vi.fn(),
   mockCount: vi.fn(),
+  // C13: purge route now calls audit_log_purge() SECURITY DEFINER via
+  // $queryRaw. Stub returns the same shape the function emits.
+  mockQueryRaw: vi.fn(),
   mockRequireMaintenanceOperator: vi.fn(),
   mockTenantFindUnique: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
@@ -30,6 +34,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     auditLog: { deleteMany: mockDeleteMany, count: mockCount },
     tenant: { findUnique: mockTenantFindUnique },
+    $queryRaw: mockQueryRaw,
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -97,6 +102,7 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     });
     mockTenantFindUnique.mockResolvedValue({ auditLogRetentionDays: null });
     mockDeleteMany.mockResolvedValue({ count: 0 });
+    mockQueryRaw.mockResolvedValue([{ rows_deleted: 0 }]);
     mockCount.mockResolvedValue(0);
   });
 
@@ -161,6 +167,7 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
     mockTenantFindUnique.mockResolvedValue({ auditLogRetentionDays: null });
     mockDeleteMany.mockResolvedValueOnce({ count: 20 });
+    mockQueryRaw.mockResolvedValueOnce([{ rows_deleted: 20 }]);
 
     const req = createRequest({}, VALID_OP_TOKEN);
     const res = await POST(req);
@@ -174,8 +181,10 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
       expect.objectContaining({ where: { id: TENANT_ID } }),
     );
     // The single deleteMany must include tenantId = auth.tenantId.
-    expect(mockDeleteMany).toHaveBeenCalledTimes(1);
-    expect(mockDeleteMany.mock.calls[0][0].where.tenantId).toBe(TENANT_ID);
+    // C13: real purge uses $queryRaw(audit_log_purge) now; deleteMany is not called.
+    expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+    // $queryRaw tagged-template: args[0]=strings, args[1]=tenantId, args[2]=cutoff
+    expect(mockQueryRaw.mock.calls[0][1]).toBe(TENANT_ID);
   });
 
   it("returns 0 when the bound tenant no longer exists", async () => {
@@ -195,11 +204,12 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
     mockTenantFindUnique.mockResolvedValue({ auditLogRetentionDays: null });
     mockDeleteMany.mockResolvedValue({ count: 0 });
+    mockQueryRaw.mockResolvedValue([{ rows_deleted: 0 }]);
 
     const req = createRequest({}, VALID_OP_TOKEN);
     await POST(req);
 
-    const cutoff = mockDeleteMany.mock.calls[0][0].where.createdAt.lt as Date;
+    const cutoff = mockQueryRaw.mock.calls[0][2] as Date;
     const expectedDate = new Date(Date.now() - 365 * MS_PER_DAY);
     expect(Math.abs(cutoff.getTime() - expectedDate.getTime())).toBeLessThan(5000);
   });
@@ -208,11 +218,12 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
     mockTenantFindUnique.mockResolvedValue({ auditLogRetentionDays: 730 });
     mockDeleteMany.mockResolvedValue({ count: 0 });
+    mockQueryRaw.mockResolvedValue([{ rows_deleted: 0 }]);
 
     const req = createRequest({ retentionDays: 365 }, VALID_OP_TOKEN);
     await POST(req);
 
-    const cutoff = mockDeleteMany.mock.calls[0][0].where.createdAt.lt as Date;
+    const cutoff = mockQueryRaw.mock.calls[0][2] as Date;
     const expected730 = new Date(Date.now() - 730 * MS_PER_DAY);
     expect(Math.abs(cutoff.getTime() - expected730.getTime())).toBeLessThan(5000);
   });
@@ -221,11 +232,12 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
     mockTenantFindUnique.mockResolvedValue({ auditLogRetentionDays: 90 });
     mockDeleteMany.mockResolvedValue({ count: 0 });
+    mockQueryRaw.mockResolvedValue([{ rows_deleted: 0 }]);
 
     const req = createRequest({ retentionDays: 730 }, VALID_OP_TOKEN);
     await POST(req);
 
-    const cutoff = mockDeleteMany.mock.calls[0][0].where.createdAt.lt as Date;
+    const cutoff = mockQueryRaw.mock.calls[0][2] as Date;
     const expected730 = new Date(Date.now() - 730 * MS_PER_DAY);
     expect(Math.abs(cutoff.getTime() - expected730.getTime())).toBeLessThan(5000);
   });
@@ -270,6 +282,7 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
     mockTenantFindUnique.mockResolvedValue({ auditLogRetentionDays: null });
     mockDeleteMany.mockResolvedValueOnce({ count: 5 });
+    mockQueryRaw.mockResolvedValueOnce([{ rows_deleted: 5 }]);
 
     const req = createRequest({}, VALID_OP_TOKEN);
     await POST(req);
@@ -345,6 +358,7 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     });
     mockTenantFindUnique.mockResolvedValue({ auditLogRetentionDays: null });
     mockDeleteMany.mockResolvedValueOnce({ count: 0 });
+    mockQueryRaw.mockResolvedValueOnce([{ rows_deleted: 0 }]);
 
     const req = createRequest({}, VALID_OP_TOKEN);
     const res = await POST(req);
@@ -354,7 +368,8 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     expect(mockTenantFindUnique).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: TENANT_A } }),
     );
-    expect(mockDeleteMany).toHaveBeenCalledTimes(1);
-    expect(mockDeleteMany.mock.calls[0][0].where.tenantId).toBe(TENANT_A);
+    // C13: real purge uses $queryRaw(audit_log_purge) now; deleteMany is not called.
+    expect(mockQueryRaw).toHaveBeenCalledTimes(1);
+    expect(mockQueryRaw.mock.calls[0][1]).toBe(TENANT_A);
   });
 });

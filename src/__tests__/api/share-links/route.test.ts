@@ -65,6 +65,11 @@ vi.mock("@/lib/team/team-policy", () => ({
   PolicyViolationError: class extends Error {},
 }));
 
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
+
 const { mockCheck } = vi.hoisted(() => ({
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
@@ -72,10 +77,25 @@ vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
 }));
 
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
+
 import { POST, GET } from "@/app/api/share-links/route";
 
 // Valid UUID v4 for test (matches z.string().uuid() validation)
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
+
 const VALID_ENTRY_ID = "00000000-0000-4000-a000-000000000020";
+
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
 
 describe("POST /api/share-links", () => {
   beforeEach(() => {
@@ -540,6 +560,11 @@ describe("POST /api/share-links", () => {
     );
   });
 });
+
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
 
 describe("GET /api/share-links", () => {
   beforeEach(() => {

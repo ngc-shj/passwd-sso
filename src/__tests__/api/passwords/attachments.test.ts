@@ -78,18 +78,43 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
 
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
+
 import { NextRequest } from "next/server";
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
+
 import { GET, POST } from "@/app/api/passwords/[id]/attachments/route";
+
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
 
 function createParams(id: string) {
   return { params: Promise.resolve({ id }) };
 }
+
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
 
 function createGetRequest() {
   return new NextRequest("http://localhost/api/passwords/e1/attachments", {
     method: "GET",
   });
 }
+
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
 
 function createFormDataRequest(
   fields: Record<string, string | Blob>,
@@ -105,6 +130,11 @@ function createFormDataRequest(
     headers,
   });
 }
+
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
 
 function validFormFields(): Record<string, string | Blob> {
   return {
@@ -122,6 +152,11 @@ function validFormFields(): Record<string, string | Blob> {
     cekWrapAadVersion: "1",
   };
 }
+
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
 
 describe("GET /api/passwords/[id]/attachments", () => {
   beforeEach(() => {
@@ -165,6 +200,11 @@ describe("GET /api/passwords/[id]/attachments", () => {
     expect(json[0].filename).toBe("test.pdf");
   });
 });
+
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
 
 describe("POST /api/passwords/[id]/attachments", () => {
   beforeEach(() => {

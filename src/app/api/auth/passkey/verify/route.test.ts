@@ -91,6 +91,10 @@ vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (fn: any) => fn,
 }));
 
+vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
+  invalidateUserSessions: vi.fn().mockResolvedValue({ sessions: 0, extensionTokens: 0, apiKeys: 0, mcpAccessTokens: 0, mcpRefreshTokens: 0, delegationSessions: 0, operatorTokens: 0, cacheTombstoneFailures: 0 }),
+}));
+
 import { POST } from "./route";
 import {
   expectInvalidatedAfterCommit,
