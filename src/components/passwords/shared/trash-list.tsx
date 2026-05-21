@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
-import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
+import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -73,7 +73,7 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
         if (!entry.encryptedOverview) continue;
         try {
           const aad = entry.aadVersion >= 1 && userId
-            ? buildPersonalEntryAAD(userId, entry.id, "overview")
+            ? buildPersonalEntryAAD(userId, entry.id, VAULT_TYPE.OVERVIEW)
             : undefined;
           const overview = JSON.parse(
             await decryptData(

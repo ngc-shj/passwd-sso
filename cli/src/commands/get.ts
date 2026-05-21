@@ -5,7 +5,7 @@
 import { apiRequest } from "../lib/api-client.js";
 import { getEncryptionKey, getUserId } from "../lib/vault-state.js";
 import { decryptData } from "../lib/crypto.js";
-import { buildPersonalEntryAAD } from "../lib/crypto-aad.js";
+import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
 import { copyToClipboard } from "../lib/clipboard.js";
 import * as output from "../lib/output.js";
 
@@ -57,7 +57,7 @@ export async function getCommand(
 
   try {
     const aad = entry.aadVersion >= 1 && userId
-      ? buildPersonalEntryAAD(userId, entry.id, "blob")
+      ? buildPersonalEntryAAD(userId, entry.id, VAULT_TYPE.BLOB)
       : undefined;
     const plaintext = await decryptData(
       entry.encryptedBlob,

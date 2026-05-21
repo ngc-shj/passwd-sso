@@ -56,6 +56,7 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
 
 vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildPersonalEntryAAD: (...args: unknown[]) => mockBuildPersonalEntryAAD(...args),
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 vi.mock("@/lib/crypto/export-crypto", () => ({

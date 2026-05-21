@@ -39,6 +39,7 @@ import {
   buildPersonalHistoryAAD,
   buildAttachmentAAD,
   buildAttachmentCekWrapAAD,
+  VAULT_TYPE,
   MIN_ACCEPTED_CEK_WRAP_AAD_VERSION,
   CURRENT_CEK_WRAP_AAD_VERSION,
 } from "@/lib/crypto/crypto-aad";
@@ -1008,10 +1009,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         onProgress?.({ phase: "entries", current: i, total: totalEntries });
 
         const blobAad = entry.aadVersion >= 1 && userId
-          ? buildPersonalEntryAAD(userId, entry.id, "blob")
+          ? buildPersonalEntryAAD(userId, entry.id, VAULT_TYPE.BLOB)
           : undefined;
         const overviewAad = entry.aadVersion >= 1 && userId
-          ? buildPersonalEntryAAD(userId, entry.id, "overview")
+          ? buildPersonalEntryAAD(userId, entry.id, VAULT_TYPE.OVERVIEW)
           : undefined;
 
         const decryptedBlob = await decryptData(

@@ -36,6 +36,7 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
 
 vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildTeamEntryAAD: (...args: unknown[]) => mockBuildTeamEntryAAD(...args),
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 vi.mock("@/components/team/forms/team-entry-dialog-shell", () => ({

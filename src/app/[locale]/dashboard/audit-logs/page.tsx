@@ -15,7 +15,7 @@ import {
 import { ScrollText } from "lucide-react";
 import { useVault } from "@/lib/vault/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
-import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
+import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import {
   API_PATH,
   AUDIT_ACTION,
@@ -79,7 +79,7 @@ export default function AuditLogsPage() {
       const names = new Map<string, string>();
       for (const [id, ov] of Object.entries(overviews)) {
         try {
-          const aad = ov.aadVersion >= 1 ? buildPersonalEntryAAD(userId, id, "overview") : undefined;
+          const aad = ov.aadVersion >= 1 ? buildPersonalEntryAAD(userId, id, VAULT_TYPE.OVERVIEW) : undefined;
           const overview = JSON.parse(
             await decryptData(ov as EncryptedData, encryptionKey, aad)
           );

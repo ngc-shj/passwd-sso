@@ -23,6 +23,7 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
 vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildAttachmentAAD: vi.fn().mockReturnValue("aad"),
   AAD_VERSION: 1,
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 import { AttachmentSection } from "./attachment-section";

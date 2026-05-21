@@ -32,6 +32,7 @@ vi.mock("@/lib/crypto/crypto-team", () => ({
 
 vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildItemKeyWrapAAD: (...args: unknown[]) => mockBuildItemKeyWrapAAD(...args),
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 import {

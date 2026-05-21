@@ -60,6 +60,7 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
 vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildPersonalEntryAAD: () => new Uint8Array(16),
   AAD_VERSION: 1,
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 vi.mock("sonner", () => ({

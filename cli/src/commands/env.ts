@@ -13,7 +13,7 @@ import { getEncryptionKey, getUserId } from "../lib/vault-state.js";
 import { autoUnlockIfNeeded } from "./unlock.js";
 import { getToken } from "../lib/api-client.js";
 import { decryptData } from "../lib/crypto.js";
-import { buildPersonalEntryAAD } from "../lib/crypto-aad.js";
+import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
 import { BLOCKED_KEYS } from "../lib/blocked-keys.js";
 import * as output from "../lib/output.js";
 
@@ -88,7 +88,7 @@ export async function envCommand(opts: EnvOptions): Promise<void> {
 
     let additionalData: Uint8Array | undefined;
     if (data.aadVersion && data.aadVersion >= 1 && userId) {
-      additionalData = buildPersonalEntryAAD(userId, data.id, "blob");
+      additionalData = buildPersonalEntryAAD(userId, data.id, VAULT_TYPE.BLOB);
     }
 
     const decrypted = await decryptData(

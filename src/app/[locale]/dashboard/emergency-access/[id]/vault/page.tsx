@@ -18,7 +18,7 @@ import {
   unwrapSecretKeyAsGrantee,
 } from "@/lib/crypto/crypto-emergency";
 import { deriveEncryptionKey, decryptData, hexDecode, type EncryptedData } from "@/lib/crypto/crypto-client";
-import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
+import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { fetchApi } from "@/lib/url-helpers";
 import { PasswordCard } from "@/components/passwords/detail/password-card";
 import type { EntryCardData } from "@/types/entry-card";
@@ -159,7 +159,7 @@ export default function EmergencyVaultPage() {
       for (const entry of rawEntries) {
         try {
           const aad = entry.aadVersion >= 1
-            ? buildPersonalEntryAAD(vaultData.ownerId, entry.id, "overview")
+            ? buildPersonalEntryAAD(vaultData.ownerId, entry.id, VAULT_TYPE.OVERVIEW)
             : undefined;
           const overviewEncrypted: EncryptedData = {
             ciphertext: entry.encryptedOverview,
@@ -227,7 +227,7 @@ export default function EmergencyVaultPage() {
     const ownerEncKey = ownerEncKeyRef.current;
     if (!ownerEncKey) throw new Error("Owner key not available");
     const aad = entry.aadVersion >= 1
-      ? buildPersonalEntryAAD(ownerIdRef.current, entry.id, "blob")
+      ? buildPersonalEntryAAD(ownerIdRef.current, entry.id, VAULT_TYPE.BLOB)
       : undefined;
     const blobEncrypted: EncryptedData = {
       ciphertext: entry.encryptedBlob,

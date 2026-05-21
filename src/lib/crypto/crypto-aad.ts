@@ -28,6 +28,20 @@ const SCOPE_ITEM_KEY = "IK";
 const SCOPE_ATTACHMENT_WRAP = "AW";
 
 /**
+ * Vault entry sub-blob selector used by Personal (PV) and Team (OV) AAD
+ * scopes. Bound into AAD to prevent cross-field replay (an attacker who
+ * can write DB cannot swap the overview ciphertext into the blob column).
+ *
+ * Const-object + derived type pattern (matches AUDIT_ACTION) so callers
+ * can `pass VAULT_TYPE.BLOB` instead of bare string literals.
+ */
+export const VAULT_TYPE = {
+  BLOB: "blob",
+  OVERVIEW: "overview",
+} as const;
+export type VaultType = (typeof VAULT_TYPE)[keyof typeof VAULT_TYPE];
+
+/**
  * Encode fields into the length-prefixed binary AAD format.
  *
  * @param scope - 2-char ASCII scope identifier
@@ -108,7 +122,7 @@ function buildAADBytes(
 export function buildPersonalEntryAAD(
   userId: string,
   entryId: string,
-  vaultType: "blob" | "overview"
+  vaultType: VaultType
 ): Uint8Array {
   return buildAADBytes(SCOPE_PERSONAL, 3, [userId, entryId, vaultType]);
 }
@@ -138,7 +152,7 @@ export function buildPersonalHistoryAAD(
 export function buildTeamEntryAAD(
   teamId: string,
   entryId: string,
-  vaultType: "blob" | "overview" = "blob",
+  vaultType: VaultType = VAULT_TYPE.BLOB,
   itemKeyVersion: number = 0
 ): Uint8Array {
   return buildAADBytes(SCOPE_TEAM, 4, [

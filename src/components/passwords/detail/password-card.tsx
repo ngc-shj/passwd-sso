@@ -54,7 +54,7 @@ import {
 import { toast } from "sonner";
 import { useVault } from "@/lib/vault/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
-import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
+import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { ShareDialog } from "@/components/share/share-dialog";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
 import { MS_PER_DAY } from "@/lib/constants/time";
@@ -256,7 +256,7 @@ export function PasswordCard({
     }
     const raw = await res.json();
     const aad = raw.aadVersion >= 1 && userId
-      ? buildPersonalEntryAAD(userId, id, "blob")
+      ? buildPersonalEntryAAD(userId, id, VAULT_TYPE.BLOB)
       : undefined;
     const plaintext = await decryptData(
       raw.encryptedBlob as EncryptedData,

@@ -3,6 +3,7 @@ import {
   buildPersonalEntryAAD,
   buildTeamEntryAAD,
   buildItemKeyWrapAAD,
+  VAULT_TYPE,
   AAD_VERSION,
 } from "@/lib/crypto/crypto-aad";
 import {
@@ -150,8 +151,8 @@ export async function runImportEntries({
         const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);
         const entryId = crypto.randomUUID();
         // C1: blob and overview now bind distinct vaultType in AAD.
-        const blobAad = buildPersonalEntryAAD(userId!, entryId, "blob");
-        const overviewAad = buildPersonalEntryAAD(userId!, entryId, "overview");
+        const blobAad = buildPersonalEntryAAD(userId!, entryId, VAULT_TYPE.BLOB);
+        const overviewAad = buildPersonalEntryAAD(userId!, entryId, VAULT_TYPE.OVERVIEW);
         const encryptedBlob = await encryptData(fullBlob, encryptionKey!, blobAad);
         const encryptedOverview = await encryptData(overviewBlob, encryptionKey!, overviewAad);
 

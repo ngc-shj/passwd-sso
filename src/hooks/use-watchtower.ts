@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useVault } from "@/lib/vault/vault-context";
 import { useTeamVaultOptional } from "@/lib/team/team-vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
-import { buildPersonalEntryAAD, buildTeamEntryAAD, buildItemKeyWrapAAD } from "@/lib/crypto/crypto-aad";
+import { buildPersonalEntryAAD, buildTeamEntryAAD, buildItemKeyWrapAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { unwrapItemKey, deriveItemEncryptionKey } from "@/lib/crypto/crypto-team";
 import { API_PATH, ENTRY_TYPE, LOCAL_STORAGE_KEY, apiPath } from "@/lib/constants";
 import { MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
@@ -733,7 +733,7 @@ async function fetchPersonalWatchtowerEntries({
     if (raw.entryType && raw.entryType !== ENTRY_TYPE.LOGIN) continue;
     try {
       const aad = raw.aadVersion >= 1 && userId
-        ? buildPersonalEntryAAD(userId, raw.id, "blob")
+        ? buildPersonalEntryAAD(userId, raw.id, VAULT_TYPE.BLOB)
         : undefined;
       const plaintext = await decryptData(
         raw.encryptedBlob as EncryptedData,

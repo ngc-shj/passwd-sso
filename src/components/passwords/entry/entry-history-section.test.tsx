@@ -51,6 +51,7 @@ vi.mock("@/lib/team/team-vault-context", () => ({
 vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildPersonalEntryAAD: vi.fn().mockReturnValue("test-aad"),
   buildTeamEntryAAD: vi.fn().mockReturnValue("test-team-aad"),
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 vi.mock("sonner", () => ({

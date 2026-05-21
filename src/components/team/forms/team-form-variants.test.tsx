@@ -72,6 +72,7 @@ vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildTeamEntryAAD: vi.fn().mockReturnValue("team-aad"),
   buildAttachmentAAD: vi.fn().mockReturnValue("att-aad"),
   AAD_VERSION: 1,
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 vi.mock("@/lib/crypto/crypto-client", () => ({
