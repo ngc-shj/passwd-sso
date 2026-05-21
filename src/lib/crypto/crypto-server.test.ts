@@ -555,16 +555,26 @@ describe("crypto-server", () => {
     });
 
     it("hash is deterministic for same password", () => {
-      const pw = "test-password-123";
+      // A02-6: hashAccessPassword enforces 43-char generated-token length;
+      // use generateAccessPassword to produce a valid fixture.
+      const pw = generateAccessPassword();
       const { hash: h1 } = hashAccessPassword(pw);
       const { hash: h2 } = hashAccessPassword(pw);
       expect(h1).toBe(h2);
     });
 
     it("different passwords produce different hashes", () => {
-      const { hash: h1 } = hashAccessPassword("password-a");
-      const { hash: h2 } = hashAccessPassword("password-b");
+      const pw1 = generateAccessPassword();
+      const pw2 = generateAccessPassword();
+      const { hash: h1 } = hashAccessPassword(pw1);
+      const { hash: h2 } = hashAccessPassword(pw2);
       expect(h1).not.toBe(h2);
+    });
+
+    it("A02-6: throws when input is not a 43-char generated token", () => {
+      expect(() => hashAccessPassword("short")).toThrow(/expected 43-char/);
+      expect(() => hashAccessPassword("a".repeat(42))).toThrow(/expected 43-char/);
+      expect(() => hashAccessPassword("a".repeat(44))).toThrow(/expected 43-char/);
     });
 
     it("hashAccessPassword returns { hash, version } object", () => {

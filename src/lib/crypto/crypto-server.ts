@@ -216,17 +216,37 @@ export function generateAccessPassword(): string {
 }
 
 /**
+ * Length emitted by {@link generateAccessPassword}: ceil(32 * 8 / 6) = 43.
+ * A02-6: enforced at runtime in hashAccessPassword so a future caller
+ * cannot accidentally pass a user-chosen (low-entropy) password into the
+ * fast-hash path.
+ */
+const ACCESS_PASSWORD_LENGTH = 43;
+
+/**
  * Hash an access password for storage.
  * Pre-hashes with SHA-256 to produce 64-char hex required by hmacVerifier.
  *
  * NOTE: SHA-256 is intentional here — the input is a server-generated
  * 256-bit random token (randomBytes(32)), not a user-chosen password.
  * A slow KDF (bcrypt/argon2) is unnecessary for high-entropy secrets.
+ *
+ * A02-6 invariant: throws if the input length doesn't match
+ * generateAccessPassword's output (43 chars base64url). This guards
+ * against a future caller substituting a user-chosen low-entropy
+ * password into this fast-hash path, which would be offline-dictionary-
+ * attackable. Pair with generateAccessPassword at the call site.
  */
 export function hashAccessPassword(
   password: string,
   version: number = getCurrentVerifierVersion()
 ): { hash: string; version: number } {
+  if (password.length !== ACCESS_PASSWORD_LENGTH) {
+    throw new Error(
+      `hashAccessPassword: expected ${ACCESS_PASSWORD_LENGTH}-char generated token, got length ${password.length}. ` +
+        `User-chosen passwords MUST go through a slow KDF (bcrypt/argon2), not this fast-hash path.`,
+    );
+  }
   const digest = createHash("sha256").update(password).digest("hex");
   return { hash: hmacVerifier(digest, version), version };
 }
