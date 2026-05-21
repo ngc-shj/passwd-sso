@@ -7,13 +7,33 @@ describe("share-access-token", () => {
     vi.restoreAllMocks();
   });
 
-  it("creates a token in payload.signature format", () => {
+  it("creates a token in kv.payload.signature (3-segment) format", () => {
     const token = createShareAccessToken("share-1");
-    expect(token).toContain(".");
     const parts = token.split(".");
-    expect(parts).toHaveLength(2);
-    expect(parts[0].length).toBeGreaterThan(0);
+    expect(parts).toHaveLength(3);
+    // kv segment is a positive ASCII decimal integer
+    expect(parts[0]).toMatch(/^[1-9][0-9]*$/);
     expect(parts[1].length).toBeGreaterThan(0);
+    expect(parts[2].length).toBeGreaterThan(0);
+  });
+
+  it("rejects legacy 2-segment tokens (no kv prefix)", () => {
+    // Manually craft a v1-style token without the kv prefix — should be rejected
+    expect(verifyShareAccessToken("payload.signature", "share-1")).toBe(false);
+  });
+
+  it("rejects tampered kv (downgrade attempt)", () => {
+    const token = createShareAccessToken("share-1");
+    const parts = token.split(".");
+    // Rewrite kv from e.g. "1" to a different version while keeping payload+sig
+    const tampered = `9999.${parts[1]}.${parts[2]}`;
+    expect(verifyShareAccessToken(tampered, "share-1")).toBe(false);
+  });
+
+  it("rejects non-integer kv (e.g. '1.0')", () => {
+    // The leading '1.0' parses with Number() but fails the regex
+    expect(verifyShareAccessToken("01.payload.sig", "share-1")).toBe(false);
+    expect(verifyShareAccessToken(" 1.payload.sig", "share-1")).toBe(false);
   });
 
   it("verifies a valid token for the correct share ID", () => {
@@ -32,8 +52,12 @@ describe("share-access-token", () => {
     expect(verifyShareAccessToken(tampered, "share-1")).toBe(false);
   });
 
-  it("rejects a token without a dot separator", () => {
+  it("rejects a token without dot separators", () => {
     expect(verifyShareAccessToken("nodot", "share-1")).toBe(false);
+  });
+
+  it("rejects a token with only one dot (insufficient segments)", () => {
+    expect(verifyShareAccessToken("one.dot", "share-1")).toBe(false);
   });
 
   it("rejects an empty string", () => {
