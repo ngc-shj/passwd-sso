@@ -809,7 +809,7 @@ describe("useWatchtower", () => {
       await result.current.analyze();
     });
 
-    expect(mockBuildPersonalEntryAAD).toHaveBeenCalledWith("user-1", "entry-1");
+    expect(mockBuildPersonalEntryAAD).toHaveBeenCalledWith("user-1", "entry-1", "blob");
     expect(mockDecryptData).toHaveBeenCalledWith(
       raw.encryptedBlob,
       fakeKey,

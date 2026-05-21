@@ -23,6 +23,9 @@ const {
     findMany: vi.fn(),
     create: vi.fn(),
     deleteMany: vi.fn(),
+    // C18: assertQuotaAvailable(...passwords...) calls count() to enforce
+    // per-user password quota before insert.
+    count: vi.fn().mockResolvedValue(0),
   },
   mockPrismaFolder: { findFirst: vi.fn() },
   mockPrismaTag: { count: vi.fn() },
