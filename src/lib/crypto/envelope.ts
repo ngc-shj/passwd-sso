@@ -28,6 +28,13 @@ export function isEncryptedEnvelope(stored: string): boolean {
   return stored.startsWith(SENTINEL);
 }
 
+// A08-4: strict integer regex. Number() is too tolerant — accepts "1.0",
+// " 1", "0x1", scientific notation, etc. — any of which could mismatch
+// the stored key version if an attacker controlled the envelope string.
+// GCM tag would still catch it (AAD includes version), but explicit
+// rejection prevents version aliasing at the parse layer.
+const VERSION_RE = /^(0|[1-9][0-9]*)$/;
+
 export function parseEnvelope(stored: string): ParsedEnvelope {
   const rest = stored.slice(SENTINEL.length);
   const colonIdx = rest.indexOf(":");
@@ -35,10 +42,10 @@ export function parseEnvelope(stored: string): ParsedEnvelope {
     throw new Error("Malformed encrypted account token: missing version delimiter");
   }
   const versionStr = rest.slice(0, colonIdx);
-  const version = Number(versionStr);
-  if (!Number.isInteger(version) || version < 0) {
+  if (!VERSION_RE.test(versionStr)) {
     throw new Error(`Malformed encrypted account token: invalid version "${versionStr}"`);
   }
+  const version = parseInt(versionStr, 10);
   const blob = Buffer.from(rest.slice(colonIdx + 1), "base64url");
   if (blob.length < IV_LENGTH + AUTH_TAG_LENGTH + 1) {
     throw new Error("Malformed encrypted account token: blob too short");
