@@ -16,6 +16,7 @@ import { logAuditInTx, personalAuditBase, teamAuditBase } from "@/lib/audit/audi
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
+import { assertQuotaAvailable, QuotaExceededError } from "@/lib/quota/resource-quotas";
 import { parseBody } from "@/lib/http/parse-body";
 import {
   TEAM_PERMISSION,
@@ -48,6 +49,20 @@ async function handlePOST(req: NextRequest) {
   const rl = await shareLinkLimiter.check(`rl:share_create:${session.user.id}`);
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
+  }
+
+  // C18 (OWASP A04-1): per-user quota gate.
+  try {
+    await assertQuotaAvailable({ userId: session.user.id }, "share_links", 1);
+  } catch (err) {
+    if (err instanceof QuotaExceededError) {
+      return errorResponse(API_ERROR.QUOTA_EXCEEDED, undefined, {
+        resource: err.resource,
+        current: err.current,
+        max: err.max,
+      });
+    }
+    throw err;
   }
 
   const result = await parseBody(req, createShareLinkSchema);

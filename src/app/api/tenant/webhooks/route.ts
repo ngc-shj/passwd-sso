@@ -22,7 +22,9 @@ import {
 import { randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { assertQuotaAvailable, QuotaExceededError } from "@/lib/quota/resource-quotas";
 import { MAX_WEBHOOKS, WEBHOOK_URL_MAX_LENGTH } from "@/lib/validations/common";
 import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE } from "@/lib/url/url-validation";
 
@@ -88,6 +90,22 @@ async function handlePOST(req: NextRequest) {
   const result = await parseBody(req, createWebhookSchema);
   if (!result.ok) return result.response;
   const { data } = result;
+
+  // C18 (OWASP A04-1): per-tenant quota gate covering tenant + team
+  // webhooks combined. Existing MAX_WEBHOOKS check below is a tighter
+  // tenant-webhook-only ceiling; both apply for defense in depth.
+  try {
+    await assertQuotaAvailable({ tenantId: actor.tenantId }, "webhooks", 1);
+  } catch (err) {
+    if (err instanceof QuotaExceededError) {
+      return errorResponse(API_ERROR.QUOTA_EXCEEDED, undefined, {
+        resource: err.resource,
+        current: err.current,
+        max: err.max,
+      });
+    }
+    throw err;
+  }
 
   // Check webhook count limit
   const existingCount = await withTenantRls(prisma, actor.tenantId, async (tx) =>

@@ -27,15 +27,16 @@ import {
   computeCanonicalBytes,
   computeEventHash,
 } from "@/lib/audit/audit-chain";
+import { MS_PER_HOUR, MS_PER_DAY } from "@/lib/constants/time";
 
 config({ path: resolve(process.cwd(), ".env.local") });
 config({ path: resolve(process.cwd(), ".env") });
 
 const TICK_INTERVAL_MS = Number(
-  process.env.AUDIT_CHAIN_VERIFY_TICK_INTERVAL_MS ?? 60 * 60 * 1000,
+  process.env.AUDIT_CHAIN_VERIFY_TICK_INTERVAL_MS ?? MS_PER_HOUR,
 );
 const HYSTERESIS_REALERT_MS = Number(
-  process.env.AUDIT_CHAIN_VERIFY_REALERT_MS ?? 24 * 60 * 60 * 1000,
+  process.env.AUDIT_CHAIN_VERIFY_REALERT_MS ?? MS_PER_DAY,
 );
 const MAX_ROWS_PER_TENANT = Number(
   process.env.AUDIT_CHAIN_VERIFY_MAX_ROWS ?? 100_000,

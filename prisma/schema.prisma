@@ -1786,6 +1786,11 @@ model PersonalLogAccessGrant {
   reason       String    @db.Text
   incidentRef  String?   @map("incident_ref") @db.VarChar(500)
   expiresAt    DateTime  @map("expires_at") @db.Timestamptz(3)
+  // C19 (OWASP A04-5): cooling-off — when set in the future, the grant
+  // is "pending" and access checks must reject until effectiveAt <= now.
+  // NULL = legacy / immediate. Default cooling-off: 1h from creation if
+  // no prior grant for the same requester/target within 24h.
+  effectiveAt  DateTime? @map("effective_at") @db.Timestamptz(3)
   revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(3)
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
 

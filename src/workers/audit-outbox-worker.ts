@@ -15,6 +15,7 @@ import {
 } from "@/lib/constants/audit/audit";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { NIL_UUID, SYSTEM_ACTOR_ID, UUID_RE } from "@/lib/constants/app";
+import { MS_PER_DAY } from "@/lib/constants/time";
 import { DELIVERERS, type TargetConfig, type DeliveryPayload } from "@/workers/audit-delivery";
 import { decryptServerData, getMasterKeyByVersion } from "@/lib/crypto/crypto-server";
 import { sanitizeErrorForStorage } from "@/lib/http/external-http";
@@ -1111,7 +1112,7 @@ export function createWorker(config: WorkerConfig) {
   // and alert-flood on flap.
   let depthAlarmed = false;
   let lastDepthAlertAt = 0;
-  const DEPTH_REALERT_MS = 24 * 60 * 60 * 1000;
+  const DEPTH_REALERT_MS = MS_PER_DAY;
   const pendingThreshold =
     Number(process.env.OUTBOX_READY_PENDING_THRESHOLD ?? "1000") || 1000;
   const oldestThresholdSecs =

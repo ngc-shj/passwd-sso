@@ -12,6 +12,7 @@ import {
 } from "@/lib/validations";
 import { BASE64_RE, CEK_WRAP_BASE64_MAX } from "@/lib/validations/common";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { assertQuotaAvailable, QuotaExceededError } from "@/lib/quota/resource-quotas";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
@@ -145,6 +146,28 @@ async function handlePOST(
 
   if (!file || !iv || !authTag || !filename || !contentType || !sizeBytes) {
     return errorResponse(API_ERROR.MISSING_REQUIRED_FIELDS);
+  }
+
+  // C18 (OWASP A04-1): per-user attachment-bytes quota gate. Checked
+  // after parsing FormData (need fileSize) but before persisting blob.
+  const sizeBytesNum = parseInt(sizeBytes, 10);
+  if (Number.isFinite(sizeBytesNum) && sizeBytesNum > 0) {
+    try {
+      await assertQuotaAvailable(
+        { userId: session.user.id },
+        "attachment_bytes",
+        sizeBytesNum,
+      );
+    } catch (err) {
+      if (err instanceof QuotaExceededError) {
+        return errorResponse(API_ERROR.QUOTA_EXCEEDED, undefined, {
+          resource: err.resource,
+          current: err.current,
+          max: err.max,
+        });
+      }
+      throw err;
+    }
   }
 
   // Require mode-2 CEK fields

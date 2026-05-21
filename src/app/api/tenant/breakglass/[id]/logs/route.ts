@@ -91,6 +91,17 @@ async function handleGET(
     });
   }
 
+  // C19 (OWASP A04-5): cooling-off period — reject if grant is set to
+  // become effective in the future. NULL effectiveAt = legacy/immediate.
+  if (grant.effectiveAt !== null && grant.effectiveAt > now) {
+    return errorResponse(API_ERROR.FORBIDDEN, undefined, {
+      details: {
+        status: "pending",
+        effectiveAt: grant.effectiveAt.toISOString(),
+      },
+    });
+  }
+
   if (grant.expiresAt <= now) {
     // Lazily record PERSONAL_LOG_ACCESS_EXPIRE (once per grant, non-blocking)
     if (!expireAuditCache.has(grantId)) {
