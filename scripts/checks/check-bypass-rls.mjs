@@ -70,6 +70,14 @@ const ALLOWED_USAGE = new Map([
     "mcpAccessToken", "mcpRefreshToken", "delegationSession",
     "operatorToken",
   ]],
+  // C18 (OWASP A04-1): per-user / per-tenant resource quotas need to count
+  // total usage that may span beyond the current request's tenant context.
+  // RLS would clip the count to the calling tenant's view, producing
+  // under-counts on shared resources. SYSTEM_MAINTENANCE bypass purpose.
+  ["src/lib/quota/resource-quotas.ts", [
+    "passwordEntry", "attachment", "passwordShare",
+    "tenantWebhook", "teamWebhook",
+  ]],
   ["src/app/api/tenant/policy/route.ts", ["user", "tenant", "teamPolicy"]],
   ["src/lib/auth/policy/access-restriction.ts", ["tenant"]],
   ["src/lib/team/team-policy.ts", ["teamMember", "teamPolicy", "tenant"]],
