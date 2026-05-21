@@ -66,12 +66,15 @@ async function purgeForTenant(
       }),
     BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
   }
-  const result = await withBypassRls(prisma, async (tx) =>
-    tx.auditLog.deleteMany({
-      where: { tenantId, createdAt: { lt: tenantCutoff } },
-    }),
+  // C13: audit_logs DELETE is revoked from passwd_app; route through the
+  // SECURITY DEFINER function so retention purges (legitimate operation)
+  // still work while rogue UPDATE/DELETE attempts via app-role SQL fail.
+  const rows = await withBypassRls(prisma, async (tx) =>
+    tx.$queryRaw<Array<{ rows_deleted: number }>>`
+      SELECT audit_log_purge(${tenantId}::uuid, ${tenantCutoff}::timestamptz) AS rows_deleted
+    `,
   BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
-  return result.count;
+  return rows[0]?.rows_deleted ?? 0;
 }
 
 async function handlePOST(req: NextRequest) {

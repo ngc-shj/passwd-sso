@@ -137,10 +137,10 @@ export async function ensureTenantMembershipForSignIn(
             where: { userId, tenantId: existingTenantId },
             data: { tenantId: found.id },
           });
-          await tx.auditLog.updateMany({
-            where: { userId, tenantId: existingTenantId },
-            data: { tenantId: found.id },
-          });
+          // C13: audit_logs UPDATE is revoked from passwd_app; route through
+          // the SECURITY DEFINER procedure so this privileged tenant-merge
+          // path retains its audit history continuity.
+          await tx.$executeRaw`CALL audit_log_tenant_migrate(${userId}::uuid, ${existingTenantId}::uuid, ${found.id}::uuid)`;
           // not a state transition — tenantId reassignment, see ../auth/email-uniqueness-design.md
           await tx.emergencyAccessGrant.updateMany({
             where: { ownerId: userId, tenantId: existingTenantId },
