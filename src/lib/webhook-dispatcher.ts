@@ -25,6 +25,17 @@ import {
   createPinnedDispatcher,
 } from "@/lib/http/external-http";
 
+/**
+ * Raised when a webhook row's secretAadVersion is below the supported floor.
+ * Indicates pending migration (scripts/migrate-webhook-secrets-v1-to-v2.ts).
+ */
+export class WebhookSecretVersionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WebhookSecretVersionError";
+  }
+}
+
 // ─── Types ──────────────────────────────────────────────────────
 
 export interface TeamWebhookEvent {
@@ -158,20 +169,23 @@ async function deliverSingleWebhook(
   try {
     let secret: string;
     try {
+      // Post-C4 (OWASP A02-4): v1 (no-AAD) secrets are retired. Any v1 row
+      // encountered post-migration is a fail-closed error. Operators must
+      // run scripts/migrate-webhook-secrets-v1-to-v2.ts before deploying.
+      if (webhook.secretAadVersion < 2) {
+        throw new WebhookSecretVersionError(
+          `webhook ${webhook.id} has retired secretAadVersion=${webhook.secretAadVersion}; ` +
+            `run scripts/migrate-webhook-secrets-v1-to-v2.ts`,
+        );
+      }
       const masterKey = getMasterKeyByVersion(webhook.masterKeyVersion);
-      // v1 = legacy no-AAD; v2 = AAD-bound. The aadVersion column is
-      // bound INTO the AAD on writes (per S9), so a v2→v1 downgrade
-      // attack by flipping the column produces a tag mismatch here.
-      const aad =
-        webhook.secretAadVersion >= 2
-          ? buildWebhookSecretAAD({
-              tableName: webhook.kind,
-              version: webhook.secretAadVersion,
-              webhookId: webhook.id,
-              tenantId: webhook.tenantId,
-              teamId: webhook.kind === "TeamWebhook" ? webhook.teamId ?? null : undefined,
-            })
-          : undefined;
+      const aad = buildWebhookSecretAAD({
+        tableName: webhook.kind,
+        version: webhook.secretAadVersion,
+        webhookId: webhook.id,
+        tenantId: webhook.tenantId,
+        teamId: webhook.kind === "TeamWebhook" ? webhook.teamId ?? null : undefined,
+      });
       secret = decryptServerData(
         {
           ciphertext: webhook.secretEncrypted,

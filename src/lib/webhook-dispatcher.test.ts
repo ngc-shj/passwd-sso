@@ -80,15 +80,15 @@ import { createHmac } from "node:crypto";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 const WEBHOOK = {
-  id: "wh-1",
-  teamId: "team-1",
-  tenantId: "tenant-1",
+  id: "11111111-1111-1111-1111-111111111111",
+  teamId: "33333333-3333-3333-3333-333333333333",
+  tenantId: "44444444-4444-4444-4444-444444444444",
   url: "https://example.com/hook",
   secretEncrypted: "encrypted",
   secretIv: "iv123456789012",
   secretAuthTag: "authtag1234567890123456789012",
   masterKeyVersion: 1,
-  secretAadVersion: 1, // legacy no-AAD; v2 AAD path is exercised in webhook-aad.test.ts
+  secretAadVersion: 2, // C4: v1 retired; v2 AAD path is exercised in webhook-aad.test.ts
   events: ["ENTRY_CREATE"],
   isActive: true,
   lastError: null,
@@ -101,20 +101,20 @@ const WEBHOOK = {
 
 const EVENT = {
   type: "ENTRY_CREATE",
-  teamId: "team-1",
+  teamId: "33333333-3333-3333-3333-333333333333",
   timestamp: new Date().toISOString(),
   data: { entryId: "entry-1" },
 };
 
 const TENANT_WEBHOOK = {
-  id: "twh-1",
-  tenantId: "tenant-1",
+  id: "22222222-2222-2222-2222-222222222222",
+  tenantId: "44444444-4444-4444-4444-444444444444",
   url: "https://example.com/tenant-hook",
   secretEncrypted: "encrypted",
   secretIv: "iv123456789012",
   secretAuthTag: "authtag1234567890123456789012",
   masterKeyVersion: 1,
-  secretAadVersion: 1,
+  secretAadVersion: 2,
   events: ["ADMIN_VAULT_RESET_INITIATE"],
   isActive: true,
   lastError: null,
@@ -127,7 +127,7 @@ const TENANT_WEBHOOK = {
 
 const TENANT_EVENT = {
   type: "ADMIN_VAULT_RESET_INITIATE",
-  tenantId: "tenant-1",
+  tenantId: "44444444-4444-4444-4444-444444444444",
   timestamp: new Date().toISOString(),
   data: { targetUserId: "user-1" },
 };
@@ -275,7 +275,7 @@ describe("dispatchWebhook", () => {
       expect(mockLogAudit).toHaveBeenCalledWith(
         expect.objectContaining({
           action: "WEBHOOK_DELIVERY_FAILED",
-          teamId: "team-1",
+          teamId: "33333333-3333-3333-3333-333333333333",
         }),
       );
     });
@@ -309,7 +309,7 @@ describe("dispatchWebhook", () => {
   });
 
   it("delivers to multiple webhooks independently", async () => {
-    const webhook2 = { ...WEBHOOK, id: "wh-2", url: "https://other.com/hook" };
+    const webhook2 = { ...WEBHOOK, id: "11111111-1111-1111-1111-111111111112", url: "https://other.com/hook" };
     mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK, webhook2]);
     mockFetch
       .mockResolvedValueOnce({ ok: true })
@@ -321,13 +321,13 @@ describe("dispatchWebhook", () => {
 
     expect(mockPrismaTeamWebhook.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "wh-1" },
+        where: { id: "11111111-1111-1111-1111-111111111111" },
         data: expect.objectContaining({ failCount: 0 }),
       }),
     );
     expect(mockPrismaTeamWebhook.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "wh-2" },
+        where: { id: "11111111-1111-1111-1111-111111111112" },
         data: expect.objectContaining({ failCount: 1 }),
       }),
     );
@@ -348,8 +348,12 @@ describe("dispatchWebhook", () => {
     const callOrder: string[] = [];
     const resolvers: Array<() => void> = [];
 
-    const makeWebhook = (id: string) => ({ ...WEBHOOK, id, url: `https://example.com/hook-${id}` });
-    const webhooks = ["wh-a", "wh-b", "wh-c"].map(makeWebhook);
+    const makeWebhook = (id: string, label: string) => ({ ...WEBHOOK, id, url: `https://example.com/hook-${label}` });
+    const webhooks = [
+      { id: "11111111-1111-1111-1111-1111111111aa", label: "wh-a" },
+      { id: "11111111-1111-1111-1111-1111111111ab", label: "wh-b" },
+      { id: "11111111-1111-1111-1111-1111111111ac", label: "wh-c" },
+    ].map((w) => makeWebhook(w.id, w.label));
     mockPrismaTeamWebhook.findMany.mockResolvedValue(webhooks);
 
     mockFetch.mockImplementation((url: string) => {
@@ -391,7 +395,8 @@ describe("dispatchWebhook", () => {
 
     const makeWebhook = (i: number) => ({
       ...WEBHOOK,
-      id: `wh-${i}`,
+      // Canonical UUID; suffix encodes the loop index for traceability.
+      id: `11111111-1111-1111-1111-1111111111${i.toString(16).padStart(2, "0")}`,
       url: `https://example.com/hook-${i}`,
     });
     const webhooks = Array.from({ length: 10 }, (_, i) => makeWebhook(i));
@@ -429,14 +434,17 @@ describe("dispatchWebhook", () => {
   });
 
   it("individual webhook failure does not affect others (Promise.allSettled behavior)", async () => {
+    const OK1 = "11111111-1111-1111-1111-111111111100";
+    const FAIL = "11111111-1111-1111-1111-111111111101";
+    const OK2 = "11111111-1111-1111-1111-111111111102";
     const makeWebhook = (id: string) => ({ ...WEBHOOK, id, url: `https://example.com/hook-${id}` });
-    const webhooks = ["wh-ok1", "wh-fail", "wh-ok2"].map(makeWebhook);
+    const webhooks = [OK1, FAIL, OK2].map(makeWebhook);
     mockPrismaTeamWebhook.findMany.mockResolvedValue(webhooks);
 
     mockFetch
-      .mockResolvedValueOnce({ ok: true })       // wh-ok1 succeeds
-      .mockRejectedValueOnce(new Error("Network error")) // wh-fail throws
-      .mockResolvedValueOnce({ ok: true });       // wh-ok2 succeeds
+      .mockResolvedValueOnce({ ok: true })       // OK1 succeeds
+      .mockRejectedValueOnce(new Error("Network error")) // FAIL throws
+      .mockResolvedValueOnce({ ok: true });       // OK2 succeeds
 
     dispatchWebhook(EVENT);
     await vi.advanceTimersByTimeAsync(100);
@@ -452,8 +460,8 @@ describe("dispatchWebhook", () => {
     const successIds = successCalls.map(
       (call: Array<{ where?: { id: string } }>) => call[0]?.where?.id,
     );
-    expect(successIds).toContain("wh-ok1");
-    expect(successIds).toContain("wh-ok2");
+    expect(successIds).toContain(OK1);
+    expect(successIds).toContain(OK2);
   });
 });
 
@@ -583,7 +591,7 @@ describe("dispatchTenantWebhook", () => {
 
     expect(mockPrismaTenantWebhook.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "twh-1" },
+        where: { id: "22222222-2222-2222-2222-222222222222" },
         data: expect.objectContaining({
           failCount: 0,
           lastError: null,
@@ -657,7 +665,7 @@ describe("dispatchTenantWebhook", () => {
     expect(call[0]).toMatchObject({
       action: "TENANT_WEBHOOK_DELIVERY_FAILED",
       scope: "TENANT",
-      tenantId: "tenant-1",
+      tenantId: "44444444-4444-4444-4444-444444444444",
     });
     expect(call[0]).not.toHaveProperty("teamId");
   });
@@ -693,7 +701,7 @@ describe("dispatchTenantWebhook", () => {
   it("delivers to multiple webhooks independently", async () => {
     const webhook2 = {
       ...TENANT_WEBHOOK,
-      id: "twh-2",
+      id: "22222222-2222-2222-2222-222222222223",
       url: "https://other.com/tenant-hook",
     };
     mockPrismaTenantWebhook.findMany.mockResolvedValue([TENANT_WEBHOOK, webhook2]);
@@ -707,13 +715,13 @@ describe("dispatchTenantWebhook", () => {
 
     expect(mockPrismaTenantWebhook.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "twh-1" },
+        where: { id: "22222222-2222-2222-2222-222222222222" },
         data: expect.objectContaining({ failCount: 0 }),
       }),
     );
     expect(mockPrismaTenantWebhook.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "twh-2" },
+        where: { id: "22222222-2222-2222-2222-222222222223" },
         data: expect.objectContaining({ failCount: 1 }),
       }),
     );
@@ -744,7 +752,7 @@ describe("dispatchTenantWebhook", () => {
         secret: "should-be-stripped",
         token: "should-be-stripped",
         // safe key that should remain
-        webhookId: "twh-1",
+        webhookId: "22222222-2222-2222-2222-222222222222",
       },
     };
 
@@ -769,7 +777,7 @@ describe("dispatchTenantWebhook", () => {
     expect(sentPayload.data).not.toHaveProperty("secret");
     expect(sentPayload.data).not.toHaveProperty("token");
     // non-PII key must be present
-    expect(sentPayload.data).toHaveProperty("webhookId", "twh-1");
+    expect(sentPayload.data).toHaveProperty("webhookId", "22222222-2222-2222-2222-222222222222");
   });
 });
 
@@ -801,7 +809,7 @@ describe("webhook delivery-failed audit sentinel", () => {
           userId: SYSTEM_ACTOR_ID,
           actorType: "SYSTEM",
           // TEAM scope: teamId is present, tenantId is not part of this call
-          teamId: "team-1",
+          teamId: "33333333-3333-3333-3333-333333333333",
         }),
       );
     });
@@ -819,7 +827,7 @@ describe("webhook delivery-failed audit sentinel", () => {
         action: "TENANT_WEBHOOK_DELIVERY_FAILED",
         userId: SYSTEM_ACTOR_ID,
         actorType: "SYSTEM",
-        tenantId: "tenant-1",
+        tenantId: "44444444-4444-4444-4444-444444444444",
       }),
     );
   });
