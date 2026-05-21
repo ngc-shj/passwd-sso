@@ -20,6 +20,13 @@ import type { AuthenticatorDevice } from "@simplewebauthn/types";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/types";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { MS_PER_SECOND } from "@/lib/constants/time";
+
+// C10: window in which two counter==0 authentications are treated as
+// suspected rapid-reuse (defense-in-depth audit telemetry only — never
+// rejects). 5s captures human-impossible re-tap intervals without
+// flagging legitimate rapid Touch ID on modern hardware.
+const COUNTER_ZERO_REUSE_WINDOW_MS = 5 * MS_PER_SECOND;
 
 // challengeId must be a 32-char hex string (16 random bytes)
 const CHALLENGE_ID_RE = /^[0-9a-f]{32}$/;
@@ -161,7 +168,7 @@ export async function authorizeWebAuthn(
     BigInt(storedCredential.counter) === 0n &&
     newCounter === 0 &&
     storedCredential.lastUsedAt &&
-    Date.now() - storedCredential.lastUsedAt.getTime() < 5000
+    Date.now() - storedCredential.lastUsedAt.getTime() < COUNTER_ZERO_REUSE_WINDOW_MS
   ) {
     await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,

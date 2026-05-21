@@ -17,7 +17,7 @@ import { errorResponse, forbidden, handleAuthError, rateLimited, unauthorized, v
 import { parseBody } from "@/lib/http/parse-body";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/audit/notification";
-import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
+import { MS_PER_DAY, MS_PER_HOUR, MS_PER_SECOND } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
@@ -137,7 +137,7 @@ async function handlePOST(req: NextRequest) {
           : null;
       const effectiveAt =
         coolingOffSecs > 0 && recentGrant === null
-          ? new Date(now.getTime() + coolingOffSecs * 1000)
+          ? new Date(now.getTime() + coolingOffSecs * MS_PER_SECOND)
           : null;
 
       const expiresAt = new Date(now.getTime() + MS_PER_DAY);
