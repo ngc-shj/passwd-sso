@@ -13,6 +13,10 @@ import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpe
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId, resolveUserTenantIdFromClient } from "@/lib/tenant-context";
 import { getLogger } from "@/lib/logger";
+import {
+  emitAuthLoginFailure,
+  type AuthProvider,
+} from "@/lib/audit/auth-failure";
 import authConfig from "./auth.config";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
 
@@ -247,10 +251,31 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: {
     ...authConfig.callbacks,
     async signIn(params) {
+      const provider = params.account?.provider;
+      const emailForAudit = params.user?.email ?? null;
+      // C11 (OWASP A09-1): map Auth.js provider strings to our audit enum.
+      const auditProvider: AuthProvider =
+        provider === "google"
+          ? "google"
+          : provider === "nodemailer"
+            ? "nodemailer"
+            : provider === "boxyhq-saml" || provider === "saml-jackson"
+              ? "saml"
+              : provider === "credentials"
+                ? "credentials"
+                : "unknown";
+
       const baseSignIn = authConfig.callbacks?.signIn;
       if (baseSignIn) {
         const baseResult = await baseSignIn(params);
-        if (!baseResult) return false;
+        if (!baseResult) {
+          await emitAuthLoginFailure({
+            email: emailForAudit,
+            provider: auditProvider,
+            reason: "provider_error",
+          });
+          return false;
+        }
       }
 
       // Reject nodemailer for SSO tenant users.
@@ -258,7 +283,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // Prevents bypassing SSO policy via direct API calls.
       // Note: WebAuthn sign-in uses a custom route (/api/auth/passkey/verify)
       // that has its own SSO tenant guard, bypassing Auth.js entirely.
-      const provider = params.account?.provider;
 
       // Propagate provider to the adapter via sessionMetaStorage so
       // createSession can record Session.provider for AAL3 enforcement.
@@ -269,19 +293,33 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (meta) meta.provider = provider ?? null;
       if (provider === "nodemailer") {
         // Nodemailer requires email by definition. Block null-email as a safeguard.
-        if (!params.user?.email) return false;
+        if (!params.user?.email) {
+          await emitAuthLoginFailure({
+            email: null,
+            provider: "nodemailer",
+            reason: "provider_error",
+          });
+          return false;
+        }
 
         const existingUser = await withBypassRls(prisma, async (tx) =>
           tx.user.findUnique({
             where: { email: params.user.email! },
             select: {
               id: true,
-              tenant: { select: { isBootstrap: true } },
+              tenant: { select: { isBootstrap: true, id: true } },
             },
           }),
         BYPASS_PURPOSE.AUTH_FLOW);
         // Existing user in a non-bootstrap (SSO) tenant → reject
         if (existingUser?.tenant && !existingUser.tenant.isBootstrap) {
+          await emitAuthLoginFailure({
+            email: emailForAudit,
+            tenantId: existingUser.tenant.id,
+            provider: "nodemailer",
+            reason: "tenant_mismatch",
+            userId: existingUser.id,
+          });
           return false;
         }
       }
@@ -321,6 +359,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           params.account,
           (params.profile ?? null) as Record<string, unknown> | null,
         );
+        if (!ok) {
+          await emitAuthLoginFailure({
+            email: emailForAudit,
+            provider: auditProvider,
+            reason: "tenant_mismatch",
+            userId,
+          });
+        }
         return ok;
       } catch (error) {
         // MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED is handled inside
@@ -330,6 +376,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           { err: error, provider: provider ?? "unknown" },
           "auth.signin.ensureTenantMembership_failed",
         );
+        await emitAuthLoginFailure({
+          email: emailForAudit,
+          provider: auditProvider,
+          reason: "provider_error",
+          userId,
+        });
         return false;
       }
     },
