@@ -1104,6 +1104,63 @@ export function createWorker(config: WorkerConfig) {
 
   let sleepResolve: (() => void) | null = null;
   let lastReaperRun = 0;
+  // C16 (OWASP A09-2): outbox-depth alert state. Tracks whether the depth
+  // is currently above threshold + when we last alerted. Re-alert on
+  // (a) clear → alarm transition AND (b) every REALERT_MS while still in
+  // alarmed state. Prevents both single-shot-only alerts (operator forgets)
+  // and alert-flood on flap.
+  let depthAlarmed = false;
+  let lastDepthAlertAt = 0;
+  const DEPTH_REALERT_MS = 24 * 60 * 60 * 1000;
+  const pendingThreshold =
+    Number(process.env.OUTBOX_READY_PENDING_THRESHOLD ?? "1000") || 1000;
+  const oldestThresholdSecs =
+    Number(process.env.OUTBOX_READY_OLDEST_THRESHOLD_SECS ?? "3600") || 3600;
+
+  async function checkDepthAlert(): Promise<void> {
+    try {
+      const rows = await workerPrisma.$queryRawUnsafe<
+        Array<{ pending: bigint; oldest_age_secs: number | null }>
+      >(`
+        SELECT
+          COUNT(*)::bigint AS pending,
+          EXTRACT(EPOCH FROM (now() - MIN(created_at)))::int AS oldest_age_secs
+        FROM audit_outbox
+        WHERE status = 'PENDING'
+      `);
+      const r = rows[0];
+      const pending = Number(r?.pending ?? 0);
+      const oldestAge = r?.oldest_age_secs ?? 0;
+      const overThreshold =
+        pending > pendingThreshold || oldestAge > oldestThresholdSecs;
+
+      const now = Date.now();
+      if (overThreshold) {
+        const shouldAlert =
+          !depthAlarmed ||
+          now - lastDepthAlertAt >= DEPTH_REALERT_MS;
+        if (shouldAlert) {
+          getLogger().error(
+            {
+              pending,
+              oldestAgeSecs: oldestAge,
+              pendingThreshold,
+              oldestThresholdSecs,
+              _logType: "outbox.depth.alert",
+            },
+            "outbox.depth.alert",
+          );
+          lastDepthAlertAt = now;
+        }
+        depthAlarmed = true;
+      } else {
+        depthAlarmed = false;
+        lastDepthAlertAt = 0;
+      }
+    } catch (err) {
+      getLogger().warn({ err }, "outbox.depth.check_failed");
+    }
+  }
 
   async function loop(): Promise<void> {
     const log = getLogger();
@@ -1128,6 +1185,9 @@ export function createWorker(config: WorkerConfig) {
       if (now - lastReaperRun >= AUDIT_OUTBOX.REAPER_INTERVAL_MS) {
         lastReaperRun = now;
         await runReaper(workerPrisma);
+        // Reaper interval is a reasonable cadence for depth alerts too;
+        // avoids hammering the COUNT(*) on every poll tick.
+        await checkDepthAlert();
       }
 
       if (!running) break;

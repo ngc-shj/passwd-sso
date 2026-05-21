@@ -234,10 +234,16 @@ async function handleGET(req: NextRequest) {
     BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
   );
 
+  // C15 (OWASP A08-2): bail at first tamper. Continuing the walk after
+  // tamper using the stored (tampered) hash produces meaningless
+  // verification results for subsequent rows — the operator should treat
+  // them as unverified. walkedThrough captures the count of rows verified
+  // BEFORE bailing; rows beyond that point are not re-hashed.
+  let walkedThrough = 0;
   for (const row of rows) {
     const seq = Number(row.chain_seq);
 
-    // Check for gaps in chain_seq
+    // Check for gaps in chain_seq (informational only, doesn't bail)
     if (prevSeq !== null && firstGapAfterSeq === null) {
       if (seq !== prevSeq + 1) {
         firstGapAfterSeq = prevSeq;
@@ -249,31 +255,32 @@ async function handleGET(req: NextRequest) {
     }
 
     // Re-compute the event hash and compare with stored event_hash
-    if (firstTamperedSeq === null) {
-      const payload =
-        row.metadata != null && typeof row.metadata === "object"
-          ? (row.metadata as Record<string, unknown>)
-          : {};
+    const payload =
+      row.metadata != null && typeof row.metadata === "object"
+        ? (row.metadata as Record<string, unknown>)
+        : {};
 
-      const chainInput = buildChainInput({
-        id: row.id,
-        createdAt: row.created_at,
-        chainSeq: BigInt(row.chain_seq),
-        prevHash,
-        payload,
-      });
-      const canonicalBytes = computeCanonicalBytes(chainInput);
-      const computedHash = computeEventHash(prevHash, canonicalBytes);
+    const chainInput = buildChainInput({
+      id: row.id,
+      createdAt: row.created_at,
+      chainSeq: BigInt(row.chain_seq),
+      prevHash,
+      payload,
+    });
+    const canonicalBytes = computeCanonicalBytes(chainInput);
+    const computedHash = computeEventHash(prevHash, canonicalBytes);
 
-      if (!computedHash.equals(row.event_hash)) {
-        firstTamperedSeq = seq;
-      }
+    if (!computedHash.equals(row.event_hash)) {
+      firstTamperedSeq = seq;
+      // Bail — subsequent rows are unverified.
+      break;
     }
 
     prevHash = row.event_hash;
     prevSeq = seq;
     prevCreatedAt = row.created_at;
     totalVerified++;
+    walkedThrough++;
   }
 
   // Detect truncation: query hit MAX_ROWS_PER_REQUEST before covering full range
@@ -319,6 +326,7 @@ async function handleGET(req: NextRequest) {
   return NextResponse.json({
     ok,
     truncated,
+    walkedThrough,
     ...(reason ? { reason } : {}),
     ...(verifiedUpToSeq !== undefined ? { verifiedUpToSeq } : {}),
     firstTamperedSeq,
