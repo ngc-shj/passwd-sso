@@ -11,6 +11,7 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 
 const getLimiter = createRateLimiter({ windowMs: 60_000, max: 60 });
 const updateLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
@@ -241,6 +242,15 @@ async function handleDELETE(
   const { id } = await params;
   const { searchParams } = new URL(req.url);
   const permanent = searchParams.get("permanent") === "true";
+
+  // A01-3: permanent delete is unrecoverable. Require fresh credential
+  // possession (15-min step-up window) so a leaked session cookie alone
+  // cannot wipe entries. Soft-delete (trash) remains gated only by
+  // session — the trash itself acts as a recovery window.
+  if (permanent) {
+    const stepUp = await requireRecentCurrentAuthMethod(req);
+    if (stepUp) return stepUp;
+  }
 
   const existing = await withUserTenantRls(userId, async () =>
     prisma.passwordEntry.findUnique({
