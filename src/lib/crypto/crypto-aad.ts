@@ -9,7 +9,8 @@
  *   [field_len: 2 bytes BE u16] [field: N bytes UTF-8] ...
  *
  * Scopes:
- *   "PV" — Personal Vault entry  (userId, entryId)
+ *   "PV" — Personal Vault entry  (userId, entryId, vaultType)
+ *   "PH" — Personal Vault history (userId, entryId, historyId)
  *   "OV" — Team Vault entry       (teamId, entryId, vaultType, itemKeyVersion)
  *   "AT" — Attachment             (entryId, attachmentId)
  *   "IK" — ItemKey wrapping       (teamId, entryId, teamKeyVersion)
@@ -20,10 +21,25 @@ const AAD_VERSION = 1;
 
 // Scope constants (2 ASCII bytes each)
 const SCOPE_PERSONAL = "PV";
+const SCOPE_PERSONAL_HISTORY = "PH";
 const SCOPE_TEAM = "OV";
 const SCOPE_ATTACHMENT = "AT";
 const SCOPE_ITEM_KEY = "IK";
 const SCOPE_ATTACHMENT_WRAP = "AW";
+
+/**
+ * Vault entry sub-blob selector used by Personal (PV) and Team (OV) AAD
+ * scopes. Bound into AAD to prevent cross-field replay (an attacker who
+ * can write DB cannot swap the overview ciphertext into the blob column).
+ *
+ * Const-object + derived type pattern (matches AUDIT_ACTION) so callers
+ * can `pass VAULT_TYPE.BLOB` instead of bare string literals.
+ */
+export const VAULT_TYPE = {
+  BLOB: "blob",
+  OVERVIEW: "overview",
+} as const;
+export type VaultType = (typeof VAULT_TYPE)[keyof typeof VAULT_TYPE];
 
 /**
  * Encode fields into the length-prefixed binary AAD format.
@@ -96,14 +112,34 @@ function buildAADBytes(
 /**
  * Build AAD for Personal Vault entry encryption.
  *
- * Binds ciphertext to specific user + entry.
- * Used for both encryptedBlob and encryptedOverview.
+ * Binds ciphertext to specific user + entry + vault type.
+ * vaultType distinguishes "blob" vs "overview" to prevent cross-field replay
+ * (mirrors buildTeamEntryAAD).
+ *
+ * BREAKING (pre-1.0): personal entry data encrypted with the 2-field AAD
+ * cannot be decrypted with this 3-field shape.
  */
 export function buildPersonalEntryAAD(
   userId: string,
-  entryId: string
+  entryId: string,
+  vaultType: VaultType
 ): Uint8Array {
-  return buildAADBytes(SCOPE_PERSONAL, 2, [userId, entryId]);
+  return buildAADBytes(SCOPE_PERSONAL, 3, [userId, entryId, vaultType]);
+}
+
+/**
+ * Build AAD for Personal Vault history record encryption.
+ *
+ * Binds ciphertext to specific user + parent entry + history record id.
+ * historyId binding prevents version rollback (replacing a current entry
+ * decrypt with an older history row's ciphertext).
+ */
+export function buildPersonalHistoryAAD(
+  userId: string,
+  entryId: string,
+  historyId: string
+): Uint8Array {
+  return buildAADBytes(SCOPE_PERSONAL_HISTORY, 3, [userId, entryId, historyId]);
 }
 
 /**
@@ -116,7 +152,7 @@ export function buildPersonalEntryAAD(
 export function buildTeamEntryAAD(
   teamId: string,
   entryId: string,
-  vaultType: "blob" | "overview" = "blob",
+  vaultType: VaultType = VAULT_TYPE.BLOB,
   itemKeyVersion: number = 0
 ): Uint8Array {
   return buildAADBytes(SCOPE_TEAM, 4, [

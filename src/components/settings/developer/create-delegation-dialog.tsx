@@ -7,7 +7,7 @@ import { API_PATH } from "@/lib/constants/auth/api-path";
 import { fetchApi } from "@/lib/url-helpers";
 import { readApiErrorBody, getApiErrorMessage } from "@/lib/http/read-api-error-body";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
-import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
+import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import {
   Dialog,
   DialogContent,
@@ -102,7 +102,7 @@ export function CreateDelegationDialog({
         try {
           const aad =
             entry.aadVersion >= 1
-              ? buildPersonalEntryAAD(userId, entry.id)
+              ? buildPersonalEntryAAD(userId, entry.id, VAULT_TYPE.OVERVIEW)
               : undefined;
           const overview: DecryptedOverview = JSON.parse(
             await decryptData(

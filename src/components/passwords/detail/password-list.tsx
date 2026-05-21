@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
-import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
+import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/vault/entry-sort";
 import { PasswordCard } from "./password-card";
 import { Archive, KeyRound, Loader2, Star } from "lucide-react";
@@ -139,7 +139,7 @@ export function PasswordList({
         if (!entry.encryptedOverview) continue;
         try {
           const aad = entry.aadVersion >= 1 && userId
-            ? buildPersonalEntryAAD(userId, entry.id)
+            ? buildPersonalEntryAAD(userId, entry.id, VAULT_TYPE.OVERVIEW)
             : undefined;
           const overview: DecryptedOverview = JSON.parse(
             await decryptData(

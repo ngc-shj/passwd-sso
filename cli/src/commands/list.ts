@@ -5,7 +5,7 @@
 import { apiRequest } from "../lib/api-client.js";
 import { getEncryptionKey, getUserId } from "../lib/vault-state.js";
 import { decryptData } from "../lib/crypto.js";
-import { buildPersonalEntryAAD } from "../lib/crypto-aad.js";
+import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
 import * as output from "../lib/output.js";
 
 interface PasswordEntry {
@@ -53,7 +53,7 @@ export async function listCommand(options: { json?: boolean }): Promise<void> {
   for (const entry of entries) {
     try {
       const aad = entry.aadVersion >= 1 && userId
-        ? buildPersonalEntryAAD(userId, entry.id)
+        ? buildPersonalEntryAAD(userId, entry.id, VAULT_TYPE.OVERVIEW)
         : undefined;
       const plaintext = await decryptData(
         entry.encryptedOverview,

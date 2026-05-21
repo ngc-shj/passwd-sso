@@ -17,7 +17,7 @@ import { errorResponse, forbidden, handleAuthError, rateLimited, unauthorized, v
 import { parseBody } from "@/lib/http/parse-body";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/audit/notification";
-import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
+import { MS_PER_DAY, MS_PER_HOUR, MS_PER_SECOND } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
@@ -114,6 +114,32 @@ async function handlePOST(req: NextRequest) {
 
       if (duplicate) return { status: "duplicate" as const };
 
+      // C19 (OWASP A04-5): cooling-off — first grant for this
+      // requester→target pair in the last 24h is deferred by
+      // BREAKGLASS_COOLING_OFF_SECONDS (default 3600). Subsequent grants
+      // in the same window are immediate (incident already underway).
+      // Configurable env: BREAKGLASS_COOLING_OFF_SECONDS=0 disables.
+      const coolingOffSecs = Number(
+        process.env.BREAKGLASS_COOLING_OFF_SECONDS ?? "3600",
+      );
+      const recentGrant =
+        coolingOffSecs > 0
+          ? await tx.personalLogAccessGrant.findFirst({
+              where: {
+                requesterId: userId,
+                targetUserId,
+                tenantId: actor.tenantId,
+                createdAt: { gt: new Date(now.getTime() - MS_PER_DAY) },
+              },
+              select: { id: true },
+              orderBy: { createdAt: "desc" },
+            })
+          : null;
+      const effectiveAt =
+        coolingOffSecs > 0 && recentGrant === null
+          ? new Date(now.getTime() + coolingOffSecs * MS_PER_SECOND)
+          : null;
+
       const expiresAt = new Date(now.getTime() + MS_PER_DAY);
       const grant = await tx.personalLogAccessGrant.create({
         data: {
@@ -123,6 +149,7 @@ async function handlePOST(req: NextRequest) {
           reason,
           incidentRef: incidentRef ?? null,
           expiresAt,
+          effectiveAt,
         },
       });
 

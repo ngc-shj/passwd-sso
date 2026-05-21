@@ -49,6 +49,7 @@ vi.mock("@/lib/crypto/crypto-team", () => ({
 vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildItemKeyWrapAAD: vi.fn().mockReturnValue("ik-aad"),
   buildTeamEntryAAD: vi.fn().mockReturnValue("team-aad"),
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 // Mock save entry helper to skip encryption (this is a UI test, not a crypto test)

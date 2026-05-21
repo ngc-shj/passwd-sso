@@ -32,6 +32,7 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
 
 vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildPersonalEntryAAD: (...args: unknown[]) => mockBuildPersonalEntryAAD(...args),
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 vi.mock("@/components/ui/dialog", () => ({
@@ -111,7 +112,7 @@ describe("PasswordEditDialogLoader", () => {
       expect(screen.getByTestId("edit-dialog")).toBeInTheDocument();
     });
 
-    expect(mockBuildPersonalEntryAAD).toHaveBeenCalledWith("user-1", "entry-1");
+    expect(mockBuildPersonalEntryAAD).toHaveBeenCalledWith("user-1", "entry-1", "blob");
     expect(screen.getByTestId("entry-id")).toHaveTextContent("entry-1");
     expect(screen.getByTestId("title")).toHaveTextContent("My Login");
     expect(screen.getByTestId("attachments-count")).toHaveTextContent("1");

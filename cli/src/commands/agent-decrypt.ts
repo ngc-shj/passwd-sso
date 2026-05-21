@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { apiRequest, startBackgroundRefresh } from "../lib/api-client.js";
 import { decryptData, hexEncode } from "../lib/crypto.js";
-import { buildPersonalEntryAAD } from "../lib/crypto-aad.js";
+import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
 import { getEncryptionKey, getUserId, getSecretKeyBytes, setEncryptionKey } from "../lib/vault-state.js";
 import { readPassphrase, unlockWithPassphrase } from "./unlock.js";
 import * as output from "../lib/output.js";
@@ -152,7 +152,7 @@ async function handleDecryptRequest(req: DecryptRequest): Promise<DecryptRespons
 
   try {
     const aad = entry.aadVersion >= 1 && userId
-      ? buildPersonalEntryAAD(userId, entry.id)
+      ? buildPersonalEntryAAD(userId, entry.id, VAULT_TYPE.BLOB)
       : undefined;
 
     const plaintext = await decryptData(entry.encryptedBlob, encryptionKey, aad);

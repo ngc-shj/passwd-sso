@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
-import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
+import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { toast } from "sonner";
 import { encryptExport } from "@/lib/crypto/export-crypto";
 import { PagePane } from "@/components/layout/page-pane";
@@ -79,7 +79,7 @@ function ExportPanelContent() {
         if (!raw.encryptedBlob) continue;
         try {
           const aad = raw.aadVersion >= 1 && userId
-            ? buildPersonalEntryAAD(userId, raw.id)
+            ? buildPersonalEntryAAD(userId, raw.id, VAULT_TYPE.BLOB)
             : undefined;
           const plaintext = await decryptData(
             raw.encryptedBlob as EncryptedData,

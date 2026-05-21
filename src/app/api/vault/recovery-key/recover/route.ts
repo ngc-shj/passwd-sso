@@ -13,6 +13,9 @@ import { parseBody } from "@/lib/http/parse-body";
 import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
+import { getSessionToken } from "@/app/api/sessions/helpers";
+import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -213,6 +216,33 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
       lockoutReset: true,
     },
   });
+
+  // C6 (OWASP A07-1): invalidate all sessions and bearer tokens across all
+  // tenants. Recovery is the user's "I forgot / I suspect compromise" path,
+  // so existing session-bound state from before the reset must be torn
+  // down. Failure returns 500 — the reset already committed and the client
+  // must instruct the user to sign out other devices manually.
+  try {
+    const result = await invalidateUserSessions(userId, {
+      allTenants: true,
+      reason: "recovery_recover",
+      // C6: keep current session (already authenticated via recovery
+      // verifier). Other sessions / all bearer tokens are revoked.
+      excludeSessionToken: getSessionToken(request),
+    });
+    if (result.cacheTombstoneFailures > 0) {
+      getLogger().warn(
+        { userId, failures: result.cacheTombstoneFailures },
+        "vault.recoveryRecover.tombstoneFailures",
+      );
+    }
+  } catch (err) {
+    getLogger().error(
+      { userId, err },
+      "vault.recoveryRecover.invalidateFailed",
+    );
+    return errorResponse(API_ERROR.SESSION_INVALIDATE_FAILED);
+  }
 
   return NextResponse.json({ success: true });
 }

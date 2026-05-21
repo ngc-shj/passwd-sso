@@ -56,9 +56,18 @@ function buildAADBytes(
   return bytes;
 }
 
+// Mirror of src/lib/crypto/crypto-aad.ts VAULT_TYPE. Keep in sync —
+// any change to the wire string values would break decrypt interop.
+export const VAULT_TYPE = {
+  BLOB: "blob",
+  OVERVIEW: "overview",
+} as const;
+export type VaultType = (typeof VAULT_TYPE)[keyof typeof VAULT_TYPE];
+
 export function buildPersonalEntryAAD(
   userId: string,
   entryId: string,
+  vaultType: VaultType,
 ): Uint8Array {
-  return buildAADBytes(SCOPE_PERSONAL, 2, [userId, entryId]);
+  return buildAADBytes(SCOPE_PERSONAL, 3, [userId, entryId, vaultType]);
 }

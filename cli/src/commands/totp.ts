@@ -5,7 +5,7 @@
 import { apiRequest } from "../lib/api-client.js";
 import { getEncryptionKey, getUserId } from "../lib/vault-state.js";
 import { decryptData } from "../lib/crypto.js";
-import { buildPersonalEntryAAD } from "../lib/crypto-aad.js";
+import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
 import { generateTOTPCode } from "../lib/totp.js";
 import { copyToClipboard } from "../lib/clipboard.js";
 import * as output from "../lib/output.js";
@@ -49,7 +49,7 @@ export async function totpCommand(
 
   try {
     const aad = res.data.aadVersion >= 1 && userId
-      ? buildPersonalEntryAAD(userId, res.data.id)
+      ? buildPersonalEntryAAD(userId, res.data.id, VAULT_TYPE.BLOB)
       : undefined;
     const plaintext = await decryptData(
       res.data.encryptedBlob,

@@ -19,7 +19,7 @@ import {
   getSessionCookieName,
   isSecureCookieFromAuthUrl,
 } from "@/lib/auth/session/cookie-name";
-import { revokeAllExtensionTokensForUser } from "@/lib/auth/tokens/extension-token";
+import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -158,11 +158,15 @@ async function handlePOST(req: NextRequest) {
     await invalidateCachedSessions(evictedTokens);
   }
 
-  // Passkey re-auth invalidates all prior bearer credentials (extension tokens).
-  // Maintains the "credential freshness" invariant for AAL3 auth events.
-  await revokeAllExtensionTokensForUser({
-    userId: user.id,
-    tenantId: existingUser.tenantId,
+  // C7 (OWASP A07-3): passkey re-auth is an AAL3 credential freshness
+  // re-establish event. Cascade revokes ALL bearer credentials across
+  // all tenants — not just ExtensionToken, but also ApiKey,
+  // McpAccessToken, McpRefreshToken, DelegationSession, OperatorToken.
+  // Session deletion above already removed Session rows; this covers
+  // the remaining bearer-class models. Sessions/tokens are scoped to
+  // global User (not tenant), so allTenants=true matches.
+  await invalidateUserSessions(user.id, {
+    allTenants: true,
     reason: "passkey_reauth",
   });
 

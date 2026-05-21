@@ -219,6 +219,9 @@ export const API_ERROR = {
   NO_TENANT: "NO_TENANT",
   INVALID_SESSION: "INVALID_SESSION",
   SESSION_STEP_UP_REQUIRED: "SESSION_STEP_UP_REQUIRED",
+  SESSION_INVALIDATE_FAILED: "SESSION_INVALIDATE_FAILED",
+  FORBIDDEN_SELF_APPROVAL: "FORBIDDEN_SELF_APPROVAL",
+  QUOTA_EXCEEDED: "QUOTA_EXCEEDED",
   INTERNAL_ERROR: "INTERNAL_ERROR",
 
   // ── API / Auth ──────────────────────────────────────────
@@ -477,6 +480,9 @@ export const API_ERROR_STATUS = {
   NO_TENANT: 403,
   INVALID_SESSION: 400,
   SESSION_STEP_UP_REQUIRED: 403,
+  SESSION_INVALIDATE_FAILED: 500,
+  FORBIDDEN_SELF_APPROVAL: 403,
+  QUOTA_EXCEEDED: 403,
   INTERNAL_ERROR: 500,
 
   // ── API / Auth ────────────────────────────────────────────
@@ -647,6 +653,9 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   NO_TENANT: "noTenant",
   INVALID_SESSION: "invalidSession",
   SESSION_STEP_UP_REQUIRED: "sessionStepUpRequired",
+  SESSION_INVALIDATE_FAILED: "sessionInvalidateFailed",
+  FORBIDDEN_SELF_APPROVAL: "forbiddenSelfApproval",
+  QUOTA_EXCEEDED: "quotaExceeded",
   INTERNAL_ERROR: "internalError",
   INVALID_REQUEST: "invalidRequest",
   AUTHENTICATION_FAILED: "authenticationFailed",

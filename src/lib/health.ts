@@ -140,3 +140,18 @@ export async function runHealthChecks(): Promise<HealthResponse> {
 
   return { status, timestamp: new Date().toISOString(), checks };
 }
+
+/**
+ * Readiness-specific subset of health checks. Excludes auditOutbox per
+ * C20 (OWASP A05-1 / S15) — worker backlog is not app liveness, and
+ * exposing outbox pending counts to unauthenticated callers leaks
+ * internal state. Detailed outbox metrics live behind operator-token
+ * auth at /api/maintenance/audit-outbox-metrics.
+ */
+export async function runReadinessChecks(): Promise<{
+  status: "healthy" | "unhealthy";
+}> {
+  const [database, redis] = await Promise.all([checkDatabase(), checkRedis()]);
+  const failed = [database, redis].some((c) => c.status === "fail");
+  return { status: failed ? "unhealthy" : "healthy" };
+}

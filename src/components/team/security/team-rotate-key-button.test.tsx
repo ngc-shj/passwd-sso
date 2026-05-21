@@ -89,6 +89,7 @@ vi.mock("@/lib/crypto/crypto-team", () => ({
 vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildTeamEntryAAD: vi.fn(() => "team-aad"),
   buildItemKeyWrapAAD: vi.fn(() => "item-key-aad"),
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 import { TeamRotateKeyButton } from "./team-rotate-key-button";

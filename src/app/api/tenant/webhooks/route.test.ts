@@ -72,8 +72,23 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 }));
 // node:crypto randomBytes is used for secret generation — real implementation is fine in tests
 
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
+
 import { GET, POST } from "@/app/api/tenant/webhooks/route";
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
+
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
+
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
 
 const ACTOR = { tenantId: "22222222-2222-4222-8222-222222222222", role: "ADMIN" };
 
@@ -81,6 +96,11 @@ const ACTOR = { tenantId: "22222222-2222-4222-8222-222222222222", role: "ADMIN" 
  * Fields returned by Prisma after applying the `select` in handleGET.
  * Secret fields are intentionally absent — Prisma's select never fetches them.
  */
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
+
 const makeWebhookSelectResult = (overrides: Record<string, unknown> = {}) => ({
   id: "wh-1",
   url: "https://example.com/hook",
@@ -93,6 +113,11 @@ const makeWebhookSelectResult = (overrides: Record<string, unknown> = {}) => ({
   createdAt: new Date(),
   ...overrides,
 });
+
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
 
 describe("GET /api/tenant/webhooks", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -164,6 +189,11 @@ describe("GET /api/tenant/webhooks", () => {
     expect(status).toBe(401);
   });
 });
+
+vi.mock("@/lib/quota/resource-quotas", () => ({
+  assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
+  QuotaExceededError: class extends Error {},
+}));
 
 describe("POST /api/tenant/webhooks", () => {
   beforeEach(() => vi.clearAllMocks());

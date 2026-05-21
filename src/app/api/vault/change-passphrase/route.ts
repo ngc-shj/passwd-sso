@@ -16,6 +16,8 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
+import { getSessionToken } from "@/app/api/sessions/helpers";
 
 export const runtime = "nodejs";
 
@@ -114,6 +116,34 @@ async function handlePOST(request: NextRequest) {
       },
     }),
   );
+
+  // C6 (OWASP A07-1): invalidate all OTHER sessions + bearer tokens across
+  // all tenants. The current device just proved possession of the OLD
+  // passphrase, so the requester's session is the legitimate actor —
+  // killing it would force confusing re-sign-in UX without adding security
+  // (the attack the audit closes is OTHER sessions surviving a known-leak
+  // passphrase change). Vault still re-locks because the key wrap changed.
+  // Failure here returns 500 — the passphrase change already committed and
+  // the client must instruct the user to manually sign out other devices.
+  try {
+    const result = await invalidateUserSessions(session.user.id, {
+      allTenants: true,
+      reason: "change_passphrase",
+      excludeSessionToken: getSessionToken(request),
+    });
+    if (result.cacheTombstoneFailures > 0) {
+      getLogger().warn(
+        { userId: session.user.id, failures: result.cacheTombstoneFailures },
+        "vault.changePassphrase.tombstoneFailures",
+      );
+    }
+  } catch (err) {
+    getLogger().error(
+      { userId: session.user.id, err },
+      "vault.changePassphrase.invalidateFailed",
+    );
+    return errorResponse(API_ERROR.SESSION_INVALIDATE_FAILED);
+  }
 
   getLogger().info({ userId: session.user.id }, "vault.changePassphrase.success");
 

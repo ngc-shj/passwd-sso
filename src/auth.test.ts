@@ -83,6 +83,10 @@ const {
       count: vi.fn(),
     },
     $transaction: vi.fn(),
+    // C13: audit_log_tenant_migrate is invoked via $executeRaw inside the
+    // bootstrap-tenant merge. Default to a no-op so tests that don't
+    // explicitly stub it still pass.
+    $executeRaw: vi.fn().mockResolvedValue(0),
   };
 
   return {
@@ -275,12 +279,15 @@ describe("ensureTenantMembershipForSignIn", () => {
       where: { userId: "user-1", tenantId: "00000000-0000-4000-a000-000000000002" },
       data: { tenantId: "00000000-0000-4000-a000-000000000001" },
     });
-    for (const model of ["tag", "folder", "session", "extensionToken", "auditLog"] as const) {
+    for (const model of ["tag", "folder", "session", "extensionToken"] as const) {
       expect(mockPrisma[model].updateMany).toHaveBeenCalledWith({
         where: { userId: "user-1", tenantId: "00000000-0000-4000-a000-000000000002" },
         data: { tenantId: "00000000-0000-4000-a000-000000000001" },
       });
     }
+    // C13: audit_log tenant migration is now routed via SECURITY DEFINER
+    // stored procedure (audit_log_tenant_migrate) instead of updateMany.
+    expect(mockPrisma.$executeRaw).toHaveBeenCalled();
     // passwordEntryHistory has no userId — filtered by tenantId only
     expect(mockPrisma.passwordEntryHistory.updateMany).toHaveBeenCalledWith({
       where: { tenantId: "00000000-0000-4000-a000-000000000002" },

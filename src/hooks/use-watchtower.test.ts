@@ -56,6 +56,8 @@ vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildPersonalEntryAAD: mockBuildPersonalEntryAAD,
   buildTeamEntryAAD: mockBuildTeamEntryAAD,
   buildItemKeyWrapAAD: mockBuildItemKeyWrapAAD,
+  // C1 const-object: real source exports VAULT_TYPE; mock must mirror.
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 vi.mock("@/lib/crypto/crypto-team", () => ({
@@ -809,7 +811,7 @@ describe("useWatchtower", () => {
       await result.current.analyze();
     });
 
-    expect(mockBuildPersonalEntryAAD).toHaveBeenCalledWith("user-1", "entry-1");
+    expect(mockBuildPersonalEntryAAD).toHaveBeenCalledWith("user-1", "entry-1", "blob");
     expect(mockDecryptData).toHaveBeenCalledWith(
       raw.encryptedBlob,
       fakeKey,

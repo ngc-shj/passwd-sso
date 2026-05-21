@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildPersonalEntryAAD,
+  buildPersonalHistoryAAD,
   buildTeamEntryAAD,
   buildAttachmentAAD,
   buildItemKeyWrapAAD,
@@ -11,17 +12,17 @@ describe("crypto-aad", () => {
   // ─── Binary Format Verification ───────────────────────────────
 
   describe("binary format", () => {
-    it("buildPersonalEntryAAD produces correct binary layout", () => {
-      const aad = buildPersonalEntryAAD("user-123", "entry-456");
+    it("buildPersonalEntryAAD produces correct binary layout with vaultType", () => {
+      const aad = buildPersonalEntryAAD("user-123", "entry-456", "blob");
       const view = new DataView(aad.buffer, aad.byteOffset, aad.byteLength);
 
       // Header
       expect(String.fromCharCode(aad[0], aad[1])).toBe("PV"); // scope
       expect(view.getUint8(2)).toBe(AAD_VERSION); // aadVersion
-      expect(view.getUint8(3)).toBe(2); // nFields
+      expect(view.getUint8(3)).toBe(3); // nFields
 
       // Field 1: "user-123" (8 bytes)
-      expect(view.getUint16(4, false)).toBe(8); // big-endian length
+      expect(view.getUint16(4, false)).toBe(8);
       const field1 = new TextDecoder().decode(aad.slice(6, 6 + 8));
       expect(field1).toBe("user-123");
 
@@ -30,8 +31,26 @@ describe("crypto-aad", () => {
       const field2 = new TextDecoder().decode(aad.slice(16, 16 + 9));
       expect(field2).toBe("entry-456");
 
-      // Total size: 4 (header) + 2+8 + 2+9 = 25
-      expect(aad.length).toBe(25);
+      // Field 3 (vaultType): "blob" (4 bytes)
+      // offset = 4 (header) + (2+8) + (2+9) = 25
+      const field3Start = 4 + (2 + 8) + (2 + 9);
+      expect(view.getUint16(field3Start, false)).toBe(4);
+      const field3 = new TextDecoder().decode(
+        aad.slice(field3Start + 2, field3Start + 2 + 4)
+      );
+      expect(field3).toBe("blob");
+
+      // Total size: 4 (header) + 2+8 + 2+9 + 2+4 = 31
+      expect(aad.length).toBe(31);
+    });
+
+    it("buildPersonalHistoryAAD produces correct binary layout with PH scope", () => {
+      const aad = buildPersonalHistoryAAD("user-1", "entry-1", "hist-1");
+      const view = new DataView(aad.buffer, aad.byteOffset, aad.byteLength);
+
+      expect(String.fromCharCode(aad[0], aad[1])).toBe("PH"); // scope
+      expect(view.getUint8(2)).toBe(AAD_VERSION);
+      expect(view.getUint8(3)).toBe(3); // nFields
     });
 
     it("buildTeamEntryAAD produces correct binary layout with 4 fields", () => {
@@ -77,20 +96,20 @@ describe("crypto-aad", () => {
 
   describe("determinism", () => {
     it("same inputs produce byte-identical output", () => {
-      const a = buildPersonalEntryAAD("user-1", "entry-1");
-      const b = buildPersonalEntryAAD("user-1", "entry-1");
+      const a = buildPersonalEntryAAD("user-1", "entry-1", "blob");
+      const b = buildPersonalEntryAAD("user-1", "entry-1", "blob");
       expect(a).toEqual(b);
     });
 
     it("different inputs produce different output", () => {
-      const a = buildPersonalEntryAAD("user-1", "entry-1");
-      const b = buildPersonalEntryAAD("user-1", "entry-2");
+      const a = buildPersonalEntryAAD("user-1", "entry-1", "blob");
+      const b = buildPersonalEntryAAD("user-1", "entry-2", "blob");
       expect(a).not.toEqual(b);
     });
 
     it("different scopes produce different output for same fields", () => {
       // PV(entry-1, attach-1) vs AT(entry-1, attach-1)
-      const pv = buildPersonalEntryAAD("entry-1", "attach-1");
+      const pv = buildPersonalEntryAAD("entry-1", "attach-1", "blob");
       const at = buildAttachmentAAD("entry-1", "attach-1");
       expect(pv).not.toEqual(at);
     });
@@ -117,7 +136,7 @@ describe("crypto-aad", () => {
   describe("UTF-8 support", () => {
     it("handles multi-byte UTF-8 characters correctly", () => {
       // Japanese characters: 3 bytes each in UTF-8
-      const aad = buildPersonalEntryAAD("ユーザー", "エントリ");
+      const aad = buildPersonalEntryAAD("ユーザー", "エントリ", "blob");
       const view = new DataView(aad.buffer, aad.byteOffset, aad.byteLength);
 
       // "ユーザー" = 4 chars × 3 bytes = 12 bytes
@@ -132,18 +151,18 @@ describe("crypto-aad", () => {
       // buildPersonalEntryAAD expects exactly 2 fields
       // We can't pass wrong count directly, but the function validates internally
       // This test confirms the type safety works
-      expect(() => buildPersonalEntryAAD("user", "entry")).not.toThrow();
+      expect(() => buildPersonalEntryAAD("user", "entry", "blob")).not.toThrow();
     });
 
     it("accepts empty string fields (encodes as length=0)", () => {
-      const aad = buildPersonalEntryAAD("", "entry-1");
+      const aad = buildPersonalEntryAAD("", "entry-1", "blob");
       const view = new DataView(aad.buffer, aad.byteOffset, aad.byteLength);
       expect(view.getUint16(4, false)).toBe(0); // field1 length = 0
     });
 
     it("handles long field values (10,000 bytes)", () => {
       const longValue = "x".repeat(10000);
-      const aad = buildPersonalEntryAAD(longValue, "entry-1");
+      const aad = buildPersonalEntryAAD(longValue, "entry-1", "blob");
       const view = new DataView(aad.buffer, aad.byteOffset, aad.byteLength);
       expect(view.getUint16(4, false)).toBe(10000);
     });
@@ -160,27 +179,49 @@ describe("crypto-aad", () => {
   // and BOTH snapshot blocks in the same PR.
 
   describe("known vectors", () => {
-    it("PV AAD matches hand-computed bytes", () => {
-      const aad = buildPersonalEntryAAD("u1", "e1");
+    it("PV AAD matches hand-computed bytes (3-field with vaultType)", () => {
+      const aad = buildPersonalEntryAAD("u1", "e1", "blob");
 
       // Expected bytes:
       // [0x50, 0x56]        scope "PV"
       // [0x01]              aadVersion = 1
-      // [0x02]              nFields = 2
+      // [0x03]              nFields = 3
       // [0x00, 0x02]        field1 length = 2 (big-endian)
       // [0x75, 0x31]        field1 "u1"
       // [0x00, 0x02]        field2 length = 2
       // [0x65, 0x31]        field2 "e1"
+      // [0x00, 0x04]        field3 length = 4
+      // [0x62, 0x6c, 0x6f, 0x62]  field3 "blob"
       const expected = new Uint8Array([
         0x50, 0x56, // PV
         0x01, // version 1
-        0x02, // 2 fields
+        0x03, // 3 fields
         0x00, 0x02, // len 2
         0x75, 0x31, // u1
         0x00, 0x02, // len 2
         0x65, 0x31, // e1
+        0x00, 0x04, // len 4
+        0x62, 0x6c, 0x6f, 0x62, // "blob"
       ]);
       expect(aad).toEqual(expected);
+    });
+
+    it("PV blob vs overview produce different AAD", () => {
+      const blob = buildPersonalEntryAAD("u1", "e1", "blob");
+      const overview = buildPersonalEntryAAD("u1", "e1", "overview");
+      expect(blob).not.toEqual(overview);
+    });
+
+    it("PH historyId differentiates AAD (rollback resistance)", () => {
+      const h1 = buildPersonalHistoryAAD("u1", "e1", "hist-1");
+      const h2 = buildPersonalHistoryAAD("u1", "e1", "hist-2");
+      expect(h1).not.toEqual(h2);
+    });
+
+    it("PV and PH for same userId/entryId produce different AAD (scope separation)", () => {
+      const pv = buildPersonalEntryAAD("u1", "e1", "blob");
+      const ph = buildPersonalHistoryAAD("u1", "e1", "hist-x");
+      expect(pv).not.toEqual(ph);
     });
   });
 

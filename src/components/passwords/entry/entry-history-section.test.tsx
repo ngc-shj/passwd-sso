@@ -50,7 +50,11 @@ vi.mock("@/lib/team/team-vault-context", () => ({
 
 vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildPersonalEntryAAD: vi.fn().mockReturnValue("test-aad"),
+  // C2: history section now uses buildPersonalHistoryAAD (PH scope) so
+  // the mock must expose it.
+  buildPersonalHistoryAAD: vi.fn().mockReturnValue("test-history-aad"),
   buildTeamEntryAAD: vi.fn().mockReturnValue("test-team-aad"),
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 vi.mock("sonner", () => ({

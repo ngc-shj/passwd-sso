@@ -75,13 +75,37 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         requestedScope: true,
         status: true,
         expiresAt: true,
-        serviceAccount: { select: { isActive: true } },
+        requesterUserId: true,
+        requesterServiceAccountId: true,
+        serviceAccount: { select: { isActive: true, createdById: true } },
       },
     }),
   );
 
   if (!request || request.tenantId !== actor.tenantId) {
     return notFound();
+  }
+
+  // C8 (OWASP A01-1): reject self-approval. Critical for the dual-control
+  // property of JIT access — a compromised admin session must not be able
+  // to issue itself or its own SA permanent escalation tokens.
+  //   - Admin-created (requesterUserId set): reject if approver == requester.
+  //   - SA self-service (requesterServiceAccountId set): reject if approver
+  //     == the SA's creator (one identity acting through two surfaces).
+  //   - Legacy rows lacking both fields: 400 invalid_request rather than
+  //     fail-open. Pre-1.0 migration set such rows to EXPIRED so this
+  //     only fires on data inserted before the column landed.
+  if (request.requesterUserId === null && request.requesterServiceAccountId === null) {
+    return errorResponse(API_ERROR.INVALID_REQUEST);
+  }
+  if (request.requesterUserId === session.user.id) {
+    return errorResponse(API_ERROR.FORBIDDEN_SELF_APPROVAL);
+  }
+  if (
+    request.requesterServiceAccountId !== null &&
+    request.serviceAccount.createdById === session.user.id
+  ) {
+    return errorResponse(API_ERROR.FORBIDDEN_SELF_APPROVAL);
   }
 
   // Reject approval of expired requests — the state-machine transition() only

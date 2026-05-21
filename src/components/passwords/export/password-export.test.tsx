@@ -56,6 +56,7 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
 
 vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildPersonalEntryAAD: (...args: unknown[]) => mockBuildPersonalEntryAAD(...args),
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 vi.mock("@/lib/crypto/export-crypto", () => ({
@@ -267,7 +268,7 @@ describe("ExportPagePanel — happy path", () => {
     });
 
     // AAD shape: built with (userId, entryId)
-    expect(mockBuildPersonalEntryAAD).toHaveBeenCalledWith("user-1", "entry-1");
+    expect(mockBuildPersonalEntryAAD).toHaveBeenCalledWith("user-1", "entry-1", "blob");
     // The decryptData call's third arg should be the built AAD
     expect(mockDecryptData.mock.calls[0][2]).toBe("aad");
 

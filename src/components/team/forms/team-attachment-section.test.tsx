@@ -49,6 +49,7 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
 vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildAttachmentAAD: vi.fn(() => "att-aad"),
   AAD_VERSION: 1,
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 vi.mock("@/lib/http/toast-api-error", () => ({

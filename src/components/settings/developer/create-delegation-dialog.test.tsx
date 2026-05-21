@@ -41,8 +41,9 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
 }));
 
 vi.mock("@/lib/crypto/crypto-aad", () => ({
-  buildPersonalEntryAAD: (userId: string, entryId: string) =>
-    `aad:${userId}:${entryId}`,
+  buildPersonalEntryAAD: (userId: string, entryId: string, vaultType: string) =>
+    `aad:${userId}:${entryId}:${vaultType}`,
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 import { CreateDelegationDialog } from "./create-delegation-dialog";

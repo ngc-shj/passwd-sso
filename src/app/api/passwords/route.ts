@@ -16,6 +16,9 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { getAttachmentBlobStore, BLOB_STORAGE } from "@/lib/blob-store";
 import { MS_PER_DAY } from "@/lib/constants/time";
+import { assertQuotaAvailable, QuotaExceededError } from "@/lib/quota/resource-quotas";
+import { errorResponse } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
@@ -138,6 +141,20 @@ async function handlePOST(req: NextRequest) {
 
   const rl = await createLimiter.check(`rl:passwords_create:${userId}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);
+
+  // C18 (OWASP A04-1): per-user quota gate before insert.
+  try {
+    await assertQuotaAvailable({ userId }, "passwords", 1);
+  } catch (err) {
+    if (err instanceof QuotaExceededError) {
+      return errorResponse(API_ERROR.QUOTA_EXCEEDED, undefined, {
+        resource: err.resource,
+        current: err.current,
+        max: err.max,
+      });
+    }
+    throw err;
+  }
 
   const result = await parseBody(req, createE2EPasswordSchema);
   if (!result.ok) return result.response;

@@ -28,6 +28,7 @@ vi.mock("@/lib/crypto/crypto-team", () => ({
 
 vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildItemKeyWrapAAD: () => new Uint8Array(0),
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 import { executeTeamEntrySubmit } from "@/components/team/forms/team-entry-submit";

@@ -33,6 +33,7 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
 
 vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildPersonalEntryAAD: (...args: unknown[]) => mockBuildAAD(...args),
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 vi.mock("@/lib/events", () => ({
@@ -86,7 +87,7 @@ describe("TrashList", () => {
     });
 
     // §Sec-1: assert AAD constructed with (userId, entryId) shape
-    expect(mockBuildAAD).toHaveBeenCalledWith("user-1", "entry-1");
+    expect(mockBuildAAD).toHaveBeenCalledWith("user-1", "entry-1", "overview");
     // assert mock was called (S104)
     expect(mockDecryptData).toHaveBeenCalled();
     // §Sec-1: encrypted blob argument is shape { ciphertext, iv, authTag }

@@ -42,6 +42,12 @@ vi.mock("@/lib/audit/audit", () => ({
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
 
+// C9: DELETE now gates on requireRecentCurrentAuthMethod. Stub returns
+// null (allow) by default; tests covering the rejection path can override.
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
+}));
+
 import { DELETE, PATCH } from "./route";
 
 // ── Test data ────────────────────────────────────────────────
