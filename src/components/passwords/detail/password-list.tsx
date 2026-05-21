@@ -139,7 +139,7 @@ export function PasswordList({
         if (!entry.encryptedOverview) continue;
         try {
           const aad = entry.aadVersion >= 1 && userId
-            ? buildPersonalEntryAAD(userId, entry.id)
+            ? buildPersonalEntryAAD(userId, entry.id, "overview")
             : undefined;
           const overview: DecryptedOverview = JSON.parse(
             await decryptData(

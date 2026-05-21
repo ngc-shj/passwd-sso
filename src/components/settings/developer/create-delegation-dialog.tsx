@@ -102,7 +102,7 @@ export function CreateDelegationDialog({
         try {
           const aad =
             entry.aadVersion >= 1
-              ? buildPersonalEntryAAD(userId, entry.id)
+              ? buildPersonalEntryAAD(userId, entry.id, "overview")
               : undefined;
           const overview: DecryptedOverview = JSON.parse(
             await decryptData(

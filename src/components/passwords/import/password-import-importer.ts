@@ -149,9 +149,11 @@ export async function runImportEntries({
       } else {
         const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);
         const entryId = crypto.randomUUID();
-        const aad = buildPersonalEntryAAD(userId!, entryId);
-        const encryptedBlob = await encryptData(fullBlob, encryptionKey!, aad);
-        const encryptedOverview = await encryptData(overviewBlob, encryptionKey!, aad);
+        // C1: blob and overview now bind distinct vaultType in AAD.
+        const blobAad = buildPersonalEntryAAD(userId!, entryId, "blob");
+        const overviewAad = buildPersonalEntryAAD(userId!, entryId, "overview");
+        const encryptedBlob = await encryptData(fullBlob, encryptionKey!, blobAad);
+        const encryptedOverview = await encryptData(overviewBlob, encryptionKey!, overviewAad);
 
         const folderId = resolveEntryFolderId(entry, folderPathToId);
         encryptedEntries.push({

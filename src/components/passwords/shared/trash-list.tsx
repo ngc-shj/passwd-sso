@@ -73,7 +73,7 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
         if (!entry.encryptedOverview) continue;
         try {
           const aad = entry.aadVersion >= 1 && userId
-            ? buildPersonalEntryAAD(userId, entry.id)
+            ? buildPersonalEntryAAD(userId, entry.id, "overview")
             : undefined;
           const overview = JSON.parse(
             await decryptData(

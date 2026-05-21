@@ -123,7 +123,7 @@ export function PasswordEditDialogLoader({
         const raw = await res.json();
 
         const aad = raw.aadVersion >= 1 && userId
-          ? buildPersonalEntryAAD(userId, id)
+          ? buildPersonalEntryAAD(userId, id, "blob")
           : undefined;
         const plaintext = await decryptData(
           raw.encryptedBlob as EncryptedData,

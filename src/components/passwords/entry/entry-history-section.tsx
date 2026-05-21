@@ -9,7 +9,7 @@ import { apiPath } from "@/lib/constants";
 import { useVault } from "@/lib/vault/vault-context";
 import { useTeamVault } from "@/lib/team/team-vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
-import { buildPersonalEntryAAD, buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
+import { buildPersonalHistoryAAD, buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -221,8 +221,10 @@ export function EntryHistorySection({
       } else {
         // Personal entries: client-side decryption
         if (!encryptionKey || !userId) return;
+        // C2: history records use the PH scope (binds historyId for
+        // rollback resistance), not the per-entry PV scope.
         const aad = h.aadVersion >= 1
-          ? buildPersonalEntryAAD(userId, entryId)
+          ? buildPersonalHistoryAAD(userId, entryId, h.id)
           : undefined;
         const plaintext = await decryptData(h.encryptedBlob, encryptionKey, aad);
         setViewData(JSON.parse(plaintext));

@@ -79,7 +79,7 @@ function ExportPanelContent() {
         if (!raw.encryptedBlob) continue;
         try {
           const aad = raw.aadVersion >= 1 && userId
-            ? buildPersonalEntryAAD(userId, raw.id)
+            ? buildPersonalEntryAAD(userId, raw.id, "blob")
             : undefined;
           const plaintext = await decryptData(
             raw.encryptedBlob as EncryptedData,
