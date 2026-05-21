@@ -93,7 +93,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   //   - SA self-service (requesterServiceAccountId set): reject if approver
   //     == the SA's creator (one identity acting through two surfaces).
   //   - Legacy rows lacking both fields: 400 invalid_request rather than
-  //     fail-open. Pre-1.0 migration set such rows to CANCELLED so this
+  //     fail-open. Pre-1.0 migration set such rows to EXPIRED so this
   //     only fires on data inserted before the column landed.
   if (request.requesterUserId === null && request.requesterServiceAccountId === null) {
     return errorResponse(API_ERROR.INVALID_REQUEST);

@@ -15,9 +15,12 @@ ALTER TABLE "access_requests"
     );
 
 -- Pre-1.0 cleanup: existing PENDING rows lacking requester metadata
--- transition to CANCELLED. Approved/denied rows are historical; leave them.
+-- transition to EXPIRED (no CANCELLED in the AccessRequestStatus enum;
+-- EXPIRED is the closest semantic match — request can no longer be
+-- acted on because it lacks the requester provenance the new approve
+-- gate requires). Approved/denied rows are historical; leave them.
 UPDATE "access_requests"
-  SET "status" = 'CANCELLED'
+  SET "status" = 'EXPIRED'
   WHERE "status" = 'PENDING'
     AND "requester_user_id" IS NULL
     AND "requester_service_account_id" IS NULL;

@@ -9,7 +9,7 @@
 ## Changelog vs Round 1
 
 - C13 (REVOKE) expanded from single migration to **stored-procedure approach**: REVOKE UPDATE/DELETE on `audit_logs`, then expose `SECURITY DEFINER` procedures `audit_logs_tenant_migrate` and `audit_logs_purge` (owned by `passwd_user`) that `passwd_app` is granted EXECUTE on. This preserves correctness of `src/auth.ts:130` tenant merge and `src/app/api/maintenance/purge-audit-logs/route.ts` without breaking either.
-- C8 (JIT) now includes Prisma migration adding `requesterUserId` + `requesterServiceAccountId` to `AccessRequest`, with pre-1.0 migration policy: existing PENDING rows transition to `CANCELLED`.
+- C8 (JIT) now includes Prisma migration adding `requesterUserId` + `requesterServiceAccountId` to `AccessRequest`, with pre-1.0 migration policy: existing PENDING rows transition to `EXPIRED`.
 - C1 Consumer-flow extended to include CLI (8 files), `emergency-access/[id]/vault/page.tsx`, `audit-logs/page.tsx`, `use-watchtower.ts`, `password-card.tsx`, and corrected path typo (`.ts` not `.tsx`).
 - C19 model name corrected to `PersonalLogAccessGrant` (not `BreakGlassGrant`); email uses existing `src/lib/email/{resend,smtp}-provider.ts` providers.
 - C12 path corrected to `src/lib/security/rate-limiters.ts`; IPv6 normalisation explicitly via `rateLimitKeyFromIp`.
@@ -138,8 +138,8 @@ A06-1 (M), A06-3 (M), A06-4 (M), A08-1 (M) — and new locked C24
     ADD COLUMN requester_service_account_id UUID NULL REFERENCES service_accounts(id) ON DELETE SET NULL,
     ADD CONSTRAINT access_requests_requester_xor
       CHECK ((requester_user_id IS NOT NULL) <> (requester_service_account_id IS NOT NULL));
-  -- Pre-1.0 cleanup: existing PENDING rows without requester info are CANCELLED
-  UPDATE access_requests SET status = 'CANCELLED' WHERE status = 'PENDING' AND requester_user_id IS NULL AND requester_service_account_id IS NULL;
+  -- Pre-1.0 cleanup: existing PENDING rows without requester info are EXPIRED
+  UPDATE access_requests SET status = 'EXPIRED' WHERE status = 'PENDING' AND requester_user_id IS NULL AND requester_service_account_id IS NULL;
   CREATE INDEX idx_access_requests_requester_user ON access_requests(requester_user_id) WHERE requester_user_id IS NOT NULL;
   CREATE INDEX idx_access_requests_requester_sa ON access_requests(requester_service_account_id) WHERE requester_service_account_id IS NOT NULL;
   ```
