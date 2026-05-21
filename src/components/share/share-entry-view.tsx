@@ -22,14 +22,7 @@ import {
 } from "lucide-react";
 import { formatDateTime, formatDate } from "@/lib/format/format-datetime";
 import { REVEAL_TIMEOUT_MS } from "@/lib/constants";
-
-function isSafeHref(url: string): boolean {
-  try {
-    return ["http:", "https:"].includes(new URL(url).protocol);
-  } catch {
-    return false;
-  }
-}
+import { isSafeHref } from "@/lib/security/safe-href";
 
 const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
   [ENTRY_TYPE.LOGIN]: <KeyRound className="h-5 w-5" />,

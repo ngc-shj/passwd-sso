@@ -11,6 +11,7 @@ import { TOTPField } from "../../shared/totp-field";
 import { useRevealTimeout, useRevealSet } from "@/hooks/vault/use-reveal-timeout";
 import type { RequireVerificationFn } from "@/hooks/vault/use-reveal-timeout";
 import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
+import { isSafeHref } from "@/lib/security/safe-href";
 import { formatDateTime, formatDate } from "@/lib/format/format-datetime";
 import type { InlineDetailData } from "@/types/entry";
 import type { CreateGuardedGetterFn } from "./types";
@@ -89,14 +90,19 @@ export function LoginSection({ data, requireVerification, createGuardedGetter }:
             <Favicon host={data.urlHost} size={12} className="shrink-0" /> {t("url")}
           </label>
           <div className="flex items-center gap-2">
-            <a
-              href={data.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-blue-600 hover:underline"
-            >
-              {data.url}
-            </a>
+            {isSafeHref(data.url) ? (
+              <a
+                href={data.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-blue-600 hover:underline"
+              >
+                {data.url}
+              </a>
+            ) : (
+              // A03-1: javascript: / data: etc. — render as plain text.
+              <span className="text-sm break-all">{data.url}</span>
+            )}
             <CopyButton getValue={() => data.url!} />
           </div>
         </div>
@@ -121,14 +127,18 @@ export function LoginSection({ data, requireVerification, createGuardedGetter }:
             </label>
             <div className="flex items-center gap-2">
               {field.type === CUSTOM_FIELD_TYPE.URL ? (
-                <a
-                  href={field.value}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-blue-600 hover:underline"
-                >
-                  {field.value}
-                </a>
+                isSafeHref(field.value) ? (
+                  <a
+                    href={field.value}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-blue-600 hover:underline"
+                  >
+                    {field.value}
+                  </a>
+                ) : (
+                  <span className="text-sm break-all">{field.value}</span>
+                )
               ) : field.type === CUSTOM_FIELD_TYPE.HIDDEN ? (
                 <>
                   <span className="font-mono text-sm">
