@@ -159,7 +159,7 @@ export default function EmergencyVaultPage() {
       for (const entry of rawEntries) {
         try {
           const aad = entry.aadVersion >= 1
-            ? buildPersonalEntryAAD(vaultData.ownerId, entry.id)
+            ? buildPersonalEntryAAD(vaultData.ownerId, entry.id, "overview")
             : undefined;
           const overviewEncrypted: EncryptedData = {
             ciphertext: entry.encryptedOverview,
@@ -227,7 +227,7 @@ export default function EmergencyVaultPage() {
     const ownerEncKey = ownerEncKeyRef.current;
     if (!ownerEncKey) throw new Error("Owner key not available");
     const aad = entry.aadVersion >= 1
-      ? buildPersonalEntryAAD(ownerIdRef.current, entry.id)
+      ? buildPersonalEntryAAD(ownerIdRef.current, entry.id, "blob")
       : undefined;
     const blobEncrypted: EncryptedData = {
       ciphertext: entry.encryptedBlob,

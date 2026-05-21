@@ -36,6 +36,7 @@ import {
 } from "../crypto/crypto-team";
 import {
   buildPersonalEntryAAD,
+  buildPersonalHistoryAAD,
   buildAttachmentAAD,
   buildAttachmentCekWrapAAD,
   MIN_ACCEPTED_CEK_WRAP_AAD_VERSION,
@@ -1006,8 +1007,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         const entry = entries[i];
         onProgress?.({ phase: "entries", current: i, total: totalEntries });
 
-        const entryAad = entry.aadVersion >= 1 && userId
-          ? buildPersonalEntryAAD(userId, entry.id)
+        const blobAad = entry.aadVersion >= 1 && userId
+          ? buildPersonalEntryAAD(userId, entry.id, "blob")
+          : undefined;
+        const overviewAad = entry.aadVersion >= 1 && userId
+          ? buildPersonalEntryAAD(userId, entry.id, "overview")
           : undefined;
 
         const decryptedBlob = await decryptData(
@@ -1017,9 +1021,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
             authTag: entry.blobAuthTag,
           },
           oldEncryptionKey,
-          entryAad,
+          blobAad,
         );
-        const newBlob = await encryptData(decryptedBlob, newEncKey, entryAad);
+        const newBlob = await encryptData(decryptedBlob, newEncKey, blobAad);
 
         const decryptedOverview = await decryptData(
           {
@@ -1028,9 +1032,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
             authTag: entry.overviewAuthTag,
           },
           oldEncryptionKey,
-          entryAad,
+          overviewAad,
         );
-        const newOverview = await encryptData(decryptedOverview, newEncKey, entryAad);
+        const newOverview = await encryptData(decryptedOverview, newEncKey, overviewAad);
 
         reencryptedEntries.push({
           id: entry.id,
@@ -1049,7 +1053,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         onProgress?.({ phase: "history", current: i, total: totalHistory });
 
         const histAad = histEntry.aadVersion >= 1 && userId
-          ? buildPersonalEntryAAD(userId, histEntry.entryId)
+          ? buildPersonalHistoryAAD(userId, histEntry.entryId, histEntry.id)
           : undefined;
 
         const decryptedBlob = await decryptData(

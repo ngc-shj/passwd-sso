@@ -79,7 +79,7 @@ export default function AuditLogsPage() {
       const names = new Map<string, string>();
       for (const [id, ov] of Object.entries(overviews)) {
         try {
-          const aad = ov.aadVersion >= 1 ? buildPersonalEntryAAD(userId, id) : undefined;
+          const aad = ov.aadVersion >= 1 ? buildPersonalEntryAAD(userId, id, "overview") : undefined;
           const overview = JSON.parse(
             await decryptData(ov as EncryptedData, encryptionKey, aad)
           );

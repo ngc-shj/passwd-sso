@@ -90,7 +90,7 @@ export async function exportCommand(options: {
   for (const entry of entries) {
     try {
       const aad = entry.aadVersion >= 1 && userId
-        ? buildPersonalEntryAAD(userId, entry.id)
+        ? buildPersonalEntryAAD(userId, entry.id, "blob")
         : undefined;
       const plaintext = await decryptData(
         entry.encryptedBlob,

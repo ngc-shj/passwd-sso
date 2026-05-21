@@ -59,6 +59,7 @@ function buildAADBytes(
 export function buildPersonalEntryAAD(
   userId: string,
   entryId: string,
+  vaultType: "blob" | "overview",
 ): Uint8Array {
-  return buildAADBytes(SCOPE_PERSONAL, 2, [userId, entryId]);
+  return buildAADBytes(SCOPE_PERSONAL, 3, [userId, entryId, vaultType]);
 }

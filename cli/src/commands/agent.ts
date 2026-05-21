@@ -94,7 +94,7 @@ export async function agentCommand(opts: AgentOptions): Promise<void> {
   for (const entry of entries) {
     try {
       const aad = entry.aadVersion >= 1 && userId
-        ? buildPersonalEntryAAD(userId, entry.id)
+        ? buildPersonalEntryAAD(userId, entry.id, "blob")
         : undefined;
       const plaintext = await decryptData(
         entry.encryptedBlob,

@@ -49,7 +49,7 @@ export async function totpCommand(
 
   try {
     const aad = res.data.aadVersion >= 1 && userId
-      ? buildPersonalEntryAAD(userId, res.data.id)
+      ? buildPersonalEntryAAD(userId, res.data.id, "blob")
       : undefined;
     const plaintext = await decryptData(
       res.data.encryptedBlob,

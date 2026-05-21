@@ -733,7 +733,7 @@ async function fetchPersonalWatchtowerEntries({
     if (raw.entryType && raw.entryType !== ENTRY_TYPE.LOGIN) continue;
     try {
       const aad = raw.aadVersion >= 1 && userId
-        ? buildPersonalEntryAAD(userId, raw.id)
+        ? buildPersonalEntryAAD(userId, raw.id, "blob")
         : undefined;
       const plaintext = await decryptData(
         raw.encryptedBlob as EncryptedData,

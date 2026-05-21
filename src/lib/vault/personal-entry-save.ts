@@ -35,7 +35,8 @@ export async function savePersonalEntry({
   }
 
   const entryId = mode === "create" ? crypto.randomUUID() : initialId!;
-  const aad = buildPersonalEntryAAD(userId, entryId);
+  const blobAAD = buildPersonalEntryAAD(userId, entryId, "blob");
+  const overviewAAD = buildPersonalEntryAAD(userId, entryId, "overview");
 
   const body = await buildEncryptedEntryBody({
     mode,
@@ -43,8 +44,8 @@ export async function savePersonalEntry({
     encryptionKey,
     fullBlob,
     overviewBlob,
-    blobAAD: aad,
-    overviewAAD: aad,
+    blobAAD,
+    overviewAAD,
     tagIds,
     extra: {
       keyVersion: 1,

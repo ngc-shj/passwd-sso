@@ -93,7 +93,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
 
     let additionalData: Uint8Array | undefined;
     if (data.aadVersion && data.aadVersion >= 1 && userId) {
-      additionalData = buildPersonalEntryAAD(userId, data.id);
+      additionalData = buildPersonalEntryAAD(userId, data.id, "blob");
     }
 
     const decrypted = await decryptData(

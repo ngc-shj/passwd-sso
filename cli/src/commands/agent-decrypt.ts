@@ -152,7 +152,7 @@ async function handleDecryptRequest(req: DecryptRequest): Promise<DecryptRespons
 
   try {
     const aad = entry.aadVersion >= 1 && userId
-      ? buildPersonalEntryAAD(userId, entry.id)
+      ? buildPersonalEntryAAD(userId, entry.id, "blob")
       : undefined;
 
     const plaintext = await decryptData(entry.encryptedBlob, encryptionKey, aad);
