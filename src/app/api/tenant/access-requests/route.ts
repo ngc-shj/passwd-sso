@@ -239,6 +239,13 @@ async function handlePOST(req: NextRequest) {
 
   const expiresAt = new Date(Date.now() + expiresInMinutes * MS_PER_MINUTE);
 
+  // C8 (OWASP A01-1): record who created this request, partitioned by
+  // actor type. The approve handler later rejects same-actor approval.
+  const requesterUserId =
+    authResult.type === "session" ? authResult.userId : null;
+  const requesterServiceAccountId =
+    authResult.type === "service_account" ? authResult.serviceAccountId : null;
+
   const accessRequest = await withBypassRls(prisma, async (tx) =>
     tx.accessRequest.create({
       data: {
@@ -247,6 +254,8 @@ async function handlePOST(req: NextRequest) {
         requestedScope: requestedScope.join(","),
         justification: justification ?? null,
         expiresAt,
+        requesterUserId,
+        requesterServiceAccountId,
       },
       select: {
         id: true,

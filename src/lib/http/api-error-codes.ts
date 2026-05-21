@@ -220,6 +220,7 @@ export const API_ERROR = {
   INVALID_SESSION: "INVALID_SESSION",
   SESSION_STEP_UP_REQUIRED: "SESSION_STEP_UP_REQUIRED",
   SESSION_INVALIDATE_FAILED: "SESSION_INVALIDATE_FAILED",
+  FORBIDDEN_SELF_APPROVAL: "FORBIDDEN_SELF_APPROVAL",
   INTERNAL_ERROR: "INTERNAL_ERROR",
 
   // ── API / Auth ──────────────────────────────────────────
@@ -479,6 +480,7 @@ export const API_ERROR_STATUS = {
   INVALID_SESSION: 400,
   SESSION_STEP_UP_REQUIRED: 403,
   SESSION_INVALIDATE_FAILED: 500,
+  FORBIDDEN_SELF_APPROVAL: 403,
   INTERNAL_ERROR: 500,
 
   // ── API / Auth ────────────────────────────────────────────
@@ -650,6 +652,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   INVALID_SESSION: "invalidSession",
   SESSION_STEP_UP_REQUIRED: "sessionStepUpRequired",
   SESSION_INVALIDATE_FAILED: "sessionInvalidateFailed",
+  FORBIDDEN_SELF_APPROVAL: "forbiddenSelfApproval",
   INTERNAL_ERROR: "internalError",
   INVALID_REQUEST: "invalidRequest",
   AUTHENTICATION_FAILED: "authenticationFailed",

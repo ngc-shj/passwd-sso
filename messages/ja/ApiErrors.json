@@ -128,6 +128,7 @@
   "operatorTokenNotFound": "運用者トークンが見つかりません。",
   "operatorTokenStaleSession": "この操作を続行するには、過去 15 分以内に再認証してください。再認証後にもう一度お試しください。",
   "sessionStepUpRequired": "この操作を続行するには、過去 15 分以内に再認証してください。再認証後にもう一度お試しください。",
+  "forbiddenSelfApproval": "自分(または自分の作成したサービスアカウント)が作成したリクエストは承認できません。別の管理者に承認してもらってください。",
   "sessionInvalidateFailed": "パスフレーズは更新されましたが、他端末からのサインアウトに失敗しました。安全のため他端末で手動サインアウトしてください。",
   "mcpClientNameConflict": "同じ名前のMCPクライアントが既に存在します。",
   "mcpClientLimitExceeded": "テナントごとのMCPクライアント上限に達しました。",

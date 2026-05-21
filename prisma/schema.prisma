@@ -178,7 +178,8 @@ model User {
   breakGlassRequested    PersonalLogAccessGrant[]   @relation("BreakGlassRequester")
   breakGlassTargeted     PersonalLogAccessGrant[]   @relation("BreakGlassTarget")
   createdServiceAccounts ServiceAccount[]           @relation("serviceAccountCreator")
-  approvedAccessRequests AccessRequest[]
+  approvedAccessRequests AccessRequest[]           @relation("AccessRequestApprovedBy")
+  requestedAccessRequests AccessRequest[]          @relation("AccessRequestRequester")
   createdMcpClients      McpClient[]                @relation("mcpClientCreator")
   delegationSessions     DelegationSession[]
   operatorTokensSubject  OperatorToken[]            @relation("OperatorTokenSubject")
@@ -1179,25 +1180,34 @@ enum AccessRequestStatus {
 }
 
 model AccessRequest {
-  id                 String              @id @default(uuid(4)) @db.Uuid
-  tenantId           String              @map("tenant_id") @db.Uuid
-  serviceAccountId   String              @map("service_account_id") @db.Uuid
-  requestedScope     String              @map("requested_scope") @db.Text
-  justification      String?             @db.Text
-  status             AccessRequestStatus @default(PENDING)
-  approvedById       String?             @map("approved_by_id") @db.Uuid
-  approvedAt         DateTime?           @map("approved_at") @db.Timestamptz(3)
-  grantedTokenId     String?             @map("granted_token_id") @db.Uuid
-  grantedTokenTtlSec Int?                @map("granted_token_ttl_sec")
-  expiresAt          DateTime            @map("expires_at") @db.Timestamptz(3)
-  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  id                          String              @id @default(uuid(4)) @db.Uuid
+  tenantId                    String              @map("tenant_id") @db.Uuid
+  serviceAccountId            String              @map("service_account_id") @db.Uuid
+  requestedScope              String              @map("requested_scope") @db.Text
+  justification               String?             @db.Text
+  status                      AccessRequestStatus @default(PENDING)
+  // C8 / OWASP A01-1: records who created this request, partitioned by
+  // actor type. Exactly one of (requesterUserId, requesterServiceAccountId)
+  // must be non-null; approve checks reject same-actor approval.
+  requesterUserId             String?             @map("requester_user_id") @db.Uuid
+  requesterServiceAccountId   String?             @map("requester_service_account_id") @db.Uuid
+  approvedById                String?             @map("approved_by_id") @db.Uuid
+  approvedAt                  DateTime?           @map("approved_at") @db.Timestamptz(3)
+  grantedTokenId              String?             @map("granted_token_id") @db.Uuid
+  grantedTokenTtlSec          Int?                @map("granted_token_ttl_sec")
+  expiresAt                   DateTime            @map("expires_at") @db.Timestamptz(3)
+  createdAt                   DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  serviceAccount ServiceAccount @relation(fields: [serviceAccountId], references: [id], onDelete: Cascade)
-  approvedBy     User?          @relation(fields: [approvedById], references: [id], onDelete: SetNull)
+  tenant                  Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  serviceAccount          ServiceAccount  @relation(fields: [serviceAccountId], references: [id], onDelete: Cascade)
+  approvedBy              User?           @relation("AccessRequestApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  requesterUser           User?           @relation("AccessRequestRequester", fields: [requesterUserId], references: [id], onDelete: SetNull)
+  requesterServiceAccount ServiceAccount? @relation("AccessRequestSelfService", fields: [requesterServiceAccountId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, status, createdAt(sort: Desc)])
   @@index([serviceAccountId, status])
+  @@index([requesterUserId])
+  @@index([requesterServiceAccountId])
   @@map("access_requests")
 }
 
@@ -1590,9 +1600,10 @@ model ServiceAccount {
   tenant         Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   team           Team?                 @relation(fields: [teamId], references: [id], onDelete: SetNull)
   createdBy      User                  @relation("serviceAccountCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  tokens         ServiceAccountToken[]
-  accessRequests AccessRequest[]
-  auditLogs      AuditLog[]
+  tokens                  ServiceAccountToken[]
+  accessRequests          AccessRequest[]
+  selfServiceAccessRequests AccessRequest[]      @relation("AccessRequestSelfService")
+  auditLogs               AuditLog[]
 
   @@unique([tenantId, name])
   @@index([tenantId, isActive])
