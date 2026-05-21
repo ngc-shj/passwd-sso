@@ -41,7 +41,9 @@ async function handleGET(
   }
 
   if (entry.userId !== userId) {
-    return forbidden();
+    // A01-4: 403 vs 404 difference leaks "ID exists in tenant" oracle to
+    // attacker. RLS should already null this branch; defense-in-depth.
+    return notFound();
   }
 
   return NextResponse.json({
@@ -104,7 +106,8 @@ async function handlePUT(
   }
 
   if (existing.userId !== userId) {
-    return forbidden();
+    // A01-4: collapse 403 → 404 to remove existence oracle.
+    return notFound();
   }
 
   const result = await parseBody(req, updateE2EPasswordSchema);
@@ -251,7 +254,8 @@ async function handleDELETE(
   }
 
   if (existing.userId !== userId) {
-    return forbidden();
+    // A01-4: collapse 403 → 404 to remove existence oracle.
+    return notFound();
   }
 
   if (permanent) {
