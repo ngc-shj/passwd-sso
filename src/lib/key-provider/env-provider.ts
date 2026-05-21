@@ -7,7 +7,7 @@
  *   - src/lib/webauthn-server.ts (getPrfSecret)
  */
 
-import { createHash } from "node:crypto";
+import { createHash, hkdfSync } from "node:crypto";
 import type { KeyName, KeyProvider } from "./types";
 import { HEX64_RE } from "./base-cloud-provider";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
@@ -123,9 +123,21 @@ export class EnvKeyProvider implements KeyProvider {
       throw new Error("DIRECTORY_SYNC_MASTER_KEY required in production");
     }
 
-    // Dev/test fallback to share master V1 (use || so empty string falls through)
+    // Dev/test fallback: derive via HKDF from share master V1 with explicit
+    // domain separation ("dirsync-derive"). Avoids raw byte reuse with share
+    // master KDF paths (verifier-pepper:, share-access-token-v1).
     const fallback = process.env.SHARE_MASTER_KEY_V1?.trim() || process.env.SHARE_MASTER_KEY?.trim();
-    if (fallback && HEX64_RE.test(fallback)) return Buffer.from(fallback, "hex");
+    if (fallback && HEX64_RE.test(fallback)) {
+      const masterKey = Buffer.from(fallback, "hex");
+      const derived = hkdfSync(
+        "sha256",
+        masterKey,
+        Buffer.alloc(0), // empty salt — HKDF-Extract with fixed zero
+        "dirsync-derive",
+        32,
+      );
+      return Buffer.from(derived);
+    }
 
     throw new Error("No encryption key available for directory sync credentials");
   }

@@ -139,21 +139,27 @@ describe("EnvKeyProvider", () => {
       expect(key).toEqual(Buffer.from(VALID_HEX_D, "hex"));
     });
 
-    it("falls back to SHARE_MASTER_KEY_V1 in dev/test", () => {
+    it("derives via HKDF from SHARE_MASTER_KEY_V1 in dev/test (not raw bytes)", () => {
       vi.stubEnv("DIRECTORY_SYNC_MASTER_KEY", "");
       vi.stubEnv("NODE_ENV", "test");
       vi.stubEnv("SHARE_MASTER_KEY_V1", VALID_HEX);
       const key = provider.getKeySync("directory-sync");
-      expect(key).toEqual(Buffer.from(VALID_HEX, "hex"));
+      // Must NOT equal the raw master key (domain separation)
+      expect(key).not.toEqual(Buffer.from(VALID_HEX, "hex"));
+      expect(key.length).toBe(32);
+      // Deterministic: same input → same output
+      const again = provider.getKeySync("directory-sync");
+      expect(key).toEqual(again);
     });
 
-    it("falls back to SHARE_MASTER_KEY when V1 absent in dev/test", () => {
+    it("derives via HKDF from SHARE_MASTER_KEY when V1 absent in dev/test", () => {
       vi.stubEnv("DIRECTORY_SYNC_MASTER_KEY", "");
       vi.stubEnv("SHARE_MASTER_KEY_V1", "");
       vi.stubEnv("NODE_ENV", "test");
       vi.stubEnv("SHARE_MASTER_KEY", VALID_HEX_B);
       const key = provider.getKeySync("directory-sync");
-      expect(key).toEqual(Buffer.from(VALID_HEX_B, "hex"));
+      expect(key).not.toEqual(Buffer.from(VALID_HEX_B, "hex"));
+      expect(key.length).toBe(32);
     });
 
     it("throws in production when DIRECTORY_SYNC_MASTER_KEY is missing", () => {
