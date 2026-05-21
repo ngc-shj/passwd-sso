@@ -1,0 +1,22 @@
+# C24 (OWASP A06-4 / A08-1): Dependabot config for GitHub Actions SHA
+# pinning. Without this, Actions pinned to a SHA (per C23) would not
+# receive security patches — a new tag pointing at a vulnerability fix
+# would land on upstream but the pinned SHA stays put.
+#
+# Weekly group bumps so all action SHAs land as one PR (avoids
+# review fatigue from many single-action PRs).
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      actions:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+
+  # npm dependencies (root) — keep existing cadence; this file only adds
+  # github-actions ecosystem. Other ecosystems can be added here later.
