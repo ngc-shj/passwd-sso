@@ -14,8 +14,26 @@ import { invalidateCachedSessionsBulk } from "@/lib/auth/session/session-cache";
  * authentication artifacts that survive the wipe (F3+S2).
  */
 export type InvalidateUserSessionsOptions =
-  | { tenantId: string; allTenants?: undefined; reason?: string }
-  | { allTenants: true; tenantId?: undefined; reason?: string };
+  | {
+      tenantId: string;
+      allTenants?: undefined;
+      reason?: string;
+      /**
+       * When set, the matching Session row + its cache tombstone are NOT
+       * touched. Used by self-service passphrase change / recovery where
+       * the requester has just proven possession of the (old) credential
+       * — invalidating their own session would force confusing re-sign-in
+       * UX without adding security (the current device is the legitimate
+       * actor). Other sessions / all bearer tokens are still revoked.
+       */
+      excludeSessionToken?: string | null;
+    }
+  | {
+      allTenants: true;
+      tenantId?: undefined;
+      reason?: string;
+      excludeSessionToken?: string | null;
+    };
 
 /**
  * Result of {@link invalidateUserSessions}. Counts revoked artifacts per
@@ -87,13 +105,18 @@ export async function invalidateUserSessions(
 
   const allTenants = "allTenants" in options && options.allTenants === true;
   const tenantFilter = allTenants ? {} : { tenantId: options.tenantId };
+  const excludeSessionToken = options.excludeSessionToken ?? null;
   const now = new Date();
 
   return withBypassRls(prisma, async (tx) => {
     // SELECT tokens before deleteMany so we can invalidate the cache after
     // the DB delete commits (R3 / S-6 sequencing).
     const targetSessions = await tx.session.findMany({
-      where: { userId, ...tenantFilter },
+      where: {
+        userId,
+        ...tenantFilter,
+        ...(excludeSessionToken ? { sessionToken: { not: excludeSessionToken } } : {}),
+      },
       select: { sessionToken: true },
     });
 
@@ -107,7 +130,11 @@ export async function invalidateUserSessions(
       operatorTokensResult,
     ] = await Promise.all([
       tx.session.deleteMany({
-        where: { userId, ...tenantFilter },
+        where: {
+          userId,
+          ...tenantFilter,
+          ...(excludeSessionToken ? { sessionToken: { not: excludeSessionToken } } : {}),
+        },
       }),
       tx.extensionToken.updateMany({
         where: { userId, revokedAt: null, ...tenantFilter },

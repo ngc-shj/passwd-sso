@@ -14,6 +14,7 @@ import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/a
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
+import { getSessionToken } from "@/app/api/sessions/helpers";
 import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
@@ -225,6 +226,9 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
     const result = await invalidateUserSessions(userId, {
       allTenants: true,
       reason: "recovery_recover",
+      // C6: keep current session (already authenticated via recovery
+      // verifier). Other sessions / all bearer tokens are revoked.
+      excludeSessionToken: getSessionToken(request),
     });
     if (result.cacheTombstoneFailures > 0) {
       getLogger().warn(

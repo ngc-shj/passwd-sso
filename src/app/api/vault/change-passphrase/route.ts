@@ -17,6 +17,7 @@ import { parseBody } from "@/lib/http/parse-body";
 import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
+import { getSessionToken } from "@/app/api/sessions/helpers";
 
 export const runtime = "nodejs";
 
@@ -116,16 +117,19 @@ async function handlePOST(request: NextRequest) {
     }),
   );
 
-  // C6 (OWASP A07-1): invalidate all sessions and bearer tokens across all
-  // tenants. After passphrase change the secret-key wrap changed, so existing
-  // session-bound vault state is stale; more importantly, passphrase change
-  // is the user's "kill switch" if the old passphrase is suspected leaked.
+  // C6 (OWASP A07-1): invalidate all OTHER sessions + bearer tokens across
+  // all tenants. The current device just proved possession of the OLD
+  // passphrase, so the requester's session is the legitimate actor —
+  // killing it would force confusing re-sign-in UX without adding security
+  // (the attack the audit closes is OTHER sessions surviving a known-leak
+  // passphrase change). Vault still re-locks because the key wrap changed.
   // Failure here returns 500 — the passphrase change already committed and
   // the client must instruct the user to manually sign out other devices.
   try {
     const result = await invalidateUserSessions(session.user.id, {
       allTenants: true,
       reason: "change_passphrase",
+      excludeSessionToken: getSessionToken(request),
     });
     if (result.cacheTombstoneFailures > 0) {
       getLogger().warn(
