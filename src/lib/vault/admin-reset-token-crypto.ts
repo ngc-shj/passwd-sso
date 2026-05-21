@@ -1,17 +1,21 @@
 // At-rest encryption for the dual-approval admin-vault-reset email-link token.
 //
-// AAD binding:
-//   AES-256-GCM AAD is set to `<tenantId>:<resetId>:<targetEmailAtInitiate>`.
-//   This binds the ciphertext to the specific reset row + target user's email
-//   at initiate time so:
-//     - A stolen ciphertext cannot be substituted into a different reset row.
-//     - An admin who initiated the reset cannot continue to use the email-link
-//       token if the target user changed their email between initiate and
-//       approve (FR12).
+// AAD binding (A02-7):
+//   AES-256-GCM AAD is encoded via the shared length-prefixed binary format
+//   (buildAADBytes) under scope `AR` with 3 fields. Length-prefixed encoding
+//   eliminates the delimiter-collision risk of the previous `tenantId:resetId:
+//   email` string form: if a future identifier format introduces ':' the
+//   wrong-shape AAD would silently match. Length prefixes make field
+//   boundaries unambiguous regardless of field content.
 //
-//   AAD bytes are opaque to AES-GCM — never re-parsed. Email may contain ':'
-//   per RFC 5322 §3.4.1 quoted-local-part; this is fine because we never split
-//   the AAD back, only compare bytes for equality during decryption.
+//   The binding still locks each ciphertext to:
+//     - the specific reset row (resetId) — substitution across rows fails
+//     - the target user's email at initiate (targetEmailAtInitiate) — if the
+//       target user changes their email after initiate, decryption fails (FR12)
+//
+// Pre-1.0 wire-format change: pending reset tokens encrypted with the old
+// string AAD will not decrypt and must be re-initiated. Reset TTL is short
+// (hours) so the impact window is bounded.
 //
 // Storage format:
 //   `psoenc1:<keyVersion>:<base64url(iv || authTag || ciphertext)>`
@@ -29,6 +33,9 @@ import {
   getCurrentMasterKeyVersion,
   getMasterKeyByVersion,
 } from "@/lib/crypto/crypto-server";
+import { buildAADBytes } from "@/lib/crypto/crypto-aad";
+
+const SCOPE_ADMIN_RESET = "AR";
 
 export type AdminResetAad = {
   tenantId: string;
@@ -38,8 +45,11 @@ export type AdminResetAad = {
 
 function buildAad(aad: AdminResetAad): Buffer {
   return Buffer.from(
-    `${aad.tenantId}:${aad.resetId}:${aad.targetEmailAtInitiate}`,
-    "utf8",
+    buildAADBytes(SCOPE_ADMIN_RESET, 3, [
+      aad.tenantId,
+      aad.resetId,
+      aad.targetEmailAtInitiate,
+    ]),
   );
 }
 
