@@ -102,6 +102,55 @@ function withCallbackRateLimit<H extends RouteHandler>(handler: H): H {
   return wrapped as unknown as H;
 }
 
+// ─── Magic-link per-IP rate limit (C12 / OWASP A04-6) ────────────
+//
+// The Auth.js email provider already limits per-email (3/10 min via
+// magicLinkEmailLimiter in auth.config.ts). That doesn't bound a single
+// IP from cycling through many emails (SMTP cost / quota DoS, plus
+// noise generation). This gate caps signin/email submissions at
+// 10 per IP per 10 minutes, applied BEFORE Auth.js dispatches to the
+// email provider.
+//
+// Auth.js's sendVerificationRequest hook does not receive the request
+// object, so request-context-based rate limiting must happen at the
+// route handler level — same pattern as withCallbackRateLimit above.
+const MAGIC_LINK_IP_WINDOW_MS = 10 * MS_PER_MINUTE;
+const MAGIC_LINK_IP_MAX = 10;
+
+const magicLinkIpLimiter = createRateLimiter({
+  windowMs: MAGIC_LINK_IP_WINDOW_MS,
+  max: MAGIC_LINK_IP_MAX,
+});
+
+function isMagicLinkSigninRoute(pathname: string, method: string): boolean {
+  // Auth.js v5 routes: POST /api/auth/signin/{providerId}
+  // (nodemailer provider's POST entrypoint)
+  return (
+    method === "POST" &&
+    (pathname === "/api/auth/signin/nodemailer" ||
+      pathname === "/api/auth/signin/email")
+  );
+}
+
+function withMagicLinkIpRateLimit<H extends RouteHandler>(handler: H): H {
+  const wrapped = async (request: NextRequest, ...rest: unknown[]) => {
+    if (!isMagicLinkSigninRoute(request.nextUrl.pathname, request.method)) {
+      return handler(request, ...rest);
+    }
+    const rl = await checkIpRateLimit({
+      ip: extractClientIp(request),
+      pathname: request.nextUrl.pathname,
+      scope: "magic_link_signin",
+      limiter: magicLinkIpLimiter,
+    });
+    if (!rl.allowed) {
+      return rateLimited(rl.retryAfterMs) as unknown as Response;
+    }
+    return handler(request, ...rest);
+  };
+  return wrapped as unknown as H;
+}
+
 // Exported for testing
 export { withAuthBasePath as _withAuthBasePath };
 export { withCallbackRateLimit as _withCallbackRateLimit };
@@ -111,5 +160,9 @@ export const GET = withRequestLog(
   withSessionMeta(withAuthBasePath(withCallbackRateLimit(handlers.GET))),
 );
 export const POST = withRequestLog(
-  withSessionMeta(withAuthBasePath(withCallbackRateLimit(handlers.POST))),
+  withSessionMeta(
+    withAuthBasePath(
+      withCallbackRateLimit(withMagicLinkIpRateLimit(handlers.POST)),
+    ),
+  ),
 );
