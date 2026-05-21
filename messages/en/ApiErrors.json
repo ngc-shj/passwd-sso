@@ -128,6 +128,7 @@
   "operatorTokenNotFound": "Operator token not found.",
   "operatorTokenStaleSession": "Re-authenticate within the last 15 minutes to continue this action, then try again.",
   "sessionStepUpRequired": "Re-authenticate within the last 15 minutes to continue this action, then try again.",
+  "sessionInvalidateFailed": "Your passphrase was updated, but signing out other devices failed. Please sign out other devices manually for security.",
   "mcpClientNameConflict": "An MCP client with this name already exists.",
   "mcpClientLimitExceeded": "Maximum number of MCP clients per tenant reached.",
   "mcpTokenNotFound": "MCP token not found or expired.",

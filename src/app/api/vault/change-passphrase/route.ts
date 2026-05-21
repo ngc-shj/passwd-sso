@@ -16,6 +16,7 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
 
 export const runtime = "nodejs";
 
@@ -114,6 +115,31 @@ async function handlePOST(request: NextRequest) {
       },
     }),
   );
+
+  // C6 (OWASP A07-1): invalidate all sessions and bearer tokens across all
+  // tenants. After passphrase change the secret-key wrap changed, so existing
+  // session-bound vault state is stale; more importantly, passphrase change
+  // is the user's "kill switch" if the old passphrase is suspected leaked.
+  // Failure here returns 500 — the passphrase change already committed and
+  // the client must instruct the user to manually sign out other devices.
+  try {
+    const result = await invalidateUserSessions(session.user.id, {
+      allTenants: true,
+      reason: "change_passphrase",
+    });
+    if (result.cacheTombstoneFailures > 0) {
+      getLogger().warn(
+        { userId: session.user.id, failures: result.cacheTombstoneFailures },
+        "vault.changePassphrase.tombstoneFailures",
+      );
+    }
+  } catch (err) {
+    getLogger().error(
+      { userId: session.user.id, err },
+      "vault.changePassphrase.invalidateFailed",
+    );
+    return errorResponse(API_ERROR.SESSION_INVALIDATE_FAILED);
+  }
 
   getLogger().info({ userId: session.user.id }, "vault.changePassphrase.success");
 
