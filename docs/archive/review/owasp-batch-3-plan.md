@@ -456,6 +456,16 @@ Each commit message includes the contract ID. The C1 and C2 commits include `BRE
 - Per-plan quota limits (current is env-based; per-tenant.plan limits is separate PR)
 - Hard-cap quota enforcement (TOCTOU mitigation; separate if needed)
 - audit-anchor-publisher role refactor (only if discovered to run as `passwd_app` during C13 impl)
+- **C21 @simplewebauthn server+browser v9 → v11**: deferred during impl after
+  discovering v11 breakage scope is larger than estimated. v11 removed the
+  `AuthenticatorDevice` type entirely and restructured the verifier response
+  (`credentialID`/`credentialPublicKey`/`counter` are now nested under
+  `credential.*`). 10+ call sites need updating plus full E2E re-validation
+  with a virtual authenticator. Belongs in its own PR alongside a CHANGELOG
+  entry that operators can review before deploying. Tracked as follow-up.
+- **Bulk Actions SHA pin (C23 follow-up)**: this PR adds the dependabot
+  config and pre-PR check infrastructure, but does not perform the bulk
+  pin itself. Dependabot will produce the SHA pinning PR on its first run.
 
 ## Go/No-Go Gate
 
@@ -481,7 +491,7 @@ Each commit message includes the contract ID. The C1 and C2 commits include `BRE
 | C18 | Env-based resource quotas (4 resources, soft-cap)                    | locked |
 | C19 | Break-glass `effectiveAt` column + email notification                | locked |
 | C20 | `/api/health/ready` body `{status}` only, no auditOutbox check       | locked |
-| C21 | SimpleWebAuthn v9 → v11                                              | locked |
+| C21 | SimpleWebAuthn v9 → v11 — **DEFERRED to follow-up PR** (impl scope)  | deferred |
 | C22 | next-auth beta.30 → beta.31                                          | locked |
 | C23 | GitHub Actions SHA pin                                               | locked |
 | C24 | `.github/dependabot.yml` for Actions ecosystem                       | locked |
