@@ -18,6 +18,8 @@ import {
 } from "@/lib/auth/webauthn/webauthn-server";
 import type { AuthenticatorDevice } from "@simplewebauthn/types";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/types";
+import { logAuditAsync } from "@/lib/audit/audit";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 
 // challengeId must be a 32-char hex string (16 random bytes)
 const CHALLENGE_ID_RE = /^[0-9a-f]{32}$/;
@@ -145,6 +147,32 @@ export async function authorizeWebAuthn(
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (updatedRows === 0) return null;
+
+  // C10 (OWASP A07-2): defense-in-depth audit telemetry for counter==0
+  // devices (older YubiKey models / some Windows Hello impls don't bump
+  // the signCount). Primary defense is still the CAS above; this emits
+  // a warning when we see two zero-counter authentications < 5s apart
+  // for the same credential — a pattern that's normal-but-suspicious
+  // on counter-less devices and would indicate replay on a counter-full
+  // device. NEVER rejects — that produced FPs on legit rapid Touch ID.
+  // Emitted request-less because the Auth.js Credentials provider
+  // authorize() function does not have access to the NextRequest.
+  if (
+    BigInt(storedCredential.counter) === 0n &&
+    newCounter === 0 &&
+    storedCredential.lastUsedAt &&
+    Date.now() - storedCredential.lastUsedAt.getTime() < 5000
+  ) {
+    await logAuditAsync({
+      scope: AUDIT_SCOPE.PERSONAL,
+      userId: storedCredential.userId,
+      action: AUDIT_ACTION.WEBAUTHN_COUNTER_ZERO_RAPID_REUSE,
+      metadata: {
+        credentialId: storedCredential.id,
+        intervalMs: Date.now() - storedCredential.lastUsedAt.getTime(),
+      },
+    });
+  }
 
   // Users without email should not authenticate via passkey
   if (!storedCredential.user.email) return null;
