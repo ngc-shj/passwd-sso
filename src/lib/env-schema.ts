@@ -484,6 +484,66 @@ export const envSchema = envObject.superRefine((data, ctx) => {
           "RESEND_API_KEY is required when EMAIL_PROVIDER=resend in production",
       });
     }
+
+    // A08-3 (OWASP audit batch 3 follow-up): audit chain HMAC integrity is
+    // observable only by detection, not prevention. Without an external
+    // anchor publish, a compromised DB could rewrite history undetected.
+    // Production deployments MUST enable the publisher (and configure its
+    // required keys) so the chain is evidentiary. Tampering window is
+    // bounded by anchor cadence + verifier worker.
+    if (!data.AUDIT_ANCHOR_PUBLISHER_ENABLED) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["AUDIT_ANCHOR_PUBLISHER_ENABLED"],
+        message:
+          "AUDIT_ANCHOR_PUBLISHER_ENABLED=true is required in production. " +
+          "Without external anchor publish the audit chain detects tampering " +
+          "only within the database boundary; an attacker with DB write access " +
+          "can rewrite history undetected. See docs/operations/alerts.md " +
+          "for destination options.",
+      });
+    } else {
+      // When enabled, the signing key + tag secret + at least one destination
+      // must also be configured. Otherwise the publisher boots but produces
+      // no externally-anchored output.
+      if (!data.AUDIT_ANCHOR_SIGNING_KEY) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["AUDIT_ANCHOR_SIGNING_KEY"],
+          message:
+            "AUDIT_ANCHOR_SIGNING_KEY is required when " +
+            "AUDIT_ANCHOR_PUBLISHER_ENABLED=true in production",
+        });
+      }
+      if (!data.AUDIT_ANCHOR_TAG_SECRET) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["AUDIT_ANCHOR_TAG_SECRET"],
+          message:
+            "AUDIT_ANCHOR_TAG_SECRET is required when " +
+            "AUDIT_ANCHOR_PUBLISHER_ENABLED=true in production",
+        });
+      }
+      const hasS3 = !!data.AUDIT_ANCHOR_DESTINATION_S3_BUCKET;
+      const hasGh = !!(
+        data.AUDIT_ANCHOR_DESTINATION_GH_REPO &&
+        data.AUDIT_ANCHOR_DESTINATION_GH_TOKEN
+      );
+      const hasFs = !!data.AUDIT_ANCHOR_DESTINATION_FS_PATH;
+      if (!hasS3 && !hasGh && !hasFs) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["AUDIT_ANCHOR_DESTINATION_S3_BUCKET"],
+          message:
+            "At least one anchor destination must be configured when " +
+            "AUDIT_ANCHOR_PUBLISHER_ENABLED=true in production: " +
+            "S3 (AUDIT_ANCHOR_DESTINATION_S3_BUCKET), " +
+            "GitHub (AUDIT_ANCHOR_DESTINATION_GH_REPO + " +
+            "AUDIT_ANCHOR_DESTINATION_GH_TOKEN), or " +
+            "filesystem (AUDIT_ANCHOR_DESTINATION_FS_PATH).",
+        });
+      }
+    }
   }
 
   // ── Cloud key provider requirements (A10-A11, always enforced) ──

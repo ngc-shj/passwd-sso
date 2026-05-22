@@ -244,6 +244,134 @@ describe("envSchema (with superRefine cross-field rules)", () => {
     }
   });
 
+  // A08-3: production deployment must enable the anchor publisher so
+  // audit chain integrity is externally evidentiary (not detection-only).
+  describe("A08-3: AUDIT_ANCHOR_PUBLISHER_ENABLED production gate", () => {
+    const validProdBase = {
+      NODE_ENV: "production",
+      AUTH_SECRET: "x".repeat(32),
+      AUTH_URL: "https://app.example.com",
+      VERIFIER_PEPPER_KEY: VALID_HEX_64,
+      REDIS_URL: "redis://localhost:6379",
+      AUTH_GOOGLE_ID: "id",
+      AUTH_GOOGLE_SECRET: "secret",
+    };
+
+    it("rejects production when AUDIT_ANCHOR_PUBLISHER_ENABLED is false (default)", () => {
+      const result = envSchema.safeParse(baseEnv(validProdBase));
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(
+          result.error.issues.some(
+            (i) => i.path[0] === "AUDIT_ANCHOR_PUBLISHER_ENABLED",
+          ),
+        ).toBe(true);
+      }
+    });
+
+    it("rejects when ENABLED=true but signing key is missing", () => {
+      const result = envSchema.safeParse(
+        baseEnv({
+          ...validProdBase,
+          AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
+          AUDIT_ANCHOR_TAG_SECRET: VALID_HEX_64,
+          AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors",
+        }),
+      );
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(
+          result.error.issues.some(
+            (i) => i.path[0] === "AUDIT_ANCHOR_SIGNING_KEY",
+          ),
+        ).toBe(true);
+      }
+    });
+
+    it("rejects when ENABLED=true but tag secret is missing", () => {
+      const result = envSchema.safeParse(
+        baseEnv({
+          ...validProdBase,
+          AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
+          AUDIT_ANCHOR_SIGNING_KEY: VALID_HEX_64,
+          AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors",
+        }),
+      );
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(
+          result.error.issues.some(
+            (i) => i.path[0] === "AUDIT_ANCHOR_TAG_SECRET",
+          ),
+        ).toBe(true);
+      }
+    });
+
+    it("rejects when ENABLED=true but no destination is configured", () => {
+      const result = envSchema.safeParse(
+        baseEnv({
+          ...validProdBase,
+          AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
+          AUDIT_ANCHOR_SIGNING_KEY: VALID_HEX_64,
+          AUDIT_ANCHOR_TAG_SECRET: VALID_HEX_64,
+        }),
+      );
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(
+          result.error.issues.some(
+            (i) => i.path[0] === "AUDIT_ANCHOR_DESTINATION_S3_BUCKET",
+          ),
+        ).toBe(true);
+      }
+    });
+
+    it("accepts production when publisher fully configured (fs destination)", () => {
+      const result = envSchema.safeParse(
+        baseEnv({
+          ...validProdBase,
+          AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
+          AUDIT_ANCHOR_SIGNING_KEY: VALID_HEX_64,
+          AUDIT_ANCHOR_TAG_SECRET: VALID_HEX_64,
+          AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors",
+        }),
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts production with S3 destination", () => {
+      const result = envSchema.safeParse(
+        baseEnv({
+          ...validProdBase,
+          AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
+          AUDIT_ANCHOR_SIGNING_KEY: VALID_HEX_64,
+          AUDIT_ANCHOR_TAG_SECRET: VALID_HEX_64,
+          AUDIT_ANCHOR_DESTINATION_S3_BUCKET: "my-bucket",
+        }),
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts production with GitHub destination", () => {
+      const result = envSchema.safeParse(
+        baseEnv({
+          ...validProdBase,
+          AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
+          AUDIT_ANCHOR_SIGNING_KEY: VALID_HEX_64,
+          AUDIT_ANCHOR_TAG_SECRET: VALID_HEX_64,
+          AUDIT_ANCHOR_DESTINATION_GH_REPO: "owner/repo",
+          AUDIT_ANCHOR_DESTINATION_GH_TOKEN: "ghp_xxx",
+        }),
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it("accepts development without publisher (no production gate)", () => {
+      const result = envSchema.safeParse(baseEnv({ NODE_ENV: "development" }));
+      expect(result.success).toBe(true);
+    });
+  });
+
   it("requires AZURE_KV_URL when KEY_PROVIDER=azure-kv (any NODE_ENV)", () => {
     const result = envSchema.safeParse(
       baseEnv({ KEY_PROVIDER: "azure-kv" }),

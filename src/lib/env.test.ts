@@ -87,6 +87,11 @@ describe("env validation", () => {
       REDIS_URL: "redis://localhost:6379",
       AUTH_GOOGLE_ID: "google-id",
       AUTH_GOOGLE_SECRET: "google-secret",
+      // A08-3: production gate requires anchor publisher fully configured.
+      AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
+      AUDIT_ANCHOR_SIGNING_KEY: "b".repeat(64),
+      AUDIT_ANCHOR_TAG_SECRET: "c".repeat(64),
+      AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors",
     });
     const { env } = await import("./env");
     expect(env.NODE_ENV).toBe("production");
@@ -142,6 +147,11 @@ describe("env validation", () => {
       REDIS_URL: "redis://localhost:6379",
       EMAIL_PROVIDER: "smtp",
       SMTP_HOST: "smtp.example.com",
+      // A08-3.
+      AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
+      AUDIT_ANCHOR_SIGNING_KEY: "b".repeat(64),
+      AUDIT_ANCHOR_TAG_SECRET: "c".repeat(64),
+      AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors",
     });
     const { env } = await import("./env");
     expect(env.EMAIL_PROVIDER).toBe("smtp");
