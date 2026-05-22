@@ -874,7 +874,11 @@ export const descriptions: Record<
     description:
       "Master switch for the audit-anchor publisher worker. Default: false.\n" +
       "When true, the worker boots and publishes daily manifests; when false,\n" +
-      "the worker process is a no-op (signing/tag keys not validated).",
+      "the worker process is a no-op (signing/tag keys not validated).\n" +
+      "REQUIRED in production (NODE_ENV=production fails startup if unset)\n" +
+      "— without external anchor publish, audit chain tampering is only\n" +
+      "detectable within the database boundary. Pair with at least one\n" +
+      "destination (S3 / GitHub / FS) plus signing key + tag secret.",
     example: "false",
   },
   AUDIT_ANCHOR_PUBLISHER_DATABASE_URL: {

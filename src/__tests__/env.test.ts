@@ -25,6 +25,13 @@ function setFullProdEnv() {
   process.env.AUTH_URL = "https://app.example.com";
   process.env.AUTH_GOOGLE_ID = "google-id";
   process.env.AUTH_GOOGLE_SECRET = "google-secret";
+  // A08-3: production gate now requires anchor publisher to be fully
+  // configured. Provide minimal valid values so prod-validation tests
+  // pass for unrelated concerns.
+  process.env.AUDIT_ANCHOR_PUBLISHER_ENABLED = "true";
+  process.env.AUDIT_ANCHOR_SIGNING_KEY = "c".repeat(64);
+  process.env.AUDIT_ANCHOR_TAG_SECRET = "d".repeat(64);
+  process.env.AUDIT_ANCHOR_DESTINATION_FS_PATH = "/var/anchors";
 }
 
 function resetEnv() {
