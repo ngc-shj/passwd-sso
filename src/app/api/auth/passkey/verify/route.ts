@@ -23,6 +23,7 @@ import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalida
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { getLogger } from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -165,10 +166,35 @@ async function handlePOST(req: NextRequest) {
   // Session deletion above already removed Session rows; this covers
   // the remaining bearer-class models. Sessions/tokens are scoped to
   // global User (not tenant), so allTenants=true matches.
-  await invalidateUserSessions(user.id, {
-    allTenants: true,
-    reason: "passkey_reauth",
-  });
+  // Exclude the just-created session token: invalidateUserSessions revokes
+  // ALL sessions across tenants, which would wipe the session we just
+  // committed above and leave the client with a cookie pointing at a
+  // non-existent Session row (next request → 401 → bounced to sign-in).
+  //
+  // Failure here returns 500 without setting the session cookie — matches
+  // the fail-closed pattern of change-passphrase / recovery-recover.
+  // The orphan Session row from line 139 is cleaned up by `tx.session.deleteMany`
+  // on the next sign-in attempt (line 125). Returning a specific error code
+  // gives the client a stable failure mode for retry logic.
+  try {
+    const result = await invalidateUserSessions(user.id, {
+      allTenants: true,
+      reason: "passkey_reauth",
+      excludeSessionToken: sessionToken,
+    });
+    if (result.cacheTombstoneFailures > 0) {
+      getLogger().warn(
+        { userId: user.id, failures: result.cacheTombstoneFailures },
+        "auth.passkey.verify.tombstoneFailures",
+      );
+    }
+  } catch (err) {
+    getLogger().error(
+      { userId: user.id, err },
+      "auth.passkey.verify.invalidateFailed",
+    );
+    return errorResponse(API_ERROR.SESSION_INVALIDATE_FAILED);
+  }
 
   // Audit log
   if (evictedCount > 0) {

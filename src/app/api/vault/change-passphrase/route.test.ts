@@ -1,12 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaUser, mockRateLimiter, mockLogAudit, mockWithUserTenantRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaUser, mockRateLimiter, mockLogAudit, mockWithUserTenantRls, mockInvalidateUserSessions } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
   mockRateLimiter: { check: vi.fn() },
   mockLogAudit: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockInvalidateUserSessions: vi.fn().mockResolvedValue({
+    sessions: 0,
+    extensionTokens: 0,
+    apiKeys: 0,
+    mcpAccessTokens: 0,
+    mcpRefreshTokens: 0,
+    delegationSessions: 0,
+    operatorTokens: 0,
+    cacheTombstoneFailures: 0,
+  }),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -40,7 +50,7 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
-  invalidateUserSessions: vi.fn().mockResolvedValue({ sessions: 0, extensionTokens: 0, apiKeys: 0, mcpAccessTokens: 0, mcpRefreshTokens: 0, delegationSessions: 0, operatorTokens: 0, cacheTombstoneFailures: 0 }),
+  invalidateUserSessions: mockInvalidateUserSessions,
 }));
 
 import { POST } from "./route";
@@ -171,6 +181,28 @@ describe("POST /api/vault/change-passphrase", () => {
           secretKeyAuthTag: validBody.secretKeyAuthTag,
         }),
       })
+    );
+  });
+
+  it("passes excludeSessionToken to invalidateUserSessions to preserve the caller's current session", async () => {
+    // Regression guard for the bug class fixed in passkey/verify:
+    // a successful passphrase change must NOT wipe the caller's own
+    // session via the global cascade. The excludeSessionToken option
+    // (resolved from the request cookie) is the mechanism that keeps
+    // the caller signed in while every other bearer credential is
+    // revoked.
+    const SESSION_TOKEN = "test-session-cookie-value";
+    const res = await POST(createRequest("POST", "http://localhost/api/vault/change-passphrase", {
+      body: validBody,
+      headers: { cookie: `authjs.session-token=${SESSION_TOKEN}` },
+    }));
+    expect(res.status).toBe(200);
+    expect(mockInvalidateUserSessions).toHaveBeenCalledWith(
+      "user-1",
+      expect.objectContaining({
+        allTenants: true,
+        excludeSessionToken: SESSION_TOKEN,
+      }),
     );
   });
 
