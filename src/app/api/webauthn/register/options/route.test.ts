@@ -12,6 +12,7 @@ const {
   mockWithUserTenantRls,
   mockGenerateRegistrationOpts,
   mockDerivePrfSalt,
+  mockDerivePrfSaltV2,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRateLimiterCheck: vi.fn(),
@@ -21,6 +22,7 @@ const {
   mockWithUserTenantRls: vi.fn(),
   mockGenerateRegistrationOpts: vi.fn(),
   mockDerivePrfSalt: vi.fn(),
+  mockDerivePrfSaltV2: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -43,9 +45,14 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
 
+// A02-8: route calls derivePrfSaltV2 with a random per-credential salt.
+// The mock is hoisted so tests can assert (a) input matches the salt stored
+// in Redis (RT5 — production primitive call-path), (b) output is the value
+// the route returns to the client. Tests stubbing PRF-disabled drive
+// mockDerivePrfSaltV2.mockImplementation(() => { throw ... }) directly.
 vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
   generateRegistrationOpts: mockGenerateRegistrationOpts,
-  derivePrfSalt: mockDerivePrfSalt,
+  derivePrfSaltV2: mockDerivePrfSaltV2,
 }));
 
 vi.mock("@/lib/http/with-request-log", () => ({
@@ -85,6 +92,14 @@ describe("POST /api/webauthn/register/options", () => {
     mockPrismaFindMany.mockResolvedValue(existingCredentials);
     mockGenerateRegistrationOpts.mockResolvedValue(mockOptions);
     mockDerivePrfSalt.mockReturnValue("prf-salt-hex");
+    // A02-8: mock derivePrfSaltV2 to deterministically echo the input
+    // so RT5 tests can assert the cached salt matches the call argument.
+    mockDerivePrfSaltV2.mockImplementation((perCredentialSalt: string) => {
+      if (!/^[0-9a-f]{64}$/.test(perCredentialSalt)) {
+        throw new Error("derivePrfSaltV2 (mock): bad hex");
+      }
+      return "v2-" + perCredentialSalt.slice(0, 60);
+    });
     mockWithUserTenantRls.mockImplementation(
       (_userId: string, fn: () => unknown) => fn(),
     );
@@ -122,7 +137,7 @@ describe("POST /api/webauthn/register/options", () => {
     expect(json.error).toBe("SERVICE_UNAVAILABLE");
   });
 
-  it("returns registration options and prfSalt on success", async () => {
+  it("returns registration options and v2 prfSalt on success", async () => {
     const req = createRequest("POST", ROUTE_URL);
     const { status, json } = await parseResponse(await POST(req));
 
@@ -130,7 +145,10 @@ describe("POST /api/webauthn/register/options", () => {
     expect(json.options).toBeDefined();
     expect(json.options.challenge).toBe("test-challenge-base64url");
     expect(json.prfSupported).toBe(true);
-    expect(json.prfSalt).toBe("prf-salt-hex");
+    // A02-8: response prfSalt is now derivePrfSaltV2(perCredentialSalt).
+    // The mock returns a deterministic transform of the input, so we can
+    // assert the response carries a v2-prefixed string.
+    expect(json.prfSalt).toMatch(/^v2-[0-9a-f]{60}$/);
   });
 
   it("passes existing credentials to exclude re-registration", async () => {
@@ -144,20 +162,29 @@ describe("POST /api/webauthn/register/options", () => {
     );
   });
 
-  it("stores challenge in Redis with 300s TTL", async () => {
+  it("stores challenge + prfSalt envelope in Redis with 300s TTL", async () => {
     const req = createRequest("POST", ROUTE_URL);
     await POST(req);
 
+    // A02-8: register-options now caches a JSON envelope containing both
+    // challenge AND the per-credential salt under the SAME Redis key.
     expect(mockRedisSet).toHaveBeenCalledWith(
       "webauthn:challenge:register:user-1",
-      "test-challenge-base64url",
+      expect.any(String),
       "EX",
       300,
     );
+    const envelope = JSON.parse(mockRedisSet.mock.calls[0][1] as string);
+    expect(envelope.challenge).toBe("test-challenge-base64url");
+    // RT5: the cached perCredentialSalt MUST be the same value passed to
+    // derivePrfSaltV2, so the wrap-side salt and DB-side salt cannot diverge.
+    expect(envelope.prfSalt).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it("returns prfSupported=false and prfSalt=null when derivePrfSalt throws", async () => {
-    mockDerivePrfSalt.mockImplementation(() => {
+  it("returns prfSupported=false and prfSalt=null when PRF is disabled (derivePrfSaltV2 throws)", async () => {
+    // A02-8: PRF-disabled drives `derivePrfSaltV2` throw directly (route no
+    // longer imports v1 derivePrfSalt).
+    mockDerivePrfSaltV2.mockImplementation(() => {
       throw new Error("PRF_SECRET not configured");
     });
 
@@ -167,6 +194,26 @@ describe("POST /api/webauthn/register/options", () => {
     expect(status).toBe(200);
     expect(json.prfSupported).toBe(false);
     expect(json.prfSalt).toBeNull();
+  });
+
+  it("(T01 RT5) caches the same perCredentialSalt that derivePrfSaltV2 receives + envelope stores it", async () => {
+    const req = createRequest("POST", ROUTE_URL);
+    const { status, json } = await parseResponse(await POST(req));
+    expect(status).toBe(200);
+
+    // The route calls derivePrfSaltV2 exactly once per request.
+    expect(mockDerivePrfSaltV2).toHaveBeenCalledTimes(1);
+    const calledWith = mockDerivePrfSaltV2.mock.calls[0][0] as string;
+    expect(calledWith).toMatch(/^[0-9a-f]{64}$/);
+
+    // The same value MUST be persisted in the Redis envelope.
+    const envelope = JSON.parse(mockRedisSet.mock.calls[0][1] as string);
+    expect(envelope.prfSalt).toBe(calledWith);
+
+    // The response prfSalt is derivePrfSaltV2's return — distinct from the
+    // cached perCredentialSalt (output ≠ input) so the wrap-side salt and
+    // the DB-side salt cannot be swapped.
+    expect(json.prfSalt).toBe("v2-" + calledWith.slice(0, 60));
   });
 
   it("uses email as userName when available", async () => {

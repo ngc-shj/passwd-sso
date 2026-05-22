@@ -9,7 +9,7 @@
  * coverage so a future refactor cannot regress them through one consumer
  * while leaving the other passing (#433 / C5).
  */
-import { describe, it, expect, vi, beforeEach, afterAll, type Mock } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/types";
 import type { verifyAuthenticationResponse } from "@simplewebauthn/server";
 
@@ -60,23 +60,16 @@ vi.mock("@simplewebauthn/server", async (importOriginal) => {
 
 import { verifyAuthenticationAssertion } from "./webauthn-server";
 
-const ORIGINAL_RP_ID = process.env.WEBAUTHN_RP_ID;
-const ORIGINAL_RP_ORIGIN = process.env.WEBAUTHN_RP_ORIGIN;
-
+// Migrated from direct process.env mutation to vi.stubEnv per pre-pr.sh
+// `check-test-hygiene` gate. The vitest setup wires afterEach unstubs so we
+// no longer need the manual save/restore via afterAll.
 beforeEach(() => {
   vi.clearAllMocks();
-  process.env.WEBAUTHN_RP_ID = "localhost";
-  process.env.WEBAUTHN_RP_ORIGIN = "http://localhost:3000";
+  vi.stubEnv("WEBAUTHN_RP_ID", "localhost");
+  vi.stubEnv("WEBAUTHN_RP_ORIGIN", "http://localhost:3000");
   mockGetRedis.mockReturnValue({ getdel: mockRedisGetdel });
   mockRedisGetdel.mockResolvedValue("stored-challenge");
   mockVerifyAuthLib.mockResolvedValue(makeVerifiedAuth());
-});
-
-afterAll(() => {
-  if (ORIGINAL_RP_ID === undefined) delete process.env.WEBAUTHN_RP_ID;
-  else process.env.WEBAUTHN_RP_ID = ORIGINAL_RP_ID;
-  if (ORIGINAL_RP_ORIGIN === undefined) delete process.env.WEBAUTHN_RP_ORIGIN;
-  else process.env.WEBAUTHN_RP_ORIGIN = ORIGINAL_RP_ORIGIN;
 });
 
 const validAssertion = {

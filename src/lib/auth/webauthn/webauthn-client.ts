@@ -288,16 +288,64 @@ export interface PasskeyAuthenticationResult {
 
 export async function startPasskeyAuthentication(
   optionsJSON: Record<string, unknown>,
-  prfSalt?: string, // hex — omit for sign-in without PRF
+  prfSalt?: string, // hex — top-level eval (legacy or mixed v1 fallback)
+  evalByCredential?: Record<string, string>, // credId base64url → salt hex (A02-8)
 ): Promise<PasskeyAuthenticationResult> {
   const publicKeyOptions = toRequestOptions(optionsJSON);
 
-  if (prfSalt) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (publicKeyOptions as any).extensions = {
-      ...publicKeyOptions.extensions,
-      prf: { eval: { first: toArrayBuffer(hexDecode(prfSalt)) } },
+  // A02-8: PRF extension input may arrive via three channels (in priority order):
+  //   1. Server-built `optionsJSON.extensions.prf` — pass through verbatim
+  //      (preferred). The server already encoded the salts as hex strings.
+  //   2. `evalByCredential` parameter — client-side construction for callers
+  //      that don't get server-built extensions yet.
+  //   3. `prfSalt` parameter — legacy top-level eval (single-credential path
+  //      or v1 RP-global fallback).
+  // Channel (1) is mutually exclusive with (2)/(3). Channels (2) and (3) can
+  // coexist and produce { eval, evalByCredential } simultaneously.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const serverPrfExt = (optionsJSON as any).extensions?.prf as
+    | { eval?: { first: string }; evalByCredential?: Record<string, { first: string }> }
+    | undefined;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const extensions: any = { ...publicKeyOptions.extensions };
+
+  if (serverPrfExt) {
+    // Convert hex strings back into ArrayBuffers for the browser-side WebAuthn API.
+    extensions.prf = {
+      ...(serverPrfExt.eval
+        ? { eval: { first: toArrayBuffer(hexDecode(serverPrfExt.eval.first)) } }
+        : {}),
+      ...(serverPrfExt.evalByCredential
+        ? {
+            evalByCredential: Object.fromEntries(
+              Object.entries(serverPrfExt.evalByCredential).map(([credId, value]) => [
+                credId,
+                { first: toArrayBuffer(hexDecode(value.first)) },
+              ]),
+            ),
+          }
+        : {}),
     };
+  } else if (prfSalt || evalByCredential) {
+    extensions.prf = {
+      ...(prfSalt ? { eval: { first: toArrayBuffer(hexDecode(prfSalt)) } } : {}),
+      ...(evalByCredential
+        ? {
+            evalByCredential: Object.fromEntries(
+              Object.entries(evalByCredential).map(([credId, salt]) => [
+                credId,
+                { first: toArrayBuffer(hexDecode(salt)) },
+              ]),
+            ),
+          }
+        : {}),
+    };
+  }
+
+  if (extensions.prf || Object.keys(extensions).length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (publicKeyOptions as any).extensions = extensions;
   }
 
   const abort = new AbortController();

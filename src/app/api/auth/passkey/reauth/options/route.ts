@@ -9,7 +9,7 @@ import { errorResponse, unauthorized, notFound } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { assertOrigin } from "@/lib/auth/session/csrf";
-import { generateAuthenticationOpts, WEBAUTHN_CHALLENGE_TTL_SECONDS } from "@/lib/auth/webauthn/webauthn-server";
+import { generateAuthenticationOpts, buildPrfExtensions, WEBAUTHN_CHALLENGE_TTL_SECONDS } from "@/lib/auth/webauthn/webauthn-server";
 import { getRedis } from "@/lib/redis";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
@@ -48,12 +48,13 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
   }
 
+  // A02-8: include prfSalt for per-credential v2 salt routing in reauth.
   const allowCredentials = await withBypassRls(
     prisma,
     (tx) =>
       tx.webAuthnCredential.findMany({
         where: { userId: session.user.id },
-        select: { credentialId: true, transports: true },
+        select: { credentialId: true, transports: true, prfSalt: true },
       }),
     BYPASS_PURPOSE.AUTH_FLOW,
   );
@@ -76,6 +77,15 @@ async function handlePOST(req: NextRequest) {
     "EX",
     WEBAUTHN_CHALLENGE_TTL_SECONDS,
   );
+
+  // A02-8: merge PRF extension input into options.
+  const prfExt = buildPrfExtensions(allowCredentials);
+  if (prfExt) {
+    options.extensions = {
+      ...options.extensions,
+      prf: prfExt,
+    } as unknown as typeof options.extensions;
+  }
 
   return NextResponse.json({
     options,

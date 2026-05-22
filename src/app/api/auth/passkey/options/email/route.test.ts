@@ -33,9 +33,26 @@ vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
 
+// A02-8: route now calls buildPrfExtensions. Default mock returns the v1
+// shape for legacy NULL-prfSalt credentials so existing tests pass; A02-8
+// cases override per-test.
 vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
   generateAuthenticationOpts: mockGenerateAuthenticationOpts,
-  derivePrfSalt: () => "a".repeat(64),
+  buildPrfExtensions: vi.fn(
+    (creds: Array<{ credentialId: string; prfSalt: string | null }>) => {
+      const hasV1 = creds.length === 0 || creds.some((c) => c.prfSalt === null);
+      const hasV2 = creds.some((c) => c.prfSalt !== null);
+      const result: { eval?: { first: string }; evalByCredential?: Record<string, { first: string }> } = {};
+      if (hasV1) result.eval = { first: "a".repeat(64) };
+      if (hasV2) {
+        result.evalByCredential = {};
+        for (const c of creds) {
+          if (c.prfSalt) result.evalByCredential[c.credentialId] = { first: c.prfSalt };
+        }
+      }
+      return result;
+    },
+  ),
 }));
 
 vi.mock("@/lib/auth/session/csrf", () => ({
@@ -65,8 +82,8 @@ import { POST } from "./route";
 const ROUTE_URL = "http://localhost:3000/api/auth/passkey/options/email";
 
 const mockCredentials = [
-  { credentialId: "cred-1-base64url", transports: ["usb"] },
-  { credentialId: "cred-2-base64url", transports: ["internal"] },
+  { credentialId: "cred-1-base64url", transports: ["usb"], prfSalt: null },
+  { credentialId: "cred-2-base64url", transports: ["internal"], prfSalt: null },
 ];
 
 // ── Setup ────────────────────────────────────────────────────
@@ -109,7 +126,12 @@ describe("POST /api/auth/passkey/options/email", () => {
     expect(json.options).toBeDefined();
     expect(json.challengeId).toMatch(/^[0-9a-f]{32}$/);
     expect(json.prfSalt).toBeDefined();
-    expect(mockGenerateAuthenticationOpts).toHaveBeenCalledWith(mockCredentials);
+    // A02-8: the route strips `prfSalt` from the credentials list before
+    // passing to `generateAuthenticationOpts`. The full list (with prfSalt)
+    // is consulted separately by `buildPrfExtensions`.
+    expect(mockGenerateAuthenticationOpts).toHaveBeenCalledWith(
+      mockCredentials.map((c) => ({ credentialId: c.credentialId, transports: c.transports })),
+    );
   });
 
   it("stores challenge in Redis with same key pattern as discoverable flow", async () => {
@@ -200,6 +222,87 @@ describe("POST /api/auth/passkey/options/email", () => {
     const call = mockGenerateAuthenticationOpts.mock.calls[0][0];
     expect(call.length).toBeGreaterThan(0);
     expect(call).not.toEqual([]);
+  });
+
+  // ── A02-8: v1/v2/mixed PRF extension shape (T07/T08/T09) ──────────────
+
+  describe("A02-8 PRF extension shape", () => {
+    it("(T09 legacy) sends top-level eval only when every credential has NULL prfSalt", async () => {
+      mockPrismaWebAuthnFindMany.mockResolvedValue([
+        { credentialId: "cred-1", transports: ["usb"], prfSalt: null },
+      ]);
+      const req = createRequest("POST", ROUTE_URL, {
+        body: { email: "test@example.com" },
+        headers: { origin: "http://localhost:3000" },
+      });
+      const { status, json } = await parseResponse(await POST(req));
+
+      expect(status).toBe(200);
+      expect(json.options.extensions?.prf?.eval?.first).toBeDefined();
+      expect(json.options.extensions?.prf?.evalByCredential).toBeUndefined();
+      expect(json.prfSalt).toBe(json.options.extensions.prf.eval.first);
+    });
+
+    it("(T07 all-v2) sends evalByCredential only when every credential has non-NULL prfSalt", async () => {
+      const V2A = "a".repeat(64);
+      const V2B = "b".repeat(64);
+      mockPrismaWebAuthnFindMany.mockResolvedValue([
+        { credentialId: "cred-A", transports: ["internal"], prfSalt: V2A },
+        { credentialId: "cred-B", transports: ["usb"], prfSalt: V2B },
+      ]);
+      const req = createRequest("POST", ROUTE_URL, {
+        body: { email: "test@example.com" },
+        headers: { origin: "http://localhost:3000" },
+      });
+      const { status, json } = await parseResponse(await POST(req));
+
+      expect(status).toBe(200);
+      expect(json.options.extensions?.prf?.eval).toBeUndefined();
+      expect(json.options.extensions?.prf?.evalByCredential).toBeDefined();
+      expect(Object.keys(json.options.extensions.prf.evalByCredential).sort()).toEqual(
+        ["cred-A", "cred-B"],
+      );
+      // Top-level prfSalt is null (no v1 fallback path); evalByCredential
+      // carries the v2 salts so the browser still has PRF eval input.
+      expect(json.prfSalt).toBeNull();
+    });
+
+    it("(T07 mixed) sends BOTH eval (for legacy NULL creds) AND evalByCredential (for v2)", async () => {
+      const V2 = "a".repeat(64);
+      mockPrismaWebAuthnFindMany.mockResolvedValue([
+        { credentialId: "cred-legacy", transports: ["usb"], prfSalt: null },
+        { credentialId: "cred-v2", transports: ["internal"], prfSalt: V2 },
+      ]);
+      const req = createRequest("POST", ROUTE_URL, {
+        body: { email: "test@example.com" },
+        headers: { origin: "http://localhost:3000" },
+      });
+      const { status, json } = await parseResponse(await POST(req));
+
+      expect(status).toBe(200);
+      expect(json.options.extensions?.prf?.eval?.first).toBeDefined();
+      // v2 cred is keyed; legacy cred is NOT keyed (falls through to eval).
+      expect(json.options.extensions?.prf?.evalByCredential).toHaveProperty("cred-v2");
+      expect(json.options.extensions?.prf?.evalByCredential).not.toHaveProperty(
+        "cred-legacy",
+      );
+    });
+
+    it("(F3 enumeration mitigation) unknown-email branch emits v1-only PRF shape (no evalByCredential, no empty {})", async () => {
+      mockPrismaUserFindFirst.mockResolvedValue(null);
+      const req = createRequest("POST", ROUTE_URL, {
+        body: { email: "nobody@example.com" },
+        headers: { origin: "http://localhost:3000" },
+      });
+      const { status, json } = await parseResponse(await POST(req));
+
+      expect(status).toBe(200);
+      // Same shape as the all-v1 real-user branch — eval.first present,
+      // evalByCredential absent. This is the enumeration-equalization guarantee.
+      expect(json.options.extensions?.prf?.eval?.first).toBeDefined();
+      expect(json.options.extensions?.prf?.evalByCredential).toBeUndefined();
+      expect(json.prfSalt).toBe(json.options.extensions.prf.eval.first);
+    });
   });
 
   it("returns 400 for invalid email format", async () => {

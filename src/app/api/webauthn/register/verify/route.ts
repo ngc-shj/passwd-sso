@@ -24,6 +24,7 @@ import {
   verifyRegistration,
   uint8ArrayToBase64url,
   getRpOrigin,
+  PER_CRED_SALT_HEX_RE,
 } from "@/lib/auth/webauthn/webauthn-server";
 import { parseDeviceFromUserAgent } from "@/lib/parse-user-agent";
 import { sendEmail } from "@/lib/email";
@@ -85,9 +86,35 @@ async function handlePOST(req: NextRequest) {
     prfSecretKeyAuthTag,
   } = result.data;
 
-  // Consume challenge from Redis (separate key from authentication)
-  const challenge = await redis.getdel(`webauthn:challenge:register:${userId}`);
-  if (!challenge) {
+  // A02-8: the register-options route now stores a JSON envelope containing
+  // both the challenge AND the per-credential PRF salt under the SAME Redis
+  // key. This atomic binding prevents a race where two concurrent
+  // register-options requests would silently brick the first request's
+  // credential — see plan v2 §C4.
+  const envelopeRaw = await redis.getdel(`webauthn:challenge:register:${userId}`);
+  if (!envelopeRaw) {
+    return errorResponse(API_ERROR.INVALID_CHALLENGE);
+  }
+  let challenge: string;
+  let perCredentialSalt: string | null;
+  try {
+    const parsed: unknown = JSON.parse(envelopeRaw);
+    // A02-8 S1: explicit runtime shape validation (Redis is an external trust
+    // boundary — `as`-cast alone leaves room for tampered or legacy-shaped
+    // values to flow through with `undefined` fields).
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      typeof (parsed as Record<string, unknown>).challenge !== "string" ||
+      ((parsed as Record<string, unknown>).prfSalt !== null &&
+        typeof (parsed as Record<string, unknown>).prfSalt !== "string")
+    ) {
+      return errorResponse(API_ERROR.INVALID_CHALLENGE);
+    }
+    const typed = parsed as { challenge: string; prfSalt: string | null };
+    challenge = typed.challenge;
+    perCredentialSalt = typed.prfSalt;
+  } catch {
     return errorResponse(API_ERROR.INVALID_CHALLENGE);
   }
 
@@ -151,6 +178,20 @@ async function handlePOST(req: NextRequest) {
     typeof rawLargeBlob === "boolean" ? rawLargeBlob : null;
 
   const hasPrf = !!(prfEncryptedSecretKey && prfSecretKeyIv && prfSecretKeyAuthTag);
+
+  // A02-8: validate the per-credential salt fetched from Redis BEFORE persisting.
+  // Defense-in-depth: a tampered Redis value would silently corrupt the PRF
+  // binding (we don't recompute the v2 salt at unlock; the column is just
+  // looked up). Reject non-canonical hex up front. Only persist prfSalt when
+  // the credential actually reports PRF wrap fields (hasPrf=true).
+  let prfSaltToPersist: string | null = null;
+  if (hasPrf && perCredentialSalt !== null) {
+    if (!PER_CRED_SALT_HEX_RE.test(perCredentialSalt)) {
+      return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, "Invalid PRF salt envelope");
+    }
+    prfSaltToPersist = perCredentialSalt;
+  }
+
   const registeredDevice = parseDeviceFromUserAgent(req.headers.get("user-agent"));
 
   // First: get user info and check tenant PIN policy
@@ -193,6 +234,7 @@ async function handlePOST(req: NextRequest) {
         nickname: nickname ?? null,
         prfSupported: hasPrf,
         registeredDevice,
+        prfSalt: prfSaltToPersist,
         ...(hasPrf
           ? {
               prfEncryptedSecretKey,

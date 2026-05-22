@@ -158,6 +158,40 @@ run_step "Static: no-deprecated-logAudit" bash -c 'if grep -rn "logAudit(" src/ 
 # webauthn) still peer-depend on @simplewebauthn/server@^9 and would invoke
 # v9-shape code through v11 internals — a latent auth-bypass risk if ever
 # enabled. Keep them dead.
+# A02-8 T10: read-only invariant on the PRF per-credential salt migration
+# script. The diagnostic must SELECT only — any DDL/DML in the SQL body
+# (excluding comments) means an operator running the diagnostic could
+# inadvertently mutate the DB. The check extracts the heredoc SQL block
+# and greps it for forbidden verbs.
+run_step "Static: prf-salt-migration-script-readonly" bash -c '
+  SCRIPT="scripts/migrate-prf-per-credential-salt.sh"
+  if [ ! -f "$SCRIPT" ]; then
+    echo "OK (script not present yet)"
+    exit 0
+  fi
+  # Extract just the SQL block(s) between `<<EOF` markers and the closing tag.
+  # Any of UPDATE/INSERT/DELETE/TRUNCATE inside that block fails the check.
+  SQL_BODY=$(awk "/^psql /,/^SQL\$/" "$SCRIPT")
+  if echo "$SQL_BODY" | grep -iqE "\\b(UPDATE|INSERT|DELETE|TRUNCATE)\\b"; then
+    echo "ERROR: forbidden write verb inside SQL body of $SCRIPT (A02-8 C9 immutable)"
+    exit 1
+  fi
+'
+
+# A02-8 T11: prfSalt is INSERT-only. Any code path that mutates the column
+# breaks the PRF wrap binding for that credential. Catch via grep of any
+# `prfSalt:` token inside a `.update(...)` block in production source (NOT
+# test files — fixtures are allowed to write any shape).
+run_step "Static: prf-salt-immutable" bash -c '
+  if git diff --diff-filter=AM main...HEAD --name-only -- src \
+    | grep -E "\\.tsx?$" | grep -v "\\.test\\." | xargs -r grep -nE "prfSalt\\s*:" 2>/dev/null \
+    | grep -B1 "\\.update(" >/dev/null 2>&1; then
+    echo "ERROR: prfSalt appears inside a .update() call — column is immutable (A02-8 C1)."
+    echo "Production code MUST NOT set prfSalt post-insert. Use .create() only."
+    exit 1
+  fi
+'
+
 run_step "Static: no-authjs-builtin-webauthn-provider" bash -c '
   # Anchor the match with a closing string-delimiter so future siblings like
   # @auth/core/providers/webauthn-safe (or webauthn2) do not get caught by a

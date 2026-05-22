@@ -13,7 +13,7 @@ import { assertOrigin } from "@/lib/auth/session/csrf";
 import { NIL_UUID } from "@/lib/constants/app";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
-import { generateAuthenticationOpts, derivePrfSalt } from "@/lib/auth/webauthn/webauthn-server";
+import { generateAuthenticationOpts, buildPrfExtensions } from "@/lib/auth/webauthn/webauthn-server";
 import { randomBytes } from "node:crypto";
 import { EMAIL_MAX_LENGTH } from "@/lib/validations/common";
 import { PASSKEY_DUMMY_CREDENTIALS_MAX } from "@/lib/validations/common.server";
@@ -109,15 +109,30 @@ async function handlePOST(req: NextRequest) {
 
   // SSO tenant users are rejected by the verify route's tenant guard,
   // so treat them the same as "not found" to avoid leaking info.
+  // A02-8: include prfSalt in the SELECT so buildPrfExtensions can route
+  // per-credential v2 salts and v1 fallback. Single source of truth for the
+  // credential list so allowCredentials and PRF extension stay in lockstep.
+  let credentialsForPrf: Array<{ credentialId: string; prfSalt: string | null }> = [];
+
   if (user && (user.tenant === null || user.tenant.isBootstrap)) {
     const credentials = await withBypassRls(prisma, async (tx) =>
       tx.webAuthnCredential.findMany({
         where: { userId: user.id },
-        select: { credentialId: true, transports: true },
+        select: { credentialId: true, transports: true, prfSalt: true },
       }),
     BYPASS_PURPOSE.AUTH_FLOW);
-    allowCredentials =
-      credentials.length > 0 ? credentials : generateDummyCredentials();
+    if (credentials.length > 0) {
+      allowCredentials = credentials.map((c) => ({
+        credentialId: c.credentialId,
+        transports: c.transports,
+      }));
+      credentialsForPrf = credentials.map((c) => ({
+        credentialId: c.credentialId,
+        prfSalt: c.prfSalt,
+      }));
+    } else {
+      allowCredentials = generateDummyCredentials();
+    }
   } else {
     // Timing mitigation: run a dummy DB query so the response time is
     // indistinguishable from the real-user path (prevents user enumeration
@@ -144,11 +159,30 @@ async function handlePOST(req: NextRequest) {
     CHALLENGE_TTL_SECONDS,
   );
 
-  let prfSalt: string | null = null;
-  try {
-    prfSalt = derivePrfSalt();
-  } catch {
-    // PRF secret not configured
+  // A02-8 F3: when the credentials list is empty (user not found or has no
+  // credentials), we still need a v1-shaped PRF extension response so the
+  // shape matches the real-user path and the timing-equalization branch
+  // doesn't accidentally introduce a user-enumeration oracle. Inject a
+  // single fake v1-style entry (`prfSalt: null`) so buildPrfExtensions
+  // emits `{ eval: { first: v1 RP-global } }` exactly like a real all-v1
+  // user. evalByCredential is omitted; v2 logic stays purely
+  // credential-driven for real users.
+  const prfExtInput =
+    credentialsForPrf.length > 0
+      ? credentialsForPrf
+      : [{ credentialId: "_timing-equalization-dummy_", prfSalt: null as string | null }];
+  const builtExt = buildPrfExtensions(prfExtInput);
+  // When the input list contains only dummy entries, strip evalByCredential
+  // (it would leak the dummy credentialId on the wire).
+  const prfExt = builtExt && credentialsForPrf.length === 0
+    ? (builtExt.eval ? { eval: builtExt.eval } : null)
+    : builtExt;
+  const prfSalt: string | null = prfExt?.eval?.first ?? null;
+  if (prfExt) {
+    options.extensions = {
+      ...options.extensions,
+      prf: prfExt,
+    } as unknown as typeof options.extensions;
   }
 
   return NextResponse.json({

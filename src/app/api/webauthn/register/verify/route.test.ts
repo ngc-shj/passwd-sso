@@ -53,6 +53,9 @@ vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
   verifyRegistration: mockVerifyRegistration,
   uint8ArrayToBase64url: mockUint8ArrayToBase64url,
   getRpOrigin: mockGetRpOrigin,
+  // A02-8: route imports the regex constant to validate Redis-sourced
+  // per-cred salt before persisting. Mock matches the production export.
+  PER_CRED_SALT_HEX_RE: /^[0-9a-f]{64}$/,
 }));
 
 vi.mock("@/lib/audit/audit", () => ({
@@ -190,7 +193,12 @@ describe("POST /api/webauthn/register/verify", () => {
     mockAuth.mockResolvedValue({ user: { id: "user-1", email: "test@example.com" } });
     mockRateLimiterCheck.mockResolvedValue({ allowed: true });
     mockGetRedis.mockReturnValue({ getdel: mockRedisGetdel });
-    mockRedisGetdel.mockResolvedValue("test-challenge");
+    // A02-8: register-options now caches a JSON envelope { challenge, prfSalt }
+    // under the same Redis key. Default to a v1-style envelope (NULL prfSalt)
+    // so existing tests retain their legacy behavior.
+    mockRedisGetdel.mockResolvedValue(
+      JSON.stringify({ challenge: "test-challenge", prfSalt: null }),
+    );
     mockVerifyRegistration.mockResolvedValue({
       verified: true,
       registrationInfo: mockRegistrationInfo,
@@ -518,9 +526,124 @@ describe("POST /api/webauthn/register/verify", () => {
           prfEncryptedSecretKey: "encrypted-secret-key",
           prfSecretKeyIv: "prf-iv",
           prfSecretKeyAuthTag: "prf-auth-tag",
+          // A02-8: when the Redis envelope has `prfSalt: null` (default),
+          // the route persists `prfSalt: null` (v1 legacy path).
+          prfSalt: null,
         }),
       }),
     );
+  });
+
+  // ── A02-8: per-credential salt persistence + envelope handling ────────
+
+  describe("A02-8 per-credential salt", () => {
+    it("(T02) persists prfSalt from the Redis envelope when wrap fields are present", async () => {
+      const PER_CRED_SALT = "a".repeat(64);
+      mockRedisGetdel.mockResolvedValue(
+        JSON.stringify({ challenge: "test-challenge", prfSalt: PER_CRED_SALT }),
+      );
+      const prfCredential = {
+        ...makeCreatedCredential(true),
+        prfSupported: true,
+      };
+      mockPrismaCredentialCreate.mockResolvedValue(prfCredential);
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: {
+          ...makeBody({ credProps: { rk: true } }),
+          prfEncryptedSecretKey: "encrypted",
+          prfSecretKeyIv: "iv",
+          prfSecretKeyAuthTag: "tag",
+        },
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+
+      // The new credential row carries the exact prfSalt from the envelope.
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ prfSalt: PER_CRED_SALT }),
+        }),
+      );
+    });
+
+    it("(T02) does NOT persist prfSalt when the request has no PRF wrap fields", async () => {
+      // hasPrf is false → prfSalt: null even if envelope has one.
+      const PER_CRED_SALT = "a".repeat(64);
+      mockRedisGetdel.mockResolvedValue(
+        JSON.stringify({ challenge: "test-challenge", prfSalt: PER_CRED_SALT }),
+      );
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
+      await POST(req);
+
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ prfSalt: null }),
+        }),
+      );
+    });
+
+    it("(T03) returns INVALID_CHALLENGE on legacy plain-string Redis value (mid-deploy migration window)", async () => {
+      // Pre-A02-8 register-options stored a plain string. Post-A02-8 verify
+      // sees it as non-JSON → fails-safe.
+      mockRedisGetdel.mockResolvedValue("not-json-just-a-string");
+
+      const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
+      const { status, json } = await parseResponse(await POST(req));
+
+      expect(status).toBe(400);
+      expect(json.error).toBe("INVALID_CHALLENGE");
+    });
+
+    it("(S1) returns INVALID_CHALLENGE on a JSON-valid envelope with the wrong shape", async () => {
+      // S1 defense-in-depth: JSON.parse("123") / "null" / "[]" succeeds but
+      // does not match the envelope shape → must reject.
+      mockRedisGetdel.mockResolvedValue("[]");
+
+      const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
+      const { status, json } = await parseResponse(await POST(req));
+
+      expect(status).toBe(400);
+      expect(json.error).toBe("INVALID_CHALLENGE");
+    });
+
+    it("(T04) returns VALIDATION_ERROR when the envelope's prfSalt is non-hex (tampered Redis)", async () => {
+      mockRedisGetdel.mockResolvedValue(
+        JSON.stringify({ challenge: "test-challenge", prfSalt: "z".repeat(64) }),
+      );
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: {
+          ...makeBody(),
+          prfEncryptedSecretKey: "encrypted",
+          prfSecretKeyIv: "iv",
+          prfSecretKeyAuthTag: "tag",
+        },
+      });
+      const { status, json } = await parseResponse(await POST(req));
+
+      expect(status).toBe(400);
+      expect(json.error).toBe("VALIDATION_ERROR");
+      // No credential row created.
+      expect(mockPrismaCredentialCreate).not.toHaveBeenCalled();
+    });
+
+    it("(T05 / RT4) race condition: second verify with a consumed envelope fails with INVALID_CHALLENGE", async () => {
+      // Two concurrent register/options requests: the second tab's set
+      // overwrote the first's, and then THIS verify (the first tab's) hits a
+      // Redis getdel that returns null (the second tab already consumed it
+      // OR the entry expired). Either way, no row created — no silent brick.
+      mockRedisGetdel.mockResolvedValue(null);
+
+      const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
+      const { status, json } = await parseResponse(await POST(req));
+
+      expect(status).toBe(400);
+      expect(json.error).toBe("INVALID_CHALLENGE");
+      expect(mockPrismaCredentialCreate).not.toHaveBeenCalled();
+    });
   });
 
   // ── minPinLength extraction tests ───────────────────────────

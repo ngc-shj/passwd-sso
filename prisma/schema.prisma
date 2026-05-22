@@ -1701,6 +1701,9 @@ model WebAuthnCredential {
   prfSecretKeyIv        String?   @map("prf_secret_key_iv") @db.VarChar(24)
   prfSecretKeyAuthTag   String?   @map("prf_secret_key_auth_tag") @db.VarChar(32)
   prfSupported          Boolean   @default(false) @map("prf_supported")
+  // A02-8: per-credential PRF salt (32-byte hex). NULL = legacy v1 (RP-global salt).
+  // Non-NULL = v2 (HKDF with per-cred salt as input). Immutable after INSERT.
+  prfSalt               String?   @map("prf_salt") @db.VarChar(64)
   registeredDevice      String?   @map("registered_device") @db.VarChar(100)
   lastUsedDevice        String?   @map("last_used_device") @db.VarChar(100)
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)

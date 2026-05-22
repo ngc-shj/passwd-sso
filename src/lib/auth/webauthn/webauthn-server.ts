@@ -226,6 +226,110 @@ export function derivePrfSalt(): string {
   return Buffer.from(derived).toString("hex");
 }
 
+// ── Per-credential PRF Salt derivation (v2) ──────────────────
+
+/**
+ * Lowercase-hex regex for the 32-byte per-credential salt stored in
+ * `webauthn_credentials.prfSalt`. `Buffer.from(str, "hex")` silently
+ * truncates invalid hex rather than throwing, so we validate explicitly
+ * before any HKDF call to fail closed (A02-8 F6 fix).
+ */
+export const PER_CRED_SALT_HEX_RE = /^[0-9a-f]{64}$/;
+
+/**
+ * Per-credential PRF salt derivation (v2).
+ *
+ * salt = HKDF(ikm = WEBAUTHN_PRF_SECRET, salt = perCredentialSalt, info = "webauthn-prf-credential-v2", L = 32)
+ *
+ * `WEBAUTHN_PRF_SECRET` is the IKM; `perCredentialSalt` is the random
+ * 32-byte salt stored in `webauthn_credentials.prfSalt`. Both contribute
+ * entropy to the derived PRK via HKDF-Extract; the `info` string provides
+ * domain separation from the v1 `prf-vault-unlock-v1` derivation.
+ *
+ * Output is sent to the browser via `extensions.prf.eval.first` or
+ * `extensions.prf.evalByCredential[<credId>].first`. The browser uses it
+ * as input to PRF(authenticator_secret, salt); the PRF output is then
+ * HKDF-derived (separately) into an AES-GCM key for vault wrap/unwrap.
+ *
+ * Throws if WEBAUTHN_PRF_SECRET is unset, or if perCredentialSalt is not
+ * 64 lowercase-hex chars.
+ *
+ * Returns 64-char lowercase hex.
+ */
+export function derivePrfSaltV2(perCredentialSalt: string): string {
+  if (!PER_CRED_SALT_HEX_RE.test(perCredentialSalt)) {
+    throw new Error("derivePrfSaltV2: perCredentialSalt must be 64 lowercase-hex chars");
+  }
+  const ikm = getPrfSecret();
+  const salt = Buffer.from(perCredentialSalt, "hex");
+  const info = Buffer.from("webauthn-prf-credential-v2", "utf-8");
+
+  const derived = hkdfSync("sha256", ikm, salt, info, 32);
+  return Buffer.from(derived).toString("hex");
+}
+
+/**
+ * PRF extension input shape sent to the browser inside
+ * `options.extensions.prf`. Returned by {@link buildPrfExtensions}.
+ *
+ * - `eval`: top-level fallback salt (v1 RP-global) used for credentials
+ *   that don't have a per-credential override.
+ * - `evalByCredential`: per-credential salts keyed by base64url credentialId.
+ *   Per-credential entries override `eval` where keyed (WebAuthn-3 §10.1.4).
+ */
+export interface PrfExtensionInput {
+  eval?: { first: string };
+  evalByCredential?: Record<string, { first: string }>;
+}
+
+/**
+ * Build the WebAuthn PRF extension input from a list of credentials.
+ *
+ * Behavior:
+ *   - all-v1 (every cred has NULL prfSalt): `{ eval: { first: <v1 RP-global> } }`
+ *   - all-v2 (every cred has non-NULL prfSalt): `{ evalByCredential: { ... } }`
+ *   - mixed: `{ eval: { first: <v1 RP-global> }, evalByCredential: { ...v2 only } }`
+ *
+ * Returns null if WEBAUTHN_PRF_SECRET is unset (PRF disabled — same as
+ * derivePrfSalt() throwing).
+ *
+ * Credential ID encoding: the `evalByCredential` keys are base64url strings,
+ * matching the stored `webauthn_credentials.credentialId` column (WebAuthn-3
+ * §10.1.4). Pass through verbatim — no decode needed.
+ *
+ * (A02-8 — replaces per-route derivePrfSalt() calls in known-credential
+ * paths: register, email-signin, post-login authenticate, PRF rebootstrap,
+ * passkey reauth. Discoverable signin keeps the bare derivePrfSalt() call.)
+ */
+export function buildPrfExtensions(
+  credentials: ReadonlyArray<{ credentialId: string; prfSalt: string | null }>,
+): PrfExtensionInput | null {
+  let v1Salt: string | null = null;
+  try {
+    v1Salt = derivePrfSalt();
+  } catch {
+    return null; // PRF disabled
+  }
+
+  const evalByCredential: Record<string, { first: string }> = {};
+  let hasV1 = false;
+  let hasV2 = false;
+
+  for (const c of credentials) {
+    if (c.prfSalt) {
+      evalByCredential[c.credentialId] = { first: derivePrfSaltV2(c.prfSalt) };
+      hasV2 = true;
+    } else {
+      hasV1 = true;
+    }
+  }
+
+  const result: PrfExtensionInput = {};
+  if (hasV1) result.eval = { first: v1Salt };
+  if (hasV2) result.evalByCredential = evalByCredential;
+  return result;
+}
+
 // ── Discoverable authentication (for sign-in) ──────────────
 
 /**
