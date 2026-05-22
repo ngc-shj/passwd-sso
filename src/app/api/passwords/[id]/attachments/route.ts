@@ -53,7 +53,8 @@ async function handleGET(
     return notFound();
   }
   if (entry.userId !== session.user.id) {
-    return forbidden();
+    // A01-4: collapse 403 → 404 to remove existence oracle.
+    return notFound();
   }
 
   const attachments = await withUserTenantRls(session.user.id, async () =>
@@ -96,7 +97,8 @@ async function handlePOST(
     return notFound();
   }
   if (entry.userId !== session.user.id) {
-    return forbidden();
+    // A01-4: collapse 403 → 404 to remove existence oracle.
+    return notFound();
   }
 
   const rl = await attachmentUploadLimiter.check(`rl:attachment_upload:${session.user.id}`);

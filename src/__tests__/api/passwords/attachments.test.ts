@@ -179,12 +179,12 @@ describe("GET /api/passwords/[id]/attachments", () => {
     expect(status).toBe(404);
   });
 
-  it("returns 403 when entry belongs to another user", async () => {
+  it("returns 404 when entry belongs to another user (A01-4: no existence oracle)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockEntryFindUnique.mockResolvedValue({ userId: "other-user" });
     const res = await GET(createGetRequest(), createParams("e1"));
     const { status } = await parseResponse(res);
-    expect(status).toBe(403);
+    expect(status).toBe(404);
   });
 
   it("returns attachments list", async () => {
@@ -240,13 +240,13 @@ describe("POST /api/passwords/[id]/attachments", () => {
     expect(status).toBe(404);
   });
 
-  it("returns 403 when entry belongs to another user", async () => {
+  it("returns 404 when entry belongs to another user (A01-4: no existence oracle)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockEntryFindUnique.mockResolvedValue({ userId: "other-user" });
     const req = createFormDataRequest(validFormFields());
     const res = await POST(req, createParams("e1"));
     const { status } = await parseResponse(res);
-    expect(status).toBe(403);
+    expect(status).toBe(404);
   });
 
   it("returns 400 when attachment limit exceeded", async () => {

@@ -44,7 +44,8 @@ async function handleGET(
     return notFound();
   }
   if (entry.userId !== session.user.id) {
-    return forbidden();
+    // A01-4: collapse 403 → 404 to remove existence oracle.
+    return notFound();
   }
 
   if (!history || history.entryId !== id) {
@@ -104,7 +105,8 @@ async function handlePATCH(
     return notFound();
   }
   if (entry.userId !== session.user.id) {
-    return forbidden();
+    // A01-4: collapse 403 → 404 to remove existence oracle.
+    return notFound();
   }
 
   if (!history || history.entryId !== id) {

@@ -76,13 +76,13 @@ describe("GET /api/passwords/[id]/history/[historyId]", () => {
     expect(status).toBe(404);
   });
 
-  it("returns 403 when entry belongs to another user", async () => {
+  it("returns 404 when entry belongs to another user (A01-4: no existence oracle)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockEntryFindUnique.mockResolvedValue({ userId: "other-user" });
     const req = createRequest("GET", "http://localhost/api/passwords/p1/history/h1");
     const res = await GET(req, createParams({ id: "p1", historyId: "h1" }));
     const { status } = await parseResponse(res);
-    expect(status).toBe(403);
+    expect(status).toBe(404);
   });
 
   it("returns individual history entry", async () => {
@@ -151,7 +151,7 @@ describe("PATCH /api/passwords/[id]/history/[historyId]", () => {
     expect(status).toBe(404);
   });
 
-  it("returns 403 when entry belongs to another user", async () => {
+  it("returns 404 when entry belongs to another user (A01-4: no existence oracle)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockEntryFindUnique.mockResolvedValue({ userId: "other-user" });
     const res = await PATCH(
@@ -165,7 +165,7 @@ describe("PATCH /api/passwords/[id]/history/[historyId]", () => {
       createParams({ id: "p1", historyId: "h1" }),
     );
     const { status } = await parseResponse(res);
-    expect(status).toBe(403);
+    expect(status).toBe(404);
   });
 
   it("returns 400 for invalid authTag format", async () => {

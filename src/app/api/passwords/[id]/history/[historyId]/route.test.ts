@@ -116,10 +116,10 @@ describe("GET /api/passwords/[id]/history/[historyId]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 403 when entry belongs to another user", async () => {
+  it("returns 404 (A01-4) when entry belongs to another user", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue({ userId: "other-user" });
     const res = await GET(createRequest("GET", makeUrl()), makeParams());
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it("returns 404 when history not found", async () => {

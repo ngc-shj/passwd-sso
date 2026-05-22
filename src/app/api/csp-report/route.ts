@@ -102,7 +102,12 @@ async function handlePOST(request: NextRequest) {
     if (body) {
       const sanitized = sanitizeCspReport(body);
       if (sanitized) {
-        getLogger().warn({ cspReport: sanitized }, "csp.violation");
+        // A09-6: _logType field matches docs/operations/alerts.md SIEM
+        // queries (Datadog: `{ _logType="csp.violation" } | rate`).
+        getLogger().warn(
+          { cspReport: sanitized, _logType: "csp.violation" },
+          "csp.violation",
+        );
       }
     }
   }

@@ -268,7 +268,7 @@ describe("passwords:write scope", () => {
       expect(status).toBe(200);
     });
 
-    it("returns 403 when entry belongs to another user", async () => {
+    it("returns 404 when entry belongs to another user (A01-4: no existence oracle)", async () => {
       mockAuthOrToken.mockResolvedValue({ type: "token", userId: "user-1", scopes: ["passwords:write"] });
       mockFindUnique.mockResolvedValue({
         id: "p1",
@@ -281,8 +281,8 @@ describe("passwords:write scope", () => {
       });
       const res = await PUT(req, createParams({ id: "p1" }));
       const { status, json } = await parseResponse(res);
-      expect(status).toBe(403);
-      expect(json.error).toBe("FORBIDDEN");
+      expect(status).toBe(404);
+      expect(json.error).toBe("NOT_FOUND");
     });
   });
 });

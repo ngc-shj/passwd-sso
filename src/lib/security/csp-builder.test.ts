@@ -122,6 +122,27 @@ describe("csp-builder", () => {
       );
     });
 
+    it("A05-2: loopback wildcards stay scoped to form-action (no leak to other directives)", async () => {
+      const { buildCspHeader } = await import("./csp-builder");
+      const header = buildCspHeader("nonce");
+      // Every directive that should NOT receive loopback wildcards. If a
+      // future refactor accidentally widens connect-src / script-src / etc.
+      // to the loopback-everywhere set, this test catches it before merge.
+      for (const directive of [
+        "connect-src",
+        "script-src",
+        "style-src",
+        "img-src",
+        "frame-src",
+        "frame-ancestors",
+        "default-src",
+      ]) {
+        // Match e.g. "connect-src ... http://localhost:* ..." — should NOT appear.
+        const re = new RegExp(`${directive}[^;]*http://localhost:\\*`);
+        expect(header).not.toMatch(re);
+      }
+    });
+
     it("includes report-to and report-uri directives", async () => {
       const { buildCspHeader } = await import("./csp-builder");
       const header = buildCspHeader("nonce");

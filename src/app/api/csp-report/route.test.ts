@@ -65,16 +65,17 @@ describe("POST /api/csp-report", () => {
     );
     expect(res.status).toBe(204);
     expect(mockWarn).toHaveBeenCalledWith(
-      {
-        cspReport: {
+      expect.objectContaining({
+        _logType: "csp.violation",
+        cspReport: expect.objectContaining({
           "document-uri": "https://example.com/page",
           "blocked-uri": "https://evil.com/script.js",
           "violated-directive": "script-src 'self'",
           "effective-directive": "script-src",
           disposition: "enforce",
           "status-code": 200,
-        },
-      },
+        }),
+      }),
       "csp.violation",
     );
     // referrer and script-sample are NOT in the sanitized output
@@ -113,15 +114,16 @@ describe("POST /api/csp-report", () => {
     );
     expect(res.status).toBe(204);
     expect(mockWarn).toHaveBeenCalledWith(
-      {
-        cspReport: {
+      expect.objectContaining({
+        _logType: "csp.violation",
+        cspReport: expect.objectContaining({
           type: "csp-violation",
           documentURL: "https://example.com/page",
           blockedURL: "https://cdn.example.com/lib.js",
           effectiveDirective: "script-src",
           disposition: "enforce",
-        },
-      },
+        }),
+      }),
       "csp.violation",
     );
   });

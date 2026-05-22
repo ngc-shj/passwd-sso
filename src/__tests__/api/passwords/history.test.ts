@@ -46,7 +46,7 @@ describe("GET /api/passwords/[id]/history", () => {
     expect(json.error).toBe("NOT_FOUND");
   });
 
-  it("returns 403 when entry belongs to another user", async () => {
+  it("returns 404 when entry belongs to another user (A01-4: no existence oracle)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValue({ userId: "other-user" });
     const req = createRequest("GET", "http://localhost/api/passwords/p1/history");

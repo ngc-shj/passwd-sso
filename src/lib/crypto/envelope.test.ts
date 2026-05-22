@@ -166,6 +166,28 @@ describe("envelope", () => {
       const ct = encryptWithKey("p", 0, SENTINEL_KEY, SENTINEL_AAD_A);
       expect(parseEnvelope(ct).version).toBe(0);
     });
+
+    // A08-4: Number() is too tolerant. Verify rejection of formats that
+    // would alias to a valid integer version.
+    it("rejects '1.0' (decimal point)", () => {
+      expect(() => parseEnvelope("psoenc1:1.0:aaaa")).toThrow(/invalid version/);
+    });
+
+    it("rejects ' 1' (leading whitespace)", () => {
+      expect(() => parseEnvelope("psoenc1: 1:aaaa")).toThrow(/invalid version/);
+    });
+
+    it("rejects '01' (leading zero, except bare 0)", () => {
+      expect(() => parseEnvelope("psoenc1:01:aaaa")).toThrow(/invalid version/);
+    });
+
+    it("rejects '0x1' (hex prefix)", () => {
+      expect(() => parseEnvelope("psoenc1:0x1:aaaa")).toThrow(/invalid version/);
+    });
+
+    it("rejects '1e2' (scientific notation)", () => {
+      expect(() => parseEnvelope("psoenc1:1e2:aaaa")).toThrow(/invalid version/);
+    });
   });
 
   // ─── AAD-substitution rejection (security obligation 2) ────────

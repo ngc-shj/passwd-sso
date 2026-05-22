@@ -35,6 +35,7 @@ Last verified: 2026-03-07
 | `OK` | `AAD_SCOPE_TEAM_KEY` | Team member key wrapping | teamId, toUserId, keyVersion, wrapVersion | crypto-team.ts |
 | `IK` | `SCOPE_ITEM_KEY` | ItemKey wrapping | teamId, entryId, teamKeyVersion | crypto-aad.ts |
 | `AW` | `SCOPE_ATTACHMENT_WRAP` | Attachment CEK wrapping (mode-2) | entryId, attachmentId, cekKeyVersion, cekWrapAadVersion | crypto-aad.ts |
+| `AR` | `SCOPE_ADMIN_RESET` | Admin-vault-reset email-link token | tenantId, resetId, targetEmailAtInitiate | admin-reset-token-crypto.ts |
 
 ### AAD Binary Format (common)
 

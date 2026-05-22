@@ -1,7 +1,9 @@
+import * as Sentry from "@sentry/nextjs";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { invalidateCachedSessionsBulk } from "@/lib/auth/session/session-cache";
+import { getLogger } from "@/lib/logger";
 
 /**
  * Options for {@link invalidateUserSessions}.
@@ -171,6 +173,36 @@ export async function invalidateUserSessions(
         targetSessions.map((s) => s.sessionToken),
       );
       cacheTombstoneFailures = cacheResult.failed;
+    }
+
+    // A07-5: failures previously surfaced only in the per-caller audit
+    // metadata. Operators have to grep audit logs to notice a Redis
+    // outage during a revocation. Capture to Sentry centrally so it
+    // reaches the standard on-call channel.
+    if (cacheTombstoneFailures > 0) {
+      getLogger().error(
+        {
+          userId,
+          failures: cacheTombstoneFailures,
+          reason: options.reason ?? null,
+          _logType: "session.cache_tombstone_failures",
+        },
+        "session.cache_tombstone_failures",
+      );
+      Sentry.captureMessage(
+        "session cache tombstone failures during invalidateUserSessions",
+        {
+          level: "error",
+          tags: {
+            reason: options.reason ?? "unspecified",
+          },
+          extra: {
+            userId,
+            failures: cacheTombstoneFailures,
+            tenantScope: allTenants ? "all" : options.tenantId,
+          },
+        },
+      );
     }
 
     return {

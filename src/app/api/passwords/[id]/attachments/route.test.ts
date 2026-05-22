@@ -170,13 +170,13 @@ describe("GET /api/passwords/[id]/attachments", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 403 when entry belongs to another user", async () => {
+  it("returns 404 (A01-4) when entry belongs to another user", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue({ userId: "other-user" });
     const res = await GET(
       createGetRequest("http://localhost:3000/api/passwords/pw-1/attachments"),
       createParams("pw-1")
     );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it("returns attachment list", async () => {

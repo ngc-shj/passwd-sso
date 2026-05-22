@@ -29,6 +29,11 @@ vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/auth/session/check-auth", () => ({ checkAuth: mockCheckAuth }));
+// A01-3: permanent=true DELETE gates on requireRecentCurrentAuthMethod.
+// Default: null (allow). Tests for the rejection path override.
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: mockPrismaPasswordEntry,
@@ -151,13 +156,13 @@ describe("GET /api/passwords/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 403 when entry belongs to another user", async () => {
+  it("returns 404 (A01-4) when entry belongs to another user", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue({ ...ownedEntry, userId: "other-user" });
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/passwords/${PW_ID}`),
       createParams({ id: PW_ID }),
     );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it("returns password entry with encrypted data and entryType", async () => {
@@ -315,13 +320,13 @@ describe("PUT /api/passwords/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 403 when entry belongs to another user", async () => {
+  it("returns 404 (A01-4) when entry belongs to another user", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue({ ...ownedEntry, userId: "other-user" });
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, { body: updateBody }),
       createParams({ id: PW_ID }),
     );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it("updates password entry successfully", async () => {
@@ -732,13 +737,13 @@ describe("DELETE /api/passwords/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 403 when entry belongs to another user", async () => {
+  it("returns 404 (A01-4) when entry belongs to another user", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue({ ...ownedEntry, userId: "other-user" });
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/passwords/${PW_ID}`),
       createParams({ id: PW_ID }),
     );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it("soft deletes (moves to trash) by default", async () => {
