@@ -1,5 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
+import type { verifyRegistration } from "@/lib/auth/webauthn/webauthn-server";
+
+// T6 (Round-1 plan): mockVerifyRegistration typed against verifyRegistration's
+// real signature so a future @simplewebauthn major bump that changes
+// VerifiedRegistrationResponse's shape becomes a compile-time error rather
+// than a silent vacuous-pass test.
 
 // ── Hoisted mocks ────────────────────────────────────────────
 
@@ -22,7 +28,7 @@ const {
   mockRateLimiterCheck: vi.fn(),
   mockGetRedis: vi.fn(),
   mockRedisGetdel: vi.fn(),
-  mockVerifyRegistration: vi.fn(),
+  mockVerifyRegistration: vi.fn() as Mock<typeof verifyRegistration>,
   mockUint8ArrayToBase64url: vi.fn((b: Uint8Array) => Buffer.from(b).toString("base64url")),
   mockGetRpOrigin: vi.fn(() => "https://example.com"),
   mockLogAudit: vi.fn(),
@@ -131,15 +137,29 @@ function makeBody(credPropsOverride?: Record<string, unknown>) {
 }
 
 // v11 shape: per-credential fields nested under .credential, while
-// credentialDeviceType / credentialBackedUp stay at the top level.
-const mockRegistrationInfo = {
+// credentialDeviceType / credentialBackedUp stay at the top level. The full
+// VerifiedRegistrationResponse type includes additional metadata
+// (fmt / aaguid / credentialType / attestationObject / userVerified / origin)
+// — production code only reads the subset spelled out below, but T6 typing
+// requires the mock to satisfy the entire v11 contract.
+type VerifiedReg = NonNullable<
+  Awaited<ReturnType<typeof verifyRegistration>>["registrationInfo"]
+>;
+const mockRegistrationInfo: VerifiedReg = {
+  fmt: "none",
+  aaguid: "00000000-0000-0000-0000-000000000000",
   credential: {
     id: "AQID", // base64url("\x01\x02\x03")
     publicKey: new Uint8Array([4, 5, 6]),
     counter: 0,
   },
+  credentialType: "public-key",
+  attestationObject: new Uint8Array([0, 0, 0]),
+  userVerified: true,
   credentialDeviceType: "multiDevice",
   credentialBackedUp: true,
+  origin: "https://example.com",
+  rpID: "example.com",
 };
 
 const now = new Date("2026-03-16T00:00:00Z");
@@ -459,7 +479,10 @@ describe("POST /api/webauthn/register/verify", () => {
   });
 
   it("returns 400 with VALIDATION_ERROR when verified is false", async () => {
-    mockVerifyRegistration.mockResolvedValue({ verified: false });
+    mockVerifyRegistration.mockResolvedValue({
+      verified: false,
+      registrationInfo: undefined,
+    });
 
     const req = createRequest("POST", ROUTE_URL, {
       body: makeBody(),

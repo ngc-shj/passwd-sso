@@ -84,3 +84,29 @@ Per triangulate workflow, a round 2 review of plan v2 by the same 3 agents is no
 - All Major findings resolved with specific code/test changes in Files-to-touch
 
 If implementation surfaces a finding not addressed here, escalate to user before continuing.
+
+## Round 2 — Phase 3 code review (commit 4b48aa13)
+
+3 expert agents reviewed the implementation commit.
+
+### Resolved in follow-up commit
+- **T1 (Testing, Major)** / **F1 (Functionality, Minor)** / **A1 (Security, Minor)**: T6 mock typing not applied during round 1 implementation. `verify-authentication-assertion.test.ts`, `webauthn-authorize.test.ts`, and `register/verify/route.test.ts` mocks are now typed as `Mock<typeof verifyAuthenticationResponse|verifyRegistration|verifyAuthentication>`, with shared `makeVerifiedAuth()` / completed `mockRegistrationInfo` helpers that satisfy the v11 contract. Future major bumps that reshape the response types will now be a compile-time error rather than a vacuous-pass test.
+- **T2 (Testing, Minor)**: C8 (`userID: new TextEncoder().encode(userId)`) had no unit test. Added two cases to `webauthn-server.test.ts` asserting the wire `user.id` matches the v9 `Buffer.from(userId, "utf-8").toString("base64url")` byte-for-byte, with an additional non-ASCII userId case.
+- **F4 (Functionality, Info)**: Duplicate type-only imports in `webauthn-authorize.ts:19-20` merged into a single import.
+- **S6 (Security, Minor)**: C10 grep guard pattern in `scripts/pre-pr.sh` tightened to anchor the match with a closing quote / backtick so future Auth.js sibling providers with prefix-overlapping names (e.g., `webauthn-safe`, `passkey-legacy`) do not produce false-positive blocks.
+
+### Plan / commit citation drift (no code change)
+- **F2 (Functionality, Minor)**: Plan §item 6 / Round-1 F3 listed `AuthenticatorTransportFuture → AuthenticatorTransport` as a v10/v11 rename. Verified against `node_modules/@simplewebauthn/types/types/index.d.ts:151`: `AuthenticatorTransportFuture` is **retained** in v11 and is the canonical type that `WebAuthnCredential.transports` and `PublicKeyCredentialDescriptorJSON.transports` both reference. The implementation correctly keeps the `Future`-suffix import — the plan's forbidden-pattern entry for `AuthenticatorTransportFuture` was speculative based on round-1 sub-agent claims and is dropped as a documented deviation.
+- **F3 (Functionality, Info)**: Plan §item 4 / Round-1 F1 claimed `authenticationInfo.credentialID` was moved under `authenticationInfo.credential.id` in v10. Verified against `node_modules/@simplewebauthn/server/esm/authentication/verifyAuthenticationResponse.d.ts:51-63`: `authenticationInfo.credentialID: Base64URLString` is **still top-level** in v11 — only the type changed (Uint8Array → string). No consumer in this codebase reads the field, so no code impact. Plan claim corrected here for the historical record.
+
+### Accepted as gaps (carry forward as follow-up TODOs)
+- **A2 (Security, Info)** / **T1+T7 (Testing)**: No integration or E2E coverage for the WebAuthn ceremony. Manual smoke test plan (`c21-simplewebauthn-v11-manual-test.md`) is the current gate. TODOs filed: `c21-followup-e2e`, `c21-followup-integration`.
+- **T3 / T4 (Testing, Info)**: Optional further tightening of the dummy-credential and timing-equalization assertions (e.g., switch `objectContaining` to `toEqual` to forbid extra-with-wrong-name fields). Skipped because the production code's `const credential: WebAuthnCredential = ...` annotation already enforces this at compile time.
+
+### Recurring Issue Check (round 2 deltas)
+- R19 (mock-reality drift): **resolved** by T1/F1/A1 fixes — mocks are now typed.
+- R29 (citation accuracy): **plan/commit message acknowledged drift** — F2 / F3 corrected here. No further action.
+- All other R-rules: status unchanged from round 1.
+
+### Verdict
+All Major findings resolved in follow-up commit. Minor/Info findings either resolved or documented as accepted gaps with TODOs. Plan-vs-code citations corrected. The Round-2 code review converges.

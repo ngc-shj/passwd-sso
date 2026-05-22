@@ -9,14 +9,45 @@
  * coverage so a future refactor cannot regress them through one consumer
  * while leaving the other passing (#433 / C5).
  */
-import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll, type Mock } from "vitest";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/types";
+import type { verifyAuthenticationResponse } from "@simplewebauthn/server";
 
+type VerifiedAuth = Awaited<ReturnType<typeof verifyAuthenticationResponse>>;
+
+// T6 (Round-1 plan): mock typed against the real lib signature so a future
+// @simplewebauthn major bump that changes VerifiedAuthenticationResponse's
+// shape (e.g., field renamed, new required field) becomes a compile-time
+// error rather than a silent vacuous-pass test. Without the type binding,
+// `.mockResolvedValue({ verified, authenticationInfo: { newCounter } })`
+// would compile even if the real type adds required fields.
 const { mockGetRedis, mockRedisGetdel, mockVerifyAuthLib } = vi.hoisted(() => ({
   mockGetRedis: vi.fn(),
   mockRedisGetdel: vi.fn(),
-  mockVerifyAuthLib: vi.fn(),
+  mockVerifyAuthLib: vi.fn() as Mock<typeof verifyAuthenticationResponse>,
 }));
+
+// Helper: build a complete VerifiedAuthenticationResponse with sensible
+// defaults so individual tests can override only the fields they care about.
+// Without this helper, every mockResolvedValue would need to spell out the
+// 7 required authenticationInfo fields.
+function makeVerifiedAuth(
+  overrides: { verified?: boolean; info?: Partial<VerifiedAuth["authenticationInfo"]> } = {},
+): VerifiedAuth {
+  return {
+    verified: overrides.verified ?? true,
+    authenticationInfo: {
+      credentialID: "mock-credential-id",
+      newCounter: 5,
+      userVerified: true,
+      credentialDeviceType: "multiDevice",
+      credentialBackedUp: false,
+      origin: "http://localhost:3000",
+      rpID: "localhost",
+      ...overrides.info,
+    },
+  };
+}
 
 vi.mock("@/lib/redis", () => ({ getRedis: mockGetRedis }));
 vi.mock("@simplewebauthn/server", async (importOriginal) => {
@@ -38,10 +69,7 @@ beforeEach(() => {
   process.env.WEBAUTHN_RP_ORIGIN = "http://localhost:3000";
   mockGetRedis.mockReturnValue({ getdel: mockRedisGetdel });
   mockRedisGetdel.mockResolvedValue("stored-challenge");
-  mockVerifyAuthLib.mockResolvedValue({
-    verified: true,
-    authenticationInfo: { newCounter: 5 },
-  });
+  mockVerifyAuthLib.mockResolvedValue(makeVerifiedAuth());
 });
 
 afterAll(() => {
@@ -210,7 +238,7 @@ describe("verifyAuthenticationAssertion", () => {
   });
 
   it("returns 400 when @simplewebauthn/server reports verification failure", async () => {
-    mockVerifyAuthLib.mockResolvedValue({ verified: false });
+    mockVerifyAuthLib.mockResolvedValue(makeVerifiedAuth({ verified: false }));
     const { tx } = makeTxStub();
     const result = await verifyAuthenticationAssertion(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

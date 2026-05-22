@@ -159,8 +159,14 @@ run_step "Static: no-deprecated-logAudit" bash -c 'if grep -rn "logAudit(" src/ 
 # v9-shape code through v11 internals — a latent auth-bypass risk if ever
 # enabled. Keep them dead.
 run_step "Static: no-authjs-builtin-webauthn-provider" bash -c '
-  if grep -rn --include="*.ts" --include="*.tsx" \
-    -E "@auth/core/providers/(passkey|webauthn)" \
+  # Anchor the match with a closing string-delimiter so future siblings like
+  # @auth/core/providers/webauthn-safe (or webauthn2) do not get caught by a
+  # prefix-loose pattern. The two literal provider paths below are exactly
+  # the v9-shape ones we keep dead-coded. Delimiters in the character class
+  # are spelled as hex escapes so the regex survives nested bash -c quoting:
+  # \x22 = ", \x27 = single quote, \x60 = backtick.
+  if grep -rPn --include="*.ts" --include="*.tsx" \
+    "@auth/core/providers/(passkey|webauthn)[\x22\x27\x60]" \
     src/; then
     echo "ERROR: @auth/core builtin WebAuthn provider imports are forbidden (C21/C10)."
     echo "These providers still pin @simplewebauthn/server@^9 and are incompatible"

@@ -1,7 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+import type { verifyAuthentication } from "./webauthn-server";
+
+type VerifiedAuth = Awaited<ReturnType<typeof verifyAuthentication>>;
 
 // ── Hoisted mocks ────────────────────────────────────────────
 
+// T6 (Round-1 plan): mock typed against verifyAuthentication's real signature.
+// Structural drift between v11+'s VerifiedAuthenticationResponse and a partial
+// mock return value becomes a compile-time error rather than a silent
+// vacuous-pass test.
 const {
   mockGetRedis,
   mockRedisGetDel,
@@ -16,11 +23,31 @@ const {
   mockRedisGetDel: vi.fn(),
   mockPrismaFindFirst: vi.fn(),
   mockPrismaExecuteRaw: vi.fn(),
-  mockVerifyAuthentication: vi.fn(),
+  mockVerifyAuthentication: vi.fn() as Mock<typeof verifyAuthentication>,
   mockGetRpOrigin: vi.fn(),
   mockBase64urlToUint8Array: vi.fn(),
   mockWithBypassRls: vi.fn(),
 }));
+
+// Helper: build a complete VerifiedAuthenticationResponse for mocks. See the
+// matching helper in verify-authentication-assertion.test.ts.
+function makeVerifiedAuth(
+  overrides: { verified?: boolean; info?: Partial<VerifiedAuth["authenticationInfo"]> } = {},
+): VerifiedAuth {
+  return {
+    verified: overrides.verified ?? true,
+    authenticationInfo: {
+      credentialID: "mock-credential-id",
+      newCounter: 6,
+      userVerified: true,
+      credentialDeviceType: "multiDevice",
+      credentialBackedUp: false,
+      origin: "http://localhost:3000",
+      rpID: "localhost",
+      ...overrides.info,
+    },
+  };
+}
 
 vi.mock("@/lib/redis", () => ({
   getRedis: mockGetRedis,
@@ -106,10 +133,7 @@ describe("authorizeWebAuthn", () => {
     mockPrismaFindFirst.mockResolvedValue(mockStoredCredential);
     mockPrismaExecuteRaw.mockResolvedValue(1);
 
-    mockVerifyAuthentication.mockResolvedValue({
-      verified: true,
-      authenticationInfo: { newCounter: 6 },
-    });
+    mockVerifyAuthentication.mockResolvedValue(makeVerifiedAuth());
   });
 
   it("returns user on successful verification", async () => {
@@ -226,10 +250,9 @@ describe("authorizeWebAuthn", () => {
   });
 
   it("returns null when verification fails", async () => {
-    mockVerifyAuthentication.mockResolvedValue({
-      verified: false,
-      authenticationInfo: { newCounter: 5 },
-    });
+    mockVerifyAuthentication.mockResolvedValue(
+      makeVerifiedAuth({ verified: false, info: { newCounter: 5 } }),
+    );
     const result = await authorizeWebAuthn(validCredentials);
     expect(result).toBeNull();
   });

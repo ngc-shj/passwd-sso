@@ -113,6 +113,39 @@ describe("derivePrfSalt", () => {
   });
 });
 
+describe("generateRegistrationOpts (C8 userID Uint8Array shape)", () => {
+  // C8 regression guard: v11 narrowed userID from `string | Uint8Array`
+  // to `Uint8Array` only. The wrapper at generateRegistrationOpts calls
+  // `new TextEncoder().encode(userId)` to satisfy the new type — verify
+  // the resulting wire-format `user.id` is the SAME base64url string that
+  // v9's `Buffer.from(userId, "utf-8").toString("base64url")` produced,
+  // so existing credentials' userHandle remains compatible.
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubEnv("WEBAUTHN_RP_ID", "example.com");
+  });
+
+  it("encodes userId via TextEncoder so wire user.id equals v9 base64url(utf8(userId))", async () => {
+    const { generateRegistrationOpts } = await import("./webauthn-server");
+    const userId = "user-uuid-1234";
+    const opts = await generateRegistrationOpts(userId, "user@example.com", []);
+    // v9 would have produced this same wire value via
+    // `Buffer.from(userId, "utf-8").toString("base64url")`. v11's lib base64url-
+    // encodes the Uint8Array we pass — both pipelines must agree.
+    const expectedWireId = Buffer.from(userId, "utf-8").toString("base64url");
+    expect(opts.user.id).toBe(expectedWireId);
+  });
+
+  it("handles non-ASCII userId without truncation", async () => {
+    // UTF-8 encoding must preserve multi-byte sequences.
+    const { generateRegistrationOpts } = await import("./webauthn-server");
+    const userId = "ユーザー-123";
+    const opts = await generateRegistrationOpts(userId, "user@example.com", []);
+    const expectedWireId = Buffer.from(userId, "utf-8").toString("base64url");
+    expect(opts.user.id).toBe(expectedWireId);
+  });
+});
+
 describe("base64urlToUint8Array / uint8ArrayToBase64url", () => {
   // These are pure functions — no env vars or module reset needed.
   // Import once at the top of the describe block.
