@@ -16,6 +16,7 @@ const {
   mockWithBypassRls,
   mockInvalidateCachedSessions,
   mockResolveEffectiveSessionTimeouts,
+  mockInvalidateUserSessions,
 } = vi.hoisted(() => ({
   mockAssertOrigin: vi.fn(),
   mockRateLimiterCheck: vi.fn(),
@@ -29,6 +30,16 @@ const {
   mockWithBypassRls: vi.fn(),
   mockInvalidateCachedSessions: vi.fn().mockResolvedValue(undefined),
   mockResolveEffectiveSessionTimeouts: vi.fn(),
+  mockInvalidateUserSessions: vi.fn().mockResolvedValue({
+    sessions: 0,
+    extensionTokens: 0,
+    apiKeys: 0,
+    mcpAccessTokens: 0,
+    mcpRefreshTokens: 0,
+    delegationSessions: 0,
+    operatorTokens: 0,
+    cacheTombstoneFailures: 0,
+  }),
 }));
 
 vi.mock("@/lib/auth/session/csrf", () => ({
@@ -92,7 +103,7 @@ vi.mock("@/lib/http/with-request-log", () => ({
 }));
 
 vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
-  invalidateUserSessions: vi.fn().mockResolvedValue({ sessions: 0, extensionTokens: 0, apiKeys: 0, mcpAccessTokens: 0, mcpRefreshTokens: 0, delegationSessions: 0, operatorTokens: 0, cacheTombstoneFailures: 0 }),
+  invalidateUserSessions: mockInvalidateUserSessions,
 }));
 
 import { POST } from "./route";
@@ -214,6 +225,21 @@ describe("POST /api/auth/passkey/verify", () => {
         passkeyVerifiedAt: expect.any(Date),
       }),
     });
+
+    // Regression (bug fix): invalidateUserSessions must EXCLUDE the
+    // session token we just created — otherwise the cascade wipes our
+    // freshly-issued session and the client is bounced to sign-in on
+    // the next request.
+    expect(mockPrismaSessionCreate).toHaveBeenCalledOnce();
+    const createdSessionToken = mockPrismaSessionCreate.mock.calls[0][0].data.sessionToken;
+    expect(createdSessionToken).toEqual(expect.any(String));
+    expect(mockInvalidateUserSessions).toHaveBeenCalledWith(
+      "user-1",
+      expect.objectContaining({
+        allTenants: true,
+        excludeSessionToken: createdSessionToken,
+      }),
+    );
   });
 
   it("calls deleteMany before create", async () => {
@@ -286,6 +312,31 @@ describe("POST /api/auth/passkey/verify", () => {
         userAgent: null,
       }),
     );
+  });
+
+  it("returns 500 SESSION_INVALIDATE_FAILED when the cascade throws and does NOT set a session cookie", async () => {
+    // F1: cascade failure is fail-closed — the new session row is committed
+    // by the inner tx but no cookie is sent, so the orphan row is cleaned
+    // up by the next sign-in's `tx.session.deleteMany`. Specific error code
+    // gives the client a stable failure mode (no leak of cascade internals).
+    mockInvalidateUserSessions.mockRejectedValueOnce(new Error("transient redis fail"));
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(500);
+    const json = await res.json();
+    expect(json.error).toBe("SESSION_INVALIDATE_FAILED");
+    expect(res.headers.get("set-cookie")).toBeNull();
+
+    // AUTH_LOGIN audit must NOT fire — sign-in did not complete.
+    const authLoginCalls = mockLogAudit.mock.calls.filter(
+      (args: unknown[]) => (args[0] as { action: string }).action === "AUTH_LOGIN",
+    );
+    expect(authLoginCalls).toHaveLength(0);
   });
 
   it("returns 403 when origin is invalid", async () => {
