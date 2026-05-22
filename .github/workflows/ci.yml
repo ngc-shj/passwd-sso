@@ -370,6 +370,14 @@ jobs:
       # Dummy auth provider — production env validation requires at least one
       AUTH_GOOGLE_ID: "ci-google-id.apps.googleusercontent.com"
       AUTH_GOOGLE_SECRET: "ci-google-secret"
+      # A08-3: production env validation now requires the audit anchor
+      # publisher to be enabled + configured (signing key + tag secret +
+      # at least one destination). E2E runs a real production build so
+      # the validation fires.
+      AUDIT_ANCHOR_PUBLISHER_ENABLED: "true"
+      AUDIT_ANCHOR_SIGNING_KEY: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      AUDIT_ANCHOR_TAG_SECRET: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      AUDIT_ANCHOR_DESTINATION_FS_PATH: "/tmp/ci-anchors"
     steps:
       - uses: actions/checkout@v6
 
