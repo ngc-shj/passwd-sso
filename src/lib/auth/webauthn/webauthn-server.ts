@@ -28,8 +28,7 @@ import type {
   AuthenticatorTransportFuture,
   RegistrationResponseJSON,
   AuthenticationResponseJSON,
-  PublicKeyCredentialDescriptorFuture,
-  AuthenticatorDevice,
+  WebAuthnCredential,
 } from "@simplewebauthn/types";
 import { hkdfSync } from "node:crypto";
 import type { TxOrPrisma } from "@/lib/prisma";
@@ -98,17 +97,18 @@ export async function generateRegistrationOpts(
   const rpId = getRpId();
   const rpName = getRpName();
 
-  const excludeCredentials: PublicKeyCredentialDescriptorFuture[] =
-    existingCredentials.map((c) => ({
-      id: base64urlToUint8Array(c.credentialId),
-      type: "public-key" as const,
-      transports: (c.transports ?? []) as AuthenticatorTransportFuture[],
-    }));
+  // v11: excludeCredentials uses inline type with string id (base64url) — no
+  // PublicKeyCredentialDescriptorFuture wrapping, no base64urlToUint8Array conversion.
+  const excludeCredentials = existingCredentials.map((c) => ({
+    id: c.credentialId,
+    transports: (c.transports ?? []) as AuthenticatorTransportFuture[],
+  }));
 
   const opts: GenerateRegistrationOptionsOpts = {
     rpName,
     rpID: rpId,
-    userID: Buffer.from(userId, "utf-8").toString("base64url"),
+    // v11: userID type narrowed from `string | Uint8Array` to `Uint8Array`.
+    userID: new TextEncoder().encode(userId),
     userName,
     attestationType: "none",
     excludeCredentials,
@@ -156,13 +156,12 @@ export async function generateAuthenticationOpts(
 ) {
   const rpId = getRpId();
 
-  const allow: PublicKeyCredentialDescriptorFuture[] = allowCredentials.map(
-    (c) => ({
-      id: base64urlToUint8Array(c.credentialId),
-      type: "public-key" as const,
-      transports: (c.transports ?? []) as AuthenticatorTransportFuture[],
-    }),
-  );
+  // v11: allowCredentials uses inline type with string id (base64url) — no
+  // PublicKeyCredentialDescriptorFuture wrapping, no base64urlToUint8Array conversion.
+  const allow = allowCredentials.map((c) => ({
+    id: c.credentialId,
+    transports: (c.transports ?? []) as AuthenticatorTransportFuture[],
+  }));
 
   const opts: GenerateAuthenticationOptionsOpts = {
     rpID: rpId,
@@ -173,19 +172,23 @@ export async function generateAuthenticationOpts(
   return generateAuthenticationOptions(opts);
 }
 
+// v11: option renamed `authenticator` → `credential`; type `AuthenticatorDevice` removed in favor
+// of `WebAuthnCredential` (string `id` instead of Uint8Array `credentialID`, `publicKey` instead
+// of `credentialPublicKey`). C9: project policy keeps rpId as single string (defensive narrowing
+// vs v11's widening to `string | string[]`).
 export async function verifyAuthentication(
   response: AuthenticationResponseJSON,
   expectedChallenge: string,
   rpId: string,
   rpOrigin: string,
-  credential: AuthenticatorDevice,
+  credential: WebAuthnCredential,
 ): Promise<VerifiedAuthenticationResponse> {
   const opts: VerifyAuthenticationResponseOpts = {
     response,
     expectedChallenge,
     expectedOrigin: rpOrigin,
     expectedRPID: rpId,
-    authenticator: credential,
+    credential,
     requireUserVerification: true,
   };
 
@@ -355,18 +358,20 @@ export async function verifyAuthenticationAssertion(
     return { ok: false, status: 404, code: "NOT_FOUND", details: "Credential not found" };
   }
 
-  const authenticator: AuthenticatorDevice = {
-    credentialPublicKey: base64urlToUint8Array(storedCredential.publicKey),
-    credentialID: base64urlToUint8Array(storedCredential.credentialId),
+  // v11: WebAuthnCredential shape — string `id` (no Uint8Array conversion),
+  // `publicKey` (was `credentialPublicKey`).
+  const credential: WebAuthnCredential = {
+    id: storedCredential.credentialId,
+    publicKey: base64urlToUint8Array(storedCredential.publicKey),
     counter: Number(storedCredential.counter),
-    transports: storedCredential.transports as AuthenticatorDevice["transports"],
+    transports: storedCredential.transports as WebAuthnCredential["transports"],
   };
 
   const origin = getRpOrigin(rpId);
 
   let verification: VerifiedAuthenticationResponse;
   try {
-    verification = await verifyAuthentication(response, challenge, rpId, origin, authenticator);
+    verification = await verifyAuthentication(response, challenge, rpId, origin, credential);
   } catch {
     return {
       ok: false,

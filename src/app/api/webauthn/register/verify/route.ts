@@ -112,9 +112,14 @@ async function handlePOST(req: NextRequest) {
 
   const { registrationInfo } = verification;
 
-  const credentialId = uint8ArrayToBase64url(registrationInfo.credentialID);
-  const publicKey = uint8ArrayToBase64url(registrationInfo.credentialPublicKey);
-  const counter = registrationInfo.counter;
+  // v11: per-credential fields nested under registrationInfo.credential.
+  // - credential.id is already a base64url string (no Uint8Array conversion).
+  // - credential.publicKey is still binary and must be base64url-encoded for storage.
+  // - credential.counter replaces the v9 top-level counter field.
+  // credentialDeviceType and credentialBackedUp stay at the top level.
+  const credentialId = registrationInfo.credential.id;
+  const publicKey = uint8ArrayToBase64url(registrationInfo.credential.publicKey);
+  const counter = registrationInfo.credential.counter;
   const deviceType = registrationInfo.credentialDeviceType;
   const backedUp = registrationInfo.credentialBackedUp;
 

@@ -16,7 +16,7 @@ import {
   getRpOrigin,
   base64urlToUint8Array,
 } from "@/lib/auth/webauthn/webauthn-server";
-import type { AuthenticatorDevice } from "@simplewebauthn/types";
+import type { WebAuthnCredential } from "@simplewebauthn/types";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/types";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
@@ -31,11 +31,43 @@ const COUNTER_ZERO_REUSE_WINDOW_MS = 5 * MS_PER_SECOND;
 // challengeId must be a 32-char hex string (16 random bytes)
 const CHALLENGE_ID_RE = /^[0-9a-f]{32}$/;
 
-// Dummy public key for timing equalization when credential not found.
-// This is an invalid key that will cause verification to fail, but ensures
-// the verification code path still runs (preventing timing oracle attacks).
-const DUMMY_PUBLIC_KEY = new Uint8Array(65);
-const DUMMY_CRED_ID = new Uint8Array(32);
+// C5: Dummy credential for timing equalization when credential not found.
+//
+// v9 used an all-zeros 65-byte buffer as DUMMY_PUBLIC_KEY. v11's CBOR-based
+// COSE-key decoder may short-circuit on the all-zeros buffer before reaching
+// signature verification, which would make the dummy branch faster than the
+// real branch and create a credential-enumeration timing oracle.
+//
+// Replacement: a valid COSE-encoded EC2/P-256 public key built from the
+// standard P-256 generator point (FIPS 186-4 / SEC 2). This is a well-known
+// constant — there is no private key to leak. Signature verification still
+// fails (because the assertion was not signed with the matching private
+// key), but the verification code path executes the full CBOR decode + ECDSA
+// verify, keeping dummy-branch timing comparable to the real branch.
+//
+// COSE layout (RFC 8152 §13.1, deterministic encoding):
+//   A5                       // map(5)
+//   01 02                    // kty (1) = EC2 (2)
+//   03 26                    // alg (3) = ES256 (-7)
+//   20 01                    // crv (-1) = P-256 (1)
+//   21 58 20 <x: 32 bytes>   // x (-2)
+//   22 58 20 <y: 32 bytes>   // y (-3)
+const DUMMY_PUBLIC_KEY = new Uint8Array([
+  0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01,
+  0x21, 0x58, 0x20,
+  // x = P-256 generator x-coordinate
+  0x6b, 0x17, 0xd1, 0xf2, 0xe1, 0x2c, 0x42, 0x47, 0xf8, 0xbc, 0xe6, 0xe5,
+  0x63, 0xa4, 0x40, 0xf2, 0x77, 0x03, 0x7d, 0x81, 0x2d, 0xeb, 0x33, 0xa0,
+  0xf4, 0xa1, 0x39, 0x45, 0xd8, 0x98, 0xc2, 0x96,
+  0x22, 0x58, 0x20,
+  // y = P-256 generator y-coordinate
+  0x4f, 0xe3, 0x42, 0xe2, 0xfe, 0x1a, 0x7f, 0x9b, 0x8e, 0xe7, 0xeb, 0x4a,
+  0x7c, 0x0f, 0x9e, 0x16, 0x2b, 0xce, 0x33, 0x57, 0x6b, 0x31, 0x5e, 0xce,
+  0xcb, 0xb6, 0x40, 0x68, 0x37, 0xbf, 0x51, 0xf5,
+]);
+// 43-char base64url string = 32-byte dummy credential ID (matches the previous
+// new Uint8Array(32) length so byte-equivalence with v9 timing is preserved).
+const DUMMY_CRED_ID = "A".repeat(43);
 
 // ── Main authorize function ──────────────────────────────────
 
@@ -97,20 +129,20 @@ export async function authorizeWebAuthn(
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
-  // 4. Build authenticator device object (dummy if not found for timing equalization)
-  const authenticator: AuthenticatorDevice = storedCredential
+  // 4. Build WebAuthnCredential (dummy if not found for timing equalization).
+  // v11 renamed AuthenticatorDevice → WebAuthnCredential, with `id: string`
+  // (base64url, not Uint8Array) and `publicKey` (not `credentialPublicKey`).
+  const credential: WebAuthnCredential = storedCredential
     ? {
-        credentialPublicKey: base64urlToUint8Array(
-          storedCredential.publicKey,
-        ),
-        credentialID: base64urlToUint8Array(storedCredential.credentialId),
+        id: storedCredential.credentialId,
+        publicKey: base64urlToUint8Array(storedCredential.publicKey),
         counter: Number(storedCredential.counter),
         transports:
-          storedCredential.transports as AuthenticatorDevice["transports"],
+          storedCredential.transports as WebAuthnCredential["transports"],
       }
     : {
-        credentialPublicKey: DUMMY_PUBLIC_KEY,
-        credentialID: DUMMY_CRED_ID,
+        id: DUMMY_CRED_ID,
+        publicKey: DUMMY_PUBLIC_KEY,
         counter: 0,
       };
 
@@ -127,7 +159,7 @@ export async function authorizeWebAuthn(
       challenge,
       rpId,
       origin,
-      authenticator,
+      credential,
     );
     // Only accept if credential was actually found AND verified
     verified = !!storedCredential && result.verified;

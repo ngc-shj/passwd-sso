@@ -130,10 +130,14 @@ function makeBody(credPropsOverride?: Record<string, unknown>) {
   };
 }
 
+// v11 shape: per-credential fields nested under .credential, while
+// credentialDeviceType / credentialBackedUp stay at the top level.
 const mockRegistrationInfo = {
-  credentialID: new Uint8Array([1, 2, 3]),
-  credentialPublicKey: new Uint8Array([4, 5, 6]),
-  counter: 0,
+  credential: {
+    id: "AQID", // base64url("\x01\x02\x03")
+    publicKey: new Uint8Array([4, 5, 6]),
+    counter: 0,
+  },
   credentialDeviceType: "multiDevice",
   credentialBackedUp: true,
 };
@@ -191,11 +195,25 @@ describe("POST /api/webauthn/register/verify", () => {
       const res = await POST(req);
       expect(res.status).toBe(201);
 
+      // T5 (v11 shape regression guard): assert the persisted credentialId comes
+      // verbatim from registrationInfo.credential.id (string) — NOT from a
+      // re-conversion of credentialPublicKey. And confirm publicKey is the
+      // base64url of the publicKey Uint8Array.
       expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ discoverable: true }),
+          data: expect.objectContaining({
+            discoverable: true,
+            credentialId: "AQID",
+            publicKey: Buffer.from(new Uint8Array([4, 5, 6])).toString("base64url"),
+            counter: 0n,
+          }),
         }),
       );
+      // T8: v11 calls uint8ArrayToBase64url exactly once per registration
+      // (only for publicKey — credentialId is already a string and skips the
+      // conversion).
+      expect(mockUint8ArrayToBase64url).toHaveBeenCalledTimes(1);
+      expect(mockUint8ArrayToBase64url).toHaveBeenCalledWith(new Uint8Array([4, 5, 6]));
     });
 
     it("passes discoverable=false to Prisma when credProps.rk is false", async () => {

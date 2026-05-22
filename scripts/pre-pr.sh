@@ -152,6 +152,23 @@ else
 fi
 run_step "Static: no-deprecated-logAudit" bash -c 'if grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*" | grep -q .; then echo "Residual logAudit() calls found:"; grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*"; exit 1; fi'
 
+# C21 / C10: forbid imports of Auth.js builtin WebAuthn providers. The project
+# uses Auth.js Credentials provider with a custom authorize() flow that calls
+# our own verifyAuthentication(). The @auth/core builtin providers (passkey,
+# webauthn) still peer-depend on @simplewebauthn/server@^9 and would invoke
+# v9-shape code through v11 internals — a latent auth-bypass risk if ever
+# enabled. Keep them dead.
+run_step "Static: no-authjs-builtin-webauthn-provider" bash -c '
+  if grep -rn --include="*.ts" --include="*.tsx" \
+    -E "@auth/core/providers/(passkey|webauthn)" \
+    src/; then
+    echo "ERROR: @auth/core builtin WebAuthn provider imports are forbidden (C21/C10)."
+    echo "These providers still pin @simplewebauthn/server@^9 and are incompatible"
+    echo "with our v11 runtime. Use our custom Credentials authorize() flow instead."
+    exit 1
+  fi
+'
+
 # fetch basePath compliance — every client API call must go through fetchApi()
 # (which honors NEXT_PUBLIC_BASE_PATH) instead of raw fetch("/api/..."). Mirrors
 # the CI gate at .github/workflows/ci.yml "Check fetch basePath compliance".

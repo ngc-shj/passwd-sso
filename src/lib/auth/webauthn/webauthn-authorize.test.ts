@@ -119,6 +119,21 @@ describe("authorizeWebAuthn", () => {
       email: "test@example.com",
       name: "Test User",
     });
+    // T4 (v11 shape regression guard): verify the WebAuthnCredential
+    // passed to verifyAuthentication has v11 shape — string `id` (base64url),
+    // Uint8Array `publicKey`, numeric `counter`. The v9 shape used `credentialID`
+    // (Uint8Array) and `credentialPublicKey` — those names must NOT appear.
+    expect(mockVerifyAuthentication).toHaveBeenCalledWith(
+      expect.anything(), // response
+      expect.anything(), // challenge
+      expect.anything(), // rpId
+      expect.anything(), // origin
+      expect.objectContaining({
+        id: expect.any(String),
+        publicKey: expect.any(Uint8Array),
+        counter: expect.any(Number),
+      }),
+    );
   });
 
   it("returns null when credentialResponse is missing", async () => {
@@ -192,8 +207,22 @@ describe("authorizeWebAuthn", () => {
     mockVerifyAuthentication.mockRejectedValue(new Error("Invalid"));
     const result = await authorizeWebAuthn(validCredentials);
     expect(result).toBeNull();
-    // Verify that verifyAuthentication was still called (timing equalization)
-    expect(mockVerifyAuthentication).toHaveBeenCalled();
+    // T4 + C5 (v11 dummy-credential shape regression guard): the dummy branch
+    // must build a WebAuthnCredential-shaped object so verifyAuthentication
+    // runs the same CBOR-decode + ECDSA-verify path as the real branch. Without
+    // this assertion, a refactor that ships a malformed dummy could create a
+    // credential-enumeration timing oracle.
+    expect(mockVerifyAuthentication).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        id: expect.any(String),
+        publicKey: expect.any(Uint8Array),
+        counter: 0,
+      }),
+    );
   });
 
   it("returns null when verification fails", async () => {
