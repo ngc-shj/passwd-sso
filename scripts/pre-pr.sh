@@ -267,6 +267,99 @@ run_step "Static: no-authjs-builtin-webauthn-provider" bash -c '
   fi
 '
 
+# A04-4 C7.1: master-key rotation approve route MUST go through the centralized
+# eligibility helper AND apply the two load-bearing CAS WHERE clauses:
+#   initiatedById: { not: ... }   — self-approval rejection
+#   tenantId: actor.tenantId      — cross-tenant rejection
+run_step "Static: master-key-rotation-dual-approval-uses-helper" bash -c '
+  ROUTE="src/app/api/admin/rotate-master-key/[rotationId]/approve/route.ts"
+  if [ ! -f "$ROUTE" ]; then
+    echo "OK (route not present)"
+    exit 0
+  fi
+  if ! grep -qE "computeApproveEligibility\\(" "$ROUTE"; then
+    echo "ERROR: $ROUTE must invoke computeApproveEligibility() (A04-4 C6)"
+    exit 1
+  fi
+  if ! grep -qE "initiatedById:\\s*\\{\\s*not:" "$ROUTE"; then
+    echo "ERROR: $ROUTE missing CAS self-approval WHERE (initiatedById: { not: ... })"
+    exit 1
+  fi
+  if ! grep -qE "tenantId:\\s*auth\\.tenantId" "$ROUTE"; then
+    echo "ERROR: $ROUTE missing CAS cross-tenant WHERE (tenantId: auth.tenantId)"
+    exit 1
+  fi
+'
+
+# A04-4 C7.2: execute route MUST enforce the full state-machine CAS:
+#   approvedAt: { not: null }   — approval required
+#   executedAt: null            — not already executed
+#   revokedAt:  null            — not revoked
+#   expiresAt:  { gt: ... }     — not expired
+#   tenantId:   actor.tenantId  — cross-tenant rejection
+run_step "Static: master-key-rotation-execute-cas" bash -c '
+  ROUTE="src/app/api/admin/rotate-master-key/[rotationId]/execute/route.ts"
+  if [ ! -f "$ROUTE" ]; then
+    echo "OK (route not present)"
+    exit 0
+  fi
+  if ! grep -qE "approvedAt:\\s*\\{\\s*not:\\s*null" "$ROUTE"; then
+    echo "ERROR: execute missing approvedAt CAS (approvedAt: { not: null })"
+    exit 1
+  fi
+  if ! grep -qE "executedAt:\\s*null" "$ROUTE"; then
+    echo "ERROR: execute missing executedAt CAS (executedAt: null)"
+    exit 1
+  fi
+  if ! grep -qE "revokedAt:\\s*null" "$ROUTE"; then
+    echo "ERROR: execute missing revokedAt CAS (revokedAt: null)"
+    exit 1
+  fi
+  if ! grep -qE "expiresAt:\\s*\\{\\s*gt:" "$ROUTE"; then
+    echo "ERROR: execute missing expiresAt CAS (expiresAt: { gt: ... })"
+    exit 1
+  fi
+  if ! grep -qE "tenantId:\\s*auth\\.tenantId" "$ROUTE"; then
+    echo "ERROR: execute missing tenantId CAS"
+    exit 1
+  fi
+'
+
+# A04-4 C7.3: legacy single-actor endpoint must return 410 Gone and MUST NOT
+# call passwordShare.updateMany — that destructive write moved into the
+# execute route, gated by dual approval.
+run_step "Static: master-key-rotation-legacy-endpoint-gone" bash -c '
+  ROUTE="src/app/api/admin/rotate-master-key/route.ts"
+  if [ ! -f "$ROUTE" ]; then
+    echo "OK (route not present)"
+    exit 0
+  fi
+  if ! grep -qE "status:\\s*410\\b" "$ROUTE"; then
+    echo "ERROR: $ROUTE must return 410 Gone (A04-4 FR8)"
+    exit 1
+  fi
+  if grep -qE "passwordShare\\.updateMany" "$ROUTE"; then
+    echo "ERROR: legacy rotate-master-key still mutates PasswordShare (single-actor path must be removed)"
+    exit 1
+  fi
+'
+
+# A04-4 C7.4 / C1.AC3: revokedShares is the share-revocation result; written
+# ONLY inside the execute route and the helper module. Any other prod source
+# writing `revokedShares:` is a regression — the count must originate from the
+# execute path or the invariant breaks.
+run_step "Static: master-key-rotation-revokedShares-execute-only" bash -c '
+  HITS=$(grep -rnE "revokedShares\\s*:" src/ --include="*.ts" --include="*.tsx" 2>/dev/null \
+    | grep -v "\\.test\\." \
+    | grep -v "src/app/api/admin/rotate-master-key/\\[rotationId\\]/execute/" \
+    | grep -v "src/lib/admin-rotation/" || true)
+  if [ -n "$HITS" ]; then
+    echo "ERROR: revokedShares written outside execute route (A04-4 C1 invariant)"
+    echo "$HITS"
+    exit 1
+  fi
+'
+
 # fetch basePath compliance — every client API call must go through fetchApi()
 # (which honors NEXT_PUBLIC_BASE_PATH) instead of raw fetch("/api/..."). Mirrors
 # the CI gate at .github/workflows/ci.yml "Check fetch basePath compliance".

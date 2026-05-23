@@ -177,6 +177,13 @@ INSERT INTO admin_vault_resets (id, tenant_id, target_user_id, initiated_by_id, 
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', '00000000-0000-0000-0000-0000000000A1', md5('rls-x-a-avr')::text, NOW() + interval '1 hour'),
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B1', '00000000-0000-0000-0000-0000000000B1', md5('rls-x-b-avr')::text, NOW() + interval '1 hour');
 
+-- A04-4: master-key rotation dual-approval — tenant-scoped rotation rows used
+-- to govern who can approve/execute/revoke (write scope of execute itself is
+-- system-wide via withBypassRls, per NF4).
+INSERT INTO master_key_rotations (id, tenant_id, initiated_by_id, target_version, expires_at) VALUES
+  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', 2, NOW() + interval '24 hours'),
+  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B1', 2, NOW() + interval '24 hours');
+
 INSERT INTO access_requests (id, tenant_id, service_account_id, requested_scope, expires_at) VALUES
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A3', 'passwords:read', NOW() + interval '1 hour'),
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B3', 'passwords:read', NOW() + interval '1 hour');

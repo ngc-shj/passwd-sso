@@ -20,3 +20,11 @@ export const EXECUTE_TTL_MS = 60 * MS_PER_MINUTE;
 
 /** Total reset lifetime from initiate to expiry (24h). */
 export const RESET_TOTAL_TTL_MS = MS_PER_DAY;
+
+/**
+ * A04-4: total master-key rotation lifetime from initiate to expiry (24h).
+ * Distinct from RESET_TOTAL_TTL_MS so the two flows can diverge without
+ * coupling — same envelope today, decoupled name. Approve narrows expiresAt
+ * to min(originalExpiresAt, now + EXECUTE_TTL_MS).
+ */
+export const ROTATION_TOTAL_TTL_MS = MS_PER_DAY;

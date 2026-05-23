@@ -52,6 +52,16 @@ const MESSAGES = {
         `An admin has initiated a vault reset for ${targetEmail}. A second admin must approve before it can be executed.`,
     },
   },
+  MASTER_KEY_ROTATION_PENDING_APPROVAL: {
+    ja: {
+      title: "マスターキーローテーション承認待ち",
+      body: "管理者がマスターキーローテーションを開始しました。実行には別の管理者の承認が必要です。",
+    },
+    en: {
+      title: "Master key rotation awaiting approval",
+      body: "An admin has initiated a master key rotation. A second admin must approve before it can be executed.",
+    },
+  },
   WATCHTOWER_ALERT: {
     ja: {
       title: "Watchtower アラート",

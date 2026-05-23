@@ -283,3 +283,53 @@ describe("ADMIN_VAULT_RESET_* group membership (T4)", () => {
     expect(teamAdmin.has(AUDIT_ACTION.ADMIN_VAULT_RESET_REVOKE)).toBe(false);
   });
 });
+
+// A04-4 (C2.AC2 / C8.AC3): MASTER_KEY_ROTATION_* group membership.
+// Master-key rotation is a tenant-scoped infrastructure action, not a per-user
+// auth event and not a team-scoped action — placement matches the existing
+// MASTER_KEY_ROTATION (which lives only in AUDIT_ACTION_GROUPS[ADMIN] and
+// AUDIT_ACTION_GROUPS_TENANT[ADMIN]). The negative assertions catch a future
+// drop-thru where the four phase actions accidentally inherit ADMIN_VAULT_RESET_*
+// placement (PERSONAL.AUTH and TEAM.ADMIN).
+describe("MASTER_KEY_ROTATION_* group membership (A04-4 C2.AC2)", () => {
+  const ALL_FOUR = [
+    AUDIT_ACTION.MASTER_KEY_ROTATION_INITIATE,
+    AUDIT_ACTION.MASTER_KEY_ROTATION_APPROVE,
+    AUDIT_ACTION.MASTER_KEY_ROTATION_EXECUTE,
+    AUDIT_ACTION.MASTER_KEY_ROTATION_REVOKE,
+  ] as const;
+
+  it("all four are in AUDIT_ACTION_VALUES", () => {
+    const values = new Set<string>(AUDIT_ACTION_VALUES);
+    for (const action of ALL_FOUR) {
+      expect(values.has(action)).toBe(true);
+    }
+  });
+
+  it("all four are in AUDIT_ACTION_GROUPS_TENANT[ADMIN]", () => {
+    const tenantAdmin = new Set(
+      AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.ADMIN],
+    );
+    for (const action of ALL_FOUR) {
+      expect(tenantAdmin.has(action)).toBe(true);
+    }
+  });
+
+  it("none of the four are in AUDIT_ACTION_GROUPS_PERSONAL[AUTH]", () => {
+    const personalAuth = new Set(
+      AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.AUTH],
+    );
+    for (const action of ALL_FOUR) {
+      expect(personalAuth.has(action)).toBe(false);
+    }
+  });
+
+  it("none of the four are in AUDIT_ACTION_GROUPS_TEAM[ADMIN]", () => {
+    const teamAdmin = new Set(
+      AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.ADMIN],
+    );
+    for (const action of ALL_FOUR) {
+      expect(teamAdmin.has(action)).toBe(false);
+    }
+  });
+});
