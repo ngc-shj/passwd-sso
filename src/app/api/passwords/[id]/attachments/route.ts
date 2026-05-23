@@ -18,7 +18,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, forbidden, notFound, unauthorized, rateLimited, validationError } from "@/lib/http/api-response";
+import { errorResponse, notFound, unauthorized, rateLimited, validationError } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { LegacyAttachmentInconsistentVersionError } from "@/lib/vault/rotate-key-server";
 
