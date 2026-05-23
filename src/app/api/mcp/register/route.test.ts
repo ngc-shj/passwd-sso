@@ -59,16 +59,14 @@ vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
 }));
 
-vi.mock("@/lib/crypto/crypto-server", () => ({
-  hashToken: vi.fn((token: string) => `hashed:${token}`),
-}));
-
 import { POST } from "@/app/api/mcp/register/route";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
+// A07-4: DCR is public-only — token_endpoint_auth_method must be the literal "none".
 const VALID_BODY = {
   client_name: "Test MCP Client",
   redirect_uris: ["https://example.com/callback"],
+  token_endpoint_auth_method: "none" as const,
 };
 
 const MOCK_CREATED_CLIENT = {
@@ -87,7 +85,8 @@ describe("POST /api/mcp/register", () => {
     mockWithBypassRls.mockImplementation(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p));
   });
 
-  it("returns 201 with client credentials on valid registration", async () => {
+  // A07-4 T-1: positive — DCR issues public client with empty clientSecretHash.
+  it("returns 201 with public client (no secret) on valid registration", async () => {
     const req = createRequest("POST", "http://localhost/api/mcp/register", {
       body: VALID_BODY,
     });
@@ -96,17 +95,27 @@ describe("POST /api/mcp/register", () => {
 
     expect(status).toBe(201);
     expect(json.client_id).toBe(MOCK_CREATED_CLIENT.clientId);
-    expect(json.client_secret).toBeTruthy();
-    expect(typeof json.client_secret).toBe("string");
+    // A07-4: public-only — no client_secret in response.
+    expect(json.client_secret).toBeUndefined();
+    expect(json.client_secret_expires_at).toBeUndefined();
+    expect(json.token_endpoint_auth_method).toBe("none");
     expect(json.client_name).toBe("Test MCP Client");
     expect(json.redirect_uris).toEqual(["https://example.com/callback"]);
     expect(json.grant_types).toEqual(["authorization_code"]);
     expect(json.response_types).toEqual(["code"]);
-    expect(json.token_endpoint_auth_method).toBe("client_secret_post");
     expect(json.client_id_issued_at).toBe(
       Math.floor(MOCK_CREATED_CLIENT.createdAt.getTime() / 1000),
     );
-    expect(json.client_secret_expires_at).toBe(0);
+
+    // A07-4 T-1: assert DB-write contract — clientSecretHash MUST be the empty
+    // string for DCR clients (public-only sentinel; matches downstream check
+    // in oauth-server.ts:`clientSecretHash === ""`). Direct value assertion so
+    // any non-empty hash (regression) flips this test red.
+    const createCall = mockPrismaCreate.mock.calls[0]?.[0] as
+      | { data: { clientSecretHash: string; isDcr: boolean } }
+      | undefined;
+    expect(createCall?.data.clientSecretHash).toBe("");
+    expect(createCall?.data.isDcr).toBe(true);
   });
 
   it("returns 400 with invalid_client_metadata when client_name is missing", async () => {
@@ -135,6 +144,7 @@ describe("POST /api/mcp/register", () => {
     const req = createRequest("POST", "http://localhost/api/mcp/register", {
       body: {
         client_name: "Test",
+        token_endpoint_auth_method: "none",
         redirect_uris: ["https://app.example.com/callback"],
       },
     });
@@ -148,6 +158,7 @@ describe("POST /api/mcp/register", () => {
     const req = createRequest("POST", "http://localhost/api/mcp/register", {
       body: {
         client_name: "Test",
+        token_endpoint_auth_method: "none",
         redirect_uris: ["http://127.0.0.1:3000/callback"],
       },
     });
@@ -161,6 +172,7 @@ describe("POST /api/mcp/register", () => {
     const req = createRequest("POST", "http://localhost/api/mcp/register", {
       body: {
         client_name: "Test",
+        token_endpoint_auth_method: "none",
         redirect_uris: ["http://localhost:3000/callback"],
       },
     });
@@ -174,6 +186,7 @@ describe("POST /api/mcp/register", () => {
     const req = createRequest("POST", "http://localhost/api/mcp/register", {
       body: {
         client_name: "Test",
+        token_endpoint_auth_method: "none",
         redirect_uris: ["http://localhost/callback"],
       },
     });
@@ -188,6 +201,7 @@ describe("POST /api/mcp/register", () => {
     const req = createRequest("POST", "http://localhost/api/mcp/register", {
       body: {
         client_name: "Test",
+        token_endpoint_auth_method: "none",
         redirect_uris: ["http://127.0.0.1/callback"],
       },
     });
@@ -202,6 +216,7 @@ describe("POST /api/mcp/register", () => {
     const req = createRequest("POST", "http://localhost/api/mcp/register", {
       body: {
         client_name: "Test",
+        token_endpoint_auth_method: "none",
         redirect_uris: ["http://[::1]:3000/callback"],
       },
     });
@@ -215,6 +230,7 @@ describe("POST /api/mcp/register", () => {
     const req = createRequest("POST", "http://localhost/api/mcp/register", {
       body: {
         client_name: "Test",
+        token_endpoint_auth_method: "none",
         redirect_uris: ["http://[::1]/callback"],
       },
     });
@@ -229,6 +245,7 @@ describe("POST /api/mcp/register", () => {
     const req = createRequest("POST", "http://localhost/api/mcp/register", {
       body: {
         client_name: "Test",
+        token_endpoint_auth_method: "none",
         redirect_uris: ["http://example.com/callback"],
       },
     });
@@ -315,23 +332,47 @@ describe("POST /api/mcp/register", () => {
     expect(json.error).toBe("invalid_request");
   });
 
-  // T-14: public client registration without client_secret
-  it("registers public client without client_secret when token_endpoint_auth_method is none", async () => {
-    const req = createRequest("POST", "http://localhost/api/mcp/register", {
-      body: {
-        ...VALID_BODY,
-        token_endpoint_auth_method: "none",
-      },
-    });
-    const res = await POST(req);
-    const { status, json } = await parseResponse(res);
+  // A07-4 T-2: wrong-shape rejection — every non-"none" value is rejected with
+  // invalid_client_metadata and the error_description references RFC 9700 §4.14.
+  // Covers the legacy "client_secret_post" default that pre-A07-4 was accepted,
+  // plus exotic shapes a buggy/malicious client might send (unicode look-alikes,
+  // very long strings, object/array shapes).
+  it.each([
+    { name: "absent", body: {} as Record<string, unknown> },
+    { name: "null", body: { token_endpoint_auth_method: null } },
+    { name: "undefined (explicit)", body: { token_endpoint_auth_method: undefined } },
+    { name: "empty string", body: { token_endpoint_auth_method: "" } },
+    { name: "capital N (case mismatch)", body: { token_endpoint_auth_method: "None" } },
+    { name: "whitespace padding", body: { token_endpoint_auth_method: " none " } },
+    { name: "array containing none", body: { token_endpoint_auth_method: ["none"] } },
+    { name: "object value", body: { token_endpoint_auth_method: { method: "none" } } },
+    { name: "number", body: { token_endpoint_auth_method: 0 } },
+    { name: "boolean", body: { token_endpoint_auth_method: false } },
+    { name: "zero-width space (unicode look-alike)", body: { token_endpoint_auth_method: "none​" } },
+    { name: "very long string", body: { token_endpoint_auth_method: "none" + "x".repeat(10_000) } },
+    { name: "legacy client_secret_post", body: { token_endpoint_auth_method: "client_secret_post" } },
+    { name: "client_secret_basic", body: { token_endpoint_auth_method: "client_secret_basic" } },
+  ])(
+    "A07-4: rejects token_endpoint_auth_method = $name with invalid_client_metadata + RFC 9700 §4.14",
+    async ({ body }) => {
+      const req = createRequest("POST", "http://localhost/api/mcp/register", {
+        body: {
+          client_name: "Test",
+          redirect_uris: ["https://example.com/callback"],
+          ...body,
+        },
+      });
+      const res = await POST(req);
+      const { status, json } = await parseResponse(res);
 
-    expect(status).toBe(201);
-    expect(json.client_id).toBeDefined();
-    expect(json.client_secret).toBeUndefined();
-    expect(json.client_secret_expires_at).toBeUndefined();
-    expect(json.token_endpoint_auth_method).toBe("none");
-  });
+      expect(status).toBe(400);
+      expect(json.error).toBe("invalid_client_metadata");
+      // Pin the RFC reference exactly so accidental softening
+      // ("Per RFC 9700" or no section) flips the test red.
+      expect(json.error_description).toMatch(/RFC 9700 §4\.14/);
+      expect(mockPrismaCreate).not.toHaveBeenCalled();
+    },
+  );
 
   it("calls logAuditAsync after successful registration", async () => {
     const req = createRequest("POST", "http://localhost/api/mcp/register", {

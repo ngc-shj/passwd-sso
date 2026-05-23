@@ -11,6 +11,7 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import {
   generateAuthenticationOpts,
+  buildPrfExtensions,
   WEBAUTHN_CHALLENGE_TTL_SECONDS,
 } from "@/lib/auth/webauthn/webauthn-server";
 
@@ -67,10 +68,13 @@ async function handlePOST(
   // Ownership check — the caller must own the credential they want to
   // re-bootstrap. We also restrict allowCredentials to this single ID so the
   // browser presents only the targeted authenticator.
+  // A02-8: include prfSalt so PRF rebootstrap reuses the credential's
+  // existing salt (immutable per C1) — re-wrap binds to the SAME salt so
+  // future unlocks continue to work.
   const credential = await withUserTenantRls(userId, async () =>
     prisma.webAuthnCredential.findFirst({
       where: { id, userId },
-      select: { credentialId: true, transports: true },
+      select: { credentialId: true, transports: true, prfSalt: true },
     }),
   );
 
@@ -91,6 +95,19 @@ async function handlePOST(
     "EX",
     WEBAUTHN_CHALLENGE_TTL_SECONDS,
   );
+
+  // A02-8: embed PRF extension input. For v2 credentials (prfSalt != null),
+  // buildPrfExtensions emits evalByCredential keyed by the cred id. For
+  // legacy v1 credentials, it emits only the top-level eval.first.
+  const prfExt = buildPrfExtensions([
+    { credentialId: credential.credentialId, prfSalt: credential.prfSalt },
+  ]);
+  if (prfExt) {
+    options.extensions = {
+      ...options.extensions,
+      prf: prfExt,
+    } as unknown as typeof options.extensions;
+  }
 
   return NextResponse.json({ options });
 }

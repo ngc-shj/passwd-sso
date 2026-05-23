@@ -363,23 +363,21 @@ export function PasskeyCredentialsCard() {
       }
       const { options } = await optsRes.json();
 
-      // We also need the prfSalt (server-derived from WEBAUTHN_PRF_SECRET).
-      // Re-use the sign-in options endpoint solely for the salt — the
-      // challenge it returns will be discarded; we use the dedicated one above.
-      const saltRes = await fetchApi(API_PATH.WEBAUTHN_AUTHENTICATE_OPTIONS, { method: "POST" });
-      if (!saltRes.ok) {
-        toast.error(t("rebootstrapError"));
-        return;
-      }
-      const { prfSalt } = await saltRes.json();
-      if (!prfSalt) {
-        // PRF salt unavailable (server-side WEBAUTHN_PRF_SECRET unconfigured).
+      // A02-8 F2: the PRF rebootstrap options endpoint now embeds the
+      // server-built PRF extension (`options.extensions.prf`) directly. The
+      // legacy "fetch salt from /api/webauthn/authenticate/options" kludge
+      // is no longer necessary and broke for v2-only users (their
+      // /authenticate/options returns prfSalt:null, even though
+      // evalByCredential is populated on the rebootstrap options). Just
+      // pass the options through; the browser client picks up extensions.prf.
+      if (!options?.extensions?.prf) {
+        // PRF unavailable on the server (WEBAUTHN_PRF_SECRET unset).
         toast.error(t("rebootstrapError"));
         return;
       }
 
       // 2. WebAuthn ceremony against the dedicated PRF rebootstrap challenge.
-      const { responseJSON, prfOutput } = await startPasskeyAuthentication(options, prfSalt);
+      const { responseJSON, prfOutput } = await startPasskeyAuthentication(options);
       if (!prfOutput) {
         toast.error(t("rebootstrapError"));
         return;

@@ -49,8 +49,10 @@ vi.mock("@/lib/auth/policy/ip-access", () => ({
 import { GET } from "@/app/api/mcp/authorize/route";
 
 // Valid client registered in DB
+// A07-4: isActive must be in WHERE clause; fixture documents the expected shape.
 const VALID_CLIENT = {
   redirectUris: ["https://example.com/callback"],
+  isActive: true,
 };
 
 // Convenience: build URL with common valid OAuth params
@@ -140,6 +142,7 @@ describe("GET /api/mcp/authorize", () => {
     it("returns 400 when redirectUri is not registered for the client", async () => {
       mockMcpClientFindFirst.mockResolvedValue({
         redirectUris: ["https://other.example.com/callback"],
+        isActive: true,
       });
       const req = createRequest("GET", authorizeUrl());
       const res = await GET(req);
@@ -226,6 +229,7 @@ describe("GET /api/mcp/authorize", () => {
     it("returns 400 when redirectUri is not registered for the client", async () => {
       mockMcpClientFindFirst.mockResolvedValue({
         redirectUris: ["https://other.example.com/callback"],
+        isActive: true,
       });
       const req = createRequest("GET", authorizeUrl());
       const res = await GET(req);
@@ -301,6 +305,7 @@ describe("GET /api/mcp/authorize", () => {
       // Client exists but redirect_uri doesn't match
       mockMcpClientFindFirst.mockResolvedValue({
         redirectUris: ["https://attacker.example.com/callback"],
+        isActive: true,
       });
       const resMismatch = await GET(createRequest("GET", authorizeUrl()));
       const jsonMismatch = await resMismatch.json();

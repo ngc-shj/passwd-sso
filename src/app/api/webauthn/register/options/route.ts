@@ -8,8 +8,9 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { generateRegistrationOpts, derivePrfSalt } from "@/lib/auth/webauthn/webauthn-server";
+import { generateRegistrationOpts, derivePrfSaltV2 } from "@/lib/auth/webauthn/webauthn-server";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { randomBytes } from "node:crypto";
 
 export const runtime = "nodejs";
 
@@ -62,21 +63,32 @@ async function handlePOST(req: NextRequest) {
     })),
   );
 
-  // Store challenge in Redis (consume-once, TTL 300s)
+  // A02-8: generate per-credential PRF salt and bind it to the challenge in
+  // a SINGLE Redis envelope so a concurrent register-options request from
+  // the same user cannot silently brick the first request's credential
+  // (the second tab's `set` overwrites BOTH challenge AND salt — first tab's
+  // verify will hit a challenge mismatch and fail cleanly).
+  const perCredentialSalt = randomBytes(32).toString("hex");
+  let prfSalt: string | null = null;
+  try {
+    prfSalt = derivePrfSaltV2(perCredentialSalt);
+  } catch {
+    // PRF secret not configured — passkey will be registered without PRF.
+    // perCredentialSalt is still generated (cheap) but stored as null in
+    // the envelope so register/verify knows not to persist it.
+  }
+
+  const envelope = JSON.stringify({
+    challenge: options.challenge,
+    prfSalt: prfSalt !== null ? perCredentialSalt : null,
+  });
+
   await redis.set(
     `webauthn:challenge:register:${userId}`,
-    options.challenge,
+    envelope,
     "EX",
     CHALLENGE_TTL_SECONDS,
   );
-
-  // Derive PRF salt so the client can use it during credential creation
-  let prfSalt: string | null = null;
-  try {
-    prfSalt = derivePrfSalt();
-  } catch {
-    // PRF secret not configured — passkey will be registered without PRF
-  }
 
   return NextResponse.json({
     options,

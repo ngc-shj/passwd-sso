@@ -11,7 +11,7 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import {
   generateAuthenticationOpts,
-  derivePrfSalt,
+  buildPrfExtensions,
   WEBAUTHN_CHALLENGE_TTL_SECONDS,
 } from "@/lib/auth/webauthn/webauthn-server";
 
@@ -60,13 +60,14 @@ async function handlePOST(req: NextRequest) {
     // No body or invalid JSON — use default PRF-only behavior
   }
 
-  // Fetch credentials: specific credential or PRF-capable only
+  // A02-8: include prfSalt in SELECT so buildPrfExtensions can pick
+  // per-credential v2 salts vs v1 fallback for this post-login unlock path.
   const credentials = await withUserTenantRls(userId, async () =>
     prisma.webAuthnCredential.findMany({
       where: targetCredentialId
         ? { userId, credentialId: targetCredentialId }
         : { userId, prfSupported: true },
-      select: { credentialId: true, transports: true },
+      select: { credentialId: true, transports: true, prfSalt: true },
     }),
   );
 
@@ -89,12 +90,17 @@ async function handlePOST(req: NextRequest) {
     WEBAUTHN_CHALLENGE_TTL_SECONDS,
   );
 
-  // Derive PRF salt for vault unlock
-  let prfSalt: string | null = null;
-  try {
-    prfSalt = derivePrfSalt();
-  } catch {
-    // PRF secret not configured — passkey will authenticate without PRF
+  // A02-8: build PRF extension input — v1 fallback for legacy creds + v2
+  // evalByCredential overrides for credentials registered after A02-8.
+  const prfExt = buildPrfExtensions(credentials);
+  const prfSalt: string | null = prfExt?.eval?.first ?? null;
+  if (prfExt) {
+    // PRF is non-standard per lib.dom.d.ts; widening cast through unknown
+    // keeps the field typed without an `any` escape hatch.
+    options.extensions = {
+      ...options.extensions,
+      prf: prfExt,
+    } as unknown as typeof options.extensions;
   }
 
   return NextResponse.json({

@@ -510,12 +510,22 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       const vaultData = await dataRes.json();
       const { options, prfSalt } = await optionsRes.json();
 
-      if (!prfSalt || !vaultData.accountSalt) return false;
+      // A02-8 F1: post-A02-8 the server may return `prfSalt: null` when every
+      // PRF-capable credential is v2 (per-credential salts are carried inside
+      // `options.extensions.prf.evalByCredential`). The legacy guard
+      // `if (!prfSalt) return false;` short-circuited those users — silently
+      // breaking PRF auto-unlock. Accept the path when EITHER the top-level
+      // v1 salt OR the server-built extensions are present.
+      const serverBuiltPrf =
+        typeof options?.extensions?.prf === "object" && options.extensions.prf !== null;
+      if ((!prfSalt && !serverBuiltPrf) || !vaultData.accountSalt) return false;
 
-      // 2. Perform WebAuthn authentication with PRF extension
+      // 2. Perform WebAuthn authentication with PRF extension. The browser
+      // client prefers `options.extensions.prf` when present and falls back
+      // to the `prfSalt` param otherwise.
       const { responseJSON, prfOutput } = await startPasskeyAuthentication(
         options,
-        prfSalt,
+        prfSalt ?? undefined,
       );
 
       if (!prfOutput) {

@@ -34,7 +34,7 @@ const nextConfig: NextConfig = {
   basePath: rawBasePath || undefined,
   output: "standalone",
   allowedDevOrigins: devAllowedOrigins.length > 0 ? devAllowedOrigins : undefined,
-  serverExternalPackages: ["file-type", "argon2-browser", "@aws-sdk/client-secrets-manager", "@azure/keyvault-secrets", "@azure/identity", "@google-cloud/secret-manager"],
+  serverExternalPackages: ["file-type", "@aws-sdk/client-secrets-manager", "@azure/keyvault-secrets", "@azure/identity", "@google-cloud/secret-manager"],
 
   env: {
     NEXT_PUBLIC_BUILD_SHA: getGitSha(),

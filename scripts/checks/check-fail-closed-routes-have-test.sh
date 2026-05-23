@@ -4,7 +4,7 @@
 # the debt allowlist at scripts/checks/fail-closed-test-debt.txt.
 #
 # Background (plan rate-limit-fail-closed-on-redis, AC4.3):
-# 42 routes / 46 limiters were opted into `failClosedOnRedisError: true` in
+# 46 routes / 50 limiters were opted into `failClosedOnRedisError: true` in
 # the initial PR. Per-route fail-closed tests are tracked as test debt;
 # this gate prevents NEW opt-in routes from landing without a test.
 #
@@ -80,12 +80,14 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-# AC4.4 / AC4.5 — limiter / branch count parity. Plan locks 46 limiter
-# instantiations across 42 route files (4 files have 2 limiters each).
-# A future PR that silently drops a limiter from one of the double-limiter
-# files would leave the file-count gate above passing (still 42 files) but
-# break the per-limiter coverage. Per-line grep guards against this.
-EXPECTED_LIMITER_COUNT=46
+# AC4.4 / AC4.5 — limiter / branch count parity. Plan locks 50 limiter
+# instantiations (46 from rate-limit-fail-closed-on-redis-plan + 4 new for
+# A04-4 master-key rotation dual-approval: initiate/approve/execute/revoke,
+# each with its own per-actor limiter).
+# A future PR that silently drops a limiter from one of the multi-limiter
+# files would leave the file-count gate above passing but break the
+# per-limiter coverage. Per-line grep guards against this.
+EXPECTED_LIMITER_COUNT=50
 limiter_count=$(grep -rh 'failClosedOnRedisError: true' "$REPO_ROOT/src/app/api" | wc -l)
 if [ "$limiter_count" -ne "$EXPECTED_LIMITER_COUNT" ]; then
   echo "AC4.4 FAIL: expected $EXPECTED_LIMITER_COUNT 'failClosedOnRedisError: true' instantiations; found $limiter_count"
@@ -99,7 +101,7 @@ fi
 # documented deviation. After the helper migration the raw `.redisErrored`
 # branches no longer appear in route handlers — the inline check is hidden
 # behind `checkRateLimitOrFail()` so we gate on the helper callsite count.
-EXPECTED_MIN_CALLSITE_COUNT=46
+EXPECTED_MIN_CALLSITE_COUNT=50
 callsite_count=$(grep -rh 'checkRateLimitOrFail(' "$REPO_ROOT/src/app/api" | wc -l)
 if [ "$callsite_count" -lt "$EXPECTED_MIN_CALLSITE_COUNT" ]; then
   echo "AC4.5 FAIL: expected at least $EXPECTED_MIN_CALLSITE_COUNT 'checkRateLimitOrFail(' callsites; found $callsite_count"

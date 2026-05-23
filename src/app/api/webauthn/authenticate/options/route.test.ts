@@ -43,9 +43,38 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
 
+// A02-8: route now calls buildPrfExtensions, not derivePrfSalt. The mock
+// preserves the existing behavior (v1 RP-global salt as `eval.first`) for
+// all-NULL prfSalt credential lists so the existing test fixtures keep
+// passing; A02-8-specific cases override per-test if needed. The legacy
+// `mockDerivePrfSalt` symbol is wired into the mock's v1 path so existing
+// `mockDerivePrfSalt.mockImplementation(() => { throw … })` cases still
+// route through the buildPrfExtensions PRF-disabled branch.
 vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
   generateAuthenticationOpts: mockGenerateAuthenticationOpts,
-  derivePrfSalt: mockDerivePrfSalt,
+  buildPrfExtensions: vi.fn(
+    (creds: Array<{ credentialId: string; prfSalt: string | null }>) => {
+      // Drive PRF-disabled via the legacy mock so existing tests that stub
+      // mockDerivePrfSalt.mockImplementation(() => throw) still pass.
+      let v1: string | null = null;
+      try {
+        v1 = mockDerivePrfSalt();
+      } catch {
+        return null;
+      }
+      const hasV1 = creds.some((c) => c.prfSalt === null);
+      const hasV2 = creds.some((c) => c.prfSalt !== null);
+      const result: { eval?: { first: string }; evalByCredential?: Record<string, { first: string }> } = {};
+      if (hasV1) result.eval = { first: v1 };
+      if (hasV2) {
+        result.evalByCredential = {};
+        for (const c of creds) {
+          if (c.prfSalt) result.evalByCredential[c.credentialId] = { first: c.prfSalt };
+        }
+      }
+      return result;
+    },
+  ),
   WEBAUTHN_CHALLENGE_TTL_SECONDS: 300,
 }));
 
@@ -65,7 +94,7 @@ import { POST } from "./route";
 const ROUTE_URL = "http://localhost:3000/api/webauthn/authenticate/options";
 
 const mockCredentials = [
-  { credentialId: "cred-id-1", transports: ["internal", "hybrid"] },
+  { credentialId: "cred-id-1", transports: ["internal", "hybrid"], prfSalt: null },
 ];
 
 const mockOptions = {
@@ -237,5 +266,42 @@ describe("POST /api/webauthn/authenticate/options", () => {
 
     expect(status).toBe(200);
     expect(json.prfSalt).toBeNull();
+  });
+
+  // ── A02-8: v1/v2/mixed PRF extension shape (T07/T08/T09) ──────────────
+
+  describe("A02-8 PRF extension shape", () => {
+    it("(T09 legacy) sends top-level eval only when every credential has NULL prfSalt", async () => {
+      mockPrismaFindMany.mockResolvedValue([
+        { credentialId: "cred-1", transports: ["internal"], prfSalt: null },
+      ]);
+      const { status, json } = await parseResponse(await POST(createRequest("POST", ROUTE_URL)));
+      expect(status).toBe(200);
+      expect(json.options.extensions?.prf?.eval?.first).toBeDefined();
+      expect(json.options.extensions?.prf?.evalByCredential).toBeUndefined();
+    });
+
+    it("(T07 all-v2) sends evalByCredential only when every credential has non-NULL prfSalt", async () => {
+      mockPrismaFindMany.mockResolvedValue([
+        { credentialId: "cred-A", transports: ["internal"], prfSalt: "a".repeat(64) },
+      ]);
+      const { status, json } = await parseResponse(await POST(createRequest("POST", ROUTE_URL)));
+      expect(status).toBe(200);
+      expect(json.options.extensions?.prf?.eval).toBeUndefined();
+      expect(json.options.extensions?.prf?.evalByCredential).toHaveProperty("cred-A");
+      expect(json.prfSalt).toBeNull();
+    });
+
+    it("(T07 mixed) sends BOTH top-level eval (for legacy creds) AND evalByCredential (for v2)", async () => {
+      mockPrismaFindMany.mockResolvedValue([
+        { credentialId: "cred-legacy", transports: ["usb"], prfSalt: null },
+        { credentialId: "cred-v2", transports: ["internal"], prfSalt: "b".repeat(64) },
+      ]);
+      const { status, json } = await parseResponse(await POST(createRequest("POST", ROUTE_URL)));
+      expect(status).toBe(200);
+      expect(json.options.extensions?.prf?.eval?.first).toBeDefined();
+      expect(json.options.extensions?.prf?.evalByCredential).toHaveProperty("cred-v2");
+      expect(json.options.extensions?.prf?.evalByCredential).not.toHaveProperty("cred-legacy");
+    });
   });
 });

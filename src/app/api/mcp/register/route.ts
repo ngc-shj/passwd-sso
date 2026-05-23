@@ -3,7 +3,6 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { hashToken } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
@@ -51,7 +50,14 @@ const dcrSchema = z.object({
     ),
   grant_types: z.array(z.string()).optional(),
   response_types: z.array(z.string()).optional(),
-  token_endpoint_auth_method: z.string().optional(),
+  // A07-4: RFC 9700 §4.14 — DCR clients are public-only (untrusted registrants).
+  // Confidential clients must be created via /api/tenant/mcp-clients (admin only).
+  // Required, exact literal "none" — no default fallback, no case/whitespace
+  // tolerance. Wrong-shape inputs (null, array, number) also fail Zod parsing.
+  token_endpoint_auth_method: z.literal("none", {
+    error: () =>
+      "token_endpoint_auth_method must be 'none' (DCR issues public clients only — RFC 9700 §4.14)",
+  }),
   scope: z.string().optional(), // Space-separated scopes (ignored, server controls scopes)
 });
 
@@ -81,8 +87,15 @@ async function handlePOST(req: NextRequest) {
 
   const parsed = dcrSchema.safeParse(rawBody);
   if (!parsed.success) {
+    // Lift the first issue's message into error_description so RFC 9700 reference
+    // surfaces in the standard RFC 6749 §5.2 error envelope.
+    const firstIssue = parsed.error.issues[0];
     return NextResponse.json(
-      { error: "invalid_client_metadata", issues: parsed.error.issues },
+      {
+        error: "invalid_client_metadata",
+        error_description: firstIssue?.message ?? "Invalid client metadata",
+        issues: parsed.error.issues,
+      },
       { status: 400 },
     );
   }
@@ -111,15 +124,13 @@ async function handlePOST(req: NextRequest) {
     );
   }
 
-  const tokenEndpointAuthMethod =
-    body.token_endpoint_auth_method ?? "client_secret_post";
-  const isPublicClient = tokenEndpointAuthMethod === "none";
   const validatedUris = body.redirect_uris;
 
-  // Generate client credentials (public clients don't get a secret)
+  // A07-4: DCR issues public clients only — no secret generation.
+  // clientSecretHash is NOT NULL on the schema; empty string is the public-client
+  // sentinel (matches downstream `clientSecretHash === ""` check in oauth-server.ts).
   const clientId = MCP_CLIENT_ID_PREFIX + randomBytes(16).toString("hex");
-  const clientSecret = isPublicClient ? null : randomBytes(32).toString("base64url");
-  const clientSecretHash = clientSecret ? hashToken(clientSecret) : "";
+  const clientSecretHash = "";
   const dcrExpiresAt = new Date(Date.now() + MCP_DCR_UNCLAIMED_EXPIRY_SEC * 1000);
 
   // Count + create atomically with bypass RLS (no tenant context for DCR)
@@ -183,13 +194,9 @@ async function handlePOST(req: NextRequest) {
     redirect_uris: validatedUris,
     grant_types: body.grant_types ?? ["authorization_code"],
     response_types: ["code"],
-    token_endpoint_auth_method: tokenEndpointAuthMethod,
+    token_endpoint_auth_method: "none", // A07-4: literal — DCR is public-only
     client_id_issued_at: Math.floor(client.createdAt.getTime() / 1000),
   };
-  if (clientSecret) {
-    responseBody.client_secret = clientSecret;
-    responseBody.client_secret_expires_at = 0;
-  }
 
   return NextResponse.json(responseBody, { status: 201 });
 }

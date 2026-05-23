@@ -97,6 +97,151 @@ describe("wrapSecretKeyWithPrf / unwrapSecretKeyWithPrf — round-trip via real 
   });
 });
 
+// A02-8 / T06: PRF extension construction in startPasskeyAuthentication.
+// Verifies the three input channels (server-built / evalByCredential param /
+// prfSalt param) and their priority/combination behavior. navigator.credentials
+// is stubbed to capture the publicKey.extensions.prf shape it receives.
+describe("startPasskeyAuthentication PRF extension wiring", () => {
+  type CapturedOptions = {
+    extensions?: {
+      prf?: {
+        eval?: { first: ArrayBuffer };
+        evalByCredential?: Record<string, { first: ArrayBuffer }>;
+      };
+    };
+  };
+
+  let lastPublicKey: CapturedOptions | null = null;
+
+  beforeEach(() => {
+    lastPublicKey = null;
+    // Stub a credentials.get that captures the publicKey extensions and
+    // returns a minimal PublicKeyCredential-like shape. The PRF extension
+    // result mirrors the input first-arg for easy assertion.
+    vi.stubGlobal("navigator", {
+      ...globalThis.navigator,
+      credentials: {
+        get: vi.fn(async ({ publicKey }: { publicKey: CapturedOptions }) => {
+          lastPublicKey = publicKey;
+          return {
+            id: "cred-id",
+            rawId: new Uint8Array(8).buffer,
+            type: "public-key",
+            response: {
+              clientDataJSON: new Uint8Array(8).buffer,
+              authenticatorData: new Uint8Array(8).buffer,
+              signature: new Uint8Array(8).buffer,
+              userHandle: null,
+            },
+            getClientExtensionResults: () => ({
+              prf: { results: { first: new Uint8Array([1, 2, 3, 4]).buffer } },
+            }),
+          };
+        }),
+      },
+    });
+  });
+
+  it("(C8 case 1) passes server-built extensions.prf through verbatim", async () => {
+    const { startPasskeyAuthentication } = await import("./webauthn-client");
+    const SERVER_V1_SALT = "a".repeat(64);
+    const SERVER_V2_SALT = "b".repeat(64);
+    const optionsJSON: Record<string, unknown> = {
+      challenge: "Y2hhbGxlbmdl",
+      rpId: "localhost",
+      allowCredentials: [],
+      extensions: {
+        prf: {
+          eval: { first: SERVER_V1_SALT },
+          evalByCredential: { "cred-1": { first: SERVER_V2_SALT } },
+        },
+      },
+    };
+    await startPasskeyAuthentication(optionsJSON);
+
+    expect(lastPublicKey?.extensions?.prf?.eval?.first).toBeInstanceOf(Uint8Array);
+    expect(lastPublicKey?.extensions?.prf?.evalByCredential?.["cred-1"]?.first).toBeInstanceOf(Uint8Array);
+    // Decoded back to hex must match the server-supplied salt (round-trip).
+    const decoded = new Uint8Array(lastPublicKey!.extensions!.prf!.eval!.first);
+    expect(hexEncode(decoded)).toBe(SERVER_V1_SALT);
+  });
+
+  it("(C8 case 2) param-only: prfSalt → top-level eval only", async () => {
+    const { startPasskeyAuthentication } = await import("./webauthn-client");
+    const SALT = "c".repeat(64);
+    await startPasskeyAuthentication(
+      { challenge: "Y2hhbGxlbmdl", rpId: "localhost", allowCredentials: [] },
+      SALT,
+    );
+
+    expect(lastPublicKey?.extensions?.prf?.eval?.first).toBeInstanceOf(Uint8Array);
+    expect(lastPublicKey?.extensions?.prf?.evalByCredential).toBeUndefined();
+    expect(
+      hexEncode(new Uint8Array(lastPublicKey!.extensions!.prf!.eval!.first)),
+    ).toBe(SALT);
+  });
+
+  it("(C8 case 3) param-only: evalByCredential → no top-level eval", async () => {
+    const { startPasskeyAuthentication } = await import("./webauthn-client");
+    const SALT = "d".repeat(64);
+    await startPasskeyAuthentication(
+      { challenge: "Y2hhbGxlbmdl", rpId: "localhost", allowCredentials: [] },
+      undefined,
+      { "cred-2": SALT },
+    );
+
+    expect(lastPublicKey?.extensions?.prf?.eval).toBeUndefined();
+    expect(lastPublicKey?.extensions?.prf?.evalByCredential?.["cred-2"]?.first).toBeInstanceOf(Uint8Array);
+    expect(
+      hexEncode(new Uint8Array(lastPublicKey!.extensions!.prf!.evalByCredential!["cred-2"].first)),
+    ).toBe(SALT);
+  });
+
+  it("(C8 case 4) param-only: BOTH prfSalt + evalByCredential → both forwarded", async () => {
+    const { startPasskeyAuthentication } = await import("./webauthn-client");
+    const V1 = "e".repeat(64);
+    const V2 = "f".repeat(64);
+    await startPasskeyAuthentication(
+      { challenge: "Y2hhbGxlbmdl", rpId: "localhost", allowCredentials: [] },
+      V1,
+      { "cred-3": V2 },
+    );
+
+    expect(lastPublicKey?.extensions?.prf?.eval?.first).toBeInstanceOf(Uint8Array);
+    expect(lastPublicKey?.extensions?.prf?.evalByCredential?.["cred-3"]?.first).toBeInstanceOf(Uint8Array);
+  });
+
+  it("server-built extensions take precedence over client-side params", async () => {
+    const { startPasskeyAuthentication } = await import("./webauthn-client");
+    const SERVER_SALT = "1".repeat(64);
+    const CLIENT_SALT = "2".repeat(64);
+    await startPasskeyAuthentication(
+      {
+        challenge: "Y2hhbGxlbmdl",
+        rpId: "localhost",
+        allowCredentials: [],
+        extensions: { prf: { eval: { first: SERVER_SALT } } },
+      },
+      CLIENT_SALT, // ignored when server-built path takes precedence
+    );
+
+    expect(
+      hexEncode(new Uint8Array(lastPublicKey!.extensions!.prf!.eval!.first)),
+    ).toBe(SERVER_SALT);
+  });
+
+  it("no PRF input → no extensions.prf on the publicKey passed to credentials.get", async () => {
+    const { startPasskeyAuthentication } = await import("./webauthn-client");
+    await startPasskeyAuthentication({
+      challenge: "Y2hhbGxlbmdl",
+      rpId: "localhost",
+      allowCredentials: [],
+    });
+
+    expect(lastPublicKey?.extensions?.prf).toBeUndefined();
+  });
+});
+
 describe("isWebAuthnSupported", () => {
   it("returns true when window.PublicKeyCredential is defined", () => {
     // jsdom does not ship PublicKeyCredential; stub it for this test.

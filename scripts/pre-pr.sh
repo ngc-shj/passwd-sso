@@ -152,6 +152,214 @@ else
 fi
 run_step "Static: no-deprecated-logAudit" bash -c 'if grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*" | grep -q .; then echo "Residual logAudit() calls found:"; grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*"; exit 1; fi'
 
+# C21 / C10: forbid imports of Auth.js builtin WebAuthn providers. The project
+# uses Auth.js Credentials provider with a custom authorize() flow that calls
+# our own verifyAuthentication(). The @auth/core builtin providers (passkey,
+# webauthn) still peer-depend on @simplewebauthn/server@^9 and would invoke
+# v9-shape code through v11 internals — a latent auth-bypass risk if ever
+# enabled. Keep them dead.
+# A02-8 T10: read-only invariant on the PRF per-credential salt migration
+# script. The diagnostic must SELECT only — any DDL/DML in the SQL body
+# (excluding comments) means an operator running the diagnostic could
+# inadvertently mutate the DB. The check extracts the heredoc SQL block
+# and greps it for forbidden verbs.
+run_step "Static: prf-salt-migration-script-readonly" bash -c '
+  SCRIPT="scripts/migrate-prf-per-credential-salt.sh"
+  if [ ! -f "$SCRIPT" ]; then
+    echo "OK (script not present yet)"
+    exit 0
+  fi
+  # Extract just the SQL block(s) between `<<EOF` markers and the closing tag.
+  # Any of UPDATE/INSERT/DELETE/TRUNCATE inside that block fails the check.
+  SQL_BODY=$(awk "/^psql /,/^SQL\$/" "$SCRIPT")
+  if echo "$SQL_BODY" | grep -iqE "\\b(UPDATE|INSERT|DELETE|TRUNCATE)\\b"; then
+    echo "ERROR: forbidden write verb inside SQL body of $SCRIPT (A02-8 C9 immutable)"
+    exit 1
+  fi
+'
+
+# A02-8 T11: prfSalt is INSERT-only. Any code path that mutates the column
+# breaks the PRF wrap binding for that credential. Catch via grep of any
+# `prfSalt:` token inside a `.update(...)` block in production source (NOT
+# test files — fixtures are allowed to write any shape).
+run_step "Static: prf-salt-immutable" bash -c '
+  if git diff --diff-filter=AM main...HEAD --name-only -- src \
+    | grep -E "\\.tsx?$" | grep -v "\\.test\\." | xargs -r grep -nE "prfSalt\\s*:" 2>/dev/null \
+    | grep -B1 "\\.update(" >/dev/null 2>&1; then
+    echo "ERROR: prfSalt appears inside a .update() call — column is immutable (A02-8 C1)."
+    echo "Production code MUST NOT set prfSalt post-insert. Use .create() only."
+    exit 1
+  fi
+'
+
+run_step "Static: no-argon2-browser-reintroduce" bash -c '
+  # A06-2: argon2-browser was swapped for hash-wasm. Forbid any import/require
+  # of argon2-browser to catch accidental re-introduction (left-pad scenario
+  # for an unmaintained dep). Also forbid hash-wasm imports outside the crypto
+  # lib + tests + cli (CLI keeps its own argon2 dep).
+  if grep -rnE "(from\s+[\x22\x27]argon2-browser[\x22\x27]|require\([\x22\x27]argon2-browser[\x22\x27]\))" \
+    src/ 2>/dev/null | grep -v "\\.test\\." | grep -q .; then
+    echo "ERROR: argon2-browser import detected — A06-2 forbids re-introduction; use hash-wasm."
+    grep -rnE "(from\s+[\x22\x27]argon2-browser[\x22\x27]|require\([\x22\x27]argon2-browser[\x22\x27]\))" \
+      src/ | grep -v "\\.test\\."
+    exit 1
+  fi
+  if grep -qF "argon2-browser" package.json; then
+    echo "ERROR: argon2-browser still listed in package.json (A06-2 dropped it)"
+    exit 1
+  fi
+'
+
+run_step "Static: dcr-public-only-literal" bash -c '
+  # A07-4: DCR (/api/mcp/register) issues public clients only per RFC 9700 §4.14.
+  # The Zod schema must use z.literal("none") (no default fallback, no z.string()
+  # optional) so wrong-shape inputs (null/array/case-mismatch) are rejected.
+  ROUTE="src/app/api/mcp/register/route.ts"
+  if [ ! -f "$ROUTE" ]; then
+    echo "OK (route not present)"
+    exit 0
+  fi
+  # Required: z.literal( or z.enum( referencing "none" must appear. Accept both
+  # quote styles + leading whitespace + line breaks (perl -0 reads whole file).
+  if ! perl -0777 -ne '"'"'exit 1 unless /z\.(literal|enum)\s*\(\s*\[?\s*["\x27]none["\x27]/'"'"' "$ROUTE"; then
+    echo "ERROR: $ROUTE must constrain token_endpoint_auth_method via z.literal(\"none\") (A07-4)"
+    exit 1
+  fi
+  # Forbidden: the legacy client_secret_post default literal must not appear here.
+  if grep -qF "client_secret_post" "$ROUTE"; then
+    echo "ERROR: $ROUTE still references client_secret_post — DCR is public-only (A07-4)"
+    exit 1
+  fi
+  # Forbidden: no secret-shaped randomBytes(...) ... base64url generation in DCR.
+  # clientId uses randomBytes(16).toString("hex") which is intentional — narrow
+  # the regex to the secret-shape pattern (any-size randomBytes piped to base64url).
+  if grep -qE "randomBytes\\([0-9]+\\)\\.toString\\([\"\x27]base64url[\"\x27]\\)" "$ROUTE"; then
+    echo "ERROR: $ROUTE generates a base64url secret — DCR must not issue client_secret (A07-4)"
+    exit 1
+  fi
+'
+
+run_step "Static: client-secret-hash-non-null" bash -c '
+  # A07-4 R5: McpClient.clientSecretHash MUST remain NOT NULL (empty-string
+  # sentinel for public clients). The DCR public-only design + downstream
+  # `clientSecretHash === ""` heuristic both depend on this invariant.
+  if grep -qE "clientSecretHash\\s+String\\?" prisma/schema.prisma; then
+    echo "ERROR: McpClient.clientSecretHash must remain NOT NULL (A07-4 R5)"
+    echo "The empty-string sentinel design relies on this. Re-audit DCR + token paths before making it nullable."
+    exit 1
+  fi
+'
+
+run_step "Static: no-authjs-builtin-webauthn-provider" bash -c '
+  # Anchor the match with a closing string-delimiter so future siblings like
+  # @auth/core/providers/webauthn-safe (or webauthn2) do not get caught by a
+  # prefix-loose pattern. The two literal provider paths below are exactly
+  # the v9-shape ones we keep dead-coded. Delimiters in the character class
+  # are spelled as hex escapes so the regex survives nested bash -c quoting:
+  # \x22 = ", \x27 = single quote, \x60 = backtick.
+  if grep -rPn --include="*.ts" --include="*.tsx" \
+    "@auth/core/providers/(passkey|webauthn)[\x22\x27\x60]" \
+    src/; then
+    echo "ERROR: @auth/core builtin WebAuthn provider imports are forbidden (C21/C10)."
+    echo "These providers still pin @simplewebauthn/server@^9 and are incompatible"
+    echo "with our v11 runtime. Use our custom Credentials authorize() flow instead."
+    exit 1
+  fi
+'
+
+# A04-4 C7.1: master-key rotation approve route MUST go through the centralized
+# eligibility helper AND apply the two load-bearing CAS WHERE clauses:
+#   initiatedById: { not: ... }   — self-approval rejection
+#   tenantId: actor.tenantId      — cross-tenant rejection
+run_step "Static: master-key-rotation-dual-approval-uses-helper" bash -c '
+  ROUTE="src/app/api/admin/rotate-master-key/[rotationId]/approve/route.ts"
+  if [ ! -f "$ROUTE" ]; then
+    echo "OK (route not present)"
+    exit 0
+  fi
+  if ! grep -qE "computeApproveEligibility\\(" "$ROUTE"; then
+    echo "ERROR: $ROUTE must invoke computeApproveEligibility() (A04-4 C6)"
+    exit 1
+  fi
+  if ! grep -qE "initiatedById:\\s*\\{\\s*not:" "$ROUTE"; then
+    echo "ERROR: $ROUTE missing CAS self-approval WHERE (initiatedById: { not: ... })"
+    exit 1
+  fi
+  if ! grep -qE "tenantId:\\s*auth\\.tenantId" "$ROUTE"; then
+    echo "ERROR: $ROUTE missing CAS cross-tenant WHERE (tenantId: auth.tenantId)"
+    exit 1
+  fi
+'
+
+# A04-4 C7.2: execute route MUST enforce the full state-machine CAS:
+#   approvedAt: { not: null }   — approval required
+#   executedAt: null            — not already executed
+#   revokedAt:  null            — not revoked
+#   expiresAt:  { gt: ... }     — not expired
+#   tenantId:   actor.tenantId  — cross-tenant rejection
+run_step "Static: master-key-rotation-execute-cas" bash -c '
+  ROUTE="src/app/api/admin/rotate-master-key/[rotationId]/execute/route.ts"
+  if [ ! -f "$ROUTE" ]; then
+    echo "OK (route not present)"
+    exit 0
+  fi
+  if ! grep -qE "approvedAt:\\s*\\{\\s*not:\\s*null" "$ROUTE"; then
+    echo "ERROR: execute missing approvedAt CAS (approvedAt: { not: null })"
+    exit 1
+  fi
+  if ! grep -qE "executedAt:\\s*null" "$ROUTE"; then
+    echo "ERROR: execute missing executedAt CAS (executedAt: null)"
+    exit 1
+  fi
+  if ! grep -qE "revokedAt:\\s*null" "$ROUTE"; then
+    echo "ERROR: execute missing revokedAt CAS (revokedAt: null)"
+    exit 1
+  fi
+  if ! grep -qE "expiresAt:\\s*\\{\\s*gt:" "$ROUTE"; then
+    echo "ERROR: execute missing expiresAt CAS (expiresAt: { gt: ... })"
+    exit 1
+  fi
+  if ! grep -qE "tenantId:\\s*auth\\.tenantId" "$ROUTE"; then
+    echo "ERROR: execute missing tenantId CAS"
+    exit 1
+  fi
+'
+
+# A04-4 C7.3: legacy single-actor endpoint must return 410 Gone and MUST NOT
+# call passwordShare.updateMany — that destructive write moved into the
+# execute route, gated by dual approval.
+run_step "Static: master-key-rotation-legacy-endpoint-gone" bash -c '
+  ROUTE="src/app/api/admin/rotate-master-key/route.ts"
+  if [ ! -f "$ROUTE" ]; then
+    echo "OK (route not present)"
+    exit 0
+  fi
+  if ! grep -qE "status:\\s*410\\b" "$ROUTE"; then
+    echo "ERROR: $ROUTE must return 410 Gone (A04-4 FR8)"
+    exit 1
+  fi
+  if grep -qE "passwordShare\\.updateMany" "$ROUTE"; then
+    echo "ERROR: legacy rotate-master-key still mutates PasswordShare (single-actor path must be removed)"
+    exit 1
+  fi
+'
+
+# A04-4 C7.4 / C1.AC3: revokedShares is the share-revocation result; written
+# ONLY inside the execute route and the helper module. Any other prod source
+# writing `revokedShares:` is a regression — the count must originate from the
+# execute path or the invariant breaks.
+run_step "Static: master-key-rotation-revokedShares-execute-only" bash -c '
+  HITS=$(grep -rnE "revokedShares\\s*:" src/ --include="*.ts" --include="*.tsx" 2>/dev/null \
+    | grep -v "\\.test\\." \
+    | grep -v "src/app/api/admin/rotate-master-key/\\[rotationId\\]/execute/" \
+    | grep -v "src/lib/admin-rotation/" || true)
+  if [ -n "$HITS" ]; then
+    echo "ERROR: revokedShares written outside execute route (A04-4 C1 invariant)"
+    echo "$HITS"
+    exit 1
+  fi
+'
+
 # fetch basePath compliance — every client API call must go through fetchApi()
 # (which honors NEXT_PUBLIC_BASE_PATH) instead of raw fetch("/api/..."). Mirrors
 # the CI gate at .github/workflows/ci.yml "Check fetch basePath compliance".

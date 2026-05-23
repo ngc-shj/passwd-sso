@@ -32,7 +32,13 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/auth/access/maintenance-auth.ts", ["tenantMember"]],
   ["src/app/api/extension/bridge-code/route.ts", ["extensionBridgeCode"]],
   ["src/app/api/extension/token/exchange/route.ts", ["extensionBridgeCode"]],
-  ["src/app/api/admin/rotate-master-key/route.ts", ["passwordShare"]],
+  // A04-4: execute is the only phase that revokes shares system-wide; the
+  // master key is global, so old-version shares across ALL tenants must be
+  // revoked regardless of which tenant approved the rotation (NF4).
+  // The legacy single-actor endpoint at /api/admin/rotate-master-key/route.ts
+  // returned 410 Gone post-A04-4 and no longer touches PasswordShare — its
+  // prior allowlist entry has been removed.
+  ["src/app/api/admin/rotate-master-key/[rotationId]/execute/route.ts", ["passwordShare"]],
   ["src/app/api/maintenance/purge-history/route.ts", ["passwordEntryHistory"]],
   ["src/app/api/teams/route.ts", ["teamMember"]],
   ["src/app/api/teams/pending-key-distributions/route.ts", ["teamMember"]],

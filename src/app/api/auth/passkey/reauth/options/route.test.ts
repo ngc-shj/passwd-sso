@@ -48,8 +48,25 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   withBypassRls: mockWithBypassRls,
 }));
 
+// A02-8: route now calls buildPrfExtensions; mock follows the same v1/v2
+// convention used in other PRF-options test files.
 vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
   generateAuthenticationOpts: mockGenerateAuthenticationOpts,
+  buildPrfExtensions: vi.fn(
+    (creds: Array<{ credentialId: string; prfSalt: string | null }>) => {
+      const hasV1 = creds.length === 0 || creds.some((c) => c.prfSalt === null);
+      const hasV2 = creds.some((c) => c.prfSalt !== null);
+      const result: { eval?: { first: string }; evalByCredential?: Record<string, { first: string }> } = {};
+      if (hasV1) result.eval = { first: "a".repeat(64) };
+      if (hasV2) {
+        result.evalByCredential = {};
+        for (const c of creds) {
+          if (c.prfSalt) result.evalByCredential[c.credentialId] = { first: c.prfSalt };
+        }
+      }
+      return result;
+    },
+  ),
   WEBAUTHN_CHALLENGE_TTL_SECONDS: 300,
 }));
 
@@ -68,7 +85,7 @@ describe("POST /api/auth/passkey/reauth/options", () => {
     mockAssertOrigin.mockReturnValue(null);
     mockRateLimiterCheck.mockResolvedValue({ allowed: true });
     mockFindMany.mockResolvedValue([
-      { credentialId: "cred-1", transports: ["internal"] },
+      { credentialId: "cred-1", transports: ["internal"], prfSalt: null },
     ]);
     mockGenerateAuthenticationOpts.mockResolvedValue({
       challenge: "challenge-1",
@@ -96,6 +113,10 @@ describe("POST /api/auth/passkey/reauth/options", () => {
       "EX",
       300,
     );
+    // A02-8: the route strips `prfSalt` from the credentials list before
+    // calling `generateAuthenticationOpts` (the underlying simplewebauthn
+    // helper doesn't take it). `prfSalt` is still consulted by
+    // `buildPrfExtensions` to choose v1 vs v2 PRF salt.
     expect(mockGenerateAuthenticationOpts).toHaveBeenCalledWith([
       { credentialId: "cred-1", transports: ["internal"] },
     ]);
@@ -140,5 +161,35 @@ describe("POST /api/auth/passkey/reauth/options", () => {
     expect(res.status).toBe(429);
     expect(mockGenerateAuthenticationOpts).not.toHaveBeenCalled();
     expect(mockRedisSet).not.toHaveBeenCalled();
+  });
+
+  // ── A02-8: v1/v2/mixed PRF extension shape (T07/T09) ──────────────────
+
+  describe("A02-8 PRF extension shape", () => {
+    it("(T09 legacy) sends top-level eval only when every credential has NULL prfSalt", async () => {
+      mockFindMany.mockResolvedValue([
+        { credentialId: "cred-1", transports: ["internal"], prfSalt: null },
+      ]);
+      const res = await POST(
+        createRequest("POST", ROUTE_URL, { headers: { origin: "http://localhost:3000" } }),
+      );
+      const json = (await res.json()) as { options: { extensions?: { prf?: { eval?: { first?: string }; evalByCredential?: Record<string, unknown> } } } };
+      expect(res.status).toBe(200);
+      expect(json.options.extensions?.prf?.eval?.first).toBeDefined();
+      expect(json.options.extensions?.prf?.evalByCredential).toBeUndefined();
+    });
+
+    it("(T07 all-v2) sends evalByCredential keyed by credential ids when prfSalt is set", async () => {
+      mockFindMany.mockResolvedValue([
+        { credentialId: "cred-A", transports: ["internal"], prfSalt: "a".repeat(64) },
+      ]);
+      const res = await POST(
+        createRequest("POST", ROUTE_URL, { headers: { origin: "http://localhost:3000" } }),
+      );
+      const json = (await res.json()) as { options: { extensions?: { prf?: { eval?: unknown; evalByCredential?: Record<string, unknown> } } } };
+      expect(res.status).toBe(200);
+      expect(json.options.extensions?.prf?.eval).toBeUndefined();
+      expect(json.options.extensions?.prf?.evalByCredential).toHaveProperty("cred-A");
+    });
   });
 });

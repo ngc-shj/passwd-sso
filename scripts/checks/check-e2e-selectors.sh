@@ -183,10 +183,27 @@ for name in $removed_exports; do
   if echo "$added_exports" | grep -qx "$name"; then
     continue
   fi
-  # Case-insensitive search in E2E for the export name
-  if grep -riq "$name" "$E2E_DIR/" 2>/dev/null; then
-    ref_files=$(grep -ril "$name" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
-    warn "Deleted export '$name' is still referenced in E2E: $ref_files"
+  # Look for the symbol inside an actual import statement only — not local
+  # variables, comments, or substring matches. The previous bare-substring
+  # check produced false positives on short export names like `hash` that
+  # collide with column names (`master_password_server_hash`), local
+  # variables (`const hash = ...`), and English nouns in comments ("auth
+  # hash").
+  #
+  # Patterns matched (TS/JS module syntax):
+  #   import { Name } from "..."
+  #   import { Name as Alias } from "..."
+  #   import { A, Name, B } from "..."
+  #   import Name from "..."
+  #   import * as Name from "..."
+  #   const { Name } = require("...")
+  #   import("...").then(({ Name }) => ...)
+  import_pattern="(import\\b[^;]*\\b${name}\\b|require\\b[^;]*\\b${name}\\b)"
+  if grep -rEq "$import_pattern" "$E2E_DIR/" 2>/dev/null; then
+    ref_files=$(grep -rElq "$import_pattern" "$E2E_DIR/" 2>/dev/null \
+                || grep -rEl "$import_pattern" "$E2E_DIR/" 2>/dev/null \
+                | tr '\n' ', ' | sed 's/,$//')
+    warn "Deleted export '$name' is still imported by E2E: $ref_files"
   fi
 done
 

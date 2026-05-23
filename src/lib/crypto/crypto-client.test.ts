@@ -16,53 +16,75 @@ import {
 } from "./crypto-client";
 import type { EncryptedData } from "./crypto-client";
 
-// Mock argon2-browser for Node/Vitest (WASM not available)
-// Uses PBKDF2 as a deterministic stand-in — NOT cryptographically equivalent,
-// but sufficient to verify the integration plumbing.
-vi.mock("argon2-browser", () => ({
-  default: {
-    ArgonType: { Argon2d: 0, Argon2i: 1, Argon2id: 2 },
-    hash: async (opts: {
-      pass: string | Uint8Array;
-      salt: string | Uint8Array;
-      time: number;
-      mem: number;
-      parallelism: number;
-      hashLen: number;
-      type: number;
-    }) => {
-      // Deterministic hash using Web Crypto PBKDF2 as stand-in
-      const passBytes = typeof opts.pass === "string"
-        ? new TextEncoder().encode(opts.pass)
-        : opts.pass;
-      const saltBytes = typeof opts.salt === "string"
-        ? new TextEncoder().encode(opts.salt)
-        : opts.salt;
-      // Include argon2 params in salt to ensure param changes produce different output
-      const paramSuffix = new TextEncoder().encode(
-        `argon2id:t=${opts.time}:m=${opts.mem}:p=${opts.parallelism}`
-      );
-      const combinedSalt = new Uint8Array(saltBytes.length + paramSuffix.length);
-      combinedSalt.set(saltBytes);
-      combinedSalt.set(paramSuffix, saltBytes.length);
+// Mock hash-wasm for Node/Vitest unit tests. Uses Web Crypto PBKDF2 as a
+// fast deterministic stand-in — NOT cryptographically equivalent, but
+// sufficient to verify integration plumbing. Real Argon2id RFC 9106
+// conformance is proven by `argon2-vectors.test.ts` (cross-impl agreement
+// hash-wasm vs @noble/hashes — both produce identical output for the same
+// input).
+//
+// The mock parameter shape derives every non-(password|salt) field from
+// hash-wasm's real `argon2id` signature via `Parameters<...>[0]` so a future
+// upstream rename (e.g. `memorySize → memSize`) fails to compile here
+// instead of producing a silently-broken mock. We narrow password/salt to
+// `string | Uint8Array` because production callers only ever pass those two
+// (hash-wasm itself accepts wider types, but exercising Buffer / ITypedArray
+// in the mock would require Web-Crypto-incompatible copies).
+type Hashwasm$Argon2idOpts = Parameters<
+  typeof import("hash-wasm").argon2id
+>[0];
+type MockArgon2idOpts =
+  Omit<Hashwasm$Argon2idOpts, "password" | "salt"> & {
+    password: string | Uint8Array;
+    salt: string | Uint8Array;
+  };
 
-      const keyMaterial = await crypto.subtle.importKey(
-        "raw", passBytes, "PBKDF2", false, ["deriveBits"],
-      );
-      const bits = await crypto.subtle.deriveBits(
-        { name: "PBKDF2", salt: combinedSalt, iterations: 1000, hash: "SHA-256" },
-        keyMaterial,
-        opts.hashLen * 8,
-      );
-      return { hash: new Uint8Array(bits), hashHex: "", encoded: "" };
-    },
+vi.mock("hash-wasm", () => ({
+  argon2id: async (opts: MockArgon2idOpts) => {
+    // Re-wrap into an ArrayBuffer-backed Uint8Array. The Parameters<...> type
+    // widens to Uint8Array<ArrayBufferLike> (could be SharedArrayBuffer-backed)
+    // which Web Crypto APIs reject; Uint8Array.from() copies into a fresh
+    // ArrayBuffer-backed buffer.
+    const passBytes = Uint8Array.from(
+      typeof opts.password === "string"
+        ? new TextEncoder().encode(opts.password)
+        : opts.password,
+    );
+    const saltBytes = Uint8Array.from(
+      typeof opts.salt === "string"
+        ? new TextEncoder().encode(opts.salt)
+        : opts.salt,
+    );
+    // Fold argon2 params into salt so param changes produce different output.
+    const paramSuffix = new TextEncoder().encode(
+      `argon2id:t=${opts.iterations}:m=${opts.memorySize}:p=${opts.parallelism}`
+    );
+    const combinedSalt = new Uint8Array(saltBytes.length + paramSuffix.length);
+    combinedSalt.set(saltBytes);
+    combinedSalt.set(paramSuffix, saltBytes.length);
+
+    const keyMaterial = await crypto.subtle.importKey(
+      "raw", passBytes, "PBKDF2", false, ["deriveBits"],
+    );
+    // 1000 iter = fast test stand-in; production enforces 3 Argon2id iter via
+    // deriveWrappingKeyArgon2id. PBKDF2 1000 iter is NOT a secure floor — mock only.
+    const bits = await crypto.subtle.deriveBits(
+      { name: "PBKDF2", salt: combinedSalt, iterations: 1000, hash: "SHA-256" },
+      keyMaterial,
+      opts.hashLength * 8,
+    );
+    return new Uint8Array(bits);
   },
 }));
 
 const TEST_PASSPHRASE = "test-passphrase-for-unit-tests";
 const TEST_SALT = new Uint8Array(32).fill(0xab);
 
-describe("deriveWrappingKeyWithParams", () => {
+// deriveWrappingKeyWithParams integration tests — these verify the plumbing
+// (param flow, output shape, error propagation) but DO NOT prove real Argon2id
+// conformance: the mock above is a PBKDF2 stand-in. Real RFC 9106 conformance
+// is proven by `argon2-vectors.test.ts` via cross-impl agreement.
+describe("deriveWrappingKeyWithParams (Argon2id — integration only; conformance in argon2-vectors.test.ts)", () => {
   it("produces the same key as deriveWrappingKey with default params", async () => {
     const [keyA, keyB] = await Promise.all([
       deriveWrappingKey(TEST_PASSPHRASE, TEST_SALT),

@@ -159,6 +159,12 @@ model User {
   adminVaultResetsAsInitiator AdminVaultReset[] @relation("adminVaultResetInitiator")
   adminVaultResetsAsApprover  AdminVaultReset[] @relation("adminVaultResetApprover")
 
+  // Master key rotations
+  masterKeyRotationsAsInitiator MasterKeyRotation[] @relation("masterKeyRotationInitiator")
+  masterKeyRotationsAsApprover  MasterKeyRotation[] @relation("masterKeyRotationApprover")
+  masterKeyRotationsAsExecutor  MasterKeyRotation[] @relation("masterKeyRotationExecutor")
+  masterKeyRotationsAsRevoker   MasterKeyRotation[] @relation("masterKeyRotationRevoker")
+
   // Travel Mode
   travelModeActive      Boolean   @default(false) @map("travel_mode_active")
   travelModeActivatedAt DateTime? @map("travel_mode_activated_at") @db.Timestamptz(3)
@@ -533,6 +539,7 @@ model Tenant {
   teamWebhooks               TeamWebhook[]
   tenantWebhooks             TenantWebhook[]
   adminVaultResets           AdminVaultReset[]
+  masterKeyRotations         MasterKeyRotation[]
   personalLogAccessGrants    PersonalLogAccessGrant[]
   serviceAccounts            ServiceAccount[]
   serviceAccountTokens       ServiceAccountToken[]
@@ -939,6 +946,10 @@ enum AuditAction {
   ADMIN_VAULT_RESET_APPROVE
   ADMIN_VAULT_RESET_EXECUTE
   ADMIN_VAULT_RESET_REVOKE
+  MASTER_KEY_ROTATION_INITIATE
+  MASTER_KEY_ROTATION_APPROVE
+  MASTER_KEY_ROTATION_EXECUTE
+  MASTER_KEY_ROTATION_REVOKE
   API_KEY_CREATE
   API_KEY_REVOKE
   TRAVEL_MODE_ENABLE
@@ -1430,6 +1441,7 @@ enum NotificationType {
   ADMIN_VAULT_RESET
   ADMIN_VAULT_RESET_REVOKED
   ADMIN_VAULT_RESET_PENDING_APPROVAL
+  MASTER_KEY_ROTATION_PENDING_APPROVAL
   SESSION_EVICTED
   PERSONAL_LOG_ACCESSED
 }
@@ -1577,6 +1589,38 @@ model AdminVaultReset {
   @@map("admin_vault_resets")
 }
 
+// ─── Master Key Rotation (dual-approval) ────────────────────
+
+model MasterKeyRotation {
+  id              String    @id @default(uuid(4)) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  initiatedById   String?   @map("initiated_by_id") @db.Uuid
+  initiatedAt     DateTime  @default(now()) @map("initiated_at") @db.Timestamptz(3)
+  targetVersion   Int       @map("target_version")
+  revokeShares    Boolean   @default(true) @map("revoke_shares")
+  approvedById    String?   @map("approved_by_id") @db.Uuid
+  approvedAt      DateTime? @map("approved_at") @db.Timestamptz(3)
+  executedAt      DateTime? @map("executed_at") @db.Timestamptz(3)
+  executedById    String?   @map("executed_by_id") @db.Uuid
+  expiresAt       DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt       DateTime? @map("revoked_at") @db.Timestamptz(3)
+  revokedById     String?   @map("revoked_by_id") @db.Uuid
+  reason          String?   @db.VarChar(500)
+  revokedShares   Int?      @map("revoked_shares")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  initiatedBy User?  @relation("masterKeyRotationInitiator", fields: [initiatedById], references: [id], onDelete: SetNull)
+  approvedBy  User?  @relation("masterKeyRotationApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  executedBy  User?  @relation("masterKeyRotationExecutor", fields: [executedById], references: [id], onDelete: SetNull)
+  revokedBy   User?  @relation("masterKeyRotationRevoker", fields: [revokedById], references: [id], onDelete: SetNull)
+
+  @@index([targetVersion, executedAt, revokedAt])
+  @@index([initiatedById, approvedAt])
+  @@index([tenantId])
+  @@map("master_key_rotations")
+}
+
 // ─── Service Account Models ─────────────────────────────────
 
 enum IdentityType {
@@ -1701,6 +1745,9 @@ model WebAuthnCredential {
   prfSecretKeyIv        String?   @map("prf_secret_key_iv") @db.VarChar(24)
   prfSecretKeyAuthTag   String?   @map("prf_secret_key_auth_tag") @db.VarChar(32)
   prfSupported          Boolean   @default(false) @map("prf_supported")
+  // A02-8: per-credential PRF salt (32-byte hex). NULL = legacy v1 (RP-global salt).
+  // Non-NULL = v2 (HKDF with per-cred salt as input). Immutable after INSERT.
+  prfSalt               String?   @map("prf_salt") @db.VarChar(64)
   registeredDevice      String?   @map("registered_device") @db.VarChar(100)
   lastUsedDevice        String?   @map("last_used_device") @db.VarChar(100)
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)

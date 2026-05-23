@@ -766,4 +766,23 @@ describe("Scenario 7: OAuth Discovery endpoint", () => {
     expect(json.response_types_supported).toEqual(["code"]);
     expect(json.grant_types_supported).toEqual(["authorization_code", "refresh_token"]);
   });
+
+  // A07-4: Discovery advertises BOTH "client_secret_post" and "none" because
+  // the token endpoint accepts both — admin-console-created confidential clients
+  // continue to use client_secret_post. DCR (/api/mcp/register) is narrower
+  // (public-only — see register/route.ts dcrSchema); the narrower DCR contract
+  // is enforced at registration time via the invalid_client_metadata response.
+  //
+  // Use arrayContaining + toHaveLength so order/style refactors don't break
+  // the test (RFC 8414 §2: methods are a set, order is not significant), but
+  // adding a third method (e.g. private_key_jwt) still fails.
+  it("A07-4: token_endpoint_auth_methods_supported advertises both methods", async () => {
+    const res = await getDiscovery();
+    const { json } = await parseResponse(res);
+
+    expect(json.token_endpoint_auth_methods_supported).toEqual(
+      expect.arrayContaining(["client_secret_post", "none"]),
+    );
+    expect(json.token_endpoint_auth_methods_supported).toHaveLength(2);
+  });
 });

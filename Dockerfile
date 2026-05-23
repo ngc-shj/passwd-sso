@@ -5,7 +5,12 @@ FROM node:20-alpine@sha256:b88333c42c23fbd91596ebd7fd10de239cedab9617de04142dde7
 # would be discarded. apk upgrade only happens in the runner stage.
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
-COPY package.json package-lock.json ./
+# `.npmrc` carries `legacy-peer-deps=true` so the next-auth@beta peerOptional
+# on @simplewebauthn/browser@^9 does not block our v11 direct dep (the
+# v9-pinned next-auth WebAuthn code paths are blocked at static-check time —
+# see scripts/pre-pr.sh `no-authjs-builtin-webauthn-provider`). Without
+# copying this file, `npm ci` inside the build fails with ERESOLVE.
+COPY package.json package-lock.json .npmrc ./
 RUN npm ci --ignore-scripts
 # Generate the Prisma client so docker-compose worker services that use
 # `target: deps` can resolve `.prisma/client/default` at runtime. The builder

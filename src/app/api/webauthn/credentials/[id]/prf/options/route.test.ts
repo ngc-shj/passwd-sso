@@ -32,6 +32,22 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
   generateAuthenticationOpts: mockGenerateAuthenticationOpts,
+  // A02-8: buildPrfExtensions is invoked after the credential lookup. Default
+  // to a v1-only response so existing tests pass; the A02-8-specific cases
+  // override per-test.
+  buildPrfExtensions: vi.fn((creds: Array<{ credentialId: string; prfSalt: string | null }>) => {
+    const v1 = creds.some((c) => c.prfSalt === null);
+    const v2 = creds.some((c) => c.prfSalt !== null);
+    const result: { eval?: { first: string }; evalByCredential?: Record<string, { first: string }> } = {};
+    if (v1) result.eval = { first: "a".repeat(64) };
+    if (v2) {
+      result.evalByCredential = {};
+      for (const c of creds) {
+        if (c.prfSalt) result.evalByCredential[c.credentialId] = { first: c.prfSalt };
+      }
+    }
+    return result;
+  }),
   WEBAUTHN_CHALLENGE_TTL_SECONDS: 300,
 }));
 vi.mock("@/lib/http/with-request-log", () => ({
@@ -56,6 +72,7 @@ describe("POST /api/webauthn/credentials/[id]/prf/options", () => {
     mockPrismaCredential.findFirst.mockResolvedValue({
       credentialId: "credential-id-base64url",
       transports: ["internal"],
+      prfSalt: null,
     });
     mockGenerateAuthenticationOpts.mockResolvedValue({
       challenge: "fresh-challenge",
@@ -110,5 +127,37 @@ describe("POST /api/webauthn/credentials/[id]/prf/options", () => {
     expect(mockGenerateAuthenticationOpts).toHaveBeenCalledWith([
       { credentialId: "credential-id-base64url", transports: ["internal"] },
     ]);
+  });
+
+  // ── A02-8: per-credential salt (T07/T09) ──────────────────────────────
+
+  describe("A02-8 PRF extension shape", () => {
+    it("(T09 legacy) sends top-level eval only when the credential has NULL prfSalt", async () => {
+      mockPrismaCredential.findFirst.mockResolvedValue({
+        credentialId: "credential-id-base64url",
+        transports: ["internal"],
+        prfSalt: null,
+      });
+      const res = await POST(createRequest("POST", URL), params);
+      const json = (await res.json()) as { options: { extensions?: { prf?: { eval?: { first?: string }; evalByCredential?: Record<string, unknown> } } } };
+      expect(res.status).toBe(200);
+      expect(json.options.extensions?.prf?.eval?.first).toBeDefined();
+      expect(json.options.extensions?.prf?.evalByCredential).toBeUndefined();
+    });
+
+    it("(T07 v2) sends evalByCredential keyed by the credential id when prfSalt is set", async () => {
+      mockPrismaCredential.findFirst.mockResolvedValue({
+        credentialId: "credential-id-base64url",
+        transports: ["internal"],
+        prfSalt: "a".repeat(64),
+      });
+      const res = await POST(createRequest("POST", URL), params);
+      const json = (await res.json()) as { options: { extensions?: { prf?: { eval?: unknown; evalByCredential?: Record<string, unknown> } } } };
+      expect(res.status).toBe(200);
+      expect(json.options.extensions?.prf?.eval).toBeUndefined();
+      expect(json.options.extensions?.prf?.evalByCredential).toHaveProperty(
+        "credential-id-base64url",
+      );
+    });
   });
 });

@@ -558,7 +558,7 @@ export async function validateMcpToken(
         id: true,
         tenantId: true,
         clientId: true,
-        mcpClient: { select: { clientId: true } },
+        mcpClient: { select: { clientId: true, isActive: true } },
         userId: true,
         serviceAccountId: true,
         scope: true,
@@ -572,6 +572,9 @@ export async function validateMcpToken(
   if (!record) return { ok: false, error: "invalid_token" };
   if (record.revokedAt) return { ok: false, error: "token_revoked" };
   if (record.expiresAt < new Date()) return { ok: false, error: "token_expired" };
+  // A07-4: third McpClient lookup site — reject inactive clients so an admin's
+  // "Deactivate client" action takes immediate effect, not just after token TTL.
+  if (!record.mcpClient.isActive) return { ok: false, error: "invalid_token" };
 
   // Throttled lastUsedAt update (fire-and-forget)
   const shouldUpdate =

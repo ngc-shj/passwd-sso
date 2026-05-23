@@ -469,7 +469,7 @@ describe("validateMcpToken", () => {
         id: "token-id",
         tenantId: "tenant-uuid",
         clientId: "client-uuid",
-        mcpClient: { clientId: "mcpc_testclient123" },
+        mcpClient: { clientId: "mcpc_testclient123", isActive: true },
         userId: "user-uuid",
         serviceAccountId: null,
         scope: "credentials:read,credentials:list",
@@ -499,7 +499,7 @@ describe("validateMcpToken", () => {
         id: "token-id",
         tenantId: "t1",
         clientId: "c1",
-        mcpClient: { clientId: "mcpc_abc" },
+        mcpClient: { clientId: "mcpc_abc", isActive: true },
         userId: "u1",
         serviceAccountId: null,
         scope: "credentials:list",
@@ -527,7 +527,7 @@ describe("validateMcpToken", () => {
         id: "token-id",
         tenantId: "t1",
         clientId: "c1",
-        mcpClient: { clientId: "mcpc_abc" },
+        mcpClient: { clientId: "mcpc_abc", isActive: true },
         userId: "u1",
         serviceAccountId: null,
         scope: "credentials:list",
@@ -555,7 +555,7 @@ describe("validateMcpToken", () => {
         id: "token-id",
         tenantId: "t1",
         clientId: "c1",
-        mcpClient: { clientId: "mcpc_abc" },
+        mcpClient: { clientId: "mcpc_abc", isActive: true },
         userId: "u1",
         serviceAccountId: null,
         scope: "credentials:list",
@@ -570,5 +570,34 @@ describe("validateMcpToken", () => {
     await validateMcpToken("mcp_valid_token");
 
     expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  // A07-4: third McpClient lookup site — token issued before client was
+  // deactivated must be rejected immediately, not wait for TTL expiry.
+  it("A07-4: rejects token bound to an inactive client (isActive=false)", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    (prisma as Record<string, unknown>).mcpAccessToken = {
+      findUnique: vi.fn().mockResolvedValue({
+        id: "token-id",
+        tenantId: "t1",
+        clientId: "c1",
+        mcpClient: { clientId: "mcpc_abc", isActive: false }, // deactivated
+        userId: "u1",
+        serviceAccountId: null,
+        scope: "credentials:list",
+        expiresAt: new Date(Date.now() + 3600_000),
+        revokedAt: null,
+        lastUsedAt: null,
+      }),
+      update: vi.fn(),
+    };
+
+    const { validateMcpToken } = await import("./oauth-server");
+    const result = await validateMcpToken("mcp_valid_token");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("invalid_token");
+    }
   });
 });

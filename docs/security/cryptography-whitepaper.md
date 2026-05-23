@@ -136,7 +136,7 @@ Grantee activates (after waiting period):
 | Salt | accountSalt (256-bit random) |  |
 | Output | 256 bits |  |
 
-Implementation: `argon2-browser` (WASM) for web/extension; `argon2` (native) for CLI.
+Implementation: `hash-wasm` (WASM, RFC 9106-conformant per cross-impl agreement with `@noble/hashes/argon2id` in `src/lib/crypto/argon2-vectors.test.ts`) for web/extension; `argon2` (native) for CLI.
 
 Fallback: If WASM instantiation fails (CSP, old browser), the client falls back to PBKDF2 and notifies the user. The selected kdfType is persisted to the user record.
 

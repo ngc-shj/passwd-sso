@@ -89,8 +89,8 @@ export function buildCspHeader(nonce: string): string {
   //   blocked, but in that case the caller should use dev mode instead).
   //
   // M2 NOTE on 'wasm-unsafe-eval' in strict mode: this is required by
-  // argon2-browser (src/lib/crypto/crypto-client.ts → argon2idHash), which
-  // is the load-bearing KDF for the vault wrapping key. Removing it breaks
+  // hash-wasm (src/lib/crypto/crypto-client.ts → argon2idHash), which is
+  // the load-bearing KDF for the vault wrapping key. Removing it breaks
   // vault setup / unlock entirely. The residual risk — XSS payload could
   // compile a WebAssembly module bypassing strict-dynamic — is accepted in
   // threat-model.md §5.7. Mitigations in place:
@@ -101,9 +101,9 @@ export function buildCspHeader(nonce: string): string {
   //   - 'worker-src 'self'' (below) blocks loading worker scripts from any
   //     other origin, so even WASM-in-Worker payloads must originate from
   //     this app's served bundles.
-  // If argon2-browser is ever replaced with a non-WASM Argon2id (or with
-  // PBKDF2-via-WebCrypto, accepting the memory-hardness loss), this string
-  // should drop 'wasm-unsafe-eval'.
+  // If hash-wasm is ever replaced with a non-WASM Argon2id (e.g. pure-JS
+  // @noble/hashes/argon2id, accepting the speed loss), this string should
+  // drop 'wasm-unsafe-eval'.
   const scriptSrc = _cspMode === "dev"
     ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'"
     : `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'`;
