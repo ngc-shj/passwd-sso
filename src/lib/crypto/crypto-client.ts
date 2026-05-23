@@ -130,8 +130,16 @@ export async function deriveWrappingKeyWithParams(
 }
 
 /**
- * Hash passphrase with Argon2id. Returns 32-byte raw hash.
- * Uses argon2-browser (WASM) in browser, can be overridden for Node/tests.
+ * Hash passphrase with Argon2id (RFC 9106). Returns 32-byte raw hash.
+ *
+ * Uses `hash-wasm` (WASM). RFC conformance verified by cross-impl agreement
+ * with `@noble/hashes/argon2id` (devDep oracle, pure JS) in
+ * `argon2-vectors.test.ts`.
+ *
+ * Dynamic import with variable indirection prevents Turbopack/webpack from
+ * statically resolving hash-wasm during SSR bundling. hash-wasm only uses
+ * `WebAssembly` globals (compile + instantiate), available in Node 18+ and
+ * all evergreen browsers — no `fs` shim.
  */
 export async function argon2idHash(
   passphrase: string,
@@ -140,20 +148,17 @@ export async function argon2idHash(
   mem: number,
   parallelism: number
 ): Promise<Uint8Array> {
-  // Dynamic import with variable to prevent Turbopack/webpack from statically
-  // resolving argon2-browser during SSR bundling (WASM + fs are browser-only)
-  const moduleName = "argon2-browser";
-  const { default: argon2 } = await import(/* webpackIgnore: true */ moduleName);
-  const result = await argon2.hash({
-    pass: passphrase,
+  const moduleName = "hash-wasm";
+  const { argon2id } = await import(/* webpackIgnore: true */ moduleName);
+  return argon2id({
+    password: passphrase,
     salt,
-    time,
-    mem,
     parallelism,
-    hashLen: 32,
-    type: argon2.ArgonType.Argon2id,
+    iterations: time,
+    memorySize: mem,
+    hashLength: 32,
+    outputType: "binary" as const,
   });
-  return result.hash;
 }
 
 async function deriveWrappingKeyArgon2id(

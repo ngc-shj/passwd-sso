@@ -192,6 +192,24 @@ run_step "Static: prf-salt-immutable" bash -c '
   fi
 '
 
+run_step "Static: no-argon2-browser-reintroduce" bash -c '
+  # A06-2: argon2-browser was swapped for hash-wasm. Forbid any import/require
+  # of argon2-browser to catch accidental re-introduction (left-pad scenario
+  # for an unmaintained dep). Also forbid hash-wasm imports outside the crypto
+  # lib + tests + cli (CLI keeps its own argon2 dep).
+  if grep -rnE "(from\s+[\x22\x27]argon2-browser[\x22\x27]|require\([\x22\x27]argon2-browser[\x22\x27]\))" \
+    src/ 2>/dev/null | grep -v "\\.test\\." | grep -q .; then
+    echo "ERROR: argon2-browser import detected — A06-2 forbids re-introduction; use hash-wasm."
+    grep -rnE "(from\s+[\x22\x27]argon2-browser[\x22\x27]|require\([\x22\x27]argon2-browser[\x22\x27]\))" \
+      src/ | grep -v "\\.test\\."
+    exit 1
+  fi
+  if grep -qF "argon2-browser" package.json; then
+    echo "ERROR: argon2-browser still listed in package.json (A06-2 dropped it)"
+    exit 1
+  fi
+'
+
 run_step "Static: dcr-public-only-literal" bash -c '
   # A07-4: DCR (/api/mcp/register) issues public clients only per RFC 9700 §4.14.
   # The Zod schema must use z.literal("none") (no default fallback, no z.string()
