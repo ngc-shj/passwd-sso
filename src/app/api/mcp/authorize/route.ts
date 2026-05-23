@@ -16,14 +16,17 @@ const authorizeLimiter = createRateLimiter({
   failClosedOnRedisError: true,
 });
 
-// Anti-enumeration: identical error for "client not found" and "redirect_uri mismatch"
+// Anti-enumeration: identical error for "client not found", "client inactive",
+// and "redirect_uri mismatch". A07-4 adds `isActive: true` to the WHERE clause
+// so revoked clients fail upfront (defense-in-depth — token endpoint already
+// gates via validateMcpToken in oauth-server.ts:170,376).
 async function validateOAuthRequest(clientId: string | null, redirectUri: string | null): Promise<boolean> {
   if (!clientId || !redirectUri) return false;
   const client = await withBypassRls(
     prisma,
     async (tx) =>
       tx.mcpClient.findFirst({
-        where: { clientId },
+        where: { clientId, isActive: true }, // A07-4
         select: { redirectUris: true },
       }),
     BYPASS_PURPOSE.AUTH_FLOW,

@@ -192,6 +192,46 @@ run_step "Static: prf-salt-immutable" bash -c '
   fi
 '
 
+run_step "Static: dcr-public-only-literal" bash -c '
+  # A07-4: DCR (/api/mcp/register) issues public clients only per RFC 9700 §4.14.
+  # The Zod schema must use z.literal("none") (no default fallback, no z.string()
+  # optional) so wrong-shape inputs (null/array/case-mismatch) are rejected.
+  ROUTE="src/app/api/mcp/register/route.ts"
+  if [ ! -f "$ROUTE" ]; then
+    echo "OK (route not present)"
+    exit 0
+  fi
+  # Required: z.literal( or z.enum( referencing "none" must appear. Accept both
+  # quote styles + leading whitespace + line breaks (perl -0 reads whole file).
+  if ! perl -0777 -ne '"'"'exit 1 unless /z\.(literal|enum)\s*\(\s*\[?\s*["\x27]none["\x27]/'"'"' "$ROUTE"; then
+    echo "ERROR: $ROUTE must constrain token_endpoint_auth_method via z.literal(\"none\") (A07-4)"
+    exit 1
+  fi
+  # Forbidden: the legacy client_secret_post default literal must not appear here.
+  if grep -qF "client_secret_post" "$ROUTE"; then
+    echo "ERROR: $ROUTE still references client_secret_post — DCR is public-only (A07-4)"
+    exit 1
+  fi
+  # Forbidden: no secret-shaped randomBytes(...) ... base64url generation in DCR.
+  # clientId uses randomBytes(16).toString("hex") which is intentional — narrow
+  # the regex to the secret-shape pattern (any-size randomBytes piped to base64url).
+  if grep -qE "randomBytes\\([0-9]+\\)\\.toString\\([\"\x27]base64url[\"\x27]\\)" "$ROUTE"; then
+    echo "ERROR: $ROUTE generates a base64url secret — DCR must not issue client_secret (A07-4)"
+    exit 1
+  fi
+'
+
+run_step "Static: client-secret-hash-non-null" bash -c '
+  # A07-4 R5: McpClient.clientSecretHash MUST remain NOT NULL (empty-string
+  # sentinel for public clients). The DCR public-only design + downstream
+  # `clientSecretHash === ""` heuristic both depend on this invariant.
+  if grep -qE "clientSecretHash\\s+String\\?" prisma/schema.prisma; then
+    echo "ERROR: McpClient.clientSecretHash must remain NOT NULL (A07-4 R5)"
+    echo "The empty-string sentinel design relies on this. Re-audit DCR + token paths before making it nullable."
+    exit 1
+  fi
+'
+
 run_step "Static: no-authjs-builtin-webauthn-provider" bash -c '
   # Anchor the match with a closing string-delimiter so future siblings like
   # @auth/core/providers/webauthn-safe (or webauthn2) do not get caught by a

@@ -100,6 +100,21 @@ async function handleGET(_req: NextRequest) {
 }
 
 async function handlePOST(req: NextRequest) {
+  // A07-4: Confidential MCP clients are admin-only.
+  //   Authentication: session cookie required (auth() below).
+  //   Authorization:  SERVICE_ACCOUNT_MANAGE permission → OWNER/ADMIN only,
+  //                   resolved by requireTenantPermission via ROLE_PERMISSIONS
+  //                   in src/lib/auth/access/tenant-auth.ts.
+  //   Step-up:        requireRecentCurrentAuthMethod enforces recent auth ceremony.
+  //
+  // DCR (/api/mcp/register) is the public-only alternative for self-service
+  // registration. See RFC 9700 §4.14.
+  //
+  // KNOWN GAP — out of scope for A07-4, must be addressed in a follow-up PR:
+  // PUT/DELETE handlers in [id]/route.ts do NOT require step-up reauth.
+  // Sensitive operations (flipping `redirectUris` to attacker-controlled URIs,
+  // or `isActive: false` to lock out operators) can therefore be performed
+  // with a non-step-up admin session. Track separately.
   const session = await auth();
   if (!session?.user?.id) return unauthorized();
 
