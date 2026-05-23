@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { updateE2EPasswordSchema } from "@/lib/validations";
-import { errorResponse, forbidden, notFound, rateLimited, validationError } from "@/lib/http/api-response";
+import { errorResponse, notFound, rateLimited, validationError } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { checkAuth } from "@/lib/auth/session/check-auth";
 import { parseBody } from "@/lib/http/parse-body";
