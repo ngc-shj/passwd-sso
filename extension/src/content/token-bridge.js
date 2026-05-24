@@ -12,6 +12,8 @@
 // src/__tests__/i18n/extension-constants-sync.test.ts enforces this.
 
 var BRIDGE_CODE_MSG_TYPE = "PASSWD_SSO_BRIDGE_CODE";
+var BRIDGE_CODE_LENGTH = 64;
+var BRIDGE_CODE_RE = new RegExp("^[a-f0-9]{" + BRIDGE_CODE_LENGTH + "}$");
 var EXCHANGE_PATH = "/api/extension/token/exchange";
 
 function isContextValid() {
@@ -47,7 +49,7 @@ function forwardToken(token, expiresAtMs) {
 function handleBridgeCodeMessage(event) {
   var code = event.data.code;
   var expiresAt = event.data.expiresAt;
-  if (typeof code !== "string" || code.length !== 64) return;
+  if (typeof code !== "string" || !BRIDGE_CODE_RE.test(code)) return;
   if (typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) return;
   if (!isContextValid()) return;
 

@@ -43,6 +43,7 @@ export {
   BRIDGE_CODE_MSG_TYPE,
   BRIDGE_CODE_TTL_MS,
   BRIDGE_CODE_MAX_ACTIVE,
+  BRIDGE_CODE_LENGTH,
   EXT_CONNECT_PARAM,
 } from "./integrations/extension";
 export { API_PATH, apiPath } from "./auth/api-path";

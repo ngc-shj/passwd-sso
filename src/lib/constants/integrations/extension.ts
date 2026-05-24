@@ -17,5 +17,13 @@ export const BRIDGE_CODE_TTL_MS = MS_PER_MINUTE; // 60 seconds
 // Maximum unused bridge codes per user (oldest auto-revoked when exceeded).
 export const BRIDGE_CODE_MAX_ACTIVE = 3;
 
+// Bridge code wire format: 64 hex chars (32 random bytes → hex-encoded by
+// generateShareToken). Length and character set are validated symmetrically
+// on the server (Zod schema in exchange/route.ts) and on the extension
+// content script. Mirrored to `extension/src/lib/constants.ts`; the sync
+// test at `src/__tests__/i18n/extension-constants-sync.test.ts` enforces
+// equality.
+export const BRIDGE_CODE_LENGTH = 64;
+
 // ── URL params ──
 export const EXT_CONNECT_PARAM = "ext_connect";

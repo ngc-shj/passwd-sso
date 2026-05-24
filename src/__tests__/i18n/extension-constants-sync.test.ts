@@ -18,6 +18,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  BRIDGE_CODE_LENGTH,
   BRIDGE_CODE_MAX_ACTIVE,
   BRIDGE_CODE_MSG_TYPE,
   BRIDGE_CODE_TTL_MS,
@@ -59,5 +60,9 @@ describe("extension constants sync (web app ↔ extension repo)", () => {
 
   it("BRIDGE_CODE_MAX_ACTIVE matches between web app and extension", () => {
     expect(extractNumericConst("BRIDGE_CODE_MAX_ACTIVE")).toBe(BRIDGE_CODE_MAX_ACTIVE);
+  });
+
+  it("BRIDGE_CODE_LENGTH matches between web app and extension", () => {
+    expect(extractNumericConst("BRIDGE_CODE_LENGTH")).toBe(BRIDGE_CODE_LENGTH);
   });
 });

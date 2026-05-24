@@ -39,7 +39,7 @@ import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { getLogger } from "@/lib/logger";
 import { parseBody } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_ACTION, BRIDGE_CODE_LENGTH } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
@@ -51,7 +51,7 @@ const exchangeLimiter = createRateLimiter({
 });
 
 const ExchangeRequestSchema = z.object({
-  code: z.string().length(64).regex(/^[a-f0-9]+$/),
+  code: z.string().length(BRIDGE_CODE_LENGTH).regex(/^[a-f0-9]+$/),
 });
 
 async function handlePOST(req: NextRequest) {
