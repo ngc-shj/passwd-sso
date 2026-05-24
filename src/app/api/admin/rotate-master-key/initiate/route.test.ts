@@ -101,7 +101,7 @@ describe("POST /api/admin/rotate-master-key/initiate", () => {
     mockCreate.mockResolvedValue({
       id: "rot-1",
       targetVersion: 2,
-      expiresAt: new Date("2026-05-24T10:00:00Z"),
+      expiresAt: new Date("2030-01-02T10:00:00Z"),
     });
   });
 

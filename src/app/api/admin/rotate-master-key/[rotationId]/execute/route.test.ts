@@ -80,23 +80,28 @@ const ALICE = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const BOB = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 const ROTATION_ID = "11111111-2222-3333-4444-555555555555";
 
+// `expiresAt` MUST be in the future relative to test execution; if it elapses,
+// computeExecuteEligibility returns ALREADY_TERMINAL and every test that
+// expects to reach the targetVersion / CAS branches fails with 409 instead of
+// the expected status. Y2038-comfortable far-future date avoids the time bomb
+// that previously fired (2026-05-23 fixture vs. 2026-05-24 wall clock).
 const APPROVED_ROW = {
   id: ROTATION_ID,
   tenantId: TENANT,
   initiatedById: ALICE,
-  initiatedAt: new Date("2026-05-23T09:00:00Z"),
+  initiatedAt: new Date("2030-01-01T09:00:00Z"),
   targetVersion: 2,
   revokeShares: true,
   approvedById: BOB,
-  approvedAt: new Date("2026-05-23T09:05:00Z"),
+  approvedAt: new Date("2030-01-01T09:05:00Z"),
   executedAt: null,
   executedById: null,
-  expiresAt: new Date("2026-05-23T10:05:00Z"),
+  expiresAt: new Date("2030-01-01T10:05:00Z"),
   revokedAt: null,
   revokedById: null,
   reason: null,
   revokedShares: null,
-  createdAt: new Date("2026-05-23T09:00:00Z"),
+  createdAt: new Date("2030-01-01T09:00:00Z"),
 };
 
 function makeRequest(): NextRequest {
