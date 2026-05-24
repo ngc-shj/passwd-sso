@@ -25,11 +25,6 @@ export class SettingsPage {
     await this.page.waitForLoadState("networkidle");
   }
 
-  async gotoCliToken(): Promise<void> {
-    await this.page.goto("/ja/dashboard/settings/developer/cli-token");
-    await this.page.waitForLoadState("networkidle");
-  }
-
   async gotoApiKeys(): Promise<void> {
     await this.page.goto("/ja/dashboard/settings/developer/api-keys");
     await this.page.waitForLoadState("networkidle");
@@ -46,13 +41,6 @@ export class SettingsPage {
   get sessionsCard(): Locator {
     return this.page.locator("[data-slot='card']").filter({
       hasText: /Sessions|セッション/i,
-    });
-  }
-
-  /** CLI token card rendered on the Developer > CLI Token page. */
-  get cliTokenCard(): Locator {
-    return this.page.locator("[data-slot='card']").filter({
-      hasText: /CLI Token|CLIトークン/i,
     });
   }
 

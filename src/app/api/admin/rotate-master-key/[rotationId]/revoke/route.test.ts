@@ -70,19 +70,19 @@ const PENDING_ROW = {
   id: ROTATION_ID,
   tenantId: TENANT,
   initiatedById: ALICE,
-  initiatedAt: new Date("2026-05-23T09:00:00Z"),
+  initiatedAt: new Date("2030-01-01T09:00:00Z"),
   targetVersion: 2,
   revokeShares: true,
   approvedById: null,
   approvedAt: null,
   executedAt: null,
   executedById: null,
-  expiresAt: new Date("2026-05-24T09:00:00Z"),
+  expiresAt: new Date("2030-01-02T09:00:00Z"),
   revokedAt: null,
   revokedById: null,
   reason: null,
   revokedShares: null,
-  createdAt: new Date("2026-05-23T09:00:00Z"),
+  createdAt: new Date("2030-01-01T09:00:00Z"),
 };
 
 function makeRequest(): NextRequest {
@@ -126,7 +126,7 @@ describe("POST /api/admin/rotate-master-key/[rotationId]/revoke", () => {
   it("returns 409 (ALREADY_TERMINAL) when row already executed", async () => {
     mockFindFirst.mockResolvedValue({
       ...PENDING_ROW,
-      executedAt: new Date("2026-05-23T09:30:00Z"),
+      executedAt: new Date("2030-01-01T09:30:00Z"),
     });
     const res = await callPOST();
     expect(res.status).toBe(409);
@@ -227,7 +227,7 @@ describe("POST /api/admin/rotate-master-key/[rotationId]/revoke", () => {
   it("transitions approved → revoked (Scenario C approved-then-revoke)", async () => {
     mockFindFirst.mockResolvedValue({
       ...PENDING_ROW,
-      approvedAt: new Date("2026-05-23T09:30:00Z"),
+      approvedAt: new Date("2030-01-01T09:30:00Z"),
       approvedById: BOB,
     });
     const res = await callPOST();

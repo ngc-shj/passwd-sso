@@ -1,56 +1,43 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "@/__tests__/helpers/mock-auth";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
+import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
+import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
 const {
-  mockAuth,
-  mockCreate,
-  mockFindMany,
   mockFindUnique,
-  mockUserFindUnique,
-  mockUpdateMany,
   mockUpdate,
-  mockTransaction,
-  mockCheck,
-  mockWithUserTenantRls,
   mockWithBypassRls,
   mockEnforceAccessRestriction,
-  mockRequireRecentSession,
+  mockLogAudit,
+  mockExtractClientIp,
+  mockCheckIpRateLimit,
+  mockCheckRateLimit,
+  mockWarn,
 } = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockCreate: vi.fn(),
-  mockFindMany: vi.fn(),
   mockFindUnique: vi.fn(),
-  mockUserFindUnique: vi.fn(),
-  mockUpdateMany: vi.fn(),
   mockUpdate: vi.fn(),
-  mockTransaction: vi.fn(),
-  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
-  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
+  mockLogAudit: vi.fn(),
+  mockExtractClientIp: vi.fn(() => "1.2.3.4"),
+  mockCheckIpRateLimit: vi.fn().mockResolvedValue({ allowed: true }),
+  mockCheckRateLimit: vi.fn().mockResolvedValue(null),
+  mockWarn: vi.fn(),
 }));
 
-vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     extensionToken: {
-      findMany: mockFindMany,
       findUnique: mockFindUnique,
-      create: mockCreate,
-      updateMany: mockUpdateMany,
       update: mockUpdate,
-    },
-    user: {
-      findUnique: mockUserFindUnique,
     },
     tenant: {
       findUnique: vi.fn().mockResolvedValue({ extensionTokenIdleTimeoutMinutes: 15 }),
     },
-    $transaction: mockTransaction,
   },
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
@@ -58,14 +45,16 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: () => "h".repeat(64),
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
+  // POST handler delegates rate-limit decisions to `checkIpRateLimit` (mocked
+  // separately); the returned shape is unused, hence inline vi.fn().
+  createRateLimiter: () => ({ check: vi.fn().mockResolvedValue({ allowed: true }), clear: vi.fn() }),
 }));
 vi.mock("@/lib/redis", () => ({
   getRedis: () => null,
   validateRedisConfig: () => {},
 }));
 vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+  withUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
@@ -73,8 +62,22 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/auth/policy/access-restriction", () => ({
   enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
-vi.mock("@/lib/auth/session/step-up", () => ({
-  requireRecentSession: mockRequireRecentSession,
+vi.mock("@/lib/audit/audit", () => ({
+  logAuditAsync: mockLogAudit,
+}));
+vi.mock("@/lib/auth/policy/ip-access", () => ({
+  extractClientIp: mockExtractClientIp,
+  rateLimitKeyFromIp: (ip: string) => `ip:${ip}`,
+}));
+vi.mock("@/lib/security/ip-rate-limit", () => ({
+  checkIpRateLimit: mockCheckIpRateLimit,
+}));
+vi.mock("@/lib/security/rate-limit-audit", () => ({
+  checkRateLimitOrFail: mockCheckRateLimit,
+}));
+vi.mock("@/lib/logger", () => ({
+  default: { warn: mockWarn, error: vi.fn(), info: vi.fn() },
+  getLogger: () => ({ warn: mockWarn, error: vi.fn(), info: vi.fn() }),
 }));
 
 import { POST, DELETE } from "./route";
@@ -84,94 +87,65 @@ import { POST, DELETE } from "./route";
 describe("POST /api/extension/token", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
-    mockRequireRecentSession.mockResolvedValue(null);
-    // Default: transaction executes the callback with the mock prisma
-    mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
-      cb({
-        extensionToken: {
-          findMany: mockFindMany,
-          create: mockCreate,
-          updateMany: mockUpdateMany,
-        },
+    mockExtractClientIp.mockReturnValue("1.2.3.4");
+    mockCheckIpRateLimit.mockResolvedValue({ allowed: true });
+    mockCheckRateLimit.mockResolvedValue(null);
+    mockLogAudit.mockResolvedValue(undefined);
+  });
+
+  it("returns 410 with no session cookie + Cache-Control: no-store", async () => {
+    const res = await POST(createRequest("POST", "http://localhost/api/extension/token"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(410);
+    expect(json.error).toBe(API_ERROR.EXTENSION_TOKEN_LEGACY_ISSUANCE_DEPRECATED);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  it("returns 410 even with valid session cookie", async () => {
+    const req = createRequest("POST", "http://localhost/api/extension/token", {
+      headers: { Cookie: `authjs.session-token=fake-session-token` },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(410);
+    expect(json.error).toBe(API_ERROR.EXTENSION_TOKEN_LEGACY_ISSUANCE_DEPRECATED);
+  });
+
+  it("emits ANONYMOUS_ACTOR_ID audit row with EXTENSION_TOKEN_LEGACY_ISSUANCE_BLOCKED + ip/userAgent", async () => {
+    const req = createRequest("POST", "http://localhost/api/extension/token", {
+      headers: { "User-Agent": "test-agent/1.0" },
+    });
+    await POST(req);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AUDIT_ACTION.EXTENSION_TOKEN_LEGACY_ISSUANCE_BLOCKED,
+        userId: ANONYMOUS_ACTOR_ID,
+        actorType: ACTOR_TYPE.ANONYMOUS,
+        ip: "1.2.3.4",
+        userAgent: "test-agent/1.0",
       }),
     );
   });
 
-  it("returns 401 when not authenticated", async () => {
-    mockAuth.mockResolvedValue(null);
+  it("response includes Deprecation: true header", async () => {
     const res = await POST(createRequest("POST", "http://localhost/api/extension/token"));
-    const { status, json } = await parseResponse(res);
-    expect(status).toBe(401);
-    expect(json.error).toBe("UNAUTHORIZED");
+    expect(res.headers.get("Deprecation")).toBe("true");
   });
 
-  it("returns 429 when rate limited", async () => {
-    mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockCheck.mockResolvedValueOnce({ allowed: false });
+  it("returns 429 when IP rate limit exceeded", async () => {
+    const rateLimitedResponse = new Response(
+      JSON.stringify({ error: "RATE_LIMIT_EXCEEDED" }),
+      { status: 429, headers: { "Content-Type": "application/json" } },
+    );
+    mockCheckRateLimit.mockResolvedValueOnce(rateLimitedResponse);
+
     const res = await POST(createRequest("POST", "http://localhost/api/extension/token"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(429);
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
-  });
-
-  it("returns 403 when session step-up is required", async () => {
-    mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireRecentSession.mockResolvedValueOnce(
-      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
-    );
-
-    const res = await POST(createRequest("POST", "http://localhost/api/extension/token"));
-    const { status, json } = await parseResponse(res);
-
-    expect(status).toBe(403);
-    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
-    expect(mockCreate).not.toHaveBeenCalled();
-  });
-
-  it("issues a token successfully", async () => {
-    mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockFindMany.mockResolvedValue([]);
-    mockCreate.mockResolvedValue({
-      id: "tok1",
-      expiresAt: new Date("2030-01-01"),
-      scope: "passwords:read,vault:unlock-data",
-    });
-
-    const res = await POST(createRequest("POST", "http://localhost/api/extension/token"));
-    const { status, json } = await parseResponse(res);
-
-    expect(status).toBe(201);
-    expect(json).toMatchObject({
-      token: expect.any(String),
-      expiresAt: expect.any(String),
-      scope: expect.arrayContaining(["passwords:read"]),
-    });
-    expect(json.token).toBe("a".repeat(64));
-    // Verify response conforms to Zod schema
-    expect(Object.keys(json).sort()).toEqual(["expiresAt", "scope", "token"]);
-  });
-
-  it("revokes oldest token when MAX_ACTIVE exceeded", async () => {
-    mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockFindMany.mockResolvedValue([
-      { id: "t1" },
-      { id: "t2" },
-      { id: "t3" },
-    ]);
-    mockCreate.mockResolvedValue({
-      id: "t4",
-      expiresAt: new Date("2030-01-01"),
-      scope: "passwords:read,vault:unlock-data",
-    });
-
-    await POST(createRequest("POST", "http://localhost/api/extension/token"));
-
-    expect(mockUpdateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: { in: ["t1"] } },
-      }),
-    );
+    // Critical invariant: rate-limit blocks before audit emission, capping
+    // audit-row write rate at the limiter's threshold per IP.
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 });
 

@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { errorResponse } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
-import { issueExtensionToken, validateExtensionToken } from "@/lib/auth/tokens/extension-token";
+import { validateExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { EXTENSION_TOKEN_DEFAULT_SCOPES } from "@/lib/constants";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { TokenIssueResponseSchema, TokenRevokeResponseSchema } from "@/lib/validations/extension-token";
+import { TokenRevokeResponseSchema } from "@/lib/validations/extension-token";
 import logger from "@/lib/logger";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
-import { requireRecentSession } from "@/lib/auth/session/step-up";
+import { extractClientIp } from "@/lib/auth/policy/ip-access";
+import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
+import { logAuditAsync } from "@/lib/audit/audit";
+import { AUDIT_ACTION, AUDIT_SCOPE, ACTOR_TYPE } from "@/lib/constants/audit/audit";
+import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
 
 function internalError() {
   return errorResponse(API_ERROR.INTERNAL_ERROR);
@@ -21,67 +23,60 @@ function internalError() {
 
 export const runtime = "nodejs";
 
-const tokenLimiter = createRateLimiter({
+const legacyDeprecatedLimiter = createRateLimiter({
   windowMs: 15 * MS_PER_MINUTE,
   max: 10,
   failClosedOnRedisError: true,
 });
 
 /**
- * POST /api/extension/token — Issue a new extension token.
- * Requires Auth.js session (user must be logged in on the web app).
- * Returns the plaintext token (only visible once).
+ * POST /api/extension/token — DEPRECATED. Always returns 410 Gone.
+ * The bridge-code exchange flow (POST /api/extension/token/exchange) is
+ * the only supported path to obtain an extension token.
  */
 async function handlePOST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return unauthorized();
-  }
-
-  const stepUpError = await requireRecentSession(req);
-  if (stepUpError) return stepUpError;
-
+  // 1. IP-keyed rate limit — cap audit writes and warn logs per source IP.
+  const ip = extractClientIp(req);
+  const rl = await checkIpRateLimit({
+    ip,
+    pathname: req.nextUrl.pathname,
+    scope: "ext_token_legacy_blocked",
+    limiter: legacyDeprecatedLimiter,
+  });
   const blocked = await checkRateLimitOrFail({
     req,
-    limiter: tokenLimiter,
-    key: `rl:ext_token:${session.user.id}`,
-    scope: "extension.token",
-    userId: session.user.id,
+    result: rl,
+    scope: "extension.token_legacy_blocked",
+    userId: null,
   });
   if (blocked) return blocked;
 
-  // Migration metric (Step 11): emit a counter so we can track when the legacy
-  // direct-issuance endpoint stops being called and the bridge code flow has
-  // fully replaced it.
-  logger.info(
-    {
-      event: "extension_token_legacy_issuance",
-      userId: session.user.id,
-    },
-    "legacy direct extension token issuance — track for migration completion",
+  // 2. Anonymous audit emission — fire-and-forget; goes to dead-letter
+  // because no tenantId is resolvable (handler intentionally skips auth()).
+  await logAuditAsync({
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.EXTENSION_TOKEN_LEGACY_ISSUANCE_BLOCKED,
+    userId: ANONYMOUS_ACTOR_ID,
+    actorType: ACTOR_TYPE.ANONYMOUS,
+    ip,
+    userAgent: req.headers.get("user-agent"),
+  });
+
+  // 3. Structured warn — primary observability surface (dead-letter for audit row).
+  logger.warn(
+    { event: "extension_token_legacy_issuance_blocked", ip },
+    "legacy extension token issuance attempted — endpoint is gone",
   );
 
-  const issued = await withUserTenantRls(session.user.id, async (tenantId) =>
-    issueExtensionToken({
-      userId: session.user.id,
-      tenantId,
-      scope: EXTENSION_TOKEN_DEFAULT_SCOPES.join(","),
-    }),
+  // 4. 410 Gone with Deprecation header per RFC 9745.
+  //    Cache-Control: no-store prevents intermediary caches from memoizing
+  //    the 410 across deploys; this endpoint is never cacheable.
+  return errorResponse(
+    API_ERROR.EXTENSION_TOKEN_LEGACY_ISSUANCE_DEPRECATED,
+    undefined,
+    undefined,
+    { Deprecation: "true", "Cache-Control": "no-store" },
   );
-
-  const body = {
-    token: issued.token,
-    expiresAt: issued.expiresAt.toISOString(),
-    scope: issued.scopeCsv.split(","),
-  };
-
-  const parsed = TokenIssueResponseSchema.safeParse(body);
-  if (!parsed.success) {
-    logger.error({ error: parsed.error.message }, "extension token issue response validation failed");
-    return internalError();
-  }
-
-  return NextResponse.json(parsed.data, { status: 201 });
 }
 
 /**

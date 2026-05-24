@@ -82,19 +82,19 @@ const ROW_PENDING = {
   id: ROTATION_ID,
   tenantId: TENANT,
   initiatedById: ALICE,
-  initiatedAt: new Date("2026-05-23T09:00:00Z"),
+  initiatedAt: new Date("2030-01-01T09:00:00Z"),
   targetVersion: 2,
   revokeShares: true,
   approvedById: null,
   approvedAt: null,
   executedAt: null,
   executedById: null,
-  expiresAt: new Date("2026-05-24T09:00:00Z"),
+  expiresAt: new Date("2030-01-02T09:00:00Z"),
   revokedAt: null,
   revokedById: null,
   reason: null,
   revokedShares: null,
-  createdAt: new Date("2026-05-23T09:00:00Z"),
+  createdAt: new Date("2030-01-01T09:00:00Z"),
 };
 
 describe("POST /api/admin/rotate-master-key/[rotationId]/approve", () => {
@@ -162,7 +162,7 @@ describe("POST /api/admin/rotate-master-key/[rotationId]/approve", () => {
   });
 
   it("returns 409 when row already approved (ALREADY_TERMINAL)", async () => {
-    mockFindFirst.mockResolvedValue({ ...ROW_PENDING, approvedAt: new Date("2026-05-23T08:00:00Z") });
+    mockFindFirst.mockResolvedValue({ ...ROW_PENDING, approvedAt: new Date("2030-01-01T08:00:00Z") });
     const res = await callPOST();
     expect(res.status).toBe(409);
     expect(mockUpdateMany).not.toHaveBeenCalled();
@@ -229,7 +229,7 @@ describe("POST /api/admin/rotate-master-key/[rotationId]/approve", () => {
     await callPOST();
     const callArg = mockUpdateMany.mock.calls[0][0];
     const newExpiresAt: Date = callArg.data.expiresAt;
-    // Original expires at 2026-05-24T09:00:00Z (24h after initiate). The 60-min
+    // Original expires at 2030-01-02T09:00:00Z (24h after initiate). The 60-min
     // execute window means the narrowed expiresAt is much sooner than the
     // initiate-time expiresAt — we just check the relation, not absolute time.
     expect(newExpiresAt.getTime()).toBeLessThan(

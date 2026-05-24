@@ -71,6 +71,7 @@
   "extensionTokenInvalid": "Invalid client app token.",
   "extensionTokenSessionExpired": "Client app token lifetime exceeded. Please re-authorize the app.",
   "extensionTokenScopeInsufficient": "Client app token does not have the required scope.",
+  "extensionTokenLegacyIssuanceDeprecated": "This endpoint is not available. Update the extension, or use 'passwd-sso login' for CLI access.",
   "invalidChallenge": "Security key registration could not be completed. Please retry.",
   "auditChainSeedNotFound": "The starting point for partial audit-chain verification was not found. Specify a different starting sequence number.",
   "mobileTokenBindingInvalid": "Mobile token binding is invalid.",

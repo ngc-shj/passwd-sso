@@ -255,6 +255,29 @@ describe("POST /api/extension/token/exchange", () => {
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
+  // ── MAX_ACTIVE rotation ──
+  it("revokes oldest token when MAX_ACTIVE (3) is exceeded via exchange flow", async () => {
+    mockBridgeCodeUpdateMany.mockResolvedValueOnce({ count: 1 });
+    mockBridgeCodeFindUnique.mockResolvedValueOnce({
+      userId: "11111111-1111-1111-1111-111111111111",
+      tenantId: "22222222-2222-2222-2222-222222222222",
+      scope: "passwords:read,vault:unlock-data",
+    });
+    mockExtensionTokenFindMany.mockResolvedValueOnce([
+      { id: "t1" },
+      { id: "t2" },
+      { id: "t3" },
+    ]);
+
+    await POST(makeRequest());
+
+    expect(mockExtensionTokenUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ["t1"] } },
+      }),
+    );
+  });
+
   // ── Issuance failure (post-consume) ──
   it("emits EXTENSION_TOKEN_EXCHANGE_FAILURE audit when issueExtensionToken throws", async () => {
     mockBridgeCodeUpdateMany.mockResolvedValueOnce({ count: 1 });
