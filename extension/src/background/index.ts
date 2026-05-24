@@ -40,7 +40,11 @@ import {
   getDpopThumbprint,
   signDpopProof,
 } from "../lib/dpop-key";
-import { swFetchAuthenticated, DpopSignError } from "./dpop-fetch";
+import { swFetchAuthenticated } from "./dpop-fetch";
+import {
+  attemptTokenRefreshWith,
+  revokeTokenOnServerWith,
+} from "./token-handler";
 import {
   ALARM_TOKEN_TTL,
   ALARM_VAULT_LOCK,
@@ -463,93 +467,30 @@ function scheduleRefreshAlarm(expiresAt: number): void {
 }
 
 async function attemptTokenRefresh(): Promise<void> {
-  if (!currentToken || !tokenExpiresAt) return;
-  if (Date.now() >= tokenExpiresAt) return;
-
-  try {
-    const { serverUrl } = await getSettings();
-    try {
-      new URL(serverUrl);
-    } catch {
-      return;
-    }
-
-    let res: Response;
-    try {
-      res = await swFetchAuthenticated(
-        EXT_API_PATH.EXTENSION_TOKEN_REFRESH,
-        { method: "POST" },
-        serverUrl,
-        currentToken,
-      );
-    } catch (err) {
-      if (err instanceof DpopSignError) {
-        // Transient WebCrypto failure — do not sign out; retry next alarm cycle.
-        if (tokenExpiresAt && tokenExpiresAt - Date.now() > 60_000) {
-          chrome.alarms.create(ALARM_TOKEN_REFRESH, { delayInMinutes: 1 });
-        }
-        return;
-      }
-      throw err;
-    }
-
-    if (res.ok) {
-      const data = (await res.json()) as {
-        token: string;
-        expiresAt: string;
-        scope: string[];
-        cnfJkt?: string;
-      };
-      const newExpiresAt = new Date(data.expiresAt).getTime();
-      currentToken = data.token;
-      tokenExpiresAt = newExpiresAt;
-      // Carry forward cnfJkt from refresh response (server preserves binding per C10).
-      if (typeof data.cnfJkt === "string") {
-        currentCnfJkt = data.cnfJkt;
-      }
-
-      chrome.alarms.create(ALARM_TOKEN_TTL, { when: newExpiresAt });
-      scheduleRefreshAlarm(newExpiresAt);
+  await attemptTokenRefreshWith({
+    getCurrentToken: () => currentToken,
+    getTokenExpiresAt: () => tokenExpiresAt,
+    setToken: (token, expiresAt) => {
+      currentToken = token;
+      tokenExpiresAt = expiresAt;
       persistState();
-    } else if (res.status === 401 || res.status === 403 || res.status === 404) {
-      // Permanent rejection — token is invalid/revoked/session gone
-      clearToken();
-    } else {
-      // Transient error (429, 5xx) — retry if enough TTL remains
-      if (tokenExpiresAt && tokenExpiresAt - Date.now() > 60_000) {
-        chrome.alarms.create(ALARM_TOKEN_REFRESH, {
-          delayInMinutes: 1,
-        });
-      }
-    }
-  } catch {
-    // Network error — keep current token, retry if enough TTL remains
-    if (tokenExpiresAt && tokenExpiresAt - Date.now() > 60_000) {
-      chrome.alarms.create(ALARM_TOKEN_REFRESH, {
-        delayInMinutes: 1,
-      });
-    }
-  }
+    },
+    // Carry forward cnfJkt from refresh response (server preserves binding per C10).
+    setCnfJkt: (cnfJkt) => {
+      currentCnfJkt = cnfJkt;
+    },
+    clearToken,
+    scheduleRefreshAlarm,
+    createTtlAlarm: (when) => {
+      chrome.alarms.create(ALARM_TOKEN_TTL, { when });
+    },
+  });
 }
 
 async function revokeCurrentTokenOnServer(): Promise<void> {
-  if (!currentToken) return;
-  try {
-    const { serverUrl } = await getSettings();
-    try {
-      new URL(serverUrl);
-    } catch {
-      return;
-    }
-    await swFetchAuthenticated(
-      EXT_API_PATH.EXTENSION_TOKEN,
-      { method: "DELETE" },
-      serverUrl,
-      currentToken,
-    );
-  } catch {
-    // Best-effort revoke; local clear still proceeds.
-  }
+  await revokeTokenOnServerWith({
+    getCurrentToken: () => currentToken,
+  });
 }
 
 async function isOwnAppPage(url: string): Promise<boolean> {

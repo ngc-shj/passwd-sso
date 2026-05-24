@@ -100,11 +100,13 @@ async function handleBridgeCodeMessage(event: MessageEvent): Promise<boolean> {
     EXT_API_PATH.EXTENSION_TOKEN_EXCHANGE,
     "POST",
   );
+  // DPoP proof is required; without it the server will reject the exchange.
+  if (!dpopProof) return false;
 
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (dpopProof) {
-    headers["DPoP"] = dpopProof;
-  }
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "DPoP": dpopProof,
+  };
 
   try {
     const response = await fetch(

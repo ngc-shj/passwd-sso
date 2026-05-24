@@ -15,6 +15,8 @@ export interface TokenRefreshCallbacks {
   getCurrentToken(): string | null;
   getTokenExpiresAt(): number | null;
   setToken(token: string, expiresAt: number): void;
+  /** Called when the refresh response includes a new cnfJkt (C10 binding propagation). */
+  setCnfJkt?(cnfJkt: string): void;
   clearToken(): void;
   scheduleRefreshAlarm(expiresAt: number): void;
   createTtlAlarm(when: number): void;
@@ -57,9 +59,14 @@ export async function attemptTokenRefreshWith(
         token: string;
         expiresAt: string;
         scope: string[];
+        cnfJkt?: string;
       };
       const newExpiresAt = new Date(data.expiresAt).getTime();
       callbacks.setToken(data.token, newExpiresAt);
+      // Carry forward cnfJkt from refresh response (server preserves binding per C10).
+      if (typeof data.cnfJkt === "string" && callbacks.setCnfJkt) {
+        callbacks.setCnfJkt(data.cnfJkt);
+      }
       callbacks.createTtlAlarm(newExpiresAt);
       callbacks.scheduleRefreshAlarm(newExpiresAt);
     } else if (res.status === 401 || res.status === 403 || res.status === 404) {

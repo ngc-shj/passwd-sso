@@ -4,7 +4,7 @@ import { ensureHostPermission } from "../lib/api";
 import { t } from "../lib/i18n";
 import { humanizeError } from "../lib/error-messages";
 import { useTheme } from "../lib/theme";
-import { getDpopThumbprint, resetInMemoryKeyCache } from "../lib/dpop-key";
+import { getDpopThumbprint, deleteIdbKey } from "../lib/dpop-key";
 import { EXT_API_PATH } from "../lib/api-paths";
 
 const DEFAULT_SERVER_URL = "https://localhost:3000";
@@ -227,7 +227,7 @@ export function App() {
       const token = statusRes?.token;
       if (!token) {
         // No active session — just delete the IDB key locally.
-        resetInMemoryKeyCache();
+        await deleteIdbKey();
         setResetStatus("ok");
         setTimeout(() => setResetStatus("idle"), 2000);
         return;
@@ -258,7 +258,7 @@ export function App() {
       }
 
       // Server confirmed revocation — now delete the IDB key.
-      resetInMemoryKeyCache();
+      await deleteIdbKey();
       // Ask background SW to clear its token state.
       chrome.runtime.sendMessage({ type: "CLEAR_TOKEN" });
       setResetStatus("ok");

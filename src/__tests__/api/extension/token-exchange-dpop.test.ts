@@ -31,7 +31,7 @@ vi.mock("@/lib/auth/dpop/verify", () => ({
   },
 }));
 vi.mock("@/lib/auth/dpop/jti-cache", () => ({
-  getJtiCache: vi.fn(() => ({ has: vi.fn(() => false), add: vi.fn() })),
+  getJtiCache: vi.fn(() => ({ hasOrRecord: vi.fn().mockResolvedValue(false) })),
 }));
 vi.mock("@/lib/auth/dpop/htu-canonical", () => ({
   canonicalHtu: vi.fn(() => "https://localhost:3000/api/extension/token/exchange"),

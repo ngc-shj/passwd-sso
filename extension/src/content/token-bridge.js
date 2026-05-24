@@ -105,10 +105,10 @@ function handleBridgeCodeMessage(event) {
     if (!serverUrl) return;
 
     getDpopProofFromBackground(EXCHANGE_PATH, "POST").then(function (dpopProof) {
-      var headers = { "Content-Type": "application/json" };
-      if (dpopProof) {
-        headers["DPoP"] = dpopProof;
-      }
+      // DPoP proof is required; without it the server will reject the exchange.
+      if (!dpopProof) return;
+
+      var headers = { "Content-Type": "application/json", "DPoP": dpopProof };
 
       fetch(serverUrl + EXCHANGE_PATH, {
         method: "POST",

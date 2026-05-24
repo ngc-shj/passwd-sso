@@ -231,7 +231,14 @@ export type ValidateIosTokenResult =
     };
 
 /**
- * Validate an iOS-clientKind access token by verifying its DPoP proof.
+ * iOS-specific variant of DPoP validation. Distinct from the shared
+ * `validateExtensionTokenDpop` because the iOS caller (mobile/token route)
+ * derives `expectedHtm`/`expectedHtu` explicitly from the route signature
+ * (not from req.url). The shared helper at
+ * `src/lib/auth/dpop/validate-token-dpop.ts` is used by `validateExtensionToken`'s
+ * dispatch for BOTH iOS_APP and BROWSER_EXTENSION rows — that path is the
+ * preferred consumer. Future refactor: extend the shared helper to accept
+ * optional expectedHtm/Htu overrides, enabling a re-export here.
  *
  * Caller has already loaded the row and confirmed `clientKind === 'IOS_APP'`,
  * `revokedAt === null`, and `expiresAt > now`.

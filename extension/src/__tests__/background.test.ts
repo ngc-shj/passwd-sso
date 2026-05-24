@@ -1370,10 +1370,10 @@ describe("token refresh alarm", () => {
       expect.objectContaining({ hasToken: true })
     );
 
-    // Should schedule a retry
+    // Should schedule a retry alarm with an absolute `when` time
     expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
       ALARM_TOKEN_REFRESH,
-      expect.objectContaining({ delayInMinutes: 1 })
+      expect.objectContaining({ when: expect.any(Number) })
     );
   });
 
@@ -1426,7 +1426,7 @@ describe("token refresh alarm", () => {
 
     expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
       ALARM_TOKEN_REFRESH,
-      expect.objectContaining({ delayInMinutes: 1 })
+      expect.objectContaining({ when: expect.any(Number) })
     );
   });
 
@@ -1477,10 +1477,10 @@ describe("token refresh alarm", () => {
       expect.objectContaining({ hasToken: true })
     );
 
-    // Should schedule a retry alarm
+    // Should schedule a retry alarm with an absolute `when` time
     expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
       ALARM_TOKEN_REFRESH,
-      expect.objectContaining({ delayInMinutes: 1 })
+      expect.objectContaining({ when: expect.any(Number) })
     );
   });
 });
@@ -2289,5 +2289,51 @@ describe("tab event badge updates", () => {
     await vi.waitFor(() => {
       expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "", tabId: 55 });
     });
+  });
+});
+
+describe("DPoP raw message handlers (GET_DPOP_JKT / GET_DPOP_PROOF)", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
+
+    await loadBackground();
+  });
+
+  function sendDpopMessage(message: unknown): Promise<unknown> {
+    return new Promise((resolve) => {
+      // The DPoP listener is registered second (messageHandlers[1])
+      const handler = messageHandlers[1];
+      handler(message, {}, (resp) => resolve(resp));
+    });
+  }
+
+  it("GET_DPOP_JKT handler calls getDpopThumbprint and responds with jkt", async () => {
+    const res = await sendDpopMessage({ type: "GET_DPOP_JKT" }) as { jkt: string };
+    expect(dpopKeyMocks.getDpopThumbprint).toHaveBeenCalled();
+    expect(res.jkt).toBe(STATIC_TEST_JKT);
+  });
+
+  it("GET_DPOP_PROOF handler calls signDpopProof and responds with dpop", async () => {
+    const res = await sendDpopMessage({
+      type: "GET_DPOP_PROOF",
+      route: "/api/extension/token/exchange",
+      method: "POST",
+    }) as { dpop: string };
+    expect(dpopKeyMocks.signDpopProof).toHaveBeenCalledWith(
+      expect.objectContaining({ route: "/api/extension/token/exchange", method: "POST" }),
+    );
+    expect(res.dpop).toBe("fake.dpop.proof");
+  });
+
+  it("unknown message type is ignored (handler returns undefined)", () => {
+    const handler = messageHandlers[1];
+    const sendResponse = vi.fn();
+    const result = handler({ type: "UNKNOWN_MSG" }, {}, sendResponse);
+    expect(result).toBeUndefined();
+    expect(sendResponse).not.toHaveBeenCalled();
   });
 });

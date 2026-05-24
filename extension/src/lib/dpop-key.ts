@@ -13,9 +13,9 @@
  * idbPut(), the next boot finds no IDB row and regenerates cleanly.
  */
 
-// TODO: refactor htu construction to import canonicalHtuClient from
-// src/lib/auth/dpop/htu-canonical.ts after Batch 1 lands.
-// For now the algorithm is inlined here.
+// htu construction is inlined here (same algorithm as canonicalHtuClient).
+// The extension build is a separate Vite/CRXJS bundle that cannot import
+// from src/lib/auth/dpop/htu-canonical.ts — no shared tsconfig path mapping.
 
 const IDB_NAME = "psso-ext";
 const IDB_STORE = "dpop-keys";
@@ -174,11 +174,7 @@ export async function getDpopThumbprint(): Promise<string> {
 /**
  * Build and sign a DPoP proof JWS (compact serialization).
  *
- * htu algorithm (inline — TODO: import canonicalHtuClient from
- * src/lib/auth/dpop/htu-canonical.ts after Batch 1 lands):
- *   const url = new URL(serverUrl);
- *   const basePath = url.pathname.replace(/\/$/, "");
- *   return url.origin + basePath + route;
+ * htu = origin + basePath + route (mirrors canonicalHtuClient on the server).
  */
 export async function signDpopProof(input: {
   route: string;
@@ -212,7 +208,6 @@ export async function signDpopProof(input: {
     htm: input.method.toUpperCase(),
     htu,
     iat: Math.floor(Date.now() / 1000),
-    cnf: { jkt: thumbprint },
   };
 
   if (input.accessToken) {
@@ -248,4 +243,26 @@ export async function signDpopProof(input: {
  */
 export function resetInMemoryKeyCache(): void {
   keyPromise = null;
+}
+
+/**
+ * Delete the persisted DPoP key from IDB and clear the in-process singleton.
+ * Called from handleResetConnection in App.tsx so the next loadOrGenerate
+ * regenerates a fresh key pair (new DPoP identity after key rotation).
+ */
+export async function deleteIdbKey(): Promise<void> {
+  keyPromise = null;
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(tx.error);
+    };
+    tx.objectStore(IDB_STORE).delete(IDB_RECORD_KEY);
+  });
 }
