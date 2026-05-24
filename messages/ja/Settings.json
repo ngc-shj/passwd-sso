@@ -19,7 +19,6 @@
     "delegation": "委任セッション",
     "travelMode": "トラベルモード",
     "emergencyAccess": "緊急アクセス",
-    "cliToken": "CLI トークン",
     "apiKey": "API キー",
     "mcpConnections": "MCP 接続"
   },

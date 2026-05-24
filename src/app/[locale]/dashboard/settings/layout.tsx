@@ -69,7 +69,6 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         label: t("section.developer"),
         icon: Terminal,
         children: [
-          { href: "/dashboard/settings/developer/cli-token", label: t("subTab.cliToken"), icon: Terminal },
           { href: "/dashboard/settings/developer/api-keys", label: t("subTab.apiKey"), icon: Key },
           { href: "/dashboard/settings/developer/mcp-connections", label: t("subTab.mcpConnections"), icon: Plug },
         ],

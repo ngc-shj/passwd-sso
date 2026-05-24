@@ -71,6 +71,7 @@
   "extensionTokenInvalid": "無効なクライアントアプリトークンです。",
   "extensionTokenSessionExpired": "クライアントアプリトークンの有効寿命を超過しました。アプリを再認可してください。",
   "extensionTokenScopeInsufficient": "クライアントアプリトークンに必要なスコープがありません。",
+  "extensionTokenLegacyIssuanceDeprecated": "このエンドポイントは廃止されました。拡張機能の更新、または CLI は 'passwd-sso login' をご利用ください。",
   "invalidChallenge": "セキュリティキーの登録に失敗しました。もう一度お試しください。",
   "auditChainSeedNotFound": "部分検証の起点となる監査ログが見つかりません。別の開始シーケンス番号を指定してください。",
   "mobileTokenBindingInvalid": "モバイルのトークンバインディングが無効です。",

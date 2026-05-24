@@ -19,7 +19,6 @@
     "delegation": "Delegation sessions",
     "travelMode": "Travel mode",
     "emergencyAccess": "Emergency access",
-    "cliToken": "CLI token",
     "apiKey": "API keys",
     "mcpConnections": "MCP connections"
   },

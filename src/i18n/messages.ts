@@ -57,7 +57,6 @@ export const NAMESPACES = [
   "TeamWebhook",
   "TenantWebhook",
   "AuditDownload",
-  "CliToken",
   "TenantAdmin",
   "ApiKey",
   "SshKeyForm",
