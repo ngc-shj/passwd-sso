@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import path from "node:path";
 
 // E2E_BASE_URL allows pointing at an already-running dev server
 // (e.g. E2E_BASE_URL=https://localhost:3001).
@@ -58,6 +59,25 @@ export default defineConfig({
       use: { ...devices["Pixel 7"] },
       // Only run tests tagged @mobile
       grep: /@mobile/,
+    },
+    {
+      // Extension project: loads a built MV3 extension into a persistent Chrome
+      // context and exercises the DPoP key handshake end-to-end.
+      // Per-test isolation is achieved via fresh userDataDir (see beforeEach in
+      // the spec). workers: 1 is set at config level — Chrome doesn't support
+      // multiple persistent contexts cleanly.
+      name: "extension",
+      use: {
+        // launchPersistentContext is invoked in the test file directly because
+        // Playwright's project "use" cannot configure it declaratively.
+        // The project entry still gates discovery via grep.
+        browserName: "chromium",
+        // Path to the built MV3 extension. The global-setup step ensures the
+        // build has run before any test in this project is attempted.
+        _extensionPath: path.join(__dirname, "..", "extension", "dist"),
+      } as Record<string, unknown>,
+      // Only run tests tagged @extension
+      grep: /@extension/,
     },
   ],
 

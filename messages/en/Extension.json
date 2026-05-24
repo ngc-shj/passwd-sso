@@ -21,5 +21,7 @@
   "closeTab": "Close tab",
   "goToDashboard": "Go to dashboard",
   "retry": "Retry",
-  "connectingBanner": "Connecting browser extension..."
+  "connectingBanner": "Connecting browser extension...",
+  "extensionRequired": "This connect requires the latest passwd-sso extension. Please install or update from the Chrome Web Store and try again.",
+  "extensionRequiredAction": "Open Chrome Web Store"
 }

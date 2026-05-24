@@ -3,7 +3,7 @@
 import { EXT_MSG } from "../lib/constants";
 
 export type ExtensionMessage =
-  | { type: typeof EXT_MSG.SET_TOKEN; token: string; expiresAt: number }
+  | { type: typeof EXT_MSG.SET_TOKEN; token: string; expiresAt: number; cnfJkt: string }
   | { type: typeof EXT_MSG.GET_TOKEN }
   | { type: typeof EXT_MSG.CLEAR_TOKEN }
   | { type: typeof EXT_MSG.GET_STATUS }

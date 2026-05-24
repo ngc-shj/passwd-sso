@@ -21,5 +21,7 @@
   "closeTab": "タブを閉じる",
   "goToDashboard": "ダッシュボードへ",
   "retry": "再試行",
-  "connectingBanner": "ブラウザ拡張機能の接続中..."
+  "connectingBanner": "ブラウザ拡張機能の接続中...",
+  "extensionRequired": "この接続には最新版の passwd-sso 拡張機能が必要です。Chrome ウェブストアからインストール／更新後に再度お試しください。",
+  "extensionRequiredAction": "Chrome ウェブストアを開く"
 }

@@ -244,7 +244,8 @@ export async function validateIosTokenDpop(
 ): Promise<ValidateIosTokenResult> {
   const { req, expectedHtm, expectedHtu, accessToken, row, expectedNonce } = ctx;
 
-  if (!row.cnfJkt) {
+  const cnfJkt = row.cnfJkt;
+  if (!cnfJkt) {
     // Defensive: an IOS_APP row without cnfJkt cannot be DPoP-validated.
     // Treat as invalid rather than crashing.
     return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
@@ -255,7 +256,7 @@ export async function validateIosTokenDpop(
     expectedHtm,
     expectedHtu,
     expectedAth: computeAth(accessToken),
-    expectedCnfJkt: row.cnfJkt,
+    expectedCnfJkt: cnfJkt,
     expectedNonce: expectedNonce ?? null,
     jtiCache: getJtiCache(),
   });
@@ -292,6 +293,8 @@ export async function validateIosTokenDpop(
       expiresAt: row.expiresAt,
       familyId: row.familyId,
       familyCreatedAt: row.familyCreatedAt,
+      // cnfJkt is guaranteed non-null here: null guard above returned early.
+      cnfJkt,
     },
   };
 }

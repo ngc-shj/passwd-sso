@@ -9,6 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto/crypto-server";
@@ -18,6 +19,7 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit/audit";
+import { parseBody } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import {
   AUDIT_ACTION,
@@ -27,6 +29,12 @@ import {
 } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
+
+const BridgeCodeIssueSchema = z
+  .object({
+    cnfJkt: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  })
+  .strict();
 
 export const runtime = "nodejs";
 
@@ -45,6 +53,12 @@ async function handlePOST(req: NextRequest) {
 
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
+
+  // Parse body — requires cnfJkt (RFC 7638 P-256 thumbprint). Strict mode
+  // rejects unknown fields.
+  const bodyResult = await parseBody(req, BridgeCodeIssueSchema);
+  if (!bodyResult.ok) return bodyResult.response;
+  const { cnfJkt } = bodyResult.data;
 
   // Per-user rate limit (matches existing tokenLimiter on POST /api/extension/token)
   const blocked = await checkRateLimitOrFail({
@@ -100,6 +114,7 @@ async function handlePOST(req: NextRequest) {
         tenantId: userRecord.tenantId,
         scope: EXTENSION_TOKEN_DEFAULT_SCOPES.join(","),
         expiresAt,
+        cnfJkt,
         ip: meta.ip,
         userAgent: meta.userAgent,
       },

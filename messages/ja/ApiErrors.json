@@ -69,6 +69,7 @@
   "extensionTokenExpired": "クライアントアプリトークンの有効期限が切れています。",
   "extensionTokenRevoked": "クライアントアプリトークンは取り消されています。",
   "extensionTokenInvalid": "無効なクライアントアプリトークンです。",
+  "extensionTokenDpopInvalid": "クライアントアプリトークンの送信者制約検証に失敗しました。最新版の拡張機能に更新して再接続してください。",
   "extensionTokenSessionExpired": "クライアントアプリトークンの有効寿命を超過しました。アプリを再認可してください。",
   "extensionTokenScopeInsufficient": "クライアントアプリトークンに必要なスコープがありません。",
   "extensionTokenLegacyIssuanceDeprecated": "このエンドポイントは利用できません。拡張機能の更新、または CLI は 'passwd-sso login' をご利用ください。",

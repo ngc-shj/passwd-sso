@@ -37,6 +37,11 @@ import {
   clearSession,
 } from "../lib/session-storage";
 import {
+  getDpopThumbprint,
+  signDpopProof,
+} from "../lib/dpop-key";
+import { swFetchAuthenticated, DpopSignError } from "./dpop-fetch";
+import {
   ALARM_TOKEN_TTL,
   ALARM_VAULT_LOCK,
   ALARM_TOKEN_REFRESH,
@@ -76,6 +81,8 @@ import { copyToClipboard } from "./clipboard";
 
 let currentToken: string | null = null;
 let tokenExpiresAt: number | null = null;
+/** RFC 7638 JWK thumbprint of the DPoP key bound to the current token. */
+let currentCnfJkt: string | null = null;
 let encryptionKey: CryptoKey | null = null;
 let currentUserId: string | null = null;
 let currentVaultSecretKeyHex: string | null = null;
@@ -241,6 +248,7 @@ async function getCachedEntries(): Promise<DecryptedEntry[]> {
 function clearToken(): void {
   currentToken = null;
   tokenExpiresAt = null;
+  currentCnfJkt = null;
   clearVault();
   chrome.alarms.clear(ALARM_TOKEN_REFRESH);
   clearSession().catch(() => {});
@@ -344,7 +352,7 @@ async function updateBadge(): Promise<void> {
 
 /** Fire-and-forget persist of token state to chrome.storage.session */
 function persistState(): void {
-  if (currentToken && tokenExpiresAt) {
+  if (currentToken && tokenExpiresAt && currentCnfJkt) {
     persistSession({
       token: currentToken,
       expiresAt: tokenExpiresAt,
@@ -352,6 +360,7 @@ function persistState(): void {
       vaultSecretKey: currentVaultSecretKeyHex ?? undefined,
       ecdhEncrypted: ecdhEncryptedData ?? undefined,
       tenantAutoLockMinutes,
+      tokenCnfJkt: currentCnfJkt,
     }).catch(() => {});
   }
 }
@@ -373,6 +382,21 @@ async function hydrateFromSession(): Promise<void> {
   // Restore tenant-policy auto-lock so the options UI sees the override
   // even if the vault hasn't been re-unlocked in this SW lifetime.
   tenantAutoLockMinutes = state.tenantAutoLockMinutes ?? null;
+
+  // Verify the persisted cnfJkt matches the current IDB DPoP key.
+  // Mismatch → the key was reset mid-session; clear state so the user reconnects.
+  try {
+    const idbJkt = await getDpopThumbprint();
+    if (state.tokenCnfJkt !== idbJkt) {
+      await clearSession();
+      return;
+    }
+    currentCnfJkt = state.tokenCnfJkt;
+  } catch {
+    // If DPoP key retrieval fails, clear state to be safe.
+    await clearSession();
+    return;
+  }
 
   if (currentVaultSecretKeyHex) {
     try {
@@ -450,20 +474,39 @@ async function attemptTokenRefresh(): Promise<void> {
       return;
     }
 
-    const res = await fetch(`${serverUrl}${EXT_API_PATH.EXTENSION_TOKEN_REFRESH}`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${currentToken}` },
-    });
+    let res: Response;
+    try {
+      res = await swFetchAuthenticated(
+        EXT_API_PATH.EXTENSION_TOKEN_REFRESH,
+        { method: "POST" },
+        serverUrl,
+        currentToken,
+      );
+    } catch (err) {
+      if (err instanceof DpopSignError) {
+        // Transient WebCrypto failure — do not sign out; retry next alarm cycle.
+        if (tokenExpiresAt && tokenExpiresAt - Date.now() > 60_000) {
+          chrome.alarms.create(ALARM_TOKEN_REFRESH, { delayInMinutes: 1 });
+        }
+        return;
+      }
+      throw err;
+    }
 
     if (res.ok) {
       const data = (await res.json()) as {
         token: string;
         expiresAt: string;
         scope: string[];
+        cnfJkt?: string;
       };
       const newExpiresAt = new Date(data.expiresAt).getTime();
       currentToken = data.token;
       tokenExpiresAt = newExpiresAt;
+      // Carry forward cnfJkt from refresh response (server preserves binding per C10).
+      if (typeof data.cnfJkt === "string") {
+        currentCnfJkt = data.cnfJkt;
+      }
 
       chrome.alarms.create(ALARM_TOKEN_TTL, { when: newExpiresAt });
       scheduleRefreshAlarm(newExpiresAt);
@@ -498,10 +541,12 @@ async function revokeCurrentTokenOnServer(): Promise<void> {
     } catch {
       return;
     }
-    await fetch(`${serverUrl}${EXT_API_PATH.EXTENSION_TOKEN}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${currentToken}` },
-    });
+    await swFetchAuthenticated(
+      EXT_API_PATH.EXTENSION_TOKEN,
+      { method: "DELETE" },
+      serverUrl,
+      currentToken,
+    );
   } catch {
     // Best-effort revoke; local clear still proceeds.
   }
@@ -920,13 +965,7 @@ async function swFetch(path: string, init?: RequestInit): Promise<Response> {
     throw new Error("PERMISSION_DENIED");
   }
 
-  const headers = new Headers(init?.headers);
-  headers.set("Authorization", `Bearer ${currentToken}`);
-  if (!headers.has("Content-Type") && init?.body) {
-    headers.set("Content-Type", "application/json");
-  }
-
-  return fetch(`${serverUrl}${path}`, { ...init, headers });
+  return swFetchAuthenticated(path, init, serverUrl, currentToken);
 }
 
 type RawEntry = {
@@ -1650,6 +1689,7 @@ async function handleMessage(
 
       currentToken = message.token;
       tokenExpiresAt = message.expiresAt;
+      currentCnfJkt = message.cnfJkt;
 
       // Set alarm for TTL expiry
       const delayMs = message.expiresAt - Date.now();
@@ -2527,5 +2567,47 @@ chrome.runtime.onMessage.addListener(
       }
     });
     return true;
+  },
+);
+
+// ── DPoP message handlers (raw messages from content script) ──────────────
+// Registered AFTER the main handleMessage listener so existing tests that
+// use messageHandlers[0] continue to hit the main dispatcher. Chrome MV3
+// fans out onMessage events to ALL listeners until one returns true /
+// calls sendResponse, so order does not affect production behavior — only
+// the test mock's first-listener convention relies on it.
+
+chrome.runtime.onMessage.addListener(
+  (
+    message: unknown,
+    _sender: chrome.runtime.MessageSender,
+    sendResponse: (response: unknown) => void,
+  ): boolean | undefined => {
+    if (!message || typeof message !== "object") return;
+    const msg = message as Record<string, unknown>;
+
+    if (msg.type === "GET_DPOP_JKT") {
+      getDpopThumbprint()
+        .then((jkt) => sendResponse({ jkt }))
+        .catch(() => sendResponse({ jkt: null }));
+      return true; // async response
+    }
+
+    if (msg.type === "GET_DPOP_PROOF") {
+      const route = typeof msg.route === "string" ? msg.route : "";
+      const method = typeof msg.method === "string" ? msg.method : "POST";
+      getSettings()
+        .then(({ serverUrl }) =>
+          signDpopProof({
+            route,
+            method,
+            serverUrl,
+            accessToken: currentToken ?? undefined,
+          }),
+        )
+        .then((dpop) => sendResponse({ dpop }))
+        .catch(() => sendResponse({ dpop: null }));
+      return true; // async response
+    }
   },
 );

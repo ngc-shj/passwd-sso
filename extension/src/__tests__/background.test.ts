@@ -10,6 +10,9 @@ import type { SessionState } from "../lib/session-storage";
 
 const PASSWORD_BY_ID_PREFIX = extApiPath.passwordById("");
 
+// Static 43-char base64url JKT used across all DPoP-related tests
+const STATIC_TEST_JKT = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
+
 const sessionStorageMocks = vi.hoisted(() => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
   loadSession: vi.fn().mockResolvedValue(null),
@@ -17,6 +20,18 @@ const sessionStorageMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../lib/session-storage", () => sessionStorageMocks);
+
+const dpopKeyMocks = vi.hoisted(() => ({
+  getDpopThumbprint: vi.fn().mockResolvedValue("abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"),
+  signDpopProof: vi.fn().mockResolvedValue("fake.dpop.proof"),
+  getOrGenerateDpopKeyPair: vi.fn().mockResolvedValue({
+    publicJwk: { kty: "EC", crv: "P-256", x: "x", y: "y" },
+    sign: vi.fn().mockResolvedValue(new ArrayBuffer(64)),
+  }),
+  resetInMemoryKeyCache: vi.fn(),
+}));
+
+vi.mock("../lib/dpop-key", () => dpopKeyMocks);
 
 const cryptoMocks = vi.hoisted(() => ({
   deriveWrappingKey: vi.fn().mockResolvedValue("wrap-key"),
@@ -321,6 +336,7 @@ describe("background message flow", () => {
       type: "SET_TOKEN",
       token: "t",
       expiresAt: Date.now() + 60_000,
+      cnfJkt: STATIC_TEST_JKT,
     });
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
     await sendMessage({ type: "LOCK_VAULT" });
@@ -957,7 +973,7 @@ describe("session persistence", () => {
 
   it("persists state to session storage after SET_TOKEN", async () => {
     const expiresAt = Date.now() + 600_000;
-    await sendMessage({ type: "SET_TOKEN", token: "tok-1", expiresAt });
+    await sendMessage({ type: "SET_TOKEN", token: "tok-1", expiresAt, cnfJkt: STATIC_TEST_JKT });
     // userId is not set yet at SET_TOKEN time, so persistState requires all 3 fields.
     // After UNLOCK_VAULT, userId is set and persistState is called.
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
@@ -975,20 +991,21 @@ describe("session persistence", () => {
       type: "SET_TOKEN",
       token: "tok-1",
       expiresAt: Date.now() + 600_000,
+      cnfJkt: STATIC_TEST_JKT,
     });
     await sendMessage({ type: "CLEAR_TOKEN" });
 
     expect(sessionStorageMocks.clearSession).toHaveBeenCalled();
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/api/extension/token"),
-      expect.objectContaining({
-        method: "DELETE",
-        headers: expect.objectContaining({
-          Authorization: "Bearer tok-1",
-        }),
-      }),
+    // swFetchAuthenticated uses Headers object; check URL and method
+    const fetchCalls = fetchMock.mock.calls as [string, RequestInit][];
+    const deleteCall = fetchCalls.find(
+      ([url, init]) => url.includes("/api/extension/token") && init?.method === "DELETE",
     );
+    expect(deleteCall).toBeDefined();
+    const [, deleteInit] = deleteCall!;
+    const authHeader = (deleteInit.headers as Headers).get("Authorization");
+    expect(authHeader).toBe("Bearer tok-1");
   });
 
   it("clears refresh alarm on CLEAR_TOKEN", async () => {
@@ -1081,6 +1098,7 @@ describe("session hydration", () => {
       expiresAt,
       userId: "u-1",
       vaultSecretKey: "010203",
+      tokenCnfJkt: STATIC_TEST_JKT,
     });
 
     vi.stubGlobal(
@@ -1174,6 +1192,7 @@ describe("session hydration", () => {
       expiresAt,
       userId: "u-1",
       vaultSecretKey: "010203",
+      tokenCnfJkt: STATIC_TEST_JKT,
     });
     const status = await statusPromise;
 
@@ -1203,6 +1222,7 @@ describe("token refresh alarm", () => {
               token: "refreshed-tok",
               expiresAt: newExpiresAt,
               scope: ["passwords:read"],
+              cnfJkt: STATIC_TEST_JKT,
             }),
           };
         }
@@ -1230,6 +1250,7 @@ describe("token refresh alarm", () => {
       type: "SET_TOKEN",
       token: "original-tok",
       expiresAt: Date.now() + 600_000,
+      cnfJkt: STATIC_TEST_JKT,
     });
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
@@ -1476,6 +1497,7 @@ describe("hydration edge cases", () => {
       expiresAt,
       userId: "u-1",
       vaultSecretKey: "010203",
+      tokenCnfJkt: STATIC_TEST_JKT,
     });
 
     vi.stubGlobal(

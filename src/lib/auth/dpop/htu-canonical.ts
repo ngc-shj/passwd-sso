@@ -52,6 +52,35 @@ function normalizePath(route: string): string {
 }
 
 /**
+ * Build the canonical `htu` value the client (browser extension) should use
+ * when constructing a DPoP proof for a call to this server.
+ *
+ * Produces the same output as `canonicalHtu` when `serverUrl` equals
+ * APP_URL/AUTH_URL, ensuring client-server htu equivalence:
+ *
+ *   canonicalHtuClient(serverUrl, route) === canonicalHtu({ route })
+ *   when getAppOrigin() === serverUrl (basePath included)
+ *
+ * Algorithm (per plan §C-shared / Round-3 S23-r3):
+ *  - Parse serverUrl with `new URL`.
+ *  - `URL.origin` lowercases scheme/host AND strips default ports (:80/:443).
+ *  - Preserve pathname as basePath (trailing slash stripped) so deployments
+ *    mounted at a sub-path (e.g. `https://example.com/passwd-sso`) produce
+ *    `https://example.com/passwd-sso/api/...` matching the server's htu.
+ *  - Append route (must start with `/`).
+ *
+ * @param serverUrl  Full server URL, e.g. from extension settings ("serverUrl").
+ * @param route      API route path, e.g. "/api/extension/token/exchange".
+ */
+export function canonicalHtuClient(serverUrl: string, route: string): string {
+  const url = new URL(serverUrl);
+  let basePath = url.pathname;
+  if (basePath.endsWith("/")) basePath = basePath.slice(0, -1);
+  const path = route.startsWith("/") ? route : `/${route}`;
+  return `${url.origin}${basePath}${path}`;
+}
+
+/**
  * Canonical-URL equality test for DPoP `htu` matching.
  *
  * RFC 9449 §4.3 says scheme+host comparison is case-insensitive but

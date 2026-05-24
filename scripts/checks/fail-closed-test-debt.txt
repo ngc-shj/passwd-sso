@@ -25,6 +25,7 @@ src/app/api/auth/passkey/reauth/verify/route.ts
 src/app/api/auth/passkey/verify/route.ts
 src/app/api/emergency-access/accept/route.ts
 src/app/api/extension/bridge-code/route.ts
+src/app/api/extension/key/reset/route.ts
 src/app/api/extension/token/exchange/route.ts
 src/app/api/extension/token/refresh/route.ts
 src/app/api/extension/token/route.ts

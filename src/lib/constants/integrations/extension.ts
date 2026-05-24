@@ -25,5 +25,10 @@ export const BRIDGE_CODE_MAX_ACTIVE = 3;
 // equality.
 export const BRIDGE_CODE_LENGTH = 64;
 
+// DPoP JKT handshake messages (web app → content script → web app).
+// Mirrored to `extension/src/lib/constants.ts`; the sync test enforces equality.
+export const EXT_JKT_REQUEST_MSG_TYPE = "PASSWD_SSO_EXT_JKT_REQUEST";
+export const EXT_JKT_READY_MSG_TYPE = "PASSWD_SSO_EXT_JKT_READY";
+
 // ── URL params ──
 export const EXT_CONNECT_PARAM = "ext_connect";

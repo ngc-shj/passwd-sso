@@ -45,6 +45,8 @@ export {
   BRIDGE_CODE_MAX_ACTIVE,
   BRIDGE_CODE_LENGTH,
   EXT_CONNECT_PARAM,
+  EXT_JKT_REQUEST_MSG_TYPE,
+  EXT_JKT_READY_MSG_TYPE,
 } from "./integrations/extension";
 export { API_PATH, apiPath } from "./auth/api-path";
 export { LOCAL_STORAGE_KEY } from "./vault/storage-key";

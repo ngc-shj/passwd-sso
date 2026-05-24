@@ -22,6 +22,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
@@ -41,6 +42,9 @@ import { parseBody } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_ACTION, BRIDGE_CODE_LENGTH } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { verifyDpopProof } from "@/lib/auth/dpop/verify";
+import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
+import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
 
 export const runtime = "nodejs";
 
@@ -122,14 +126,14 @@ async function handlePOST(req: NextRequest) {
     return unauthorized();
   }
 
-  // Fetch the consumed code to resolve userId/tenantId/scope from server data
+  // Fetch the consumed code to resolve userId/tenantId/scope/cnfJkt from server data
   // (P1-S1: server-side resolution, never from client input).
   const consumed = await withBypassRls(
     prisma,
     async (tx) =>
       tx.extensionBridgeCode.findUnique({
         where: { codeHash },
-        select: { userId: true, tenantId: true, scope: true },
+        select: { userId: true, tenantId: true, scope: true, cnfJkt: true },
       }),
     BYPASS_PURPOSE.TOKEN_LIFECYCLE,
   );
@@ -149,6 +153,37 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.INTERNAL_ERROR);
   }
 
+  // DPoP verification is always required. cnfJkt is NOT NULL on bridge-code rows.
+  // Failure returns the same unauthorized() as code-unknown/expired — timing-uniform.
+  const dpopHeader = req.headers.get("dpop");
+  const dpopResult = await verifyDpopProof(dpopHeader, {
+    expectedHtm: "POST",
+    expectedHtu: canonicalHtu({ route: "/api/extension/token/exchange" }),
+    expectedCnfJkt: consumed.cnfJkt,
+    expectedNonce: null,
+    jtiCache: getJtiCache(),
+  });
+
+  if (!dpopResult.ok) {
+    getLogger().warn(
+      {
+        event: "extension_token_exchange_failure",
+        reason: "dpop_invalid",
+        dpopError: dpopResult.error,
+        ip,
+        userAgent: req.headers.get("user-agent"),
+      },
+      "extension token exchange failed: DPoP proof invalid",
+    );
+    await logAuditAsync({
+      ...personalAuditBase(req, consumed.userId),
+      tenantId: consumed.tenantId,
+      action: AUDIT_ACTION.EXTENSION_TOKEN_EXCHANGE_FAILURE,
+      metadata: { reason: "dpop_invalid", dpopError: dpopResult.error },
+    });
+    return unauthorized();
+  }
+
   // Issue ExtensionToken via shared helper (same logic as legacy POST /api/extension/token).
   // Wrap in try/catch so a token-issuance failure on this branch (where we DO have a
   // resolvable userId/tenantId from the consumed code record) is recorded as an audit
@@ -159,6 +194,7 @@ async function handlePOST(req: NextRequest) {
       userId: consumed.userId,
       tenantId: consumed.tenantId,
       scope: consumed.scope,
+      cnfJkt: consumed.cnfJkt,
     });
   } catch (err) {
     await logAuditAsync({
@@ -179,11 +215,17 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.INTERNAL_ERROR);
   }
 
-  // Audit success: userId and tenantId both come from the consumed code record
+  // Audit success: carry cnfJktFingerprint (first 16 hex of SHA-256(cnfJkt)) for forensics.
+  const cnfJktFingerprint = createHash("sha256")
+    .update(consumed.cnfJkt)
+    .digest("hex")
+    .slice(0, 16);
+
   await logAuditAsync({
     ...personalAuditBase(req, consumed.userId),
     tenantId: consumed.tenantId,
     action: AUDIT_ACTION.EXTENSION_TOKEN_EXCHANGE_SUCCESS,
+    metadata: { cnfJktFingerprint },
   });
 
   return NextResponse.json(
@@ -191,6 +233,7 @@ async function handlePOST(req: NextRequest) {
       token: issued.token,
       expiresAt: issued.expiresAt.toISOString(),
       scope: consumed.scope.split(","),
+      cnfJkt: issued.cnfJkt,
     },
     { status: 201 },
   );

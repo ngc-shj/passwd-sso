@@ -6,6 +6,7 @@ export const API_PATH = {
   EXTENSION_TOKEN_REFRESH: "/api/extension/token/refresh",
   EXTENSION_TOKEN_EXCHANGE: "/api/extension/token/exchange",
   EXTENSION_BRIDGE_CODE: "/api/extension/bridge-code",
+  EXTENSION_KEY_RESET: "/api/extension/key/reset",
   PASSWORDS: "/api/passwords",
   PASSWORDS_BULK_TRASH: "/api/passwords/bulk-trash",
   PASSWORDS_BULK_ARCHIVE: "/api/passwords/bulk-archive",

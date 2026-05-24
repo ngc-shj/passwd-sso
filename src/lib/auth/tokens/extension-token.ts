@@ -13,26 +13,15 @@ import { EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
-// ─── Types ───────────────────────────────────────────────────
+import { validateExtensionTokenDpop } from "@/lib/auth/dpop/validate-token-dpop";
 
-export interface ValidatedExtensionToken {
-  tokenId: string;
-  userId: string;
-  tenantId: string;
-  scopes: ExtensionTokenScope[];
-  expiresAt: Date;
-  familyId: string;
-  familyCreatedAt: Date;
-}
+// ─── Types (re-exported from the leaf module for source-compat) ──────────────
 
-export type TokenValidationError =
-  | "EXTENSION_TOKEN_INVALID"
-  | "EXTENSION_TOKEN_REVOKED"
-  | "EXTENSION_TOKEN_EXPIRED";
-
-export type TokenValidationResult =
-  | { ok: true; data: ValidatedExtensionToken }
-  | { ok: false; error: TokenValidationError };
+export type {
+  ValidatedExtensionToken,
+  TokenValidationError,
+  TokenValidationResult,
+} from "@/lib/auth/tokens/extension-token-types";
 
 // ─── Helpers ─────────────────────────────────────────────────
 
@@ -73,19 +62,20 @@ export function hasScope(
  * Returns a discriminated union so callers can map errors to HTTP status/codes.
  *
  * Dispatch:
- *  - `clientKind === 'BROWSER_EXTENSION'` (default for legacy rows): the
- *    classic path — bearer-only validation + `lastUsedAt` bump.
- *  - `clientKind === 'IOS_APP'`: defers to `validateIosTokenDpop` from
- *    `mobile-token.ts`, which additionally requires a valid DPoP proof
- *    bound to the row's `cnfJkt`. iOS rows also have `lastUsedIp` /
- *    `lastUsedUserAgent` updated on each call (browser rows leave those
- *    columns NULL).
+ *  - `clientKind === 'IOS_APP'`: defers to `validateExtensionTokenDpop` from
+ *    `dpop/validate-token-dpop.ts`, which requires a valid DPoP proof bound
+ *    to the row's `cnfJkt`. IOS_APP rows without cnfJkt are rejected early.
+ *    IP / user-agent are updated on success.
+ *  - `clientKind === 'BROWSER_EXTENSION'`: ALWAYS requires a valid DPoP proof
+ *    (no bearer-only fallback — cnfJkt is NOT NULL for all BROWSER_EXTENSION
+ *    rows post-migration). IP / user-agent are NOT updated (browser rows
+ *    historically left those fields NULL).
  *
  * On success, updates `lastUsedAt` (best-effort, non-blocking).
  */
 export async function validateExtensionToken(
   req: NextRequest,
-): Promise<TokenValidationResult> {
+): Promise<import("@/lib/auth/tokens/extension-token-types").TokenValidationResult> {
   const plaintext = extractBearer(req);
   if (!plaintext) {
     return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
@@ -122,20 +112,14 @@ export async function validateExtensionToken(
   }
 
   // ── iOS-host-app dispatch ──────────────────────────────────
-  // For IOS_APP rows, additionally require a DPoP proof bound to the
-  // row's stored cnfJkt. Lazy-imported to avoid a module-init cycle:
-  // mobile-token.ts imports parseScopes / revokeExtensionTokenFamily
-  // from this file.
+  // IOS_APP rows without cnfJkt cannot be DPoP-validated; reject early
+  // so ValidatedExtensionToken.cnfJkt is always non-null by construction.
   if (token.clientKind === "IOS_APP") {
-    const [{ validateIosTokenDpop }, { canonicalHtu }] = await Promise.all([
-      import("./mobile-token"),
-      import("@/lib/auth/dpop/htu-canonical"),
-    ]);
-    const route = new URL(req.url).pathname;
-    const dpopResult = await validateIosTokenDpop({
+    if (!token.cnfJkt) {
+      return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
+    }
+    const dpopResult = await validateExtensionTokenDpop({
       req,
-      expectedHtm: req.method,
-      expectedHtu: canonicalHtu({ route }),
       accessToken: plaintext,
       row: {
         id: token.id,
@@ -146,37 +130,46 @@ export async function validateExtensionToken(
         expiresAt: token.expiresAt,
         familyId: token.familyId,
         familyCreatedAt: token.familyCreatedAt,
+        clientKind: token.clientKind,
       },
     });
     if (dpopResult.ok) return { ok: true, data: dpopResult.data };
-    // Map iOS DPoP failures to the existing INVALID error so legacy callers
+    // Map DPoP failures to EXTENSION_TOKEN_INVALID so legacy callers
     // (which look up API_ERROR[result.error]) keep type-checking. Routes
-    // that need granular DPoP error reporting call validateIosTokenDpop
+    // that need granular DPoP error reporting call validateExtensionTokenDpop
     // directly with the row + access token.
     return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
   }
 
-  // ── BROWSER_EXTENSION (default): unchanged ─────────────────
-  // Best-effort lastUsedAt update (non-blocking).
-  void withBypassRls(prisma, async (tx) =>
-    tx.extensionToken.update({
-      where: { id: token.id },
-      data: { lastUsedAt: new Date() },
-    }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE).catch(() => {});
+  // ── BROWSER_EXTENSION: DPoP always required ────────────────
+  // cnfJkt is NOT NULL for all BROWSER_EXTENSION rows post-migration.
+  // The partial CHECK constraint enforces this at the DB layer.
+  const cnfJkt = token.cnfJkt;
+  if (!cnfJkt) {
+    // Should not happen post-migration; defensive guard.
+    return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
+  }
 
-  return {
-    ok: true,
-    data: {
-      tokenId: token.id,
+  const dpopResult = await validateExtensionTokenDpop({
+    req,
+    accessToken: plaintext,
+    row: {
+      id: token.id,
       userId: token.userId,
       tenantId: token.tenantId,
-      scopes: parseScopes(token.scope),
+      cnfJkt,
+      scope: token.scope,
       expiresAt: token.expiresAt,
       familyId: token.familyId,
       familyCreatedAt: token.familyCreatedAt,
+      clientKind: token.clientKind,
     },
-  };
+  });
+
+  if (!dpopResult.ok) {
+    return { ok: false, error: "EXTENSION_TOKEN_DPOP_INVALID" };
+  }
+  return { ok: true, data: dpopResult.data };
 }
 
 // ─── Issuance ────────────────────────────────────────────────
@@ -185,8 +178,7 @@ export async function validateExtensionToken(
  * Issue a new extension token for a user/tenant pair.
  *
  * Shared between:
- * - `POST /api/extension/token` (legacy direct issuance)
- * - `POST /api/extension/token/exchange` (new bridge code flow)
+ * - `POST /api/extension/token/exchange` (bridge code flow)
  *
  * `POST /api/extension/token/refresh` does NOT use this helper because
  * refresh requires `revoke(oldToken) + create(newToken)` to be atomic in
@@ -201,8 +193,10 @@ export async function issueExtensionToken(params: {
   userId: string;
   tenantId: string;
   scope: string;
-}): Promise<{ token: string; expiresAt: Date; scopeCsv: string }> {
-  const { userId, tenantId, scope } = params;
+  /** RFC 7638 JWK thumbprint of the extension's DPoP key. Required. */
+  cnfJkt: string;
+}): Promise<{ token: string; expiresAt: Date; scopeCsv: string; cnfJkt: string }> {
+  const { userId, tenantId, scope, cnfJkt } = params;
   const now = new Date();
 
   // Read tenant extension-token idle TTL. Fall back to the policy ceiling if
@@ -246,20 +240,29 @@ export async function issueExtensionToken(params: {
           tokenHash,
           scope,
           expiresAt,
+          cnfJkt,
           // New token = new family. Refresh flow carries the existing familyId
           // forward (see /api/extension/token/refresh).
           familyId,
           familyCreatedAt: now,
         },
-        select: { expiresAt: true, scope: true },
+        select: { expiresAt: true, scope: true, cnfJkt: true },
       });
     }),
   );
+
+  // cnfJkt is always written in the create.data above — null here is a system
+  // invariant violation (Prisma schema allows null for legacy rows, but newly
+  // issued tokens always carry it).
+  if (!created.cnfJkt) {
+    throw new Error("issueExtensionToken: cnfJkt missing from newly created row");
+  }
 
   return {
     token: plaintext,
     expiresAt: created.expiresAt,
     scopeCsv: created.scope,
+    cnfJkt: created.cnfJkt,
   };
 }
 

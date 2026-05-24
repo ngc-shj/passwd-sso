@@ -87,7 +87,7 @@ fi
 # A future PR that silently drops a limiter from one of the multi-limiter
 # files would leave the file-count gate above passing but break the
 # per-limiter coverage. Per-line grep guards against this.
-EXPECTED_LIMITER_COUNT=50
+EXPECTED_LIMITER_COUNT=51
 limiter_count=$(grep -rh 'failClosedOnRedisError: true' "$REPO_ROOT/src/app/api" | wc -l)
 if [ "$limiter_count" -ne "$EXPECTED_LIMITER_COUNT" ]; then
   echo "AC4.4 FAIL: expected $EXPECTED_LIMITER_COUNT 'failClosedOnRedisError: true' instantiations; found $limiter_count"

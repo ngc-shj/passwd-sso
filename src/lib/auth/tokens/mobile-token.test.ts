@@ -286,6 +286,7 @@ describe("validateIosTokenDpop", () => {
         expiresAt: baseRow.expiresAt,
         familyId: FAMILY_ID,
         familyCreatedAt: baseRow.familyCreatedAt,
+        cnfJkt: CNF_JKT,
       });
     }
   });

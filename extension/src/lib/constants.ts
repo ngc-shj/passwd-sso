@@ -3,6 +3,11 @@
 export const TOKEN_ELEMENT_ID = "passwd-sso-ext-token";
 export const TOKEN_READY_EVENT = "passwd-sso-token-ready";
 
+// DPoP JKT handshake messages (web app → content script → web app).
+// Mirror values in src/lib/constants/integrations/extension.ts; the sync test enforces equality.
+export const EXT_JKT_REQUEST_MSG_TYPE = "PASSWD_SSO_EXT_JKT_REQUEST";
+export const EXT_JKT_READY_MSG_TYPE = "PASSWD_SSO_EXT_JKT_READY";
+
 // Bridge code flow: postMessage (web app) → content script → exchange endpoint.
 // Mirror values in src/lib/constants/extension.ts (web app side); a sync test
 // validates equality between the two repos.

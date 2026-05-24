@@ -39,7 +39,7 @@ describe("cors", () => {
       expect(res.headers.get("Access-Control-Allow-Origin")).toBe(APP_ORIGIN);
       expect(res.headers.get("Access-Control-Allow-Methods")).toContain("PATCH");
       expect(res.headers.get("Access-Control-Allow-Headers")).toBe(
-        "Content-Type, Authorization",
+        "Content-Type, Authorization, DPoP",
       );
       expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true");
       expect(res.headers.get("Access-Control-Max-Age")).toBe("86400");

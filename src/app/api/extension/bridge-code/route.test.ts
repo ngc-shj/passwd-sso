@@ -80,9 +80,12 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 
 import { POST } from "./route";
 
+const VALID_CNF_JKT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb";
+
 function makeRequest(): import("next/server").NextRequest {
   return createRequest("POST", "http://localhost/api/extension/bridge-code", {
     headers: { Origin: "http://localhost" },
+    body: { cnfJkt: VALID_CNF_JKT },
   });
 }
 

@@ -11,6 +11,7 @@ describe("TokenIssueResponseSchema", () => {
     token: "eyJhbGciOiJIUzI1NiJ9.payload.signature",
     expiresAt: "2026-03-18T12:00:00.000Z",
     scope: ["vault:read", "vault:write"],
+    cnfJkt: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb",
   };
 
   // Happy path

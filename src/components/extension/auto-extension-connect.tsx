@@ -10,6 +10,7 @@ import {
   CONNECT_STATUS,
   type ConnectStatus,
 } from "@/lib/constants";
+import { requestExtensionJkt } from "@/lib/extension-jkt-request";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, Loader2, KeyRound } from "lucide-react";
@@ -44,6 +45,7 @@ export function AutoExtensionConnect() {
   const [status, setStatus] = useState<ConnectStatus>(CONNECT_STATUS.IDLE);
   const [requiresReauth, setRequiresReauth] = useState(false);
   const [requiresRecentSession, setRequiresRecentSession] = useState(false);
+  const [requiresExtensionUpdate, setRequiresExtensionUpdate] = useState(false);
   const [reauthenticating, setReauthenticating] = useState(false);
   const [reauthError, setReauthError] = useState<string | null>(null);
 
@@ -51,9 +53,25 @@ export function AutoExtensionConnect() {
     setStatus(CONNECT_STATUS.CONNECTING);
     setRequiresReauth(false);
     setRequiresRecentSession(false);
+    setRequiresExtensionUpdate(false);
     setReauthError(null);
     try {
-      const res = await fetchApi(API_PATH.EXTENSION_BRIDGE_CODE, { method: "POST" });
+      // Stage 1: obtain the extension's DPoP key thumbprint.
+      // On timeout (extension absent or pre-DPoP version), fail with a clear
+      // "install / update the extension" message — no legacy fallback (per FR8).
+      const jkt = await requestExtensionJkt({ timeoutMs: 500 });
+      if (!jkt) {
+        setStatus(CONNECT_STATUS.FAILED);
+        setRequiresExtensionUpdate(true);
+        return { ok: false, requiresReauth: false };
+      }
+
+      // Stage 2: bridge-code issuance, binding the code to the extension's key.
+      const res = await fetchApi(API_PATH.EXTENSION_BRIDGE_CODE, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cnfJkt: jkt }),
+      });
       if (!res.ok) {
         const body = await readApiErrorBody(res);
         const needsReauth = body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED;
@@ -182,18 +200,22 @@ export function AutoExtensionConnect() {
           {status === CONNECT_STATUS.FAILED && (
             <div className="space-y-2">
               <h1 className="text-xl font-semibold">
-                {requiresReauth
-                  ? t("connectReauthTitle")
-                  : requiresRecentSession
-                    ? t("connectRecentSessionTitle")
-                    : t("connectFailedTitle")}
+                {requiresExtensionUpdate
+                  ? t("connectFailedTitle")
+                  : requiresReauth
+                    ? t("connectReauthTitle")
+                    : requiresRecentSession
+                      ? t("connectRecentSessionTitle")
+                      : t("connectFailedTitle")}
               </h1>
               <p className="text-sm text-muted-foreground">
-                {requiresReauth
-                  ? t("connectReauthDescription")
-                  : requiresRecentSession
-                    ? t("connectRecentSessionDescription")
-                    : t("connectFailedDescription")}
+                {requiresExtensionUpdate
+                  ? t("extensionRequired")
+                  : requiresReauth
+                    ? t("connectReauthDescription")
+                    : requiresRecentSession
+                      ? t("connectRecentSessionDescription")
+                      : t("connectFailedDescription")}
               </p>
               {reauthError ? (
                 <p className="text-sm text-destructive">{reauthError}</p>
@@ -214,24 +236,39 @@ export function AutoExtensionConnect() {
           )}
           {status === CONNECT_STATUS.FAILED && (
             <div className="flex flex-col gap-3 w-full max-w-xs">
-              <Button
-                onClick={handleRetry}
-                className="w-full"
-                disabled={reauthenticating}
-              >
-                {reauthenticating ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    {t("connecting")}
-                  </>
-                ) : requiresReauth ? (
-                  t("connectReauthAction")
-                ) : requiresRecentSession ? (
-                  t("connectRecentSessionAction")
-                ) : (
-                  t("retry")
-                )}
-              </Button>
+              {requiresExtensionUpdate ? (
+                <Button
+                  asChild
+                  className="w-full"
+                >
+                  <a
+                    href="https://chrome.google.com/webstore"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {t("extensionRequiredAction")}
+                  </a>
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleRetry}
+                  className="w-full"
+                  disabled={reauthenticating}
+                >
+                  {reauthenticating ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      {t("connecting")}
+                    </>
+                  ) : requiresReauth ? (
+                    t("connectReauthAction")
+                  ) : requiresRecentSession ? (
+                    t("connectRecentSessionAction")
+                  ) : (
+                    t("retry")
+                  )}
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 onClick={() => setStatus(CONNECT_STATUS.IDLE)}

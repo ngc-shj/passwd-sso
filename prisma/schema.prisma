@@ -245,6 +245,9 @@ model ExtensionBridgeCode {
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   ip        String?   @db.VarChar(64)
   userAgent String?   @map("user_agent") @db.VarChar(512)
+  /// RFC 7638 JWK thumbprint of the extension's DPoP key (base64url).
+  /// Required — every bridge-code is bound to a thumbprint.
+  cnfJkt    String    @map("cnf_jkt") @db.VarChar(64)
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)

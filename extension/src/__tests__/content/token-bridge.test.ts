@@ -16,7 +16,12 @@ describe("token bridge (postMessage)", () => {
     vi.stubGlobal("chrome", {
       runtime: {
         id: "test-extension-id",
-        sendMessage: vi.fn(),
+        sendMessage: vi.fn().mockImplementation(async (msg: { type: string }) => {
+          if (msg.type === "GET_DPOP_PROOF") {
+            return { dpop: "fake.dpop.jws" };
+          }
+          return undefined;
+        }),
       },
       storage: {
         local: {
@@ -66,11 +71,13 @@ describe("token bridge (postMessage)", () => {
     });
 
     it("forwards token to background after successful exchange", async () => {
+      const cnfJkt = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
       mockFetch.mockResolvedValueOnce(
         new Response(
           JSON.stringify({
             token: "issued-token",
             expiresAt: "2099-01-01T00:00:00.000Z",
+            cnfJkt,
           }),
           { status: 201 },
         ),
@@ -88,10 +95,14 @@ describe("token bridge (postMessage)", () => {
           body: JSON.stringify({ code: VALID_CODE }),
         }),
       );
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "GET_DPOP_PROOF" }),
+      );
       expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
         type: "SET_TOKEN",
         token: "issued-token",
         expiresAt: Date.parse("2099-01-01T00:00:00.000Z"),
+        cnfJkt,
       });
     });
 
@@ -125,7 +136,9 @@ describe("token bridge (postMessage)", () => {
         makeEvent({ type: BRIDGE_CODE_MSG_TYPE, code: VALID_CODE, expiresAt: 123 }),
       );
       expect(ok).toBe(false);
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+      expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "SET_TOKEN" }),
+      );
     });
 
     it("does not forward token when fetch network throws", async () => {
@@ -134,7 +147,9 @@ describe("token bridge (postMessage)", () => {
         makeEvent({ type: BRIDGE_CODE_MSG_TYPE, code: VALID_CODE, expiresAt: 123 }),
       );
       expect(ok).toBe(false);
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+      expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "SET_TOKEN" }),
+      );
     });
 
     it("does not exchange when serverUrl is missing", async () => {
@@ -159,7 +174,9 @@ describe("token bridge (postMessage)", () => {
         makeEvent({ type: BRIDGE_CODE_MSG_TYPE, code: VALID_CODE, expiresAt: 123 }),
       );
       expect(ok).toBe(false);
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+      expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "SET_TOKEN" }),
+      );
     });
   });
 });

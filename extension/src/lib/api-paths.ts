@@ -2,6 +2,7 @@ export const EXT_API_PATH = {
   EXTENSION_TOKEN: "/api/extension/token",
   EXTENSION_TOKEN_REFRESH: "/api/extension/token/refresh",
   EXTENSION_TOKEN_EXCHANGE: "/api/extension/token/exchange",
+  EXTENSION_KEY_RESET: "/api/extension/key/reset",
   PASSWORDS: "/api/passwords",
   VAULT_UNLOCK_DATA: "/api/vault/unlock/data",
   TEAMS: "/api/teams",

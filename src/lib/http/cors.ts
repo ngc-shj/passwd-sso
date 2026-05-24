@@ -64,7 +64,7 @@ function corsHeaders(
     return {
       "Access-Control-Allow-Origin": origin,
       "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, DPoP",
       // Credentials not needed for extension (Bearer token in header)
       ...(origin === appOrigin ? { "Access-Control-Allow-Credentials": "true" } : {}),
       "Access-Control-Max-Age": "86400",
