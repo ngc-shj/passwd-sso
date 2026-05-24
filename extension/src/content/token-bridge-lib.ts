@@ -1,5 +1,8 @@
-import { BRIDGE_CODE_MSG_TYPE } from "../lib/constants";
+import { BRIDGE_CODE_MSG_TYPE, BRIDGE_CODE_LENGTH } from "../lib/constants";
 import { EXT_API_PATH } from "../lib/api-paths";
+
+// Mirror of server-side Zod schema in src/app/api/extension/token/exchange/route.ts
+const BRIDGE_CODE_RE = new RegExp(`^[a-f0-9]{${BRIDGE_CODE_LENGTH}}$`);
 
 function isContextValid(): boolean {
   try { return !!chrome.runtime?.id; }
@@ -33,7 +36,7 @@ function forwardToken(token: string, expiresAtMs: number): void {
  */
 async function handleBridgeCodeMessage(event: MessageEvent): Promise<boolean> {
   const { code, expiresAt } = event.data ?? {};
-  if (typeof code !== "string" || code.length !== 64) return false;
+  if (typeof code !== "string" || !BRIDGE_CODE_RE.test(code)) return false;
   if (typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) return false;
   if (!isContextValid()) return false;
 

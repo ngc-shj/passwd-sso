@@ -9,6 +9,8 @@ export const TOKEN_READY_EVENT = "passwd-sso-token-ready";
 export const BRIDGE_CODE_MSG_TYPE = "PASSWD_SSO_BRIDGE_CODE";
 export const BRIDGE_CODE_TTL_MS = 60 * 1000;
 export const BRIDGE_CODE_MAX_ACTIVE = 3;
+// Bridge code wire format (mirror of web app constant — sync test enforces equality)
+export const BRIDGE_CODE_LENGTH = 64;
 
 // ── Session storage ──
 export const SESSION_KEY = "authState";

@@ -222,7 +222,7 @@ After the 2026-04 cleanup the postMessage column is no longer reachable from any
 | `src/lib/inject-extension-bridge-code.ts` | Web app: dispatches `postMessage` with bridge code (replaces `inject-extension-token.ts`) |
 | `src/app/api/extension/bridge-code/route.ts` | Web app endpoint: issues a one-time code (Auth.js session required) |
 | `src/app/api/extension/token/exchange/route.ts` | Web app endpoint: atomically consumes a code, returns a token (no session) |
-| `src/lib/auth/tokens/extension-token.ts` | Shared `issueExtensionToken()` helper used by legacy POST + new exchange |
+| `src/lib/auth/tokens/extension-token.ts` | Shared `issueExtensionToken()` helper used by `/api/extension/token/exchange` (legacy POST `/api/extension/token` was retired — see Migration status below) |
 | `src/lib/constants/integrations/extension.ts` | Shared constants: `BRIDGE_CODE_MSG_TYPE`, `BRIDGE_CODE_TTL_MS`, `BRIDGE_CODE_MAX_ACTIVE` |
 | `extension/src/content/token-bridge.js` | Content script (ISOLATED): receives postMessage, exchanges bridge code, forwards token to background. Plain JS — see project memory `project_extension_parallel_impl.md`. |
 | `extension/src/content/token-bridge-lib.ts` | TypeScript version of content script (for tests only — not registered at runtime) |
@@ -237,10 +237,14 @@ After the 2026-04 cleanup the postMessage column is no longer reachable from any
 
 The legacy `TOKEN_BRIDGE_MSG_TYPE` postMessage relay path was removed in the
 2026-04 cleanup; the extension content script no longer accepts that message
-type. The legacy `POST /api/extension/token` endpoint remains operational and
-continues to emit a structured log entry (`event: extension_token_legacy_issuance`)
-on every call so we can measure when legacy traffic drops to zero — that
-endpoint's removal is tracked separately.
+type. The legacy `POST /api/extension/token` endpoint was retired in the
+`deprecate-legacy-extension-token` PR (2026-05) and now always returns
+HTTP 410 Gone with `Deprecation: true` + `Cache-Control: no-store` headers.
+Calls are still observable via `event: extension_token_legacy_issuance_blocked`
+(warn-level structured log) and the `EXTENSION_TOKEN_LEGACY_ISSUANCE_BLOCKED`
+audit action; expected post-deploy count on both is zero. The full handler
+deletion is scheduled for the next Minor release after one observation window
+of zero surprise traffic.
 
 ---
 
