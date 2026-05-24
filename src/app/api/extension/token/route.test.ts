@@ -10,7 +10,6 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 const {
   mockFindUnique,
   mockUpdate,
-  mockCheck,
   mockWithBypassRls,
   mockEnforceAccessRestriction,
   mockLogAudit,
@@ -21,7 +20,6 @@ const {
 } = vi.hoisted(() => ({
   mockFindUnique: vi.fn(),
   mockUpdate: vi.fn(),
-  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
   mockLogAudit: vi.fn(),
@@ -47,7 +45,9 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: () => "h".repeat(64),
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
+  // POST handler delegates rate-limit decisions to `checkIpRateLimit` (mocked
+  // separately); the returned shape is unused, hence inline vi.fn().
+  createRateLimiter: () => ({ check: vi.fn().mockResolvedValue({ allowed: true }), clear: vi.fn() }),
 }));
 vi.mock("@/lib/redis", () => ({
   getRedis: () => null,
@@ -93,11 +93,12 @@ describe("POST /api/extension/token", () => {
     mockLogAudit.mockResolvedValue(undefined);
   });
 
-  it("returns 410 with no session cookie", async () => {
+  it("returns 410 with no session cookie + Cache-Control: no-store", async () => {
     const res = await POST(createRequest("POST", "http://localhost/api/extension/token"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(410);
     expect(json.error).toBe(API_ERROR.EXTENSION_TOKEN_LEGACY_ISSUANCE_DEPRECATED);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
   });
 
   it("returns 410 even with valid session cookie", async () => {
@@ -110,13 +111,18 @@ describe("POST /api/extension/token", () => {
     expect(json.error).toBe(API_ERROR.EXTENSION_TOKEN_LEGACY_ISSUANCE_DEPRECATED);
   });
 
-  it("emits ANONYMOUS_ACTOR_ID audit row with EXTENSION_TOKEN_LEGACY_ISSUANCE_BLOCKED", async () => {
-    await POST(createRequest("POST", "http://localhost/api/extension/token"));
+  it("emits ANONYMOUS_ACTOR_ID audit row with EXTENSION_TOKEN_LEGACY_ISSUANCE_BLOCKED + ip/userAgent", async () => {
+    const req = createRequest("POST", "http://localhost/api/extension/token", {
+      headers: { "User-Agent": "test-agent/1.0" },
+    });
+    await POST(req);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: AUDIT_ACTION.EXTENSION_TOKEN_LEGACY_ISSUANCE_BLOCKED,
         userId: ANONYMOUS_ACTOR_ID,
         actorType: ACTOR_TYPE.ANONYMOUS,
+        ip: "1.2.3.4",
+        userAgent: "test-agent/1.0",
       }),
     );
   });
@@ -137,6 +143,9 @@ describe("POST /api/extension/token", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(429);
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+    // Critical invariant: rate-limit blocks before audit emission, capping
+    // audit-row write rate at the limiter's threshold per IP.
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 });
 

@@ -69,11 +69,13 @@ async function handlePOST(req: NextRequest) {
   );
 
   // 4. 410 Gone with Deprecation header per RFC 9745.
+  //    Cache-Control: no-store prevents intermediary caches from memoizing
+  //    the 410 across deploys; this endpoint is never cacheable.
   return errorResponse(
     API_ERROR.EXTENSION_TOKEN_LEGACY_ISSUANCE_DEPRECATED,
     undefined,
     undefined,
-    { Deprecation: "true" },
+    { Deprecation: "true", "Cache-Control": "no-store" },
   );
 }
 
