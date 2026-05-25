@@ -359,7 +359,7 @@ export function App() {
                   type="button"
                   onClick={() => void handleResetConnection()}
                   disabled={resetStatus === "loading"}
-                  className="px-4 py-1.5 bg-red-600 dark:bg-red-700 text-white text-sm font-medium rounded-md hover:bg-red-700 dark:hover:bg-red-600 active:bg-red-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-4 py-1.5 bg-red-600 dark:bg-red-700 text-white text-sm font-medium rounded-md hover:bg-red-700 dark:hover:bg-red-600 active:bg-red-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap shrink-0"
                 >
                   {resetStatus === "loading" ? t("options.resetConnectionLoading") : t("options.resetConnectionAction")}
                 </button>
