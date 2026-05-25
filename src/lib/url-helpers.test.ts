@@ -302,3 +302,42 @@ describe("isHttps", () => {
   });
 });
 
+// ─── resolveBasePath ────────────────────────────────────────
+// Reads process.env at call time, so vi.stubEnv works without dynamic import.
+
+describe("resolveBasePath", () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("uses URL pathname when present (strips trailing slash)", async () => {
+    const { resolveBasePath } = await import("@/lib/url-helpers");
+    expect(resolveBasePath(new URL("https://example.com/passwd-sso"))).toBe("/passwd-sso");
+    expect(resolveBasePath(new URL("https://example.com/passwd-sso/"))).toBe("/passwd-sso");
+  });
+
+  it("returns empty string when both URL pathname and env are empty", async () => {
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+    const { resolveBasePath } = await import("@/lib/url-helpers");
+    expect(resolveBasePath(new URL("https://example.com"))).toBe("");
+  });
+
+  it("falls back to NEXT_PUBLIC_BASE_PATH when URL pathname is empty", async () => {
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/from-env");
+    const { resolveBasePath } = await import("@/lib/url-helpers");
+    expect(resolveBasePath(new URL("https://example.com"))).toBe("/from-env");
+    expect(resolveBasePath(new URL("https://example.com/"))).toBe("/from-env");
+  });
+
+  it("URL pathname takes precedence over env when both set", async () => {
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/from-env");
+    const { resolveBasePath } = await import("@/lib/url-helpers");
+    expect(resolveBasePath(new URL("https://example.com/from-url"))).toBe("/from-url");
+  });
+
+  it("multi-segment URL pathname is preserved", async () => {
+    const { resolveBasePath } = await import("@/lib/url-helpers");
+    expect(resolveBasePath(new URL("https://example.com/apps/passwd-sso"))).toBe("/apps/passwd-sso");
+  });
+});
+

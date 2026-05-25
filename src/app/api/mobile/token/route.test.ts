@@ -99,9 +99,10 @@ vi.mock("@/lib/auth/policy/ip-access", () => ({
   rateLimitKeyFromIp: (ip: string) => ip,
 }));
 
-vi.mock("@/lib/url-helpers", () => ({
-  getAppOrigin: () => "https://example.test",
-}));
+vi.mock("@/lib/url-helpers", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/url-helpers")>();
+  return { ...actual, getAppOrigin: () => "https://example.test" };
+});
 
 vi.mock("@/lib/logger", () => ({
   default: { warn: mockWarn, error: mockError, info: vi.fn() },

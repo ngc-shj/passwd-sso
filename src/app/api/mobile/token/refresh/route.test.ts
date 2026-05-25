@@ -56,9 +56,10 @@ vi.mock("@/lib/auth/dpop/jti-cache", () => ({
   getJtiCache: () => ({ hasOrRecord: vi.fn().mockResolvedValue(false) }),
 }));
 
-vi.mock("@/lib/url-helpers", () => ({
-  getAppOrigin: () => "https://example.test",
-}));
+vi.mock("@/lib/url-helpers", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/url-helpers")>();
+  return { ...actual, getAppOrigin: () => "https://example.test" };
+});
 
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),

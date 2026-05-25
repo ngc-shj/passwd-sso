@@ -85,22 +85,13 @@ describe("canonicalHtu", () => {
     );
   });
 
-  // Deployments that put the sub-path in NEXT_PUBLIC_BASE_PATH instead of
-  // APP_URL/AUTH_URL — e.g., AUTH_URL=https://example.com, NEXT_PUBLIC_BASE_PATH=/passwd-sso.
-  // The request URL the browser actually called includes the basePath; htu must too.
+  // Integration smoke test: canonicalHtu delegates basePath to resolveBasePath
+  // (whose detailed behavior is tested in url-helpers.test.ts).
   it("falls back to NEXT_PUBLIC_BASE_PATH when APP_URL has no basePath", () => {
     vi.stubEnv("APP_URL", "https://example.com");
     vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
     expect(canonicalHtu({ route: "/api/extension/token/exchange" })).toBe(
       "https://example.com/passwd-sso/api/extension/token/exchange",
-    );
-  });
-
-  it("prefers APP_URL pathname over NEXT_PUBLIC_BASE_PATH when both set", () => {
-    vi.stubEnv("APP_URL", "https://example.com/from-url");
-    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/from-env"); // ignored
-    expect(canonicalHtu({ route: "/api/x" })).toBe(
-      "https://example.com/from-url/api/x",
     );
   });
 });

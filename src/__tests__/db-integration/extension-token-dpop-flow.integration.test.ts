@@ -129,9 +129,10 @@ vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (fn: unknown) => fn,
 }));
 
-vi.mock("@/lib/url-helpers", () => ({
-  getAppOrigin: () => "http://localhost:3000",
-}));
+vi.mock("@/lib/url-helpers", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/url-helpers")>();
+  return { ...actual, getAppOrigin: () => "http://localhost:3000" };
+});
 
 // ─── Stub: Redis (jti cache uses in-memory; no real Redis needed) ─────────────
 

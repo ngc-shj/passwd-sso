@@ -1,26 +1,4 @@
-import { getAppOrigin } from "@/lib/url-helpers";
-
-/**
- * Derive basePath from a URL: pathname (trailing slash stripped), with a
- * fallback to `process.env.NEXT_PUBLIC_BASE_PATH` for deployments that put
- * the sub-path in the env var instead of AUTH_URL.
- *
- * Module-local (not re-exported via url-helpers) to avoid having to update
- * the 90+ existing test files that mock `@/lib/url-helpers` with partial
- * shape. Both canonicalHtu and canonicalHtuClient share this derivation —
- * the only consumers in the codebase.
- *
- * Reads process.env at call time so tests can override via vi.stubEnv.
- */
-function resolveBasePath(url: URL): string {
-  let basePath = url.pathname;
-  if (basePath.endsWith("/")) basePath = basePath.slice(0, -1);
-  if (!basePath) {
-    const envBasePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
-    if (envBasePath) basePath = envBasePath;
-  }
-  return basePath;
-}
+import { getAppOrigin, resolveBasePath } from "@/lib/url-helpers";
 
 /**
  * Build the canonical `htu` value the server expects in a DPoP proof.

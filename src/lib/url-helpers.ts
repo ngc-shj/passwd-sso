@@ -1,5 +1,27 @@
 export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
+/**
+ * Derive basePath from a URL: pathname (trailing slash stripped), with a
+ * fallback to `process.env.NEXT_PUBLIC_BASE_PATH` for deployments that put
+ * the sub-path in the env var instead of AUTH_URL.
+ *
+ * Reads process.env at call time so tests can override via vi.stubEnv.
+ * Used by canonicalHtu and canonicalHtuClient — the only consumers in the
+ * codebase today. Test mocks of `@/lib/url-helpers` MUST include this
+ * export (spread via `vi.importActual` is the preferred pattern).
+ *
+ * @param url Parsed URL (e.g. `new URL(AUTH_URL)` or `new URL(serverUrl)`).
+ */
+export function resolveBasePath(url: URL): string {
+  let basePath = url.pathname;
+  if (basePath.endsWith("/")) basePath = basePath.slice(0, -1);
+  if (!basePath) {
+    const envBasePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+    if (envBasePath) basePath = envBasePath;
+  }
+  return basePath;
+}
+
 
 /**
  * Resolve the canonical app origin from environment.

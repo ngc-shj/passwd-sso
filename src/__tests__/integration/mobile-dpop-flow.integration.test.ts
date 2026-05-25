@@ -104,9 +104,10 @@ vi.mock("@/lib/auth/policy/ip-access", () => ({
   rateLimitKeyFromIp: (ip: string) => ip,
 }));
 
-vi.mock("@/lib/url-helpers", () => ({
-  getAppOrigin: () => "https://app.example.test",
-}));
+vi.mock("@/lib/url-helpers", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/url-helpers")>();
+  return { ...actual, getAppOrigin: () => "https://app.example.test" };
+});
 
 vi.mock("@/lib/logger", async () => {
   const { AsyncLocalStorage } = await import("node:async_hooks");
