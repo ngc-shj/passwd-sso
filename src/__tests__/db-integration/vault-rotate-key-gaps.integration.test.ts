@@ -243,13 +243,18 @@ describe("vault rotation gaps — invalidateUserSessions(KEY_ROTATION) (real DB 
         randomBytes(32).toString("hex"),
       );
       await tx.$executeRawUnsafe(
-        `INSERT INTO extension_tokens (id, user_id, tenant_id, token_hash, scope, family_id, expires_at, created_at)
-         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'extension', $5::uuid, now() + interval '30 days', now())`,
+        `INSERT INTO extension_tokens (id, user_id, tenant_id, token_hash, scope, family_id, expires_at, created_at, cnf_jkt)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'extension', $5::uuid, now() + interval '30 days', now(), $6)`,
         randomUUID(),
         userId,
         tenantId,
         randomBytes(32).toString("hex"),
         randomUUID(),
+        // BROWSER_EXTENSION rows require non-null cnf_jkt (CHECK constraint
+        // `extension_tokens_cnf_jkt_required_for_browser_ext`). Any 43-char
+        // base64url placeholder is fine — this row is only used to verify
+        // invalidateUserSessions revokes it, not for DPoP validation.
+        "a".repeat(43),
       );
       await tx.$executeRawUnsafe(
         `INSERT INTO api_keys (id, user_id, tenant_id, prefix, name, token_hash, scope, expires_at, created_at)

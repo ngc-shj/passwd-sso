@@ -95,13 +95,16 @@ INSERT INTO emergency_access_grants (id, tenant_id, owner_id, grantee_email, wai
   ('00000000-0000-0000-0000-0000000000AC', '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', 'grantee-a@test.local', 1, md5('rls-x-a-ea')::text, NOW() + interval '1 day', NOW()),
   ('00000000-0000-0000-0000-0000000000BC', '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B1', 'grantee-b@test.local', 1, md5('rls-x-b-ea')::text, NOW() + interval '1 day', NOW());
 
-INSERT INTO extension_bridge_codes (id, tenant_id, user_id, code_hash, scope, expires_at) VALUES
-  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', md5('rls-x-a-eb')::text, 'passwords:read', NOW() + interval '1 hour'),
-  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B1', md5('rls-x-b-eb')::text, 'passwords:read', NOW() + interval '1 hour');
+-- cnf_jkt is NOT NULL on extension_bridge_codes and required for BROWSER_EXTENSION
+-- rows in extension_tokens via partial CHECK constraint. Any 43-char base64url
+-- placeholder satisfies the schema — these seed rows are never DPoP-validated.
+INSERT INTO extension_bridge_codes (id, tenant_id, user_id, code_hash, scope, expires_at, cnf_jkt) VALUES
+  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', md5('rls-x-a-eb')::text, 'passwords:read', NOW() + interval '1 hour', repeat('a', 43)),
+  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B1', md5('rls-x-b-eb')::text, 'passwords:read', NOW() + interval '1 hour', repeat('b', 43));
 
-INSERT INTO extension_tokens (id, user_id, tenant_id, token_hash, scope, expires_at, family_id) VALUES
-  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A1', '00000000-0000-0000-0000-0000000000A0', md5('rls-x-a-et')::text, 'passwords:read', NOW() + interval '1 hour', gen_random_uuid()),
-  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B1', '00000000-0000-0000-0000-0000000000B0', md5('rls-x-b-et')::text, 'passwords:read', NOW() + interval '1 hour', gen_random_uuid());
+INSERT INTO extension_tokens (id, user_id, tenant_id, token_hash, scope, expires_at, family_id, cnf_jkt) VALUES
+  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A1', '00000000-0000-0000-0000-0000000000A0', md5('rls-x-a-et')::text, 'passwords:read', NOW() + interval '1 hour', gen_random_uuid(), repeat('a', 43)),
+  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B1', '00000000-0000-0000-0000-0000000000B0', md5('rls-x-b-et')::text, 'passwords:read', NOW() + interval '1 hour', gen_random_uuid(), repeat('b', 43));
 
 INSERT INTO folders (id, tenant_id, user_id, name, updated_at) VALUES
   ('00000000-0000-0000-0000-0000000000A8', '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', 'rls-x-a-folder', NOW()),

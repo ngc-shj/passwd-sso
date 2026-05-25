@@ -70,13 +70,18 @@ describe("session timeout — integration", () => {
           await tx.$executeRawUnsafe(
             `INSERT INTO extension_tokens (
                id, user_id, tenant_id, token_hash, scope, expires_at, created_at,
-               family_id, family_created_at
-             ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, now() + interval '1 hour', now(), NULL, NULL)`,
+               family_id, family_created_at, cnf_jkt
+             ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, now() + interval '1 hour', now(), NULL, NULL, $6)`,
             randomUUID(),
             userId,
             tenantId,
             `tok_${randomUUID()}`,
             "passwords:read",
+            // Provide cnf_jkt so the test isolates the family_id NOT NULL
+            // failure under test — without it, the new
+            // `extension_tokens_cnf_jkt_required_for_browser_ext` CHECK can
+            // fire instead and change the error message the assertion expects.
+            "a".repeat(43),
           );
         }),
       ).rejects.toThrow(/null value in column "family_(id|created_at)"/);
