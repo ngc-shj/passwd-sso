@@ -29,6 +29,8 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { getLogger } from "@/lib/logger";
+import { extractClientIp } from "@/lib/auth/policy/ip-access";
 
 export const runtime = "nodejs";
 
@@ -52,6 +54,18 @@ async function handlePOST(req: NextRequest) {
   // for BROWSER_EXTENSION rows post-migration).
   const validated = await validateExtensionToken(req);
   if (!validated.ok) {
+    // Diagnostic: reset failures are silent at the wire (401 only); without
+    // the reason field operators cannot tell a stale-token (INVALID/REVOKED)
+    // case apart from a DPoP-binding bug (DPOP_INVALID). Log structured.
+    getLogger().warn(
+      {
+        event: "extension_key_reset_auth_failure",
+        reason: validated.error,
+        ip: extractClientIp(req),
+        userAgent: req.headers.get("user-agent"),
+      },
+      "extension key reset auth failed",
+    );
     return unauthorized();
   }
 
