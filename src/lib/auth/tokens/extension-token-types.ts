@@ -1,4 +1,4 @@
-import type { ExtensionTokenScope } from "@/lib/constants";
+import { EXTENSION_TOKEN_SCOPE, type ExtensionTokenScope } from "@/lib/constants";
 
 /**
  * Leaf type module — imported by both extension-token.ts and
@@ -6,6 +6,20 @@ import type { ExtensionTokenScope } from "@/lib/constants";
  * otherwise be a circular dependency:
  *   dpop/validate-token-dpop → extension-token → dpop/validate-token-dpop
  */
+
+const ALLOWED_SCOPES = new Set<string>(Object.values(EXTENSION_TOKEN_SCOPE));
+
+/** Parse CSV scope string into typed array. Unknown scopes are dropped. */
+export function parseScopes(csv: string): ExtensionTokenScope[] {
+  const out: ExtensionTokenScope[] = [];
+  for (const raw of csv.split(",")) {
+    const s = raw.trim();
+    if (s && ALLOWED_SCOPES.has(s)) {
+      out.push(s as ExtensionTokenScope);
+    }
+  }
+  return out;
+}
 
 export interface ValidatedExtensionToken {
   tokenId: string;

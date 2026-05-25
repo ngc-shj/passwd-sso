@@ -7,29 +7,11 @@ import { verifyDpopProof, computeAth } from "@/lib/auth/dpop/verify";
 import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
 import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
 import {
-  EXTENSION_TOKEN_SCOPE,
-  type ExtensionTokenScope,
-} from "@/lib/constants";
-import type {
-  ValidatedExtensionToken,
-  TokenValidationError,
+  parseScopes,
+  type ValidatedExtensionToken,
+  type TokenValidationError,
 } from "@/lib/auth/tokens/extension-token-types";
 import type { DpopVerifyError } from "@/lib/auth/dpop/verify";
-
-// Local copy of parseScopes to avoid a circular dependency:
-// validate-token-dpop → extension-token → validate-token-dpop.
-// Both implementations must stay in sync if EXTENSION_TOKEN_SCOPE changes.
-const ALLOWED_SCOPES = new Set<string>(Object.values(EXTENSION_TOKEN_SCOPE));
-function parseScopes(csv: string): ExtensionTokenScope[] {
-  const out: ExtensionTokenScope[] = [];
-  for (const raw of csv.split(",")) {
-    const s = raw.trim();
-    if (s && ALLOWED_SCOPES.has(s)) {
-      out.push(s as ExtensionTokenScope);
-    }
-  }
-  return out;
-}
 
 export interface ValidateTokenDpopRow {
   id: string;

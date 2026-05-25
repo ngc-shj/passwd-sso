@@ -1,8 +1,11 @@
+// Production mirror: extension/src/content/token-bridge.js (plain JS, no imports).
+// All logic changes here MUST be applied symmetrically to token-bridge.js.
 import {
   BRIDGE_CODE_MSG_TYPE,
   BRIDGE_CODE_LENGTH,
   EXT_JKT_REQUEST_MSG_TYPE,
   EXT_JKT_READY_MSG_TYPE,
+  JKT_RE,
 } from "../lib/constants";
 import { EXT_API_PATH } from "../lib/api-paths";
 
@@ -29,7 +32,7 @@ async function getServerUrl(): Promise<string | null> {
 async function getJktFromBackground(): Promise<string | null> {
   try {
     const res = await chrome.runtime.sendMessage({ type: "GET_DPOP_JKT" }) as { jkt: string | null };
-    if (typeof res?.jkt === "string" && /^[A-Za-z0-9_-]{43}$/.test(res.jkt)) {
+    if (typeof res?.jkt === "string" && JKT_RE.test(res.jkt)) {
       return res.jkt;
     }
     return null;

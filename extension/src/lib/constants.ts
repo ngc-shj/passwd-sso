@@ -17,6 +17,9 @@ export const BRIDGE_CODE_MAX_ACTIVE = 3;
 // Bridge code wire format (mirror of web app constant — sync test enforces equality)
 export const BRIDGE_CODE_LENGTH = 64;
 
+/** RFC 7638 §3 thumbprint is always 43 base64url characters. */
+export const JKT_RE = /^[A-Za-z0-9_-]{43}$/;
+
 // ── Session storage ──
 export const SESSION_KEY = "authState";
 

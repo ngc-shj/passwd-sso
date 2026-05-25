@@ -9,6 +9,18 @@ import { EXT_API_PATH } from "../lib/api-paths";
 import { getSettings } from "../lib/storage";
 import { DpopSignError, swFetchAuthenticated } from "./dpop-fetch";
 
+// ── Helpers ────────────────────────────────────────────────────
+
+async function getValidServerUrl(): Promise<string | null> {
+  const { serverUrl } = await getSettings();
+  try {
+    new URL(serverUrl);
+    return serverUrl;
+  } catch {
+    return null;
+  }
+}
+
 // ── Token refresh ──────────────────────────────────────────────
 
 export interface TokenRefreshCallbacks {
@@ -31,12 +43,8 @@ export async function attemptTokenRefreshWith(
   if (Date.now() >= tokenExpiresAt) return;
 
   try {
-    const { serverUrl } = await getSettings();
-    try {
-      new URL(serverUrl);
-    } catch {
-      return;
-    }
+    const serverUrl = await getValidServerUrl();
+    if (!serverUrl) return;
 
     let res: Response;
     try {
@@ -98,12 +106,8 @@ export async function revokeTokenOnServerWith(
   const token = callbacks.getCurrentToken();
   if (!token) return;
   try {
-    const { serverUrl } = await getSettings();
-    try {
-      new URL(serverUrl);
-    } catch {
-      return;
-    }
+    const serverUrl = await getValidServerUrl();
+    if (!serverUrl) return;
     await swFetchAuthenticated(
       EXT_API_PATH.EXTENSION_TOKEN,
       { method: "DELETE" },

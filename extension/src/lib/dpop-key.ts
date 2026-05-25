@@ -45,38 +45,46 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
+/**
+ * Run fn inside an IDB transaction; resolve after tx.oncomplete, close on exit.
+ * Collapses the open/transaction/handler boilerplate shared by all IDB ops.
+ */
+function withDb<T>(
+  mode: IDBTransactionMode,
+  fn: (store: IDBObjectStore) => IDBRequest<T>,
+): Promise<T> {
+  return openDb().then(
+    (db) =>
+      new Promise<T>((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, mode);
+        const req = fn(tx.objectStore(IDB_STORE));
+        tx.oncomplete = () => {
+          db.close();
+          resolve(req.result as T);
+        };
+        tx.onerror = () => {
+          db.close();
+          reject(tx.error);
+        };
+        req.onerror = () => {
+          db.close();
+          reject(req.error);
+        };
+      }),
+  );
+}
+
 /** Read the persisted key record from IDB, or null if absent. */
 async function idbGet(): Promise<DpopKeyRecord | null> {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE, "readonly");
-    const req = tx.objectStore(IDB_STORE).get(IDB_RECORD_KEY);
-    req.onsuccess = () => {
-      db.close();
-      resolve((req.result as DpopKeyRecord) ?? null);
-    };
-    req.onerror = () => {
-      db.close();
-      reject(req.error);
-    };
-  });
+  const result = await withDb("readonly", (s) =>
+    s.get(IDB_RECORD_KEY) as IDBRequest<DpopKeyRecord | undefined>,
+  );
+  return result ?? null;
 }
 
 /** Persist a key record to IDB. Resolves only after the transaction commits. */
 async function idbPut(record: DpopKeyRecord): Promise<void> {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE, "readwrite");
-    tx.oncomplete = () => {
-      db.close();
-      resolve();
-    };
-    tx.onerror = () => {
-      db.close();
-      reject(tx.error);
-    };
-    tx.objectStore(IDB_STORE).put(record, IDB_RECORD_KEY);
-  });
+  await withDb("readwrite", (s) => s.put(record, IDB_RECORD_KEY));
 }
 
 /** Generate a new non-extractable EC P-256 key pair. */
@@ -252,17 +260,5 @@ export function resetInMemoryKeyCache(): void {
  */
 export async function deleteIdbKey(): Promise<void> {
   keyPromise = null;
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(IDB_STORE, "readwrite");
-    tx.oncomplete = () => {
-      db.close();
-      resolve();
-    };
-    tx.onerror = () => {
-      db.close();
-      reject(tx.error);
-    };
-    tx.objectStore(IDB_STORE).delete(IDB_RECORD_KEY);
-  });
+  await withDb("readwrite", (s) => s.delete(IDB_RECORD_KEY));
 }

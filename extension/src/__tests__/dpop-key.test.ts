@@ -6,6 +6,24 @@
  */
 import "fake-indexeddb/auto";
 import { describe, it, expect, beforeEach } from "vitest";
+import { JKT_RE } from "../lib/constants";
+
+function openTestDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const r = indexedDB.open("psso-ext", 1);
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+
+async function getAllKeys(db: IDBDatabase): Promise<unknown[]> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("dpop-keys", "readonly");
+    const req = tx.objectStore("dpop-keys").getAll();
+    req.onsuccess = () => { db.close(); resolve(req.result as unknown[]); };
+    req.onerror = () => { db.close(); reject(req.error); };
+  });
+}
 
 // Reset module state between tests so the in-process singleton is cleared.
 // Each test gets a fresh import of the module.
@@ -31,7 +49,7 @@ describe("dpop-key (C6)", () => {
     const jkt2 = await getDpopThumbprint();
 
     expect(jkt1).toBe(jkt2);
-    expect(jkt1).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(jkt1).toMatch(JKT_RE);
   });
 
   it("concurrent Promise.all calls return the same thumbprint with exactly 1 IDB record", async () => {
@@ -43,18 +61,8 @@ describe("dpop-key (C6)", () => {
     expect(jkt1).toBe(jkt2);
 
     // Verify only one key was written to IDB.
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const r = indexedDB.open("psso-ext");
-      r.onsuccess = () => resolve(r.result);
-      r.onerror = () => reject(r.error);
-    });
-    const all = await new Promise<unknown[]>((resolve, reject) => {
-      const tx = db.transaction("dpop-keys", "readonly");
-      const req = tx.objectStore("dpop-keys").getAll();
-      req.onsuccess = () => resolve(req.result as unknown[]);
-      req.onerror = () => reject(req.error);
-    });
-    db.close();
+    const db = await openTestDb();
+    const all = await getAllKeys(db);
     expect(all).toHaveLength(1);
   });
 
@@ -90,7 +98,7 @@ describe("dpop-key (C6)", () => {
     });
 
     const jktNew = await getDpopThumbprint();
-    expect(jktNew).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(jktNew).toMatch(JKT_RE);
 
     // Verify exactly one IDB row was written.
     const db2 = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -208,7 +216,7 @@ describe("dpop-key (C6)", () => {
 
     // Generate a key first
     const jkt1 = await getDpopThumbprint();
-    expect(jkt1).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(jkt1).toMatch(JKT_RE);
 
     // Delete it — this must remove the IDB row AND clear keyPromise
     await deleteIdbKey();
@@ -230,7 +238,7 @@ describe("dpop-key (C6)", () => {
 
     // Next getDpopThumbprint must regenerate (a fresh thumbprint may differ)
     const jkt2 = await getDpopThumbprint();
-    expect(jkt2).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(jkt2).toMatch(JKT_RE);
 
     // Suppress unused-var warning for resetInMemoryKeyCache
     void resetInMemoryKeyCache;

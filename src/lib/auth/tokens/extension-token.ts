@@ -5,7 +5,6 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { randomUUID } from "node:crypto";
 import {
-  EXTENSION_TOKEN_SCOPE,
   EXTENSION_TOKEN_MAX_ACTIVE,
   type ExtensionTokenScope,
 } from "@/lib/constants";
@@ -15,13 +14,14 @@ import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { validateExtensionTokenDpop } from "@/lib/auth/dpop/validate-token-dpop";
 
-// ─── Types (re-exported from the leaf module for source-compat) ──────────────
+// ─── Types and helpers (re-exported from the leaf module for source-compat) ──
 
 export type {
   ValidatedExtensionToken,
   TokenValidationError,
   TokenValidationResult,
 } from "@/lib/auth/tokens/extension-token-types";
+export { parseScopes } from "@/lib/auth/tokens/extension-token-types";
 
 // ─── Helpers ─────────────────────────────────────────────────
 
@@ -30,22 +30,6 @@ function extractBearer(req: NextRequest): string | null {
   if (!auth) return null;
   const m = auth.match(/^Bearer\s+(.+)$/i);
   return m?.[1]?.trim() ?? null;
-}
-
-const ALLOWED_SCOPES = new Set<string>(
-  Object.values(EXTENSION_TOKEN_SCOPE),
-);
-
-/** Parse CSV scope string into typed array. Unknown scopes are dropped. */
-export function parseScopes(csv: string): ExtensionTokenScope[] {
-  const out: ExtensionTokenScope[] = [];
-  for (const raw of csv.split(",")) {
-    const s = raw.trim();
-    if (s && ALLOWED_SCOPES.has(s)) {
-      out.push(s as ExtensionTokenScope);
-    }
-  }
-  return out;
 }
 
 export function hasScope(

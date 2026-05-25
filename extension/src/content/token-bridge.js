@@ -17,7 +17,7 @@ var EXT_JKT_READY_MSG_TYPE = "PASSWD_SSO_EXT_JKT_READY";
 var BRIDGE_CODE_LENGTH = 64;
 var BRIDGE_CODE_RE = new RegExp("^[a-f0-9]{" + BRIDGE_CODE_LENGTH + "}$");
 var EXCHANGE_PATH = "/api/extension/token/exchange";
-var JKT_RE = /^[A-Za-z0-9_-]{43}$/;
+var JKT_RE = /^[A-Za-z0-9_-]{43}$/; // Mirror of JKT_RE in extension/src/lib/constants.ts
 
 function isContextValid() {
   try { return !!chrome.runtime && !!chrome.runtime.id; }

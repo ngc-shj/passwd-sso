@@ -7,7 +7,7 @@
  * the ephemeral key is lost and decryption fails → user must re-authenticate.
  */
 
-import { SESSION_KEY } from "./constants";
+import { SESSION_KEY, JKT_RE } from "./constants";
 import {
   encryptField,
   decryptField,
@@ -121,8 +121,7 @@ export async function loadSession(): Promise<SessionState | null> {
 
   // tokenCnfJkt validation: must be a 43-char base64url string.
   // Absent means a pre-PR session — return null so the user reconnects cleanly.
-  const cnfJktRe = /^[A-Za-z0-9_-]{43}$/;
-  if (typeof raw.tokenCnfJkt !== "string" || !cnfJktRe.test(raw.tokenCnfJkt)) {
+  if (typeof raw.tokenCnfJkt !== "string" || !JKT_RE.test(raw.tokenCnfJkt)) {
     return null;
   }
 
