@@ -676,29 +676,33 @@ chrome.contextMenus.onClicked.addListener(handleContextMenuClick);
 // ── Alarm: auto-clear on expiry ──────────────────────────────
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === ALARM_TOKEN_TTL) {
-    clearToken();
-  }
-  if (alarm.name === ALARM_VAULT_LOCK) {
-    (async () => {
+  // MV3: SW may have just woken up to handle this alarm. Wait for hydrateFromSession()
+  // to populate currentToken / tokenExpiresAt / cachedVaultTimeoutAction from
+  // chrome.storage.session before running handlers — otherwise getCurrentToken()
+  // returns null and attemptTokenRefresh() silently early-returns, dropping the
+  // refresh entirely.
+  (async () => {
+    await hydrationPromise;
+    if (alarm.name === ALARM_TOKEN_TTL) {
+      clearToken();
+    }
+    if (alarm.name === ALARM_VAULT_LOCK) {
       if (cachedVaultTimeoutAction === TimeoutAction.LOGOUT) {
         await revokeCurrentTokenOnServer();
         clearToken();
       } else {
         clearVault();
       }
-    })().catch(() => {});
-  }
-  if (alarm.name === ALARM_TOKEN_REFRESH) {
-    attemptTokenRefresh().catch(() => {});
-  }
-  if (alarm.name === ALARM_CLEAR_CLIPBOARD) {
-    (async () => {
+    }
+    if (alarm.name === ALARM_TOKEN_REFRESH) {
+      await attemptTokenRefresh();
+    }
+    if (alarm.name === ALARM_CLEAR_CLIPBOARD) {
       if (Date.now() - lastClipboardCopyTime >= cachedClipboardClearSeconds * 1000) {
         await copyToClipboard("");
       }
-    })().catch(() => {});
-  }
+    }
+  })().catch(() => {});
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
