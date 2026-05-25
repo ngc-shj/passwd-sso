@@ -128,6 +128,47 @@ describe("startConnect (C6)", () => {
     expect(setToken).not.toHaveBeenCalled();
   });
 
+  // Regression: a basePath-bearing serverUrl (e.g. behind a Tailscale Serve
+  // or reverse-proxy prefix) MUST be preserved on both fetches. An earlier
+  // implementation used `new URL(path, serverUrl)` which discards the
+  // basePath because absolute paths override the base's pathname, sending
+  // requests to the host root and producing silent network errors.
+  it("preserves basePath in serverUrl on both bridge-code and exchange fetches", async () => {
+    const basePathServer = "https://example.com/passwd-sso";
+    vi.doMock("../../lib/storage", () => ({
+      getSettings: vi.fn().mockResolvedValue({ serverUrl: basePathServer }),
+    }));
+    vi.resetModules();
+    const { startConnect: startConnectIso } = await import("../../background/token-handler");
+
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ code: BRIDGE_CODE, expiresAt: new Date(Date.now() + 60000).toISOString() }, 201),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            token: TOKEN,
+            expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+            scope: ["passwords:read"],
+            cnfJkt: CNF_JKT,
+          },
+          201,
+        ),
+      );
+
+    await startConnectIso({ setToken, fetchImpl, signDpopProofImpl: signDpopProof });
+
+    const [bridgeUrl] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(bridgeUrl).toBe(`${basePathServer}/api/extension/bridge-code`);
+    const [exchangeUrl] = fetchImpl.mock.calls[1] as [string, RequestInit];
+    expect(exchangeUrl).toBe(`${basePathServer}/api/extension/token/exchange`);
+
+    vi.doUnmock("../../lib/storage");
+    vi.resetModules();
+  });
+
   it("DPoP signer throws (e.g., IDB unavailable) → no setToken; errorCode = GENERIC_FAILURE", async () => {
     const fetchImpl = vi.fn<typeof fetch>();
     signDpopProof.mockRejectedValueOnce(new DpopSignError("IDB unavailable"));

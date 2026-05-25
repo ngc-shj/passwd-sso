@@ -169,8 +169,12 @@ export async function startConnect(
       method: "POST",
       serverUrl,
     });
+    // String concat (not new URL) — serverUrl may carry a basePath such as
+    // `/passwd-sso`; `new URL("/api/...", serverUrl)` would discard that
+    // basePath because absolute paths override the base's pathname. Mirrors
+    // the swFetchAuthenticated helper's `${serverUrl}${path}` pattern.
     const res = await fetchFn(
-      new URL(EXT_API_PATH.EXTENSION_BRIDGE_CODE, serverUrl).toString(),
+      `${serverUrl}${EXT_API_PATH.EXTENSION_BRIDGE_CODE}`,
       {
         method: "POST",
         credentials: "include",
@@ -205,8 +209,9 @@ export async function startConnect(
       method: "POST",
       serverUrl,
     });
+    // Same basePath-preserving string concat as the bridge-code fetch above.
     const res = await fetchFn(
-      new URL(EXT_API_PATH.EXTENSION_TOKEN_EXCHANGE, serverUrl).toString(),
+      `${serverUrl}${EXT_API_PATH.EXTENSION_TOKEN_EXCHANGE}`,
       {
         method: "POST",
         credentials: "omit",
