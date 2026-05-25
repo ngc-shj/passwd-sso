@@ -11,10 +11,10 @@ import { getAppOrigin } from "@/lib/url-helpers";
  *  - scheme:    lowercase
  *  - host:      lowercase
  *  - port:      stripped if it is the scheme default (80/443)
- *  - basePath:  preserved from APP_URL/AUTH_URL pathname (so basePath-mounted
- *               deployments like `https://example.com/passwd-sso` produce
- *               `https://example.com/passwd-sso/api/...` matching the URL the
- *               client actually called)
+ *  - basePath:  primary source = APP_URL/AUTH_URL pathname; fallback =
+ *               `NEXT_PUBLIC_BASE_PATH` env (so deployments that put the
+ *               sub-path in NEXT_PUBLIC_BASE_PATH instead of AUTH_URL still
+ *               match the URL the client actually called)
  *  - path:      exactly the route as configured (proxy rewrites must NOT
  *               reach this layer — server records its canonical URL once)
  *  - query, fragment: removed
@@ -36,11 +36,16 @@ export function canonicalHtu(args: { route: string }): string {
     (scheme === "https:" && (port === "" || port === "443"));
   const authority = isDefaultPort ? host : `${host}:${port}`;
 
-  // Preserve basePath from APP_URL pathname. For non-basePath deployments
-  // the pathname is "" or "/" — both strip to "" so the legacy URL shape
-  // `<scheme>//<authority><route>` is produced unchanged.
+  // basePath: primary source is APP_URL/AUTH_URL pathname. If empty (operator
+  // put the sub-path in NEXT_PUBLIC_BASE_PATH instead), fall back to that env
+  // so the htu still matches the URL the client called. Read process.env at
+  // call time (server-only function) so tests can mutate via vi.stubEnv.
   let basePath = url.pathname;
   if (basePath.endsWith("/")) basePath = basePath.slice(0, -1);
+  if (!basePath) {
+    const envBasePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+    if (envBasePath) basePath = envBasePath;
+  }
 
   const path = normalizePath(args.route);
   return `${scheme}//${authority}${basePath}${path}`;
