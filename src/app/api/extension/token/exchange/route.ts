@@ -1,23 +1,32 @@
 /**
  * POST /api/extension/token/exchange — Exchange a one-time bridge code for a token.
  *
- * Step 5 of the extension-bridge-code-exchange plan. Called from the extension
- * content script (isolated world) after it receives a bridge code via
- * `window.postMessage`. The endpoint:
+ * Called from the extension SW after a successful bridge-code issuance. The
+ * endpoint runs SELECT-then-CAS (not CAS-then-SELECT):
  *
- * 1. Validates the request body (64-char hex code)
- * 2. Rate-limits per client IP (no session is available at this point)
- * 3. Atomically consumes the code (single UPDATE + count check)
- * 4. Resolves userId/tenantId/scope from the consumed code record
- *    (server-side resolution — never from client input, P1-S1)
- * 5. Issues an extension token via the shared `issueExtensionToken()` helper
- * 6. Logs success via `logAudit`; logs failures via pino directly
- *    (Considerations §7 — `logAudit` requires a resolvable user/tenant)
+ *   1. Validate the request body (64-char hex code + strict schema).
+ *   2. Rate-limit per client IP (no session is available at this point).
+ *   3. `findUnique` the bridge code by codeHash — read-only, no mutation.
+ *   4. `verifyDpopProof` with `expectedCnfJkt: consumed.cnfJkt` — proves the
+ *      caller controls the same key the bridge code was bound to. If the
+ *      proof fails, NO MUTATION happens (this fixes the DoS-via-consumption
+ *      window where the prior CAS-first design consumed codes on invalid
+ *      DPoP, denying the legitimate caller their own code).
+ *   5. `updateMany` CAS with predicate `{ codeHash, usedAt: null,
+ *      cnfJkt: consumed.cnfJkt, expiresAt: { gt: now } }`. The cnfJkt
+ *      predicate is a defense-in-depth TOCTOU guard — the verifier already
+ *      established `dpopResult.jkt === consumed.cnfJkt`, but re-asserting
+ *      it at the CAS layer prevents any pathological scenario where the
+ *      row's cnfJkt could change between SELECT and CAS.
+ *   6. If `count === 0`: race-lost (another caller consumed in between).
+ *      Same 401 + audit reason `unknown_or_consumed` as code-unknown.
+ *   7. Issue an extension token via the shared `issueExtensionToken()`
+ *      helper, passing `consumed.cnfJkt` so the token row's cnfJkt
+ *      matches.
  *
  * No Auth.js session and no Origin check by design — the extension content
- * script's effective origin in fetch headers may be `chrome-extension://`,
- * which would fail `assertOrigin`. Compensating control: 256-bit single-use
- * short-lived bridge code.
+ * script's effective origin is `chrome-extension://`. Compensating control:
+ * 256-bit single-use short-lived bridge code + DPoP proof of key custody.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -54,15 +63,18 @@ const exchangeLimiter = createRateLimiter({
   failClosedOnRedisError: true,
 });
 
-const ExchangeRequestSchema = z.object({
-  code: z.string().length(BRIDGE_CODE_LENGTH).regex(/^[a-f0-9]+$/),
-});
+// `.strict()` rejects unknown keys. Future field additions require a plan
+// amendment — the schema is the authoritative wire contract for this route.
+const ExchangeRequestSchema = z
+  .object({
+    code: z.string().length(BRIDGE_CODE_LENGTH).regex(/^[a-f0-9]+$/),
+  })
+  .strict();
 
 async function handlePOST(req: NextRequest) {
-  // Parse request body
+  // 1. Parse + validate body.
   const bodyResult = await parseBody(req, ExchangeRequestSchema);
   if (!bodyResult.ok) {
-    // No user context — pino-only logging (audit requires resolvable user/tenant)
     getLogger().warn(
       {
         event: "extension_token_exchange_failure",
@@ -77,8 +89,7 @@ async function handlePOST(req: NextRequest) {
 
   const { code } = bodyResult.data;
 
-  // Rate limit BEFORE DB lookup (keyed by client IP, no session available).
-  // Compensating control: 256-bit code entropy makes brute force infeasible.
+  // 2. IP rate limit BEFORE DB lookup.
   const ip = extractClientIp(req);
   const rl = await checkIpRateLimit({
     ip,
@@ -94,40 +105,11 @@ async function handlePOST(req: NextRequest) {
   });
   if (blocked) return blocked;
 
-  // Atomic consume: single UPDATE with affected-rows check
+  // 3. SELECT — read-only lookup; no mutation. Either resolves a row or
+  //    fast-fails as unknown.
   const codeHash = hashToken(code);
   const now = new Date();
-  const result = await withBypassRls(
-    prisma,
-    async (tx) =>
-      tx.extensionBridgeCode.updateMany({
-        where: {
-          codeHash,
-          usedAt: null,
-          expiresAt: { gt: now },
-        },
-        data: { usedAt: now },
-      }),
-    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
-  );
 
-  if (result.count === 0) {
-    // Either code unknown, already used, or expired — same response for all cases.
-    // Pino-only: no resolvable user/tenant for the failure case.
-    getLogger().warn(
-      {
-        event: "extension_token_exchange_failure",
-        reason: "unknown_or_consumed",
-        ip,
-        userAgent: req.headers.get("user-agent"),
-      },
-      "extension token exchange failed: code unknown, expired, or already consumed",
-    );
-    return unauthorized();
-  }
-
-  // Fetch the consumed code to resolve userId/tenantId/scope/cnfJkt from server data
-  // (P1-S1: server-side resolution, never from client input).
   const consumed = await withBypassRls(
     prisma,
     async (tx) =>
@@ -139,22 +121,23 @@ async function handlePOST(req: NextRequest) {
   );
 
   if (!consumed) {
-    // System invariant violation: the UPDATE just succeeded but findUnique
-    // returned null. Log loudly so we can debug if this ever fires.
-    // Cannot emit logAudit here because we have no resolvable userId/tenantId
-    // (the consumed record literally just disappeared).
-    getLogger().error(
+    // Code unknown — same 401 envelope used for consumed/expired/race-lost
+    // so a probing attacker cannot tell these states apart from response shape.
+    getLogger().warn(
       {
-        event: "extension_token_exchange_invariant_violation",
-        codeHash,
+        event: "extension_token_exchange_failure",
+        reason: "unknown_or_consumed",
+        ip,
+        userAgent: req.headers.get("user-agent"),
       },
-      "consumed code not found after successful update — system invariant violated",
+      "extension token exchange failed: code unknown",
     );
-    return errorResponse(API_ERROR.INTERNAL_ERROR);
+    return unauthorized();
   }
 
-  // DPoP verification is always required. cnfJkt is NOT NULL on bridge-code rows.
-  // Failure returns the same unauthorized() as code-unknown/expired — timing-uniform.
+  // 4. DPoP verification — REQUIRED before any mutation. Failure here MUST
+  //    NOT consume the bridge code (the prior CAS-first design did, opening
+  //    a DoS-via-consumption window).
   const dpopHeader = req.headers.get("dpop");
   const dpopResult = await verifyDpopProof(dpopHeader, {
     expectedHtm: "POST",
@@ -184,10 +167,43 @@ async function handlePOST(req: NextRequest) {
     return unauthorized();
   }
 
-  // Issue ExtensionToken via shared helper (same logic as legacy POST /api/extension/token).
-  // Wrap in try/catch so a token-issuance failure on this branch (where we DO have a
-  // resolvable userId/tenantId from the consumed code record) is recorded as an audit
-  // event, not just a swallowed 500.
+  // 5. CAS consume — atomic UPDATE conditioned on usedAt:null + cnfJkt match
+  //    + not-yet-expired. The cnfJkt predicate is defense-in-depth (verifier
+  //    already enforced it on the read above). updateMany returns
+  //    `{ count }` rather than throwing on miss, which is what we need to
+  //    detect the race-lost case.
+  const consumeResult = await withBypassRls(
+    prisma,
+    async (tx) =>
+      tx.extensionBridgeCode.updateMany({
+        where: {
+          codeHash,
+          usedAt: null,
+          cnfJkt: consumed.cnfJkt,
+          expiresAt: { gt: now },
+        },
+        data: { usedAt: now },
+      }),
+    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+  );
+
+  if (consumeResult.count === 0) {
+    // Race lost (another caller consumed between SELECT and CAS) OR the row
+    // expired during DPoP verification. Same response envelope as code-unknown.
+    getLogger().warn(
+      {
+        event: "extension_token_exchange_failure",
+        reason: "unknown_or_consumed",
+        ip,
+        userAgent: req.headers.get("user-agent"),
+      },
+      "extension token exchange failed: race-lost or expired",
+    );
+    return unauthorized();
+  }
+
+  // 6. Token issuance. Carry consumed.cnfJkt into the new token so future
+  //    DPoP-validated requests verify against the same thumbprint.
   let issued: Awaited<ReturnType<typeof issueExtensionToken>>;
   try {
     issued = await issueExtensionToken({
@@ -215,7 +231,8 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.INTERNAL_ERROR);
   }
 
-  // Audit success: carry cnfJktFingerprint (first 16 hex of SHA-256(cnfJkt)) for forensics.
+  // 7. Audit success. cnfJktFingerprint (first 16 hex of SHA-256(cnfJkt))
+  //    is carried for forensics without exposing the full thumbprint.
   const cnfJktFingerprint = createHash("sha256")
     .update(consumed.cnfJkt)
     .digest("hex")

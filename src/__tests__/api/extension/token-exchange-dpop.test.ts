@@ -87,10 +87,11 @@ describe("POST /api/extension/token/exchange — DPoP enforcement (C3)", () => {
     mockLogAuditAsync.mockResolvedValue(undefined);
     mockIssueExtensionToken.mockResolvedValue(ISSUED_TOKEN);
 
-    // Default: CAS consume succeeds (count=1), then findUnique returns consumed record
+    // New order (C5): findUnique returns consumed record, then CAS consume
+    // succeeds (count=1). DPoP verify runs between the two.
     mockWithBypassRls
-      .mockResolvedValueOnce({ count: 1 }) // updateMany
-      .mockResolvedValueOnce(CONSUMED_RECORD); // findUnique
+      .mockResolvedValueOnce(CONSUMED_RECORD) // findUnique
+      .mockResolvedValueOnce({ count: 1 }); // updateMany CAS
   });
 
   it("returns 201 with token and cnfJkt when DPoP proof is valid", async () => {
@@ -175,10 +176,10 @@ describe("POST /api/extension/token/exchange — DPoP enforcement (C3)", () => {
     );
   });
 
-  it("returns 401 when code is unknown/expired (no DPoP involvement)", async () => {
-    // Simulate CAS consume returning 0 rows
+  it("returns 401 when code is unknown (findUnique returns null) — no DPoP involvement", async () => {
+    // C5 order: findUnique fast-fails on null → 401 without touching DPoP or CAS.
     mockWithBypassRls.mockReset();
-    mockWithBypassRls.mockResolvedValueOnce({ count: 0 });
+    mockWithBypassRls.mockResolvedValueOnce(null);
 
     const req = createRequest(
       "POST",
@@ -193,7 +194,39 @@ describe("POST /api/extension/token/exchange — DPoP enforcement (C3)", () => {
     const { status } = await parseResponse(res);
 
     expect(status).toBe(401);
-    // DPoP should NOT be checked when code is invalid (no cnfJkt to verify against)
+    // No cnfJkt to verify against — DPoP not invoked.
     expect(mockVerifyDpop).not.toHaveBeenCalled();
+    // Only one withBypassRls call (findUnique) — CAS never happened.
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
+  });
+
+  // C5: invalid DPoP must not consume the bridge code.
+  it("returns 401 on invalid DPoP — bridge code is NOT consumed (no CAS)", async () => {
+    mockVerifyDpop.mockResolvedValue({ ok: false, error: "DPOP_SIG_INVALID" });
+    mockWithBypassRls.mockReset();
+    mockWithBypassRls.mockResolvedValueOnce(CONSUMED_RECORD);
+
+    const req = createRequest(
+      "POST",
+      "http://localhost:3000/api/extension/token/exchange",
+      {
+        body: { code: VALID_CODE },
+        headers: { "dpop": "tampered-proof" },
+      },
+    );
+
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(401);
+    expect(mockVerifyDpop).toHaveBeenCalledTimes(1);
+    // findUnique only — CAS updateMany did NOT run.
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
+    // Failure audit still fires (we have userId + tenantId from the SELECT).
+    expect(mockLogAuditAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ dpopError: "DPOP_SIG_INVALID" }),
+      }),
+    );
   });
 });
