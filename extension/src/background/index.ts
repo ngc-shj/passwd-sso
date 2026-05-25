@@ -39,6 +39,7 @@ import {
 import {
   getDpopThumbprint,
   signDpopProof,
+  resetInMemoryKeyCache,
 } from "../lib/dpop-key";
 import { swFetchAuthenticated } from "./dpop-fetch";
 import {
@@ -1663,6 +1664,19 @@ async function handleMessage(
       clearToken();
       chrome.alarms.clear(ALARM_TOKEN_TTL);
       sendResponse({ type: EXT_MSG.CLEAR_TOKEN, ok: true });
+      return;
+    }
+
+    case EXT_MSG.RESET_DPOP_KEY: {
+      // The Options page just called deleteIdbKey(); drop the SW's in-memory
+      // cached keyPromise so the next loadOrGenerate() reads the (now-empty)
+      // IDB and generates a fresh key. Without this the SW would sign the
+      // NEXT bridge-code exchange's DPoP proof with the stale key, binding
+      // the freshly issued token to a cnf_jkt the Options page can no longer
+      // produce — making subsequent /key/reset calls 401 with
+      // DPOP_CNF_JKT_MISMATCH.
+      resetInMemoryKeyCache();
+      sendResponse({ type: EXT_MSG.RESET_DPOP_KEY, ok: true });
       return;
     }
 

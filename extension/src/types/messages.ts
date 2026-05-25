@@ -28,6 +28,7 @@ export type ExtensionMessage =
   | { type: typeof EXT_MSG.AUTOFILL_CREDIT_CARD; entryId: string; tabId: number; teamId?: string }
   | { type: typeof EXT_MSG.AUTOFILL_IDENTITY; entryId: string; tabId: number; teamId?: string }
   | { type: typeof EXT_MSG.KEEPALIVE_PING }
+  | { type: typeof EXT_MSG.RESET_DPOP_KEY }
   // Passkey SW messages — senderUrl is intentionally absent: the SW reads it
   // from chrome.runtime.MessageSender (_sender.tab?.url), not from the message payload,
   // to prevent the content script from spoofing the sender origin.
@@ -133,6 +134,7 @@ export type ExtensionResponse =
     }
   | { type: typeof EXT_MSG.AUTOFILL_CREDIT_CARD; ok: boolean; error?: string }
   | { type: typeof EXT_MSG.AUTOFILL_IDENTITY; ok: boolean; error?: string }
+  | { type: typeof EXT_MSG.RESET_DPOP_KEY; ok: true }
   | {
       type: typeof EXT_MSG.PASSKEY_GET_MATCHES;
       entries: PasskeyMatchEntry[];

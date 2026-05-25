@@ -77,6 +77,11 @@ export const EXT_MSG = {
   AUTOFILL_CREDIT_CARD: "AUTOFILL_CREDIT_CARD",
   AUTOFILL_IDENTITY: "AUTOFILL_IDENTITY",
   KEEPALIVE_PING: "KEEPALIVE_PING",
+  // Options → SW: invalidate the SW's in-memory DPoP key cache after the
+  // Options page deleted the IDB record. Without this the SW keeps signing
+  // bridge-code DPoP proofs with the stale key, producing tokens that the
+  // next reset cannot revoke (cnf_jkt mismatch on /key/reset DPoP verify).
+  RESET_DPOP_KEY: "RESET_DPOP_KEY",
   // Passkey SW message types (content script → Service Worker)
   PASSKEY_GET_MATCHES: "PASSKEY_GET_MATCHES",
   PASSKEY_SIGN_ASSERTION: "PASSKEY_SIGN_ASSERTION",

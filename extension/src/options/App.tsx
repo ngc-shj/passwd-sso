@@ -6,6 +6,7 @@ import { humanizeError } from "../lib/error-messages";
 import { useTheme } from "../lib/theme";
 import { getDpopThumbprint, deleteIdbKey } from "../lib/dpop-key";
 import { EXT_API_PATH } from "../lib/api-paths";
+import { EXT_MSG } from "../lib/constants";
 
 const DEFAULT_SERVER_URL = "https://localhost:3000";
 
@@ -223,11 +224,15 @@ export function App() {
       const cnfJkt = await getDpopThumbprint();
 
       // Get the current token from the background SW.
-      const statusRes = await chrome.runtime.sendMessage({ type: "GET_TOKEN" }) as { token: string | null };
+      const statusRes = await chrome.runtime.sendMessage({ type: EXT_MSG.GET_TOKEN }) as { token: string | null };
       const token = statusRes?.token;
       if (!token) {
-        // No active session — just delete the IDB key locally.
+        // No active session — just delete the IDB key locally, then tell SW
+        // to drop its in-memory dpop-key cache (separate JS heap from this
+        // Options page; otherwise SW would re-bind the next bridge-code token
+        // to the stale jkt — see RESET_DPOP_KEY handler in background/index.ts).
         await deleteIdbKey();
+        chrome.runtime.sendMessage({ type: EXT_MSG.RESET_DPOP_KEY });
         setResetStatus("ok");
         setTimeout(() => setResetStatus("idle"), 2000);
         return;
@@ -263,8 +268,11 @@ export function App() {
 
       // Server confirmed revocation — now delete the IDB key.
       await deleteIdbKey();
+      // Tell SW to drop its in-memory dpop-key cache so the next bridge-code
+      // flow re-reads IDB (now empty) and generates a fresh key.
+      chrome.runtime.sendMessage({ type: EXT_MSG.RESET_DPOP_KEY });
       // Ask background SW to clear its token state.
-      chrome.runtime.sendMessage({ type: "CLEAR_TOKEN" });
+      chrome.runtime.sendMessage({ type: EXT_MSG.CLEAR_TOKEN });
       setResetStatus("ok");
       setTimeout(() => setResetStatus("idle"), 2000);
     } catch {
