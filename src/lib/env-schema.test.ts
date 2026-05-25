@@ -428,6 +428,99 @@ describe("envSchema (with superRefine cross-field rules)", () => {
   });
 });
 
+describe("EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS (C1)", () => {
+  const VALID_ID = "abcdefghijklmnopabcdefghijklmnop"; // 32 chars in [a-p]
+  const VALID_ID_2 = "ponmlkjihgfedcbaponmlkjihgfedcba"; // also 32 in [a-p]
+
+  it("accepts a single valid chrome-extension origin", () => {
+    const result = envObject.safeParse(
+      baseEnv({ EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS: `chrome-extension://${VALID_ID}` }),
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts CSV of multiple valid origins", () => {
+    const result = envObject.safeParse(
+      baseEnv({
+        EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS: `chrome-extension://${VALID_ID},chrome-extension://${VALID_ID_2}`,
+      }),
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it("treats undefined as valid (optional)", () => {
+    const result = envObject.safeParse(baseEnv({}));
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects empty string", () => {
+    const result = envObject.safeParse(
+      baseEnv({ EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS: "" }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects uppercase characters in extension id", () => {
+    const result = envObject.safeParse(
+      baseEnv({ EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS: "chrome-extension://ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP" }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects digits in extension id (Chrome uses a-p only)", () => {
+    const result = envObject.safeParse(
+      baseEnv({ EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS: "chrome-extension://abcdefghij1234567890abcdefghij12" }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects characters outside a-p (q-z forbidden)", () => {
+    const result = envObject.safeParse(
+      baseEnv({ EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS: "chrome-extension://qrstuvwxyzqrstuvwxyzqrstuvwxyzab" }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects ids shorter than 32 chars", () => {
+    const result = envObject.safeParse(
+      baseEnv({ EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS: "chrome-extension://abc" }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects ids longer than 32 chars", () => {
+    const result = envObject.safeParse(
+      baseEnv({
+        EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS: `chrome-extension://${VALID_ID}a`,
+      }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects CSV with trailing comma", () => {
+    const result = envObject.safeParse(
+      baseEnv({ EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS: `chrome-extension://${VALID_ID},` }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects CSV with spaces", () => {
+    const result = envObject.safeParse(
+      baseEnv({
+        EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS: `chrome-extension://${VALID_ID}, chrome-extension://${VALID_ID_2}`,
+      }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects non-chrome-extension scheme", () => {
+    const result = envObject.safeParse(
+      baseEnv({ EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS: `https://${VALID_ID}` }),
+    );
+    expect(result.success).toBe(false);
+  });
+});
+
 describe("getSchemaShape", () => {
   it("returns the envObject .shape (pickable)", () => {
     const shape = getSchemaShape();

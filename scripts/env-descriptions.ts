@@ -23,6 +23,7 @@ export const GROUPS = [
   "Public (client-inlined)",
   "Sentry",
   "Tailscale",
+  "Extension trust path",
   "Operational",
 ] as const;
 
@@ -806,6 +807,19 @@ export const descriptions: Record<
       "Path to the Tailscale local API Unix socket. Optional.\n" +
       "Default: /var/run/tailscale/tailscaled.sock",
     example: "/var/run/tailscale/tailscaled.sock",
+  },
+
+  // ── Extension trust path ──────────────────────────────────────────────────
+
+  EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS: {
+    group: "Extension trust path",
+    order: 1,
+    description:
+      "Allowlist of chrome-extension Origins permitted to POST /api/extension/bridge-code.\n" +
+      "Required when the browser extension is deployed; the route fails closed (403) if unset.\n" +
+      "CSV-separated for multi-environment deploys (dev unpacked, Web Store).\n" +
+      "Each value MUST be 'chrome-extension://<32-char id>' where the id is [a-p]{32} (Chrome's encoding).",
+    example: "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
   },
 
   // ── DCR cleanup worker ────────────────────────────────────────────────────────
