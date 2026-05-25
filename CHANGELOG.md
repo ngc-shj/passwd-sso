@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.4.52](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.51...passwd-sso-v0.4.52) (2026-05-25)
+
+
+### Features
+
+* **extension:** DPoP sender-constrained tokens (RFC 9449) ([#491](https://github.com/ngc-shj/passwd-sso/issues/491)) ([3f08e60](https://github.com/ngc-shj/passwd-sso/commit/3f08e60d33e9ee4f3d9d500bb310ba029412de2c))
+
+
+### Bug Fixes
+
+* **auth:** preserve freshly-issued session in passkey re-auth cascade ([#486](https://github.com/ngc-shj/passwd-sso/issues/486)) ([4ae21db](https://github.com/ngc-shj/passwd-sso/commit/4ae21dbe1602f39235a50ccd389c5c98312598cc))
+* **env:** require AUDIT_ANCHOR_PUBLISHER_ENABLED in production (A08-3) ([#485](https://github.com/ngc-shj/passwd-sso/issues/485)) ([f821126](https://github.com/ngc-shj/passwd-sso/commit/f82112656481e592707f3e887ee8d59dae41b14f))
+* **security:** batch 1 — critical + high findings from codebase audit ([#479](https://github.com/ngc-shj/passwd-sso/issues/479)) ([4265725](https://github.com/ngc-shj/passwd-sso/commit/4265725d7b885b89b9131454f6e0dbfab419b35e))
+* **security:** batch 2 — medium + low findings from codebase audit ([#481](https://github.com/ngc-shj/passwd-sso/issues/481)) ([79373df](https://github.com/ngc-shj/passwd-sso/commit/79373df33ba21c8717575dd1b6ec80098b2c1c98))
+* **security:** deprecate legacy extension token endpoint (P0) ([#489](https://github.com/ngc-shj/passwd-sso/issues/489)) ([a152cd0](https://github.com/ngc-shj/passwd-sso/commit/a152cd0d30a8cc0125753a5405c62ca061f138fc))
+* **security:** OWASP batch 3 — Low + Info findings (14 items) ([#484](https://github.com/ngc-shj/passwd-sso/issues/484)) ([522ee05](https://github.com/ngc-shj/passwd-sso/commit/522ee0588b704aa4e3785ed77836d598f6f3fcbb))
+
+
+### Code Refactoring
+
+* extract BRIDGE_CODE_LENGTH constant + post-review minor fixes ([#490](https://github.com/ngc-shj/passwd-sso/issues/490)) ([5c05a92](https://github.com/ngc-shj/passwd-sso/commit/5c05a9268013a4b1899b632982d345509037583c))
+
 ## [0.4.51](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.50...passwd-sso-v0.4.51) (2026-05-20)
 
 
