@@ -110,7 +110,7 @@ function corsHeaders(
     //   (b) chrome-extension Origin on the bridge-code route AND allowlisted
     // It is NOT set for Bearer-bypass routes (extension origin without
     // credentials guard) — those routes carry Bearer tokens, not cookies.
-    const credentials =
+    const credentials: Record<string, string> =
       origin === appOrigin || bridgeCodeAllowed
         ? { "Access-Control-Allow-Credentials": "true" }
         : {};

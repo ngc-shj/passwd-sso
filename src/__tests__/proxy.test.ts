@@ -32,6 +32,7 @@ vi.mock("@/lib/auth/session/session-cache", async () => {
 import { proxy } from "../proxy";
 import { applySecurityHeaders as _applySecurityHeaders } from "../lib/proxy/security-headers";
 import { extractSessionToken as _extractSessionToken } from "../lib/proxy/auth-gate";
+import { __resetAllowlistForTests } from "../lib/http/cors";
 import {
   PASSKEY_AUDIT_MAP_MAX as _PASSKEY_AUDIT_MAP_MAX,
   PASSKEY_AUDIT_DEDUP_MS as _PASSKEY_AUDIT_DEDUP_MS,
@@ -380,6 +381,125 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+});
+
+// ─── C8 — Proxy passes /api/extension/bridge-code through to route handler ───
+//
+// Plan C2/C8: the bridge-code route is classified as API_EXTENSION_BRIDGE_CODE
+// and the orchestrator early-returns BEFORE the baseline CSRF gate. The route
+// handler is solely responsible for Origin allowlist check, auth(), DPoP
+// verification, and tenant IP restriction. These tests prove the proxy does
+// NOT short-circuit with 403 — every 403 in this flow comes from the route
+// handler (which is a separate test surface), never from the proxy CSRF gate.
+const CHROME_EXT_ALLOWED = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
+const CHROME_EXT_ATTACKER = "chrome-extension://ponmlkjihgfedcbaponmlkjihgfedcba";
+
+describe("proxy — C8 bridge-code passthrough", () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.stubEnv("APP_URL", APP_ORIGIN);
+    vi.stubEnv("EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS", CHROME_EXT_ALLOWED);
+    __resetAllowlistForTests();
+    // Session fetch never reached on the bridge-code path; assert it stays
+    // un-called to prove the early-return ran before the auth gate.
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ user: null }), { status: 200 }),
+    );
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
+    __resetAllowlistForTests();
+  });
+
+  it("cookie + allowlisted chrome-extension Origin + POST → passes through (200, no CSRF 403)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/extension/bridge-code`, {
+      method: "POST",
+      headers: {
+        origin: CHROME_EXT_ALLOWED,
+        Cookie: "authjs.session-token=sess-bridge",
+        "Content-Type": "application/json",
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    // Proxy CSRF gate did NOT fire (any 403 here would be from the proxy,
+    // since the route handler hasn't run in this test surface).
+    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    // Allowlisted extension origin gets credentialed CORS headers.
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(CHROME_EXT_ALLOWED);
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+  });
+
+  it("cookie + non-allowlisted chrome-extension Origin + POST → passes through (route handler will 403)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/extension/bridge-code`, {
+      method: "POST",
+      headers: {
+        origin: CHROME_EXT_ATTACKER,
+        Cookie: "authjs.session-token=sess-bridge",
+        "Content-Type": "application/json",
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    // Proxy still returns 200 — the Origin allowlist check is the route
+    // handler's job, NOT the proxy CSRF gate's. Distinguishing the 403
+    // source matters: if the proxy 403'd here, the route handler's audit
+    // trail and step-up checks would be bypassed.
+    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    // Non-allowlisted extension origin → no CORS Allow-Origin (browser will
+    // block the response, but the proxy itself does not 403 the request).
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+  });
+
+  it("cookie + cross-origin https://attacker.example + POST → passes through (route handler will 403)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/extension/bridge-code`, {
+      method: "POST",
+      headers: {
+        origin: "https://attacker.example",
+        Cookie: "authjs.session-token=sess-bridge",
+        "Content-Type": "application/json",
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    // Critically, the baseline CSRF gate would have returned 403 for this
+    // (cookie + mutating method + cross-origin) on any other route. The
+    // early-return for API_EXTENSION_BRIDGE_CODE intentionally bypasses it
+    // — the route handler must enforce Origin against the allowlist instead.
+    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  it("no cookie + allowlisted chrome-extension Origin + POST → passes through (route handler will 401)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/extension/bridge-code`, {
+      method: "POST",
+      headers: {
+        origin: CHROME_EXT_ALLOWED,
+        "Content-Type": "application/json",
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    // No session cookie → CSRF gate would not fire anyway, but more
+    // importantly the proxy must not 401 here either. auth() runs in the
+    // route handler.
+    expect(res.status).not.toBe(401);
+    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(CHROME_EXT_ALLOWED);
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+  });
 });
 
 describe("proxy — CORS preflight and headers", () => {

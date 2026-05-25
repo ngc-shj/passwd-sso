@@ -1,11 +1,28 @@
 /**
  * POST /api/extension/bridge-code — Issue a one-time bridge code.
  *
- * Step 4 of the extension-bridge-code-exchange plan. The web app calls this
- * endpoint after the user signs in and forwards the resulting code via
- * `window.postMessage` to the extension content script. The content script
- * then calls `POST /api/extension/token/exchange` directly to swap the code
- * for a bearer token, never exposing the bearer token to MAIN-world JS.
+ * The web app's UI is rendered same-origin; the chrome extension SW initiates
+ * this request itself with credentials and a DPoP proof. The route handler
+ * enforces its own Origin allowlist (the proxy classifies bridge-code as
+ * API_EXTENSION_BRIDGE_CODE so the baseline CSRF gate does NOT fire — see
+ * `src/lib/proxy/api-route.ts:55` and plan C2/C4).
+ *
+ * Step order (cheap → expensive, fail-fast). Per-step justifications:
+ *
+ *   1. IP-keyed rate limit (60/min/IP, fail-closed on Redis error) BEFORE
+ *      Origin — anonymous-DoS gate at the cheapest layer.
+ *   2. Origin allowlist (exact match on EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS).
+ *   3. Body schema `z.object({}).strict()` — rejects unknown keys including
+ *      any client-supplied `cnfJkt` (closes the body-spoofing gap).
+ *   4. Auth.js session check — moved BEFORE DPoP verify so unauthenticated
+ *      callers don't burn ES256 + JTI cache work.
+ *   4a. Tenant IP access restriction — proxy short-circuit bypassed the
+ *       normal IP gate, restore it here.
+ *   5. Step-up auth (requireRecentCurrentAuthMethod).
+ *   6. Per-user rate limit.
+ *   7. DPoP proof verify — `cnfJkt` comes from `result.jkt` (the verifier's
+ *      thumbprint of the proof's own JWK), NEVER from request body.
+ *   8. DB write (BRIDGE_CODE_MAX_ACTIVE enforcement + create row).
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -14,8 +31,12 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { unauthorized } from "@/lib/http/api-response";
+import { errorResponse, forbidden, unauthorized } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
+import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
+import { extractClientIp } from "@/lib/auth/policy/ip-access";
+import { checkAccessRestrictionWithAudit } from "@/lib/auth/policy/access-restriction";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit/audit";
@@ -26,18 +47,34 @@ import {
   EXTENSION_TOKEN_DEFAULT_SCOPES,
   BRIDGE_CODE_TTL_MS,
   BRIDGE_CODE_MAX_ACTIVE,
+  API_PATH,
 } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
+import { isBridgeCodeOriginAllowed } from "@/lib/http/cors";
+import { verifyDpopProof } from "@/lib/auth/dpop/verify";
+import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
+import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
 
-const BridgeCodeIssueSchema = z
-  .object({
-    cnfJkt: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
-  })
-  .strict();
+// Strict empty-object schema — cnfJkt is intentionally NOT declared. Any
+// client-supplied `cnfJkt` (or any other key) is rejected as
+// VALIDATION_ERROR. The trust path is now: DPoP signer key → verifier-
+// derived thumbprint → DB row. Body cannot influence the bound key.
+const BridgeCodeIssueSchema = z.object({}).strict();
 
 export const runtime = "nodejs";
 
+// IP-keyed gate. 60/min matches the anon-DoS budget for similar pre-auth
+// endpoints. Fail-closed on Redis error so a Redis outage cannot be used
+// to drown the route in unbounded requests.
+const ipLimiter = createRateLimiter({
+  windowMs: MS_PER_MINUTE,
+  max: 60,
+  failClosedOnRedisError: true,
+});
+
+// Per-user budget once authenticated. Aligns with the legacy
+// bridgeCodeLimiter shape (10/15min) — preserved unchanged from PR #491.
 const bridgeCodeLimiter = createRateLimiter({
   windowMs: 15 * MS_PER_MINUTE,
   max: 10,
@@ -45,54 +82,98 @@ const bridgeCodeLimiter = createRateLimiter({
 });
 
 async function handlePOST(req: NextRequest) {
-  // Auth.js session
-  const session = await auth();
-  if (!session?.user?.id) {
-    return unauthorized();
+  // 1) IP-keyed rate limit — cheapest gate, runs before any cookie/header parse.
+  const clientIp = extractClientIp(req);
+  const ipRl = await checkIpRateLimit({
+    ip: clientIp,
+    pathname: req.nextUrl.pathname,
+    scope: "ext_bridge_ip",
+    limiter: ipLimiter,
+  });
+  const ipBlocked = await checkRateLimitOrFail({
+    req,
+    result: ipRl,
+    scope: "extension.bridge_code_ip",
+    userId: null,
+  });
+  if (ipBlocked) return ipBlocked;
+
+  // 2) Origin allowlist. The proxy intentionally bypasses CSRF for this
+  //    route — we are the sole layer enforcing Origin against
+  //    EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS. Fail-closed when the env var
+  //    is unset (no entries in the Set → every origin rejected).
+  const origin = req.headers.get("origin");
+  if (!isBridgeCodeOriginAllowed(origin)) {
+    return forbidden();
   }
 
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
-  if (stepUpError) return stepUpError;
-
-  // Parse body — requires cnfJkt (RFC 7638 P-256 thumbprint). Strict mode
-  // rejects unknown fields.
+  // 3) Body schema — strict empty object. Rejects ANY client-supplied
+  //    field (most importantly `cnfJkt`), closing the body-spoofing gap.
   const bodyResult = await parseBody(req, BridgeCodeIssueSchema);
   if (!bodyResult.ok) return bodyResult.response;
-  const { cnfJkt } = bodyResult.data;
 
-  // Per-user rate limit (matches existing tokenLimiter on POST /api/extension/token)
-  const blocked = await checkRateLimitOrFail({
-    req,
-    limiter: bridgeCodeLimiter,
-    key: `rl:ext_bridge:${session.user.id}`,
-    scope: "extension.bridge_code",
-    userId: session.user.id,
-  });
-  if (blocked) return blocked;
-
-  // Resolve tenant via existing RLS pattern (signature: 2 args)
+  // 4) Auth.js session check.
+  const session = await auth();
+  if (!session?.user?.id) return unauthorized();
   const userId = session.user.id;
+
+  // 4a) Tenant IP access restriction. The proxy early-return for
+  //     API_EXTENSION_BRIDGE_CODE skipped the normal IP gate — restore it
+  //     here, scoped to the authenticated user's tenant.
   const userRecord = await withUserTenantRls(userId, async () =>
     prisma.user.findUnique({
       where: { id: userId },
       select: { tenantId: true },
     }),
   );
-  if (!userRecord) {
-    return unauthorized();
+  if (!userRecord) return unauthorized();
+  if (userRecord.tenantId) {
+    const access = await checkAccessRestrictionWithAudit(
+      userRecord.tenantId,
+      clientIp,
+      userId,
+      req,
+    );
+    if (!access.allowed) {
+      return errorResponse(API_ERROR.ACCESS_DENIED);
+    }
   }
 
-  // Generate code (256-bit randomBytes via shared helper)
+  // 5) Step-up gate.
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
+
+  // 6) Per-user rate limit.
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: bridgeCodeLimiter,
+    key: `rl:ext_bridge:${userId}`,
+    scope: "extension.bridge_code",
+    userId,
+  });
+  if (blocked) return blocked;
+
+  // 7) DPoP proof verify. `cnfJkt` is the verifier-returned thumbprint of
+  //    the proof's own JWK — NOT a body field. No expectedAth (no access
+  //    token exists at this stage), no expectedCnfJkt (this IS the
+  //    discovery step that binds the key for the first time).
+  const dpopHeader = req.headers.get("dpop");
+  const dpopResult = await verifyDpopProof(dpopHeader, {
+    expectedHtm: "POST",
+    expectedHtu: canonicalHtu({ route: API_PATH.EXTENSION_BRIDGE_CODE }),
+    expectedNonce: null,
+    jtiCache: getJtiCache(),
+  });
+  if (!dpopResult.ok) return unauthorized();
+  const cnfJkt = dpopResult.jkt;
+
+  // 8) DB write — atomic BRIDGE_CODE_MAX_ACTIVE enforcement + create row.
   const code = generateShareToken();
   const codeHash = hashToken(code);
   const now = new Date();
   const expiresAt = new Date(now.getTime() + BRIDGE_CODE_TTL_MS);
-
-  // Extract request metadata once and reuse for both DB record + audit emit
   const meta = extractRequestMeta(req);
 
-  // Atomic: enforce BRIDGE_CODE_MAX_ACTIVE per user (revoke oldest unused)
-  // and create the new code in a single withBypassRls / $transaction.
   await withBypassRls(prisma, async (tx) => {
     const active = await tx.extensionBridgeCode.findMany({
       where: { userId, usedAt: null, expiresAt: { gt: now } },
@@ -121,14 +202,12 @@ async function handlePOST(req: NextRequest) {
     });
   }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 
-  // Audit (success path uses logAudit; userId/tenantId both resolved)
   await logAuditAsync({
     ...personalAuditBase(req, userId),
     action: AUDIT_ACTION.EXTENSION_BRIDGE_CODE_ISSUE,
     tenantId: userRecord.tenantId,
   });
 
-  // Response — only the plaintext code and expiry are returned
   return NextResponse.json(
     { code, expiresAt: expiresAt.toISOString() },
     { status: 201 },
