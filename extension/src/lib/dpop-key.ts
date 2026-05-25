@@ -198,8 +198,6 @@ export async function signDpopProof(input: {
   const basePath = parsedUrl.pathname.replace(/\/$/, "");
   const htu = parsedUrl.origin + basePath + input.route;
 
-  const thumbprint = await computeThumbprint(publicJwk);
-
   const header = {
     typ: "dpop+jwt",
     alg: "ES256",

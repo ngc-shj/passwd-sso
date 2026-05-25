@@ -182,44 +182,17 @@ describe(
       await ctx.deleteTestData(tenantId);
     });
 
-    // ─── Helper: seed bridge-code row directly in DB ─────────────────────────
-
-    async function seedBridgeCode(cnfJkt: string): Promise<string> {
-      const code = `${"a".repeat(64)}`; // dummy plaintext — we'll use codeHash directly
-      const uniqueCode = randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, "");
-      const codeHash = hashToken(uniqueCode.slice(0, 64));
-      const expiresAt = new Date(Date.now() + 60_000);
-
-      await ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        await tx.$executeRawUnsafe(
-          `INSERT INTO extension_bridge_codes (
-             id, code_hash, user_id, tenant_id, scope, expires_at, cnf_jkt
-           ) VALUES (
-             $1::uuid, $2, $3::uuid, $4::uuid, $5, $6, $7
-           )`,
-          randomUUID(),
-          codeHash,
-          userId,
-          tenantId,
-          "passwords:read,passwords:write",
-          expiresAt,
-          cnfJkt,
-        );
-      });
-
-      return uniqueCode.slice(0, 64);
-    }
-
-    // ─── Test 1: full bridge-code → exchange → validate flow ─────────────────
+    // ─── Test 1: DPoP-bound token + DPoP proof verification on API call ──────
+    //
+    // The bridge-code → exchange HTTP path is covered by the unit suite under
+    // src/app/api/extension/token/exchange/route.test.ts. This integration test
+    // bypasses the wire-level exchange and calls issueExtensionToken() directly
+    // to exercise the real-DB validate path with a live DPoP proof.
 
     it(
-      "issues a cnfJkt-bound token via bridge-code exchange + verifies DPoP on API call",
+      "issues a cnfJkt-bound token + verifies DPoP on API call",
       async () => {
         const kp = await generateKeypair();
-
-        // Step 3: issue bridge-code with cnfJkt.
-        const codePlain = await seedBridgeCode(kp.jkt);
 
         // Step 4: sign DPoP proof for exchange route.
         const exchangeHtu = canonicalHtu({ route: "/api/extension/token/exchange" });
