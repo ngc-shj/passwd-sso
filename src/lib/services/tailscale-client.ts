@@ -131,6 +131,9 @@ async function callWhoIs(ip: string): Promise<WhoIsResponse> {
     signal: controller.signal,
     headers: {
       "Sec-Tailscale": "localapi",
+      // Override default Host so `TAILSCALE_API_BASE=http://localhost:...`
+      // does not get rejected by tailscaled's DNS-rebinding guard.
+      "Host": "local-tailscaled.sock",
     },
   });
   clearTimeout(timeoutId);
