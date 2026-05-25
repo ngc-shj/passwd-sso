@@ -39,17 +39,12 @@ export async function attemptTokenRefreshWith(
 ): Promise<void> {
   const token = callbacks.getCurrentToken();
   const tokenExpiresAt = callbacks.getTokenExpiresAt();
-  // DIAG
-  console.log("[psso] attemptTokenRefresh start", {
-    hasToken: token !== null,
-    expiresAt: tokenExpiresAt ? new Date(tokenExpiresAt).toISOString() : null,
-  });
-  if (!token || !tokenExpiresAt) { console.log("[psso] refresh skip: no token state"); return; }
-  if (Date.now() >= tokenExpiresAt) { console.log("[psso] refresh skip: already expired"); return; }
+  if (!token || !tokenExpiresAt) return;
+  if (Date.now() >= tokenExpiresAt) return;
 
   try {
     const serverUrl = await getValidServerUrl();
-    if (!serverUrl) { console.log("[psso] refresh skip: no serverUrl"); return; }
+    if (!serverUrl) return;
 
     let res: Response;
     try {
@@ -62,14 +57,11 @@ export async function attemptTokenRefreshWith(
     } catch (err) {
       if (err instanceof DpopSignError) {
         // Transient WebCrypto failure — do not sign out; retry next alarm cycle.
-        console.log("[psso] refresh skip: DpopSignError", err);
         return;
       }
-      console.error("[psso] refresh swFetch throw", err);
       throw err;
     }
 
-    console.log("[psso] refresh response", res.status);
     if (res.ok) {
       const data = (await res.json()) as {
         token: string;
