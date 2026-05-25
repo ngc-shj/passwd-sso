@@ -42,31 +42,83 @@ function resolveOrigin(): string | null {
  * - APP_URL unset → empty (deny-equivalent for browsers)
  */
 function isExtensionOrigin(origin: string): boolean {
-  return /^chrome-extension:\/\/[a-z]{32}$/.test(origin) ||
+  // Chrome extension IDs are 32 chars from [a-p] (Chrome's signing-key encoding
+  // maps random bytes to a-p, NOT generic a-z). Aligned with C1 zod regex
+  // EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS — see plan S16.
+  return /^chrome-extension:\/\/[a-p]{32}$/.test(origin) ||
     /^moz-extension:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(origin) ||
     /^safari-web-extension:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(origin);
 }
 
+/**
+ * Parse the EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS env var into a Set for
+ * exact-string allowlist lookup. Built once per process and reset on demand
+ * via __resetAllowlistForTests (test-only).
+ */
+let _allowlistCache: Set<string> | null = null;
+function getBridgeCodeAllowlist(): Set<string> {
+  if (_allowlistCache !== null) return _allowlistCache;
+  const raw = process.env.EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS ?? "";
+  if (!raw) {
+    _allowlistCache = new Set();
+    return _allowlistCache;
+  }
+  _allowlistCache = new Set(raw.split(","));
+  return _allowlistCache;
+}
+
+/** @internal Test-only: reset the cached allowlist Set. */
+export function __resetAllowlistForTests(): void {
+  _allowlistCache = null;
+}
+
+/**
+ * Check whether the given Origin is in the bridge-code allowlist. Uses exact
+ * string equality on a precomputed Set — never substring (see plan S6/S9).
+ */
+export function isBridgeCodeOriginAllowed(origin: string | null): boolean {
+  if (!origin) return false;
+  return getBridgeCodeAllowlist().has(origin);
+}
+
 function corsHeaders(
   request: NextRequest,
-  opts?: { allowExtension?: boolean },
+  opts?: { allowExtension?: boolean; allowExtensionCredentials?: boolean },
 ): Record<string, string> {
   const origin = request.headers.get("origin");
   if (!origin) return {};
 
   const appOrigin = resolveOrigin();
 
+  // allowExtensionCredentials implies the bridge-code route (cookies + DPoP +
+  // chrome-extension origin). The Origin MUST be in the allowlist parsed from
+  // EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS — extension-shape regex match alone
+  // is insufficient since any installed extension could otherwise piggy-back.
+  const bridgeCodeAllowed =
+    opts?.allowExtensionCredentials &&
+    isExtensionOrigin(origin) &&
+    isBridgeCodeOriginAllowed(origin);
+
   const allowed =
     (appOrigin && origin === appOrigin) ||
-    (opts?.allowExtension && isExtensionOrigin(origin));
+    (opts?.allowExtension && isExtensionOrigin(origin)) ||
+    bridgeCodeAllowed;
 
   if (allowed) {
+    // Allow-Credentials is set only for two cases:
+    //   (a) same-origin Web App (existing behavior — cookie auth)
+    //   (b) chrome-extension Origin on the bridge-code route AND allowlisted
+    // It is NOT set for Bearer-bypass routes (extension origin without
+    // credentials guard) — those routes carry Bearer tokens, not cookies.
+    const credentials: Record<string, string> =
+      origin === appOrigin || bridgeCodeAllowed
+        ? { "Access-Control-Allow-Credentials": "true" }
+        : {};
     return {
       "Access-Control-Allow-Origin": origin,
       "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization, DPoP",
-      // Credentials not needed for extension (Bearer token in header)
-      ...(origin === appOrigin ? { "Access-Control-Allow-Credentials": "true" } : {}),
+      ...credentials,
       "Access-Control-Max-Age": "86400",
       "Vary": "Origin",
     };
@@ -82,7 +134,7 @@ function corsHeaders(
  */
 export function handlePreflight(
   request: NextRequest,
-  opts?: { allowExtension?: boolean },
+  opts?: { allowExtension?: boolean; allowExtensionCredentials?: boolean },
 ): NextResponse {
   return new NextResponse(null, {
     status: 204,
@@ -98,7 +150,7 @@ export function handlePreflight(
 export function applyCorsHeaders(
   request: NextRequest,
   response: NextResponse,
-  opts?: { allowExtension?: boolean },
+  opts?: { allowExtension?: boolean; allowExtensionCredentials?: boolean },
 ): NextResponse {
   for (const [key, value] of Object.entries(corsHeaders(request, opts))) {
     if (key === "Vary") {

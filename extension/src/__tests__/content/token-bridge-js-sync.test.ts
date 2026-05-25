@@ -1,19 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { BRIDGE_CODE_MSG_TYPE } from "../../lib/constants";
+import {
+  EXT_CONNECT_REQUEST_MSG_TYPE,
+  EXT_CONNECT_READY_MSG_TYPE,
+} from "../../lib/constants";
 
 describe("token-bridge.js sync", () => {
-  it("keeps hardcoded bridge code MSG_TYPE aligned with shared constants", async () => {
+  it("keeps hardcoded EXT_CONNECT_REQUEST_MSG_TYPE aligned with shared constants", async () => {
     // token-bridge.js is a hand-maintained plain JS content script (no import
-    // support). When BRIDGE_CODE_MSG_TYPE changes in constants.ts, this test
-    // fails unless token-bridge.js is updated in lock-step.
+    // support). When EXT_CONNECT_REQUEST_MSG_TYPE changes in constants.ts,
+    // this test fails unless token-bridge.js is updated in lock-step.
     const { default: file } = await import("../../content/token-bridge.js?raw");
-    expect(file).toContain(`"${BRIDGE_CODE_MSG_TYPE}"`);
+    expect(file).toContain(`"${EXT_CONNECT_REQUEST_MSG_TYPE}"`);
   });
 
-  it("references the exchange endpoint path", async () => {
-    // Guards against accidental removal of the exchange code path.
-    // Must match src/lib/constants/api-path.ts EXTENSION_TOKEN_EXCHANGE.
+  it("keeps hardcoded EXT_CONNECT_READY_MSG_TYPE aligned with shared constants", async () => {
     const { default: file } = await import("../../content/token-bridge.js?raw");
-    expect(file).toContain("/api/extension/token/exchange");
+    expect(file).toContain(`"${EXT_CONNECT_READY_MSG_TYPE}"`);
+  });
+
+  it("uses the START_CONNECT runtime message name", async () => {
+    // The .js file hardcodes the string "START_CONNECT" (no import); a rename
+    // in EXT_MSG.START_CONNECT must be mirrored here.
+    const { default: file } = await import("../../content/token-bridge.js?raw");
+    expect(file).toContain(`"START_CONNECT"`);
   });
 });

@@ -45,6 +45,7 @@ import { swFetchAuthenticated } from "./dpop-fetch";
 import {
   attemptTokenRefreshWith,
   revokeTokenOnServerWith,
+  startConnect,
 } from "./token-handler";
 import {
   ALARM_TOKEN_TTL,
@@ -1625,6 +1626,39 @@ async function handleMessage(
   await hydrationPromise;
 
   switch (message.type) {
+    case EXT_MSG.START_CONNECT: {
+      // Web app asked the extension to initiate the bridge-code + exchange
+      // flow. The SW signs DPoP, calls the credentialed bridge-code endpoint,
+      // exchanges the code for a token, and persists the result. No token,
+      // bridge code, or DPoP key material is ever exposed to MAIN-world JS
+      // (content script forwards only the request/response envelope).
+      const result = await startConnect({
+        setToken: (token, expiresAt, cnfJkt) => {
+          const tokenChanged = currentToken !== null && currentToken !== token;
+          if (tokenChanged) clearVault();
+          currentToken = token;
+          tokenExpiresAt = expiresAt;
+          currentCnfJkt = cnfJkt;
+          const delayMs = expiresAt - Date.now();
+          if (delayMs > 0) {
+            chrome.alarms.create(ALARM_TOKEN_TTL, { when: expiresAt });
+            scheduleRefreshAlarm(expiresAt);
+            persistState();
+          } else {
+            clearToken();
+          }
+          void updateBadge();
+        },
+      });
+      const response: ExtensionResponse = {
+        type: EXT_MSG.START_CONNECT,
+        ok: result.ok,
+        ...(result.errorCode ? { errorCode: result.errorCode } : {}),
+      };
+      sendResponse(response);
+      return;
+    }
+
     case EXT_MSG.SET_TOKEN: {
       const tokenChanged = currentToken !== null && currentToken !== message.token;
       if (tokenChanged) {
@@ -2470,6 +2504,9 @@ chrome.runtime.onMessage.addListener(
       // Each branch returns the correct response shape for the message type.
       try {
         switch (message.type) {
+          case EXT_MSG.START_CONNECT:
+            sendResponse({ type: EXT_MSG.START_CONNECT, ok: false, errorCode: "GENERIC_FAILURE" } as ExtensionResponse);
+            break;
           case EXT_MSG.GET_STATUS:
             sendResponse({ type: EXT_MSG.GET_STATUS, hasToken: false, expiresAt: null, vaultUnlocked: false } as ExtensionResponse);
             break;

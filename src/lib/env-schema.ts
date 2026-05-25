@@ -333,6 +333,17 @@ export const envObject = z.object({
   // SENTRY_DSN public-key segment is project-sensitive — sidecar marks secret: true.
   SENTRY_DSN: z.string().optional(),
 
+  // --- Extension trust path (C1) ---
+  // Allowlist of chrome-extension origins permitted to call /api/extension/bridge-code.
+  // Chrome extension IDs use base16-encoded random bytes mapped to a-p (NOT a-z) per
+  // Chrome's signing-key encoding; reject other characters. CSV-separated for
+  // multi-environment deploys (dev unpacked + Web Store have different IDs).
+  // Origin compare is exact-string on a precomputed Set — never substring.
+  EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS: z
+    .string()
+    .regex(/^chrome-extension:\/\/[a-p]{32}(,chrome-extension:\/\/[a-p]{32})*$/)
+    .optional(),
+
   // --- Public (client-inlined, A30-A33) ---
   // Next.js inlines NEXT_PUBLIC_* into the client bundle at build time.
   // Server-side defaults are a safety net; consumer-side `??` fallbacks

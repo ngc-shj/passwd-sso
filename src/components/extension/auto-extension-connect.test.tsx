@@ -2,13 +2,10 @@
 /**
  * AutoExtensionConnect — Client Component test (jsdom)
  *
- * Covers:
- *   - No ?ext_connect → renders nothing (IDLE)
- *   - ?ext_connect=1 → initiates connection, removes param from URL
- *   - Fetch success → CONNECTED state, "Go to dashboard" button
- *   - Fetch failure → FAILED state, "Retry" + "Go to dashboard" buttons
- *   - Retry triggers new connection attempt
- *   - APP_NAME is displayed
+ * Post-C7 (SW-initiated handshake): the component drives a single helper
+ * `requestExtensionConnect()` and reacts to its `{ ok, errorCode }` result.
+ * It no longer does any bridge-code fetch itself — that logic lives in the
+ * extension SW now.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -17,12 +14,16 @@ import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
 // ── Hoisted mocks ──────────────────────────────────────────
-const { mockInjectBridgeCode, mockReauthenticateWithPasskey, mockSignOut, mockRequestExtensionJkt } = vi.hoisted(() => ({
-  mockInjectBridgeCode: vi.fn(),
+const {
+  mockRequestExtensionConnect,
+  mockReauthenticateWithPasskey,
+  mockSignOut,
+  mockCanUsePasskeyRecovery,
+} = vi.hoisted(() => ({
+  mockRequestExtensionConnect: vi.fn() as ReturnType<typeof vi.fn>,
   mockReauthenticateWithPasskey: vi.fn(),
   mockSignOut: vi.fn(),
-  // Resolves to a valid 43-char jkt by default so existing tests are unaffected.
-  mockRequestExtensionJkt: vi.fn().mockResolvedValue("A".repeat(43)) as ReturnType<typeof vi.fn>,
+  mockCanUsePasskeyRecovery: vi.fn(),
 }));
 
 vi.mock("next-intl", () => ({
@@ -32,17 +33,22 @@ vi.mock("next-intl", () => ({
 vi.mock("next-auth/react", () => ({
   signOut: mockSignOut,
 }));
-vi.mock("@/lib/inject-extension-bridge-code", () => ({
-  injectExtensionBridgeCode: mockInjectBridgeCode,
-}));
-vi.mock("@/lib/extension-jkt-request", () => ({
-  requestExtensionJkt: mockRequestExtensionJkt,
+vi.mock("@/lib/extension-connect-request", () => ({
+  requestExtensionConnect: mockRequestExtensionConnect,
+  EXTENSION_CONNECT_ERROR_CODE: {
+    EXTENSION_ABSENT: "EXTENSION_ABSENT",
+    SESSION_STEP_UP_REQUIRED: "SESSION_STEP_UP_REQUIRED",
+    GENERIC_FAILURE: "GENERIC_FAILURE",
+  },
 }));
 vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
   reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
 vi.mock("@/lib/url-helpers", async (importOriginal) => ({
-  ...(await importOriginal()) as Record<string, unknown>,
+  ...((await importOriginal()) as Record<string, unknown>),
   withBasePath: (path: string) => path,
 }));
 
@@ -51,7 +57,6 @@ import { AutoExtensionConnect, isOverlayActive } from "./auto-extension-connect"
 // ── Helpers ────────────────────────────────────────────────
 
 let replaceStateSpy: ReturnType<typeof vi.spyOn>;
-let fetchSpy: ReturnType<typeof vi.spyOn>;
 let originalLocation: Location;
 
 function setSearchParams(search: string) {
@@ -70,11 +75,10 @@ function setSearchParams(search: string) {
 beforeEach(() => {
   originalLocation = window.location;
   replaceStateSpy = vi.spyOn(window.history, "replaceState").mockImplementation(() => {});
-  fetchSpy = vi.spyOn(globalThis, "fetch");
+  mockRequestExtensionConnect.mockReset();
   mockReauthenticateWithPasskey.mockReset();
   mockSignOut.mockReset();
-  // Default: extension is present and responds with a valid jkt.
-  mockRequestExtensionJkt.mockResolvedValue("A".repeat(43));
+  mockCanUsePasskeyRecovery.mockReset();
 });
 
 afterEach(() => {
@@ -84,23 +88,19 @@ afterEach(() => {
     configurable: true,
   });
   replaceStateSpy.mockRestore();
-  fetchSpy.mockRestore();
 });
 
 describe("AutoExtensionConnect", () => {
   it("renders nothing when ext_connect param is absent", () => {
     setSearchParams("");
-
     const { container } = render(<AutoExtensionConnect />);
-
     expect(container.innerHTML).toBe("");
+    expect(mockRequestExtensionConnect).not.toHaveBeenCalled();
   });
 
   it("removes ext_connect from URL when present", async () => {
     setSearchParams("?ext_connect=1");
-    fetchSpy.mockResolvedValue(
-      new Response(JSON.stringify({ code: "a".repeat(64), expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
-    );
+    mockRequestExtensionConnect.mockResolvedValue({ ok: true });
 
     render(<AutoExtensionConnect />);
 
@@ -111,9 +111,7 @@ describe("AutoExtensionConnect", () => {
 
   it("preserves other query params when removing ext_connect", async () => {
     setSearchParams("?ext_connect=1&foo=bar");
-    fetchSpy.mockResolvedValue(
-      new Response(JSON.stringify({ code: "a".repeat(64), expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
-    );
+    mockRequestExtensionConnect.mockResolvedValue({ ok: true });
 
     render(<AutoExtensionConnect />);
 
@@ -122,31 +120,40 @@ describe("AutoExtensionConnect", () => {
     });
   });
 
-  it("shows connecting state, then connected on fetch success", async () => {
+  it("calls requestExtensionConnect and shows CONNECTED on ok:true", async () => {
     setSearchParams("?ext_connect=1");
-    fetchSpy.mockResolvedValue(
-      new Response(
-        JSON.stringify({ code: "b".repeat(64), expiresAt: "2099-01-01T00:00:00Z" }),
-        { status: 200 },
-      ),
-    );
+    mockRequestExtensionConnect.mockResolvedValue({ ok: true });
 
     render(<AutoExtensionConnect />);
 
-    // Initially in connecting state
     expect(screen.getByText("connecting")).toBeInTheDocument();
-
-    // After fetch resolves → connected
     await waitFor(() => {
       expect(screen.getByText("connectedTitle")).toBeInTheDocument();
     });
-    expect(screen.getByText("connectedDescription")).toBeInTheDocument();
-    expect(mockInjectBridgeCode).toHaveBeenCalledWith("b".repeat(64), expect.any(Number));
+    expect(mockRequestExtensionConnect).toHaveBeenCalledTimes(1);
   });
 
-  it("shows failed state on fetch error", async () => {
+  it("shows extension-required state when errorCode = EXTENSION_ABSENT", async () => {
     setSearchParams("?ext_connect=1");
-    fetchSpy.mockRejectedValue(new Error("network error"));
+    mockRequestExtensionConnect.mockResolvedValue({
+      ok: false,
+      errorCode: "EXTENSION_ABSENT",
+    });
+
+    render(<AutoExtensionConnect />);
+
+    await waitFor(() => {
+      expect(screen.getByText("extensionRequired")).toBeInTheDocument();
+    });
+    expect(screen.getByText("extensionRequiredAction")).toBeInTheDocument();
+  });
+
+  it("shows generic failure on errorCode = GENERIC_FAILURE", async () => {
+    setSearchParams("?ext_connect=1");
+    mockRequestExtensionConnect.mockResolvedValue({
+      ok: false,
+      errorCode: "GENERIC_FAILURE",
+    });
 
     render(<AutoExtensionConnect />);
 
@@ -156,29 +163,13 @@ describe("AutoExtensionConnect", () => {
     expect(screen.getByText("connectFailedDescription")).toBeInTheDocument();
   });
 
-  it("shows failed state on non-ok response", async () => {
+  it("shows reauth guidance when SESSION_STEP_UP_REQUIRED + passkey-capable", async () => {
     setSearchParams("?ext_connect=1");
-    fetchSpy.mockResolvedValue(new Response(null, { status: 500 }));
-
-    render(<AutoExtensionConnect />);
-
-    await waitFor(() => {
-      expect(screen.getByText("connectFailedTitle")).toBeInTheDocument();
+    mockRequestExtensionConnect.mockResolvedValue({
+      ok: false,
+      errorCode: "SESSION_STEP_UP_REQUIRED",
     });
-  });
-
-  it("shows reauth guidance when bridge-code returns SESSION_STEP_UP_REQUIRED", async () => {
-    setSearchParams("?ext_connect=1");
-    fetchSpy
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }),
-          { status: 403 },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ canPasskeySignIn: true }), { status: 200 }),
-      );
+    mockCanUsePasskeyRecovery.mockResolvedValue(true);
 
     render(<AutoExtensionConnect />);
 
@@ -190,22 +181,10 @@ describe("AutoExtensionConnect", () => {
 
   it("reauthenticates and retries when retry is clicked from reauth-required state", async () => {
     setSearchParams("?ext_connect=1");
-    fetchSpy
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }),
-          { status: 403 },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ canPasskeySignIn: true }), { status: 200 }),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ code: "d".repeat(64), expiresAt: "2099-01-01T00:00:00Z" }),
-          { status: 200 },
-        ),
-      );
+    mockRequestExtensionConnect
+      .mockResolvedValueOnce({ ok: false, errorCode: "SESSION_STEP_UP_REQUIRED" })
+      .mockResolvedValueOnce({ ok: true });
+    mockCanUsePasskeyRecovery.mockResolvedValue(true);
     mockReauthenticateWithPasskey.mockResolvedValue({
       ok: true,
       verifiedAt: "2099-01-01T00:00:00Z",
@@ -230,16 +209,11 @@ describe("AutoExtensionConnect", () => {
 
   it("shows cancellation feedback when reauth is cancelled", async () => {
     setSearchParams("?ext_connect=1");
-    fetchSpy
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }),
-          { status: 403 },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ canPasskeySignIn: true }), { status: 200 }),
-      );
+    mockRequestExtensionConnect.mockResolvedValue({
+      ok: false,
+      errorCode: "SESSION_STEP_UP_REQUIRED",
+    });
+    mockCanUsePasskeyRecovery.mockResolvedValue(true);
     mockReauthenticateWithPasskey.mockResolvedValue({
       ok: false,
       error: "AUTHENTICATION_CANCELLED",
@@ -259,18 +233,13 @@ describe("AutoExtensionConnect", () => {
     });
   });
 
-  it("redirects to sign-in when stale session is returned for a non-passkey user", async () => {
+  it("redirects to sign-in when stale session for a non-passkey user", async () => {
     setSearchParams("?ext_connect=1");
-    fetchSpy
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({ error: "SESSION_STEP_UP_REQUIRED" }),
-          { status: 403 },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ canPasskeySignIn: false }), { status: 200 }),
-      );
+    mockRequestExtensionConnect.mockResolvedValue({
+      ok: false,
+      errorCode: "SESSION_STEP_UP_REQUIRED",
+    });
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
 
     render(<AutoExtensionConnect />);
 
@@ -288,18 +257,15 @@ describe("AutoExtensionConnect", () => {
 
   it("retry button triggers a new connection attempt", async () => {
     setSearchParams("?ext_connect=1");
-    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 500 }));
+    mockRequestExtensionConnect
+      .mockResolvedValueOnce({ ok: false, errorCode: "GENERIC_FAILURE" })
+      .mockResolvedValueOnce({ ok: true });
 
     render(<AutoExtensionConnect />);
 
     await waitFor(() => {
       expect(screen.getByText("connectFailedTitle")).toBeInTheDocument();
     });
-
-    // Now retry with success
-    fetchSpy.mockResolvedValueOnce(
-      new Response(JSON.stringify({ code: "c".repeat(64), expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
-    );
 
     const user = userEvent.setup();
     await user.click(screen.getByText("retry"));
@@ -311,9 +277,7 @@ describe("AutoExtensionConnect", () => {
 
   it("'Go to dashboard' button returns to IDLE (renders nothing)", async () => {
     setSearchParams("?ext_connect=1");
-    fetchSpy.mockResolvedValue(
-      new Response(JSON.stringify({ code: "a".repeat(64), expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
-    );
+    mockRequestExtensionConnect.mockResolvedValue({ ok: true });
 
     const { container } = render(<AutoExtensionConnect />);
 
@@ -324,15 +288,12 @@ describe("AutoExtensionConnect", () => {
     const user = userEvent.setup();
     await user.click(screen.getByText("goToDashboard"));
 
-    // Back to IDLE → renders nothing
     expect(container.innerHTML).toBe("");
   });
 
   it("displays APP_NAME in branding section", async () => {
     setSearchParams("?ext_connect=1");
-    fetchSpy.mockResolvedValue(
-      new Response(JSON.stringify({ code: "a".repeat(64), expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
-    );
+    mockRequestExtensionConnect.mockResolvedValue({ ok: true });
 
     render(<AutoExtensionConnect />);
 
@@ -346,9 +307,7 @@ describe("AutoExtensionConnect", () => {
 
   it("sets data-overlay-active on overlay div when CONNECTED", async () => {
     setSearchParams("?ext_connect=1");
-    fetchSpy.mockResolvedValue(
-      new Response(JSON.stringify({ code: "a".repeat(64), expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
-    );
+    mockRequestExtensionConnect.mockResolvedValue({ ok: true });
 
     render(<AutoExtensionConnect />);
 
@@ -361,8 +320,7 @@ describe("AutoExtensionConnect", () => {
 
   it("sets data-overlay-active on overlay div when CONNECTING", async () => {
     setSearchParams("?ext_connect=1");
-    // Never resolve fetch to stay in CONNECTING state
-    fetchSpy.mockReturnValue(new Promise(() => {}));
+    mockRequestExtensionConnect.mockReturnValue(new Promise(() => {}));
 
     render(<AutoExtensionConnect />);
 
@@ -375,7 +333,10 @@ describe("AutoExtensionConnect", () => {
 
   it("sets data-overlay-active on overlay div when FAILED", async () => {
     setSearchParams("?ext_connect=1");
-    fetchSpy.mockResolvedValue(new Response("", { status: 500 }));
+    mockRequestExtensionConnect.mockResolvedValue({
+      ok: false,
+      errorCode: "GENERIC_FAILURE",
+    });
 
     render(<AutoExtensionConnect />);
 
@@ -392,66 +353,10 @@ describe("AutoExtensionConnect", () => {
 
     expect(document.querySelector("[data-overlay-active]")).toBeNull();
   });
-
-  // ── DPoP handshake (C9) ────────────────────────────────────────────────────
-
-  it("posts bridge-code request with cnfJkt body when stage-1 jkt resolves", async () => {
-    setSearchParams("?ext_connect=1");
-    const jkt = "B".repeat(43);
-    mockRequestExtensionJkt.mockResolvedValueOnce(jkt);
-    fetchSpy.mockResolvedValue(
-      new Response(
-        JSON.stringify({ code: "a".repeat(64), expiresAt: "2099-01-01T00:00:00Z" }),
-        { status: 200 },
-      ),
-    );
-
-    render(<AutoExtensionConnect />);
-
-    await waitFor(() => {
-      expect(screen.getByText("connectedTitle")).toBeInTheDocument();
-    });
-
-    // The bridge-code fetch MUST include the jkt in the request body.
-    expect(fetchSpy).toHaveBeenCalledWith(
-      expect.stringContaining("/api/extension/bridge-code"),
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ cnfJkt: jkt }),
-      }),
-    );
-  });
-
-  it("shows extensionRequired message and does not call fetch when stage-1 returns null", async () => {
-    setSearchParams("?ext_connect=1");
-    mockRequestExtensionJkt.mockResolvedValueOnce(null);
-
-    render(<AutoExtensionConnect />);
-
-    await waitFor(() => {
-      // The i18n mock returns the translation key itself.
-      expect(screen.getByText("extensionRequired")).toBeInTheDocument();
-    });
-
-    // No bridge-code fetch should have been attempted.
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  it("shows extensionRequiredAction link when stage-1 returns null", async () => {
-    setSearchParams("?ext_connect=1");
-    mockRequestExtensionJkt.mockResolvedValueOnce(null);
-
-    render(<AutoExtensionConnect />);
-
-    await waitFor(() => {
-      expect(screen.getByText("extensionRequiredAction")).toBeInTheDocument();
-    });
-  });
 });
 
 describe("keyboard shortcut guard with isOverlayActive", () => {
   it("suppresses shortcuts when data-overlay-active is in the DOM", () => {
-    // Simulate the guard pattern used in password-dashboard.tsx
     const shortcutFired = vi.fn();
     const handler = (e: KeyboardEvent) => {
       if (isOverlayActive()) return;
@@ -460,7 +365,6 @@ describe("keyboard shortcut guard with isOverlayActive", () => {
 
     window.addEventListener("keydown", handler);
 
-    // With overlay active — shortcut should NOT fire
     const overlay = document.createElement("div");
     overlay.setAttribute("data-overlay-active", "");
     document.body.appendChild(overlay);
@@ -468,7 +372,6 @@ describe("keyboard shortcut guard with isOverlayActive", () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "n" }));
     expect(shortcutFired).not.toHaveBeenCalled();
 
-    // After overlay removed — shortcut should fire (F3: resume)
     document.body.removeChild(overlay);
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "n" }));
     expect(shortcutFired).toHaveBeenCalledTimes(1);

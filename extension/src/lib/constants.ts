@@ -1,20 +1,19 @@
-// ── Token bridge (shared contract with web app's inject-extension-bridge-code.ts) ──
-/** @deprecated Use TOKEN_BRIDGE_EVENT for new code. */
+// ── Token bridge (legacy DOM-event constants kept for backwards-compatibility) ──
+/** @deprecated Kept for reference only; no current code path emits this event. */
 export const TOKEN_ELEMENT_ID = "passwd-sso-ext-token";
 export const TOKEN_READY_EVENT = "passwd-sso-token-ready";
 
-// DPoP JKT handshake messages (web app → content script → web app).
+// Extension-connect handshake (web app → content script → SW → server).
+// The web app posts EXT_CONNECT_REQUEST after sign-in to ask the extension to
+// initiate the bridge-code + exchange flow. The SW posts EXT_CONNECT_READY
+// back via the content script once the flow completes (success or failure).
 // Mirror values in src/lib/constants/integrations/extension.ts; the sync test enforces equality.
-export const EXT_JKT_REQUEST_MSG_TYPE = "PASSWD_SSO_EXT_JKT_REQUEST";
-export const EXT_JKT_READY_MSG_TYPE = "PASSWD_SSO_EXT_JKT_READY";
+export const EXT_CONNECT_REQUEST_MSG_TYPE = "PASSWD_SSO_EXT_CONNECT_REQUEST";
+export const EXT_CONNECT_READY_MSG_TYPE = "PASSWD_SSO_EXT_CONNECT_READY";
 
-// Bridge code flow: postMessage (web app) → content script → exchange endpoint.
-// Mirror values in src/lib/constants/extension.ts (web app side); a sync test
-// validates equality between the two repos.
-export const BRIDGE_CODE_MSG_TYPE = "PASSWD_SSO_BRIDGE_CODE";
+// Bridge code wire constants (mirror of web app constant — sync test enforces equality)
 export const BRIDGE_CODE_TTL_MS = 60 * 1000;
 export const BRIDGE_CODE_MAX_ACTIVE = 3;
-// Bridge code wire format (mirror of web app constant — sync test enforces equality)
 export const BRIDGE_CODE_LENGTH = 64;
 
 /** RFC 7638 §3 thumbprint is always 43 base64url characters. */
@@ -57,6 +56,10 @@ export const WEBAUTHN_BRIDGE_RESP = "PASSWD_SSO_WEBAUTHN_RESP";
 
 // ── Extension ↔ Service Worker message types ──
 export const EXT_MSG = {
+  // Web app → content script → SW: initiate the bridge-code → exchange flow.
+  // The SW signs DPoP + fetches /api/extension/bridge-code (credentialed) +
+  // /api/extension/token/exchange + persists the resulting token.
+  START_CONNECT: "START_CONNECT",
   SET_TOKEN: "SET_TOKEN",
   GET_TOKEN: "GET_TOKEN",
   CLEAR_TOKEN: "CLEAR_TOKEN",

@@ -32,6 +32,7 @@ export const ROUTE_POLICY_KIND = {
   PUBLIC_RECEIVER: "public-receiver",
   API_V1: "api-v1",
   API_EXTENSION_EXCHANGE: "api-extension-exchange",
+  API_EXTENSION_BRIDGE_CODE: "api-extension-bridge-code",
   API_SESSION_REQUIRED: "api-session-required",
   API_DEFAULT: "api-default",
   PAGE: "page",
@@ -45,6 +46,7 @@ export type RoutePolicy =
   | { kind: typeof ROUTE_POLICY_KIND.PUBLIC_RECEIVER }          // /api/csp-report — public POST receiver
   | { kind: typeof ROUTE_POLICY_KIND.API_V1 }                   // /api/v1/* — Bearer (API key) authenticated
   | { kind: typeof ROUTE_POLICY_KIND.API_EXTENSION_EXCHANGE }   // /api/extension/token/exchange — bootstraps Bearer
+  | { kind: typeof ROUTE_POLICY_KIND.API_EXTENSION_BRIDGE_CODE }// /api/extension/bridge-code — chrome-extension Origin + session-cookie + DPoP (CSRF gate bypassed by orchestrator early-return)
   | { kind: typeof ROUTE_POLICY_KIND.API_SESSION_REQUIRED }     // session-cookie-protected API routes (incl. Bearer-bypass-eligible)
   | { kind: typeof ROUTE_POLICY_KIND.API_DEFAULT }              // other /api/* — default cache-control only
   | { kind: typeof ROUTE_POLICY_KIND.PAGE };                    // non-API path
@@ -118,6 +120,15 @@ export function classifyRoute(pathname: string): RoutePolicy {
   // code. No session, no Bearer on the request.
   if (pathname === API_PATH.EXTENSION_TOKEN_EXCHANGE) {
     return { kind: ROUTE_POLICY_KIND.API_EXTENSION_EXCHANGE };
+  }
+
+  // Bridge-code issuance — chrome-extension Origin + session cookie + DPoP.
+  // MUST be checked BEFORE the SESSION_REQUIRED_PREFIXES loop below, because
+  // API_PATH.EXTENSION is one of the prefixes and would otherwise capture
+  // bridge-code as SESSION_REQUIRED (re-triggering the CSRF gate that the
+  // orchestrator must bypass for chrome-extension origins). See plan C2.
+  if (pathname === API_PATH.EXTENSION_BRIDGE_CODE) {
+    return { kind: ROUTE_POLICY_KIND.API_EXTENSION_BRIDGE_CODE };
   }
 
   // Session-required API routes. This includes Bearer-bypass-eligible

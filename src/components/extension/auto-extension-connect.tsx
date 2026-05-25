@@ -2,21 +2,20 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { injectExtensionBridgeCode } from "@/lib/inject-extension-bridge-code";
 import {
   APP_NAME,
-  API_PATH,
   EXT_CONNECT_PARAM,
   CONNECT_STATUS,
   type ConnectStatus,
 } from "@/lib/constants";
-import { requestExtensionJkt } from "@/lib/extension-jkt-request";
+import {
+  requestExtensionConnect,
+  EXTENSION_CONNECT_ERROR_CODE,
+} from "@/lib/extension-connect-request";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, XCircle, Loader2, KeyRound } from "lucide-react";
-import { fetchApi, withBasePath } from "@/lib/url-helpers";
-import { API_ERROR } from "@/lib/http/api-error-codes";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { withBasePath } from "@/lib/url-helpers";
 import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
 import { canUsePasskeyRecovery } from "@/lib/auth/webauthn/can-use-passkey-recovery";
 import { signOut } from "next-auth/react";
@@ -56,37 +55,31 @@ export function AutoExtensionConnect() {
     setRequiresExtensionUpdate(false);
     setReauthError(null);
     try {
-      // Stage 1: obtain the extension's DPoP key thumbprint.
-      // On timeout (extension absent or pre-DPoP version), fail with a clear
-      // "install / update the extension" message — no legacy fallback (per FR8).
-      const jkt = await requestExtensionJkt({ timeoutMs: 500 });
-      if (!jkt) {
-        setStatus(CONNECT_STATUS.FAILED);
+      // The extension SW does the whole bridge-code → exchange flow itself;
+      // the web app just kicks it off and consumes the {ok, errorCode}.
+      // The bridge code and bearer token never reach this page.
+      const result = await requestExtensionConnect();
+      if (result.ok) {
+        setStatus(CONNECT_STATUS.CONNECTED);
+        return { ok: true, requiresReauth: false };
+      }
+
+      if (result.errorCode === EXTENSION_CONNECT_ERROR_CODE.EXTENSION_ABSENT) {
         setRequiresExtensionUpdate(true);
+        setStatus(CONNECT_STATUS.FAILED);
         return { ok: false, requiresReauth: false };
       }
 
-      // Stage 2: bridge-code issuance, binding the code to the extension's key.
-      const res = await fetchApi(API_PATH.EXTENSION_BRIDGE_CODE, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cnfJkt: jkt }),
-      });
-      if (!res.ok) {
-        const body = await readApiErrorBody(res);
-        const needsReauth = body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED;
-        if (needsReauth) {
-          const passkeyCapable = await canUsePasskeyRecovery();
-          setRequiresReauth(passkeyCapable);
-          setRequiresRecentSession(!passkeyCapable);
-        }
+      if (result.errorCode === EXTENSION_CONNECT_ERROR_CODE.SESSION_STEP_UP_REQUIRED) {
+        const passkeyCapable = await canUsePasskeyRecovery();
+        setRequiresReauth(passkeyCapable);
+        setRequiresRecentSession(!passkeyCapable);
         setStatus(CONNECT_STATUS.FAILED);
-        return { ok: false, requiresReauth: needsReauth };
+        return { ok: false, requiresReauth: true };
       }
-      const json = await res.json();
-      injectExtensionBridgeCode(json.code, Date.parse(json.expiresAt));
-      setStatus(CONNECT_STATUS.CONNECTED);
-      return { ok: true, requiresReauth: false };
+
+      setStatus(CONNECT_STATUS.FAILED);
+      return { ok: false, requiresReauth: false };
     } catch {
       setStatus(CONNECT_STATUS.FAILED);
       return { ok: false, requiresReauth: false };

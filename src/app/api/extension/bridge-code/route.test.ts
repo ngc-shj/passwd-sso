@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { DEFAULT_SESSION } from "@/__tests__/helpers/mock-auth";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 
@@ -11,11 +11,15 @@ const {
   mockBridgeCodeUpdateMany,
   mockUserFindUnique,
   mockCheck,
+  mockCheckIpRateLimit,
+  mockCheckRateLimitOrFail,
   mockWithUserTenantRls,
   mockWithBypassRls,
   mockLogAudit,
   mockExtractClientIp,
+  mockCheckAccessRestrictionWithAudit,
   mockRequireRecentCurrentAuthMethod,
+  mockVerifyDpop,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockBridgeCodeCreate: vi.fn(),
@@ -23,11 +27,15 @@ const {
   mockBridgeCodeUpdateMany: vi.fn(),
   mockUserFindUnique: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
+  mockCheckIpRateLimit: vi.fn().mockResolvedValue({ allowed: true }),
+  mockCheckRateLimitOrFail: vi.fn().mockResolvedValue(null),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockLogAudit: vi.fn(),
   mockExtractClientIp: vi.fn(() => "1.2.3.4"),
+  mockCheckAccessRestrictionWithAudit: vi.fn().mockResolvedValue({ allowed: true }),
   mockRequireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
+  mockVerifyDpop: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -49,6 +57,12 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
+}));
+vi.mock("@/lib/security/rate-limit-audit", () => ({
+  checkRateLimitOrFail: mockCheckRateLimitOrFail,
+}));
+vi.mock("@/lib/security/ip-rate-limit", () => ({
+  checkIpRateLimit: mockCheckIpRateLimit,
 }));
 vi.mock("@/lib/redis", () => ({
   getRedis: () => null,
@@ -74,32 +88,57 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: mockExtractClientIp,
 }));
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
+  checkAccessRestrictionWithAudit: mockCheckAccessRestrictionWithAudit,
+}));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
 }));
+vi.mock("@/lib/auth/dpop/verify", () => ({
+  verifyDpopProof: mockVerifyDpop,
+}));
+vi.mock("@/lib/auth/dpop/jti-cache", () => ({
+  getJtiCache: vi.fn(() => ({ has: vi.fn(() => false), add: vi.fn() })),
+}));
+vi.mock("@/lib/auth/dpop/htu-canonical", () => ({
+  canonicalHtu: vi.fn(() => "http://localhost:3000/api/extension/bridge-code"),
+}));
 
 import { POST } from "./route";
+import { __resetAllowlistForTests } from "@/lib/http/cors";
 
-const VALID_CNF_JKT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb";
+const ALLOWED_ORIGIN = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
+const VERIFIER_JKT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb";
 
 function makeRequest(): import("next/server").NextRequest {
-  return createRequest("POST", "http://localhost/api/extension/bridge-code", {
-    headers: { Origin: "http://localhost" },
-    body: { cnfJkt: VALID_CNF_JKT },
+  return createRequest("POST", "http://localhost:3000/api/extension/bridge-code", {
+    headers: { Origin: ALLOWED_ORIGIN, DPoP: "valid-dpop-proof" },
+    body: {},
   });
 }
 
 describe("POST /api/extension/bridge-code", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS", ALLOWED_ORIGIN);
+    __resetAllowlistForTests();
     mockCheck.mockResolvedValue({ allowed: true });
+    mockCheckIpRateLimit.mockResolvedValue({ allowed: true });
+    mockCheckRateLimitOrFail.mockResolvedValue(null);
     mockExtractClientIp.mockReturnValue("1.2.3.4");
+    mockCheckAccessRestrictionWithAudit.mockResolvedValue({ allowed: true });
     mockWithBypassRls.mockImplementation(async (p, fn) => fn(p));
     mockWithUserTenantRls.mockImplementation(async (_u, fn) => fn());
     mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockBridgeCodeFindMany.mockResolvedValue([]);
     mockBridgeCodeCreate.mockResolvedValue({});
     mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
+    mockVerifyDpop.mockResolvedValue({ ok: true, jkt: VERIFIER_JKT, claims: {} });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    __resetAllowlistForTests();
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -120,9 +159,18 @@ describe("POST /api/extension/bridge-code", () => {
     expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
   });
 
-  it("returns 429 when rate limited", async () => {
+  it("returns 429 when per-user rate limited", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockCheck.mockResolvedValueOnce({ allowed: false });
+    // Per-user limit fires after Origin/auth/IP/step-up gates. The IP gate
+    // is mocked open via mockCheckRateLimitOrFail; flip the per-user call.
+    mockCheckRateLimitOrFail.mockImplementation(async (args: { scope: string }) => {
+      if (args.scope === "extension.bridge_code") {
+        return new Response(JSON.stringify({ error: "RATE_LIMIT_EXCEEDED" }), {
+          status: 429,
+        });
+      }
+      return null;
+    });
     const res = await POST(makeRequest());
     const { status, json } = await parseResponse(res);
     expect(status).toBe(429);
@@ -143,6 +191,20 @@ describe("POST /api/extension/bridge-code", () => {
     expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
   });
 
+  it("returns 403 when tenant IP access restriction denies", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockCheckAccessRestrictionWithAudit.mockResolvedValueOnce({
+      allowed: false,
+      reason: "ip not in tenant CIDR",
+    });
+    const res = await POST(makeRequest());
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("ACCESS_DENIED");
+    expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
+    expect(mockVerifyDpop).not.toHaveBeenCalled();
+  });
+
   it("issues a bridge code on success and emits an audit log", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     const res = await POST(makeRequest());
@@ -153,7 +215,6 @@ describe("POST /api/extension/bridge-code", () => {
       code: "a".repeat(64),
       expiresAt: expect.any(String),
     });
-    // Bearer token MUST NOT appear in the response
     expect(json).not.toHaveProperty("token");
 
     expect(mockBridgeCodeCreate).toHaveBeenCalledWith(
@@ -161,6 +222,8 @@ describe("POST /api/extension/bridge-code", () => {
         data: expect.objectContaining({
           codeHash: "h".repeat(64),
           tenantId: "tenant-1",
+          // cnfJkt is the verifier-returned thumbprint, NOT a body field.
+          cnfJkt: VERIFIER_JKT,
         }),
       }),
     );

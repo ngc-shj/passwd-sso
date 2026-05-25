@@ -136,13 +136,13 @@ describe("POST /api/extension/token/exchange", () => {
 
   // ── 1. Success path ──
   it("issues a token when the code is valid and unused", async () => {
-    mockBridgeCodeUpdateMany.mockResolvedValueOnce({ count: 1 });
     mockBridgeCodeFindUnique.mockResolvedValueOnce({
       userId: "11111111-1111-1111-1111-111111111111",
       tenantId: "22222222-2222-2222-2222-222222222222",
       scope: "passwords:read,vault:unlock-data",
       cnfJkt: VALID_CNF_JKT,
     });
+    mockBridgeCodeUpdateMany.mockResolvedValueOnce({ count: 1 });
 
     const res = await POST(makeRequest());
     const { status, json } = await parseResponse(res);
@@ -163,9 +163,9 @@ describe("POST /api/extension/token/exchange", () => {
     );
   });
 
-  // ── 2. Code already used (concurrent exchange race) ──
-  it("returns 401 when the code is already consumed (count=0)", async () => {
-    mockBridgeCodeUpdateMany.mockResolvedValueOnce({ count: 0 });
+  // ── 2. Code unknown — fast-fail at SELECT step ──
+  it("returns 401 when the code hash does not match any record", async () => {
+    mockBridgeCodeFindUnique.mockResolvedValueOnce(null);
 
     const res = await POST(makeRequest());
     const { status, json } = await parseResponse(res);
@@ -177,11 +177,20 @@ describe("POST /api/extension/token/exchange", () => {
       expect.any(String),
     );
     expect(mockLogAudit).not.toHaveBeenCalled();
+    // No mutation when row missing — CAS not even attempted.
+    expect(mockBridgeCodeUpdateMany).not.toHaveBeenCalled();
+    // DPoP verifier not invoked when there's no row to bind against.
+    expect(mockVerifyDpop).not.toHaveBeenCalled();
   });
 
-  // ── 3. Code expired ──
-  it("returns 401 when the code is expired (filtered out by expiresAt > now)", async () => {
-    // Same path as count=0 — the SQL filter excludes expired codes
+  // ── 3. Code already consumed or expired — race-lost at CAS step ──
+  it("returns 401 when CAS count=0 (race-lost / already-consumed / expired)", async () => {
+    mockBridgeCodeFindUnique.mockResolvedValueOnce({
+      userId: "11111111-1111-1111-1111-111111111111",
+      tenantId: "22222222-2222-2222-2222-222222222222",
+      scope: "passwords:read",
+      cnfJkt: VALID_CNF_JKT,
+    });
     mockBridgeCodeUpdateMany.mockResolvedValueOnce({ count: 0 });
 
     const res = await POST(makeRequest());
@@ -192,18 +201,6 @@ describe("POST /api/extension/token/exchange", () => {
       expect.objectContaining({ reason: "unknown_or_consumed" }),
       expect.any(String),
     );
-    expect(mockLogAudit).not.toHaveBeenCalled();
-  });
-
-  // ── 4. Code unknown / hash mismatch ──
-  it("returns 401 when the code hash does not match any record", async () => {
-    mockBridgeCodeUpdateMany.mockResolvedValueOnce({ count: 0 });
-
-    const res = await POST(makeRequest());
-    const { status } = await parseResponse(res);
-
-    expect(status).toBe(401);
-    expect(mockWarn).toHaveBeenCalled();
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
@@ -238,15 +235,24 @@ describe("POST /api/extension/token/exchange", () => {
 
   // ── 7. Replay protection (2-call sequence) ──
   it("rejects a replayed code: first call succeeds, second call returns 401", async () => {
+    mockBridgeCodeFindUnique
+      .mockResolvedValueOnce({
+        userId: "11111111-1111-1111-1111-111111111111",
+        tenantId: "22222222-2222-2222-2222-222222222222",
+        scope: "passwords:read",
+        cnfJkt: VALID_CNF_JKT,
+      })
+      // Second call: the row is now consumed — findUnique still returns it,
+      // but the CAS predicate `usedAt: null` will exclude it (count=0).
+      .mockResolvedValueOnce({
+        userId: "11111111-1111-1111-1111-111111111111",
+        tenantId: "22222222-2222-2222-2222-222222222222",
+        scope: "passwords:read",
+        cnfJkt: VALID_CNF_JKT,
+      });
     mockBridgeCodeUpdateMany
       .mockResolvedValueOnce({ count: 1 })
       .mockResolvedValueOnce({ count: 0 });
-    mockBridgeCodeFindUnique.mockResolvedValueOnce({
-      userId: "11111111-1111-1111-1111-111111111111",
-      tenantId: "22222222-2222-2222-2222-222222222222",
-      scope: "passwords:read",
-      cnfJkt: VALID_CNF_JKT,
-    });
 
     const first = await POST(makeRequest());
     const second = await POST(makeRequest());
@@ -255,34 +261,15 @@ describe("POST /api/extension/token/exchange", () => {
     expect(second.status).toBe(401);
   });
 
-  // ── Invariant violation ──
-  it("returns 500 if findUnique returns null after a successful UPDATE", async () => {
-    mockBridgeCodeUpdateMany.mockResolvedValueOnce({ count: 1 });
-    mockBridgeCodeFindUnique.mockResolvedValueOnce(null);
-
-    const res = await POST(makeRequest());
-    const { status } = await parseResponse(res);
-
-    expect(status).toBe(500);
-    expect(mockError).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event: "extension_token_exchange_invariant_violation",
-      }),
-      expect.any(String),
-    );
-    // No userId/tenantId in this branch — pino-only, no logAudit
-    expect(mockLogAudit).not.toHaveBeenCalled();
-  });
-
   // ── MAX_ACTIVE rotation ──
   it("revokes oldest token when MAX_ACTIVE (3) is exceeded via exchange flow", async () => {
-    mockBridgeCodeUpdateMany.mockResolvedValueOnce({ count: 1 });
     mockBridgeCodeFindUnique.mockResolvedValueOnce({
       userId: "11111111-1111-1111-1111-111111111111",
       tenantId: "22222222-2222-2222-2222-222222222222",
       scope: "passwords:read,vault:unlock-data",
       cnfJkt: VALID_CNF_JKT,
     });
+    mockBridgeCodeUpdateMany.mockResolvedValueOnce({ count: 1 });
     mockExtensionTokenFindMany.mockResolvedValueOnce([
       { id: "t1" },
       { id: "t2" },
@@ -300,13 +287,13 @@ describe("POST /api/extension/token/exchange", () => {
 
   // ── Issuance failure (post-consume) ──
   it("emits EXTENSION_TOKEN_EXCHANGE_FAILURE audit when issueExtensionToken throws", async () => {
-    mockBridgeCodeUpdateMany.mockResolvedValueOnce({ count: 1 });
     mockBridgeCodeFindUnique.mockResolvedValueOnce({
       userId: "11111111-1111-1111-1111-111111111111",
       tenantId: "22222222-2222-2222-2222-222222222222",
       scope: "passwords:read",
       cnfJkt: VALID_CNF_JKT,
     });
+    mockBridgeCodeUpdateMany.mockResolvedValueOnce({ count: 1 });
     // Make $transaction throw to simulate issueExtensionToken failure
     mockTransaction.mockImplementationOnce(async () => {
       throw new Error("simulated DB failure during token issuance");
@@ -329,5 +316,46 @@ describe("POST /api/extension/token/exchange", () => {
       expect.objectContaining({ reason: "issue_failed" }),
       expect.any(String),
     );
+  });
+
+  // ── C5: invalid DPoP MUST NOT consume the bridge code ──
+  it("returns 401 on invalid DPoP and does NOT consume the bridge code (no updateMany)", async () => {
+    const dpopModule = await import("@/lib/auth/dpop/verify");
+    vi.mocked(dpopModule.verifyDpopProof).mockResolvedValueOnce({
+      ok: false,
+      error: "DPOP_SIG_INVALID",
+    });
+
+    mockBridgeCodeFindUnique.mockResolvedValueOnce({
+      userId: "11111111-1111-1111-1111-111111111111",
+      tenantId: "22222222-2222-2222-2222-222222222222",
+      scope: "passwords:read",
+      cnfJkt: VALID_CNF_JKT,
+    });
+
+    const res = await POST(makeRequest());
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(401);
+    expect(json.error).toBe("UNAUTHORIZED");
+    // SELECT happened, but CAS did NOT — bridge code remains usable.
+    expect(mockBridgeCodeFindUnique).toHaveBeenCalledTimes(1);
+    expect(mockBridgeCodeUpdateMany).not.toHaveBeenCalled();
+  });
+
+  // ── C5: strict schema rejects unknown body fields ──
+  it("returns 400 when an unknown field appears in the request body (.strict())", async () => {
+    const res = await POST(
+      makeRequest({ code: VALID_CODE, unknown: "x" } as Record<string, unknown>),
+    );
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+    const detailsStr = JSON.stringify(json.details);
+    expect(detailsStr.toLowerCase()).toContain("unrecognized");
+    // No DB lookup happened — strict schema blocks at the boundary.
+    expect(mockBridgeCodeFindUnique).not.toHaveBeenCalled();
+    expect(mockBridgeCodeUpdateMany).not.toHaveBeenCalled();
   });
 });
