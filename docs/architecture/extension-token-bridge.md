@@ -10,37 +10,53 @@ web application and maintains a secure session.
 The extension connects to the web app via a Bearer token whose lifetime is
 governed by tenant policy (`extensionTokenIdleTimeoutMinutes` /
 `extensionTokenAbsoluteTimeoutMinutes`; defaults: 7d idle / 30d absolute).
-Token delivery uses a **one-time bridge code exchange**
-(introduced in PR #364):
+Token delivery uses a **SW-initiated bridge code exchange** (rewritten in
+the extension JKT trust-path PR; see §Migration status):
 
-1. The web app's JavaScript obtains a single-use bridge code from
-   `POST /api/extension/bridge-code` (requires Auth.js session and a recent
-   sign-in within the shared step-up window).
-2. The web app posts the code via `window.postMessage` to the content script.
-3. The content script (ISOLATED world) calls `POST /api/extension/token/exchange`
-   directly via `fetch()` to atomically consume the code and receive a token.
-4. The content script forwards the token to the background service worker.
+1. The web app's UI posts `EXT_CONNECT_REQUEST` to its content script. The
+   payload carries only a `reqId` — no code, no token, no key material.
+2. The content script forwards `EXT_MSG.START_CONNECT` to the background
+   service worker.
+3. The SW signs a DPoP proof with its IDB-resident EC P-256 key and calls
+   `POST /api/extension/bridge-code` with `credentials: "include"` (Auth.js
+   session cookie attached) and an empty body `{}`. The server derives
+   `cnf_jkt` from the verifier's thumbprint of the proof's JWK — never
+   from any client-supplied field.
+4. The SW signs a second DPoP proof (same key) and calls
+   `POST /api/extension/token/exchange` with `credentials: "omit"` and the
+   bridge code in the body. The server verifies the proof against the
+   bridge code's `cnf_jkt` (locking the key chain), atomically consumes
+   the code, and returns the Bearer token.
+5. The SW persists `{ token, expiresAt, cnfJkt }` in its own heap +
+   `chrome.storage.session`. The content script posts `EXT_CONNECT_READY
+   { ok, errorCode? }` back to the web app — never the token or the code.
 
-The bridge code is short-lived (60 s TTL) and single-use, enforced server-side
-via a single atomic `UPDATE`. The bearer token never appears in any
-`postMessage` payload — only the code does — so a MAIN-world XSS that observes
-the postMessage receives a code, not a token, and must race the legitimate
-content script to consume it before being blocked by single-use enforcement.
+The bridge code is short-lived (60 s TTL) and single-use, enforced via
+SELECT-then-CAS in the exchange route. The bearer token and bridge code
+**never appear in any `postMessage` payload visible to the page** — a
+MAIN-world XSS that listens for `EXT_CONNECT_READY` sees only `{ ok,
+errorCode }`. The cnf_jkt persistence chain (`bridge_code.cnf_jkt` →
+`token.cnf_jkt` → future DPoP verifies) anchors the entire token's
+lifetime to the SW's non-extractable key.
 
 ```mermaid
 flowchart TB
     subgraph BrowserTab["Browser Tab (web app page)"]
-        WebApp["Web App JS<br/>(MAIN world)<br/>injectExtensionBridgeCode"]
+        WebApp["Web App JS<br/>(MAIN world)<br/>requestExtensionConnect()"]
         ContentScript["Content Script<br/>(ISOLATED world)<br/>token-bridge.js"]
-        WebApp -- "window.postMessage<br/>{type: PASSWD_SSO_BRIDGE_CODE,<br/>code, expiresAt}<br/>targetOrigin: same-origin" --> ContentScript
+        WebApp -- "window.postMessage<br/>{type: PASSWD_SSO_EXT_CONNECT_REQUEST,<br/>reqId}<br/>targetOrigin: same-origin" --> ContentScript
+        ContentScript -- "window.postMessage<br/>{type: PASSWD_SSO_EXT_CONNECT_READY,<br/>reqId, ok, errorCode?}<br/>targetOrigin: same-origin" --> WebApp
     end
 
-    ContentScript -- "fetch POST<br/>/api/extension/token/exchange<br/>{code}" --> ApiServer
-    ApiServer["API Server<br/>(/api/extension/token/exchange)<br/>• atomic single-use consume<br/>• issue ExtensionToken<br/>• audit emit"]
-    ApiServer -- "{token, expiresAt}" --> ContentScript
-    ContentScript -- "chrome.runtime.sendMessage<br/>{type: SET_TOKEN}" --> BgWorker
+    ContentScript -- "chrome.runtime.sendMessage<br/>{type: START_CONNECT}" --> BgWorker
+    BgWorker["Background Service Worker<br/>startConnect()<br/>• signs DPoP w/ IDB EC P-256 key<br/>• POST bridge-code (credentials:include)<br/>• POST exchange (credentials:omit)<br/>• stores token + cnfJkt in heap"]
+    BgWorker -- "fetch POST<br/>/api/extension/bridge-code<br/>+ session cookie + DPoP" --> ApiBridge
+    ApiBridge["bridge-code route<br/>• Origin allowlist (exact match)<br/>• body z.object({}).strict()<br/>• Auth.js session<br/>• tenant IP restriction<br/>• step-up<br/>• cnf_jkt = verifyDpopProof().jkt<br/>• DB write"]
+    ApiBridge -- "{code, expiresAt}" --> BgWorker
 
-    BgWorker["Background Service Worker<br/>• stores token<br/>• schedules refresh alarm<br/>• persists to encrypted session storage"]
+    BgWorker -- "fetch POST<br/>/api/extension/token/exchange<br/>+ DPoP (no cookies)" --> ApiExchange
+    ApiExchange["exchange route<br/>• findUnique by codeHash<br/>• verifyDpopProof w/ expectedCnfJkt<br/>• CAS updateMany (usedAt null + cnfJkt + expiresAt)<br/>• issueExtensionToken({cnfJkt})"]
+    ApiExchange -- "{token, expiresAt, scope, cnfJkt}" --> BgWorker
 ```
 
 ## Connection Flow
@@ -51,24 +67,37 @@ sequenceDiagram
     participant Popup as Extension Popup
     participant WebApp as Web App (MAIN)
     participant CS as Content Script (ISOLATED)
+    participant SW as Background SW
     participant API as API Server
-    participant BG as Background SW
 
     User ->> Popup: click "Connect"
     Popup ->> WebApp: open tab (?ext_connect=1)
     User ->> WebApp: login (Auth.js session)
-    WebApp ->> API: POST /api/extension/bridge-code
-    API -->> WebApp: {code, expiresAt}
-    WebApp ->> CS: window.postMessage (PASSWD_SSO_BRIDGE_CODE)
 
-    Note over CS: Content script validates:<br/>• event.source === window<br/>• event.origin match<br/>• event.data.type match<br/>• code is 64-char hex
+    Note over WebApp: useEffect detects ext_connect=1<br/>strips param via replaceState<br/>calls requestExtensionConnect()
 
-    CS ->> API: POST /api/extension/token/exchange {code}
-    Note over API: Atomic UPDATE:<br/>SET used_at = now<br/>WHERE code_hash = ? AND used_at IS NULL<br/>AND expires_at > now
-    API -->> CS: {token, expiresAt}
+    WebApp ->> CS: window.postMessage<br/>EXT_CONNECT_REQUEST {reqId}
+    Note over CS: validates:<br/>• event.source === window<br/>• event.origin match<br/>• type match<br/>• reqId is non-empty string
+    CS ->> SW: chrome.runtime.sendMessage START_CONNECT
 
-    CS ->> BG: chrome.runtime.sendMessage SET_TOKEN
-    Note over BG: Store token, encrypt &<br/>persist to session store,<br/>schedule refresh alarm
+    Note over SW: startConnect()<br/>signs DPoP with IDB EC P-256 key
+    SW ->> API: POST /api/extension/bridge-code<br/>Origin: chrome-extension://<id><br/>credentials: include<br/>DPoP: <proof><br/>body: {}
+
+    Note over API: bridge-code route<br/>1. IP rate limit<br/>2. Origin allowlist exact match<br/>3. body z.object({}).strict()<br/>4. auth() (session cookie)<br/>4a. tenant IP restriction<br/>5. requireRecentCurrentAuthMethod<br/>6. per-user rate limit<br/>7. verifyDpopProof → cnf_jkt = result.jkt<br/>8. DB write (BRIDGE_CODE_MAX_ACTIVE rotation + create)
+
+    API -->> SW: 201 {code, expiresAt}
+
+    Note over SW: signs second DPoP (same key)
+    SW ->> API: POST /api/extension/token/exchange<br/>credentials: omit<br/>DPoP: <proof><br/>body: {code}
+
+    Note over API: exchange route (SELECT-then-CAS)<br/>1. body schema strict<br/>2. IP rate limit<br/>3. findUnique by codeHash<br/>4. verifyDpopProof(expectedCnfJkt: consumed.cnfJkt)<br/>5. updateMany CAS<br/>   WHERE usedAt IS NULL<br/>     AND cnfJkt = consumed.cnfJkt<br/>     AND expiresAt > now<br/>6. issueExtensionToken({cnfJkt})
+
+    API -->> SW: 201 {token, expiresAt, scope, cnfJkt}
+
+    Note over SW: persist {token, expiresAt, cnfJkt}<br/>in heap + chrome.storage.session<br/>schedule refresh alarm
+
+    SW -->> CS: response {ok: true}
+    CS ->> WebApp: window.postMessage<br/>EXT_CONNECT_READY {reqId, ok: true}
 
     Popup -->> User: "Connected" badge
     WebApp -->> User: "Connected" UI
@@ -78,55 +107,67 @@ sequenceDiagram
 
 | Phase | Mechanism | TTL |
 |-------|-----------|-----|
-| **Issue (bridge code)** | `POST /api/extension/bridge-code` (requires Auth.js session + recent-session step-up) | 60 s code TTL |
-| **Code delivery** | `window.postMessage` (MAIN → ISOLATED) | instant |
-| **Code → token exchange** | `POST /api/extension/token/exchange` (no session, atomic single-use consume) | issues token with tenant-policy TTL (default 7d idle / 30d absolute) |
-| **Issue (legacy direct)** | `POST /api/extension/token` (Auth.js session + recent-session step-up) — **DEPRECATED** | tenant-policy TTL |
+| **Issue (bridge code)** | `POST /api/extension/bridge-code` from SW with `credentials:"include"` + DPoP — requires Auth.js session + tenant IP policy + step-up; `cnf_jkt` derived from `verifyDpopProof().jkt` | 60 s code TTL |
+| **Connect-request delivery** | `window.postMessage EXT_CONNECT_REQUEST` (page → content script) → `chrome.runtime.sendMessage START_CONNECT` (content script → SW). Payload is `{ reqId }` only — no code, no key material | instant |
+| **Code → token exchange** | `POST /api/extension/token/exchange` from SW with `credentials:"omit"` + DPoP — SELECT-then-CAS: findUnique → verifyDpopProof(expectedCnfJkt) → updateMany CAS → issueExtensionToken | issues token with tenant-policy TTL (default 7d idle / 30d absolute) |
+| **Connect-result delivery** | `EXT_CONNECT_READY {reqId, ok, errorCode?}` (SW → content script → page). Token is never in the payload | instant |
 | **Storage** | Encrypted with ephemeral AES-256-GCM key in `chrome.storage.session` | until browser close |
-| **Refresh** | `POST /api/extension/token/refresh` (Bearer + session) | tenant-policy TTL (new token) |
+| **Refresh** | `POST /api/extension/token/refresh` (Bearer + DPoP). Server carries `cnf_jkt` forward unchanged | tenant-policy TTL (new token) |
 | **Refresh trigger** | `ALARM_TOKEN_REFRESH` fires before idle expiry | — |
-| **Revocation** | `DELETE /api/extension/token` or token expiry | — |
-| **SW restart** | Ephemeral key lost → token unreadable → re-auth required | — |
+| **Revocation** | `DELETE /api/extension/token` (Bearer + DPoP) or token expiry | — |
+| **SW restart** | Ephemeral key lost → token unreadable → re-connect required | — |
 
 ### Server-side identity resolution
 
-The exchange endpoint resolves `userId`, `tenantId`, and `scope` **from the
-consumed bridge code DB record**, never from the request body. The client
-only supplies the 64-char hex code; everything else comes from the row that
-was atomically claimed by the `UPDATE`. This prevents horizontal privilege
-escalation if a code is intercepted.
+The exchange endpoint resolves `userId`, `tenantId`, `scope`, and `cnfJkt`
+**from the consumed bridge code DB record**, never from the request body.
+The SW only supplies the 64-char hex code; everything else comes from the
+row that was atomically claimed by the CAS `updateMany`. This prevents
+horizontal privilege escalation if a code is intercepted, and locks the
+issued token's `cnf_jkt` to the same thumbprint the bridge-code POST
+established.
+
+The bridge-code endpoint similarly never trusts the request body for
+`cnf_jkt` — the body schema is `z.object({}).strict()`, which rejects
+any field. `cnf_jkt` is sourced exclusively from the DPoP verifier's
+returned `jkt` (RFC 7638 thumbprint of the proof's JWK).
 
 ### Failure path logging
 
-Failed exchanges (unknown / consumed / expired code, malformed body) cannot
-be attributed to a user — there is no resolvable `userId` / `tenantId`. They
-are logged via `getLogger().warn(...)` (pino, structured app log) instead of
-`logAudit(...)` (which requires a user/tenant context). The successful
-exchange path uses `logAudit({ action: EXTENSION_TOKEN_EXCHANGE_SUCCESS, ... })`
-with values from the consumed record.
+Failed exchanges (unknown / consumed / expired code, malformed body) at
+the early step cannot be attributed to a user — there is no resolvable
+`userId` / `tenantId`. They are logged via `getLogger().warn(...)` (pino,
+structured app log) instead of `logAudit(...)`. Once `findUnique` resolves
+a row, the failure paths (invalid DPoP, etc.) have `consumed.userId` and
+`consumed.tenantId` available and emit
+`EXTENSION_TOKEN_EXCHANGE_FAILURE` audit events.
 
 A separate `EXTENSION_TOKEN_EXCHANGE_FAILURE` audit action is emitted when
 the bridge code is consumed successfully but `issueExtensionToken()` throws
-afterwards (we have a known `consumed.userId` / `consumed.tenantId` in that
-branch).
+afterwards.
 
 ## Session Storage Encryption
 
-Sensitive fields (`token`, `vaultSecretKey`) are encrypted before persisting
-to `chrome.storage.session`:
+Sensitive fields (`token`, `vaultSecretKey`) are encrypted before
+persisting to `chrome.storage.session`. `tokenCnfJkt` is the public
+RFC 7638 thumbprint of the DPoP key — not a secret on its own — and
+is stored in plaintext for the SW-restart sanity check below:
 
 ```mermaid
 flowchart TB
     InMem["<b>In-memory (service worker)</b><br/><br/>ephemeralKey (CryptoKey)<br/>AES-256-GCM, non-extractable<br/>generated on SW startup<br/>lost on SW termination"]
     InMem -- "encrypt" --> Session
 
-    Session["<b>chrome.storage.session</b><br/><br/>encryptedToken: {ct, iv, tag} ← hex<br/>encryptedVaultKey: {ct, iv, tag} ← hex<br/>expiresAt: number ← plaintext<br/>userId: string ← plaintext<br/>ecdhEncrypted: {ct, iv, tag} ← vault key encrypted"]
+    Session["<b>chrome.storage.session</b><br/><br/>encryptedToken: {ct, iv, tag} ← hex<br/>encryptedVaultKey: {ct, iv, tag} ← hex<br/>expiresAt: number ← plaintext<br/>userId: string ← plaintext<br/>tokenCnfJkt: string ← plaintext (RFC 7638 thumbprint, not a secret)<br/>ecdhEncrypted: {ct, iv, tag} ← vault key encrypted"]
 ```
 
-On service worker restart:
-1. `hydrateFromSession()` loads encrypted blobs
-2. Attempts decryption with ephemeral key — **key is gone** → returns `null`
-3. Token cleared, vault locked → user must reconnect and re-enter passphrase
+On service worker restart, `hydrateFromSession()` loads encrypted blobs,
+attempts decryption with the ephemeral key (which is gone) → returns
+`null` → token cleared, vault locked → user must reconnect and re-enter
+passphrase. The persisted `tokenCnfJkt` is also re-checked against the
+SW's IDB DPoP key thumbprint; mismatch (e.g., the key was reset via the
+Options page) clears the session so the next request triggers a fresh
+connect.
 
 ## Content Script Registration
 
@@ -140,111 +181,176 @@ background service worker using `chrome.scripting.registerContentScripts`:
 
 ## Validation Checks
 
-The content script performs four checks before forwarding:
+The content script performs three checks before forwarding any message:
 
 | Check | Purpose | Failure mode |
 |-------|---------|-------------|
 | `event.source === window` | Reject messages from child iframes | Silent drop |
 | `event.origin === window.location.origin` | Reject cross-origin messages | Silent drop |
-| `event.data.type === "PASSWD_SSO_BRIDGE_CODE"` | Reject unrelated postMessage traffic | Silent drop |
-| `code.length === 64` and hex (bridge code path only) | Reject malformed payloads | Silent drop |
+| `event.data.type === "PASSWD_SSO_EXT_CONNECT_REQUEST"` | Reject unrelated postMessage traffic | Silent drop |
+| `event.data.reqId` is non-empty string | Reject malformed envelopes | Silent drop |
 
 All rejections are silent (no error response) to prevent oracle attacks.
+The content script forwards **only the message type** (no `reqId`,
+no extras) to the SW — extra fields injected by a malicious page never
+reach the SW message envelope.
 
-### Cross-origin / CORS for the exchange endpoint
+### Origin allowlist + CORS for the bridge-code endpoint
 
-`POST /api/extension/token/exchange` is reached from the content script via
-direct `fetch()`. Although content scripts share the page's `Origin` for
-fetch, the request still must succeed regardless of the page origin matching
-`APP_URL`. The proxy (`src/proxy.ts`) special-cases this path:
+`POST /api/extension/bridge-code` is reached from the extension SW via
+`fetch()` with `credentials: "include"`. The proxy classifies this path
+as `ROUTE_POLICY_KIND.API_EXTENSION_BRIDGE_CODE` and short-circuits the
+baseline CSRF gate (which would otherwise reject the chrome-extension
+Origin with 403). The route handler then enforces its own Origin check
+against `EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS` — exact-string match on
+a precomputed `Set<string>` (never substring). When the env var is unset
+the Set is empty and every Origin is rejected (fail-closed).
 
-- Bypasses the session check (the whole point of the endpoint is to bootstrap
-  auth from a code, not from a session).
-- `applyCorsHeaders(..., { allowExtension: true })` adds CORS headers permitting
-  `chrome-extension://`, `moz-extension://`, and `safari-web-extension://` origins.
-- Preflight `OPTIONS` requests are handled with the same `allowExtension` flag.
+`applyCorsHeaders(..., { allowExtensionCredentials: true })` emits
+`Access-Control-Allow-Credentials: true` **only** when the request's
+Origin is in the allowlist. Bearer-bypass routes (the exchange endpoint
+below) use `allowExtension` without the `Credentials` suffix and never
+emit `Allow-Credentials`.
 
-CSRF protection (`assertOrigin`) is intentionally NOT applied to this endpoint
-because the content script's effective origin may be `chrome-extension://`,
-which would fail any same-origin check. The compensating control is the
-256-bit single-use code.
+### CORS for the exchange endpoint
+
+`POST /api/extension/token/exchange` is reached from the SW via direct
+`fetch()` with `credentials: "omit"`. The proxy `applyCorsHeaders(...,
+{ allowExtension: true })` adds CORS headers permitting `chrome-extension://`,
+`moz-extension://`, and `safari-web-extension://` origins for preflight,
+but never emits `Allow-Credentials: true` (the exchange is authenticated
+by the bridge code + DPoP, not by cookies). CSRF / Origin checks are not
+applied because the bridge code is single-use and short-lived, and the
+DPoP proof binds the request to the cnfJkt established at issuance.
 
 ### Browser-session issuance hardening
 
-Both browser-session issuance paths (`POST /api/extension/bridge-code` and the
-legacy `POST /api/extension/token`) also require a recent Auth.js session via
-the shared `requireRecentSession()` helper. This prevents an attacker with a
-stolen but older dashboard session from upgrading it into a longer-lived
-extension credential.
+The bridge-code endpoint requires a recent Auth.js session via the shared
+`requireRecentCurrentAuthMethod()` helper. This prevents an attacker with
+a stolen but older dashboard session from upgrading it into a longer-lived
+extension credential. When the gate fires, the response is HTTP 403 with
+`{ "error": "SESSION_STEP_UP_REQUIRED" }`, which the SW propagates
+verbatim and the web app's `auto-extension-connect` component surfaces
+as a passkey-reauth CTA.
 
 ## Threat Model
 
-The bridge code exchange replaces the previous bearer-in-postMessage scheme.
-A MAIN-world attacker (XSS, supply-chain-compromised npm package) can still
-call `window.addEventListener("message", ...)` to intercept the postMessage,
-but the payload is now a one-time, 60-second-TTL, server-side single-use code
-— not a bearer token. The captured code yields a token only if the attacker:
+The SW-initiated bridge code exchange replaces the previous web-app-issued
+postMessage scheme. The trust path for `cnf_jkt` is now:
 
-1. Acts within 60 seconds of issuance.
-2. Wins a race against the legitimate content script's exchange call.
-3. The atomic `UPDATE` (`SET used_at = now WHERE used_at IS NULL`) lets only
-   one party succeed; the loser receives 401 and the failed exchange is
-   logged via pino for forensic correlation.
+```
+extension SW's IDB-resident EC P-256 key
+  ↓ DPoP proof signed with private key
+server-side verifier (verifyDpopProof)
+  ↓ thumbprint derived from the proof's own JWK header
+extension_bridge_codes.cnf_jkt (DB)
+  ↓ findUnique + CAS predicate
+extension_tokens.cnf_jkt (DB)
+  ↓ every future authenticated request's expectedCnfJkt
+```
 
-Even if the attacker wins the race, they obtain a token with the same scope
-and TTL the legitimate user would have received — no horizontal escalation,
-no cross-tenant access. The legitimate flow degrades to "extension stays
-unconnected" (the user retries).
+The page (MAIN world) and the content script (ISOLATED world) never see
+the bridge code, the token, or any DPoP key material. A MAIN-world XSS
+can call `window.postMessage({type: "PASSWD_SSO_EXT_CONNECT_REQUEST",
+reqId: ...})` to trigger a connect attempt, but:
 
-A future enhancement (Stage 4 of the original plan, **out of scope**) would
-add a PKCE-style verifier so that even capturing the code does not enable
-exchange. This was deferred because a meaningful PKCE design requires the
-extension to register a `code_challenge` with the server through a channel
-the web app cannot tamper with — that requires a bootstrap mechanism the
-extension does not yet have.
+1. The connect attempt still requires the legitimate user's Auth.js
+   session cookie (the SW's `credentials:"include"` sends the same cookie
+   the user already has — no privilege escalation).
+2. The token issued lands in the SW's heap, not the page's. The page
+   only receives `{ ok: true }`.
+3. The cnf_jkt is bound to the SW's IDB key, which a page-script cannot
+   read or replace. An attacker who later steals the Bearer token cannot
+   use it without producing DPoP proofs signed by the same key.
 
-| Attack vector | Old direct token (legacy) | New bridge code exchange |
-|--------------|-------------------------|------------------------|
-| DOM query (`getElementById`) | N/A (bearer in postMessage) | N/A |
-| MutationObserver | N/A | N/A |
-| postMessage listener captures bearer | **Token captured directly (tenant-policy TTL, default 7d idle)** | Captures a 60-s single-use code |
-| MAIN-world event listener captures payload | Token (tenant-policy TTL, default 7d idle) | Code (60-s TTL, single-use, race with content script) |
-| Replay (after legitimate consume) | N/A | Atomic `UPDATE` returns count = 0 → 401 |
+| Attack vector | Pre-rewrite | Post-rewrite (this design) |
+|--------------|-------------|----------------------------|
+| `window.postMessage` listener captures bridge code | Captures a 60-s single-use code | **Never reachable** — code stays in SW heap |
+| `window.postMessage` listener captures bearer token | Captures `EXT_CONNECT_READY` only contains `{ok, errorCode}` | **Never reachable** — same |
+| Page-script forges request body with `cnfJkt: attacker-key-jkt` | Was accepted; server stored attacker's jkt | **Rejected** — body is `z.object({}).strict()`; cnf_jkt comes from verifier |
+| Stolen bridge code consumed by attacker's DPoP | Consumed the code on attacker's failed verify (DoS) | **No consume** — SELECT-then-CAS; verify failure leaves `used_at` NULL |
+| Cross-tenant escalation via tampered request | N/A — server-side identity resolution | Same |
+| Replay (after legitimate consume) | Atomic UPDATE returns count=0 → 401 | CAS predicate (`usedAt: null`) returns count=0 → 401 |
 | DevTools / memory forensics | Memory only | Memory only |
-| Cross-tenant escalation via tampered request | N/A | Server-side identity resolution from DB record |
+| Page-script triggers unauthorized connect | N/A | **Residual** — XSS can trigger START_CONNECT (same as XSS-acts-as-user; token lands in SW, not page) |
 
-After the 2026-04 cleanup the postMessage column is no longer reachable from any in-tree code; the column is retained for historical comparison.
+### Residual: XSS-acts-as-user (deferred)
+
+A MAIN-world XSS retains the ability to trigger `START_CONNECT` and cause
+the extension to (re-)connect. The attacker does NOT obtain the token or
+the bridge code; the residual harm is limited to:
+
+- Triggering an unnecessary bridge-code + exchange round-trip
+- Generating audit log noise
+- Consuming the per-user + per-IP rate-limit budget
+
+The primary defenses against XSS-driven spam are the server-side
+limiters already in place: per-IP 60/min on `/api/extension/bridge-code`
+(see `ipLimiter` in `src/app/api/extension/bridge-code/route.ts`),
+per-user 10/15 min on the same route (`bridgeCodeLimiter`), and
+per-IP 10/15 min on `/api/extension/token/exchange` (`exchangeLimiter`).
+Together these bound the attack rate without needing extension-side
+suppression.
+
+**Deferred (XSS-acts-as-user follow-up)**: `userActivation.isActive`
+gating in the content-script handler and any SW-side fresh-token
+suppression. An earlier follow-up draft added a SW-side fresh-token
+no-op guard, but a code review surfaced that the guard also suppresses
+the legitimate user-switch reconnect path (where `setToken`'s
+`tokenChanged` branch would normally `clearVault()` and replace the
+heap state). The guard was reverted. A future iteration that wants to
+suppress XSS-trigger spam must either: (a) pass the current `userId`
+in `EXT_CONNECT_REQUEST` and skip suppression on mismatch, or (b)
+gate on `userActivation.isActive` in the content script — pending
+empirical Chrome validation that the legitimate `?ext_connect=1`
+useEffect flow carries transient activation.
 
 ## File Map
 
 | File | Role |
 |------|------|
-| `src/lib/inject-extension-bridge-code.ts` | Web app: dispatches `postMessage` with bridge code (replaces `inject-extension-token.ts`) |
-| `src/app/api/extension/bridge-code/route.ts` | Web app endpoint: issues a one-time code (Auth.js session required) |
-| `src/app/api/extension/token/exchange/route.ts` | Web app endpoint: atomically consumes a code, returns a token (no session) |
-| `src/lib/auth/tokens/extension-token.ts` | Shared `issueExtensionToken()` helper used by `/api/extension/token/exchange` (legacy POST `/api/extension/token` was retired — see Migration status below) |
-| `src/lib/constants/integrations/extension.ts` | Shared constants: `BRIDGE_CODE_MSG_TYPE`, `BRIDGE_CODE_TTL_MS`, `BRIDGE_CODE_MAX_ACTIVE` |
-| `extension/src/content/token-bridge.js` | Content script (ISOLATED): receives postMessage, exchanges bridge code, forwards token to background. Plain JS — see project memory `project_extension_parallel_impl.md`. |
+| `src/lib/extension-connect-request.ts` | Web app: posts `EXT_CONNECT_REQUEST`, awaits matching `EXT_CONNECT_READY`, returns `{ ok, errorCode? }` |
+| `src/app/api/extension/bridge-code/route.ts` | Web app endpoint: issues a one-time code (Origin allowlist + Auth.js session + tenant IP + step-up + DPoP-derived cnf_jkt) |
+| `src/app/api/extension/token/exchange/route.ts` | Web app endpoint: SELECT-then-CAS — finds the code, verifies DPoP against `consumed.cnfJkt`, atomically consumes, issues token |
+| `src/lib/proxy/route-policy.ts` | Web app: `ROUTE_POLICY_KIND.API_EXTENSION_BRIDGE_CODE` classification |
+| `src/lib/proxy/api-route.ts` | Web app: orchestrator early-return for `API_EXTENSION_BRIDGE_CODE` (skips baseline CSRF gate) |
+| `src/lib/http/cors.ts` | Web app: `isBridgeCodeOriginAllowed()` exact-match allowlist + `allowExtensionCredentials` CORS option |
+| `src/lib/auth/tokens/extension-token.ts` | Shared `issueExtensionToken({cnfJkt})` helper used by `/api/extension/token/exchange` |
+| `src/lib/constants/integrations/extension.ts` | Shared constants: `EXT_CONNECT_REQUEST_MSG_TYPE`, `EXT_CONNECT_READY_MSG_TYPE`, `BRIDGE_CODE_TTL_MS`, `BRIDGE_CODE_MAX_ACTIVE`, `BRIDGE_CODE_LENGTH` |
+| `src/components/extension/auto-extension-connect.tsx` | Web app UI: invokes `requestExtensionConnect()`, branches on `errorCode` for reauth / extension-update / generic-failure CTAs |
+| `extension/src/content/token-bridge.js` | Content script (ISOLATED): receives `EXT_CONNECT_REQUEST`, forwards `START_CONNECT` to SW, posts `EXT_CONNECT_READY` back. Plain JS — see project memory `project_extension_parallel_impl.md`. |
 | `extension/src/content/token-bridge-lib.ts` | TypeScript version of content script (for tests only — not registered at runtime) |
-| `extension/src/lib/constants.ts` | Extension constants (mirrors web app constants; cross-repo sync test enforces equality) |
-| `extension/src/lib/api-paths.ts` | Extension paths: includes `EXTENSION_TOKEN_EXCHANGE` |
+| `extension/src/background/token-handler.ts` | SW `startConnect()`: signs two DPoP proofs, POSTs bridge-code + exchange, persists token + cnfJkt |
+| `extension/src/background/index.ts` | SW: token state, refresh, `EXT_MSG.START_CONNECT` dispatch, dynamic script registration |
+| `extension/src/lib/dpop-key.ts` | Extension: IDB-persisted EC P-256 keypair + `signDpopProof()` |
+| `extension/src/lib/constants.ts` | Extension constants (mirrors web app; cross-repo sync test enforces equality) |
+| `extension/src/lib/api-paths.ts` | Extension paths: `EXTENSION_BRIDGE_CODE`, `EXTENSION_TOKEN_EXCHANGE`, etc. |
 | `extension/src/lib/session-crypto.ts` | Ephemeral AES-256-GCM key for session encryption |
-| `extension/src/lib/session-storage.ts` | Encrypted persist/load for `chrome.storage.session` |
-| `extension/src/background/index.ts` | Background SW: token state, refresh, dynamic script registration |
-| `prisma/schema.prisma` | `ExtensionBridgeCode` model + `EXTENSION_BRIDGE_CODE_ISSUE` / `EXTENSION_TOKEN_EXCHANGE_SUCCESS` / `EXTENSION_TOKEN_EXCHANGE_FAILURE` audit actions |
+| `extension/src/lib/session-storage.ts` | Encrypted persist/load for `chrome.storage.session` (carries `tokenCnfJkt`) |
+| `prisma/schema.prisma` | `ExtensionBridgeCode` model (with `cnf_jkt` column) + `EXTENSION_BRIDGE_CODE_ISSUE` / `EXTENSION_TOKEN_EXCHANGE_SUCCESS` / `EXTENSION_TOKEN_EXCHANGE_FAILURE` audit actions |
 
 ### Migration status
 
-The legacy `TOKEN_BRIDGE_MSG_TYPE` postMessage relay path was removed in the
-2026-04 cleanup; the extension content script no longer accepts that message
-type. The legacy `POST /api/extension/token` endpoint was retired in the
-`deprecate-legacy-extension-token` PR (2026-05) and now always returns
-HTTP 410 Gone with `Deprecation: true` + `Cache-Control: no-store` headers.
-Calls are still observable via `event: extension_token_legacy_issuance_blocked`
-(warn-level structured log) and the `EXTENSION_TOKEN_LEGACY_ISSUANCE_BLOCKED`
-audit action; expected post-deploy count on both is zero. The full handler
-deletion is scheduled for the next Minor release after one observation window
-of zero surprise traffic.
+The extension JKT trust-path rewrite (PR #492, 2026-05) inverted the
+bridge-code flow: the web app no longer issues codes or carries the
+token. The SW initiates the bridge-code + exchange handshake itself,
+deriving `cnf_jkt` from the DPoP verifier rather than from any
+client-supplied body field. The exchange route was reordered to
+SELECT-then-CAS so an invalid DPoP no longer consumes the bridge code
+(closes a DoS-via-consumption window for stolen codes).
+
+The previous legacy postMessage relay (`PASSWD_SSO_BRIDGE_CODE` carrying
+`{code, expiresAt}`) and the body-`cnfJkt` field on the bridge-code POST
+were removed in the same PR. The dead `src/lib/inject-extension-bridge-code.ts`
+and `src/lib/extension-jkt-request.ts` modules were deleted.
+
+The legacy `POST /api/extension/token` endpoint was retired earlier (2026-05)
+and now always returns HTTP 410 Gone with `Deprecation: true` +
+`Cache-Control: no-store` headers. Calls are still observable via
+`event: extension_token_legacy_issuance_blocked` (warn-level structured log)
+and the `EXTENSION_TOKEN_LEGACY_ISSUANCE_BLOCKED` audit action. The full
+handler deletion is scheduled for the next Minor release after one
+observation window of zero surprise traffic.
 
 ---
 
