@@ -465,6 +465,12 @@ function scheduleRefreshAlarm(expiresAt: number): void {
   const MIN_DELAY_MS = 5_000;
   const effectiveRefreshAt = Math.max(refreshAt, now + MIN_DELAY_MS);
   chrome.alarms.create(ALARM_TOKEN_REFRESH, { when: effectiveRefreshAt });
+  // DIAG
+  console.log("[psso] scheduleRefreshAlarm", {
+    expiresAt: new Date(expiresAt).toISOString(),
+    refreshAt: new Date(effectiveRefreshAt).toISOString(),
+    inSec: Math.round((effectiveRefreshAt - now) / 1000),
+  });
 }
 
 async function attemptTokenRefresh(): Promise<void> {
@@ -676,6 +682,8 @@ chrome.contextMenus.onClicked.addListener(handleContextMenuClick);
 // ── Alarm: auto-clear on expiry ──────────────────────────────
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  // DIAG: temporary logging until refresh-no-fire investigation is complete.
+  console.log("[psso] alarm fired", alarm.name, new Date().toISOString());
   // MV3: SW may have just woken up to handle this alarm. Wait for hydrateFromSession()
   // to populate currentToken / tokenExpiresAt / cachedVaultTimeoutAction from
   // chrome.storage.session before running handlers — otherwise getCurrentToken()
@@ -683,6 +691,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   // refresh entirely.
   (async () => {
     await hydrationPromise;
+    console.log("[psso] alarm post-hydration", alarm.name, {
+      hasToken: currentToken !== null,
+      expiresAt: tokenExpiresAt ? new Date(tokenExpiresAt).toISOString() : null,
+    });
     if (alarm.name === ALARM_TOKEN_TTL) {
       clearToken();
     }
@@ -696,13 +708,16 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     }
     if (alarm.name === ALARM_TOKEN_REFRESH) {
       await attemptTokenRefresh();
+      console.log("[psso] attemptTokenRefresh returned");
     }
     if (alarm.name === ALARM_CLEAR_CLIPBOARD) {
       if (Date.now() - lastClipboardCopyTime >= cachedClipboardClearSeconds * 1000) {
         await copyToClipboard("");
       }
     }
-  })().catch(() => {});
+  })().catch((err) => {
+    console.error("[psso] alarm handler error", alarm.name, err);
+  });
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
