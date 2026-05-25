@@ -22,6 +22,8 @@ import {
   BRIDGE_CODE_MAX_ACTIVE,
   BRIDGE_CODE_MSG_TYPE,
   BRIDGE_CODE_TTL_MS,
+  EXT_JKT_REQUEST_MSG_TYPE,
+  EXT_JKT_READY_MSG_TYPE,
 } from "@/lib/constants/integrations/extension";
 
 const EXT_CONSTANTS_PATH = path.join(
@@ -64,5 +66,13 @@ describe("extension constants sync (web app ↔ extension repo)", () => {
 
   it("BRIDGE_CODE_LENGTH matches between web app and extension", () => {
     expect(extractNumericConst("BRIDGE_CODE_LENGTH")).toBe(BRIDGE_CODE_LENGTH);
+  });
+
+  it("EXT_JKT_REQUEST_MSG_TYPE matches between web app and extension", () => {
+    expect(extractStringConst("EXT_JKT_REQUEST_MSG_TYPE")).toBe(EXT_JKT_REQUEST_MSG_TYPE);
+  });
+
+  it("EXT_JKT_READY_MSG_TYPE matches between web app and extension", () => {
+    expect(extractStringConst("EXT_JKT_READY_MSG_TYPE")).toBe(EXT_JKT_READY_MSG_TYPE);
   });
 });

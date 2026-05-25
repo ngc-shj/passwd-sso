@@ -90,7 +90,21 @@ async function callWhoIs(ip: string): Promise<WhoIsResponse> {
   if (!tcpBase) {
     return new Promise((resolve, reject) => {
       const req = http.request(
-        { socketPath, path, method: "GET", timeout: WHOIS_TIMEOUT_MS },
+        {
+          socketPath,
+          path,
+          method: "GET",
+          timeout: WHOIS_TIMEOUT_MS,
+          // Tailscale 1.46+ requires this header on LocalAPI requests to
+          // prevent DNS-rebinding attacks against the Unix socket.
+          // See https://github.com/tailscale/tailscale/pull/8581
+          headers: {
+            "Sec-Tailscale": "localapi",
+            // Host header must be a non-resolvable name; tailscaled rejects
+            // requests where Host == "localhost" or a real DNS name.
+            "Host": "local-tailscaled.sock",
+          },
+        },
         (res) => {
           let body = "";
           res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
@@ -115,6 +129,12 @@ async function callWhoIs(ip: string): Promise<WhoIsResponse> {
   const timeoutId = setTimeout(() => controller.abort(), WHOIS_TIMEOUT_MS);
   const res = await fetch(new URL(path, tcpBase).toString(), {
     signal: controller.signal,
+    headers: {
+      "Sec-Tailscale": "localapi",
+      // Override default Host so `TAILSCALE_API_BASE=http://localhost:...`
+      // does not get rejected by tailscaled's DNS-rebinding guard.
+      "Host": "local-tailscaled.sock",
+    },
   });
   clearTimeout(timeoutId);
   if (!res.ok) throw new Error(`WhoIs returned ${res.status}`);

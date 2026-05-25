@@ -93,6 +93,7 @@ function validTokenResult(overrides?: Record<string, unknown>) {
       expiresAt: new Date("2030-01-01"),
       familyId: "fam-1",
       familyCreatedAt: new Date(),
+      cnfJkt: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb",
       ...overrides,
     },
   };
@@ -107,6 +108,7 @@ describe("POST /api/extension/token/refresh", () => {
     mockExtTokenCreate.mockResolvedValue({
       expiresAt: new Date("2030-01-01"),
       scope: "passwords:read,vault:unlock-data",
+      cnfJkt: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb",
     });
     // Interactive transaction: pass tx object with same mocks to the callback
     mockTransaction.mockImplementation(
@@ -260,6 +262,7 @@ describe("POST /api/extension/token/refresh", () => {
     mockExtTokenCreate.mockResolvedValue({
       expiresAt: new Date("2030-01-01"),
       scope: "passwords:read",
+      cnfJkt: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb",
     });
 
     const req = createRequest("POST", "http://localhost/api/extension/token/refresh", {

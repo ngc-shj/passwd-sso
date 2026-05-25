@@ -3,9 +3,8 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
-const { mockFindUnique, mockUpdate } = vi.hoisted(() => ({
+const { mockFindUnique } = vi.hoisted(() => ({
   mockFindUnique: vi.fn(),
-  mockUpdate: vi.fn(),
 }));
 const { mockWithBypassRls } = vi.hoisted(() => ({
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
@@ -31,13 +30,19 @@ const { mockLogAuditAsync } = vi.hoisted(() => ({
   mockLogAuditAsync: vi.fn(),
 }));
 
+// Mock the shared DPoP helper to keep validateExtensionToken tests focused
+// on dispatch/routing, not DPoP verification internals (those are covered
+// by validate-token-dpop.test.ts and mobile-token.test.ts).
+const { mockValidateTokenDpop } = vi.hoisted(() => ({
+  mockValidateTokenDpop: vi.fn(),
+}));
+
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     extensionToken: {
       findUnique: mockFindUnique,
       findMany: mockFindMany,
       create: mockCreate,
-      update: mockUpdate,
       updateMany: mockUpdateMany,
     },
     tenant: { findUnique: mockTenantFindUnique },
@@ -58,6 +63,9 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
+vi.mock("@/lib/auth/dpop/validate-token-dpop", () => ({
+  validateExtensionTokenDpop: mockValidateTokenDpop,
+}));
 
 import {
   validateExtensionToken,
@@ -67,6 +75,9 @@ import {
 } from "./extension-token";
 import { EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+
+const VALID_CNF_JKT = "A".repeat(43);
+const FAMILY_ID = "fam-00000000-0000-4000-8000-000000000001";
 
 // ─── parseScopes ─────────────────────────────────────────────
 
@@ -113,7 +124,6 @@ describe("hasScope", () => {
 describe("validateExtensionToken", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUpdate.mockResolvedValue({});
   });
 
   it("returns INVALID when no Authorization header", async () => {
@@ -143,9 +153,14 @@ describe("validateExtensionToken", () => {
     mockFindUnique.mockResolvedValue({
       id: "t1",
       userId: "u1",
+      tenantId: "ten1",
       scope: "passwords:read",
       expiresAt: new Date("2030-01-01"),
       revokedAt: new Date("2025-01-01"),
+      familyId: FAMILY_ID,
+      familyCreatedAt: new Date(),
+      clientKind: "BROWSER_EXTENSION",
+      cnfJkt: VALID_CNF_JKT,
     });
     const req = createRequest("GET", "http://localhost/api/passwords", {
       headers: { Authorization: `Bearer ${"a".repeat(64)}` },
@@ -158,9 +173,14 @@ describe("validateExtensionToken", () => {
     mockFindUnique.mockResolvedValue({
       id: "t1",
       userId: "u1",
+      tenantId: "ten1",
       scope: "passwords:read",
       expiresAt: new Date("2020-01-01"),
       revokedAt: null,
+      familyId: FAMILY_ID,
+      familyCreatedAt: new Date(),
+      clientKind: "BROWSER_EXTENSION",
+      cnfJkt: VALID_CNF_JKT,
     });
     const req = createRequest("GET", "http://localhost/api/passwords", {
       headers: { Authorization: `Bearer ${"a".repeat(64)}` },
@@ -169,51 +189,189 @@ describe("validateExtensionToken", () => {
     expect(result).toEqual({ ok: false, error: "EXTENSION_TOKEN_EXPIRED" });
   });
 
-  it("returns ok with data for valid token", async () => {
-    const expiresAt = new Date("2030-01-01");
+  it("returns INVALID when BROWSER_EXTENSION row has null cnfJkt (post-migration invariant violation)", async () => {
     mockFindUnique.mockResolvedValue({
       id: "t1",
       userId: "u1",
-      scope: "passwords:read,vault:unlock-data",
-      expiresAt,
+      tenantId: "ten1",
+      scope: "passwords:read",
+      expiresAt: new Date("2030-01-01"),
       revokedAt: null,
+      familyId: FAMILY_ID,
+      familyCreatedAt: new Date(),
+      clientKind: "BROWSER_EXTENSION",
+      cnfJkt: null,
     });
     const req = createRequest("GET", "http://localhost/api/passwords", {
       headers: { Authorization: `Bearer ${"a".repeat(64)}` },
     });
     const result = await validateExtensionToken(req);
-    expect(result).toEqual({
+    expect(result).toEqual({ ok: false, error: "EXTENSION_TOKEN_INVALID" });
+    expect(mockValidateTokenDpop).not.toHaveBeenCalled();
+  });
+
+  it("dispatches BROWSER_EXTENSION to validateExtensionTokenDpop and returns ok on success", async () => {
+    const expiresAt = new Date("2030-01-01");
+    const familyCreatedAt = new Date();
+    mockFindUnique.mockResolvedValue({
+      id: "t1",
+      userId: "u1",
+      tenantId: "ten1",
+      scope: "passwords:read,vault:unlock-data",
+      expiresAt,
+      revokedAt: null,
+      familyId: FAMILY_ID,
+      familyCreatedAt,
+      clientKind: "BROWSER_EXTENSION",
+      cnfJkt: VALID_CNF_JKT,
+    });
+    mockValidateTokenDpop.mockResolvedValue({
       ok: true,
       data: {
         tokenId: "t1",
         userId: "u1",
+        tenantId: "ten1",
         scopes: ["passwords:read", "vault:unlock-data"],
         expiresAt,
+        familyId: FAMILY_ID,
+        familyCreatedAt,
+        cnfJkt: VALID_CNF_JKT,
       },
     });
+
+    const req = createRequest("GET", "http://localhost/api/passwords", {
+      headers: {
+        Authorization: `Bearer ${"a".repeat(64)}`,
+        DPoP: "valid.dpop.proof",
+      },
+    });
+    const result = await validateExtensionToken(req);
+
+    expect(mockValidateTokenDpop).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.cnfJkt).toBe(VALID_CNF_JKT);
+    }
   });
 
-  it("updates lastUsedAt on valid token (best-effort)", async () => {
+  it("returns EXTENSION_TOKEN_DPOP_INVALID when BROWSER_EXTENSION DPoP fails", async () => {
     mockFindUnique.mockResolvedValue({
       id: "t1",
       userId: "u1",
+      tenantId: "ten1",
       scope: "passwords:read",
       expiresAt: new Date("2030-01-01"),
       revokedAt: null,
+      familyId: FAMILY_ID,
+      familyCreatedAt: new Date(),
+      clientKind: "BROWSER_EXTENSION",
+      cnfJkt: VALID_CNF_JKT,
     });
+    mockValidateTokenDpop.mockResolvedValue({
+      ok: false,
+      error: "EXTENSION_TOKEN_DPOP_INVALID",
+      dpopError: "DPOP_HEADER_MISSING",
+    });
+
     const req = createRequest("GET", "http://localhost/api/passwords", {
       headers: { Authorization: `Bearer ${"a".repeat(64)}` },
     });
-    await validateExtensionToken(req);
+    const result = await validateExtensionToken(req);
+    expect(result).toEqual({
+      ok: false,
+      error: "EXTENSION_TOKEN_DPOP_INVALID",
+      dpopError: "DPOP_HEADER_MISSING",
+    });
+  });
 
-    // Allow the void promise to settle
-    await new Promise((r) => setTimeout(r, 10));
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "t1" },
-        data: expect.objectContaining({ lastUsedAt: expect.any(Date) }),
-      }),
-    );
+  it("returns INVALID for IOS_APP with null cnfJkt without calling DPoP helper", async () => {
+    mockFindUnique.mockResolvedValue({
+      id: "t1",
+      userId: "u1",
+      tenantId: "ten1",
+      scope: "passwords:read",
+      expiresAt: new Date("2030-01-01"),
+      revokedAt: null,
+      familyId: FAMILY_ID,
+      familyCreatedAt: new Date(),
+      clientKind: "IOS_APP",
+      cnfJkt: null,
+    });
+
+    const req = createRequest("GET", "http://localhost/api/passwords", {
+      headers: { Authorization: `Bearer ${"a".repeat(64)}` },
+    });
+    const result = await validateExtensionToken(req);
+    expect(result).toEqual({ ok: false, error: "EXTENSION_TOKEN_INVALID" });
+    expect(mockValidateTokenDpop).not.toHaveBeenCalled();
+  });
+
+  it("dispatches IOS_APP to validateExtensionTokenDpop and maps success", async () => {
+    const expiresAt = new Date("2030-01-01");
+    const familyCreatedAt = new Date();
+    mockFindUnique.mockResolvedValue({
+      id: "t1",
+      userId: "u1",
+      tenantId: "ten1",
+      scope: "passwords:read",
+      expiresAt,
+      revokedAt: null,
+      familyId: FAMILY_ID,
+      familyCreatedAt,
+      clientKind: "IOS_APP",
+      cnfJkt: VALID_CNF_JKT,
+    });
+    mockValidateTokenDpop.mockResolvedValue({
+      ok: true,
+      data: {
+        tokenId: "t1",
+        userId: "u1",
+        tenantId: "ten1",
+        scopes: ["passwords:read"],
+        expiresAt,
+        familyId: FAMILY_ID,
+        familyCreatedAt,
+        cnfJkt: VALID_CNF_JKT,
+      },
+    });
+
+    const req = createRequest("GET", "http://localhost/api/passwords", {
+      headers: {
+        Authorization: `Bearer ${"a".repeat(64)}`,
+        DPoP: "valid.dpop.proof",
+      },
+    });
+    const result = await validateExtensionToken(req);
+
+    expect(mockValidateTokenDpop).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(true);
+  });
+
+  it("maps IOS_APP DPoP failure to EXTENSION_TOKEN_INVALID (backward-compat)", async () => {
+    mockFindUnique.mockResolvedValue({
+      id: "t1",
+      userId: "u1",
+      tenantId: "ten1",
+      scope: "passwords:read",
+      expiresAt: new Date("2030-01-01"),
+      revokedAt: null,
+      familyId: FAMILY_ID,
+      familyCreatedAt: new Date(),
+      clientKind: "IOS_APP",
+      cnfJkt: VALID_CNF_JKT,
+    });
+    mockValidateTokenDpop.mockResolvedValue({
+      ok: false,
+      error: "EXTENSION_TOKEN_DPOP_INVALID",
+      dpopError: "DPOP_SIG_INVALID",
+    });
+
+    const req = createRequest("GET", "http://localhost/api/passwords", {
+      headers: { Authorization: `Bearer ${"a".repeat(64)}` },
+    });
+    const result = await validateExtensionToken(req);
+    // IOS_APP callers expect EXTENSION_TOKEN_INVALID for source-compat.
+    expect(result).toEqual({ ok: false, error: "EXTENSION_TOKEN_INVALID" });
   });
 });
 
@@ -236,25 +394,29 @@ describe("issueExtensionToken", () => {
     mockCreate.mockResolvedValue({
       expiresAt: new Date("2099-01-01T00:00:00.000Z"),
       scope: "passwords:read,vault:unlock-data",
+      cnfJkt: VALID_CNF_JKT,
     });
   });
 
-  it("returns a 64-char hex token, expiresAt, and scopeCsv", async () => {
+  it("returns a 64-char token, expiresAt, scopeCsv, and cnfJkt", async () => {
     const result = await issueExtensionToken({
       userId: "u1",
       tenantId: "t1",
       scope: "passwords:read,vault:unlock-data",
+      cnfJkt: VALID_CNF_JKT,
     });
     expect(result.token).toBe("a".repeat(64));
     expect(result.expiresAt).toBeInstanceOf(Date);
     expect(result.scopeCsv).toBe("passwords:read,vault:unlock-data");
+    expect(result.cnfJkt).toBe(VALID_CNF_JKT);
   });
 
-  it("creates the token via prisma.extensionToken.create with the hashed token", async () => {
+  it("creates the token via prisma.extensionToken.create with the hashed token and cnfJkt", async () => {
     await issueExtensionToken({
       userId: "u1",
       tenantId: "t1",
       scope: "passwords:read",
+      cnfJkt: VALID_CNF_JKT,
     });
     expect(mockCreate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -263,6 +425,7 @@ describe("issueExtensionToken", () => {
           tenantId: "t1",
           tokenHash: "hashed_" + "a".repeat(64),
           scope: "passwords:read",
+          cnfJkt: VALID_CNF_JKT,
         }),
       }),
     );
@@ -274,6 +437,7 @@ describe("issueExtensionToken", () => {
       userId: "u1",
       tenantId: "tenant-1",
       scope: "passwords:read",
+      cnfJkt: VALID_CNF_JKT,
     });
     expect(mockUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -289,6 +453,7 @@ describe("issueExtensionToken", () => {
       userId: "u1",
       tenantId: "tenant-1",
       scope: "passwords:read",
+      cnfJkt: VALID_CNF_JKT,
     });
     expect(mockUpdateMany).not.toHaveBeenCalled();
   });
@@ -298,14 +463,12 @@ describe("issueExtensionToken", () => {
       userId: "u1",
       tenantId: "tenant-1",
       scope: "passwords:read",
+      cnfJkt: VALID_CNF_JKT,
     });
     expect(mockTransaction).toHaveBeenCalledTimes(1);
   });
 
   it("falls back to EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT when tenant.extensionTokenIdleTimeoutMinutes is null", async () => {
-    // Drift detector: a regression that lowers / raises the application
-    // fallback (or copies the literal back into one of the call sites)
-    // would change the computed expiresAt and trip this assertion.
     mockTenantFindUnique.mockResolvedValueOnce({ extensionTokenIdleTimeoutMinutes: null });
 
     const before = Date.now();
@@ -313,6 +476,7 @@ describe("issueExtensionToken", () => {
       userId: "u1",
       tenantId: "t1",
       scope: "passwords:read",
+      cnfJkt: VALID_CNF_JKT,
     });
     const after = Date.now();
 
@@ -320,8 +484,7 @@ describe("issueExtensionToken", () => {
     const callArg = mockCreate.mock.calls[0]?.[0] as { data: { expiresAt: Date } };
     const expiresAtMs = callArg.data.expiresAt.getTime();
 
-    // expiresAt MUST equal `now + EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT min` (±a small
-    // wall-clock window for the time taken inside issueExtensionToken).
+    // expiresAt MUST equal `now + EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT min` (±small window).
     expect(expiresAtMs).toBeGreaterThanOrEqual(before + EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT * MS_PER_MINUTE);
     expect(expiresAtMs).toBeLessThanOrEqual(after + EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT * MS_PER_MINUTE);
   });

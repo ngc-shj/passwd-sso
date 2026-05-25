@@ -17,10 +17,12 @@ import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
 // ── Hoisted mocks ──────────────────────────────────────────
-const { mockInjectBridgeCode, mockReauthenticateWithPasskey, mockSignOut } = vi.hoisted(() => ({
+const { mockInjectBridgeCode, mockReauthenticateWithPasskey, mockSignOut, mockRequestExtensionJkt } = vi.hoisted(() => ({
   mockInjectBridgeCode: vi.fn(),
   mockReauthenticateWithPasskey: vi.fn(),
   mockSignOut: vi.fn(),
+  // Resolves to a valid 43-char jkt by default so existing tests are unaffected.
+  mockRequestExtensionJkt: vi.fn().mockResolvedValue("A".repeat(43)) as ReturnType<typeof vi.fn>,
 }));
 
 vi.mock("next-intl", () => ({
@@ -32,6 +34,9 @@ vi.mock("next-auth/react", () => ({
 }));
 vi.mock("@/lib/inject-extension-bridge-code", () => ({
   injectExtensionBridgeCode: mockInjectBridgeCode,
+}));
+vi.mock("@/lib/extension-jkt-request", () => ({
+  requestExtensionJkt: mockRequestExtensionJkt,
 }));
 vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
   reauthenticateWithPasskey: mockReauthenticateWithPasskey,
@@ -68,6 +73,8 @@ beforeEach(() => {
   fetchSpy = vi.spyOn(globalThis, "fetch");
   mockReauthenticateWithPasskey.mockReset();
   mockSignOut.mockReset();
+  // Default: extension is present and responds with a valid jkt.
+  mockRequestExtensionJkt.mockResolvedValue("A".repeat(43));
 });
 
 afterEach(() => {
@@ -384,6 +391,61 @@ describe("AutoExtensionConnect", () => {
     render(<AutoExtensionConnect />);
 
     expect(document.querySelector("[data-overlay-active]")).toBeNull();
+  });
+
+  // ── DPoP handshake (C9) ────────────────────────────────────────────────────
+
+  it("posts bridge-code request with cnfJkt body when stage-1 jkt resolves", async () => {
+    setSearchParams("?ext_connect=1");
+    const jkt = "B".repeat(43);
+    mockRequestExtensionJkt.mockResolvedValueOnce(jkt);
+    fetchSpy.mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: "a".repeat(64), expiresAt: "2099-01-01T00:00:00Z" }),
+        { status: 200 },
+      ),
+    );
+
+    render(<AutoExtensionConnect />);
+
+    await waitFor(() => {
+      expect(screen.getByText("connectedTitle")).toBeInTheDocument();
+    });
+
+    // The bridge-code fetch MUST include the jkt in the request body.
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining("/api/extension/bridge-code"),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ cnfJkt: jkt }),
+      }),
+    );
+  });
+
+  it("shows extensionRequired message and does not call fetch when stage-1 returns null", async () => {
+    setSearchParams("?ext_connect=1");
+    mockRequestExtensionJkt.mockResolvedValueOnce(null);
+
+    render(<AutoExtensionConnect />);
+
+    await waitFor(() => {
+      // The i18n mock returns the translation key itself.
+      expect(screen.getByText("extensionRequired")).toBeInTheDocument();
+    });
+
+    // No bridge-code fetch should have been attempted.
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("shows extensionRequiredAction link when stage-1 returns null", async () => {
+    setSearchParams("?ext_connect=1");
+    mockRequestExtensionJkt.mockResolvedValueOnce(null);
+
+    render(<AutoExtensionConnect />);
+
+    await waitFor(() => {
+      expect(screen.getByText("extensionRequiredAction")).toBeInTheDocument();
+    });
   });
 });
 

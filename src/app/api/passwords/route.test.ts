@@ -16,6 +16,7 @@ const {
   mockWithUserTenantRls,
   mockWithBypassRls,
   mockRateLimiterCheck,
+  mockVerifyDpop,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockValidateSaToken: vi.fn(),
@@ -37,9 +38,20 @@ const {
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockRateLimiterCheck: vi.fn(),
+  mockVerifyDpop: vi.fn(),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/tokens/service-account-token", () => ({ validateServiceAccountToken: mockValidateSaToken, hasSaTokenScope: vi.fn().mockReturnValue(true) }));
+vi.mock("@/lib/auth/dpop/verify", () => ({
+  verifyDpopProof: mockVerifyDpop,
+  computeAth: vi.fn((t: string) => `ath-${t}`),
+}));
+vi.mock("@/lib/auth/dpop/jti-cache", () => ({
+  getJtiCache: vi.fn(() => ({ has: vi.fn(() => false), add: vi.fn() })),
+}));
+vi.mock("@/lib/auth/dpop/htu-canonical", () => ({
+  canonicalHtu: vi.fn(() => "https://localhost:3000/api/passwords"),
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: mockPrismaPasswordEntry,
@@ -107,6 +119,8 @@ const mockEntry = {
   deletedAt: null,
 };
 
+const VALID_CNF_JKT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb";
+
 describe("GET /api/passwords", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -117,6 +131,7 @@ describe("GET /api/passwords", () => {
     mockPrismaTag.count.mockResolvedValue(1);
     mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
     mockExtTokenUpdate.mockResolvedValue({});
+    mockVerifyDpop.mockResolvedValue({ ok: true, claims: {}, jkt: VALID_CNF_JKT });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -152,6 +167,10 @@ describe("GET /api/passwords", () => {
       scope: "passwords:read",
       expiresAt: new Date("2030-01-01"),
       revokedAt: null,
+      cnfJkt: VALID_CNF_JKT,
+      familyId: "fam-1",
+      familyCreatedAt: new Date(),
+      clientKind: "BROWSER_EXTENSION",
     });
     mockPrismaPasswordEntry.findMany.mockResolvedValue([mockEntry]);
 
@@ -171,6 +190,10 @@ describe("GET /api/passwords", () => {
       scope: "vault:unlock-data",
       expiresAt: new Date("2030-01-01"),
       revokedAt: null,
+      cnfJkt: VALID_CNF_JKT,
+      familyId: "fam-2",
+      familyCreatedAt: new Date(),
+      clientKind: "BROWSER_EXTENSION",
     });
 
     const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords", {
@@ -405,6 +428,10 @@ describe("POST /api/passwords", () => {
       scope: "passwords:read",
       expiresAt: new Date("2030-01-01"),
       revokedAt: null,
+      cnfJkt: VALID_CNF_JKT,
+      familyId: "fam-3",
+      familyCreatedAt: new Date(),
+      clientKind: "BROWSER_EXTENSION",
     });
 
     const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {

@@ -231,7 +231,14 @@ export type ValidateIosTokenResult =
     };
 
 /**
- * Validate an iOS-clientKind access token by verifying its DPoP proof.
+ * iOS-specific variant of DPoP validation. Distinct from the shared
+ * `validateExtensionTokenDpop` because the iOS caller (mobile/token route)
+ * derives `expectedHtm`/`expectedHtu` explicitly from the route signature
+ * (not from req.url). The shared helper at
+ * `src/lib/auth/dpop/validate-token-dpop.ts` is used by `validateExtensionToken`'s
+ * dispatch for BOTH iOS_APP and BROWSER_EXTENSION rows — that path is the
+ * preferred consumer. Future refactor: extend the shared helper to accept
+ * optional expectedHtm/Htu overrides, enabling a re-export here.
  *
  * Caller has already loaded the row and confirmed `clientKind === 'IOS_APP'`,
  * `revokedAt === null`, and `expiresAt > now`.
@@ -244,7 +251,8 @@ export async function validateIosTokenDpop(
 ): Promise<ValidateIosTokenResult> {
   const { req, expectedHtm, expectedHtu, accessToken, row, expectedNonce } = ctx;
 
-  if (!row.cnfJkt) {
+  const cnfJkt = row.cnfJkt;
+  if (!cnfJkt) {
     // Defensive: an IOS_APP row without cnfJkt cannot be DPoP-validated.
     // Treat as invalid rather than crashing.
     return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
@@ -255,7 +263,7 @@ export async function validateIosTokenDpop(
     expectedHtm,
     expectedHtu,
     expectedAth: computeAth(accessToken),
-    expectedCnfJkt: row.cnfJkt,
+    expectedCnfJkt: cnfJkt,
     expectedNonce: expectedNonce ?? null,
     jtiCache: getJtiCache(),
   });
@@ -292,6 +300,8 @@ export async function validateIosTokenDpop(
       expiresAt: row.expiresAt,
       familyId: row.familyId,
       familyCreatedAt: row.familyCreatedAt,
+      // cnfJkt is guaranteed non-null here: null guard above returned early.
+      cnfJkt,
     },
   };
 }

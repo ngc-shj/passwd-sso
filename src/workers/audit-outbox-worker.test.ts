@@ -316,6 +316,23 @@ async function runWorkerOnce(worker: ReturnType<typeof createWorker>): Promise<v
   await worker.start();
 }
 
+/**
+ * Drain pending fire-and-forget dispatch promises.
+ *
+ * The worker calls `void dispatchWebhookForRow(...)`, which internally does
+ * `await import("@/lib/webhook-dispatcher")` then `void dispatchWebhook(...)`.
+ * vi.dynamicImportSettled() waits for the import to resolve; the trailing
+ * setImmediate ticks drain the post-import microtasks so the inner void call
+ * reaches our mock. Replaces fixed setTimeout(20ms) waits that were flaky
+ * under CPU load.
+ */
+async function flushDispatchQueue(): Promise<void> {
+  await vi.dynamicImportSettled();
+  for (let i = 0; i < 3; i++) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
+
 // ─── parsePayload — happy path ────────────────────────────────────────────────
 
 describe("parsePayload — happy path", () => {
@@ -728,8 +745,7 @@ describe("webhook dispatch", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    // Allow microtask queue to flush (void dispatchWebhookForRow)
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    await flushDispatchQueue();
 
     expect(mockDispatchWebhook).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -762,7 +778,7 @@ describe("webhook dispatch", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    await flushDispatchQueue();
 
     expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -782,7 +798,7 @@ describe("webhook dispatch", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    await flushDispatchQueue();
 
     expect(mockDispatchWebhook).not.toHaveBeenCalled();
     expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
@@ -811,7 +827,7 @@ describe("webhook dispatch", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    await flushDispatchQueue();
 
     expect(mockDispatchWebhook).not.toHaveBeenCalled();
     expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
@@ -883,8 +899,7 @@ describe("webhook dispatch — WEBHOOK_DISPATCH_SUPPRESS", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    // Flush microtask queue so any fire-and-forget dispatch calls settle
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    await flushDispatchQueue();
 
     expect(mockDispatchWebhook).not.toHaveBeenCalled();
     expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
@@ -912,7 +927,7 @@ describe("webhook dispatch — WEBHOOK_DISPATCH_SUPPRESS", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    await flushDispatchQueue();
 
     expect(mockDispatchWebhook).not.toHaveBeenCalled();
     expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
@@ -941,7 +956,7 @@ describe("webhook dispatch — WEBHOOK_DISPATCH_SUPPRESS", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    await flushDispatchQueue();
 
     expect(mockDispatchWebhook).not.toHaveBeenCalled();
     expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
@@ -969,7 +984,7 @@ describe("webhook dispatch — WEBHOOK_DISPATCH_SUPPRESS", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    await flushDispatchQueue();
 
     expect(mockDispatchWebhook).not.toHaveBeenCalled();
     expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();

@@ -7,7 +7,7 @@
  * the ephemeral key is lost and decryption fails → user must re-authenticate.
  */
 
-import { SESSION_KEY } from "./constants";
+import { SESSION_KEY, JKT_RE } from "./constants";
 import {
   encryptField,
   decryptField,
@@ -29,6 +29,8 @@ interface StoredSessionState {
    * Plain number; not sensitive.
    */
   tenantAutoLockMinutes?: number | null;
+  /** RFC 7638 JWK thumbprint of the DPoP key bound to the current token (43 base64url chars). */
+  tokenCnfJkt?: string;
 }
 
 /** Shape returned to callers after decryption. */
@@ -40,6 +42,8 @@ export interface SessionState {
   /** Encrypted ECDH private key (hex) for team key derivation — re-unwrapped on SW restart */
   ecdhEncrypted?: { ciphertext: string; iv: string; authTag: string };
   tenantAutoLockMinutes?: number | null;
+  /** RFC 7638 JWK thumbprint of the DPoP key bound to the current token (43 base64url chars). */
+  tokenCnfJkt: string;
 }
 
 function isEncryptedField(v: unknown): v is EncryptedField {
@@ -66,6 +70,7 @@ export async function persistSession(state: SessionState): Promise<void> {
     encryptedVaultSecretKey: encryptedVaultSecretKey ?? undefined,
     ecdhEncrypted: state.ecdhEncrypted,
     tenantAutoLockMinutes: state.tenantAutoLockMinutes ?? undefined,
+    tokenCnfJkt: state.tokenCnfJkt,
   };
   await chrome.storage.session.set({ [SESSION_KEY]: stored });
 }
@@ -114,6 +119,12 @@ export async function loadSession(): Promise<SessionState | null> {
     tenantAutoLockMinutes = null;
   }
 
+  // tokenCnfJkt validation: must be a 43-char base64url string.
+  // Absent means a pre-PR session — return null so the user reconnects cleanly.
+  if (typeof raw.tokenCnfJkt !== "string" || !JKT_RE.test(raw.tokenCnfJkt)) {
+    return null;
+  }
+
   return {
     token,
     expiresAt: raw.expiresAt,
@@ -121,6 +132,7 @@ export async function loadSession(): Promise<SessionState | null> {
     vaultSecretKey,
     ecdhEncrypted: raw.ecdhEncrypted,
     tenantAutoLockMinutes,
+    tokenCnfJkt: raw.tokenCnfJkt,
   };
 }
 

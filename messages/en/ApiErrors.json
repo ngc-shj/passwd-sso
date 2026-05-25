@@ -69,6 +69,7 @@
   "extensionTokenExpired": "Client app token has expired.",
   "extensionTokenRevoked": "Client app token has been revoked.",
   "extensionTokenInvalid": "Invalid client app token.",
+  "extensionTokenDpopInvalid": "Client app token sender constraint verification failed. Update the extension and reconnect.",
   "extensionTokenSessionExpired": "Client app token lifetime exceeded. Please re-authorize the app.",
   "extensionTokenScopeInsufficient": "Client app token does not have the required scope.",
   "extensionTokenLegacyIssuanceDeprecated": "This endpoint is not available. Update the extension, or use 'passwd-sso login' for CLI access.",

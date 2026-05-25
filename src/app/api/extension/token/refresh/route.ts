@@ -39,7 +39,7 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR[result.error], 401);
   }
 
-  const { tokenId, userId, tenantId, scopes, familyId, familyCreatedAt } = result.data;
+  const { tokenId, userId, tenantId, scopes, familyId, familyCreatedAt, cnfJkt } = result.data;
 
   // Tenant network-boundary enforcement comes BEFORE rate limit so an
   // off-network holder of a stolen bearer cannot burn the legitimate
@@ -132,8 +132,10 @@ async function handlePOST(req: NextRequest) {
           // Carry the family forward so the absolute cap persists across rotations
           familyId,
           familyCreatedAt,
+          // Carry cnfJkt forward — DPoP binding MUST persist across rotation
+          cnfJkt,
         },
-        select: { expiresAt: true, scope: true },
+        select: { expiresAt: true, scope: true, cnfJkt: true },
       });
 
       return newToken;
@@ -148,6 +150,7 @@ async function handlePOST(req: NextRequest) {
     token: plaintext,
     expiresAt: created.expiresAt.toISOString(),
     scope: created.scope.split(","),
+    cnfJkt: created.cnfJkt,
   };
 
   const parsed = TokenIssueResponseSchema.safeParse(body);

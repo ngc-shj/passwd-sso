@@ -1,6 +1,10 @@
 /**
  * Playwright global setup — seed test users into the database.
  *
+ * Also builds the browser extension (if present) before any E2E test runs.
+ * Extension build failure prints diagnostics but does NOT abort the suite —
+ * extension-tagged tests skip themselves when the dist/ directory is absent.
+ *
  * Creates twelve users:
  *  1. "vault-ready"      — vault fully set up, for general unlock/CRUD/lock tests
  *  2. "fresh"            — no vault setup, for setup wizard tests
@@ -18,8 +22,9 @@
  * Session tokens are written to .auth-state.json for test consumption.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import Redis from "ioredis";
 import { loadEnv } from "@/lib/load-env";
 
@@ -117,7 +122,59 @@ async function clearRateLimits(): Promise<void> {
   }
 }
 
+/**
+ * Build the MV3 extension so its dist/ directory is ready for Playwright to
+ * load. Wrapped in try/catch so a build failure prints diagnostics without
+ * aborting the entire suite — @extension tests skip themselves when dist/ is
+ * absent (SKIP_EXTENSION_E2E env var or missing dist/manifest.json).
+ */
+function buildExtension(): void {
+  const repoRoot = join(__dirname, "..");
+  const extensionDir = join(repoRoot, "extension");
+  const distDir = join(extensionDir, "dist");
+
+  // Allow callers to opt out (e.g. CI jobs that don't have Chrome available).
+  if (process.env.SKIP_EXTENSION_E2E === "1") {
+    console.log("[E2E Setup] SKIP_EXTENSION_E2E=1 — skipping extension build.");
+    return;
+  }
+
+  // Skip the build if dist/ is already present and fresh (manual pre-build).
+  if (existsSync(join(distDir, "manifest.json"))) {
+    console.log("[E2E Setup] Extension dist/ already present — skipping rebuild.");
+    return;
+  }
+
+  console.log("[E2E Setup] Building extension…");
+  try {
+    const result = spawnSync("npm", ["--prefix", "extension", "run", "build"], {
+      cwd: repoRoot,
+      encoding: "utf-8",
+      timeout: 120_000,
+    });
+    if (result.status !== 0) {
+      console.error(
+        "Extension build failed — fix extension/ before running @extension E2E tests.",
+      );
+      if (result.stdout) console.error(result.stdout);
+      if (result.stderr) console.error(result.stderr);
+      // Non-fatal: extension tests will skip themselves.
+    } else {
+      console.log("[E2E Setup] Extension build succeeded.");
+    }
+  } catch (err) {
+    console.error(
+      "Extension build failed — fix extension/ before running @extension E2E tests.",
+      err,
+    );
+    // Non-fatal: extension tests will skip themselves.
+  }
+}
+
 export default async function globalSetup(): Promise<void> {
+  // Build the extension before any test runs (non-fatal on failure).
+  buildExtension();
+
   // Safety guards
   assertTestDatabase();
 

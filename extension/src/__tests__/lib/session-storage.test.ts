@@ -100,10 +100,12 @@ describe("session-storage", () => {
     it("returns decrypted values for a valid encrypted session", async () => {
       mockDecryptField.mockResolvedValueOnce("tok-1");
 
+      const fakeJkt = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"; // 43 chars
       mockStorage[SESSION_KEY] = {
         encryptedToken: FAKE_ENCRYPTED,
         expiresAt: 1700000000000,
         userId: "u-1",
+        tokenCnfJkt: fakeJkt,
       };
 
       const result = await loadSession();
@@ -116,6 +118,7 @@ describe("session-storage", () => {
         // Field added when tenant auto-lock persistence landed; absent from
         // stored rows becomes `null` per the validator.
         tenantAutoLockMinutes: null,
+        tokenCnfJkt: fakeJkt,
       });
     });
 
@@ -162,6 +165,45 @@ describe("session-storage", () => {
       expect(result).toBeNull();
     });
 
+    it("returns null when tokenCnfJkt is absent (pre-PR upgrade scenario)", async () => {
+      mockDecryptField.mockResolvedValueOnce("tok-1");
+
+      mockStorage[SESSION_KEY] = {
+        encryptedToken: FAKE_ENCRYPTED,
+        expiresAt: 1700000000000,
+        // tokenCnfJkt intentionally omitted — simulates old session without DPoP binding
+      };
+
+      const result = await loadSession();
+      expect(result).toBeNull();
+    });
+
+    it("returns null when tokenCnfJkt has wrong length (42 chars)", async () => {
+      mockDecryptField.mockResolvedValueOnce("tok-1");
+
+      mockStorage[SESSION_KEY] = {
+        encryptedToken: FAKE_ENCRYPTED,
+        expiresAt: 1700000000000,
+        tokenCnfJkt: "a".repeat(42), // one char too short
+      };
+
+      const result = await loadSession();
+      expect(result).toBeNull();
+    });
+
+    it("returns null when tokenCnfJkt contains invalid charset", async () => {
+      mockDecryptField.mockResolvedValueOnce("tok-1");
+
+      mockStorage[SESSION_KEY] = {
+        encryptedToken: FAKE_ENCRYPTED,
+        expiresAt: 1700000000000,
+        tokenCnfJkt: "!".repeat(43), // invalid base64url chars
+      };
+
+      const result = await loadSession();
+      expect(result).toBeNull();
+    });
+
     it("decrypts vaultSecretKey when present", async () => {
       mockDecryptField
         .mockResolvedValueOnce("tok-1")      // for encryptedToken
@@ -171,6 +213,7 @@ describe("session-storage", () => {
         encryptedToken: FAKE_ENCRYPTED,
         expiresAt: 1700000000000,
         encryptedVaultSecretKey: { ciphertext: "vsk-enc", iv: "iv2", authTag: "tag2" },
+        tokenCnfJkt: "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG", // 43 chars
       };
 
       const result = await loadSession();

@@ -17,6 +17,7 @@ const {
   mockWarn,
   mockError,
   mockExtractClientIp,
+  mockVerifyDpop,
 } = vi.hoisted(() => ({
   mockBridgeCodeUpdateMany: vi.fn(),
   mockBridgeCodeFindUnique: vi.fn(),
@@ -31,6 +32,17 @@ const {
   mockWarn: vi.fn(),
   mockError: vi.fn(),
   mockExtractClientIp: vi.fn(() => "1.2.3.4"),
+  mockVerifyDpop: vi.fn(),
+}));
+
+vi.mock("@/lib/auth/dpop/verify", () => ({
+  verifyDpopProof: mockVerifyDpop,
+}));
+vi.mock("@/lib/auth/dpop/jti-cache", () => ({
+  getJtiCache: vi.fn(() => ({ has: vi.fn(() => false), add: vi.fn() })),
+}));
+vi.mock("@/lib/auth/dpop/htu-canonical", () => ({
+  canonicalHtu: vi.fn(() => "https://localhost:3000/api/extension/token/exchange"),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -92,6 +104,8 @@ function makeRequest(body: unknown = { code: VALID_CODE }): import("next/server"
 }
 
 describe("POST /api/extension/token/exchange", () => {
+  const VALID_CNF_JKT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb";
+
   beforeEach(() => {
     vi.clearAllMocks();
     // Re-establish defaults that vi.clearAllMocks resets
@@ -99,6 +113,8 @@ describe("POST /api/extension/token/exchange", () => {
     mockExtractClientIp.mockReturnValue("1.2.3.4");
     mockWithBypassRls.mockImplementation(async (p, fn) => fn(p));
     mockWithUserTenantRls.mockImplementation(async (_u, fn) => fn());
+    // DPoP proof passes by default
+    mockVerifyDpop.mockResolvedValue({ ok: true, claims: {}, jkt: VALID_CNF_JKT });
     // The shared issueExtensionToken helper internally calls $transaction.
     // Provide a default that runs the callback against the mocked Prisma surface.
     mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
@@ -114,6 +130,7 @@ describe("POST /api/extension/token/exchange", () => {
     mockExtensionTokenCreate.mockResolvedValue({
       expiresAt: new Date("2099-01-01T00:00:00.000Z"),
       scope: "passwords:read,vault:unlock-data",
+      cnfJkt: VALID_CNF_JKT,
     });
   });
 
@@ -124,6 +141,7 @@ describe("POST /api/extension/token/exchange", () => {
       userId: "11111111-1111-1111-1111-111111111111",
       tenantId: "22222222-2222-2222-2222-222222222222",
       scope: "passwords:read,vault:unlock-data",
+      cnfJkt: VALID_CNF_JKT,
     });
 
     const res = await POST(makeRequest());
@@ -227,6 +245,7 @@ describe("POST /api/extension/token/exchange", () => {
       userId: "11111111-1111-1111-1111-111111111111",
       tenantId: "22222222-2222-2222-2222-222222222222",
       scope: "passwords:read",
+      cnfJkt: VALID_CNF_JKT,
     });
 
     const first = await POST(makeRequest());
@@ -262,6 +281,7 @@ describe("POST /api/extension/token/exchange", () => {
       userId: "11111111-1111-1111-1111-111111111111",
       tenantId: "22222222-2222-2222-2222-222222222222",
       scope: "passwords:read,vault:unlock-data",
+      cnfJkt: VALID_CNF_JKT,
     });
     mockExtensionTokenFindMany.mockResolvedValueOnce([
       { id: "t1" },
@@ -285,6 +305,7 @@ describe("POST /api/extension/token/exchange", () => {
       userId: "11111111-1111-1111-1111-111111111111",
       tenantId: "22222222-2222-2222-2222-222222222222",
       scope: "passwords:read",
+      cnfJkt: VALID_CNF_JKT,
     });
     // Make $transaction throw to simulate issueExtensionToken failure
     mockTransaction.mockImplementationOnce(async () => {

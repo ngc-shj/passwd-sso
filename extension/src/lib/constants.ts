@@ -3,6 +3,11 @@
 export const TOKEN_ELEMENT_ID = "passwd-sso-ext-token";
 export const TOKEN_READY_EVENT = "passwd-sso-token-ready";
 
+// DPoP JKT handshake messages (web app → content script → web app).
+// Mirror values in src/lib/constants/integrations/extension.ts; the sync test enforces equality.
+export const EXT_JKT_REQUEST_MSG_TYPE = "PASSWD_SSO_EXT_JKT_REQUEST";
+export const EXT_JKT_READY_MSG_TYPE = "PASSWD_SSO_EXT_JKT_READY";
+
 // Bridge code flow: postMessage (web app) → content script → exchange endpoint.
 // Mirror values in src/lib/constants/extension.ts (web app side); a sync test
 // validates equality between the two repos.
@@ -11,6 +16,9 @@ export const BRIDGE_CODE_TTL_MS = 60 * 1000;
 export const BRIDGE_CODE_MAX_ACTIVE = 3;
 // Bridge code wire format (mirror of web app constant — sync test enforces equality)
 export const BRIDGE_CODE_LENGTH = 64;
+
+/** RFC 7638 §3 thumbprint is always 43 base64url characters. */
+export const JKT_RE = /^[A-Za-z0-9_-]{43}$/;
 
 // ── Session storage ──
 export const SESSION_KEY = "authState";
@@ -69,6 +77,11 @@ export const EXT_MSG = {
   AUTOFILL_CREDIT_CARD: "AUTOFILL_CREDIT_CARD",
   AUTOFILL_IDENTITY: "AUTOFILL_IDENTITY",
   KEEPALIVE_PING: "KEEPALIVE_PING",
+  // Options → SW: invalidate the SW's in-memory DPoP key cache after the
+  // Options page deleted the IDB record. Without this the SW keeps signing
+  // bridge-code DPoP proofs with the stale key, producing tokens that the
+  // next reset cannot revoke (cnf_jkt mismatch on /key/reset DPoP verify).
+  RESET_DPOP_KEY: "RESET_DPOP_KEY",
   // Passkey SW message types (content script → Service Worker)
   PASSKEY_GET_MATCHES: "PASSKEY_GET_MATCHES",
   PASSKEY_SIGN_ASSERTION: "PASSKEY_SIGN_ASSERTION",

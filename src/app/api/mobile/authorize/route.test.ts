@@ -39,9 +39,10 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
 
-vi.mock("@/lib/url-helpers", () => ({
-  getAppOrigin: mockGetAppOrigin,
-}));
+vi.mock("@/lib/url-helpers", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/url-helpers")>();
+  return { ...actual, getAppOrigin: mockGetAppOrigin };
+});
 
 vi.mock("@/lib/crypto/crypto-server", () => ({
   generateShareToken: () => "f".repeat(64),

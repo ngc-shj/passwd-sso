@@ -10,6 +10,9 @@ import type { SessionState } from "../lib/session-storage";
 
 const PASSWORD_BY_ID_PREFIX = extApiPath.passwordById("");
 
+// Static 43-char base64url JKT used across all DPoP-related tests
+const STATIC_TEST_JKT = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
+
 const sessionStorageMocks = vi.hoisted(() => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
   loadSession: vi.fn().mockResolvedValue(null),
@@ -17,6 +20,18 @@ const sessionStorageMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../lib/session-storage", () => sessionStorageMocks);
+
+const dpopKeyMocks = vi.hoisted(() => ({
+  getDpopThumbprint: vi.fn().mockResolvedValue("abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"),
+  signDpopProof: vi.fn().mockResolvedValue("fake.dpop.proof"),
+  getOrGenerateDpopKeyPair: vi.fn().mockResolvedValue({
+    publicJwk: { kty: "EC", crv: "P-256", x: "x", y: "y" },
+    sign: vi.fn().mockResolvedValue(new ArrayBuffer(64)),
+  }),
+  resetInMemoryKeyCache: vi.fn(),
+}));
+
+vi.mock("../lib/dpop-key", () => dpopKeyMocks);
 
 const cryptoMocks = vi.hoisted(() => ({
   deriveWrappingKey: vi.fn().mockResolvedValue("wrap-key"),
@@ -321,6 +336,7 @@ describe("background message flow", () => {
       type: "SET_TOKEN",
       token: "t",
       expiresAt: Date.now() + 60_000,
+      cnfJkt: STATIC_TEST_JKT,
     });
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
     await sendMessage({ type: "LOCK_VAULT" });
@@ -957,7 +973,7 @@ describe("session persistence", () => {
 
   it("persists state to session storage after SET_TOKEN", async () => {
     const expiresAt = Date.now() + 600_000;
-    await sendMessage({ type: "SET_TOKEN", token: "tok-1", expiresAt });
+    await sendMessage({ type: "SET_TOKEN", token: "tok-1", expiresAt, cnfJkt: STATIC_TEST_JKT });
     // userId is not set yet at SET_TOKEN time, so persistState requires all 3 fields.
     // After UNLOCK_VAULT, userId is set and persistState is called.
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
@@ -975,20 +991,21 @@ describe("session persistence", () => {
       type: "SET_TOKEN",
       token: "tok-1",
       expiresAt: Date.now() + 600_000,
+      cnfJkt: STATIC_TEST_JKT,
     });
     await sendMessage({ type: "CLEAR_TOKEN" });
 
     expect(sessionStorageMocks.clearSession).toHaveBeenCalled();
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/api/extension/token"),
-      expect.objectContaining({
-        method: "DELETE",
-        headers: expect.objectContaining({
-          Authorization: "Bearer tok-1",
-        }),
-      }),
+    // swFetchAuthenticated uses Headers object; check URL and method
+    const fetchCalls = fetchMock.mock.calls as [string, RequestInit][];
+    const deleteCall = fetchCalls.find(
+      ([url, init]) => url.includes("/api/extension/token") && init?.method === "DELETE",
     );
+    expect(deleteCall).toBeDefined();
+    const [, deleteInit] = deleteCall!;
+    const authHeader = (deleteInit.headers as Headers).get("Authorization");
+    expect(authHeader).toBe("Bearer tok-1");
   });
 
   it("clears refresh alarm on CLEAR_TOKEN", async () => {
@@ -1081,6 +1098,7 @@ describe("session hydration", () => {
       expiresAt,
       userId: "u-1",
       vaultSecretKey: "010203",
+      tokenCnfJkt: STATIC_TEST_JKT,
     });
 
     vi.stubGlobal(
@@ -1174,6 +1192,7 @@ describe("session hydration", () => {
       expiresAt,
       userId: "u-1",
       vaultSecretKey: "010203",
+      tokenCnfJkt: STATIC_TEST_JKT,
     });
     const status = await statusPromise;
 
@@ -1203,6 +1222,7 @@ describe("token refresh alarm", () => {
               token: "refreshed-tok",
               expiresAt: newExpiresAt,
               scope: ["passwords:read"],
+              cnfJkt: STATIC_TEST_JKT,
             }),
           };
         }
@@ -1230,6 +1250,7 @@ describe("token refresh alarm", () => {
       type: "SET_TOKEN",
       token: "original-tok",
       expiresAt: Date.now() + 600_000,
+      cnfJkt: STATIC_TEST_JKT,
     });
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
@@ -1349,10 +1370,10 @@ describe("token refresh alarm", () => {
       expect.objectContaining({ hasToken: true })
     );
 
-    // Should schedule a retry
+    // Should schedule a retry alarm with an absolute `when` time
     expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
       ALARM_TOKEN_REFRESH,
-      expect.objectContaining({ delayInMinutes: 1 })
+      expect.objectContaining({ when: expect.any(Number) })
     );
   });
 
@@ -1405,7 +1426,7 @@ describe("token refresh alarm", () => {
 
     expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
       ALARM_TOKEN_REFRESH,
-      expect.objectContaining({ delayInMinutes: 1 })
+      expect.objectContaining({ when: expect.any(Number) })
     );
   });
 
@@ -1456,10 +1477,10 @@ describe("token refresh alarm", () => {
       expect.objectContaining({ hasToken: true })
     );
 
-    // Should schedule a retry alarm
+    // Should schedule a retry alarm with an absolute `when` time
     expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
       ALARM_TOKEN_REFRESH,
-      expect.objectContaining({ delayInMinutes: 1 })
+      expect.objectContaining({ when: expect.any(Number) })
     );
   });
 });
@@ -1476,6 +1497,7 @@ describe("hydration edge cases", () => {
       expiresAt,
       userId: "u-1",
       vaultSecretKey: "010203",
+      tokenCnfJkt: STATIC_TEST_JKT,
     });
 
     vi.stubGlobal(
@@ -2267,5 +2289,51 @@ describe("tab event badge updates", () => {
     await vi.waitFor(() => {
       expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "", tabId: 55 });
     });
+  });
+});
+
+describe("DPoP raw message handlers (GET_DPOP_JKT / GET_DPOP_PROOF)", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
+
+    await loadBackground();
+  });
+
+  function sendDpopMessage(message: unknown): Promise<unknown> {
+    return new Promise((resolve) => {
+      // The DPoP listener is registered second (messageHandlers[1])
+      const handler = messageHandlers[1];
+      handler(message, {}, (resp) => resolve(resp));
+    });
+  }
+
+  it("GET_DPOP_JKT handler calls getDpopThumbprint and responds with jkt", async () => {
+    const res = await sendDpopMessage({ type: "GET_DPOP_JKT" }) as { jkt: string };
+    expect(dpopKeyMocks.getDpopThumbprint).toHaveBeenCalled();
+    expect(res.jkt).toBe(STATIC_TEST_JKT);
+  });
+
+  it("GET_DPOP_PROOF handler calls signDpopProof and responds with dpop", async () => {
+    const res = await sendDpopMessage({
+      type: "GET_DPOP_PROOF",
+      route: "/api/extension/token/exchange",
+      method: "POST",
+    }) as { dpop: string };
+    expect(dpopKeyMocks.signDpopProof).toHaveBeenCalledWith(
+      expect.objectContaining({ route: "/api/extension/token/exchange", method: "POST" }),
+    );
+    expect(res.dpop).toBe("fake.dpop.proof");
+  });
+
+  it("unknown message type is ignored (handler returns undefined)", () => {
+    const handler = messageHandlers[1];
+    const sendResponse = vi.fn();
+    const result = handler({ type: "UNKNOWN_MSG" }, {}, sendResponse);
+    expect(result).toBeUndefined();
+    expect(sendResponse).not.toHaveBeenCalled();
   });
 });

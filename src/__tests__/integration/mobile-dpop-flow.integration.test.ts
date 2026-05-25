@@ -14,10 +14,9 @@
 
 import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from "vitest";
 import { randomUUID, randomBytes, createHash } from "node:crypto";
-import { textEncode } from "@/lib/crypto/crypto-utils";
-import { jwkThumbprint } from "@/lib/auth/dpop/verify";
 import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
+import { generateKeypair, makeProof } from "@/__tests__/helpers/dpop-test-keypair";
 
 // Real verifyDpopProof — intentionally NOT mocked.
 // Set APP_URL via vi.stubEnv (project convention — pre-pr.sh gate forbids
@@ -105,9 +104,10 @@ vi.mock("@/lib/auth/policy/ip-access", () => ({
   rateLimitKeyFromIp: (ip: string) => ip,
 }));
 
-vi.mock("@/lib/url-helpers", () => ({
-  getAppOrigin: () => "https://app.example.test",
-}));
+vi.mock("@/lib/url-helpers", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/url-helpers")>();
+  return { ...actual, getAppOrigin: () => "https://app.example.test" };
+});
 
 vi.mock("@/lib/logger", async () => {
   const { AsyncLocalStorage } = await import("node:async_hooks");
@@ -130,46 +130,6 @@ import { POST } from "@/app/api/mobile/token/route";
 const USER_ID = randomUUID();
 const TENANT_ID = randomUUID();
 const TOKEN_ID = randomUUID();
-
-interface TestKeypair {
-  privateKey: CryptoKey;
-  publicJwk: { kty: "EC"; crv: "P-256"; x: string; y: string };
-  jkt: string;
-}
-
-async function generateKeypair(): Promise<TestKeypair> {
-  const kp = (await crypto.subtle.generateKey(
-    { name: "ECDSA", namedCurve: "P-256" },
-    true,
-    ["sign", "verify"],
-  )) as CryptoKeyPair;
-  const exported = (await crypto.subtle.exportKey("jwk", kp.publicKey)) as {
-    kty: string; crv: string; x: string; y: string;
-  };
-  const publicJwk = {
-    kty: "EC" as const,
-    crv: "P-256" as const,
-    x: exported.x,
-    y: exported.y,
-  };
-  return { privateKey: kp.privateKey, publicJwk, jkt: jwkThumbprint(publicJwk) };
-}
-
-async function makeProof(
-  kp: TestKeypair,
-  claims: { jti: string; htm: string; htu: string; iat: number },
-): Promise<string> {
-  const header = { typ: "dpop+jwt", alg: "ES256", jwk: kp.publicJwk };
-  const h64 = Buffer.from(JSON.stringify(header)).toString("base64url");
-  const p64 = Buffer.from(JSON.stringify(claims)).toString("base64url");
-  const signingInput = `${h64}.${p64}`;
-  const sig = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    kp.privateKey,
-    textEncode(signingInput),
-  );
-  return `${signingInput}.${Buffer.from(sig).toString("base64url")}`;
-}
 
 describe("POST /api/mobile/token — real-key DPoP (C10 sentinel for C6)", () => {
   beforeEach(() => {

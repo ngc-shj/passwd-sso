@@ -4,6 +4,9 @@ import { ensureHostPermission } from "../lib/api";
 import { t } from "../lib/i18n";
 import { humanizeError } from "../lib/error-messages";
 import { useTheme } from "../lib/theme";
+import { getDpopThumbprint, deleteIdbKey } from "../lib/dpop-key";
+import { EXT_API_PATH } from "../lib/api-paths";
+import { EXT_MSG } from "../lib/constants";
 
 const DEFAULT_SERVER_URL = "https://localhost:3000";
 
@@ -16,6 +19,11 @@ function validateServerUrl(raw: string): { ok: boolean; value: string; error?: s
     if (url.protocol !== "https:" && !(isLocalhost && url.protocol === "http:")) {
       return { ok: false, value: trimmed, error: "HTTPS_REQUIRED" };
     }
+    // Reject double slashes in the path (e.g. https://example.com//path)
+    if (/\/\//.test(url.pathname)) {
+      return { ok: false, value: trimmed, error: "INVALID_URL" };
+    }
+    // Strip trailing slash; URL constructor lowercases scheme/host and strips default port.
     const path = url.pathname.replace(/\/+$/, "");
     return { ok: true, value: `${url.origin}${path}` };
   } catch {
@@ -110,6 +118,7 @@ export function App() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
   const [savedSnapshot, setSavedSnapshot] = useState("");
+  const [resetStatus, setResetStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
 
   const snapshot = (urlOverride?: string) => JSON.stringify({
     serverUrl: urlOverride ?? serverUrl, autoLockMinutes, theme, showBadgeCount,
@@ -201,6 +210,76 @@ export function App() {
     setTimeout(() => setSaved(false), 2000);
   };
 
+  const handleResetConnection = async () => {
+    setResetStatus("loading");
+    try {
+      const { serverUrl: savedServerUrl } = await getSettings();
+      const validated = validateServerUrl(savedServerUrl);
+      if (!validated.ok) {
+        setResetStatus("error");
+        return;
+      }
+
+      // Get current DPoP thumbprint — must be sent in body and in the DPoP proof.
+      const cnfJkt = await getDpopThumbprint();
+
+      // Get the current token from the background SW.
+      const statusRes = await chrome.runtime.sendMessage({ type: EXT_MSG.GET_TOKEN }) as { token: string | null };
+      const token = statusRes?.token;
+      if (!token) {
+        // No active session — just delete the IDB key locally, then tell SW
+        // to drop its in-memory dpop-key cache (separate JS heap from this
+        // Options page; otherwise SW would re-bind the next bridge-code token
+        // to the stale jkt — see RESET_DPOP_KEY handler in background/index.ts).
+        await deleteIdbKey();
+        chrome.runtime.sendMessage({ type: EXT_MSG.RESET_DPOP_KEY });
+        setResetStatus("ok");
+        setTimeout(() => setResetStatus("idle"), 2000);
+        return;
+      }
+
+      // Sign a DPoP proof for the reset endpoint.
+      const { signDpopProof } = await import("../lib/dpop-key");
+      const dpopProof = await signDpopProof({
+        route: EXT_API_PATH.EXTENSION_KEY_RESET,
+        method: "POST",
+        serverUrl: validated.value,
+        accessToken: token,
+      });
+
+      const res = await fetch(`${validated.value}${EXT_API_PATH.EXTENSION_KEY_RESET}`, {
+        method: "POST",
+        // Omit cookies — extension authenticates via Bearer + DPoP. Without
+        // this, Chrome attaches the web app's session cookie (host_permissions),
+        // tripping the server's CSRF gate (cookie+POST → assertOrigin 403).
+        credentials: "omit",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+          "DPoP": dpopProof,
+        },
+        body: JSON.stringify({ cnfJkt }),
+      });
+
+      if (!res.ok) {
+        setResetStatus("error");
+        return;
+      }
+
+      // Server confirmed revocation — now delete the IDB key.
+      await deleteIdbKey();
+      // Tell SW to drop its in-memory dpop-key cache so the next bridge-code
+      // flow re-reads IDB (now empty) and generates a fresh key.
+      chrome.runtime.sendMessage({ type: EXT_MSG.RESET_DPOP_KEY });
+      // Ask background SW to clear its token state.
+      chrome.runtime.sendMessage({ type: EXT_MSG.CLEAR_TOKEN });
+      setResetStatus("ok");
+      setTimeout(() => setResetStatus("idle"), 2000);
+    } catch {
+      setResetStatus("error");
+    }
+  };
+
   const renderSection = () => {
     switch (activeSection) {
       case "general":
@@ -268,6 +347,34 @@ export function App() {
       case "security":
         return (
           <>
+            <div className="py-3 flex flex-col gap-2">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                {t("options.resetConnection")}
+              </span>
+              <span className="text-xs text-gray-400 dark:text-gray-500">
+                {t("options.resetConnectionHint")}
+              </span>
+              <div className="flex items-center gap-3 mt-1">
+                <button
+                  type="button"
+                  onClick={() => void handleResetConnection()}
+                  disabled={resetStatus === "loading"}
+                  className="px-4 py-1.5 bg-red-600 dark:bg-red-700 text-white text-sm font-medium rounded-md hover:bg-red-700 dark:hover:bg-red-600 active:bg-red-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap shrink-0"
+                >
+                  {resetStatus === "loading" ? t("options.resetConnectionLoading") : t("options.resetConnectionAction")}
+                </button>
+                {resetStatus === "ok" && (
+                  <span className="text-sm text-green-600 dark:text-green-400 font-medium">
+                    {t("options.resetConnectionOk")}
+                  </span>
+                )}
+                {resetStatus === "error" && (
+                  <span className="text-sm text-red-600 dark:text-red-400">
+                    {t("options.resetConnectionError")}
+                  </span>
+                )}
+              </div>
+            </div>
             <SettingRow
               label={t("options.autoLock")}
               description={

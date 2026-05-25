@@ -1,4 +1,4 @@
-import { getAppOrigin } from "@/lib/url-helpers";
+import { getAppOrigin, resolveBasePath } from "@/lib/url-helpers";
 
 /**
  * Build the canonical `htu` value the server expects in a DPoP proof.
@@ -11,10 +11,10 @@ import { getAppOrigin } from "@/lib/url-helpers";
  *  - scheme:    lowercase
  *  - host:      lowercase
  *  - port:      stripped if it is the scheme default (80/443)
- *  - basePath:  preserved from APP_URL/AUTH_URL pathname (so basePath-mounted
- *               deployments like `https://example.com/passwd-sso` produce
- *               `https://example.com/passwd-sso/api/...` matching the URL the
- *               client actually called)
+ *  - basePath:  primary source = APP_URL/AUTH_URL pathname; fallback =
+ *               `NEXT_PUBLIC_BASE_PATH` env (so deployments that put the
+ *               sub-path in NEXT_PUBLIC_BASE_PATH instead of AUTH_URL still
+ *               match the URL the client actually called)
  *  - path:      exactly the route as configured (proxy rewrites must NOT
  *               reach this layer — server records its canonical URL once)
  *  - query, fragment: removed
@@ -36,11 +36,9 @@ export function canonicalHtu(args: { route: string }): string {
     (scheme === "https:" && (port === "" || port === "443"));
   const authority = isDefaultPort ? host : `${host}:${port}`;
 
-  // Preserve basePath from APP_URL pathname. For non-basePath deployments
-  // the pathname is "" or "/" — both strip to "" so the legacy URL shape
-  // `<scheme>//<authority><route>` is produced unchanged.
-  let basePath = url.pathname;
-  if (basePath.endsWith("/")) basePath = basePath.slice(0, -1);
+  // basePath: APP_URL/AUTH_URL pathname → NEXT_PUBLIC_BASE_PATH env fallback.
+  // See resolveBasePath in url-helpers.ts.
+  const basePath = resolveBasePath(url);
 
   const path = normalizePath(args.route);
   return `${scheme}//${authority}${basePath}${path}`;
@@ -49,6 +47,34 @@ export function canonicalHtu(args: { route: string }): string {
 function normalizePath(route: string): string {
   if (!route.startsWith("/")) return `/${route}`;
   return route;
+}
+
+/**
+ * Build the canonical `htu` value the client (browser extension) should use
+ * when constructing a DPoP proof for a call to this server.
+ *
+ * Produces the same output as `canonicalHtu` when `serverUrl` equals
+ * APP_URL/AUTH_URL, ensuring client-server htu equivalence:
+ *
+ *   canonicalHtuClient(serverUrl, route) === canonicalHtu({ route })
+ *   when getAppOrigin() === serverUrl (basePath included)
+ *
+ * Algorithm (per plan §C-shared / Round-3 S23-r3):
+ *  - Parse serverUrl with `new URL`.
+ *  - `URL.origin` lowercases scheme/host AND strips default ports (:80/:443).
+ *  - Preserve pathname as basePath (trailing slash stripped) so deployments
+ *    mounted at a sub-path (e.g. `https://example.com/passwd-sso`) produce
+ *    `https://example.com/passwd-sso/api/...` matching the server's htu.
+ *  - Append route (must start with `/`).
+ *
+ * @param serverUrl  Full server URL, e.g. from extension settings ("serverUrl").
+ * @param route      API route path, e.g. "/api/extension/token/exchange".
+ */
+export function canonicalHtuClient(serverUrl: string, route: string): string {
+  const url = new URL(serverUrl);
+  const basePath = resolveBasePath(url);
+  const path = route.startsWith("/") ? route : `/${route}`;
+  return `${url.origin}${basePath}${path}`;
 }
 
 /**

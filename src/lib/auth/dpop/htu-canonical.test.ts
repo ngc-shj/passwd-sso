@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { canonicalHtu, htuMatches } from "./htu-canonical";
+import { canonicalHtu, canonicalHtuClient, htuMatches } from "./htu-canonical";
 
 beforeEach(() => {
   // Default: APP_URL set. Specific tests override via vi.stubEnv.
@@ -84,6 +84,16 @@ describe("canonicalHtu", () => {
       "https://example.com/apps/passwd-sso/api/mobile/token/refresh",
     );
   });
+
+  // Integration smoke test: canonicalHtu delegates basePath to resolveBasePath
+  // (whose detailed behavior is tested in url-helpers.test.ts).
+  it("falls back to NEXT_PUBLIC_BASE_PATH when APP_URL has no basePath", () => {
+    vi.stubEnv("APP_URL", "https://example.com");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
+    expect(canonicalHtu({ route: "/api/extension/token/exchange" })).toBe(
+      "https://example.com/passwd-sso/api/extension/token/exchange",
+    );
+  });
 });
 
 describe("htuMatches", () => {
@@ -153,4 +163,116 @@ describe("htuMatches", () => {
       ),
     ).toBe(false);
   });
+});
+
+describe("canonicalHtuClient", () => {
+  it("basic URL — strips default port and produces origin+route", () => {
+    expect(canonicalHtuClient("https://example.com", "/api/foo")).toBe(
+      "https://example.com/api/foo",
+    );
+  });
+
+  it("lowercases scheme and host (URL.origin behavior)", () => {
+    expect(canonicalHtuClient("HTTPS://EXAMPLE.COM", "/api/foo")).toBe(
+      "https://example.com/api/foo",
+    );
+  });
+
+  it("strips default https port 443", () => {
+    expect(canonicalHtuClient("https://example.com:443", "/api/foo")).toBe(
+      "https://example.com/api/foo",
+    );
+  });
+
+  it("strips default http port 80", () => {
+    expect(canonicalHtuClient("http://example.com:80", "/api/foo")).toBe(
+      "http://example.com/api/foo",
+    );
+  });
+
+  it("preserves non-default port", () => {
+    expect(canonicalHtuClient("http://localhost:3000", "/api/foo")).toBe(
+      "http://localhost:3000/api/foo",
+    );
+  });
+
+  it("preserves basePath (no trailing slash)", () => {
+    expect(
+      canonicalHtuClient("https://example.com/passwd-sso", "/api/extension/token/exchange"),
+    ).toBe("https://example.com/passwd-sso/api/extension/token/exchange");
+  });
+
+  it("strips trailing slash from serverUrl before appending route", () => {
+    expect(
+      canonicalHtuClient("https://example.com/passwd-sso/", "/api/x"),
+    ).toBe("https://example.com/passwd-sso/api/x");
+  });
+
+  it("adds leading slash to route when missing", () => {
+    expect(canonicalHtuClient("https://example.com", "api/foo")).toBe(
+      "https://example.com/api/foo",
+    );
+  });
+});
+
+// ─── canonicalHtuClient vs canonicalHtu equivalence smoke tests ──────────────
+//
+// Per plan §C-shared / Round-3 S23-r3: both functions MUST produce identical
+// htu strings when serverUrl === APP_URL (including basePath deployments).
+// Regression here means the extension's DPoP proofs will fail on the server.
+
+describe("canonicalHtuClient === canonicalHtu equivalence", () => {
+  it.each([
+    {
+      label: "plain domain (no basePath)",
+      serverUrl: "https://example.com",
+      route: "/api/extension/token/exchange",
+      appOrigin: "https://example.com",
+    },
+    {
+      label: "uppercase scheme+host in serverUrl",
+      serverUrl: "HTTPS://EXAMPLE.COM",
+      route: "/api/x",
+      appOrigin: "https://example.com",
+    },
+    {
+      label: "default port 443 present in serverUrl",
+      serverUrl: "https://example.com:443",
+      route: "/api/x",
+      appOrigin: "https://example.com",
+    },
+    {
+      label: "trailing slash on serverUrl",
+      serverUrl: "https://example.com/",
+      route: "/api/x",
+      appOrigin: "https://example.com",
+    },
+    {
+      label: "basePath-bearing serverUrl (S23-r3 critical case)",
+      serverUrl: "https://example.com/passwd-sso",
+      route: "/api/x",
+      appOrigin: "https://example.com/passwd-sso",
+    },
+    {
+      label: "basePath with trailing slash on serverUrl",
+      serverUrl: "https://example.com/passwd-sso/",
+      route: "/api/x",
+      appOrigin: "https://example.com/passwd-sso",
+    },
+    {
+      label: "multi-segment basePath",
+      serverUrl: "https://example.com/apps/passwd-sso",
+      route: "/api/mobile/token/refresh",
+      appOrigin: "https://example.com/apps/passwd-sso",
+    },
+  ])(
+    "$label",
+    ({ serverUrl, route, appOrigin }) => {
+      vi.stubEnv("APP_URL", appOrigin);
+      vi.stubEnv("AUTH_URL", "");
+      const serverResult = canonicalHtu({ route });
+      const clientResult = canonicalHtuClient(serverUrl, route);
+      expect(clientResult).toBe(serverResult);
+    },
+  );
 });

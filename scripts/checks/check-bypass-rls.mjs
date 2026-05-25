@@ -29,6 +29,12 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/audit/audit-user-lookup.ts", ["user"]],
   ["src/lib/auth/tokens/scim-token.ts", ["scimToken"]],
   ["src/lib/auth/tokens/extension-token.ts", ["extensionToken", "tenant"]],
+  // C5: shared DPoP validate helper for IOS_APP + BROWSER_EXTENSION rows.
+  // Updates lastUsedAt / lastUsedIp / lastUsedUserAgent on the resolved row.
+  ["src/lib/auth/dpop/validate-token-dpop.ts", ["extensionToken"]],
+  // C12: user-initiated key reset revokes the calling user's cnfJkt-bound
+  // ExtensionToken rows (after body-cnfJkt-must-match-proof check).
+  ["src/app/api/extension/key/reset/route.ts", ["extensionToken"]],
   ["src/lib/auth/access/maintenance-auth.ts", ["tenantMember"]],
   ["src/app/api/extension/bridge-code/route.ts", ["extensionBridgeCode"]],
   ["src/app/api/extension/token/exchange/route.ts", ["extensionBridgeCode"]],

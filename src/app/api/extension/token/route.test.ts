@@ -17,6 +17,7 @@ const {
   mockCheckIpRateLimit,
   mockCheckRateLimit,
   mockWarn,
+  mockVerifyDpop,
 } = vi.hoisted(() => ({
   mockFindUnique: vi.fn(),
   mockUpdate: vi.fn(),
@@ -27,6 +28,18 @@ const {
   mockCheckIpRateLimit: vi.fn().mockResolvedValue({ allowed: true }),
   mockCheckRateLimit: vi.fn().mockResolvedValue(null),
   mockWarn: vi.fn(),
+  mockVerifyDpop: vi.fn(),
+}));
+
+vi.mock("@/lib/auth/dpop/verify", () => ({
+  verifyDpopProof: mockVerifyDpop,
+  computeAth: vi.fn((t: string) => `ath-${t}`),
+}));
+vi.mock("@/lib/auth/dpop/jti-cache", () => ({
+  getJtiCache: vi.fn(() => ({ has: vi.fn(() => false), add: vi.fn() })),
+}));
+vi.mock("@/lib/auth/dpop/htu-canonical", () => ({
+  canonicalHtu: vi.fn(() => "https://localhost:3000/api/extension/token"),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -151,9 +164,12 @@ describe("POST /api/extension/token", () => {
 
 // ─── DELETE ──────────────────────────────────────────────────
 
+const VALID_CNF_JKT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb";
+
 describe("DELETE /api/extension/token", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockVerifyDpop.mockResolvedValue({ ok: true, claims: {}, jkt: VALID_CNF_JKT });
   });
 
   it("revokes a token successfully via Bearer", async () => {
@@ -163,6 +179,10 @@ describe("DELETE /api/extension/token", () => {
       scope: "passwords:read,vault:unlock-data",
       expiresAt: new Date("2030-01-01"),
       revokedAt: null,
+      cnfJkt: VALID_CNF_JKT,
+      familyId: "fam-1",
+      familyCreatedAt: new Date(),
+      clientKind: "BROWSER_EXTENSION",
     });
     mockUpdate.mockResolvedValue({});
 
@@ -243,6 +263,10 @@ describe("DELETE /api/extension/token", () => {
       scope: "passwords:read,vault:unlock-data",
       expiresAt: new Date("2030-01-01"),
       revokedAt: null,
+      cnfJkt: VALID_CNF_JKT,
+      familyId: "fam-1",
+      familyCreatedAt: new Date(),
+      clientKind: "BROWSER_EXTENSION",
     });
     const denied = new Response(
       JSON.stringify({ error: "ACCESS_DENIED" }),

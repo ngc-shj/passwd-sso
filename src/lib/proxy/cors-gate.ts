@@ -24,6 +24,7 @@ export const EXTENSION_TOKEN_ROUTES: readonly string[] = [
   API_PATH.VAULT_UNLOCK_DATA,
   API_PATH.EXTENSION_TOKEN,         // DELETE (revoke) — validated by route handler
   API_PATH.EXTENSION_TOKEN_REFRESH, // POST (refresh) — validated by route handler
+  API_PATH.EXTENSION_KEY_RESET,     // POST (key reset) — Bearer + DPoP, no session cookie
   API_PATH.TENANT_ACCESS_REQUESTS,  // SA self-service JIT — validated by route handler via authOrToken
   API_PATH.VAULT_DELEGATION,        // Delegation check — CLI agent uses Bearer for /check
 ];
@@ -37,7 +38,8 @@ export function isBearerBypassRoute(pathname: string): boolean {
   return EXTENSION_TOKEN_ROUTES.some((route) => {
     if (
       route === API_PATH.EXTENSION_TOKEN ||
-      route === API_PATH.EXTENSION_TOKEN_REFRESH
+      route === API_PATH.EXTENSION_TOKEN_REFRESH ||
+      route === API_PATH.EXTENSION_KEY_RESET
     ) {
       return pathname === route;
     }

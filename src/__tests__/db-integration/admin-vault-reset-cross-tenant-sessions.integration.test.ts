@@ -156,10 +156,10 @@ describe.skipIf(!redisAvailable)(
         await tx.$executeRawUnsafe(
           `INSERT INTO extension_tokens (
              id, user_id, tenant_id, token_hash, scope,
-             expires_at, family_id, family_created_at, created_at
+             expires_at, family_id, family_created_at, created_at, cnf_jkt
            ) VALUES (
              $1::uuid, $2::uuid, $3::uuid, $4, $5,
-             now() + interval '1 day', $6::uuid, now(), now()
+             now() + interval '1 day', $6::uuid, now(), now(), $7
            )`,
           id,
           userId,
@@ -167,6 +167,9 @@ describe.skipIf(!redisAvailable)(
           tokenHash,
           "extension:read",
           familyId,
+          // BROWSER_EXTENSION rows require cnf_jkt (CHECK constraint
+          // `extension_tokens_cnf_jkt_required_for_browser_ext`).
+          "a".repeat(43),
         );
       });
       return id;
