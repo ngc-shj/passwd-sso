@@ -151,7 +151,11 @@ export async function validateExtensionToken(
   });
 
   if (!dpopResult.ok) {
-    return { ok: false, error: "EXTENSION_TOKEN_DPOP_INVALID" };
+    return {
+      ok: false,
+      error: "EXTENSION_TOKEN_DPOP_INVALID",
+      dpopError: dpopResult.dpopError,
+    };
   }
   return { ok: true, data: dpopResult.data };
 }

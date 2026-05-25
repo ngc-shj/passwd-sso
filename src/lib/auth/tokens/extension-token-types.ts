@@ -48,4 +48,13 @@ export type TokenValidationError =
 
 export type TokenValidationResult =
   | { ok: true; data: ValidatedExtensionToken }
-  | { ok: false; error: TokenValidationError };
+  | {
+      ok: false;
+      error: TokenValidationError;
+      /**
+       * Granular DPoP failure reason when `error === "EXTENSION_TOKEN_DPOP_INVALID"`.
+       * Diagnostic only — callers may surface it in pino logs but MUST NOT echo
+       * it to clients (RFC 9449 §6.1: timing-uniform 401 to avoid oracle).
+       */
+      dpopError?: string;
+    };

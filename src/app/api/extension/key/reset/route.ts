@@ -61,6 +61,7 @@ async function handlePOST(req: NextRequest) {
       {
         event: "extension_key_reset_auth_failure",
         reason: validated.error,
+        dpopError: validated.dpopError,
         ip: extractClientIp(req),
         userAgent: req.headers.get("user-agent"),
       },

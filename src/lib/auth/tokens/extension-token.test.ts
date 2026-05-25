@@ -277,7 +277,11 @@ describe("validateExtensionToken", () => {
       headers: { Authorization: `Bearer ${"a".repeat(64)}` },
     });
     const result = await validateExtensionToken(req);
-    expect(result).toEqual({ ok: false, error: "EXTENSION_TOKEN_DPOP_INVALID" });
+    expect(result).toEqual({
+      ok: false,
+      error: "EXTENSION_TOKEN_DPOP_INVALID",
+      dpopError: "DPOP_HEADER_MISSING",
+    });
   });
 
   it("returns INVALID for IOS_APP with null cnfJkt without calling DPoP helper", async () => {
