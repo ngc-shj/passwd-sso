@@ -121,17 +121,19 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("requires session for /api/extension/bridge-code (extension prefix is session-required)", async () => {
+  it("passes /api/extension/bridge-code through (route handler does its own auth + Origin + DPoP)", async () => {
     const res = await proxy(
       createApiRequest("/api/extension/bridge-code", {
         Cookie: "authjs.session-token=sess-bridge",
       }),
       dummyOptions,
     );
-    // The session lookup must run (proves the route is NOT in the bypass list);
-    // mock returns no user → 401.
-    expect(fetchSpy).toHaveBeenCalled();
-    expect(res.status).toBe(401);
+    // Post-C2: bridge-code uses the new API_EXTENSION_BRIDGE_CODE classification
+    // with orchestrator early-return BEFORE the CSRF gate. Proxy does NOT call
+    // auth() — that's the route handler's job (along with Origin allowlist +
+    // DPoP + tenant IP check). Proxy returns 200 (next()) so the route can run.
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
   });
 
   it("does NOT bypass session check for Bearer + /api/api-keys (C2: session-only)", async () => {

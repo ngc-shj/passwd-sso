@@ -61,10 +61,11 @@ export function isExtensionExchangeRoute(pathname: string): boolean {
  */
 export function handleApiPreflight(
   request: NextRequest,
-  opts: { isBearerRoute: boolean; isExchangeRoute: boolean },
+  opts: { isBearerRoute: boolean; isExchangeRoute: boolean; isBridgeCodeRoute?: boolean },
 ): NextResponse {
   return handlePreflight(request, {
     allowExtension: opts.isBearerRoute || opts.isExchangeRoute,
+    allowExtensionCredentials: opts.isBridgeCodeRoute,
   });
 }
 

@@ -23,10 +23,11 @@ export async function handleApiAuth(request: NextRequest) {
   // dispatch is eligible for this specific path.
   const isBearerRoute = isBearerBypassRoute(pathname);
   const isExchangeRoute = policy.kind === ROUTE_POLICY_KIND.API_EXTENSION_EXCHANGE;
+  const isBridgeCodeRoute = policy.kind === ROUTE_POLICY_KIND.API_EXTENSION_BRIDGE_CODE;
 
   // Preflight (handled regardless of policy.kind).
   if (request.method === "OPTIONS") {
-    return handleApiPreflight(request, { isBearerRoute, isExchangeRoute });
+    return handleApiPreflight(request, { isBearerRoute, isExchangeRoute, isBridgeCodeRoute });
   }
 
   // Non-CSRF early returns. ALL paths outside the cookie-CSRF threat
@@ -43,6 +44,18 @@ export async function handleApiAuth(request: NextRequest) {
     const res = NextResponse.next();
     res.headers.set("Cache-Control", "private, no-store");
     return res;
+  }
+
+  // POST /api/extension/bridge-code — chrome-extension Origin + session
+  // cookie + DPoP. The CSRF gate would otherwise reject the cookie+POST
+  // request because Origin is chrome-extension://<id>, not APP_URL. The
+  // route handler enforces its own Origin allowlist check + auth() + DPoP
+  // + tenant IP restriction. MUST short-circuit BEFORE the CSRF gate fires
+  // — see plan C2 (Round-2 S14/T16 load-bearing wiring).
+  if (isBridgeCodeRoute) {
+    const res = NextResponse.next();
+    res.headers.set("Cache-Control", "private, no-store");
+    return applyCorsHeaders(request, res, { allowExtensionCredentials: true });
   }
 
   // Baseline CSRF gate: request-attribute-based, path-independent.

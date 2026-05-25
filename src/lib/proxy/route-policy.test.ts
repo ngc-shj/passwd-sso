@@ -38,13 +38,15 @@ const POSITIVE_CASES: Record<RoutePolicyKind, readonly ClassifyCase[]> = {
   [ROUTE_POLICY_KIND.API_EXTENSION_EXCHANGE]: [
     { pathname: "/api/extension/token/exchange", description: "exact exchange" },
   ],
+  [ROUTE_POLICY_KIND.API_EXTENSION_BRIDGE_CODE]: [
+    { pathname: "/api/extension/bridge-code", description: "exact bridge-code (chrome-extension origin + session cookie + DPoP)" },
+  ],
   [ROUTE_POLICY_KIND.API_SESSION_REQUIRED]: [
     { pathname: "/api/passwords", description: "passwords prefix" },
     { pathname: "/api/teams/team-1", description: "teams prefix" },
     { pathname: "/api/vault/setup", description: "vault prefix" },
     { pathname: "/api/folders", description: "folders prefix" },
     { pathname: "/api/notifications", description: "notifications prefix" },
-    { pathname: "/api/extension/bridge-code", description: "extension non-token-exchange" },
     { pathname: "/api/mcp/authorize", description: "mcp authorize exact path" },
     { pathname: "/api/mcp/authorize/consent", description: "mcp consent exact path" },
     { pathname: "/api/mobile/authorize", description: "mobile authorize exact path" },
