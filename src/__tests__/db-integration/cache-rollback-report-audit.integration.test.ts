@@ -14,7 +14,7 @@
  * integration tests (audit-outbox-*.integration.test.ts).
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
@@ -28,9 +28,6 @@ import {
 } from "@/__tests__/helpers/dpop-test-keypair";
 import { _resetJtiCacheForTests } from "@/lib/auth/dpop/jti-cache";
 import { ROLLBACK_REJECTION_KIND } from "@/app/api/mobile/cache-rollback-report/route";
-
-// Set APP_URL before importing the route so canonicalHtu() resolves.
-process.env.APP_URL = process.env.APP_URL ?? "https://app.example.test";
 
 import { POST as cacheRollbackReportPOST } from "@/app/api/mobile/cache-rollback-report/route";
 
@@ -46,6 +43,9 @@ describe("POST /api/mobile/cache-rollback-report — audit emission (T43)", () =
     await ctx.cleanup();
   });
   beforeEach(async () => {
+    // canonicalHtu reads APP_URL at call time (not import time), so the stub
+    // here applies before any handler invocation. afterEach unstubs via setup.ts.
+    vi.stubEnv("APP_URL", "https://app.example.test");
     tenantId = await ctx.createTenant();
     userId = await ctx.createUser(tenantId);
     _resetJtiCacheForTests();
