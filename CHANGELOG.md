@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.53](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.52...passwd-sso-v0.4.53) (2026-05-25)
+
+
+### Features
+
+* **extension:** SW-initiated bridge-code + cnf_jkt trust path ([#492](https://github.com/ngc-shj/passwd-sso/issues/492)) ([24a2002](https://github.com/ngc-shj/passwd-sso/commit/24a20026e54cedf549e00e1aabc3774da53c9756))
+
 ## [0.4.52](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.51...passwd-sso-v0.4.52) (2026-05-25)
 
 
