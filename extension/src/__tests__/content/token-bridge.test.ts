@@ -1,38 +1,43 @@
 /**
  * @vitest-environment jsdom
+ *
+ * C7 — content script connect-request relay tests. The content script's only
+ * job is to forward EXT_CONNECT_REQUEST → SW.START_CONNECT and post back
+ * EXT_CONNECT_READY with the SW's result.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { handlePostMessage } from "../../content/token-bridge-lib";
-import { BRIDGE_CODE_MSG_TYPE, EXT_JKT_REQUEST_MSG_TYPE, EXT_JKT_READY_MSG_TYPE } from "../../lib/constants";
+import {
+  EXT_CONNECT_REQUEST_MSG_TYPE,
+  EXT_CONNECT_READY_MSG_TYPE,
+} from "../../lib/constants";
 
-const VALID_CODE = "a".repeat(64);
-
-describe("token bridge (postMessage)", () => {
-  let mockFetch: ReturnType<typeof vi.fn>;
+describe("token bridge (postMessage) — EXT_CONNECT_REQUEST relay", () => {
+  let mockSendMessage: ReturnType<typeof vi.fn>;
+  let postedMessages: Array<{ data: unknown; targetOrigin: string }>;
+  let originalPostMessage: typeof window.postMessage;
 
   beforeEach(() => {
-    mockFetch = vi.fn();
-    vi.stubGlobal("fetch", mockFetch);
+    mockSendMessage = vi.fn();
     vi.stubGlobal("chrome", {
       runtime: {
         id: "test-extension-id",
-        sendMessage: vi.fn().mockImplementation(async (msg: { type: string }) => {
-          if (msg.type === "GET_DPOP_PROOF") {
-            return { dpop: "fake.dpop.jws" };
-          }
-          return undefined;
-        }),
-      },
-      storage: {
-        local: {
-          get: vi.fn().mockResolvedValue({ serverUrl: "https://test.example" }),
-        },
+        sendMessage: mockSendMessage,
       },
     });
+
+    // Capture window.postMessage targets without dispatching events (which
+    // would cause infinite recursion through handlePostMessage's listener).
+    postedMessages = [];
+    originalPostMessage = window.postMessage.bind(window);
+    window.postMessage = ((data: unknown, targetOrigin: string) => {
+      postedMessages.push({ data, targetOrigin });
+    }) as typeof window.postMessage;
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    window.postMessage = originalPostMessage;
   });
 
   function makeEvent(
@@ -43,231 +48,102 @@ describe("token bridge (postMessage)", () => {
     return { data, source, origin } as unknown as MessageEvent;
   }
 
-  describe("bridge code exchange (BRIDGE_CODE_MSG_TYPE)", () => {
-    it("rejects bridge code message from a different origin", async () => {
-      const ok = await handlePostMessage(
-        makeEvent(
-          { type: BRIDGE_CODE_MSG_TYPE, code: VALID_CODE, expiresAt: 123 },
-          window,
-          "https://evil.com",
-        ),
-      );
-      expect(ok).toBe(false);
-      expect(mockFetch).not.toHaveBeenCalled();
-    });
+  it("rejects message from a different origin (cross-origin)", async () => {
+    const ok = await handlePostMessage(
+      makeEvent(
+        { type: EXT_CONNECT_REQUEST_MSG_TYPE, reqId: "req-1" },
+        window,
+        "https://evil.com",
+      ),
+    );
+    expect(ok).toBe(false);
+    expect(mockSendMessage).not.toHaveBeenCalled();
+    expect(postedMessages).toHaveLength(0);
+  });
 
-    it("rejects bridge code message with wrong type", async () => {
-      const ok = await handlePostMessage(
-        makeEvent({ type: "OTHER_MSG", code: VALID_CODE, expiresAt: 123 }),
-      );
-      expect(ok).toBe(false);
-      expect(mockFetch).not.toHaveBeenCalled();
-    });
+  it("rejects message from a different source (iframe)", async () => {
+    const ok = await handlePostMessage(
+      makeEvent({ type: EXT_CONNECT_REQUEST_MSG_TYPE, reqId: "req-1" }, {}),
+    );
+    expect(ok).toBe(false);
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
 
-    it("does not respond to bridge code messages with invalid type (oracle prevention)", async () => {
-      await handlePostMessage(makeEvent({ type: "WRONG" }, {}));
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
-      expect(mockFetch).not.toHaveBeenCalled();
-    });
+  it("ignores messages with unknown type (oracle prevention)", async () => {
+    const ok = await handlePostMessage(makeEvent({ type: "OTHER_MSG", reqId: "req-1" }));
+    expect(ok).toBe(false);
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
 
-    it("forwards token to background after successful exchange", async () => {
-      const cnfJkt = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
-      mockFetch.mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            token: "issued-token",
-            expiresAt: "2099-01-01T00:00:00.000Z",
-            cnfJkt,
-          }),
-          { status: 201 },
-        ),
-      );
+  it("ignores connect requests without a reqId (defensive)", async () => {
+    const ok = await handlePostMessage(makeEvent({ type: EXT_CONNECT_REQUEST_MSG_TYPE }));
+    expect(ok).toBe(false);
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
 
-      const ok = await handlePostMessage(
-        makeEvent({ type: BRIDGE_CODE_MSG_TYPE, code: VALID_CODE, expiresAt: 123 }),
-      );
+  it("forwards START_CONNECT and posts READY with ok:true on success", async () => {
+    mockSendMessage.mockResolvedValueOnce({ ok: true });
 
-      expect(ok).toBe(true);
-      expect(mockFetch).toHaveBeenCalledWith(
-        "https://test.example/api/extension/token/exchange",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({ code: VALID_CODE }),
-          headers: expect.objectContaining({ DPoP: "fake.dpop.jws" }),
-        }),
-      );
-      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "GET_DPOP_PROOF" }),
-      );
-      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-        type: "SET_TOKEN",
-        token: "issued-token",
-        expiresAt: Date.parse("2099-01-01T00:00:00.000Z"),
-        cnfJkt,
-      });
-    });
+    const ok = await handlePostMessage(
+      makeEvent({ type: EXT_CONNECT_REQUEST_MSG_TYPE, reqId: "req-42" }),
+    );
 
-    it("rejects bridge code message from a different source (iframe)", async () => {
-      const ok = await handlePostMessage(
-        makeEvent({ type: BRIDGE_CODE_MSG_TYPE, code: VALID_CODE, expiresAt: 123 }, {}),
-      );
-      expect(ok).toBe(false);
-      expect(mockFetch).not.toHaveBeenCalled();
-    });
-
-    it("rejects bridge code message with code of wrong length", async () => {
-      const ok = await handlePostMessage(
-        makeEvent({ type: BRIDGE_CODE_MSG_TYPE, code: "tooshort", expiresAt: 123 }),
-      );
-      expect(ok).toBe(false);
-      expect(mockFetch).not.toHaveBeenCalled();
-    });
-
-    it("rejects bridge code message with NaN expiresAt", async () => {
-      const ok = await handlePostMessage(
-        makeEvent({ type: BRIDGE_CODE_MSG_TYPE, code: VALID_CODE, expiresAt: NaN }),
-      );
-      expect(ok).toBe(false);
-      expect(mockFetch).not.toHaveBeenCalled();
-    });
-
-    it("does not forward token when exchange returns 401", async () => {
-      mockFetch.mockResolvedValueOnce(new Response("", { status: 401 }));
-      const ok = await handlePostMessage(
-        makeEvent({ type: BRIDGE_CODE_MSG_TYPE, code: VALID_CODE, expiresAt: 123 }),
-      );
-      expect(ok).toBe(false);
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
-        expect.objectContaining({ type: "SET_TOKEN" }),
-      );
-    });
-
-    it("does not forward token when fetch network throws", async () => {
-      mockFetch.mockRejectedValueOnce(new Error("network"));
-      const ok = await handlePostMessage(
-        makeEvent({ type: BRIDGE_CODE_MSG_TYPE, code: VALID_CODE, expiresAt: 123 }),
-      );
-      expect(ok).toBe(false);
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
-        expect.objectContaining({ type: "SET_TOKEN" }),
-      );
-    });
-
-    it("does not exchange when serverUrl is missing", async () => {
-      vi.stubGlobal("chrome", {
-        runtime: { id: "test-extension-id", sendMessage: vi.fn() },
-        storage: {
-          local: { get: vi.fn().mockResolvedValue({}) },
-        },
-      });
-      const ok = await handlePostMessage(
-        makeEvent({ type: BRIDGE_CODE_MSG_TYPE, code: VALID_CODE, expiresAt: 123 }),
-      );
-      expect(ok).toBe(false);
-      expect(mockFetch).not.toHaveBeenCalled();
-    });
-
-    it("does not forward token when exchange response shape is invalid", async () => {
-      mockFetch.mockResolvedValueOnce(
-        new Response(JSON.stringify({ unexpected: "shape" }), { status: 201 }),
-      );
-      const ok = await handlePostMessage(
-        makeEvent({ type: BRIDGE_CODE_MSG_TYPE, code: VALID_CODE, expiresAt: 123 }),
-      );
-      expect(ok).toBe(false);
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(
-        expect.objectContaining({ type: "SET_TOKEN" }),
-      );
-    });
-
-    it("returns false when DPoP proof is null (missing IDB key)", async () => {
-      // GET_DPOP_PROOF returns null — exchange must be aborted (F2 fix)
-      vi.stubGlobal("chrome", {
-        runtime: {
-          id: "test-extension-id",
-          sendMessage: vi.fn().mockImplementation(async (msg: { type: string }) => {
-            if (msg.type === "GET_DPOP_PROOF") return { dpop: null };
-            return undefined;
-          }),
-        },
-        storage: {
-          local: { get: vi.fn().mockResolvedValue({ serverUrl: "https://test.example" }) },
-        },
-      });
-      const ok = await handlePostMessage(
-        makeEvent({ type: BRIDGE_CODE_MSG_TYPE, code: VALID_CODE, expiresAt: 123 }),
-      );
-      expect(ok).toBe(false);
-      expect(mockFetch).not.toHaveBeenCalled();
+    expect(ok).toBe(true);
+    expect(mockSendMessage).toHaveBeenCalledWith({ type: "START_CONNECT" });
+    expect(postedMessages).toHaveLength(1);
+    expect(postedMessages[0]).toEqual({
+      data: { type: EXT_CONNECT_READY_MSG_TYPE, reqId: "req-42", ok: true },
+      targetOrigin: window.location.origin,
     });
   });
 
-  describe("jkt handshake (EXT_JKT_REQUEST_MSG_TYPE)", () => {
-    const STATIC_JKT = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
+  it("propagates errorCode from SW on failure", async () => {
+    mockSendMessage.mockResolvedValueOnce({ ok: false, errorCode: "SESSION_STEP_UP_REQUIRED" });
 
-    beforeEach(() => {
-      vi.stubGlobal("chrome", {
-        runtime: {
-          id: "test-extension-id",
-          sendMessage: vi.fn().mockImplementation(async (msg: { type: string }) => {
-            if (msg.type === "GET_DPOP_JKT") return { jkt: STATIC_JKT };
-            return undefined;
-          }),
-        },
-        storage: {
-          local: { get: vi.fn().mockResolvedValue({ serverUrl: "https://test.example" }) },
-        },
-      });
+    const ok = await handlePostMessage(
+      makeEvent({ type: EXT_CONNECT_REQUEST_MSG_TYPE, reqId: "req-7" }),
+    );
+
+    expect(ok).toBe(true);
+    expect(postedMessages[0].data).toEqual({
+      type: EXT_CONNECT_READY_MSG_TYPE,
+      reqId: "req-7",
+      ok: false,
+      errorCode: "SESSION_STEP_UP_REQUIRED",
     });
+  });
 
-    it("responds to EXT_JKT_REQUEST with GET_DPOP_JKT and posts back EXT_JKT_READY", async () => {
-      const posted: unknown[] = [];
-      vi.spyOn(window, "postMessage").mockImplementation((msg) => { posted.push(msg); });
+  it("posts READY with GENERIC_FAILURE when sendMessage throws", async () => {
+    mockSendMessage.mockRejectedValueOnce(new Error("context invalidated"));
 
-      const reqId = "req-abc-123";
-      const ok = await handlePostMessage(
-        makeEvent({ type: EXT_JKT_REQUEST_MSG_TYPE, reqId }),
-      );
+    const ok = await handlePostMessage(
+      makeEvent({ type: EXT_CONNECT_REQUEST_MSG_TYPE, reqId: "req-9" }),
+    );
 
-      expect(ok).toBe(true);
-      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: "GET_DPOP_JKT" });
-      expect(posted).toContainEqual(
-        expect.objectContaining({ type: EXT_JKT_READY_MSG_TYPE, reqId, jkt: STATIC_JKT }),
-      );
+    expect(ok).toBe(true);
+    expect(postedMessages[0].data).toEqual({
+      type: EXT_CONNECT_READY_MSG_TYPE,
+      reqId: "req-9",
+      ok: false,
+      errorCode: "GENERIC_FAILURE",
     });
+  });
 
-    it("ignores EXT_JKT_REQUEST from a different origin", async () => {
-      const ok = await handlePostMessage(
-        makeEvent({ type: EXT_JKT_REQUEST_MSG_TYPE, reqId: "r1" }, window, "https://evil.com"),
-      );
-      expect(ok).toBe(false);
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
-    });
+  it("never forwards bridge codes or tokens — request envelope carries only reqId", async () => {
+    mockSendMessage.mockResolvedValueOnce({ ok: true });
 
-    it("ignores EXT_JKT_REQUEST from a non-window source (iframe)", async () => {
-      const ok = await handlePostMessage(
-        makeEvent({ type: EXT_JKT_REQUEST_MSG_TYPE, reqId: "r1" }, {}),
-      );
-      expect(ok).toBe(false);
-    });
+    await handlePostMessage(
+      makeEvent({
+        type: EXT_CONNECT_REQUEST_MSG_TYPE,
+        reqId: "req-1",
+        // Even if the page maliciously injects extra fields, they MUST NOT
+        // leak into the runtime message — START_CONNECT carries no payload.
+        token: "should-not-appear",
+        code: "should-not-appear",
+      }),
+    );
 
-    it("ignores EXT_JKT_REQUEST with missing reqId", async () => {
-      const posted: unknown[] = [];
-      vi.spyOn(window, "postMessage").mockImplementation((msg) => { posted.push(msg); });
-
-      const ok = await handlePostMessage(
-        makeEvent({ type: EXT_JKT_REQUEST_MSG_TYPE }),
-      );
-      // reqId missing → handleJktRequestMessage returns false early
-      expect(ok).toBe(false);
-      expect(posted).toHaveLength(0);
-    });
-
-    it("ignores EXT_JKT_REQUEST with non-string reqId", async () => {
-      const ok = await handlePostMessage(
-        makeEvent({ type: EXT_JKT_REQUEST_MSG_TYPE, reqId: 42 }),
-      );
-      expect(ok).toBe(false);
-    });
+    const sentMessage = mockSendMessage.mock.calls[0][0] as Record<string, unknown>;
+    expect(Object.keys(sentMessage).sort()).toEqual(["type"]);
   });
 });

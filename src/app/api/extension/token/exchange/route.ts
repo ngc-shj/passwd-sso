@@ -24,9 +24,14 @@
  *      helper, passing `consumed.cnfJkt` so the token row's cnfJkt
  *      matches.
  *
- * No Auth.js session and no Origin check by design — the extension content
- * script's effective origin is `chrome-extension://`. Compensating control:
- * 256-bit single-use short-lived bridge code + DPoP proof of key custody.
+ * No Auth.js session and no Origin check by design — the SW initiates this
+ * exchange directly with `credentials:"omit"`, so neither cookies nor a
+ * meaningful Origin header reach this route. The cross-origin authentication
+ * for this endpoint is the bridge code itself (256-bit single-use, short TTL)
+ * plus the DPoP proof of key custody. The companion bridge-code endpoint
+ * (`/api/extension/bridge-code`, see C2/C4) does enforce Origin against the
+ * EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS allowlist — that's where the
+ * extension's identity is gated.
  */
 
 import { NextRequest, NextResponse } from "next/server";

@@ -10,8 +10,8 @@
  * Why this lives in the web app and not the extension: the web app vitest
  * environment can read sibling repo files via relative path. The extension
  * `?raw` import inside `token-bridge-js-sync.test.ts` covers
- * `BRIDGE_CODE_MSG_TYPE` in the bundled JS, but cannot verify numeric values
- * that may be inlined or absent from the bundle.
+ * `EXT_CONNECT_REQUEST_MSG_TYPE` in the bundled JS, but cannot verify numeric
+ * values that may be inlined or absent from the bundle.
  */
 
 import path from "node:path";
@@ -20,10 +20,9 @@ import { describe, expect, it } from "vitest";
 import {
   BRIDGE_CODE_LENGTH,
   BRIDGE_CODE_MAX_ACTIVE,
-  BRIDGE_CODE_MSG_TYPE,
   BRIDGE_CODE_TTL_MS,
-  EXT_JKT_REQUEST_MSG_TYPE,
-  EXT_JKT_READY_MSG_TYPE,
+  EXT_CONNECT_REQUEST_MSG_TYPE,
+  EXT_CONNECT_READY_MSG_TYPE,
 } from "@/lib/constants/integrations/extension";
 
 const EXT_CONSTANTS_PATH = path.join(
@@ -52,10 +51,6 @@ function extractNumericConst(name: string): number | undefined {
 }
 
 describe("extension constants sync (web app ↔ extension repo)", () => {
-  it("BRIDGE_CODE_MSG_TYPE matches between web app and extension", () => {
-    expect(extractStringConst("BRIDGE_CODE_MSG_TYPE")).toBe(BRIDGE_CODE_MSG_TYPE);
-  });
-
   it("BRIDGE_CODE_TTL_MS matches between web app and extension", () => {
     expect(extractNumericConst("BRIDGE_CODE_TTL_MS")).toBe(BRIDGE_CODE_TTL_MS);
   });
@@ -68,11 +63,11 @@ describe("extension constants sync (web app ↔ extension repo)", () => {
     expect(extractNumericConst("BRIDGE_CODE_LENGTH")).toBe(BRIDGE_CODE_LENGTH);
   });
 
-  it("EXT_JKT_REQUEST_MSG_TYPE matches between web app and extension", () => {
-    expect(extractStringConst("EXT_JKT_REQUEST_MSG_TYPE")).toBe(EXT_JKT_REQUEST_MSG_TYPE);
+  it("EXT_CONNECT_REQUEST_MSG_TYPE matches between web app and extension", () => {
+    expect(extractStringConst("EXT_CONNECT_REQUEST_MSG_TYPE")).toBe(EXT_CONNECT_REQUEST_MSG_TYPE);
   });
 
-  it("EXT_JKT_READY_MSG_TYPE matches between web app and extension", () => {
-    expect(extractStringConst("EXT_JKT_READY_MSG_TYPE")).toBe(EXT_JKT_READY_MSG_TYPE);
+  it("EXT_CONNECT_READY_MSG_TYPE matches between web app and extension", () => {
+    expect(extractStringConst("EXT_CONNECT_READY_MSG_TYPE")).toBe(EXT_CONNECT_READY_MSG_TYPE);
   });
 });

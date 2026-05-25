@@ -5,10 +5,15 @@ import { MS_PER_MINUTE } from "../time";
 export const TOKEN_ELEMENT_ID = "passwd-sso-ext-token";
 export const TOKEN_READY_EVENT = "passwd-sso-token-ready";
 
-// Bridge code flow: postMessage (web app) → content script → exchange endpoint.
-// The web app posts a one-time code; the extension exchanges it for a bearer
-// token via direct fetch in the content script's isolated world.
-export const BRIDGE_CODE_MSG_TYPE = "PASSWD_SSO_BRIDGE_CODE";
+// Extension-connect handshake (web app → content script → SW → server).
+// After sign-in the web app posts EXT_CONNECT_REQUEST asking the extension's
+// SW to initiate the bridge-code + exchange flow. The SW signs DPoP, calls
+// the credentialed bridge-code endpoint, exchanges the code for a token, and
+// posts EXT_CONNECT_READY back via the content script. The web app never
+// sees the bridge code or the token — those stay inside the SW's heap.
+// Mirrored to `extension/src/lib/constants.ts`; the sync test enforces equality.
+export const EXT_CONNECT_REQUEST_MSG_TYPE = "PASSWD_SSO_EXT_CONNECT_REQUEST";
+export const EXT_CONNECT_READY_MSG_TYPE = "PASSWD_SSO_EXT_CONNECT_READY";
 
 // Bridge code TTL — short enough to limit replay window, long enough to survive
 // extension wakeup latency on slow devices.
@@ -24,11 +29,6 @@ export const BRIDGE_CODE_MAX_ACTIVE = 3;
 // test at `src/__tests__/i18n/extension-constants-sync.test.ts` enforces
 // equality.
 export const BRIDGE_CODE_LENGTH = 64;
-
-// DPoP JKT handshake messages (web app → content script → web app).
-// Mirrored to `extension/src/lib/constants.ts`; the sync test enforces equality.
-export const EXT_JKT_REQUEST_MSG_TYPE = "PASSWD_SSO_EXT_JKT_REQUEST";
-export const EXT_JKT_READY_MSG_TYPE = "PASSWD_SSO_EXT_JKT_READY";
 
 // ── URL params ──
 export const EXT_CONNECT_PARAM = "ext_connect";
