@@ -1,6 +1,28 @@
 import { getAppOrigin } from "@/lib/url-helpers";
 
 /**
+ * Derive basePath from a URL: pathname (trailing slash stripped), with a
+ * fallback to `process.env.NEXT_PUBLIC_BASE_PATH` for deployments that put
+ * the sub-path in the env var instead of AUTH_URL.
+ *
+ * Module-local (not re-exported via url-helpers) to avoid having to update
+ * the 90+ existing test files that mock `@/lib/url-helpers` with partial
+ * shape. Both canonicalHtu and canonicalHtuClient share this derivation —
+ * the only consumers in the codebase.
+ *
+ * Reads process.env at call time so tests can override via vi.stubEnv.
+ */
+function resolveBasePath(url: URL): string {
+  let basePath = url.pathname;
+  if (basePath.endsWith("/")) basePath = basePath.slice(0, -1);
+  if (!basePath) {
+    const envBasePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+    if (envBasePath) basePath = envBasePath;
+  }
+  return basePath;
+}
+
+/**
  * Build the canonical `htu` value the server expects in a DPoP proof.
  *
  * RFC 9449 §4.3:
@@ -36,16 +58,9 @@ export function canonicalHtu(args: { route: string }): string {
     (scheme === "https:" && (port === "" || port === "443"));
   const authority = isDefaultPort ? host : `${host}:${port}`;
 
-  // basePath: primary source is APP_URL/AUTH_URL pathname. If empty (operator
-  // put the sub-path in NEXT_PUBLIC_BASE_PATH instead), fall back to that env
-  // so the htu still matches the URL the client called. Read process.env at
-  // call time (server-only function) so tests can mutate via vi.stubEnv.
-  let basePath = url.pathname;
-  if (basePath.endsWith("/")) basePath = basePath.slice(0, -1);
-  if (!basePath) {
-    const envBasePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
-    if (envBasePath) basePath = envBasePath;
-  }
+  // basePath: APP_URL/AUTH_URL pathname → NEXT_PUBLIC_BASE_PATH env fallback.
+  // See resolveBasePath in url-helpers.ts.
+  const basePath = resolveBasePath(url);
 
   const path = normalizePath(args.route);
   return `${scheme}//${authority}${basePath}${path}`;
@@ -79,8 +94,7 @@ function normalizePath(route: string): string {
  */
 export function canonicalHtuClient(serverUrl: string, route: string): string {
   const url = new URL(serverUrl);
-  let basePath = url.pathname;
-  if (basePath.endsWith("/")) basePath = basePath.slice(0, -1);
+  const basePath = resolveBasePath(url);
   const path = route.startsWith("/") ? route : `/${route}`;
   return `${url.origin}${basePath}${path}`;
 }

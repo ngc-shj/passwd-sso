@@ -1,5 +1,6 @@
 export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
+
 /**
  * Resolve the canonical app origin from environment.
  * Priority: APP_URL > AUTH_URL.

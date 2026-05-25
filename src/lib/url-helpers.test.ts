@@ -301,3 +301,4 @@ describe("isHttps", () => {
     expect(isHttps).toBe(false);
   });
 });
+
