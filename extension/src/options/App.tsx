@@ -244,6 +244,10 @@ export function App() {
 
       const res = await fetch(`${validated.value}${EXT_API_PATH.EXTENSION_KEY_RESET}`, {
         method: "POST",
+        // Omit cookies — extension authenticates via Bearer + DPoP. Without
+        // this, Chrome attaches the web app's session cookie (host_permissions),
+        // tripping the server's CSRF gate (cookie+POST → assertOrigin 403).
+        credentials: "omit",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`,

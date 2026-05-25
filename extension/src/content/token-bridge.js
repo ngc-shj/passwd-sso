@@ -112,6 +112,11 @@ function handleBridgeCodeMessage(event) {
 
       fetch(serverUrl + EXCHANGE_PATH, {
         method: "POST",
+        // Omit cookies — extension auth is Bearer + DPoP. Cookies would
+        // trip the server's CSRF gate (cookie+POST → assertOrigin rejects
+        // chrome-extension origin with 403). Content script runs in page
+        // context, so default credentials would attach web app cookies.
+        credentials: "omit",
         headers: headers,
         body: JSON.stringify({ code: code }),
       }).then(function (response) {

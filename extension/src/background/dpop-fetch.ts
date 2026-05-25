@@ -58,5 +58,11 @@ export async function swFetchAuthenticated(
   }
 
   headers.set("DPoP", proof);
-  return fetch(`${serverUrl}${path}`, { ...init, headers });
+  // credentials: "omit" — extension authenticates via Bearer + DPoP, never
+  // via web-app session cookies. Without this, Chrome includes the
+  // web-app's session cookie on cross-origin fetch (because the extension
+  // holds host_permissions for that origin), which trips the server's
+  // baseline CSRF gate (cookie-bearing mutating request → assertOrigin
+  // rejects chrome-extension origin with 403).
+  return fetch(`${serverUrl}${path}`, { ...init, headers, credentials: "omit" });
 }

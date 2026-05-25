@@ -116,6 +116,8 @@ async function handleBridgeCodeMessage(event: MessageEvent): Promise<boolean> {
       `${serverUrl}${EXT_API_PATH.EXTENSION_TOKEN_EXCHANGE}`,
       {
         method: "POST",
+        // Omit cookies — see token-bridge.js for the same fix + reasoning.
+        credentials: "omit",
         headers,
         body: JSON.stringify({ code }),
       },
