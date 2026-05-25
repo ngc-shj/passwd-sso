@@ -137,4 +137,44 @@ describe("verifyTailscalePeer (TCP fallback path)", () => {
     const result = await verifyTailscalePeer("100.64.0.10", "my-tailnet");
     expect(result).toBe(false);
   });
+
+  // ─── Header regression guards (Tailscale 1.46+ DNS-rebinding protection) ────
+  //
+  // tailscaled rejects LocalAPI requests without these headers with 403
+  // "invalid localapi request". Removing either header silently breaks all
+  // tenant-scoped Tailscale enforcement (audit logs show 5 ACCESS_DENIED in
+  // prod before the fix). See tailscale/tailscale#8581.
+
+  it("sends Sec-Tailscale: localapi header on every LocalAPI request", async () => {
+    fetchSpy.mockResolvedValue(
+      new Response(
+        JSON.stringify({ Node: { Name: "h.my-tailnet.ts.net." } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await verifyTailscalePeer("100.64.0.11", "my-tailnet");
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers["Sec-Tailscale"]).toBe("localapi");
+  });
+
+  it("sends a non-resolvable Host header so localhost-based base URLs are not rejected", async () => {
+    fetchSpy.mockResolvedValue(
+      new Response(
+        JSON.stringify({ Node: { Name: "h.my-tailnet.ts.net." } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await verifyTailscalePeer("100.64.0.12", "my-tailnet");
+
+    const init = fetchSpy.mock.calls[0]![1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    // tailscaled rejects "localhost" or any DNS-resolvable name. A .sock
+    // pseudo-host is the documented escape.
+    expect(headers["Host"]).toBe("local-tailscaled.sock");
+  });
 });
