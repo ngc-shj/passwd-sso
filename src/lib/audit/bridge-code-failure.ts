@@ -16,7 +16,7 @@
 
 import type { NextRequest } from "next/server";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { AUDIT_ACTION } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import type { DpopVerifyError } from "@/lib/auth/dpop/verify";
@@ -65,9 +65,9 @@ export async function emitBridgeCodeIssueFailure(
     metadata.dpopError = args.dpopError;
   }
 
+  // base from personalAuditBase already carries scope: PERSONAL.
   await logAuditAsync({
     ...base,
-    scope: AUDIT_SCOPE.PERSONAL,
     ...(args.tenantId !== null && { tenantId: args.tenantId }),
     action: AUDIT_ACTION.EXTENSION_BRIDGE_CODE_ISSUE_FAILURE,
     metadata,

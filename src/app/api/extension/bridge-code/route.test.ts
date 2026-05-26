@@ -369,5 +369,11 @@ describe("POST /api/extension/bridge-code", () => {
         where: { id: { in: ["c1"] } },
       }),
     );
+    // Single-emit symmetry with the dedicated success test: only the SUCCESS
+    // audit fires on this path, never the FAILURE action.
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
+    expect(mockLogAudit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "EXTENSION_BRIDGE_CODE_ISSUE_FAILURE" }),
+    );
   });
 });
