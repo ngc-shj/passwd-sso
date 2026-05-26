@@ -141,15 +141,85 @@ describe("POST /api/extension/bridge-code", () => {
     __resetAllowlistForTests();
   });
 
-  it("returns 401 when not authenticated", async () => {
+  // Audit assertion helper — every failure path emits exactly one
+  // EXTENSION_BRIDGE_CODE_ISSUE_FAILURE event with the expected reason.
+  function expectFailureEmit(reason: string, opts?: { userId?: string | null; tenantId?: string | null; metadataExtra?: Record<string, unknown> }) {
+    const expectedUserId = opts?.userId !== undefined ? opts.userId : null;
+    const expectedTenantId = opts?.tenantId !== undefined ? opts.tenantId : null;
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
+    const call = mockLogAudit.mock.calls[0][0];
+    expect(call.action).toBe("EXTENSION_BRIDGE_CODE_ISSUE_FAILURE");
+    expect(call.scope).toBe("PERSONAL");
+    expect(call.metadata).toEqual({ reason, ...opts?.metadataExtra });
+    if (expectedUserId === null) {
+      // pre-auth: SYSTEM_ACTOR_ID + actorType=SYSTEM
+      expect(call.userId).toBe("00000000-0000-4000-8000-000000000001");
+      expect(call.actorType).toBe("SYSTEM");
+      expect(call).not.toHaveProperty("tenantId");
+    } else {
+      expect(call.userId).toBe(expectedUserId);
+      expect(call).not.toHaveProperty("actorType");
+      if (expectedTenantId === null) {
+        expect(call).not.toHaveProperty("tenantId");
+      } else {
+        expect(call.tenantId).toBe(expectedTenantId);
+      }
+    }
+  }
+
+  it("emits failure audit with ip_rate_limit when IP rate-limit returns 429", async () => {
+    mockCheckIpRateLimit.mockResolvedValueOnce({ allowed: false });
+    mockCheckRateLimitOrFail.mockImplementationOnce(async () =>
+      new Response(JSON.stringify({ error: "RATE_LIMIT_EXCEEDED" }), { status: 429 }),
+    );
+    const res = await POST(makeRequest());
+    expect(res.status).toBe(429);
+    expectFailureEmit("ip_rate_limit");
+    expect(mockAuth).not.toHaveBeenCalled();
+  });
+
+  it("emits failure audit with ip_rate_limit_redis_fail when IP limiter Redis-fails", async () => {
+    mockCheckIpRateLimit.mockResolvedValueOnce({ allowed: false, redisErrored: true });
+    mockCheckRateLimitOrFail.mockImplementationOnce(async () =>
+      new Response(JSON.stringify({ error: "SERVICE_UNAVAILABLE" }), { status: 503 }),
+    );
+    const res = await POST(makeRequest());
+    expect(res.status).toBe(503);
+    expectFailureEmit("ip_rate_limit_redis_fail");
+  });
+
+  it("emits failure audit with origin_disallowed when Origin is not in allowlist", async () => {
+    const reqWithBadOrigin = createRequest("POST", "http://localhost:3000/api/extension/bridge-code", {
+      headers: { Origin: "https://evil.example.com", DPoP: "x" },
+      body: {},
+    });
+    const res = await POST(reqWithBadOrigin);
+    expect(res.status).toBe(403);
+    expectFailureEmit("origin_disallowed");
+    expect(mockAuth).not.toHaveBeenCalled();
+  });
+
+  it("emits failure audit with body_schema_invalid when body contains unknown keys", async () => {
+    const reqWithBadBody = createRequest("POST", "http://localhost:3000/api/extension/bridge-code", {
+      headers: { Origin: ALLOWED_ORIGIN, DPoP: "x" },
+      body: { cnfJkt: "attacker-supplied" },
+    });
+    const res = await POST(reqWithBadBody);
+    expect(res.status).toBe(400);
+    expectFailureEmit("body_schema_invalid");
+    expect(mockAuth).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 and emits failure audit with unauthenticated when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(makeRequest());
     const { status, json } = await parseResponse(res);
     expect(status).toBe(401);
     expect(json.error).toBe("UNAUTHORIZED");
+    expectFailureEmit("unauthenticated");
   });
 
-  it("returns 401 when the user record cannot be resolved (deleted user)", async () => {
+  it("returns 401 and emits failure audit with user_not_found when user record is missing", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockUserFindUnique.mockResolvedValueOnce(null);
     const res = await POST(makeRequest());
@@ -157,12 +227,44 @@ describe("POST /api/extension/bridge-code", () => {
     expect(status).toBe(401);
     expect(json.error).toBe("UNAUTHORIZED");
     expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
+    expectFailureEmit("user_not_found", { userId: DEFAULT_SESSION.user.id, tenantId: null });
   });
 
-  it("returns 429 when per-user rate limited", async () => {
+  it("returns 403 and emits failure audit with tenant_access_restricted when tenant IP denies", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    // Per-user limit fires after Origin/auth/IP/step-up gates. The IP gate
-    // is mocked open via mockCheckRateLimitOrFail; flip the per-user call.
+    mockCheckAccessRestrictionWithAudit.mockResolvedValueOnce({
+      allowed: false,
+      reason: "ip not in tenant CIDR",
+    });
+    const res = await POST(makeRequest());
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("ACCESS_DENIED");
+    expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
+    expect(mockVerifyDpop).not.toHaveBeenCalled();
+    expectFailureEmit("tenant_access_restricted", { userId: DEFAULT_SESSION.user.id, tenantId: "tenant-1" });
+  });
+
+  it("returns 403 and emits failure audit with step_up_required when session step-up is required", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireRecentCurrentAuthMethod.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const res = await POST(makeRequest());
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
+    expectFailureEmit("step_up_required", { userId: DEFAULT_SESSION.user.id, tenantId: "tenant-1" });
+  });
+
+  it("returns 429 and emits failure audit with rate_limit when per-user rate limited", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    // mockCheck is bridgeCodeLimiter.check — default { allowed: true } returns;
+    // override to {allowed: false} for the per-user gate.
+    mockCheck.mockResolvedValueOnce({ allowed: false });
     mockCheckRateLimitOrFail.mockImplementation(async (args: { scope: string }) => {
       if (args.scope === "extension.bridge_code") {
         return new Response(JSON.stringify({ error: "RATE_LIMIT_EXCEEDED" }), {
@@ -175,37 +277,49 @@ describe("POST /api/extension/bridge-code", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(429);
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+    expectFailureEmit("rate_limit", { userId: DEFAULT_SESSION.user.id, tenantId: "tenant-1" });
   });
 
-  it("returns 403 when session step-up is required", async () => {
+  it("emits failure audit with rate_limit_redis_fail when per-user limiter Redis-fails", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireRecentCurrentAuthMethod.mockResolvedValueOnce(
-      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
-    );
-
-    const res = await POST(makeRequest());
-    const { status, json } = await parseResponse(res);
-
-    expect(status).toBe(403);
-    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
-    expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
-  });
-
-  it("returns 403 when tenant IP access restriction denies", async () => {
-    mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockCheckAccessRestrictionWithAudit.mockResolvedValueOnce({
-      allowed: false,
-      reason: "ip not in tenant CIDR",
+    mockCheck.mockResolvedValueOnce({ allowed: false, redisErrored: true });
+    mockCheckRateLimitOrFail.mockImplementation(async (args: { scope: string }) => {
+      if (args.scope === "extension.bridge_code") {
+        return new Response(JSON.stringify({ error: "SERVICE_UNAVAILABLE" }), {
+          status: 503,
+        });
+      }
+      return null;
     });
     const res = await POST(makeRequest());
-    const { status, json } = await parseResponse(res);
-    expect(status).toBe(403);
-    expect(json.error).toBe("ACCESS_DENIED");
-    expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
-    expect(mockVerifyDpop).not.toHaveBeenCalled();
+    expect(res.status).toBe(503);
+    expectFailureEmit("rate_limit_redis_fail", { userId: DEFAULT_SESSION.user.id, tenantId: "tenant-1" });
   });
 
-  it("issues a bridge code on success and emits an audit log", async () => {
+  it("returns 401 and emits failure audit with dpop_invalid when DPoP verify fails", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockVerifyDpop.mockResolvedValueOnce({ ok: false, error: "DPOP_HTM_MISMATCH" });
+    const res = await POST(makeRequest());
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(401);
+    expect(json.error).toBe("UNAUTHORIZED");
+    expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
+    expectFailureEmit("dpop_invalid", {
+      userId: DEFAULT_SESSION.user.id,
+      tenantId: "tenant-1",
+      metadataExtra: { dpopError: "DPOP_HTM_MISMATCH" },
+    });
+  });
+
+  it("returns 500 and emits failure audit with db_error when bridge-code create throws", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockBridgeCodeCreate.mockRejectedValueOnce(new Error("simulated DB write failure"));
+    const res = await POST(makeRequest());
+    expect(res.status).toBe(500);
+    expectFailureEmit("db_error", { userId: DEFAULT_SESSION.user.id, tenantId: "tenant-1" });
+  });
+
+  it("issues a bridge code on success and emits ONLY the success audit", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     const res = await POST(makeRequest());
     const { status, json } = await parseResponse(res);
@@ -228,12 +342,17 @@ describe("POST /api/extension/bridge-code", () => {
       }),
     );
 
+    // Exactly one audit emit on success: EXTENSION_BRIDGE_CODE_ISSUE.
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "EXTENSION_BRIDGE_CODE_ISSUE",
         scope: "PERSONAL",
         tenantId: "tenant-1",
       }),
+    );
+    expect(mockLogAudit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "EXTENSION_BRIDGE_CODE_ISSUE_FAILURE" }),
     );
   });
 
