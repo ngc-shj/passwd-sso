@@ -251,7 +251,7 @@ export function AutoExtensionConnect() {
           {status === CONNECT_STATUS.AWAITING_CLICK && (
             <div className="flex flex-col gap-3 w-full max-w-xs">
               <Button onClick={handleConnectClick} className="w-full">
-                {t("connect")}
+                {t("awaitingClickAction")}
               </Button>
             </div>
           )}

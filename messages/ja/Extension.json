@@ -1,7 +1,8 @@
 {
   "connect": "拡張機能を接続",
-  "awaitingClickTitle": "拡張機能と接続しますか?",
-  "awaitingClickDescription": "意図しない自動操作を防ぐため、下のボタンをクリックして接続を確定してください。",
+  "awaitingClickTitle": "拡張機能との接続を許可しますか?",
+  "awaitingClickDescription": "意図しない自動操作を防ぐため、下のボタンで接続を許可してください。",
+  "awaitingClickAction": "拡張機能との接続を許可",
   "connecting": "接続中...",
   "connected": "接続完了",
   "failed": "接続失敗",
