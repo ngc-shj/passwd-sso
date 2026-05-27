@@ -33,6 +33,14 @@ function postReady(reqId, ok, errorCode) {
 function handleConnectRequestMessage(event) {
   var reqId = event.data && event.data.reqId;
   if (typeof reqId !== "string" || reqId.length === 0) return;
+
+  // C15-v2 user-activation gate. Mirror of token-bridge-lib.ts — see that
+  // file for the full rationale (oracle prevention via silent drop before
+  // isContextValid; isActive-not-hasBeenActive to defeat sticky-activation
+  // bypass). MUST stay in sync with token-bridge-lib.ts; token-bridge-js-sync
+  // test enforces the substring `navigator.userActivation` is present here.
+  if (!navigator.userActivation || !navigator.userActivation.isActive) return;
+
   if (!isContextValid()) {
     postReady(reqId, false, "EXTENSION_ABSENT");
     return;

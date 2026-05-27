@@ -24,4 +24,15 @@ describe("token-bridge.js sync", () => {
     const { default: file } = await import("../../content/token-bridge.js?raw");
     expect(file).toContain(`"START_CONNECT"`);
   });
+
+  it("contains the C15-v2 navigator.userActivation gate", async () => {
+    // The gate is a security control. token-bridge.js is the production
+    // artifact loaded into the host page; token-bridge-lib.ts is test-only.
+    // A regression that adds the gate to -lib.ts but not .js would silently
+    // disable the gate in production while all unit tests pass (RT4 vacuous
+    // guard). This assertion closes that gap.
+    const { default: file } = await import("../../content/token-bridge.js?raw");
+    expect(file).toContain("navigator.userActivation");
+    expect(file).toContain(".isActive");
+  });
 });
