@@ -94,14 +94,32 @@ export function AutoExtensionConnect() {
 
     didRunRef.current = true;
 
-    // Remove ext_connect from URL immediately to prevent re-fire on reload
+    // PROTOTYPE C15-v2: instead of auto-firing connect() from useEffect (which
+    // an XSS payload can mimic on page load), surface a button and require a
+    // real user click. The click satisfies navigator.userActivation.isActive
+    // at the moment of window.postMessage — a flag XSS cannot forge because
+    // programmatic .click() does NOT set user activation per W3C spec.
+    setStatus(CONNECT_STATUS.AWAITING_CLICK);
+  }, []);
+
+  const handleConnectClick = useCallback(async () => {
+    // PROTOTYPE C15-v2: empirical confirmation that the click yields
+    // isActive=true. Remove before any production PR.
+    // eslint-disable-next-line no-console
+    console.log("[C15-v2 click] userActivation at click handler entry", {
+      isActive: navigator.userActivation?.isActive,
+      hasBeenActive: navigator.userActivation?.hasBeenActive,
+    });
+
+    // Remove ext_connect from URL so reload does not re-prompt.
+    const params = new URLSearchParams(window.location.search);
     params.delete(EXT_CONNECT_PARAM);
     const newSearch = params.toString();
     const newUrl =
       window.location.pathname + (newSearch ? `?${newSearch}` : "") + window.location.hash;
     window.history.replaceState(null, "", newUrl);
 
-    connect();
+    await connect();
   }, [connect]);
 
   const handleRetry = async () => {
@@ -154,6 +172,11 @@ export function AutoExtensionConnect() {
       <Card className="w-full max-w-md">
         <CardContent className="flex flex-col items-center text-center pt-8 pb-8 space-y-6">
           {/* Icon */}
+          {status === CONNECT_STATUS.AWAITING_CLICK && (
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+              <KeyRound className="h-8 w-8 text-primary" />
+            </div>
+          )}
           {status === CONNECT_STATUS.CONNECTING && (
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -177,6 +200,14 @@ export function AutoExtensionConnect() {
           </div>
 
           {/* Title & Description */}
+          {status === CONNECT_STATUS.AWAITING_CLICK && (
+            <div className="space-y-2">
+              <h1 className="text-xl font-semibold">{t("awaitingClickTitle")}</h1>
+              <p className="text-sm text-muted-foreground">
+                {t("awaitingClickDescription")}
+              </p>
+            </div>
+          )}
           {status === CONNECT_STATUS.CONNECTING && (
             <div className="space-y-2">
               <h1 className="text-xl font-semibold">{t("connecting")}</h1>
@@ -217,6 +248,20 @@ export function AutoExtensionConnect() {
           )}
 
           {/* Actions */}
+          {status === CONNECT_STATUS.AWAITING_CLICK && (
+            <div className="flex flex-col gap-3 w-full max-w-xs">
+              <Button onClick={handleConnectClick} className="w-full">
+                {t("connect")}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setStatus(CONNECT_STATUS.IDLE)}
+                className="w-full"
+              >
+                {t("goToDashboard")}
+              </Button>
+            </div>
+          )}
           {status === CONNECT_STATUS.CONNECTED && (
             <div className="flex flex-col gap-3 w-full max-w-xs">
               <Button

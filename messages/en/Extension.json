@@ -1,5 +1,7 @@
 {
   "connect": "Connect Extension",
+  "awaitingClickTitle": "Connect the extension?",
+  "awaitingClickDescription": "To prevent unintended automated actions, click the button below to confirm the connection.",
   "connecting": "Connecting...",
   "connected": "Connected!",
   "failed": "Connection failed",
