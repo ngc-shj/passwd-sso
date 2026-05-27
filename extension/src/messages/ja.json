@@ -3,7 +3,7 @@
     "title": "passwd-sso",
     "settings": "設定",
     "loading": "読み込み中...",
-    "signIn": "拡張機能を使うには passwd-sso にサインインしてください。",
+    "signIn": "拡張機能を使うには passwd-sso で接続を許可してください。",
     "openApp": "接続",
     "unlockDescription": "保管庫をアンロックするためにパスフレーズを入力してください。",
     "passphrasePlaceholder": "パスフレーズ",

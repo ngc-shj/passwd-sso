@@ -3,7 +3,7 @@
     "title": "passwd-sso",
     "settings": "Settings",
     "loading": "Loading...",
-    "signIn": "Sign in to passwd-sso to use the extension.",
+    "signIn": "Allow the connection in passwd-sso to use the extension.",
     "openApp": "Connect",
     "unlockDescription": "Enter your passphrase to unlock the vault.",
     "passphrasePlaceholder": "Passphrase",
