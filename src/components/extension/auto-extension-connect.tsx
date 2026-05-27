@@ -92,6 +92,21 @@ export function AutoExtensionConnect() {
     const params = new URLSearchParams(window.location.search);
     if (!params.has(EXT_CONNECT_PARAM)) return;
 
+    // C15-VALIDATION: TEMPORARY — observe whether navigator.userActivation
+    // is still active when the useEffect fires post-navigation. Remove
+    // before opening any C15 implementation PR. See
+    // docs/archive/review/c15-user-activation-validation.md.
+    // eslint-disable-next-line no-console
+    console.log("[C15-validation] useEffect entry", {
+      isActive: navigator.userActivation?.isActive,
+      hasBeenActive: navigator.userActivation?.hasBeenActive,
+      documentReferrer: document.referrer,
+      performanceNow: performance.now(),
+      pageLoadMs:
+        (performance.timing?.loadEventEnd ?? 0) -
+        (performance.timing?.navigationStart ?? 0),
+    });
+
     didRunRef.current = true;
 
     // Remove ext_connect from URL immediately to prevent re-fire on reload
