@@ -261,6 +261,49 @@ function clearToken(): void {
   void updateBadge();
 }
 
+/**
+ * Install a freshly-issued token into the SW state. Single source of truth
+ * for the post-issuance bookkeeping (vault relock on user/session switch,
+ * alarm scheduling, persistence). The production caller is the START_CONNECT
+ * handler's `setToken` callback (see `token-handler.ts`).
+ *
+ * There is intentionally NO `chrome.runtime.onMessage` route into this
+ * function. The previous `EXT_MSG.SET_TOKEN` message has been removed to
+ * shrink the SW's attack surface — a renegade content script can no longer
+ * inject a token by faking a chrome runtime message. The export exists so
+ * tests can bootstrap SW token state directly without driving the full
+ * bridge-code + exchange round-trip; tests run in the same JS context as
+ * the SW under jsdom and have unrestricted module access.
+ */
+export function applyToken(
+  token: string,
+  expiresAt: number,
+  cnfJkt: string,
+): void {
+  const tokenChanged = currentToken !== null && currentToken !== token;
+  if (tokenChanged) {
+    // A new token may represent a different auth session/user.
+    // Force vault relock to avoid carrying unlocked state across token rotation.
+    clearVault();
+  }
+
+  currentToken = token;
+  tokenExpiresAt = expiresAt;
+  currentCnfJkt = cnfJkt;
+
+  const delayMs = expiresAt - Date.now();
+  if (delayMs > 0) {
+    chrome.alarms.create(ALARM_TOKEN_TTL, { when: expiresAt });
+    scheduleRefreshAlarm(expiresAt);
+    persistState();
+  } else {
+    // Already expired
+    clearToken();
+  }
+
+  void updateBadge();
+}
+
 function clearVault(): void {
   encryptionKey = null;
   currentUserId = null;
@@ -1633,22 +1676,7 @@ async function handleMessage(
       // bridge code, or DPoP key material is ever exposed to MAIN-world JS
       // (content script forwards only the request/response envelope).
       const result = await startConnect({
-        setToken: (token, expiresAt, cnfJkt) => {
-          const tokenChanged = currentToken !== null && currentToken !== token;
-          if (tokenChanged) clearVault();
-          currentToken = token;
-          tokenExpiresAt = expiresAt;
-          currentCnfJkt = cnfJkt;
-          const delayMs = expiresAt - Date.now();
-          if (delayMs > 0) {
-            chrome.alarms.create(ALARM_TOKEN_TTL, { when: expiresAt });
-            scheduleRefreshAlarm(expiresAt);
-            persistState();
-          } else {
-            clearToken();
-          }
-          void updateBadge();
-        },
+        setToken: (token, expiresAt, cnfJkt) => applyToken(token, expiresAt, cnfJkt),
       });
       const response: ExtensionResponse = {
         type: EXT_MSG.START_CONNECT,
@@ -1656,36 +1684,6 @@ async function handleMessage(
         ...(result.errorCode ? { errorCode: result.errorCode } : {}),
       };
       sendResponse(response);
-      return;
-    }
-
-    case EXT_MSG.SET_TOKEN: {
-      const tokenChanged = currentToken !== null && currentToken !== message.token;
-      if (tokenChanged) {
-        // A new token may represent a different auth session/user.
-        // Force vault relock to avoid carrying unlocked state across token rotation.
-        clearVault();
-      }
-
-      currentToken = message.token;
-      tokenExpiresAt = message.expiresAt;
-      currentCnfJkt = message.cnfJkt;
-
-      // Set alarm for TTL expiry
-      const delayMs = message.expiresAt - Date.now();
-      if (delayMs > 0) {
-        chrome.alarms.create(ALARM_TOKEN_TTL, {
-          when: message.expiresAt,
-        });
-        scheduleRefreshAlarm(message.expiresAt);
-        persistState();
-      } else {
-        // Already expired
-        clearToken();
-      }
-
-      sendResponse({ type: EXT_MSG.SET_TOKEN, ok: true });
-      void updateBadge();
       return;
     }
 

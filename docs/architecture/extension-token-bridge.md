@@ -272,38 +272,44 @@ reqId: ...})` to trigger a connect attempt, but:
 | Cross-tenant escalation via tampered request | N/A — server-side identity resolution | Same |
 | Replay (after legitimate consume) | Atomic UPDATE returns count=0 → 401 | CAS predicate (`usedAt: null`) returns count=0 → 401 |
 | DevTools / memory forensics | Memory only | Memory only |
-| Page-script triggers unauthorized connect | N/A | **Residual** — XSS can trigger START_CONNECT (same as XSS-acts-as-user; token lands in SW, not page) |
+| Page-script triggers unauthorized connect | N/A | **Blocked at content-script gate** — `EXT_CONNECT_REQUEST` is silently dropped unless `navigator.userActivation.isActive` is true; programmatic `.click()` and synthesized `MouseEvent` do not set activation per HTML User Activation v2 |
 
-### Residual: XSS-acts-as-user (deferred)
+### XSS-acts-as-user mitigation: user-activation gate (C15-v2)
 
-A MAIN-world XSS retains the ability to trigger `START_CONNECT` and cause
-the extension to (re-)connect. The attacker does NOT obtain the token or
-the bridge code; the residual harm is limited to:
+The content-script relay (`extension/src/content/token-bridge-lib.ts` and
+the parallel `token-bridge.js`) requires
+`navigator.userActivation.isActive` before forwarding
+`EXT_CONNECT_REQUEST` to the service worker. The web app cooperates by
+**not** auto-connecting on `?ext_connect=1`; it renders an
+`AWAITING_CLICK` confirmation card and calls `requestExtensionConnect()`
+only from the Allow button's onClick handler, so a legitimate flow
+always carries fresh transient activation at the `postMessage` site.
 
-- Triggering an unnecessary bridge-code + exchange round-trip
-- Generating audit log noise
-- Consuming the per-user + per-IP rate-limit budget
+Activation failure is a **silent drop** — no `EXT_CONNECT_READY` reply,
+no audit emission — to avoid an `EXTENSION_ABSENT` oracle that would
+distinguish "extension installed but lacking activation" from
+"extension absent." The page-side
+`requestExtensionConnect()` 8-second timeout collapses both cases to
+`EXTENSION_ABSENT` from the page's perspective.
 
-The primary defenses against XSS-driven spam are the server-side
-limiters already in place: per-IP 60/min on `/api/extension/bridge-code`
-(see `ipLimiter` in `src/app/api/extension/bridge-code/route.ts`),
-per-user 10/15 min on the same route (`bridgeCodeLimiter`), and
-per-IP 10/15 min on `/api/extension/token/exchange` (`exchangeLimiter`).
-Together these bound the attack rate without needing extension-side
-suppression.
+The gate reads `isActive` (transient activation, ~5 s implementation-
+defined window) and never `hasBeenActive` (sticky activation persists
+for the document lifetime and would defeat the gate).
 
-**Deferred (XSS-acts-as-user follow-up)**: `userActivation.isActive`
-gating in the content-script handler and any SW-side fresh-token
-suppression. An earlier follow-up draft added a SW-side fresh-token
-no-op guard, but a code review surfaced that the guard also suppresses
-the legitimate user-switch reconnect path (where `setToken`'s
-`tokenChanged` branch would normally `clearVault()` and replace the
-heap state). The guard was reverted. A future iteration that wants to
-suppress XSS-trigger spam must either: (a) pass the current `userId`
-in `EXT_CONNECT_REQUEST` and skip suppression on mismatch, or (b)
-gate on `userActivation.isActive` in the content script — pending
-empirical Chrome validation that the legitimate `?ext_connect=1`
-useEffect flow carries transient activation.
+**Residual** (acknowledged limitations):
+
+- A same-origin XSS that races a real user gesture within the
+  transient-activation window may still trigger a connect "as the
+  user." The attacker does NOT obtain the token, the bridge code, or
+  the DPoP key (all SW-confined); the observable harm is limited to
+  one extra bridge-code + exchange round-trip, audit-log noise, and
+  rate-limit budget consumption.
+- The bridge-code route's per-IP (60/min) and per-user (10/15 min)
+  rate limiters bound the attack rate; `EXTENSION_BRIDGE_CODE_ISSUE_FAILURE`
+  audit emissions provide forensic visibility.
+- A SW-side `_sender.tab?.url` sender check on `START_CONNECT` is a
+  separate defense-in-depth opportunity (not blocking; tracked as
+  future hardening).
 
 ## File Map
 

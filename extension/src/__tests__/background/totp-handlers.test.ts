@@ -106,8 +106,13 @@ function installChromeMock() {
   return chromeMock;
 }
 
+let bgModule: typeof import("../../background/index") | null = null;
 async function loadBackground() {
-  await import("../../background/index");
+  bgModule = await import("../../background/index");
+}
+function applyToken(token: string, expiresAt: number, cnfJkt: string): void {
+  if (!bgModule) throw new Error("loadBackground() must be called before applyToken()");
+  bgModule.applyToken(token, expiresAt, cnfJkt);
 }
 
 function sendMsg(message: unknown): Promise<unknown> {
@@ -118,11 +123,7 @@ function sendMsg(message: unknown): Promise<unknown> {
 }
 
 async function unlockVault() {
-  await sendMsg({
-    type: "SET_TOKEN",
-    token: "t",
-    expiresAt: Date.now() + 60_000,
-  });
+  applyToken("t", Date.now() + 60_000, "");
   await sendMsg({ type: "UNLOCK_VAULT", passphrase: "pw" });
 }
 

@@ -161,8 +161,13 @@ function installChromeMock() {
   return chromeMock;
 }
 
+let bgModule: typeof import("../background/index") | null = null;
 async function loadBackground() {
-  await import("../background/index");
+  bgModule = await import("../background/index");
+}
+function applyToken(token: string, expiresAt: number, cnfJkt: string): void {
+  if (!bgModule) throw new Error("loadBackground() must be called before applyToken()");
+  bgModule.applyToken(token, expiresAt, cnfJkt);
 }
 
 function sendMessage(message: unknown): Promise<unknown> {
@@ -243,11 +248,7 @@ describe("background message flow", () => {
   });
 
   it("unlocks the vault and reports vaultUnlocked status", async () => {
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
 
     const res = await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
     expect(res).toEqual({ type: "UNLOCK_VAULT", ok: true });
@@ -270,11 +271,7 @@ describe("background message flow", () => {
   });
 
   it("sends stop-keepalive on LOCK_VAULT", async () => {
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
     (chromeMock?.runtime.sendMessage as ReturnType<typeof vi.fn>).mockClear();
 
@@ -292,11 +289,7 @@ describe("background message flow", () => {
   });
 
   it("relocks vault when token value changes", async () => {
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t-1",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t-1", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const before = await sendMessage({ type: "GET_STATUS" });
@@ -304,11 +297,7 @@ describe("background message flow", () => {
       expect.objectContaining({ type: "GET_STATUS", hasToken: true, vaultUnlocked: true }),
     );
 
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t-2",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t-2", Date.now() + 60_000, "");
 
     const after = await sendMessage({ type: "GET_STATUS" });
     expect(after).toEqual(
@@ -319,11 +308,7 @@ describe("background message flow", () => {
 
   it("returns error on invalid passphrase", async () => {
     cryptoMocks.unwrapSecretKey.mockRejectedValueOnce(new Error("bad passphrase"));
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
 
     const res = await sendMessage({ type: "UNLOCK_VAULT", passphrase: "bad" });
     expect(res).toEqual(
@@ -332,12 +317,7 @@ describe("background message flow", () => {
   });
 
   it("removes persisted vault secret on LOCK_VAULT", async () => {
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-      cnfJkt: STATIC_TEST_JKT,
-    });
+    applyToken("t", Date.now() + 60_000, STATIC_TEST_JKT);
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
     await sendMessage({ type: "LOCK_VAULT" });
 
@@ -355,11 +335,7 @@ describe("background message flow", () => {
       serverUrl: "https://localhost:3000",
       autoLockMinutes: 0,
     });
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
     expect(chromeMock?.alarms.create).not.toHaveBeenCalledWith(
       ALARM_VAULT_LOCK,
@@ -368,11 +344,7 @@ describe("background message flow", () => {
   });
 
   it("updates auto-lock timer when settings change", async () => {
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const handler = storageChangeHandlers[0];
@@ -385,11 +357,7 @@ describe("background message flow", () => {
   });
 
   it("clears auto-lock timer when set to 0", async () => {
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const handler = storageChangeHandlers[0];
@@ -425,11 +393,7 @@ describe("background message flow", () => {
   });
 
   it("updates badge when token is set and vault unlocked", async () => {
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
     await vi.waitFor(() => {
       expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "" });
@@ -439,11 +403,7 @@ describe("background message flow", () => {
   });
 
   it("clears all tab badges on vault lock", async () => {
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
     chromeMock?.action.setBadgeText.mockClear();
 
@@ -458,11 +418,7 @@ describe("background message flow", () => {
   });
 
   it("clears all tab badges on disconnect", async () => {
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     chromeMock?.action.setBadgeText.mockClear();
 
     await sendMessage({ type: "CLEAR_TOKEN" });
@@ -474,11 +430,7 @@ describe("background message flow", () => {
   });
 
   it("handles trigger-autofill command by requesting inline suggestions", async () => {
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const handler = commandHandlers[0];
@@ -501,11 +453,7 @@ describe("background message flow", () => {
       .mockRejectedValueOnce(new Error("Could not establish connection. Receiving end does not exist."))
       .mockResolvedValueOnce({});
 
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const handler = commandHandlers[0];
@@ -521,11 +469,7 @@ describe("background message flow", () => {
   });
 
   it("fetches and decrypts password overviews", async () => {
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const res = await sendMessage({ type: "FETCH_PASSWORDS" });
@@ -560,11 +504,7 @@ describe("background message flow", () => {
     cryptoMocks.decryptData.mockResolvedValueOnce(
       JSON.stringify({ password: "secret" })
     );
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const res = await sendMessage({ type: "COPY_PASSWORD", entryId: "pw-1" });
@@ -603,11 +543,7 @@ describe("background message flow", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const res = await sendMessage({ type: "COPY_PASSWORD", entryId: "pw-1" });
@@ -628,11 +564,7 @@ describe("background message flow", () => {
       .mockResolvedValueOnce(JSON.stringify({ password: "secret" }))
       .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
 
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
@@ -651,11 +583,7 @@ describe("background message flow", () => {
       )
       .mockResolvedValueOnce(JSON.stringify({ username: null }));
 
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
@@ -681,11 +609,7 @@ describe("background message flow", () => {
       )
       .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
 
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
@@ -709,11 +633,7 @@ describe("background message flow", () => {
       }),
     );
 
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const res = await sendMessage({
@@ -744,11 +664,7 @@ describe("background message flow", () => {
   });
 
   it("does not suppress inline matches when scheme differs from serverUrl", async () => {
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const res = await sendMessage({
@@ -766,11 +682,7 @@ describe("background message flow", () => {
   });
 
   it("suppresses inline matches using topUrl from iframe context", async () => {
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const res = await sendMessage({
@@ -788,11 +700,7 @@ describe("background message flow", () => {
   });
 
   it("suppresses using topUrl even when frame url is external", async () => {
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const res = await sendMessage({
@@ -815,11 +723,7 @@ describe("background message flow", () => {
       return { serverUrl: "https://localhost:3000", autoLockMinutes: 15 };
     });
 
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const res = await sendMessage({
@@ -864,11 +768,7 @@ describe("background message flow", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
@@ -882,11 +782,7 @@ describe("background message flow", () => {
       .mockResolvedValueOnce(JSON.stringify({ password: "secret" }))
       .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
 
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
@@ -908,11 +804,7 @@ describe("background message flow", () => {
       .mockRejectedValueOnce(new Error("Value is unserializable"))
       .mockResolvedValueOnce([]);
 
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const res = await new Promise((resolve) => {
@@ -971,10 +863,10 @@ describe("session persistence", () => {
     await loadBackground();
   });
 
-  it("persists state to session storage after SET_TOKEN", async () => {
+  it("persists state to session storage after a token is set", async () => {
     const expiresAt = Date.now() + 600_000;
-    await sendMessage({ type: "SET_TOKEN", token: "tok-1", expiresAt, cnfJkt: STATIC_TEST_JKT });
-    // userId is not set yet at SET_TOKEN time, so persistState requires all 3 fields.
+    applyToken("tok-1", expiresAt, STATIC_TEST_JKT);
+    // userId is not set yet at token-set time, so persistState requires all 3 fields.
     // After UNLOCK_VAULT, userId is set and persistState is called.
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
@@ -987,12 +879,7 @@ describe("session persistence", () => {
   });
 
   it("clears session storage on CLEAR_TOKEN", async () => {
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "tok-1",
-      expiresAt: Date.now() + 600_000,
-      cnfJkt: STATIC_TEST_JKT,
-    });
+    applyToken("tok-1", Date.now() + 600_000, STATIC_TEST_JKT);
     await sendMessage({ type: "CLEAR_TOKEN" });
 
     expect(sessionStorageMocks.clearSession).toHaveBeenCalled();
@@ -1009,22 +896,14 @@ describe("session persistence", () => {
   });
 
   it("clears refresh alarm on CLEAR_TOKEN", async () => {
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "tok-1",
-      expiresAt: Date.now() + 600_000,
-    });
+    applyToken("tok-1", Date.now() + 600_000, "");
     await sendMessage({ type: "CLEAR_TOKEN" });
 
     expect(chromeMock?.alarms.clear).toHaveBeenCalledWith(ALARM_TOKEN_REFRESH);
   });
 
   it("still clears local state when revoke API fails on CLEAR_TOKEN", async () => {
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "tok-1",
-      expiresAt: Date.now() + 600_000,
-    });
+    applyToken("tok-1", Date.now() + 600_000, "");
     const fetchMock = vi
       .fn()
       .mockRejectedValueOnce(new Error("network"))
@@ -1038,9 +917,9 @@ describe("session persistence", () => {
     expect(chromeMock?.alarms.clear).toHaveBeenCalledWith(ALARM_TOKEN_REFRESH);
   });
 
-  it("schedules refresh alarm on SET_TOKEN", async () => {
+  it("schedules refresh alarm when a token is set", async () => {
     const expiresAt = Date.now() + 600_000;
-    await sendMessage({ type: "SET_TOKEN", token: "tok-1", expiresAt });
+    applyToken("tok-1", expiresAt, "");
 
     expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
       ALARM_TOKEN_REFRESH,
@@ -1054,7 +933,7 @@ describe("session persistence", () => {
     // storm the refresh endpoint; with the clamp it should fire at ~30s.
     const now = Date.now();
     const expiresAt = now + 60_000; // 1 minute
-    await sendMessage({ type: "SET_TOKEN", token: "tok-short", expiresAt });
+    applyToken("tok-short", expiresAt, "");
 
     const alarmCalls = (chromeMock?.alarms.create as ReturnType<typeof vi.fn>).mock.calls.filter(
       ([name]) => name === ALARM_TOKEN_REFRESH,
@@ -1073,7 +952,7 @@ describe("session persistence", () => {
   it("uses the 2-min buffer for long-lived tokens (existing behavior)", async () => {
     const now = Date.now();
     const expiresAt = now + 10 * 60_000; // 10 minutes
-    await sendMessage({ type: "SET_TOKEN", token: "tok-long", expiresAt });
+    applyToken("tok-long", expiresAt, "");
 
     const alarmCalls = (chromeMock?.alarms.create as ReturnType<typeof vi.fn>).mock.calls.filter(
       ([name]) => name === ALARM_TOKEN_REFRESH,
@@ -1246,12 +1125,7 @@ describe("token refresh alarm", () => {
     await loadBackground();
 
     // Set token and unlock vault
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "original-tok",
-      expiresAt: Date.now() + 600_000,
-      cnfJkt: STATIC_TEST_JKT,
-    });
+    applyToken("original-tok", Date.now() + 600_000, STATIC_TEST_JKT);
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     // Trigger refresh alarm
@@ -1300,11 +1174,7 @@ describe("token refresh alarm", () => {
 
     await loadBackground();
 
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "tok",
-      expiresAt: Date.now() + 600_000,
-    });
+    applyToken("tok", Date.now() + 600_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     // Trigger refresh alarm
@@ -1350,11 +1220,7 @@ describe("token refresh alarm", () => {
 
     await loadBackground();
 
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "tok",
-      expiresAt: Date.now() + 600_000,
-    });
+    applyToken("tok", Date.now() + 600_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     chromeMock?.alarms.create.mockClear();
@@ -1407,11 +1273,7 @@ describe("token refresh alarm", () => {
 
     await loadBackground();
 
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "tok",
-      expiresAt: Date.now() + 600_000,
-    });
+    applyToken("tok", Date.now() + 600_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     chromeMock?.alarms.create.mockClear();
@@ -1456,14 +1318,10 @@ describe("token refresh alarm", () => {
 
     await loadBackground();
 
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "tok",
-      expiresAt: Date.now() + 600_000,
-    });
+    applyToken("tok", Date.now() + 600_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
-    // Clear create calls from SET_TOKEN so we can check the retry
+    // Clear create calls from the token-set step so we can check the retry
     chromeMock?.alarms.create.mockClear();
 
     const handler = alarmHandlers[0];
@@ -1537,53 +1395,6 @@ describe("hydration edge cases", () => {
 });
 
 describe("failsafe responses", () => {
-  it("returns type-safe failsafe when handleMessage throws for GET_STATUS", async () => {
-    vi.resetModules();
-    vi.clearAllMocks();
-    chromeMock = installChromeMock();
-
-    // Make hydration promise reject to trigger the failsafe catch
-    chromeMock.storage.session.get.mockImplementation(async () => {
-      throw new Error("fatal");
-    });
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
-    );
-
-    await loadBackground();
-
-    // Patch handleMessage to throw after hydration by making
-    // the hydration itself fail — the failsafe catch should fire.
-    // Since hydrationPromise.catch(() => {}) swallows the error,
-    // hydration resolves normally but with empty state.
-    // To truly trigger the failsafe, we need handleMessage itself to throw.
-    // We can achieve this by corrupting the message handler's dependencies.
-    const handler = messageHandlers[0];
-
-    // Send a message with a type that will cause a runtime error inside handleMessage
-    // by temporarily breaking a dependency after hydration
-    const originalCreateAlarm = chromeMock.alarms.create;
-    chromeMock.alarms.create = vi.fn(() => {
-      throw new Error("simulated crash");
-    });
-
-    const res = await new Promise((resolve) => {
-      handler(
-        { type: "SET_TOKEN", token: "t", expiresAt: Date.now() + 60_000 },
-        {},
-        (resp) => resolve(resp),
-      );
-    });
-
-    // The failsafe should return a generic error for SET_TOKEN (default branch)
-    expect(res).toEqual(
-      expect.objectContaining({ ok: false, error: "INTERNAL_ERROR" }),
-    );
-
-    chromeMock.alarms.create = originalCreateAlarm;
-  });
 
   it("returns type-safe failsafe for FETCH_PASSWORDS on unexpected error", async () => {
     vi.resetModules();
@@ -1619,11 +1430,7 @@ describe("failsafe responses", () => {
 
     await loadBackground();
 
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const res = await sendMessage({ type: "FETCH_PASSWORDS" });
@@ -1647,7 +1454,7 @@ describe("failsafe responses", () => {
     );
 
     await loadBackground();
-    // Vault is locked (no SET_TOKEN / UNLOCK_VAULT) — handler returns the locked-state response.
+    // Vault is locked (no token, no UNLOCK_VAULT) — handler returns the locked-state response.
     // senderUrl must match rpId for the auth check to pass and reach the vault-locked path.
     const res = await sendMessageWithSender(
       { type: "PASSKEY_GET_MATCHES", rpId: "example.com" },
@@ -1848,11 +1655,7 @@ describe("CHECK_PENDING_SAVE host validation", () => {
     await loadBackground();
 
     // Unlock vault
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
   });
 
@@ -1987,11 +1790,7 @@ describe("LOGIN_DETECTED suppresses on own app", () => {
     await loadBackground();
 
     // Unlock vault
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
   });
 
@@ -2105,11 +1904,7 @@ describe("PASSKEY handlers suppress on own app", () => {
 
     await loadBackground();
 
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
   });
 
@@ -2234,11 +2029,7 @@ describe("tab event badge updates", () => {
 
     await loadBackground();
 
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     // Populate cache by fetching entries

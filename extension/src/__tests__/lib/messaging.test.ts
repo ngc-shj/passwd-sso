@@ -35,17 +35,15 @@ describe("sendMessage", () => {
   });
 
   it("passes message payload to chrome.runtime.sendMessage", async () => {
-    mockSendMessage.mockResolvedValue({ type: "SET_TOKEN", ok: true });
+    mockSendMessage.mockResolvedValue({ type: "COPY_PASSWORD", ok: true });
 
     await sendMessage({
-      type: "SET_TOKEN",
-      token: "tok-1",
-      expiresAt: 999,
+      type: "COPY_PASSWORD",
+      entryId: "id-1",
     });
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-      type: "SET_TOKEN",
-      token: "tok-1",
-      expiresAt: 999,
+      type: "COPY_PASSWORD",
+      entryId: "id-1",
     });
   });
 

@@ -19,9 +19,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
-import { NextRequest } from "next/server";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
-import { validateExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { hashToken } from "@/lib/crypto/crypto-server";
 
 describe("extension_tokens migration backward compatibility (T23)", () => {
