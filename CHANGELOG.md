@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.54](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.53...passwd-sso-v0.4.54) (2026-05-27)
+
+
+### Features
+
+* **extension:** click-driven ext_connect + userActivation gate (C15-v2) ([#497](https://github.com/ngc-shj/passwd-sso/issues/497)) ([bc6e578](https://github.com/ngc-shj/passwd-sso/commit/bc6e578f051ad05e817830d706ac80cc6cb61b2b))
+* **extension:** emit EXTENSION_BRIDGE_CODE_ISSUE_FAILURE on every fail path ([#495](https://github.com/ngc-shj/passwd-sso/issues/495)) ([6b07d6e](https://github.com/ngc-shj/passwd-sso/commit/6b07d6e8c3bb5fa21881bfc3a5ccdf4857f1e23b))
+
+
+### Bug Fixes
+
+* **extension:** clearer disconnect icon + accurate login-prompt wording ([#498](https://github.com/ngc-shj/passwd-sso/issues/498)) ([dcdd94a](https://github.com/ngc-shj/passwd-sso/commit/dcdd94a8a9b18d80887688e628f94b6274a7bda8))
+
 ## [0.4.53](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.52...passwd-sso-v0.4.53) (2026-05-25)
 
 
