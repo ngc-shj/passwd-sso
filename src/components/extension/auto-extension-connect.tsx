@@ -253,13 +253,6 @@ export function AutoExtensionConnect() {
               <Button onClick={handleConnectClick} className="w-full">
                 {t("connect")}
               </Button>
-              <Button
-                variant="ghost"
-                onClick={() => setStatus(CONNECT_STATUS.IDLE)}
-                className="w-full"
-              >
-                {t("goToDashboard")}
-              </Button>
             </div>
           )}
           {status === CONNECT_STATUS.CONNECTED && (
