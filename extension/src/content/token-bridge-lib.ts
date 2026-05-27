@@ -46,6 +46,17 @@ function postReady(reqId: string, ok: boolean, errorCode?: string): void {
 async function handleConnectRequestMessage(event: MessageEvent): Promise<boolean> {
   const { reqId } = (event.data ?? {}) as { reqId?: unknown };
   if (typeof reqId !== "string" || reqId.length === 0) return false;
+
+  // C15-v2 user-activation gate: drop silently when no transient activation
+  // is present (XSS firing window.postMessage autonomously cannot forge
+  // userActivation per HTML User Activation v2 — programmatic .click() and
+  // dispatchEvent(MouseEvent) do not set the flag). MUST fire BEFORE
+  // isContextValid: the EXTENSION_ABSENT postReady on that path would
+  // otherwise leak an oracle ("extension installed but I lack activation"
+  // vs "extension absent"). Only `isActive` (transient) is checked —
+  // `hasBeenActive` (sticky) persists forever and would defeat the gate.
+  if (!navigator.userActivation?.isActive) return false;
+
   if (!isContextValid()) {
     postReady(reqId, false, "EXTENSION_ABSENT");
     return true;

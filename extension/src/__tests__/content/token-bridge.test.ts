@@ -33,11 +33,21 @@ describe("token bridge (postMessage) — EXT_CONNECT_REQUEST relay", () => {
     window.postMessage = ((data: unknown, targetOrigin: string) => {
       postedMessages.push({ data, targetOrigin });
     }) as typeof window.postMessage;
+
+    // C15-v2 gate: default to a fresh user activation so existing tests
+    // exercise the post-gate paths. The gate itself is covered by
+    // token-bridge-user-activation.test.ts.
+    Object.defineProperty(navigator, "userActivation", {
+      value: { isActive: true, hasBeenActive: true },
+      configurable: true,
+      writable: true,
+    });
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
     window.postMessage = originalPostMessage;
+    delete (navigator as Navigator & { userActivation?: unknown }).userActivation;
   });
 
   function makeEvent(

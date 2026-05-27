@@ -94,14 +94,25 @@ export function AutoExtensionConnect() {
 
     didRunRef.current = true;
 
-    // Remove ext_connect from URL immediately to prevent re-fire on reload
+    // C15-v2: surface the AWAITING_CLICK confirmation card instead of auto-
+    // firing connect(). The user click on the Allow button satisfies
+    // navigator.userActivation.isActive at the moment of postMessage; the
+    // content-script gate then refuses XSS-issued postMessages that arrive
+    // without that activation. URL param removal is deferred to the click
+    // handler so reload reproduces the prompt.
+    setStatus(CONNECT_STATUS.AWAITING_CLICK);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleConnectClick = useCallback(async () => {
+    const params = new URLSearchParams(window.location.search);
     params.delete(EXT_CONNECT_PARAM);
     const newSearch = params.toString();
     const newUrl =
       window.location.pathname + (newSearch ? `?${newSearch}` : "") + window.location.hash;
     window.history.replaceState(null, "", newUrl);
 
-    connect();
+    await connect();
   }, [connect]);
 
   const handleRetry = async () => {
@@ -137,10 +148,16 @@ export function AutoExtensionConnect() {
         return;
       }
 
-      const retryResult = await connect();
-      if (!retryResult.ok && retryResult.requiresReauth) {
-        setReauthError(t("connectReauthStillRequired"));
-      }
+      // C15-v2: navigator.credentials.get() inside reauthenticateWithPasskey
+      // CONSUMES the page's transient user activation per HTML User
+      // Activation v2. A subsequent connect() → postMessage would be silent-
+      // dropped by the content-script gate. Surface AWAITING_CLICK so the
+      // user provides a fresh gesture to authorize the now-step-up'd
+      // connection. The "再認証完了" framing is conveyed by transitioning
+      // back to the same Allow prompt — the user already saw the reauth
+      // ceremony complete, so the second Allow click reads as "finish
+      // connecting now that re-auth is done."
+      setStatus(CONNECT_STATUS.AWAITING_CLICK);
     } finally {
       setReauthenticating(false);
     }
@@ -154,6 +171,11 @@ export function AutoExtensionConnect() {
       <Card className="w-full max-w-md">
         <CardContent className="flex flex-col items-center text-center pt-8 pb-8 space-y-6">
           {/* Icon */}
+          {status === CONNECT_STATUS.AWAITING_CLICK && (
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+              <KeyRound className="h-8 w-8 text-primary" />
+            </div>
+          )}
           {status === CONNECT_STATUS.CONNECTING && (
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -177,6 +199,14 @@ export function AutoExtensionConnect() {
           </div>
 
           {/* Title & Description */}
+          {status === CONNECT_STATUS.AWAITING_CLICK && (
+            <div className="space-y-2">
+              <h1 className="text-xl font-semibold">{t("awaitingClickTitle")}</h1>
+              <p className="text-sm text-muted-foreground">
+                {t("awaitingClickDescription")}
+              </p>
+            </div>
+          )}
           {status === CONNECT_STATUS.CONNECTING && (
             <div className="space-y-2">
               <h1 className="text-xl font-semibold">{t("connecting")}</h1>
@@ -217,6 +247,17 @@ export function AutoExtensionConnect() {
           )}
 
           {/* Actions */}
+          {status === CONNECT_STATUS.AWAITING_CLICK && (
+            <div className="flex flex-col gap-3 w-full max-w-xs">
+              <Button
+                onClick={handleConnectClick}
+                className="w-full"
+                data-c15-action="allow-connect"
+              >
+                {t("awaitingClickAction")}
+              </Button>
+            </div>
+          )}
           {status === CONNECT_STATUS.CONNECTED && (
             <div className="flex flex-col gap-3 w-full max-w-xs">
               <Button

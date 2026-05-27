@@ -2,14 +2,15 @@
 /**
  * AutoExtensionConnect — Client Component test (jsdom)
  *
- * Post-C7 (SW-initiated handshake): the component drives a single helper
- * `requestExtensionConnect()` and reacts to its `{ ok, errorCode }` result.
- * It no longer does any bridge-code fetch itself — that logic lives in the
- * extension SW now.
+ * C15-v2 (click-driven flow): when `?ext_connect=1` is on the URL, the
+ * component renders an AWAITING_CLICK confirmation card. `connect()` only
+ * runs when the user clicks the Allow button — never from useEffect. The
+ * click satisfies `navigator.userActivation.isActive`, which the extension
+ * content-script then verifies as the unforgeable XSS gate.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
@@ -72,6 +73,19 @@ function setSearchParams(search: string) {
   });
 }
 
+/**
+ * Render the component, wait for the AWAITING_CLICK prompt, then click the
+ * Allow button. Use this in any test that asserts on post-click state.
+ */
+async function renderAndClickAllow() {
+  render(<AutoExtensionConnect />);
+  const button = await screen.findByRole("button", {
+    name: "awaitingClickAction",
+  });
+  const user = userEvent.setup();
+  await user.click(button);
+}
+
 beforeEach(() => {
   originalLocation = window.location;
   replaceStateSpy = vi.spyOn(window.history, "replaceState").mockImplementation(() => {});
@@ -98,35 +112,74 @@ describe("AutoExtensionConnect", () => {
     expect(mockRequestExtensionConnect).not.toHaveBeenCalled();
   });
 
-  it("removes ext_connect from URL when present", async () => {
+  it("?ext_connect=1 shows AWAITING_CLICK prompt with no postMessage yet", async () => {
+    setSearchParams("?ext_connect=1");
+    render(<AutoExtensionConnect />);
+    expect(
+      await screen.findByText("awaitingClickTitle"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("awaitingClickDescription")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "awaitingClickAction" }),
+    ).toBeInTheDocument();
+    expect(mockRequestExtensionConnect).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call requestExtensionConnect on mount (click is the only trigger)", async () => {
+    // RT4 negative test: closes the "test the gate but not the door" pattern.
+    setSearchParams("?ext_connect=1");
+    render(<AutoExtensionConnect />);
+    // Flush microtasks + a tick to defeat any deferred auto-fire.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(mockRequestExtensionConnect).not.toHaveBeenCalled();
+    expect(screen.getByText("awaitingClickTitle")).toBeInTheDocument();
+  });
+
+  it("keeps ?ext_connect=1 in URL while AWAITING_CLICK (reload re-prompts)", async () => {
+    setSearchParams("?ext_connect=1");
+    render(<AutoExtensionConnect />);
+    await screen.findByText("awaitingClickTitle");
+    expect(replaceStateSpy).not.toHaveBeenCalled();
+    expect(window.location.search).toBe("?ext_connect=1");
+  });
+
+  it("removes ?ext_connect=1 only after the user clicks Allow", async () => {
     setSearchParams("?ext_connect=1");
     mockRequestExtensionConnect.mockResolvedValue({ ok: true });
-
-    render(<AutoExtensionConnect />);
-
+    await renderAndClickAllow();
     await waitFor(() => {
       expect(replaceStateSpy).toHaveBeenCalledWith(null, "", "/en/dashboard");
     });
   });
 
-  it("preserves other query params when removing ext_connect", async () => {
+  it("S3: re-rendering with ?ext_connect=1 retained shows the prompt again", async () => {
+    setSearchParams("?ext_connect=1");
+    const { unmount } = render(<AutoExtensionConnect />);
+    await screen.findByText("awaitingClickTitle");
+    unmount();
+    // Re-mount simulates page reload while URL still has the param.
+    render(<AutoExtensionConnect />);
+    expect(
+      await screen.findByText("awaitingClickTitle"),
+    ).toBeInTheDocument();
+    expect(mockRequestExtensionConnect).not.toHaveBeenCalled();
+  });
+
+  it("preserves other query params when removing ext_connect after click", async () => {
     setSearchParams("?ext_connect=1&foo=bar");
     mockRequestExtensionConnect.mockResolvedValue({ ok: true });
-
-    render(<AutoExtensionConnect />);
-
+    await renderAndClickAllow();
     await waitFor(() => {
       expect(replaceStateSpy).toHaveBeenCalledWith(null, "", "/en/dashboard?foo=bar");
     });
   });
 
-  it("calls requestExtensionConnect and shows CONNECTED on ok:true", async () => {
+  it("calls requestExtensionConnect and shows CONNECTED on ok:true (post-click)", async () => {
     setSearchParams("?ext_connect=1");
     mockRequestExtensionConnect.mockResolvedValue({ ok: true });
-
-    render(<AutoExtensionConnect />);
-
-    expect(screen.getByText("connecting")).toBeInTheDocument();
+    await renderAndClickAllow();
     await waitFor(() => {
       expect(screen.getByText("connectedTitle")).toBeInTheDocument();
     });
@@ -139,9 +192,7 @@ describe("AutoExtensionConnect", () => {
       ok: false,
       errorCode: "EXTENSION_ABSENT",
     });
-
-    render(<AutoExtensionConnect />);
-
+    await renderAndClickAllow();
     await waitFor(() => {
       expect(screen.getByText("extensionRequired")).toBeInTheDocument();
     });
@@ -154,9 +205,7 @@ describe("AutoExtensionConnect", () => {
       ok: false,
       errorCode: "GENERIC_FAILURE",
     });
-
-    render(<AutoExtensionConnect />);
-
+    await renderAndClickAllow();
     await waitFor(() => {
       expect(screen.getByText("connectFailedTitle")).toBeInTheDocument();
     });
@@ -170,16 +219,19 @@ describe("AutoExtensionConnect", () => {
       errorCode: "SESSION_STEP_UP_REQUIRED",
     });
     mockCanUsePasskeyRecovery.mockResolvedValue(true);
-
-    render(<AutoExtensionConnect />);
-
+    await renderAndClickAllow();
     await waitFor(() => {
       expect(screen.getByText("connectReauthTitle")).toBeInTheDocument();
     });
     expect(screen.getByText("connectReauthDescription")).toBeInTheDocument();
   });
 
-  it("reauthenticates and retries when retry is clicked from reauth-required state", async () => {
+  it("re-prompts AWAITING_CLICK after passkey reauth (C15-v2: credentials.get consumes activation)", async () => {
+    // navigator.credentials.get() inside reauthenticateWithPasskey consumes
+    // the page's transient user activation. The content-script gate would
+    // silent-drop a subsequent auto-retry's postMessage. Verify the
+    // component surfaces AWAITING_CLICK again so the user re-authorizes
+    // with a fresh gesture.
     setSearchParams("?ext_connect=1");
     mockRequestExtensionConnect
       .mockResolvedValueOnce({ ok: false, errorCode: "SESSION_STEP_UP_REQUIRED" })
@@ -189,22 +241,29 @@ describe("AutoExtensionConnect", () => {
       ok: true,
       verifiedAt: "2099-01-01T00:00:00Z",
     });
-
-    render(<AutoExtensionConnect />);
-
+    await renderAndClickAllow();
     await waitFor(() => {
       expect(screen.getByText("connectReauthTitle")).toBeInTheDocument();
     });
-
     const user = userEvent.setup();
     await user.click(screen.getByText("connectReauthAction"));
-
     await waitFor(() => {
       expect(mockReauthenticateWithPasskey).toHaveBeenCalledTimes(1);
     });
+    // After successful reauth, AWAITING_CLICK is shown again — NOT an
+    // auto-retry into CONNECTED.
+    await waitFor(() => {
+      expect(screen.getByText("awaitingClickTitle")).toBeInTheDocument();
+    });
+    expect(mockRequestExtensionConnect).toHaveBeenCalledTimes(1); // not retried automatically
+    // User provides the fresh gesture; connect() runs and succeeds.
+    await user.click(
+      screen.getByRole("button", { name: "awaitingClickAction" }),
+    );
     await waitFor(() => {
       expect(screen.getByText("connectedTitle")).toBeInTheDocument();
     });
+    expect(mockRequestExtensionConnect).toHaveBeenCalledTimes(2);
   });
 
   it("shows cancellation feedback when reauth is cancelled", async () => {
@@ -218,16 +277,12 @@ describe("AutoExtensionConnect", () => {
       ok: false,
       error: "AUTHENTICATION_CANCELLED",
     });
-
-    render(<AutoExtensionConnect />);
-
+    await renderAndClickAllow();
     await waitFor(() => {
       expect(screen.getByText("connectReauthTitle")).toBeInTheDocument();
     });
-
     const user = userEvent.setup();
     await user.click(screen.getByText("connectReauthAction"));
-
     await waitFor(() => {
       expect(screen.getByText("connectReauthCancelled")).toBeInTheDocument();
     });
@@ -240,16 +295,12 @@ describe("AutoExtensionConnect", () => {
       errorCode: "SESSION_STEP_UP_REQUIRED",
     });
     mockCanUsePasskeyRecovery.mockResolvedValue(false);
-
-    render(<AutoExtensionConnect />);
-
+    await renderAndClickAllow();
     await waitFor(() => {
       expect(screen.getByText("connectRecentSessionTitle")).toBeInTheDocument();
     });
-
     const user = userEvent.setup();
     await user.click(screen.getByText("connectRecentSessionAction"));
-
     await waitFor(() => {
       expect(mockSignOut).toHaveBeenCalledTimes(1);
     });
@@ -260,74 +311,65 @@ describe("AutoExtensionConnect", () => {
     mockRequestExtensionConnect
       .mockResolvedValueOnce({ ok: false, errorCode: "GENERIC_FAILURE" })
       .mockResolvedValueOnce({ ok: true });
-
-    render(<AutoExtensionConnect />);
-
+    await renderAndClickAllow();
     await waitFor(() => {
       expect(screen.getByText("connectFailedTitle")).toBeInTheDocument();
     });
-
     const user = userEvent.setup();
     await user.click(screen.getByText("retry"));
-
     await waitFor(() => {
       expect(screen.getByText("connectedTitle")).toBeInTheDocument();
     });
   });
 
-  it("'Go to dashboard' button returns to IDLE (renders nothing)", async () => {
+  it("'Go to dashboard' button (from CONNECTED) returns to IDLE", async () => {
     setSearchParams("?ext_connect=1");
     mockRequestExtensionConnect.mockResolvedValue({ ok: true });
-
     const { container } = render(<AutoExtensionConnect />);
-
+    const allowButton = await screen.findByRole("button", {
+      name: "awaitingClickAction",
+    });
+    const user = userEvent.setup();
+    await user.click(allowButton);
     await waitFor(() => {
       expect(screen.getByText("connectedTitle")).toBeInTheDocument();
     });
-
-    const user = userEvent.setup();
     await user.click(screen.getByText("goToDashboard"));
-
     expect(container.innerHTML).toBe("");
   });
 
-  it("displays APP_NAME in branding section", async () => {
+  it("displays APP_NAME in branding section (AWAITING_CLICK + post-click)", async () => {
     setSearchParams("?ext_connect=1");
-    mockRequestExtensionConnect.mockResolvedValue({ ok: true });
-
     render(<AutoExtensionConnect />);
-
-    await waitFor(() => {
-      expect(screen.getByText("connectedTitle")).toBeInTheDocument();
-    });
-
+    await screen.findByText("awaitingClickTitle");
     // APP_NAME defaults to "passwd-sso" (from NEXT_PUBLIC_APP_NAME env)
     expect(screen.getByText("passwd-sso")).toBeInTheDocument();
+  });
+
+  it("sets data-overlay-active on overlay div in AWAITING_CLICK", async () => {
+    setSearchParams("?ext_connect=1");
+    render(<AutoExtensionConnect />);
+    await screen.findByText("awaitingClickTitle");
+    expect(document.querySelector("[data-overlay-active]")).not.toBeNull();
   });
 
   it("sets data-overlay-active on overlay div when CONNECTED", async () => {
     setSearchParams("?ext_connect=1");
     mockRequestExtensionConnect.mockResolvedValue({ ok: true });
-
-    render(<AutoExtensionConnect />);
-
+    await renderAndClickAllow();
     await waitFor(() => {
       expect(screen.getByText("connectedTitle")).toBeInTheDocument();
     });
-
     expect(document.querySelector("[data-overlay-active]")).not.toBeNull();
   });
 
   it("sets data-overlay-active on overlay div when CONNECTING", async () => {
     setSearchParams("?ext_connect=1");
     mockRequestExtensionConnect.mockReturnValue(new Promise(() => {}));
-
-    render(<AutoExtensionConnect />);
-
+    await renderAndClickAllow();
     await waitFor(() => {
       expect(screen.getByText("connecting")).toBeInTheDocument();
     });
-
     expect(document.querySelector("[data-overlay-active]")).not.toBeNull();
   });
 
@@ -337,21 +379,26 @@ describe("AutoExtensionConnect", () => {
       ok: false,
       errorCode: "GENERIC_FAILURE",
     });
-
-    render(<AutoExtensionConnect />);
-
+    await renderAndClickAllow();
     await waitFor(() => {
       expect(screen.getByText("connectFailedTitle")).toBeInTheDocument();
     });
-
     expect(document.querySelector("[data-overlay-active]")).not.toBeNull();
   });
 
   it("does not have data-overlay-active when IDLE (no ext_connect)", () => {
     setSearchParams("");
     render(<AutoExtensionConnect />);
-
     expect(document.querySelector("[data-overlay-active]")).toBeNull();
+  });
+
+  it("Allow button has data-c15-action attribute (stable selector for manual tests)", async () => {
+    setSearchParams("?ext_connect=1");
+    render(<AutoExtensionConnect />);
+    const button = await screen.findByRole("button", {
+      name: "awaitingClickAction",
+    });
+    expect(button.getAttribute("data-c15-action")).toBe("allow-connect");
   });
 });
 
