@@ -127,6 +127,36 @@ acceptable; record which one for the PR review.
 distinguish a legitimate click from an XSS payload that races within the
 transient activation window (~5 s).
 
+### TC4b — Post-passkey-reauth retry (regression for C15-v2 reauth bug)
+
+**Why this exists**: an earlier iteration auto-called `connect()` after a
+successful passkey re-auth. `navigator.credentials.get()` consumes the
+page's transient user activation, so the subsequent postMessage was
+silent-dropped by the content-script gate → page showed "extension
+absent" after the 8-second timeout. This TC pins the regression.
+
+**Steps**:
+1. Sign in normally so the dashboard loads.
+2. Wait long enough that the session no longer satisfies the bridge-code
+   route's step-up-auth requirement (or trigger step-up some other way).
+3. Open the extension popup → click Connect → land on
+   `/<locale>/dashboard?ext_connect=1`.
+4. AWAITING_CLICK card appears → click **拡張機能との接続を許可**.
+5. `connect()` returns `SESSION_STEP_UP_REQUIRED` → FAILED state shows
+   "ブラウザでの再認証が必要です" + **Passkey で再認証** button.
+6. Click **Passkey で再認証** → complete the WebAuthn ceremony.
+
+**Expected result**:
+- After the passkey ceremony succeeds, the **AWAITING_CLICK card is
+  shown AGAIN** (not an immediate transition to CONNECTING / CONNECTED /
+  EXTENSION_ABSENT).
+- The user clicks **拡張機能との接続を許可** a second time.
+- `connect()` runs with fresh activation → CONNECTING → CONNECTED.
+
+**Pass condition**: the second Allow click reaches CONNECTED. If the
+page reaches EXTENSION_ABSENT after the reauth step, the regression has
+returned.
+
 ### TC5 — Timeout-collapse confirmation (informational)
 
 **Steps**:

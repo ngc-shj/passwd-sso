@@ -148,10 +148,16 @@ export function AutoExtensionConnect() {
         return;
       }
 
-      const retryResult = await connect();
-      if (!retryResult.ok && retryResult.requiresReauth) {
-        setReauthError(t("connectReauthStillRequired"));
-      }
+      // C15-v2: navigator.credentials.get() inside reauthenticateWithPasskey
+      // CONSUMES the page's transient user activation per HTML User
+      // Activation v2. A subsequent connect() → postMessage would be silent-
+      // dropped by the content-script gate. Surface AWAITING_CLICK so the
+      // user provides a fresh gesture to authorize the now-step-up'd
+      // connection. The "再認証完了" framing is conveyed by transitioning
+      // back to the same Allow prompt — the user already saw the reauth
+      // ceremony complete, so the second Allow click reads as "finish
+      // connecting now that re-auth is done."
+      setStatus(CONNECT_STATUS.AWAITING_CLICK);
     } finally {
       setReauthenticating(false);
     }

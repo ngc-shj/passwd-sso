@@ -226,7 +226,12 @@ describe("AutoExtensionConnect", () => {
     expect(screen.getByText("connectReauthDescription")).toBeInTheDocument();
   });
 
-  it("reauthenticates and retries when retry is clicked from reauth-required state", async () => {
+  it("re-prompts AWAITING_CLICK after passkey reauth (C15-v2: credentials.get consumes activation)", async () => {
+    // navigator.credentials.get() inside reauthenticateWithPasskey consumes
+    // the page's transient user activation. The content-script gate would
+    // silent-drop a subsequent auto-retry's postMessage. Verify the
+    // component surfaces AWAITING_CLICK again so the user re-authorizes
+    // with a fresh gesture.
     setSearchParams("?ext_connect=1");
     mockRequestExtensionConnect
       .mockResolvedValueOnce({ ok: false, errorCode: "SESSION_STEP_UP_REQUIRED" })
@@ -245,9 +250,20 @@ describe("AutoExtensionConnect", () => {
     await waitFor(() => {
       expect(mockReauthenticateWithPasskey).toHaveBeenCalledTimes(1);
     });
+    // After successful reauth, AWAITING_CLICK is shown again — NOT an
+    // auto-retry into CONNECTED.
+    await waitFor(() => {
+      expect(screen.getByText("awaitingClickTitle")).toBeInTheDocument();
+    });
+    expect(mockRequestExtensionConnect).toHaveBeenCalledTimes(1); // not retried automatically
+    // User provides the fresh gesture; connect() runs and succeeds.
+    await user.click(
+      screen.getByRole("button", { name: "awaitingClickAction" }),
+    );
     await waitFor(() => {
       expect(screen.getByText("connectedTitle")).toBeInTheDocument();
     });
+    expect(mockRequestExtensionConnect).toHaveBeenCalledTimes(2);
   });
 
   it("shows cancellation feedback when reauth is cancelled", async () => {
