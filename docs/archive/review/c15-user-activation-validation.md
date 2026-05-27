@@ -115,36 +115,100 @@ Expected: `isActive: true` — this is the control that confirms the API is work
 
 Expected: `isActive: false`. The postMessage WILL be processed by the SW (per the current behavior) — this is precisely the gap C15 aims to close.
 
-## Observation table
+## Observations
 
-Fill in after running the tests.
+Tests were partial; the only `[C15-validation]` log captured was from a run where
+the vault unlock click immediately preceded the useEffect:
 
-| TC | isActive | hasBeenActive | Notes |
-|----|----------|---------------|-------|
-| TC1 |          |               |       |
-| TC2 |          |               |       |
-| TC3 |          |               |       |
-| TC4 |          |               | Control — should be `true` |
-| TC5 |          |               |       |
+```
+[C15-validation] useEffect entry
+  isActive: true
+  hasBeenActive: true
+  documentReferrer: ''
+  performanceNow: 10600
+  pageLoadMs: 1017
+[C15-validation] pre-postMessage
+  isActive: true
+  hasBeenActive: true
+  reqId: <uuid>
+  performanceNow: 10606
+```
 
-Chrome version: __________
-OS: __________
+Key fact: `performanceNow - pageLoadMs ≈ 9.5s`. The useEffect fired ~9.5 seconds
+after page load, well outside the 5-second transient activation window from
+page-load-time gestures alone. `isActive: true` is only possible because a
+user gesture occurred WITHIN the preceding 5 seconds — and the most plausible
+explanation is the **vault unlock click**.
 
-## Decision matrix
+The "vault already unlocked, no preceding click" scenario could not be
+empirically confirmed because every test run reached the page with the vault
+re-locked (vault state appears not to persist across tab open in the user's
+environment); the AutoExtensionConnect component never mounted without an
+unlock click intervening.
 
-| TC1+TC2+TC3 | TC5 | Decision |
-|-------------|-----|----------|
-| All `false` | `false` | **Naive gate breaks legitimate flow** → fallback design or skip |
-| All `true` | `true` | **Naive gate is useless** (cannot discriminate) → skip |
-| All `true` | `false` | **Naive gate works** → implement C15 as planned |
-| Mixed | any | **Inconsistent** → investigate per-case before designing |
+`documentReferrer: ''` is consistent with the extension popup → new tab flow
+(the `chrome-extension://...` referrer is stripped by default policy).
 
-## Conclusion (to be filled after observation)
+## Findings
 
-_Pending._
+1. **Legitimate flow on this codebase typically routes through vault unlock**,
+   and the unlock click satisfies `userActivation.isActive` at the moment of
+   `postMessage`. Naive gate would NOT break this flow.
 
-## Out of scope for this validation PR
+2. **The "vault already unlocked at navigation" path is plausible** (vault
+   state could persist via SessionStorage / IndexedDB / SW message channel in
+   some configurations) but **could not be reproduced** in the observed
+   environment. If such a path exists in production, naive gate would reject
+   the legitimate flow on that path — the failure mode is silent (extension
+   never connects, user sees `EXTENSION_ABSENT` error code with no
+   forensic-server signal because the gate sits in the content script before
+   the SW fetch).
 
-- The implementation of C15 itself (separate PR contingent on the decision above).
-- Any fallback design (separate plan if needed).
-- The instrumentation is reverted before this PR opens; the only artifact retained is this document with observations filled in.
+3. **Beyond vault unlock click**, any user gesture within 5 seconds of the
+   useEffect satisfies the gate — including unrelated clicks, scrolls,
+   keypresses. XSS that runs autonomously on page load (zero preceding
+   gesture) WOULD be blocked. XSS that races a user click within a 5-second
+   window WOULD NOT be blocked.
+
+## Decision
+
+**Skip C15** for the foreseeable future. Rationale:
+
+- **Existing defenses are sufficient for the residual threat**:
+  - 60/min/IP IP rate-limit on bridge-code route
+  - 10/15min/user per-user rate-limit
+  - DPoP sender-constrained tokens (PR #491): token cannot be exfiltrated
+  - SW-initiated bridge code with cnf_jkt trust path (PR #492): token never
+    reaches a JS heap reachable by XSS
+  - Audit visibility on every failure path (PR #495 / C14): operators can
+    detect abuse patterns
+- **Marginal additional value**: naive gate only blocks XSS that fires before
+  any user gesture. XSS-after-gesture is unblocked. Given XSS in a long-lived
+  dashboard tab is the higher-impact scenario, the gate doesn't move the
+  attacker's effective bar much.
+- **Risk of breaking legitimate flow** in the un-tested "vault already
+  unlocked" path. The failure mode is silent and indistinguishable from
+  "extension not installed" — bad UX.
+- **Implementation + maintenance cost** in the extension content script for a
+  defense that adds bounded value.
+
+If the threat model later prioritizes "XSS-on-page-load → bridge-code issuance
+auto-fire" specifically (e.g., a CSP regression that newly admits XSS), this
+decision can be revisited with empirical retest of the "vault already
+unlocked" path.
+
+## Out of scope for this PR
+
+- C15 implementation — **not pursued**.
+- Any fallback design — not pursued (decision is to skip).
+- The instrumentation has been reverted; this document is the sole retained
+  artifact.
+
+## Re-validation triggers
+
+Revisit C15 when:
+- A new XSS surface is found that bypasses DPoP / rate-limit / cnf_jkt
+- Vault state persistence model changes (e.g., shared across tabs via SW)
+- Browser User Activation spec evolves to provide a stronger discriminator
+- A different threat model (e.g., browser-level malicious extension) requires
+  stronger gating in the host page

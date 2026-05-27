@@ -86,16 +86,6 @@ export async function requestExtensionConnect(
       };
 
       window.addEventListener("message", handler);
-      // C15-VALIDATION: TEMPORARY — observe userActivation at the exact
-      // moment of postMessage. Remove before any C15 implementation PR. See
-      // docs/archive/review/c15-user-activation-validation.md.
-      // eslint-disable-next-line no-console
-      console.log("[C15-validation] pre-postMessage", {
-        isActive: navigator.userActivation?.isActive,
-        hasBeenActive: navigator.userActivation?.hasBeenActive,
-        reqId,
-        performanceNow: performance.now(),
-      });
       window.postMessage(
         { type: EXT_CONNECT_REQUEST_MSG_TYPE, reqId },
         window.location.origin,
