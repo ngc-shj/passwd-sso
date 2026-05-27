@@ -142,12 +142,14 @@ function sendMessage(message: unknown): Promise<unknown> {
   });
 }
 
+let bgModule: typeof import("../background/index") | null = null;
+function applyToken(token: string, expiresAt: number, cnfJkt: string): void {
+  if (!bgModule) throw new Error("background module must be loaded before applyToken()");
+  bgModule.applyToken(token, expiresAt, cnfJkt);
+}
+
 async function unlockVault(chromeMock: ReturnType<typeof installChromeMock>) {
-  await sendMessage({
-    type: "SET_TOKEN",
-    token: "t",
-    expiresAt: Date.now() + 60_000,
-  });
+  applyToken("t", Date.now() + 60_000, "");
   await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 }
 
@@ -246,7 +248,7 @@ describe("X-4 keyboard shortcut commands", () => {
       }),
     );
 
-    await import("../background/index");
+    bgModule = await import("../background/index");
   });
 
   it("copy-password copies password to clipboard via offscreen document", async () => {
@@ -306,11 +308,7 @@ describe("X-4 keyboard shortcut commands", () => {
 
   it("copy-password does nothing when vault is locked", async () => {
     // Don't unlock — vault is locked
-    await sendMessage({
-      type: "SET_TOKEN",
-      token: "t",
-      expiresAt: Date.now() + 60_000,
-    });
+    applyToken("t", Date.now() + 60_000, "");
 
     const handler = commandHandlers[0];
     await handler(CMD_COPY_PASSWORD);

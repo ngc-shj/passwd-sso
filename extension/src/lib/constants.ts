@@ -60,7 +60,6 @@ export const EXT_MSG = {
   // The SW signs DPoP + fetches /api/extension/bridge-code (credentialed) +
   // /api/extension/token/exchange + persists the resulting token.
   START_CONNECT: "START_CONNECT",
-  SET_TOKEN: "SET_TOKEN",
   GET_TOKEN: "GET_TOKEN",
   CLEAR_TOKEN: "CLEAR_TOKEN",
   GET_STATUS: "GET_STATUS",
