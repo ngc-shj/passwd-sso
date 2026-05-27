@@ -40,8 +40,10 @@ import { checkAccessRestrictionWithAudit } from "@/lib/auth/policy/access-restri
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit/audit";
+import { emitBridgeCodeIssueFailure } from "@/lib/audit/bridge-code-failure";
 import { parseBody } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { getLogger } from "@/lib/logger";
 import {
   AUDIT_ACTION,
   EXTENSION_TOKEN_DEFAULT_SCOPES,
@@ -96,7 +98,15 @@ async function handlePOST(req: NextRequest) {
     scope: "extension.bridge_code_ip",
     userId: null,
   });
-  if (ipBlocked) return ipBlocked;
+  if (ipBlocked) {
+    await emitBridgeCodeIssueFailure({
+      req,
+      userId: null,
+      tenantId: null,
+      reason: ipRl.redisErrored ? "ip_rate_limit_redis_fail" : "ip_rate_limit",
+    });
+    return ipBlocked;
+  }
 
   // 2) Origin allowlist. The proxy intentionally bypasses CSRF for this
   //    route — we are the sole layer enforcing Origin against
@@ -104,17 +114,39 @@ async function handlePOST(req: NextRequest) {
   //    is unset (no entries in the Set → every origin rejected).
   const origin = req.headers.get("origin");
   if (!isBridgeCodeOriginAllowed(origin)) {
+    await emitBridgeCodeIssueFailure({
+      req,
+      userId: null,
+      tenantId: null,
+      reason: "origin_disallowed",
+    });
     return forbidden();
   }
 
   // 3) Body schema — strict empty object. Rejects ANY client-supplied
   //    field (most importantly `cnfJkt`), closing the body-spoofing gap.
   const bodyResult = await parseBody(req, BridgeCodeIssueSchema);
-  if (!bodyResult.ok) return bodyResult.response;
+  if (!bodyResult.ok) {
+    await emitBridgeCodeIssueFailure({
+      req,
+      userId: null,
+      tenantId: null,
+      reason: "body_schema_invalid",
+    });
+    return bodyResult.response;
+  }
 
   // 4) Auth.js session check.
   const session = await auth();
-  if (!session?.user?.id) return unauthorized();
+  if (!session?.user?.id) {
+    await emitBridgeCodeIssueFailure({
+      req,
+      userId: null,
+      tenantId: null,
+      reason: "unauthenticated",
+    });
+    return unauthorized();
+  }
   const userId = session.user.id;
 
   // 4a) Tenant IP access restriction. The proxy early-return for
@@ -126,7 +158,15 @@ async function handlePOST(req: NextRequest) {
       select: { tenantId: true },
     }),
   );
-  if (!userRecord) return unauthorized();
+  if (!userRecord) {
+    await emitBridgeCodeIssueFailure({
+      req,
+      userId,
+      tenantId: null,
+      reason: "user_not_found",
+    });
+    return unauthorized();
+  }
   if (userRecord.tenantId) {
     const access = await checkAccessRestrictionWithAudit(
       userRecord.tenantId,
@@ -135,23 +175,46 @@ async function handlePOST(req: NextRequest) {
       req,
     );
     if (!access.allowed) {
+      await emitBridgeCodeIssueFailure({
+        req,
+        userId,
+        tenantId: userRecord.tenantId,
+        reason: "tenant_access_restricted",
+      });
       return errorResponse(API_ERROR.ACCESS_DENIED);
     }
   }
 
   // 5) Step-up gate.
   const stepUpError = await requireRecentCurrentAuthMethod(req);
-  if (stepUpError) return stepUpError;
+  if (stepUpError) {
+    await emitBridgeCodeIssueFailure({
+      req,
+      userId,
+      tenantId: userRecord.tenantId,
+      reason: "step_up_required",
+    });
+    return stepUpError;
+  }
 
-  // 6) Per-user rate limit.
+  // 6) Per-user rate limit. Pre-computed-result form so the route can
+  //    observe `rl.redisErrored` and pick the right failure reason.
+  const rl = await bridgeCodeLimiter.check(`rl:ext_bridge:${userId}`);
   const blocked = await checkRateLimitOrFail({
     req,
-    limiter: bridgeCodeLimiter,
-    key: `rl:ext_bridge:${userId}`,
+    result: rl,
     scope: "extension.bridge_code",
     userId,
   });
-  if (blocked) return blocked;
+  if (blocked) {
+    await emitBridgeCodeIssueFailure({
+      req,
+      userId,
+      tenantId: userRecord.tenantId,
+      reason: rl.redisErrored ? "rate_limit_redis_fail" : "rate_limit",
+    });
+    return blocked;
+  }
 
   // 7) DPoP proof verify. `cnfJkt` is the verifier-returned thumbprint of
   //    the proof's own JWK — NOT a body field. No expectedAth (no access
@@ -164,7 +227,16 @@ async function handlePOST(req: NextRequest) {
     expectedNonce: null,
     jtiCache: getJtiCache(),
   });
-  if (!dpopResult.ok) return unauthorized();
+  if (!dpopResult.ok) {
+    await emitBridgeCodeIssueFailure({
+      req,
+      userId,
+      tenantId: userRecord.tenantId,
+      reason: "dpop_invalid",
+      dpopError: dpopResult.error,
+    });
+    return unauthorized();
+  }
   const cnfJkt = dpopResult.jkt;
 
   // 8) DB write — atomic BRIDGE_CODE_MAX_ACTIVE enforcement + create row.
@@ -174,33 +246,52 @@ async function handlePOST(req: NextRequest) {
   const expiresAt = new Date(now.getTime() + BRIDGE_CODE_TTL_MS);
   const meta = extractRequestMeta(req);
 
-  await withBypassRls(prisma, async (tx) => {
-    const active = await tx.extensionBridgeCode.findMany({
-      where: { userId, usedAt: null, expiresAt: { gt: now } },
-      orderBy: { createdAt: "asc" },
-      select: { id: true },
-    });
-    const overflow = active.length + 1 - BRIDGE_CODE_MAX_ACTIVE;
-    if (overflow > 0) {
-      const toRevoke = active.slice(0, overflow).map((r) => r.id);
-      await tx.extensionBridgeCode.updateMany({
-        where: { id: { in: toRevoke } },
-        data: { usedAt: now },
+  try {
+    await withBypassRls(prisma, async (tx) => {
+      const active = await tx.extensionBridgeCode.findMany({
+        where: { userId, usedAt: null, expiresAt: { gt: now } },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
       });
-    }
-    await tx.extensionBridgeCode.create({
-      data: {
-        codeHash,
-        userId,
-        tenantId: userRecord.tenantId,
-        scope: EXTENSION_TOKEN_DEFAULT_SCOPES.join(","),
-        expiresAt,
-        cnfJkt,
-        ip: meta.ip,
-        userAgent: meta.userAgent,
-      },
+      const overflow = active.length + 1 - BRIDGE_CODE_MAX_ACTIVE;
+      if (overflow > 0) {
+        const toRevoke = active.slice(0, overflow).map((r) => r.id);
+        await tx.extensionBridgeCode.updateMany({
+          where: { id: { in: toRevoke } },
+          data: { usedAt: now },
+        });
+      }
+      await tx.extensionBridgeCode.create({
+        data: {
+          codeHash,
+          userId,
+          tenantId: userRecord.tenantId,
+          scope: EXTENSION_TOKEN_DEFAULT_SCOPES.join(","),
+          expiresAt,
+          cnfJkt,
+          ip: meta.ip,
+          userAgent: meta.userAgent,
+        },
+      });
+    }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  } catch (err) {
+    await emitBridgeCodeIssueFailure({
+      req,
+      userId,
+      tenantId: userRecord.tenantId,
+      reason: "db_error",
     });
-  }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+    getLogger().error(
+      {
+        event: "extension_bridge_code_issue_failure",
+        reason: "db_error",
+        userId,
+        err,
+      },
+      "extension bridge-code issuance failed: DB write threw",
+    );
+    return errorResponse(API_ERROR.INTERNAL_ERROR);
+  }
 
   await logAuditAsync({
     ...personalAuditBase(req, userId),

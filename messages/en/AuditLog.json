@@ -232,6 +232,7 @@
   "MCP_CONNECTION_REVOKE_ALL": "All MCP connections revoked",
   "PASSKEY_ENFORCEMENT_BLOCKED": "Access blocked: passkey not enrolled",
   "EXTENSION_BRIDGE_CODE_ISSUE": "Extension bridge code issued",
+  "EXTENSION_BRIDGE_CODE_ISSUE_FAILURE": "Extension bridge code issuance failed",
   "EXTENSION_TOKEN_EXCHANGE_SUCCESS": "Client app token exchange successful",
   "EXTENSION_TOKEN_EXCHANGE_FAILURE": "Client app token exchange failed",
   "EXTENSION_TOKEN_LEGACY_ISSUANCE_BLOCKED": "Blocked legacy extension token issuance attempt",
