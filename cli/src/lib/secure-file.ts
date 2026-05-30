@@ -34,8 +34,7 @@ export function writeSecretFile(
     mode,
   );
   try {
-    // codeql[js/network-data-written-to-file] secrets are intentionally persisted
-    writeSync(fd, data);
+    writeSync(fd, data); // codeql[js/network-data-written-to-file] secrets (OAuth tokens / decrypted export) are intentionally persisted to a 0600 O_NOFOLLOW file
   } finally {
     closeSync(fd);
   }
