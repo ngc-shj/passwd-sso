@@ -7,6 +7,10 @@
 
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import {
+  collectAttachmentRefsByCreator,
+  deleteAttachmentBlobs,
+} from "@/lib/blob-store/cleanup";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { bulkTransition } from "@/lib/emergency-access/emergency-access-state";
@@ -46,9 +50,12 @@ export async function executeVaultReset(
   );
 
   // Single transaction: delete all vault data (callback form required for bulkTransition — S4).
-  await withBypassRls(prisma, async (tx) =>
+  const attachmentRefs = await withBypassRls(prisma, async (tx) =>
     prisma.$transaction(async (tx) => {
-      // Attachments (bytea stored directly in DB, no external storage)
+      // Attachments: rows are bytea in DB, but external blob backends store the
+      // ciphertext out-of-band — capture refs before delete so they aren't
+      // orphaned, then purge after the transaction commits.
+      const refs = await collectAttachmentRefsByCreator(tx, targetUserId);
       await tx.attachment.deleteMany({ where: { createdById: targetUserId } });
       // Share links
       await tx.passwordShare.deleteMany({ where: { createdById: targetUserId } });
@@ -115,8 +122,14 @@ export async function executeVaultReset(
       if (process.env.NODE_ENV === "test" && __testHook) {
         await __testHook(tx);
       }
+
+      return refs;
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+
+  // Purge external blob objects only after the DB transaction commits
+  // (best-effort; no-op on the DB backend).
+  await deleteAttachmentBlobs(attachmentRefs);
 
   return { deletedEntries, deletedAttachments };
 }

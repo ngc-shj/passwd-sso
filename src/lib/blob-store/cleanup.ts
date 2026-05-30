@@ -52,6 +52,38 @@ export async function collectEntryAttachmentRefs(
 }
 
 /**
+ * Collect external blob refs for every attachment created by a user, BEFORE a
+ * full vault reset deletes them by `createdById`. Returns [] on the DB backend.
+ * Relies on the object key encoded in the stored payload (the normal case); the
+ * context is only a legacy fallback.
+ */
+export async function collectAttachmentRefsByCreator(
+  client: TxOrPrisma,
+  createdById: string,
+): Promise<AttachmentBlobRef[]> {
+  const blobStore = getAttachmentBlobStore();
+  if (blobStore.backend === BLOB_STORAGE.DB) return [];
+
+  const attachments = await client.attachment.findMany({
+    where: { createdById },
+    select: {
+      id: true,
+      encryptedData: true,
+      passwordEntryId: true,
+      teamPasswordEntryId: true,
+    },
+  });
+
+  return attachments.map((a) => ({
+    stored: a.encryptedData,
+    context: {
+      attachmentId: a.id,
+      entryId: (a.passwordEntryId ?? a.teamPasswordEntryId)!,
+    },
+  }));
+}
+
+/**
  * Best-effort deletion of external blob-store objects. Storage failures are
  * swallowed (Promise.allSettled): the DB delete has already happened, and an
  * orphaned object is preferable to surfacing a failed user-facing delete.
