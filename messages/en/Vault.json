@@ -59,6 +59,7 @@
   "recoveryKeyClose": "Close",
   "recoveryKeyGenerating": "Generating Recovery Key...",
   "recoveryKeyRegenerateWarning": "You already have a Recovery Key. Generating a new one will invalidate the previous key.",
+  "recoveryKeyRegenerateInvalidatedWarning": "Your previous Recovery Key was already invalidated by a vault key rotation. Generate a new Recovery Key below.",
   "vaultMustBeUnlocked": "Vault must be unlocked.",
   "or": "or",
   "setupInviteContext": "To accept this invitation, you need to set up your vault first. Please set a passphrase below.",
