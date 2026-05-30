@@ -34,7 +34,11 @@ export function writeSecretFile(
     mode,
   );
   try {
-    writeSync(fd, data); // codeql[js/http-to-file-access] secrets (OAuth tokens / decrypted export) are intentionally persisted to a 0600 O_NOFOLLOW file
+    // Intentional persistence of the caller's own secrets (OAuth tokens /
+    // decrypted export) to a 0600 O_NOFOLLOW file. CodeQL js/http-to-file-access
+    // is excluded for this in .github/codeql/codeql-config.yml (inline
+    // // codeql[...] suppression is not honored by GitHub code scanning here).
+    writeSync(fd, data);
   } finally {
     closeSync(fd);
   }
