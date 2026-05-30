@@ -60,12 +60,14 @@ const EN_REDIRECT_SAMPLE: Array<{ input: string; expected: string }> = [
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-async function setupTenantAdminContext(
+type AuthedUser = { sessionToken: string; passphrase?: string };
+
+async function setupAuthedContext(
   browser: Parameters<typeof test.beforeAll>[0] extends never ? never : import("@playwright/test").Browser,
+  user: AuthedUser,
 ): Promise<{ context: BrowserContext; page: Page }> {
-  const { tenantAdmin } = getAuthState();
   const context = await browser.newContext();
-  await injectSession(context, tenantAdmin.sessionToken);
+  await injectSession(context, user.sessionToken);
   const page = await context.newPage();
 
   // Unlock vault on dashboard (admin pages bypass VaultGate, but subsequent
@@ -73,10 +75,14 @@ async function setupTenantAdminContext(
   await page.goto("/ja/dashboard");
   const lockPage = new VaultLockPage(page);
   await expect(lockPage.passphraseInput).toBeVisible({ timeout: 15_000 });
-  await lockPage.unlockAndWait(tenantAdmin.passphrase!);
+  await lockPage.unlockAndWait(user.passphrase!);
 
   return { context, page };
 }
+
+const setupTenantAdminContext = (
+  browser: Parameters<typeof test.beforeAll>[0] extends never ? never : import("@playwright/test").Browser,
+) => setupAuthedContext(browser, getAuthState().tenantAdmin);
 
 // ── Tenant nav parameterized tests ────────────────────────────────────────────
 
@@ -126,8 +132,14 @@ test.describe("Admin IA — team nav", () => {
   // navigation assertions loudly rather than silently skipping every test.
   const teamId = E2E_TEAM_ID;
 
+  // The /admin/teams/[teamId]/* pages are TEAM-membership-gated, so they must be
+  // driven by a member of E2E_TEAM_ID (teamOwner is its OWNER) — a tenant admin
+  // who is not a team member gets a 404. (teamOwner is also a tenant ADMIN.)
   test.beforeAll(async ({ browser }) => {
-    ({ context, page } = await setupTenantAdminContext(browser as import("@playwright/test").Browser));
+    ({ context, page } = await setupAuthedContext(
+      browser as import("@playwright/test").Browser,
+      getAuthState().teamOwner,
+    ));
   });
 
   test.afterAll(async () => {
