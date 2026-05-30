@@ -40,6 +40,7 @@ import {
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -222,6 +223,13 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     );
     return errorResponse(API_ERROR.MOBILE_BRIDGE_CODE_INVALID);
   }
+
+  // Tenant network-boundary enforcement. The bridge-code exchange is not
+  // session-based, so the proxy access-restriction gate does not cover it;
+  // enforce here for parity with the extension/iOS token lifecycle. tenantId
+  // and userId come from the validated bridge-code row.
+  const denied = await enforceAccessRestriction(req, stored.userId, stored.tenantId);
+  if (denied) return denied;
 
   // 8. Issue the token pair. cnfJkt is the verifier-computed thumbprint of
   // the proof's own JWK — same value as stored.deviceJkt post-verify.

@@ -8,6 +8,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { readJsonWithCap } from "@/lib/http/parse-body";
+import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -58,13 +60,19 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
     return notFound();
   }
 
-  // Empty body is allowed: defaults are used.
-  const rawText = await req.text();
+  // Empty body is allowed: defaults are used. A content-length of 0 (or an
+  // absent header with no body) means "no overrides" → parse {}. Otherwise
+  // read with a byte cap.
+  const contentLength = req.headers.get("content-length");
   let body: unknown;
-  try {
-    body = rawText ? JSON.parse(rawText) : {};
-  } catch {
-    return errorResponse(API_ERROR.INVALID_JSON);
+  if (contentLength === "0" || (!contentLength && !req.body)) {
+    body = {};
+  } else {
+    const read = await readJsonWithCap(req, MAX_JSON_BODY_BYTES);
+    if (!read.ok) {
+      return errorResponse(read.tooLarge ? API_ERROR.PAYLOAD_TOO_LARGE : API_ERROR.INVALID_JSON);
+    }
+    body = read.body;
   }
   const parsed = runSchema.safeParse(body);
   if (!parsed.success) {

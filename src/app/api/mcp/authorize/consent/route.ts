@@ -8,6 +8,7 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 import { requireRecentSession } from "@/lib/auth/session/step-up";
 
 export async function POST(req: NextRequest) {
@@ -31,6 +32,16 @@ export async function POST(req: NextRequest) {
 
   const stepUpError = await requireRecentSession(req);
   if (stepUpError) return stepUpError;
+
+  // Cap the untrusted form body before parsing (content-length pre-check;
+  // session-authed so lower severity, but still untrusted input).
+  const contentLength = req.headers.get("content-length");
+  if (contentLength) {
+    const declared = Number(contentLength);
+    if (Number.isFinite(declared) && declared > MAX_JSON_BODY_BYTES) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
+  }
 
   // Parse form data submitted from the consent UI
   const formData = await req.formData();

@@ -57,6 +57,15 @@ export async function POST(req: NextRequest) {
   const contentType = req.headers.get("content-type") ?? "";
 
   if (contentType.includes("application/x-www-form-urlencoded")) {
+    // Cap the untrusted form body. readJsonWithCap is JSON-only, so guard the
+    // form branch with an explicit content-length pre-check (RFC 6749 envelope).
+    const contentLength = req.headers.get("content-length");
+    if (contentLength) {
+      const declared = Number(contentLength);
+      if (Number.isFinite(declared) && declared > MAX_JSON_BODY_BYTES) {
+        return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+      }
+    }
     try {
       const text = await req.text();
       body = Object.fromEntries(new URLSearchParams(text));

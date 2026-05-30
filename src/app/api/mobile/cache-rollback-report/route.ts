@@ -29,6 +29,7 @@ import {
 } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import { validateExtensionToken } from "@/lib/auth/tokens/extension-token";
+import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
@@ -89,6 +90,11 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     return errorResponse(API_ERROR[auth.error], 401);
   }
   const { userId, tenantId } = auth.data;
+
+  // Tenant network-boundary enforcement — reject off-network reports from a
+  // stolen bearer before parsing body or emitting audit.
+  const denied = await enforceAccessRestriction(req, userId, tenantId);
+  if (denied) return denied;
 
   // 2. Body validation. Reject any unknown field (Zod strict).
   const bodyResult = await parseBody(req, ReportRequestSchema);

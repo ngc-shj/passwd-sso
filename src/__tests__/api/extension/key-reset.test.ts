@@ -11,6 +11,7 @@ const {
   mockCheckRateLimitOrFail,
   mockLogAuditAsync,
   mockTokenUpdateMany,
+  mockEnforceAccessRestriction,
 } = vi.hoisted(() => ({
   mockValidateExtensionToken: vi.fn(),
   mockWithBypassRls: vi.fn(),
@@ -18,8 +19,13 @@ const {
   mockCheckRateLimitOrFail: vi.fn(),
   mockLogAuditAsync: vi.fn(),
   mockTokenUpdateMany: vi.fn(),
+  // Tenant IP-restriction gate — allow by default (null = pass).
+  mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
+  enforceAccessRestriction: mockEnforceAccessRestriction,
+}));
 vi.mock("@/lib/auth/tokens/extension-token", () => ({
   validateExtensionToken: mockValidateExtensionToken,
 }));
@@ -75,6 +81,7 @@ describe("POST /api/extension/key/reset (C12)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockValidateExtensionToken.mockResolvedValue({ ok: true, data: VALIDATED_TOKEN });
+    mockEnforceAccessRestriction.mockResolvedValue(null);
     mockCheckRateLimitOrFail.mockResolvedValue(null);
     mockLogAuditAsync.mockResolvedValue(undefined);
     mockWithBypassRls.mockImplementation(
@@ -114,6 +121,25 @@ describe("POST /api/extension/key/reset (C12)", () => {
         }),
       }),
     );
+  });
+
+  it("S3: returns the tenant access-restriction denial and does not revoke when IP is blocked", async () => {
+    const { NextResponse } = await import("next/server");
+    mockEnforceAccessRestriction.mockResolvedValueOnce(
+      NextResponse.json({ error: { code: "ACCESS_DENIED" } }, { status: 403 }),
+    );
+
+    const req = makeReq({ cnfJkt: VALID_CNF_JKT });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(mockEnforceAccessRestriction).toHaveBeenCalledWith(
+      expect.anything(),
+      "user-1",
+      "tenant-1",
+    );
+    expect(mockTokenUpdateMany).not.toHaveBeenCalled();
   });
 
   it("returns 401 when Bearer is missing", async () => {
