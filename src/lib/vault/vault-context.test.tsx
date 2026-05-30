@@ -21,7 +21,10 @@ import {
   VaultUnlockError,
 } from "./vault-context";
 import { stashPrf, clearPrf } from "@/lib/auth/prf-handoff";
-import { wrapSecretKeyWithPrf, hexEncode } from "@/lib/auth/webauthn/webauthn-client";
+import { wrapSecretKeyWithPrf } from "@/lib/auth/webauthn/webauthn-client";
+// Namespace import used ONLY to attach a pass-through spy that captures the
+// real unwrapped key for a zeroization assertion — crypto still runs for real.
+import * as webauthnClient from "@/lib/auth/webauthn/webauthn-client";
 
 const PASSPHRASE = "correct horse battery staple";
 
@@ -382,7 +385,7 @@ describe("VaultProvider — unlockWithStoredPrf (in-memory PRF hand-off)", () =>
       const prfOutput = new Uint8Array(32).fill(0x5a);
       const wrapped = await wrapSecretKeyWithPrf(secretKey!, prfOutput);
       stashPrf({
-        prfOutputHex: hexEncode(prfOutput),
+        prfOutput,
         prfData: {
           prfEncryptedSecretKey: wrapped.ciphertext,
           prfSecretKeyIv: wrapped.iv,
@@ -414,6 +417,139 @@ describe("VaultProvider — unlockWithStoredPrf (in-memory PRF hand-off)", () =>
       });
       expect(second).toBe(false);
       expect(result.current.encryptionKey).toBeNull();
+    },
+    60_000,
+  );
+
+  it("zeroizes the PRF buffer on the !dataRes.ok early return", async () => {
+    clearPrf();
+    // makeFetchEnv(null) → /api/vault/unlock/data returns { ok: false, 404 }.
+    const { fetchMock } = makeFetchEnv(null);
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useVault(), { wrapper });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const prfOutput = new Uint8Array(32).fill(0x5a);
+    stashPrf({
+      prfOutput,
+      prfData: { prfEncryptedSecretKey: "ct", prfSecretKeyIv: "iv", prfSecretKeyAuthTag: "tag" },
+    });
+
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.unlockWithStoredPrf();
+    });
+    expect(ok).toBe(false);
+    // The single outer finally wipes the buffer even on the early return.
+    expect(prfOutput.every((b) => b === 0)).toBe(true);
+  });
+
+  it("zeroizes the PRF buffer on the missing-accountSalt early return", async () => {
+    clearPrf();
+    // unlock/data returns ok:true but without accountSalt → early return false.
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = typeof url === "string" ? url : "";
+      if (path === "/api/vault/status") {
+        return { ok: true, json: async () => ({ setupRequired: false, hasRecoveryKey: false, vaultAutoLockMinutes: null, tenantMinPasswordLength: 0, tenantRequireUppercase: false, tenantRequireLowercase: false, tenantRequireNumbers: false, tenantRequireSymbols: false }) };
+      }
+      if (path === "/api/vault/unlock/data") {
+        return { ok: true, json: async () => ({ keyVersion: 1 }) }; // no accountSalt
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    }) as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    const { result } = renderHook(() => useVault(), { wrapper });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const prfOutput = new Uint8Array(32).fill(0x5a);
+    stashPrf({
+      prfOutput,
+      prfData: { prfEncryptedSecretKey: "ct", prfSecretKeyIv: "iv", prfSecretKeyAuthTag: "tag" },
+    });
+
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.unlockWithStoredPrf();
+    });
+    expect(ok).toBe(false);
+    expect(prfOutput.every((b) => b === 0)).toBe(true);
+  });
+
+  it(
+    "zeroizes the unwrapped secret key when unlock throws AFTER the key is unwrapped",
+    async () => {
+      // Regression guard for the secretKey throw-path gap: a VaultUnlockError
+      // thrown after unwrapSecretKeyWithPrf must still hit the single finally
+      // that wipes the unwrapped secretKey. We capture the real unwrapped key
+      // via a pass-through spy (crypto still runs for real) and assert it is
+      // zeroized after the throw.
+      let capturedSecretKey: Uint8Array | null = null;
+      const actualUnwrap = webauthnClient.unwrapSecretKeyWithPrf;
+      const unwrapSpy = vi
+        .spyOn(webauthnClient, "unwrapSecretKeyWithPrf")
+        .mockImplementation(async (wrapped, prf) => {
+          const sk = await actualUnwrap(wrapped, prf);
+          capturedSecretKey = sk;
+          return sk;
+        });
+
+      const { fetchMock, store } = makeFetchEnv(null);
+      // Wrap the env so /api/vault/unlock fails with a server error AFTER the
+      // real key unwrap + derivation has already happened.
+      const failingFetch = vi.fn(async (url: string, init?: RequestInit) => {
+        const path = typeof url === "string" ? url : "";
+        if (path === "/api/vault/unlock" && init?.method === "POST") {
+          return { ok: false, status: 423, json: async () => ({ error: "VAULT_LOCKED" }) };
+        }
+        return fetchMock(path, init);
+      }) as unknown as typeof fetch;
+      globalThis.fetch = failingFetch;
+
+      const { result } = renderHook(() => useVault(), { wrapper });
+      await act(async () => {
+        await result.current.setup(PASSPHRASE);
+      });
+      const secretKey = result.current.getSecretKey();
+      expect(secretKey).toBeInstanceOf(Uint8Array);
+      expect(store.vault).not.toBeNull();
+
+      // Stash a real PRF-wrapped key so the unwrap + derivation succeed and the
+      // throw happens at the /api/vault/unlock step.
+      const prfOutput = new Uint8Array(32).fill(0x5a);
+      const wrapped = await wrapSecretKeyWithPrf(secretKey!, prfOutput);
+      stashPrf({
+        prfOutput,
+        prfData: {
+          prfEncryptedSecretKey: wrapped.ciphertext,
+          prfSecretKeyIv: wrapped.iv,
+          prfSecretKeyAuthTag: wrapped.authTag,
+        },
+      });
+
+      act(() => {
+        result.current.lock();
+      });
+
+      await act(async () => {
+        await expect(result.current.unlockWithStoredPrf()).rejects.toBeInstanceOf(
+          VaultUnlockError,
+        );
+      });
+
+      // The spy ran (key was unwrapped) and the finally wiped the secret key
+      // on the post-unwrap throw path; prfOutput is wiped by the same finally.
+      expect(unwrapSpy).toHaveBeenCalledOnce();
+      expect(capturedSecretKey).not.toBeNull();
+      expect(capturedSecretKey!.every((b) => b === 0)).toBe(true);
+      expect(prfOutput.every((b) => b === 0)).toBe(true);
+
+      unwrapSpy.mockRestore();
     },
     60_000,
   );
