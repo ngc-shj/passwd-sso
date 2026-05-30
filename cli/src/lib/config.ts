@@ -113,7 +113,23 @@ export function saveCredentials(creds: StoredCredentials): void {
 export function loadCredentials(): StoredCredentials | null {
   migrateIfNeeded();
   try {
-    const raw = readFileSync(getCredentialsFilePath(), "utf-8").trim();
+    // Mirror saveCredentials' symlink hardening on the read side: refuse a
+    // symlinked data dir, and open the file with O_NOFOLLOW so a pre-planted
+    // symlink at the credentials path cannot redirect the read elsewhere.
+    const dataDir = getDataDir();
+    if (existsSync(dataDir) && lstatSync(dataDir).isSymbolicLink()) {
+      return null;
+    }
+    const fd = openSync(
+      getCredentialsFilePath(),
+      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+    );
+    let raw: string;
+    try {
+      raw = readFileSync(fd, "utf-8").trim();
+    } finally {
+      closeSync(fd);
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
