@@ -30,13 +30,15 @@ Identity entries today store **monolithic** `fullName` and `address` strings, so
 5. **Additive, non-destructive** blob schema: keep `fullName`/`address` as optional fields; add structured fields alongside. No DB migration of encrypted blobs. (Pre-1.0; per [[feedback_no_reflexive_migration_warnings]] avoid migration shims — additive read/write is enough.)
 6. New strings in BOTH `messages/en.json` + `messages/ja.json` and the extension's `src/messages/{en,ja}.json`; no internal jargon ([[feedback_no_internal_jargon_in_user_strings]]). Convert any 3+ enumerated field-key literal lists to a const-object per [[feedback_const_object_for_string_literals]].
 
-### Open sub-decision (flag for review + user)
-- **Japanese phonetic (フリガナ/kana) name fields and JP address granularity**: JP forms often split 姓/名 + フリガナ 姓/名, and address into 郵便番号/都道府県/市区町村/番地/建物. HTML `autocomplete` has no standard kana token. **Proposed v1**: implement the standard `autocomplete`-token set (given/family + address-line1/2, level2/1, postal, country) which already covers 姓/名 and JP address components via `address-level1`=都道府県 / `address-level2`=市区町村; **defer kana (フリガナ) to a fast-follow** to bound scope. The plan reviewers should confirm this v1 boundary is acceptable for a JP-first product.
+### Sub-decisions (RESOLVED by user)
+- **Kana (フリガナ): INCLUDED in v1** — store + detect + fill `familyNameKana`/`givenNameKana` (regex-only detection, no autocomplete token; see C3). JP address granularity is covered by standard `address-level1`=都道府県 / `address-level2`=市区町村.
+- **HIDE_PASSWORD masks address + postal** (see C7).
 
 ## Contracts
 
 ### C1 — Identity blob field set (app data model) — FULL touch-list
-- Add optional fields: `givenName`, `familyName`, `middleName?`, `addressLine1`, `addressLine2`, `city`, `state`, `postalCode`, `country`. **Keep** `fullName`, `address` as optional (legacy/back-compat + combined-form fill). Define the key set ONCE as a const-object (proposed: `src/lib/constants/identity-fields.ts`) imported by every site below ([[feedback_const_object_for_string_literals]]).
+- Add optional fields: `givenName`, `familyName`, `middleName?`, **`familyNameKana`, `givenNameKana`** (フリガナ — user decision: include in v1), `addressLine1`, `addressLine2`, `city`, `state`, `postalCode`, `country`. **Keep** `fullName`, `address` as optional (legacy/back-compat + combined-form fill). Define the key set ONCE as a const-object (proposed: `src/lib/constants/identity-fields.ts`) imported by every site below ([[feedback_const_object_for_string_literals]]).
+- **Kana note**: HTML `autocomplete` has no standard kana token, so kana detection/fill is regex-only (JP field hints: フリガナ / カナ / かな / セイ / メイ) — see C3. Kana fields are stored + filled best-effort; their absence on a form is normal (no fallback needed).
 - **Write (persist) sites — BOTH paths**:
   - Team: `src/lib/team/team-entry-payload.ts` IDENTITY case (`:94-105` blob, `:200-207` overview).
   - **Personal builds its blob INLINE** in `src/components/passwords/personal/personal-identity-form.tsx:217-241` (`handleSubmit`) — there is NO personal payload builder today (`personal-entry-payload.ts` is LOGIN-only). **F1: either update this inline builder OR (preferred) extract `buildPersonalIdentityPayload` for SSoT** — do not assume a builder exists.
@@ -54,7 +56,8 @@ Identity entries today store **monolithic** `fullName` and `address` strings, so
 ### C3 — Extension detector: split tokens
 - **File**: `extension/src/content/identity-form-detector-lib.ts`
 - Add detection for `given-name`, `family-name`, `address-line2`, `address-level2`(city), `country-name` (keep existing `name`, `address-line1`, `address-level1`, `postal-code`, `tel`, `email`, `bday`), with EN+JA regex fallbacks (姓/名/市区町村/都道府県/国). Reuse shared visibility/usable helpers (no duplicate copies — see the [[project_extension_parallel_impl]] `-lib`/`.js` pairing; edit both).
-- **Acceptance**: a split form's given/family/city/state/postal/country fields are all detected.
+- **Kana fields (regex-only, no autocomplete token)**: detect `familyNameKana`/`givenNameKana` via JP hints — name/id/placeholder/label containing フリガナ / カナ / かな combined with セイ/姓 (family) vs メイ/名 (given). Order-sensitive; when only a single combined kana field exists, fill the composed kana. Guard against false-matching the non-kana 姓/名 fields (a kana field's hint contains フリガナ/カナ/かな; a plain name field does not).
+- **Acceptance**: a split form's given/family/city/state/postal/country fields are all detected; a JP form's フリガナ セイ/メイ fields are detected as kana (and NOT confused with the plain 姓/名 fields).
 
 ### C4 — Extension payload + fill (structured, with monolithic fallback)
 - **Files**: `extension/src/types/messages.ts` (`IdentityAutofillPayload` — add the structured fields), **`extension/src/background/index.ts`** (F3: the IDENTITY blob-parse type at ~1394 AND the `sendFillMessage` construction at ~1438 — both must read+send the new fields; missing either sends empty strings), `extension/src/content/autofill-identity-lib.ts` + `autofill-identity.js` (edit BOTH — hand-maintained twins, F7).
@@ -71,7 +74,7 @@ Identity entries today store **monolithic** `fullName` and `address` strings, so
 ### C7 — Share-permission field classification (S2)
 - **File**: `src/lib/constants/auth/share-permission.ts` (+ verify `src/components/share/share-dialog.tsx` `INTERNAL_FIELDS`).
 - **`OVERVIEW_FIELDS.IDENTITY`** (currently `title/fullName/email`): explicitly keep address components OUT — only the name label + email belong in the overview tier.
-- **`HIDE_PASSWORD.IDENTITY`** (currently masks only `idNumber`): **decide explicitly** whether to also mask `addressLine1`/`addressLine2`/`postalCode` (a residential address is as sensitive as the ID number). Default proposal: mask `addressLine1`, `addressLine2`, `postalCode` under HIDE_PASSWORD; reviewers confirm.
+- **`HIDE_PASSWORD.IDENTITY`** (currently masks only `idNumber`): **user decision — also mask `addressLine1`, `addressLine2`, `postalCode`** under HIDE_PASSWORD (a residential address is as sensitive as the ID number). Add them to the set.
 - **`SENSITIVE_FIELDS.IDENTITY`**: review whether address components count as sensitive for the share matrix.
 - **Invariant**: structured address PII never lands in the overview blob (S1); add a test asserting the overview builder output has no address-component keys.
 - **Acceptance**: sharing an identity entry under each permission level handles the new fields per the explicit classification; address PII absent from overview.
@@ -93,7 +96,8 @@ Identity entries today store **monolithic** `fullName` and `address` strings, so
 - **Back-compat no-mis-split (T3, guards the forbidden pattern)**: legacy entry (only `fullName`/`address`) on a split form (given-name+family-name present, NO combined `name`) → assert both split fields remain EMPTY.
 - **postalCode fix (T4)**: background IDENTITY `AUTOFILL_FROM_CONTENT` fill test with a blob carrying `postalCode` → assert the payload's `postalCode` is non-empty.
 - **Dropdown label fallback (T6)**: overview with only `givenName`/`familyName` (no `fullName`) → `GET_IDENTITY_MATCHES_FOR_URL` response `username` equals the composed `"Given Family"`.
-- **Share (C7)**: overview builder output contains no address-component keys; share under HIDE_PASSWORD masks the agreed address fields.
+- **Kana (v1)**: round-trip familyNameKana/givenNameKana through save→load; detector picks フリガナ セイ/メイ fields WITHOUT matching the plain 姓/名 fields; fill routes kana values to kana fields only.
+- **Share (C7)**: overview builder output contains no address-component keys; share under HIDE_PASSWORD masks `idNumber` AND `addressLine1`/`addressLine2`/`postalCode` (assert these are absent/masked in the HIDE_PASSWORD share payload).
 - **i18n (T7)**: extend `src/__tests__/i18n/entry-form-translation-keys.test.ts` (currently checks only 2 IdentityForm keys) to full en↔ja parity for the IdentityForm namespace; extension `src/messages/{en,ja}.json` parity is auto-covered.
 - **R19/mock alignment**: every IDENTITY background-test mock blob must carry the new fields; `identity-fields.test.tsx` fixture props updated (T9).
 - Both app (`npx vitest run`) + extension (`cd extension && npm test`) suites + both builds green.
@@ -117,12 +121,12 @@ Identity entries today store **monolithic** `fullName` and `address` strings, so
 
 | ID | Subject | Status |
 |----|---------|--------|
-| C1 | Identity blob structured fields (additive) + FULL write/hydrate touch-list + personal inline builder + overview label composition | pending |
-| C2 | Editor UI for structured fields + non-lossy legacy display | pending |
-| C3 | Extension detector: split autocomplete tokens | pending |
-| C4 | Extension payload + fill (structured + monolithic fallback, no mis-split); background read+send; postalCode fixed | pending |
-| C5 | i18n (app + extension, en + ja) + IdentityForm parity test | pending |
-| C6 | Export/Import round-trip preserves structured fields | pending |
-| C7 | Share-permission classification (overview exclusion + HIDE_PASSWORD masking decision) | pending |
+| C1 | Identity blob structured fields (additive) + FULL write/hydrate touch-list + personal inline builder + overview label composition | locked |
+| C2 | Editor UI for structured fields + non-lossy legacy display | locked |
+| C3 | Extension detector: split autocomplete tokens | locked |
+| C4 | Extension payload + fill (structured + monolithic fallback, no mis-split); background read+send; postalCode fixed | locked |
+| C5 | i18n (app + extension, en + ja) + IdentityForm parity test | locked |
+| C6 | Export/Import round-trip preserves structured fields | locked |
+| C7 | Share-permission classification (overview exclusion + HIDE_PASSWORD masking decision) | locked |
 
 **Scope note**: this is materially larger than first drafted — ~15 files across both personal+team paths, plus the share feature and export/import. The core design is unchanged (additive, no migration, monolithic fallback); the growth is propagation completeness.
