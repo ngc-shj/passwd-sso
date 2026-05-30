@@ -103,7 +103,13 @@ export function createJtiCache(options: { ttlMs?: number; now?: () => number } =
           return result === null;
         } catch (err) {
           logRedisError((err as { code?: string } | undefined)?.code);
-          // Fall through to in-memory fallback.
+          // Fail CLOSED: when Redis is the configured (multi-instance) backend
+          // but the SET fails, do NOT degrade to the per-process in-memory map
+          // — that would let the same proof replay once per instance during an
+          // outage. Treat it as a replay and reject. The in-memory path below
+          // is reserved for deployments with no Redis configured (dev /
+          // single-process), where it is the intended primary store.
+          return true;
         }
       }
       return checkMemory(memory, key, ttlMs, now());
