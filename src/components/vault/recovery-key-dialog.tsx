@@ -188,7 +188,11 @@ export function RecoveryKeyDialog({
             {(hasRecoveryKey || recoveryKeyInvalidated) && (
               <div className="flex items-start gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3 text-sm text-yellow-700 dark:text-yellow-400">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <p>{t("recoveryKeyRegenerateWarning")}</p>
+                <p>
+                  {recoveryKeyInvalidated
+                    ? t("recoveryKeyRegenerateInvalidatedWarning")
+                    : t("recoveryKeyRegenerateWarning")}
+                </p>
               </div>
             )}
 

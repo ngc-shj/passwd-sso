@@ -59,6 +59,7 @@
   "recoveryKeyClose": "閉じる",
   "recoveryKeyGenerating": "回復キーを生成中...",
   "recoveryKeyRegenerateWarning": "既に回復キーが設定されています。新しい鍵を生成すると、以前の鍵は無効になります。",
+  "recoveryKeyRegenerateInvalidatedWarning": "以前の回復キーは保管庫キーローテーションにより既に無効化されています。新しい回復キーを生成してください。",
   "vaultMustBeUnlocked": "保管庫のロックを解除してください。",
   "or": "または",
   "setupInviteContext": "招待を受け入れるには、まず保管庫のセットアップが必要です。以下でパスフレーズを設定してください。",
