@@ -3,41 +3,13 @@
  */
 
 import { resolve } from "node:path";
-import {
-  existsSync,
-  lstatSync,
-  openSync,
-  writeSync,
-  closeSync,
-  constants as fsConstants,
-} from "node:fs";
+import { existsSync, lstatSync } from "node:fs";
 import { apiRequest } from "../lib/api-client.js";
 import { getEncryptionKey, getUserId } from "../lib/vault-state.js";
 import { decryptData } from "../lib/crypto.js";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
+import { writeSecretFile } from "../lib/secure-file.js";
 import * as output from "../lib/output.js";
-
-/**
- * Write decrypted export output with O_NOFOLLOW + mode 0600. The lstat check at
- * the call site gives a friendly early error; O_NOFOLLOW is the atomic backstop
- * that closes the check-then-write TOCTOU (an attacker swapping the path to a
- * symlink after the check) — matching saveCredentials in lib/config.ts.
- */
-function writeExportFile(outputPath: string, data: string): void {
-  const fd = openSync(
-    outputPath,
-    fsConstants.O_WRONLY |
-      fsConstants.O_CREAT |
-      fsConstants.O_TRUNC |
-      (fsConstants.O_NOFOLLOW ?? 0),
-    0o600,
-  );
-  try {
-    writeSync(fd, data);
-  } finally {
-    closeSync(fd);
-  }
-}
 
 interface PasswordEntry {
   id: string;
@@ -139,7 +111,7 @@ export async function exportCommand(options: {
   if (format === "json") {
     const out = JSON.stringify(decrypted, null, 2);
     if (outputPath) {
-      writeExportFile(outputPath, out);
+      writeSecretFile(outputPath, out);
       output.success(`Exported ${decrypted.length} entries to ${outputPath}`);
     } else {
       console.log(out);
@@ -161,7 +133,7 @@ export async function exportCommand(options: {
     const csvOut = csvRows.join("\n");
 
     if (outputPath) {
-      writeExportFile(outputPath, csvOut);
+      writeSecretFile(outputPath, csvOut);
       output.success(`Exported ${decrypted.length} entries to ${outputPath}`);
     } else {
       console.log(csvOut);
