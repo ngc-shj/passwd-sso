@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import {
+  collectEntryAttachmentRefs,
+  deleteAttachmentBlobs,
+} from "@/lib/blob-store/cleanup";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { updateE2EPasswordSchema } from "@/lib/validations";
 import { errorResponse, notFound, rateLimited, validationError } from "@/lib/http/api-response";
@@ -269,9 +273,16 @@ async function handleDELETE(
   }
 
   if (permanent) {
-    await withUserTenantRls(userId, async () =>
-      prisma.passwordEntry.delete({ where: { id } }),
-    );
+    const refs = await withUserTenantRls(userId, async () => {
+      // Capture external blob refs before the cascade delete removes the rows
+      const attachmentRefs = await collectEntryAttachmentRefs(prisma, {
+        kind: "personal",
+        entryIds: [id],
+      });
+      await prisma.passwordEntry.delete({ where: { id } });
+      return attachmentRefs;
+    });
+    await deleteAttachmentBlobs(refs);
   } else {
     await withUserTenantRls(userId, async () =>
       prisma.passwordEntry.update({

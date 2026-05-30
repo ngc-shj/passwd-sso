@@ -14,7 +14,10 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
-import { getAttachmentBlobStore, BLOB_STORAGE } from "@/lib/blob-store";
+import {
+  collectEntryAttachmentRefs,
+  deleteAttachmentBlobs,
+} from "@/lib/blob-store/cleanup";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { assertQuotaAvailable, QuotaExceededError } from "@/lib/quota/resource-quotas";
 import { errorResponse } from "@/lib/http/api-response";
@@ -77,25 +80,16 @@ async function handleGET(req: NextRequest) {
       if (staleEntries.length === 0) return;
 
       // Clean up external blob-store objects before cascade delete
-      const blobStore = getAttachmentBlobStore();
-      if (blobStore.backend !== BLOB_STORAGE.DB) {
-        const attachments = await prisma.attachment.findMany({
-          where: { passwordEntryId: { in: staleEntries.map((e) => e.id) } },
-          select: { id: true, encryptedData: true, passwordEntryId: true },
-        });
-        await Promise.allSettled(
-          attachments.map((a) =>
-            blobStore.deleteObject(a.encryptedData, {
-              attachmentId: a.id,
-              entryId: a.passwordEntryId!,
-            }),
-          ),
-        );
-      }
+      const refs = await collectEntryAttachmentRefs(prisma, {
+        kind: "personal",
+        entryIds: staleEntries.map((e) => e.id),
+      });
 
       await prisma.passwordEntry.deleteMany({
         where: { id: { in: staleEntries.map((e) => e.id) } },
       });
+
+      await deleteAttachmentBlobs(refs);
     }).catch(() => {});
   }
 

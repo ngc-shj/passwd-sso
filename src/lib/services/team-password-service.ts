@@ -5,6 +5,10 @@
  */
 
 import { prisma } from "@/lib/prisma";
+import {
+  collectEntryAttachmentRefs,
+  deleteAttachmentBlobs,
+} from "@/lib/blob-store/cleanup";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
@@ -220,12 +224,22 @@ export async function listTeamPasswords(
 
 export async function purgeExpiredTeamPasswords(teamId: string): Promise<void> {
   const thirtyDaysAgo = new Date(Date.now() - 30 * MS_PER_DAY);
-  await prisma.teamPasswordEntry.deleteMany({
-    where: {
-      teamId,
-      deletedAt: { lt: thirtyDaysAgo },
-    },
+  const expired = await prisma.teamPasswordEntry.findMany({
+    where: { teamId, deletedAt: { lt: thirtyDaysAgo } },
+    select: { id: true },
   });
+  if (expired.length === 0) return;
+
+  // Capture external blob refs before the cascade delete removes the rows
+  const refs = await collectEntryAttachmentRefs(prisma, {
+    kind: "team",
+    teamId,
+    entryIds: expired.map((e) => e.id),
+  });
+  await prisma.teamPasswordEntry.deleteMany({
+    where: { teamId, id: { in: expired.map((e) => e.id) } },
+  });
+  await deleteAttachmentBlobs(refs);
 }
 
 // ---------------------------------------------------------------------------
@@ -529,7 +543,14 @@ export async function deleteTeamPassword(
   permanent: boolean,
 ): Promise<void> {
   if (permanent) {
+    // Capture external blob refs before the cascade delete removes the rows
+    const refs = await collectEntryAttachmentRefs(prisma, {
+      kind: "team",
+      teamId,
+      entryIds: [passwordId],
+    });
     await prisma.teamPasswordEntry.delete({ where: { id: passwordId } });
+    await deleteAttachmentBlobs(refs);
   } else {
     await prisma.teamPasswordEntry.update({
       where: { id: passwordId },
