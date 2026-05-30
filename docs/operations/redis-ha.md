@@ -39,16 +39,19 @@ The HA overlay provides:
 
 ## Why Redis Is Required in Production
 
-Redis serves two critical functions in multi-process deployments:
+Redis serves three critical functions in multi-process deployments:
 
 1. **Session cache with tombstone-based revocation propagation** — the proxy auth gate caches session validity in Redis with a 30 s positive TTL and 5 s negative TTL (`SESSION_CACHE_TTL_MS` / `NEGATIVE_CACHE_TTL_MS`, hardcoded in `src/lib/validations/common.server.ts`; not configurable via environment). When a session is revoked, a 5 s tombstone (`TOMBSTONE_TTL_MS`) is written to Redis so that all app nodes honor the revocation within one cache cycle. Without Redis, tombstones do not propagate across processes.
 2. **Shared rate limiting** — rate-limit counters are stored in Redis. Without it, limits apply per-process only and can be bypassed by distributing requests across nodes.
+3. **DPoP replay protection (`jti` uniqueness)** — DPoP-bound tokens (extension/iOS) record each proof's `jti` in Redis so a captured proof cannot be replayed on a different node. Unlike (1) and (2), this **fails closed**: when Redis is the configured backend but the `jti` write errors, the request is rejected rather than degraded to a per-process map (which would allow one replay per node). The in-memory path applies only when no Redis is configured (dev/single-process).
 
 Set `HEALTH_REDIS_REQUIRED=true` to fail the readiness probe (`GET /api/health/ready`) when Redis is unreachable, preventing the load balancer from routing traffic to an impaired node.
 
 ## Fallback
 
 Without Redis, session-revocation tombstones are not propagated across processes, increasing the window during which a revoked session may continue to be honored on other nodes. Rate limiting also degrades to per-process state, which can be exploited in a distributed deployment. This fallback behavior is acceptable for single-process development but must not be relied upon in production.
+
+Note the asymmetry: session cache and rate limiting **degrade** without Redis, but DPoP `jti` replay protection **fails closed** during a Redis *error* when Redis is configured — DPoP-authenticated requests (extension/iOS token flows) are rejected for the duration of the outage. Size Redis HA accordingly if those clients are in use.
 
 Set `HEALTH_REDIS_REQUIRED=true` to fail readiness probes when Redis is unreachable.
 

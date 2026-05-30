@@ -37,6 +37,7 @@ Common causes:
 ## 3. Impact
 
 - Listed routes return 503 → users cannot unlock vault, complete passkey login, mint tokens, accept emergency-access grants, verify share-link passwords.
+- **DPoP-authenticated requests fail closed** — extension/iOS token flows that present a DPoP proof are rejected during the outage: the `jti` replay cache (`src/lib/auth/dpop/jti-cache.ts`) rejects rather than degrading to a per-process map when Redis is configured (prevents replay-per-node). This is a separate subsystem from rate limiting; the in-memory path applies only when no Redis is configured (dev/single-process).
 - Non-listed routes (~120 other rate-limited endpoints) continue to function with in-memory per-process rate-limit fallback. They are degraded (per-instance ceiling instead of distributed) but functional.
 - Audit subsystem continues to operate (Postgres-backed); the `RATE_LIMIT_FAIL_CLOSED` rows themselves are throttled per `(scope, userId|ip-bucket)` per 5 min to avoid storms.
 - Webhook subscribers do NOT receive `RATE_LIMIT_FAIL_CLOSED` (suppressed via `WEBHOOK_DISPATCH_SUPPRESS` to avoid storms during outage). Monitor via SIEM / logs instead.

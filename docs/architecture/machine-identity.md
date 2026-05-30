@@ -361,6 +361,7 @@ Tenant audit log UI includes an actor type filter dropdown. The API accepts an o
 7. **Token lifecycle** — Deactivation immediately rejects all tokens; hard delete cascades
 8. **JIT atomicity** — Single transaction + optimistic lock prevents double-approval
 9. **Recent-session issuance hardening** — Browser-session endpoints that mint machine credentials require a recent Auth.js session (15-minute shared step-up window)
+10. **Network access restriction** — `/api/mcp` (POST + SSE GET) enforces the tenant's IP access policy via `enforceAccessRestriction` (CIDR allowlist / Tailscale), so a leaked `mcp_` token is usable only from approved networks — parity with `/api/v1/*`, `/api/extension/*`, and SCIM. Applies when the tenant has `allowedCidrs` (or Tailscale) configured.
 
 ## Database Models
 

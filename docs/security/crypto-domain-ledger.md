@@ -4,7 +4,7 @@ This document is the single source of truth for all cryptographic domain
 separations used in passwd-sso. It is automatically verified by
 `scripts/checks/check-crypto-domains.mjs` in CI.
 
-Last verified: 2026-03-07
+Last verified: 2026-05-30
 
 ---
 
@@ -45,6 +45,22 @@ Last verified: 2026-03-07
 ```
 
 AAD version: `1` for all scopes.
+
+---
+
+## Server-Side (Master-Key) AAD
+
+Separate from the structured E2E AAD above, the server-side share/Send crypto
+(`crypto-server.ts`, encrypted under `SHARE_MASTER_KEY`, **not** E2E) binds its
+ciphertext to the owning tenant with a plain-string AAD:
+
+| Usage | AAD string | Purpose | File |
+|---|---|---|---|
+| Share-link / Send data + file | `share-data:v1:<tenantId>` | Prevent transplanting a ciphertext from one tenant's row into another's under the shared master key | crypto-server.ts (`shareAad`) |
+
+Decrypt tries the tenant-bound AAD first and falls back to no-AAD, so rows
+created before AAD binding still decrypt; a new (AAD-bound) ciphertext moved
+across tenants fails both paths and is rejected.
 
 ---
 

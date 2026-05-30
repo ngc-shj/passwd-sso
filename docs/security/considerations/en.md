@@ -159,6 +159,7 @@ Client(on valid):
 - Algorithm: `aes-256-gcm` (Node `crypto`)
 - `SHARE_MASTER_KEY`: 64 hex chars (256-bit)
 - IV: `12 bytes`, AuthTag: `16 bytes`
+- AAD: ciphertext is bound to the owning tenant via `share-data:v1:<tenantId>` to prevent transplanting a ciphertext across tenant rows under the shared master key; rows created before AAD binding decrypt via a legacy no-AAD fallback
 - Used for server-encrypted share links and sends
 
 ### Export Encryption (`src/lib/export-crypto.ts`)

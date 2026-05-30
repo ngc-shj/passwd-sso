@@ -197,6 +197,14 @@ Every ciphertext is bound to its context via AAD. This prevents:
 | `IK` | ItemKey wrapping | teamId, entryId, teamKeyVersion |
 | `OK` | Team member key wrapping | teamId, toUserId, keyVersion, wrapVersion |
 
+The scopes above use the structured E2E AAD format. Separately, the **server-side**
+(non-E2E) share-link / Send crypto under `SHARE_MASTER_KEY` (`crypto-server.ts`)
+binds its ciphertext to the owning tenant with a plain-string AAD
+`share-data:v1:<tenantId>`, preventing a ciphertext from being transplanted
+across tenant rows under the shared master key. Decrypt falls back to no-AAD so
+rows written before AAD binding still decrypt; a new (bound) ciphertext moved
+across tenants fails both paths and is rejected.
+
 ## 6. Key Rotation
 
 ### 6.1 Personal Vault
