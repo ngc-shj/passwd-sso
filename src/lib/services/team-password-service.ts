@@ -14,6 +14,7 @@ import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import type { EntryType } from "@prisma/client";
 import { MS_PER_DAY } from "@/lib/constants/time";
+import { TRASH_PURGE_BATCH_SIZE } from "@/lib/validations/common";
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -224,9 +225,13 @@ export async function listTeamPasswords(
 
 export async function purgeExpiredTeamPasswords(teamId: string): Promise<void> {
   const thirtyDaysAgo = new Date(Date.now() - 30 * MS_PER_DAY);
+  // Cap per-request cleanup (parity with the personal GC) so a team with a
+  // large trash backlog can't load/delete unboundedly on a list request;
+  // remaining entries are purged on the next load.
   const expired = await prisma.teamPasswordEntry.findMany({
     where: { teamId, deletedAt: { lt: thirtyDaysAgo } },
     select: { id: true },
+    take: TRASH_PURGE_BATCH_SIZE,
   });
   if (expired.length === 0) return;
 

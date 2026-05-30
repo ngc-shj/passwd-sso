@@ -104,6 +104,10 @@ export const ENCRYPTED_ITEM_KEY_MAX = 1_024;
 
 // ─── Bulk Operation ──────────────────────────────────────────
 export const MAX_BULK_IDS = 100;
+// Per-request cap on the 30-day trash auto-purge (personal + team) so a
+// pathological backlog can't load/delete unboundedly on a list request;
+// the remainder is purged on the next load.
+export const TRASH_PURGE_BATCH_SIZE = 500;
 
 // ─── Share Access ────────────────────────────────────────────
 // SHARE_PASSWORD_MAX_ATTEMPTS: Client UX only; server-side rate limit is independent

@@ -9,7 +9,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { createPersonalPasswordEntry } from "@/lib/services/personal-password-service";
-import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
+import { FILENAME_MAX_LENGTH, TRASH_PURGE_BATCH_SIZE } from "@/lib/validations/common";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -75,7 +75,7 @@ async function handleGET(req: NextRequest) {
       const staleEntries = await prisma.passwordEntry.findMany({
         where: { userId, deletedAt: { lt: thirtyDaysAgo } },
         select: { id: true },
-        take: 500,
+        take: TRASH_PURGE_BATCH_SIZE,
       });
       if (staleEntries.length === 0) return;
 
