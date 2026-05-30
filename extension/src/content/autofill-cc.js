@@ -241,7 +241,9 @@ if (
 ) {
   window[CC_AUTOFILL_GUARD] = true;
   chrome.runtime.onMessage.addListener(function (message, sender) {
-    // Only accept messages from our own extension — reject external senders
+    // Only accept messages from our own extension — reject external senders.
+    // Literal must equal EXT_MSG.AUTOFILL_CC_FILL in src/lib/constants.ts —
+    // this plain-JS web-accessible resource cannot import the module.
     if (message && message.type === "AUTOFILL_CC_FILL" && sender.id === chrome.runtime.id) {
       performCreditCardAutofill(message);
     }

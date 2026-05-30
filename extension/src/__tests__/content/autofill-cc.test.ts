@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { performCreditCardAutofill } from "../../content/autofill-cc-lib";
+import { EXT_MSG } from "../../lib/constants";
 
 beforeEach(() => {
   Object.defineProperty(navigator, "language", {
@@ -26,7 +27,7 @@ describe("performCreditCardAutofill", () => {
     `);
 
     performCreditCardAutofill({
-      type: "AUTOFILL_CC_FILL",
+      type: EXT_MSG.AUTOFILL_CC_FILL,
       cardholderName: "John Doe",
       cardNumber: "4111111111111111",
       expiryMonth: "12",
@@ -50,7 +51,7 @@ describe("performCreditCardAutofill", () => {
     `);
 
     performCreditCardAutofill({
-      type: "AUTOFILL_CC_FILL",
+      type: EXT_MSG.AUTOFILL_CC_FILL,
       cardholderName: "",
       cardNumber: "4111111111111111",
       expiryMonth: "3",
@@ -80,7 +81,7 @@ describe("performCreditCardAutofill", () => {
     `);
 
     performCreditCardAutofill({
-      type: "AUTOFILL_CC_FILL",
+      type: EXT_MSG.AUTOFILL_CC_FILL,
       cardholderName: "",
       cardNumber: "4111111111111111",
       expiryMonth: "12",
@@ -106,7 +107,7 @@ describe("performCreditCardAutofill", () => {
     `);
 
     performCreditCardAutofill({
-      type: "AUTOFILL_CC_FILL",
+      type: EXT_MSG.AUTOFILL_CC_FILL,
       cardholderName: "",
       cardNumber: "4111111111111111",
       expiryMonth: "01",
@@ -125,7 +126,7 @@ describe("performCreditCardAutofill", () => {
     `);
 
     performCreditCardAutofill({
-      type: "AUTOFILL_CC_FILL",
+      type: EXT_MSG.AUTOFILL_CC_FILL,
       cardholderName: "Test",
       cardNumber: "4111111111111111",
       expiryMonth: "12",
@@ -146,7 +147,7 @@ describe("performCreditCardAutofill", () => {
     `);
 
     performCreditCardAutofill({
-      type: "AUTOFILL_CC_FILL",
+      type: EXT_MSG.AUTOFILL_CC_FILL,
       cardholderName: "Hidden Name",
       cardNumber: "4111111111111111",
       expiryMonth: "",
@@ -168,7 +169,7 @@ describe("performCreditCardAutofill", () => {
     `);
 
     performCreditCardAutofill({
-      type: "AUTOFILL_CC_FILL",
+      type: EXT_MSG.AUTOFILL_CC_FILL,
       cardholderName: "",
       cardNumber: "4111111111111111",
       expiryMonth: "01",
@@ -187,7 +188,7 @@ describe("performCreditCardAutofill", () => {
     `);
 
     const payload = {
-      type: "AUTOFILL_CC_FILL" as const,
+      type: EXT_MSG.AUTOFILL_CC_FILL,
       cardholderName: "",
       cardNumber: "4111111111111111",
       expiryMonth: "",
@@ -209,7 +210,7 @@ describe("performCreditCardAutofill", () => {
     `);
 
     performCreditCardAutofill({
-      type: "AUTOFILL_CC_FILL",
+      type: EXT_MSG.AUTOFILL_CC_FILL,
       cardholderName: "",
       cardNumber: "4111111111111111",
       expiryMonth: "",

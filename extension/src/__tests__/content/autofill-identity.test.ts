@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { performIdentityAutofill } from "../../content/autofill-identity-lib";
+import { EXT_MSG } from "../../lib/constants";
 
 beforeEach(() => {
   Object.defineProperty(navigator, "language", {
@@ -25,7 +26,7 @@ describe("performIdentityAutofill", () => {
     `);
 
     performIdentityAutofill({
-      type: "AUTOFILL_IDENTITY_FILL",
+      type: EXT_MSG.AUTOFILL_IDENTITY_FILL,
       fullName: "Jane Doe",
       address: "123 Main St",
       phone: "555-1234",
@@ -54,7 +55,7 @@ describe("performIdentityAutofill", () => {
     `);
 
     performIdentityAutofill({
-      type: "AUTOFILL_IDENTITY_FILL",
+      type: EXT_MSG.AUTOFILL_IDENTITY_FILL,
       fullName: "Jane Doe",
       address: "",
       phone: "555-1234",
@@ -75,7 +76,7 @@ describe("performIdentityAutofill", () => {
     `);
 
     performIdentityAutofill({
-      type: "AUTOFILL_IDENTITY_FILL",
+      type: EXT_MSG.AUTOFILL_IDENTITY_FILL,
       fullName: "Jane Doe",
       address: "",
       phone: "",
@@ -95,7 +96,7 @@ describe("performIdentityAutofill", () => {
     `);
 
     performIdentityAutofill({
-      type: "AUTOFILL_IDENTITY_FILL",
+      type: EXT_MSG.AUTOFILL_IDENTITY_FILL,
       fullName: "Jane Doe",
       address: "123 Main St",
       phone: "555-1234",
@@ -117,7 +118,7 @@ describe("performIdentityAutofill", () => {
     `);
 
     performIdentityAutofill({
-      type: "AUTOFILL_IDENTITY_FILL",
+      type: EXT_MSG.AUTOFILL_IDENTITY_FILL,
       fullName: "Jane Doe",
       address: "",
       phone: "555-1234",
@@ -139,7 +140,7 @@ describe("performIdentityAutofill", () => {
     `);
 
     performIdentityAutofill({
-      type: "AUTOFILL_IDENTITY_FILL",
+      type: EXT_MSG.AUTOFILL_IDENTITY_FILL,
       fullName: "Jane Doe",
       address: "",
       phone: "555-1234",
@@ -163,7 +164,7 @@ describe("performIdentityAutofill", () => {
     `);
 
     performIdentityAutofill({
-      type: "AUTOFILL_IDENTITY_FILL",
+      type: EXT_MSG.AUTOFILL_IDENTITY_FILL,
       fullName: "Jane Doe",
       address: "",
       phone: "555-1234",
@@ -190,7 +191,7 @@ describe("performIdentityAutofill", () => {
     `);
 
     performIdentityAutofill({
-      type: "AUTOFILL_IDENTITY_FILL",
+      type: EXT_MSG.AUTOFILL_IDENTITY_FILL,
       fullName: "山田太郎",
       address: "東京都渋谷区1-2-3",
       phone: "03-1234-5678",

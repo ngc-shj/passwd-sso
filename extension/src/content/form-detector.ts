@@ -4,6 +4,9 @@
 
 import { initFormDetector } from "./form-detector-lib";
 import { initLoginDetector } from "./login-detector-lib";
+import { initCreditCardDetector } from "./cc-form-detector-lib";
+import { initIdentityDetector } from "./identity-form-detector-lib";
+import { removeShadowHost } from "./ui/shadow-host";
 // Register AUTOFILL_FILL listener so autofill works without chrome.scripting.executeScript
 // (which requires host permissions or activeTab that may not be available).
 import "./autofill-lib";
@@ -17,8 +20,14 @@ const GUARD_KEY = "__passwdSsoFormDetector";
 if (!(window as unknown as Record<string, boolean>)[GUARD_KEY]) {
   (window as unknown as Record<string, boolean>)[GUARD_KEY] = true;
 
-  const { destroy } = initFormDetector();
-  const { destroy: destroyLoginDetector } = initLoginDetector();
+  // Collect every detector's teardown. Each detector only removes its own
+  // listeners + hides the dropdown; the shared shadow host is removed once here.
+  const cleanups = [
+    initFormDetector(),
+    initLoginDetector(),
+    initCreditCardDetector(),
+    initIdentityDetector(),
+  ];
 
   // Self-destruct when extension context is invalidated (extension reload/update).
   // Orphaned content scripts can no longer communicate with the service worker,
@@ -32,8 +41,9 @@ if (!(window as unknown as Record<string, boolean>)[GUARD_KEY]) {
       (msg.includes("Cannot read properties of undefined") && msg.includes("runtime"))
     ) {
       event.preventDefault();
-      destroy();
-      destroyLoginDetector();
+      for (const { destroy } of cleanups) destroy();
+      // F6: remove the shared shadow host once, after all detectors tore down.
+      removeShadowHost();
     }
   });
 }

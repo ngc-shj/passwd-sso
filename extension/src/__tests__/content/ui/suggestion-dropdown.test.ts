@@ -131,14 +131,36 @@ describe("handleDropdownKeydown", () => {
     expect(isDropdownVisible()).toBe(false);
   });
 
+  // jsdom sets Event.isTrusted as a non-configurable own property (false by default).
+  // Object.defineProperty cannot override it, so use a Proxy to intercept isTrusted reads.
+  const trustedKeydown = (key: string): KeyboardEvent => {
+    const e = new KeyboardEvent("keydown", { key, cancelable: true });
+    return new Proxy(e, {
+      get(target, prop, receiver) {
+        if (prop === "isTrusted") return true;
+        const val = Reflect.get(target, prop, receiver);
+        return typeof val === "function" ? (val as (...a: unknown[]) => unknown).bind(target) : val;
+      },
+    }) as KeyboardEvent;
+  };
+
   it("selects active item with Enter", () => {
     const opts = makeOptions();
     showDropdown(opts);
     handleDropdownKeydown(new KeyboardEvent("keydown", { key: "ArrowDown", cancelable: true }));
-    const handled = handleDropdownKeydown(
-      new KeyboardEvent("keydown", { key: "Enter", cancelable: true }),
-    );
+    const handled = handleDropdownKeydown(trustedKeydown("Enter"));
     expect(handled).toBe(true);
     expect(opts.onSelect).toHaveBeenCalledWith("1", undefined);
+  });
+
+  it("does NOT select on a synthetic (untrusted) Enter — blocks scripted exfiltration", () => {
+    const opts = makeOptions();
+    showDropdown(opts);
+    handleDropdownKeydown(new KeyboardEvent("keydown", { key: "ArrowDown", cancelable: true }));
+    const handled = handleDropdownKeydown(
+      new KeyboardEvent("keydown", { key: "Enter", cancelable: true }), // isTrusted=false
+    );
+    expect(handled).toBe(false);
+    expect(opts.onSelect).not.toHaveBeenCalled();
   });
 });

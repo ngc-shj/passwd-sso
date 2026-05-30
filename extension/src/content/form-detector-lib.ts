@@ -13,7 +13,7 @@ import {
   isDropdownVisible,
   handleDropdownKeydown,
 } from "./ui/suggestion-dropdown";
-import { getShadowHost, removeShadowHost } from "./ui/shadow-host";
+import { getShadowHost } from "./ui/shadow-host";
 
 /** Returns false when the extension has been reloaded/updated and this content script is orphaned. */
 function isContextValid(): boolean {
@@ -339,7 +339,7 @@ function showForInput(
   });
 }
 
-function showInlineNotice(input: HTMLInputElement, message: string): void {
+export function showInlineNotice(input: HTMLInputElement, message: string): void {
   const { root } = getShadowHost();
   const existing = root.querySelector(".psso-inline-notice");
   if (existing) existing.remove();
@@ -577,7 +577,9 @@ export function initFormDetector(): FormDetectorCleanup {
     document.removeEventListener("keydown", keydownHandler, true);
     observer.disconnect();
     hideDropdown();
-    removeShadowHost();
+    // F6: the shared shadow host is removed once by the entry-point teardown,
+    // not per-detector — tearing down LOGIN must not destroy the shared dropdown
+    // DOM that the CC/IDENTITY detectors also use.
     if (typeof navigation !== "undefined") {
       navigation.removeEventListener("navigate", navigationHandler);
     }
