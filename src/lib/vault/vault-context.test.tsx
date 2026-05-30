@@ -20,6 +20,8 @@ import {
   notifyUnlockFailure,
   VaultUnlockError,
 } from "./vault-context";
+import { stashPrf, clearPrf } from "@/lib/auth/prf-handoff";
+import { wrapSecretKeyWithPrf, hexEncode } from "@/lib/auth/webauthn/webauthn-client";
 
 const PASSPHRASE = "correct horse battery staple";
 
@@ -340,6 +342,81 @@ describe("VaultProvider — verifyPassphrase before unlock", () => {
     });
     expect(valid).toBe(false);
   });
+});
+
+describe("VaultProvider — unlockWithStoredPrf (in-memory PRF hand-off)", () => {
+  it("returns false and leaves the vault locked when no PRF was handed off (full-reload fallback)", async () => {
+    clearPrf();
+    const { fetchMock } = makeFetchEnv(null);
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useVault(), { wrapper });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.unlockWithStoredPrf();
+    });
+    expect(ok).toBe(false);
+    expect(result.current.encryptionKey).toBeNull();
+  });
+
+  it(
+    "unlocks using the in-memory PRF hand-off, then consumes it (second attempt falls back)",
+    async () => {
+      const { fetchMock } = makeFetchEnv(null);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      const { result } = renderHook(() => useVault(), { wrapper });
+
+      // Setup produces the real secretKey + verificationArtifact in the store.
+      await act(async () => {
+        await result.current.setup(PASSPHRASE);
+      });
+      const secretKey = result.current.getSecretKey();
+      expect(secretKey).toBeInstanceOf(Uint8Array);
+
+      // PRF-wrap the real secret key so unlockWithStoredPrf can unwrap+verify it.
+      const prfOutput = new Uint8Array(32).fill(0x5a);
+      const wrapped = await wrapSecretKeyWithPrf(secretKey!, prfOutput);
+      stashPrf({
+        prfOutputHex: hexEncode(prfOutput),
+        prfData: {
+          prfEncryptedSecretKey: wrapped.ciphertext,
+          prfSecretKeyIv: wrapped.iv,
+          prfSecretKeyAuthTag: wrapped.authTag,
+        },
+      });
+
+      // Lock, then unlock via the hand-off (no second authenticator ceremony).
+      act(() => {
+        result.current.lock();
+      });
+      expect(result.current.encryptionKey).toBeNull();
+
+      let ok = false;
+      await act(async () => {
+        ok = await result.current.unlockWithStoredPrf();
+      });
+      expect(ok).toBe(true);
+      expect(result.current.encryptionKey).toBeInstanceOf(CryptoKey);
+
+      // Single-use: the hand-off was cleared on read, so a second attempt
+      // (after re-lock) falls back to false rather than re-using stale material.
+      act(() => {
+        result.current.lock();
+      });
+      let second = true;
+      await act(async () => {
+        second = await result.current.unlockWithStoredPrf();
+      });
+      expect(second).toBe(false);
+      expect(result.current.encryptionKey).toBeNull();
+    },
+    60_000,
+  );
 });
 
 describe("VaultProvider — session-driven status", () => {

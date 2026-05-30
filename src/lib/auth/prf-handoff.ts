@@ -31,6 +31,11 @@ export function stashPrf(handoff: PrfHandoff): void {
   pending = handoff;
 }
 
+/** Whether PRF material is stashed, without consuming it (gate before takePrf). */
+export function hasPrf(): boolean {
+  return pending !== null;
+}
+
 /** Return the stashed PRF material and clear it (single-use). */
 export function takePrf(): PrfHandoff | null {
   const value = pending;

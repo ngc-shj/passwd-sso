@@ -15,10 +15,7 @@ import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { useCallbackUrl } from "@/hooks/use-callback-url";
 import { callbackUrlToHref } from "@/lib/auth/session/callback-url";
-
-/** sessionStorage keys for passing PRF data to vault auto-unlock */
-const SS_PRF_OUTPUT = "psso:prf-output";
-const SS_PRF_DATA = "psso:prf-data";
+import { stashPrf } from "@/lib/auth/prf-handoff";
 
 export function SecurityKeySignInForm() {
   const t = useTranslations("Auth");
@@ -89,10 +86,11 @@ export function SecurityKeySignInForm() {
 
       const verifyData = await verifyRes.json();
 
-      // 4. PRF data for vault auto-unlock
+      // 4. Hand PRF data to the dashboard in-memory (NOT sessionStorage, which
+      // XSS can read) for vault auto-unlock. Survives the client-side router.push
+      // below; a full reload drops it → manual unlock.
       if (prfOutput && verifyData.prf) {
-        sessionStorage.setItem(SS_PRF_OUTPUT, hexEncode(prfOutput));
-        sessionStorage.setItem(SS_PRF_DATA, JSON.stringify(verifyData.prf));
+        stashPrf({ prfOutputHex: hexEncode(prfOutput), prfData: verifyData.prf });
         prfOutput.fill(0);
       }
 

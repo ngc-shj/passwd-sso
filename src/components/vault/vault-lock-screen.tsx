@@ -8,6 +8,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { API_PATH } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { isWebAuthnSupported } from "@/lib/auth/webauthn/webauthn-client";
+import { hasPrf } from "@/lib/auth/prf-handoff";
 import { fetchApi } from "@/lib/url-helpers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -159,12 +160,9 @@ export function VaultLockScreen() {
     webauthnSignInRef.current = false;
     sessionStorage.removeItem("psso:webauthn-signin");
 
-    const hasStoredPrf = !!(
-      sessionStorage.getItem("psso:prf-output") &&
-      sessionStorage.getItem("psso:prf-data")
-    );
-
-    if (hasStoredPrf) {
+    // PRF material is handed off in-memory (not sessionStorage) and consumed by
+    // unlockWithStoredPrf; peek without consuming to decide whether to attempt.
+    if (hasPrf()) {
       // Single-ceremony flow: use PRF output from sign-in (no second QR scan)
       setPasskeyLoading(true);
       unlockWithStoredPrf()

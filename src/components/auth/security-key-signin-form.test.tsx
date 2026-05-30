@@ -9,6 +9,7 @@ const {
   mockHexEncode,
   mockRouterPush,
   mockFetch,
+  mockStashPrf,
   prfSentinel,
 } = vi.hoisted(() => ({
   mockStartPasskeyAuthentication: vi.fn(),
@@ -18,7 +19,12 @@ const {
   ),
   mockRouterPush: vi.fn(),
   mockFetch: vi.fn(),
+  mockStashPrf: vi.fn(),
   prfSentinel: { current: null as Uint8Array | null },
+}));
+
+vi.mock("@/lib/auth/prf-handoff", () => ({
+  stashPrf: (h: unknown) => mockStashPrf(h),
 }));
 
 vi.mock("next-intl", () => ({
@@ -99,7 +105,7 @@ describe("SecurityKeySignInForm — §Sec-7 WebAuthn / PRF", () => {
     expect(mockStartPasskeyAuthentication).not.toHaveBeenCalled();
   });
 
-  it("(success) persists PRF hex to sessionStorage and zeroizes prfOutput", async () => {
+  it("(success) hands PRF material to the in-memory channel (NOT sessionStorage), then zeroizes prfOutput", async () => {
     const prfBytes = makePrfSentinel();
     mockStartPasskeyAuthentication.mockResolvedValueOnce({
       responseJSON: { id: "cred-1" },
@@ -107,7 +113,17 @@ describe("SecurityKeySignInForm — §Sec-7 WebAuthn / PRF", () => {
     });
     mockFetch
       .mockResolvedValueOnce(okJson({ options: {}, challengeId: "ch-1", prfSalt: "salt" }))
-      .mockResolvedValueOnce(okJson({ ok: true, prf: { wrappedKey: "wk" } }));
+      .mockResolvedValueOnce(
+        okJson({
+          ok: true,
+          // Real PRF-wrapped key bundle shape (matches /verify route + PrfHandoff).
+          prf: {
+            prfEncryptedSecretKey: "ct",
+            prfSecretKeyIv: "iv",
+            prfSecretKeyAuthTag: "tag",
+          },
+        }),
+      );
 
     render(<SecurityKeySignInForm />);
     fireEvent.change(screen.getByPlaceholderText("emailForSecurityKey"), {
@@ -117,14 +133,25 @@ describe("SecurityKeySignInForm — §Sec-7 WebAuthn / PRF", () => {
 
     const expectedHex = "ab".repeat(32);
     await waitFor(() => {
-      expect(sessionStorage.getItem("psso:prf-output")).toBe(expectedHex);
+      // PRF material goes to the in-memory hand-off, never to XSS-readable storage.
+      expect(mockStashPrf).toHaveBeenCalledWith({
+        prfOutputHex: expectedHex,
+        prfData: {
+          prfEncryptedSecretKey: "ct",
+          prfSecretKeyIv: "iv",
+          prfSecretKeyAuthTag: "tag",
+        },
+      });
+      // Only the non-sensitive trigger flag is in sessionStorage.
       expect(sessionStorage.getItem("psso:webauthn-signin")).toBe("1");
+      expect(sessionStorage.getItem("psso:prf-output")).toBeNull();
+      expect(sessionStorage.getItem("psso:prf-data")).toBeNull();
     });
     expect(prfBytes.every((b) => b === 0)).toBe(true);
     expect(mockRouterPush).toHaveBeenCalledWith("/dashboard");
   });
 
-  it("(verify-failure) zeroizes prfOutput AND writes NO PRF/webauthn-signin keys to sessionStorage", async () => {
+  it("(verify-failure) zeroizes prfOutput AND hands off NO PRF / writes no webauthn-signin key", async () => {
     const prfBytes = makePrfSentinel();
     mockStartPasskeyAuthentication.mockResolvedValueOnce({
       responseJSON: { id: "cred-1" },
@@ -144,13 +171,12 @@ describe("SecurityKeySignInForm — §Sec-7 WebAuthn / PRF", () => {
       expect(screen.getByText("securityKeySignInFailed")).toBeInTheDocument();
     });
     expect(prfBytes.every((b) => b === 0)).toBe(true);
-    expect(sessionStorage.getItem("psso:prf-output")).toBeNull();
-    expect(sessionStorage.getItem("psso:prf-data")).toBeNull();
+    expect(mockStashPrf).not.toHaveBeenCalled();
     expect(sessionStorage.getItem("psso:webauthn-signin")).toBeNull();
     expect(mockRouterPush).not.toHaveBeenCalled();
   });
 
-  it("(AUTHENTICATION_CANCELLED) renders cancellation copy and writes NO PRF keys", async () => {
+  it("(AUTHENTICATION_CANCELLED) renders cancellation copy and hands off NO PRF", async () => {
     mockFetch.mockResolvedValueOnce(okJson({ options: {}, challengeId: "ch-1", prfSalt: "salt" }));
     mockStartPasskeyAuthentication.mockRejectedValueOnce(new Error("AUTHENTICATION_CANCELLED"));
 
@@ -163,8 +189,7 @@ describe("SecurityKeySignInForm — §Sec-7 WebAuthn / PRF", () => {
     await waitFor(() => {
       expect(screen.getByText("securityKeySignInCancelled")).toBeInTheDocument();
     });
-    expect(sessionStorage.getItem("psso:prf-output")).toBeNull();
-    expect(sessionStorage.getItem("psso:prf-data")).toBeNull();
+    expect(mockStashPrf).not.toHaveBeenCalled();
     expect(sessionStorage.getItem("psso:webauthn-signin")).toBeNull();
   });
 });

@@ -652,7 +652,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   // ─── Unlock with stored PRF (single-ceremony sign-in flow) ──────
 
   /**
-   * Unlock the vault using PRF output stored in sessionStorage during sign-in.
+   * Unlock the vault using PRF output handed off in-memory during sign-in.
    * This avoids a second authenticator interaction (e.g., QR code scan) by
    * reusing the PRF output obtained during the sign-in ceremony.
    */

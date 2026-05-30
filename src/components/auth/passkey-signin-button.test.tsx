@@ -104,7 +104,17 @@ describe("PasskeySignInButton — §Sec-7 WebAuthn / PRF", () => {
     });
     mockFetch
       .mockResolvedValueOnce(okJson({ options: {}, challengeId: "ch-1", prfSalt: "salt" })) // /options
-      .mockResolvedValueOnce(okJson({ ok: true, prf: { wrappedKey: "wk", iv: "iv" } })); // /verify
+      .mockResolvedValueOnce(
+        okJson({
+          ok: true,
+          // Real PRF-wrapped key bundle shape (matches /verify route + PrfHandoff).
+          prf: {
+            prfEncryptedSecretKey: "ct",
+            prfSecretKeyIv: "iv",
+            prfSecretKeyAuthTag: "tag",
+          },
+        }),
+      ); // /verify
 
     render(<PasskeySignInButton />);
     fireEvent.click(screen.getByRole("button", { name: /signInWithPasskey/ }));
@@ -115,7 +125,11 @@ describe("PasskeySignInButton — §Sec-7 WebAuthn / PRF", () => {
       // PRF material goes to the in-memory hand-off, never to XSS-readable storage.
       expect(mockStashPrf).toHaveBeenCalledWith({
         prfOutputHex: expectedHex,
-        prfData: { wrappedKey: "wk", iv: "iv" },
+        prfData: {
+          prfEncryptedSecretKey: "ct",
+          prfSecretKeyIv: "iv",
+          prfSecretKeyAuthTag: "tag",
+        },
       });
       // Only the non-sensitive trigger flag is in sessionStorage.
       expect(sessionStorage.getItem("psso:webauthn-signin")).toBe("1");
