@@ -76,6 +76,11 @@ jobs:
     env:
       # T1: present so REDIS_URL-gated integration tests execute (see redis service).
       REDIS_URL: redis://localhost:6379
+      # T1: the now-running session-cache tests derive the cache-key HMAC from
+      # SHARE_MASTER_KEY (getMasterKeyByVersion(1) via getSessionCacheHmacKey),
+      # so it must be present or cacheKey() throws and every cache op fails.
+      # Ephemeral CI-only 64-hex value (service container destroyed per run).
+      SHARE_MASTER_KEY: "1111111111111111111111111111111111111111111111111111111111111111"
       # Round 4 T19 fix: DATABASE_URL inline from service — no secrets.
       # Fork PRs run unchanged (no secret access required).
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/passwd_test

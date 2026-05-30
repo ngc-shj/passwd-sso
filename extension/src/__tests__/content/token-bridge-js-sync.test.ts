@@ -40,7 +40,9 @@ describe("token-bridge.js sync", () => {
       /if \( ?!navigator\.userActivation \|\| !navigator\.userActivation\.isActive ?\) return;?/,
     );
     // Must NOT rely on sticky activation, which would let a single past
-    // gesture authorize later silent connects.
-    expect(file).not.toContain("hasBeenActive");
+    // gesture authorize later silent connects. Match the property ACCESS
+    // (`.hasBeenActive`), not the bare word — the gate's own comment mentions
+    // "isActive-not-hasBeenActive" to document the deliberate choice.
+    expect(file).not.toContain(".hasBeenActive");
   });
 });
