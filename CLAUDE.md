@@ -98,7 +98,7 @@ route handlers own application-layer concerns.
 - `src/app/api/auth/passkey/options/email/route.ts` — same
 - `src/app/api/auth/passkey/verify/route.ts` — pre-auth verification (creates session as output; inbound request has none). WebAuthn `expectedOrigin` provides primary defense; inline assertOrigin is the early-reject defense-in-depth.
 
-**Stricter route-level guard exception**: `src/app/api/vault/admin-reset/route.ts` keeps its post-baseline `if (!getAppOrigin()) return 500` check. The proxy CSRF gate uses Host-header fallback when `APP_URL` is unset; admin-reset intentionally does NOT permit this fallback.
+**Stricter route-level guard exception**: `src/app/api/vault/admin-reset/route.ts` keeps its post-baseline `if (!getAppOrigin()) return 500` check. The proxy CSRF gate (`assertOrigin`) already fails closed with a **403** when neither `APP_URL` nor `AUTH_URL` is set — there is no Host-header fallback anywhere. admin-reset goes further by returning a **500** in that case, surfacing it as a server misconfiguration (the endpoint must never run without an explicitly configured origin) rather than a generic 403.
 
 **Internal fetch from proxy → route**: `src/proxy.ts:153` fires `void fetch(...)` to `/api/internal/audit-emit` for passkey enforcement audit emission. The fetch sets `Origin: <self-origin>` explicitly (Node fetch does not auto-set Origin); without it the new CSRF gate would 403 the proxy's own self-call. Add the same pattern if you introduce another internal fetch in the proxy.
 
@@ -461,7 +461,11 @@ Dev override adds: `mailpit` (local email testing on port 8025), `audit-outbox-w
 
 **Database role separation**: The `app` service connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS) so RLS is enforced in dev. The `migrate` service connects as `passwd_user` (SUPERUSER, table owner) for DDL. The `audit-outbox-worker` service connects as `passwd_outbox_worker` (NOSUPERUSER, NOBYPASSRLS, least privilege — SELECT/UPDATE/DELETE on `audit_outbox`, INSERT on `audit_logs`, SELECT on `tenants` only). For local `npm run db:migrate`, set `MIGRATION_DATABASE_URL` in `.env.local` pointing to `passwd_user`.
 
-**Audit outbox**: Audit events are written to `audit_outbox` table in the same DB transaction as business logic. A separate worker process drains pending rows into `audit_logs`. The worker runs as `npm run worker:audit-outbox` (dev) or as the `audit-outbox-worker` Docker service. Without the worker, audit events accumulate in `audit_outbox` with status `PENDING` — the web app continues to function normally.
+**Audit outbox**: Audit events land in the `audit_outbox` table, drained into `audit_logs` by a separate worker process. There are two enqueue paths with different durability guarantees:
+- `enqueueAuditInTx(tx, ...)` — enqueues within a caller-supplied transaction, giving true atomic-with-business-logic durability. Use this when an audit record must not survive/precede a rolled-back mutation (or be lost when the mutation commits).
+- `logAuditAsync(...)` / `logAuditBulkAsync(...)` — the common route path. Emits a structured JSON log line synchronously (never throws), then enqueues to `audit_outbox` in its **own** transaction **after** the business transaction has committed. This is best-effort: a crash in the narrow window between the business commit and the enqueue loses the outbox row (the synchronous structured log still captured it).
+
+The worker runs as `npm run worker:audit-outbox` (dev) or as the `audit-outbox-worker` Docker service. Without the worker, audit events accumulate in `audit_outbox` with status `PENDING` — the web app continues to function normally.
 
 ## Versioning
 

@@ -83,6 +83,11 @@ async function handlePOST(
     return errorResponse(API_ERROR.INVALID_STATUS);
   }
 
+  // No email is sent here by design: confirm is the owner completing key
+  // escrow (IDLE = grant armed), an owner-side setup step the grantee takes no
+  // action on. Grantee-facing notifications fire on the events they must act on
+  // — invitation, approved, and revoked (the three emergency-access templates).
+  // The asymmetry vs other transitions is intentional, not a missed dispatch.
   await logAuditAsync({
     ...personalAuditBase(req, session.user.id),
     action: AUDIT_ACTION.EMERGENCY_GRANT_CONFIRM,
