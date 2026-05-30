@@ -14,14 +14,14 @@ import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/a
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
-import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
+import { hexIv, hexAuthTag, hexSalt, hexHash, WRAPPED_SECRET_KEY_MAX } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
 const generateSchema = z.object({
   currentVerifierHash: hexHash,
-  encryptedSecretKey: z.string().min(1),
+  encryptedSecretKey: z.string().min(1).max(WRAPPED_SECRET_KEY_MAX),
   secretKeyIv: hexIv,
   secretKeyAuthTag: hexAuthTag,
   hkdfSalt: hexSalt,

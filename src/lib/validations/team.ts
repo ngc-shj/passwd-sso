@@ -25,6 +25,7 @@ import {
   PASSWORD_HISTORY_COUNT_MAX,
   MAX_CIDRS,
   TEAM_KEY_VERSION_MAX,
+  INVITATION_TOKEN_MAX,
   aadVersionSchema,
   encryptedFieldSchema,
   hexIv,
@@ -184,7 +185,7 @@ export const updateTeamTagSchema = z.object({
 });
 
 export const invitationAcceptSchema = z.object({
-  token: z.string().min(1),
+  token: z.string().min(1).max(INVITATION_TOKEN_MAX),
 });
 
 // ─── Bulk Team Import Schema ────────────────────────────────

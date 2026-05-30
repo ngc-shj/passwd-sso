@@ -7,6 +7,7 @@ import { errorResponse } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
+import { WEBAUTHN_RESPONSE_MAX } from "@/lib/validations/common";
 import { assertOrigin } from "@/lib/auth/session/csrf";
 import { authorizeWebAuthn } from "@/lib/auth/webauthn/webauthn-authorize";
 import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit/audit";
@@ -67,8 +68,8 @@ async function handlePOST(req: NextRequest) {
 
   // Parse request body
   const passkeyVerifySchema = z.object({
-    credentialResponse: z.string(),
-    challengeId: z.string(),
+    credentialResponse: z.string().min(1).max(WEBAUTHN_RESPONSE_MAX),
+    challengeId: z.string().regex(/^[0-9a-f]{32}$/),
   });
   const bodyResult = await parseBody(req, passkeyVerifySchema);
   if (!bodyResult.ok) return bodyResult.response;

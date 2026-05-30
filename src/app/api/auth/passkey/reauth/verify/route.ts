@@ -10,6 +10,7 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { assertOrigin } from "@/lib/auth/session/csrf";
 import { parseBody } from "@/lib/http/parse-body";
+import { WEBAUTHN_RESPONSE_MAX } from "@/lib/validations/common";
 import { getSessionToken } from "@/app/api/sessions/helpers";
 import { verifyAuthenticationAssertion } from "@/lib/auth/webauthn/webauthn-server";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
@@ -27,7 +28,7 @@ const rateLimiter = createRateLimiter({
 const challengeIdSchema = /^[0-9a-f]{32}$/;
 
 const requestSchema = z.object({
-  credentialResponse: z.string().min(1),
+  credentialResponse: z.string().min(1).max(WEBAUTHN_RESPONSE_MAX),
   challengeId: z.string().regex(challengeIdSchema),
 });
 

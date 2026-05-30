@@ -14,7 +14,7 @@ import { z } from "zod";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
-import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
+import { hexIv, hexAuthTag, hexSalt, hexHash, WRAPPED_SECRET_KEY_MAX } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
 import { getSessionToken } from "@/app/api/sessions/helpers";
@@ -23,7 +23,7 @@ export const runtime = "nodejs";
 
 const changePassphraseSchema = z.object({
   currentVerifierHash: hexHash,
-  encryptedSecretKey: z.string().min(1),
+  encryptedSecretKey: z.string().min(1).max(WRAPPED_SECRET_KEY_MAX),
   secretKeyIv: hexIv,
   secretKeyAuthTag: hexAuthTag,
   accountSalt: hexSalt,

@@ -21,6 +21,9 @@ import {
   hexSalt,
   hexHash,
   verificationArtifactSchema,
+  WRAPPED_SECRET_KEY_MAX,
+  EPHEMERAL_PUBLIC_KEY_MAX,
+  ECDH_PRIVATE_KEY_CIPHERTEXT_MAX,
 } from "@/lib/validations/common";
 import {
   KDF_PBKDF2_ITERATIONS_MIN,
@@ -56,7 +59,7 @@ const kdfParamsSchema = z.discriminatedUnion("kdfType", [
 ]).optional();
 
 const setupSchema = z.object({
-  encryptedSecretKey: z.string().min(1),
+  encryptedSecretKey: z.string().min(1).max(WRAPPED_SECRET_KEY_MAX),
   secretKeyIv: hexIv,
   secretKeyAuthTag: hexAuthTag,
   accountSalt: hexSalt,
@@ -64,8 +67,8 @@ const setupSchema = z.object({
   verifierHash: hexHash,
   verificationArtifact: verificationArtifactSchema,
   // ECDH key pair for team E2E encryption
-  ecdhPublicKey: z.string().min(1),
-  encryptedEcdhPrivateKey: z.string().min(1),
+  ecdhPublicKey: z.string().min(1).max(EPHEMERAL_PUBLIC_KEY_MAX),
+  encryptedEcdhPrivateKey: z.string().min(1).max(ECDH_PRIVATE_KEY_CIPHERTEXT_MAX),
   ecdhPrivateKeyIv: hexIv,
   ecdhPrivateKeyAuthTag: hexAuthTag,
   // KDF metadata (optional — server applies defaults if omitted)

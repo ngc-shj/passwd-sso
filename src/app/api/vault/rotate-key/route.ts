@@ -23,6 +23,7 @@ import {
   VAULT_ROTATE_ENTRIES_MAX,
   VAULT_ROTATE_HISTORY_MAX,
   ECDH_PRIVATE_KEY_CIPHERTEXT_MAX,
+  WRAPPED_SECRET_KEY_MAX,
   VAULT_ROTATE_ATTACHMENT_CEK_MAX,
   BASE64_RE,
   CEK_WRAP_BASE64_MAX,
@@ -62,7 +63,7 @@ const rotateKeySchema = z.object({
   // Current passphrase verification
   currentAuthHash: hexHash,
   // New vault wrapping data
-  encryptedSecretKey: z.string().min(1).max(512),
+  encryptedSecretKey: z.string().min(1).max(WRAPPED_SECRET_KEY_MAX),
   secretKeyIv: hexIv,
   secretKeyAuthTag: hexAuthTag,
   accountSalt: hexSalt,

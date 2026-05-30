@@ -23,6 +23,10 @@ import { handleAuthError, unauthorized, validationError } from "@/lib/http/api-r
 import {
   MAX_AUDIT_DELIVERY_TARGETS,
   WEBHOOK_URL_MAX_LENGTH,
+  AUDIT_DELIVERY_SECRET_MAX,
+  AUDIT_DELIVERY_TOKEN_MAX,
+  AUDIT_DELIVERY_REGION_MAX,
+  AUDIT_DELIVERY_AWS_CREDENTIAL_MAX,
 } from "@/lib/validations/common";
 
 import { isSsrfSafeWebhookUrl as ssrfSafeUrl, SSRF_URL_VALIDATION_MESSAGE as ssrfMessage } from "@/lib/url/url-validation";
@@ -31,19 +35,19 @@ const createDeliveryTargetSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal(AuditDeliveryTargetKind.WEBHOOK),
     url: z.string().url().max(WEBHOOK_URL_MAX_LENGTH).refine(ssrfSafeUrl, { message: ssrfMessage }),
-    secret: z.string().min(1),
+    secret: z.string().min(1).max(AUDIT_DELIVERY_SECRET_MAX),
   }),
   z.object({
     kind: z.literal(AuditDeliveryTargetKind.SIEM_HEC),
     url: z.string().url().max(WEBHOOK_URL_MAX_LENGTH).refine(ssrfSafeUrl, { message: ssrfMessage }),
-    token: z.string().min(1),
+    token: z.string().min(1).max(AUDIT_DELIVERY_TOKEN_MAX),
   }),
   z.object({
     kind: z.literal(AuditDeliveryTargetKind.S3_OBJECT),
     endpoint: z.string().url().max(WEBHOOK_URL_MAX_LENGTH).refine(ssrfSafeUrl, { message: ssrfMessage }),
-    region: z.string().min(1),
-    accessKeyId: z.string().min(1),
-    secretAccessKey: z.string().min(1),
+    region: z.string().min(1).max(AUDIT_DELIVERY_REGION_MAX),
+    accessKeyId: z.string().min(1).max(AUDIT_DELIVERY_AWS_CREDENTIAL_MAX),
+    secretAccessKey: z.string().min(1).max(AUDIT_DELIVERY_AWS_CREDENTIAL_MAX),
   }),
 ]);
 
