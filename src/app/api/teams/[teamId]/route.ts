@@ -11,6 +11,10 @@ import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withTenantRls } from "@/lib/tenant-rls";
+import {
+  collectEntryAttachmentRefs,
+  deleteAttachmentBlobs,
+} from "@/lib/blob-store/cleanup";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/http/api-response";
@@ -138,17 +142,31 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     throw e;
   }
 
+  let attachmentRefs: Awaited<ReturnType<typeof collectEntryAttachmentRefs>>;
   try {
-    await withTeamTenantRls(teamId, async (tenantId) =>
-      withTenantRls(prisma, tenantId, async (tx) =>
-        tx.team.delete({ where: { id: teamId } }),
-      ),
+    attachmentRefs = await withTeamTenantRls(teamId, async (tenantId) =>
+      withTenantRls(prisma, tenantId, async (tx) => {
+        const entries = await tx.teamPasswordEntry.findMany({
+          where: { teamId },
+          select: { id: true },
+        });
+        // Capture external blob refs before the cascade delete removes the rows
+        const refs = await collectEntryAttachmentRefs(tx, {
+          kind: "team",
+          teamId,
+          entryIds: entries.map((e) => e.id),
+        });
+        await tx.team.delete({ where: { id: teamId } });
+        return refs;
+      }),
     );
   } catch (e) {
     const err = handleTeamTenantError(e);
     if (err) return err;
     throw e;
   }
+
+  await deleteAttachmentBlobs(attachmentRefs);
 
   return NextResponse.json({ success: true });
 }
