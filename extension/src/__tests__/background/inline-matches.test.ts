@@ -513,3 +513,48 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
     expect(res.ok).toBe(true);
   });
 });
+
+// ── M3: disabled-inline gate for CC and IDENTITY ──────────────────────────────
+
+describe("M3: resolveInlineMatches suppresses inline when enableInlineSuggestions=false", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    const mock = installChromeMock();
+    // Override storage to return enableInlineSuggestions=false.
+    mock.storage.local.get.mockResolvedValue({
+      serverUrl: "https://localhost:3000",
+      autoLockMinutes: 15,
+      enableInlineSuggestions: false,
+    });
+    mockEntries([], []);
+    await loadBackground();
+    // Flush the getSettings().then(...) microtask so cachedEnableInlineSuggestions
+    // is set before any message arrives.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    // Unlock the vault so the gate is reached with a valid token+key.
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: EXT_MSG.UNLOCK_VAULT, passphrase: "pw" });
+  });
+
+  it("GET_CC_MATCHES_FOR_URL returns suppressInline=true and empty entries", async () => {
+    const res = (await sendMessage({
+      type: EXT_MSG.GET_CC_MATCHES_FOR_URL,
+      url: "https://store.example.com/checkout",
+    })) as { suppressInline: boolean; entries: unknown[] };
+
+    expect(res.suppressInline).toBe(true);
+    expect(res.entries).toEqual([]);
+  });
+
+  it("GET_IDENTITY_MATCHES_FOR_URL returns suppressInline=true and empty entries", async () => {
+    const res = (await sendMessage({
+      type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL,
+      url: "https://shop.example.com/address",
+    })) as { suppressInline: boolean; entries: unknown[] };
+
+    expect(res.suppressInline).toBe(true);
+    expect(res.entries).toEqual([]);
+  });
+});

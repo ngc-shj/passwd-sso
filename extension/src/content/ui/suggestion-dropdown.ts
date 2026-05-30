@@ -185,6 +185,11 @@ export function handleDropdownKeydown(e: KeyboardEvent): boolean {
       return true;
     }
     case "Enter": {
+      // A fill is a credential disclosure — only a trusted (real) keypress may
+      // trigger it. Blocks a page script dispatching synthetic ArrowDown+Enter
+      // to auto-select and exfiltrate the entry (mirrors isSafeSelectClick on
+      // the mouse path). Navigation keys above are cosmetic and need no guard.
+      if (!e.isTrusted) return false;
       if (activeIndex >= 0 && activeIndex < itemElements.length) {
         e.preventDefault();
         const activeItem = itemElements[activeIndex];

@@ -17,6 +17,18 @@ vi.mock("../../content/ui/suggestion-dropdown", () => ({
 
 vi.mock("../../lib/i18n", () => ({ t: (key: string) => key }));
 
+// M6: spy on showInlineNotice; stub the guard helpers with jsdom-safe defaults
+// (no layout in jsdom → hit-test always passes, elements always visible).
+const showInlineNoticeMock = vi.hoisted(() => vi.fn());
+vi.mock("../../content/form-detector-lib", () => ({
+  showInlineNotice: showInlineNoticeMock,
+  isUsableInput: (el: HTMLInputElement) => !el.disabled && !el.readOnly,
+  isElementVisuallySafe: () => true,
+  isPageVisuallySafe: () => true,
+  isInputHitTestSafe: () => true,
+  hasVisiblePopoverOverlayNear: () => false,
+}));
+
 // jsdom lacks layout — make visibility/hit-test helpers pass.
 if (typeof globalThis.CSS === "undefined") {
   (globalThis as Record<string, unknown>).CSS = { escape: (s: string) => s };
@@ -48,6 +60,7 @@ function matchRequests(type: string) {
 beforeEach(() => {
   showDropdownMock.mockReset();
   hideDropdownMock.mockReset();
+  showInlineNoticeMock.mockReset();
   document.body.innerHTML = "";
 });
 
@@ -121,6 +134,35 @@ describe("initCreditCardDetector", () => {
     destroy();
   });
 
+  it("M6: onSelect with NO_CARD_NUMBER response calls showInlineNotice with noCardNumber key", async () => {
+    document.body.innerHTML = `<input id="ccnum" autocomplete="cc-number" />`;
+    installChrome({
+      [EXT_MSG.GET_CC_MATCHES_FOR_URL]: {
+        type: EXT_MSG.GET_CC_MATCHES_FOR_URL,
+        entries: [{ id: "cc-1", title: "Card", username: "Alice", urlHost: "", entryType: "CREDIT_CARD" }],
+        vaultLocked: false,
+        suppressInline: false,
+      },
+      [EXT_MSG.AUTOFILL_FROM_CONTENT]: { ok: false, error: "NO_CARD_NUMBER" },
+    });
+    const { initCreditCardDetector } = await import("../../content/cc-form-detector-lib");
+    const { destroy } = initCreditCardDetector();
+
+    const input = document.getElementById("ccnum") as HTMLInputElement;
+    input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+
+    // Drive onSelect with the captured dropdown options.
+    const opts = showDropdownMock.mock.calls[0][0] as {
+      onSelect: (id: string, teamId?: string) => void;
+    };
+    opts.onSelect("cc-1");
+
+    // showInlineNotice must have been called with the noCardNumber i18n key.
+    expect(showInlineNoticeMock).toHaveBeenCalledOnce();
+    expect(showInlineNoticeMock).toHaveBeenCalledWith(input, "errors.noCardNumber");
+    destroy();
+  });
+
   it("T8: destroy() removes the focus listener (no further requests)", async () => {
     document.body.innerHTML = `<input id="ccnum" autocomplete="cc-number" />`;
     installChrome({
@@ -165,6 +207,36 @@ describe("initCreditCardDetector", () => {
 });
 
 describe("initIdentityDetector", () => {
+  it("M1 (mock-only): no-op in a cross-origin subframe", async () => {
+    document.body.innerHTML = `
+      <form>
+        <input id="name" autocomplete="name" />
+        <input id="addr" autocomplete="address-line1" />
+      </form>
+    `;
+    installChrome({});
+    // Simulate a cross-origin subframe: window.top !== window.self AND
+    // accessing window.top.location throws (SecurityError). jsdom cannot model
+    // a real cross-origin frame, so we monkey-patch window.top for this test.
+    const realTop = window.top;
+    const crossOriginTop = {
+      get location(): Location {
+        throw new Error("cross-origin");
+      },
+    };
+    Object.defineProperty(window, "top", { value: crossOriginTop, configurable: true });
+    try {
+      const { initIdentityDetector } = await import("../../content/identity-form-detector-lib");
+      const { destroy } = initIdentityDetector();
+      const input = document.getElementById("name") as HTMLInputElement;
+      input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+      expect(matchRequests(EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL)).toHaveLength(0);
+      destroy();
+    } finally {
+      Object.defineProperty(window, "top", { value: realTop, configurable: true });
+    }
+  });
+
   it("issues one GET_IDENTITY_MATCHES request when a detected identity field is focused", async () => {
     document.body.innerHTML = `
       <form>
