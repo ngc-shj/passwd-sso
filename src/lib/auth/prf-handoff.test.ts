@@ -103,5 +103,15 @@ describe("prf-handoff", () => {
       expect(second.prfOutput.some((b) => b !== 0)).toBe(true);
       expect(takePrf()).toBe(second);
     });
+
+    it("clearPrf cancels the pending TTL timer (no dangling timer left armed)", () => {
+      // clearPrf's cancellation is timer hygiene, not a buffer-wipe effect (a
+      // phantom fire would hit null pending and no-op). Assert it directly via
+      // the fake-timer queue rather than an observable wipe.
+      stashPrf(makeSample());
+      expect(vi.getTimerCount()).toBe(1);
+      clearPrf();
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 });

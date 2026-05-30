@@ -84,6 +84,23 @@ drops the module and the timer via GC regardless.
   takePrf-cancels-TTL, re-stash-resets-TTL. Mutation-verified (neutering the
   `setTimeout` fails the self-expiry test). Full suite 10775 passed.
 
+### TTL triangulate review (functionality / security / testing)
+Ran a focused Phase 3 round on the TTL delta (`88d35c49..HEAD`):
+- Functionality: No findings — timer lifecycle correct (`cancelTtl` on every
+  `pending` transition), `clearPrf` hoisting valid, SSR-safe (no module-top
+  `setTimeout`), 30s comfortably covers stash→`takePrf` with graceful
+  degradation to manual unlock on expiry.
+- Security: No findings — strictly reduces residency (abandoned handoff wiped at
+  ≤30s vs. unbounded-until-GC before), no new exposure, take-vs-timer race
+  foreclosed by single-threaded `cancelTtl` in `takePrf`.
+- Testing: two Low items. (a) "does NOT wipe before TTL" is a narrow boundary
+  guard — kept. (b) Coverage gap: `clearPrf`'s timer cancellation untested.
+  Analysis showed the expert's suggested wipe-based test would be vacuous (a
+  following `stashPrf` cancels the timer anyway; a phantom fire no-ops on null
+  `pending`) — `clearPrf`'s `cancelTtl` is a timer-hygiene contract. Added a
+  `vi.getTimerCount()` assertion test instead; mutation-verified (removing
+  `cancelTtl` from `clearPrf` fails it). `prf-handoff.test.ts` now 9 tests.
+
 ## Tightening-only skip — Round 1
 Findings applied directly (no Round 2 review):
 - [T1] [Low] dead `prfSentinel` scaffolding — both producer test files — applied
