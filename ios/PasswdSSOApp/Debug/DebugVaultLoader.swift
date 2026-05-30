@@ -153,14 +153,17 @@ public enum DebugVaultLoader {
   // MARK: - Private helpers
 
   /// Build fixture CacheEntries with VaultEntrySummary/VaultEntryDetail JSON,
-  /// encrypted with vault_key + buildPersonalEntryAAD(userId, entryId).
+  /// encrypted with vault_key + per-field buildPersonalEntryAAD(userId, entryId, vaultType).
   /// Uses the same encryption format as CredentialResolver expects at decrypt time.
   private static func buildFixtureCacheEntries(
     vaultKey: SymmetricKey,
     userId: String
   ) throws -> [CacheEntry] {
     try fixtureEntries.map { fixture in
-      let aad = try buildPersonalEntryAAD(userId: userId, entryId: fixture.id)
+      let blobAAD = try buildPersonalEntryAAD(
+        userId: userId, entryId: fixture.id, vaultType: VaultType.blob)
+      let overviewAAD = try buildPersonalEntryAAD(
+        userId: userId, entryId: fixture.id, vaultType: VaultType.overview)
 
       let summary = VaultEntrySummary(
         id: fixture.id,
@@ -185,10 +188,10 @@ public enum DebugVaultLoader {
       let detailData = try encoder.encode(detail)
 
       let overviewEncrypted = try encryptAESGCMEncoded(
-        plaintext: overviewData, key: vaultKey, aad: aad
+        plaintext: overviewData, key: vaultKey, aad: overviewAAD
       )
       let blobEncrypted = try encryptAESGCMEncoded(
-        plaintext: detailData, key: vaultKey, aad: aad
+        plaintext: detailData, key: vaultKey, aad: blobAAD
       )
 
       return CacheEntry(

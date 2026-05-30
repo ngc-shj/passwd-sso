@@ -60,8 +60,9 @@ public enum EntryEncrypterError: Error, Equatable {
 
 // MARK: - Encrypt helper
 
-/// Encrypts both the full entry plaintext (blob) and the overview-summary plaintext
-/// with the personal-vault AAD `buildPersonalEntryAAD(userId, entryId)`.
+/// Encrypts the full entry plaintext (blob) and the overview-summary plaintext,
+/// each with its own personal-vault AAD (BLOB vs OVERVIEW) — they must never
+/// share an AAD (cross-field replay protection).
 public func encryptPersonalEntry(
   entryId: String,
   userId: String,
@@ -69,16 +70,19 @@ public func encryptPersonalEntry(
   detail: EntryPlaintext,
   overview: OverviewPlaintext
 ) throws -> (blob: EncryptedData, overview: EncryptedData) {
-  let aad = try buildPersonalEntryAAD(userId: userId, entryId: entryId)
+  let blobAAD = try buildPersonalEntryAAD(
+    userId: userId, entryId: entryId, vaultType: VaultType.blob)
+  let overviewAAD = try buildPersonalEntryAAD(
+    userId: userId, entryId: entryId, vaultType: VaultType.overview)
   let encoder = JSONEncoder()
 
   let detailData = try encoder.encode(detail)
   let overviewData = try encoder.encode(overview)
 
   do {
-    let blobEncrypted = try encryptAESGCMEncoded(plaintext: detailData, key: vaultKey, aad: aad)
+    let blobEncrypted = try encryptAESGCMEncoded(plaintext: detailData, key: vaultKey, aad: blobAAD)
     let overviewEncrypted = try encryptAESGCMEncoded(
-      plaintext: overviewData, key: vaultKey, aad: aad)
+      plaintext: overviewData, key: vaultKey, aad: overviewAAD)
     return (blob: blobEncrypted, overview: overviewEncrypted)
   } catch {
     throw EntryEncrypterError.encryptionFailed

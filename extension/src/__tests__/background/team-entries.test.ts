@@ -14,6 +14,7 @@ const cryptoMocks = vi.hoisted(() => ({
     ),
   buildPersonalEntryAAD: vi.fn().mockReturnValue(new Uint8Array([1, 2])),
   hexDecode: vi.fn().mockReturnValue(new Uint8Array([0, 1])),
+  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 vi.mock("../../lib/crypto", () => cryptoMocks);

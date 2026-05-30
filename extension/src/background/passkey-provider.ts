@@ -3,6 +3,7 @@ import {
   encryptData,
   decryptData,
   buildPersonalEntryAAD,
+  VAULT_TYPE,
 } from "../lib/crypto";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
 import { readApiErrorBody } from "../lib/api-error-body";
@@ -233,7 +234,9 @@ async function doSignAssertion(
     if ((data.aadVersion ?? 0) < 1) {
       return { ok: false, error: "INVALID_ENTRY" };
     }
-    const aad = buildPersonalEntryAAD(userId, data.id);
+    // Blob-only path: decrypt and re-encrypt the blob; the overview is never
+    // touched here (omitted from the PUT below), so only the BLOB AAD is used.
+    const aad = buildPersonalEntryAAD(userId, data.id, VAULT_TYPE.BLOB);
 
     const blobPlain = await decryptData(data.encryptedBlob, encKey, aad);
     const blob = JSON.parse(blobPlain) as Record<string, unknown>;
@@ -363,7 +366,8 @@ export async function handlePasskeyCreateCredential(
     const attestationObject = buildAttestationObject(authData);
 
     const entryId = crypto.randomUUID();
-    const aad = buildPersonalEntryAAD(currentUserId, entryId);
+    const blobAad = buildPersonalEntryAAD(currentUserId, entryId, VAULT_TYPE.BLOB);
+    const overviewAad = buildPersonalEntryAAD(currentUserId, entryId, VAULT_TYPE.OVERVIEW);
     const title = `${rpName} (${userName})`;
 
     const fullBlob = JSON.stringify({
@@ -393,8 +397,8 @@ export async function handlePasskeyCreateCredential(
       tags: [],
     });
 
-    const encryptedBlob = await encryptData(fullBlob, encKey, aad);
-    const encryptedOverview = await encryptData(overviewBlob, encKey, aad);
+    const encryptedBlob = await encryptData(fullBlob, encKey, blobAad);
+    const encryptedOverview = await encryptData(overviewBlob, encKey, overviewAad);
 
     const res = await deps.swFetch(EXT_API_PATH.PASSWORDS, {
       method: "POST",
@@ -424,7 +428,7 @@ export async function handlePasskeyCreateCredential(
         const targetData = await targetRes.json().catch(() => null) as { encryptedBlob?: EncryptedData; aadVersion?: number; id?: string } | null;
         if (targetData?.encryptedBlob && targetData.id) {
           const targetAad = (targetData.aadVersion ?? 0) >= 1
-            ? buildPersonalEntryAAD(currentUserId, targetData.id)
+            ? buildPersonalEntryAAD(currentUserId, targetData.id, VAULT_TYPE.BLOB)
             : undefined;
           const targetBlob = await decryptData(targetData.encryptedBlob, encKey, targetAad)
             .then((s) => JSON.parse(s) as Record<string, unknown>)

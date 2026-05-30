@@ -6,6 +6,7 @@ import type {
 } from "../types/messages";
 import {
   buildPersonalEntryAAD,
+  VAULT_TYPE,
   decryptData,
   deriveEncryptionKey,
   deriveWrappingKey,
@@ -914,7 +915,7 @@ chrome.commands.onCommand.addListener(async (command) => {
 
         const aad =
           (data.aadVersion ?? 0) >= 1
-            ? buildPersonalEntryAAD(currentUserId!, data.id)
+            ? buildPersonalEntryAAD(currentUserId!, data.id, VAULT_TYPE.BLOB)
             : undefined;
         const plaintext = await decryptData(data.encryptedBlob, encryptionKey!, aad);
         blob = JSON.parse(plaintext) as typeof blob;
@@ -974,7 +975,7 @@ async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
   for (const item of active) {
     const aad =
       (item.aadVersion ?? 0) >= 1
-        ? buildPersonalEntryAAD(currentUserId, item.id)
+        ? buildPersonalEntryAAD(currentUserId, item.id, VAULT_TYPE.OVERVIEW)
         : undefined;
     try {
       const plaintext = await decryptData(
@@ -1342,15 +1343,20 @@ async function performAutofillForEntry(
       entryType: string;
     };
 
-    const aad =
-      (data.aadVersion ?? 0) >= 1
-        ? buildPersonalEntryAAD(currentUserId, data.id)
-        : undefined;
-    blobPlain = await decryptData(data.encryptedBlob, encryptionKey, aad);
+    // Dual-field path: blob and overview each need their own AAD (BLOB vs
+    // OVERVIEW) — never share one, or the app-written overview won't decrypt.
+    const useAad = (data.aadVersion ?? 0) >= 1;
+    const blobAad = useAad
+      ? buildPersonalEntryAAD(currentUserId, data.id, VAULT_TYPE.BLOB)
+      : undefined;
+    const overviewAad = useAad
+      ? buildPersonalEntryAAD(currentUserId, data.id, VAULT_TYPE.OVERVIEW)
+      : undefined;
+    blobPlain = await decryptData(data.encryptedBlob, encryptionKey, blobAad);
     overviewPlain = await decryptData(
       data.encryptedOverview,
       encryptionKey,
-      aad,
+      overviewAad,
     );
     entryType = data.entryType;
   }
@@ -1942,7 +1948,7 @@ async function handleMessage(
 
           const aad =
             (data.aadVersion ?? 0) >= 1
-              ? buildPersonalEntryAAD(currentUserId, data.id)
+              ? buildPersonalEntryAAD(currentUserId, data.id, VAULT_TYPE.BLOB)
               : undefined;
           const plaintext = await decryptData(
             data.encryptedBlob,
@@ -2020,7 +2026,7 @@ async function handleMessage(
 
           const aad =
             (data.aadVersion ?? 0) >= 1
-              ? buildPersonalEntryAAD(currentUserId, data.id)
+              ? buildPersonalEntryAAD(currentUserId, data.id, VAULT_TYPE.BLOB)
               : undefined;
           const plaintext = await decryptData(
             data.encryptedBlob,

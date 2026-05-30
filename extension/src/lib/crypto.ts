@@ -252,9 +252,20 @@ function buildAADBytes(
   return bytes;
 }
 
+// Mirrors src/lib/crypto/crypto-aad.ts: personal-vault AAD binds
+// userId + entryId + vaultType ("blob" vs "overview") to prevent cross-field
+// ciphertext replay. Must stay byte-identical to the app builder — the
+// aad-parity tests pin this.
+export const VAULT_TYPE = {
+  BLOB: "blob",
+  OVERVIEW: "overview",
+} as const;
+export type VaultType = (typeof VAULT_TYPE)[keyof typeof VAULT_TYPE];
+
 export function buildPersonalEntryAAD(
   userId: string,
-  entryId: string
+  entryId: string,
+  vaultType: VaultType
 ): Uint8Array {
-  return buildAADBytes(SCOPE_PERSONAL, 2, [userId, entryId]);
+  return buildAADBytes(SCOPE_PERSONAL, 3, [userId, entryId, vaultType]);
 }

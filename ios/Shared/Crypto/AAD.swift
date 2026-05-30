@@ -15,6 +15,13 @@ public enum AADScope: String {
   case itemKey = "IK"
 }
 
+/// Vault-field discriminators used in the AAD `vaultType` field, mirroring
+/// crypto-aad.ts `VAULT_TYPE`. Used by both personal and team entry AADs.
+public enum VaultType {
+  public static let blob = "blob"
+  public static let overview = "overview"
+}
+
 /// Build the length-prefixed binary AAD from scope + fields.
 /// All multi-byte integers are big-endian per plan §"Encrypted-entries cache integrity".
 public func buildAADBytes(scope: AADScope, fields: [String]) throws -> Data {
@@ -50,9 +57,18 @@ public func buildAADBytes(scope: AADScope, fields: [String]) throws -> Data {
   return data
 }
 
-/// Build AAD for a personal vault entry (userId, entryId).
-public func buildPersonalEntryAAD(userId: String, entryId: String) throws -> Data {
-  try buildAADBytes(scope: .personal, fields: [userId, entryId])
+/// Build AAD for a personal vault entry (userId, entryId, vaultType).
+/// vaultType ("blob" vs "overview") prevents cross-field ciphertext replay and
+/// is REQUIRED — it must match the field being encrypted/decrypted (3-field
+/// shape, byte-identical to crypto-aad.ts since server PR #482). String-typed
+/// to match buildTeamEntryAAD and the vaultType already threaded by
+/// CredentialResolver / VaultViewModel.
+public func buildPersonalEntryAAD(
+  userId: String,
+  entryId: String,
+  vaultType: String
+) throws -> Data {
+  try buildAADBytes(scope: .personal, fields: [userId, entryId, vaultType])
 }
 
 /// Build AAD for a team vault entry (teamId, entryId, vaultType, itemKeyVersion).
@@ -60,7 +76,7 @@ public func buildPersonalEntryAAD(userId: String, entryId: String) throws -> Dat
 public func buildTeamEntryAAD(
   teamId: String,
   entryId: String,
-  vaultType: String = "blob",
+  vaultType: String = VaultType.blob,
   itemKeyVersion: Int = 0
 ) throws -> Data {
   try buildAADBytes(scope: .team, fields: [teamId, entryId, vaultType, String(itemKeyVersion)])

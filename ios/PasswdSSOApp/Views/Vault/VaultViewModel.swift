@@ -100,7 +100,7 @@ public enum VaultViewModelError: Error, Equatable {
       )
     }
     if entry.aadVersion >= 1 {
-      return try buildPersonalEntryAAD(userId: userId, entryId: entry.id)
+      return try buildPersonalEntryAAD(userId: userId, entryId: entry.id, vaultType: vaultType)
     }
     return nil  // legacy aadVersion == 0 entries have no AAD binding
   }
@@ -111,7 +111,7 @@ public enum VaultViewModelError: Error, Equatable {
     userId: String
   ) -> VaultEntrySummary? {
     do {
-      let aad = try buildEntryAAD(entry: entry, userId: userId, vaultType: "overview")
+      let aad = try buildEntryAAD(entry: entry, userId: userId, vaultType: VaultType.overview)
       let plaintext = try decryptAESGCMEncoded(
         encrypted: entry.encryptedOverview,
         key: vaultKey,
@@ -129,7 +129,7 @@ public enum VaultViewModelError: Error, Equatable {
     userId: String
   ) -> VaultEntryDetail? {
     do {
-      let aad = try buildEntryAAD(entry: entry, userId: userId, vaultType: "blob")
+      let aad = try buildEntryAAD(entry: entry, userId: userId, vaultType: VaultType.blob)
       let plaintext = try decryptAESGCMEncoded(
         encrypted: entry.encryptedBlob,
         key: vaultKey,

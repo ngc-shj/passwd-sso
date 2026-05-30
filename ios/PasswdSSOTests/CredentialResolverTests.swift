@@ -153,7 +153,7 @@ private func encryptDetail(
 }
 
 /// Build a personal CacheEntry with AAD-bound ciphertext.
-/// aadVersion >= 1 → encrypt with buildPersonalEntryAAD(userId, entryId).
+/// aadVersion >= 1 → encrypt each field with buildPersonalEntryAAD(userId, entryId, vaultType).
 private func makePersonalCacheEntry(
   summary: VaultEntrySummary,
   detail: VaultEntryDetail,
@@ -162,11 +162,13 @@ private func makePersonalCacheEntry(
   aadVersion: Int,
   keyVersion: Int = 1
 ) throws -> CacheEntry {
+  // Both fields belong to the same entry — bind to one canonical entryId.
+  let entryId = summary.id
   let overviewAAD: Data? = aadVersion >= 1
-    ? try buildPersonalEntryAAD(userId: userId, entryId: summary.id)
+    ? try buildPersonalEntryAAD(userId: userId, entryId: entryId, vaultType: VaultType.overview)
     : nil
   let blobAAD: Data? = aadVersion >= 1
-    ? try buildPersonalEntryAAD(userId: userId, entryId: detail.id)
+    ? try buildPersonalEntryAAD(userId: userId, entryId: entryId, vaultType: VaultType.blob)
     : nil
   return CacheEntry(
     id: summary.id,
@@ -190,10 +192,10 @@ private func makeTeamCacheEntry(
 ) throws -> CacheEntry {
   let entryId = summary.id
   let overviewAAD = try buildTeamEntryAAD(
-    teamId: teamId, entryId: entryId, vaultType: "overview", itemKeyVersion: itemKeyVersion
+    teamId: teamId, entryId: entryId, vaultType: VaultType.overview, itemKeyVersion: itemKeyVersion
   )
   let blobAAD = try buildTeamEntryAAD(
-    teamId: teamId, entryId: entryId, vaultType: "blob", itemKeyVersion: itemKeyVersion
+    teamId: teamId, entryId: entryId, vaultType: VaultType.blob, itemKeyVersion: itemKeyVersion
   )
 
   let (entryKey, encryptedItemKey): (SymmetricKey, EncryptedData?)
@@ -854,10 +856,10 @@ final class CredentialResolverTests: XCTestCase {
     )
     // itemKeyVersion=1 but encryptedItemKey=nil → resolver must filter this entry
     let overviewAAD = try buildTeamEntryAAD(
-      teamId: teamId, entryId: "te-missing", vaultType: "overview", itemKeyVersion: 1
+      teamId: teamId, entryId: "te-missing", vaultType: VaultType.overview, itemKeyVersion: 1
     )
     let blobAAD = try buildTeamEntryAAD(
-      teamId: teamId, entryId: "te-missing", vaultType: "blob", itemKeyVersion: 1
+      teamId: teamId, entryId: "te-missing", vaultType: VaultType.blob, itemKeyVersion: 1
     )
     let brokenEntry = CacheEntry(
       id: "te-missing",
@@ -910,10 +912,10 @@ final class CredentialResolverTests: XCTestCase {
     )
     // Encrypt overview with vaultType="blob" AAD (wrong — resolver will try "overview")
     let wrongAAD = try buildTeamEntryAAD(
-      teamId: teamId, entryId: "te-wrong-aad", vaultType: "blob", itemKeyVersion: 0
+      teamId: teamId, entryId: "te-wrong-aad", vaultType: VaultType.blob, itemKeyVersion: 0
     )
     let blobAAD = try buildTeamEntryAAD(
-      teamId: teamId, entryId: "te-wrong-aad", vaultType: "blob", itemKeyVersion: 0
+      teamId: teamId, entryId: "te-wrong-aad", vaultType: VaultType.blob, itemKeyVersion: 0
     )
     let wrongEntry = CacheEntry(
       id: "te-wrong-aad",

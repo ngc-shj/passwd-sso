@@ -6,6 +6,7 @@ import {
   encryptData,
   decryptData,
   buildPersonalEntryAAD,
+  VAULT_TYPE,
 } from "../lib/crypto";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
 import { readApiErrorBody } from "../lib/api-error-body";
@@ -89,7 +90,7 @@ export async function handleLoginDetected(
 
     const aad =
       (data.aadVersion ?? 0) >= 1
-        ? buildPersonalEntryAAD(userId, data.id)
+        ? buildPersonalEntryAAD(userId, data.id, VAULT_TYPE.BLOB)
         : undefined;
 
     const blobPlain = await decryptData(data.encryptedBlob, encKey, aad);
@@ -136,7 +137,8 @@ export async function handleSaveLogin(
 
   try {
     const entryId = crypto.randomUUID();
-    const aad = buildPersonalEntryAAD(userId, entryId);
+    const blobAad = buildPersonalEntryAAD(userId, entryId, VAULT_TYPE.BLOB);
+    const overviewAad = buildPersonalEntryAAD(userId, entryId, VAULT_TYPE.OVERVIEW);
 
     const fullBlob = JSON.stringify({
       title,
@@ -151,8 +153,8 @@ export async function handleSaveLogin(
       urlHost: host,
     });
 
-    const encryptedBlob = await encryptData(fullBlob, encKey, aad);
-    const encryptedOverview = await encryptData(overviewBlob, encKey, aad);
+    const encryptedBlob = await encryptData(fullBlob, encKey, blobAad);
+    const encryptedOverview = await encryptData(overviewBlob, encKey, overviewAad);
 
     const res = await deps.swFetch(EXT_API_PATH.PASSWORDS, {
       method: "POST",
@@ -210,21 +212,28 @@ export async function handleUpdateLogin(
       id: string;
     };
 
-    const aad =
-      (data.aadVersion ?? 0) >= 1
-        ? buildPersonalEntryAAD(userId, data.id)
-        : undefined;
+    // Per-field AADs: blob and overview must never share an AAD (cross-field
+    // replay protection — matches the app's BLOB/OVERVIEW split).
+    // `?? 1` promotes a null/absent aadVersion to 1; an explicit 0 stays 0
+    // (no-AAD legacy path) — `??` does not fire on 0.
+    const useAad = (data.aadVersion ?? 0) >= 1;
+    const blobAad = useAad
+      ? buildPersonalEntryAAD(userId, data.id, VAULT_TYPE.BLOB)
+      : undefined;
+    const overviewAad = useAad
+      ? buildPersonalEntryAAD(userId, data.id, VAULT_TYPE.OVERVIEW)
+      : undefined;
 
     // Decrypt full blob, update password, re-encrypt
-    const blobPlain = await decryptData(data.encryptedBlob, encKey, aad);
+    const blobPlain = await decryptData(data.encryptedBlob, encKey, blobAad);
     const blob = JSON.parse(blobPlain) as Record<string, unknown>;
     blob.password = newPassword;
 
     // Re-encrypt both blobs (overview stays the same content but needs re-encryption)
-    const overviewPlain = await decryptData(data.encryptedOverview, encKey, aad);
+    const overviewPlain = await decryptData(data.encryptedOverview, encKey, overviewAad);
 
-    const encryptedBlob = await encryptData(JSON.stringify(blob), encKey, aad);
-    const encryptedOverview = await encryptData(overviewPlain, encKey, aad);
+    const encryptedBlob = await encryptData(JSON.stringify(blob), encKey, blobAad);
+    const encryptedOverview = await encryptData(overviewPlain, encKey, overviewAad);
 
     const putRes = await deps.swFetch(extApiPath.passwordById(entryId), {
       method: "PUT",

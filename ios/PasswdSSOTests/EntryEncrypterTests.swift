@@ -42,10 +42,15 @@ final class EntryEncrypterTests: XCTestCase {
       overview: sampleOverview
     )
 
-    let aad = try buildPersonalEntryAAD(userId: userId, entryId: entryId)
+    // Per-field AADs — must match what encryptPersonalEntry used per field.
+    let blobAAD = try buildPersonalEntryAAD(
+      userId: userId, entryId: entryId, vaultType: VaultType.blob)
+    let overviewAAD = try buildPersonalEntryAAD(
+      userId: userId, entryId: entryId, vaultType: VaultType.overview)
 
-    let blobData = try decryptAESGCMEncoded(encrypted: blobEnc, key: vaultKey, aad: aad)
-    let overviewData = try decryptAESGCMEncoded(encrypted: overviewEnc, key: vaultKey, aad: aad)
+    let blobData = try decryptAESGCMEncoded(encrypted: blobEnc, key: vaultKey, aad: blobAAD)
+    let overviewData = try decryptAESGCMEncoded(
+      encrypted: overviewEnc, key: vaultKey, aad: overviewAAD)
 
     let decodedDetail = try JSONDecoder().decode(EntryPlaintext.self, from: blobData)
     let decodedOverview = try JSONDecoder().decode(OverviewPlaintext.self, from: overviewData)
@@ -66,10 +71,31 @@ final class EntryEncrypterTests: XCTestCase {
     )
 
     // Different userId → different AAD → should fail authentication
-    let wrongAAD = try buildPersonalEntryAAD(userId: "other-user", entryId: entryId)
+    let wrongAAD = try buildPersonalEntryAAD(
+      userId: "other-user", entryId: entryId, vaultType: VaultType.blob)
 
     XCTAssertThrowsError(
       try decryptAESGCMEncoded(encrypted: blobEnc, key: vaultKey, aad: wrongAAD)
+    )
+  }
+
+  // MARK: - Cross-field AAD fails (anti-vacuous)
+
+  func testEncryptPersonalEntry_blobCannotDecryptWithOverviewAAD() throws {
+    let (blobEnc, _) = try encryptPersonalEntry(
+      entryId: entryId,
+      userId: userId,
+      vaultKey: vaultKey,
+      detail: sampleDetail,
+      overview: sampleOverview
+    )
+
+    // Same user + entry, wrong vaultType → must fail (cross-field replay guard).
+    let overviewAAD = try buildPersonalEntryAAD(
+      userId: userId, entryId: entryId, vaultType: VaultType.overview)
+
+    XCTAssertThrowsError(
+      try decryptAESGCMEncoded(encrypted: blobEnc, key: vaultKey, aad: overviewAAD)
     )
   }
 
