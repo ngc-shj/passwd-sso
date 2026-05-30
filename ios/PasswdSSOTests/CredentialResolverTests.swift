@@ -153,7 +153,7 @@ private func encryptDetail(
 }
 
 /// Build a personal CacheEntry with AAD-bound ciphertext.
-/// aadVersion >= 1 → encrypt with buildPersonalEntryAAD(userId, entryId).
+/// aadVersion >= 1 → encrypt each field with buildPersonalEntryAAD(userId, entryId, vaultType).
 private func makePersonalCacheEntry(
   summary: VaultEntrySummary,
   detail: VaultEntryDetail,
@@ -162,11 +162,13 @@ private func makePersonalCacheEntry(
   aadVersion: Int,
   keyVersion: Int = 1
 ) throws -> CacheEntry {
+  // Both fields belong to the same entry — bind to one canonical entryId.
+  let entryId = summary.id
   let overviewAAD: Data? = aadVersion >= 1
-    ? try buildPersonalEntryAAD(userId: userId, entryId: summary.id, vaultType: VaultType.overview)
+    ? try buildPersonalEntryAAD(userId: userId, entryId: entryId, vaultType: VaultType.overview)
     : nil
   let blobAAD: Data? = aadVersion >= 1
-    ? try buildPersonalEntryAAD(userId: userId, entryId: detail.id, vaultType: VaultType.blob)
+    ? try buildPersonalEntryAAD(userId: userId, entryId: entryId, vaultType: VaultType.blob)
     : nil
   return CacheEntry(
     id: summary.id,

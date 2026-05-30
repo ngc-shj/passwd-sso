@@ -345,6 +345,16 @@ describe("login-save", () => {
       expect(updatedBlob.username).toBe("alice");
       expect(updatedBlob.url).toBe("https://github.com");
       expect(updatedBlob.notes).toBe("my notes");
+
+      // The re-encrypted overview must round-trip with the OVERVIEW AAD —
+      // guards against the blob/overview AADs being crossed on re-encrypt.
+      expect(putBody.encryptedOverview).toBeDefined();
+      const updatedOverview = JSON.parse(
+        await decryptData(putBody.encryptedOverview, testKey, overviewAad),
+      );
+      expect(updatedOverview.title).toBe("GitHub");
+      expect(updatedOverview.username).toBe("alice");
+      expect(updatedOverview.urlHost).toBe("github.com");
     });
 
     it("returns error when vault is locked", async () => {

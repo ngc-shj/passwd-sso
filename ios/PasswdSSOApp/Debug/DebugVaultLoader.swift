@@ -153,7 +153,7 @@ public enum DebugVaultLoader {
   // MARK: - Private helpers
 
   /// Build fixture CacheEntries with VaultEntrySummary/VaultEntryDetail JSON,
-  /// encrypted with vault_key + buildPersonalEntryAAD(userId, entryId).
+  /// encrypted with vault_key + per-field buildPersonalEntryAAD(userId, entryId, vaultType).
   /// Uses the same encryption format as CredentialResolver expects at decrypt time.
   private static func buildFixtureCacheEntries(
     vaultKey: SymmetricKey,

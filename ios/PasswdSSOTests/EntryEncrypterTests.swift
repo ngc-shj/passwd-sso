@@ -79,6 +79,26 @@ final class EntryEncrypterTests: XCTestCase {
     )
   }
 
+  // MARK: - Cross-field AAD fails (anti-vacuous)
+
+  func testEncryptPersonalEntry_blobCannotDecryptWithOverviewAAD() throws {
+    let (blobEnc, _) = try encryptPersonalEntry(
+      entryId: entryId,
+      userId: userId,
+      vaultKey: vaultKey,
+      detail: sampleDetail,
+      overview: sampleOverview
+    )
+
+    // Same user + entry, wrong vaultType → must fail (cross-field replay guard).
+    let overviewAAD = try buildPersonalEntryAAD(
+      userId: userId, entryId: entryId, vaultType: VaultType.overview)
+
+    XCTAssertThrowsError(
+      try decryptAESGCMEncoded(encrypted: blobEnc, key: vaultKey, aad: overviewAAD)
+    )
+  }
+
   // MARK: - Independent IVs
 
   func testEncryptPersonalEntry_blobAndOverviewIndependentIVs() throws {
