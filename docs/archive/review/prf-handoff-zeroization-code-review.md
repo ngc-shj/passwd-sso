@@ -71,6 +71,19 @@ flag remains). No Critical → no escalation.
   happens before the finally wipe; no use-after-zeroize; scope-isolated to
   `unlockWithStoredPrf`; null-safe optional chain; strictly increases coverage).
 
+## Post-review hardening — stashPrf TTL (follow-up)
+A secondary review of PR #505 suggested a TTL on `stashPrf` so an unconsumed
+handoff does not linger indefinitely. Applied: `PRF_HANDOFF_TTL_MS = 30_000`;
+`stashPrf` arms `setTimeout(clearPrf, …)`, cancelled by `takePrf` / `clearPrf` /
+overwrite via a managed `ttlTimer` (so a stale timer can never wipe a fresh
+handoff or a consumer-owned buffer). The module doc keeps the scope honest: the
+TTL only bounds the in-SPA-without-unlock residency window — a full page reload
+drops the module and the timer via GC regardless.
+- Modified: `src/lib/auth/prf-handoff.ts`.
+- Tests: `prf-handoff.test.ts` — TTL self-expiry, no-wipe-before-TTL,
+  takePrf-cancels-TTL, re-stash-resets-TTL. Mutation-verified (neutering the
+  `setTimeout` fails the self-expiry test). Full suite 10775 passed.
+
 ## Tightening-only skip — Round 1
 Findings applied directly (no Round 2 review):
 - [T1] [Low] dead `prfSentinel` scaffolding — both producer test files — applied

@@ -1,5 +1,11 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { stashPrf, takePrf, clearPrf, type PrfHandoff } from "./prf-handoff";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  stashPrf,
+  takePrf,
+  clearPrf,
+  PRF_HANDOFF_TTL_MS,
+  type PrfHandoff,
+} from "./prf-handoff";
 
 // Fresh buffers per call — stash/clear zeroize in place, so sharing one buffer
 // across tests would leak mutations between them.
@@ -49,5 +55,53 @@ describe("prf-handoff", () => {
     expect(first.prfOutput.every((b) => b === 0)).toBe(true);
     expect(takePrf()).toBe(second);
     expect(second.prfOutput.some((b) => b !== 0)).toBe(true);
+  });
+
+  describe("TTL self-expiry", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("zeroizes and drops an unconsumed handoff after the TTL elapses", () => {
+      const sample = makeSample();
+      stashPrf(sample);
+      vi.advanceTimersByTime(PRF_HANDOFF_TTL_MS);
+      expect(sample.prfOutput.every((b) => b === 0)).toBe(true);
+      expect(takePrf()).toBeNull();
+    });
+
+    it("does NOT wipe before the TTL elapses", () => {
+      const sample = makeSample();
+      stashPrf(sample);
+      vi.advanceTimersByTime(PRF_HANDOFF_TTL_MS - 1);
+      expect(sample.prfOutput.some((b) => b !== 0)).toBe(true);
+      expect(takePrf()).toBe(sample);
+    });
+
+    it("takePrf cancels the TTL so the consumer-owned buffer is not wiped later", () => {
+      const sample = makeSample();
+      stashPrf(sample);
+      const taken = takePrf();
+      expect(taken).toBe(sample);
+      // After the consumer owns it, the expired timer must not reach back in.
+      vi.advanceTimersByTime(PRF_HANDOFF_TTL_MS);
+      expect(sample.prfOutput.some((b) => b !== 0)).toBe(true);
+    });
+
+    it("a re-stash resets the TTL and the prior timer cannot wipe the new buffer", () => {
+      const first = makeSample(0xab);
+      stashPrf(first);
+      // Just before the first TTL would fire, stash a fresh handoff.
+      vi.advanceTimersByTime(PRF_HANDOFF_TTL_MS - 1);
+      const second = makeSample(0xcd);
+      stashPrf(second);
+      // The original timer (now cancelled) would have fired here.
+      vi.advanceTimersByTime(1);
+      expect(second.prfOutput.some((b) => b !== 0)).toBe(true);
+      expect(takePrf()).toBe(second);
+    });
   });
 });
