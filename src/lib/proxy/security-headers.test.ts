@@ -1,9 +1,24 @@
 import { describe, it, expect } from "vitest";
 import { NextResponse } from "next/server";
-import { applySecurityHeaders } from "./security-headers";
+import { applySecurityHeaders, applyBaselineSecurityHeaders } from "./security-headers";
 import { PERMISSIONS_POLICY } from "@/lib/security/security-headers";
 
 const dummyOptions = { cspHeader: "default-src 'self'", nonce: "n0nc3-XYZ" };
+
+describe("applyBaselineSecurityHeaders (API + pages)", () => {
+  it("sets the non-CSP baseline: nosniff + Referrer-Policy", () => {
+    const res = applyBaselineSecurityHeaders(new NextResponse());
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
+  });
+
+  it("does NOT set page-only headers (CSP / X-Frame-Options / Permissions-Policy)", () => {
+    const res = applyBaselineSecurityHeaders(new NextResponse());
+    expect(res.headers.get("Content-Security-Policy")).toBeNull();
+    expect(res.headers.get("X-Frame-Options")).toBeNull();
+    expect(res.headers.get("Permissions-Policy")).toBeNull();
+  });
+});
 
 describe("applySecurityHeaders", () => {
   it("sets Content-Security-Policy from cspHeader option", () => {
