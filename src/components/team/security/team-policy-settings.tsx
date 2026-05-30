@@ -243,8 +243,10 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
               max={POLICY_MIN_PW_LENGTH_MAX}
               value={policy.minPasswordLength}
               onChange={(e) => {
+                // R23: no mid-stroke clamp — typing "1" toward "15" must not be
+                // rewritten. Range is enforced by validate() on save.
                 const parsed = parseInt(e.target.value, 10);
-                const value = Number.isNaN(parsed) ? 0 : Math.max(POLICY_MIN_PW_LENGTH_MIN, Math.min(POLICY_MIN_PW_LENGTH_MAX, parsed));
+                const value = Number.isNaN(parsed) ? 0 : parsed;
                 setPolicy((p) => ({ ...p, minPasswordLength: value }));
                 setFieldErrors((prev) => {
                   const { minPasswordLength: _, ...rest } = prev;
@@ -414,8 +416,9 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
               max={PASSWORD_HISTORY_COUNT_MAX}
               value={policy.passwordHistoryCount}
               onChange={(e) => {
+                // R23: no mid-stroke clamp; range enforced by validate() on save.
                 const parsed = parseInt(e.target.value, 10);
-                const value = Number.isNaN(parsed) ? 0 : Math.max(0, Math.min(PASSWORD_HISTORY_COUNT_MAX, parsed));
+                const value = Number.isNaN(parsed) ? 0 : parsed;
                 setPolicy((p) => ({ ...p, passwordHistoryCount: value }));
               }}
             />
