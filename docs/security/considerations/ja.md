@@ -49,7 +49,7 @@ Browser -> Auth Provider/NextAuth -> session established
 [Sign-in: Passkey (discoverable)]
 Browser -> navigator.credentials.get(allowCredentials:[]) -> authenticator
   -> POST /api/auth/passkey/verify -> session established
-  -> PRF output (if supported) -> vault auto-unlock via sessionStorage
+  -> PRF output (if supported) -> vault auto-unlock via in-memory hand-off
 
 [Sign-in: Email + Security Key (non-discoverable)]
 Browser -> POST /api/auth/passkey/options/email {email}
@@ -360,13 +360,12 @@ Client(valid時):
 - `memory`:
   - `encryptionKey`（`CryptoKey`）
   - `secretKeyRef`（`Uint8Array`）
-  - 理由: 復号鍵を永続ストレージへ置かないため（攻撃面を最小化）
+  - PRF ハンドオフ（`src/lib/auth/prf-handoff.ts`）: PRF 出力と PRF ラップ済みシークレットキーは、サインインからボールト自動アンロックへ **sessionStorage ではなくモジュールレベルのインメモリ変数**で受け渡す（sessionStorage は XSS から列挙可能なため）。1回使用（読取りで即クリア）。クライアント遷移（`router.push`）は跨ぐがフルリロードでは消失（その場合は手動アンロックへ degrade）
+  - 理由: 復号鍵を永続／DOM から読取り可能なストレージへ一切置かないため
 - `sessionStorage`:
-  - `psso:prf-output`（PRF 由来の鍵素材、1回使用後にゼロ化。寿命: サインイン～ボールトアンロック間）
-  - `psso:prf-data`（サーバーから取得した PRF ラップ済みシークレットキー、1回使用後に削除）
-  - `psso:webauthn-signin`（UX フラグ、秘密情報なし）
+  - `psso:webauthn-signin`（UX トリガフラグ、秘密情報なし）
   - 旧 `psso:skip-beforeunload-once` フラグは削除済み。ダーティステートガードは React のインメモリ state のみで管理
-  - 理由: PRF 出力はシングルセレモニーサインインフロー中のページ遷移間のみ一時的に保存
+  - 理由: 非機密の boolean トリガのみを保持。PRF 素材は上記インメモリハンドオフへ移動
 - `localStorage`:
   - Watchtower の表示設定/最終確認時刻等の UI 補助情報
   - 理由: 利便性向上。秘密情報は保存しない

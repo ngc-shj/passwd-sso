@@ -10,6 +10,7 @@ const {
   mockHexEncode,
   mockRouterPush,
   mockFetch,
+  mockStashPrf,
   prfSentinel,
 } = vi.hoisted(() => ({
   mockStartPasskeyAuthentication: vi.fn(),
@@ -19,8 +20,13 @@ const {
   ),
   mockRouterPush: vi.fn(),
   mockFetch: vi.fn(),
+  mockStashPrf: vi.fn(),
   // Sentinel: 0xAB repeated. Tests check zeroization by post-hoc inspection.
   prfSentinel: { current: null as Uint8Array | null },
+}));
+
+vi.mock("@/lib/auth/prf-handoff", () => ({
+  stashPrf: (h: unknown) => mockStashPrf(h),
 }));
 
 vi.mock("next-intl", () => ({
@@ -90,7 +96,7 @@ describe("PasskeySignInButton — §Sec-7 WebAuthn / PRF", () => {
     expect(screen.getByRole("button", { name: /signInWithPasskey/ })).not.toBeDisabled();
   });
 
-  it("(success) writes hex(prfOutput) to sessionStorage, then zeroizes prfOutput", async () => {
+  it("(success) hands PRF material to the in-memory channel (NOT sessionStorage), then zeroizes prfOutput", async () => {
     const prfBytes = makePrfSentinel();
     mockStartPasskeyAuthentication.mockResolvedValueOnce({
       responseJSON: { id: "cred-1" },
@@ -106,12 +112,18 @@ describe("PasskeySignInButton — §Sec-7 WebAuthn / PRF", () => {
     // Hex of 32 bytes of 0xAB
     const expectedHex = "ab".repeat(32);
     await waitFor(() => {
-      expect(sessionStorage.getItem("psso:prf-output")).toBe(expectedHex);
+      // PRF material goes to the in-memory hand-off, never to XSS-readable storage.
+      expect(mockStashPrf).toHaveBeenCalledWith({
+        prfOutputHex: expectedHex,
+        prfData: { wrappedKey: "wk", iv: "iv" },
+      });
+      // Only the non-sensitive trigger flag is in sessionStorage.
       expect(sessionStorage.getItem("psso:webauthn-signin")).toBe("1");
-      expect(sessionStorage.getItem("psso:prf-data")).not.toBeNull();
+      expect(sessionStorage.getItem("psso:prf-output")).toBeNull();
+      expect(sessionStorage.getItem("psso:prf-data")).toBeNull();
     });
 
-    // Zeroization invariant: source line 85 calls prfOutput.fill(0) after persist.
+    // Zeroization invariant: source calls prfOutput.fill(0) after the hand-off.
     expect(prfBytes.every((b) => b === 0)).toBe(true);
 
     expect(mockRouterPush).toHaveBeenCalledWith("/dashboard");
@@ -138,9 +150,8 @@ describe("PasskeySignInButton — §Sec-7 WebAuthn / PRF", () => {
     // Zeroization in failure path (source line 73 prfOutput?.fill(0))
     expect(prfBytes.every((b) => b === 0)).toBe(true);
 
-    // No PRF/session keys persisted
-    expect(sessionStorage.getItem("psso:prf-output")).toBeNull();
-    expect(sessionStorage.getItem("psso:prf-data")).toBeNull();
+    // No PRF handed off and no session keys persisted
+    expect(mockStashPrf).not.toHaveBeenCalled();
     expect(sessionStorage.getItem("psso:webauthn-signin")).toBeNull();
 
     // No nav on failure
@@ -157,8 +168,7 @@ describe("PasskeySignInButton — §Sec-7 WebAuthn / PRF", () => {
     await waitFor(() => {
       expect(screen.getByText("passkeySignInCancelled")).toBeInTheDocument();
     });
-    expect(sessionStorage.getItem("psso:prf-output")).toBeNull();
-    expect(sessionStorage.getItem("psso:prf-data")).toBeNull();
+    expect(mockStashPrf).not.toHaveBeenCalled();
     expect(sessionStorage.getItem("psso:webauthn-signin")).toBeNull();
   });
 
