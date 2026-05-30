@@ -40,6 +40,7 @@ import { toastApiError } from "@/lib/http/toast-api-error";
 import { API_PATH } from "@/lib/constants";
 import { SEND_MAX_FILE_SIZE, SEND_MAX_TEXT_LENGTH, MAX_VIEWS_MIN, MAX_VIEWS_MAX, SEND_NAME_MAX_LENGTH } from "@/lib/validations";
 import { formatFileSize } from "@/lib/format/format-file-size";
+import { bindRangeInput } from "@/lib/ui/input-range";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 
 interface SendDialogProps {
@@ -390,18 +391,7 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
                   max={MAX_VIEWS_MAX}
                   placeholder={t("maxViewsPlaceholder")}
                   value={maxViews}
-                  onChange={(e) => {
-                    // Allow free digit entry while typing; range clamp runs on
-                    // blur (R23) so e.g. "150" is not truncated to "15" mid-stroke.
-                    setMaxViews(e.target.value.replace(/[^0-9]/g, ""));
-                  }}
-                  onBlur={(e) => {
-                    const raw = e.target.value;
-                    if (!raw) { setMaxViews(""); return; }
-                    const n = parseInt(raw, 10);
-                    if (Number.isNaN(n)) { setMaxViews(""); return; }
-                    setMaxViews(String(Math.min(Math.max(n, MAX_VIEWS_MIN), MAX_VIEWS_MAX)));
-                  }}
+                  {...bindRangeInput(setMaxViews, { min: MAX_VIEWS_MIN, max: MAX_VIEWS_MAX })}
                 />
               </div>
             </div>

@@ -43,6 +43,7 @@ import {
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { MAX_VIEWS_MIN, MAX_VIEWS_MAX } from "@/lib/validations";
+import { bindRangeInput } from "@/lib/ui/input-range";
 import { safeRecord } from "@/lib/safe-keys";
 
 interface ShareLink {
@@ -515,18 +516,7 @@ export function ShareDialog({
                 max={MAX_VIEWS_MAX}
                 placeholder={t("maxViewsPlaceholder")}
                 value={maxViews}
-                onChange={(e) => {
-                  // Allow free digit entry while typing; range clamp runs on
-                  // blur (R23) so e.g. "150" is not truncated to "15" mid-stroke.
-                  setMaxViews(e.target.value.replace(/[^0-9]/g, ""));
-                }}
-                onBlur={(e) => {
-                  const raw = e.target.value;
-                  if (!raw) { setMaxViews(""); return; }
-                  const n = parseInt(raw, 10);
-                  if (Number.isNaN(n)) { setMaxViews(""); return; }
-                  setMaxViews(String(Math.min(Math.max(n, MAX_VIEWS_MIN), MAX_VIEWS_MAX)));
-                }}
+                {...bindRangeInput(setMaxViews, { min: MAX_VIEWS_MIN, max: MAX_VIEWS_MAX })}
               />
             </div>
 
