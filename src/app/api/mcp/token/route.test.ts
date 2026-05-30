@@ -180,11 +180,15 @@ describe("POST /api/mcp/token", () => {
     mockExchangeRefreshToken.mockResolvedValue({
       ok: true,
       accessToken: "mcp_new",
+      accessTokenId: "at_1",
       refreshToken: "mcpr_new",
+      refreshTokenId: "rt_1",
+      familyId: "fam_1",
       expiresIn: 3600,
       scope: "credentials:list,credentials:use",
       tenantId: "t1",
       userId: "u1",
+      serviceAccountId: null,
     });
 
     const req = createRequest("POST", "http://localhost/api/mcp/token", {

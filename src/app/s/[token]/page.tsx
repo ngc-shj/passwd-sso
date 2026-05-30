@@ -170,7 +170,7 @@ export default async function SharePage({ params }: Props) {
           ciphertext: share.encryptedData,
           iv: share.dataIv,
           authTag: share.dataAuthTag,
-        }, share.masterKeyVersion)
+        }, share.masterKeyVersion, share.tenantId)
       );
     } catch {
       return <ShareError reason="notFound" />;

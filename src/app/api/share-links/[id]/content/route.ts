@@ -189,7 +189,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
             iv: share.dataIv,
             authTag: share.dataAuthTag,
           },
-          share.masterKeyVersion
+          share.masterKeyVersion,
+          share.tenantId
         )
       );
     } catch {

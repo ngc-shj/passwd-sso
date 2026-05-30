@@ -180,8 +180,8 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
     const json = await res.json();
 
     expect(res.status).toBe(201);
-    expect(json.success).toBe(3);
-    expect(json.failed).toBe(0);
+    expect(json.importedCount).toBe(3);
+    expect(json.failedCount).toBe(0);
   });
 
   it("handles partial failure when service throws a generic error", async () => {
@@ -201,8 +201,8 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
     const json = await res.json();
 
     expect(res.status).toBe(201);
-    expect(json.success).toBe(1);
-    expect(json.failed).toBe(1);
+    expect(json.importedCount).toBe(1);
+    expect(json.failedCount).toBe(1);
   });
 
   it("handles partial failure when service throws TeamPasswordServiceError", async () => {
@@ -224,8 +224,8 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
     const json = await res.json();
 
     expect(res.status).toBe(201);
-    expect(json.success).toBe(2);
-    expect(json.failed).toBe(1);
+    expect(json.importedCount).toBe(2);
+    expect(json.failedCount).toBe(1);
   });
 
   it("calls logAuditAsync with ENTRY_BULK_IMPORT and TEAM scope", async () => {

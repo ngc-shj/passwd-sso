@@ -25,7 +25,7 @@ import { entryTypeSchema } from "./entry";
 const shareDataSchema = z.object({
   title: z.string().min(1).max(ENTRY_NAME_MAX),
   username: z.string().max(ENTRY_NAME_MAX).nullish(),
-  password: z.string().nullish(),
+  password: z.string().max(ENTRY_SECRET_MAX).nullish(),
   url: z.string().max(ENTRY_URL_MAX).nullish(),
   notes: z.string().max(ENTRY_NOTES_MAX).nullish(),
   customFields: z.array(z.object({

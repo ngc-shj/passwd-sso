@@ -172,40 +172,65 @@ export function hashToken(token: string): string {
 }
 
 /**
- * Encrypt share data with the current server-side master key (AES-256-GCM).
+ * AAD binding the share/send ciphertext to its owning tenant. Prevents a
+ * DB-write adversary from copying a ciphertext tuple from one tenant's row
+ * into another tenant's row and having it still decrypt under the shared
+ * master key. Domain-separated and versioned so the binding can evolve.
+ */
+function shareAad(tenantId: string): Buffer {
+  return Buffer.from(`share-data:v1:${tenantId}`, "utf8");
+}
+
+/**
+ * Encrypt share data with the current server-side master key (AES-256-GCM),
+ * binding the ciphertext to `tenantId` via AAD.
  *
  * IMPORTANT: This is NOT end-to-end encryption. The server holds the master key
  * and can decrypt this data. Used for Sends and personal share links where the
  * server mediates access. For true E2E encryption, use the client-side crypto
  * in crypto-client.ts (vault entries, team share links with masterKeyVersion=0).
  */
-export function encryptShareData(plaintext: string): ServerEncryptedData & { masterKeyVersion: number } {
+export function encryptShareData(plaintext: string, tenantId: string): ServerEncryptedData & { masterKeyVersion: number } {
   const version = getCurrentMasterKeyVersion();
   const masterKey = getMasterKeyByVersion(version);
-  return { ...encryptServerData(plaintext, masterKey), masterKeyVersion: version };
-}
-
-/** Decrypt share data with the specified master key version (AES-256-GCM). */
-export function decryptShareData(encrypted: ServerEncryptedData, masterKeyVersion: number): string {
-  const masterKey = getMasterKeyByVersion(masterKeyVersion);
-  return decryptServerData(encrypted, masterKey);
+  return { ...encryptServerData(plaintext, masterKey, shareAad(tenantId)), masterKeyVersion: version };
 }
 
 /**
- * Encrypt binary data with the current server-side master key (AES-256-GCM).
+ * Decrypt share data with the specified master key version (AES-256-GCM).
+ * Tries the tenant-bound AAD first; on auth failure falls back to no-AAD so
+ * rows created before AAD binding (legacy) still decrypt. A new AAD-bound
+ * ciphertext substituted across tenants fails both paths and is rejected.
+ */
+export function decryptShareData(encrypted: ServerEncryptedData, masterKeyVersion: number, tenantId: string): string {
+  const masterKey = getMasterKeyByVersion(masterKeyVersion);
+  try {
+    return decryptServerData(encrypted, masterKey, shareAad(tenantId));
+  } catch {
+    return decryptServerData(encrypted, masterKey);
+  }
+}
+
+/**
+ * Encrypt binary data with the current server-side master key (AES-256-GCM),
+ * binding the ciphertext to `tenantId` via AAD.
  *
  * IMPORTANT: This is server-side encryption, not E2E. See encryptShareData() for details.
  */
-export function encryptShareBinary(data: Buffer): ServerEncryptedBinary & { masterKeyVersion: number } {
+export function encryptShareBinary(data: Buffer, tenantId: string): ServerEncryptedBinary & { masterKeyVersion: number } {
   const version = getCurrentMasterKeyVersion();
   const masterKey = getMasterKeyByVersion(version);
-  return { ...encryptServerBinary(data, masterKey), masterKeyVersion: version };
+  return { ...encryptServerBinary(data, masterKey, shareAad(tenantId)), masterKeyVersion: version };
 }
 
-/** Decrypt binary data with the specified master key version (AES-256-GCM). */
-export function decryptShareBinary(encrypted: ServerEncryptedBinary, masterKeyVersion: number): Buffer {
+/** Decrypt binary data with the specified master key version (AES-256-GCM). Legacy no-AAD fallback as in decryptShareData. */
+export function decryptShareBinary(encrypted: ServerEncryptedBinary, masterKeyVersion: number, tenantId: string): Buffer {
   const masterKey = getMasterKeyByVersion(masterKeyVersion);
-  return decryptServerBinary(encrypted, masterKey);
+  try {
+    return decryptServerBinary(encrypted, masterKey, shareAad(tenantId));
+  } catch {
+    return decryptServerBinary(encrypted, masterKey);
+  }
 }
 
 // ─── Access Password (for password-protected shares) ────────────

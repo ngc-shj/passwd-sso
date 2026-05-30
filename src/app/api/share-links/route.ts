@@ -104,8 +104,8 @@ async function handlePOST(req: NextRequest) {
     );
     const plaintext = JSON.stringify(filteredData);
 
-    // Encrypt share data with master key
-    const encrypted = encryptShareData(plaintext);
+    // Encrypt share data with master key (AAD-bound to tenant)
+    const encrypted = encryptShareData(plaintext, tenantId);
     encryptedData = encrypted.ciphertext;
     dataIv = encrypted.iv;
     dataAuthTag = encrypted.authTag;

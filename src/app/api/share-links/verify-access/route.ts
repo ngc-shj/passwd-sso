@@ -9,7 +9,7 @@ import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, notFound, validationError } from "@/lib/http/api-response";
+import { errorResponse, notFound } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
@@ -92,7 +92,12 @@ async function handlePOST(req: NextRequest) {
   }
 
   if (!share.accessPasswordHash) {
-    return validationError();
+    // Collapse to 404 rather than a distinct validation error: a share that
+    // exists but is not password-protected must not be distinguishable here
+    // from a non-existent one (anti-enumeration). The normal client flow for
+    // an unprotected share never calls verify-access — it goes straight to the
+    // content endpoint.
+    return notFound();
   }
 
   const verifyResult = verifyAccessPassword(password, share.accessPasswordHash, share.accessPasswordHashVersion);

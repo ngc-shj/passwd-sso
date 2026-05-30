@@ -1,0 +1,58 @@
+/**
+ * Symlink-safe file I/O for secret material (credentials, decrypted exports).
+ *
+ * O_NOFOLLOW refuses to follow a symlink at the final path component, closing
+ * the symlink / check-then-write TOCTOU window that plain writeFileSync/
+ * readFileSync leave open. Used wherever the CLI persists or reads secrets.
+ *
+ * MIRROR: e2e/helpers/secure-file.ts holds the same O_NOFOLLOW logic (the cli
+ * package and the e2e tree compile under separate tsconfigs and cannot share a
+ * module). Keep the O_NOFOLLOW semantics in sync. This copy adds an `encoding`
+ * param + codeql annotation the e2e copy intentionally omits.
+ */
+
+import {
+  openSync,
+  writeSync,
+  closeSync,
+  readFileSync,
+  constants as fsConstants,
+} from "node:fs";
+
+/** Write `data` to `path` with O_NOFOLLOW + the given mode (default 0600). */
+export function writeSecretFile(
+  path: string,
+  data: string,
+  mode = 0o600,
+): void {
+  const fd = openSync(
+    path,
+    fsConstants.O_WRONLY |
+      fsConstants.O_CREAT |
+      fsConstants.O_TRUNC |
+      (fsConstants.O_NOFOLLOW ?? 0),
+    mode,
+  );
+  try {
+    // Intentional persistence of the caller's own secrets (OAuth tokens /
+    // decrypted export) to a 0600 O_NOFOLLOW file. CodeQL js/http-to-file-access
+    // is excluded for this in .github/codeql/codeql-config.yml (inline
+    // // codeql[...] suppression is not honored by GitHub code scanning here).
+    writeSync(fd, data);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Read `path` with O_NOFOLLOW (refuses a symlinked final component). */
+export function readSecretFile(
+  path: string,
+  encoding: BufferEncoding = "utf-8",
+): string {
+  const fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  try {
+    return readFileSync(fd, encoding);
+  } finally {
+    closeSync(fd);
+  }
+}

@@ -101,6 +101,17 @@ function prepareSocket(socketPath: string): void {
     process.exit(1);
   }
 
+  // mkdirSync's mode applies only to a freshly-created dir; a pre-existing dir
+  // (e.g. a custom $XDG_RUNTIME_DIR) may be group/other-accessible. Re-stat the
+  // mode and reject anything other than 0700 (matches ssh-agent-socket.ts).
+  const dirMode = dirStat.mode & 0o7777;
+  if (dirMode !== 0o700) {
+    process.stderr.write(
+      `Error: Socket directory ${dir} has mode ${dirMode.toString(8)}, expected 700\n`,
+    );
+    process.exit(1);
+  }
+
   // Remove stale socket if present, verify ownership first
   try {
     const sockStat = lstatSync(socketPath);

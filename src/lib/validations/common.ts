@@ -40,8 +40,16 @@ export const WEBHOOK_URL_MAX_LENGTH = 2048;
 
 // ─── Audit Delivery ─────────────────────────────────────────
 export const MAX_AUDIT_DELIVERY_TARGETS = 10;
+// Per-target secret/credential field caps (persisted encrypted).
+export const AUDIT_DELIVERY_SECRET_MAX = 256;       // webhook HMAC secret
+export const AUDIT_DELIVERY_TOKEN_MAX = 1_024;      // SIEM HEC token
+export const AUDIT_DELIVERY_REGION_MAX = 64;        // S3 region
+export const AUDIT_DELIVERY_AWS_CREDENTIAL_MAX = 256; // S3 accessKeyId / secretAccessKey
 
 // ─── Directory Sync ──────────────────────────────────────────
+// Provider credential map (persisted encrypted): bound key length + entry count.
+export const DIRECTORY_SYNC_CREDENTIAL_KEY_MAX = 128;
+export const DIRECTORY_SYNC_CREDENTIAL_ENTRIES_MAX = 32;
 export const SYNC_INTERVAL_MIN = 15;
 export const SYNC_INTERVAL_MAX = 1440;
 export const SYNC_INTERVAL_DEFAULT = 60;
@@ -49,6 +57,8 @@ export const SYNC_INTERVAL_DEFAULT = 60;
 // ─── WebAuthn ────────────────────────────────────────────────
 export const WEBAUTHN_NICKNAME_MAX_LENGTH = 100;
 export const PRF_ENCRYPTED_KEY_MAX_LENGTH = 10_000;
+// WebAuthn assertion/registration response JSON (JSON.parse'd downstream).
+export const WEBAUTHN_RESPONSE_MAX = 10_000;
 
 // ─── SCIM ────────────────────────────────────────────────────
 export const SCIM_TOKEN_EXPIRY_MIN_DAYS = 1;
@@ -74,9 +84,13 @@ export const TEAM_ROTATE_MEMBER_KEYS_MAX = 1000;
 export const VAULT_ROTATE_ENTRIES_MAX = 5000;
 export const VAULT_ROTATE_HISTORY_MAX = 10_000;
 export const ECDH_PRIVATE_KEY_CIPHERTEXT_MAX = 512;  // P-256 PKCS8=138B → AES-GCM hex ≈ 308 chars
+// Wrapped 256-bit secret key (AES-GCM hex/base64 envelope) — small.
+export const WRAPPED_SECRET_KEY_MAX = 512;
 
 // ─── General Limits ──────────────────────────────────────────
 export const EMAIL_MAX_LENGTH = 254;           // RFC 5321
+// Opaque lookup token submitted for an invitation/accept flow (DB-compared).
+export const INVITATION_TOKEN_MAX = 128;
 export const FILENAME_MAX_LENGTH = 255;
 export const URL_MAX_LENGTH = 2048;
 export const SEARCH_QUERY_MAX_LENGTH = 100;
@@ -85,9 +99,15 @@ export const CONTENT_TYPE_MAX_LENGTH = 100;
 // ─── Ciphertext Limits ───────────────────────────────────────
 export const CIPHERTEXT_MAX = 500_000;
 export const HISTORY_BLOB_MAX = 1_000_000;     // history reencrypt allows larger blobs
+// Wrapped per-item key (encrypted 256-bit key + envelope), hex/base64 — small.
+export const ENCRYPTED_ITEM_KEY_MAX = 1_024;
 
 // ─── Bulk Operation ──────────────────────────────────────────
 export const MAX_BULK_IDS = 100;
+// Per-request cap on the 30-day trash auto-purge (personal + team) so a
+// pathological backlog can't load/delete unboundedly on a list request;
+// the remainder is purged on the next load.
+export const TRASH_PURGE_BATCH_SIZE = 500;
 
 // ─── Share Access ────────────────────────────────────────────
 // SHARE_PASSWORD_MAX_ATTEMPTS: Client UX only; server-side rate limit is independent
@@ -332,8 +352,9 @@ export const encryptedFieldSchema = z.object({
  * unlock to confirm passphrase correctness. Same shape as `encryptedFieldSchema`
  * but without the large-blob ciphertext cap (the artifact is always short).
  */
+export const VERIFICATION_ARTIFACT_CIPHERTEXT_MAX = 256;
 export const verificationArtifactSchema = z.object({
-  ciphertext: z.string().min(1),
+  ciphertext: z.string().min(1).max(VERIFICATION_ARTIFACT_CIPHERTEXT_MAX),
   iv: hexIv,
   authTag: hexAuthTag,
 });

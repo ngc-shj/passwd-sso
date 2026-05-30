@@ -6,6 +6,7 @@ const {
   mockAuth,
   mockPrismaTeam,
   mockPrismaTenant,
+  mockPrismaTeamPasswordEntry,
   mockRequireTeamMember,
   mockRequireTeamPermission,
   mockWithTeamTenantRls,
@@ -29,6 +30,7 @@ const {
       count: vi.fn(),
     },
     mockPrismaTenant: { delete: vi.fn() },
+    mockPrismaTeamPasswordEntry: { findMany: vi.fn() },
     mockRequireTeamMember: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1")),
@@ -39,7 +41,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { team: mockPrismaTeam, tenant: mockPrismaTenant },
+  prisma: { team: mockPrismaTeam, tenant: mockPrismaTenant, teamPasswordEntry: mockPrismaTeamPasswordEntry },
 }));
 vi.mock("@/lib/auth/access/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
@@ -279,6 +281,7 @@ describe("DELETE /api/teams/[teamId]", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue(ownerMembership);
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([]);
   });
 
   it("returns 401 when unauthenticated", async () => {

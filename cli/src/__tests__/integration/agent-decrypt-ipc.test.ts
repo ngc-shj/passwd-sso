@@ -15,6 +15,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { hexEncode, deriveEncryptionKey } from "../../lib/crypto.js";
 import { handleConnection, MAX_BUFFER_SIZE } from "../../commands/agent-decrypt.js";
+import { apiRequest } from "../../lib/api-client.js";
 
 // ─── Mock Socket ─────────────────────────────────────────────────────────────
 
@@ -204,6 +205,47 @@ describe("handleConnection socket protocol", () => {
     // apiRequest is mocked to return { ok: false }, so we get an auth error
     expect(res.ok).toBe(false);
     expect(typeof res.error).toBe("string");
+  });
+
+  it("T7: rejects when the server explicitly denies delegation (HTTP ok, authorized:false)", async () => {
+    // Distinct from a transport failure: the delegation check succeeds at the
+    // HTTP layer but the server says the client is not authorized for this
+    // entry. The agent must refuse and surface the server's reason.
+    vi.mocked(apiRequest).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      data: { authorized: false, reason: "no_active_delegation" },
+    });
+    const req = JSON.stringify({
+      entryId: "entry_abc123",
+      clientId: "mcpc_test",
+      field: "password",
+    });
+    const res = await sendAndReceive(req + "\n");
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/[Nn]ot authorized/);
+    expect(res.error).toContain("no_active_delegation");
+  });
+
+  it("T7: advances past authorization when the server authorizes (positive path)", async () => {
+    // Authorization granted → the agent proceeds to fetch the entry. The entry
+    // fetch is then mocked to fail, proving the flow advanced BEYOND the
+    // authorization gate rather than short-circuiting at it (the deny-only
+    // coverage could not distinguish "authorized then failed later" from
+    // "denied at the gate").
+    vi.mocked(apiRequest)
+      .mockResolvedValueOnce({ ok: true, status: 200, data: { authorized: true } })
+      .mockResolvedValueOnce({ ok: false, status: 404, data: {} });
+    const req = JSON.stringify({
+      entryId: "entry_abc123",
+      clientId: "mcpc_test",
+      field: "password",
+    });
+    const res = await sendAndReceive(req + "\n");
+    expect(res.ok).toBe(false);
+    // Reached the entry-fetch stage (not "Not authorized").
+    expect(res.error).toMatch(/[Ff]ailed to fetch entry/);
+    expect(res.error).not.toMatch(/[Nn]ot authorized/);
   });
 
   it("ignores empty lines between messages", async () => {

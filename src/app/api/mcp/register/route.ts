@@ -4,6 +4,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { readJsonWithCap } from "@/lib/http/parse-body";
+import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { logAuditAsync } from "@/lib/audit/audit";
@@ -76,16 +78,14 @@ async function handlePOST(req: NextRequest) {
   });
   if (blocked) return blocked;
 
-  // Parse and validate request body
-  // req.json bypass: RFC 7591 error format required ({ error: "invalid_request" } per RFC 6749 §5.2).
-  let rawBody: unknown;
-  try {
-    rawBody = await req.json();
-  } catch {
+  // Parse and validate request body (byte-capped; pre-auth endpoint).
+  // RFC 7591 error format required ({ error: "invalid_request" } per RFC 6749 §5.2).
+  const read = await readJsonWithCap(req, MAX_JSON_BODY_BYTES);
+  if (!read.ok) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  const parsed = dcrSchema.safeParse(rawBody);
+  const parsed = dcrSchema.safeParse(read.body);
   if (!parsed.success) {
     // Lift the first issue's message into error_description so RFC 9700 reference
     // surfaces in the standard RFC 6749 §5.2 error envelope.

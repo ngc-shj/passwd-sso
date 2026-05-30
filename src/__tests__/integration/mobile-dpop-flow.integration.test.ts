@@ -146,9 +146,10 @@ describe("POST /api/mobile/token — real-key DPoP (C10 sentinel for C6)", () =>
       tokenId: TOKEN_ID,
     });
     // withBypassRls callback runs against the tx — give it a tx-shape that
-    // routes both findUnique (called via prisma directly) and updateMany
-    // (called via tx.mobileBridgeCode). For tests, both point at the same
-    // mocks.
+    // routes the bridge-code mocks AND the tenant lookup that
+    // enforceAccessRestriction → getTenantAccessPolicy performs (the
+    // /api/mobile/token issuance now enforces tenant IP restriction). A null
+    // tenant resolves to "no restriction configured" → request allowed.
     mockWithBypassRls.mockImplementation(async (_p, fn) =>
       typeof fn === "function"
         ? fn({
@@ -156,6 +157,7 @@ describe("POST /api/mobile/token — real-key DPoP (C10 sentinel for C6)", () =>
               findUnique: mockMobileBridgeCodeFindUnique,
               updateMany: mockMobileBridgeCodeUpdateMany,
             },
+            tenant: { findUnique: async () => null },
           })
         : undefined,
     );

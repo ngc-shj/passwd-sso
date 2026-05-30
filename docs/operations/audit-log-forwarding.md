@@ -6,13 +6,17 @@ Audit events flow through a durable two-stage pipeline:
 
 ```
 Route handler
-  └─ logAuditAsync()
-       └─ INSERT INTO audit_outbox   ← in the same database transaction as the business operation
+  └─ logAuditAsync()                         (common path — best-effort, post-commit)
+       ├─ structured JSON log line           ← synchronous, never throws
+       └─ INSERT INTO audit_outbox           ← own transaction, AFTER the business commit
             └─ audit-outbox-worker (separate process)
                  └─ INSERT INTO audit_logs   ← drained in background
+
+  enqueueAuditInTx(tx, ...)                  (atomic path — same business transaction)
+       └─ INSERT INTO audit_outbox           ← rolls back with the business write
 ```
 
-1. **Route handler** calls `logAuditAsync()` which writes a row to the `audit_outbox` table in the same database transaction as the business operation. If the transaction rolls back, the audit event is also rolled back — no phantom events.
+1. **Route handler** — the common path `logAuditAsync()` first emits a synchronous structured JSON log line (never throws), then enqueues to `audit_outbox` in **its own** transaction **after** the business transaction has committed. This is best-effort: a crash in the narrow window between the business commit and the enqueue loses the outbox row (the structured log already captured the event). For true atomicity-with-business-logic, a handler uses `enqueueAuditInTx(tx, ...)` inside its own transaction — that row rolls back with the business write, so it never produces a phantom event for a rolled-back mutation.
 2. **audit-outbox-worker** (`npm run worker:audit-outbox`) drains `PENDING` rows from `audit_outbox` into `audit_logs`. The worker must be running for audit events to appear in `audit_logs`. Without it, events accumulate in `audit_outbox` indefinitely.
 
 **Monitoring outbox health:**

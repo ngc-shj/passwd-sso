@@ -8,13 +8,17 @@ import { checkAuth } from "@/lib/auth/session/check-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
-import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
-import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
+import { createPersonalPasswordEntry } from "@/lib/services/personal-password-service";
+import { FILENAME_MAX_LENGTH, TRASH_PURGE_BATCH_SIZE } from "@/lib/validations/common";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
-import { getAttachmentBlobStore, BLOB_STORAGE } from "@/lib/blob-store";
+import {
+  collectEntryAttachmentRefs,
+  deleteAttachmentBlobs,
+  type AttachmentBlobRef,
+} from "@/lib/blob-store/cleanup";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { assertQuotaAvailable, QuotaExceededError } from "@/lib/quota/resource-quotas";
 import { errorResponse } from "@/lib/http/api-response";
@@ -66,37 +70,32 @@ async function handleGET(req: NextRequest) {
   // Auto-purge items deleted more than 30 days ago
   if (!trashOnly) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * MS_PER_DAY);
-    await withUserTenantRls(userId, async () => {
+    const purgedRefs = await withUserTenantRls(userId, async () => {
       // Cap per-request cleanup to avoid pathological cases (very old users with
       // thousands of trashed entries); remaining entries purged on next load.
       const staleEntries = await prisma.passwordEntry.findMany({
         where: { userId, deletedAt: { lt: thirtyDaysAgo } },
         select: { id: true },
-        take: 500,
+        take: TRASH_PURGE_BATCH_SIZE,
       });
-      if (staleEntries.length === 0) return;
+      if (staleEntries.length === 0) return [] as AttachmentBlobRef[];
 
-      // Clean up external blob-store objects before cascade delete
-      const blobStore = getAttachmentBlobStore();
-      if (blobStore.backend !== BLOB_STORAGE.DB) {
-        const attachments = await prisma.attachment.findMany({
-          where: { passwordEntryId: { in: staleEntries.map((e) => e.id) } },
-          select: { id: true, encryptedData: true, passwordEntryId: true },
-        });
-        await Promise.allSettled(
-          attachments.map((a) =>
-            blobStore.deleteObject(a.encryptedData, {
-              attachmentId: a.id,
-              entryId: a.passwordEntryId!,
-            }),
-          ),
-        );
-      }
+      // Capture external blob refs before the cascade delete removes the rows
+      const refs = await collectEntryAttachmentRefs(prisma, {
+        kind: "personal",
+        entryIds: staleEntries.map((e) => e.id),
+      });
 
       await prisma.passwordEntry.deleteMany({
         where: { id: { in: staleEntries.map((e) => e.id) } },
       });
-    }).catch(() => {});
+
+      return refs;
+    }).catch(() => [] as AttachmentBlobRef[]);
+
+    // Purge external blobs OUTSIDE the RLS transaction — don't hold a DB tx
+    // (and its pooled connection) open during blob-store network I/O.
+    await deleteAttachmentBlobs(purgedRefs);
   }
 
   // Return encrypted overviews (and optionally blobs) for client-side decryption
@@ -159,51 +158,12 @@ async function handlePOST(req: NextRequest) {
   const result = await parseBody(req, createE2EPasswordSchema);
   if (!result.ok) return result.response;
 
-  const { id: clientId, encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, folderId, isFavorite, entryType, requireReprompt, expiresAt } = result.data;
+  const createResult = await withUserTenantRls(userId, async (tenantId) =>
+    createPersonalPasswordEntry(prisma, userId, tenantId, result.data),
+  );
 
-  const createResult = await withUserTenantRls(userId, async (tenantId) => {
-    // Verify folder ownership
-    if (folderId) {
-      const folder = await prisma.folder.findFirst({ where: { id: folderId, userId } });
-      if (!folder) {
-        return { error: "INVALID_FOLDER" as const };
-      }
-    }
-
-    // Verify tag ownership
-    if (tagIds?.length) {
-      const ownedCount = await prisma.tag.count({ where: { id: { in: tagIds }, userId } });
-      if (ownedCount !== tagIds.length) {
-        return { error: "INVALID_TAGS" as const };
-      }
-    }
-
-    const entry = await prisma.passwordEntry.create({
-      data: {
-        ...(clientId ? { id: clientId } : {}),
-        ...toBlobColumns(encryptedBlob),
-        ...toOverviewColumns(encryptedOverview),
-        keyVersion,
-        aadVersion,
-        entryType,
-        ...(isFavorite !== undefined ? { isFavorite } : {}),
-        ...(requireReprompt !== undefined ? { requireReprompt } : {}),
-        ...(expiresAt !== undefined ? { expiresAt: expiresAt ? new Date(expiresAt) : null } : {}),
-        ...(folderId ? { folderId } : {}),
-        userId,
-        tenantId,
-        ...(tagIds?.length
-          ? { tags: { connect: tagIds.map((id) => ({ id })) } }
-          : {}),
-      },
-      include: { tags: { select: { id: true } } },
-    });
-
-    return { entry };
-  });
-
-  if ("error" in createResult) {
-    const message = createResult.error === "INVALID_FOLDER" ? "Invalid folderId" : "Invalid tagIds";
+  if (!createResult.ok) {
+    const message = createResult.reason === "FOLDER_NOT_FOUND" ? "Invalid folderId" : "Invalid tagIds";
     return validationError({ message });
   }
 

@@ -107,7 +107,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   );
 
   return NextResponse.json(
-    { success: createdIds.length, failed: failedCount },
+    { success: true, importedCount: createdIds.length, failedCount },
     { status: 201 },
   );
 }

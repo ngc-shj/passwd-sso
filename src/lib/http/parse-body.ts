@@ -36,6 +36,23 @@ type ParseOk<T> = { ok: true; data: T };
 type ParseFail = { ok: false; response: NextResponse };
 export type ParseResult<T> = ParseOk<T> | ParseFail;
 
+/**
+ * Cheap advisory pre-check: true when a present Content-Length header declares
+ * more than `maxBytes`. Used by routes that read form-urlencoded / raw bodies
+ * (and so cannot use readJsonWithCap) to early-reject oversized requests. NOT a
+ * substitute for the streaming cap — a missing/lying header still requires the
+ * authoritative guard (readJsonWithCap, or an after-read length check).
+ */
+export function exceedsDeclaredContentLength(
+  req: NextRequest,
+  maxBytes: number,
+): boolean {
+  const contentLength = req.headers.get("content-length");
+  if (!contentLength) return false;
+  const n = Number(contentLength);
+  return Number.isFinite(n) && n > maxBytes;
+}
+
 type ReadOk = { ok: true; body: unknown };
 type ReadFail = { ok: false; tooLarge?: true; invalidJson?: true };
 type ReadResult = ReadOk | ReadFail;
@@ -52,10 +69,8 @@ export async function readJsonWithCap(
   maxBytes: number,
 ): Promise<ReadResult> {
   // Pre-check content-length when present (cheap early reject)
-  const contentLength = req.headers.get("content-length");
-  if (contentLength) {
-    const n = Number(contentLength);
-    if (Number.isFinite(n) && n > maxBytes) return { ok: false, tooLarge: true };
+  if (exceedsDeclaredContentLength(req, maxBytes)) {
+    return { ok: false, tooLarge: true };
   }
 
   const reader = req.body?.getReader();
@@ -66,7 +81,7 @@ export async function readJsonWithCap(
     // cannot enforce the byte cap, so a missing content-length header here is
     // treated as invalid input (fail-closed). Tests that mock req.body=null
     // MUST set content-length, or the request is rejected.
-    if (!contentLength) {
+    if (!req.headers.get("content-length")) {
       return { ok: false, invalidJson: true };
     }
     try {

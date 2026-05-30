@@ -5,11 +5,16 @@
  */
 
 import { prisma } from "@/lib/prisma";
+import {
+  collectEntryAttachmentRefs,
+  type AttachmentBlobRef,
+} from "@/lib/blob-store/cleanup";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import type { EntryType } from "@prisma/client";
 import { MS_PER_DAY } from "@/lib/constants/time";
+import { TRASH_PURGE_BATCH_SIZE } from "@/lib/validations/common";
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -218,14 +223,36 @@ export async function listTeamPasswords(
 // purgeExpiredTeamPasswords (fire-and-forget helper used by GET list route)
 // ---------------------------------------------------------------------------
 
-export async function purgeExpiredTeamPasswords(teamId: string): Promise<void> {
+/**
+ * Delete trash older than 30 days for a team. Runs the DB work under the
+ * caller's RLS context and returns the external blob refs to purge — the caller
+ * must `deleteAttachmentBlobs(refs)` AFTER the RLS transaction closes, so
+ * blob-store network I/O does not hold a DB tx open.
+ */
+export async function purgeExpiredTeamPasswords(
+  teamId: string,
+): Promise<AttachmentBlobRef[]> {
   const thirtyDaysAgo = new Date(Date.now() - 30 * MS_PER_DAY);
-  await prisma.teamPasswordEntry.deleteMany({
-    where: {
-      teamId,
-      deletedAt: { lt: thirtyDaysAgo },
-    },
+  // Cap per-request cleanup (parity with the personal GC) so a team with a
+  // large trash backlog can't load/delete unboundedly on a list request;
+  // remaining entries are purged on the next load.
+  const expired = await prisma.teamPasswordEntry.findMany({
+    where: { teamId, deletedAt: { lt: thirtyDaysAgo } },
+    select: { id: true },
+    take: TRASH_PURGE_BATCH_SIZE,
   });
+  if (expired.length === 0) return [];
+
+  // Capture external blob refs before the cascade delete removes the rows
+  const refs = await collectEntryAttachmentRefs(prisma, {
+    kind: "team",
+    teamId,
+    entryIds: expired.map((e) => e.id),
+  });
+  await prisma.teamPasswordEntry.deleteMany({
+    where: { teamId, id: { in: expired.map((e) => e.id) } },
+  });
+  return refs;
 }
 
 // ---------------------------------------------------------------------------
@@ -523,17 +550,30 @@ export async function updateTeamPassword(
 // deleteTeamPassword
 // ---------------------------------------------------------------------------
 
+/**
+ * Delete (or trash) a team entry under the caller's RLS context. For a
+ * permanent delete, returns the external blob refs to purge — the caller must
+ * `deleteAttachmentBlobs(refs)` AFTER the RLS transaction closes so blob-store
+ * network I/O does not hold a DB tx open. Returns [] for a soft delete.
+ */
 export async function deleteTeamPassword(
   teamId: string,
   passwordId: string,
   permanent: boolean,
-): Promise<void> {
+): Promise<AttachmentBlobRef[]> {
   if (permanent) {
-    await prisma.teamPasswordEntry.delete({ where: { id: passwordId } });
-  } else {
-    await prisma.teamPasswordEntry.update({
-      where: { id: passwordId },
-      data: { deletedAt: new Date() },
+    // Capture external blob refs before the cascade delete removes the rows
+    const refs = await collectEntryAttachmentRefs(prisma, {
+      kind: "team",
+      teamId,
+      entryIds: [passwordId],
     });
+    await prisma.teamPasswordEntry.delete({ where: { id: passwordId } });
+    return refs;
   }
+  await prisma.teamPasswordEntry.update({
+    where: { id: passwordId },
+    data: { deletedAt: new Date() },
+  });
+  return [];
 }

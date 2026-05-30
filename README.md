@@ -62,7 +62,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Travel Mode** — Hide sensitive entries when crossing borders; remote disable restores access
 - **Network Access Restriction** — CIDR allowlist and Tailscale integration per tenant
 - **Audit Logs & Webhooks** — Personal/team/tenant logs with filters, CSV/JSONL download, webhook delivery
-- **Durable Audit Outbox** — Transactional outbox guarantees audit events are never silently lost; background worker drains to audit_logs with at-least-once delivery, dedup, and dead-letter handling
+- **Durable Audit Outbox** — Audit events emit a synchronous structured log, then enqueue to an `audit_outbox` table drained by a background worker (dedup + dead-letter). The in-transaction enqueue path (`enqueueAuditInTx`) is atomic with the business write; the common route path is best-effort post-commit, with the structured log as the safety net
 - **Audit Log Forwarding** — Structured JSON output via Fluent Bit sidecar for external collection
 - **Break Glass** — Tenant admin emergency access to personal audit logs with time-limited grants
 - **Error Tracking** — Sentry with recursive sensitive data scrubbing
@@ -138,7 +138,7 @@ Next.js App (SSR / API Routes)
   │  ← Service Account tokens: sa_ prefix, JIT access workflow
   ▼
 PostgreSQL ← Prisma 7          Redis ← rate limiting, session cache
-  │  ← audit_outbox (transactional write)
+  │  ← audit_outbox (post-commit enqueue; in-tx via enqueueAuditInTx)
   ▼
 Audit Outbox Worker (separate process) ← drains audit_outbox → audit_logs
   │
@@ -326,7 +326,7 @@ Zero-knowledge architecture — the server stores only ciphertext and cannot dec
 - **Key derivation** — Passphrase → PBKDF2/Argon2id → wrapping key → wraps random 256-bit secret key
 - **Domain separation** — Secret key → HKDF → separate encryption key + auth key
 - **Secret Key** — Account-specific salt for defense against server compromise
-- **AAD binding** — Additional Authenticated Data ties ciphertext to user and entry IDs
+- **AAD binding** — Additional Authenticated Data ties ciphertext to user and entry IDs (E2E vault); server-side share links / Sends bind ciphertext to the owning tenant
 - **Session security** — Database sessions (not JWT), tenant/team-policy-driven absolute timeout (default 30 days, configurable down to 5 minutes per policy), auto-lock after 15 min idle or 5 min tab hidden
 - **Clipboard clear** — Copied passwords auto-clear after 30 seconds
 - **CSRF defense** — JSON body + SameSite cookie + CSP + Origin validation against configured `APP_URL` / `AUTH_URL` (fail-closed if unset)

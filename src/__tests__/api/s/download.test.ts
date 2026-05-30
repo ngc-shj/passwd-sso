@@ -49,6 +49,7 @@ function createDownloadRequest(token: string): NextRequest {
 function makeFileShare(overrides: Record<string, unknown> = {}) {
   return {
     id: "share-1",
+    tenantId: "tenant-1",
     shareType: "FILE",
     sendFilename: "document.pdf",
     sendContentType: "application/pdf",
@@ -164,10 +165,11 @@ describe("GET /s/[token]/download", () => {
     const text = new TextDecoder().decode(body);
     expect(text).toBe("decrypted-file-content");
 
-    // Verify masterKeyVersion was passed to decryptShareBinary
+    // Verify masterKeyVersion + tenantId were passed to decryptShareBinary
     expect(mockDecryptShareBinary).toHaveBeenCalledWith(
       expect.anything(),
-      1
+      1,
+      expect.anything()
     );
   });
 

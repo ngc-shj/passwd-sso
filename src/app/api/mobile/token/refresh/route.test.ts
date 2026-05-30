@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
@@ -9,12 +9,14 @@ const {
   mockCheck,
   mockRefreshIosToken,
   mockVerifyDpop,
+  mockEnforceAccessRestriction,
 } = vi.hoisted(() => ({
   mockExtensionTokenFindUnique: vi.fn(),
   mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockRefreshIosToken: vi.fn(),
   mockVerifyDpop: vi.fn(),
+  mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -26,6 +28,10 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
   withBypassRls: mockWithBypassRls,
+}));
+
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
+  enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
 
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -134,6 +140,7 @@ describe("POST /api/mobile/token/refresh", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCheck.mockResolvedValue({ allowed: true });
+    mockEnforceAccessRestriction.mockResolvedValue(null);
     mockWithBypassRls.mockImplementation(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p));
     mockExtensionTokenFindUnique.mockResolvedValue(existingRow());
     mockVerifyDpop.mockResolvedValue(happyDpop());
@@ -236,6 +243,17 @@ describe("POST /api/mobile/token/refresh", () => {
     const { status, json } = await parseJson(res);
     expect(status).toBe(429);
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+    expect(mockRefreshIosToken).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 when the tenant access restriction denies the client IP", async () => {
+    mockEnforceAccessRestriction.mockResolvedValueOnce(
+      NextResponse.json({ error: "ACCESS_DENIED" }, { status: 403 }),
+    );
+    const res = await POST(makeRequest());
+    const { status, json } = await parseJson(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("ACCESS_DENIED");
     expect(mockRefreshIosToken).not.toHaveBeenCalled();
   });
 

@@ -33,5 +33,17 @@ for (const locale of ["ja", "en"] as const) {
     // of locale — it is a screen-reader landmark, not a translated UI label.
     const securityRegion = page.getByRole("region", { name: "Security" });
     await expect(securityRegion).toBeVisible({ timeout: 5_000 });
+
+    // T11: pin the landmark contract precisely so a refactor to a localized
+    // aria-labelledby (which would pass in one locale and break in another) or
+    // a duplicate region is caught:
+    //   - exactly one match (no phantom / duplicate region)
+    //   - the name comes from the literal `aria-label="Security"` attribute
+    //   - the element is a <section>
+    await expect(securityRegion).toHaveCount(1);
+    await expect(securityRegion).toHaveAttribute("aria-label", "Security");
+    expect(
+      await securityRegion.evaluate((el) => el.tagName.toLowerCase()),
+    ).toBe("section");
   });
 }

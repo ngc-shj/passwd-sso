@@ -13,11 +13,7 @@ import {
   readFileSync,
   writeFileSync,
   lstatSync,
-  openSync,
-  writeSync,
-  closeSync,
   unlinkSync,
-  constants as fsConstants,
 } from "node:fs";
 import {
   getConfigDir,
@@ -25,6 +21,7 @@ import {
   getConfigFilePath,
   getCredentialsFilePath,
 } from "./paths.js";
+import { writeSecretFile, readSecretFile } from "./secure-file.js";
 import { migrateIfNeeded } from "./migrate.js";
 
 export interface CliConfig {
@@ -85,24 +82,10 @@ export interface StoredCredentials {
 export function saveCredentials(creds: StoredCredentials): void {
   ensureDataDir();
   const dataDir = getDataDir();
-  const stat = lstatSync(dataDir);
-  if (stat.isSymbolicLink()) {
+  if (lstatSync(dataDir).isSymbolicLink()) {
     throw new Error("Data directory is a symlink — refusing to write credentials.");
   }
-  const credPath = getCredentialsFilePath();
-  const fd = openSync(
-    credPath,
-    fsConstants.O_WRONLY |
-      fsConstants.O_CREAT |
-      fsConstants.O_TRUNC |
-      (fsConstants.O_NOFOLLOW ?? 0),
-    0o600,
-  );
-  try {
-    writeSync(fd, JSON.stringify(creds)); // codeql[js/network-data-written-to-file] OAuth tokens are intentionally persisted for session continuity
-  } finally {
-    closeSync(fd);
-  }
+  writeSecretFile(getCredentialsFilePath(), JSON.stringify(creds));
 }
 
 /**
@@ -113,7 +96,14 @@ export function saveCredentials(creds: StoredCredentials): void {
 export function loadCredentials(): StoredCredentials | null {
   migrateIfNeeded();
   try {
-    const raw = readFileSync(getCredentialsFilePath(), "utf-8").trim();
+    // Mirror saveCredentials' symlink hardening on the read side: refuse a
+    // symlinked data dir, and open the file with O_NOFOLLOW so a pre-planted
+    // symlink at the credentials path cannot redirect the read elsewhere.
+    const dataDir = getDataDir();
+    if (existsSync(dataDir) && lstatSync(dataDir).isSymbolicLink()) {
+      return null;
+    }
+    const raw = readSecretFile(getCredentialsFilePath()).trim();
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);

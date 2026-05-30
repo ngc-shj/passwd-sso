@@ -175,4 +175,49 @@ describe("tenant-swap adversarial: cross-tenant resource access blocked by RLS",
       expect(found).toBeNull();
     });
   });
+
+  // T3: machine-identity tables share the same tenant-scoped RLS regime as the
+  // vault tables but had no cross-tenant probe. service_accounts is the
+  // representative table for the mcp_* / service_account* / *_token family — a
+  // dropped or mis-scoped RLS policy on any of them would surface the same way.
+  describe("machine identity (serviceAccount)", () => {
+    let tenantB_saId: string;
+
+    beforeEach(async () => {
+      tenantB_saId = randomUUID();
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.serviceAccount.create({
+          data: {
+            id: tenantB_saId,
+            tenantId: tenantB_id,
+            name: `sa-${tenantB_saId.slice(0, 8)}`,
+            createdById: userB_id,
+          },
+        });
+      });
+    });
+
+    it("attack: tenant A cannot read tenant B's service account under RLS", async () => {
+      const found = await withTenantRls(ctx.app.prisma, tenantA_id, async (tx) => {
+        return tx.serviceAccount.findUnique({
+          where: { id: tenantB_saId },
+          select: { id: true, tenantId: true },
+        });
+      });
+      expect(found).toBeNull();
+    });
+
+    it("positive control: tenant B context returns the seeded service account", async () => {
+      const found = await withTenantRls(ctx.app.prisma, tenantB_id, async (tx) => {
+        return tx.serviceAccount.findUnique({
+          where: { id: tenantB_saId },
+          select: { id: true, tenantId: true },
+        });
+      });
+      expect(found).not.toBeNull();
+      expect(found?.id).toBe(tenantB_saId);
+      expect(found?.tenantId).toBe(tenantB_id);
+    });
+  });
 });

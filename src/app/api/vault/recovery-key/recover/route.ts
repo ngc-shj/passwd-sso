@@ -17,7 +17,7 @@ import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalida
 import { getSessionToken } from "@/app/api/sessions/helpers";
 import { getLogger } from "@/lib/logger";
 import { z } from "zod";
-import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
+import { hexIv, hexAuthTag, hexSalt, hexHash, WRAPPED_SECRET_KEY_MAX } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
@@ -31,13 +31,13 @@ const resetSchema = z.object({
   step: z.literal("reset"),
   verifierHash: hexHash,
   // New passphrase-wrapped data
-  encryptedSecretKey: z.string().min(1),
+  encryptedSecretKey: z.string().min(1).max(WRAPPED_SECRET_KEY_MAX),
   secretKeyIv: hexIv,
   secretKeyAuthTag: hexAuthTag,
   accountSalt: hexSalt,
   newVerifierHash: hexHash,
   // Re-wrapped recovery key data
-  recoveryEncryptedSecretKey: z.string().min(1),
+  recoveryEncryptedSecretKey: z.string().min(1).max(WRAPPED_SECRET_KEY_MAX),
   recoverySecretKeyIv: hexIv,
   recoverySecretKeyAuthTag: hexAuthTag,
   recoveryHkdfSalt: hexSalt,

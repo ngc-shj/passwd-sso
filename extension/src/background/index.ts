@@ -38,7 +38,6 @@ import {
 } from "../lib/session-storage";
 import {
   getDpopThumbprint,
-  signDpopProof,
   resetInMemoryKeyCache,
 } from "../lib/dpop-key";
 import { swFetchAuthenticated } from "./dpop-fetch";
@@ -2564,44 +2563,3 @@ chrome.runtime.onMessage.addListener(
   },
 );
 
-// ── DPoP message handlers (raw messages from content script) ──────────────
-// Registered AFTER the main handleMessage listener so existing tests that
-// use messageHandlers[0] continue to hit the main dispatcher. Chrome MV3
-// fans out onMessage events to ALL listeners until one returns true /
-// calls sendResponse, so order does not affect production behavior — only
-// the test mock's first-listener convention relies on it.
-
-chrome.runtime.onMessage.addListener(
-  (
-    message: unknown,
-    _sender: chrome.runtime.MessageSender,
-    sendResponse: (response: unknown) => void,
-  ): boolean | undefined => {
-    if (!message || typeof message !== "object") return;
-    const msg = message as Record<string, unknown>;
-
-    if (msg.type === "GET_DPOP_JKT") {
-      getDpopThumbprint()
-        .then((jkt) => sendResponse({ jkt }))
-        .catch(() => sendResponse({ jkt: null }));
-      return true; // async response
-    }
-
-    if (msg.type === "GET_DPOP_PROOF") {
-      const route = typeof msg.route === "string" ? msg.route : "";
-      const method = typeof msg.method === "string" ? msg.method : "POST";
-      getSettings()
-        .then(({ serverUrl }) =>
-          signDpopProof({
-            route,
-            method,
-            serverUrl,
-            accessToken: currentToken ?? undefined,
-          }),
-        )
-        .then((dpop) => sendResponse({ dpop }))
-        .catch(() => sendResponse({ dpop: null }));
-      return true; // async response
-    }
-  },
-);

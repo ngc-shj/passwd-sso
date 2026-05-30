@@ -25,14 +25,24 @@ describe("token-bridge.js sync", () => {
     expect(file).toContain(`"START_CONNECT"`);
   });
 
-  it("contains the C15-v2 navigator.userActivation gate", async () => {
+  it("contains the C15-v2 navigator.userActivation gate with fail-closed structure", async () => {
     // The gate is a security control. token-bridge.js is the production
     // artifact loaded into the host page; token-bridge-lib.ts is test-only.
     // A regression that adds the gate to -lib.ts but not .js would silently
     // disable the gate in production while all unit tests pass (RT4 vacuous
-    // guard). This assertion closes that gap.
+    // guard). T6: assert the actual fail-closed SHAPE — not just substring
+    // presence — so an inverted gate (e.g. `&&` → `||`, or switching to the
+    // sticky `hasBeenActive`) is caught here.
     const { default: file } = await import("../../content/token-bridge.js?raw");
-    expect(file).toContain("navigator.userActivation");
-    expect(file).toContain(".isActive");
+    const normalized = file.replace(/\s+/g, " ");
+    // Must bail (return) when transient activation is absent.
+    expect(normalized).toMatch(
+      /if \( ?!navigator\.userActivation \|\| !navigator\.userActivation\.isActive ?\) return;?/,
+    );
+    // Must NOT rely on sticky activation, which would let a single past
+    // gesture authorize later silent connects. Match the property ACCESS
+    // (`.hasBeenActive`), not the bare word — the gate's own comment mentions
+    // "isActive-not-hasBeenActive" to document the deliberate choice.
+    expect(file).not.toContain(".hasBeenActive");
   });
 });

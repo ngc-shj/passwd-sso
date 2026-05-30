@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { parseBody, readJsonWithCap } from "./parse-body";
+import { parseBody, readJsonWithCap, exceedsDeclaredContentLength } from "./parse-body";
 
 function jsonRequest(body: unknown): NextRequest {
   return new NextRequest("http://localhost:3000/api/test", {
@@ -237,5 +237,37 @@ describe("readJsonWithCap", () => {
     if (result.ok) {
       expect(result.body).toEqual({ foo: "bar" });
     }
+  });
+});
+
+describe("exceedsDeclaredContentLength", () => {
+  function reqWithContentLength(value: string | null): NextRequest {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (value !== null) headers["Content-Length"] = value;
+    return new NextRequest("http://localhost:3000/api/test", {
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+  }
+
+  it("returns false when the content-length header is absent", () => {
+    expect(exceedsDeclaredContentLength(reqWithContentLength(null), 100)).toBe(false);
+  });
+
+  it("returns false when the declared length is under the cap", () => {
+    expect(exceedsDeclaredContentLength(reqWithContentLength("50"), 100)).toBe(false);
+  });
+
+  it("returns false when the declared length equals the cap", () => {
+    expect(exceedsDeclaredContentLength(reqWithContentLength("100"), 100)).toBe(false);
+  });
+
+  it("returns true when the declared length exceeds the cap", () => {
+    expect(exceedsDeclaredContentLength(reqWithContentLength("101"), 100)).toBe(true);
+  });
+
+  it("returns false for a non-numeric (garbage) header", () => {
+    expect(exceedsDeclaredContentLength(reqWithContentLength("not-a-number"), 100)).toBe(false);
   });
 });

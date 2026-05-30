@@ -56,7 +56,7 @@ export function SectionNav({ items }: SectionNavProps) {
                         className="w-full justify-start gap-2 h-8"
                         asChild
                       >
-                        <Link href={child.href}>
+                        <Link href={child.href} aria-current={isActive ? "page" : undefined}>
                           <child.icon className="h-3.5 w-3.5" />
                           {child.label}
                         </Link>
@@ -77,7 +77,7 @@ export function SectionNav({ items }: SectionNavProps) {
               className="w-full justify-start gap-2"
               asChild
             >
-              <Link href={item.href}>
+              <Link href={item.href} aria-current={isActive ? "page" : undefined}>
                 <item.icon className="h-4 w-4" />
                 {item.label}
               </Link>
@@ -100,7 +100,7 @@ export function SectionNav({ items }: SectionNavProps) {
                   className="shrink-0 gap-1.5"
                   asChild
                 >
-                  <Link href={child.href}>
+                  <Link href={child.href} aria-current={isActive ? "page" : undefined}>
                     <child.icon className="h-3.5 w-3.5" />
                     {child.label}
                   </Link>
@@ -117,7 +117,7 @@ export function SectionNav({ items }: SectionNavProps) {
               className="shrink-0 gap-1.5"
               asChild
             >
-              <Link href={item.href}>
+              <Link href={item.href} aria-current={isActive ? "page" : undefined}>
                 <item.icon className="h-3.5 w-3.5" />
                 {item.label}
               </Link>

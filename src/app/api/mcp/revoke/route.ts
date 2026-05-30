@@ -4,7 +4,7 @@ import { hashToken } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
-import { readJsonWithCap } from "@/lib/http/parse-body";
+import { readJsonWithCap, exceedsDeclaredContentLength } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -57,6 +57,11 @@ export async function POST(req: NextRequest) {
   const contentType = req.headers.get("content-type") ?? "";
 
   if (contentType.includes("application/x-www-form-urlencoded")) {
+    // Cap the untrusted form body. readJsonWithCap is JSON-only, so guard the
+    // form branch with an explicit content-length pre-check (RFC 6749 envelope).
+    if (exceedsDeclaredContentLength(req, MAX_JSON_BODY_BYTES)) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
     try {
       const text = await req.text();
       body = Object.fromEntries(new URLSearchParams(text));

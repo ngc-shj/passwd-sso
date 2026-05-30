@@ -137,7 +137,7 @@ Next.js アプリ (SSR / API Routes)
   │  ← サービスアカウントトークン: sa_ プレフィックス、JIT アクセスワークフロー
   ▼
 PostgreSQL ← Prisma 7          Redis ← レート制限、セッションキャッシュ
-  │  ← audit_outbox（トランザクション書き込み）
+  │  ← audit_outbox（コミット後にエンキュー。同一トランザクションは enqueueAuditInTx 経由）
   ▼
 Audit Outbox Worker（別プロセス）← audit_outbox を drain → audit_logs
   │
@@ -325,7 +325,7 @@ cd extension && npm install && npm run build
 - **鍵導出** — パスフレーズ → PBKDF2/Argon2id → ラッピング鍵 → ランダム 256 ビット秘密鍵をラップ
 - **ドメイン分離** — 秘密鍵 → HKDF → 暗号化鍵 + 認証鍵に分離
 - **Secret Key** — アカウント固有の追加ソルトでサーバー侵害に対する防御を強化
-- **AAD バインディング** — 追加認証データで暗号文をユーザー・エントリ ID に紐付け
+- **AAD バインディング** — 追加認証データで暗号文をユーザー・エントリ ID に紐付け（E2E 保管庫）。サーバー暗号化の共有リンク / Send は暗号文を所有テナントにバインド
 - **セッションセキュリティ** — データベースセッション（JWT ではない）、テナント/チームポリシーによる絶対タイムアウト（デフォルト 30 日、ポリシーで最短 5 分まで設定可能）、15 分無操作または 5 分タブ非表示で自動ロック
 - **クリップボードクリア** — コピーしたパスワードは 30 秒後に自動消去
 - **CSRF 防御** — JSON body + SameSite Cookie + CSP + 設定済み `APP_URL` / `AUTH_URL` に対する Origin ヘッダー検証（未設定時は fail-closed）

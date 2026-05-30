@@ -1,8 +1,8 @@
 /**
  * Shared test fixtures — loads auth state from global-setup output.
  */
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { readSecretFile } from "./secure-file";
 
 interface AuthUser {
   id: string;
@@ -44,7 +44,7 @@ let _authState: AuthState | null = null;
 export function getAuthState(): AuthState {
   if (!_authState) {
     const path = join(__dirname, "..", ".auth-state.json");
-    _authState = JSON.parse(readFileSync(path, "utf-8"));
+    _authState = JSON.parse(readSecretFile(path));
   }
   return _authState!;
 }

@@ -12,3 +12,11 @@ query-filters:
   # A slow KDF is unnecessary for high-entropy secrets.
   - exclude:
       id: js/insufficient-password-hash
+  # The CLI intentionally persists the user's own credentials (OAuth tokens) and
+  # decrypted vault exports to a 0600 O_NOFOLLOW file — that IS the feature. The
+  # only "HTTP data → file" flows in the repo are this intentional CLI
+  # persistence (cli/src/lib/secure-file.ts); the "untrusted" source is the
+  # user's own session/server response. Inline // codeql[...] suppression is not
+  # honored by this repo's code scanning, so exclude the query here.
+  - exclude:
+      id: js/http-to-file-access

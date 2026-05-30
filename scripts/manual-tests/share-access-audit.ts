@@ -45,7 +45,7 @@ async function main() {
   const accessPw = "test-password-12345";
   const { hash: accessPwHash, version: accessPwHashVersion } = hashAccessPassword(accessPw);
 
-  const enc = encryptShareData(JSON.stringify({ note: "audit-test" }));
+  const enc = encryptShareData(JSON.stringify({ note: "audit-test" }), entry.tenantId);
   const share = await withBypassRls(prisma, () =>
     prisma.passwordShare.create({
       data: {

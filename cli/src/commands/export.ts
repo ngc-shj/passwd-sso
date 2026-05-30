@@ -8,6 +8,7 @@ import { apiRequest } from "../lib/api-client.js";
 import { getEncryptionKey, getUserId } from "../lib/vault-state.js";
 import { decryptData } from "../lib/crypto.js";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
+import { writeSecretFile } from "../lib/secure-file.js";
 import * as output from "../lib/output.js";
 
 interface PasswordEntry {
@@ -110,8 +111,7 @@ export async function exportCommand(options: {
   if (format === "json") {
     const out = JSON.stringify(decrypted, null, 2);
     if (outputPath) {
-      const { writeFileSync } = await import("node:fs");
-      writeFileSync(outputPath, out, { encoding: "utf-8", mode: 0o600 });
+      writeSecretFile(outputPath, out);
       output.success(`Exported ${decrypted.length} entries to ${outputPath}`);
     } else {
       console.log(out);
@@ -133,8 +133,7 @@ export async function exportCommand(options: {
     const csvOut = csvRows.join("\n");
 
     if (outputPath) {
-      const { writeFileSync } = await import("node:fs");
-      writeFileSync(outputPath, csvOut, { encoding: "utf-8", mode: 0o600 });
+      writeSecretFile(outputPath, csvOut);
       output.success(`Exported ${decrypted.length} entries to ${outputPath}`);
     } else {
       console.log(csvOut);

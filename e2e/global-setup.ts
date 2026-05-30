@@ -22,7 +22,7 @@
  * Session tokens are written to .auth-state.json for test consumption.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { writeFileSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import Redis from "ioredis";
@@ -44,8 +44,9 @@ import {
 } from "./helpers/db";
 import { seedPasswordEntry } from "./helpers/password-entry";
 import { seedShareLink } from "./helpers/share-link";
-import { seedTeam, seedTeamMember } from "./helpers/team";
+import { seedTeam, seedTeamMember, E2E_TEAM_ID } from "./helpers/team";
 import { seedEmergencyGrant } from "./helpers/emergency-access";
+import { writeSecretFile } from "./helpers/secure-file";
 
 const AUTH_STATE_PATH = join(__dirname, ".auth-state.json");
 
@@ -217,7 +218,6 @@ export default async function globalSetup(): Promise<void> {
   await seedSession(TEST_USERS.fresh.id, freshToken);
 
   // ── Team: pre-seed teamOwner as OWNER and teamMember as MEMBER ────
-  const E2E_TEAM_ID = "00000000-0000-4000-e2e0-000000e2e000";
   await seedTeam({
     id: E2E_TEAM_ID,
     name: "E2E Pre-seeded Team",
@@ -324,7 +324,7 @@ export default async function globalSetup(): Promise<void> {
     shareLinkToken,
   };
 
-  writeFileSync(AUTH_STATE_PATH, JSON.stringify(authState, null, 2), { mode: 0o600 });
+  writeSecretFile(AUTH_STATE_PATH, JSON.stringify(authState, null, 2));
 
   await closePool();
 

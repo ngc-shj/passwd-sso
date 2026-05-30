@@ -117,6 +117,13 @@ describe("audit-outbox SKIP LOCKED concurrency", () => {
     // Together they should cover all 4 rows
     expect(claimed1.length + claimed2.length).toBe(4);
 
+    // T10: guard against a vacuous pass — both workers must have actually
+    // claimed at least one row. Without this, a setup where one worker claims
+    // nothing (e.g. SKIP LOCKED not engaging, or the contention window never
+    // opening) would still satisfy the disjoint + total-of-4 assertions above.
+    expect(claimed1.length).toBeGreaterThan(0);
+    expect(claimed2.length).toBeGreaterThan(0);
+
     // All claimed IDs should be from our inserted rows
     const allClaimed = [...set1, ...set2];
     for (const id of allClaimed) {

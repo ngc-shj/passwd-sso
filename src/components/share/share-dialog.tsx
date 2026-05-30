@@ -43,6 +43,7 @@ import {
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { MAX_VIEWS_MIN, MAX_VIEWS_MAX } from "@/lib/validations";
+import { bindRangeInput } from "@/lib/ui/input-range";
 import { safeRecord } from "@/lib/safe-keys";
 
 interface ShareLink {
@@ -515,13 +516,7 @@ export function ShareDialog({
                 max={MAX_VIEWS_MAX}
                 placeholder={t("maxViewsPlaceholder")}
                 value={maxViews}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  if (!raw) { setMaxViews(""); return; }
-                  const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < MAX_VIEWS_MIN) { setMaxViews(""); return; }
-                  setMaxViews(String(Math.min(n, MAX_VIEWS_MAX)));
-                }}
+                {...bindRangeInput(setMaxViews, { min: MAX_VIEWS_MIN, max: MAX_VIEWS_MAX })}
               />
             </div>
 

@@ -40,6 +40,7 @@ import { toastApiError } from "@/lib/http/toast-api-error";
 import { API_PATH } from "@/lib/constants";
 import { SEND_MAX_FILE_SIZE, SEND_MAX_TEXT_LENGTH, MAX_VIEWS_MIN, MAX_VIEWS_MAX, SEND_NAME_MAX_LENGTH } from "@/lib/validations";
 import { formatFileSize } from "@/lib/format/format-file-size";
+import { bindRangeInput } from "@/lib/ui/input-range";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 
 interface SendDialogProps {
@@ -390,13 +391,7 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
                   max={MAX_VIEWS_MAX}
                   placeholder={t("maxViewsPlaceholder")}
                   value={maxViews}
-                  onChange={(e) => {
-                    const raw = e.target.value;
-                    if (!raw) { setMaxViews(""); return; }
-                    const n = parseInt(raw, 10);
-                    if (Number.isNaN(n) || n < MAX_VIEWS_MIN) { setMaxViews(""); return; }
-                    setMaxViews(String(Math.min(n, MAX_VIEWS_MAX)));
-                  }}
+                  {...bindRangeInput(setMaxViews, { min: MAX_VIEWS_MIN, max: MAX_VIEWS_MAX })}
                 />
               </div>
             </div>

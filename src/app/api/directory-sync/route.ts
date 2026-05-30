@@ -20,6 +20,8 @@ import {
   SYNC_INTERVAL_MAX,
   SYNC_INTERVAL_DEFAULT,
   NAME_MAX_LENGTH,
+  DIRECTORY_SYNC_CREDENTIAL_KEY_MAX,
+  DIRECTORY_SYNC_CREDENTIAL_ENTRIES_MAX,
 } from "@/lib/validations/common";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
@@ -32,7 +34,14 @@ const createSchema = z.object({
   displayName: z.string().min(1).max(NAME_MAX_LENGTH),
   enabled: z.boolean().optional().default(true),
   syncIntervalMinutes: z.number().int().min(SYNC_INTERVAL_MIN).max(SYNC_INTERVAL_MAX).optional().default(SYNC_INTERVAL_DEFAULT),
-  credentials: z.record(z.string(), z.unknown()),
+  // Values may be nested objects (e.g. Google service-account JSON), so keep
+  // z.unknown() for values; cap key length + entry count to bound request size.
+  credentials: z
+    .record(z.string().max(DIRECTORY_SYNC_CREDENTIAL_KEY_MAX), z.unknown())
+    .refine(
+      (obj) => Object.keys(obj).length <= DIRECTORY_SYNC_CREDENTIAL_ENTRIES_MAX,
+      "too many credential entries",
+    ),
 });
 
 // ─── GET ─────────────────────────────────────────────────────

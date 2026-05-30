@@ -5,6 +5,8 @@ import { getRedis } from "@/lib/redis";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { readJsonWithCap } from "@/lib/http/parse-body";
+import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 import { errorResponse, errorResponseWithMessage, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -48,16 +50,16 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
   }
 
-  // Parse optional body for targeted credential test
-  // req.json bypass: optional-body semantics preserved; falls back to PRF-only mode on parse error.
+  // Parse optional body for targeted credential test (byte-capped).
+  // Optional-body semantics preserved: missing / invalid / oversized body
+  // falls back to PRF-only mode rather than erroring.
   let targetCredentialId: string | undefined;
-  try {
-    const body = await req.json();
+  const read = await readJsonWithCap(req, MAX_JSON_BODY_BYTES);
+  if (read.ok) {
+    const body = read.body as { credentialId?: unknown } | null;
     if (body?.credentialId && typeof body.credentialId === "string" && body.credentialId.length <= 256) {
       targetCredentialId = body.credentialId;
     }
-  } catch {
-    // No body or invalid JSON — use default PRF-only behavior
   }
 
   // A02-8: include prfSalt in SELECT so buildPrfExtensions can pick

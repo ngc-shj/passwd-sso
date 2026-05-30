@@ -20,6 +20,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { validateExtensionToken } from "@/lib/auth/tokens/extension-token";
+import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { unauthorized, errorResponse } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
@@ -71,6 +72,11 @@ async function handlePOST(req: NextRequest) {
   }
 
   const { userId, tenantId, cnfJkt: tokenCnfJkt } = validated.data;
+
+  // Tenant network-boundary enforcement BEFORE rate limit — an off-network
+  // holder of a stolen bearer must not consume the user's reset budget.
+  const denied = await enforceAccessRestriction(req, userId, tenantId);
+  if (denied) return denied;
 
   // Per-user rate limit — 5 calls per 15 min (reset is rare).
   const blocked = await checkRateLimitOrFail({

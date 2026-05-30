@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextResponse } from "next/server";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
@@ -7,14 +8,20 @@ const {
   mockValidateExtensionToken,
   mockCheck,
   mockLogAuditAsync,
+  mockEnforceAccessRestriction,
 } = vi.hoisted(() => ({
   mockValidateExtensionToken: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockLogAuditAsync: vi.fn(),
+  mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/lib/auth/tokens/extension-token", () => ({
   validateExtensionToken: mockValidateExtensionToken,
+}));
+
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
+  enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
 
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -81,6 +88,7 @@ describe("POST /api/mobile/cache-rollback-report", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCheck.mockResolvedValue({ allowed: true });
+    mockEnforceAccessRestriction.mockResolvedValue(null);
     mockValidateExtensionToken.mockResolvedValue(authOk());
   });
 
@@ -153,6 +161,17 @@ describe("POST /api/mobile/cache-rollback-report", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(401);
     expect(json.error).toBe("EXTENSION_TOKEN_INVALID");
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 when the tenant access restriction denies the client IP", async () => {
+    mockEnforceAccessRestriction.mockResolvedValueOnce(
+      NextResponse.json({ error: "ACCESS_DENIED" }, { status: 403 }),
+    );
+    const res = await POST(makeReq());
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("ACCESS_DENIED");
     expect(mockLogAuditAsync).not.toHaveBeenCalled();
   });
 

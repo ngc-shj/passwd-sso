@@ -17,11 +17,14 @@ on:
       - 'src/lib/tenant/**'
       - 'src/lib/mcp/**'
       - 'src/lib/vault/**'
+      - 'src/lib/services/**'
       - 'src/workers/**'
       - 'src/__tests__/db-integration/**'
       - 'prisma/schema.prisma'
       - 'prisma/migrations/**'
-      - 'src/app/api/emergency-access/**'
+      # T2: route handlers read/write tenant-scoped tables; a route-only PR must
+      # still run the integration suite (RLS scoping + write-read format).
+      - 'src/app/api/**'
       - 'src/lib/emergency-access/**'
       - 'src/lib/access-request/**'
 
@@ -57,7 +60,27 @@ jobs:
           --health-timeout=3s
           --health-retries=5
 
+      # T1: real Redis so the session-revocation tombstone and admin-vault-reset
+      # cross-tenant-session integration tests (skipIf(!REDIS_URL)) actually run
+      # instead of silently skipping green.
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=5
+
     env:
+      # T1: present so REDIS_URL-gated integration tests execute (see redis service).
+      REDIS_URL: redis://localhost:6379
+      # T1: the now-running session-cache tests derive the cache-key HMAC from
+      # SHARE_MASTER_KEY (getMasterKeyByVersion(1) via getSessionCacheHmacKey),
+      # so it must be present or cacheKey() throws and every cache op fails.
+      # Ephemeral CI-only 64-hex value (service container destroyed per run).
+      SHARE_MASTER_KEY: "1111111111111111111111111111111111111111111111111111111111111111"
       # Round 4 T19 fix: DATABASE_URL inline from service — no secrets.
       # Fork PRs run unchanged (no secret access required).
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/passwd_test

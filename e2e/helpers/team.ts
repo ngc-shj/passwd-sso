@@ -3,6 +3,13 @@
  */
 import { E2E_TENANT, getPool } from "./db";
 
+/**
+ * Deterministic id of the team pre-seeded in global-setup. Tests use this
+ * directly instead of scraping it from the UI, so a teams-list rendering
+ * regression fails the test loudly rather than silently skipping.
+ */
+export const E2E_TEAM_ID = "00000000-0000-4000-e2e0-000000e2e000";
+
 export interface SeedTeamOptions {
   id: string;
   tenantId?: string;

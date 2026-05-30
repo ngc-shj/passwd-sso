@@ -41,6 +41,9 @@ import {
 } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
+import { exceedsDeclaredContentLength } from "@/lib/http/parse-body";
+import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -87,9 +90,18 @@ function extractDpopBearer(req: NextRequest): string | null {
 }
 
 async function handlePOST(req: NextRequest): Promise<Response> {
+  // Cheap early reject before buffering the whole body (cap untrusted bytes).
+  if (exceedsDeclaredContentLength(req, MAX_JSON_BODY_BYTES)) {
+    return errorResponse(API_ERROR.PAYLOAD_TOO_LARGE);
+  }
+
   // We need raw body bytes for the replay-vs-retry hash AND a parsed copy
   // for validation. Read once, then reparse from the buffer.
   const rawBody = new Uint8Array(await req.arrayBuffer());
+  // Authoritative cap (defends against chunked TE that omits content-length).
+  if (rawBody.length > MAX_JSON_BODY_BYTES) {
+    return errorResponse(API_ERROR.PAYLOAD_TOO_LARGE);
+  }
   let parsedBody: unknown;
   try {
     parsedBody = rawBody.length === 0
@@ -149,6 +161,12 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     );
     return errorResponse(API_ERROR.MOBILE_REFRESH_TOKEN_REVOKED);
   }
+
+  // Tenant network-boundary enforcement BEFORE rate limit so an off-network
+  // holder of a stolen refresh token cannot burn the legitimate user's
+  // per-user refresh budget. userId/tenantId come from the validated row.
+  const denied = await enforceAccessRestriction(req, oldRow.userId, oldRow.tenantId);
+  if (denied) return denied;
 
   // Per-userId rate limit (only after we know the user). A stranger holding
   // a stolen refresh token would have to know a valid token-hash to even

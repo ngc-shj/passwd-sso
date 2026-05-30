@@ -4,9 +4,13 @@ import { createRequest } from "../../../__tests__/helpers/request-builder";
 const {
   mockValidateMcpToken,
   mockHandleMcpRequest,
+  mockEnforceAccessRestriction,
 } = vi.hoisted(() => ({
   mockValidateMcpToken: vi.fn(),
   mockHandleMcpRequest: vi.fn(),
+  // Default: access allowed (returns null). Overridden per-test to simulate a
+  // tenant IP-restriction denial.
+  mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/lib/mcp/oauth-server", () => ({
@@ -14,6 +18,9 @@ vi.mock("@/lib/mcp/oauth-server", () => ({
 }));
 vi.mock("@/lib/mcp/server", () => ({
   handleMcpRequest: mockHandleMcpRequest,
+}));
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
+  enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
 
 import { POST, GET } from "@/app/api/mcp/route";
@@ -74,6 +81,29 @@ describe("POST /api/mcp", () => {
       VALID_TOKEN_DATA,
       null,
     );
+  });
+
+  it("S3: returns the access-restriction denial and does not dispatch when IP is blocked", async () => {
+    mockValidateMcpToken.mockResolvedValue({ ok: true, data: VALID_TOKEN_DATA });
+    const { NextResponse } = await import("next/server");
+    mockEnforceAccessRestriction.mockResolvedValueOnce(
+      NextResponse.json({ error: { code: "ACCESS_DENIED" } }, { status: 403 }),
+    );
+
+    const req = createRequest("POST", "http://localhost/api/mcp", {
+      body: { jsonrpc: "2.0", method: "tools/list", id: 1 },
+      headers: { authorization: "Bearer mcp_valid_token" },
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(403);
+    expect(mockEnforceAccessRestriction).toHaveBeenCalledWith(
+      expect.anything(),
+      VALID_TOKEN_DATA.userId,
+      VALID_TOKEN_DATA.tenantId,
+      expect.anything(),
+    );
+    expect(mockHandleMcpRequest).not.toHaveBeenCalled();
   });
 
   it("returns 400 for invalid JSON body", async () => {

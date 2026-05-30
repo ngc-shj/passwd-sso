@@ -184,11 +184,11 @@ async function handlePOST(req: NextRequest) {
     accessPasswordHashVersion = r.version;
   }
 
-  // Encrypt metadata with master key
-  const encryptedMeta = encryptShareData(JSON.stringify({ name: meta.name }));
+  // Encrypt metadata with master key (AAD-bound to tenant)
+  const encryptedMeta = encryptShareData(JSON.stringify({ name: meta.name }), actor.tenantId);
 
-  // Encrypt file binary with master key
-  const encryptedFile = encryptShareBinary(fileBuffer);
+  // Encrypt file binary with master key (AAD-bound to tenant)
+  const encryptedFile = encryptShareBinary(fileBuffer, actor.tenantId);
   fileBuffer.fill(0); // Clear plaintext from memory
 
   // Generate token

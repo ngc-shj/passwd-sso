@@ -24,7 +24,7 @@
  */
 
 import { randomBytes, createHash, createHmac, pbkdf2Sync, hkdfSync, createCipheriv } from "node:crypto";
-import { writeFileSync, writeSync, unlinkSync, existsSync, openSync, closeSync, constants as fsConstants } from "node:fs";
+import { writeSync, unlinkSync, existsSync, openSync, closeSync, constants as fsConstants } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import pg from "pg";
@@ -514,8 +514,21 @@ async function main() {
     // Seed
     const credentials = await seedUsers(pool, userCount);
 
-    // Write auth file atomically with restricted permissions
-    writeFileSync(AUTH_FILE, JSON.stringify(credentials, null, 2), { mode: 0o600 });
+    // Write auth file with restricted permissions, refusing to follow symlinks
+    {
+      let fd;
+      try {
+        fd = openSync(
+          AUTH_FILE,
+          fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | (fsConstants.O_NOFOLLOW ?? 0),
+          0o600,
+        );
+        const buf = Buffer.from(JSON.stringify(credentials, null, 2), "utf8");
+        writeSync(fd, buf);
+      } finally {
+        if (fd !== undefined) closeSync(fd);
+      }
+    }
     console.log(`Wrote ${credentials.length} credentials to ${AUTH_FILE} (chmod 600)`);
 
     // Post-seed smoke check
