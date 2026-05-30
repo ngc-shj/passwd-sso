@@ -12,6 +12,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { deleteAttachmentBlobs } from "@/lib/blob-store/cleanup";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, forbidden, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import * as teamPasswordService from "@/lib/services/team-password-service";
@@ -178,9 +179,12 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   const { searchParams } = new URL(req.url);
   const permanent = searchParams.get("permanent") === "true";
 
-  await withTeamTenantRls(teamId, () =>
+  const blobRefs = await withTeamTenantRls(teamId, () =>
     teamPasswordService.deleteTeamPassword(teamId, id, permanent),
   );
+  // Purge external blobs after the RLS tx closes (don't hold a DB connection
+  // open during blob-store network I/O).
+  await deleteAttachmentBlobs(blobRefs);
 
   await logAuditAsync({
     ...teamAuditBase(req, session.user.id, teamId),

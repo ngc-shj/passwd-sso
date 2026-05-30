@@ -17,6 +17,7 @@ import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import {
   collectEntryAttachmentRefs,
   deleteAttachmentBlobs,
+  type AttachmentBlobRef,
 } from "@/lib/blob-store/cleanup";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { assertQuotaAvailable, QuotaExceededError } from "@/lib/quota/resource-quotas";
@@ -69,7 +70,7 @@ async function handleGET(req: NextRequest) {
   // Auto-purge items deleted more than 30 days ago
   if (!trashOnly) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * MS_PER_DAY);
-    await withUserTenantRls(userId, async () => {
+    const purgedRefs = await withUserTenantRls(userId, async () => {
       // Cap per-request cleanup to avoid pathological cases (very old users with
       // thousands of trashed entries); remaining entries purged on next load.
       const staleEntries = await prisma.passwordEntry.findMany({
@@ -77,9 +78,9 @@ async function handleGET(req: NextRequest) {
         select: { id: true },
         take: TRASH_PURGE_BATCH_SIZE,
       });
-      if (staleEntries.length === 0) return;
+      if (staleEntries.length === 0) return [] as AttachmentBlobRef[];
 
-      // Clean up external blob-store objects before cascade delete
+      // Capture external blob refs before the cascade delete removes the rows
       const refs = await collectEntryAttachmentRefs(prisma, {
         kind: "personal",
         entryIds: staleEntries.map((e) => e.id),
@@ -89,8 +90,12 @@ async function handleGET(req: NextRequest) {
         where: { id: { in: staleEntries.map((e) => e.id) } },
       });
 
-      await deleteAttachmentBlobs(refs);
-    }).catch(() => {});
+      return refs;
+    }).catch(() => [] as AttachmentBlobRef[]);
+
+    // Purge external blobs OUTSIDE the RLS transaction — don't hold a DB tx
+    // (and its pooled connection) open during blob-store network I/O.
+    await deleteAttachmentBlobs(purgedRefs);
   }
 
   // Return encrypted overviews (and optionally blobs) for client-side decryption
