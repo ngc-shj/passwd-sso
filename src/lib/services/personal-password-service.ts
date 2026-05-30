@@ -7,14 +7,21 @@
  */
 
 import type { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import type { TxOrPrisma } from "@/lib/prisma";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import type { createE2EPasswordSchema } from "@/lib/validations";
 
 type CreatePersonalPasswordInput = z.infer<typeof createE2EPasswordSchema>;
 
+/** The created entry plus its tag ids — covers both the single-create response
+ * (POST /api/passwords) and the bulk-import path (which only reads `id`). */
+export type CreatedPersonalEntry = Prisma.PasswordEntryGetPayload<{
+  include: { tags: { select: { id: true } } };
+}>;
+
 export type CreatePersonalPasswordResult =
-  | { ok: true; id: string }
+  | { ok: true; entry: CreatedPersonalEntry }
   | { ok: false; reason: "FOLDER_NOT_FOUND" | "TAGS_NOT_OWNED" };
 
 /**
@@ -69,8 +76,8 @@ export async function createPersonalPasswordEntry(
         ? { tags: { connect: tagIds.map((id) => ({ id })) } }
         : {}),
     },
-    select: { id: true },
+    include: { tags: { select: { id: true } } },
   });
 
-  return { ok: true, id: entry.id };
+  return { ok: true, entry };
 }

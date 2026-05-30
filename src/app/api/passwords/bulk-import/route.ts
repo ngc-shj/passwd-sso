@@ -46,7 +46,7 @@ async function handlePOST(req: NextRequest) {
     for (const entryData of entries) {
       try {
         const res = await createPersonalPasswordEntry(prisma, userId, tenantId, entryData);
-        if (res.ok) createdIds.push(res.id);
+        if (res.ok) createdIds.push(res.entry.id);
         else failedCount++;
       } catch {
         failedCount++;

@@ -8,7 +8,7 @@ import { checkAuth } from "@/lib/auth/session/check-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
-import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
+import { createPersonalPasswordEntry } from "@/lib/services/personal-password-service";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 
@@ -153,51 +153,12 @@ async function handlePOST(req: NextRequest) {
   const result = await parseBody(req, createE2EPasswordSchema);
   if (!result.ok) return result.response;
 
-  const { id: clientId, encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, folderId, isFavorite, entryType, requireReprompt, expiresAt } = result.data;
+  const createResult = await withUserTenantRls(userId, async (tenantId) =>
+    createPersonalPasswordEntry(prisma, userId, tenantId, result.data),
+  );
 
-  const createResult = await withUserTenantRls(userId, async (tenantId) => {
-    // Verify folder ownership
-    if (folderId) {
-      const folder = await prisma.folder.findFirst({ where: { id: folderId, userId } });
-      if (!folder) {
-        return { error: "INVALID_FOLDER" as const };
-      }
-    }
-
-    // Verify tag ownership
-    if (tagIds?.length) {
-      const ownedCount = await prisma.tag.count({ where: { id: { in: tagIds }, userId } });
-      if (ownedCount !== tagIds.length) {
-        return { error: "INVALID_TAGS" as const };
-      }
-    }
-
-    const entry = await prisma.passwordEntry.create({
-      data: {
-        ...(clientId ? { id: clientId } : {}),
-        ...toBlobColumns(encryptedBlob),
-        ...toOverviewColumns(encryptedOverview),
-        keyVersion,
-        aadVersion,
-        entryType,
-        ...(isFavorite !== undefined ? { isFavorite } : {}),
-        ...(requireReprompt !== undefined ? { requireReprompt } : {}),
-        ...(expiresAt !== undefined ? { expiresAt: expiresAt ? new Date(expiresAt) : null } : {}),
-        ...(folderId ? { folderId } : {}),
-        userId,
-        tenantId,
-        ...(tagIds?.length
-          ? { tags: { connect: tagIds.map((id) => ({ id })) } }
-          : {}),
-      },
-      include: { tags: { select: { id: true } } },
-    });
-
-    return { entry };
-  });
-
-  if ("error" in createResult) {
-    const message = createResult.error === "INVALID_FOLDER" ? "Invalid folderId" : "Invalid tagIds";
+  if (!createResult.ok) {
+    const message = createResult.reason === "FOLDER_NOT_FOUND" ? "Invalid folderId" : "Invalid tagIds";
     return validationError({ message });
   }
 
