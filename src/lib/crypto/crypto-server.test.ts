@@ -251,20 +251,20 @@ describe("crypto-server", () => {
     it("encryptShareData returns masterKeyVersion matching current", () => {
       process.env.SHARE_MASTER_KEY_V2 = V2_KEY;
       vi.stubEnv("SHARE_MASTER_KEY_CURRENT_VERSION", "2");
-      const encrypted = encryptShareData("test");
+      const encrypted = encryptShareData("test", "tenant-a");
       expect(encrypted.masterKeyVersion).toBe(2);
     });
 
     it("encryptShareData / decryptShareData roundtrip with version", () => {
-      const encrypted = encryptShareData("test data");
-      const decrypted = decryptShareData(encrypted, encrypted.masterKeyVersion);
+      const encrypted = encryptShareData("test data", "tenant-a");
+      const decrypted = decryptShareData(encrypted, encrypted.masterKeyVersion, "tenant-a");
       expect(decrypted).toBe("test data");
     });
 
     it("encryptShareBinary / decryptShareBinary roundtrip with version", () => {
       const data = Buffer.from("binary share data");
-      const encrypted = encryptShareBinary(data);
-      const decrypted = decryptShareBinary(encrypted, encrypted.masterKeyVersion);
+      const encrypted = encryptShareBinary(data, "tenant-a");
+      const decrypted = decryptShareBinary(encrypted, encrypted.masterKeyVersion, "tenant-a");
       expect(decrypted.equals(data)).toBe(true);
     });
 
@@ -317,22 +317,45 @@ describe("crypto-server", () => {
   describe("encryptShareData / decryptShareData", () => {
     it("roundtrips correctly", () => {
       const plaintext = JSON.stringify({ title: "Shared", password: "abc" });
-      const encrypted = encryptShareData(plaintext);
-      const decrypted = decryptShareData(encrypted, encrypted.masterKeyVersion);
+      const encrypted = encryptShareData(plaintext, "tenant-a");
+      const decrypted = decryptShareData(encrypted, encrypted.masterKeyVersion, "tenant-a");
       expect(decrypted).toBe(plaintext);
     });
 
     it("handles unicode content", () => {
       const plaintext = "共有データ 🔗";
-      const encrypted = encryptShareData(plaintext);
-      const decrypted = decryptShareData(encrypted, encrypted.masterKeyVersion);
+      const encrypted = encryptShareData(plaintext, "tenant-a");
+      const decrypted = decryptShareData(encrypted, encrypted.masterKeyVersion, "tenant-a");
       expect(decrypted).toBe(plaintext);
     });
 
     it("produces different ciphertexts for same plaintext", () => {
-      const e1 = encryptShareData("same");
-      const e2 = encryptShareData("same");
+      const e1 = encryptShareData("same", "tenant-a");
+      const e2 = encryptShareData("same", "tenant-a");
       expect(e1.ciphertext).not.toBe(e2.ciphertext);
+    });
+
+    it("rejects a ciphertext substituted across tenants (AAD binding)", () => {
+      // S4: a DB-write adversary copies tenant-a's ciphertext into tenant-b's
+      // row. Decrypt under tenant-b must fail (AAD mismatch, no legacy fallback
+      // because the data WAS AAD-bound).
+      const encrypted = encryptShareData("secret", "tenant-a");
+      expect(() =>
+        decryptShareData(encrypted, encrypted.masterKeyVersion, "tenant-b"),
+      ).toThrow();
+    });
+
+    it("decrypts legacy no-AAD ciphertext via fallback", () => {
+      // Rows created before S4 have no AAD. encryptServerData with no aad
+      // simulates that; decryptShareData must still recover them.
+      const version = getCurrentMasterKeyVersion();
+      const legacy = encryptServerData("legacy", getMasterKeyByVersion(version));
+      const decrypted = decryptShareData(
+        { ...legacy },
+        version,
+        "tenant-a",
+      );
+      expect(decrypted).toBe("legacy");
     });
   });
 

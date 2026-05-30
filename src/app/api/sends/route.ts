@@ -41,11 +41,6 @@ async function handlePOST(req: NextRequest) {
 
   const { name, text, expiresIn, maxViews, requirePassword } = result.data;
 
-  // Server-side encryption with master key (NOT E2E).
-  // The server can decrypt this data. For E2E-encrypted sharing,
-  // use share links with client-side encryption (masterKeyVersion=0).
-  const encrypted = encryptShareData(JSON.stringify({ name, text }));
-
   // Generate access password if requested
   let accessPassword: string | undefined;
   let accessPasswordHash: string | null = null;
@@ -62,8 +57,12 @@ async function handlePOST(req: NextRequest) {
   const tokenHash = hashToken(token);
 
   const expiresAt = new Date(Date.now() + SEND_EXPIRY_MAP[expiresIn]);
-  const share = await withUserTenantRls(session.user.id, async (tenantId) =>
-    prisma.passwordShare.create({
+  const share = await withUserTenantRls(session.user.id, async (tenantId) => {
+    // Server-side encryption with master key (NOT E2E), AAD-bound to tenant.
+    // The server can decrypt this data. For E2E-encrypted sharing,
+    // use share links with client-side encryption (masterKeyVersion=0).
+    const encrypted = encryptShareData(JSON.stringify({ name, text }), tenantId);
+    return prisma.passwordShare.create({
       data: {
         tokenHash,
         shareType: "TEXT",
@@ -80,8 +79,8 @@ async function handlePOST(req: NextRequest) {
         createdById: session.user.id,
         tenantId,
       },
-    }),
-  );
+    });
+  });
 
   // Audit log
   await logAuditAsync({

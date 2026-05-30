@@ -160,7 +160,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       ciphertext: Buffer.from(share.encryptedFile),
       iv: share.fileIv,
       authTag: share.fileAuthTag,
-    }, share.masterKeyVersion);
+    }, share.masterKeyVersion, share.tenantId);
 
     // Sanitize filename for Content-Disposition
     const filename = share.sendFilename ?? "download";
