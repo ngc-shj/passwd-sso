@@ -9,14 +9,12 @@ const {
   mockRouterPush,
   mockFetch,
   mockStashPrf,
-  prfSentinel,
 } = vi.hoisted(() => ({
   mockStartPasskeyAuthentication: vi.fn(),
   mockIsWebAuthnSupported: vi.fn(() => true),
   mockRouterPush: vi.fn(),
   mockFetch: vi.fn(),
   mockStashPrf: vi.fn(),
-  prfSentinel: { current: null as Uint8Array | null },
 }));
 
 vi.mock("@/lib/auth/prf-handoff", () => ({
@@ -54,9 +52,8 @@ vi.mock("@/lib/auth/webauthn/webauthn-client", () => ({
 import { SecurityKeySignInForm } from "./security-key-signin-form";
 
 function makePrfSentinel(): Uint8Array {
-  const bytes = new Uint8Array(32).fill(0xab);
-  prfSentinel.current = bytes;
-  return bytes;
+  // 0xAB repeated. Tests hold this reference to check zeroization post-hoc.
+  return new Uint8Array(32).fill(0xab);
 }
 
 function okJson(body: unknown): Response {
