@@ -8,3 +8,7 @@ export const KEY_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16
 export const USER_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM12.74 13c.14 0 .26-.11.24-.25A5.002 5.002 0 0 0 3.02 12.75c-.02.14.1.25.24.25h9.48Z"/></svg>`;
 
 export const DISCONNECT_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="16" height="16"><path d="M1.22 1.22a.75.75 0 0 1 1.06 0l12.5 12.5a.75.75 0 0 1-1.06 1.06L1.22 2.28a.75.75 0 0 1 0-1.06Z"/><path d="M6.5 2a3.5 3.5 0 0 1 3.47 3.05l-1.54 1.54A2 2 0 0 0 6.5 4H5.25a.75.75 0 0 1 0-1.5H6.5ZM10.75 13.5H9.5a3.5 3.5 0 0 1-3.47-3.05l1.54-1.54A2 2 0 0 0 9.5 11.5h1.25a.75.75 0 0 1 0 1.5V13.5Z"/></svg>`;
+
+export const CARD_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M1 4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v.5H1V4Zm14 2.5V12a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V6.5h14ZM3.5 10a.75.75 0 0 0 0 1.5h3a.75.75 0 0 0 0-1.5h-3Z"/></svg>`;
+
+export const ID_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12.5v-9Zm3.5 1a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3ZM4 10.5c0-.83 1-1.5 1.5-1.5s1.5.67 1.5 1.5V11H4v-.5ZM9 5.25a.75.75 0 0 0 0 1.5h2.5a.75.75 0 0 0 0-1.5H9Zm0 3a.75.75 0 0 0 0 1.5h2.5a.75.75 0 0 0 0-1.5H9Z" clip-rule="evenodd"/></svg>`;

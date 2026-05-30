@@ -13,6 +13,8 @@ export type ExtensionMessage =
   | { type: typeof EXT_MSG.COPY_PASSWORD; entryId: string; teamId?: string }
   | { type: typeof EXT_MSG.AUTOFILL; entryId: string; tabId: number; teamId?: string }
   | { type: typeof EXT_MSG.GET_MATCHES_FOR_URL; url: string; topUrl?: string }
+  | { type: typeof EXT_MSG.GET_CC_MATCHES_FOR_URL; url: string; topUrl?: string }
+  | { type: typeof EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL; url: string; topUrl?: string }
   | { type: typeof EXT_MSG.COPY_TOTP; entryId: string; teamId?: string }
   | {
       type: typeof EXT_MSG.AUTOFILL_FROM_CONTENT;
@@ -117,6 +119,20 @@ export type ExtensionResponse =
       disconnected?: boolean;
       suppressInline?: boolean;
     }
+  | {
+      type: typeof EXT_MSG.GET_CC_MATCHES_FOR_URL;
+      entries: DecryptedEntry[];
+      vaultLocked: boolean;
+      disconnected?: boolean;
+      suppressInline?: boolean;
+    }
+  | {
+      type: typeof EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL;
+      entries: DecryptedEntry[];
+      vaultLocked: boolean;
+      disconnected?: boolean;
+      suppressInline?: boolean;
+    }
   | { type: typeof EXT_MSG.COPY_TOTP; code: string | null; error?: string }
   | { type: typeof EXT_MSG.AUTOFILL_FROM_CONTENT; ok: boolean; error?: string }
   | { type: typeof EXT_MSG.LOGIN_DETECTED; action: "save" | "update" | "none"; existingEntryId?: string; existingTitle?: string }
@@ -180,7 +196,7 @@ export interface AutofillTargetHint {
 // ── Credit Card autofill payload ──
 
 export interface CreditCardAutofillPayload {
-  type: "AUTOFILL_CC_FILL";
+  type: typeof EXT_MSG.AUTOFILL_CC_FILL;
   cardholderName: string;
   cardNumber: string;
   expiryMonth: string;
@@ -191,7 +207,7 @@ export interface CreditCardAutofillPayload {
 // ── Identity autofill payload ──
 
 export interface IdentityAutofillPayload {
-  type: "AUTOFILL_IDENTITY_FILL";
+  type: typeof EXT_MSG.AUTOFILL_IDENTITY_FILL;
   fullName: string;
   address: string;
   postalCode: string;

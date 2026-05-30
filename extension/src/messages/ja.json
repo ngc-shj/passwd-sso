@@ -92,7 +92,11 @@
     "vaultLocked": "保管庫がロックされています",
     "disconnected": "サーバーに接続されていません",
     "noMatches": "一致するエントリがありません",
-    "logins": "ログイン候補"
+    "noCreditCards": "保存済みのカードがありません",
+    "noIdentities": "保存済みの個人情報がありません",
+    "logins": "ログイン候補",
+    "creditCards": "カード候補",
+    "identities": "個人情報候補"
   },
   "contextMenu": {
     "title": "passwd-sso",
@@ -143,6 +147,7 @@
     "vaultLocked": "保管庫がロックされています。",
     "fetchFailed": "エントリの取得に失敗しました。",
     "noPassword": "このエントリにパスワードがありません。",
+    "noCardNumber": "このエントリにカード番号がありません。",
     "permissionDenied": "ホスト権限が拒否されました。",
     "clipboardFailed": "クリップボードに書き込めませんでした。",
     "copyFailed": "コピーに失敗しました。",

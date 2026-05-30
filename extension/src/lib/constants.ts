@@ -69,6 +69,8 @@ export const EXT_MSG = {
   COPY_PASSWORD: "COPY_PASSWORD",
   AUTOFILL: "AUTOFILL",
   GET_MATCHES_FOR_URL: "GET_MATCHES_FOR_URL",
+  GET_CC_MATCHES_FOR_URL: "GET_CC_MATCHES_FOR_URL",
+  GET_IDENTITY_MATCHES_FOR_URL: "GET_IDENTITY_MATCHES_FOR_URL",
   COPY_TOTP: "COPY_TOTP",
   AUTOFILL_FROM_CONTENT: "AUTOFILL_FROM_CONTENT",
   LOGIN_DETECTED: "LOGIN_DETECTED",
@@ -78,6 +80,11 @@ export const EXT_MSG = {
   CHECK_PENDING_SAVE: "CHECK_PENDING_SAVE",
   AUTOFILL_CREDIT_CARD: "AUTOFILL_CREDIT_CARD",
   AUTOFILL_IDENTITY: "AUTOFILL_IDENTITY",
+  // Fill payloads sent SW → injected web-accessible content scripts (autofill-cc.js
+  // / autofill-identity.js). Those plain-JS files cannot import this module, so they
+  // declare matching local literals — keep both in sync (mirrors the WebAuthn note).
+  AUTOFILL_CC_FILL: "AUTOFILL_CC_FILL",
+  AUTOFILL_IDENTITY_FILL: "AUTOFILL_IDENTITY_FILL",
   KEEPALIVE_PING: "KEEPALIVE_PING",
   // Options → SW: invalidate the SW's in-memory DPoP key cache after the
   // Options page deleted the IDB record. Without this the SW keeps signing

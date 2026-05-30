@@ -1,5 +1,24 @@
 // Pure logic module for identity/address form detection (exported, testable).
-// Side-effect-free — no global event registration here.
+// detectIdentityFields is side-effect-free; initIdentityDetector wires the
+// inline-suggestion lifecycle (focus → match request → dropdown → fill).
+
+import type { DecryptedEntry } from "../types/messages";
+import { t } from "../lib/i18n";
+import { EXT_MSG } from "../lib/constants";
+import {
+  isUsableInput,
+  isElementVisuallySafe,
+  isPageVisuallySafe,
+  isInputHitTestSafe,
+  hasVisiblePopoverOverlayNear,
+  showInlineNotice,
+} from "./form-detector-lib";
+import {
+  showDropdown,
+  hideDropdown,
+  isDropdownVisible,
+  handleDropdownKeydown,
+} from "./ui/suggestion-dropdown";
 
 // ── Types ──
 
@@ -172,4 +191,262 @@ export function detectIdentityFields(root: ParentNode): IdentityFormFields | nul
     dateOfBirth,
     region,
   };
+}
+
+// ── Inline detector ─────────────────────────────────────────
+
+declare const navigation: EventTarget | undefined;
+
+export interface IdentityDetectorCleanup {
+  destroy: () => void;
+}
+
+function isContextValid(): boolean {
+  try {
+    return !!chrome.runtime?.id;
+  } catch {
+    return false;
+  }
+}
+
+/** Collect the detected identity field elements into a membership set for O(1) focus lookup. */
+function collectIdentityFields(fields: IdentityFormFields, into: WeakSet<HTMLElement>): void {
+  const candidates = [
+    fields.fullName,
+    fields.address,
+    fields.postalCode,
+    fields.phone,
+    fields.email,
+    fields.dateOfBirth,
+    fields.region,
+  ];
+  for (const el of candidates) {
+    if (el) into.add(el);
+  }
+}
+
+/**
+ * Initialize the inline identity suggestion detector. Mirrors the LOGIN detector
+ * but with detector-LOCAL suppression state and an identity-field WeakSet.
+ */
+export function initIdentityDetector(): IdentityDetectorCleanup {
+  let destroyed = false;
+
+  // S2: cross-origin subframe must not render a deceptive dropdown.
+  const isCrossOriginSubframe = (() => {
+    if (window.top === window.self) return false;
+    try {
+      void window.top?.location.href;
+      return false;
+    } catch {
+      return true;
+    }
+  })();
+  if (isCrossOriginSubframe) {
+    return { destroy: () => {} };
+  }
+
+  let identityFields = new WeakSet<HTMLElement>();
+  let autofillSuppressUntil = 0;
+  let activeInput: HTMLInputElement | null = null;
+
+  const rescan = () => {
+    if (destroyed) return;
+    const next = new WeakSet<HTMLElement>();
+    const fields = detectIdentityFields(document);
+    if (fields) collectIdentityFields(fields, next);
+    identityFields = next;
+  };
+
+  const requestMatches = (input: HTMLInputElement) => {
+    if (!isContextValid()) {
+      destroy();
+      return;
+    }
+    if (
+      !isPageVisuallySafe() ||
+      !isElementVisuallySafe(input) ||
+      !isInputHitTestSafe(input) ||
+      hasVisiblePopoverOverlayNear(input)
+    ) {
+      hideDropdown();
+      activeInput = null;
+      return;
+    }
+    const url = window.location.href;
+    let topUrl: string | undefined;
+    try {
+      topUrl = window.top?.location?.href;
+    } catch {
+      topUrl = undefined;
+    }
+    try {
+      chrome.runtime.sendMessage(
+        { type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL, url, topUrl },
+        (response) => {
+          if (destroyed) return;
+          if (!isContextValid()) { destroy(); return; }
+          if (chrome.runtime.lastError) return;
+          if (!response) return;
+          showForInput(
+            input,
+            response.entries ?? [],
+            response.vaultLocked ?? false,
+            response.suppressInline ?? false,
+            response.disconnected ?? false,
+          );
+        },
+      );
+    } catch {
+      destroy();
+    }
+  };
+
+  const showForInput = (
+    input: HTMLInputElement,
+    entries: DecryptedEntry[],
+    vaultLocked: boolean,
+    suppressInline: boolean,
+    disconnected: boolean,
+  ) => {
+    if (suppressInline) {
+      hideDropdown();
+      activeInput = null;
+      return;
+    }
+    activeInput = input;
+    showDropdown({
+      anchorRect: input.getBoundingClientRect(),
+      entries,
+      vaultLocked,
+      disconnected,
+      entryType: "IDENTITY",
+      onSelect: (entryId, teamId) => {
+        if (!isContextValid()) return;
+        autofillSuppressUntil = Date.now() + 1500;
+        chrome.runtime.sendMessage(
+          { type: EXT_MSG.AUTOFILL_FROM_CONTENT, entryId, ...(teamId ? { teamId } : {}) },
+          (resp?: { ok?: boolean; error?: string }) => {
+            if (!isContextValid()) return;
+            if (chrome.runtime.lastError) {
+              showInlineNotice(input, t("errors.autofillFailed"));
+              return;
+            }
+            if (!resp?.ok) {
+              if (resp?.error === "VAULT_LOCKED") {
+                showInlineNotice(input, t("contentScript.vaultLocked"));
+              } else {
+                showInlineNotice(input, t("errors.autofillFailed"));
+              }
+              return;
+            }
+            hideDropdown();
+          },
+        );
+      },
+      onDismiss: () => {
+        activeInput = null;
+      },
+      lockedMessage: t("contentScript.vaultLocked"),
+      disconnectedMessage: t("contentScript.disconnected"),
+      noMatchesMessage: t("contentScript.noIdentities"),
+      headerLabel: t("contentScript.identities"),
+    });
+  };
+
+  const focusHandler = (e: FocusEvent) => {
+    if (destroyed) return;
+    if (Date.now() < autofillSuppressUntil) return;
+    const input = e.target;
+    if (!(input instanceof HTMLInputElement)) return;
+    if (!isUsableInput(input)) return;
+    if (!identityFields.has(input)) return;
+    requestMatches(input);
+  };
+
+  const blurHandler = (e: FocusEvent) => {
+    if (destroyed) return;
+    if (activeInput && e.target === activeInput) {
+      setTimeout(() => {
+        if (activeInput && activeInput !== document.activeElement) {
+          hideDropdown();
+        }
+      }, 150);
+    }
+  };
+
+  const keydownHandler = (e: KeyboardEvent) => {
+    if (destroyed) return;
+    if (isDropdownVisible()) {
+      handleDropdownKeydown(e);
+    }
+  };
+
+  const observer = new MutationObserver((mutations) => {
+    if (destroyed) return;
+    if (mutations.some((m) => m.addedNodes.length > 0)) rescan();
+  });
+
+  const runtimeMessageHandler = (message: { type?: string }) => {
+    if (destroyed) return;
+    if (
+      message?.type !== "PSSO_VAULT_STATE_CHANGED" &&
+      message?.type !== "PSSO_TRIGGER_INLINE_SUGGESTIONS"
+    ) {
+      return;
+    }
+    rescan();
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement && identityFields.has(active) && isUsableInput(active)) {
+      requestMatches(active);
+    }
+  };
+
+  try {
+    chrome.runtime.onMessage?.addListener(runtimeMessageHandler);
+  } catch {
+    // Extension context invalidated — skip listener registration.
+  }
+
+  document.addEventListener("focusin", focusHandler, true);
+  document.addEventListener("focusout", blurHandler, true);
+  document.addEventListener("keydown", keydownHandler, true);
+  rescan();
+  if (document.body) {
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  const navigationHandler = () => {
+    if (destroyed) return;
+    hideDropdown();
+    setTimeout(rescan, 100);
+  };
+  if (typeof navigation !== "undefined") {
+    navigation.addEventListener("navigate", navigationHandler);
+  }
+  window.addEventListener("popstate", navigationHandler);
+  window.addEventListener("hashchange", navigationHandler);
+
+  function destroy(): void {
+    if (destroyed) return;
+    destroyed = true;
+    try {
+      chrome.runtime.onMessage?.removeListener(runtimeMessageHandler);
+    } catch {
+      // Extension context invalidated.
+    }
+    document.removeEventListener("focusin", focusHandler, true);
+    document.removeEventListener("focusout", blurHandler, true);
+    document.removeEventListener("keydown", keydownHandler, true);
+    observer.disconnect();
+    if (typeof navigation !== "undefined") {
+      navigation.removeEventListener("navigate", navigationHandler);
+    }
+    window.removeEventListener("popstate", navigationHandler);
+    window.removeEventListener("hashchange", navigationHandler);
+    // F6: shared shadow host removed once by entry-point teardown.
+    hideDropdown();
+  }
+
+  return { destroy };
 }

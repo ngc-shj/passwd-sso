@@ -4,7 +4,9 @@
 import type { DecryptedEntry } from "../../types/messages";
 import { getShadowHost } from "./shadow-host";
 import { DROPDOWN_STYLES } from "./styles";
-import { KEY_ICON, LOCK_ICON, USER_ICON, DISCONNECT_ICON } from "./icons";
+import { KEY_ICON, LOCK_ICON, USER_ICON, DISCONNECT_ICON, CARD_ICON, ID_ICON } from "./icons";
+
+export type DropdownEntryType = "LOGIN" | "CREDIT_CARD" | "IDENTITY";
 
 export interface DropdownOptions {
   anchorRect: DOMRect;
@@ -17,6 +19,20 @@ export interface DropdownOptions {
   disconnectedMessage?: string;
   noMatchesMessage: string;
   headerLabel: string;
+  // Drives the per-item icon. Optional, defaults to "LOGIN" so existing callers
+  // keep compiling unchanged.
+  entryType?: DropdownEntryType;
+}
+
+function itemIconFor(entryType: DropdownEntryType): string {
+  switch (entryType) {
+    case "CREDIT_CARD":
+      return CARD_ICON;
+    case "IDENTITY":
+      return ID_ICON;
+    default:
+      return KEY_ICON;
+  }
 }
 
 let currentDropdown: HTMLDivElement | null = null;
@@ -72,6 +88,8 @@ export function showDropdown(opts: DropdownOptions): void {
     itemElements = [];
     activeIndex = -1;
 
+    const itemIcon = itemIconFor(opts.entryType ?? "LOGIN");
+
     for (const entry of opts.entries) {
       const item = document.createElement("div");
       item.className = "psso-item";
@@ -80,7 +98,7 @@ export function showDropdown(opts: DropdownOptions): void {
       if (entry.teamId) item.setAttribute("data-team-id", entry.teamId);
 
       item.innerHTML = `
-        <div class="psso-item-icon">${KEY_ICON}</div>
+        <div class="psso-item-icon">${itemIcon}</div>
         <div class="psso-item-text">
           <div class="psso-item-title">${escapeHtml(entry.title || entry.urlHost)}</div>
           <div class="psso-item-username">${USER_ICON}<span>${escapeHtml(entry.username)}</span></div>

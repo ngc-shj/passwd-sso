@@ -1312,10 +1312,26 @@ async function performAutofillForEntry(
   tabId: number,
   targetHint?: AutofillTargetHint,
   teamId?: string,
+  frameId?: number,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!encryptionKey || !currentUserId) {
     return { ok: false, error: "VAULT_LOCKED" };
   }
+
+  // Inline path supplies the originating frame so card/identity plaintext is
+  // delivered only to that frame. Popup/context-menu callers pass no frameId —
+  // keep tab-wide behavior (do NOT substitute frame 0, which would break
+  // same-origin-subframe popup fills).
+  const hasFrameTarget = typeof frameId === "number";
+  const executeTarget = hasFrameTarget
+    ? { tabId, frameIds: [frameId] }
+    : { tabId };
+  // chrome.tabs.sendMessage's options overload rejects `undefined`; only pass
+  // frame-targeting options when an originating frame is known.
+  const sendFillMessage = (payload: unknown): Promise<unknown> =>
+    hasFrameTarget
+      ? chrome.tabs.sendMessage(tabId, payload, { frameId })
+      : chrome.tabs.sendMessage(tabId, payload);
 
   let blobPlain: string;
   let overviewPlain: string;
@@ -1394,11 +1410,11 @@ async function performAutofillForEntry(
     }
     try {
       await chrome.scripting.executeScript({
-        target: { tabId },
+        target: executeTarget,
         files: ["src/content/autofill-cc.js"],
       });
-      await chrome.tabs.sendMessage(tabId, {
-        type: "AUTOFILL_CC_FILL",
+      await sendFillMessage({
+        type: EXT_MSG.AUTOFILL_CC_FILL,
         cardholderName: blob.cardholderName ?? "",
         cardNumber,
         expiryMonth: blob.expiryMonth ?? "",
@@ -1416,11 +1432,11 @@ async function performAutofillForEntry(
   if (entryType === EXT_ENTRY_TYPE.IDENTITY) {
     try {
       await chrome.scripting.executeScript({
-        target: { tabId },
+        target: executeTarget,
         files: ["src/content/autofill-identity.js"],
       });
-      await chrome.tabs.sendMessage(tabId, {
-        type: "AUTOFILL_IDENTITY_FILL",
+      await sendFillMessage({
+        type: EXT_MSG.AUTOFILL_IDENTITY_FILL,
         fullName: blob.fullName ?? "",
         address: blob.address ?? "",
         postalCode: blob.postalCode ?? "",
@@ -1659,6 +1675,75 @@ async function performAutofillForEntry(
   }
 
   return { ok: true };
+}
+
+// ── Inline match resolution (shared by LOGIN / CC / IDENTITY) ────
+
+type InlineMatchKind = "login" | "credit_card" | "identity";
+
+interface InlineMatchResult {
+  entries: DecryptedEntry[];
+  vaultLocked: boolean;
+  suppressInline: boolean;
+  disconnected?: boolean;
+}
+
+/**
+ * Content-supplied identifiers reach an authenticated API path; bound their
+ * charset/length as defense-in-depth (the id is also URL-encoded into the path).
+ * NOT a UUIDv4-strict guard — entry ids in this repo are mixed CUID v1 + UUIDv4,
+ * so a UUIDv4-only regex would reject legitimate legacy CUID entries.
+ */
+const CONTENT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+function isValidContentId(value: unknown): value is string {
+  return typeof value === "string" && CONTENT_ID_RE.test(value);
+}
+
+/**
+ * Shared gate + filter for inline suggestion requests. LOGIN keeps the host
+ * match (and the `!tabHost` early-return); CC/IDENTITY filter purely by entry
+ * type with no host match and MUST still return entries on hostless pages.
+ * Badge update + cache population side effects stay LOGIN-only (caller's job).
+ */
+async function resolveInlineMatches(
+  kind: InlineMatchKind,
+  effectiveUrl: string,
+): Promise<InlineMatchResult> {
+  if (!cachedEnableInlineSuggestions) {
+    return { entries: [], vaultLocked: false, suppressInline: true };
+  }
+  if (await isOwnAppPage(effectiveUrl)) {
+    return { entries: [], vaultLocked: false, suppressInline: true };
+  }
+  if (!currentToken) {
+    return { entries: [], vaultLocked: false, disconnected: true, suppressInline: false };
+  }
+  if (!encryptionKey || !currentUserId) {
+    return { entries: [], vaultLocked: true, suppressInline: false };
+  }
+
+  if (kind === "login") {
+    const tabHost = extractHost(effectiveUrl);
+    // LOGIN-only: no host means no possible host match.
+    if (!tabHost) {
+      return { entries: [], vaultLocked: false, suppressInline: false };
+    }
+    const entries = await getCachedEntries();
+    const matches = entries.filter((e) => {
+      if (e.entryType !== EXT_ENTRY_TYPE.LOGIN) return false;
+      if (e.urlHost && isHostMatch(e.urlHost, tabHost)) return true;
+      return (e.additionalUrlHosts ?? []).some((h) => isHostMatch(h, tabHost));
+    });
+    return { entries: matches, vaultLocked: false, suppressInline: false };
+  }
+
+  // CC / IDENTITY: URL-independent — no host match, no `!tabHost` early-return.
+  const targetType =
+    kind === "credit_card" ? EXT_ENTRY_TYPE.CREDIT_CARD : EXT_ENTRY_TYPE.IDENTITY;
+  const entries = await getCachedEntries();
+  const matches = entries.filter((e) => e.entryType === targetType);
+  return { entries: matches, vaultLocked: false, suppressInline: false };
 }
 
 // ── Message handler ──────────────────────────────────────────
@@ -2144,75 +2229,58 @@ async function handleMessage(
     }
 
     case EXT_MSG.GET_MATCHES_FOR_URL: {
-      if (!cachedEnableInlineSuggestions) {
-        sendResponse({
-          type: EXT_MSG.GET_MATCHES_FOR_URL,
-          entries: [],
-          vaultLocked: false,
-          suppressInline: true,
-        });
-        return;
-      }
       const effectiveUrl = message.topUrl ?? message.url;
-      if (await isOwnAppPage(effectiveUrl)) {
-        sendResponse({
-          type: EXT_MSG.GET_MATCHES_FOR_URL,
-          entries: [],
-          vaultLocked: false,
-          suppressInline: true,
-        });
-        return;
-      }
-      if (!currentToken) {
-        sendResponse({
-          type: EXT_MSG.GET_MATCHES_FOR_URL,
-          entries: [],
-          vaultLocked: false,
-          disconnected: true,
-          suppressInline: false,
-        });
-        return;
-      }
-      if (!encryptionKey || !currentUserId) {
-        sendResponse({
-          type: EXT_MSG.GET_MATCHES_FOR_URL,
-          entries: [],
-          vaultLocked: true,
-          suppressInline: false,
-        });
-        return;
-      }
-
       try {
-        const tabHost = extractHost(effectiveUrl);
-        if (!tabHost) {
-          sendResponse({
-            type: EXT_MSG.GET_MATCHES_FOR_URL,
-            entries: [],
-            vaultLocked: false,
-            suppressInline: false,
-          });
-          return;
-        }
-        const entries = await getCachedEntries();
-        const matches = entries.filter((e) => {
-          if (e.entryType !== EXT_ENTRY_TYPE.LOGIN) return false;
-          if (e.urlHost && isHostMatch(e.urlHost, tabHost)) return true;
-          return (e.additionalUrlHosts ?? []).some((h) => isHostMatch(h, tabHost));
-        });
-        sendResponse({
-          type: EXT_MSG.GET_MATCHES_FOR_URL,
-          entries: matches,
-          vaultLocked: false,
-          suppressInline: false,
-        });
-        // Cache was just populated — update badge for sender tab
-        if (_sender.tab?.id) {
+        const result = await resolveInlineMatches("login", effectiveUrl);
+        sendResponse({ type: EXT_MSG.GET_MATCHES_FOR_URL, ...result });
+        // LOGIN-only side effect (success path only): badge counts host-matched
+        // logins. Mirror the original exactly — fired only after a successful
+        // host-matched filter (gates passed AND a non-null host), never on the
+        // suppressed / disconnected / locked / hostless branches.
+        if (
+          !result.disconnected &&
+          !result.suppressInline &&
+          !result.vaultLocked &&
+          extractHost(effectiveUrl) &&
+          _sender.tab?.id
+        ) {
           void updateBadgeForTab(_sender.tab.id, effectiveUrl);
         }
       } catch {
         sendResponse({
           type: EXT_MSG.GET_MATCHES_FOR_URL,
+          entries: [],
+          vaultLocked: false,
+          suppressInline: false,
+        });
+      }
+      return;
+    }
+
+    case EXT_MSG.GET_CC_MATCHES_FOR_URL: {
+      const effectiveUrl = message.topUrl ?? message.url;
+      try {
+        const result = await resolveInlineMatches("credit_card", effectiveUrl);
+        sendResponse({ type: EXT_MSG.GET_CC_MATCHES_FOR_URL, ...result });
+      } catch {
+        sendResponse({
+          type: EXT_MSG.GET_CC_MATCHES_FOR_URL,
+          entries: [],
+          vaultLocked: false,
+          suppressInline: false,
+        });
+      }
+      return;
+    }
+
+    case EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL: {
+      const effectiveUrl = message.topUrl ?? message.url;
+      try {
+        const result = await resolveInlineMatches("identity", effectiveUrl);
+        sendResponse({ type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL, ...result });
+      } catch {
+        sendResponse({
+          type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL,
           entries: [],
           vaultLocked: false,
           suppressInline: false,
@@ -2231,6 +2299,20 @@ async function handleMessage(
         return;
       }
 
+      // C9: bound content-supplied identifiers before they reach the authed
+      // fetch path. teamId is optional — reject only when present-and-invalid.
+      if (
+        !isValidContentId(message.entryId) ||
+        (message.teamId !== undefined && !isValidContentId(message.teamId))
+      ) {
+        sendResponse({
+          type: EXT_MSG.AUTOFILL_FROM_CONTENT,
+          ok: false,
+          error: "INVALID_ID",
+        });
+        return;
+      }
+
       try {
         const tabId = _sender.tab?.id;
         if (!tabId) {
@@ -2241,11 +2323,14 @@ async function handleMessage(
           });
           return;
         }
+        // C8: deliver card/identity plaintext only to the originating frame.
+        const frameId = _sender.frameId;
         const result = await performAutofillForEntry(
           message.entryId,
           tabId,
           message.targetHint,
           message.teamId,
+          frameId,
         );
         sendResponse({
           type: EXT_MSG.AUTOFILL_FROM_CONTENT,
@@ -2518,6 +2603,12 @@ chrome.runtime.onMessage.addListener(
             break;
           case EXT_MSG.GET_MATCHES_FOR_URL:
             sendResponse({ type: EXT_MSG.GET_MATCHES_FOR_URL, entries: [], vaultLocked: !!currentToken && !encryptionKey, disconnected: !currentToken, suppressInline: false } as ExtensionResponse);
+            break;
+          case EXT_MSG.GET_CC_MATCHES_FOR_URL:
+            sendResponse({ type: EXT_MSG.GET_CC_MATCHES_FOR_URL, entries: [], vaultLocked: !!currentToken && !encryptionKey, disconnected: !currentToken, suppressInline: false } as ExtensionResponse);
+            break;
+          case EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL:
+            sendResponse({ type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL, entries: [], vaultLocked: !!currentToken && !encryptionKey, disconnected: !currentToken, suppressInline: false } as ExtensionResponse);
             break;
           case EXT_MSG.FETCH_PASSWORDS:
             sendResponse({ type: EXT_MSG.FETCH_PASSWORDS, entries: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
