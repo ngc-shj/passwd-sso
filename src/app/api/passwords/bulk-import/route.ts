@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAuditAsync, logAuditBulkAsync, personalAuditBase } from "@/lib/audit/audit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
+import { createPersonalPasswordEntry } from "@/lib/services/personal-password-service";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { rateLimited, unauthorized } from "@/lib/http/api-response";
 
@@ -45,60 +45,9 @@ async function handlePOST(req: NextRequest) {
   await withUserTenantRls(userId, async (tenantId) => {
     for (const entryData of entries) {
       try {
-        const {
-          id: clientId,
-          encryptedBlob,
-          encryptedOverview,
-          keyVersion,
-          aadVersion,
-          tagIds,
-          folderId,
-          isFavorite,
-          entryType,
-          requireReprompt,
-          expiresAt,
-        } = entryData;
-
-        // Verify folder ownership
-        if (folderId) {
-          const folder = await prisma.folder.findFirst({ where: { id: folderId, userId } });
-          if (!folder) {
-            failedCount++;
-            continue;
-          }
-        }
-
-        // Verify tag ownership
-        if (tagIds?.length) {
-          const ownedCount = await prisma.tag.count({ where: { id: { in: tagIds }, userId } });
-          if (ownedCount !== tagIds.length) {
-            failedCount++;
-            continue;
-          }
-        }
-
-        const entry = await prisma.passwordEntry.create({
-          data: {
-            ...(clientId ? { id: clientId } : {}),
-            ...toBlobColumns(encryptedBlob),
-            ...toOverviewColumns(encryptedOverview),
-            keyVersion,
-            aadVersion,
-            entryType,
-            ...(isFavorite !== undefined ? { isFavorite } : {}),
-            ...(requireReprompt !== undefined ? { requireReprompt } : {}),
-            ...(expiresAt !== undefined ? { expiresAt: expiresAt ? new Date(expiresAt) : null } : {}),
-            ...(folderId ? { folderId } : {}),
-            userId,
-            tenantId,
-            ...(tagIds?.length
-              ? { tags: { connect: tagIds.map((id) => ({ id })) } }
-              : {}),
-          },
-          select: { id: true },
-        });
-
-        createdIds.push(entry.id);
+        const res = await createPersonalPasswordEntry(prisma, userId, tenantId, entryData);
+        if (res.ok) createdIds.push(res.id);
+        else failedCount++;
       } catch {
         failedCount++;
       }
@@ -135,7 +84,7 @@ async function handlePOST(req: NextRequest) {
   );
 
   return NextResponse.json(
-    { success: createdIds.length, failed: failedCount },
+    { success: true, importedCount: createdIds.length, failedCount },
     { status: 201 },
   );
 }

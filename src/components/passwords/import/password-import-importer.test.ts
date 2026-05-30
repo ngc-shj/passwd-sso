@@ -31,16 +31,16 @@ function response(ok: boolean): Response {
     ok,
     status: ok ? 201 : 500,
     headers: { get: () => null },
-    json: async () => ({ success: ok ? 1 : 0, failed: ok ? 0 : 1 }),
+    json: async () => ({ success: true, importedCount: ok ? 1 : 0, failedCount: ok ? 0 : 1 }),
   } as unknown as Response;
 }
 
-function bulkResponse(ok: boolean, success: number, failed: number): Response {
+function bulkResponse(ok: boolean, importedCount: number, failedCount: number): Response {
   return {
     ok,
     status: ok ? 201 : 500,
     headers: { get: () => null },
-    json: async () => ({ success, failed }),
+    json: async () => ({ success: true, importedCount, failedCount }),
   } as unknown as Response;
 }
 

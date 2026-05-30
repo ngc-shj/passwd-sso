@@ -200,7 +200,7 @@ export async function runImportEntries({
 
         if (res.ok) {
           const data = await res.json();
-          chunkSuccess = typeof data.success === "number" ? data.success : 0;
+          chunkSuccess = typeof data.importedCount === "number" ? data.importedCount : 0;
         }
         sent = true;
       } catch {
