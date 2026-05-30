@@ -205,7 +205,10 @@ describe("POST /api/share-links/verify-access", () => {
     expect(status).toBe(404);
   });
 
-  it("returns 400 when share has no access password configured", async () => {
+  it("returns 404 when share has no access password configured (anti-enumeration)", async () => {
+    // S10: a share that exists but is unprotected must be indistinguishable
+    // from a non-existent share, so this collapses to 404 (not a 400 that would
+    // confirm the share's existence).
     mockPasswordShareFindUnique.mockResolvedValue(
       makeShare({ accessPasswordHash: null }),
     );
@@ -215,7 +218,7 @@ describe("POST /api/share-links/verify-access", () => {
       }),
     );
     const { status } = await parseResponse(res);
-    expect(status).toBe(400);
+    expect(status).toBe(404);
   });
 
   it("returns 403 and logs failed attempt when password is wrong", async () => {
