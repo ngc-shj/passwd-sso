@@ -4,6 +4,11 @@
  * O_NOFOLLOW refuses to follow a symlink at the final path component, closing
  * the symlink / check-then-write TOCTOU window that plain writeFileSync/
  * readFileSync leave open. Used wherever the CLI persists or reads secrets.
+ *
+ * MIRROR: e2e/helpers/secure-file.ts holds the same O_NOFOLLOW logic (the cli
+ * package and the e2e tree compile under separate tsconfigs and cannot share a
+ * module). Keep the O_NOFOLLOW semantics in sync. This copy adds an `encoding`
+ * param + codeql annotation the e2e copy intentionally omits.
  */
 
 import {

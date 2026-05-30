@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { validateMcpToken } from "@/lib/mcp/oauth-server";
+import { validateMcpToken, type McpTokenData } from "@/lib/mcp/oauth-server";
 import { handleMcpRequest } from "@/lib/mcp/server";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
@@ -9,6 +9,18 @@ import { BASE_PATH } from "@/lib/url-helpers";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { readJsonWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
+
+// Tenant network access restriction for MCP. MCP tokens carry tenantId, so a
+// leaked mcp_ token must still honor the tenant's allowed-CIDR / Tailscale
+// policy — matching the v1 / extension / SCIM token paths.
+function enforceMcpAccess(req: NextRequest, data: McpTokenData) {
+  return enforceAccessRestriction(
+    req,
+    data.userId ?? SYSTEM_ACTOR_ID,
+    data.tenantId,
+    ACTOR_TYPE.MCP_AGENT,
+  );
+}
 
 async function handlePOST(req: NextRequest) {
   // Validate MCP access token
@@ -29,15 +41,7 @@ async function handlePOST(req: NextRequest) {
     );
   }
 
-  // Tenant network access restriction. MCP tokens carry tenantId, so a leaked
-  // mcp_ token must still honor the tenant's allowed-CIDR / Tailscale policy
-  // — matching the v1 / extension / SCIM token paths.
-  const denied = await enforceAccessRestriction(
-    req,
-    tokenResult.data.userId ?? SYSTEM_ACTOR_ID,
-    tokenResult.data.tenantId,
-    ACTOR_TYPE.MCP_AGENT,
-  );
+  const denied = await enforceMcpAccess(req, tokenResult.data);
   if (denied) return denied;
 
   const read = await readJsonWithCap(req, MAX_JSON_BODY_BYTES);
@@ -66,12 +70,7 @@ async function handleGET(req: NextRequest) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  const denied = await enforceAccessRestriction(
-    req,
-    tokenResult.data.userId ?? SYSTEM_ACTOR_ID,
-    tokenResult.data.tenantId,
-    ACTOR_TYPE.MCP_AGENT,
-  );
+  const denied = await enforceMcpAccess(req, tokenResult.data);
   if (denied) return denied;
 
   // Basic SSE stream — sends a single endpoint event then closes

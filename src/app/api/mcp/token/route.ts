@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { hashToken } from "@/lib/crypto/crypto-server";
-import { readJsonWithCap } from "@/lib/http/parse-body";
+import { readJsonWithCap, exceedsDeclaredContentLength } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 import {
   createRefreshToken,
@@ -38,12 +38,8 @@ async function handlePOST(req: NextRequest) {
   if (contentType.includes("application/x-www-form-urlencoded")) {
     // Cap the untrusted form body. readJsonWithCap is JSON-only, so guard the
     // form branch with an explicit content-length pre-check (RFC 6749 envelope).
-    const contentLength = req.headers.get("content-length");
-    if (contentLength) {
-      const declared = Number(contentLength);
-      if (Number.isFinite(declared) && declared > MAX_JSON_BODY_BYTES) {
-        return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-      }
+    if (exceedsDeclaredContentLength(req, MAX_JSON_BODY_BYTES)) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }
     try {
       const text = await req.text();

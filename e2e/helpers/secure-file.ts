@@ -2,6 +2,9 @@
  * Symlink-safe file I/O for the E2E auth-state file (holds session tokens).
  * O_NOFOLLOW refuses a symlinked final path component, closing the symlink /
  * TOCTOU window plain writeFileSync/readFileSync leave open.
+ *
+ * MIRROR: cli/src/lib/secure-file.ts holds the same O_NOFOLLOW logic (separate
+ * tsconfigs prevent sharing one module). Keep the O_NOFOLLOW semantics in sync.
  */
 import {
   openSync,

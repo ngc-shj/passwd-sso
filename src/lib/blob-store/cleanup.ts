@@ -2,7 +2,7 @@ import { getAttachmentBlobStore, BLOB_STORAGE } from "@/lib/blob-store";
 import type { AttachmentBlobContext } from "@/lib/blob-store/types";
 import type { TxOrPrisma } from "@/lib/prisma";
 
-interface AttachmentBlobRef {
+export interface AttachmentBlobRef {
   stored: Uint8Array;
   context: AttachmentBlobContext;
 }

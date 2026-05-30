@@ -14,6 +14,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import {
   collectEntryAttachmentRefs,
   deleteAttachmentBlobs,
+  type AttachmentBlobRef,
 } from "@/lib/blob-store/cleanup";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -142,7 +143,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  let attachmentRefs: Awaited<ReturnType<typeof collectEntryAttachmentRefs>>;
+  let attachmentRefs: AttachmentBlobRef[];
   try {
     attachmentRefs = await withTeamTenantRls(teamId, async (tenantId) =>
       withTenantRls(prisma, tenantId, async (tx) => {

@@ -8,6 +8,7 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import {
   collectEntryAttachmentRefs,
   deleteAttachmentBlobs,
+  type AttachmentBlobRef,
 } from "@/lib/blob-store/cleanup";
 import { unauthorized } from "@/lib/http/api-response";
 
@@ -19,7 +20,7 @@ async function handlePOST(req: NextRequest) {
   }
 
   // Atomic findMany + deleteMany to prevent TOCTOU race
-  const { entryIds, deletedCount, attachmentRefs } = await withUserTenantRls(session.user.id, async (): Promise<{ entryIds: string[]; deletedCount: number; attachmentRefs: Awaited<ReturnType<typeof collectEntryAttachmentRefs>> }> => {
+  const { entryIds, deletedCount, attachmentRefs } = await withUserTenantRls(session.user.id, async (): Promise<{ entryIds: string[]; deletedCount: number; attachmentRefs: AttachmentBlobRef[] }> => {
     const [entries, result, refs] = await prisma.$transaction(async (tx) => {
       const found = await tx.passwordEntry.findMany({
         where: { userId: session.user.id, deletedAt: { not: null } },
