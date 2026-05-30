@@ -516,11 +516,16 @@ export function ShareDialog({
                 placeholder={t("maxViewsPlaceholder")}
                 value={maxViews}
                 onChange={(e) => {
+                  // Allow free digit entry while typing; range clamp runs on
+                  // blur (R23) so e.g. "150" is not truncated to "15" mid-stroke.
+                  setMaxViews(e.target.value.replace(/[^0-9]/g, ""));
+                }}
+                onBlur={(e) => {
                   const raw = e.target.value;
                   if (!raw) { setMaxViews(""); return; }
                   const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < MAX_VIEWS_MIN) { setMaxViews(""); return; }
-                  setMaxViews(String(Math.min(n, MAX_VIEWS_MAX)));
+                  if (Number.isNaN(n)) { setMaxViews(""); return; }
+                  setMaxViews(String(Math.min(Math.max(n, MAX_VIEWS_MIN), MAX_VIEWS_MAX)));
                 }}
               />
             </div>
