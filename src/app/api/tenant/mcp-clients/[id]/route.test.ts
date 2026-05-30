@@ -91,6 +91,15 @@ describe("GET /api/tenant/mcp-clients/[id]", () => {
     expect(status).toBe(200);
     expect(json.client.id).toBe("client-1");
     expect(json.client.clientId).toBe("mcpc_abc123");
+    // T4: the mock passes through, so the cross-tenant boundary itself is
+    // proven by the integration RLS probe (tenant-swap adversarial test). Here
+    // we assert the route scopes RLS to the AUTHENTICATED tenant — a regression
+    // that wrapped the query with the wrong tenantId would fail this.
+    expect(mockWithTenantRls).toHaveBeenCalledWith(
+      expect.anything(),
+      ACTOR.tenantId,
+      expect.any(Function),
+    );
   });
 
   it("returns 404 when client not found", async () => {

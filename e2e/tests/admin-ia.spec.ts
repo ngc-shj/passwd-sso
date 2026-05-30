@@ -1,6 +1,7 @@
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { injectSession } from "../helpers/auth";
 import { getAuthState } from "../helpers/fixtures";
+import { E2E_TEAM_ID } from "../helpers/team";
 import { VaultLockPage } from "../page-objects/vault-lock.page";
 
 // e2e-selectors:expected-deleted-routes
@@ -120,29 +121,13 @@ test.describe("Admin IA — tenant nav", () => {
 test.describe("Admin IA — team nav", () => {
   let context: BrowserContext;
   let page: Page;
-  let teamId: string;
+  // Use the deterministic pre-seeded team id (global-setup) instead of scraping
+  // it from the teams-list UI. A teams-list rendering regression now fails the
+  // navigation assertions loudly rather than silently skipping every test.
+  const teamId = E2E_TEAM_ID;
 
   test.beforeAll(async ({ browser }) => {
     ({ context, page } = await setupTenantAdminContext(browser as import("@playwright/test").Browser));
-
-    // Navigate to teams list and extract the first team link
-    await page.goto("/ja/admin/tenant/teams");
-    await page.waitForLoadState("networkidle");
-
-    // The tenant teams page renders the team list via a client-side fetch
-    // (useEffect), so waitForLoadState("networkidle") alone is not always
-    // sufficient — explicitly wait for the team link to be in the DOM.
-    // If no teams exist in the fixture, teamId stays empty and the team
-    // tests below skip with a reason (rather than failing the beforeAll).
-    const teamLink = page.locator("a[href*='/admin/teams/']").first();
-    const found = await teamLink
-      .waitFor({ state: "attached", timeout: 20_000 })
-      .then(() => true)
-      .catch(() => false);
-    if (!found) return;
-    const href = await teamLink.getAttribute("href");
-    const match = href?.match(/\/admin\/teams\/([^/]+)/);
-    teamId = match?.[1] ?? "";
   });
 
   test.afterAll(async () => {
@@ -150,14 +135,12 @@ test.describe("Admin IA — team nav", () => {
   });
 
   test("team Members page renders without error", async () => {
-    test.skip(!teamId, "No team found in teams list");
     const response = await page.goto(`/ja/admin/teams/${teamId}/members`);
     expect(response?.status()).not.toBe(404);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 10_000 });
   });
 
   test("team General redirects to Profile sub-tab", async () => {
-    test.skip(!teamId, "No team found in teams list");
     const response = await page.goto(`/ja/admin/teams/${teamId}/general`);
     expect(response?.status()).not.toBe(404);
     // /general is a redirect-only page that lands on /profile by default
@@ -170,38 +153,32 @@ test.describe("Admin IA — team nav", () => {
   });
 
   test("team General Delete sub-tab is reachable", async () => {
-    test.skip(!teamId, "No team found in teams list");
     const response = await page.goto(`/ja/admin/teams/${teamId}/general/delete`);
     expect(response?.status()).not.toBe(404);
     await expect(page).toHaveURL(new RegExp(`/admin/teams/${teamId}/general/delete$`));
   });
 
   test("team Policy page renders without error", async () => {
-    test.skip(!teamId, "No team found in teams list");
     const response = await page.goto(`/ja/admin/teams/${teamId}/policy`);
     expect(response?.status()).not.toBe(404);
   });
 
   test("team Key Rotation page renders without error", async () => {
-    test.skip(!teamId, "No team found in teams list");
     const response = await page.goto(`/ja/admin/teams/${teamId}/key-rotation`);
     expect(response?.status()).not.toBe(404);
   });
 
   test("team Webhooks page renders without error", async () => {
-    test.skip(!teamId, "No team found in teams list");
     const response = await page.goto(`/ja/admin/teams/${teamId}/webhooks`);
     expect(response?.status()).not.toBe(404);
   });
 
   test("team Audit Logs page renders without error", async () => {
-    test.skip(!teamId, "No team found in teams list");
     const response = await page.goto(`/ja/admin/teams/${teamId}/audit-logs`);
     expect(response?.status()).not.toBe(404);
   });
 
   test("team Transfer Ownership page renders without error", async () => {
-    test.skip(!teamId, "No team found in teams list");
     const response = await page.goto(`/ja/admin/teams/${teamId}/members/transfer-ownership`);
     expect(response?.status()).not.toBe(404);
   });

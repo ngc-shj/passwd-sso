@@ -60,9 +60,14 @@ export default defineConfig({
       ],
       thresholds: {
         lines: 60,
-        "src/lib/auth/session/auth-or-token.ts": { lines: 80 },
-        "src/lib/crypto/crypto-server.ts": { lines: 80 },
-        "src/lib/crypto/crypto-team.ts": { lines: 80 },
+        // T8: a branch floor so negative/denied paths (authz rejection,
+        // expired-grant, revoked-token) can't silently erode. Global floor is
+        // intentionally conservative; the security-critical files hold a higher
+        // branch bar.
+        branches: 50,
+        "src/lib/auth/session/auth-or-token.ts": { lines: 80, branches: 70 },
+        "src/lib/crypto/crypto-server.ts": { lines: 80, branches: 70 },
+        "src/lib/crypto/crypto-team.ts": { lines: 80, branches: 70 },
       },
     },
     isolate: true,
