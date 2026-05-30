@@ -2,6 +2,9 @@ import { type NextRequest, NextResponse } from "next/server";
 import { validateMcpToken } from "@/lib/mcp/oauth-server";
 import { handleMcpRequest } from "@/lib/mcp/server";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
+import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
+import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { BASE_PATH } from "@/lib/url-helpers";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { readJsonWithCap } from "@/lib/http/parse-body";
@@ -25,6 +28,17 @@ async function handlePOST(req: NextRequest) {
       { status: 401 },
     );
   }
+
+  // Tenant network access restriction. MCP tokens carry tenantId, so a leaked
+  // mcp_ token must still honor the tenant's allowed-CIDR / Tailscale policy
+  // — matching the v1 / extension / SCIM token paths.
+  const denied = await enforceAccessRestriction(
+    req,
+    tokenResult.data.userId ?? SYSTEM_ACTOR_ID,
+    tokenResult.data.tenantId,
+    ACTOR_TYPE.MCP_AGENT,
+  );
+  if (denied) return denied;
 
   const read = await readJsonWithCap(req, MAX_JSON_BODY_BYTES);
   if (!read.ok) {
@@ -51,6 +65,14 @@ async function handleGET(req: NextRequest) {
   if (!tokenResult.ok) {
     return new NextResponse("Unauthorized", { status: 401 });
   }
+
+  const denied = await enforceAccessRestriction(
+    req,
+    tokenResult.data.userId ?? SYSTEM_ACTOR_ID,
+    tokenResult.data.tenantId,
+    ACTOR_TYPE.MCP_AGENT,
+  );
+  if (denied) return denied;
 
   // Basic SSE stream — sends a single endpoint event then closes
   const stream = new ReadableStream({
