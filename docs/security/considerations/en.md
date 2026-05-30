@@ -49,7 +49,7 @@ Browser -> Auth Provider/NextAuth -> session established
 [Sign-in: Passkey (discoverable)]
 Browser -> navigator.credentials.get(allowCredentials:[]) -> authenticator
   -> POST /api/auth/passkey/verify -> session established
-  -> PRF output (if supported) -> vault auto-unlock via sessionStorage
+  -> PRF output (if supported) -> vault auto-unlock via in-memory hand-off
 
 [Sign-in: Email + Security Key (non-discoverable)]
 Browser -> POST /api/auth/passkey/options/email {email}
@@ -360,13 +360,12 @@ so there is no immediate break scenario. Still, long-term migration planning is 
 - `memory`:
   - `encryptionKey` (`CryptoKey`)
   - `secretKeyRef` (`Uint8Array`)
-  - Rationale: keep decryption material out of persistent storage
+  - PRF hand-off (`src/lib/auth/prf-handoff.ts`): the PRF output and PRF-wrapped secret key are passed from sign-in to vault auto-unlock via a module-level in-memory variable, NOT sessionStorage (which XSS can enumerate). Single-use (cleared on read); survives the client-side `router.push` but not a full reload (then auto-unlock degrades to the manual prompt).
+  - Rationale: keep decryption material out of any persistent / DOM-readable storage
 - `sessionStorage`:
-  - `psso:prf-output` (PRF-derived key material, zeroed after single use; lifespan: sign-in to vault unlock)
-  - `psso:prf-data` (PRF-wrapped secret key from server, cleared after single use)
-  - `psso:webauthn-signin` (UX flag, no secrets)
+  - `psso:webauthn-signin` (UX trigger flag, no secrets)
   - Previous `psso:skip-beforeunload-once` flag removed; dirty-state guards now use in-memory React state only
-  - Rationale: PRF output is stored only transiently across page navigation during the single-ceremony sign-in flow
+  - Rationale: only a non-sensitive boolean trigger lives here; PRF material moved to the in-memory hand-off above
 - `localStorage`:
   - Watchtower UI helper state (e.g., display/ack timestamps)
   - Rationale: usability only; no secret material

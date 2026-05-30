@@ -165,6 +165,21 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("applies baseline security headers to API responses (orchestrator wiring)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/v1/passwords"),
+      dummyOptions,
+    );
+    // proxy() must wrap handleApiAuth's response with applyBaselineSecurityHeaders.
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("Referrer-Policy")).toBe(
+      "strict-origin-when-cross-origin",
+    );
+    // CSP / X-Frame-Options stay page-only — not applied to API responses.
+    expect(res.headers.get("Content-Security-Policy")).toBeNull();
+    expect(res.headers.get("X-Frame-Options")).toBeNull();
+  });
+
   it("allows /api/v1/vault/status without session (public API)", async () => {
     const res = await proxy(
       createApiRequest("/api/v1/vault/status"),

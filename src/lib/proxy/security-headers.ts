@@ -16,6 +16,24 @@ export type SecurityHeadersOptions = {
   nonce: string;
 };
 
+/**
+ * Baseline, content-agnostic security headers safe for ANY response (pages and
+ * API alike): nosniff, Referrer-Policy, and HSTS over HTTPS. Deliberately
+ * excludes CSP / X-Frame-Options / Permissions-Policy / the nonce cookie, which
+ * are page-rendering concerns applied by {@link applySecurityHeaders}.
+ */
+export function applyBaselineSecurityHeaders(response: NextResponse): NextResponse {
+  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  response.headers.set("X-Content-Type-Options", "nosniff");
+  if (isHttps) {
+    response.headers.set(
+      "Strict-Transport-Security",
+      "max-age=63072000; includeSubDomains; preload",
+    );
+  }
+  return response;
+}
+
 export function applySecurityHeaders(
   response: NextResponse,
   { cspHeader, nonce }: SecurityHeadersOptions,
@@ -36,15 +54,8 @@ export function applySecurityHeaders(
     `csp-endpoint="${cspReportUrl}"`,
   );
 
-  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-  response.headers.set("X-Content-Type-Options", "nosniff");
+  applyBaselineSecurityHeaders(response);
   response.headers.set("X-Frame-Options", "DENY");
-  if (isHttps) {
-    response.headers.set(
-      "Strict-Transport-Security",
-      "max-age=63072000; includeSubDomains; preload",
-    );
-  }
   response.headers.set("Permissions-Policy", PERMISSIONS_POLICY);
 
   response.cookies.set("csp-nonce", nonce, {

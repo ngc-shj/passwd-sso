@@ -1,9 +1,32 @@
 import { describe, it, expect } from "vitest";
 import { NextResponse } from "next/server";
-import { applySecurityHeaders } from "./security-headers";
+import { applySecurityHeaders, applyBaselineSecurityHeaders } from "./security-headers";
 import { PERMISSIONS_POLICY } from "@/lib/security/security-headers";
 
 const dummyOptions = { cspHeader: "default-src 'self'", nonce: "n0nc3-XYZ" };
+
+describe("applyBaselineSecurityHeaders (API + pages)", () => {
+  it("sets the non-CSP baseline: nosniff + Referrer-Policy", () => {
+    const res = applyBaselineSecurityHeaders(new NextResponse());
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(res.headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
+  });
+
+  it("does NOT set page-only headers (CSP / X-Frame-Options / Permissions-Policy)", () => {
+    const res = applyBaselineSecurityHeaders(new NextResponse());
+    expect(res.headers.get("Content-Security-Policy")).toBeNull();
+    expect(res.headers.get("X-Frame-Options")).toBeNull();
+    expect(res.headers.get("Permissions-Policy")).toBeNull();
+  });
+
+  it("omits Strict-Transport-Security when not over HTTPS (default test env)", () => {
+    // isHttps is import-time false (no AUTH_URL in setup.ts) — documents the
+    // baseline path's HSTS-off behavior on plain HTTP; the HTTPS branch mirrors
+    // applySecurityHeaders and is exercised there.
+    const res = applyBaselineSecurityHeaders(new NextResponse());
+    expect(res.headers.get("Strict-Transport-Security")).toBeNull();
+  });
+});
 
 describe("applySecurityHeaders", () => {
   it("sets Content-Security-Policy from cspHeader option", () => {

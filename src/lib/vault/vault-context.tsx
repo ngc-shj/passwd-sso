@@ -48,6 +48,7 @@ import type { VaultStatus } from "@/lib/constants";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { fetchApi } from "@/lib/url-helpers";
 import { hexDecode, hexEncode } from "../crypto/crypto-utils";
+import { takePrf } from "@/lib/auth/prf-handoff";
 import {
   startPasskeyAuthentication,
   unwrapSecretKeyWithPrf,
@@ -651,23 +652,19 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   // ─── Unlock with stored PRF (single-ceremony sign-in flow) ──────
 
   /**
-   * Unlock the vault using PRF output stored in sessionStorage during sign-in.
+   * Unlock the vault using PRF output handed off in-memory during sign-in.
    * This avoids a second authenticator interaction (e.g., QR code scan) by
    * reusing the PRF output obtained during the sign-in ceremony.
    */
   const unlockWithStoredPrf = useCallback(async (): Promise<boolean> => {
-    const prfOutputHex = sessionStorage.getItem("psso:prf-output");
-    const prfDataStr = sessionStorage.getItem("psso:prf-data");
-
-    // Always clean up immediately
-    sessionStorage.removeItem("psso:prf-output");
-    sessionStorage.removeItem("psso:prf-data");
-
-    if (!prfOutputHex || !prfDataStr) return false;
+    // PRF material is handed off in-memory (not sessionStorage) and cleared on
+    // read; absent after a full reload → caller falls back to manual unlock.
+    const handoff = takePrf();
+    if (!handoff) return false;
 
     try {
-      const prfOutput = hexDecode(prfOutputHex);
-      const prfData = JSON.parse(prfDataStr);
+      const prfOutput = hexDecode(handoff.prfOutputHex);
+      const prfData = handoff.prfData;
 
       // Fetch vault data
       const dataRes = await fetchApi(API_PATH.VAULT_UNLOCK_DATA);
