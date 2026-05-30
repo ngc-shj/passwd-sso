@@ -662,9 +662,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     const handoff = takePrf();
     if (!handoff) return false;
 
-    // Single finally zeroizes the PRF output on every exit (early returns and
-    // throws alike); ownership transferred to us by takePrf above.
+    // Single finally zeroizes both the PRF output and the unwrapped secret key
+    // on every exit (early returns and throws alike); the PRF buffer's
+    // ownership was transferred to us by takePrf above. secretKey is hoisted
+    // here so the finally covers the post-derivation throw paths too.
     const prfOutput = handoff.prfOutput;
+    let secretKey: Uint8Array | null = null;
     try {
       const prfData = handoff.prfData;
 
@@ -680,7 +683,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       if (!vaultData.accountSalt) return false;
 
       // Unwrap secretKey using PRF output (no WebAuthn ceremony needed)
-      const secretKey = await unwrapSecretKeyWithPrf(
+      secretKey = await unwrapSecretKeyWithPrf(
         {
           ciphertext: prfData.prfEncryptedSecretKey,
           iv: prfData.prfSecretKeyIv,
@@ -694,7 +697,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       if (vaultData.verificationArtifact) {
         const valid = await verifyKey(encKey, vaultData.verificationArtifact);
         if (!valid) {
-          secretKey.fill(0);
           return false;
         }
       }
@@ -714,7 +716,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         if (body.error) {
           throw new VaultUnlockError(body.error, body.lockedUntil);
         }
-        secretKey.fill(0);
         return false;
       }
 
@@ -748,8 +749,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      secretKey.fill(0);
-
       // Auto-confirm pending emergency access grants
       const userId = session?.user?.id;
       if (userId && secretKeyRef.current) {
@@ -769,6 +768,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       return false;
     } finally {
       prfOutput.fill(0);
+      secretKey?.fill(0);
     }
   }, [session?.user?.id]);
 

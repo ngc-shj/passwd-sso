@@ -54,20 +54,22 @@ flag remains). No Critical → no escalation.
 - Modified: `src/components/auth/passkey-signin-button.test.tsx`,
   `src/components/auth/security-key-signin-form.test.tsx`
 
-### Security [Adjacent] secretKey throw-path zeroization — Out of scope (pre-existing)
-- **Anti-Deferral check**: pre-existing in a changed file (`vault-context.tsx`).
-- **Justification**: The gap is identical on `main` and is unrelated to this
-  fix's contract (PRF output zeroization). It is narrow defense-in-depth
-  (secretKey is copied to `secretKeyRef` and wiped at line 751 on success; the
-  only uncovered window is an exception thrown after assignment). Worst case:
-  the live `secretKey` buffer lingers in heap until GC after an unlock that
-  throws post-derivation — likelihood low (derivation rarely throws), cost to
-  fix small but cross-cutting (would touch the whole unlock family for
-  consistency, not just this path). Per the user's filter on speculative
-  defensive scaffolding, surfaced to the user rather than silently expanded
-  into this PR's scope.
-- **Orchestrator sign-off**: routed to user decision (see final report); not
-  blocking this fix.
+### Security [Adjacent] secretKey throw-path zeroization — Fixed (user opted to include)
+- The user chose to include this in the PR. Applied the same consolidation as
+  C3: `secretKey` hoisted to an outer `let`, the three explicit `secretKey.fill(0)`
+  calls folded into the single outer `finally` (`secretKey?.fill(0)` next to
+  `prfOutput.fill(0)`), so the post-derivation throw paths (VaultUnlockError on
+  `/api/vault/unlock` body.error, crypto-derivation throws) now zeroize the
+  unwrapped vault secret key.
+- Modified: `src/lib/vault/vault-context.tsx` (`unlockWithStoredPrf`).
+- Test: `src/lib/vault/vault-context.test.tsx` — new "zeroizes the unwrapped
+  secret key when unlock throws AFTER the key is unwrapped" regression test;
+  captures the real unwrapped key via a pass-through spy on
+  `unwrapSecretKeyWithPrf` (real crypto preserved) and asserts it is zeroized.
+  Mutation-verified: removing `secretKey?.fill(0)` makes the test fail.
+- Focused functionality + security re-review of the delta: No findings (copy
+  happens before the finally wipe; no use-after-zeroize; scope-isolated to
+  `unlockWithStoredPrf`; null-safe optional chain; strictly increases coverage).
 
 ## Tightening-only skip — Round 1
 Findings applied directly (no Round 2 review):
