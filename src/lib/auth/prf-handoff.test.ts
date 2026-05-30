@@ -1,14 +1,18 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { stashPrf, takePrf, clearPrf } from "./prf-handoff";
+import { stashPrf, takePrf, clearPrf, type PrfHandoff } from "./prf-handoff";
 
-const sample = {
-  prfOutputHex: "ab".repeat(32),
-  prfData: {
-    prfEncryptedSecretKey: "ct",
-    prfSecretKeyIv: "iv",
-    prfSecretKeyAuthTag: "tag",
-  },
-};
+// Fresh buffers per call — stash/clear zeroize in place, so sharing one buffer
+// across tests would leak mutations between them.
+function makeSample(byte = 0xab): PrfHandoff {
+  return {
+    prfOutput: new Uint8Array(32).fill(byte),
+    prfData: {
+      prfEncryptedSecretKey: "ct",
+      prfSecretKeyIv: "iv",
+      prfSecretKeyAuthTag: "tag",
+    },
+  };
+}
 
 describe("prf-handoff", () => {
   beforeEach(() => {
@@ -19,23 +23,31 @@ describe("prf-handoff", () => {
     expect(takePrf()).toBeNull();
   });
 
-  it("returns the stashed material once, then clears (single-use)", () => {
+  it("returns the same stashed reference once, then clears (single-use)", () => {
+    const sample = makeSample();
     stashPrf(sample);
-    expect(takePrf()).toEqual(sample);
-    // Second read is empty — material is not retained.
+    const taken = takePrf();
+    // Same reference — no copy, so the consumer can zeroize the real buffer.
+    expect(taken).toBe(sample);
     expect(takePrf()).toBeNull();
   });
 
-  it("clearPrf drops material without consuming it", () => {
+  it("clearPrf zeroizes the dropped buffer and consumes it", () => {
+    const sample = makeSample();
     stashPrf(sample);
     clearPrf();
+    expect(sample.prfOutput.every((b) => b === 0)).toBe(true);
     expect(takePrf()).toBeNull();
   });
 
-  it("stashPrf overwrites a prior pending value", () => {
-    stashPrf(sample);
-    const next = { ...sample, prfOutputHex: "cd".repeat(32) };
-    stashPrf(next);
-    expect(takePrf()).toEqual(next);
+  it("stashPrf overwrites a prior pending value and zeroizes the prior buffer", () => {
+    const first = makeSample(0xab);
+    const second = makeSample(0xcd);
+    stashPrf(first);
+    stashPrf(second);
+    // The overwritten buffer is wiped; the new one survives intact.
+    expect(first.prfOutput.every((b) => b === 0)).toBe(true);
+    expect(takePrf()).toBe(second);
+    expect(second.prfOutput.some((b) => b !== 0)).toBe(true);
   });
 });

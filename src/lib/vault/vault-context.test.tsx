@@ -21,7 +21,7 @@ import {
   VaultUnlockError,
 } from "./vault-context";
 import { stashPrf, clearPrf } from "@/lib/auth/prf-handoff";
-import { wrapSecretKeyWithPrf, hexEncode } from "@/lib/auth/webauthn/webauthn-client";
+import { wrapSecretKeyWithPrf } from "@/lib/auth/webauthn/webauthn-client";
 
 const PASSPHRASE = "correct horse battery staple";
 
@@ -382,7 +382,7 @@ describe("VaultProvider — unlockWithStoredPrf (in-memory PRF hand-off)", () =>
       const prfOutput = new Uint8Array(32).fill(0x5a);
       const wrapped = await wrapSecretKeyWithPrf(secretKey!, prfOutput);
       stashPrf({
-        prfOutputHex: hexEncode(prfOutput),
+        prfOutput,
         prfData: {
           prfEncryptedSecretKey: wrapped.ciphertext,
           prfSecretKeyIv: wrapped.iv,
@@ -417,6 +417,66 @@ describe("VaultProvider — unlockWithStoredPrf (in-memory PRF hand-off)", () =>
     },
     60_000,
   );
+
+  it("zeroizes the PRF buffer on the !dataRes.ok early return", async () => {
+    clearPrf();
+    // makeFetchEnv(null) → /api/vault/unlock/data returns { ok: false, 404 }.
+    const { fetchMock } = makeFetchEnv(null);
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useVault(), { wrapper });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const prfOutput = new Uint8Array(32).fill(0x5a);
+    stashPrf({
+      prfOutput,
+      prfData: { prfEncryptedSecretKey: "ct", prfSecretKeyIv: "iv", prfSecretKeyAuthTag: "tag" },
+    });
+
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.unlockWithStoredPrf();
+    });
+    expect(ok).toBe(false);
+    // The single outer finally wipes the buffer even on the early return.
+    expect(prfOutput.every((b) => b === 0)).toBe(true);
+  });
+
+  it("zeroizes the PRF buffer on the missing-accountSalt early return", async () => {
+    clearPrf();
+    // unlock/data returns ok:true but without accountSalt → early return false.
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = typeof url === "string" ? url : "";
+      if (path === "/api/vault/status") {
+        return { ok: true, json: async () => ({ setupRequired: false, hasRecoveryKey: false, vaultAutoLockMinutes: null, tenantMinPasswordLength: 0, tenantRequireUppercase: false, tenantRequireLowercase: false, tenantRequireNumbers: false, tenantRequireSymbols: false }) };
+      }
+      if (path === "/api/vault/unlock/data") {
+        return { ok: true, json: async () => ({ keyVersion: 1 }) }; // no accountSalt
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    }) as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    const { result } = renderHook(() => useVault(), { wrapper });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const prfOutput = new Uint8Array(32).fill(0x5a);
+    stashPrf({
+      prfOutput,
+      prfData: { prfEncryptedSecretKey: "ct", prfSecretKeyIv: "iv", prfSecretKeyAuthTag: "tag" },
+    });
+
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.unlockWithStoredPrf();
+    });
+    expect(ok).toBe(false);
+    expect(prfOutput.every((b) => b === 0)).toBe(true);
+  });
 });
 
 describe("VaultProvider — session-driven status", () => {

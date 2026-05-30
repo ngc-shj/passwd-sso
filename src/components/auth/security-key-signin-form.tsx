@@ -9,7 +9,6 @@ import { Loader2, KeyRound } from "lucide-react";
 import {
   isWebAuthnSupported,
   startPasskeyAuthentication,
-  hexEncode,
 } from "@/lib/auth/webauthn/webauthn-client";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
@@ -41,6 +40,9 @@ export function SecurityKeySignInForm() {
     }
 
     setLoading(true);
+    // Held in the outer scope so `finally` can zeroize it on every path where
+    // ownership was NOT transferred to the handoff (set to null after stashPrf).
+    let prfOutput: Uint8Array | null = null;
     try {
       // 1. Get options with allowCredentials for this email
       const optionsRes = await fetchApi(
@@ -60,10 +62,11 @@ export function SecurityKeySignInForm() {
       const { options, challengeId, prfSalt } = await optionsRes.json();
 
       // 2. WebAuthn ceremony (browser matches security key to allowCredentials)
-      const { responseJSON, prfOutput } = await startPasskeyAuthentication(
+      const result = await startPasskeyAuthentication(
         options,
         prfSalt || undefined,
       );
+      prfOutput = result.prfOutput;
 
       // 3. Verify (reuses existing /api/auth/passkey/verify)
       const verifyRes = await fetchApi(
@@ -72,14 +75,13 @@ export function SecurityKeySignInForm() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            credentialResponse: JSON.stringify(responseJSON),
+            credentialResponse: JSON.stringify(result.responseJSON),
             challengeId,
           }),
         },
       );
 
       if (!verifyRes.ok) {
-        prfOutput?.fill(0);
         setError(t("securityKeySignInFailed"));
         return;
       }
@@ -88,10 +90,12 @@ export function SecurityKeySignInForm() {
 
       // 4. Hand PRF data to the dashboard in-memory (NOT sessionStorage, which
       // XSS can read) for vault auto-unlock. Survives the client-side router.push
-      // below; a full reload drops it → manual unlock.
+      // below; a full reload drops it → manual unlock. Ownership of the buffer
+      // transfers to the handoff: null it out so the finally below does not
+      // zeroize what the consumer must still read.
       if (prfOutput && verifyData.prf) {
-        stashPrf({ prfOutputHex: hexEncode(prfOutput), prfData: verifyData.prf });
-        prfOutput.fill(0);
+        stashPrf({ prfOutput, prfData: verifyData.prf });
+        prfOutput = null;
       }
 
       sessionStorage.setItem("psso:webauthn-signin", "1");
@@ -103,6 +107,9 @@ export function SecurityKeySignInForm() {
         setError(t("securityKeySignInFailed"));
       }
     } finally {
+      // Zeroize on every path where the buffer was not handed off (error throw,
+      // verify failure, no PRF bundle). No-op after a successful stashPrf.
+      prfOutput?.fill(0);
       setLoading(false);
     }
   };

@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
 import { Loader2, Fingerprint } from "lucide-react";
-import { isWebAuthnSupported, startPasskeyAuthentication, hexEncode } from "@/lib/auth/webauthn/webauthn-client";
+import { isWebAuthnSupported, startPasskeyAuthentication } from "@/lib/auth/webauthn/webauthn-client";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { useCallbackUrl } from "@/hooks/use-callback-url";
@@ -28,6 +28,9 @@ export function PasskeySignInButton() {
     setLoading(true);
     setError(null);
 
+    // Held in the outer scope so `finally` can zeroize it on every path where
+    // ownership was NOT transferred to the handoff (set to null after stashPrf).
+    let prfOutput: Uint8Array | null = null;
     try {
       // 1. Get discoverable credential options from server (includes prfSalt)
       const optionsRes = await fetchApi(
@@ -45,10 +48,11 @@ export function PasskeySignInButton() {
       // 2. Run WebAuthn authentication WITH PRF if salt is available.
       // This combines sign-in + PRF key derivation into a single ceremony
       // so users only need one authenticator interaction (e.g., one QR scan).
-      const { responseJSON, prfOutput } = await startPasskeyAuthentication(
+      const result = await startPasskeyAuthentication(
         options,
         prfSalt || undefined,
       );
+      prfOutput = result.prfOutput;
 
       // 3. Verify and create database session via custom route.
       // Auth.js Credentials provider only supports JWT sessions, which is
@@ -60,14 +64,13 @@ export function PasskeySignInButton() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            credentialResponse: JSON.stringify(responseJSON),
+            credentialResponse: JSON.stringify(result.responseJSON),
             challengeId,
           }),
         },
       );
 
       if (!verifyRes.ok) {
-        prfOutput?.fill(0);
         setError(t("passkeySignInFailed"));
         return;
       }
@@ -78,9 +81,11 @@ export function PasskeySignInButton() {
       // hand both to the dashboard in-memory (NOT sessionStorage, which XSS can
       // read) for vault auto-unlock without a second ceremony. Survives the
       // client-side router.push below; a full reload drops it → manual unlock.
+      // Ownership of the buffer transfers to the handoff: null it out so the
+      // finally below does not zeroize what the consumer must still read.
       if (prfOutput && verifyData.prf) {
-        stashPrf({ prfOutputHex: hexEncode(prfOutput), prfData: verifyData.prf });
-        prfOutput.fill(0);
+        stashPrf({ prfOutput, prfData: verifyData.prf });
+        prfOutput = null;
       }
 
       // 5. Set flag for vault auto-unlock after dashboard navigation
@@ -95,6 +100,9 @@ export function PasskeySignInButton() {
         setError(t("passkeySignInFailed"));
       }
     } finally {
+      // Zeroize on every path where the buffer was not handed off (error throw,
+      // verify failure, no PRF bundle). No-op after a successful stashPrf.
+      prfOutput?.fill(0);
       setLoading(false);
     }
   };

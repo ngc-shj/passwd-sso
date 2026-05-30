@@ -662,8 +662,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     const handoff = takePrf();
     if (!handoff) return false;
 
+    // Single finally zeroizes the PRF output on every exit (early returns and
+    // throws alike); ownership transferred to us by takePrf above.
+    const prfOutput = handoff.prfOutput;
     try {
-      const prfOutput = hexDecode(handoff.prfOutputHex);
       const prfData = handoff.prfData;
 
       // Fetch vault data
@@ -678,19 +680,14 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       if (!vaultData.accountSalt) return false;
 
       // Unwrap secretKey using PRF output (no WebAuthn ceremony needed)
-      let secretKey: Uint8Array;
-      try {
-        secretKey = await unwrapSecretKeyWithPrf(
-          {
-            ciphertext: prfData.prfEncryptedSecretKey,
-            iv: prfData.prfSecretKeyIv,
-            authTag: prfData.prfSecretKeyAuthTag,
-          },
-          prfOutput,
-        );
-      } finally {
-        prfOutput.fill(0);
-      }
+      const secretKey = await unwrapSecretKeyWithPrf(
+        {
+          ciphertext: prfData.prfEncryptedSecretKey,
+          iv: prfData.prfSecretKeyIv,
+          authTag: prfData.prfSecretKeyAuthTag,
+        },
+        prfOutput,
+      );
 
       // Derive encryption key and verify with artifact
       const encKey = await deriveEncryptionKey(secretKey);
@@ -770,6 +767,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       if (err instanceof VaultUnlockError) throw err;
       return false;
+    } finally {
+      prfOutput.fill(0);
     }
   }, [session?.user?.id]);
 

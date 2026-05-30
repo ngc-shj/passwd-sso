@@ -6,7 +6,6 @@ import "@testing-library/jest-dom/vitest";
 const {
   mockStartPasskeyAuthentication,
   mockIsWebAuthnSupported,
-  mockHexEncode,
   mockRouterPush,
   mockFetch,
   mockStashPrf,
@@ -14,9 +13,6 @@ const {
 } = vi.hoisted(() => ({
   mockStartPasskeyAuthentication: vi.fn(),
   mockIsWebAuthnSupported: vi.fn(() => true),
-  mockHexEncode: vi.fn((b: Uint8Array) =>
-    Array.from(b, (x) => x.toString(16).padStart(2, "0")).join(""),
-  ),
   mockRouterPush: vi.fn(),
   mockFetch: vi.fn(),
   mockStashPrf: vi.fn(),
@@ -53,7 +49,6 @@ vi.mock("@/lib/auth/webauthn/webauthn-client", () => ({
   startPasskeyAuthentication: (
     ...args: unknown[]
   ) => mockStartPasskeyAuthentication(...args),
-  hexEncode: (b: Uint8Array) => mockHexEncode(b),
 }));
 
 import { SecurityKeySignInForm } from "./security-key-signin-form";
@@ -105,7 +100,7 @@ describe("SecurityKeySignInForm — §Sec-7 WebAuthn / PRF", () => {
     expect(mockStartPasskeyAuthentication).not.toHaveBeenCalled();
   });
 
-  it("(success) hands PRF material to the in-memory channel (NOT sessionStorage), then zeroizes prfOutput", async () => {
+  it("(success) hands the live PRF buffer to the in-memory channel (NOT sessionStorage) WITHOUT zeroizing it", async () => {
     const prfBytes = makePrfSentinel();
     mockStartPasskeyAuthentication.mockResolvedValueOnce({
       responseJSON: { id: "cred-1" },
@@ -131,11 +126,11 @@ describe("SecurityKeySignInForm — §Sec-7 WebAuthn / PRF", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /signInWithSecurityKey/ }));
 
-    const expectedHex = "ab".repeat(32);
     await waitFor(() => {
-      // PRF material goes to the in-memory hand-off, never to XSS-readable storage.
+      // Ownership transfer: the SAME live Uint8Array reference is stashed (no
+      // hex copy), so the consumer can zeroize the real buffer after use.
       expect(mockStashPrf).toHaveBeenCalledWith({
-        prfOutputHex: expectedHex,
+        prfOutput: prfBytes,
         prfData: {
           prfEncryptedSecretKey: "ct",
           prfSecretKeyIv: "iv",
@@ -147,8 +142,55 @@ describe("SecurityKeySignInForm — §Sec-7 WebAuthn / PRF", () => {
       expect(sessionStorage.getItem("psso:prf-output")).toBeNull();
       expect(sessionStorage.getItem("psso:prf-data")).toBeNull();
     });
-    expect(prfBytes.every((b) => b === 0)).toBe(true);
+    // Ownership transferred: producer must NOT wipe the stashed buffer.
+    expect(prfBytes.some((b) => b !== 0)).toBe(true);
     expect(mockRouterPush).toHaveBeenCalledWith("/dashboard");
+  });
+
+  it("(no PRF bundle) does NOT hand off and zeroizes the obtained buffer", async () => {
+    const prfBytes = makePrfSentinel();
+    mockStartPasskeyAuthentication.mockResolvedValueOnce({
+      responseJSON: { id: "cred-1" },
+      prfOutput: prfBytes,
+    });
+    mockFetch
+      .mockResolvedValueOnce(okJson({ options: {}, challengeId: "ch-1", prfSalt: "salt" }))
+      .mockResolvedValueOnce(okJson({ ok: true })); // /verify ok but no prf bundle
+
+    render(<SecurityKeySignInForm />);
+    fireEvent.change(screen.getByPlaceholderText("emailForSecurityKey"), {
+      target: { value: "user@example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /signInWithSecurityKey/ }));
+
+    await waitFor(() => {
+      expect(mockRouterPush).toHaveBeenCalledWith("/dashboard");
+    });
+    expect(mockStashPrf).not.toHaveBeenCalled();
+    expect(prfBytes.every((b) => b === 0)).toBe(true);
+  });
+
+  it("(fetch throws after ceremony) zeroizes the obtained buffer in finally", async () => {
+    const prfBytes = makePrfSentinel();
+    mockStartPasskeyAuthentication.mockResolvedValueOnce({
+      responseJSON: { id: "cred-1" },
+      prfOutput: prfBytes,
+    });
+    mockFetch
+      .mockResolvedValueOnce(okJson({ options: {}, challengeId: "ch-1", prfSalt: "salt" }))
+      .mockRejectedValueOnce(new Error("network")); // /verify rejects
+
+    render(<SecurityKeySignInForm />);
+    fireEvent.change(screen.getByPlaceholderText("emailForSecurityKey"), {
+      target: { value: "user@example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /signInWithSecurityKey/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText("securityKeySignInFailed")).toBeInTheDocument();
+    });
+    expect(prfBytes.every((b) => b === 0)).toBe(true);
+    expect(mockStashPrf).not.toHaveBeenCalled();
   });
 
   it("(verify-failure) zeroizes prfOutput AND hands off NO PRF / writes no webauthn-signin key", async () => {
