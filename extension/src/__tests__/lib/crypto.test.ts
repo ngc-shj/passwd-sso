@@ -8,6 +8,7 @@ import {
   verifyKey,
   decryptData,
   buildPersonalEntryAAD,
+  VAULT_TYPE,
   type EncryptedData,
 } from "../../lib/crypto";
 
@@ -218,36 +219,67 @@ describe("verifyKey", () => {
 
 describe("buildPersonalEntryAAD", () => {
   it("produces deterministic output", () => {
-    const a = buildPersonalEntryAAD("user-1", "entry-1");
-    const b = buildPersonalEntryAAD("user-1", "entry-1");
+    const a = buildPersonalEntryAAD("user-1", "entry-1", VAULT_TYPE.BLOB);
+    const b = buildPersonalEntryAAD("user-1", "entry-1", VAULT_TYPE.BLOB);
     expect(hexEncode(a)).toBe(hexEncode(b));
   });
 
   it("differs for different userId", () => {
-    const a = buildPersonalEntryAAD("user-1", "entry-1");
-    const b = buildPersonalEntryAAD("user-2", "entry-1");
+    const a = buildPersonalEntryAAD("user-1", "entry-1", VAULT_TYPE.BLOB);
+    const b = buildPersonalEntryAAD("user-2", "entry-1", VAULT_TYPE.BLOB);
     expect(hexEncode(a)).not.toBe(hexEncode(b));
   });
 
   it("differs for different entryId", () => {
-    const a = buildPersonalEntryAAD("user-1", "entry-1");
-    const b = buildPersonalEntryAAD("user-1", "entry-2");
+    const a = buildPersonalEntryAAD("user-1", "entry-1", VAULT_TYPE.BLOB);
+    const b = buildPersonalEntryAAD("user-1", "entry-2", VAULT_TYPE.BLOB);
     expect(hexEncode(a)).not.toBe(hexEncode(b));
   });
 
   it("starts with scope 'PV' and version 1", () => {
-    const aad = buildPersonalEntryAAD("u", "e");
+    const aad = buildPersonalEntryAAD("u", "e", VAULT_TYPE.BLOB);
     expect(aad[0]).toBe("P".charCodeAt(0));
     expect(aad[1]).toBe("V".charCodeAt(0));
     expect(aad[2]).toBe(1); // version
-    expect(aad[3]).toBe(2); // field count
+    expect(aad[3]).toBe(3); // field count
   });
 
   it("can be used as AAD for encryption/decryption", async () => {
     const key = await makeTestKey();
-    const aad = buildPersonalEntryAAD("user-1", "entry-1");
+    const aad = buildPersonalEntryAAD("user-1", "entry-1", VAULT_TYPE.BLOB);
     const encrypted = await encrypt("secret-data", key, aad);
     const result = await decryptData(encrypted, key, aad);
     expect(result).toBe("secret-data");
+  });
+
+  // Recurrence guard (mirrors src/__tests__/aad-parity.test.ts and the iOS
+  // AADParityTests): pin the 3-field shape to the cross-implementation golden
+  // vectors so an extension-side AAD regression fails extension-ci.
+  it("matches the frozen 3-field golden vectors", () => {
+    // "PV"(5056) + version 01 + nFields 03 + len(1)"u" + len(1)"e" + len(N)vaultType
+    expect(hexEncode(buildPersonalEntryAAD("u", "e", VAULT_TYPE.BLOB))).toBe(
+      "505601030001750001650004626c6f62",
+    );
+    expect(hexEncode(buildPersonalEntryAAD("u", "e", VAULT_TYPE.OVERVIEW))).toBe(
+      "5056010300017500016500086f76657276696577",
+    );
+  });
+
+  it("binds the vaultType: BLOB and OVERVIEW AADs differ for the same entry", () => {
+    expect(hexEncode(buildPersonalEntryAAD("u", "e", VAULT_TYPE.BLOB))).not.toBe(
+      hexEncode(buildPersonalEntryAAD("u", "e", VAULT_TYPE.OVERVIEW)),
+    );
+  });
+
+  it("anti-vacuous: a BLOB-encrypted field cannot be decrypted with the OVERVIEW AAD", async () => {
+    const key = await makeTestKey();
+    const encrypted = await encrypt(
+      "secret-data",
+      key,
+      buildPersonalEntryAAD("user-1", "entry-1", VAULT_TYPE.BLOB),
+    );
+    await expect(
+      decryptData(encrypted, key, buildPersonalEntryAAD("user-1", "entry-1", VAULT_TYPE.OVERVIEW)),
+    ).rejects.toThrow();
   });
 });

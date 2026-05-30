@@ -3,6 +3,7 @@ import type { DecryptedEntry } from "../types/messages";
 import {
   encryptData,
   buildPersonalEntryAAD,
+  VAULT_TYPE,
 } from "../lib/crypto";
 
 // Must stub chrome before importing passkey-provider
@@ -324,7 +325,7 @@ describe("passkey-provider", () => {
     });
 
     it("returns MISSING_KEY_MATERIAL when blob lacks privateKeyJwk", async () => {
-      const aad = buildPersonalEntryAAD(TEST_USER_ID, TEST_ENTRY_ID);
+      const aad = buildPersonalEntryAAD(TEST_USER_ID, TEST_ENTRY_ID, VAULT_TYPE.BLOB);
       const blob = JSON.stringify({ credentialId: TEST_CRED_ID, relyingPartyId: TEST_RP_ID });
       const encryptedBlob = await encryptData(blob, testKey, aad);
 
@@ -352,7 +353,7 @@ describe("passkey-provider", () => {
       // Build a real encrypted blob with a P-256 key pair
       const { generatePasskeyKeypair } = await import("../lib/webauthn-crypto");
       const { privateKeyJwk } = await generatePasskeyKeypair();
-      const aad = buildPersonalEntryAAD(TEST_USER_ID, TEST_ENTRY_ID);
+      const aad = buildPersonalEntryAAD(TEST_USER_ID, TEST_ENTRY_ID, VAULT_TYPE.BLOB);
       const blob = JSON.stringify({
         credentialId: TEST_CRED_ID,
         relyingPartyId: TEST_RP_ID,
@@ -404,7 +405,7 @@ describe("passkey-provider", () => {
     it("still returns ok:true with signature when counter-update PUT fails (non-fatal)", async () => {
       const { generatePasskeyKeypair } = await import("../lib/webauthn-crypto");
       const { privateKeyJwk } = await generatePasskeyKeypair();
-      const aad = buildPersonalEntryAAD(TEST_USER_ID, TEST_ENTRY_ID);
+      const aad = buildPersonalEntryAAD(TEST_USER_ID, TEST_ENTRY_ID, VAULT_TYPE.BLOB);
       const blob = JSON.stringify({
         credentialId: TEST_CRED_ID,
         relyingPartyId: TEST_RP_ID,
@@ -444,7 +445,7 @@ describe("passkey-provider", () => {
     it("returns SENDER_ORIGIN_MISMATCH when senderUrl hostname does not match stored rpId", async () => {
       const { generatePasskeyKeypair } = await import("../lib/webauthn-crypto");
       const { privateKeyJwk } = await generatePasskeyKeypair();
-      const aad = buildPersonalEntryAAD(TEST_USER_ID, TEST_ENTRY_ID);
+      const aad = buildPersonalEntryAAD(TEST_USER_ID, TEST_ENTRY_ID, VAULT_TYPE.BLOB);
       const blob = JSON.stringify({
         credentialId: TEST_CRED_ID,
         relyingPartyId: TEST_RP_ID, // example.com
@@ -853,7 +854,7 @@ describe("passkey-provider", () => {
         relyingPartyId: TEST_RP_ID,
         username: "alice@example.com",
       });
-      const replaceAad = buildPersonalEntryAAD(TEST_USER_ID, replaceId);
+      const replaceAad = buildPersonalEntryAAD(TEST_USER_ID, replaceId, VAULT_TYPE.BLOB);
       const encryptedReplaceBlob = await encryptData(replaceBlob, testKey, replaceAad);
 
       const swFetch = vi.fn()
@@ -894,7 +895,7 @@ describe("passkey-provider", () => {
         entryType: "LOGIN", // not PASSKEY
         relyingPartyId: TEST_RP_ID,
       });
-      const replaceAad = buildPersonalEntryAAD(TEST_USER_ID, replaceId);
+      const replaceAad = buildPersonalEntryAAD(TEST_USER_ID, replaceId, VAULT_TYPE.BLOB);
       const encryptedReplaceBlob = await encryptData(replaceBlob, testKey, replaceAad);
 
       const swFetch = vi.fn()
@@ -930,7 +931,7 @@ describe("passkey-provider", () => {
         entryType: "PASSKEY",
         relyingPartyId: "other.com", // different rpId
       });
-      const replaceAad = buildPersonalEntryAAD(TEST_USER_ID, replaceId);
+      const replaceAad = buildPersonalEntryAAD(TEST_USER_ID, replaceId, VAULT_TYPE.BLOB);
       const encryptedReplaceBlob = await encryptData(replaceBlob, testKey, replaceAad);
 
       const swFetch = vi.fn()
@@ -967,7 +968,7 @@ describe("passkey-provider", () => {
         relyingPartyId: TEST_RP_ID,
         username: "bob@example.com", // different userName
       });
-      const replaceAad = buildPersonalEntryAAD(TEST_USER_ID, replaceId);
+      const replaceAad = buildPersonalEntryAAD(TEST_USER_ID, replaceId, VAULT_TYPE.BLOB);
       const encryptedReplaceBlob = await encryptData(replaceBlob, testKey, replaceAad);
 
       const swFetch = vi.fn()

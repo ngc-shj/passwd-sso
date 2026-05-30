@@ -4,6 +4,7 @@ import {
   encryptData,
   decryptData,
   buildPersonalEntryAAD,
+  VAULT_TYPE,
 } from "../lib/crypto";
 
 // Must stub chrome before importing login-save
@@ -93,7 +94,7 @@ describe("login-save", () => {
     });
 
     it("returns 'none' when password matches existing entry", async () => {
-      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1);
+      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1, VAULT_TYPE.BLOB);
       const blob = JSON.stringify({ password: "same-password" });
       const encBlob = await encryptData(blob, testKey, aad);
 
@@ -114,7 +115,7 @@ describe("login-save", () => {
     });
 
     it("returns 'update' when existing entry has null password", async () => {
-      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1);
+      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1, VAULT_TYPE.BLOB);
       const blob = JSON.stringify({ password: null });
       const encBlob = await encryptData(blob, testKey, aad);
 
@@ -136,7 +137,7 @@ describe("login-save", () => {
     });
 
     it("returns 'update' when existing entry has undefined password", async () => {
-      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1);
+      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1, VAULT_TYPE.BLOB);
       const blob = JSON.stringify({ username: "alice" }); // no password field
       const encBlob = await encryptData(blob, testKey, aad);
 
@@ -158,7 +159,7 @@ describe("login-save", () => {
     });
 
     it("returns 'update' when password differs from existing entry", async () => {
-      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1);
+      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1, VAULT_TYPE.BLOB);
       const blob = JSON.stringify({ password: "old-password" });
       const encBlob = await encryptData(blob, testKey, aad);
 
@@ -214,14 +215,15 @@ describe("login-save", () => {
       expect(deps.invalidateCache).toHaveBeenCalled();
 
       // Verify encrypted blobs decrypt to correct content
-      const aad = buildPersonalEntryAAD("user-1", "new-uuid-1234");
-      const fullPlain = JSON.parse(await decryptData(callBody.encryptedBlob, testKey, aad));
+      const blobAad = buildPersonalEntryAAD("user-1", "new-uuid-1234", VAULT_TYPE.BLOB);
+      const overviewAad = buildPersonalEntryAAD("user-1", "new-uuid-1234", VAULT_TYPE.OVERVIEW);
+      const fullPlain = JSON.parse(await decryptData(callBody.encryptedBlob, testKey, blobAad));
       expect(fullPlain.username).toBe("alice");
       expect(fullPlain.password).toBe("password123");
       expect(fullPlain.title).toBe("example.com");
       expect(fullPlain.url).toBe("https://example.com/login");
 
-      const overviewPlain = JSON.parse(await decryptData(callBody.encryptedOverview, testKey, aad));
+      const overviewPlain = JSON.parse(await decryptData(callBody.encryptedOverview, testKey, overviewAad));
       expect(overviewPlain.title).toBe("example.com");
       expect(overviewPlain.username).toBe("alice");
       expect(overviewPlain.urlHost).toBe("example.com");
@@ -289,7 +291,8 @@ describe("login-save", () => {
 
   describe("handleUpdateLogin", () => {
     it("updates password while preserving other fields", async () => {
-      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1);
+      const blobAad = buildPersonalEntryAAD("user-1", TEST_UUID_1, VAULT_TYPE.BLOB);
+      const overviewAad = buildPersonalEntryAAD("user-1", TEST_UUID_1, VAULT_TYPE.OVERVIEW);
       const originalBlob = {
         title: "GitHub",
         username: "alice",
@@ -297,9 +300,9 @@ describe("login-save", () => {
         url: "https://github.com",
         notes: "my notes",
       };
-      const encBlob = await encryptData(JSON.stringify(originalBlob), testKey, aad);
+      const encBlob = await encryptData(JSON.stringify(originalBlob), testKey, blobAad);
       const overviewBlob = { title: "GitHub", username: "alice", urlHost: "github.com" };
-      const encOverview = await encryptData(JSON.stringify(overviewBlob), testKey, aad);
+      const encOverview = await encryptData(JSON.stringify(overviewBlob), testKey, overviewAad);
 
       const mockFetch = vi.fn()
         .mockResolvedValueOnce(
@@ -335,7 +338,7 @@ describe("login-save", () => {
 
       // Verify the updated blob preserves all original fields except password
       const putBody = JSON.parse(putCall[1].body);
-      const updatedBlobPlain = await decryptData(putBody.encryptedBlob, testKey, aad);
+      const updatedBlobPlain = await decryptData(putBody.encryptedBlob, testKey, blobAad);
       const updatedBlob = JSON.parse(updatedBlobPlain);
       expect(updatedBlob.password).toBe("new-password");
       expect(updatedBlob.title).toBe("GitHub");
@@ -379,11 +382,12 @@ describe("login-save", () => {
     });
 
     it("handles non-JSON error response from PUT", async () => {
-      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1);
+      const blobAad = buildPersonalEntryAAD("user-1", TEST_UUID_1, VAULT_TYPE.BLOB);
+      const overviewAad = buildPersonalEntryAAD("user-1", TEST_UUID_1, VAULT_TYPE.OVERVIEW);
       const blob = JSON.stringify({ password: "old" });
-      const encBlob = await encryptData(blob, testKey, aad);
+      const encBlob = await encryptData(blob, testKey, blobAad);
       const overviewBlob = JSON.stringify({ title: "GitHub", username: "alice", urlHost: "github.com" });
-      const encOverview = await encryptData(overviewBlob, testKey, aad);
+      const encOverview = await encryptData(overviewBlob, testKey, overviewAad);
 
       const mockFetch = vi.fn()
         .mockResolvedValueOnce(
@@ -417,7 +421,7 @@ describe("login-save", () => {
         { id: TEST_UUID_2, title: "GitHub (personal)", username: "alice", urlHost: "github.com", entryType: "LOGIN" },
       ];
 
-      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1);
+      const aad = buildPersonalEntryAAD("user-1", TEST_UUID_1, VAULT_TYPE.BLOB);
       const blob = JSON.stringify({ password: "old-password" });
       const encBlob = await encryptData(blob, testKey, aad);
 

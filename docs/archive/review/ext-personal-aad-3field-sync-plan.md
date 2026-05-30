@@ -154,6 +154,16 @@ C5 (root suite, under `app-ci`) catches the app-side regression direction. This 
 3. **Extension creates a login** (`SAVE_LOGIN`) then the **web app** opens that entry: with C4, the app decrypts both blob and overview.
 4. **Mixed-age vault**: entries created before #482 (2-field) are not expected to decrypt post-fix (no migration) — verify the extension does not crash, just omits them (existing `catch` at `index.ts:1014`).
 
+## iOS (added mid-implementation — user-confirmed, same branch)
+
+The iOS app (`ios/`) is a **third** implementation of the personal-vault AAD and had the identical stale 2-field bug (team AAD was already 4-field/vaultType-aware; personal was forgotten — same shape as the extension). Its existing `AADParityTests.swift` pinned the **wrong** 2-field golden, which is exactly why it never caught the #482 divergence. Fixed in the same branch.
+
+- **C8** — `ios/Shared/Crypto/AAD.swift`: `buildPersonalEntryAAD(userId:entryId:vaultType:)` → 3-field; add a `VaultType` constant namespace (`blob`/`overview`) mirroring the app's `VAULT_TYPE`. `vaultType: String` (matches `buildTeamEntryAAD` and the String already threaded by callers). **No raw `"blob"`/`"overview"` literals anywhere in iOS** — all use `VaultType.blob` / `VaultType.overview` (per user request; also converted the pre-existing team-AAD literals in tests).
+- **C9** — `ios/Shared/Vault/EntryEncrypter.swift`: split the shared `aad` into `blobAAD`/`overviewAAD` per field.
+- **C10** — usage sites pass the correct vaultType: `CredentialResolver.swift:378` and `VaultViewModel.swift:103` thread their existing `vaultType` param into the personal branch (callers already pass `"overview"`/`"blob"` for decryptOverview/decryptDetail); `DebugVaultLoader.swift` splits blob/overview.
+- **C11** — iOS tests: `AADParityTests.swift` golden vectors → correct 3-field bytes (BLOB + OVERVIEW, plus a not-equal assertion); `EntryEncrypterTests`/`CredentialResolverTests` use distinct per-field AADs.
+- **Verification limitation**: this environment is Linux without Xcode — iOS changes were verified by inspection + the forbidden-pattern grep (zero 2-arg calls), but `xcodebuild`/`xctest` was NOT run. **iOS must be built and tested in Xcode before release.**
+
 ## Go/No-Go Gate
 
 | ID | Subject | Status |
@@ -165,3 +175,7 @@ C5 (root suite, under `app-ci`) catches the app-side regression direction. This 
 | C5 | Root-suite app↔extension AAD parity + golden vectors + cross-decrypt regression + structural lock (catches app-side drift under app-ci) | locked |
 | C6 | Update existing extension tests/fixtures/mocks to 3-arg; per-field BLOB/OVERVIEW structural rule + anti-vacuous throw test | locked |
 | C7 | Extension-suite golden-vector parity guard (catches extension-side drift under extension-ci; no ci.yml coupling) | locked |
+| C8 | iOS `buildPersonalEntryAAD` → 3-field + `VaultType` constant (no raw literals) | locked |
+| C9 | iOS `EntryEncrypter` splits blob/overview AADs | locked |
+| C10 | iOS usage sites thread correct vaultType (CredentialResolver/VaultViewModel/DebugVaultLoader) | locked |
+| C11 | iOS tests: 3-field golden vectors + per-field AADs | locked |

@@ -315,7 +315,7 @@ public actor CredentialResolver {
     key: SymmetricKey,
     userId: String
   ) -> VaultEntrySummary? {
-    let aad = buildEntryAAD(entry: entry, vaultType: "overview", userId: userId)
+    let aad = buildEntryAAD(entry: entry, vaultType: VaultType.overview, userId: userId)
     guard
       let ivData = try? hexDecode(entry.encryptedOverview.iv),
       let cipherData = try? hexDecode(entry.encryptedOverview.ciphertext),
@@ -339,7 +339,7 @@ public actor CredentialResolver {
     key: SymmetricKey,
     userId: String
   ) -> VaultEntryDetail? {
-    let aad = buildEntryAAD(entry: entry, vaultType: "blob", userId: userId)
+    let aad = buildEntryAAD(entry: entry, vaultType: VaultType.blob, userId: userId)
     guard
       let ivData = try? hexDecode(entry.encryptedBlob.iv),
       let cipherData = try? hexDecode(entry.encryptedBlob.ciphertext),
@@ -375,7 +375,7 @@ public actor CredentialResolver {
       )
     } else {
       guard entry.aadVersion >= 1 else { return nil }
-      return try? buildPersonalEntryAAD(userId: userId, entryId: entry.id)
+      return try? buildPersonalEntryAAD(userId: userId, entryId: entry.id, vaultType: vaultType)
     }
   }
 

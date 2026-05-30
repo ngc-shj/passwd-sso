@@ -3,6 +3,7 @@ import {
   encryptData,
   decryptData,
   buildPersonalEntryAAD,
+  VAULT_TYPE,
 } from "../lib/crypto";
 
 // Web Crypto API is available in Node 20+ (vitest uses Node)
@@ -38,7 +39,7 @@ describe("encryptData / decryptData round-trip", () => {
   it("encrypts and decrypts with AAD", async () => {
     const key = await makeTestKey();
     const plaintext = JSON.stringify({ password: "s3cret", username: "alice" });
-    const aad = buildPersonalEntryAAD("user-123", "entry-456");
+    const aad = buildPersonalEntryAAD("user-123", "entry-456", VAULT_TYPE.BLOB);
 
     const encrypted = await encryptData(plaintext, key, aad);
     const decrypted = await decryptData(encrypted, key, aad);
@@ -48,8 +49,8 @@ describe("encryptData / decryptData round-trip", () => {
   it("fails to decrypt with wrong AAD", async () => {
     const key = await makeTestKey();
     const plaintext = "sensitive data";
-    const aad1 = buildPersonalEntryAAD("user-1", "entry-1");
-    const aad2 = buildPersonalEntryAAD("user-2", "entry-2");
+    const aad1 = buildPersonalEntryAAD("user-1", "entry-1", VAULT_TYPE.BLOB);
+    const aad2 = buildPersonalEntryAAD("user-2", "entry-2", VAULT_TYPE.BLOB);
 
     const encrypted = await encryptData(plaintext, key, aad1);
 
@@ -59,7 +60,7 @@ describe("encryptData / decryptData round-trip", () => {
   it("fails to decrypt with no AAD when encrypted with AAD", async () => {
     const key = await makeTestKey();
     const plaintext = "authenticated data";
-    const aad = buildPersonalEntryAAD("user-1", "entry-1");
+    const aad = buildPersonalEntryAAD("user-1", "entry-1", VAULT_TYPE.BLOB);
 
     const encrypted = await encryptData(plaintext, key, aad);
 
@@ -98,7 +99,7 @@ describe("encryptData / decryptData round-trip", () => {
 
   it("handles large JSON payload", async () => {
     const key = await makeTestKey();
-    const aad = buildPersonalEntryAAD("user-big", "entry-big");
+    const aad = buildPersonalEntryAAD("user-big", "entry-big", VAULT_TYPE.BLOB);
     const payload = JSON.stringify({
       title: "Example",
       username: "user@example.com",
