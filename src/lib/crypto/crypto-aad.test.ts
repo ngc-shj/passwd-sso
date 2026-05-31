@@ -4,8 +4,18 @@ import {
   buildTeamEntryAAD,
   buildAttachmentAAD,
   buildItemKeyWrapAAD,
+  buildTeamKeyWrapAAD,
+  buildAdminResetAAD,
+  buildEmergencyWrapAAD,
+  buildWebhookSecretAAD,
+  buildAccountTokenAAD,
   AAD_VERSION,
 } from "./crypto-aad";
+
+const hex = (b: Uint8Array) =>
+  Array.from(b)
+    .map((x) => x.toString(16).padStart(2, "0"))
+    .join("");
 
 describe("crypto-aad", () => {
   // ─── Binary Format Verification ───────────────────────────────
@@ -262,6 +272,76 @@ describe("crypto-aad", () => {
   describe("AAD_VERSION", () => {
     it("is 1", () => {
       expect(AAD_VERSION).toBe(1);
+    });
+  });
+
+  // ─── Relocated + reformatted scopes (OK/AR/EM/WH/AC) ──────────
+  // Direct layout/golden coverage in the registry's own suite (round-trip
+  // behavior is covered per-module; these pin the binary shape at the source).
+
+  describe("buildTeamKeyWrapAAD (OK)", () => {
+    it("produces the frozen OK golden vector", () => {
+      const aad = buildTeamKeyWrapAAD({ teamId: "t", toUserId: "u", keyVersion: 2, wrapVersion: 1 });
+      expect(String.fromCharCode(aad[0], aad[1])).toBe("OK");
+      expect(aad[2]).toBe(AAD_VERSION);
+      expect(aad[3]).toBe(4); // nFields
+      expect(hex(aad)).toBe("4f4b0104000174000175000132000131");
+    });
+  });
+
+  describe("buildAdminResetAAD (AR)", () => {
+    it("produces the frozen AR golden vector", () => {
+      const aad = buildAdminResetAAD({ tenantId: "t", resetId: "r", targetEmailAtInitiate: "e@x" });
+      expect(String.fromCharCode(aad[0], aad[1])).toBe("AR");
+      expect(aad[3]).toBe(3);
+      expect(hex(aad)).toBe("415201030001740001720003654078");
+    });
+  });
+
+  describe("buildEmergencyWrapAAD (EM)", () => {
+    it("produces the frozen EM golden vector (5 fields)", () => {
+      const aad = buildEmergencyWrapAAD({ grantId: "g", ownerId: "o", granteeId: "e", keyVersion: 1, wrapVersion: 1 });
+      expect(String.fromCharCode(aad[0], aad[1])).toBe("EM");
+      expect(aad[3]).toBe(5);
+      expect(hex(aad)).toBe("454d010500016700016f000165000131000131");
+    });
+    it("wrapVersion binds (v1 ≠ v2)", () => {
+      const v1 = buildEmergencyWrapAAD({ grantId: "g", ownerId: "o", granteeId: "e", keyVersion: 1, wrapVersion: 1 });
+      const v2 = buildEmergencyWrapAAD({ grantId: "g", ownerId: "o", granteeId: "e", keyVersion: 1, wrapVersion: 2 });
+      expect(hex(v1)).not.toBe(hex(v2));
+    });
+  });
+
+  describe("buildWebhookSecretAAD (WH)", () => {
+    it("TenantWebhook: 4 fields, frozen golden", () => {
+      const aad = buildWebhookSecretAAD({ tableName: "TenantWebhook", version: 2, webhookId: "w", tenantId: "t" });
+      expect(String.fromCharCode(aad[0], aad[1])).toBe("WH");
+      expect(aad[3]).toBe(4);
+      expect(hex(aad)).toBe("57480104000d54656e616e74576562686f6f6b00027632000177000174");
+    });
+    it("TeamWebhook: 5 fields (teamId appended), frozen golden", () => {
+      const aad = buildWebhookSecretAAD({ tableName: "TeamWebhook", version: 2, webhookId: "w", tenantId: "t", teamId: "m" });
+      expect(aad[3]).toBe(5);
+      expect(hex(aad)).toBe("57480105000b5465616d576562686f6f6b0002763200017700017400016d");
+    });
+    it("rejects a TeamWebhook without teamId", () => {
+      expect(() =>
+        buildWebhookSecretAAD({ tableName: "TeamWebhook", version: 1, webhookId: "w", tenantId: "t" }),
+      ).toThrow(/teamId/);
+    });
+  });
+
+  describe("buildAccountTokenAAD (AC)", () => {
+    it("produces the frozen AC golden vector", () => {
+      const aad = buildAccountTokenAAD({ userId: "u", provider: "google", providerAccountId: "p" });
+      expect(String.fromCharCode(aad[0], aad[1])).toBe("AC");
+      expect(aad[3]).toBe(3);
+      expect(hex(aad)).toBe("414301030001750006676f6f676c65000170");
+    });
+    it("provider may contain ':' (binary length-prefix removes delimiter ambiguity)", () => {
+      const a = buildAccountTokenAAD({ userId: "u", provider: "saml:acme", providerAccountId: "x" });
+      const b = buildAccountTokenAAD({ userId: "u", provider: "saml", providerAccountId: "acme:x" });
+      expect(hex(a)).not.toBe(hex(b)); // length-prefix keeps them distinct
     });
   });
 });
