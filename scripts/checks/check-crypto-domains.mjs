@@ -124,13 +124,22 @@ export function parseLedgerAadScopes(ledgerContent) {
   return [...new Set(matches)];
 }
 
+// Crypto directories where string-delimited AAD (e.g. .join("|")) is a
+// regression indicator — all AAD in these dirs is now binary.
+const CRYPTO_DIRS = [
+  "src/lib/crypto/",
+  "extension/src/lib/",
+];
+
 /**
  * Check A — AAD encoder containment.
  *
  * Flags any non-test .ts/.tsx file under src/ or extension/src/ that:
  *   - calls buildAADBytes(  (referencing the private encoder by name), OR
  *   - uses the inline length-prefix idiom: setUint16(<expr>, false)
- *     (the big-endian field-length write that replicates the encoder header)
+ *     (the big-endian field-length write that replicates the encoder header), OR
+ *   - uses a single-char-delimiter .join("|") / .join(":") in a crypto dir
+ *     (string-delimited AAD reformat regression — all AAD is now binary)
  * … EXCEPT files in the AAD_ENCODER_ALLOWLIST.
  *
  * Comment/block-comment lines are stripped before matching (mirror
@@ -147,15 +156,23 @@ export function checkAadEncoderContainment(files) {
     /\bbuildAADBytes\s*\(/,
     /\.setUint16\s*\([^)]*,\s*false\s*\)/,
   ];
+  // String-delimited AAD: a single-char delimiter join in a crypto module
+  // signals a reformat regression back to the old "|"-joined format.
+  const stringJoinPattern = /\.join\s*\(\s*["'][|:]["']\s*\)/;
 
   for (const { rel, content } of files) {
     if (AAD_ENCODER_ALLOWLIST.has(rel)) continue;
-    // Strip comment lines before matching
+    // Strip comment lines before matching (// lines, * block-comment lines,
+    // and /* block-comment openers)
     const activeLines = content
       .split("\n")
       .filter((line) => {
         const trimmed = line.trimStart();
-        return !trimmed.startsWith("//") && !trimmed.startsWith("*");
+        return (
+          !trimmed.startsWith("//") &&
+          !trimmed.startsWith("*") &&
+          !trimmed.startsWith("/*")
+        );
       })
       .join("\n");
     for (const pat of encoderPatterns) {
@@ -165,6 +182,13 @@ export function checkAadEncoderContainment(files) {
         );
         break; // one error per file
       }
+    }
+    // String-join check: only fires for crypto-dir files
+    const inCryptoDir = CRYPTO_DIRS.some((dir) => rel.startsWith(dir));
+    if (inCryptoDir && stringJoinPattern.test(activeLines)) {
+      errors.push(
+        `Check A: string-delimited AAD idiom (.join("|") or .join(":")) found in crypto module: ${rel} — AAD must be binary`
+      );
     }
   }
   return errors;
@@ -273,11 +297,14 @@ export function checkKeyVersionHardcode(files) {
  * For each entry in aad-golden-vectors.json (skipping `_`-prefixed keys):
  *   1. Asserts the hex literal appears in the app parity test
  *      (src/__tests__/aad-parity.test.ts) — confirms the TS side is pinned.
- *   2. Converts the hex to the Swift `[0xNN, 0xNN, ...]` byte-array form and
- *      asserts that comma-joined sequence appears in the iOS parity test
+ *   2. When the entry has `ios: true`, converts the hex to the Swift
+ *      `[0xNN, 0xNN, ...]` byte-array form and asserts that comma-joined
+ *      sequence appears in the iOS parity test
  *      (ios/PasswdSSOTests/AADParityTests.swift) — confirms the Swift side
  *      is pinned to the same bytes. Whitespace/newlines between bytes are
  *      tolerated on both sides before comparison.
+ *      When `ios: false`, the iOS check is skipped (scope not implemented
+ *      on iOS, e.g. OK which is app+extension only).
  *
  * This check runs in main CI (Node only). iOS CI (Xcode) separately verifies
  * that the builder actually produces those bytes at runtime.
@@ -305,25 +332,29 @@ export function checkIosGoldenParity({ goldenJson, appParityContent, iosParityCo
 
   for (const [key, entry] of Object.entries(goldenJson)) {
     if (key.startsWith("_")) continue;
-    const { hex } = entry;
+    const { hex, ios } = entry;
 
-    // 1. App parity: the raw hex string must appear literally in the TS file.
+    // 1. App parity: the raw hex string must appear literally in the TS file
+    //    for every vector, regardless of ios flag.
     if (!appParityContent.includes(hex)) {
       errors.push(
         `Check D: golden vector "${key}" hex "${hex}" not found in app parity test (src/__tests__/aad-parity.test.ts)`
       );
     }
 
-    // 2. iOS parity: convert hex to "0xNN, 0xNN, ..." and search in normalized iOS file.
-    const swiftBytes = hex
-      .match(/.{2}/g)
-      .map((b) => `0x${b}`)
-      .join(", ");
+    // 2. iOS parity: only check when ios: true.
+    //    Vectors with ios: false are not implemented on iOS — skip.
+    if (ios === true) {
+      const swiftBytes = hex
+        .match(/.{2}/g)
+        .map((b) => `0x${b}`)
+        .join(", ");
 
-    if (!normalizedIos.includes(swiftBytes)) {
-      errors.push(
-        `Check D: golden vector "${key}" Swift bytes "${swiftBytes}" not found in iOS parity test (ios/PasswdSSOTests/AADParityTests.swift)`
-      );
+      if (!normalizedIos.includes(swiftBytes)) {
+        errors.push(
+          `Check D: golden vector "${key}" Swift bytes "${swiftBytes}" not found in iOS parity test (ios/PasswdSSOTests/AADParityTests.swift)`
+        );
+      }
     }
   }
 

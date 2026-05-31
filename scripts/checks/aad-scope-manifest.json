@@ -18,14 +18,15 @@
     "roundTrip": "src/lib/crypto/crypto-team.test.ts"
   },
   "OK": {
-    "description": "Team member key wrapping (TeamMemberKey wrapped per recipient) — scope \"OK\"",
+    "description": "Team member key wrapping (TeamMemberKey wrapped per recipient) — scope \"OK\". iOS does not implement OK (app+extension only).",
     "crossCodebase": true,
     "parity": "src/__tests__/aad-parity.test.ts",
     "roundTrip": "src/lib/crypto/crypto-team.test.ts"
   },
   "AT": {
     "description": "Attachment body encryption — scope \"AT\"",
-    "crossCodebase": false,
+    "crossCodebase": true,
+    "parity": "src/__tests__/aad-parity.test.ts",
     "roundTrip": "src/__tests__/db-integration/vault-rotate-key-attachments.integration.test.ts"
   },
   "AW": {

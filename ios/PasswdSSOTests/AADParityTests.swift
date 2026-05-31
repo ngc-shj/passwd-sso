@@ -85,6 +85,23 @@ final class AADParityTests: XCTestCase {
     XCTAssertGreaterThan(result.count, 4)
   }
 
+  func testTeamEntryAADOverviewByteIdentical() throws {
+    // Full-byte golden vector for OV overview (byte-identical to crypto-aad.ts):
+    // scope="OV"(2) + version=1(1) + nFields=4(1)
+    //   + len="t"(2)+"t"(1) + len="e"(2)+"e"(1)
+    //   + len="overview"(2)+"overview"(8) + len("0")(2)+"0"(1)
+    let result = try buildTeamEntryAAD(teamId: "t", entryId: "e", vaultType: VaultType.overview, itemKeyVersion: 0)
+    XCTAssertEqual([UInt8](result), [
+      0x4f, 0x56,             // "OV"
+      0x01,                   // aadVersion = 1
+      0x04,                   // nFields = 4
+      0x00, 0x01, 0x74,       // len("t")=1, "t"
+      0x00, 0x01, 0x65,       // len("e")=1, "e"
+      0x00, 0x08, 0x6f, 0x76, 0x65, 0x72, 0x76, 0x69, 0x65, 0x77,  // len("overview")=8, "overview"
+      0x00, 0x01, 0x30,       // len("0")=1, "0"
+    ])
+  }
+
   // MARK: - Attachment
 
   func testAttachmentAADByteIdentical() throws {
