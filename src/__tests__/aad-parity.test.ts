@@ -1,22 +1,30 @@
 import { describe, it, expect } from "vitest";
 import {
   buildPersonalEntryAAD as appBuildPersonalEntryAAD,
+  buildTeamEntryAAD as appBuildTeamEntryAAD,
+  buildItemKeyWrapAAD as appBuildItemKeyWrapAAD,
   VAULT_TYPE as APP_VAULT_TYPE,
 } from "@/lib/crypto/crypto-aad";
+import { buildTeamKeyWrapAAD as appBuildTeamKeyWrapAAD } from "@/lib/crypto/crypto-team";
 import { encryptData } from "@/lib/crypto/crypto-client";
 import {
   buildPersonalEntryAAD as extBuildPersonalEntryAAD,
   VAULT_TYPE as EXT_VAULT_TYPE,
   decryptData as extDecryptData,
 } from "../../extension/src/lib/crypto";
+import {
+  buildTeamEntryAAD as extBuildTeamEntryAAD,
+  buildItemKeyWrapAAD as extBuildItemKeyWrapAAD,
+  buildTeamKeyWrapAAD as extBuildTeamKeyWrapAAD,
+} from "../../extension/src/lib/crypto-team";
 
-// Recurrence guard for the desync fixed in fix/ext-personal-aad-3field-sync:
-// the app moved the personal-vault AAD to a 3-field shape (#482) and the
-// extension was not updated, silently breaking decryption. This test fails
-// the moment the app personal AAD diverges from the extension's. The frozen
-// golden vectors additionally pin the absolute shape so a change that breaks
-// BOTH sides identically still fails. (iOS pins the same vectors in
-// ios/PasswdSSOTests/AADParityTests.swift; team/history AADs are out of scope.)
+// Recurrence guard for the cross-codebase AAD desync class (#503: the app
+// moved the personal-vault AAD to a 3-field shape and the extension lagged,
+// silently breaking decryption). Each scope shared between app and extension
+// is pinned here: app and extension MUST emit byte-identical AAD, and a frozen
+// golden vector additionally catches a change that breaks BOTH sides
+// identically. Covers PV (personal) + OV/IK/OK (team). (iOS pins the same
+// vectors in ios/PasswdSSOTests/AADParityTests.swift.)
 
 const toHex = (b: Uint8Array) =>
   Array.from(b)
@@ -98,5 +106,41 @@ describe("personal-vault AAD parity (app ↔ extension)", () => {
     await expect(
       extDecryptData(enc, key, extBuildPersonalEntryAAD(userId, entryId, EXT_VAULT_TYPE.OVERVIEW)),
     ).rejects.toThrow();
+  });
+});
+
+describe("team-vault AAD parity (app ↔ extension)", () => {
+  const teamId = "t";
+  const entryId = "e";
+
+  // Frozen golden vectors (generated from the builders; pin the absolute shape
+  // so a both-sides-identical change still fails).
+  const GOLDEN_OV_BLOB = "4f5601040001740001650004626c6f62000130";
+  const GOLDEN_OV_OVERVIEW = "4f56010400017400016500086f76657276696577000130";
+  const GOLDEN_IK = "494b0103000174000165000133";
+  const GOLDEN_OK = "4f4b0104000174000175000132000131";
+
+  it("OV (team entry) blob+overview AAD: app === extension === golden", () => {
+    expect(toHex(appBuildTeamEntryAAD(teamId, entryId, "blob", 0))).toBe(GOLDEN_OV_BLOB);
+    expect(toHex(extBuildTeamEntryAAD(teamId, entryId, "blob", 0))).toBe(GOLDEN_OV_BLOB);
+    expect(toHex(appBuildTeamEntryAAD(teamId, entryId, "overview", 0))).toBe(GOLDEN_OV_OVERVIEW);
+    expect(toHex(extBuildTeamEntryAAD(teamId, entryId, "overview", 0))).toBe(GOLDEN_OV_OVERVIEW);
+  });
+
+  it("IK (item key wrap) AAD: app === extension === golden", () => {
+    expect(toHex(appBuildItemKeyWrapAAD(teamId, entryId, 3))).toBe(GOLDEN_IK);
+    expect(toHex(extBuildItemKeyWrapAAD(teamId, entryId, 3))).toBe(GOLDEN_IK);
+  });
+
+  it("OK (team member key wrap) AAD: app === extension === golden", () => {
+    const ctx = { teamId, toUserId: "u", keyVersion: 2, wrapVersion: 1 };
+    expect(toHex(appBuildTeamKeyWrapAAD(ctx))).toBe(GOLDEN_OK);
+    expect(toHex(extBuildTeamKeyWrapAAD(ctx))).toBe(GOLDEN_OK);
+  });
+
+  it("anti-vacuous: OV blob AAD differs from OV overview AAD (scope/field sanity)", () => {
+    expect(toHex(appBuildTeamEntryAAD(teamId, entryId, "blob", 0))).not.toBe(
+      toHex(appBuildTeamEntryAAD(teamId, entryId, "overview", 0)),
+    );
   });
 });
