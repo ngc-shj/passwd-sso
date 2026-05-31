@@ -39,7 +39,7 @@ interface ImportPanelContentProps {
 
 function ImportPanelContent({ onComplete, teamId: scopedTeamId }: ImportPanelContentProps) {
   const t = useTranslations("Import");
-  const { encryptionKey, userId } = useVault();
+  const { encryptionKey, userId, getKeyVersion } = useVault();
   const teamVault = useTeamVaultOptional();
   const isTeamImport = Boolean(scopedTeamId);
   const tagsPath = scopedTeamId ? apiPath.teamTags(scopedTeamId) : API_PATH.TAGS;
@@ -93,6 +93,7 @@ function ImportPanelContent({ onComplete, teamId: scopedTeamId }: ImportPanelCon
     encryptedInput,
     userId: userId ?? undefined,
     encryptionKey: encryptionKey ?? undefined,
+    keyVersion: isTeamImport ? undefined : getKeyVersion(),
     teamEncryptionKey,
     teamKeyVersion,
     teamId: scopedTeamId,

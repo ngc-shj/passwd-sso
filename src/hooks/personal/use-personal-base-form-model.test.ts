@@ -73,6 +73,7 @@ describe("usePersonalBaseFormModel", () => {
     mockUseVault.mockReturnValue({
       encryptionKey: mockEncryptionKey,
       userId: mockUserId,
+      getKeyVersion: () => 1,
     });
   });
 

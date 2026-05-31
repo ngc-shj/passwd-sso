@@ -27,6 +27,11 @@ import {
   type TeamKeyWrapContext,
 } from "./crypto-team";
 import { deriveEncryptionKey } from "./crypto-client";
+import {
+  buildTeamEntryAAD,
+  buildItemKeyWrapAAD,
+  VAULT_TYPE,
+} from "./crypto-aad";
 
 const TEST_TEAM_ID = "team-test-001";
 
@@ -661,6 +666,115 @@ describe("crypto-team", () => {
       const data = new Uint8Array([0xca, 0xfe]);
       expect(hexEncode(data)).toBe("cafe");
       expect(hexDecode("cafe")).toEqual(data);
+    });
+  });
+
+  // C15: round-trip via the registry builder (OK scope)
+  describe("C15 round-trip with registry AAD builder (OK scope)", () => {
+    it("wrap→unwrap succeeds with matching registry AAD", async () => {
+      const teamKey = generateTeamSymmetricKey();
+      const salt = crypto.getRandomValues(new Uint8Array(32));
+      const saltHex = hexEncode(salt);
+      const ephemeralKeyPair = await generateECDHKeyPair();
+      const ephemeralPubJwk = await exportPublicKey(ephemeralKeyPair.publicKey);
+      const memberKeyPair = await generateECDHKeyPair();
+
+      const encrypted = await wrapTeamKeyForMember(
+        teamKey, ephemeralKeyPair.privateKey, memberKeyPair.publicKey, salt, TEST_CTX,
+      );
+      const unwrapped = await unwrapTeamKey(
+        encrypted, ephemeralPubJwk, memberKeyPair.privateKey, saltHex, TEST_CTX,
+      );
+      expect(unwrapped).toEqual(teamKey);
+    });
+
+    it("anti-vacuous: decrypt with wrong teamId must reject", async () => {
+      const teamKey = generateTeamSymmetricKey();
+      const salt = crypto.getRandomValues(new Uint8Array(32));
+      const saltHex = hexEncode(salt);
+      const ephemeralKeyPair = await generateECDHKeyPair();
+      const ephemeralPubJwk = await exportPublicKey(ephemeralKeyPair.publicKey);
+      const memberKeyPair = await generateECDHKeyPair();
+
+      const encrypted = await wrapTeamKeyForMember(
+        teamKey, ephemeralKeyPair.privateKey, memberKeyPair.publicKey, salt, TEST_CTX,
+      );
+      await expect(
+        unwrapTeamKey(encrypted, ephemeralPubJwk, memberKeyPair.privateKey, saltHex, makeCtx({ teamId: "attacker-team" })),
+      ).rejects.toThrow();
+    });
+
+    it("anti-vacuous: decrypt with wrong toUserId must reject", async () => {
+      const teamKey = generateTeamSymmetricKey();
+      const salt = crypto.getRandomValues(new Uint8Array(32));
+      const saltHex = hexEncode(salt);
+      const ephemeralKeyPair = await generateECDHKeyPair();
+      const ephemeralPubJwk = await exportPublicKey(ephemeralKeyPair.publicKey);
+      const memberKeyPair = await generateECDHKeyPair();
+
+      const encrypted = await wrapTeamKeyForMember(
+        teamKey, ephemeralKeyPair.privateKey, memberKeyPair.publicKey, salt, TEST_CTX,
+      );
+      await expect(
+        unwrapTeamKey(encrypted, ephemeralPubJwk, memberKeyPair.privateKey, saltHex, makeCtx({ toUserId: "attacker-user" })),
+      ).rejects.toThrow();
+    });
+  });
+
+  // C15: round-trip via the registry builder (OV scope)
+  describe("C15 round-trip with registry AAD builder (OV scope)", () => {
+    it("encrypt→decrypt succeeds with matching buildTeamEntryAAD (blob)", async () => {
+      const teamKey = generateTeamSymmetricKey();
+      const encKey = await deriveTeamEncryptionKey(teamKey);
+      const teamId = "team-ov-rt";
+      const entryId = "entry-ov-rt";
+      const aad = buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, 1);
+      const plaintext = '{"title":"OV round-trip","username":"u"}';
+
+      const encrypted = await encryptTeamEntry(plaintext, encKey, aad);
+      const decrypted = await decryptTeamEntry(encrypted, encKey, aad);
+      expect(decrypted).toBe(plaintext);
+    });
+
+    it("anti-vacuous: wrong vaultType AAD must reject (OV blob ≠ OV overview)", async () => {
+      const teamKey = generateTeamSymmetricKey();
+      const encKey = await deriveTeamEncryptionKey(teamKey);
+      const teamId = "team-ov-rt";
+      const entryId = "entry-ov-rt";
+      const blobAad = buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.BLOB, 1);
+      const overviewAad = buildTeamEntryAAD(teamId, entryId, VAULT_TYPE.OVERVIEW, 1);
+
+      const encrypted = await encryptTeamEntry("secret", encKey, blobAad);
+      await expect(decryptTeamEntry(encrypted, encKey, overviewAad)).rejects.toThrow();
+    });
+  });
+
+  // C15: round-trip via the registry builder (IK scope)
+  describe("C15 round-trip with registry AAD builder (IK scope)", () => {
+    it("wrapItemKey→unwrapItemKey succeeds with matching buildItemKeyWrapAAD", async () => {
+      const teamKey = generateTeamSymmetricKey();
+      const teamEncKey = await deriveTeamEncryptionKey(teamKey);
+      const itemKey = generateItemKey();
+      const teamId = "team-ik-rt";
+      const entryId = "entry-ik-rt";
+      const aad = buildItemKeyWrapAAD(teamId, entryId, 2);
+
+      const wrapped = await wrapItemKey(itemKey, teamEncKey, aad);
+      const unwrapped = await unwrapItemKey(wrapped, teamEncKey, aad);
+      expect(unwrapped).toEqual(itemKey);
+    });
+
+    it("anti-vacuous: wrong teamKeyVersion AAD must reject", async () => {
+      const teamKey = generateTeamSymmetricKey();
+      const teamEncKey = await deriveTeamEncryptionKey(teamKey);
+      const itemKey = generateItemKey();
+      const teamId = "team-ik-rt";
+      const entryId = "entry-ik-rt";
+      const aad1 = buildItemKeyWrapAAD(teamId, entryId, 2);
+      const aad2 = buildItemKeyWrapAAD(teamId, entryId, 3);
+
+      const wrapped = await wrapItemKey(itemKey, teamEncKey, aad1);
+      await expect(unwrapItemKey(wrapped, teamEncKey, aad2)).rejects.toThrow();
     });
   });
 });

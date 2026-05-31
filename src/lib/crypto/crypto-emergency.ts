@@ -15,8 +15,8 @@
  *
  * Security:
  *   - HKDF uses random 32-byte salt (stored in DB) — prevents same-key reuse across grants
- *   - AES-GCM AAD binds ciphertext to grant context (grantId|ownerId|granteeId|keyVersion|wrapVersion)
- *     using fixed-order pipe-separated concatenation to avoid JSON serialization ordering issues
+ *   - AES-GCM AAD binds ciphertext to grant context (grantId, ownerId, granteeId, keyVersion, wrapVersion)
+ *     using the length-prefixed binary format from crypto-aad.ts (scope "EM")
  *   - HKDF info includes version string for domain separation across algorithm versions
  *   - wrapVersion field enables v1→v2 migration without breaking existing data
  *
@@ -80,22 +80,7 @@ export interface WrapContext {
 // ─── Utility ────────────────────────────────────────────────
 
 import { textEncode, toArrayBuffer } from "./crypto-utils";
-
-/**
- * Build AAD bytes from WrapContext.
- * Fixed-order pipe-separated concatenation (not JSON) to guarantee byte-identical
- * AAD between encrypt and decrypt.
- */
-export function buildAAD(ctx: WrapContext): BufferSource {
-  const aad = [
-    ctx.grantId,
-    ctx.ownerId,
-    ctx.granteeId,
-    String(ctx.keyVersion),
-    String(ctx.wrapVersion),
-  ].join("|");
-  return textEncode(aad);
-}
+import { buildEmergencyWrapAAD } from "./crypto-aad";
 
 // ─── Key Pair Generation ────────────────────────────────────
 
@@ -241,7 +226,7 @@ export async function wrapSecretKeyForGrantee(
   const aesParams: AesGcmParams = {
     name: "AES-GCM",
     iv: toArrayBuffer(iv),
-    additionalData: buildAAD(ctx),
+    additionalData: toArrayBuffer(buildEmergencyWrapAAD(ctx)),
   };
   const encryptedBuf = await crypto.subtle.encrypt(
     aesParams,
@@ -292,7 +277,7 @@ export async function unwrapSecretKeyAsGrantee(
     {
       name: "AES-GCM",
       iv: toArrayBuffer(iv),
-      additionalData: buildAAD(ctx),
+      additionalData: toArrayBuffer(buildEmergencyWrapAAD(ctx)),
     },
     sharedKey,
     toArrayBuffer(combined)

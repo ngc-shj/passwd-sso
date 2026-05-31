@@ -1,0 +1,38 @@
+{
+  "_doc": "Frozen golden AAD vectors shared across app (TS), extension (TS), and iOS (Swift). Byte-equality is enforced by scripts/checks/check-crypto-domains.mjs (Check D) in main CI; each codebase's own parity test proves its builder produces these bytes. To change an AAD format, update this file AND all three codebases' parity tests in one commit.",
+  "PV-blob": {
+    "input": "userId=u, entryId=e, vaultType=blob",
+    "hex": "505601030001750001650004626c6f62",
+    "ios": true
+  },
+  "PV-overview": {
+    "input": "userId=u, entryId=e, vaultType=overview",
+    "hex": "5056010300017500016500086f76657276696577",
+    "ios": true
+  },
+  "OV-blob": {
+    "input": "teamId=t, entryId=e, vaultType=blob, itemKeyVersion=0",
+    "hex": "4f5601040001740001650004626c6f62000130",
+    "ios": true
+  },
+  "OV-overview": {
+    "input": "teamId=t, entryId=e, vaultType=overview, itemKeyVersion=0",
+    "hex": "4f56010400017400016500086f76657276696577000130",
+    "ios": true
+  },
+  "IK": {
+    "input": "teamId=t, entryId=e, teamKeyVersion=3",
+    "hex": "494b0103000174000165000133",
+    "ios": true
+  },
+  "AT": {
+    "input": "entryId=e, attachmentId=a",
+    "hex": "41540102000165000161",
+    "ios": true
+  },
+  "OK": {
+    "input": "teamId=t, toUserId=u, keyVersion=2, wrapVersion=1",
+    "hex": "4f4b0104000174000175000132000131",
+    "ios": false
+  }
+}

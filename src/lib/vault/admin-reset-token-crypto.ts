@@ -2,13 +2,10 @@
 //
 // AAD binding (A02-7):
 //   AES-256-GCM AAD is encoded via the shared length-prefixed binary format
-//   (buildAADBytes) under scope `AR` with 3 fields. Length-prefixed encoding
-//   eliminates the delimiter-collision risk of the previous `tenantId:resetId:
-//   email` string form: if a future identifier format introduces ':' the
-//   wrong-shape AAD would silently match. Length prefixes make field
-//   boundaries unambiguous regardless of field content.
+//   (buildAdminResetAAD from the single registry) under scope `AR` with 3
+//   fields. Length-prefixed encoding eliminates delimiter-collision risk.
 //
-//   The binding still locks each ciphertext to:
+//   The binding locks each ciphertext to:
 //     - the specific reset row (resetId) — substitution across rows fails
 //     - the target user's email at initiate (targetEmailAtInitiate) — if the
 //       target user changes their email after initiate, decryption fails (FR12)
@@ -33,24 +30,13 @@ import {
   getCurrentMasterKeyVersion,
   getMasterKeyByVersion,
 } from "@/lib/crypto/crypto-server";
-import { buildAADBytes } from "@/lib/crypto/crypto-aad";
+import { buildAdminResetAAD, type AdminResetAad } from "@/lib/crypto/crypto-aad";
 
-const SCOPE_ADMIN_RESET = "AR";
-
-export type AdminResetAad = {
-  tenantId: string;
-  resetId: string;
-  targetEmailAtInitiate: string;
-};
+// Re-export so callers importing AdminResetAad from this module stay unchanged.
+export type { AdminResetAad };
 
 function buildAad(aad: AdminResetAad): Buffer {
-  return Buffer.from(
-    buildAADBytes(SCOPE_ADMIN_RESET, 3, [
-      aad.tenantId,
-      aad.resetId,
-      aad.targetEmailAtInitiate,
-    ]),
-  );
+  return Buffer.from(buildAdminResetAAD(aad));
 }
 
 export function encryptResetToken(plaintext: string, aad: AdminResetAad): string {

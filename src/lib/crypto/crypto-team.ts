@@ -27,6 +27,13 @@ import {
   importPublicKey,
 } from "./crypto-emergency";
 import { toArrayBuffer, textEncode } from "./crypto-utils";
+import {
+  buildTeamKeyWrapAAD,
+  type TeamKeyWrapContext,
+} from "./crypto-aad";
+
+// Re-export so callers importing TeamKeyWrapContext from crypto-team still work.
+export type { TeamKeyWrapContext };
 
 // ─── Constants ──────────────────────────────────────────────────
 
@@ -44,12 +51,6 @@ const HKDF_TEAM_ENC_INFO = "passwd-sso-team-enc-v1";
 export const HKDF_ECDH_WRAP_INFO = "passwd-sso-ecdh-v1";
 
 export const CURRENT_TEAM_WRAP_VERSION = 1;
-
-/** AAD scope for TeamMemberKey wrapping */
-const AAD_SCOPE_TEAM_KEY = "OK";
-
-/** AAD version for team key wrapping */
-const AAD_VERSION = 1;
 
 // ─── Team Symmetric Key Generation ───────────────────────────────
 
@@ -165,68 +166,9 @@ export async function deriveEcdhWrappingKey(
   );
 }
 
-// ─── AAD for TeamMemberKey Wrapping ──────────────────────────────
-
-export interface TeamKeyWrapContext {
-  teamId: string;
-  toUserId: string;
-  keyVersion: number;
-  wrapVersion: number;
-}
-
-/**
- * Build AAD for TeamMemberKey wrapping.
- * Binary format (same as crypto-aad.ts buildAADBytes):
- *   [scope: 2B "OK"] [aadVersion: 1B] [nFields: 1B=4]
- *   [field_len: 2B BE] [field: N bytes] × 4
- *
- * Fields: teamId | toUserId | keyVersion | wrapVersion
- * Prevents cross-team, cross-user, and cross-version transplant attacks.
- */
-export function buildTeamKeyWrapAAD(ctx: TeamKeyWrapContext): Uint8Array {
-  const fields = [
-    ctx.teamId,
-    ctx.toUserId,
-    String(ctx.keyVersion),
-    String(ctx.wrapVersion),
-  ];
-
-  const encoder = new TextEncoder();
-  const encodedFields = fields.map((f) => encoder.encode(f));
-
-  const headerSize = 4; // scope(2) + aadVersion(1) + nFields(1)
-  const fieldsSize = encodedFields.reduce((sum, ef) => sum + 2 + ef.length, 0);
-  const totalSize = headerSize + fieldsSize;
-
-  const buf = new ArrayBuffer(totalSize);
-  const view = new DataView(buf);
-  const bytes = new Uint8Array(buf);
-
-  let offset = 0;
-
-  // Scope: "OK"
-  bytes[offset] = AAD_SCOPE_TEAM_KEY.charCodeAt(0);
-  bytes[offset + 1] = AAD_SCOPE_TEAM_KEY.charCodeAt(1);
-  offset += 2;
-
-  // AAD version
-  view.setUint8(offset, AAD_VERSION);
-  offset += 1;
-
-  // Number of fields
-  view.setUint8(offset, fields.length);
-  offset += 1;
-
-  // Fields
-  for (const encoded of encodedFields) {
-    view.setUint16(offset, encoded.length, false); // big-endian
-    offset += 2;
-    bytes.set(encoded, offset);
-    offset += encoded.length;
-  }
-
-  return bytes;
-}
+// buildTeamKeyWrapAAD is imported from crypto-aad (single registry).
+// Re-export it so callers importing from crypto-team stay unchanged.
+export { buildTeamKeyWrapAAD };
 
 // ─── Team Key Wrapping (Admin → Member) ──────────────────────────
 

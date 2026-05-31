@@ -45,6 +45,7 @@ function createDeps(overrides?: Partial<LoginSaveDeps>): LoginSaveDeps {
   return {
     getEncryptionKey: vi.fn().mockReturnValue(null),
     getCurrentUserId: vi.fn().mockReturnValue("user-1"),
+    getKeyVersion: vi.fn().mockReturnValue(1),
     getCachedEntries: vi.fn().mockResolvedValue(mockEntries),
     isHostMatch: vi.fn((entryHost: string, tabHost: string) => entryHost === tabHost),
     extractHost: vi.fn((url: string) => {
@@ -229,6 +230,28 @@ describe("login-save", () => {
       expect(overviewPlain.urlHost).toBe("example.com");
     });
 
+    it("threads the current key version into the POST body", async () => {
+      const mockFetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ id: "new-uuid-1234" }), { status: 201 }),
+      );
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        getKeyVersion: vi.fn().mockReturnValue(3),
+        swFetch: mockFetch,
+      });
+      initLoginSave(deps);
+
+      const result = await handleSaveLogin(
+        "https://example.com/login",
+        "example.com",
+        "alice",
+        "password123",
+      );
+      expect(result.ok).toBe(true);
+      const callBody = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(callBody.keyVersion).toBe(3);
+    });
+
     it("returns error when vault is locked", async () => {
       const deps = createDeps({ getEncryptionKey: vi.fn().mockReturnValue(null) });
       initLoginSave(deps);
@@ -355,6 +378,31 @@ describe("login-save", () => {
       expect(updatedOverview.title).toBe("GitHub");
       expect(updatedOverview.username).toBe("alice");
       expect(updatedOverview.urlHost).toBe("github.com");
+    });
+
+    it("threads the current key version into the PUT body", async () => {
+      const blobAad = buildPersonalEntryAAD("user-1", TEST_UUID_1, VAULT_TYPE.BLOB);
+      const overviewAad = buildPersonalEntryAAD("user-1", TEST_UUID_1, VAULT_TYPE.OVERVIEW);
+      const encBlob = await encryptData(JSON.stringify({ password: "old" }), testKey, blobAad);
+      const encOverview = await encryptData(JSON.stringify({ title: "GitHub", username: "alice", urlHost: "github.com" }), testKey, overviewAad);
+
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ id: TEST_UUID_1, encryptedBlob: encBlob, encryptedOverview: encOverview, aadVersion: 1 })),
+        )
+        .mockResolvedValueOnce(new Response(JSON.stringify({ id: TEST_UUID_1 }), { status: 200 }));
+
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        getKeyVersion: vi.fn().mockReturnValue(3),
+        swFetch: mockFetch,
+      });
+      initLoginSave(deps);
+
+      const result = await handleUpdateLogin(TEST_UUID_1, "new-password");
+      expect(result.ok).toBe(true);
+      const putBody = JSON.parse(mockFetch.mock.calls[1][1].body);
+      expect(putBody.keyVersion).toBe(3);
     });
 
     it("returns error when vault is locked", async () => {

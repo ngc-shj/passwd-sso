@@ -10,6 +10,7 @@ interface ExecutePersonalEntrySubmitArgs {
   initialId?: string;
   encryptionKey: CryptoKey;
   userId: string;
+  keyVersion: number;
   fullBlob: string;
   overviewBlob: string;
   tagIds: string[];
@@ -28,6 +29,7 @@ export async function executePersonalEntrySubmit({
   initialId,
   encryptionKey,
   userId,
+  keyVersion,
   fullBlob,
   overviewBlob,
   tagIds,
@@ -48,6 +50,7 @@ export async function executePersonalEntrySubmit({
       initialId,
       encryptionKey,
       userId,
+      keyVersion,
       fullBlob,
       overviewBlob,
       tagIds,

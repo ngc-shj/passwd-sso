@@ -35,6 +35,7 @@ interface RunImportParams {
   sourceFilename: string;
   userId?: string;
   encryptionKey?: CryptoKey;
+  keyVersion?: number;
   teamEncryptionKey?: CryptoKey;
   teamKeyVersion?: number;
   teamId?: string;
@@ -62,6 +63,7 @@ export async function runImportEntries({
   sourceFilename,
   userId,
   encryptionKey,
+  keyVersion,
   teamEncryptionKey,
   teamKeyVersion,
   teamId,
@@ -72,6 +74,9 @@ export async function runImportEntries({
   }
   if (!isTeamImport && !userId) {
     throw new Error("userId is required for personal import");
+  }
+  if (!isTeamImport && keyVersion === undefined) {
+    throw new Error("keyVersion is required for personal import");
   }
   if (isTeamImport && (!teamEncryptionKey || !teamId)) {
     throw new Error("teamEncryptionKey and teamId are required for team import");
@@ -162,7 +167,7 @@ export async function runImportEntries({
           encryptedBlob,
           encryptedOverview,
           entryType: entry.entryType,
-          keyVersion: 1,
+          keyVersion: keyVersion!,
           aadVersion: AAD_VERSION,
           tagIds,
           ...(entry.requireReprompt ? { requireReprompt: true } : {}),

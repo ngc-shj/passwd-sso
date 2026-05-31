@@ -49,10 +49,12 @@ vi.mock("@/lib/team/team-vault-context", () => ({
 }));
 
 vi.mock("@/lib/crypto/crypto-aad", () => ({
+  // History uses the entry-blob AAD (PV "blob"); see C1 in
+  // personal-history-aad-mismatch-plan.md. NOTE (RT1): decryptData + the AAD
+  // builders are mocked here, so this suite verifies AAD scope SELECTION +
+  // wiring only, not real AES-GCM. Real-crypto coverage is the integration
+  // test (C5).
   buildPersonalEntryAAD: vi.fn().mockReturnValue("test-aad"),
-  // C2: history section now uses buildPersonalHistoryAAD (PH scope) so
-  // the mock must expose it.
-  buildPersonalHistoryAAD: vi.fn().mockReturnValue("test-history-aad"),
   buildTeamEntryAAD: vi.fn().mockReturnValue("test-team-aad"),
   VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
@@ -127,6 +129,7 @@ vi.mock("@/components/ui/alert-dialog", () => ({
 }));
 
 import { EntryHistorySection } from "./entry-history-section";
+import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
 
 const HISTORY_ITEMS = [
   {
@@ -345,6 +348,17 @@ describe("EntryHistorySection", () => {
     await waitFor(() => {
       expect(mockDecryptData).toHaveBeenCalled();
     });
+
+    // C1 (anti-vacuous): the personal history blob MUST be decrypted with the
+    // entry AAD (PV "blob"), not a history-specific scope. Assert both the
+    // scope selection AND that the built AAD is forwarded to decryptData —
+    // (1) alone would pass even if the wrong value were passed downstream.
+    expect(buildPersonalEntryAAD).toHaveBeenCalledWith("user-1", "entry-1", "blob");
+    expect(mockDecryptData).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "test-aad",
+    );
   });
 });
 

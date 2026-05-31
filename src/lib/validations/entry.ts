@@ -10,14 +10,11 @@ import {
   PASSPHRASE_SEPARATOR_DEFAULT,
   PASSPHRASE_SEPARATOR_MAX,
   CHARS_FIELD_MAX,
-  HISTORY_BLOB_MAX,
-  ENCRYPTED_ITEM_KEY_MAX,
   FILENAME_MAX_LENGTH,
   TEAM_KEY_VERSION_MAX,
   aadVersionSchema,
   asciiPrintable,
   encryptedFieldSchema,
-  hexString,
 } from "./common";
 
 export const entryTypeSchema = z.enum(ENTRY_TYPE_VALUES);
@@ -82,28 +79,6 @@ export const generateRequestSchema = z.preprocess(
     z.object({ mode: z.literal("passphrase") }).merge(generatePassphraseSchema),
   ]),
 );
-
-// ─── History Re-encrypt Schemas ─────────────────────────────
-
-export const historyReencryptSchema = z.object({
-  encryptedBlob: z.string().min(1).max(HISTORY_BLOB_MAX),
-  blobIv: hexString(12),
-  blobAuthTag: hexString(16),
-  keyVersion: z.number().int().min(1).max(TEAM_KEY_VERSION_MAX),
-  oldBlobHash: hexString(32),
-});
-
-export const teamHistoryReencryptSchema = z.object({
-  encryptedBlob: z.string().min(1).max(HISTORY_BLOB_MAX),
-  blobIv: hexString(12),
-  blobAuthTag: hexString(16),
-  teamKeyVersion: z.number().int().min(1).max(TEAM_KEY_VERSION_MAX),
-  itemKeyVersion: z.number().int().min(0).max(TEAM_KEY_VERSION_MAX).optional(),
-  encryptedItemKey: z.string().max(ENCRYPTED_ITEM_KEY_MAX).optional(),
-  itemKeyIv: hexString(12).optional(),
-  itemKeyAuthTag: hexString(16).optional(),
-  oldBlobHash: hexString(32),
-});
 
 // ─── Bulk Import Schemas ────────────────────────────────────
 

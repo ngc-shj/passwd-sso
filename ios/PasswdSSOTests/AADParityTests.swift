@@ -60,13 +60,21 @@ final class AADParityTests: XCTestCase {
 
   // MARK: - Team entry
 
-  func testTeamEntryAADScope() throws {
-    let result = try buildTeamEntryAAD(teamId: "t1", entryId: "e1")
-
-    XCTAssertEqual(result[0], UInt8(ascii: "O"))
-    XCTAssertEqual(result[1], UInt8(ascii: "V"))
-    XCTAssertEqual(result[2], 0x01)
-    XCTAssertEqual(result[3], 0x04)  // nFields=4
+  func testTeamEntryAADByteIdentical() throws {
+    // Full-byte golden vector (byte-identical to crypto-aad.ts):
+    // scope="OV"(2) + version=1(1) + nFields=4(1)
+    //   + len="t"(2)+"t"(1) + len="e"(2)+"e"(1)
+    //   + len="blob"(2)+"blob"(4) + len="0"(2)+"0"(1)
+    let result = try buildTeamEntryAAD(teamId: "t", entryId: "e", vaultType: VaultType.blob, itemKeyVersion: 0)
+    XCTAssertEqual([UInt8](result), [
+      0x4f, 0x56,             // "OV"
+      0x01,                   // aadVersion = 1
+      0x04,                   // nFields = 4
+      0x00, 0x01, 0x74,       // len("t")=1, "t"
+      0x00, 0x01, 0x65,       // len("e")=1, "e"
+      0x00, 0x04, 0x62, 0x6c, 0x6f, 0x62,  // len("blob")=4, "blob"
+      0x00, 0x01, 0x30,       // len("0")=1, "0"
+    ])
   }
 
   func testTeamEntryAADDefaults() throws {
@@ -77,26 +85,54 @@ final class AADParityTests: XCTestCase {
     XCTAssertGreaterThan(result.count, 4)
   }
 
+  func testTeamEntryAADOverviewByteIdentical() throws {
+    // Full-byte golden vector for OV overview (byte-identical to crypto-aad.ts):
+    // scope="OV"(2) + version=1(1) + nFields=4(1)
+    //   + len="t"(2)+"t"(1) + len="e"(2)+"e"(1)
+    //   + len="overview"(2)+"overview"(8) + len("0")(2)+"0"(1)
+    let result = try buildTeamEntryAAD(teamId: "t", entryId: "e", vaultType: VaultType.overview, itemKeyVersion: 0)
+    XCTAssertEqual([UInt8](result), [
+      0x4f, 0x56,             // "OV"
+      0x01,                   // aadVersion = 1
+      0x04,                   // nFields = 4
+      0x00, 0x01, 0x74,       // len("t")=1, "t"
+      0x00, 0x01, 0x65,       // len("e")=1, "e"
+      0x00, 0x08, 0x6f, 0x76, 0x65, 0x72, 0x76, 0x69, 0x65, 0x77,  // len("overview")=8, "overview"
+      0x00, 0x01, 0x30,       // len("0")=1, "0"
+    ])
+  }
+
   // MARK: - Attachment
 
-  func testAttachmentAADScope() throws {
-    let result = try buildAttachmentAAD(entryId: "e1", attachmentId: "a1")
-
-    XCTAssertEqual(result[0], UInt8(ascii: "A"))
-    XCTAssertEqual(result[1], UInt8(ascii: "T"))
-    XCTAssertEqual(result[2], 0x01)
-    XCTAssertEqual(result[3], 0x02)  // nFields=2
+  func testAttachmentAADByteIdentical() throws {
+    // Full-byte golden vector (byte-identical to crypto-aad.ts):
+    // scope="AT"(2) + version=1(1) + nFields=2(1)
+    //   + len="e"(2)+"e"(1) + len="a"(2)+"a"(1)
+    let result = try buildAttachmentAAD(entryId: "e", attachmentId: "a")
+    XCTAssertEqual([UInt8](result), [
+      0x41, 0x54,             // "AT"
+      0x01,                   // aadVersion = 1
+      0x02,                   // nFields = 2
+      0x00, 0x01, 0x65,       // len("e")=1, "e"
+      0x00, 0x01, 0x61,       // len("a")=1, "a"
+    ])
   }
 
   // MARK: - ItemKey wrap
 
-  func testItemKeyWrapAADScope() throws {
+  func testItemKeyWrapAADByteIdentical() throws {
+    // Full-byte golden vector (byte-identical to crypto-aad.ts):
+    // scope="IK"(2) + version=1(1) + nFields=3(1)
+    //   + len="t"(2)+"t"(1) + len="e"(2)+"e"(1) + len("3")(2)+"3"(1)
     let result = try buildItemKeyWrapAAD(teamId: "t", entryId: "e", teamKeyVersion: 3)
-
-    XCTAssertEqual(result[0], UInt8(ascii: "I"))
-    XCTAssertEqual(result[1], UInt8(ascii: "K"))
-    XCTAssertEqual(result[2], 0x01)
-    XCTAssertEqual(result[3], 0x03)  // nFields=3
+    XCTAssertEqual([UInt8](result), [
+      0x49, 0x4b,             // "IK"
+      0x01,                   // aadVersion = 1
+      0x03,                   // nFields = 3
+      0x00, 0x01, 0x74,       // len("t")=1, "t"
+      0x00, 0x01, 0x65,       // len("e")=1, "e"
+      0x00, 0x01, 0x33,       // len("3")=1, "3"
+    ])
   }
 
   // MARK: - Big-endian field lengths

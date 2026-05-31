@@ -17,6 +17,7 @@ interface UseImportExecutionParams {
   encryptedInput: boolean;
   userId?: string;
   encryptionKey?: CryptoKey;
+  keyVersion?: number;
   teamEncryptionKey?: CryptoKey;
   teamKeyVersion?: number;
   teamId?: string;
@@ -46,6 +47,7 @@ export function useImportExecution({
   encryptedInput,
   userId,
   encryptionKey,
+  keyVersion,
   teamEncryptionKey,
   teamKeyVersion,
   teamId,
@@ -78,6 +80,7 @@ export function useImportExecution({
         sourceFilename,
         userId,
         encryptionKey: encryptionKey ?? undefined,
+        keyVersion,
         teamEncryptionKey: teamEncryptionKey ?? undefined,
         teamKeyVersion,
         teamId,

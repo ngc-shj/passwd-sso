@@ -8,6 +8,7 @@ interface SavePersonalEntryParams {
   initialId?: string;
   encryptionKey: CryptoKey;
   userId: string;
+  keyVersion: number;
   fullBlob: string;
   overviewBlob: string;
   tagIds: string[];
@@ -22,6 +23,7 @@ export async function savePersonalEntry({
   initialId,
   encryptionKey,
   userId,
+  keyVersion,
   fullBlob,
   overviewBlob,
   tagIds,
@@ -48,7 +50,7 @@ export async function savePersonalEntry({
     overviewAAD,
     tagIds,
     extra: {
-      keyVersion: 1,
+      keyVersion,
       aadVersion: AAD_VERSION,
     },
     optionals: { entryType, requireReprompt, expiresAt, folderId },

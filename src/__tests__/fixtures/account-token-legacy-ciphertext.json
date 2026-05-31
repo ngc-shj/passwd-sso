@@ -5,5 +5,5 @@
   "provider": "google",
   "providerAccountId": "test-provider-account-id",
   "plaintext": "test_refresh_token_value",
-  "ciphertext": "psoenc1:0:l89a5ho1D6INGzlSDQRhf4B8IuXBEitJxRx1WHLu0dC3x89a8EASS4snrXwHp18soH-ilw"
+  "ciphertext": "psoenc1:0:AAAAAAAAAAAAAAAA6OcDxu4FfaKlLI_1P_n8IHrZxqrqXubbes3aXUdY_vK3LQklSe0VSg"
 }

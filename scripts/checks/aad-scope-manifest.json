@@ -1,0 +1,57 @@
+{
+  "PV": {
+    "description": "Personal vault entry (and its verbatim history snapshots) — scope \"PV\"",
+    "crossCodebase": true,
+    "parity": "src/__tests__/aad-parity.test.ts",
+    "roundTrip": "src/__tests__/db-integration/personal-history-aad-roundtrip.integration.test.ts"
+  },
+  "OV": {
+    "description": "Team vault entry — scope \"OV\"",
+    "crossCodebase": true,
+    "parity": "src/__tests__/aad-parity.test.ts",
+    "roundTrip": "src/lib/crypto/crypto-team.test.ts"
+  },
+  "IK": {
+    "description": "ItemKey wrapping (per-entry key wrapped by the team key) — scope \"IK\"",
+    "crossCodebase": true,
+    "parity": "src/__tests__/aad-parity.test.ts",
+    "roundTrip": "src/lib/crypto/crypto-team.test.ts"
+  },
+  "OK": {
+    "description": "Team member key wrapping (TeamMemberKey wrapped per recipient) — scope \"OK\". iOS does not implement OK (app+extension only).",
+    "crossCodebase": true,
+    "parity": "src/__tests__/aad-parity.test.ts",
+    "roundTrip": "src/lib/crypto/crypto-team.test.ts"
+  },
+  "AT": {
+    "description": "Attachment body encryption — scope \"AT\"",
+    "crossCodebase": true,
+    "parity": "src/__tests__/aad-parity.test.ts",
+    "roundTrip": "src/__tests__/db-integration/vault-rotate-key-attachments.integration.test.ts"
+  },
+  "AW": {
+    "description": "Attachment CEK (content-encryption key) wrapping, mode-2 — scope \"AW\"",
+    "crossCodebase": false,
+    "roundTrip": "src/__tests__/db-integration/vault-rotate-key-attachments.integration.test.ts"
+  },
+  "AR": {
+    "description": "Admin vault-reset email-link token — scope \"AR\"",
+    "crossCodebase": false,
+    "roundTrip": "src/lib/vault/admin-reset-token-crypto.test.ts"
+  },
+  "EM": {
+    "description": "Emergency-access ECDH secret-key escrow wrap — scope \"EM\"",
+    "crossCodebase": false,
+    "roundTrip": "src/lib/crypto/crypto-emergency.test.ts"
+  },
+  "WH": {
+    "description": "Webhook secret encryption (server-side master key) — scope \"WH\"",
+    "crossCodebase": false,
+    "roundTrip": "src/lib/crypto/webhook-aad.test.ts"
+  },
+  "AC": {
+    "description": "Account OAuth token encryption (server-side master key) — scope \"AC\"",
+    "crossCodebase": false,
+    "roundTrip": "src/lib/crypto/account-token-crypto.test.ts"
+  }
+}

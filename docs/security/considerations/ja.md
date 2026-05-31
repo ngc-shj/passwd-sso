@@ -434,9 +434,10 @@ Client(valid時):
 
 ### 15.3 AAD バインディング
 
-- AAD は固定順の `grantId|ownerId|granteeId|keyVersion|wrapVersion`
-- JSON ではなく固定順連結でバイト列を決定（順序差異リスク回避）
-- 目的: grant 間の ciphertext transplant/replay 防止
+- 単一 AAD レジストリ（`crypto-aad.ts`, scope `EM`）が共通のバイナリ長さ前置形式
+  `[scope][version][nFields][len|field]…` で `grantId, ownerId, granteeId, keyVersion, wrapVersion` から構築
+- バイト列は決定的で、長さ前置により区切り・順序の曖昧さを排除
+- 目的: grant 間の ciphertext transplant/replay 防止（および scope 間 — scope バイトが `EM` を他の全 AAD と区別）
 
 ### 15.4 DB に保持される主データ
 

@@ -17,7 +17,6 @@ import {
   PASSWORD_LENGTH_DEFAULT,
   PASSWORD_LENGTH_MAX,
   CIPHERTEXT_MAX,
-  HISTORY_BLOB_MAX,
   NOTIFICATION_TITLE_MAX,
   ENTRY_NAME_MAX,
 } from "@/lib/validations/common";
@@ -306,10 +305,6 @@ describe("HEX_COLOR_REGEX", () => {
 describe("Constant relationships", () => {
   it("PASSWORD_LENGTH_DEFAULT is less than PASSWORD_LENGTH_MAX", () => {
     expect(PASSWORD_LENGTH_DEFAULT).toBeLessThan(PASSWORD_LENGTH_MAX);
-  });
-
-  it("CIPHERTEXT_MAX is less than HISTORY_BLOB_MAX", () => {
-    expect(CIPHERTEXT_MAX).toBeLessThan(HISTORY_BLOB_MAX);
   });
 
   it("NOTIFICATION_TITLE_MAX equals ENTRY_NAME_MAX (both 200)", () => {

@@ -227,4 +227,48 @@ describe("session-storage", () => {
       expect(chrome.storage.session.remove).toHaveBeenCalledWith(SESSION_KEY);
     });
   });
+
+  describe("personalKeyVersion persistence", () => {
+    it("persists personalKeyVersion so a SW restart restores the current key version", async () => {
+      await persistSession({
+        token: "tok-1",
+        expiresAt: 1700000000000,
+        personalKeyVersion: 3,
+      });
+      const stored = (chrome.storage.session.set as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(stored[SESSION_KEY].personalKeyVersion).toBe(3);
+    });
+
+    // loadSession requires a valid 43-char tokenCnfJkt to return a session.
+    const VALID_JKT = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"; // 43 chars
+
+    it("loadSession round-trips personalKeyVersion", async () => {
+      mockDecryptField.mockResolvedValueOnce("tok-1");
+      mockStorage[SESSION_KEY] = {
+        encryptedToken: FAKE_ENCRYPTED,
+        expiresAt: 1700000000000,
+        tokenCnfJkt: VALID_JKT,
+        personalKeyVersion: 3,
+      };
+      const result = await loadSession();
+      expect(result?.personalKeyVersion).toBe(3);
+    });
+
+    it("drops a non-integer / negative personalKeyVersion on load (validator)", async () => {
+      mockDecryptField.mockResolvedValue("tok-1");
+      for (const bad of [1.5, -1, "3" as unknown as number]) {
+        mockStorage[SESSION_KEY] = {
+          encryptedToken: FAKE_ENCRYPTED,
+          expiresAt: 1700000000000,
+          tokenCnfJkt: VALID_JKT,
+          personalKeyVersion: bad,
+        };
+        const result = await loadSession();
+        // Non-vacuous: loadSession returns a valid session (token present),
+        // but the bad personalKeyVersion is dropped by the validator.
+        expect(result?.token).toBe("tok-1");
+        expect(result?.personalKeyVersion).toBeUndefined();
+      }
+    });
+  });
 });

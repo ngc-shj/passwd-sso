@@ -48,7 +48,7 @@ export function usePersonalBaseFormModel({
   onCancel,
 }: UsePersonalBaseFormModelArgs) {
   const router = useRouter();
-  const { encryptionKey, userId } = useVault();
+  const { encryptionKey, userId, getKeyVersion } = useVault();
   const { folders } = usePersonalFolders();
   const [submitting, setSubmitting] = useState(false);
   const [title, setTitle] = useState(initialTitle ?? "");
@@ -83,6 +83,7 @@ export function usePersonalBaseFormModel({
       initialId,
       encryptionKey,
       userId,
+      keyVersion: getKeyVersion(),
       fullBlob,
       overviewBlob,
       tagIds: toTagIds(selectedTags),

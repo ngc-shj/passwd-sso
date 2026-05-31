@@ -435,7 +435,15 @@ export async function encryptBinary(
   const params: AesGcmParams = { name: "AES-GCM", iv: toArrayBuffer(iv) };
   if (aad) params.additionalData = toArrayBuffer(aad);
 
-  const encrypted = await crypto.subtle.encrypt(params, key, data);
+  // Normalize `data` to a TypedArray view: jsdom + Node ≤22 reject a plain
+  // ArrayBuffer in webcrypto's BufferSource check (see toArrayBuffer docs),
+  // even though browsers accept it. decryptBinary already routes its data
+  // through toArrayBuffer; this keeps encryptBinary symmetric.
+  const encrypted = await crypto.subtle.encrypt(
+    params,
+    key,
+    toArrayBuffer(new Uint8Array(data))
+  );
 
   const encryptedBytes = new Uint8Array(encrypted);
   const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - 16);

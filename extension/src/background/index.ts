@@ -94,6 +94,11 @@ let currentUserId: string | null = null;
 let currentVaultSecretKeyHex: string | null = null;
 // Tenant policy auto-lock override (null = use local setting)
 let tenantAutoLockMinutes: number | null = null;
+// Version of the personal vault key currently in memory. Must match the key
+// that encrypted each saved blob so the server can select the right key for
+// history-compare decryption. Set from server's data.keyVersion at unlock;
+// persisted through SW restart via session-storage.
+let personalKeyVersion: number | null = null;
 
 // ── Team key state ──────────────────────────────────────────────
 let ecdhPrivateKeyBytes: Uint8Array | null = null;
@@ -309,6 +314,7 @@ function clearVault(): void {
   currentUserId = null;
   currentVaultSecretKeyHex = null;
   tenantAutoLockMinutes = null;
+  personalKeyVersion = null;
   // Zero-clear ECDH private key bytes (defense-in-depth)
   if (ecdhPrivateKeyBytes) {
     ecdhPrivateKeyBytes.fill(0);
@@ -410,6 +416,7 @@ function persistState(): void {
       ecdhEncrypted: ecdhEncryptedData ?? undefined,
       tenantAutoLockMinutes,
       tokenCnfJkt: currentCnfJkt,
+      personalKeyVersion: personalKeyVersion ?? undefined,
     }).catch(() => {});
   }
 }
@@ -431,6 +438,8 @@ async function hydrateFromSession(): Promise<void> {
   // Restore tenant-policy auto-lock so the options UI sees the override
   // even if the vault hasn't been re-unlocked in this SW lifetime.
   tenantAutoLockMinutes = state.tenantAutoLockMinutes ?? null;
+  // Restore personal key version so saves after SW restart are stamped correctly.
+  personalKeyVersion = state.personalKeyVersion ?? null;
 
   // Verify the persisted cnfJkt matches the current IDB DPoP key.
   // Mismatch → the key was reset mid-session; clear state so the user reconnects.
@@ -607,6 +616,7 @@ initContextMenu({
 initLoginSave({
   getEncryptionKey: () => encryptionKey,
   getCurrentUserId: () => currentUserId,
+  getKeyVersion: () => personalKeyVersion ?? 1,
   getCachedEntries,
   isHostMatch,
   extractHost,
@@ -617,6 +627,7 @@ initLoginSave({
 initPasskeyProvider({
   getEncryptionKey: () => encryptionKey,
   getCurrentUserId: () => currentUserId,
+  getKeyVersion: () => personalKeyVersion ?? 1,
   getCachedEntries,
   swFetch,
   invalidateCache,
@@ -1914,6 +1925,7 @@ async function handleMessage(
 
         encryptionKey = encKey;
         currentUserId = data.userId || null;
+        personalKeyVersion = typeof data.keyVersion === "number" ? data.keyVersion : 1;
         // Store tenant policy auto-lock override from server
         tenantAutoLockMinutes = typeof data.vaultAutoLockMinutes === "number"
           ? data.vaultAutoLockMinutes

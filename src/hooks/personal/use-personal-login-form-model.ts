@@ -33,7 +33,7 @@ export function usePersonalLoginFormModel({
   const translationBundle = useEntryFormTranslations();
   const translations = toPersonalLoginFormTranslations(translationBundle);
   const router = useRouter();
-  const { encryptionKey, userId, tenantPolicy } = useVault();
+  const { encryptionKey, userId, tenantPolicy, getKeyVersion } = useVault();
   const formState = usePersonalLoginFormState(initialData, { defaultFolderId, defaultTags });
   const { folders } = usePersonalFolders();
 
@@ -62,6 +62,7 @@ export function usePersonalLoginFormModel({
     onCancel,
     encryptionKey,
     userId,
+    keyVersion: getKeyVersion(),
     values,
     setSubmitting: formState.setters.setSubmitting,
     translations,

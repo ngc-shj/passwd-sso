@@ -29,6 +29,7 @@ describe("savePersonalEntry", () => {
       mode: "create",
       encryptionKey: {} as CryptoKey,
       userId: "user-1",
+      keyVersion: 3,
       fullBlob: "{\"a\":1}",
       overviewBlob: "{\"b\":2}",
       tagIds: ["tag-a"],
@@ -52,6 +53,8 @@ describe("savePersonalEntry", () => {
     expect(body.encryptedBlob).toBe("enc:{\"a\":1}");
     expect(body.encryptedOverview).toBe("enc:{\"b\":2}");
     expect(body.aadVersion).toBe(AAD_VERSION);
+    // keyVersion must match the provided vault key version, not be hardcoded
+    expect(body.keyVersion).toBe(3);
   });
 
   it("updates personal entry via PUT without create-only fields", async () => {
@@ -62,6 +65,7 @@ describe("savePersonalEntry", () => {
       initialId: "entry-existing",
       encryptionKey: {} as CryptoKey,
       userId: "user-1",
+      keyVersion: 2,
       fullBlob: "{}",
       overviewBlob: "{}",
       tagIds: [],
@@ -85,6 +89,7 @@ describe("savePersonalEntry", () => {
         mode: "edit",
         encryptionKey: {} as CryptoKey,
         userId: "user-1",
+        keyVersion: 1,
         fullBlob: "{}",
         overviewBlob: "{}",
         tagIds: [],

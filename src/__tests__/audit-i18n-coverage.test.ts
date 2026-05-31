@@ -52,4 +52,25 @@ describe("audit i18n coverage", () => {
     const jaActionKeys = AUDIT_ACTION_VALUES.filter((a) => jaKeys.has(a));
     expect(enActionKeys).toEqual(jaActionKeys);
   });
+
+  // Orphan-label guard: any UPPER_SNAKE_CASE key in the JSON that is not in
+  // AUDIT_ACTION_VALUES is a forgotten label from a removed audit action.
+  // Meta/UI keys use camelCase, so the UPPER_SNAKE pattern is sufficient to
+  // identify action labels vs UI strings.
+  const ACTION_KEY_PATTERN = /^[A-Z][A-Z0-9_]+$/;
+  const actionValuesSet = new Set<string>(AUDIT_ACTION_VALUES);
+
+  it("no orphan action labels in en AuditLog.json (removed actions leave no forgotten labels)", () => {
+    const orphans = [...enKeys].filter(
+      (k) => ACTION_KEY_PATTERN.test(k) && !k.startsWith("group") && !actionValuesSet.has(k),
+    );
+    expect(orphans).toEqual([]);
+  });
+
+  it("no orphan action labels in ja AuditLog.json (removed actions leave no forgotten labels)", () => {
+    const orphans = [...jaKeys].filter(
+      (k) => ACTION_KEY_PATTERN.test(k) && !k.startsWith("group") && !actionValuesSet.has(k),
+    );
+    expect(orphans).toEqual([]);
+  });
 });

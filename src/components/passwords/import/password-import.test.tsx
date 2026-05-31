@@ -29,6 +29,7 @@ vi.mock("@/lib/vault/vault-context", () => ({
   useVault: () => ({
     encryptionKey: { type: "key" } as unknown as CryptoKey,
     userId: "user-1",
+    getKeyVersion: () => 1,
   }),
 }));
 

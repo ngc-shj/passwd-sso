@@ -112,6 +112,7 @@ describe("useImportExecution", () => {
         encryptedInput: true,
         userId: "u1",
         encryptionKey: {} as CryptoKey,
+        keyVersion: 3,
       })
     );
 
@@ -120,6 +121,9 @@ describe("useImportExecution", () => {
     });
 
     expect(mockRunImportEntries).toHaveBeenCalledTimes(1);
+    expect(mockRunImportEntries).toHaveBeenCalledWith(
+      expect.objectContaining({ keyVersion: 3 }),
+    );
     expect(mockFireImportAudit).toHaveBeenCalledWith(3, 2, 1, "input.json", true, undefined);
     expect(mockToastSuccess).toHaveBeenCalledWith("importedCount");
     expect(onComplete).toHaveBeenCalledTimes(1);
