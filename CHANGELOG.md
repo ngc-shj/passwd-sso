@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.4.55](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.54...passwd-sso-v0.4.55) (2026-05-31)
+
+
+### Features
+
+* **ext:** inline in-page autofill suggestions for credit cards and identities ([#504](https://github.com/ngc-shj/passwd-sso/issues/504)) ([ed67abd](https://github.com/ngc-shj/passwd-sso/commit/ed67abd565fa4a0aaa120aa61433869cc5e0b602))
+* **identity:** structured name + address fields for autofill ([#507](https://github.com/ngc-shj/passwd-sso/issues/507)) ([fdf6937](https://github.com/ngc-shj/passwd-sso/commit/fdf693768563befc0c1d1216ddd132d7dc583cb5))
+
+
+### Bug Fixes
+
+* **i18n:** use distinct recovery-key warning when key already invalidated ([#506](https://github.com/ngc-shj/passwd-sso/issues/506)) ([936d7b2](https://github.com/ngc-shj/passwd-sso/commit/936d7b21a88f40ab2b6b3843dd567a598ed7e8e4))
+* security hardening sweep — sub-threshold review findings, propagation, tests & docs ([#500](https://github.com/ngc-shj/passwd-sso/issues/500)) ([f66f2b0](https://github.com/ngc-shj/passwd-sso/commit/f66f2b0e8f6f52074ba85e26cefb6e27ffe46d0e))
+* **security:** decrypt personal entry history with the entry AAD; unify and gate all AAD construction ([#508](https://github.com/ngc-shj/passwd-sso/issues/508)) ([ddb7844](https://github.com/ngc-shj/passwd-sso/commit/ddb784466e8e346c38efcb793647d78d005fb881))
+* **security:** pre-v1.0 XSS hardening — in-memory PRF handoff + API baseline headers ([#502](https://github.com/ngc-shj/passwd-sso/issues/502)) ([196ecb4](https://github.com/ngc-shj/passwd-sso/commit/196ecb4b43ac3a96e259a02a98ef845b1555d961))
+* **security:** sync personal-vault AAD to 3-field scheme (extension + iOS) ([#503](https://github.com/ngc-shj/passwd-sso/issues/503)) ([fc2e507](https://github.com/ngc-shj/passwd-sso/commit/fc2e507ff5bb207be1c5678f921ca52679b27a7c))
+* **security:** zeroize PRF output and unwrapped vault key on all paths ([#505](https://github.com/ngc-shj/passwd-sso/issues/505)) ([21f9939](https://github.com/ngc-shj/passwd-sso/commit/21f99397b4dac52938cddf8fceaf074eea253e55))
+
 ## [0.4.54](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.53...passwd-sso-v0.4.54) (2026-05-27)
 
 
