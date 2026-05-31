@@ -32,6 +32,7 @@ describe("buildPersonalLoginFormController", () => {
       onCancel,
       encryptionKey: {} as CryptoKey,
       userId: "user-1",
+      keyVersion: 3,
       values: buildValues(),
       setSubmitting: vi.fn(),
       translations: buildTranslations(),
@@ -45,6 +46,7 @@ describe("buildPersonalLoginFormController", () => {
     expect(submitPersonalLoginFormMock.mock.calls[0]?.[0]).toMatchObject({
       mode: "create",
       userId: "user-1",
+      keyVersion: 3,
       title: "title",
     });
 
@@ -63,6 +65,7 @@ describe("buildPersonalLoginFormController", () => {
       onSaved: vi.fn(),
       encryptionKey: {} as CryptoKey,
       userId: null,
+      keyVersion: 1,
       values: buildValues(),
       setSubmitting: vi.fn(),
       translations: buildTranslations(),
@@ -85,6 +88,7 @@ describe("buildPersonalLoginFormController", () => {
       onSaved,
       encryptionKey: {} as CryptoKey,
       userId: "user-1",
+      keyVersion: 1,
       values: buildValues(),
       setSubmitting: vi.fn(),
       translations: buildTranslations(),

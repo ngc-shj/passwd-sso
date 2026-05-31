@@ -16,6 +16,7 @@ export interface SubmitPersonalLoginFormArgs {
   initialData?: PersonalLoginFormInitialData;
   encryptionKey: CryptoKey | null;
   userId: string | null;
+  keyVersion: number;
   title: string;
   username: string;
   password: string;
@@ -40,6 +41,7 @@ export async function submitPersonalLoginForm({
   initialData,
   encryptionKey,
   userId,
+  keyVersion,
   title,
   username,
   password,
@@ -86,6 +88,7 @@ export async function submitPersonalLoginForm({
     initialId: initialData?.id,
     encryptionKey,
     userId,
+    keyVersion,
     fullBlob,
     overviewBlob,
     tagIds: extractTagIds(selectedTags),

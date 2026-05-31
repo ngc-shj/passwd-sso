@@ -16,6 +16,7 @@ export interface PersonalLoginFormControllerArgs {
   onCancel: Pick<PersonalLoginFormProps, "onCancel">["onCancel"];
   encryptionKey: CryptoKey | null;
   userId: string | null;
+  keyVersion: number;
   values: PersonalLoginFormEntryValues;
   setSubmitting: (value: boolean) => void;
   translations: PersonalLoginFormTranslations;
@@ -30,6 +31,7 @@ export function buildPersonalLoginFormController({
   onCancel,
   encryptionKey,
   userId,
+  keyVersion,
   values,
   setSubmitting,
   translations,
@@ -48,6 +50,7 @@ export function buildPersonalLoginFormController({
       onSaved,
       encryptionKey,
       userId,
+      keyVersion,
       values,
       setSubmitting,
       translations,

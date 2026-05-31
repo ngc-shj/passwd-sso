@@ -51,6 +51,7 @@ describe("usePersonalLoginFormModel", () => {
         requireNumbers: false,
         requireSymbols: false,
       },
+      getKeyVersion: () => 3,
     });
     usePersonalFoldersMock.mockReturnValue([]);
     submitPersonalLoginFormMock.mockResolvedValue(undefined);
@@ -100,6 +101,7 @@ describe("usePersonalLoginFormModel", () => {
     expect(submitPersonalLoginFormMock.mock.calls[0]?.[0]).toMatchObject({
       mode: "create",
       userId: "user-1",
+      keyVersion: 3,
       onSaved,
       setSubmitting: expect.any(Function),
     });

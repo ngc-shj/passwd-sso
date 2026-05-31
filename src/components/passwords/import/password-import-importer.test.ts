@@ -191,6 +191,7 @@ describe("runImportEntries", () => {
       sourceFilename: "personal.json",
       userId: "user-1",
       encryptionKey: {} as CryptoKey,
+      keyVersion: 3,
     });
 
     expect(result).toEqual({ successCount: 1, failedCount: 0 });
@@ -212,6 +213,8 @@ describe("runImportEntries", () => {
     expect(entry.entryType).toBe(ENTRY_TYPE.LOGIN);
     expect(entry.encryptedBlob).toEqual({ ciphertext: "full", iv: "iv1", authTag: "tag1" });
     expect(entry.encryptedOverview).toEqual({ ciphertext: "overview", iv: "iv2", authTag: "tag2" });
+    // keyVersion must match the provided vault key version, not be hardcoded
+    expect(entry.keyVersion).toBe(3);
   });
 
   it("calls favorite toggle API for team import when isFavorite is true", async () => {
@@ -350,6 +353,7 @@ describe("runImportEntries", () => {
       sourceFilename: "personal.json",
       userId: "user-1",
       encryptionKey: {} as CryptoKey,
+      keyVersion: 1,
     });
 
     const postCall = fetchMock.mock.calls[1];
@@ -383,6 +387,7 @@ describe("runImportEntries", () => {
       sourceFilename: "personal.json",
       userId: "user-1",
       encryptionKey: {} as CryptoKey,
+      keyVersion: 1,
     });
 
     const postCall = fetchMock.mock.calls[2];
@@ -410,6 +415,7 @@ describe("runImportEntries", () => {
       sourceFilename: "personal.json",
       userId: "user-1",
       encryptionKey: {} as CryptoKey,
+      keyVersion: 1,
     });
 
     const postCall = fetchMock.mock.calls[1];
@@ -437,6 +443,7 @@ describe("runImportEntries", () => {
       sourceFilename: "big.json",
       userId: "user-1",
       encryptionKey: {} as CryptoKey,
+      keyVersion: 1,
     });
 
     expect(result).toEqual({ successCount: 120, failedCount: 0 });
@@ -472,6 +479,7 @@ describe("runImportEntries", () => {
       sourceFilename: "big.json",
       userId: "user-1",
       encryptionKey: {} as CryptoKey,
+      keyVersion: 1,
       onProgress: progress,
     });
 
@@ -499,6 +507,7 @@ describe("runImportEntries", () => {
       sourceFilename: "retry.json",
       userId: "user-1",
       encryptionKey: {} as CryptoKey,
+      keyVersion: 1,
     });
 
     expect(result).toEqual({ successCount: 1, failedCount: 0 });
@@ -525,6 +534,7 @@ describe("runImportEntries", () => {
       sourceFilename: "retry.json",
       userId: "user-1",
       encryptionKey: {} as CryptoKey,
+      keyVersion: 1,
     });
 
     expect(result).toEqual({ successCount: 0, failedCount: 1 });
@@ -550,6 +560,7 @@ describe("runImportEntries", () => {
       sourceFilename: "multi.json",
       userId: "user-1",
       encryptionKey: {} as CryptoKey,
+      keyVersion: 1,
     });
 
     expect(result.successCount).toBe(2);
@@ -580,5 +591,19 @@ describe("runImportEntries", () => {
         userId: "user-1",
       }),
     ).rejects.toThrow("encryptionKey is required for personal import");
+  });
+
+  it("throws when personal import is missing keyVersion", async () => {
+    await expect(
+      runImportEntries({
+        entries: [makeEntry()],
+        isTeamImport: false,
+        tagsPath: "/api/tags",
+        foldersPath: "/api/folders",
+        sourceFilename: "test.json",
+        userId: "user-1",
+        encryptionKey: {} as CryptoKey,
+      }),
+    ).rejects.toThrow("keyVersion is required for personal import");
   });
 });
