@@ -74,6 +74,9 @@ key rotation in the running app, and the breaking-change recovery flows.
   no rows used it).
 - Data: full pre-work dev backup at `~/passwd-sso-backups/passwd_sso-20260531-103630.sql.gz`.
 
-## Results (fill in after running)
-- A1: [ ]   A2: [ ]   A3: [ ]   A4: [ ]
-- B1: [ ]   B2: [ ]   B3: [ ]   (operator-only; mark N/A if not exercised)
+## Results (2026-05-31, dev — operator: account owner)
+- **A1: PASS** — history View decrypts in the browser; DB shows history records present at key_version 2.
+- **A2: PASS** — credit-card / identity history View decrypts (UI); a CREDIT_CARD entry persists at key_version 2.
+- **A3: PASS** — key rotation completed with history present (users.key_version 1→2); all entries (409) and history rows (1972) re-encrypted to key_version 2.
+- **A4: PASS** — vault rotated to v2 at 05:52:33; a LOGIN entry created at 05:55:33 (post-rotation) is stamped key_version **2** (current), not the old hardcoded 1. Zero key_version-1 entries remain. keyVersion fix confirmed in the running app.
+- B1 / B2 / B3: **N/A** — operator-only breaking-change recovery flows (multi-user / real IdP / webhook delivery); not exercised in this dev pass.
