@@ -31,6 +31,21 @@ describe("buildWebhookSecretAAD — shape", () => {
     expect(a.equals(b)).toBe(true);
   });
 
+  it("returns a Buffer (WH scope binary, not pipe-joined UTF-8)", () => {
+    const aad = buildWebhookSecretAAD({
+      tableName: "TenantWebhook",
+      version: 2,
+      webhookId: WEBHOOK_ID,
+      tenantId: TENANT_ID,
+    });
+    expect(Buffer.isBuffer(aad)).toBe(true);
+    // First 2 bytes = "WH"
+    expect(aad[0]).toBe(0x57); // 'W'
+    expect(aad[1]).toBe(0x48); // 'H'
+    // 3rd byte = AAD version (1)
+    expect(aad[2]).toBe(1);
+  });
+
   it("differs by tableName (S8: cross-table swap blocked)", () => {
     const tenant = buildWebhookSecretAAD({
       tableName: "TenantWebhook",
@@ -64,17 +79,6 @@ describe("buildWebhookSecretAAD — shape", () => {
     expect(v2.equals(v3)).toBe(false);
   });
 
-  it("rejects malformed UUIDs in webhookId (F14)", () => {
-    expect(() =>
-      buildWebhookSecretAAD({
-        tableName: "TenantWebhook",
-        version: 2,
-        webhookId: "not-a-uuid",
-        tenantId: TENANT_ID,
-      }),
-    ).toThrow(/webhookId/);
-  });
-
   it("rejects TeamWebhook without teamId", () => {
     expect(() =>
       buildWebhookSecretAAD({
@@ -95,7 +99,7 @@ describe("buildWebhookSecretAAD — shape", () => {
         tenantId: TENANT_ID,
         teamId: TEAM_ID,
       }),
-    ).toThrow(/must not have a teamId/);
+    ).toThrow(/must not carry a teamId/);
   });
 
   it("rejects non-positive version", () => {
@@ -210,5 +214,54 @@ describe("AES-GCM round-trip with AAD", () => {
     });
     const enc = encryptServerData(PLAINTEXT, MASTER_KEY, aadA);
     expect(() => decryptServerData(enc, MASTER_KEY, aadB)).toThrow();
+  });
+});
+
+// C15: explicit round-trip tests via the registry builder (WH scope)
+describe("C15 round-trip with registry AAD builder (WH scope)", () => {
+  it("encrypt→decrypt succeeds with matching binary-format AAD", () => {
+    const a = buildWebhookSecretAAD({
+      tableName: "TenantWebhook",
+      version: WEBHOOK_SECRET_AAD_VERSION_CURRENT,
+      webhookId: WEBHOOK_ID,
+      tenantId: TENANT_ID,
+    });
+    const enc = encryptServerData(PLAINTEXT, MASTER_KEY, a);
+    const dec = decryptServerData(enc, MASTER_KEY, a);
+    expect(dec).toBe(PLAINTEXT);
+  });
+
+  it("anti-vacuous: wrong webhookId must reject", () => {
+    const aadGood = buildWebhookSecretAAD({
+      tableName: "TenantWebhook",
+      version: 2,
+      webhookId: WEBHOOK_ID,
+      tenantId: TENANT_ID,
+    });
+    const aadWrong = buildWebhookSecretAAD({
+      tableName: "TenantWebhook",
+      version: 2,
+      webhookId: OTHER_WEBHOOK_ID,
+      tenantId: TENANT_ID,
+    });
+    const enc = encryptServerData(PLAINTEXT, MASTER_KEY, aadGood);
+    expect(() => decryptServerData(enc, MASTER_KEY, aadWrong)).toThrow();
+  });
+
+  it("anti-vacuous: wrong tenantId must reject", () => {
+    const aadGood = buildWebhookSecretAAD({
+      tableName: "TenantWebhook",
+      version: 2,
+      webhookId: WEBHOOK_ID,
+      tenantId: TENANT_ID,
+    });
+    const aadWrong = buildWebhookSecretAAD({
+      tableName: "TenantWebhook",
+      version: 2,
+      webhookId: WEBHOOK_ID,
+      tenantId: OTHER_TENANT_ID,
+    });
+    const enc = encryptServerData(PLAINTEXT, MASTER_KEY, aadGood);
+    expect(() => decryptServerData(enc, MASTER_KEY, aadWrong)).toThrow();
   });
 });

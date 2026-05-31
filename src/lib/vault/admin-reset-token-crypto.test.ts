@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   encryptResetToken,
   decryptResetToken,
+  type AdminResetAad,
 } from "@/lib/vault/admin-reset-token-crypto";
 
 const aad = {
@@ -73,5 +74,34 @@ describe("admin-reset-token-crypto", () => {
     blob[12] ^= 0xff; // flip first byte of auth tag (after the 12-byte IV)
     const tampered = `${prefix}${versionStr}:${blob.toString("base64url")}`;
     expect(() => decryptResetToken(tampered, aad)).toThrow();
+  });
+
+  // C15: round-trip via the registry builder (AR scope)
+  describe("C15 round-trip with registry AAD builder", () => {
+    it("encrypt→decrypt succeeds with matching registry AAD (AR scope)", () => {
+      const ct = encryptResetToken("reset-link-token", aad);
+      expect(decryptResetToken(ct, aad)).toBe("reset-link-token");
+    });
+
+    it("anti-vacuous: decrypt with wrong tenantId must reject", () => {
+      const ct = encryptResetToken("reset-link-token", aad);
+      expect(() =>
+        decryptResetToken(ct, { ...aad, tenantId: "wrong_tenant" } as AdminResetAad),
+      ).toThrow();
+    });
+
+    it("anti-vacuous: decrypt with wrong resetId must reject", () => {
+      const ct = encryptResetToken("reset-link-token", aad);
+      expect(() =>
+        decryptResetToken(ct, { ...aad, resetId: "wrong_reset" } as AdminResetAad),
+      ).toThrow();
+    });
+
+    it("anti-vacuous: decrypt with wrong targetEmailAtInitiate must reject", () => {
+      const ct = encryptResetToken("reset-link-token", aad);
+      expect(() =>
+        decryptResetToken(ct, { ...aad, targetEmailAtInitiate: "wrong@example.com" } as AdminResetAad),
+      ).toThrow();
+    });
   });
 });

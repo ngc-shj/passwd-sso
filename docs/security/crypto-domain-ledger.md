@@ -4,7 +4,7 @@ This document is the single source of truth for all cryptographic domain
 separations used in passwd-sso. It is automatically verified by
 `scripts/checks/check-crypto-domains.mjs` in CI.
 
-Last verified: 2026-05-30
+Last verified: 2026-05-31
 
 ---
 
@@ -31,10 +31,13 @@ Last verified: 2026-05-30
 | `PV` | `SCOPE_PERSONAL` | Personal vault entry encryption (history records are verbatim snapshots, sealed with this same scope) | userId, entryId, vaultType | crypto-aad.ts |
 | `OV` | `SCOPE_TEAM` | Team vault entry encryption | teamId, entryId, vaultType, itemKeyVersion | crypto-aad.ts |
 | `AT` | `SCOPE_ATTACHMENT` | Attachment encryption | entryId, attachmentId | crypto-aad.ts |
-| `OK` | `AAD_SCOPE_TEAM_KEY` | Team member key wrapping | teamId, toUserId, keyVersion, wrapVersion | crypto-team.ts |
+| `OK` | `SCOPE_TEAM_KEY` | Team member key wrapping | teamId, toUserId, keyVersion, wrapVersion | crypto-aad.ts |
 | `IK` | `SCOPE_ITEM_KEY` | ItemKey wrapping | teamId, entryId, teamKeyVersion | crypto-aad.ts |
 | `AW` | `SCOPE_ATTACHMENT_WRAP` | Attachment CEK wrapping (mode-2) | entryId, attachmentId, cekKeyVersion, cekWrapAadVersion | crypto-aad.ts |
-| `AR` | `SCOPE_ADMIN_RESET` | Admin-vault-reset email-link token | tenantId, resetId, targetEmailAtInitiate | admin-reset-token-crypto.ts |
+| `AR` | `SCOPE_ADMIN_RESET` | Admin-vault-reset email-link token | tenantId, resetId, targetEmailAtInitiate | crypto-aad.ts |
+| `EM` | `SCOPE_EMERGENCY` | Emergency-access ECDH secret-key escrow wrap | grantId, ownerId, granteeId, keyVersion, wrapVersion | crypto-aad.ts |
+| `WH` | `SCOPE_WEBHOOK` | Webhook secret encryption | tableName, vN, webhookId, tenantId, [teamId] | crypto-aad.ts |
+| `AC` | `SCOPE_ACCOUNT_TOKEN` | Account OAuth token encryption | userId, provider, providerAccountId | crypto-aad.ts |
 
 ### AAD Binary Format (common)
 

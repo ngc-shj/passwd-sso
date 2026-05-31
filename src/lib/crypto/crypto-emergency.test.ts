@@ -10,10 +10,10 @@ import {
   decryptPrivateKey,
   createKeyEscrow,
   unwrapSecretKeyAsGrantee,
-  buildAAD,
   CURRENT_WRAP_VERSION,
   type WrapContext,
 } from "./crypto-emergency";
+import { buildEmergencyWrapAAD } from "./crypto-aad";
 import { deriveEncryptionKey, hexDecode } from "./crypto-client";
 
 const TEST_CTX: Omit<WrapContext, "wrapVersion"> = {
@@ -345,18 +345,20 @@ describe("crypto-emergency", () => {
     });
   });
 
-  describe("buildAAD canonicalization", () => {
-    it("produces pipe-separated UTF-8 bytes in fixed order", () => {
+  describe("buildEmergencyWrapAAD (EM scope, binary format)", () => {
+    it("produces binary format with scope 'EM'", () => {
       const ctx: WrapContext = {
-        grantId: "clxyz123abc",
-        ownerId: "clusr_owner_001",
-        granteeId: "clusr_grantee_002",
-        keyVersion: 1,
-        wrapVersion: 1,
+        grantId: "g1", ownerId: "o1", granteeId: "g2",
+        keyVersion: 1, wrapVersion: 1,
       };
-      const aad = buildAAD(ctx);
-      const decoded = new TextDecoder().decode(aad);
-      expect(decoded).toBe("clxyz123abc|clusr_owner_001|clusr_grantee_002|1|1");
+      const aad = buildEmergencyWrapAAD(ctx);
+      expect(aad).toBeInstanceOf(Uint8Array);
+      // First 2 bytes = "EM"
+      expect(String.fromCharCode(aad[0], aad[1])).toBe("EM");
+      // 3rd byte = AAD version (1)
+      expect(aad[2]).toBe(1);
+      // 4th byte = nFields (5)
+      expect(aad[3]).toBe(5);
     });
 
     it("produces byte-identical output for same inputs", () => {
@@ -367,8 +369,8 @@ describe("crypto-emergency", () => {
         keyVersion: 2,
         wrapVersion: 1,
       };
-      const aad1 = new Uint8Array(buildAAD(ctx));
-      const aad2 = new Uint8Array(buildAAD(ctx));
+      const aad1 = buildEmergencyWrapAAD(ctx);
+      const aad2 = buildEmergencyWrapAAD(ctx);
       expect(aad1).toEqual(aad2);
     });
 
@@ -381,11 +383,7 @@ describe("crypto-emergency", () => {
         grantId: "g1", ownerId: "o1", granteeId: "g2",
         keyVersion: 1, wrapVersion: 2,
       };
-      const aadV1 = new TextDecoder().decode(buildAAD(ctxV1));
-      const aadV2 = new TextDecoder().decode(buildAAD(ctxV2));
-      expect(aadV1).toBe("g1|o1|g2|1|1");
-      expect(aadV2).toBe("g1|o1|g2|1|2");
-      expect(aadV1).not.toBe(aadV2);
+      expect(buildEmergencyWrapAAD(ctxV1)).not.toEqual(buildEmergencyWrapAAD(ctxV2));
     });
 
     it("differs when any single field changes", () => {
@@ -400,23 +398,20 @@ describe("crypto-emergency", () => {
         { ...base, keyVersion: 9 },
         { ...base, wrapVersion: 9 },
       ];
-      const baseAAD = new TextDecoder().decode(buildAAD(base));
+      const baseAAD = buildEmergencyWrapAAD(base);
       for (const variant of variants) {
-        const variantAAD = new TextDecoder().decode(buildAAD(variant));
-        expect(variantAAD).not.toBe(baseAAD);
+        expect(buildEmergencyWrapAAD(variant)).not.toEqual(baseAAD);
       }
     });
 
-    it("does not use JSON format", () => {
+    it("uses binary length-prefixed format (no pipe delimiter)", () => {
       const ctx: WrapContext = {
         grantId: "g1", ownerId: "o1", granteeId: "g2",
         keyVersion: 1, wrapVersion: 1,
       };
-      const decoded = new TextDecoder().decode(buildAAD(ctx));
-      expect(decoded).not.toContain("{");
-      expect(decoded).not.toContain("}");
-      expect(decoded).not.toContain("\"");
-      expect(decoded).not.toContain(":");
+      // Verify no pipe character (0x7c) in the raw bytes
+      const aad = buildEmergencyWrapAAD(ctx);
+      expect(Array.from(aad)).not.toContain(0x7c); // '|'
     });
   });
 
@@ -431,6 +426,56 @@ describe("crypto-emergency", () => {
       const granteePublicKeyJwk = await exportPublicKey(granteeKeyPair.publicKey);
       const escrow = await createKeyEscrow(ownerSecretKey, granteePublicKeyJwk, TEST_CTX);
       expect(escrow.wrapVersion).toBe(CURRENT_WRAP_VERSION);
+    });
+  });
+
+  // C15: round-trip via the registry builder (EM scope)
+  describe("C15 round-trip with registry AAD builder", () => {
+    it("encrypt→decrypt succeeds with matching registry AAD (EM scope)", async () => {
+      const ownerSecretKey = crypto.getRandomValues(new Uint8Array(32));
+      const granteeKeyPair = await generateECDHKeyPair();
+      const granteePublicKeyJwk = await exportPublicKey(granteeKeyPair.publicKey);
+      const escrow = await createKeyEscrow(ownerSecretKey, granteePublicKeyJwk, TEST_CTX);
+      const unwrapped = await unwrapSecretKeyAsGrantee(
+        { ciphertext: escrow.encryptedSecretKey, iv: escrow.secretKeyIv, authTag: escrow.secretKeyAuthTag },
+        escrow.ownerEphemeralPublicKey,
+        granteeKeyPair.privateKey,
+        hexDecode(escrow.hkdfSalt),
+        makeWrapCtx(),
+      );
+      expect(unwrapped).toEqual(ownerSecretKey);
+    });
+
+    it("anti-vacuous: decrypt with wrong-AAD (different ownerId) must reject", async () => {
+      const ownerSecretKey = crypto.getRandomValues(new Uint8Array(32));
+      const granteeKeyPair = await generateECDHKeyPair();
+      const granteePublicKeyJwk = await exportPublicKey(granteeKeyPair.publicKey);
+      const escrow = await createKeyEscrow(ownerSecretKey, granteePublicKeyJwk, TEST_CTX);
+      await expect(
+        unwrapSecretKeyAsGrantee(
+          { ciphertext: escrow.encryptedSecretKey, iv: escrow.secretKeyIv, authTag: escrow.secretKeyAuthTag },
+          escrow.ownerEphemeralPublicKey,
+          granteeKeyPair.privateKey,
+          hexDecode(escrow.hkdfSalt),
+          makeWrapCtx({ ownerId: "wrong-owner-id" }),
+        ),
+      ).rejects.toThrow();
+    });
+
+    it("anti-vacuous: decrypt with wrong-AAD (different granteeId) must reject", async () => {
+      const ownerSecretKey = crypto.getRandomValues(new Uint8Array(32));
+      const granteeKeyPair = await generateECDHKeyPair();
+      const granteePublicKeyJwk = await exportPublicKey(granteeKeyPair.publicKey);
+      const escrow = await createKeyEscrow(ownerSecretKey, granteePublicKeyJwk, TEST_CTX);
+      await expect(
+        unwrapSecretKeyAsGrantee(
+          { ciphertext: escrow.encryptedSecretKey, iv: escrow.secretKeyIv, authTag: escrow.secretKeyAuthTag },
+          escrow.ownerEphemeralPublicKey,
+          granteeKeyPair.privateKey,
+          hexDecode(escrow.hkdfSalt),
+          makeWrapCtx({ granteeId: "different-grantee" }),
+        ),
+      ).rejects.toThrow();
     });
   });
 });

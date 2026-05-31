@@ -53,20 +53,13 @@ describe("account-token-crypto", () => {
     ).toThrow();
   });
 
-  it("buildAad rejects fields containing the ':' delimiter", () => {
-    // S1 fix: prevent (provider="saml", providerAccountId="acme:sub") from
-    // colliding with (provider="saml:acme", providerAccountId="sub").
-    expect(() =>
-      encryptAccountToken("p", { ...aad, provider: "saml:acme" }),
-    ).toThrow(/reserved delimiter/);
-    expect(() =>
-      encryptAccountToken("p", { ...aad, providerAccountId: "with:colon" }),
-    ).toThrow(/reserved delimiter/);
-    // userId is UUID-sourced in production (no colons), but the guard runs
-    // for defense-in-depth — verify it fires.
-    expect(() =>
-      encryptAccountToken("p", { ...aad, userId: "user:evil" }),
-    ).toThrow(/reserved delimiter/);
+  it("provider values containing ':' are accepted (binary AAD has no delimiter)", () => {
+    // The old colon-format AAD rejected ':' in fields to prevent collision.
+    // The binary length-prefixed format eliminates delimiter ambiguity entirely,
+    // so ':' in provider (e.g. SAML) is now safe.
+    const samlAad = { ...aad, provider: "saml:acme" };
+    const ct = encryptAccountToken("p", samlAad);
+    expect(decryptAccountToken(ct, samlAad)).toBe("p");
   });
 
   it("rejects ciphertext when the AAD context does not match", () => {
@@ -211,10 +204,11 @@ describe("account-token-crypto", () => {
 
   // AAD-byte drift detection. The fixture is a known plaintext encrypted
   // under a deterministic test master key in the on-disk envelope format,
-  // using the AAD shape `userId:provider:providerAccountId`. If `buildAad`
-  // ever changes shape without regenerating the fixture, this test fails —
-  // forcing intentional reconciliation. Regenerate via
-  // `npx tsx scripts/regenerate-account-token-legacy-fixture.ts`.
+  // using the binary length-prefixed AAD shape (scope "AC", 3 fields:
+  // userId, provider, providerAccountId) from the registry in crypto-aad.ts.
+  // If `buildAccountTokenAAD` ever changes shape without regenerating the
+  // fixture, this test fails — forcing intentional reconciliation.
+  // Regenerate via `npx tsx scripts/regenerate-account-token-legacy-fixture.ts`.
   describe("AAD-byte drift regression", () => {
     it("decrypts a fixture ciphertext using the current AAD shape", async () => {
       const cryptoServer = await import("@/lib/crypto/crypto-server");
@@ -239,6 +233,35 @@ describe("account-token-crypto", () => {
       } finally {
         spy.mockRestore();
       }
+    });
+  });
+
+  // C15: round-trip via the registry builder (AC scope)
+  describe("C15 round-trip with registry AAD builder (AC scope)", () => {
+    it("encrypt→decrypt succeeds with matching registry AAD", () => {
+      const ct = encryptAccountToken("my-oauth-token", aad);
+      expect(decryptAccountToken(ct, aad)).toBe("my-oauth-token");
+    });
+
+    it("anti-vacuous: decrypt with wrong userId must reject", () => {
+      const ct = encryptAccountToken("my-oauth-token", aad);
+      expect(() =>
+        decryptAccountToken(ct, { ...aad, userId: "wrong-user-id" }),
+      ).toThrow();
+    });
+
+    it("anti-vacuous: decrypt with wrong provider must reject", () => {
+      const ct = encryptAccountToken("my-oauth-token", aad);
+      expect(() =>
+        decryptAccountToken(ct, { ...aad, provider: "github" }),
+      ).toThrow();
+    });
+
+    it("anti-vacuous: decrypt with wrong providerAccountId must reject", () => {
+      const ct = encryptAccountToken("my-oauth-token", aad);
+      expect(() =>
+        decryptAccountToken(ct, { ...aad, providerAccountId: "different@example.com" }),
+      ).toThrow();
     });
   });
 });

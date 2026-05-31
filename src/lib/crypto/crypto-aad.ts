@@ -14,6 +14,15 @@
  *   "AT" — Attachment             (entryId, attachmentId)
  *   "IK" — ItemKey wrapping       (teamId, entryId, teamKeyVersion)
  *   "AW" — Attachment CEK Wrap (entryId, attachmentId, cekKeyVersion, cekWrapAadVersion)
+ *   "OK" — Team member key wrap   (teamId, toUserId, keyVersion, wrapVersion)
+ *   "AR" — Admin reset token      (tenantId, resetId, targetEmailAtInitiate)
+ *   "EM" — Emergency escrow wrap  (grantId, ownerId, granteeId, keyVersion, wrapVersion)
+ *   "WH" — Webhook secret         (tableName, vN, webhookId, tenantId, [teamId])
+ *   "AC" — Account OAuth token    (userId, provider, providerAccountId)
+ *
+ * This module is the single registry for AAD construction: buildAADBytes is
+ * module-private, so every AAD value in the codebase originates from a named
+ * builder here. (Enforced by scripts/checks/check-crypto-domains.mjs.)
  */
 
 const AAD_VERSION = 1;
@@ -24,6 +33,11 @@ const SCOPE_TEAM = "OV";
 const SCOPE_ATTACHMENT = "AT";
 const SCOPE_ITEM_KEY = "IK";
 const SCOPE_ATTACHMENT_WRAP = "AW";
+const SCOPE_TEAM_KEY = "OK";
+const SCOPE_ADMIN_RESET = "AR";
+const SCOPE_EMERGENCY = "EM";
+const SCOPE_WEBHOOK = "WH";
+const SCOPE_ACCOUNT_TOKEN = "AC";
 
 /**
  * Vault entry sub-blob selector used by Personal (PV) and Team (OV) AAD
@@ -195,6 +209,117 @@ export function buildAttachmentCekWrapAAD(
   ]);
 }
 
+/**
+ * Build AAD for Team member key wrapping (scope "OK").
+ *
+ * Prevents cross-team, cross-user, and cross-version transplant of wrapped
+ * TeamMemberKeys.
+ */
+export interface TeamKeyWrapContext {
+  teamId: string;
+  toUserId: string;
+  keyVersion: number;
+  wrapVersion: number;
+}
+export function buildTeamKeyWrapAAD(ctx: TeamKeyWrapContext): Uint8Array {
+  return buildAADBytes(SCOPE_TEAM_KEY, 4, [
+    ctx.teamId,
+    ctx.toUserId,
+    String(ctx.keyVersion),
+    String(ctx.wrapVersion),
+  ]);
+}
+
+/**
+ * Build AAD for an admin vault-reset token (scope "AR").
+ */
+export interface AdminResetAad {
+  tenantId: string;
+  resetId: string;
+  targetEmailAtInitiate: string;
+}
+export function buildAdminResetAAD(aad: AdminResetAad): Uint8Array {
+  return buildAADBytes(SCOPE_ADMIN_RESET, 3, [
+    aad.tenantId,
+    aad.resetId,
+    aad.targetEmailAtInitiate,
+  ]);
+}
+
+/**
+ * Build AAD for an emergency-access ECDH secret-key escrow wrap (scope "EM").
+ *
+ * wrapVersion enables v1→v2 (PQ-hybrid) migration without breaking data.
+ */
+export interface EmergencyWrapContext {
+  grantId: string;
+  ownerId: string;
+  granteeId: string;
+  keyVersion: number;
+  wrapVersion: number;
+}
+export function buildEmergencyWrapAAD(ctx: EmergencyWrapContext): Uint8Array {
+  return buildAADBytes(SCOPE_EMERGENCY, 5, [
+    ctx.grantId,
+    ctx.ownerId,
+    ctx.granteeId,
+    String(ctx.keyVersion),
+    String(ctx.wrapVersion),
+  ]);
+}
+
+/**
+ * Build AAD for an encrypted webhook secret (scope "WH").
+ *
+ * teamId is present for TeamWebhook, absent for TenantWebhook. The
+ * length-prefixed binary format makes delimiter-collision impossible, so the
+ * prior canonical-UUID guard (a pipe-format defense) is no longer needed.
+ */
+export interface WebhookSecretAADArgs {
+  tableName: "TenantWebhook" | "TeamWebhook";
+  version: number;
+  webhookId: string;
+  tenantId: string;
+  teamId?: string | null;
+}
+export function buildWebhookSecretAAD(args: WebhookSecretAADArgs): Uint8Array {
+  const { tableName, version, webhookId, tenantId, teamId } = args;
+  if (!Number.isInteger(version) || version < 1) {
+    throw new Error(`webhook AAD: version must be a positive integer (got ${version})`);
+  }
+  if (tableName !== "TenantWebhook" && tableName !== "TeamWebhook") {
+    throw new Error(`webhook AAD: unknown tableName ${tableName}`);
+  }
+  if (tableName === "TeamWebhook" && !teamId) {
+    throw new Error("webhook AAD: TeamWebhook requires teamId");
+  }
+  if (tableName === "TenantWebhook" && teamId) {
+    throw new Error("webhook AAD: TenantWebhook must not carry a teamId");
+  }
+  const fields = [tableName, `v${version}`, webhookId, tenantId];
+  if (teamId) fields.push(teamId);
+  return buildAADBytes(SCOPE_WEBHOOK, fields.length, fields);
+}
+
+/**
+ * Build AAD for an encrypted account OAuth token (scope "AC").
+ *
+ * Binds ciphertext to the owning user + provider identity. The length-prefixed
+ * format removes any delimiter ambiguity, so provider values may contain ":".
+ */
+export interface AccountTokenAad {
+  userId: string;
+  provider: string;
+  providerAccountId: string;
+}
+export function buildAccountTokenAAD(aad: AccountTokenAad): Uint8Array {
+  return buildAADBytes(SCOPE_ACCOUNT_TOKEN, 3, [
+    aad.userId,
+    aad.provider,
+    aad.providerAccountId,
+  ]);
+}
+
 export const MIN_ACCEPTED_CEK_WRAP_AAD_VERSION = 1;
 
 // Current CEK wrap AAD format version emitted by all client wrap operations.
@@ -203,5 +328,7 @@ export const MIN_ACCEPTED_CEK_WRAP_AAD_VERSION = 1;
 // paths in lockstep.
 export const CURRENT_CEK_WRAP_AAD_VERSION = 1;
 
-// Re-export for tests, schema references, and reuse by other AAD builders
-export { AAD_VERSION, buildAADBytes };
+// AAD_VERSION is exported for callers that stamp it alongside ciphertext.
+// buildAADBytes is intentionally NOT exported — it is module-private so that
+// every AAD value originates from a named builder above (the single registry).
+export { AAD_VERSION };

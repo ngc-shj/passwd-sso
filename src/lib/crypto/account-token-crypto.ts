@@ -7,20 +7,10 @@
 //   `psoenc1:<keyVersion>:<base64url(iv || authTag || ciphertext)>`
 //
 // AAD binding:
-//   AES-256-GCM AAD = `<userId>:<provider>:<providerAccountId>`. This binds
-//   the ciphertext to the local identity that owns the credential, not just
-//   to the provider-side account ID. A DB-write attacker who pivots
-//   `accounts.user_id` to redirect a long-lived refresh_token can no longer
-//   keep the ciphertext valid — GCM auth fails on the next read. `tenantId`
-//   is intentionally NOT part of AAD: `@@unique([provider, providerAccountId])`
-//   already makes cross-tenant ciphertext substitution structurally impossible,
-//   so adding `tenantId` would inflate AAD bytes for no security gain.
-//
-//   `buildAad` rejects any field containing `":"` to prevent delimiter
-//   collision (e.g., `(provider="saml", providerAccountId="acme:sub")` would
-//   otherwise produce identical AAD bytes to `(provider="saml:acme",
-//   providerAccountId="sub")`). Cheaper than a full encoding scheme; turns
-//   a silent collision into an explicit error at write time.
+//   AES-256-GCM AAD is the binary length-prefixed format (scope "AC", 3 fields:
+//   userId, provider, providerAccountId) from the single registry in
+//   crypto-aad.ts. The binary format eliminates delimiter-collision risk, so
+//   provider values may now contain ":".
 //
 //   The envelope ops (parse / encrypt / decrypt) live in
 //   `src/lib/crypto/envelope.ts`.
@@ -51,31 +41,13 @@ import {
   getCurrentMasterKeyVersion,
   getMasterKeyByVersion,
 } from "@/lib/crypto/crypto-server";
+import { buildAccountTokenAAD, type AccountTokenAad } from "@/lib/crypto/crypto-aad";
 
-export type AccountTokenAad = {
-  userId: string;
-  provider: string;
-  providerAccountId: string;
-};
+// Re-export so callers importing AccountTokenAad from this module stay unchanged.
+export type { AccountTokenAad };
 
 function buildAad(aad: AccountTokenAad): Buffer {
-  // Reject `:` in any field to prevent delimiter-collision aliasing:
-  //   ("saml", "acme:sub")  →  AAD = "u1:saml:acme:sub"
-  //   ("saml:acme", "sub")  →  AAD = "u1:saml:acme:sub"
-  // are otherwise indistinguishable bytes.
-  if (
-    aad.userId.includes(":") ||
-    aad.provider.includes(":") ||
-    aad.providerAccountId.includes(":")
-  ) {
-    throw new Error(
-      "AccountTokenAad field contains reserved delimiter ':'",
-    );
-  }
-  return Buffer.from(
-    `${aad.userId}:${aad.provider}:${aad.providerAccountId}`,
-    "utf8",
-  );
+  return Buffer.from(buildAccountTokenAAD(aad));
 }
 
 export function isEncryptedAccountToken(stored: string): boolean {

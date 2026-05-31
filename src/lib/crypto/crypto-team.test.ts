@@ -663,4 +663,56 @@ describe("crypto-team", () => {
       expect(hexDecode("cafe")).toEqual(data);
     });
   });
+
+  // C15: round-trip via the registry builder (OK scope)
+  describe("C15 round-trip with registry AAD builder (OK scope)", () => {
+    it("wrap→unwrap succeeds with matching registry AAD", async () => {
+      const teamKey = generateTeamSymmetricKey();
+      const salt = crypto.getRandomValues(new Uint8Array(32));
+      const saltHex = hexEncode(salt);
+      const ephemeralKeyPair = await generateECDHKeyPair();
+      const ephemeralPubJwk = await exportPublicKey(ephemeralKeyPair.publicKey);
+      const memberKeyPair = await generateECDHKeyPair();
+
+      const encrypted = await wrapTeamKeyForMember(
+        teamKey, ephemeralKeyPair.privateKey, memberKeyPair.publicKey, salt, TEST_CTX,
+      );
+      const unwrapped = await unwrapTeamKey(
+        encrypted, ephemeralPubJwk, memberKeyPair.privateKey, saltHex, TEST_CTX,
+      );
+      expect(unwrapped).toEqual(teamKey);
+    });
+
+    it("anti-vacuous: decrypt with wrong teamId must reject", async () => {
+      const teamKey = generateTeamSymmetricKey();
+      const salt = crypto.getRandomValues(new Uint8Array(32));
+      const saltHex = hexEncode(salt);
+      const ephemeralKeyPair = await generateECDHKeyPair();
+      const ephemeralPubJwk = await exportPublicKey(ephemeralKeyPair.publicKey);
+      const memberKeyPair = await generateECDHKeyPair();
+
+      const encrypted = await wrapTeamKeyForMember(
+        teamKey, ephemeralKeyPair.privateKey, memberKeyPair.publicKey, salt, TEST_CTX,
+      );
+      await expect(
+        unwrapTeamKey(encrypted, ephemeralPubJwk, memberKeyPair.privateKey, saltHex, makeCtx({ teamId: "attacker-team" })),
+      ).rejects.toThrow();
+    });
+
+    it("anti-vacuous: decrypt with wrong toUserId must reject", async () => {
+      const teamKey = generateTeamSymmetricKey();
+      const salt = crypto.getRandomValues(new Uint8Array(32));
+      const saltHex = hexEncode(salt);
+      const ephemeralKeyPair = await generateECDHKeyPair();
+      const ephemeralPubJwk = await exportPublicKey(ephemeralKeyPair.publicKey);
+      const memberKeyPair = await generateECDHKeyPair();
+
+      const encrypted = await wrapTeamKeyForMember(
+        teamKey, ephemeralKeyPair.privateKey, memberKeyPair.publicKey, salt, TEST_CTX,
+      );
+      await expect(
+        unwrapTeamKey(encrypted, ephemeralPubJwk, memberKeyPair.privateKey, saltHex, makeCtx({ toUserId: "attacker-user" })),
+      ).rejects.toThrow();
+    });
+  });
 });

@@ -9,9 +9,9 @@
 //
 // IMPORTANT: this script intentionally builds AAD inline so the fixture is
 // a faithful snapshot of the on-disk format, independent of the helper
-// module under test. AAD shape MUST be kept in sync with `buildAad` in
-// `src/lib/crypto/account-token-crypto.ts`. Current shape:
-//   `${userId}:${provider}:${providerAccountId}`
+// module under test. AAD shape MUST be kept in sync with `buildAccountTokenAAD`
+// in `src/lib/crypto/crypto-aad.ts`. Current shape:
+//   binary length-prefixed, scope "AC", 3 fields: userId, provider, providerAccountId
 //
 // Run: `npx tsx scripts/regenerate-account-token-legacy-fixture.ts`
 
@@ -23,6 +23,7 @@ const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 const SENTINEL = "psoenc1:";
+const AAD_VERSION = 1;
 
 const fixture = {
   // Deterministic 256-bit test key (NOT a real production key).
@@ -43,10 +44,28 @@ if (key.length !== 32) {
   throw new Error(`master key must be 32 bytes, got ${key.length}`);
 }
 
-const aad = Buffer.from(
-  `${fixture.userId}:${fixture.provider}:${fixture.providerAccountId}`,
-  "utf8",
-);
+// Build binary length-prefixed AAD (scope "AC", 3 fields) — must match
+// buildAccountTokenAAD in src/lib/crypto/crypto-aad.ts.
+function buildAadBytes(scope: string, fields: string[]): Buffer {
+  const encoder = new TextEncoder();
+  const encodedFields = fields.map((f) => encoder.encode(f));
+  const headerSize = 4; // scope(2) + aadVersion(1) + nFields(1)
+  const fieldsSize = encodedFields.reduce((sum, ef) => sum + 2 + ef.length, 0);
+  const buf = new ArrayBuffer(headerSize + fieldsSize);
+  const view = new DataView(buf);
+  const bytes = new Uint8Array(buf);
+  let offset = 0;
+  bytes[offset] = scope.charCodeAt(0); bytes[offset + 1] = scope.charCodeAt(1); offset += 2;
+  view.setUint8(offset, AAD_VERSION); offset += 1;
+  view.setUint8(offset, fields.length); offset += 1;
+  for (const encoded of encodedFields) {
+    view.setUint16(offset, encoded.length, false); offset += 2;
+    bytes.set(encoded, offset); offset += encoded.length;
+  }
+  return Buffer.from(buf);
+}
+
+const aad = buildAadBytes("AC", [fixture.userId, fixture.provider, fixture.providerAccountId]);
 
 const iv = randomBytes(IV_LENGTH);
 const cipher = createCipheriv(ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });

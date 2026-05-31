@@ -638,23 +638,22 @@ describe("createCustomAdapter", () => {
       expect(callArgs.data.id_token).toBeNull();
     });
 
-    it("propagates buildAad delimiter rejection to caller", async () => {
-      // T-new-2 regression guard: a colon in provider/providerAccountId
-      // throws synchronously inside encryptAccountTokenTriple → linkAccount.
-      // Auth.js sees a generic crypto error and fails the OAuth callback.
+    it("accepts provider values containing ':' (binary AAD has no delimiter restriction)", async () => {
+      // The old colon-format AAD rejected ':' in fields to prevent collision.
+      // The binary length-prefixed format eliminates delimiter ambiguity, so
+      // SAML providers with ':' in their identifier are now accepted.
       mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockPrismaAccount.create.mockResolvedValue({});
       const adapter = createCustomAdapter();
       await expect(
         adapter.linkAccount!({
           userId: "u-1",
           type: "oidc",
-          provider: "saml:malicious",
+          provider: "saml:acme",
           providerAccountId: "g-1",
           refresh_token: "rt",
         }),
-      ).rejects.toThrow(/reserved delimiter/);
-      // No row written when validation fails.
-      expect(mockPrismaAccount.create).not.toHaveBeenCalled();
+      ).resolves.not.toThrow();
     });
   });
 
