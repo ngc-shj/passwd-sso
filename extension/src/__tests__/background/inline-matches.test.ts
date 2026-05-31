@@ -259,6 +259,24 @@ describe("resolveInlineMatches (LOGIN / CC / IDENTITY)", () => {
     expect(res.entries[0].username).toBe("Alice Smith");
   });
 
+  it("IDENTITY with composed fullName (givenName+familyName at write time) surfaces in username", async () => {
+    // Simulates an entry that had no fullName but givenName="Taro" + familyName="Yamada"
+    // written to the overview blob as fullName="Taro Yamada" by composeIdentityNameLabel.
+    mockEntries(
+      [{ id: "id-2", entryType: EXT_ENTRY_TYPE.IDENTITY }],
+      [{ title: "My Card", fullName: "Taro Yamada", email: "taro@example.com", urlHost: "" }],
+    );
+    await unlock();
+
+    const res = (await sendMessage({
+      type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL,
+      url: "https://form.example/register",
+    })) as { entries: Array<{ id: string; username: string }> };
+
+    expect(res.entries.map((e) => e.id)).toEqual(["id-2"]);
+    expect(res.entries[0].username).toBe("Taro Yamada");
+  });
+
   it("CC does not return LOGIN entries (filters strictly by entry type)", async () => {
     mockEntries(
       [

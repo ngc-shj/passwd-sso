@@ -48,6 +48,17 @@ export function TeamIdentityForm({
   // Entry-specific state
   const [fullName, setFullName] = useState(editData?.fullName ?? "");
   const [address, setAddress] = useState(editData?.address ?? "");
+  const [givenName, setGivenName] = useState(editData?.givenName ?? "");
+  const [familyName, setFamilyName] = useState(editData?.familyName ?? "");
+  const [middleName, setMiddleName] = useState(editData?.middleName ?? "");
+  const [familyNameKana, setFamilyNameKana] = useState(editData?.familyNameKana ?? "");
+  const [givenNameKana, setGivenNameKana] = useState(editData?.givenNameKana ?? "");
+  const [addressLine1, setAddressLine1] = useState(editData?.addressLine1 ?? "");
+  const [addressLine2, setAddressLine2] = useState(editData?.addressLine2 ?? "");
+  const [city, setCity] = useState(editData?.city ?? "");
+  const [state, setState] = useState(editData?.state ?? "");
+  const [postalCode, setPostalCode] = useState(editData?.postalCode ?? "");
+  const [country, setCountry] = useState(editData?.country ?? "");
   const [phone, setPhone] = useState(editData?.phone ?? "");
   const [email, setEmail] = useState(editData?.email ?? "");
   const [dateOfBirth, setDateOfBirth] = useState(editData?.dateOfBirth ?? "");
@@ -65,6 +76,17 @@ export function TeamIdentityForm({
       notes: base.notes,
       fullName,
       address,
+      givenName,
+      familyName,
+      middleName,
+      familyNameKana,
+      givenNameKana,
+      addressLine1,
+      addressLine2,
+      city,
+      state,
+      postalCode,
+      country,
       phone,
       email,
       dateOfBirth,
@@ -83,6 +105,17 @@ export function TeamIdentityForm({
       base.notes,
       fullName,
       address,
+      givenName,
+      familyName,
+      middleName,
+      familyNameKana,
+      givenNameKana,
+      addressLine1,
+      addressLine2,
+      city,
+      state,
+      postalCode,
+      country,
       phone,
       email,
       dateOfBirth,
@@ -183,6 +216,17 @@ export function TeamIdentityForm({
       tagNames,
       fullName,
       address,
+      givenName,
+      familyName,
+      middleName,
+      familyNameKana,
+      givenNameKana,
+      addressLine1,
+      addressLine2,
+      city,
+      state,
+      postalCode,
+      country,
       phone,
       email,
       dateOfBirth,
@@ -220,6 +264,39 @@ export function TeamIdentityForm({
             address={address}
             onAddressChange={setAddress}
             addressPlaceholder={ti("addressPlaceholder")}
+            givenName={givenName}
+            onGivenNameChange={setGivenName}
+            givenNamePlaceholder={ti("givenNamePlaceholder")}
+            familyName={familyName}
+            onFamilyNameChange={setFamilyName}
+            familyNamePlaceholder={ti("familyNamePlaceholder")}
+            middleName={middleName}
+            onMiddleNameChange={setMiddleName}
+            middleNamePlaceholder={ti("middleNamePlaceholder")}
+            familyNameKana={familyNameKana}
+            onFamilyNameKanaChange={setFamilyNameKana}
+            familyNameKanaPlaceholder={ti("familyNameKanaPlaceholder")}
+            givenNameKana={givenNameKana}
+            onGivenNameKanaChange={setGivenNameKana}
+            givenNameKanaPlaceholder={ti("givenNameKanaPlaceholder")}
+            addressLine1={addressLine1}
+            onAddressLine1Change={setAddressLine1}
+            addressLine1Placeholder={ti("addressLine1Placeholder")}
+            addressLine2={addressLine2}
+            onAddressLine2Change={setAddressLine2}
+            addressLine2Placeholder={ti("addressLine2Placeholder")}
+            city={city}
+            onCityChange={setCity}
+            cityPlaceholder={ti("cityPlaceholder")}
+            state={state}
+            onStateChange={setState}
+            statePlaceholder={ti("statePlaceholder")}
+            postalCode={postalCode}
+            onPostalCodeChange={setPostalCode}
+            postalCodePlaceholder={ti("postalCodePlaceholder")}
+            country={country}
+            onCountryChange={setCountry}
+            countryPlaceholder={ti("countryPlaceholder")}
             phone={phone}
             onPhoneChange={setPhone}
             phonePlaceholder={ti("phonePlaceholder")}
@@ -258,6 +335,19 @@ export function TeamIdentityForm({
             labels={{
               fullName: ti("fullName"),
               address: ti("address"),
+              givenName: ti("givenName"),
+              familyName: ti("familyName"),
+              middleName: ti("middleName"),
+              familyNameKana: ti("familyNameKana"),
+              givenNameKana: ti("givenNameKana"),
+              addressLine1: ti("addressLine1"),
+              addressLine2: ti("addressLine2"),
+              city: ti("city"),
+              state: ti("state"),
+              postalCode: ti("postalCode"),
+              country: ti("country"),
+              nameGroup: ti("nameGroup"),
+              addressGroup: ti("addressGroup"),
               phone: ti("phone"),
               email: ti("email"),
               dateOfBirth: ti("dateOfBirth"),

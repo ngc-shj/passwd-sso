@@ -1,5 +1,6 @@
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
+import { composeIdentityNameLabel } from "@/lib/constants/identity-fields";
 import { ENTRY_SNIPPET_MAX } from "@/lib/validations/common";
 import { filterNonEmptyCustomFields, parseUrlHost } from "@/lib/vault/entry-form-helpers";
 import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
@@ -27,6 +28,17 @@ export interface BuildTeamEntryPayloadInput {
 
   fullName?: string;
   address?: string;
+  givenName?: string;
+  familyName?: string;
+  middleName?: string;
+  familyNameKana?: string;
+  givenNameKana?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
   phone?: string;
   email?: string;
   dateOfBirth?: string;
@@ -95,6 +107,17 @@ export function buildTeamEntryPayload(
       entryFields = {
         fullName: input.fullName?.trim() || null,
         address: input.address?.trim() || null,
+        givenName: input.givenName?.trim() || null,
+        familyName: input.familyName?.trim() || null,
+        middleName: input.middleName?.trim() || null,
+        familyNameKana: input.familyNameKana?.trim() || null,
+        givenNameKana: input.givenNameKana?.trim() || null,
+        addressLine1: input.addressLine1?.trim() || null,
+        addressLine2: input.addressLine2?.trim() || null,
+        city: input.city?.trim() || null,
+        state: input.state?.trim() || null,
+        postalCode: input.postalCode?.trim() || null,
+        country: input.country?.trim() || null,
         phone: input.phone?.trim() || null,
         email: input.email?.trim() || null,
         dateOfBirth: input.dateOfBirth || null,
@@ -201,7 +224,11 @@ export function buildTeamEntryPayload(
       const idDigits = (input.idNumber ?? "").replace(/\D/g, "");
       overviewData = {
         title,
-        fullName: input.fullName?.trim() || null,
+        // Compose name from structured given/family when fullName is absent so a
+        // structured-only entry isn't blank in the list/dropdown. Address PII stays
+        // out of the overview (kept in the encrypted fullBlob only).
+        fullName: composeIdentityNameLabel(input.fullName, input.givenName, input.familyName),
+        email: input.email?.trim() || null,
         idNumberLast4: idDigits.length >= 4 ? idDigits.slice(-4) : null,
         tags,
       };

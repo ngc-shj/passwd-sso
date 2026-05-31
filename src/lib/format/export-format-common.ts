@@ -24,6 +24,17 @@ export interface ExportEntry {
   cvv: string | null;
   fullName: string | null;
   address: string | null;
+  givenName?: string | null;
+  familyName?: string | null;
+  middleName?: string | null;
+  familyNameKana?: string | null;
+  givenNameKana?: string | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
   phone: string | null;
   email: string | null;
   dateOfBirth: string | null;
@@ -231,6 +242,17 @@ export function formatExportJson(
             identity: {
               fullName: e.fullName,
               address: e.address,
+              givenName: e.givenName,
+              familyName: e.familyName,
+              middleName: e.middleName,
+              familyNameKana: e.familyNameKana,
+              givenNameKana: e.givenNameKana,
+              addressLine1: e.addressLine1,
+              addressLine2: e.addressLine2,
+              city: e.city,
+              state: e.state,
+              postalCode: e.postalCode,
+              country: e.country,
               phone: e.phone,
               email: e.email,
               dateOfBirth: e.dateOfBirth,
@@ -409,6 +431,17 @@ function passwdSsoCsvPayload(
     cvv: entry.cvv,
     fullName: entry.fullName,
     address: entry.address,
+    givenName: entry.givenName,
+    familyName: entry.familyName,
+    middleName: entry.middleName,
+    familyNameKana: entry.familyNameKana,
+    givenNameKana: entry.givenNameKana,
+    addressLine1: entry.addressLine1,
+    addressLine2: entry.addressLine2,
+    city: entry.city,
+    state: entry.state,
+    postalCode: entry.postalCode,
+    country: entry.country,
     phone: entry.phone,
     email: entry.email,
     dateOfBirth: entry.dateOfBirth,

@@ -102,6 +102,74 @@ describe("buildTeamEntryPayload", () => {
     expect(overview.title).toBe("My ID");
   });
 
+  it("persists all structured identity fields in fullBlob", () => {
+    const { fullBlob } = buildTeamEntryPayload({
+      entryType: ENTRY_TYPE.IDENTITY,
+      title: "Structured",
+      notes: "",
+      givenName: " Taro ",
+      familyName: " Yamada ",
+      middleName: " M ",
+      familyNameKana: " ヤマダ ",
+      givenNameKana: " タロウ ",
+      addressLine1: " 1-1-1 Chiyoda ",
+      addressLine2: " Apt 101 ",
+      city: " Chiyoda-ku ",
+      state: " Tokyo ",
+      postalCode: " 100-0001 ",
+      country: " Japan ",
+      tagNames: [],
+    });
+
+    const blob = JSON.parse(fullBlob);
+    expect(blob.givenName).toBe("Taro");
+    expect(blob.familyName).toBe("Yamada");
+    expect(blob.middleName).toBe("M");
+    expect(blob.familyNameKana).toBe("ヤマダ");
+    expect(blob.givenNameKana).toBe("タロウ");
+    expect(blob.addressLine1).toBe("1-1-1 Chiyoda");
+    expect(blob.addressLine2).toBe("Apt 101");
+    expect(blob.city).toBe("Chiyoda-ku");
+    expect(blob.state).toBe("Tokyo");
+    expect(blob.postalCode).toBe("100-0001");
+    expect(blob.country).toBe("Japan");
+  });
+
+  it("composes the identity overview name from givenName+familyName when fullName is absent", () => {
+    const { overviewBlob } = buildTeamEntryPayload({
+      entryType: ENTRY_TYPE.IDENTITY,
+      title: "Structured only",
+      notes: "",
+      givenName: "Taro",
+      familyName: "Yamada",
+      email: "taro@example.com",
+      addressLine1: "1-1-1 Chiyoda",
+      postalCode: "100-0001",
+      tagNames: [],
+    });
+    const overview = JSON.parse(overviewBlob);
+    expect(overview.fullName).toBe("Taro Yamada");
+    expect(overview.email).toBe("taro@example.com");
+    // Address PII must never land in the overview blob.
+    expect(overview.addressLine1).toBeUndefined();
+    expect(overview.postalCode).toBeUndefined();
+    expect(overview.address).toBeUndefined();
+  });
+
+  it("prefers fullName over composed name in the identity overview", () => {
+    const { overviewBlob } = buildTeamEntryPayload({
+      entryType: ENTRY_TYPE.IDENTITY,
+      title: "Both",
+      notes: "",
+      fullName: "Legacy Name",
+      givenName: "Taro",
+      familyName: "Yamada",
+      tagNames: [],
+    });
+    const overview = JSON.parse(overviewBlob);
+    expect(overview.fullName).toBe("Legacy Name");
+  });
+
   it("builds passkey blobs with all fields", () => {
     const { fullBlob, overviewBlob } = buildTeamEntryPayload({
       entryType: ENTRY_TYPE.PASSKEY,

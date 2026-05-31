@@ -48,6 +48,17 @@ interface VaultEntryFull {
   cvv?: string | null;
   fullName?: string | null;
   address?: string | null;
+  givenName?: string | null;
+  familyName?: string | null;
+  middleName?: string | null;
+  familyNameKana?: string | null;
+  givenNameKana?: string | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
   phone?: string | null;
   email?: string | null;
   dateOfBirth?: string | null;
@@ -168,6 +179,17 @@ export function PasswordEditDialogLoader({
           cvv: entry.cvv,
           fullName: entry.fullName,
           address: entry.address,
+          givenName: entry.givenName,
+          familyName: entry.familyName,
+          middleName: entry.middleName,
+          familyNameKana: entry.familyNameKana,
+          givenNameKana: entry.givenNameKana,
+          addressLine1: entry.addressLine1,
+          addressLine2: entry.addressLine2,
+          city: entry.city,
+          state: entry.state,
+          postalCode: entry.postalCode,
+          country: entry.country,
           phone: entry.phone,
           email: entry.email,
           dateOfBirth: entry.dateOfBirth,

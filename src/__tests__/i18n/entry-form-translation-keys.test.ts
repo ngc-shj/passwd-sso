@@ -92,4 +92,29 @@ describe("entry form i18n keys", () => {
       expectNamespaceKeys("en", namespace, keys);
     }
   });
+
+  it("has full en↔ja parity for the IdentityForm namespace", () => {
+    const en = Object.keys(readNamespace("en", "IdentityForm")).sort();
+    const ja = Object.keys(readNamespace("ja", "IdentityForm")).sort();
+    expect(ja).toEqual(en);
+  });
+
+  it("has the structured identity field labels + placeholders in both locales", () => {
+    const structuredKeys = [
+      "nameGroup", "addressGroup",
+      "givenName", "givenNamePlaceholder",
+      "familyName", "familyNamePlaceholder",
+      "middleName", "middleNamePlaceholder",
+      "familyNameKana", "familyNameKanaPlaceholder",
+      "givenNameKana", "givenNameKanaPlaceholder",
+      "addressLine1", "addressLine1Placeholder",
+      "addressLine2", "addressLine2Placeholder",
+      "city", "cityPlaceholder",
+      "state", "statePlaceholder",
+      "postalCode", "postalCodePlaceholder",
+      "country", "countryPlaceholder",
+    ];
+    expectNamespaceKeys("ja", "IdentityForm", structuredKeys);
+    expectNamespaceKeys("en", "IdentityForm", structuredKeys);
+  });
 });

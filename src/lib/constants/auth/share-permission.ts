@@ -33,7 +33,12 @@ export const SENSITIVE_FIELDS: Readonly<Record<EntryTypeValue, ReadonlySet<strin
   LOGIN:            new Set(["password", "customFields"]),
   SECURE_NOTE:      new Set(["content", "customFields"]),
   CREDIT_CARD:      new Set(["cardNumber", "cvv", "customFields"]),
-  IDENTITY:         new Set(["idNumber", "customFields"]),
+  // A residential address is as sensitive as the ID number, so HIDE_PASSWORD
+  // masks the street/postal fields alongside idNumber — including the legacy
+  // combined `address` field (same street PII as addressLine1, just unstructured),
+  // so masking is consistent regardless of entry age. city/state/country
+  // (general locality) are left visible.
+  IDENTITY:         new Set(["idNumber", "address", "addressLine1", "addressLine2", "postalCode", "customFields"]),
   PASSKEY:          new Set(["credentialId", "customFields"]),
   // swiftBic is intentionally excluded: it is a public financial institution
   // identifier (like a bank's routing code) and not sensitive on its own.
@@ -47,6 +52,8 @@ export const OVERVIEW_FIELDS: Readonly<Record<EntryTypeValue, ReadonlySet<string
   LOGIN:            new Set(["title", "username", "url"]),
   SECURE_NOTE:      new Set(["title"]),
   CREDIT_CARD:      new Set(["title", "cardholderName", "brand", "expiryMonth", "expiryYear"]),
+  // Only the name label (fullName / composed given+family) + email belong in the
+  // overview tier; structured address components are intentionally excluded.
   IDENTITY:         new Set(["title", "fullName", "email"]),
   PASSKEY:          new Set(["title", "username", "relyingPartyName"]),
   BANK_ACCOUNT:     new Set(["title", "bankName", "accountType", "accountHolderName"]),

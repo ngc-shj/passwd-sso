@@ -45,8 +45,16 @@ const BANK_ACCOUNT_DATA = {
 const IDENTITY_DATA = {
   title: "Passport",
   fullName: "John Doe",
+  givenName: "John",
+  familyName: "Doe",
   email: "john@example.com",
   address: "123 Main St",
+  addressLine1: "123 Main St",
+  addressLine2: "Apt 4",
+  city: "Springfield",
+  state: "IL",
+  postalCode: "62704",
+  country: "US",
   phone: "+1-555-0100",
   idNumber: "AB123456",
   nationality: "US",
@@ -232,26 +240,54 @@ describe("applySharePermissions — BANK_ACCOUNT", () => {
 // ─── Entry-type-specific: IDENTITY ───────────────────────────
 
 describe("applySharePermissions — IDENTITY", () => {
-  it("HIDE_PASSWORD removes idNumber", () => {
+  it("HIDE_PASSWORD masks idNumber, structured address lines/postal, and legacy address field", () => {
     const result = applySharePermissions(
       IDENTITY_DATA,
       [SHARE_PERMISSION.HIDE_PASSWORD],
       "IDENTITY",
     );
     expect(result).not.toHaveProperty("idNumber");
+    expect(result).not.toHaveProperty("addressLine1");
+    expect(result).not.toHaveProperty("addressLine2");
+    expect(result).not.toHaveProperty("postalCode");
+    // Legacy combined `address` is also masked (same street PII as addressLine1).
+    expect(result).not.toHaveProperty("address");
+    // Name, email, city/state/country, phone remain visible.
     expect(result).toHaveProperty("fullName", "John Doe");
+    expect(result).toHaveProperty("givenName", "John");
+    expect(result).toHaveProperty("familyName", "Doe");
     expect(result).toHaveProperty("email", "john@example.com");
-    expect(result).toHaveProperty("address", "123 Main St");
+    expect(result).toHaveProperty("city", "Springfield");
+    expect(result).toHaveProperty("state", "IL");
+    expect(result).toHaveProperty("country", "US");
     expect(result).toHaveProperty("phone", "+1-555-0100");
   });
 
-  it("OVERVIEW_ONLY keeps title, fullName, email", () => {
+  it("OVERVIEW_ONLY keeps only title, fullName, email — no address components", () => {
     const result = applySharePermissions(
       IDENTITY_DATA,
       [SHARE_PERMISSION.OVERVIEW_ONLY],
       "IDENTITY",
     );
     expect(Object.keys(result).sort()).toEqual(["email", "fullName", "title"]);
+    expect(result).not.toHaveProperty("addressLine1");
+    expect(result).not.toHaveProperty("addressLine2");
+    expect(result).not.toHaveProperty("city");
+    expect(result).not.toHaveProperty("state");
+    expect(result).not.toHaveProperty("postalCode");
+    expect(result).not.toHaveProperty("country");
+  });
+});
+
+describe("OVERVIEW_FIELDS.IDENTITY has no address components", () => {
+  it("contains no structured or combined address keys", () => {
+    const addressKeys = [
+      "address", "addressLine1", "addressLine2", "city",
+      "state", "postalCode", "country",
+    ];
+    for (const key of addressKeys) {
+      expect(OVERVIEW_FIELDS.IDENTITY.has(key)).toBe(false);
+    }
   });
 });
 
