@@ -209,8 +209,16 @@ export interface CreditCardAutofillPayload {
 export interface IdentityAutofillPayload {
   type: typeof EXT_MSG.AUTOFILL_IDENTITY_FILL;
   fullName: string;
+  givenName: string;
+  familyName: string;
+  familyNameKana: string;
+  givenNameKana: string;
   address: string;
+  addressLine2: string;
+  city: string;
+  state: string;
   postalCode: string;
+  country: string;
   phone: string;
   email: string;
   dateOfBirth: string;

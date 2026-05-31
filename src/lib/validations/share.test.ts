@@ -33,6 +33,46 @@ const validEncryptedField = (): {
   authTag: HEX_AUTH_TAG,
 });
 
+// ─── shareDataSchema: structured identity field preservation ─────────────────
+
+describe("shareDataSchema — structured identity fields are preserved (regression: silent-strip)", () => {
+  it("parses all 11 structured identity fields without stripping any", () => {
+    const identityData = {
+      title: "My Passport",
+      givenName: "Taro",
+      familyName: "Yamada",
+      middleName: "K",
+      familyNameKana: "ヤマダ",
+      givenNameKana: "タロウ",
+      addressLine1: "1-2-3 Shinjuku",
+      addressLine2: "Apt 5F",
+      city: "Tokyo",
+      state: "Tokyo-to",
+      postalCode: "160-0022",
+      country: "JP",
+    };
+    const result = createShareLinkSchema.safeParse({
+      passwordEntryId: VALID_UUID,
+      data: identityData,
+      expiresIn: "1d",
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    const parsed = result.data.data!;
+    expect(parsed.givenName).toBe("Taro");
+    expect(parsed.familyName).toBe("Yamada");
+    expect(parsed.middleName).toBe("K");
+    expect(parsed.familyNameKana).toBe("ヤマダ");
+    expect(parsed.givenNameKana).toBe("タロウ");
+    expect(parsed.addressLine1).toBe("1-2-3 Shinjuku");
+    expect(parsed.addressLine2).toBe("Apt 5F");
+    expect(parsed.city).toBe("Tokyo");
+    expect(parsed.state).toBe("Tokyo-to");
+    expect(parsed.postalCode).toBe("160-0022");
+    expect(parsed.country).toBe("JP");
+  });
+});
+
 // ─── createShareLinkSchema (personal entry path) ────────────
 
 describe("createShareLinkSchema (personal)", () => {

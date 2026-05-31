@@ -66,40 +66,51 @@ function setSelectValue(select: HTMLSelectElement, targetValue: string): void {
 
 // ── Main autofill function ──
 
+function fillField(
+  field: HTMLInputElement | HTMLSelectElement | null,
+  value: string,
+): void {
+  if (!field || !value) return;
+  if (field instanceof HTMLSelectElement) {
+    setSelectValue(field, value);
+  } else {
+    setInputValue(field, value);
+  }
+}
+
 export function performIdentityAutofill(payload: IdentityAutofillPayload): void {
   const fields = detectIdentityFields(document);
   if (!fields) return;
 
-  if (fields.fullName && payload.fullName) {
-    setInputValue(fields.fullName, payload.fullName);
+  // ── Name ──
+  // Prefer structured given/family; fall back to the monolithic fullName ONLY for
+  // a combined `name` field. NEVER split fullName into the split fields (forbidden).
+  const hasStructuredName = Boolean(payload.givenName || payload.familyName);
+  fillField(fields.givenName, payload.givenName);
+  fillField(fields.familyName, payload.familyName);
+  if (!hasStructuredName) {
+    fillField(fields.fullName, payload.fullName);
   }
 
-  if (fields.address && payload.address) {
-    setInputValue(fields.address, payload.address);
-  }
+  // Kana (フリガナ) — structured only, no monolithic fallback.
+  fillField(fields.familyNameKana, payload.familyNameKana);
+  fillField(fields.givenNameKana, payload.givenNameKana);
 
-  if (fields.postalCode && payload.postalCode) {
-    setInputValue(fields.postalCode, payload.postalCode);
-  }
+  // ── Address ──
+  // The `address` slot already carries structured addressLine1 when present and
+  // the monolithic address otherwise (resolved in the background); filling the
+  // address-line1 field from a single value is not a mis-split.
+  fillField(fields.address, payload.address);
+  fillField(fields.addressLine2, payload.addressLine2);
+  fillField(fields.city, payload.city);
+  fillField(fields.postalCode, payload.postalCode);
+  fillField(fields.country, payload.country);
 
-  if (fields.phone && payload.phone) {
-    setInputValue(fields.phone, payload.phone);
-  }
+  // Region (address-level1) prefers the structured state, falling back to the
+  // legacy nationality value for entries that predate the structured fields.
+  fillField(fields.region, payload.state || payload.nationality);
 
-  if (fields.email && payload.email) {
-    setInputValue(fields.email, payload.email);
-  }
-
-  if (fields.dateOfBirth && payload.dateOfBirth) {
-    setInputValue(fields.dateOfBirth, payload.dateOfBirth);
-  }
-
-  // Region can be either input or select
-  if (fields.region && payload.nationality) {
-    if (fields.region instanceof HTMLSelectElement) {
-      setSelectValue(fields.region, payload.nationality);
-    } else {
-      setInputValue(fields.region, payload.nationality);
-    }
-  }
+  fillField(fields.phone, payload.phone);
+  fillField(fields.email, payload.email);
+  fillField(fields.dateOfBirth, payload.dateOfBirth);
 }

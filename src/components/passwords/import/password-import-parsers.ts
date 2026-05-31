@@ -48,6 +48,17 @@ export function parsePasswdSsoPayload(raw: string | undefined): Partial<ParsedEn
       cvv: typeof parsed.cvv === "string" ? parsed.cvv : "",
       fullName: typeof parsed.fullName === "string" ? parsed.fullName : "",
       address: typeof parsed.address === "string" ? parsed.address : "",
+      givenName: typeof parsed.givenName === "string" ? parsed.givenName : "",
+      familyName: typeof parsed.familyName === "string" ? parsed.familyName : "",
+      middleName: typeof parsed.middleName === "string" ? parsed.middleName : "",
+      familyNameKana: typeof parsed.familyNameKana === "string" ? parsed.familyNameKana : "",
+      givenNameKana: typeof parsed.givenNameKana === "string" ? parsed.givenNameKana : "",
+      addressLine1: typeof parsed.addressLine1 === "string" ? parsed.addressLine1 : "",
+      addressLine2: typeof parsed.addressLine2 === "string" ? parsed.addressLine2 : "",
+      city: typeof parsed.city === "string" ? parsed.city : "",
+      state: typeof parsed.state === "string" ? parsed.state : "",
+      postalCode: typeof parsed.postalCode === "string" ? parsed.postalCode : "",
+      country: typeof parsed.country === "string" ? parsed.country : "",
       phone: typeof parsed.phone === "string" ? parsed.phone : "",
       email: typeof parsed.email === "string" ? parsed.email : "",
       dateOfBirth: typeof parsed.dateOfBirth === "string" ? parsed.dateOfBirth : "",
@@ -213,7 +224,12 @@ export function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFor
       expiryMonth: "", expiryYear: "", cvv: "",
     };
     const identityDefaults = {
-      fullName: "", address: "", phone: "", email: "",
+      fullName: "", address: "",
+      givenName: "", familyName: "", middleName: "",
+      familyNameKana: "", givenNameKana: "",
+      addressLine1: "", addressLine2: "", city: "", state: "",
+      postalCode: "", country: "",
+      phone: "", email: "",
       dateOfBirth: "", nationality: "", idNumber: "",
       issueDate: "", expiryDate: "",
     };
@@ -400,7 +416,7 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
       const metaOverrides = { folderPath, isFavorite, expiresAt };
 
       const cardDefaults = { cardholderName: "", cardNumber: "", brand: "", expiryMonth: "", expiryYear: "", cvv: "" };
-      const identityDefaults = { fullName: "", address: "", phone: "", email: "", dateOfBirth: "", nationality: "", idNumber: "", issueDate: "", expiryDate: "" };
+      const identityDefaults = { fullName: "", address: "", givenName: "", familyName: "", middleName: "", familyNameKana: "", givenNameKana: "", addressLine1: "", addressLine2: "", city: "", state: "", postalCode: "", country: "", phone: "", email: "", dateOfBirth: "", nationality: "", idNumber: "", issueDate: "", expiryDate: "" };
       const passkeyDefaults = { relyingPartyId: "", relyingPartyName: "", credentialId: "", creationDate: "", deviceInfo: "" };
       const bankAccountDefaults = { bankName: "", accountType: "", accountHolderName: "", accountNumber: "", routingNumber: "", swiftBic: "", iban: "", branchName: "" };
       const softwareLicenseDefaults = { softwareName: "", licenseKey: "", version: "", licensee: "", purchaseDate: "", expirationDate: "" };
@@ -547,6 +563,17 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
               ? `${identity.firstName} ${identity.lastName ?? ""}`.trim()
               : ""),
           address: identity.address ?? identity.address1 ?? "",
+          givenName: identity.givenName ?? identity.firstName ?? "",
+          familyName: identity.familyName ?? identity.lastName ?? "",
+          middleName: identity.middleName ?? "",
+          familyNameKana: identity.familyNameKana ?? "",
+          givenNameKana: identity.givenNameKana ?? "",
+          addressLine1: identity.addressLine1 ?? identity.address1 ?? "",
+          addressLine2: identity.addressLine2 ?? identity.address2 ?? "",
+          city: identity.city ?? "",
+          state: identity.state ?? "",
+          postalCode: identity.postalCode ?? identity.zip ?? "",
+          country: identity.country ?? "",
           phone: identity.phone ?? "",
           email: identity.email ?? "",
           dateOfBirth: identity.dateOfBirth ?? "",
@@ -677,7 +704,12 @@ function parseKeePassXcEntry(entryEl: Element, folderPath: string): ParsedEntry 
     notes: fields["Notes"] ?? "",
     cardholderName: "", cardNumber: "", brand: "",
     expiryMonth: "", expiryYear: "", cvv: "",
-    fullName: "", address: "", phone: "", email: "",
+    fullName: "", address: "",
+    givenName: "", familyName: "", middleName: "",
+    familyNameKana: "", givenNameKana: "",
+    addressLine1: "", addressLine2: "", city: "", state: "",
+    postalCode: "", country: "",
+    phone: "", email: "",
     dateOfBirth: "", nationality: "", idNumber: "",
     issueDate: "", expiryDate: "",
     relyingPartyId: "", relyingPartyName: "",

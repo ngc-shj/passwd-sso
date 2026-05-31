@@ -150,4 +150,83 @@ describe("detectIdentityFields", () => {
     expect(fields!.postalCode).toBeTruthy();
     expect(fields!.region).toBeTruthy();
   });
+
+  // ── T5: structured split tokens ──
+
+  it("detects split given/family/line2/city/country by autocomplete tokens", () => {
+    setupForm(`
+      <input autocomplete="given-name" />
+      <input autocomplete="family-name" />
+      <input autocomplete="address-line1" />
+      <input autocomplete="address-line2" />
+      <input autocomplete="address-level2" />
+      <input autocomplete="address-level1" />
+      <input autocomplete="postal-code" />
+      <input autocomplete="country-name" />
+    `);
+
+    const fields = detectIdentityFields(document);
+    expect(fields).not.toBeNull();
+    expect(fields!.givenName).toBeTruthy();
+    expect(fields!.familyName).toBeTruthy();
+    expect(fields!.address).toBeTruthy();
+    expect(fields!.addressLine2).toBeTruthy();
+    expect(fields!.city).toBeTruthy();
+    expect(fields!.region).toBeTruthy();
+    expect(fields!.postalCode).toBeTruthy();
+    expect(fields!.country).toBeTruthy();
+    // No combined name token present → fullName stays null.
+    expect(fields!.fullName).toBeNull();
+  });
+
+  it("detects split city/country by Japanese labels", () => {
+    setupForm(`
+      <label for="city">市区町村</label>
+      <input id="city" type="text" />
+      <label for="country">国</label>
+      <input id="country" type="text" />
+    `);
+
+    const fields = detectIdentityFields(document);
+    expect(fields).not.toBeNull();
+    expect(fields!.city).toBeTruthy();
+    expect(fields!.country).toBeTruthy();
+  });
+
+  // ── Kana disambiguation (both directions) ──
+
+  it("detects フリガナ セイ/メイ as kana AND plain 姓/名 as given/family", () => {
+    setupForm(`
+      <label for="sei">姓</label>
+      <input id="sei" type="text" />
+      <label for="mei">名</label>
+      <input id="mei" type="text" />
+      <label for="sei-kana">セイ（フリガナ）</label>
+      <input id="sei-kana" type="text" />
+      <label for="mei-kana">メイ（フリガナ）</label>
+      <input id="mei-kana" type="text" />
+    `);
+
+    const fields = detectIdentityFields(document);
+    expect(fields).not.toBeNull();
+
+    const sei = document.getElementById("sei");
+    const mei = document.getElementById("mei");
+    const seiKana = document.getElementById("sei-kana");
+    const meiKana = document.getElementById("mei-kana");
+
+    // Plain name fields → given/family, NOT kana.
+    expect(fields!.familyName).toBe(sei);
+    expect(fields!.givenName).toBe(mei);
+    // Kana fields → kana slots, NOT the plain given/family.
+    expect(fields!.familyNameKana).toBe(seiKana);
+    expect(fields!.givenNameKana).toBe(meiKana);
+
+    // Disambiguation both ways: a kana element never lands in a plain slot…
+    expect(fields!.familyName).not.toBe(seiKana);
+    expect(fields!.givenName).not.toBe(meiKana);
+    // …and a plain element never lands in a kana slot.
+    expect(fields!.familyNameKana).not.toBe(sei);
+    expect(fields!.givenNameKana).not.toBe(mei);
+  });
 });

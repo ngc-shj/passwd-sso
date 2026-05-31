@@ -20,6 +20,17 @@ function baseParsedEntry(overrides: Partial<ParsedEntry>): ParsedEntry {
     cvv: "",
     fullName: "",
     address: "",
+    givenName: "",
+    familyName: "",
+    middleName: "",
+    familyNameKana: "",
+    givenNameKana: "",
+    addressLine1: "",
+    addressLine2: "",
+    city: "",
+    state: "",
+    postalCode: "",
+    country: "",
     phone: "",
     email: "",
     dateOfBirth: "",
@@ -180,5 +191,54 @@ describe("buildPersonalImportBlobs — SOFTWARE_LICENSE", () => {
     expect(overview.licensee).toBe("Jane Doe");
     expect(overview.tags).toEqual([{ name: "software", color: "#0000ff" }]);
     expect(overview.requireReprompt).toBe(false);
+  });
+});
+
+// ─── IDENTITY (structured) ────────────────────
+
+describe("buildPersonalImportBlobs — IDENTITY structured", () => {
+  const identityEntry = baseParsedEntry({
+    entryType: ENTRY_TYPE.IDENTITY,
+    title: "My ID",
+    givenName: "Taro",
+    familyName: "Yamada",
+    middleName: "M",
+    familyNameKana: "ヤマダ",
+    givenNameKana: "タロウ",
+    addressLine1: "1-1-1 Chiyoda",
+    addressLine2: "Apt 101",
+    city: "Chiyoda-ku",
+    state: "Tokyo",
+    postalCode: "100-0001",
+    country: "Japan",
+    email: "taro@example.com",
+    idNumber: "A12345678",
+  });
+
+  it("persists all structured identity fields in fullBlob", () => {
+    const { fullBlob } = buildPersonalImportBlobs(identityEntry);
+    const blob = JSON.parse(fullBlob);
+
+    expect(blob.givenName).toBe("Taro");
+    expect(blob.familyName).toBe("Yamada");
+    expect(blob.middleName).toBe("M");
+    expect(blob.familyNameKana).toBe("ヤマダ");
+    expect(blob.givenNameKana).toBe("タロウ");
+    expect(blob.addressLine1).toBe("1-1-1 Chiyoda");
+    expect(blob.addressLine2).toBe("Apt 101");
+    expect(blob.city).toBe("Chiyoda-ku");
+    expect(blob.state).toBe("Tokyo");
+    expect(blob.postalCode).toBe("100-0001");
+    expect(blob.country).toBe("Japan");
+  });
+
+  it("composes overview name from given+family when fullName absent and excludes address PII", () => {
+    const { overviewBlob } = buildPersonalImportBlobs(identityEntry);
+    const overview = JSON.parse(overviewBlob);
+
+    expect(overview.fullName).toBe("Taro Yamada");
+    expect(overview.email).toBe("taro@example.com");
+    expect(overview.addressLine1).toBeUndefined();
+    expect(overview.postalCode).toBeUndefined();
   });
 });

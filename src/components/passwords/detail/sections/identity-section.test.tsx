@@ -60,4 +60,24 @@ describe("IdentitySection", () => {
     expect(screen.getByText("••••••••")).toBeInTheDocument();
     expect(screen.queryByText("ABC-12345")).not.toBeInTheDocument();
   });
+
+  it("renders structured fields when present (givenName, city, postalCode)", () => {
+    const structuredData: InlineDetailData = {
+      ...baseData,
+      givenName: "Taro",
+      city: "Shinjuku",
+      postalCode: "160-0022",
+    };
+    render(
+      <IdentitySection
+        data={structuredData}
+        requireVerification={(_id, _r, cb) => cb()}
+        createGuardedGetter={(_id, _r, getter) => () => Promise.resolve(getter())}
+      />,
+    );
+
+    expect(screen.getByText("Taro")).toBeInTheDocument();
+    expect(screen.getByText("Shinjuku")).toBeInTheDocument();
+    expect(screen.getByText("160-0022")).toBeInTheDocument();
+  });
 });

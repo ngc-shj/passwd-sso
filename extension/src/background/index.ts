@@ -1393,8 +1393,18 @@ async function performAutofillForEntry(
     cvv?: string | null;
     // IDENTITY fields
     fullName?: string | null;
+    givenName?: string | null;
+    familyName?: string | null;
+    middleName?: string | null;
+    familyNameKana?: string | null;
+    givenNameKana?: string | null;
     address?: string | null;
+    addressLine1?: string | null;
+    addressLine2?: string | null;
+    city?: string | null;
+    state?: string | null;
     postalCode?: string | null;
+    country?: string | null;
     phone?: string | null;
     dateOfBirth?: string | null;
     nationality?: string | null;
@@ -1438,8 +1448,18 @@ async function performAutofillForEntry(
       await sendFillMessage({
         type: EXT_MSG.AUTOFILL_IDENTITY_FILL,
         fullName: blob.fullName ?? "",
-        address: blob.address ?? "",
+        givenName: blob.givenName ?? "",
+        familyName: blob.familyName ?? "",
+        familyNameKana: blob.familyNameKana ?? "",
+        givenNameKana: blob.givenNameKana ?? "",
+        // Structured addressLine1 is the canonical source; legacy entries store
+        // the monolithic `address` instead.
+        address: blob.addressLine1 ?? blob.address ?? "",
+        addressLine2: blob.addressLine2 ?? "",
+        city: blob.city ?? "",
+        state: blob.state ?? "",
         postalCode: blob.postalCode ?? "",
+        country: blob.country ?? "",
         phone: blob.phone ?? "",
         email: blob.email ?? "",
         dateOfBirth: blob.dateOfBirth ?? "",

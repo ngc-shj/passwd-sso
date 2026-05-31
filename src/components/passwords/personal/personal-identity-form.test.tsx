@@ -72,11 +72,27 @@ vi.mock("@/components/entry-fields/identity-fields", () => ({
     onFullNameChange,
     idNumber,
     onIdNumberChange,
+    givenName,
+    onGivenNameChange,
+    familyName,
+    onFamilyNameChange,
+    postalCode,
+    onPostalCodeChange,
+    city,
+    onCityChange,
   }: {
     fullName: string;
     onFullNameChange: (v: string) => void;
     idNumber: string;
     onIdNumberChange: (v: string) => void;
+    givenName: string;
+    onGivenNameChange: (v: string) => void;
+    familyName: string;
+    onFamilyNameChange: (v: string) => void;
+    postalCode: string;
+    onPostalCodeChange: (v: string) => void;
+    city: string;
+    onCityChange: (v: string) => void;
   }) => (
     <>
       <input
@@ -88,6 +104,26 @@ vi.mock("@/components/entry-fields/identity-fields", () => ({
         aria-label="id-number"
         value={idNumber}
         onChange={(e) => onIdNumberChange(e.target.value)}
+      />
+      <input
+        aria-label="given-name"
+        value={givenName}
+        onChange={(e) => onGivenNameChange(e.target.value)}
+      />
+      <input
+        aria-label="family-name"
+        value={familyName}
+        onChange={(e) => onFamilyNameChange(e.target.value)}
+      />
+      <input
+        aria-label="postal-code"
+        value={postalCode}
+        onChange={(e) => onPostalCodeChange(e.target.value)}
+      />
+      <input
+        aria-label="city"
+        value={city}
+        onChange={(e) => onCityChange(e.target.value)}
       />
     </>
   ),
@@ -175,5 +211,61 @@ describe("IdentityForm", () => {
       fullName: "Alice",
       idNumber: "ID-123",
     });
+  });
+
+  it("persists structured fields (givenName, familyName, postalCode, city) in fullBlob", async () => {
+    mockSubmitEntry.mockResolvedValue(undefined);
+    render(<IdentityForm mode="create" variant="dialog" />);
+    fireEvent.change(screen.getByRole("textbox", { name: "title" }), {
+      target: { value: "Passport" },
+    });
+    fireEvent.change(screen.getByLabelText("given-name"), {
+      target: { value: "Taro" },
+    });
+    fireEvent.change(screen.getByLabelText("family-name"), {
+      target: { value: "Yamada" },
+    });
+    fireEvent.change(screen.getByLabelText("postal-code"), {
+      target: { value: "160-0022" },
+    });
+    fireEvent.change(screen.getByLabelText("city"), {
+      target: { value: "Shinjuku" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("submit"));
+    });
+    await waitFor(() => expect(mockSubmitEntry).toHaveBeenCalled());
+    const args = mockSubmitEntry.mock.calls[0][0];
+    const fullBlob = JSON.parse(args.fullBlob);
+    expect(fullBlob).toMatchObject({
+      title: "Passport",
+      givenName: "Taro",
+      familyName: "Yamada",
+      postalCode: "160-0022",
+      city: "Shinjuku",
+    });
+  });
+
+  it("overview composes fullName from givenName+familyName when fullName is empty", async () => {
+    mockSubmitEntry.mockResolvedValue(undefined);
+    render(<IdentityForm mode="create" variant="dialog" />);
+    fireEvent.change(screen.getByRole("textbox", { name: "title" }), {
+      target: { value: "ID Card" },
+    });
+    // fullName intentionally left blank
+    fireEvent.change(screen.getByLabelText("given-name"), {
+      target: { value: "Hanako" },
+    });
+    fireEvent.change(screen.getByLabelText("family-name"), {
+      target: { value: "Suzuki" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("submit"));
+    });
+    await waitFor(() => expect(mockSubmitEntry).toHaveBeenCalled());
+    const args = mockSubmitEntry.mock.calls[0][0];
+    const overviewBlob = JSON.parse(args.overviewBlob);
+    // composeIdentityNameLabel builds "Hanako Suzuki" when fullName is empty
+    expect(overviewBlob.fullName).toBe("Hanako Suzuki");
   });
 });

@@ -25,6 +25,17 @@ export interface ParsedEntry {
   cvv: string;
   fullName: string;
   address: string;
+  givenName: string;
+  familyName: string;
+  middleName: string;
+  familyNameKana: string;
+  givenNameKana: string;
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
   phone: string;
   email: string;
   dateOfBirth: string;

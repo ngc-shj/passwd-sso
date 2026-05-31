@@ -826,6 +826,94 @@ describe("background message flow", () => {
     expect(argsList.length).toBeGreaterThanOrEqual(2);
     expect(argsList[argsList.length - 1]?.[2]).toBeNull();
   });
+
+  // ── T4: IDENTITY autofill forwards postalCode + structured fields ──
+
+  it("forwards postalCode and structured identity fields on AUTOFILL_FROM_CONTENT", async () => {
+    // Personal fetch-by-id returns an IDENTITY entry.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
+          return {
+            ok: true,
+            json: async () => ({
+              token: "refreshed-tok",
+              expiresAt: new Date(Date.now() + 900_000).toISOString(),
+              scope: ["passwords:read", "vault:unlock-data"],
+            }),
+          };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        if (url.includes(PASSWORD_BY_ID_PREFIX)) {
+          return {
+            ok: true,
+            json: async () => ({
+              id: "id-1",
+              encryptedBlob: { ciphertext: "aa", iv: "bb", authTag: "cc" },
+              encryptedOverview: { ciphertext: "11", iv: "22", authTag: "33" },
+              entryType: EXT_ENTRY_TYPE.IDENTITY,
+              aadVersion: 1,
+            }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+
+    cryptoMocks.decryptData
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          givenName: "Jane",
+          familyName: "Doe",
+          addressLine1: "123 Main St",
+          city: "Springfield",
+          state: "CA",
+          postalCode: "90210",
+          country: "US",
+        }),
+      )
+      .mockResolvedValueOnce(JSON.stringify({ username: "Jane Doe" }));
+
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await new Promise((resolve) => {
+      const handler = messageHandlers[0];
+      handler(
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "id-1" },
+        { tab: { id: 1 } },
+        (resp) => resolve(resp),
+      );
+    });
+    expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
+
+    const fillCall = chromeMock?.tabs.sendMessage.mock.calls.find(
+      (c: unknown[]) =>
+        (c[1] as { type?: string })?.type === "AUTOFILL_IDENTITY_FILL",
+    );
+    expect(fillCall).toBeDefined();
+    const fillPayload = fillCall![1] as Record<string, string>;
+    expect(fillPayload.postalCode).toBe("90210");
+    expect(fillPayload.givenName).toBe("Jane");
+    expect(fillPayload.familyName).toBe("Doe");
+    expect(fillPayload.address).toBe("123 Main St");
+    expect(fillPayload.city).toBe("Springfield");
+    expect(fillPayload.state).toBe("CA");
+    expect(fillPayload.country).toBe("US");
+  });
 });
 
 // ── Session persistence & token refresh ──────────────────────

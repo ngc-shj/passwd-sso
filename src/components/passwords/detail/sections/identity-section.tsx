@@ -24,9 +24,27 @@ export function IdentitySection({ data, requireVerification, createGuardedGetter
   const { revealed: showIdNumber, handleReveal: handleRevealIdNumber, hide: hideIdNumber } =
     useRevealTimeout(requireVerification, data.id, data.requireReprompt ?? false);
 
+  const textRow = (label: string, value: string | null | undefined) =>
+    value ? (
+      <div className="space-y-1">
+        <label className="text-sm text-muted-foreground">{label}</label>
+        <div className="flex items-center gap-2">
+          <span className="text-sm">{value}</span>
+          <CopyButton getValue={() => value} />
+        </div>
+      </div>
+    ) : null;
+
   return (
     <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-      {/* Full Name */}
+      {/* Structured name */}
+      {textRow(t("familyName"), data.familyName)}
+      {textRow(t("givenName"), data.givenName)}
+      {textRow(t("middleName"), data.middleName)}
+      {textRow(t("familyNameKana"), data.familyNameKana)}
+      {textRow(t("givenNameKana"), data.givenNameKana)}
+
+      {/* Full Name (legacy / combined) */}
       {data.fullName && (
         <div className="col-span-2 space-y-1">
           <label className="text-sm text-muted-foreground">{t("fullName")}</label>
@@ -37,7 +55,15 @@ export function IdentitySection({ data, requireVerification, createGuardedGetter
         </div>
       )}
 
-      {/* Address */}
+      {/* Structured address */}
+      {textRow(t("addressLine1"), data.addressLine1)}
+      {textRow(t("addressLine2"), data.addressLine2)}
+      {textRow(t("city"), data.city)}
+      {textRow(t("state"), data.state)}
+      {textRow(t("postalCode"), data.postalCode)}
+      {textRow(t("country"), data.country)}
+
+      {/* Address (legacy / combined) */}
       {data.address && (
         <div className="col-span-2 space-y-1">
           <label className="text-sm text-muted-foreground">{t("address")}</label>

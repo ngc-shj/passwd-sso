@@ -1,4 +1,5 @@
 import { ENTRY_TYPE } from "@/lib/constants";
+import { composeIdentityNameLabel } from "@/lib/constants/identity-fields";
 import type { ParsedEntry } from "@/components/passwords/import/password-import-types";
 import { ENTRY_SNIPPET_MAX } from "@/lib/validations/common";
 
@@ -38,6 +39,17 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
         title: entry.title,
         fullName: entry.fullName || null,
         address: entry.address || null,
+        givenName: entry.givenName || null,
+        familyName: entry.familyName || null,
+        middleName: entry.middleName || null,
+        familyNameKana: entry.familyNameKana || null,
+        givenNameKana: entry.givenNameKana || null,
+        addressLine1: entry.addressLine1 || null,
+        addressLine2: entry.addressLine2 || null,
+        city: entry.city || null,
+        state: entry.state || null,
+        postalCode: entry.postalCode || null,
+        country: entry.country || null,
         phone: entry.phone || null,
         email: entry.email || null,
         dateOfBirth: entry.dateOfBirth || null,
@@ -51,7 +63,8 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
       }),
       overviewBlob: JSON.stringify({
         title: entry.title,
-        fullName: entry.fullName || null,
+        fullName: composeIdentityNameLabel(entry.fullName, entry.givenName, entry.familyName),
+        email: entry.email || null,
         idNumberLast4,
         tags: entry.tags,
         requireReprompt: entry.requireReprompt,

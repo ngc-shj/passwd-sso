@@ -38,6 +38,17 @@ export interface TeamEntryFormEditData {
   cvv?: string | null;
   fullName?: string | null;
   address?: string | null;
+  givenName?: string | null;
+  familyName?: string | null;
+  middleName?: string | null;
+  familyNameKana?: string | null;
+  givenNameKana?: string | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
   phone?: string | null;
   email?: string | null;
   dateOfBirth?: string | null;

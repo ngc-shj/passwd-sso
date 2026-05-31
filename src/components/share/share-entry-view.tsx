@@ -283,7 +283,18 @@ export function ShareEntryView({
 
   const renderIdentityFields = () => (
     <>
+      {renderField(t("familyName"), data.familyName)}
+      {renderField(t("givenName"), data.givenName)}
+      {renderField(t("middleName"), data.middleName)}
+      {renderField(t("familyNameKana"), data.familyNameKana)}
+      {renderField(t("givenNameKana"), data.givenNameKana)}
       {renderField(t("fullName"), data.fullName)}
+      {renderField(t("addressLine1"), data.addressLine1)}
+      {renderField(t("addressLine2"), data.addressLine2)}
+      {renderField(t("city"), data.city)}
+      {renderField(t("state"), data.state)}
+      {renderField(t("postalCode"), data.postalCode)}
+      {renderField(t("country"), data.country)}
       {renderField(t("address"), data.address)}
       {renderField(t("phone"), data.phone)}
       {renderField(t("email"), data.email)}
