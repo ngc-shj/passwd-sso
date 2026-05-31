@@ -31,6 +31,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      id-token: write # OIDC for npm Trusted Publishing
     steps:
       - uses: actions/checkout@v6
 
@@ -38,6 +39,10 @@ jobs:
         with:
           node-version-file: ".nvmrc"
           registry-url: "https://registry.npmjs.org"
+
+      # Trusted Publishing (OIDC) requires npm >= 11.5.1; Node 20 ships npm 10.
+      - name: Upgrade npm for Trusted Publishing
+        run: npm install -g npm@latest
 
       - name: Install and build CLI
         working-directory: cli
@@ -55,6 +60,4 @@ jobs:
 
       - name: Publish to npm
         working-directory: cli
-        run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish # Auth via OIDC Trusted Publishing (no NODE_AUTH_TOKEN)
