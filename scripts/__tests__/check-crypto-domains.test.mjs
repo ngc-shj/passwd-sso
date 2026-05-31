@@ -9,6 +9,7 @@ import {
   checkAadEncoderContainment,
   checkAeadAadAllowlist,
   checkScopeManifest,
+  checkIosGoldenParity,
 } from "../checks/check-crypto-domains.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -297,6 +298,112 @@ describe("checkScopeManifest", () => {
       },
     };
     const errors = checkScopeManifest(codeScopes, manifest, ROOT);
+    expect(errors).toHaveLength(0);
+  });
+});
+
+// ── Check D: iOS golden-vector anti-drift ────────────────────────────────────
+
+describe("checkIosGoldenParity", () => {
+  // Minimal golden JSON with two vectors for fixture testing.
+  const goldenJson = {
+    _doc: "ignored",
+    "PV-blob": { input: "userId=u, entryId=e, vaultType=blob", hex: "505601030001750001650004626c6f62" },
+    "AT": { input: "entryId=e, attachmentId=a", hex: "41540102000165000161" },
+  };
+
+  // App parity content that contains both hex literals.
+  const appParityOk = `
+const GOLDEN_BLOB = "505601030001750001650004626c6f62";
+const GOLDEN_AT   = "41540102000165000161";
+`;
+
+  // iOS parity content that contains the byte arrays for both vectors.
+  // OV-blob bytes: 0x50, 0x56, ... (PV-blob)
+  // AT bytes: 0x41, 0x54, ...
+  const iosPVBytes = "0x50, 0x56, 0x01, 0x03, 0x00, 0x01, 0x75, 0x00, 0x01, 0x65, 0x00, 0x04, 0x62, 0x6c, 0x6f, 0x62";
+  const iosATBytes = "0x41, 0x54, 0x01, 0x02, 0x00, 0x01, 0x65, 0x00, 0x01, 0x61";
+  const iosParityOk = `
+XCTAssertEqual([UInt8](blobResult), [
+  ${iosPVBytes}
+])
+XCTAssertEqual([UInt8](result), [
+  ${iosATBytes}
+])
+`;
+
+  it("flags when a golden hex is missing from the app parity content", () => {
+    const appParityMissing = `const GOLDEN_BLOB = "505601030001750001650004626c6f62";
+// AT hex deliberately absent here
+`;
+    const errors = checkIosGoldenParity({
+      goldenJson,
+      appParityContent: appParityMissing,
+      iosParityContent: iosParityOk,
+    });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.some((e) => e.includes("Check D") && e.includes("AT") && e.includes("app parity"))).toBe(true);
+  });
+
+  it("flags when the Swift byte-array is missing or mismatched in the iOS parity content", () => {
+    // Provide iOS content with a wrong byte for AT (0x99 instead of 0x41)
+    const iosParityBad = `
+XCTAssertEqual([UInt8](blobResult), [
+  ${iosPVBytes}
+])
+XCTAssertEqual([UInt8](result), [
+  0x99, 0x54, 0x01, 0x02, 0x00, 0x01, 0x65, 0x00, 0x01, 0x61
+])
+`;
+    const errors = checkIosGoldenParity({
+      goldenJson,
+      appParityContent: appParityOk,
+      iosParityContent: iosParityBad,
+    });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.some((e) => e.includes("Check D") && e.includes("AT") && e.includes("iOS parity"))).toBe(true);
+  });
+
+  it("passes when both app parity and iOS parity contain matching vectors", () => {
+    const errors = checkIosGoldenParity({
+      goldenJson,
+      appParityContent: appParityOk,
+      iosParityContent: iosParityOk,
+    });
+    expect(errors).toHaveLength(0);
+  });
+
+  it("skips keys prefixed with _", () => {
+    const goldenWithDocOnly = { _doc: "should be skipped" };
+    const errors = checkIosGoldenParity({
+      goldenJson: goldenWithDocOnly,
+      appParityContent: "",
+      iosParityContent: "",
+    });
+    expect(errors).toHaveLength(0);
+  });
+
+  it("tolerates whitespace/newlines between bytes in iOS content", () => {
+    // Same bytes as iosPVBytes but with extra whitespace and newlines
+    const iosParityWithExtraWhitespace = `
+XCTAssertEqual([UInt8](blobResult), [
+  0x50,  0x56,
+  0x01, 0x03,
+  0x00,   0x01, 0x75,
+  0x00, 0x01, 0x65,
+  0x00, 0x04, 0x62, 0x6c, 0x6f, 0x62
+])
+XCTAssertEqual([UInt8](result), [
+  0x41,
+  0x54, 0x01, 0x02,
+  0x00, 0x01, 0x65, 0x00, 0x01, 0x61
+])
+`;
+    const errors = checkIosGoldenParity({
+      goldenJson,
+      appParityContent: appParityOk,
+      iosParityContent: iosParityWithExtraWhitespace,
+    });
     expect(errors).toHaveLength(0);
   });
 });

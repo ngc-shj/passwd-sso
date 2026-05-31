@@ -214,6 +214,69 @@ export function checkAeadAadAllowlist(files) {
 }
 
 /**
+ * Check D — iOS golden-vector anti-drift (Node-gate, no Xcode required).
+ *
+ * For each entry in aad-golden-vectors.json (skipping `_`-prefixed keys):
+ *   1. Asserts the hex literal appears in the app parity test
+ *      (src/__tests__/aad-parity.test.ts) — confirms the TS side is pinned.
+ *   2. Converts the hex to the Swift `[0xNN, 0xNN, ...]` byte-array form and
+ *      asserts that comma-joined sequence appears in the iOS parity test
+ *      (ios/PasswdSSOTests/AADParityTests.swift) — confirms the Swift side
+ *      is pinned to the same bytes. Whitespace/newlines between bytes are
+ *      tolerated on both sides before comparison.
+ *
+ * This check runs in main CI (Node only). iOS CI (Xcode) separately verifies
+ * that the builder actually produces those bytes at runtime.
+ *
+ * @param {{ goldenJson: Object, appParityContent: string, iosParityContent: string }} opts
+ * @returns {string[]} error messages
+ */
+export function checkIosGoldenParity({ goldenJson, appParityContent, iosParityContent }) {
+  const errors = [];
+
+  // Normalize the iOS file for substring matching:
+  //   1. Strip inline // comments from each line (comments break contiguous
+  //      byte sequences like "0x50, 0x56,  // "PV"\n      0x01," which would
+  //      otherwise not match "0x50, 0x56, 0x01").
+  //   2. Collapse whitespace/newlines around commas to a canonical comma-space form.
+  const normalizeIos = (content) =>
+    content
+      .split("\n")
+      .map((line) => line.replace(/\/\/.*$/, ""))  // strip // comments
+      .join(" ")
+      .replace(/\s*,\s*/g, ", ")   // normalize comma spacing
+      .replace(/\s+/g, " ");       // collapse remaining whitespace
+
+  const normalizedIos = normalizeIos(iosParityContent);
+
+  for (const [key, entry] of Object.entries(goldenJson)) {
+    if (key.startsWith("_")) continue;
+    const { hex } = entry;
+
+    // 1. App parity: the raw hex string must appear literally in the TS file.
+    if (!appParityContent.includes(hex)) {
+      errors.push(
+        `Check D: golden vector "${key}" hex "${hex}" not found in app parity test (src/__tests__/aad-parity.test.ts)`
+      );
+    }
+
+    // 2. iOS parity: convert hex to "0xNN, 0xNN, ..." and search in normalized iOS file.
+    const swiftBytes = hex
+      .match(/.{2}/g)
+      .map((b) => `0x${b}`)
+      .join(", ");
+
+    if (!normalizedIos.includes(swiftBytes)) {
+      errors.push(
+        `Check D: golden vector "${key}" Swift bytes "${swiftBytes}" not found in iOS parity test (ios/PasswdSSOTests/AADParityTests.swift)`
+      );
+    }
+  }
+
+  return errors;
+}
+
+/**
  * Check C — per-scope test coverage via manifest (C16).
  *
  * Bidirectionally enforces:
@@ -460,6 +523,40 @@ function main() {
     errors.push(...checkCErrors);
   }
 
+  // ── Check D: iOS golden-vector anti-drift ──────────────────────────────────
+  const goldenPath = join(ROOT, "scripts/checks/aad-golden-vectors.json");
+  const appParityPath = join(ROOT, "src/__tests__/aad-parity.test.ts");
+  const iosParityPath = join(ROOT, "ios/PasswdSSOTests/AADParityTests.swift");
+
+  let goldenJson, appParityContent, iosParityContent;
+  let checkDSkipped = false;
+  try {
+    goldenJson = JSON.parse(readFileSync(goldenPath, "utf-8"));
+  } catch {
+    errors.push("Check D: aad-golden-vectors.json not found or not valid JSON at " + goldenPath);
+    checkDSkipped = true;
+  }
+  if (!checkDSkipped) {
+    try {
+      appParityContent = readFileSync(appParityPath, "utf-8");
+    } catch {
+      errors.push("Check D: app parity test not found at " + appParityPath);
+      checkDSkipped = true;
+    }
+  }
+  if (!checkDSkipped) {
+    try {
+      iosParityContent = readFileSync(iosParityPath, "utf-8");
+    } catch {
+      errors.push("Check D: iOS parity test not found at " + iosParityPath);
+      checkDSkipped = true;
+    }
+  }
+  if (!checkDSkipped) {
+    const checkDErrors = checkIosGoldenParity({ goldenJson, appParityContent, iosParityContent });
+    errors.push(...checkDErrors);
+  }
+
   if (errors.length > 0) {
     console.error("Crypto domain ledger verification FAILED:");
     for (const e of errors) {
@@ -468,12 +565,14 @@ function main() {
     process.exit(1);
   }
 
+  const goldenCount = Object.keys(goldenJson).filter((k) => !k.startsWith("_")).length;
   console.log(
     `Crypto domain ledger OK: ${allCodeHkdf.size} HKDF info strings, ${allCodeAad.size} AAD scopes verified.`
   );
   console.log(`  Check A: AAD encoder containment OK`);
   console.log(`  Check B: AEAD-with-AAD allowlist OK`);
-  console.log(`  Check C: scope manifest coverage OK (${Object.keys(manifest).length} scopes)`);
+  console.log(`  Check C: scope manifest coverage OK (${manifest ? Object.keys(manifest).length : 0} scopes)`);
+  console.log(`  Check D: iOS golden-vector parity OK (${goldenCount} vectors, app + iOS pinned)`);
 }
 
 main();

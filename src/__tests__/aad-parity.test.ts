@@ -3,6 +3,7 @@ import {
   buildPersonalEntryAAD as appBuildPersonalEntryAAD,
   buildTeamEntryAAD as appBuildTeamEntryAAD,
   buildItemKeyWrapAAD as appBuildItemKeyWrapAAD,
+  buildAttachmentAAD as appBuildAttachmentAAD,
   VAULT_TYPE as APP_VAULT_TYPE,
 } from "@/lib/crypto/crypto-aad";
 import { buildTeamKeyWrapAAD as appBuildTeamKeyWrapAAD } from "@/lib/crypto/crypto-team";
@@ -142,5 +143,16 @@ describe("team-vault AAD parity (app ↔ extension)", () => {
     expect(toHex(appBuildTeamEntryAAD(teamId, entryId, "blob", 0))).not.toBe(
       toHex(appBuildTeamEntryAAD(teamId, entryId, "overview", 0)),
     );
+  });
+});
+
+describe("attachment AAD golden vector (app, iOS-shared scope)", () => {
+  // AT scope is implemented by the app and iOS (no extension builder).
+  // The frozen golden vector locks the byte shape across both codebases;
+  // iOS CI verifies the Swift builder produces the same bytes at runtime.
+  const GOLDEN_AT = "41540102000165000161";
+
+  it("AT (attachment) AAD matches the frozen golden vector", () => {
+    expect(toHex(appBuildAttachmentAAD("e", "a"))).toBe(GOLDEN_AT);
   });
 });
