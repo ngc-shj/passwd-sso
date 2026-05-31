@@ -438,9 +438,13 @@ so there is no immediate break scenario. Still, long-term migration planning is 
 
 ### 15.3 AAD binding
 
-- AAD is fixed-order: `grantId|ownerId|granteeId|keyVersion|wrapVersion`
-- Byte representation is deterministic (no JSON ordering ambiguity)
-- Purpose: prevent ciphertext transplant/replay across grants
+- Built by the single AAD registry (`crypto-aad.ts`, scope `EM`) in the common
+  length-prefixed binary format: `[scope][version][nFields][len|field]…` over
+  `grantId, ownerId, granteeId, keyVersion, wrapVersion`
+- Byte representation is deterministic; the length prefix removes any
+  delimiter/ordering ambiguity
+- Purpose: prevent ciphertext transplant/replay across grants (and across
+  scopes — the scope byte distinguishes `EM` from every other AAD)
 
 ### 15.4 Main DB-stored artifacts
 
