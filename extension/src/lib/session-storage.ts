@@ -31,6 +31,8 @@ interface StoredSessionState {
   tenantAutoLockMinutes?: number | null;
   /** RFC 7638 JWK thumbprint of the DPoP key bound to the current token (43 base64url chars). */
   tokenCnfJkt?: string;
+  /** Personal vault key version at the time of unlock. Used to stamp saved entries correctly. */
+  personalKeyVersion?: number;
 }
 
 /** Shape returned to callers after decryption. */
@@ -44,6 +46,8 @@ export interface SessionState {
   tenantAutoLockMinutes?: number | null;
   /** RFC 7638 JWK thumbprint of the DPoP key bound to the current token (43 base64url chars). */
   tokenCnfJkt: string;
+  /** Personal vault key version at the time of unlock. Used to stamp saved entries correctly. */
+  personalKeyVersion?: number;
 }
 
 function isEncryptedField(v: unknown): v is EncryptedField {
@@ -71,6 +75,7 @@ export async function persistSession(state: SessionState): Promise<void> {
     ecdhEncrypted: state.ecdhEncrypted,
     tenantAutoLockMinutes: state.tenantAutoLockMinutes ?? undefined,
     tokenCnfJkt: state.tokenCnfJkt,
+    personalKeyVersion: state.personalKeyVersion,
   };
   await chrome.storage.session.set({ [SESSION_KEY]: stored });
 }
@@ -125,6 +130,12 @@ export async function loadSession(): Promise<SessionState | null> {
     return null;
   }
 
+  // personalKeyVersion validation
+  let personalKeyVersion: number | undefined;
+  if (typeof raw.personalKeyVersion === "number" && Number.isInteger(raw.personalKeyVersion) && raw.personalKeyVersion >= 0) {
+    personalKeyVersion = raw.personalKeyVersion;
+  }
+
   return {
     token,
     expiresAt: raw.expiresAt,
@@ -133,6 +144,7 @@ export async function loadSession(): Promise<SessionState | null> {
     ecdhEncrypted: raw.ecdhEncrypted,
     tenantAutoLockMinutes,
     tokenCnfJkt: raw.tokenCnfJkt,
+    personalKeyVersion,
   };
 }
 

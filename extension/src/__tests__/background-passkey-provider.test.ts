@@ -81,6 +81,7 @@ function createDeps(overrides?: Partial<PasskeyProviderDeps>): PasskeyProviderDe
   return {
     getEncryptionKey: vi.fn().mockReturnValue(null),
     getCurrentUserId: vi.fn().mockReturnValue(TEST_USER_ID),
+    getKeyVersion: vi.fn().mockReturnValue(1),
     getCachedEntries: vi.fn().mockResolvedValue([
       mockPasskeyEntry,
       mockLoginEntry,
@@ -400,6 +401,50 @@ describe("passkey-provider", () => {
       expect(decryptedBlob.passkeySignCount).toBe(1);
       // Verify invalidateCache was called after successful PUT
       expect(deps.invalidateCache).toHaveBeenCalledOnce();
+    });
+
+    it("threads the current key version into the counter-update PUT body", async () => {
+      const { generatePasskeyKeypair } = await import("../lib/webauthn-crypto");
+      const { privateKeyJwk } = await generatePasskeyKeypair();
+      const aad = buildPersonalEntryAAD(TEST_USER_ID, TEST_ENTRY_ID, VAULT_TYPE.BLOB);
+      const blob = JSON.stringify({
+        credentialId: TEST_CRED_ID,
+        relyingPartyId: TEST_RP_ID,
+        passkeyPrivateKeyJwk: JSON.stringify(privateKeyJwk),
+        passkeySignCount: 0,
+      });
+      const encryptedBlob = await encryptData(blob, testKey, aad);
+
+      const validClientDataJSON = JSON.stringify({
+        type: "webauthn.get",
+        challenge: "dGVzdC1jaGFsbGVuZ2U",
+        origin: "https://example.com",
+      });
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        getKeyVersion: vi.fn().mockReturnValue(3),
+        swFetch: vi.fn()
+          .mockResolvedValueOnce(
+            new Response(
+              JSON.stringify({ id: TEST_ENTRY_ID, encryptedBlob, encryptedOverview: { ciphertext: "", iv: "", authTag: "" }, aadVersion: 1 }),
+              { status: 200 },
+            ),
+          )
+          .mockResolvedValueOnce(new Response("{}", { status: 200 })),
+      });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeySignAssertion(
+        TEST_ENTRY_ID,
+        validClientDataJSON,
+        undefined,
+        "https://example.com/auth",
+      );
+      expect(result.ok).toBe(true);
+      const putCalls = (deps.swFetch as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([, init]: [string, RequestInit?]) => init?.method === "PUT");
+      const putBody = JSON.parse(putCalls[0][1].body as string) as { keyVersion: number };
+      expect(putBody.keyVersion).toBe(3);
     });
 
     it("still returns ok:true with signature when counter-update PUT fails (non-fatal)", async () => {
@@ -801,6 +846,26 @@ describe("passkey-provider", () => {
       const result = await handlePasskeyCreateCredential(validCreateParams);
       expect(result.ok).toBe(true);
       expect(invalidateCache).toHaveBeenCalledOnce();
+    });
+
+    it("threads the current key version into the POST body on credential creation", async () => {
+      const mockFetch = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        getCachedEntries: vi.fn().mockResolvedValue([]),
+        getKeyVersion: vi.fn().mockReturnValue(3),
+        swFetch: mockFetch,
+        invalidateCache: vi.fn(),
+      });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeyCreateCredential(validCreateParams);
+      expect(result.ok).toBe(true);
+      const postCalls = (mockFetch.mock.calls as Array<[string, RequestInit?]>)
+        .filter(([, init]) => init?.method === "POST");
+      expect(postCalls).toHaveLength(1);
+      const postBody = JSON.parse(postCalls[0][1]!.body as string) as { keyVersion: number };
+      expect(postBody.keyVersion).toBe(3);
     });
 
     it("returns serialized attestation response on success", async () => {

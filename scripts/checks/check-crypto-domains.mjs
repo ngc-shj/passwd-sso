@@ -214,6 +214,60 @@ export function checkAeadAadAllowlist(files) {
 }
 
 /**
+ * Check E — keyVersion hardcode guard.
+ *
+ * Flags any non-test .ts/.tsx file under src/ or extension/src/ that contains
+ * a `keyVersion: <digit>` literal — case-sensitive lowercase `keyVersion`.
+ * This pattern does NOT match `teamKeyVersion`, `itemKeyVersion`, or
+ * `cekKeyVersion` (those have an uppercase K after the prefix).
+ *
+ * The two allowlisted files are legitimate key-material-creation sites where a
+ * literal version is correct by design:
+ *   - vault/setup:  a brand-new vault's first personal key is always v1.
+ *   - vault-reset:  a reset baseline personal key starts at v0.
+ *
+ * All other sites MUST thread the version from the in-memory key (client-held),
+ * because under concurrent rotation the server's users.key_version may be ahead
+ * of the client's stale in-memory key.
+ *
+ * Comment/block-comment lines are stripped before matching (mirror existing checks).
+ *
+ * @param {Array<{rel: string, content: string}>} files - {rel, content} pairs
+ * @returns {string[]} error messages
+ */
+export function checkKeyVersionHardcode(files) {
+  // Sites where a literal keyVersion is correct by design.
+  const KEY_VERSION_HARDCODE_ALLOWLIST = new Set([
+    "src/app/api/vault/setup/route.ts",   // brand-new vault: first key is v1
+    "src/lib/vault/vault-reset.ts",        // reset baseline: key starts at v0
+  ]);
+
+  // Matches `keyVersion: <digit>` as an object property (not a ternary colon).
+  // Requires that `keyVersion` is preceded only by whitespace or a comma/brace —
+  // i.e. it appears in object-literal position, not after `data.keyVersion`.
+  // This avoids false positives from ternary expressions like `... ? data.keyVersion : 1`.
+  const keyVersionLiteralRe = /(?:^|[,{])\s*keyVersion\s*:\s*\d/m;
+  const errors = [];
+
+  for (const { rel, content } of files) {
+    if (KEY_VERSION_HARDCODE_ALLOWLIST.has(rel)) continue;
+    const activeLines = content
+      .split("\n")
+      .filter((line) => {
+        const trimmed = line.trimStart();
+        return !trimmed.startsWith("//") && !trimmed.startsWith("*");
+      })
+      .join("\n");
+    if (keyVersionLiteralRe.test(activeLines)) {
+      errors.push(
+        `Check E: hardcoded keyVersion literal found in non-allowlisted file: ${rel} — thread the live key version instead`
+      );
+    }
+  }
+  return errors;
+}
+
+/**
  * Check D — iOS golden-vector anti-drift (Node-gate, no Xcode required).
  *
  * For each entry in aad-golden-vectors.json (skipping `_`-prefixed keys):
@@ -509,6 +563,10 @@ function main() {
   const checkBErrors = checkAeadAadAllowlist(structuralFiles);
   errors.push(...checkBErrors);
 
+  // ── Check E: keyVersion hardcode guard ─────────────────────────────────────
+  const checkEErrors = checkKeyVersionHardcode(structuralFiles);
+  errors.push(...checkEErrors);
+
   // ── Check C: per-scope manifest coverage ───────────────────────────────────
   const manifestPath = join(ROOT, "scripts/checks/aad-scope-manifest.json");
   let manifest;
@@ -573,6 +631,7 @@ function main() {
   console.log(`  Check B: AEAD-with-AAD allowlist OK`);
   console.log(`  Check C: scope manifest coverage OK (${manifest ? Object.keys(manifest).length : 0} scopes)`);
   console.log(`  Check D: iOS golden-vector parity OK (${goldenCount} vectors, app + iOS pinned)`);
+  console.log(`  Check E: keyVersion hardcode guard OK`);
 }
 
 main();

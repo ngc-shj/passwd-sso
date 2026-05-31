@@ -10,6 +10,7 @@ import {
   checkAeadAadAllowlist,
   checkScopeManifest,
   checkIosGoldenParity,
+  checkKeyVersionHardcode,
 } from "../checks/check-crypto-domains.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -405,5 +406,105 @@ XCTAssertEqual([UInt8](result), [
       iosParityContent: iosParityWithExtraWhitespace,
     });
     expect(errors).toHaveLength(0);
+  });
+});
+
+// ── Check E: keyVersion hardcode guard ───────────────────────────────────────
+
+describe("checkKeyVersionHardcode", () => {
+  it("flags keyVersion: <digit> literal in a non-allowlisted file", () => {
+    const files = [
+      {
+        rel: "extension/src/background/login-save.ts",
+        content: `
+const body = JSON.stringify({
+  encryptedBlob,
+  keyVersion: 1,
+});
+`,
+      },
+    ];
+    const errors = checkKeyVersionHardcode(files);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0]).toMatch(/Check E/);
+    expect(errors[0]).toMatch(/extension\/src\/background\/login-save\.ts/);
+  });
+
+  it("does not flag keyVersion: <digit> in the vault/setup allowlisted file", () => {
+    const files = [
+      {
+        rel: "src/app/api/vault/setup/route.ts",
+        content: `keyVersion: 1,`,
+      },
+    ];
+    const errors = checkKeyVersionHardcode(files);
+    expect(errors).toHaveLength(0);
+  });
+
+  it("does not flag keyVersion: <digit> in the vault-reset allowlisted file", () => {
+    const files = [
+      {
+        rel: "src/lib/vault/vault-reset.ts",
+        content: `keyVersion: 0,`,
+      },
+    ];
+    const errors = checkKeyVersionHardcode(files);
+    expect(errors).toHaveLength(0);
+  });
+
+  it("does not flag teamKeyVersion, itemKeyVersion, or cekKeyVersion literals", () => {
+    const files = [
+      {
+        rel: "src/lib/some-module.ts",
+        content: `
+const body = {
+  teamKeyVersion: 1,
+  itemKeyVersion: 1,
+  cekKeyVersion: 1,
+};
+`,
+      },
+    ];
+    const errors = checkKeyVersionHardcode(files);
+    expect(errors).toHaveLength(0);
+  });
+
+  it("does not flag a comment line mentioning keyVersion: 1", () => {
+    const files = [
+      {
+        rel: "src/lib/some-module.ts",
+        content: `
+// keyVersion: 1 used to be hardcoded here
+* keyVersion: 1 was the default
+`,
+      },
+    ];
+    const errors = checkKeyVersionHardcode(files);
+    expect(errors).toHaveLength(0);
+  });
+
+  it("does not flag a ternary expression like data.keyVersion : 1", () => {
+    const files = [
+      {
+        rel: "src/lib/some-module.ts",
+        content: `
+personalKeyVersion = typeof data.keyVersion === "number" ? data.keyVersion : 1;
+`,
+      },
+    ];
+    const errors = checkKeyVersionHardcode(files);
+    expect(errors).toHaveLength(0);
+  });
+
+  it("flags keyVersion: 0 as well as keyVersion: 1", () => {
+    const files = [
+      {
+        rel: "src/lib/some-module.ts",
+        content: `const q = { keyVersion: 0 };`,
+      },
+    ];
+    const errors = checkKeyVersionHardcode(files);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0]).toMatch(/Check E/);
   });
 });

@@ -28,6 +28,7 @@ import {
 export interface PasskeyProviderDeps {
   getEncryptionKey: () => CryptoKey | null;
   getCurrentUserId: () => string | null;
+  getKeyVersion: () => number;
   getCachedEntries: () => Promise<DecryptedEntry[]>;
   swFetch: (path: string, init?: RequestInit) => Promise<Response>;
   invalidateCache: () => void;
@@ -279,7 +280,7 @@ async function doSignAssertion(
       body: JSON.stringify({
         encryptedBlob,
         aadVersion: data.aadVersion ?? 1,
-        keyVersion: 1,
+        keyVersion: deps.getKeyVersion(),
       }),
     });
 
@@ -407,7 +408,7 @@ export async function handlePasskeyCreateCredential(
         encryptedBlob,
         encryptedOverview,
         aadVersion: 1,
-        keyVersion: 1,
+        keyVersion: deps.getKeyVersion(),
         entryType: EXT_ENTRY_TYPE.PASSKEY,
       }),
     });

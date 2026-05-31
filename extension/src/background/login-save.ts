@@ -21,6 +21,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export interface LoginSaveDeps {
   getEncryptionKey: () => CryptoKey | null;
   getCurrentUserId: () => string | null;
+  getKeyVersion: () => number;
   getCachedEntries: () => Promise<DecryptedEntry[]>;
   isHostMatch: (entryHost: string, tabHost: string) => boolean;
   extractHost: (url: string) => string | null;
@@ -163,7 +164,7 @@ export async function handleSaveLogin(
         encryptedBlob,
         encryptedOverview,
         aadVersion: 1,
-        keyVersion: 1,
+        keyVersion: deps.getKeyVersion(),
         entryType: EXT_ENTRY_TYPE.LOGIN,
       }),
     });
@@ -241,7 +242,7 @@ export async function handleUpdateLogin(
         encryptedBlob,
         encryptedOverview,
         aadVersion: data.aadVersion ?? 1,
-        keyVersion: 1,
+        keyVersion: deps.getKeyVersion(),
       }),
     });
 
