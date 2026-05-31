@@ -98,7 +98,6 @@ export const CONTENT_TYPE_MAX_LENGTH = 100;
 
 // ─── Ciphertext Limits ───────────────────────────────────────
 export const CIPHERTEXT_MAX = 500_000;
-export const HISTORY_BLOB_MAX = 1_000_000;     // history reencrypt allows larger blobs
 // Wrapped per-item key (encrypted 256-bit key + envelope), hex/base64 — small.
 export const ENCRYPTED_ITEM_KEY_MAX = 1_024;
 

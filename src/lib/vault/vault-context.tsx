@@ -36,7 +36,6 @@ import {
 } from "../crypto/crypto-team";
 import {
   buildPersonalEntryAAD,
-  buildPersonalHistoryAAD,
   buildAttachmentAAD,
   buildAttachmentCekWrapAAD,
   VAULT_TYPE,
@@ -1059,8 +1058,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         const histEntry = historyEntries[i];
         onProgress?.({ phase: "history", current: i, total: totalHistory });
 
+        // History blobs are verbatim snapshots of the entry blob, sealed with
+        // the entry AAD (PV "blob"). Re-encrypt under the same AAD so the
+        // rotated row stays decryptable by the history view.
         const histAad = histEntry.aadVersion >= 1 && userId
-          ? buildPersonalHistoryAAD(userId, histEntry.entryId, histEntry.id)
+          ? buildPersonalEntryAAD(userId, histEntry.entryId, VAULT_TYPE.BLOB)
           : undefined;
 
         const decryptedBlob = await decryptData(

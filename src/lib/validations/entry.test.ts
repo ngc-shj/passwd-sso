@@ -6,8 +6,6 @@ import {
   createE2EPasswordSchema,
   updateE2EPasswordSchema,
   generateRequestSchema,
-  historyReencryptSchema,
-  teamHistoryReencryptSchema,
   bulkImportSchema,
   BULK_IMPORT_MAX_ENTRIES,
 } from "@/lib/validations/entry";
@@ -18,7 +16,6 @@ import {
   PASSPHRASE_WORD_COUNT_MAX,
   PASSPHRASE_SEPARATOR_MAX,
   CHARS_FIELD_MAX,
-  HISTORY_BLOB_MAX,
   FILENAME_MAX_LENGTH,
   HEX_IV_LENGTH,
   HEX_AUTH_TAG_LENGTH,
@@ -27,7 +24,6 @@ import { ENTRY_TYPE_VALUES } from "@/lib/constants";
 
 const HEX_IV = "a".repeat(HEX_IV_LENGTH);
 const HEX_AUTH_TAG = "b".repeat(HEX_AUTH_TAG_LENGTH);
-const HEX_HASH = "d".repeat(64);
 const VALID_UUID = "00000000-0000-4000-a000-000000000001";
 
 const validEncryptedField = (): {
@@ -311,109 +307,6 @@ describe("generateRequestSchema", () => {
 
   it("rejects an unknown mode", () => {
     const result = generateRequestSchema.safeParse({ mode: "unknown" });
-    expect(result.success).toBe(false);
-  });
-});
-
-// ─── historyReencryptSchema ─────────────────────────────────
-
-describe("historyReencryptSchema", () => {
-  const valid = (): {
-    encryptedBlob: string;
-    blobIv: string;
-    blobAuthTag: string;
-    keyVersion: number;
-    oldBlobHash: string;
-  } => ({
-    encryptedBlob: "data",
-    blobIv: HEX_IV,
-    blobAuthTag: HEX_AUTH_TAG,
-    keyVersion: 1,
-    oldBlobHash: HEX_HASH,
-  });
-
-  it("accepts valid input", () => {
-    expect(historyReencryptSchema.safeParse(valid()).success).toBe(true);
-  });
-
-  it("rejects missing encryptedBlob", () => {
-    const { encryptedBlob: _, ...rest } = valid();
-    expect(historyReencryptSchema.safeParse(rest).success).toBe(false);
-  });
-
-  it("rejects empty encryptedBlob", () => {
-    const result = historyReencryptSchema.safeParse({ ...valid(), encryptedBlob: "" });
-    expect(result.success).toBe(false);
-  });
-
-  it(`rejects encryptedBlob at max+1 (${HISTORY_BLOB_MAX + 1})`, () => {
-    const result = historyReencryptSchema.safeParse({
-      ...valid(),
-      encryptedBlob: "x".repeat(HISTORY_BLOB_MAX + 1),
-    });
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      const issue = result.error.issues.find((i) => i.path[0] === "encryptedBlob");
-      expect(issue?.code).toBe("too_big");
-    }
-  });
-
-  it("rejects oldBlobHash with wrong length", () => {
-    const result = historyReencryptSchema.safeParse({
-      ...valid(),
-      oldBlobHash: "d".repeat(63),
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects when keyVersion is a string", () => {
-    const result = historyReencryptSchema.safeParse({ ...valid(), keyVersion: "1" });
-    expect(result.success).toBe(false);
-  });
-});
-
-// ─── teamHistoryReencryptSchema ─────────────────────────────
-
-describe("teamHistoryReencryptSchema", () => {
-  const valid = (): {
-    encryptedBlob: string;
-    blobIv: string;
-    blobAuthTag: string;
-    teamKeyVersion: number;
-    oldBlobHash: string;
-  } => ({
-    encryptedBlob: "data",
-    blobIv: HEX_IV,
-    blobAuthTag: HEX_AUTH_TAG,
-    teamKeyVersion: 1,
-    oldBlobHash: HEX_HASH,
-  });
-
-  it("accepts valid minimal input", () => {
-    expect(teamHistoryReencryptSchema.safeParse(valid()).success).toBe(true);
-  });
-
-  it("accepts optional itemKey fields", () => {
-    const result = teamHistoryReencryptSchema.safeParse({
-      ...valid(),
-      itemKeyVersion: 1,
-      encryptedItemKey: "enc",
-      itemKeyIv: HEX_IV,
-      itemKeyAuthTag: HEX_AUTH_TAG,
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it("rejects missing teamKeyVersion", () => {
-    const { teamKeyVersion: _, ...rest } = valid();
-    expect(teamHistoryReencryptSchema.safeParse(rest).success).toBe(false);
-  });
-
-  it("rejects malformed itemKeyIv length", () => {
-    const result = teamHistoryReencryptSchema.safeParse({
-      ...valid(),
-      itemKeyIv: "abc",
-    });
     expect(result.success).toBe(false);
   });
 });

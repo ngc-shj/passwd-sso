@@ -177,7 +177,6 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 |--------|-------|------------|----------|------------|
 | `ENTRY_HISTORY_RESTORE` | PERSONAL/TEAM | PasswordEntry / TeamPasswordEntry | `{ restoredFromChangedAt }` | — (export-only) |
 | `HISTORY_PURGE` | PERSONAL/TEAM | PasswordEntry / TeamPasswordEntry | `{ purgedCount }` | purgedCount |
-| `ENTRY_HISTORY_REENCRYPT` | PERSONAL/TEAM | PasswordEntry / TeamPasswordEntry | Personal: `{ historyId, oldKeyVersion, newKeyVersion }` / Team: `{ historyId, oldTeamKeyVersion, newTeamKeyVersion, oldItemKeyVersion, newItemKeyVersion }` | — (export-only) |
 
 ### Share Links (`group:share`)
 
@@ -389,7 +388,7 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `group:attachment` | ATTACHMENT_UPLOAD, ATTACHMENT_DELETE |
 | `group:team` | TEAM_MEMBER_INVITE, TEAM_MEMBER_REMOVE, TEAM_ROLE_UPDATE |
 | `group:folder` | FOLDER_CREATE, FOLDER_UPDATE, FOLDER_DELETE |
-| `group:history` | ENTRY_HISTORY_RESTORE, HISTORY_PURGE, ENTRY_HISTORY_REENCRYPT |
+| `group:history` | ENTRY_HISTORY_RESTORE, HISTORY_PURGE |
 | `group:share` | SHARE_CREATE, SHARE_REVOKE, SHARE_ACCESS_VERIFY_SUCCESS, SHARE_ACCESS_VERIFY_FAILED |
 | `group:send` | SEND_CREATE, SEND_REVOKE |
 | `group:emergency` | EMERGENCY_GRANT_CREATE, EMERGENCY_GRANT_ACCEPT, EMERGENCY_GRANT_REJECT, EMERGENCY_GRANT_CONFIRM, EMERGENCY_ACCESS_REQUEST, EMERGENCY_ACCESS_ACTIVATE, EMERGENCY_ACCESS_REVOKE, EMERGENCY_VAULT_ACCESS |
@@ -407,7 +406,7 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `group:transfer` | ENTRY_EXPORT |
 | `group:attachment` | ATTACHMENT_UPLOAD, ATTACHMENT_DELETE |
 | `group:folder` | FOLDER_CREATE, FOLDER_UPDATE, FOLDER_DELETE |
-| `group:history` | ENTRY_HISTORY_RESTORE, HISTORY_PURGE, ENTRY_HISTORY_REENCRYPT |
+| `group:history` | ENTRY_HISTORY_RESTORE, HISTORY_PURGE |
 | `group:team` | TEAM_MEMBER_ADD, TEAM_MEMBER_INVITE, TEAM_MEMBER_REMOVE, TEAM_ROLE_UPDATE |
 | `group:share` | SHARE_CREATE, SHARE_REVOKE, SHARE_ACCESS_VERIFY_SUCCESS, SHARE_ACCESS_VERIFY_FAILED |
 | `group:admin` | MASTER_KEY_ROTATION, TEAM_E2E_MIGRATION, TEAM_KEY_ROTATION, TEAM_MEMBER_KEY_DISTRIBUTE, POLICY_UPDATE, AUDIT_LOG_DOWNLOAD, WATCHTOWER_ALERT_SENT, ADMIN_VAULT_RESET_INITIATE, ADMIN_VAULT_RESET_EXECUTE |

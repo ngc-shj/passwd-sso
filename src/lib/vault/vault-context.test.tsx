@@ -21,6 +21,8 @@ import {
   VaultUnlockError,
 } from "./vault-context";
 import { stashPrf, clearPrf } from "@/lib/auth/prf-handoff";
+import { encryptData, decryptData } from "@/lib/crypto/crypto-client";
+import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { wrapSecretKeyWithPrf } from "@/lib/auth/webauthn/webauthn-client";
 // Namespace import used ONLY to attach a pass-through spy that captures the
 // real unwrapped key for a zeroization assertion — crypto still runs for real.
@@ -590,4 +592,117 @@ describe("VaultProvider — session-driven status", () => {
 
     expect(result.current.userId).toBe("user-42");
   });
+});
+
+describe("VaultProvider — key rotation re-encrypts personal history under the entry AAD (C2)", () => {
+  it(
+    "rotated history blob decrypts with buildPersonalEntryAAD (real Web Crypto round-trip)",
+    async () => {
+      const { fetchMock } = makeFetchEnv(null);
+      const userId = "user-1";
+      const entryId = "11111111-1111-4111-8111-111111111111";
+      const historyId = "22222222-2222-4222-8222-222222222222";
+      const payload = JSON.stringify({ title: "Bank", password: "p@ss-原文" });
+      const overviewPayload = JSON.stringify({ title: "Bank" });
+
+      let rotatePostBody: {
+        historyEntries: Array<{ id: string; encryptedBlob: { ciphertext: string; iv: string; authTag: string } }>;
+      } | null = null;
+
+      // Compose: serve rotate-key endpoints, delegate the rest to makeFetchEnv.
+      // rotationData is mutated after setup once we hold the old key.
+      const rotationData: {
+        entries: unknown[];
+        historyEntries: unknown[];
+        mode2Attachments: unknown[];
+        mode0Attachments: unknown[];
+        mode0AttachmentsOverflow: boolean;
+      } = {
+        entries: [],
+        historyEntries: [],
+        mode2Attachments: [],
+        mode0Attachments: [],
+        mode0AttachmentsOverflow: false,
+      };
+
+      globalThis.fetch = (async (url: string, init?: RequestInit) => {
+        const path = typeof url === "string" ? url : "";
+        if (path === "/api/vault/rotate-key/data") {
+          return { ok: true, json: async () => rotationData };
+        }
+        if (path === "/api/vault/rotate-key" && init?.method === "POST") {
+          rotatePostBody = JSON.parse(init.body as string);
+          return { ok: true, json: async () => ({ keyVersion: 2, rotationEffects: null }) };
+        }
+        return fetchMock(url, init);
+      }) as unknown as typeof fetch;
+
+      const { result } = renderHook(() => useVault(), { wrapper });
+
+      await act(async () => {
+        await result.current.setup(PASSPHRASE);
+      });
+      const oldKey = result.current.encryptionKey;
+      expect(oldKey).toBeInstanceOf(CryptoKey);
+      expect(result.current.userId).toBe(userId);
+
+      // Seed an entry + a verbatim history snapshot, sealed with the OLD key
+      // under the entry AADs (exactly what production stores).
+      const blobAad = buildPersonalEntryAAD(userId, entryId, VAULT_TYPE.BLOB);
+      const overviewAad = buildPersonalEntryAAD(userId, entryId, VAULT_TYPE.OVERVIEW);
+      const blob = await encryptData(payload, oldKey!, blobAad);
+      const overview = await encryptData(overviewPayload, oldKey!, overviewAad);
+      rotationData.entries = [
+        {
+          id: entryId,
+          encryptedBlob: blob.ciphertext,
+          blobIv: blob.iv,
+          blobAuthTag: blob.authTag,
+          encryptedOverview: overview.ciphertext,
+          overviewIv: overview.iv,
+          overviewAuthTag: overview.authTag,
+          keyVersion: 1,
+          aadVersion: 1,
+        },
+      ];
+      rotationData.historyEntries = [
+        {
+          id: historyId,
+          entryId,
+          encryptedBlob: blob.ciphertext,
+          blobIv: blob.iv,
+          blobAuthTag: blob.authTag,
+          keyVersion: 1,
+          aadVersion: 1,
+        },
+      ];
+
+      await act(async () => {
+        await result.current.rotateKey(PASSPHRASE);
+      });
+
+      // The new key is now installed in the context.
+      const newKey = result.current.encryptionKey;
+      expect(newKey).toBeInstanceOf(CryptoKey);
+      expect(newKey).not.toBe(oldKey);
+
+      // The rotation POST carried the re-encrypted history; it MUST decrypt
+      // with the entry AAD (PV "blob") under the new key.
+      expect(rotatePostBody).not.toBeNull();
+      const rotated = rotatePostBody!.historyEntries[0].encryptedBlob;
+      const decrypted = await decryptData(
+        rotated,
+        newKey!,
+        buildPersonalEntryAAD(userId, entryId, VAULT_TYPE.BLOB),
+      );
+      expect(JSON.parse(decrypted)).toEqual(JSON.parse(payload));
+
+      // Anti-vacuous: the retired history scope would have used a different
+      // AAD; a wrong scope must fail, proving the entry AAD is what matched.
+      await expect(
+        decryptData(rotated, newKey!, buildPersonalEntryAAD(userId, entryId, VAULT_TYPE.OVERVIEW)),
+      ).rejects.toThrow();
+    },
+    60_000,
+  );
 });

@@ -1,20 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHash } from "node:crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, rateLimited, notFound, unauthorized } from "@/lib/http/api-response";
-import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { errorResponse, notFound, unauthorized } from "@/lib/http/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { parseBody } from "@/lib/http/parse-body";
-import { historyReencryptSchema } from "@/lib/validations";
 
 type Params = { params: Promise<{ id: string; historyId: string }> };
-
-const reencryptLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
 // GET /api/passwords/[id]/history/[historyId] — individual history entry
 async function handleGET(
@@ -66,95 +58,4 @@ async function handleGET(
   });
 }
 
-// PATCH /api/passwords/[id]/history/[historyId] — re-encrypt history entry
-async function handlePATCH(
-  req: NextRequest,
-  { params }: Params,
-) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return unauthorized();
-  }
-
-  const rl = await reencryptLimiter.check(`rl:history_reencrypt:${session.user.id}`);
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
-
-  const { id, historyId } = await params;
-
-  const parsed = await parseBody(req, historyReencryptSchema);
-  if (!parsed.ok) return parsed.response;
-
-  const { encryptedBlob, blobIv, blobAuthTag, keyVersion, oldBlobHash } = parsed.data;
-
-  // Verify ownership and fetch history in parallel
-  const [entry, history] = await withUserTenantRls(session.user.id, () =>
-    Promise.all([
-      prisma.passwordEntry.findUnique({
-        where: { id },
-        select: { userId: true },
-      }),
-      prisma.passwordEntryHistory.findUnique({
-        where: { id: historyId },
-      }),
-    ]),
-  );
-
-  if (!entry) {
-    return notFound();
-  }
-  if (entry.userId !== session.user.id) {
-    // A01-4: collapse 403 → 404 to remove existence oracle.
-    return notFound();
-  }
-
-  if (!history || history.entryId !== id) {
-    return errorResponse(API_ERROR.HISTORY_NOT_FOUND);
-  }
-
-  // Prevent key version downgrade or same-version re-encryption
-  if (keyVersion <= history.keyVersion) {
-    return errorResponse(API_ERROR.KEY_VERSION_NOT_NEWER);
-  }
-
-  // Compare-and-swap: verify old blob hash
-  const actualHash = createHash("sha256").update(history.encryptedBlob).digest("hex");
-  if (oldBlobHash !== actualHash) {
-    return errorResponse(API_ERROR.BLOB_HASH_MISMATCH);
-  }
-
-  // Atomic update with optimistic locking on keyVersion to prevent TOCTOU
-  const result = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntryHistory.updateMany({
-      where: { id: historyId, keyVersion: history.keyVersion },
-      data: {
-        encryptedBlob,
-        blobIv,
-        blobAuthTag,
-        keyVersion,
-      },
-    }),
-  );
-
-  if (result.count === 0) {
-    return errorResponse(API_ERROR.BLOB_HASH_MISMATCH);
-  }
-
-  await logAuditAsync({
-    ...personalAuditBase(req, session.user.id),
-    action: AUDIT_ACTION.ENTRY_HISTORY_REENCRYPT,
-    targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
-    targetId: id,
-    metadata: {
-      historyId,
-      oldKeyVersion: history.keyVersion,
-      newKeyVersion: keyVersion,
-    },
-  });
-
-  return NextResponse.json({ success: true });
-}
-
 export const GET = withRequestLog(handleGET);
-export const PATCH = withRequestLog(handlePATCH);

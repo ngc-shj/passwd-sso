@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   buildPersonalEntryAAD,
-  buildPersonalHistoryAAD,
   buildTeamEntryAAD,
   buildAttachmentAAD,
   buildItemKeyWrapAAD,
@@ -42,15 +41,6 @@ describe("crypto-aad", () => {
 
       // Total size: 4 (header) + 2+8 + 2+9 + 2+4 = 31
       expect(aad.length).toBe(31);
-    });
-
-    it("buildPersonalHistoryAAD produces correct binary layout with PH scope", () => {
-      const aad = buildPersonalHistoryAAD("user-1", "entry-1", "hist-1");
-      const view = new DataView(aad.buffer, aad.byteOffset, aad.byteLength);
-
-      expect(String.fromCharCode(aad[0], aad[1])).toBe("PH"); // scope
-      expect(view.getUint8(2)).toBe(AAD_VERSION);
-      expect(view.getUint8(3)).toBe(3); // nFields
     });
 
     it("buildTeamEntryAAD produces correct binary layout with 4 fields", () => {
@@ -210,18 +200,6 @@ describe("crypto-aad", () => {
       const blob = buildPersonalEntryAAD("u1", "e1", "blob");
       const overview = buildPersonalEntryAAD("u1", "e1", "overview");
       expect(blob).not.toEqual(overview);
-    });
-
-    it("PH historyId differentiates AAD (rollback resistance)", () => {
-      const h1 = buildPersonalHistoryAAD("u1", "e1", "hist-1");
-      const h2 = buildPersonalHistoryAAD("u1", "e1", "hist-2");
-      expect(h1).not.toEqual(h2);
-    });
-
-    it("PV and PH for same userId/entryId produce different AAD (scope separation)", () => {
-      const pv = buildPersonalEntryAAD("u1", "e1", "blob");
-      const ph = buildPersonalHistoryAAD("u1", "e1", "hist-x");
-      expect(pv).not.toEqual(ph);
     });
   });
 

@@ -33,8 +33,6 @@ import {
   createE2EPasswordSchema,
   updateE2EPasswordSchema,
   generateRequestSchema,
-  historyReencryptSchema,
-  teamHistoryReencryptSchema,
 } from "@/lib/validations/entry";
 
 // ─── send.ts ─────────────────────────────────────────────────
@@ -776,65 +774,6 @@ describe("generateRequestSchema", () => {
 
   it("rejects unknown mode", () => {
     expect(generateRequestSchema.safeParse({ mode: "diceware" }).success).toBe(false);
-  });
-});
-
-describe("historyReencryptSchema", () => {
-  const valid = {
-    encryptedBlob: "blobdata",
-    blobIv: HEX_IV,
-    blobAuthTag: HEX_AUTH_TAG,
-    keyVersion: 2,
-    oldBlobHash: HEX_HASH,
-  };
-
-  it("accepts valid input", () => {
-    expect(historyReencryptSchema.safeParse(valid).success).toBe(true);
-  });
-
-  it("rejects empty encryptedBlob", () => {
-    expect(historyReencryptSchema.safeParse({ ...valid, encryptedBlob: "" }).success).toBe(false);
-  });
-
-  it("rejects blobIv with wrong length", () => {
-    expect(historyReencryptSchema.safeParse({ ...valid, blobIv: "short" }).success).toBe(false);
-  });
-
-  it("rejects blobAuthTag with wrong length", () => {
-    expect(historyReencryptSchema.safeParse({ ...valid, blobAuthTag: "short" }).success).toBe(false);
-  });
-
-  it("rejects oldBlobHash with wrong length", () => {
-    expect(historyReencryptSchema.safeParse({ ...valid, oldBlobHash: "badhash" }).success).toBe(false);
-  });
-});
-
-describe("teamHistoryReencryptSchema", () => {
-  const valid = {
-    encryptedBlob: "blobdata",
-    blobIv: HEX_IV,
-    blobAuthTag: HEX_AUTH_TAG,
-    teamKeyVersion: 2,
-    oldBlobHash: HEX_HASH,
-  };
-
-  it("accepts valid input without item key fields", () => {
-    expect(teamHistoryReencryptSchema.safeParse(valid).success).toBe(true);
-  });
-
-  it("accepts valid input with optional item key fields", () => {
-    expect(teamHistoryReencryptSchema.safeParse({
-      ...valid,
-      itemKeyVersion: 1,
-      encryptedItemKey: "itemkeydata",
-      itemKeyIv: HEX_IV,
-      itemKeyAuthTag: HEX_AUTH_TAG,
-    }).success).toBe(true);
-  });
-
-  it("rejects missing blobIv", () => {
-    const { blobIv: _, ...rest } = valid;
-    expect(teamHistoryReencryptSchema.safeParse(rest).success).toBe(false);
   });
 });
 
