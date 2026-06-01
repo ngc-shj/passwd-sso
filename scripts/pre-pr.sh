@@ -8,6 +8,13 @@ GREEN='\033[0;32m'
 BOLD='\033[1m'
 RESET='\033[0m'
 
+# PRE_PR_STATIC_ONLY=1 runs only the environment-independent static checks
+# (grep/script guards) and skips Lint, Test, Build, integration, and the
+# staged-diff secret scan. CI's static-checks job sets this so the security
+# static guards run in CI from the same definition as the local hook — there
+# is no second copy to drift (R33).
+STATIC_ONLY="${PRE_PR_STATIC_ONLY:-0}"
+
 passed=0
 failed=0
 failures=()
@@ -123,7 +130,11 @@ run_step "Static: settings-card-layout"  bash scripts/checks/check-settings-card
 run_step "Static: api-error-codes" bash scripts/checks/check-api-error-codes.sh
 run_step "Static: api-error-body-drift" bash scripts/checks/check-api-error-body-drift.sh
 run_step "Static: fail-closed-routes-have-test" bash scripts/checks/check-fail-closed-routes-have-test.sh
-run_step "Lint"                   npx eslint .
+run_step "Static: actions-sha-pinned" bash scripts/checks/check-actions-sha-pinned.sh
+run_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-prisma-pin.sh
+if [ "$STATIC_ONLY" != "1" ]; then
+  run_step "Lint"                   npx eslint .
+fi
 run_step "Static: env drift check"  npm run check:env-docs
 run_step "Static: team-auth-rls"  node scripts/checks/check-team-auth-rls.mjs
 run_step "Static: bypass-rls"     node scripts/checks/check-bypass-rls.mjs
@@ -376,7 +387,9 @@ run_step "Static: fetch basePath compliance" bash -c '
   fi
 '
 
-if command -v gitleaks >/dev/null 2>&1; then
+if [ "$STATIC_ONLY" = "1" ]; then
+  printf "${BOLD}▸ Secret scan${RESET}\n  (skipped — PRE_PR_STATIC_ONLY: the gitleaks --staged scan is a local pre-push check; nothing is staged in CI)\n\n"
+elif command -v gitleaks >/dev/null 2>&1; then
   run_step "Secret scan (gitleaks)" gitleaks detect --no-banner --redact --staged
 else
   # S19/S27 safe fallback: use node (already available — package.json runtime).
@@ -412,15 +425,18 @@ if git diff --name-only main...HEAD | grep -q '^src/app/\[locale\]/admin/'; then
     passed=$((passed + 1))
   fi
 fi
-# Clear vitest cache to match CI's clean environment
-rm -rf node_modules/.vitest extension/node_modules/.vitest 2>/dev/null || true
-run_step "Test"                   npx vitest run
+if [ "$STATIC_ONLY" != "1" ]; then
+  # Clear vitest cache to match CI's clean environment
+  rm -rf node_modules/.vitest extension/node_modules/.vitest 2>/dev/null || true
+  run_step "Test"                   npx vitest run
+fi
 
 # Integration tests on refactor branches touching auth/DB modules.
 # Round 4: T10 (regex covers pre- and post-PR-5 paths), T13 (DB reachability + 3s timeout),
 # T22 (CI via ci-integration.yml is authoritative; this local run is a preview).
 # Set PREPR_SKIP_INTEGRATION=1 to defer to CI.
-if git rev-parse --abbrev-ref HEAD | grep -q "^refactor/" && \
+if [ "$STATIC_ONLY" != "1" ] && \
+   git rev-parse --abbrev-ref HEAD | grep -q "^refactor/" && \
    git diff --name-only main...HEAD | \
      grep -E '^src/lib/(prisma|redis|tenant-(context|rls)|auth/.+-token)\.ts$|^src/lib/(prisma|tenant|auth)/' \
      > /dev/null; then
@@ -435,7 +451,9 @@ if git rev-parse --abbrev-ref HEAD | grep -q "^refactor/" && \
   fi
 fi
 
-run_step "Build"                  npx next build
+if [ "$STATIC_ONLY" != "1" ]; then
+  run_step "Build"                  npx next build
+fi
 
 echo ""
 printf "${BOLD}═══ Results ═══${RESET}\n"

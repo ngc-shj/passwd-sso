@@ -25,10 +25,10 @@ jobs:
       env: ${{ steps.filter.outputs.env }}
       ios: ${{ steps.filter.outputs.ios }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - id: filter
-        uses: dorny/paths-filter@v4
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         with:
           filters: |
             app:
@@ -80,8 +80,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: '22'
           cache: 'npm'
@@ -94,7 +94,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Verify version consistency
         working-directory: ${{ github.workspace }}
@@ -117,6 +117,43 @@ jobs:
             FAIL=1
           fi
           exit $FAIL
+
+  # ─── Static Security Check Guards ─────────────────────────
+  # Runs the environment-independent static guards from scripts/pre-pr.sh via
+  # PRE_PR_STATIC_ONLY — same definition as the local pre-PR hook, so the
+  # checks cannot drift between local and CI (R33). Always runs (not gated on
+  # `changes`) so workflow-pinning and security guards are never skipped.
+  static-checks:
+    name: "Static: security check guards"
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0 # diff-based guards (prf-salt-immutable, R35 gate) need `main`
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - run: npm ci
+
+      # actions/checkout with fetch-depth: 0 fetches full history of the PR ref
+      # but does NOT create a local `main` branch. The static guards compare
+      # against main (`git diff main...HEAD`); without this they fail open
+      # (empty diff → vacuous pass). Same pattern as refactor-phase-verify.yml.
+      - name: Ensure main ref is available
+        run: |
+          set -euo pipefail
+          if ! git rev-parse --verify main >/dev/null 2>&1; then
+            git fetch origin main:main
+          fi
+
+      # No `prisma generate` step: every static guard is a pure source/schema
+      # grep (none import the generated client), so the client is not needed.
+      - name: Run static check guards (PRE_PR_STATIC_ONLY)
+        run: PRE_PR_STATIC_ONLY=1 bash scripts/pre-pr.sh
 
   # ─── Main App: Lint → Test → Build ────────────────────────
   app-ci:
@@ -142,9 +179,9 @@ jobs:
       VERIFIER_PEPPER_KEY: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
       REDIS_URL: "redis://localhost:6379"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: ".nvmrc"
           cache: "npm"
@@ -200,9 +237,9 @@ jobs:
       run:
         working-directory: extension
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: ".nvmrc"
           cache: "npm"
@@ -229,7 +266,7 @@ jobs:
     if: needs.changes.outputs.ios == 'true' || needs.changes.outputs.ci == 'true'
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Select latest stable Xcode
         run: |
@@ -307,9 +344,9 @@ jobs:
       run:
         working-directory: cli
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: ".nvmrc"
           cache: "npm"
@@ -379,9 +416,9 @@ jobs:
       AUDIT_ANCHOR_TAG_SECRET: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
       AUDIT_ANCHOR_DESTINATION_FS_PATH: "/tmp/ci-anchors"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: ".nvmrc"
           cache: "npm"
@@ -403,7 +440,7 @@ jobs:
       - name: Run E2E tests
         run: npm run test:e2e
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
           name: playwright-report
@@ -443,9 +480,9 @@ jobs:
       PASSWD_APP_PASSWORD: passwd_app_pass
       DATABASE_URL: "postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: ".nvmrc"
           cache: "npm"
@@ -510,13 +547,13 @@ jobs:
     needs: changes
     if: needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Build Docker image
         run: docker build --build-arg DATABASE_URL=postgresql://dummy:dummy@localhost:5432/dummy -t passwd-sso:scan .
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: "passwd-sso:scan"
           scan-type: image
@@ -532,9 +569,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: ".nvmrc"
           cache: "npm"
@@ -553,9 +590,9 @@ jobs:
       run:
         working-directory: extension
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: ".nvmrc"
           cache: "npm"
@@ -575,9 +612,9 @@ jobs:
       run:
         working-directory: cli
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: ".nvmrc"
           cache: "npm"
@@ -598,9 +635,9 @@ jobs:
       needs.changes.outputs.cli == 'true' ||
       needs.changes.outputs.ci == 'true'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version-file: ".nvmrc"
           cache: "npm"

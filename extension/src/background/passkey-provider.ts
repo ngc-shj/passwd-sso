@@ -287,9 +287,15 @@ async function doSignAssertion(
     if (putRes.ok) {
       deps.invalidateCache();
     }
-    // Assertion succeeds even if counter-update PUT fails: the signed authenticatorData
-    // already contains the incremented counter and the RP validates it independently.
-    // A transient server failure should not block the user from signing in.
+    // Soft-fail on counter-persist failure: a network error already returned
+    // {ok:false} via the catch below, so this point is only reached on an HTTP
+    // error response. This assertion still ships signCount=N+1, so the *current*
+    // sign-in succeeds (we do not block the user on a transient server fault).
+    // Trade-off: because the blob was NOT persisted, the next sign-in re-hydrates
+    // the stale N and re-signs N+1 — presenting the same counter twice. An RP that
+    // strictly enforces counter monotonicity (> not >=) may reject that next
+    // assertion as a possible clone. This self-heals as soon as one PUT succeeds.
+    // passwd-sso's own RP tolerates this; external RPs vary.
 
     return {
       ok: true,
