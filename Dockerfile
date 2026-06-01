@@ -81,11 +81,16 @@ COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 # `--ignore-scripts` on the global npm upgrade limits root-execution blast
 # radius if the registry is compromised. Cache is cleared at the end to avoid
 # shipping the downloaded tarballs in the final layer.
+# PRISMA_VER is pinned to the package-lock.json `prisma` version (the CLI the
+# `migrate` compose service runs); a floating `latest` here breaks build
+# reproducibility and risks CLI/generated-client skew. Kept in lockstep with the
+# lockfile by scripts/checks/check-dockerfile-prisma-pin.sh.
 RUN TAR_VER=7.5.11 && \
     PICOMATCH_VER=4.0.4 && \
     NPM_VER=11.12.1 && \
+    PRISMA_VER=7.8.0 && \
     npm install -g "npm@${NPM_VER}" --loglevel=error --ignore-scripts && \
-    npm install prisma --no-save --ignore-scripts && \
+    npm install "prisma@${PRISMA_VER}" --no-save --ignore-scripts && \
     TAR_DIR=/usr/local/lib/node_modules/npm/node_modules/tar && \
     if [ -d "$TAR_DIR" ]; then \
       CURRENT=$(node -p "require('${TAR_DIR}/package.json').version") && \
@@ -122,7 +127,8 @@ RUN TAR_VER=7.5.11 && \
     # Post-patch invariant assertion: fail the build if any expected version is missing.
     [ "$(npm -v)" = "${NPM_VER}" ] && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/tar/package.json').version;if(v<'${TAR_VER}'){console.error('tar still '+v);process.exit(1)}" && \
-    node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/tinyglobby/node_modules/picomatch/package.json').version;if(v<'${PICOMATCH_VER}'){console.error('picomatch still '+v);process.exit(1)}"
+    node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/tinyglobby/node_modules/picomatch/package.json').version;if(v<'${PICOMATCH_VER}'){console.error('picomatch still '+v);process.exit(1)}" && \
+    node -e "const v=require('/app/node_modules/prisma/package.json').version;if(v!=='${PRISMA_VER}'){console.error('prisma pin failed: got '+v+', expected ${PRISMA_VER}');process.exit(1)}"
 
 # Copy @prisma runtime adapters (overlay on top of prisma's @prisma packages)
 COPY --from=builder /app/node_modules/@prisma/adapter-pg ./node_modules/@prisma/adapter-pg
