@@ -118,6 +118,34 @@ jobs:
           fi
           exit $FAIL
 
+  # ─── Secret Scan (gitleaks) ───────────────────────────────
+  # Scans the working tree with a checksum-pinned gitleaks binary. Allowlists for
+  # test fixtures / docs / known non-secret code markers live in .gitleaks.toml.
+  # Uses the binary directly (not gitleaks-action) to keep the supply chain
+  # pinned and avoid the action's license/telemetry surface. Always runs (not
+  # gated on `changes`) — the local pre-pr hook only scans the staged diff.
+  secret-scan:
+    name: "Secret scan (gitleaks)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install pinned gitleaks
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+          GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        run: |
+          set -euo pipefail
+          curl -fsSL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar xzf gitleaks.tar.gz gitleaks
+          ./gitleaks version
+
+      - name: Scan working tree
+        run: ./gitleaks dir . --config .gitleaks.toml --no-banner --redact
+
   # ─── Static Security Check Guards ─────────────────────────
   # Runs the environment-independent static guards from scripts/pre-pr.sh via
   # PRE_PR_STATIC_ONLY — same definition as the local pre-PR hook, so the
