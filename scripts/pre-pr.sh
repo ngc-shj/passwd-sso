@@ -388,7 +388,7 @@ run_step "Static: fetch basePath compliance" bash -c '
 '
 
 if [ "$STATIC_ONLY" = "1" ]; then
-  printf "${BOLD}▸ Secret scan${RESET}\n  (skipped — PRE_PR_STATIC_ONLY: the gitleaks --staged scan is a local pre-push check; nothing is staged in CI)\n\n"
+  printf "${BOLD}▸ Secret scan${RESET}\n  (skipped — PRE_PR_STATIC_ONLY: this is the local --staged scan; CI runs a full-tree gitleaks scan in the secret-scan job)\n\n"
 elif command -v gitleaks >/dev/null 2>&1; then
   run_step "Secret scan (gitleaks)" gitleaks detect --no-banner --redact --staged
 else

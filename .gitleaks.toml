@@ -1,0 +1,35 @@
+# gitleaks config — extends the default ruleset with allowlists for this repo's
+# test fixtures, sample data, docs, and a few non-secret code markers. Production
+# source is still scanned. Used by the CI secret-scan job (.github/workflows/ci.yml)
+# and any local `gitleaks dir . --config .gitleaks.toml` run.
+#
+# When adding an allowlist entry, prefer the narrowest scope (a specific path or a
+# unique regex) over broad suppression, and explain why the match is not a secret.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Test files, fixtures, sample export data, and docs hold non-secret test vectors / mock tokens (RFC 6238 TOTP vectors, SSH-key fixtures, example API tokens, sample CSV/JSON exports)."
+paths = [
+  '''.*\.test\.(ts|tsx|swift)$''',
+  '''.*\.spec\.(ts|tsx)$''',
+  '''(^|/)__tests__/''',
+  '''(^|/)test/fixtures/''',
+  '''^ios/.*Tests/.*''',
+  '''^docs/''',
+]
+
+[[allowlists]]
+description = "SSH-key format/parser source files: the only key-shaped strings are PEM header markers used for format detection, not real key material."
+paths = [
+  '''^cli/src/lib/openssh-key-parser\.ts$''',
+  '''^src/lib/format/ssh-key\.ts$''',
+]
+
+[[allowlists]]
+description = "Crypto KDF constant identifier, not a credential (generic-api-key false positive)."
+regexTarget = "match"
+regexes = [
+  '''VERIFIER_PBKDF2_BITS''',
+]

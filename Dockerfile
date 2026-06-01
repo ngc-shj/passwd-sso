@@ -126,8 +126,8 @@ RUN TAR_VER=7.5.11 && \
     rm -rf /root/.npm /tmp/* && \
     # Post-patch invariant assertion: fail the build if any expected version is missing.
     [ "$(npm -v)" = "${NPM_VER}" ] && \
-    node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/tar/package.json').version;if(v<'${TAR_VER}'){console.error('tar still '+v);process.exit(1)}" && \
-    node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/tinyglobby/node_modules/picomatch/package.json').version;if(v<'${PICOMATCH_VER}'){console.error('picomatch still '+v);process.exit(1)}" && \
+    node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/tar/package.json').version,c=v.split('.').map(Number),m='${TAR_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('tar still '+v);process.exit(1)}}" && \
+    node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/tinyglobby/node_modules/picomatch/package.json').version,c=v.split('.').map(Number),m='${PICOMATCH_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('picomatch still '+v);process.exit(1)}}" && \
     node -e "const v=require('/app/node_modules/prisma/package.json').version;if(v!=='${PRISMA_VER}'){console.error('prisma pin failed: got '+v+', expected ${PRISMA_VER}');process.exit(1)}"
 
 # Copy @prisma runtime adapters (overlay on top of prisma's @prisma packages)
