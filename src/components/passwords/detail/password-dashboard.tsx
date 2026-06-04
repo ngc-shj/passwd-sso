@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, Fragment, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { SearchBar } from "@/components/layout/search-bar";
-import { PasswordList, type SortOption, type PasswordListHandle } from "@/components/passwords/detail/password-list";
+import { PasswordList, type SortOption, type PasswordListHandle, type DisplayEntry } from "@/components/passwords/detail/password-list";
 import { TrashList, type TrashListHandle } from "@/components/passwords/shared/trash-list";
 import { PasswordNewDialog } from "@/components/passwords/dialogs/personal-password-new-dialog";
 import { EntryListHeader } from "@/components/passwords/entry/entry-list-header";
@@ -33,6 +33,15 @@ import { buildTagPath } from "@/lib/format/tag-tree";
 import type { TagData } from "@/components/tags/tag-input";
 import { VAULT_DATA_CHANGED_EVENT, notifyVaultDataChanged } from "@/lib/events";
 import { isOverlayActive } from "@/components/extension/auto-extension-connect";
+import { useVault } from "@/lib/vault/vault-context";
+import { useLayoutMode } from "@/hooks/use-layout-mode";
+import { MasterDetailShell } from "@/components/passwords/detail/master-detail-shell";
+import { PasswordDetailPane } from "@/components/passwords/detail/password-detail-pane";
+import { usePasswordEntryDetail } from "@/hooks/vault/use-password-entry-detail";
+import { buildPersonalGetDetail } from "@/lib/vault/build-personal-get-detail";
+import { PasswordEditDialogLoader } from "@/components/passwords/dialogs/personal-password-edit-dialog-loader";
+import { ShareDialog } from "@/components/share/share-dialog";
+import { toast } from "sonner";
 
 // Static icon map — created once at module scope to avoid re-creation on every render
 const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
@@ -59,6 +68,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
   const t = useTranslations("Dashboard");
   const tl = useTranslations("PasswordList");
   const ts = useTranslations("Shortcuts");
+  const tCard = useTranslations("PasswordCard");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -73,6 +83,48 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
   const searchRef = useRef<HTMLInputElement>(null);
   const passwordListRef = useRef<PasswordListHandle>(null);
   const trashListRef = useRef<TrashListHandle>(null);
+  const listPaneRef = useRef<HTMLDivElement>(null);
+
+  // C4: single source of truth for the active (selected) entry.
+  // INV-C1.5: this state lives INSIDE PasswordDashboard (under VaultGate) — NOT hoisted above VaultGate.
+  const [activeEntry, setActiveEntry] = useState<DisplayEntry | null>(null);
+
+  // C5: layout mode from matchMedia (SSR-safe, INV-C5.3/C5.5).
+  const layoutMode = useLayoutMode();
+
+  // Vault context for personal decrypt + detail pane.
+  const { encryptionKey, userId, status: vaultStatus } = useVault();
+
+  // Pane-level detail dialogs (edit, share) — owned here, not duplicated in PasswordCard.
+  const [paneEditOpen, setPaneEditOpen] = useState(false);
+  const [paneShareOpen, setPaneShareOpen] = useState(false);
+  const [paneShareData, setPaneShareData] = useState<Record<string, unknown> | undefined>(undefined);
+
+  // Build the getDetail closure for the active entry (personal path).
+  // INV-C1.7: all field-mapping lives in buildPersonalGetDetail, not the hook.
+  // Memoized so the closure reference is stable until activeEntry.id / encryptionKey changes.
+  const getDetail = useMemo(
+    () =>
+      activeEntry && encryptionKey
+        ? buildPersonalGetDetail(activeEntry, { encryptionKey, userId })
+        : async (_id: string): Promise<never> => { throw new Error("No active entry or vault locked"); },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeEntry?.id, encryptionKey, userId],
+  );
+
+  // C1 hook — manages fetch/decrypt lifecycle for the active entry in the detail pane.
+  const {
+    detailData,
+    loading: detailLoading,
+    error: detailError,
+    invalidate: invalidateDetail,
+  } = usePasswordEntryDetail(
+    activeEntry?.id ?? null,
+    { getDetail, vaultStatus },
+  );
+
+  // Debounce ref for keyboard arrow-nav (INV-C7.4).
+  const arrowNavDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { folders } = usePersonalFolders();
   const { tags } = usePersonalTags();
@@ -109,7 +161,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
         ? t("archive")
         : entryType && ENTRY_TYPE_TITLES[entryType]
           ? ENTRY_TYPE_TITLES[entryType]
-          : folderLabel ?? tagLabel ?? (folderId || tagId ? "\u00A0" : t("passwords"));
+          : folderLabel ?? tagLabel ?? (folderId || tagId ? " " : t("passwords"));
 
   const headerIcon = isTrash
     ? <Trash2 className="h-6 w-6" />
@@ -135,12 +187,14 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
   const isPrimaryScopeLabel =
     isTrash || isArchive || isFavorites || isPersonalAll || isCategorySelected || isFolderOrTagSelected;
 
-  // Reset selection mode when view changes (adjust state during render)
+  // INV-C4.2: reset selection mode AND activeEntry when view changes.
+  // Done during render (NOT in an effect) so the pane clears in the same frame as the view change.
   const viewKey = `${view}|${tagId}|${folderId}|${entryType}`;
   const [prevViewKey, setPrevViewKey] = useState(viewKey);
   if (prevViewKey !== viewKey) {
     setPrevViewKey(viewKey);
     setSelectionMode(false);
+    setActiveEntry(null); // INV-C4.2: clear pane on view change
   }
 
   const handleSelectedCountChange = useCallback((count: number, isAllSelected: boolean, isAtLimit: boolean) => {
@@ -151,6 +205,11 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
 
   const activeListRef = isTrash ? trashListRef : passwordListRef;
 
+  // INV-C4.3: clear pane when a single-entry removal is signalled from the list.
+  const handleEntryRemoved = useCallback((id: string) => {
+    setActiveEntry((prev) => (prev?.id === id ? null : prev));
+  }, []);
+
   // Listen for vault-data-changed (import, etc.)
   useEffect(() => {
     const handler = () => setRefreshKey((k) => k + 1);
@@ -158,7 +217,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
     return () => window.removeEventListener(VAULT_DATA_CHANGED_EVENT, handler);
   }, []);
 
-  // Keyboard shortcuts
+  // Global keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // Suppress all shortcuts while a full-screen overlay is active
@@ -235,9 +294,127 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
     notifyVaultDataChanged();
   }, []);
 
+  // Keyboard navigation: we keep refs to the latest visible entries and active entry
+  // so that debounced setTimeout callbacks read current values without stale closures.
+  const visibleEntriesRef = useRef<DisplayEntry[]>([]);
+  const activeEntryRef = useRef<DisplayEntry | null>(activeEntry);
+  // Keep activeEntryRef in sync with activeEntry state (renders are the only update point).
+  activeEntryRef.current = activeEntry;
+
+  // Refined keyboard handler that uses visibleEntriesRef.
+  const handleListKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (layoutMode !== "master-detail") return;
+    if (selectionMode) return; // INV-C4.4
+
+    const target = e.target as HTMLElement;
+    const inInput = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
+
+    if (e.key === "Escape") {
+      listPaneRef.current?.focus();
+      e.stopPropagation();
+      return;
+    }
+
+    if (inInput) return; // INV-C7.2
+
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      // Capture key before the synthetic event is recycled.
+      const direction = e.key;
+      if (arrowNavDebounceRef.current) clearTimeout(arrowNavDebounceRef.current);
+      // Debounce (~150ms) so holding ↓ doesn't fire N concurrent getDetail calls (INV-C7.4).
+      arrowNavDebounceRef.current = setTimeout(() => {
+        arrowNavDebounceRef.current = null;
+        const listEl = listPaneRef.current;
+        if (!listEl) return;
+        // Use PasswordRow's role="option" elements as the ordered visible list.
+        // Each row's aria-current="true" marks the active one.
+        const rows = Array.from(listEl.querySelectorAll<HTMLElement>("[role='option']"));
+        if (rows.length === 0) return;
+        const currentActive = activeEntryRef.current;
+        const currentIdx = currentActive
+          ? rows.findIndex((r) => r.getAttribute("aria-current") === "true")
+          : -1;
+        const nextIdx = direction === "ArrowDown"
+          ? Math.min(currentIdx + 1, rows.length - 1)
+          : Math.max(currentIdx - 1, 0);
+        // Navigate using the visibleEntriesRef for DisplayEntry lookup (populated by PasswordList).
+        const entries = visibleEntriesRef.current;
+        const next = entries[nextIdx];
+        if (next) setActiveEntry(next);
+      }, 150);
+      return;
+    }
+
+    if (e.key === "Enter" || e.key === "Tab") {
+      const detailEl = listPaneRef.current?.parentElement?.querySelector<HTMLElement>("[data-testid='master-detail-detail']");
+      detailEl?.focus();
+      e.preventDefault();
+    }
+  }, [layoutMode, selectionMode]);
+
+  // The pane needs a share handler.
+  const handlePaneShare = useCallback(async () => {
+    if (!activeEntry || !encryptionKey) return;
+    try {
+      const detail = await buildPersonalGetDetail(activeEntry, { encryptionKey, userId })(activeEntry.id);
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { totp: _t, passwordHistory: _ph, id: _id, requireReprompt: _rp, ...safe } = detail;
+      setPaneShareData(safe as Record<string, unknown>);
+      setPaneShareOpen(true);
+    } catch {
+      toast.error(tCard("networkError"));
+    }
+  }, [activeEntry, encryptionKey, userId, tCard]);
+
+  const listSlot = (
+    <div
+      ref={listPaneRef}
+      tabIndex={layoutMode === "master-detail" ? 0 : undefined}
+      onKeyDown={handleListKeyDown}
+      className="outline-none h-full"
+    >
+      <div className="space-y-4 p-2">
+        <PasswordList
+          searchQuery={searchQuery}
+          tagId={tagId ?? null}
+          folderId={folderId ?? null}
+          entryType={entryType}
+          refreshKey={refreshKey}
+          favoritesOnly={isFavorites}
+          archivedOnly={isArchive}
+          sortBy={sortBy}
+          onDataChange={handleDataChange}
+          selectionMode={selectionMode}
+          onSelectedCountChange={handleSelectedCountChange}
+          selectAllRef={passwordListRef}
+          activeEntryId={activeEntry?.id ?? null}
+          onActivate={setActiveEntry}
+          onEntryRemoved={handleEntryRemoved}
+          layoutMode={layoutMode}
+          onVisibleEntriesChange={(entries) => { visibleEntriesRef.current = entries; }}
+        />
+      </div>
+    </div>
+  );
+
+  const detailSlot = (
+    <div className="h-full p-4">
+      <PasswordDetailPane
+        key={activeEntry?.id ?? "none"}
+        entryId={activeEntry?.id ?? null}
+        detailData={detailData}
+        loading={detailLoading}
+        error={detailError}
+        onEdit={activeEntry ? () => setPaneEditOpen(true) : undefined}
+        onRefresh={() => { invalidateDetail(); handleDataChange(); }}
+      />
+    </div>
+  );
+
   return (
-    <div className="flex-1 p-4 md:p-6">
-      <div className="mx-auto max-w-4xl space-y-4">
+    <div className="flex-1 flex flex-col min-h-0 p-4 md:p-6">
+      <div className={layoutMode === "master-detail" ? "w-full" : "mx-auto max-w-4xl w-full"}>
         <EntryListHeader
           icon={headerIcon}
           title={isPrimaryScopeLabel ? subtitle : t("personalVault")}
@@ -359,9 +536,15 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
             />
           )}
         </div>
+      </div>
 
-        <div className="space-y-4">
-          {isTrash ? (
+      {/* Main content area — MasterDetailShell handles layout mode (C5) */}
+      <div className={[
+        "flex-1 min-h-0",
+        layoutMode === "master-detail" ? "overflow-hidden" : "mx-auto max-w-4xl w-full",
+      ].join(" ")}>
+        {isTrash ? (
+          <div className="space-y-4">
             <TrashList
               refreshKey={refreshKey}
               searchQuery={searchQuery}
@@ -369,23 +552,15 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
               onSelectedCountChange={handleSelectedCountChange}
               selectAllRef={trashListRef}
             />
-          ) : (
-            <PasswordList
-              searchQuery={searchQuery}
-              tagId={tagId ?? null}
-              folderId={folderId ?? null}
-              entryType={entryType}
-              refreshKey={refreshKey}
-              favoritesOnly={isFavorites}
-              archivedOnly={isArchive}
-              sortBy={sortBy}
-              onDataChange={handleDataChange}
-              selectionMode={selectionMode}
-              onSelectedCountChange={handleSelectedCountChange}
-              selectAllRef={passwordListRef}
-            />
-          )}
-        </div>
+          </div>
+        ) : (
+          <MasterDetailShell
+            layoutMode={layoutMode}
+            activeEntryId={activeEntry?.id ?? null}
+            listSlot={listSlot}
+            detailSlot={detailSlot}
+          />
+        )}
       </div>
 
       <PasswordNewDialog
@@ -396,6 +571,30 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
         defaultFolderId={folderId ?? null}
         defaultTags={defaultTagData}
       />
+
+      {/* Detail pane edit dialog — owned here, not duplicated from PasswordCard (Commonization). */}
+      {activeEntry && (
+        <PasswordEditDialogLoader
+          id={activeEntry.id}
+          open={paneEditOpen}
+          onOpenChange={setPaneEditOpen}
+          onSaved={() => {
+            invalidateDetail();
+            handleDataChange();
+          }}
+        />
+      )}
+
+      {/* Detail pane share dialog */}
+      {activeEntry && (
+        <ShareDialog
+          open={paneShareOpen}
+          onOpenChange={setPaneShareOpen}
+          passwordEntryId={activeEntry.id}
+          decryptedData={paneShareData}
+          entryType={activeEntry.entryType}
+        />
+      )}
 
       <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
         <DialogContent className="sm:max-w-md">

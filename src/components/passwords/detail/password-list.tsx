@@ -7,6 +7,7 @@ import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/vault/entry-sort";
 import { PasswordCard } from "./password-card";
+import { PasswordRow } from "./password-row";
 import { Archive, KeyRound, Loader2, Star } from "lucide-react";
 import type { EntryTypeValue } from "@/lib/constants";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
@@ -18,6 +19,9 @@ import { EntryListShell } from "@/components/bulk/entry-list-shell";
 import { fetchApi } from "@/lib/url-helpers";
 import { filterTravelSafe } from "@/lib/auth/policy/travel-mode";
 import { useTravelMode } from "@/hooks/use-travel-mode";
+import { buildPersonalGetDetail } from "@/lib/vault/build-personal-get-detail";
+import { toast } from "sonner";
+import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
 
 interface DecryptedOverview {
   title: string;
@@ -41,7 +45,7 @@ interface DecryptedOverview {
   tags: EntryTagNameColor[];
 }
 
-interface DisplayEntry {
+export interface DisplayEntry {
   id: string;
   entryType: EntryTypeValue;
   title: string;
@@ -87,6 +91,13 @@ interface PasswordListProps {
   selectionMode?: boolean;
   onSelectedCountChange?: (count: number, allSelected: boolean, atLimit: boolean) => void;
   selectAllRef?: React.Ref<PasswordListHandle>;
+  // C4: active-entry model — lifted from local expandedId to dashboard
+  activeEntryId?: string | null;
+  onActivate?: (entry: DisplayEntry | null) => void;
+  onEntryRemoved?: (id: string) => void;
+  layoutMode?: "accordion" | "master-detail";
+  // C7: keyboard nav — called when the visible (search-filtered) entry list changes.
+  onVisibleEntriesChange?: (entries: DisplayEntry[]) => void;
 }
 
 
@@ -103,21 +114,38 @@ export function PasswordList({
   selectionMode = false,
   onSelectedCountChange,
   selectAllRef,
+  activeEntryId = null,
+  onActivate,
+  onEntryRemoved,
+  layoutMode = "accordion",
+  onVisibleEntriesChange,
 }: PasswordListProps) {
   const t = useTranslations("PasswordList");
+  const tCopy = useTranslations("CopyButton");
+  const tCard = useTranslations("PasswordCard");
   const { encryptionKey, userId } = useVault();
   const { active: travelModeActive } = useTravelMode();
   // All decrypted entries fetched from the server (no search filter applied)
   const [allEntries, setAllEntries] = useState<DisplayEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  // Maps entry id → DisplayEntry for O(1) lookup during onToggleExpand
+  const entryById = useCallback((id: string): DisplayEntry | null => {
+    return allEntries.find((e) => e.id === id) ?? null;
+  }, [allEntries]);
+
+  // Accordion expand handler: toggle off if already active, else activate.
   const handleToggleExpand = (id: string) => {
-    setExpandedId((prev) => (prev === id ? null : id));
+    const entry = entryById(id);
+    if (activeEntryId === id) {
+      onActivate?.(null);
+    } else if (entry) {
+      onActivate?.(entry);
+    }
   };
 
-  const fetchPasswords = useCallback(async () => {
-    if (!encryptionKey) return;
+  const fetchPasswords = useCallback(async (): Promise<DisplayEntry[]> => {
+    if (!encryptionKey) return [];
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -129,7 +157,7 @@ export function PasswordList({
 
       const res = await fetchApi(`${API_PATH.PASSWORDS}?${params}`);
       if (!res.ok) {
-        return;
+        return [];
       }
       const data = await res.json();
 
@@ -189,8 +217,10 @@ export function PasswordList({
       filtered.sort((a, b) => compareEntriesWithFavorite(a, b, sortBy));
 
       setAllEntries(filtered);
+      return filtered;
     } catch {
       // Network error
+      return [];
     } finally {
       setLoading(false);
     }
@@ -221,8 +251,13 @@ export function PasswordList({
     );
   }, [allEntries, searchQuery]);
 
+  // Notify the parent (dashboard) whenever the visible entry list changes (C7 keyboard nav).
   useEffect(() => {
-    fetchPasswords();
+    onVisibleEntriesChange?.(entries);
+  }, [entries, onVisibleEntriesChange]);
+
+  useEffect(() => {
+    void fetchPasswords();
   }, [fetchPasswords, refreshKey]);
 
   // Bulk selection — uses allEntries (pre-search) so selections persist across search queries
@@ -248,7 +283,13 @@ export function PasswordList({
     t,
     onSuccess: () => {
       clearSelection();
-      fetchPasswords();
+      // INV-C4.3 (bulk): after the re-fetch settles, check whether the active entry
+      // was removed by the bulk operation. If absent, call onActivate(null).
+      void fetchPasswords().then((refreshed) => {
+        if (activeEntryId && !refreshed.some((e) => e.id === activeEntryId)) {
+          onActivate?.(null);
+        }
+      });
       onDataChange?.();
     },
   });
@@ -258,6 +299,8 @@ export function PasswordList({
     // immediately so the list reflects the new state without waiting for a re-fetch.
     if (favoritesOnly && current) {
       setAllEntries((prev) => prev.filter((e) => e.id !== id));
+      // INV-C4.3 (single-entry): signal removal so the dashboard clears the active pane.
+      onEntryRemoved?.(id);
     } else {
       setAllEntries((prev) =>
         prev.map((e) => (e.id === id ? { ...e, isFavorite: !current } : e))
@@ -271,36 +314,40 @@ export function PasswordList({
         body: JSON.stringify({ isFavorite: !current }),
       });
       if (!res.ok) {
-        fetchPasswords();
+        void fetchPasswords();
       }
     } catch {
-      fetchPasswords();
+      void fetchPasswords();
     }
     onDataChange?.();
   };
 
   const handleToggleArchive = async (id: string, current: boolean) => {
     setAllEntries((prev) => prev.filter((e) => e.id !== id));
+    // INV-C4.3 (single-entry): signal removal so the dashboard clears the active pane.
+    onEntryRemoved?.(id);
     try {
       const res = await fetchApi(apiPath.passwordById(id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isArchived: !current }),
       });
-      if (!res.ok) fetchPasswords();
+      if (!res.ok) void fetchPasswords();
     } catch {
-      fetchPasswords();
+      void fetchPasswords();
     }
     onDataChange?.();
   };
 
   const handleDelete = async (id: string) => {
     setAllEntries((prev) => prev.filter((e) => e.id !== id));
+    // INV-C4.3 (single-entry): signal removal so the dashboard clears the active pane.
+    onEntryRemoved?.(id);
     try {
       const res = await fetchApi(apiPath.passwordById(id), { method: "DELETE" });
-      if (!res.ok) fetchPasswords();
+      if (!res.ok) void fetchPasswords();
     } catch {
-      fetchPasswords();
+      void fetchPasswords();
     }
     onDataChange?.();
   };
@@ -348,6 +395,103 @@ export function PasswordList({
     );
   }
 
+  // Clipboard schedule-clear helper (mirrors password-card.tsx).
+  const scheduleClearClipboard = (copiedValue: string) => {
+    setTimeout(async () => {
+      try {
+        const current = await navigator.clipboard.readText();
+        if (current === copiedValue) await navigator.clipboard.writeText("");
+      } catch {
+        try { await navigator.clipboard.writeText(""); } catch { /* best-effort */ }
+      }
+    }, CLIPBOARD_CLEAR_TIMEOUT_MS);
+  };
+
+  // Clipboard schedule-clear and copy-with-toast helpers for PasswordRow in master-detail mode.
+  const makeCopyToast = async (getter: () => Promise<string>) => {
+    try {
+      const val = await getter();
+      if (!val) return;
+      await navigator.clipboard.writeText(val);
+      toast.success(tCopy("copied"));
+      scheduleClearClipboard(val);
+    } catch {
+      toast.error(tCard("networkError"));
+    }
+  };
+
+  // Build per-entry fetch + copy callbacks for PasswordRow in master-detail mode.
+  // Uses buildPersonalGetDetail — the ONE source of truth for personal field assembly.
+  const buildRowCallbacks = (entry: DisplayEntry) => {
+    const getEntry = encryptionKey
+      ? buildPersonalGetDetail(entry, { encryptionKey, userId })
+      : async (_id: string): Promise<never> => { throw new Error("Vault locked"); };
+
+    const fetchPassword = async () => {
+      const d = await getEntry(entry.id);
+      return d.password ?? "";
+    };
+    const fetchContent = async () => {
+      const d = await getEntry(entry.id);
+      return d.content ?? "";
+    };
+    const fetchCardField = async (field: "cardNumber" | "cvv") => {
+      const d = await getEntry(entry.id);
+      return (d[field] ?? "") as string;
+    };
+    const fetchIdentityField = async (field: "idNumber") => {
+      const d = await getEntry(entry.id);
+      return (d[field] ?? "") as string;
+    };
+    const fetchPasskeyField = async (field: "credentialId" | "username") => {
+      const d = await getEntry(entry.id);
+      return (d[field] ?? "") as string;
+    };
+    const fetchBankField = async (field: "accountNumber" | "routingNumber") => {
+      const d = await getEntry(entry.id);
+      return (d[field] ?? "") as string;
+    };
+    const fetchLicenseField = async (field: "licenseKey") => {
+      const d = await getEntry(entry.id);
+      return (d[field] ?? "") as string;
+    };
+    const fetchSshField = async (field: "fingerprint" | "publicKey") => {
+      const d = await getEntry(entry.id);
+      return (d[field] ?? "") as string;
+    };
+
+    return {
+      fetchPassword,
+      fetchContent,
+      fetchCardField,
+      fetchIdentityField,
+      fetchPasskeyField,
+      fetchBankField,
+      fetchLicenseField,
+      fetchSshField,
+      onCopyPassword: () => void makeCopyToast(fetchPassword),
+      onCopyContent: () => void makeCopyToast(fetchContent),
+      onCopyUsername: () => {
+        if (!entry.username) return;
+        void makeCopyToast(async () => entry.username ?? "");
+      },
+      onCopyCardNumber: () => void makeCopyToast(() => fetchCardField("cardNumber")),
+      onCopyCvv: () => void makeCopyToast(() => fetchCardField("cvv")),
+      onCopyCredentialId: () => void makeCopyToast(() => fetchPasskeyField("credentialId")),
+      onCopyAccountNumber: () => void makeCopyToast(() => fetchBankField("accountNumber")),
+      onCopyLicenseKey: () => void makeCopyToast(() => fetchLicenseField("licenseKey")),
+      onCopyFingerprint: () => void makeCopyToast(() => fetchSshField("fingerprint")),
+      onCopyPublicKey: () => void makeCopyToast(() => fetchSshField("publicKey")),
+      onCopyIdNumber: () => void makeCopyToast(() => fetchIdentityField("idNumber")),
+      onOpenUrl: async () => {
+        try {
+          const d = await getEntry(entry.id);
+          if (d.url) window.open(d.url, "_blank", "noopener,noreferrer");
+        } catch { toast.error(tCard("networkError")); }
+      },
+    };
+  };
+
   return (
     <EntryListShell
       entries={entries}
@@ -356,17 +500,52 @@ export function PasswordList({
       atLimit={atLimit}
       onToggleSelectOne={toggleSelectOne}
       selectEntryLabel={(title) => t("selectEntry", { title })}
-      renderEntry={(entry) => (
-        <PasswordCard
-          entry={entry}
-          expanded={expandedId === entry.id}
-          onToggleFavorite={handleToggleFavorite}
-          onToggleArchive={handleToggleArchive}
-          onDelete={handleDelete}
-          onToggleExpand={handleToggleExpand}
-          onRefresh={() => { fetchPasswords(); onDataChange?.(); }}
-        />
-      )}
+      renderEntry={(entry) => {
+        if (layoutMode === "master-detail") {
+          const callbacks = buildRowCallbacks(entry);
+          return (
+            <PasswordRow
+              entry={entry}
+              isActive={activeEntryId === entry.id}
+              onActivate={() => {
+                // Toggle off if already active, else activate (INV-C4.1).
+                // In selectionMode, PasswordRow itself suppresses onActivate (INV-C4.1).
+                if (activeEntryId === entry.id) {
+                  onActivate?.(null);
+                } else {
+                  onActivate?.(entry);
+                }
+              }}
+              selectionMode={selectionMode}
+              {...callbacks}
+              onShare={async () => {
+                // Share from the row activates the entry so the pane is visible;
+                // the share dialog is owned by the dashboard's pane controller.
+                onActivate?.(entry);
+              }}
+              onEdit={() => {
+                // Activate the entry — the detail pane's Edit button opens the dialog.
+                onActivate?.(entry);
+              }}
+              onToggleArchive={() => {
+                void handleToggleArchive(entry.id, entry.isArchived);
+              }}
+              onDeleteRequest={() => void handleDelete(entry.id)}
+            />
+          );
+        }
+        return (
+          <PasswordCard
+            entry={entry}
+            expanded={activeEntryId === entry.id && layoutMode === "accordion"}
+            onToggleFavorite={handleToggleFavorite}
+            onToggleArchive={handleToggleArchive}
+            onDelete={handleDelete}
+            onToggleExpand={handleToggleExpand}
+            onRefresh={() => { void fetchPasswords(); onDataChange?.(); }}
+          />
+        );
+      }}
       floatingActions={
         <>
           {archivedOnly ? (

@@ -22,20 +22,14 @@ vi.mock("next-intl", () => ({
 }));
 
 vi.mock("@/lib/vault/vault-context", () => ({
-  useVault: () => ({ encryptionKey: STABLE_KEY, userId: "user-1" }),
+  useVault: () => ({ encryptionKey: STABLE_KEY, userId: "user-1", status: "UNLOCKED" }),
 }));
 
-vi.mock("@/lib/crypto/crypto-client", () => ({
-  decryptData: vi.fn(),
-}));
+// Decrypt mocks removed — they exercised logic that now lives in usePasswordEntryDetail.
+// Those mocks (decryptData, crypto-aad, fetchApi) now belong to use-password-entry-detail.test.tsx.
 
-vi.mock("@/lib/crypto/crypto-aad", () => ({
-  buildPersonalEntryAAD: vi.fn().mockReturnValue("aad"),
-  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
-}));
-
-vi.mock("@/lib/url-helpers", () => ({
-  fetchApi: vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
+vi.mock("@/hooks/vault/use-password-entry-detail", () => ({
+  usePasswordEntryDetail: () => ({ detailData: null, loading: false, error: null, invalidate: vi.fn() }),
 }));
 
 vi.mock("@/components/share/share-dialog", () => ({

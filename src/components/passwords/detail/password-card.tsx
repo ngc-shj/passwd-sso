@@ -1,17 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 import { useTranslations } from "next-intl";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -21,7 +14,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { TagBadge } from "@/components/tags/tag-badge";
-import { CopyButton } from "../shared/copy-button";
 import { Favicon } from "../shared/favicon";
 import {
   PasswordDetailInline,
@@ -29,15 +21,7 @@ import {
 } from "./password-detail-inline";
 import { PasswordEditDialogLoader } from "../dialogs/personal-password-edit-dialog-loader";
 import {
-  User,
   Star,
-  MoreVertical,
-  Copy,
-  ExternalLink,
-  Edit,
-  Archive,
-  ArchiveRestore,
-  Trash2,
   ChevronRight,
   ChevronDown,
   Loader2,
@@ -45,7 +29,6 @@ import {
   CreditCard,
   IdCard,
   Fingerprint,
-  Link as LinkIcon,
   ShieldCheck,
   CalendarClock,
   Landmark,
@@ -67,6 +50,10 @@ import type {
 } from "@/lib/vault/entry-form-types";
 import { fetchApi } from "@/lib/url-helpers";
 import type { EntryCardData } from "@/types/entry-card";
+import { usePasswordEntryDetail } from "@/hooks/vault/use-password-entry-detail";
+import { buildPersonalGetDetail } from "@/lib/vault/build-personal-get-detail";
+import { EntrySecondaryLine } from "./entry-secondary-line";
+import { EntryActionsMenu } from "./entry-actions-menu";
 
 export type { EntryCardData };
 
@@ -152,7 +139,6 @@ interface VaultEntryFull {
 }
 
 import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
-import { DISPLAY_FINGERPRINT_SHORT } from "@/lib/validations/common";
 
 function scheduleClearClipboard(copiedValue: string) {
   setTimeout(async () => {
@@ -230,13 +216,15 @@ export function PasswordCard({
   const tDash = useTranslations("Dashboard");
   const tc = useTranslations("Common");
   const tCopy = useTranslations("CopyButton");
-  const { encryptionKey, userId } = useVault();
+  const { encryptionKey, userId, status: vaultStatus } = useVault();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [shareData, setShareData] = useState<Record<string, unknown> | undefined>(undefined);
-  const [detailData, setDetailData] = useState<InlineDetailData | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
+  // Wall-clock snapshot read once via a lazy initializer (reading Date.now()/new Date()
+  // directly in the render body is impure — flagged by the React Compiler rule). All
+  // expiry math below uses the pure new Date(ms) form against this snapshot.
+  const [nowMs] = useState(() => Date.now());
   const entryTypeLabel = {
     [ENTRY_TYPE.LOGIN]: tDash("catLogin"),
     [ENTRY_TYPE.SECURE_NOTE]: tDash("catSecureNote"),
@@ -248,6 +236,8 @@ export function PasswordCard({
     [ENTRY_TYPE.SSH_KEY]: tDash("catSshKey"),
   }[entryType] ?? entryType;
 
+  // Low-level fetch+decrypt helper used by copy handlers and the personal getDetail closure.
+  // NOT called directly by the expand lifecycle — the hook owns that.
   const fetchDecryptedEntry = async (): Promise<{ entry: VaultEntryFull; raw: Record<string, unknown> }> => {
     if (!encryptionKey) throw new Error("Vault locked");
     const res = await fetchApi(apiPath.passwordById(id));
@@ -268,147 +258,73 @@ export function PasswordCard({
 
   const fetchPassword = async (): Promise<string> => {
     if (getPasswordProp) return getPasswordProp();
-    const { entry } = await fetchDecryptedEntry();
-    return entry.password ?? "";
+    const { entry: e } = await fetchDecryptedEntry();
+    return e.password ?? "";
   };
 
   const fetchContent = async (): Promise<string> => {
-    const { entry } = await fetchDecryptedEntry();
-    return entry.content ?? "";
+    const { entry: e } = await fetchDecryptedEntry();
+    return e.content ?? "";
   };
 
   const fetchIdentityField = async (field: "idNumber"): Promise<string> => {
     if (getDetailProp) return (await getDetailProp())[field] ?? "";
-    const { entry } = await fetchDecryptedEntry();
-    return entry[field] ?? "";
+    const { entry: e } = await fetchDecryptedEntry();
+    return e[field] ?? "";
   };
 
   const fetchBankField = async (field: "accountNumber" | "routingNumber"): Promise<string> => {
     if (getDetailProp) return (await getDetailProp())[field] ?? "";
-    const { entry } = await fetchDecryptedEntry();
-    return entry[field] ?? "";
+    const { entry: e } = await fetchDecryptedEntry();
+    return e[field] ?? "";
   };
 
   const fetchLicenseField = async (field: "licenseKey"): Promise<string> => {
     if (getDetailProp) return (await getDetailProp())[field] ?? "";
-    const { entry } = await fetchDecryptedEntry();
-    return entry[field] ?? "";
+    const { entry: e } = await fetchDecryptedEntry();
+    return e[field] ?? "";
   };
 
   const fetchSshField = async (field: "fingerprint" | "publicKey"): Promise<string> => {
     if (getDetailProp) return (await getDetailProp())[field] ?? "";
-    const { entry } = await fetchDecryptedEntry();
-    return entry[field] ?? "";
+    const { entry: e } = await fetchDecryptedEntry();
+    return e[field] ?? "";
   };
 
   const fetchCardField = async (field: "cardNumber" | "cvv"): Promise<string> => {
     if (getDetailProp) return (await getDetailProp())[field] ?? "";
-    const { entry } = await fetchDecryptedEntry();
-    return entry[field] ?? "";
+    const { entry: e } = await fetchDecryptedEntry();
+    return e[field] ?? "";
   };
 
-  // Clear cached detail and loading state when collapsed
-  useEffect(() => {
-    if (!expanded) {
-      setDetailData(null);
-      setDetailLoading(false);
-    }
-  }, [expanded]);
+  const fetchPasskeyField = async (field: "credentialId" | "username"): Promise<string> => {
+    if (getDetailProp) return (await getDetailProp())[field] ?? "";
+    const { entry: e } = await fetchDecryptedEntry();
+    return e[field] ?? "";
+  };
 
-  // Fetch detail data when expanded and no cached data
-  useEffect(() => {
-    if (!expanded || detailData) return;
+  // Build the getDetail closure for usePasswordEntryDetail.
+  // Team mode: delegate to the injected getDetailProp (already returns a complete InlineDetailData).
+  // Personal mode: use the shared buildPersonalGetDetail helper — one source of truth for
+  //   field assembly (INV-C1.7, Commonization principle). Both this accordion body and the
+  //   personal master-detail pane consume the same shared builder.
+  const getDetail = getDetailProp
+    ? getDetailProp
+    : encryptionKey
+      ? buildPersonalGetDetail(
+          { id, entryType, urlHost, requireReprompt },
+          { encryptionKey, userId },
+        )
+      : async (): Promise<InlineDetailData> => {
+          throw new Error("Vault locked");
+        };
 
-    let cancelled = false;
-    setDetailLoading(true);
-
-    if (getDetailProp) {
-      // Team mode: use provided data fetcher
-      getDetailProp()
-        .then((detail) => {
-          if (!cancelled) setDetailData(detail);
-        })
-        .catch((err) => {
-          if (process.env.NODE_ENV === "development") console.error("[PasswordCard] getDetail error:", err);
-        })
-        .finally(() => {
-          setDetailLoading(false);
-        });
-    } else {
-      // Personal mode: E2E decrypt
-      fetchDecryptedEntry()
-        .then(({ entry, raw }) => {
-          if (cancelled) return;
-          setDetailData({
-            id,
-            entryType,
-            requireReprompt: (raw.requireReprompt as boolean | undefined) ?? requireReprompt,
-            password: entry.password ?? "",
-            content: entry.content,
-            isMarkdown: entry.isMarkdown,
-            url: entry.url ?? null,
-            urlHost,
-            notes: entry.notes ?? null,
-            customFields: entry.customFields ?? [],
-            passwordHistory: entry.passwordHistory ?? [],
-            totp: entry.totp,
-            cardholderName: entry.cardholderName,
-            cardNumber: entry.cardNumber,
-            brand: entry.brand,
-            expiryMonth: entry.expiryMonth,
-            expiryYear: entry.expiryYear,
-            cvv: entry.cvv,
-            fullName: entry.fullName,
-            address: entry.address,
-            phone: entry.phone,
-            email: entry.email,
-            dateOfBirth: entry.dateOfBirth,
-            nationality: entry.nationality,
-            idNumber: entry.idNumber,
-            issueDate: entry.issueDate,
-            expiryDate: entry.expiryDate,
-            relyingPartyId: entry.relyingPartyId,
-            relyingPartyName: entry.relyingPartyName,
-            username: entry.username,
-            credentialId: entry.credentialId,
-            creationDate: entry.creationDate,
-            deviceInfo: entry.deviceInfo,
-            bankName: entry.bankName,
-            accountType: entry.accountType,
-            accountHolderName: entry.accountHolderName,
-            accountNumber: entry.accountNumber,
-            routingNumber: entry.routingNumber,
-            swiftBic: entry.swiftBic,
-            iban: entry.iban,
-            branchName: entry.branchName,
-            softwareName: entry.softwareName,
-            licenseKey: entry.licenseKey,
-            version: entry.version,
-            licensee: entry.licensee,
-            purchaseDate: entry.purchaseDate,
-            expirationDate: entry.expirationDate,
-            privateKey: entry.privateKey,
-            publicKey: entry.publicKey,
-            keyType: entry.keyType,
-            keySize: entry.keySize,
-            fingerprint: entry.fingerprint,
-            sshPassphrase: entry.passphrase,
-            sshComment: entry.comment,
-            createdAt: raw.createdAt as string,
-            updatedAt: raw.updatedAt as string,
-          });
-        })
-        .catch(() => {})
-        .finally(() => {
-          if (!cancelled) setDetailLoading(false);
-        });
-    }
-
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expanded, detailData]);
+  // INV-C1.2: only decrypt when the card is expanded (entryId=null suppresses the fetch).
+  // INV-C1.1/C1.3/C1.4 are enforced by the hook.
+  const { detailData, loading: detailLoading, invalidate } = usePasswordEntryDetail(
+    expanded ? id : null,
+    { getDetail, vaultStatus }
+  );
 
   const handleCopyContent = async () => {
     try {
@@ -463,12 +379,6 @@ export function PasswordCard({
     } catch {
       toast.error(t("networkError"));
     }
-  };
-
-  const fetchPasskeyField = async (field: "credentialId" | "username"): Promise<string> => {
-    if (getDetailProp) return (await getDetailProp())[field] ?? "";
-    const { entry } = await fetchDecryptedEntry();
-    return entry[field] ?? "";
   };
 
   const handleCopyCredentialId = async () => {
@@ -549,8 +459,8 @@ export function PasswordCard({
         const url = await getUrlProp();
         if (url) window.open(url, "_blank", "noopener,noreferrer");
       } else {
-        const { entry } = await fetchDecryptedEntry();
-        if (entry.url) window.open(entry.url, "_blank", "noopener,noreferrer");
+        const { entry: e } = await fetchDecryptedEntry();
+        if (e.url) window.open(e.url, "_blank", "noopener,noreferrer");
       }
     } catch {
       toast.error(t("networkError"));
@@ -609,9 +519,9 @@ export function PasswordCard({
               )}
               {(() => {
                 if (!expiresAt) return null;
-                const nowDate = new Date();
+                const nowDate = new Date(nowMs);
                 const todayStr = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, "0")}-${String(nowDate.getDate()).padStart(2, "0")}`;
-                const thresholdDate = new Date(Date.now() + EXPIRING_THRESHOLD_DAYS * MS_PER_DAY);
+                const thresholdDate = new Date(nowMs + EXPIRING_THRESHOLD_DAYS * MS_PER_DAY);
                 const thresholdStr = `${thresholdDate.getFullYear()}-${String(thresholdDate.getMonth() + 1).padStart(2, "0")}-${String(thresholdDate.getDate()).padStart(2, "0")}`;
                 const expiresDate = expiresAt.split("T")[0];
                 if (expiresDate > thresholdStr) return null;
@@ -627,68 +537,26 @@ export function PasswordCard({
                 );
               })()}
             </span>
-            <div className="flex items-center gap-3 text-sm text-muted-foreground">
-              {isSshKey ? (
-                <>
-                  {keyType && <span className="truncate font-mono">{keyType}</span>}
-                  {fingerprint && <span className="truncate font-mono text-xs">{fingerprint.slice(0, DISPLAY_FINGERPRINT_SHORT)}…</span>}
-                </>
-              ) : isBankAccount ? (
-                <>
-                  {bankName && <span className="truncate">{bankName}</span>}
-                  {accountNumberLast4 && <span className="truncate">•••• {accountNumberLast4}</span>}
-                </>
-              ) : isSoftwareLicense ? (
-                <>
-                  {softwareName && <span className="truncate">{softwareName}</span>}
-                  {licensee && <span className="truncate">{licensee}</span>}
-                </>
-              ) : isPasskey ? (
-                <>
-                  {relyingPartyId && <span className="truncate">{relyingPartyId}</span>}
-                  {username && (
-                    <span className="flex items-center gap-1 truncate">
-                      <User className="h-3 w-3 shrink-0" />
-                      {username}
-                    </span>
-                  )}
-                </>
-              ) : isIdentity ? (
-                <>
-                  {fullName && <span className="truncate">{fullName}</span>}
-                  {idNumberLast4 && <span className="truncate">•••• {idNumberLast4}</span>}
-                </>
-              ) : isCreditCard ? (
-                <>
-                  {brand && <span className="truncate">{brand}</span>}
-                  {lastFour && <span className="truncate">•••• {lastFour}</span>}
-                  {cardholderName && <span className="truncate">{cardholderName}</span>}
-                </>
-              ) : isNote ? (
-                snippet && (
-                  <span className="truncate">{snippet}</span>
-                )
-              ) : (
-                <>
-                  {username && (
-                    <span className="flex items-center gap-1 truncate">
-                      <User className="h-3 w-3 shrink-0" />
-                      {username}
-                    </span>
-                  )}
-                  {urlHost && (
-                    <span className="truncate">
-                      {urlHost}
-                    </span>
-                  )}
-                </>
-              )}
-              {isTeamMode && (
-                <span className="truncate text-xs font-medium">
-                  {entryTypeLabel}
-                </span>
-              )}
-            </div>
+            <EntrySecondaryLine
+              entryType={entryType}
+              username={username}
+              urlHost={urlHost}
+              snippet={snippet}
+              brand={brand}
+              lastFour={lastFour}
+              cardholderName={cardholderName}
+              fullName={fullName}
+              idNumberLast4={idNumberLast4}
+              relyingPartyId={relyingPartyId}
+              bankName={bankName}
+              accountNumberLast4={accountNumberLast4}
+              softwareName={softwareName}
+              licensee={licensee}
+              keyType={keyType}
+              fingerprint={fingerprint}
+              isTeamMode={isTeamMode}
+              entryTypeLabel={entryTypeLabel}
+            />
             {createdBy && (
               <span className="truncate text-xs text-muted-foreground block">
                 {createdBy}
@@ -702,190 +570,69 @@ export function PasswordCard({
               ))}
             </div>
           )}
-          <div className="flex items-center shrink-0 pointer-events-none">
-            <div
-              className="pointer-events-auto"
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              {!isNote && !isCreditCard && !isIdentity && !isPasskey && !isBankAccount && !isSoftwareLicense && !isSshKey && <CopyButton getValue={fetchPassword} />}
-              {isCreditCard && <CopyButton getValue={() => fetchCardField("cardNumber")} />}
-              {isIdentity && <CopyButton getValue={() => fetchIdentityField("idNumber")} />}
-              {isPasskey && <CopyButton getValue={() => fetchPasskeyField("credentialId")} />}
-              {isBankAccount && <CopyButton getValue={() => fetchBankField("accountNumber")} />}
-              {isSoftwareLicense && <CopyButton getValue={() => fetchLicenseField("licenseKey")} />}
-              {isSshKey && <CopyButton getValue={() => fetchSshField("fingerprint")} />}
-            </div>
-            <div
-              className="pointer-events-auto"
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0">
-                    <MoreVertical className="h-4 w-4" />
-                    <span className="sr-only">{t("moreActions")}</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-              {isBankAccount ? (
-                <DropdownMenuItem onSelect={handleCopyAccountNumber}>
-                  <Copy className="h-4 w-4" />
-                  {t("copyAccountNumber")}
-                </DropdownMenuItem>
-              ) : isSoftwareLicense ? (
-                <DropdownMenuItem onSelect={handleCopyLicenseKey}>
-                  <Copy className="h-4 w-4" />
-                  {t("copyLicenseKey")}
-                </DropdownMenuItem>
-              ) : isPasskey ? (
-                <>
-                  {username && (
-                    <DropdownMenuItem onSelect={handleCopyUsername}>
-                      <User className="h-4 w-4" />
-                      {t("copyUsername")}
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem onSelect={handleCopyCredentialId}>
-                    <Copy className="h-4 w-4" />
-                    {t("copyCredentialId")}
-                  </DropdownMenuItem>
-                </>
-              ) : isIdentity ? (
-                <DropdownMenuItem onSelect={handleCopyIdNumber}>
-                  <Copy className="h-4 w-4" />
-                  {t("copyIdNumber")}
-                </DropdownMenuItem>
-              ) : isCreditCard ? (
-                <>
-                  <DropdownMenuItem onSelect={handleCopyCardNumber}>
-                    <Copy className="h-4 w-4" />
-                    {t("copyCardNumber")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleCopyCvv}>
-                    <Copy className="h-4 w-4" />
-                    {t("copyCvv")}
-                  </DropdownMenuItem>
-                </>
-              ) : isSshKey ? (
-                <>
-                  <DropdownMenuItem onSelect={handleCopyFingerprint}>
-                    <Copy className="h-4 w-4" />
-                    {t("copyFingerprint")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleCopyPublicKey}>
-                    <Copy className="h-4 w-4" />
-                    {t("copyPublicKey")}
-                  </DropdownMenuItem>
-                </>
-              ) : isNote ? (
-                <DropdownMenuItem onSelect={handleCopyContent}>
-                  <Copy className="h-4 w-4" />
-                  {t("copyContent")}
-                </DropdownMenuItem>
-              ) : (
-                <>
-                  {username && (
-                    <DropdownMenuItem onSelect={handleCopyUsername}>
-                      <User className="h-4 w-4" />
-                      {t("copyUsername")}
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem onSelect={handleCopyPassword}>
-                    <Copy className="h-4 w-4" />
-                    {t("copyPassword")}
-                  </DropdownMenuItem>
-                  {urlHost && (
-                    <DropdownMenuItem onSelect={handleOpenUrl}>
-                      <ExternalLink className="h-4 w-4" />
-                      {t("openUrl")}
-                    </DropdownMenuItem>
-                  )}
-                </>
-              )}
-              {canShare && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onSelect={async () => {
-                      if (!isTeamMode) {
-                        // Personal: decrypt entry data, strip TOTP
-                        try {
-                          const { entry } = await fetchDecryptedEntry();
-
-                          const { totp: _t, passwordHistory: _ph, tags: _tags, ...safe } = entry;
-                          setShareData(safe as Record<string, unknown>);
-                        } catch {
-                          toast.error(t("networkError"));
-                          return;
-                        }
-                      } else if (getDetailProp) {
-                        // Team: decrypt via getDetail, strip TOTP/internal fields
-                        try {
-                          const detail = await getDetailProp();
-
-                          const { totp: _t, passwordHistory: _ph, id: _id, requireReprompt: _rp, ...safe } = detail;
-                          setShareData(safe as Record<string, unknown>);
-                        } catch {
-                          toast.error(t("networkError"));
-                          return;
-                        }
-                      }
-                      setShareDialogOpen(true);
-                    }}
-                  >
-                    <LinkIcon className="h-4 w-4" />
-                    {t("share")}
-                  </DropdownMenuItem>
-                </>
-              )}
-              {canEdit && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onSelect={() => {
-                      if (onEditClick) onEditClick();
-                      else setEditDialogOpen(true);
-                    }}
-                  >
-                    <Edit className="h-4 w-4" />
-                    {t("edit")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onSelect={() => {
-                      onToggleArchive(id, isArchived);
-                      toast.success(isArchived ? t("unarchived") : t("archived"));
-                    }}
-                  >
-                    {isArchived ? (
-                      <ArchiveRestore className="h-4 w-4" />
-                    ) : (
-                      <Archive className="h-4 w-4" />
-                    )}
-                    {isArchived ? t("unarchive") : t("archive")}
-                  </DropdownMenuItem>
-                </>
-              )}
-              {canDelete && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onSelect={(e) => {
-                      e.preventDefault();
-                      setDeleteDialogOpen(true);
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    {t("delete")}
-                  </DropdownMenuItem>
-                </>
-              )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </div>
+          <EntryActionsMenu
+            entryType={entryType}
+            username={username}
+            urlHost={urlHost}
+            isArchived={isArchived}
+            canEdit={canEdit}
+            canDelete={canDelete}
+            canShare={canShare}
+            fetchPassword={fetchPassword}
+            fetchContent={fetchContent}
+            fetchCardField={fetchCardField}
+            fetchIdentityField={fetchIdentityField}
+            fetchPasskeyField={fetchPasskeyField}
+            fetchBankField={fetchBankField}
+            fetchLicenseField={fetchLicenseField}
+            fetchSshField={fetchSshField}
+            onCopyUsername={handleCopyUsername}
+            onCopyPassword={handleCopyPassword}
+            onCopyContent={handleCopyContent}
+            onCopyCardNumber={handleCopyCardNumber}
+            onCopyCvv={handleCopyCvv}
+            onCopyCredentialId={handleCopyCredentialId}
+            onCopyAccountNumber={handleCopyAccountNumber}
+            onCopyLicenseKey={handleCopyLicenseKey}
+            onCopyFingerprint={handleCopyFingerprint}
+            onCopyPublicKey={handleCopyPublicKey}
+            onCopyIdNumber={handleCopyIdNumber}
+            onOpenUrl={handleOpenUrl}
+            onShare={async () => {
+              if (!isTeamMode) {
+                // Personal: decrypt entry data, strip TOTP
+                try {
+                  const { entry: e } = await fetchDecryptedEntry();
+                  const { totp: _t, passwordHistory: _ph, tags: _tags, ...safe } = e;
+                  setShareData(safe as Record<string, unknown>);
+                } catch {
+                  toast.error(t("networkError"));
+                  return;
+                }
+              } else if (getDetailProp) {
+                // Team: decrypt via getDetail, strip TOTP/internal fields
+                try {
+                  const detail = await getDetailProp();
+                  const { totp: _t, passwordHistory: _ph, id: _id, requireReprompt: _rp, ...safe } = detail;
+                  setShareData(safe as Record<string, unknown>);
+                } catch {
+                  toast.error(t("networkError"));
+                  return;
+                }
+              }
+              setShareDialogOpen(true);
+            }}
+            onEdit={() => {
+              if (onEditClick) onEditClick();
+              else setEditDialogOpen(true);
+            }}
+            onToggleArchive={() => {
+              onToggleArchive(id, isArchived);
+              toast.success(isArchived ? t("unarchived") : t("archived"));
+            }}
+            onDeleteRequest={() => setDeleteDialogOpen(true)}
+            t={t}
+          />
         </CardContent>
 
         {/* Expanded inline detail */}
@@ -906,7 +653,7 @@ export function PasswordCard({
                   else setEditDialogOpen(true);
                 } : undefined}
                 onRefresh={() => {
-                  setDetailData(null);
+                  invalidate();
                   onRefresh();
                 }}
                 teamId={scopedTeamId}
@@ -923,7 +670,7 @@ export function PasswordCard({
           open={editDialogOpen}
           onOpenChange={setEditDialogOpen}
           onSaved={() => {
-            setDetailData(null);
+            invalidate();
             onRefresh();
           }}
         />
