@@ -3,6 +3,9 @@
 import { useEffect, useState, useCallback, forwardRef } from "react";
 import { useTranslations } from "next-intl";
 import { PasswordCard } from "@/components/passwords/detail/password-card";
+import { PasswordRow } from "@/components/passwords/detail/password-row";
+import { MasterDetailShell } from "@/components/passwords/detail/master-detail-shell";
+import { PasswordDetailPane } from "@/components/passwords/detail/password-detail-pane";
 import type { InlineDetailData } from "@/components/passwords/detail/password-detail-inline";
 import { mapDecryptedBlobToDetailFields } from "@/lib/vault/map-detail-fields";
 import { TeamEditDialogLoader } from "@/components/team/management/team-edit-dialog-loader";
@@ -12,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { useBulkSelection } from "@/hooks/bulk/use-bulk-selection";
 import { useBulkAction } from "@/hooks/bulk/use-bulk-action";
 import { EntryListShell } from "@/components/bulk/entry-list-shell";
-import { TEAM_ROLE, apiPath } from "@/lib/constants";
+import { TEAM_ROLE, VAULT_STATUS, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import {
   compareEntriesWithFavorite,
@@ -23,6 +26,9 @@ import { decryptData } from "@/lib/crypto/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 import { fetchApi } from "@/lib/url-helpers";
 import { notifyTeamDataChanged } from "@/lib/events";
+import { useLayoutMode } from "@/hooks/use-layout-mode";
+import { usePasswordEntryDetail } from "@/hooks/vault/use-password-entry-detail";
+import { useEntryActions } from "@/hooks/vault/use-entry-actions";
 
 interface TeamArchivedEntry {
   id: string;
@@ -36,6 +42,13 @@ interface TeamArchivedEntry {
   cardholderName: string | null;
   fullName: string | null;
   idNumberLast4: string | null;
+  relyingPartyId: string | null;
+  bankName: string | null;
+  accountNumberLast4: string | null;
+  softwareName: string | null;
+  licensee: string | null;
+  keyType: string | null;
+  fingerprint: string | null;
   isFavorite: boolean;
   isArchived: boolean;
   tags: { id: string; name: string; color: string | null }[];
@@ -76,6 +89,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
   ) {
   const tl = useTranslations("PasswordList");
   const { getEntryDecryptionKey } = useTeamVault();
+  const layoutMode = useLayoutMode();
   const [entries, setEntries] = useState<TeamArchivedEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -83,7 +97,13 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
   const [editTeamId, setEditTeamId] = useState<string | null>(null);
   const [editEntryId, setEditEntryId] = useState<string | null>(null);
 
+  // Active entry for 3-pane detail pane (master-detail mode only).
+  const [activeEntry, setActiveEntry] = useState<TeamArchivedEntry | null>(null);
+
   const effectiveSelectionMode = selectionMode ?? false;
+
+  const roleCanEdit = role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN || role === TEAM_ROLE.MEMBER;
+  const roleCanDelete = role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN;
 
   const fetchArchived = useCallback(async () => {
     setLoading(true);
@@ -131,6 +151,13 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
               cardholderName: overview.cardholderName ?? null,
               fullName: overview.fullName ?? null,
               idNumberLast4: overview.idNumberLast4 ?? null,
+              relyingPartyId: overview.relyingPartyId ?? null,
+              bankName: overview.bankName ?? null,
+              accountNumberLast4: overview.accountNumberLast4 ?? null,
+              softwareName: overview.softwareName ?? null,
+              licensee: overview.licensee ?? null,
+              keyType: overview.keyType ?? null,
+              fingerprint: overview.fingerprint ?? null,
               isFavorite: entry.isFavorite,
               isArchived: entry.isArchived,
               tags: entry.tags,
@@ -152,6 +179,13 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
               cardholderName: null,
               fullName: null,
               idNumberLast4: null,
+              relyingPartyId: null,
+              bankName: null,
+              accountNumberLast4: null,
+              softwareName: null,
+              licensee: null,
+              keyType: null,
+              fingerprint: null,
               isFavorite: entry.isFavorite as boolean,
               isArchived: entry.isArchived as boolean,
               tags: (entry.tags ?? []) as TeamArchivedEntry["tags"],
@@ -223,7 +257,6 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     },
   });
 
-   
   const handleToggleFavorite = async (id: string, _current: boolean) => {
     const entry = entries.find((e) => e.id === id);
     if (!entry) return;
@@ -239,11 +272,11 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     }
   };
 
-   
+  // Unarchive/restore a single entry — removes it from the archive list.
   const handleToggleArchive = async (id: string, _current: boolean) => {
     const entry = entries.find((e) => e.id === id);
     if (!entry) return;
-    // Unarchive: remove from this list
+    if (activeEntry?.id === id) setActiveEntry(null);
     setEntries((prev) => prev.filter((e) => e.id !== id));
     try {
       const res = await fetchApi(apiPath.teamPasswordById(teamId, id), {
@@ -261,6 +294,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
   const handleDelete = async (id: string) => {
     const entry = entries.find((e) => e.id === id);
     if (!entry) return;
+    if (activeEntry?.id === id) setActiveEntry(null);
     setEntries((prev) => prev.filter((e) => e.id !== id));
     try {
       const res = await fetchApi(apiPath.teamPasswordById(teamId, id), {
@@ -358,6 +392,31 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     [teamId, decryptFullBlob]
   );
 
+  // Detail hook for the active entry in master-detail mode.
+  // Archived entries are already decrypted (list renders after decrypt), so vault
+  // status is always UNLOCKED for the purpose of this pane.
+  const archGetDetail = useCallback(
+    (_id: string) =>
+      activeEntry
+        ? createDetailFetcher(activeEntry)()
+        : Promise.reject(new Error("no active entry")),
+    [activeEntry, createDetailFetcher],
+  );
+
+  const {
+    detailData: archDetailData,
+    loading: archDetailLoading,
+    error: archDetailError,
+  } = usePasswordEntryDetail(activeEntry?.id ?? null, {
+    getDetail: archGetDetail,
+    vaultStatus: VAULT_STATUS.UNLOCKED,
+  });
+
+  // Row callbacks for master-detail rows.
+  const buildArchivedRowCallbacks = useEntryActions((entry: TeamArchivedEntry) =>
+    createDetailFetcher(entry),
+  );
+
   if (loading) return null;
 
   if (sortedFiltered.length === 0) {
@@ -377,6 +436,117 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     );
   }
 
+  const floatingBulkActions = (
+    <>
+      <Button variant="secondary" size="sm" onClick={() => requestAction("unarchive")}>
+        <RotateCcw className="mr-1 h-4 w-4" />
+        {tl("moveSelectedToUnarchive")}
+      </Button>
+      <Button variant="destructive" size="sm" onClick={() => requestAction("trash")}>
+        <Trash2 className="mr-1 h-4 w-4" />
+        {tl("moveSelectedToTrash")}
+      </Button>
+    </>
+  );
+
+  const bulkConfirmDialog = {
+    open: bulkDialogOpen,
+    onOpenChange: setBulkDialogOpen,
+    title:
+      pendingAction === "unarchive"
+        ? tl("moveSelectedToUnarchive")
+        : tl("moveSelectedToTrash"),
+    description:
+      pendingAction === "unarchive"
+        ? tl("bulkUnarchiveConfirm", { count: selectedIds.size })
+        : tl("bulkMoveConfirm", { count: selectedIds.size }),
+    cancelLabel: tl("cancel"),
+    confirmLabel: tl("confirm"),
+    processing: bulkProcessing,
+    onConfirm: () => void executeAction(),
+  };
+
+  const editDialog = editTeamId && editEntryId ? (
+    <TeamEditDialogLoader
+      teamId={editTeamId}
+      id={editEntryId}
+      open={formOpen}
+      onOpenChange={setFormOpen}
+      onSaved={() => {
+        fetchArchived();
+        setExpandedId(null);
+        notifyTeamDataChanged();
+      }}
+    />
+  ) : null;
+
+  if (layoutMode === "master-detail") {
+    return (
+      <div className="h-full min-h-0">
+        <MasterDetailShell
+          layoutMode={layoutMode}
+          activeEntryId={activeEntry?.id ?? null}
+          listSlot={
+            <div className="space-y-1 p-2">
+              <EntryListShell
+                entries={sortedFiltered}
+                selectionMode={effectiveSelectionMode}
+                selectedIds={selectedIds}
+                atLimit={atLimit}
+                onToggleSelectOne={toggleSelectOne}
+                selectEntryLabel={(title) => tl("selectEntry", { title })}
+                floatingActions={floatingBulkActions}
+                confirmDialog={bulkConfirmDialog}
+                renderEntry={(entry) => (
+                  <PasswordRow
+                    entry={entry}
+                    isActive={activeEntry?.id === entry.id}
+                    onActivate={() =>
+                      setActiveEntry((prev) =>
+                        prev?.id === entry.id ? null : entry
+                      )
+                    }
+                    selectionMode={effectiveSelectionMode}
+                    {...buildArchivedRowCallbacks(entry)}
+                    onShare={() => setActiveEntry(entry)}
+                    onEdit={() => handleEdit(entry.id)}
+                    onToggleArchive={() => void handleToggleArchive(entry.id, entry.isArchived)}
+                    onDeleteRequest={() => void handleDelete(entry.id)}
+                    canEdit={roleCanEdit}
+                    canDelete={roleCanDelete}
+                    canShare={roleCanEdit}
+                  />
+                )}
+              />
+            </div>
+          }
+          detailSlot={
+            effectiveSelectionMode ? (
+              <div className="flex h-full items-center justify-center py-16 text-sm text-muted-foreground">
+                {tl("selectedCount", { count: selectedIds.size })}
+              </div>
+            ) : (
+              <PasswordDetailPane
+                key={activeEntry?.id ?? "none"}
+                entryId={activeEntry?.id ?? null}
+                entry={activeEntry}
+                detailData={archDetailData}
+                loading={archDetailLoading}
+                error={archDetailError}
+                onEdit={activeEntry ? () => handleEdit(activeEntry.id) : undefined}
+                onRefresh={() => fetchArchived()}
+                teamId={teamId}
+                readOnly={!roleCanEdit}
+              />
+            )
+          }
+        />
+        {editDialog}
+      </div>
+    );
+  }
+
+  // Accordion mode (< lg): existing PasswordCard list, unchanged behavior.
   return (
     <EntryListShell
       entries={sortedFiltered}
@@ -403,54 +573,16 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
           getDetail={createDetailFetcher(entry)}
           getUrl={createUrlFetcher(entry)}
           onEditClick={() => handleEdit(entry.id)}
-          canEdit={role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN || role === TEAM_ROLE.MEMBER}
-          canDelete={role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN}
+          canEdit={roleCanEdit}
+          canDelete={roleCanDelete}
           createdBy={teamName}
           teamId={teamId}
         />
       )}
-      floatingActions={
-        <>
-          <Button variant="secondary" size="sm" onClick={() => requestAction("unarchive")}>
-            <RotateCcw className="mr-1 h-4 w-4" />
-            {tl("moveSelectedToUnarchive")}
-          </Button>
-          <Button variant="destructive" size="sm" onClick={() => requestAction("trash")}>
-            <Trash2 className="mr-1 h-4 w-4" />
-            {tl("moveSelectedToTrash")}
-          </Button>
-        </>
-      }
-      confirmDialog={{
-        open: bulkDialogOpen,
-        onOpenChange: setBulkDialogOpen,
-        title:
-          pendingAction === "unarchive"
-            ? tl("moveSelectedToUnarchive")
-            : tl("moveSelectedToTrash"),
-        description:
-          pendingAction === "unarchive"
-            ? tl("bulkUnarchiveConfirm", { count: selectedIds.size })
-            : tl("bulkMoveConfirm", { count: selectedIds.size }),
-        cancelLabel: tl("cancel"),
-        confirmLabel: tl("confirm"),
-        processing: bulkProcessing,
-        onConfirm: () => void executeAction(),
-      }}
+      floatingActions={floatingBulkActions}
+      confirmDialog={bulkConfirmDialog}
     >
-      {editTeamId && editEntryId && (
-        <TeamEditDialogLoader
-          teamId={editTeamId}
-          id={editEntryId}
-          open={formOpen}
-          onOpenChange={setFormOpen}
-          onSaved={() => {
-            fetchArchived();
-            setExpandedId(null);
-            notifyTeamDataChanged();
-          }}
-        />
-      )}
+      {editDialog}
     </EntryListShell>
   );
 });

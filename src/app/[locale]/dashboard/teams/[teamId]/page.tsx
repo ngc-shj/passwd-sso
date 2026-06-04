@@ -653,15 +653,17 @@ export default function TeamDashboardPage({
 
   // master-detail: h-full fills <main>'s definite flex height so panes scroll
   // independently (INV-C5.1). accordion: flex-1 keeps page-level scroll.
+  // isTeamArchive in master-detail also needs h-full for TeamArchivedList's MasterDetailShell.
+  const isMasterDetail = layoutMode === "master-detail";
   return (
     <div
       className={[
         "flex flex-col min-h-0 p-4 md:p-6",
-        layoutMode === "master-detail" && !isTeamSpecialView ? "h-full" : "flex-1",
+        isMasterDetail && (!isTeamSpecialView || isTeamArchive) ? "h-full" : "flex-1",
       ].join(" ")}
     >
       {/* Header + search bar — always max-w-4xl, above the shell */}
-      <div className={layoutMode === "master-detail" && !isTeamSpecialView ? "w-full" : "mx-auto max-w-4xl w-full"}>
+      <div className={isMasterDetail && (!isTeamSpecialView || isTeamArchive) ? "w-full" : "mx-auto max-w-4xl w-full"}>
         <EntryListHeader
           icon={headerIcon}
           title={isPrimaryScopeLabel ? subtitle : (team?.name ?? "...")}
@@ -799,7 +801,7 @@ export default function TeamDashboardPage({
       {/* Main content area */}
       <div className={[
         "flex-1 min-h-0",
-        layoutMode === "master-detail" && !isTeamSpecialView ? "overflow-hidden" : "mx-auto max-w-4xl w-full",
+        isMasterDetail && (!isTeamSpecialView || isTeamArchive) ? "overflow-hidden" : "mx-auto max-w-4xl w-full",
       ].join(" ")}>
         {keyPending && !isTeamSpecialView && (
           <Card className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30 mb-4">
@@ -818,7 +820,7 @@ export default function TeamDashboardPage({
         )}
 
         {isTeamArchive && team ? (
-          <div className="space-y-4">
+          <div className={isMasterDetail ? "h-full min-h-0" : "space-y-4"}>
             <TeamArchivedList
               ref={archivedListRef}
               teamId={teamId}
