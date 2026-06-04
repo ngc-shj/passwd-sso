@@ -19,9 +19,7 @@ import { EntryListShell } from "@/components/bulk/entry-list-shell";
 import { fetchApi } from "@/lib/url-helpers";
 import { filterTravelSafe } from "@/lib/auth/policy/travel-mode";
 import { useTravelMode } from "@/hooks/use-travel-mode";
-import { buildPersonalGetDetail } from "@/lib/vault/build-personal-get-detail";
-import { toast } from "sonner";
-import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
+import { useEntryActions } from "@/hooks/vault/use-entry-actions";
 
 interface DecryptedOverview {
   title: string;
@@ -121,9 +119,8 @@ export function PasswordList({
   onVisibleEntriesChange,
 }: PasswordListProps) {
   const t = useTranslations("PasswordList");
-  const tCopy = useTranslations("CopyButton");
-  const tCard = useTranslations("PasswordCard");
   const { encryptionKey, userId } = useVault();
+  const buildRowCallbacks = useEntryActions(encryptionKey, userId);
   const { active: travelModeActive } = useTravelMode();
   // All decrypted entries fetched from the server (no search filter applied)
   const [allEntries, setAllEntries] = useState<DisplayEntry[]>([]);
@@ -394,103 +391,6 @@ export function PasswordList({
       </div>
     );
   }
-
-  // Clipboard schedule-clear helper (mirrors password-card.tsx).
-  const scheduleClearClipboard = (copiedValue: string) => {
-    setTimeout(async () => {
-      try {
-        const current = await navigator.clipboard.readText();
-        if (current === copiedValue) await navigator.clipboard.writeText("");
-      } catch {
-        try { await navigator.clipboard.writeText(""); } catch { /* best-effort */ }
-      }
-    }, CLIPBOARD_CLEAR_TIMEOUT_MS);
-  };
-
-  // Clipboard schedule-clear and copy-with-toast helpers for PasswordRow in master-detail mode.
-  const makeCopyToast = async (getter: () => Promise<string>) => {
-    try {
-      const val = await getter();
-      if (!val) return;
-      await navigator.clipboard.writeText(val);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(val);
-    } catch {
-      toast.error(tCard("networkError"));
-    }
-  };
-
-  // Build per-entry fetch + copy callbacks for PasswordRow in master-detail mode.
-  // Uses buildPersonalGetDetail — the ONE source of truth for personal field assembly.
-  const buildRowCallbacks = (entry: DisplayEntry) => {
-    const getEntry = encryptionKey
-      ? buildPersonalGetDetail(entry, { encryptionKey, userId })
-      : async (_id: string): Promise<never> => { throw new Error("Vault locked"); };
-
-    const fetchPassword = async () => {
-      const d = await getEntry(entry.id);
-      return d.password ?? "";
-    };
-    const fetchContent = async () => {
-      const d = await getEntry(entry.id);
-      return d.content ?? "";
-    };
-    const fetchCardField = async (field: "cardNumber" | "cvv") => {
-      const d = await getEntry(entry.id);
-      return (d[field] ?? "") as string;
-    };
-    const fetchIdentityField = async (field: "idNumber") => {
-      const d = await getEntry(entry.id);
-      return (d[field] ?? "") as string;
-    };
-    const fetchPasskeyField = async (field: "credentialId" | "username") => {
-      const d = await getEntry(entry.id);
-      return (d[field] ?? "") as string;
-    };
-    const fetchBankField = async (field: "accountNumber" | "routingNumber") => {
-      const d = await getEntry(entry.id);
-      return (d[field] ?? "") as string;
-    };
-    const fetchLicenseField = async (field: "licenseKey") => {
-      const d = await getEntry(entry.id);
-      return (d[field] ?? "") as string;
-    };
-    const fetchSshField = async (field: "fingerprint" | "publicKey") => {
-      const d = await getEntry(entry.id);
-      return (d[field] ?? "") as string;
-    };
-
-    return {
-      fetchPassword,
-      fetchContent,
-      fetchCardField,
-      fetchIdentityField,
-      fetchPasskeyField,
-      fetchBankField,
-      fetchLicenseField,
-      fetchSshField,
-      onCopyPassword: () => void makeCopyToast(fetchPassword),
-      onCopyContent: () => void makeCopyToast(fetchContent),
-      onCopyUsername: () => {
-        if (!entry.username) return;
-        void makeCopyToast(async () => entry.username ?? "");
-      },
-      onCopyCardNumber: () => void makeCopyToast(() => fetchCardField("cardNumber")),
-      onCopyCvv: () => void makeCopyToast(() => fetchCardField("cvv")),
-      onCopyCredentialId: () => void makeCopyToast(() => fetchPasskeyField("credentialId")),
-      onCopyAccountNumber: () => void makeCopyToast(() => fetchBankField("accountNumber")),
-      onCopyLicenseKey: () => void makeCopyToast(() => fetchLicenseField("licenseKey")),
-      onCopyFingerprint: () => void makeCopyToast(() => fetchSshField("fingerprint")),
-      onCopyPublicKey: () => void makeCopyToast(() => fetchSshField("publicKey")),
-      onCopyIdNumber: () => void makeCopyToast(() => fetchIdentityField("idNumber")),
-      onOpenUrl: async () => {
-        try {
-          const d = await getEntry(entry.id);
-          if (d.url) window.open(d.url, "_blank", "noopener,noreferrer");
-        } catch { toast.error(tCard("networkError")); }
-      },
-    };
-  };
 
   return (
     <EntryListShell

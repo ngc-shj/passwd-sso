@@ -1,16 +1,8 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import {
-  FileText,
-  CreditCard,
-  IdCard,
-  Fingerprint,
-  Landmark,
-  KeySquare,
-} from "lucide-react";
-import { Favicon } from "../shared/favicon";
 import { TagBadge } from "@/components/tags/tag-badge";
+import { EntryIcon } from "./entry-icon";
 import { EntrySecondaryLine } from "./entry-secondary-line";
 import { EntryActionsMenu } from "./entry-actions-menu";
 import { ENTRY_TYPE } from "@/lib/constants";
@@ -139,14 +131,6 @@ export function PasswordRow({
     isArchived,
   } = entry;
 
-  const isNote = entryType === ENTRY_TYPE.SECURE_NOTE;
-  const isCreditCard = entryType === ENTRY_TYPE.CREDIT_CARD;
-  const isIdentity = entryType === ENTRY_TYPE.IDENTITY;
-  const isPasskey = entryType === ENTRY_TYPE.PASSKEY;
-  const isBankAccount = entryType === ENTRY_TYPE.BANK_ACCOUNT;
-  const isSoftwareLicense = entryType === ENTRY_TYPE.SOFTWARE_LICENSE;
-  const isSshKey = entryType === ENTRY_TYPE.SSH_KEY;
-
   const visibleTags = tags.slice(0, MAX_VISIBLE_TAGS);
   const overflowCount = tags.length - visibleTags.length;
 
@@ -179,23 +163,9 @@ export function PasswordRow({
     >
       {/* Line 1: icon + title + actions */}
       <div className="flex items-center gap-2">
-        {/* Entry type icon / favicon */}
+        {/* Entry type icon / favicon — shared component (commonization, INV-C6.4) */}
         <div className="shrink-0 text-muted-foreground" data-testid="row-icon">
-          {isBankAccount ? (
-            <Landmark className="h-4 w-4" />
-          ) : isSoftwareLicense ? (
-            <KeySquare className="h-4 w-4" />
-          ) : isPasskey ? (
-            <Fingerprint className="h-4 w-4" />
-          ) : isIdentity ? (
-            <IdCard className="h-4 w-4" />
-          ) : isCreditCard ? (
-            <CreditCard className="h-4 w-4" />
-          ) : isNote ? (
-            <FileText className="h-4 w-4" />
-          ) : (
-            <Favicon host={urlHost} size={16} className="shrink-0" />
-          )}
+          <EntryIcon entryType={entryType} urlHost={urlHost} size={16} className="shrink-0" />
         </div>
 
         {/* Title — truncates when space is tight */}

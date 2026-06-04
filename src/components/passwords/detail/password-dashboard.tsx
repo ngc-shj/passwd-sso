@@ -39,6 +39,7 @@ import { MasterDetailShell } from "@/components/passwords/detail/master-detail-s
 import { PasswordDetailPane } from "@/components/passwords/detail/password-detail-pane";
 import { usePasswordEntryDetail } from "@/hooks/vault/use-password-entry-detail";
 import { buildPersonalGetDetail } from "@/lib/vault/build-personal-get-detail";
+import { useEntryActions } from "@/hooks/vault/use-entry-actions";
 import { PasswordEditDialogLoader } from "@/components/passwords/dialogs/personal-password-edit-dialog-loader";
 
 // Static icon map — created once at module scope to avoid re-creation on every render
@@ -91,6 +92,10 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
 
   // Vault context for personal decrypt + detail pane.
   const { encryptionKey, userId, status: vaultStatus } = useVault();
+
+  // Shared factory for entry copy/fetch callbacks — used by both list rows (via PasswordList)
+  // and the detail pane header (via paneActions below). ONE source of truth (Commonization).
+  const buildEntryCallbacks = useEntryActions(encryptionKey, userId);
 
   // Pane-level detail dialogs (edit) — owned here, not duplicated in PasswordCard.
   const [paneEditOpen, setPaneEditOpen] = useState(false);
@@ -387,7 +392,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
 
   // F1(b): in master-detail + selectionMode, render a summary instead of the entry pane.
   const detailSlot = (
-    <div className="h-full p-4">
+    <div className="h-full">
       {layoutMode === "master-detail" && selectionMode ? (
         <div className="flex flex-col items-center justify-center h-full py-16 text-center text-muted-foreground gap-3">
           <p className="text-sm">{tl("selectedInPane", { count: selectedCount })}</p>
@@ -396,11 +401,16 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
         <PasswordDetailPane
           key={activeEntry?.id ?? "none"}
           entryId={activeEntry?.id ?? null}
+          entry={activeEntry}
           detailData={detailData}
           loading={detailLoading}
           error={detailError}
           onEdit={activeEntry ? () => setPaneEditOpen(true) : undefined}
           onRefresh={() => { invalidateDetail(); handleDataChange(); }}
+          actions={activeEntry ? buildEntryCallbacks(activeEntry) : undefined}
+          canEdit={activeEntry ? !activeEntry.isArchived : false}
+          canDelete={false}
+          canShare={false}
         />
       )}
     </div>
