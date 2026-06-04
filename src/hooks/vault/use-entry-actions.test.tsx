@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useEntryActions } from "./use-entry-actions";
 import type { DisplayEntry } from "@/components/passwords/detail/password-list";
+import type { InlineDetailData } from "@/types/entry";
 import * as sonner from "sonner";
 
 vi.mock("next-intl", () => ({
@@ -10,34 +11,35 @@ vi.mock("next-intl", () => ({
   useLocale: () => "en",
 }));
 
-// Stub buildPersonalGetDetail so tests don't touch crypto or the network.
-vi.mock("@/lib/vault/build-personal-get-detail", () => ({
-  buildPersonalGetDetail: vi.fn(
-    (_entry: unknown, _opts: unknown) =>
-      async (_id: string) => ({
-        id: _id,
-        password: "s3cr3t",
-        content: "note content",
-        url: "https://example.com",
-        urlHost: "example.com",
-        notes: null,
-        cardNumber: "4111111111111111",
-        cvv: "123",
-        idNumber: "ID123",
-        credentialId: "cred-abc",
-        username: "user@example.com",
-        accountNumber: "00012345",
-        routingNumber: "021000021",
-        licenseKey: "XXXX-YYYY",
-        fingerprint: "ab:cd:ef",
-        publicKey: "ssh-rsa AAAA...",
-        customFields: [],
-        passwordHistory: [],
-        createdAt: "2024-01-01T00:00:00Z",
-        updatedAt: "2024-01-01T00:00:00Z",
-      }),
-  ),
-}));
+// The hook is vault-agnostic: it takes a `getDetailFor(entry) => () => Promise<detail>`.
+// These stubs play the role buildPersonalGetDetail / createDetailFetcher play in production.
+const decryptedDetail = {
+  id: "entry-1",
+  password: "s3cr3t",
+  content: "note content",
+  url: "https://example.com",
+  urlHost: "example.com",
+  notes: null,
+  cardNumber: "4111111111111111",
+  cvv: "123",
+  idNumber: "ID123",
+  credentialId: "cred-abc",
+  username: "user@example.com",
+  accountNumber: "00012345",
+  routingNumber: "021000021",
+  licenseKey: "XXXX-YYYY",
+  fingerprint: "ab:cd:ef",
+  publicKey: "ssh-rsa AAAA...",
+  customFields: [],
+  passwordHistory: [],
+  createdAt: "2024-01-01T00:00:00Z",
+  updatedAt: "2024-01-01T00:00:00Z",
+} as unknown as InlineDetailData;
+
+const getDetailFor = () => async () => decryptedDetail;
+const lockedGetDetailFor = () => async (): Promise<InlineDetailData> => {
+  throw new Error("Vault locked");
+};
 
 const minimalEntry: DisplayEntry = {
   id: "entry-1",
@@ -68,7 +70,6 @@ const minimalEntry: DisplayEntry = {
   updatedAt: "2024-01-01T00:00:00Z",
 };
 
-const mockKey = {} as CryptoKey;
 
 describe("useEntryActions", () => {
   let writeText: ReturnType<typeof vi.fn>;
@@ -98,7 +99,7 @@ describe("useEntryActions", () => {
   };
 
   it("onCopyPassword writes to clipboard and shows success toast", async () => {
-    const { result } = renderHook(() => useEntryActions(mockKey, "user-1"));
+    const { result } = renderHook(() => useEntryActions(getDetailFor));
     const callbacks = result.current(minimalEntry);
 
     callbacks.onCopyPassword();
@@ -109,7 +110,7 @@ describe("useEntryActions", () => {
   });
 
   it("onCopyUsername writes username to clipboard and shows success toast", async () => {
-    const { result } = renderHook(() => useEntryActions(mockKey, "user-1"));
+    const { result } = renderHook(() => useEntryActions(getDetailFor));
     const callbacks = result.current(minimalEntry);
 
     callbacks.onCopyUsername();
@@ -121,7 +122,7 @@ describe("useEntryActions", () => {
 
   it("onCopyUsername is a no-op when entry has no username", async () => {
     const entryNoUser: DisplayEntry = { ...minimalEntry, username: null };
-    const { result } = renderHook(() => useEntryActions(mockKey, "user-1"));
+    const { result } = renderHook(() => useEntryActions(getDetailFor));
     const callbacks = result.current(entryNoUser);
 
     callbacks.onCopyUsername();
@@ -136,7 +137,7 @@ describe("useEntryActions", () => {
     // readText returns the copied value so the clear condition fires
     readText.mockResolvedValue("s3cr3t");
 
-    const { result } = renderHook(() => useEntryActions(mockKey, "user-1"));
+    const { result } = renderHook(() => useEntryActions(getDetailFor));
     const callbacks = result.current(minimalEntry);
 
     callbacks.onCopyPassword();
@@ -152,7 +153,7 @@ describe("useEntryActions", () => {
   });
 
   it("shows networkError toast when vault is locked (encryptionKey null)", async () => {
-    const { result } = renderHook(() => useEntryActions(null, "user-1"));
+    const { result } = renderHook(() => useEntryActions(lockedGetDetailFor));
     const callbacks = result.current(minimalEntry);
 
     callbacks.onCopyPassword();
@@ -164,7 +165,7 @@ describe("useEntryActions", () => {
 
   it("onOpenUrl opens a window when url is present", async () => {
     const windowOpen = vi.spyOn(window, "open").mockImplementation(() => null);
-    const { result } = renderHook(() => useEntryActions(mockKey, "user-1"));
+    const { result } = renderHook(() => useEntryActions(getDetailFor));
     const callbacks = result.current(minimalEntry);
 
     await callbacks.onOpenUrl();
@@ -174,7 +175,7 @@ describe("useEntryActions", () => {
   });
 
   it("fetchPassword resolves the decrypted password", async () => {
-    const { result } = renderHook(() => useEntryActions(mockKey, "user-1"));
+    const { result } = renderHook(() => useEntryActions(getDetailFor));
     const callbacks = result.current(minimalEntry);
 
     const pw = await callbacks.fetchPassword();

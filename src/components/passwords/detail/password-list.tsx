@@ -20,6 +20,8 @@ import { fetchApi } from "@/lib/url-helpers";
 import { filterTravelSafe } from "@/lib/auth/policy/travel-mode";
 import { useTravelMode } from "@/hooks/use-travel-mode";
 import { useEntryActions } from "@/hooks/vault/use-entry-actions";
+import { buildPersonalGetDetail } from "@/lib/vault/build-personal-get-detail";
+
 
 interface DecryptedOverview {
   title: string;
@@ -120,7 +122,11 @@ export function PasswordList({
 }: PasswordListProps) {
   const t = useTranslations("PasswordList");
   const { encryptionKey, userId } = useVault();
-  const buildRowCallbacks = useEntryActions(encryptionKey, userId);
+  const buildRowCallbacks = useEntryActions((entry: DisplayEntry) => {
+    if (!encryptionKey) return async () => { throw new Error("Vault locked"); };
+    const getDetail = buildPersonalGetDetail(entry, { encryptionKey, userId });
+    return () => getDetail(entry.id);
+  });
   const { active: travelModeActive } = useTravelMode();
   // All decrypted entries fetched from the server (no search filter applied)
   const [allEntries, setAllEntries] = useState<DisplayEntry[]>([]);

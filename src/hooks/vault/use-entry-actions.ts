@@ -2,9 +2,18 @@
 
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { buildPersonalGetDetail } from "@/lib/vault/build-personal-get-detail";
 import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
-import type { DisplayEntry } from "@/components/passwords/detail/password-list";
+import type { InlineDetailData } from "@/types/entry";
+
+/**
+ * Minimal entry shape required by useEntryActions.
+ * Both DisplayEntry (personal) and TeamPasswordEntry satisfy this interface,
+ * so the hook is vault-agnostic (Commonization principle).
+ */
+export interface DisplayEntryLike {
+  id: string;
+  username: string | null;
+}
 
 /**
  * The full set of copy/fetch/open callbacks for a single vault entry.
@@ -35,17 +44,22 @@ export interface EntryActionCallbacks {
 }
 
 /**
- * Returns a stable factory function `(entry: DisplayEntry) => EntryActionCallbacks`.
- * Used by PasswordList (list rows) and PasswordDashboard (detail pane header) so
- * copy/fetch logic is never duplicated across the personal vault UI.
+ * Returns a stable factory function `(entry: E) => EntryActionCallbacks`.
+ *
+ * The hook is vault-agnostic: it accepts a `getDetailFor` function that builds
+ * a per-entry detail fetcher. Both the personal vault (via buildPersonalGetDetail)
+ * and the team vault (via createDetailFetcher) use this same hook — there is ONE
+ * source of truth for copy/fetch/clipboard logic (Commonization).
+ *
+ * @param getDetailFor - Given an entry, returns a zero-arg async function that
+ *   resolves to InlineDetailData. Called at factory-call time (per row render),
+ *   so it can close over entry-specific context (id, entryType, etc.).
  *
  * Security: clipboard is cleared after CLIPBOARD_CLEAR_TIMEOUT_MS (30s).
- * The vault-locked path throws immediately so no plaintext is ever requested.
  */
-export function useEntryActions(
-  encryptionKey: CryptoKey | null,
-  userId: string | null,
-): (entry: DisplayEntry) => EntryActionCallbacks {
+export function useEntryActions<E extends DisplayEntryLike>(
+  getDetailFor: (entry: E) => () => Promise<InlineDetailData>,
+): (entry: E) => EntryActionCallbacks {
   const tCopy = useTranslations("CopyButton");
   const tCard = useTranslations("PasswordCard");
 
@@ -73,41 +87,39 @@ export function useEntryActions(
     }
   };
 
-  return (entry: DisplayEntry): EntryActionCallbacks => {
-    const getEntry = encryptionKey
-      ? buildPersonalGetDetail(entry, { encryptionKey, userId })
-      : async (_id: string): Promise<never> => { throw new Error("Vault locked"); };
+  return (entry: E): EntryActionCallbacks => {
+    const getDetail = getDetailFor(entry);
 
     const fetchPassword = async () => {
-      const d = await getEntry(entry.id);
+      const d = await getDetail();
       return d.password ?? "";
     };
     const fetchContent = async () => {
-      const d = await getEntry(entry.id);
+      const d = await getDetail();
       return d.content ?? "";
     };
     const fetchCardField = async (field: "cardNumber" | "cvv") => {
-      const d = await getEntry(entry.id);
+      const d = await getDetail();
       return (d[field] ?? "") as string;
     };
     const fetchIdentityField = async (field: "idNumber") => {
-      const d = await getEntry(entry.id);
+      const d = await getDetail();
       return (d[field] ?? "") as string;
     };
     const fetchPasskeyField = async (field: "credentialId" | "username") => {
-      const d = await getEntry(entry.id);
+      const d = await getDetail();
       return (d[field] ?? "") as string;
     };
     const fetchBankField = async (field: "accountNumber" | "routingNumber") => {
-      const d = await getEntry(entry.id);
+      const d = await getDetail();
       return (d[field] ?? "") as string;
     };
     const fetchLicenseField = async (field: "licenseKey") => {
-      const d = await getEntry(entry.id);
+      const d = await getDetail();
       return (d[field] ?? "") as string;
     };
     const fetchSshField = async (field: "fingerprint" | "publicKey") => {
-      const d = await getEntry(entry.id);
+      const d = await getDetail();
       return (d[field] ?? "") as string;
     };
 
@@ -136,7 +148,7 @@ export function useEntryActions(
       onCopyIdNumber: () => void makeCopyToast(() => fetchIdentityField("idNumber")),
       onOpenUrl: async () => {
         try {
-          const d = await getEntry(entry.id);
+          const d = await getDetail();
           if (d.url) window.open(d.url, "_blank", "noopener,noreferrer");
         } catch { toast.error(tCard("networkError")); }
       },
