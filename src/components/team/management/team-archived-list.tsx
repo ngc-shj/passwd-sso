@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, forwardRef } from "react";
 import { useTranslations } from "next-intl";
 import { PasswordCard } from "@/components/passwords/detail/password-card";
 import type { InlineDetailData } from "@/components/passwords/detail/password-detail-inline";
+import { mapDecryptedBlobToDetailFields } from "@/lib/vault/map-detail-fields";
 import { TeamEditDialogLoader } from "@/components/team/management/team-edit-dialog-loader";
 import { Archive, RotateCcw, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -13,7 +14,6 @@ import { useBulkAction } from "@/hooks/bulk/use-bulk-action";
 import { EntryListShell } from "@/components/bulk/entry-list-shell";
 import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import {
   compareEntriesWithFavorite,
   type EntrySortOption,
@@ -314,53 +314,15 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
         const raw = await res.json();
         const blob = await decryptFullBlob(entry.id, raw);
         return {
+          // Blob-sourced display fields via the shared mapper (commonized with the
+          // personal/team/emergency paths so no per-entry-type field can be dropped here).
+          ...mapDecryptedBlobToDetailFields(blob),
+          // Caller-specific fields:
           id: raw.id,
           title: (blob.title as string) ?? undefined,
           entryType: entry.entryType,
-          password: (blob.password as string) ?? "",
-          content: blob.content as string | undefined,
-          isMarkdown: blob.isMarkdown as boolean | undefined,
-          url: (blob.url as string) ?? null,
           urlHost: null,
-          notes: (blob.notes as string) ?? null,
-          customFields: (blob.customFields as EntryCustomField[]) ?? [],
           passwordHistory: [],
-          totp: blob.totp as EntryTotp | undefined,
-          brand: blob.brand as string | undefined,
-          cardholderName: blob.cardholderName as string | undefined,
-          cardNumber: blob.cardNumber as string | undefined,
-          expiryMonth: blob.expiryMonth as string | undefined,
-          expiryYear: blob.expiryYear as string | undefined,
-          cvv: blob.cvv as string | undefined,
-          fullName: blob.fullName as string | undefined,
-          address: blob.address as string | undefined,
-          phone: blob.phone as string | undefined,
-          email: blob.email as string | undefined,
-          dateOfBirth: blob.dateOfBirth as string | undefined,
-          nationality: blob.nationality as string | undefined,
-          idNumber: blob.idNumber as string | undefined,
-          issueDate: blob.issueDate as string | undefined,
-          expiryDate: blob.expiryDate as string | undefined,
-          relyingPartyId: blob.relyingPartyId as string | undefined,
-          relyingPartyName: blob.relyingPartyName as string | undefined,
-          username: blob.username as string | undefined,
-          credentialId: blob.credentialId as string | undefined,
-          creationDate: blob.creationDate as string | undefined,
-          deviceInfo: blob.deviceInfo as string | undefined,
-          bankName: blob.bankName as string | undefined,
-          accountType: blob.accountType as string | undefined,
-          accountHolderName: blob.accountHolderName as string | undefined,
-          accountNumber: blob.accountNumber as string | undefined,
-          routingNumber: blob.routingNumber as string | undefined,
-          swiftBic: blob.swiftBic as string | undefined,
-          iban: blob.iban as string | undefined,
-          branchName: blob.branchName as string | undefined,
-          softwareName: blob.softwareName as string | undefined,
-          licenseKey: blob.licenseKey as string | undefined,
-          version: blob.version as string | undefined,
-          licensee: blob.licensee as string | undefined,
-          purchaseDate: blob.purchaseDate as string | undefined,
-          expirationDate: blob.expirationDate as string | undefined,
           createdAt: raw.createdAt,
           updatedAt: raw.updatedAt,
         };

@@ -9,6 +9,7 @@ import { EntryListHeader } from "@/components/passwords/entry/entry-list-header"
 import { EntrySortMenu } from "@/components/passwords/entry/entry-sort-menu";
 import { SearchBar } from "@/components/layout/search-bar";
 import type { InlineDetailData } from "@/components/passwords/detail/password-detail-inline";
+import { mapDecryptedBlobToDetailFields } from "@/lib/vault/map-detail-fields";
 import { TeamNewDialog } from "@/components/team/management/team-new-dialog";
 import { TeamEditDialogLoader } from "@/components/team/management/team-edit-dialog-loader";
 import { TeamArchivedList, type TeamArchivedListHandle } from "@/components/team/management/team-archived-list";
@@ -26,7 +27,6 @@ import {
 import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, Clock, Landmark, KeySquare, CheckSquare, FolderOpen, Tag, Terminal } from "lucide-react";
 import { TEAM_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/vault/entry-sort";
 import { buildFolderPath } from "@/lib/folder/folder-path";
 import { buildTagPath } from "@/lib/format/tag-tree";
@@ -429,60 +429,15 @@ export default function TeamDashboardPage({
       const raw = await res.json();
       const blob = await decryptFullBlob(id, raw);
       return {
+        // Blob-sourced display fields via the shared mapper (commonized with the
+        // personal/emergency paths so no per-entry-type field can be dropped here).
+        ...mapDecryptedBlobToDetailFields(blob),
+        // Caller-specific fields:
         id: raw.id,
         title: (blob.title as string) ?? undefined,
         entryType: eType,
-        password: (blob.password as string) ?? "",
-        content: blob.content as string | undefined,
-        isMarkdown: blob.isMarkdown as boolean | undefined,
-        url: (blob.url as string) ?? null,
         urlHost: null,
-        notes: (blob.notes as string) ?? null,
-        customFields: (blob.customFields as EntryCustomField[]) ?? [],
         passwordHistory: [],
-        totp: blob.totp as EntryTotp | undefined,
-        cardholderName: blob.cardholderName as string | undefined,
-        cardNumber: blob.cardNumber as string | undefined,
-        brand: blob.brand as string | undefined,
-        expiryMonth: blob.expiryMonth as string | undefined,
-        expiryYear: blob.expiryYear as string | undefined,
-        cvv: blob.cvv as string | undefined,
-        fullName: blob.fullName as string | undefined,
-        address: blob.address as string | undefined,
-        phone: blob.phone as string | undefined,
-        email: blob.email as string | undefined,
-        dateOfBirth: blob.dateOfBirth as string | undefined,
-        nationality: blob.nationality as string | undefined,
-        idNumber: blob.idNumber as string | undefined,
-        issueDate: blob.issueDate as string | undefined,
-        expiryDate: blob.expiryDate as string | undefined,
-        relyingPartyId: blob.relyingPartyId as string | undefined,
-        relyingPartyName: blob.relyingPartyName as string | undefined,
-        username: blob.username as string | undefined,
-        credentialId: blob.credentialId as string | undefined,
-        creationDate: blob.creationDate as string | undefined,
-        deviceInfo: blob.deviceInfo as string | undefined,
-        bankName: blob.bankName as string | undefined,
-        accountType: blob.accountType as string | undefined,
-        accountHolderName: blob.accountHolderName as string | undefined,
-        accountNumber: blob.accountNumber as string | undefined,
-        routingNumber: blob.routingNumber as string | undefined,
-        swiftBic: blob.swiftBic as string | undefined,
-        iban: blob.iban as string | undefined,
-        branchName: blob.branchName as string | undefined,
-        softwareName: blob.softwareName as string | undefined,
-        licenseKey: blob.licenseKey as string | undefined,
-        version: blob.version as string | undefined,
-        licensee: blob.licensee as string | undefined,
-        purchaseDate: blob.purchaseDate as string | undefined,
-        expirationDate: blob.expirationDate as string | undefined,
-        privateKey: blob.privateKey as string | undefined,
-        publicKey: blob.publicKey as string | undefined,
-        keyType: blob.keyType as string | undefined,
-        keySize: blob.keySize as number | undefined,
-        fingerprint: blob.fingerprint as string | undefined,
-        sshPassphrase: blob.passphrase as string | undefined,
-        sshComment: blob.comment as string | undefined,
         createdAt: raw.createdAt,
         updatedAt: raw.updatedAt,
       };

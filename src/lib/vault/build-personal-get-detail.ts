@@ -5,6 +5,7 @@ import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import type { InlineDetailData } from "@/types/entry";
+import { mapDecryptedBlobToDetailFields } from "@/lib/vault/map-detail-fields";
 
 /**
  * Minimal entry fields needed to build the personal getDetail closure.
@@ -60,136 +61,15 @@ export function buildPersonalGetDetail(
       aad,
     );
 
-    const e = JSON.parse(plaintext) as {
-      password?: string;
-      content?: string;
-      isMarkdown?: boolean;
-      url?: string | null;
-      notes?: string | null;
-      customFields?: unknown[];
-      passwordHistory?: unknown[];
-      totp?: unknown;
-      cardholderName?: string | null;
-      cardNumber?: string | null;
-      brand?: string | null;
-      expiryMonth?: string | null;
-      expiryYear?: string | null;
-      cvv?: string | null;
-      fullName?: string | null;
-      givenName?: string | null;
-      familyName?: string | null;
-      middleName?: string | null;
-      familyNameKana?: string | null;
-      givenNameKana?: string | null;
-      addressLine1?: string | null;
-      addressLine2?: string | null;
-      city?: string | null;
-      state?: string | null;
-      postalCode?: string | null;
-      country?: string | null;
-      address?: string | null;
-      phone?: string | null;
-      email?: string | null;
-      dateOfBirth?: string | null;
-      nationality?: string | null;
-      idNumber?: string | null;
-      issueDate?: string | null;
-      expiryDate?: string | null;
-      relyingPartyId?: string | null;
-      relyingPartyName?: string | null;
-      username?: string | null;
-      credentialId?: string | null;
-      creationDate?: string | null;
-      deviceInfo?: string | null;
-      bankName?: string | null;
-      accountType?: string | null;
-      accountHolderName?: string | null;
-      accountNumber?: string | null;
-      routingNumber?: string | null;
-      swiftBic?: string | null;
-      iban?: string | null;
-      branchName?: string | null;
-      softwareName?: string | null;
-      licenseKey?: string | null;
-      version?: string | null;
-      licensee?: string | null;
-      purchaseDate?: string | null;
-      expirationDate?: string | null;
-      privateKey?: string | null;
-      publicKey?: string | null;
-      keyType?: string | null;
-      keySize?: number | null;
-      fingerprint?: string | null;
-      passphrase?: string | null;
-      comment?: string | null;
-    };
+    const e = JSON.parse(plaintext) as Record<string, unknown>;
 
     return {
+      ...mapDecryptedBlobToDetailFields(e),
       id,
       entryType: entry.entryType as InlineDetailData["entryType"],
       requireReprompt: (raw.requireReprompt as boolean | undefined) ?? entry.requireReprompt ?? false,
-      password: e.password ?? "",
-      content: e.content,
-      isMarkdown: e.isMarkdown,
-      url: e.url ?? null,
       urlHost: entry.urlHost,
-      notes: e.notes ?? null,
-      customFields: (e.customFields ?? []) as InlineDetailData["customFields"],
       passwordHistory: (e.passwordHistory ?? []) as InlineDetailData["passwordHistory"],
-      totp: e.totp as InlineDetailData["totp"],
-      cardholderName: e.cardholderName,
-      cardNumber: e.cardNumber,
-      brand: e.brand,
-      expiryMonth: e.expiryMonth,
-      expiryYear: e.expiryYear,
-      cvv: e.cvv,
-      fullName: e.fullName,
-      givenName: e.givenName,
-      familyName: e.familyName,
-      middleName: e.middleName,
-      familyNameKana: e.familyNameKana,
-      givenNameKana: e.givenNameKana,
-      addressLine1: e.addressLine1,
-      addressLine2: e.addressLine2,
-      city: e.city,
-      state: e.state,
-      postalCode: e.postalCode,
-      country: e.country,
-      address: e.address,
-      phone: e.phone,
-      email: e.email,
-      dateOfBirth: e.dateOfBirth,
-      nationality: e.nationality,
-      idNumber: e.idNumber,
-      issueDate: e.issueDate,
-      expiryDate: e.expiryDate,
-      relyingPartyId: e.relyingPartyId,
-      relyingPartyName: e.relyingPartyName,
-      username: e.username,
-      credentialId: e.credentialId,
-      creationDate: e.creationDate,
-      deviceInfo: e.deviceInfo,
-      bankName: e.bankName,
-      accountType: e.accountType,
-      accountHolderName: e.accountHolderName,
-      accountNumber: e.accountNumber,
-      routingNumber: e.routingNumber,
-      swiftBic: e.swiftBic,
-      iban: e.iban,
-      branchName: e.branchName,
-      softwareName: e.softwareName,
-      licenseKey: e.licenseKey,
-      version: e.version,
-      licensee: e.licensee,
-      purchaseDate: e.purchaseDate,
-      expirationDate: e.expirationDate,
-      privateKey: e.privateKey,
-      publicKey: e.publicKey,
-      keyType: e.keyType,
-      keySize: e.keySize,
-      fingerprint: e.fingerprint,
-      sshPassphrase: e.passphrase,
-      sshComment: e.comment,
       createdAt: raw.createdAt as string,
       updatedAt: raw.updatedAt as string,
     };
