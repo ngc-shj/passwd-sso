@@ -72,12 +72,32 @@ PasswordDashboard (C4) ← owns activeEntry; renders list (C6 compact rows) + pa
         └── keyboard nav (C7)
 ```
 
+### Commonization principle (user directive — overrides personal-only coupling)
+
+**Both the UI (screens/components) AND the logic (processing) MUST be commonized across personal and team
+vaults; no personal-only path that team must re-implement in parallel** (cf. project_extension_parallel_impl).
+Concretely, every shared artifact in this plan is built **vault-agnostic**, parameterized by an injected
+`getDetail` closure + vault key/lock source (`useVault()` vs `useTeamVault()`), with ZERO per-vault
+field-mapping in the shared layer:
+- C1 `usePasswordEntryDetail` (hook) — vault-agnostic via injected `getDetail` (INV-C1.7).
+- C2 `PasswordDetailPane` (pane) — presentational, vault-agnostic.
+- C5 **`MasterDetailShell`** (the 3-pane layout container) — extracted as a REUSABLE component that BOTH the
+  personal dashboard and (later) the team page mount; NOT inlined into `PasswordDashboard` (INV-C5.6).
+- C6 `PasswordRow` + the per-entry-type secondary-line renderer + copy/menu cluster — shared sub-components
+  consumed by personal AND team rows (INV-C6.4).
+- C7 keyboard nav — operates on the vault-agnostic list/pane, not personal-specific state.
+
+This makes SC1 (team/emergency 3-pane) a **wiring task** (point the team data source + team `getDetail` at the
+same `MasterDetailShell`), not a parallel build.
+
 ### Scope decision
 
-3-pane **layout** ships for the **personal dashboard only** in this PR. Team page, team-archived list, and
-emergency-access vault keep the accordion — but they consume the same extracted C1/C2 code, so they inherit
-the security clear-on-lock fix. Team/emergency 3-pane layout is deferred (SC1). `selectedId` is **client
-React state, not a URL param** (SC2 — deep-linking deferred; avoids browser-history entry-id metadata leak).
+The 3-pane **layout is wired up for the personal dashboard only** in this PR; the shared `MasterDetailShell`
++ C1/C2/C6 components are built vault-agnostic so team/emergency adoption is later wiring (SC1), not a second
+implementation. Team page, team-archived list, and emergency-access vault keep the accordion in THIS PR but
+already consume the shared C1/C2/C6 code (inheriting the clear-on-lock fix + commonized rendering).
+`activeEntry` is **client React state, not a URL param** (SC2 — deep-linking deferred; avoids browser-history
+entry-id metadata leak).
 
 ## Contracts
 
@@ -353,6 +373,11 @@ can construct the personal `getDetail` closure (F11/F14 dissolve). `expandedId` 
     the pane. NO cross-component bridge and NO re-seeding is performed (the F10/F13 bridge is eliminated by
     the C4 unification); the layoutMode change triggers no `getDetail` re-fetch (same `activeEntry.id`,
     same `key`, so the C1 hook does not refire).
+  - **INV-C5.6** (app-enforced, commonization — user directive): the 3-pane container is a REUSABLE,
+    vault-agnostic component `MasterDetailShell` (props: list slot, detail slot, `layoutMode`, `activeEntryId`)
+    — NOT layout logic inlined into `PasswordDashboard`. The personal dashboard mounts it; the team page
+    (SC1) mounts the SAME component later by feeding the team list + team `getDetail`. No personal-specific
+    branch inside the shell.
   - **INV-C5.5** (app-enforced, SSR/hydration): `useLayoutMode()` MUST be SSR-safe — return `"accordion"`
     during SSR AND the first client render (implement via `useSyncExternalStore` with a server snapshot, or
     a mounted-guard), so server and client first-render agree (no hydration mismatch). The breakpoint-correct
@@ -507,9 +532,11 @@ contracts internally consistent). No Critical/Major findings remain open.
 ## Considerations & constraints
 
 ### Scope contract
-- **SC1** — Team page / team-archived list / emergency-access vault 3-pane **layout** is out of scope.
-  They keep the accordion but DO consume the extracted C1/C2 code (inheriting the clear-on-lock fix).
-  Owned by a future PR (`feature/three-pane-team-emergency`).
+- **SC1** — Team page / team-archived list / emergency-access vault 3-pane **layout wiring** is out of scope
+  for THIS PR — but per the commonization directive, the shared `MasterDetailShell` + C1/C2/C6 are built
+  vault-agnostic so SC1 is a WIRING task (feed team list + team `getDetail` into the same shell), NOT a
+  parallel build. These consumers keep the accordion in this PR but already consume the shared extracted code
+  (clear-on-lock fix + commonized per-type rendering). Owned by `feature/three-pane-team-emergency`.
 - **SC2** — Deep-linking `selectedId` via URL searchParam is out of scope (security: entry-id browser-history
   metadata leak; UX deferred). `selectedId` is client React state only. Owned by a future issue.
 - **SC3** — Edit-in-place within the detail pane is out of scope; edit remains the existing modal dialog
@@ -539,6 +566,60 @@ contracts internally consistent). No Critical/Major findings remain open.
   restore re-display is closed by INV-C1.6 (`pageshow` re-check).
 - **R-risk-3**: row-click overload (open-detail vs multi-select-toggle vs expand) — INV-C4.1/.4 disambiguate
   by `layoutMode` × `selectionMode`.
+
+## Implementation Checklist (Step 2-1)
+
+### Reusable inventory (MUST reuse — do not reimplement)
+- `useVault()` (vault-context.tsx:1308) — personal key/`vaultStatus`/`lock()`. `useTeamVault()`
+  (team-vault-core.tsx:71) — team key access. `VaultStatus` / `VAULT_STATUS` (vault-context.tsx:91).
+- `lock()` (vault-context.tsx:248-265) — call for INV-C1.6 forced lock (NOT bare setVaultStatus).
+- `useReprompt` (use-reprompt.ts), `useRevealTimeout`/`useRevealSet` (use-reveal-timeout.ts) — keep INSIDE
+  `key={activeEntry.id}` boundary (INV-C2.3). Existing `eslint-disable` at use-reprompt.ts:79 migrates WITH
+  its documented reason (RS2).
+- `buildPersonalEntryAAD` / `buildTeamEntryAAD` — stay inside each vault's `getDetail` closure (INV-C1.7); no
+  AAD re-derivation in the shared hook (project_aad_distributed_contract_rootcause).
+- `fetchDecryptedEntry` logic (password-card.tsx:251-411) — moves into the personal `getDetail` closure
+  verbatim (incl. `aadVersion>=1 && userId` gate); do NOT re-derive.
+- `DisplayEntry` (password-list.tsx) — reuse as the `activeEntry` row type (F19); no parallel `EntryOverview`.
+- `VaultGate` (vault-gate.tsx) — pane MUST stay a descendant (INV-C1.5).
+- `EntryListShell` (entry-list-shell.tsx) — external-checkbox selection-mode wrapper; reuse, don't fork.
+
+### Files to create
+- `src/hooks/vault/use-password-entry-detail.ts` (C1) + `.test.tsx`
+- `src/hooks/use-layout-mode.ts` (C5, useSyncExternalStore+matchMedia, SSR-safe) + `.test.tsx`
+- `src/components/passwords/detail/password-detail-pane.tsx` (C2) + `.test.tsx`
+- `src/components/passwords/detail/password-row.tsx` (C6 compact) + `.test.tsx`
+- `src/components/passwords/detail/master-detail-shell.tsx` (C5, vault-agnostic reusable, INV-C5.6) + `.test.tsx`
+- shared per-entry-type secondary-line renderer + copy/menu cluster sub-components (C6/INV-C6.4)
+- `src/__tests__/setup.ts` (or per-test-file): add `matchMedia` polyfill (T13)
+
+### Files to modify
+- `password-card.tsx` (C3) — replace `expanded &&` block with C1 hook + shared pane body; PUBLIC PROPS
+  UNCHANGED (`expanded`/`onToggleExpand`); use shared per-type renderer (INV-C6.4); call `invalidate()` at
+  :909/:928 instead of `setDetailData(null)`.
+- `password-list.tsx` (C4) — remove `expandedId`; add `activeEntryId`/`onActivate`/`onEntryRemoved`/
+  `layoutMode`; map internally to PasswordCard `expanded`/`onToggleExpand`; fire `onEntryRemoved(id)` at
+  :256/:282/:297; bulk membership-check→`onActivate(null)` after `fetchPasswords()` (INV-C4.3).
+- `password-dashboard.tsx` (C4/C5) — own `activeEntry` (DisplayEntry|null); `useLayoutMode()`; mount
+  `MasterDetailShell` with list + `PasswordDetailPane key={activeEntry?.id}`; clear `activeEntry` in the
+  during-render `viewKey` block (INV-C4.2) + on `onEntryRemoved` (INV-C4.3); keyboard nav (C7).
+- `messages/en.json` + `messages/ja.json` — "select an entry" / "N selected" (ja: 保管庫 vocabulary, no カタカナ).
+- bfcache `pageshow` handler (INV-C1.6) — likely in vault-context.tsx alongside the `pagehide` handler.
+
+### Patterns to follow consistently
+- Commonization (user directive): every new component vault-agnostic; team/emergency consume the same C1/C2/
+  C6 code; `MasterDetailShell` reusable (INV-C5.6). The 3 SC1 consumers keep their own `expandedId` (path-
+  scoped forbidden pattern, F18) and are UNTOUCHED except adopting the shared hook/pane/renderer.
+- All clear-behavior tests: positive-precondition → trigger → assert-null (T6, non-decorative).
+
+### CI gate parity (Step 2-1 diff)
+Local `scripts/pre-pr.sh` present (the aggregate). CI gates include: `check-state-mutation-centralization`,
+`refactor-phase-verify`, `check:bypass-rls`, `check:crypto-domains`, `check:env-docs`, `check:migration-drift`,
+`check:team-auth-rls`, `licenses:check:*:strict`, `lint`, (+ test/build/e2e). Disposition: run
+`scripts/pre-pr.sh` in Step 2-4 (it bundles these) + `extract-ci-checks.sh` loop. No parity gap recorded yet;
+`check:team-auth-rls` / `check:crypto-domains` are relevant given team-path commonization — re-verify in 2-4.
+Per project_ci_gates_beyond_pre_pr: Extension + DB+Redis integration jobs are NOT in pre-pr.sh — but this PR
+touches neither extension nor DB, so those jobs are N/A here.
 
 ## User operation scenarios
 
