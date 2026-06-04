@@ -41,6 +41,17 @@ Entering selection mode now clears `activeEntry` and the master-detail detail sl
 summary (existing `selectedCount` i18n) instead of a decrypted single-entry pane, so no plaintext stays on
 screen and no `getDetail` decrypt runs during bulk ops (INV-C4.4).
 
+## D8 — SC1 scope expanded: team normal-list + team archive made 3-pane this PR (user-directed)
+SC1 originally deferred ALL team/emergency 3-pane to a follow-up. Per user direction (commonization;
+"personal and team should look the same"), the team NORMAL list and team ARCHIVE view were brought into the
+3-pane shell this PR, reusing the shared MasterDetailShell/PasswordRow/PasswordDetailPane/useLayoutMode/
+usePasswordEntryDetail and the now vault-agnostic useEntryActions + shared blob mapper. Personal archive was
+already 3-pane (PasswordList reuse). Still deferred (SC1-remainder): TRASH 3-pane (personal TrashList + team
+TeamTrashList) and the deeper STRUCTURAL unification (a single vault-agnostic list component both vaults mount
+so all views get 3-pane automatically — team currently uses bespoke per-view components vs personal's single
+PasswordList). User accepted current state: visual/behavioral parity achieved via shared sub-components;
+structural unification is a separate follow-up. `TODO(three-pane-structural-unification)`.
+
 ## D5 — Share-from-row-menu in master-detail activates the entry (within SC3)
 In master-detail mode, choosing Share from the compact row's overflow menu activates the entry (opens the
 pane) rather than immediately opening the share dialog, because `PasswordDetailInline` exposes no share
