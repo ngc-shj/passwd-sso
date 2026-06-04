@@ -5,6 +5,9 @@ import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { PasswordCard } from "@/components/passwords/detail/password-card";
+import { PasswordRow } from "@/components/passwords/detail/password-row";
+import { MasterDetailShell } from "@/components/passwords/detail/master-detail-shell";
+import { PasswordDetailPane } from "@/components/passwords/detail/password-detail-pane";
 import { EntryListHeader } from "@/components/passwords/entry/entry-list-header";
 import { EntrySortMenu } from "@/components/passwords/entry/entry-sort-menu";
 import { SearchBar } from "@/components/layout/search-bar";
@@ -25,7 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, Clock, Landmark, KeySquare, CheckSquare, FolderOpen, Tag, Terminal } from "lucide-react";
-import { TEAM_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
+import { TEAM_ROLE, ENTRY_TYPE, VAULT_STATUS, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/vault/entry-sort";
 import { buildFolderPath } from "@/lib/folder/folder-path";
@@ -40,6 +43,9 @@ import { useBulkAction } from "@/hooks/bulk/use-bulk-action";
 import { useTeamEntryMutations } from "@/hooks/team/use-team-entry-mutations";
 import { EntryListShell } from "@/components/bulk/entry-list-shell";
 import { fetchApi } from "@/lib/url-helpers";
+import { useLayoutMode } from "@/hooks/use-layout-mode";
+import { usePasswordEntryDetail } from "@/hooks/vault/use-password-entry-detail";
+import { useEntryActions } from "@/hooks/vault/use-entry-actions";
 
 interface TeamInfo {
   id: string;
@@ -118,6 +124,12 @@ export default function TeamDashboardPage({
   const isTeamFavorites = activeScope === "favorites";
   const isTeamSpecialView = isTeamArchive || isTeamTrash;
 
+  // 3-pane layout mode — "master-detail" at lg+, "accordion" below (INV-C5.5).
+  const layoutMode = useLayoutMode();
+
+  // Active entry in the detail pane (single source of truth, INV-C4.2).
+  const [activeEntry, setActiveEntry] = useState<TeamPasswordEntry | null>(null);
+
   const [teamFolders, setTeamFolders] = useState<FolderItem[]>([]);
   const [teamTags, setTeamTags] = useState<{ id: string; name: string; color?: string | null; parentId?: string | null }[]>([]);
   useEffect(() => {
@@ -137,12 +149,13 @@ export default function TeamDashboardPage({
     })();
   }, [teamId]);
 
-  // Reset selection mode when view changes (during render, not in effect)
+  // Reset selection mode and active entry when view changes (during render, INV-C4.2).
   const viewKey = `${activeScope}|${activeTagId}|${activeFolderId}|${activeEntryType}`;
   const [prevViewKey, setPrevViewKey] = useState(viewKey);
   if (prevViewKey !== viewKey) {
     setPrevViewKey(viewKey);
     setSelectionMode(false);
+    setActiveEntry(null);
   }
 
   const fetchTeam = async (): Promise<boolean> => {
@@ -362,8 +375,9 @@ export default function TeamDashboardPage({
     isFolderOrTagSelected;
 
   const handleToggleFavorite = async (id: string, current: boolean) => {
-    // Optimistic update
+    // Optimistic update — unfavoriting on the favorites view removes the entry (INV-C4.3).
     if (isTeamFavorites && current) {
+      if (activeEntry?.id === id) setActiveEntry(null);
       setPasswords((prev) => prev.filter((e) => e.id !== id));
     } else {
       setPasswords((prev) =>
@@ -381,14 +395,31 @@ export default function TeamDashboardPage({
   };
 
   const {
-    toggleArchive: handleToggleArchive,
-    deleteEntry: handleDelete,
+    toggleArchive: toggleArchiveMutation,
+    deleteEntry: deleteEntryMutation,
     handleSaved,
   } = useTeamEntryMutations<TeamPasswordEntry>({
     teamId,
     setEntries: setPasswords,
     refetchEntries: fetchPasswords,
   });
+
+  // Wrap mutations to clear activeEntry when the affected entry is selected (INV-C4.3).
+  const handleToggleArchive = useCallback(
+    (id: string, archived: boolean) => {
+      if (activeEntry?.id === id) setActiveEntry(null);
+      return toggleArchiveMutation(id, archived);
+    },
+    [activeEntry, toggleArchiveMutation],
+  );
+
+  const handleDelete = useCallback(
+    (id: string) => {
+      if (activeEntry?.id === id) setActiveEntry(null);
+      return deleteEntryMutation(id);
+    },
+    [activeEntry, deleteEntryMutation],
+  );
 
   const decryptFullBlob = useCallback(
     async (id: string, raw: Record<string, unknown>) => {
@@ -469,6 +500,35 @@ export default function TeamDashboardPage({
       return (blob.url as string) ?? null;
     },
     [teamId, decryptFullBlob],
+  );
+
+  // Team vault status — mirrors personal vaultStatus; LOADING when the team key is
+  // pending (not yet distributed), UNLOCKED once it is available (INV-C1.2/C1.3).
+  const teamVaultStatus = keyPending ? VAULT_STATUS.LOADING : VAULT_STATUS.UNLOCKED;
+
+  // getDetail for the active entry in the team detail pane.
+  // Re-created only when activeEntry changes (the fetcher is entry-specific).
+  const teamGetDetail = useCallback(
+    (_id: string) =>
+      activeEntry
+        ? createDetailFetcher(activeEntry.id, activeEntry.entryType)()
+        : Promise.reject(new Error("no active entry")),
+    [activeEntry, createDetailFetcher],
+  );
+
+  const {
+    detailData: teamDetailData,
+    loading: teamDetailLoading,
+    error: teamDetailError,
+    invalidate: invalidateTeamDetail,
+  } = usePasswordEntryDetail(activeEntry?.id ?? null, {
+    getDetail: teamGetDetail,
+    vaultStatus: teamVaultStatus,
+  });
+
+  // Row callbacks for master-detail rows — vault-agnostic via useEntryActions.
+  const buildTeamRowCallbacks = useEntryActions((entry: TeamPasswordEntry) =>
+    createDetailFetcher(entry.id, entry.entryType),
   );
 
   const filtered = passwords.filter((p) => {
@@ -556,9 +616,52 @@ export default function TeamDashboardPage({
     );
   }
 
+  // Shared bulk action dialog — used by both layout modes.
+  const bulkConfirmDialog = {
+    open: bulkDialogOpen,
+    onOpenChange: setBulkDialogOpen,
+    title:
+      pendingAction === "archive"
+        ? tl("moveSelectedToArchive")
+        : pendingAction === "unarchive"
+          ? tl("moveSelectedToUnarchive")
+          : tl("moveSelectedToTrash"),
+    description:
+      pendingAction === "archive"
+        ? tl("bulkArchiveConfirm", { count: selectedIds.size })
+        : pendingAction === "unarchive"
+          ? tl("bulkUnarchiveConfirm", { count: selectedIds.size })
+          : tl("bulkMoveConfirm", { count: selectedIds.size }),
+    cancelLabel: tl("cancel"),
+    confirmLabel: tl("confirm"),
+    processing: bulkProcessing,
+    onConfirm: () => void executeAction(),
+  };
+
+  const floatingBulkActions = (
+    <>
+      <Button variant="secondary" size="sm" onClick={() => requestAction("archive")}>
+        <Archive className="h-4 w-4 mr-2" />
+        {tl("moveSelectedToArchive")}
+      </Button>
+      <Button variant="destructive" size="sm" onClick={() => requestAction("trash")}>
+        <Trash2 className="h-4 w-4 mr-2" />
+        {tl("moveSelectedToTrash")}
+      </Button>
+    </>
+  );
+
+  // master-detail: h-full fills <main>'s definite flex height so panes scroll
+  // independently (INV-C5.1). accordion: flex-1 keeps page-level scroll.
   return (
-    <div className="flex-1 p-4 md:p-6">
-      <div className="mx-auto max-w-4xl space-y-4">
+    <div
+      className={[
+        "flex flex-col min-h-0 p-4 md:p-6",
+        layoutMode === "master-detail" && !isTeamSpecialView ? "h-full" : "flex-1",
+      ].join(" ")}
+    >
+      {/* Header + search bar — always max-w-4xl, above the shell */}
+      <div className={layoutMode === "master-detail" && !isTeamSpecialView ? "w-full" : "mx-auto max-w-4xl w-full"}>
         <EntryListHeader
           icon={headerIcon}
           title={isPrimaryScopeLabel ? subtitle : (team?.name ?? "...")}
@@ -609,7 +712,7 @@ export default function TeamDashboardPage({
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setSelectionMode(true)}
+                    onClick={() => { setSelectionMode(true); setActiveEntry(null); }}
                   >
                     <CheckSquare className="h-4 w-4 mr-2" />
                     {tDash("select")}
@@ -677,7 +780,7 @@ export default function TeamDashboardPage({
           }
         />
 
-        <div className="flex items-center gap-2 rounded-xl border bg-card/80 p-3">
+        <div className="mb-4 flex items-center gap-2 rounded-xl border bg-card/80 p-3">
           <div className="flex-1">
             <SearchBar value={searchQuery} onChange={setSearchQuery} />
           </div>
@@ -691,9 +794,15 @@ export default function TeamDashboardPage({
             }}
           />
         </div>
+      </div>
 
+      {/* Main content area */}
+      <div className={[
+        "flex-1 min-h-0",
+        layoutMode === "master-detail" && !isTeamSpecialView ? "overflow-hidden" : "mx-auto max-w-4xl w-full",
+      ].join(" ")}>
         {keyPending && !isTeamSpecialView && (
-          <Card className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
+          <Card className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30 mb-4">
             <div className="flex items-start gap-3">
               <Clock className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600 dark:text-amber-400" />
               <div>
@@ -709,37 +818,41 @@ export default function TeamDashboardPage({
         )}
 
         {isTeamArchive && team ? (
-          <TeamArchivedList
-            ref={archivedListRef}
-            teamId={teamId}
-            teamName={team.name}
-            role={team.role}
-            searchQuery={searchQuery}
-            refreshKey={refreshKey}
-            sortBy={sortBy}
-            selectionMode={selectionMode}
-            onSelectedCountChange={(count, allSel, limit) => {
-              setChildSelectedCount(count);
-              setChildAllSelected(allSel);
-              setChildAtLimit(limit);
-            }}
-          />
+          <div className="space-y-4">
+            <TeamArchivedList
+              ref={archivedListRef}
+              teamId={teamId}
+              teamName={team.name}
+              role={team.role}
+              searchQuery={searchQuery}
+              refreshKey={refreshKey}
+              sortBy={sortBy}
+              selectionMode={selectionMode}
+              onSelectedCountChange={(count, allSel, limit) => {
+                setChildSelectedCount(count);
+                setChildAllSelected(allSel);
+                setChildAtLimit(limit);
+              }}
+            />
+          </div>
         ) : isTeamTrash && team ? (
-          <TeamTrashList
-            ref={trashListRef}
-            teamId={teamId}
-            teamName={team.name}
-            role={team.role}
-            searchQuery={searchQuery}
-            refreshKey={refreshKey}
-            sortBy={sortBy}
-            selectionMode={selectionMode}
-            onSelectedCountChange={(count, allSel, limit) => {
-              setChildSelectedCount(count);
-              setChildAllSelected(allSel);
-              setChildAtLimit(limit);
-            }}
-          />
+          <div className="space-y-4">
+            <TeamTrashList
+              ref={trashListRef}
+              teamId={teamId}
+              teamName={team.name}
+              role={team.role}
+              searchQuery={searchQuery}
+              refreshKey={refreshKey}
+              sortBy={sortBy}
+              selectionMode={selectionMode}
+              onSelectedCountChange={(count, allSel, limit) => {
+                setChildSelectedCount(count);
+                setChildAllSelected(allSel);
+                setChildAtLimit(limit);
+              }}
+            />
+          </div>
         ) : loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -758,7 +871,73 @@ export default function TeamDashboardPage({
               )}
             </div>
           </Card>
+        ) : layoutMode === "master-detail" ? (
+          // 3-pane master-detail (lg+): compact rows on the left, detail pane on the right.
+          <MasterDetailShell
+            layoutMode={layoutMode}
+            activeEntryId={activeEntry?.id ?? null}
+            listSlot={
+              <div className="space-y-1 p-2">
+                <EntryListShell
+                  entries={sortedFiltered}
+                  selectionMode={selectionMode}
+                  selectedIds={selectedIds}
+                  atLimit={atLimit}
+                  onToggleSelectOne={toggleSelectOne}
+                  selectEntryLabel={(title) => tl("selectEntry", { title })}
+                  floatingActions={floatingBulkActions}
+                  confirmDialog={bulkConfirmDialog}
+                  renderEntry={(entry) => (
+                    <PasswordRow
+                      entry={entry}
+                      isActive={activeEntry?.id === entry.id}
+                      onActivate={() =>
+                        setActiveEntry((prev) =>
+                          prev?.id === entry.id ? null : entry
+                        )
+                      }
+                      selectionMode={selectionMode}
+                      {...buildTeamRowCallbacks(entry)}
+                      onShare={() => setActiveEntry(entry)}
+                      onEdit={() => handleEdit(entry.id)}
+                      onToggleArchive={() =>
+                        void handleToggleArchive(entry.id, entry.isArchived)
+                      }
+                      onDeleteRequest={() => void handleDelete(entry.id)}
+                      canEdit={canEditPerm}
+                      canDelete={canDeletePerm}
+                      canShare={canEditPerm}
+                    />
+                  )}
+                />
+              </div>
+            }
+            detailSlot={
+              selectionMode ? (
+                <div className="flex h-full items-center justify-center py-16 text-sm text-muted-foreground">
+                  {tl("selectedCount", { count: selectedIds.size })}
+                </div>
+              ) : (
+                <PasswordDetailPane
+                  key={activeEntry?.id ?? "none"}
+                  entryId={activeEntry?.id ?? null}
+                  entry={activeEntry}
+                  detailData={teamDetailData}
+                  loading={teamDetailLoading}
+                  error={teamDetailError}
+                  onEdit={activeEntry ? () => handleEdit(activeEntry.id) : undefined}
+                  onRefresh={() => {
+                    fetchPasswords();
+                    invalidateTeamDetail();
+                  }}
+                  teamId={teamId}
+                  readOnly={!canEditPerm}
+                />
+              )
+            }
+          />
         ) : (
+          // Accordion mode (< lg): existing PasswordCard list, unchanged behavior.
           <EntryListShell
             entries={sortedFiltered}
             selectionMode={selectionMode}
@@ -794,38 +973,8 @@ export default function TeamDashboardPage({
                 teamId={teamId}
               />
             )}
-            floatingActions={
-              <>
-                <Button variant="secondary" size="sm" onClick={() => requestAction("archive")}>
-                  <Archive className="h-4 w-4 mr-2" />
-                  {tl("moveSelectedToArchive")}
-                </Button>
-                <Button variant="destructive" size="sm" onClick={() => requestAction("trash")}>
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  {tl("moveSelectedToTrash")}
-                </Button>
-              </>
-            }
-            confirmDialog={{
-              open: bulkDialogOpen,
-              onOpenChange: setBulkDialogOpen,
-              title:
-                pendingAction === "archive"
-                  ? tl("moveSelectedToArchive")
-                  : pendingAction === "unarchive"
-                    ? tl("moveSelectedToUnarchive")
-                    : tl("moveSelectedToTrash"),
-              description:
-                pendingAction === "archive"
-                  ? tl("bulkArchiveConfirm", { count: selectedIds.size })
-                  : pendingAction === "unarchive"
-                    ? tl("bulkUnarchiveConfirm", { count: selectedIds.size })
-                    : tl("bulkMoveConfirm", { count: selectedIds.size }),
-              cancelLabel: tl("cancel"),
-              confirmLabel: tl("confirm"),
-              processing: bulkProcessing,
-              onConfirm: () => void executeAction(),
-            }}
+            floatingActions={floatingBulkActions}
+            confirmDialog={bulkConfirmDialog}
           />
         )}
       </div>
@@ -855,6 +1004,7 @@ export default function TeamDashboardPage({
             handleSaved();
             setExpandedId(null);
             setRefreshKey((k) => k + 1);
+            invalidateTeamDetail();
           }}
           defaultFolderId={activeFolderId ?? null}
           defaultTags={matchedTag ? [{ id: matchedTag.id, name: matchedTag.name, color: matchedTag.color ?? null }] : undefined}

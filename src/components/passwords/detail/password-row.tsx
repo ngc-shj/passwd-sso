@@ -6,13 +6,41 @@ import { EntryIcon } from "./entry-icon";
 import { EntrySecondaryLine } from "./entry-secondary-line";
 import { EntryActionsMenu } from "./entry-actions-menu";
 import { ENTRY_TYPE } from "@/lib/constants";
-import type { DisplayEntry } from "./password-list";
+import type { EntryTypeValue } from "@/lib/constants";
 
 // Maximum number of tags to show before adding an overflow indicator.
 const MAX_VISIBLE_TAGS = 3;
 
+/**
+ * Minimal entry shape required by PasswordRow.
+ * Both DisplayEntry (personal vault) and TeamPasswordEntry (team vault) satisfy
+ * this interface, keeping PasswordRow vault-agnostic (Commonization principle).
+ */
+export interface PasswordRowEntry {
+  id: string;
+  entryType: EntryTypeValue;
+  title: string;
+  username: string | null;
+  urlHost: string | null;
+  snippet: string | null;
+  brand: string | null;
+  lastFour: string | null;
+  cardholderName: string | null;
+  fullName: string | null;
+  idNumberLast4: string | null;
+  relyingPartyId: string | null;
+  bankName: string | null;
+  accountNumberLast4: string | null;
+  softwareName: string | null;
+  licensee: string | null;
+  keyType: string | null;
+  fingerprint: string | null;
+  tags: { name: string; color: string | null }[];
+  isArchived: boolean;
+}
+
 interface PasswordRowProps {
-  entry: DisplayEntry;
+  entry: PasswordRowEntry;
   /** Whether this row is the currently selected entry in the detail pane. */
   isActive: boolean;
   /** Called when the user clicks the row (selects this entry). */

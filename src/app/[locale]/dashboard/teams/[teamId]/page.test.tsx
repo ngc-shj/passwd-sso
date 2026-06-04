@@ -12,6 +12,48 @@ const { mockSearchParams, mockFetch, mockGetTeamEncryptionKey, mockDecryptData }
   mockDecryptData: vi.fn(),
 }));
 
+// useLayoutMode returns "accordion" in jsdom tests (no real matchMedia).
+vi.mock("@/hooks/use-layout-mode", () => ({
+  useLayoutMode: () => "accordion" as const,
+}));
+
+// Stub usePasswordEntryDetail — not exercised in these data-flow tests.
+vi.mock("@/hooks/vault/use-password-entry-detail", () => ({
+  usePasswordEntryDetail: () => ({
+    detailData: null,
+    loading: false,
+    error: null,
+    invalidate: vi.fn(),
+  }),
+}));
+
+// Stub useEntryActions — returns a factory that yields no-op callbacks.
+vi.mock("@/hooks/vault/use-entry-actions", () => ({
+  useEntryActions: () => () => ({
+    fetchPassword: vi.fn(),
+    fetchContent: vi.fn(),
+    fetchCardField: vi.fn(),
+    fetchIdentityField: vi.fn(),
+    fetchPasskeyField: vi.fn(),
+    fetchBankField: vi.fn(),
+    fetchLicenseField: vi.fn(),
+    fetchSshField: vi.fn(),
+    onCopyUsername: vi.fn(),
+    onCopyPassword: vi.fn(),
+    onCopyContent: vi.fn(),
+    onCopyCardNumber: vi.fn(),
+    onCopyCvv: vi.fn(),
+    onCopyCredentialId: vi.fn(),
+    onCopyAccountNumber: vi.fn(),
+    onCopyLicenseKey: vi.fn(),
+    onCopyFingerprint: vi.fn(),
+    onCopyPublicKey: vi.fn(),
+    onCopyIdNumber: vi.fn(),
+    onOpenUrl: vi.fn(),
+    onShare: vi.fn(),
+  }),
+}));
+
 const teamArchivedListMock = vi.fn();
 const teamTrashListMock = vi.fn();
 
@@ -45,6 +87,17 @@ vi.mock("@/components/passwords/detail/password-card", () => ({
       password-card
     </button>
   ),
+}));
+vi.mock("@/components/passwords/detail/password-row", () => ({
+  PasswordRow: () => <div data-testid="password-row" />,
+}));
+vi.mock("@/components/passwords/detail/master-detail-shell", () => ({
+  MasterDetailShell: ({ listSlot, detailSlot }: { listSlot: React.ReactNode; detailSlot: React.ReactNode }) => (
+    <div data-testid="master-detail-shell">{listSlot}{detailSlot}</div>
+  ),
+}));
+vi.mock("@/components/passwords/detail/password-detail-pane", () => ({
+  PasswordDetailPane: () => <div data-testid="password-detail-pane" />,
 }));
 vi.mock("@/components/team/forms/team-login-form", () => ({
   TeamLoginForm: () => null,

@@ -7,8 +7,21 @@ import { EntryIcon } from "./entry-icon";
 import { CopyButton } from "../shared/copy-button";
 import { TagBadge } from "@/components/tags/tag-badge";
 import { ENTRY_TYPE } from "@/lib/constants";
+import type { EntryTypeValue } from "@/lib/constants";
 import type { InlineDetailData } from "@/types/entry";
-import type { DisplayEntry } from "./password-list";
+
+/**
+ * Minimal entry shape required by PasswordDetailPane.
+ * Both DisplayEntry (personal vault) and TeamPasswordEntry (team vault) satisfy
+ * this interface, keeping PasswordDetailPane vault-agnostic (Commonization principle).
+ */
+export interface PasswordDetailPaneEntry {
+  entryType: EntryTypeValue;
+  title: string;
+  username: string | null;
+  urlHost: string | null;
+  tags: { name: string; color: string | null }[];
+}
 
 interface PasswordDetailPaneProps {
   entryId: string | null;
@@ -19,7 +32,7 @@ interface PasswordDetailPaneProps {
    * in the left pane is a separate component, so the right pane must carry its
    * own identity header).
    */
-  entry: DisplayEntry | null;
+  entry: PasswordDetailPaneEntry | null;
   detailData: InlineDetailData | null;
   loading: boolean;
   error: Error | null;
