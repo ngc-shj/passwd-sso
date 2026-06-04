@@ -16,7 +16,10 @@ const EXPECTED_FIELDS: Record<string, string[]> = {
     "expiryMonth", "expiryYear", "cvv", "notes",
   ],
   IDENTITY: [
-    "title", "fullName", "address", "phone", "email",
+    "title", "fullName",
+    "givenName", "familyName", "middleName", "familyNameKana", "givenNameKana",
+    "addressLine1", "addressLine2", "city", "state", "postalCode", "country",
+    "address", "phone", "email",
     "dateOfBirth", "nationality", "idNumber", "issueDate", "expiryDate", "notes",
   ],
   PASSKEY: [

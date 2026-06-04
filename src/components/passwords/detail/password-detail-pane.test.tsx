@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import type { InlineDetailData } from "@/types/entry";
-import type { EntryActionCallbacks } from "@/hooks/vault/use-entry-actions";
 import type { DisplayEntry } from "./password-list";
 
 vi.mock("next-intl", () => ({
@@ -18,26 +17,6 @@ vi.mock("next-intl", () => ({
 vi.mock("./password-detail-inline", () => ({
   PasswordDetailInline: ({ data }: { data: InlineDetailData }) => (
     <div data-testid="detail-inline" data-entry-id={data.id} />
-  ),
-}));
-
-// Stub EntryActionsMenu to a test sentinel that exposes onCopyUsername via a button.
-vi.mock("./entry-actions-menu", () => ({
-  EntryActionsMenu: ({
-    onCopyUsername,
-    onEdit,
-  }: {
-    onCopyUsername: () => void;
-    onEdit: () => void;
-  }) => (
-    <div data-testid="entry-actions-menu">
-      <button type="button" data-testid="copy-username-btn" onClick={onCopyUsername}>
-        copy-username
-      </button>
-      <button type="button" data-testid="edit-btn" onClick={onEdit}>
-        edit
-      </button>
-    </div>
   ),
 }));
 
@@ -83,33 +62,6 @@ const minimalEntry: DisplayEntry = {
   createdAt: "2024-01-01T00:00:00Z",
   updatedAt: "2024-01-01T00:00:00Z",
 };
-
-function makeActions(overrides?: Partial<EntryActionCallbacks>): EntryActionCallbacks {
-  const noop = async () => "";
-  return {
-    fetchPassword: noop,
-    fetchContent: noop,
-    fetchCardField: async () => "",
-    fetchIdentityField: async () => "",
-    fetchPasskeyField: async () => "",
-    fetchBankField: async () => "",
-    fetchLicenseField: async () => "",
-    fetchSshField: async () => "",
-    onCopyPassword: vi.fn(),
-    onCopyContent: vi.fn(),
-    onCopyUsername: vi.fn(),
-    onCopyCardNumber: vi.fn(),
-    onCopyCvv: vi.fn(),
-    onCopyCredentialId: vi.fn(),
-    onCopyAccountNumber: vi.fn(),
-    onCopyLicenseKey: vi.fn(),
-    onCopyFingerprint: vi.fn(),
-    onCopyPublicKey: vi.fn(),
-    onCopyIdNumber: vi.fn(),
-    onOpenUrl: async () => {},
-    ...overrides,
-  };
-}
 
 describe("PasswordDetailPane", () => {
   it("renders the empty-state when entryId is null (INV-C2.2)", () => {
@@ -300,8 +252,8 @@ describe("T4 INV-C2.1: cross-entry reveal carry-over prevented by key={entryId}"
   });
 });
 
-// ── T5: pane header with EntryActionsMenu ─────────────────────────────────────
-describe("PasswordDetailPane header with actions", () => {
+// ── Pane header: identity + username as a labeled, copyable field ─────────────
+describe("PasswordDetailPane header", () => {
   it("renders the entry title in the header", () => {
     render(
       <PasswordDetailPane
@@ -310,13 +262,12 @@ describe("PasswordDetailPane header with actions", () => {
         detailData={null}
         loading={false}
         error={null}
-        actions={makeActions()}
       />,
     );
     expect(screen.getByTestId("detail-pane-title")).toHaveTextContent("My Login");
   });
 
-  it("renders the secondary line in the header", () => {
+  it("renders the username as a labeled field with its value", () => {
     render(
       <PasswordDetailPane
         entryId="entry-1"
@@ -324,27 +275,32 @@ describe("PasswordDetailPane header with actions", () => {
         detailData={null}
         loading={false}
         error={null}
-        actions={makeActions()}
       />,
     );
-    expect(screen.getByTestId("detail-pane-secondary")).toBeInTheDocument();
+    const field = screen.getByTestId("detail-pane-username");
+    // label is the i18n key stub ("username") + the plaintext value from the overview row.
+    expect(field).toHaveTextContent("username");
+    expect(field).toHaveTextContent("user@example.com");
   });
 
-  it("renders EntryActionsMenu when entry and actions are provided", () => {
+  it("does NOT render the username field when the entry has no username", () => {
     render(
       <PasswordDetailPane
         entryId="entry-1"
-        entry={minimalEntry}
+        entry={{ ...minimalEntry, username: null }}
         detailData={null}
         loading={false}
         error={null}
-        actions={makeActions()}
       />,
     );
-    expect(screen.getByTestId("entry-actions-menu")).toBeInTheDocument();
+    expect(screen.queryByTestId("detail-pane-username")).not.toBeInTheDocument();
   });
 
-  it("does NOT render EntryActionsMenu when actions are absent", () => {
+  it("copies the username from the header copy button", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: { writeText, readText: vi.fn().mockResolvedValue("") },
+    });
     render(
       <PasswordDetailPane
         entryId="entry-1"
@@ -354,39 +310,8 @@ describe("PasswordDetailPane header with actions", () => {
         error={null}
       />,
     );
-    expect(screen.queryByTestId("entry-actions-menu")).not.toBeInTheDocument();
-  });
-
-  it("clicking copy-username invokes actions.onCopyUsername", () => {
-    const onCopyUsername = vi.fn();
-    render(
-      <PasswordDetailPane
-        entryId="entry-1"
-        entry={minimalEntry}
-        detailData={null}
-        loading={false}
-        error={null}
-        actions={makeActions({ onCopyUsername })}
-      />,
-    );
-    fireEvent.click(screen.getByTestId("copy-username-btn"));
-    expect(onCopyUsername).toHaveBeenCalledTimes(1);
-  });
-
-  it("clicking edit invokes onEdit", () => {
-    const onEdit = vi.fn();
-    render(
-      <PasswordDetailPane
-        entryId="entry-1"
-        entry={minimalEntry}
-        detailData={null}
-        loading={false}
-        error={null}
-        actions={makeActions()}
-        onEdit={onEdit}
-      />,
-    );
-    fireEvent.click(screen.getByTestId("edit-btn"));
-    expect(onEdit).toHaveBeenCalledTimes(1);
+    const field = screen.getByTestId("detail-pane-username");
+    fireEvent.click(within(field).getByRole("button"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("user@example.com"));
   });
 });

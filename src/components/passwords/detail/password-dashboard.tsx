@@ -39,7 +39,6 @@ import { MasterDetailShell } from "@/components/passwords/detail/master-detail-s
 import { PasswordDetailPane } from "@/components/passwords/detail/password-detail-pane";
 import { usePasswordEntryDetail } from "@/hooks/vault/use-password-entry-detail";
 import { buildPersonalGetDetail } from "@/lib/vault/build-personal-get-detail";
-import { useEntryActions } from "@/hooks/vault/use-entry-actions";
 import { PasswordEditDialogLoader } from "@/components/passwords/dialogs/personal-password-edit-dialog-loader";
 
 // Static icon map — created once at module scope to avoid re-creation on every render
@@ -93,10 +92,6 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
   // Vault context for personal decrypt + detail pane.
   const { encryptionKey, userId, status: vaultStatus } = useVault();
 
-  // Shared factory for entry copy/fetch callbacks — used by both list rows (via PasswordList)
-  // and the detail pane header (via paneActions below). ONE source of truth (Commonization).
-  const buildEntryCallbacks = useEntryActions(encryptionKey, userId);
-
   // Pane-level detail dialogs (edit) — owned here, not duplicated in PasswordCard.
   const [paneEditOpen, setPaneEditOpen] = useState(false);
 
@@ -108,8 +103,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
       activeEntry && encryptionKey
         ? buildPersonalGetDetail(activeEntry, { encryptionKey, userId })
         : async (_id: string): Promise<never> => { throw new Error("No active entry or vault locked"); },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeEntry?.id, encryptionKey, userId],
+    [activeEntry, encryptionKey, userId],
   );
 
   // C1 hook — manages fetch/decrypt lifecycle for the active entry in the detail pane.
@@ -303,8 +297,12 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
   // so that debounced setTimeout callbacks read current values without stale closures.
   const visibleEntriesRef = useRef<DisplayEntry[]>([]);
   const activeEntryRef = useRef<DisplayEntry | null>(activeEntry);
-  // Keep activeEntryRef in sync with activeEntry state (renders are the only update point).
-  activeEntryRef.current = activeEntry;
+  // Keep activeEntryRef in sync so the debounced keyboard-nav callback reads the
+  // current value without a stale closure. Synced in an effect (writing a ref during
+  // render is disallowed by the React Compiler).
+  useEffect(() => {
+    activeEntryRef.current = activeEntry;
+  }, [activeEntry]);
 
   // Refined keyboard handler that uses visibleEntriesRef.
   const handleListKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -407,10 +405,6 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
           error={detailError}
           onEdit={activeEntry ? () => setPaneEditOpen(true) : undefined}
           onRefresh={() => { invalidateDetail(); handleDataChange(); }}
-          actions={activeEntry ? buildEntryCallbacks(activeEntry) : undefined}
-          canEdit={activeEntry ? !activeEntry.isArchived : false}
-          canDelete={false}
-          canShare={false}
         />
       )}
     </div>

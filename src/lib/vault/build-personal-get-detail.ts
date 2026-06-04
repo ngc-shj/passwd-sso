@@ -76,6 +76,17 @@ export function buildPersonalGetDetail(
       expiryYear?: string | null;
       cvv?: string | null;
       fullName?: string | null;
+      givenName?: string | null;
+      familyName?: string | null;
+      middleName?: string | null;
+      familyNameKana?: string | null;
+      givenNameKana?: string | null;
+      addressLine1?: string | null;
+      addressLine2?: string | null;
+      city?: string | null;
+      state?: string | null;
+      postalCode?: string | null;
+      country?: string | null;
       address?: string | null;
       phone?: string | null;
       email?: string | null;
@@ -133,6 +144,17 @@ export function buildPersonalGetDetail(
       expiryYear: e.expiryYear,
       cvv: e.cvv,
       fullName: e.fullName,
+      givenName: e.givenName,
+      familyName: e.familyName,
+      middleName: e.middleName,
+      familyNameKana: e.familyNameKana,
+      givenNameKana: e.givenNameKana,
+      addressLine1: e.addressLine1,
+      addressLine2: e.addressLine2,
+      city: e.city,
+      state: e.state,
+      postalCode: e.postalCode,
+      country: e.country,
       address: e.address,
       phone: e.phone,
       email: e.email,

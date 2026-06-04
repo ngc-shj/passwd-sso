@@ -120,6 +120,37 @@ describe("buildPersonalGetDetail", () => {
     );
   });
 
+  it("maps the structured IDENTITY fields from the blob (regression: structured address)", async () => {
+    // The structured-address feature added these fields to the form/section/type/history,
+    // but the decrypt→detailData mapping originally only carried the flat fields, so the
+    // identity detail rendered nothing. Guard every structured field round-trips.
+    const structured = {
+      givenName: "Taro",
+      familyName: "Yamada",
+      middleName: "M",
+      familyNameKana: "ヤマダ",
+      givenNameKana: "タロウ",
+      addressLine1: "1-2-3 Chuo",
+      addressLine2: "Apt 4",
+      city: "Yokohama",
+      state: "Kanagawa",
+      postalCode: "220-0000",
+      country: "JP",
+    };
+    mockFetchApi.mockResolvedValueOnce({ ok: true, json: async () => makeRawRow() });
+    mockDecryptData.mockResolvedValueOnce(makeDecryptedBlob(structured));
+
+    const closure = buildPersonalGetDetail(
+      makeEntry({ entryType: "IDENTITY" }),
+      { encryptionKey: STABLE_KEY, userId: USER_ID },
+    );
+    const detail = await closure(ENTRY_ID);
+
+    for (const [key, value] of Object.entries(structured)) {
+      expect(detail[key as keyof InlineDetailData]).toBe(value);
+    }
+  });
+
   it("does NOT build personal AAD when aadVersion < 1 (legacy)", async () => {
     mockFetchApi.mockResolvedValueOnce({
       ok: true,

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { Code, Eye } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "../../shared/copy-button";
@@ -28,12 +29,22 @@ export function SecureNoteSection({ data }: SectionProps) {
         <label className="text-sm text-muted-foreground">{t("content")}</label>
         {data.isMarkdown && (
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
-            className="h-6 px-2 text-xs"
+            className="h-7 gap-1.5 text-xs"
             onClick={() => setShowMarkdownView((v) => !v)}
           >
-            {showMarkdownView ? t("showSource") : t("showMarkdown")}
+            {showMarkdownView ? (
+              <>
+                <Code className="h-3.5 w-3.5" />
+                {t("showSource")}
+              </>
+            ) : (
+              <>
+                <Eye className="h-3.5 w-3.5" />
+                {t("showMarkdown")}
+              </>
+            )}
           </Button>
         )}
       </div>
