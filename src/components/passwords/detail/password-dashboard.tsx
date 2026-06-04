@@ -40,8 +40,6 @@ import { PasswordDetailPane } from "@/components/passwords/detail/password-detai
 import { usePasswordEntryDetail } from "@/hooks/vault/use-password-entry-detail";
 import { buildPersonalGetDetail } from "@/lib/vault/build-personal-get-detail";
 import { PasswordEditDialogLoader } from "@/components/passwords/dialogs/personal-password-edit-dialog-loader";
-import { ShareDialog } from "@/components/share/share-dialog";
-import { toast } from "sonner";
 
 // Static icon map — created once at module scope to avoid re-creation on every render
 const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
@@ -68,7 +66,6 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
   const t = useTranslations("Dashboard");
   const tl = useTranslations("PasswordList");
   const ts = useTranslations("Shortcuts");
-  const tCard = useTranslations("PasswordCard");
 
   const [searchQuery, setSearchQuery] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -95,10 +92,8 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
   // Vault context for personal decrypt + detail pane.
   const { encryptionKey, userId, status: vaultStatus } = useVault();
 
-  // Pane-level detail dialogs (edit, share) — owned here, not duplicated in PasswordCard.
+  // Pane-level detail dialogs (edit) — owned here, not duplicated in PasswordCard.
   const [paneEditOpen, setPaneEditOpen] = useState(false);
-  const [paneShareOpen, setPaneShareOpen] = useState(false);
-  const [paneShareData, setPaneShareData] = useState<Record<string, unknown> | undefined>(undefined);
 
   // Build the getDetail closure for the active entry (personal path).
   // INV-C1.7: all field-mapping lives in buildPersonalGetDetail, not the hook.
@@ -208,6 +203,11 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
   // INV-C4.3: clear pane when a single-entry removal is signalled from the list.
   const handleEntryRemoved = useCallback((id: string) => {
     setActiveEntry((prev) => (prev?.id === id ? null : prev));
+  }, []);
+
+  // F2: clean up any pending arrow-nav debounce timer on unmount.
+  useEffect(() => () => {
+    if (arrowNavDebounceRef.current) clearTimeout(arrowNavDebounceRef.current);
   }, []);
 
   // Listen for vault-data-changed (import, etc.)
@@ -353,19 +353,6 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
     }
   }, [layoutMode, selectionMode]);
 
-  // The pane needs a share handler.
-  const handlePaneShare = useCallback(async () => {
-    if (!activeEntry || !encryptionKey) return;
-    try {
-      const detail = await buildPersonalGetDetail(activeEntry, { encryptionKey, userId })(activeEntry.id);
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { totp: _t, passwordHistory: _ph, id: _id, requireReprompt: _rp, ...safe } = detail;
-      setPaneShareData(safe as Record<string, unknown>);
-      setPaneShareOpen(true);
-    } catch {
-      toast.error(tCard("networkError"));
-    }
-  }, [activeEntry, encryptionKey, userId, tCard]);
 
   const listSlot = (
     <div
@@ -398,22 +385,37 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
     </div>
   );
 
+  // F1(b): in master-detail + selectionMode, render a summary instead of the entry pane.
   const detailSlot = (
     <div className="h-full p-4">
-      <PasswordDetailPane
-        key={activeEntry?.id ?? "none"}
-        entryId={activeEntry?.id ?? null}
-        detailData={detailData}
-        loading={detailLoading}
-        error={detailError}
-        onEdit={activeEntry ? () => setPaneEditOpen(true) : undefined}
-        onRefresh={() => { invalidateDetail(); handleDataChange(); }}
-      />
+      {layoutMode === "master-detail" && selectionMode ? (
+        <div className="flex flex-col items-center justify-center h-full py-16 text-center text-muted-foreground gap-3">
+          <p className="text-sm">{tl("selectedInPane", { count: selectedCount })}</p>
+        </div>
+      ) : (
+        <PasswordDetailPane
+          key={activeEntry?.id ?? "none"}
+          entryId={activeEntry?.id ?? null}
+          detailData={detailData}
+          loading={detailLoading}
+          error={detailError}
+          onEdit={activeEntry ? () => setPaneEditOpen(true) : undefined}
+          onRefresh={() => { invalidateDetail(); handleDataChange(); }}
+        />
+      )}
     </div>
   );
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 p-4 md:p-6">
+    // master-detail: h-full fills the (block, overflow-auto) <main>'s definite flex height so
+    // the list/detail panes scroll independently (INV-C5.1) instead of <main> scrolling the
+    // whole view as one. accordion: flex-1 keeps the page-level scroll (<main> scrolls).
+    <div
+      className={[
+        "flex flex-col min-h-0 p-4 md:p-6",
+        layoutMode === "master-detail" ? "h-full" : "flex-1",
+      ].join(" ")}
+    >
       <div className={layoutMode === "master-detail" ? "w-full" : "mx-auto max-w-4xl w-full"}>
         <EntryListHeader
           icon={headerIcon}
@@ -454,7 +456,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setSelectionMode(true)}
+                  onClick={() => { setSelectionMode(true); setActiveEntry(null); }}
                 >
                   <CheckSquare className="h-4 w-4 mr-2" />
                   {t("select")}
@@ -582,17 +584,6 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
             invalidateDetail();
             handleDataChange();
           }}
-        />
-      )}
-
-      {/* Detail pane share dialog */}
-      {activeEntry && (
-        <ShareDialog
-          open={paneShareOpen}
-          onOpenChange={setPaneShareOpen}
-          passwordEntryId={activeEntry.id}
-          decryptedData={paneShareData}
-          entryType={activeEntry.entryType}
         />
       )}
 

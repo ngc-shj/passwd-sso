@@ -111,6 +111,39 @@ describe("usePasswordEntryDetail", () => {
     await waitFor(() => expect(result.current.detailData?.id).toBe("entry-B"));
   });
 
+  // ─── S1: stale plaintext released on entryId switch ─────────────
+
+  it("S1: switching A→B while B is pending clears A's plaintext (loading=true, detailData=null)", async () => {
+    const deferredA = makeDeferred<InlineDetailData>();
+    const deferredB = makeDeferred<InlineDetailData>();
+    let callCount = 0;
+    const getDetail = vi.fn(() => {
+      callCount++;
+      return callCount === 1 ? deferredA.promise : deferredB.promise;
+    });
+
+    const { result, rerender } = renderHook(
+      ({ id }) => usePasswordEntryDetail(id, { getDetail, vaultStatus: UNLOCKED }),
+      { initialProps: { id: "entry-A" as string } },
+    );
+
+    // Resolve A so it is loaded
+    act(() => deferredA.resolve(makeDetail("entry-A")));
+    await waitFor(() => expect(result.current.detailData?.id).toBe("entry-A"));
+
+    // Switch to B (B's fetch is pending)
+    rerender({ id: "entry-B" });
+
+    // Immediately: A's data must be gone, loading must be true
+    expect(result.current.detailData).toBeNull();
+    expect(result.current.loading).toBe(true);
+
+    // Resolve B — confirm it arrives correctly
+    act(() => deferredB.resolve(makeDetail("entry-B")));
+    await waitFor(() => expect(result.current.detailData?.id).toBe("entry-B"));
+    expect(result.current.loading).toBe(false);
+  });
+
   // ─── INV-C1.4: cancel-flag race ──────────────────────────────────
 
   it("INV-C1.4: stale A-fetch resolving after B is selected does not overwrite B", async () => {

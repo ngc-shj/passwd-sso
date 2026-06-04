@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 
 // next-auth/react is the only ergonomic mock — it is the boundary into the
@@ -778,6 +778,43 @@ describe("VaultProvider — bfcache pageshow guard (INV-C1.6)", () => {
       });
       // Should still be LOCKED (no double-lock side effects)
       expect(result.current.status).toBe(VAULT_STATUS.LOCKED);
+      expect(result.current.encryptionKey).toBeNull();
+    },
+    60_000,
+  );
+
+  it(
+    "T1: pagehide zeroes secretKeyRef (status stays UNLOCKED), persisted pageshow forces lock()",
+    async () => {
+      const { fetchMock } = makeFetchEnv(null);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      const { result } = renderHook(() => useVault(), { wrapper });
+
+      // Setup → vault is UNLOCKED with a real key
+      await act(async () => {
+        await result.current.setup(PASSPHRASE);
+      });
+      expect(result.current.encryptionKey).not.toBeNull();
+      expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+
+      // Simulate bfcache: pagehide zeroes secretKeyRef but does NOT call lock().
+      // After pagehide: secretKeyRef.current === null, vaultStatus still UNLOCKED.
+      act(() => {
+        window.dispatchEvent(new Event("pagehide"));
+      });
+      // encryptionKey is still set (pagehide does not call lock()/setEncryptionKey(null))
+      // vaultStatus is still UNLOCKED
+      expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+
+      // Simulate bfcache restore: persisted pageshow fires.
+      // Handler checks secretKeyRef.current === null && vaultStatus === UNLOCKED → calls lock().
+      act(() => {
+        window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      });
+
+      // Assert: vault transitioned to LOCKED
+      await waitFor(() => expect(result.current.status).toBe(VAULT_STATUS.LOCKED));
       expect(result.current.encryptionKey).toBeNull();
     },
     60_000,

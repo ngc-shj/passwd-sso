@@ -28,6 +28,19 @@ Per the plan's allowance, the master-detail pane's edit/share use the SAME dialo
 (`PasswordEditDialogLoader`, `ShareDialog`) mounted by the dashboard — no duplication of dialog/handler
 logic vs PasswordCard. PasswordCard remains the dialog owner for accordion mode.
 
+## D6 — INV-C5.1 scroll-split fix (user-reported)
+The list and detail shared a single scrollbar in the running app: `<main>` (DashboardShell) is
+`overflow-auto` but `display:block`, so the dashboard root's `flex-1` was a no-op, its height collapsed to
+content, `MasterDetailShell`'s `h-full` resolved against an unbounded height, and `<main>` scrolled the whole
+view. Fix: in master-detail mode the dashboard root uses `h-full` (fills `<main>`'s definite flex height) so
+the two panes scroll independently; accordion keeps `flex-1` (page-level scroll). CSS-only; verified by the
+flex-height-chain reasoning + in-browser (VC1 — not unit-testable in jsdom).
+
+## D7 — F1 selection-mode pane summary
+Entering selection mode now clears `activeEntry` and the master-detail detail slot renders an "N selected"
+summary (existing `selectedCount` i18n) instead of a decrypted single-entry pane, so no plaintext stays on
+screen and no `getDetail` decrypt runs during bulk ops (INV-C4.4).
+
 ## D5 — Share-from-row-menu in master-detail activates the entry (within SC3)
 In master-detail mode, choosing Share from the compact row's overflow menu activates the entry (opens the
 pane) rather than immediately opening the share dialog, because `PasswordDetailInline` exposes no share

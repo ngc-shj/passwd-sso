@@ -249,6 +249,30 @@ describe("PasswordRow", () => {
     // Overflow indicator
     expect(screen.getByText("+2")).toBeInTheDocument();
   });
+
+  // ── T6: no hover-decrypt (INV-C1.2/T8) ───────────────────────────────────────
+  // Hovering the row must NOT call onActivate (no decrypt-on-hover).
+  // INV-C1.2: decryption is only triggered by explicit user selection.
+
+  it("T6 INV-C1.2: hovering the row does NOT call onActivate (no hover-decrypt)", async () => {
+    const onActivate = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <PasswordRow
+        entry={makeEntry()}
+        isActive={false}
+        onActivate={onActivate}
+        {...defaultRowProps}
+      />,
+    );
+
+    // Hover the row title area
+    await user.hover(screen.getByTestId("row-title"));
+
+    // onActivate must NOT have been called by hover — only by explicit click
+    expect(onActivate).not.toHaveBeenCalled();
+  });
 });
 
 // ──────────────────────────────────────────────────────────────────────────────

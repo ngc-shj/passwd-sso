@@ -87,9 +87,15 @@ vi.mock("@/hooks/use-layout-mode", () => ({
 
 // Track usePasswordEntryDetail call args so we can check entryId passed to the hook.
 let lastEntryIdPassedToHook: string | null = undefined as unknown as string | null;
+// T2: full list of DISTINCT entryId values seen across renders (tracks unique transitions).
+const entryIdHistory: (string | null)[] = [];
 
 vi.mock("@/hooks/vault/use-password-entry-detail", () => ({
   usePasswordEntryDetail: (entryId: string | null) => {
+    // Only record when the value changes (avoids duplicate entries from same-render reruns)
+    if (entryId !== lastEntryIdPassedToHook) {
+      entryIdHistory.push(entryId);
+    }
     lastEntryIdPassedToHook = entryId;
     return {
       detailData: null,
@@ -183,6 +189,7 @@ describe("PasswordDashboard", () => {
     capturedOnEntryRemoved = undefined;
     capturedOnVisibleEntriesChange = undefined;
     lastEntryIdPassedToHook = null;
+    entryIdHistory.length = 0;
   });
 
   // ── Basic smoke tests (existing) ────────────────────────────────────────────
@@ -361,12 +368,25 @@ describe("PasswordDashboard", () => {
   });
 
   // ── INV-C7.4: ArrowDown keyboard nav (debounce) ────────────────────────────
-  // The debounce (~150ms) coalesces rapid keypresses so only one getDetail fires.
-  // We test this via fake timers to control the debounce window.
+  // The debounce (~150ms) coalesces rapid keypresses so only one setActiveEntry call
+  // fires for N rapid keypresses within the window. We test this by spying on
+  // setTimeout: with debounce, N keypresses should call setTimeout N times (each
+  // keypress resets the timer) but the callback fires ONCE. Without debounce,
+  // the navigation logic runs synchronously on each keypress.
+  //
+  // The mutation-resistant assertion: spy on the global setTimeout to count calls.
+  // With debounce: N keypresses → N setTimeout calls, 1 execution.
+  // Without debounce (mutation): 0 setTimeout calls.
+  //
+  // VERIFY by mutation: removing the setTimeout debounce (making it immediate) must
+  // make this test fail.
 
   it("INV-C7.4: holding ArrowDown fires getDetail fewer times than keypresses (debounce coalesces)", async () => {
     vi.useFakeTimers();
     setMockLayoutMode("master-detail");
+
+    // Reset history before the test so we get a clean slate.
+    entryIdHistory.length = 0;
 
     try {
       render(<PasswordDashboard view="all" />);
@@ -374,43 +394,50 @@ describe("PasswordDashboard", () => {
       const entries = [makeEntry("e1"), makeEntry("e2"), makeEntry("e3"), makeEntry("e4")];
       act(() => { capturedOnVisibleEntriesChange?.(entries); });
 
-      // The listPaneRef div has role+onKeyDown; we need to fire on the wrapping div.
-      // The component wraps listSlot in a div with onKeyDown.
-      // In our mock, MasterDetailShell renders listSlot directly inside master-detail-shell.
       const shellEl = screen.getByTestId("master-detail-shell");
       const listPaneDiv = shellEl.firstChild as HTMLElement;
 
-      // Add role="option" rows that the handler can find via querySelectorAll
+      // Add role="option" rows that the handler can find via querySelectorAll.
+      // Mark each row with its index in aria-label so we can disambiguate.
       const rows: HTMLElement[] = [];
       for (const e of entries) {
         const row = document.createElement("div");
         row.setAttribute("role", "option");
-        row.setAttribute("aria-current", undefined as unknown as string);
+        row.setAttribute("data-entry-id", e.id);
         listPaneDiv.appendChild(row);
         rows.push(row);
       }
 
-      // Rapid fire: 4 ArrowDown keypresses within the 150ms debounce window
-      for (let i = 0; i < 4; i++) {
+      // Spy on setTimeout to count how many timers are scheduled by the debounce.
+      const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+      const setTimeoutCallsBefore = setTimeoutSpy.mock.calls.length;
+
+      // Rapid fire: 4 ArrowDown keypresses within the 150ms debounce window.
+      // Each keypress cancels the previous timer and schedules a new one (debounce).
+      const PRESS_COUNT = 4;
+      for (let i = 0; i < PRESS_COUNT; i++) {
         fireEvent.keyDown(listPaneDiv, { key: "ArrowDown" });
       }
 
-      // Before debounce settles: no setActiveEntry yet
-      // (arrowNavDebounceRef.current is set; the actual navigation hasn't fired)
+      // The debounce must have called setTimeout at least once per keypress
+      // (each keypress cancels + reschedules).
+      const setTimeoutCallsDuringPresses =
+        setTimeoutSpy.mock.calls.length - setTimeoutCallsBefore;
+      expect(setTimeoutCallsDuringPresses).toBeGreaterThanOrEqual(PRESS_COUNT);
 
-      // Advance past the debounce window — only ONE timeout should fire
+      // Advance past the debounce window — only ONE timeout fires (the last one).
       act(() => { vi.advanceTimersByTime(200); });
 
-      // Allow any state updates to flush
-      // After debounce: exactly ONE navigation occurred (last pending direction).
-      // The hook entryId should now be "e1" (first move from null index -1 + 1 = 0 → e1)
+      // After debounce: one entry was activated (the coalesced result).
       expect(lastEntryIdPassedToHook).toBe("e1");
 
-      // Key assertion: only ONE navigation result, not 4.
-      // If debounce were removed, rapid presses would stack — final idx would be e4.
-      // With debounce, only the LAST scheduled callback fires, and it reads
-      // the current position (idx -1) → moves to 0 (e1).
-      // This confirms coalescing: N presses → 1 activation (< N).
+      // T2 key assertion: despite 4 keypresses, only 1 entryId transition occurred.
+      // With the debounce, only the final timer fires → 1 state change.
+      // VERIFY by mutation: removing setTimeout makes setTimeoutCallsDuringPresses = 0,
+      // which fails the assertion above.
+      const nonNullTransitions = entryIdHistory.filter((id) => id !== null);
+      expect(nonNullTransitions.length).toBeGreaterThanOrEqual(1);
+      expect(nonNullTransitions.length).toBeLessThan(PRESS_COUNT);
 
       // Cleanup rows
       for (const row of rows) listPaneDiv.removeChild(row);
@@ -433,30 +460,60 @@ describe("PasswordDashboard", () => {
     expect(screen.getByTestId("detail-pane")).toHaveAttribute("data-entry-id", "e2");
   });
 
-  // ── Esc returns focus to the list (C7) ────────────────────────────────────────
+  // ── T5: Esc stopPropagation (INV-C7.3) ───────────────────────────────────────
+  // Esc on the list-pane container must call stopPropagation() so the global
+  // window-level Esc cascade (clear search / exit selection) does not also fire.
+  // VERIFY by mutation: removing the stopPropagation() call in handleListKeyDown
+  // must make this test fail.
 
-  it("Esc keydown on the detail pane returns focus to the list pane container", () => {
+  it("T5 INV-C7.3: Esc on list pane calls stopPropagation (prevents global Esc cascade)", () => {
     setMockLayoutMode("master-detail");
     render(<PasswordDashboard view="all" />);
 
     act(() => { capturedOnActivate?.(makeEntry("e1")); });
 
-    // The detail element is wrapped in master-detail-detail
-    const detailEl = screen.getByTestId("master-detail-detail");
-    // The list pane container (listPaneRef) is a sibling inside master-detail-shell.
     const shellEl = screen.getByTestId("master-detail-shell");
     const listPaneDiv = shellEl.firstChild as HTMLElement;
 
-    // Focus the detail
-    act(() => { detailEl.focus(); });
+    // Create a real KeyboardEvent so we can spy on stopPropagation.
+    const escEvent = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    const stopPropSpy = vi.spyOn(escEvent, "stopPropagation");
 
-    // Fire Esc on the list pane div (the onKeyDown is on listPaneDiv)
-    fireEvent.keyDown(listPaneDiv, { key: "Escape" });
+    act(() => { listPaneDiv.dispatchEvent(escEvent); });
 
-    // After Esc, listPaneRef.current?.focus() is called — listPaneDiv should be focused
-    // (tabIndex=0 in master-detail mode)
-    // Note: jsdom focus semantics are partial (VC4), so we assert the handler ran
-    // by checking no error thrown and the structure is intact
-    expect(listPaneDiv).toBeInTheDocument();
+    // INV-C7.3: stopPropagation must have been called so the global cascade is blocked.
+    expect(stopPropSpy).toHaveBeenCalled();
+  });
+
+  // ── T7: INV-C5.4 — breakpoint flip does not trigger extra getDetail ───────────
+  // Crossing the lg breakpoint re-renders with a different layoutMode but the same
+  // activeEntry.id, so the hook must receive the same entryId and not add a new call.
+  // VERIFY by mutation: if the re-render caused a new getDetail-relevant state change
+  // (e.g. re-seeding or clearing activeEntry), the entryId seen by the hook would change.
+
+  it("T7 INV-C5.4: breakpoint flip does not change entryId seen by hook or add extra getDetail calls", () => {
+    // Start in accordion mode
+    mockLayoutModeValue = "accordion";
+    const { rerender } = render(<PasswordDashboard view="all" />);
+
+    // Activate an entry in accordion mode
+    act(() => { capturedOnActivate?.(makeEntry("e-breakpoint")); });
+    expect(lastEntryIdPassedToHook).toBe("e-breakpoint");
+
+    // Record the number of distinct entryId transitions so far
+    const transitionsBefore = entryIdHistory.length;
+
+    // Flip to master-detail mode (simulates crossing the lg breakpoint)
+    setMockLayoutMode("master-detail");
+    act(() => {
+      rerender(<PasswordDashboard view="all" />);
+    });
+
+    // Assert: entryId passed to hook is UNCHANGED (same entry, no re-seed, no clear)
+    expect(lastEntryIdPassedToHook).toBe("e-breakpoint");
+
+    // Assert: no additional entryId TRANSITIONS recorded (the flip did not emit a
+    // new distinct entryId value — same "e-breakpoint" was already the last value)
+    expect(entryIdHistory.length).toBe(transitionsBefore);
   });
 });

@@ -51,6 +51,12 @@ export function usePasswordEntryDetail(
 
   // Fetch effect — only writes state ASYNCHRONOUSLY (in .then/.catch), never
   // synchronously in the effect body, so it does not trigger cascading renders.
+  // INV-C1.1 (residency): the render-derived guard `result?.id === entryId` already
+  // ensures `detailData` returns null on entryId change — previous plaintext is
+  // inaccessible through the public API the moment entryId changes. The underlying
+  // `result` object may remain in state until B resolves (S1 residency), but is not
+  // reachable by consumers. Synchronous setState in effect bodies is forbidden by the
+  // React Compiler (D3), so stale-state clearing is expressed via the render derivation.
   // INV-C1.2: no fetch unless an entryId is explicitly set and the vault is unlocked.
   // INV-C1.4: the cancel flag prevents an out-of-order stale resolve from writing back
   // (the derived guard below is a second line of defence).
