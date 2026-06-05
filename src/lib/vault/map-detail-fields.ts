@@ -7,9 +7,11 @@ import type { InlineDetailData } from "@/types/entry";
  * from its own row/overview data.
  *
  * Uses Omit (not Partial) so each field keeps its exact optionality from
- * InlineDetailData — required fields (password, url, notes, customFields) stay
- * required here, so the mapper cannot silently drop one and a spread into
- * InlineDetailData type-checks at every call site.
+ * InlineDetailData. The REQUIRED fields (password, url, notes, customFields) stay
+ * required here, so dropping one is a compile error and a spread into
+ * InlineDetailData type-checks at every call site. (Optional InlineDetailData
+ * fields can still be omitted — e.g. the extended passkey fields are intentionally
+ * not surfaced by any detail view.)
  */
 type BlobDetailFields = Omit<
   InlineDetailData,

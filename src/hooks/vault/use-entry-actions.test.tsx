@@ -152,7 +152,7 @@ describe("useEntryActions", () => {
     vi.useRealTimers();
   });
 
-  it("shows networkError toast when vault is locked (encryptionKey null)", async () => {
+  it("shows networkError toast when getDetailFor rejects (locked vault / fetch failure)", async () => {
     const { result } = renderHook(() => useEntryActions(lockedGetDetailFor));
     const callbacks = result.current(minimalEntry);
 

@@ -6,8 +6,7 @@ import { PasswordCard } from "@/components/passwords/detail/password-card";
 import { PasswordRow } from "@/components/passwords/detail/password-row";
 import { MasterDetailShell } from "@/components/passwords/detail/master-detail-shell";
 import { PasswordDetailPane } from "@/components/passwords/detail/password-detail-pane";
-import type { InlineDetailData } from "@/components/passwords/detail/password-detail-inline";
-import { mapDecryptedBlobToDetailFields } from "@/lib/vault/map-detail-fields";
+import { buildTeamGetDetail } from "@/lib/vault/build-team-get-detail";
 import { TeamEditDialogLoader } from "@/components/team/management/team-edit-dialog-loader";
 import { Archive, RotateCcw, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
@@ -15,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { useBulkSelection } from "@/hooks/bulk/use-bulk-selection";
 import { useBulkAction } from "@/hooks/bulk/use-bulk-action";
 import { EntryListShell } from "@/components/bulk/entry-list-shell";
-import { TEAM_ROLE, VAULT_STATUS, apiPath } from "@/lib/constants";
+import { TEAM_ROLE, VAULT_STATUS, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import {
   compareEntriesWithFavorite,
@@ -169,7 +168,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
           } catch {
             return {
               id: entry.id as string,
-              entryType: entry.entryType as EntryTypeValue,
+              entryType: (entry.entryType ?? ENTRY_TYPE.LOGIN) as EntryTypeValue,
               title: "(decryption failed)",
               username: null,
               urlHost: null,
@@ -340,28 +339,8 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
 
   const createDetailFetcher = useCallback(
     (entry: TeamArchivedEntry) =>
-      async (): Promise<InlineDetailData> => {
-        const res = await fetchApi(apiPath.teamPasswordById(teamId, entry.id));
-        if (!res.ok) {
-          throw new Error("Failed");
-        }
-        const raw = await res.json();
-        const blob = await decryptFullBlob(entry.id, raw);
-        return {
-          // Blob-sourced display fields via the shared mapper (commonized with the
-          // personal/team/emergency paths so no per-entry-type field can be dropped here).
-          ...mapDecryptedBlobToDetailFields(blob),
-          // Caller-specific fields:
-          id: raw.id,
-          title: (blob.title as string) ?? undefined,
-          entryType: entry.entryType,
-          urlHost: null,
-          passwordHistory: [],
-          createdAt: raw.createdAt,
-          updatedAt: raw.updatedAt,
-        };
-      },
-    [teamId, decryptFullBlob]
+      buildTeamGetDetail(teamId, { id: entry.id, entryType: entry.entryType }, { getEntryDecryptionKey }),
+    [teamId, getEntryDecryptionKey]
   );
 
   const createPasswordFetcher = useCallback(

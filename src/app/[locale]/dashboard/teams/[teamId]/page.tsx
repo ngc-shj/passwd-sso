@@ -11,8 +11,7 @@ import { PasswordDetailPane } from "@/components/passwords/detail/password-detai
 import { EntryListHeader } from "@/components/passwords/entry/entry-list-header";
 import { EntrySortMenu } from "@/components/passwords/entry/entry-sort-menu";
 import { SearchBar } from "@/components/layout/search-bar";
-import type { InlineDetailData } from "@/components/passwords/detail/password-detail-inline";
-import { mapDecryptedBlobToDetailFields } from "@/lib/vault/map-detail-fields";
+import { buildTeamGetDetail } from "@/lib/vault/build-team-get-detail";
 import { TeamNewDialog } from "@/components/team/management/team-new-dialog";
 import { TeamEditDialogLoader } from "@/components/team/management/team-edit-dialog-loader";
 import { TeamArchivedList, type TeamArchivedListHandle } from "@/components/team/management/team-archived-list";
@@ -452,28 +451,9 @@ export default function TeamDashboardPage({
   };
 
   const createDetailFetcher = useCallback(
-    (id: string, eType?: EntryTypeValue) => async (): Promise<InlineDetailData> => {
-      const res = await fetchApi(apiPath.teamPasswordById(teamId, id));
-      if (!res.ok) {
-        throw new Error("Failed");
-      }
-      const raw = await res.json();
-      const blob = await decryptFullBlob(id, raw);
-      return {
-        // Blob-sourced display fields via the shared mapper (commonized with the
-        // personal/emergency paths so no per-entry-type field can be dropped here).
-        ...mapDecryptedBlobToDetailFields(blob),
-        // Caller-specific fields:
-        id: raw.id,
-        title: (blob.title as string) ?? undefined,
-        entryType: eType,
-        urlHost: null,
-        passwordHistory: [],
-        createdAt: raw.createdAt,
-        updatedAt: raw.updatedAt,
-      };
-    },
-    [teamId, decryptFullBlob],
+    (id: string, eType?: EntryTypeValue) =>
+      buildTeamGetDetail(teamId, { id, entryType: eType }, { getEntryDecryptionKey }),
+    [teamId, getEntryDecryptionKey],
   );
 
   const createPasswordFetcher = useCallback(
