@@ -62,7 +62,10 @@ export class PasswordEntryPage {
   }
 
   /**
-   * Three-dot (⋮) menu button scoped to a specific card.
+   * Three-dot (⋮) menu button scoped to a specific card / row.
+   * In master-detail this resolves to the row's COPY-ONLY accelerator menu — manage
+   * actions (edit/archive/delete/restore/share) live in the detail pane; use
+   * manageMenuButton() for those. In the accordion it is the full shared menu.
    * Falls back to first match when no title is given (single-entry scenarios).
    */
   moreMenuButton(title?: string | RegExp): Locator {
@@ -72,7 +75,39 @@ export class PasswordEntryPage {
     });
   }
 
-  /** "Edit" / "編集" — portal-rendered, page-scoped is correct. */
+  /** The detail pane region (master-detail layout only). */
+  get detailPane(): Locator {
+    return this.page.getByTestId("master-detail-detail");
+  }
+
+  /**
+   * Select an entry so the detail pane — the home for manage actions in master-detail —
+   * renders. Idempotent: clicking an already-active row toggles it OFF, so skip the
+   * click when the pane already shows this entry. No-op in the accordion layout.
+   */
+  async selectEntry(title: string | RegExp): Promise<void> {
+    if (!this.isMasterDetail) return;
+    const paneTitle = this.detailPane.getByTestId("detail-pane-title").filter({ hasText: title });
+    if ((await paneTitle.count()) > 0) return;
+    await this.card(title).click();
+    await paneTitle.waitFor({ timeout: 5_000 });
+  }
+
+  /**
+   * The ⋮ menu hosting manage actions (archive / delete / restore / share).
+   * Master-detail: the detail pane's ⋮ (call selectEntry first). Accordion: the card's ⋮.
+   */
+  manageMenuButton(title?: string | RegExp): Locator {
+    if (this.isMasterDetail) {
+      return this.detailPane.getByRole("button", {
+        name: /More actions|その他のアクション/i,
+      });
+    }
+    const scope = title ? this.card(title) : this.page;
+    return scope.getByRole("button", { name: /More actions|その他のアクション/i });
+  }
+
+  /** "Edit" / "編集" — portal-rendered menuitem (accordion ⋮). */
   get editMenuItem() {
     return this.page.getByRole("menuitem", { name: /Edit|編集/i });
   }
@@ -114,20 +149,52 @@ export class PasswordEntryPage {
     });
   }
 
-  /** Open ⋮ menu → Edit → wait for edit dialog. Card-scoped when title given. */
+  /**
+   * Open the entry's edit form.
+   * Master-detail: select the entry, then click the detail pane's visible Edit button
+   * (promoted out of the ⋮). Accordion: row ⋮ → Edit menuitem.
+   */
   async openEditDialog(title?: string | RegExp): Promise<void> {
-    await this.moreMenuButton(title).click();
-    await this.editMenuItem.click();
+    if (this.isMasterDetail) {
+      if (title) await this.selectEntry(title);
+      await this.detailPane.getByRole("button", { name: /^Edit$|^編集$/i }).click();
+    } else {
+      await this.moreMenuButton(title).click();
+      await this.editMenuItem.click();
+    }
     await this.page.locator("[role='dialog']").waitFor({ timeout: 5_000 });
   }
 
-  /** Open ⋮ menu → Delete → confirm in dialog. Card-scoped when title given. */
+  /** Manage ⋮ → Move to Trash → confirm. */
   async deleteEntry(title?: string | RegExp): Promise<void> {
-    await this.moreMenuButton(title).click();
+    if (title) await this.selectEntry(title);
+    await this.manageMenuButton(title).click();
     // Wait for the dropdown to be open and the menu item to be visible
     await this.deleteMenuItem.waitFor({ state: "visible", timeout: 5_000 });
     await this.deleteMenuItem.click();
     await this.deleteConfirmButton.click();
+  }
+
+  /** Manage ⋮ → Archive. */
+  async archiveEntry(title?: string | RegExp): Promise<void> {
+    if (title) await this.selectEntry(title);
+    await this.manageMenuButton(title).click();
+    await this.page.getByRole("menuitem", { name: /^Archive$|^アーカイブ$/i }).click();
+  }
+
+  /** Manage ⋮ → Unarchive. */
+  async unarchiveEntry(title?: string | RegExp): Promise<void> {
+    if (title) await this.selectEntry(title);
+    await this.manageMenuButton(title).click();
+    await this.page.getByRole("menuitem", { name: /^Unarchive$|^アーカイブ解除$/i }).click();
+  }
+
+  /** Manage ⋮ → Share Link → wait for the share dialog. */
+  async openShareDialog(title?: string | RegExp): Promise<void> {
+    if (title) await this.selectEntry(title);
+    await this.manageMenuButton(title).click();
+    await this.page.getByRole("menuitem", { name: /Share Link|リンクで共有/i }).click();
+    await this.page.locator("[role='dialog']").waitFor({ timeout: 5_000 });
   }
 
   /** "Restore" / "復元" — trash-view ⋮ menu item, portal-rendered (page-scoped). */
@@ -136,12 +203,12 @@ export class PasswordEntryPage {
   }
 
   /**
-   * Open ⋮ menu → Restore (trash view; no confirmation dialog). The restore action
-   * lives in the shared EntryActionsMenu, so this works for both layouts and for
-   * personal + team vaults.
+   * Manage ⋮ → Restore (trash view; no confirmation dialog). Works for both layouts
+   * and for personal + team vaults.
    */
   async restoreEntry(title?: string | RegExp): Promise<void> {
-    await this.moreMenuButton(title).click();
+    if (title) await this.selectEntry(title);
+    await this.manageMenuButton(title).click();
     await this.restoreMenuItem.waitFor({ state: "visible", timeout: 5_000 });
     await this.restoreMenuItem.click();
   }

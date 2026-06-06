@@ -1,4 +1,5 @@
 {
   "copied": "Copied! (clears in 30s)",
-  "copy": "Copy to clipboard"
+  "copy": "Copy to clipboard",
+  "copyNamed": "Copy {name}"
 }

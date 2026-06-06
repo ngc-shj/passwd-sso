@@ -10,6 +10,7 @@ import {
   ArchiveRestore,
   Trash2,
   RotateCcw,
+  Edit,
   Link as LinkIcon,
 } from "lucide-react";
 import { PasswordDetailInline } from "./password-detail-inline";
@@ -164,8 +165,22 @@ export function PasswordDetailPane({
               {entry.title}
             </h2>
 
-            {/* Persistent action home — always reachable once an entry is selected. */}
+            {/* Persistent action home — always reachable once an entry is selected.
+                Edit is the primary verb so it leads the cluster (Edit · Star · ⋮).
+                Gated by onEdit, sourced solely from the edit-permission gate in
+                EntryListView (INV-C3.1/C3.2). */}
             <div className="flex shrink-0 items-center gap-1">
+              {onEdit && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={onEdit}
+                >
+                  <Edit className="h-4 w-4" />
+                  <span className="sr-only">{tc("edit")}</span>
+                </Button>
+              )}
               {showFavorite && onToggleFavorite && (
                 <button
                   type="button"
@@ -243,7 +258,7 @@ export function PasswordDetailPane({
               <label className="text-sm text-muted-foreground">{td("username")}</label>
               <div className="flex items-center gap-2">
                 <span className="break-all text-sm">{entry.username}</span>
-                <CopyButton getValue={() => entry.username ?? ""} />
+                <CopyButton fieldLabel={td("username")} getValue={() => entry.username ?? ""} />
               </div>
             </div>
           )}
@@ -280,6 +295,9 @@ export function PasswordDetailPane({
           onRefresh={onRefresh}
           teamId={teamId}
           readOnly={readOnly}
+          // Edit lives in the pane header (C3); suppress the duplicate body-footer
+          // button. onEdit still flows so attachment/history stay editable (INV-C4.2).
+          showEditButton={false}
         />
       ) : null}
     </div>

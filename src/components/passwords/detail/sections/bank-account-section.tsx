@@ -36,7 +36,7 @@ export function BankAccountSection({ data, requireVerification, createGuardedGet
           <label className="text-sm text-muted-foreground">{t("bankName")}</label>
           <div className="flex items-center gap-2">
             <span className="text-sm">{data.bankName}</span>
-            <CopyButton getValue={() => data.bankName ?? ""} />
+            <CopyButton getValue={() => data.bankName ?? ""} fieldLabel={t("bankName")} />
           </div>
         </div>
       )}
@@ -47,7 +47,7 @@ export function BankAccountSection({ data, requireVerification, createGuardedGet
           <label className="text-sm text-muted-foreground">{t("accountHolderName")}</label>
           <div className="flex items-center gap-2">
             <span className="text-sm">{data.accountHolderName}</span>
-            <CopyButton getValue={() => data.accountHolderName ?? ""} />
+            <CopyButton getValue={() => data.accountHolderName ?? ""} fieldLabel={t("accountHolderName")} />
           </div>
         </div>
       )}
@@ -87,6 +87,7 @@ export function BankAccountSection({ data, requireVerification, createGuardedGet
                 data.requireReprompt ?? false,
                 () => data.accountNumber ?? "",
               )}
+              fieldLabel={t("accountNumber")}
             />
           </div>
           {showAccountNumber && (
@@ -117,6 +118,7 @@ export function BankAccountSection({ data, requireVerification, createGuardedGet
                 data.requireReprompt ?? false,
                 () => data.routingNumber ?? "",
               )}
+              fieldLabel={t("routingNumber")}
             />
           </div>
           {showRoutingNumber && (
@@ -131,7 +133,7 @@ export function BankAccountSection({ data, requireVerification, createGuardedGet
           <label className="text-sm text-muted-foreground">{t("swiftBic")}</label>
           <div className="flex items-center gap-2">
             <span className="font-mono text-sm">{data.swiftBic}</span>
-            <CopyButton getValue={() => data.swiftBic ?? ""} />
+            <CopyButton getValue={() => data.swiftBic ?? ""} fieldLabel={t("swiftBic")} />
           </div>
         </div>
       )}
@@ -158,6 +160,7 @@ export function BankAccountSection({ data, requireVerification, createGuardedGet
                 data.requireReprompt ?? false,
                 () => data.iban ?? "",
               )}
+              fieldLabel={t("iban")}
             />
           </div>
           {showIban && (

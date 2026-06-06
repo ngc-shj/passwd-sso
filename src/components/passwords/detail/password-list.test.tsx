@@ -2,7 +2,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor, act, fireEvent, within } from "@testing-library/react";
-import type { DisplayEntry } from "./password-list";
 
 const { mockFetchApi, mockDecryptData, STABLE_KEY } = vi.hoisted(() => ({
   mockFetchApi: vi.fn(),
@@ -15,10 +14,11 @@ const { mockFetchApi, mockDecryptData, STABLE_KEY } = vi.hoisted(() => ({
 let capturedCardToggleFavorite: ((id: string, current: boolean) => void) | undefined;
 let capturedCardToggleArchive: ((id: string, current: boolean) => void) | undefined;
 let capturedCardDelete: ((id: string) => void) | undefined;
-// Master-detail mode: PasswordRow captures callbacks
-let capturedRowToggleArchive: (() => void) | undefined;
-let capturedRowDeleteRequest: (() => void) | undefined;
+// Master-detail mode: PasswordRow captures the activate callback; the detail pane
+// captures the manage callbacks (archive/delete moved off the row — C2).
 let capturedRowActivate: (() => void) | undefined;
+let capturedPaneArchive: (() => void) | undefined;
+let capturedPaneDelete: (() => void) | undefined;
 
 // T3: capture useBulkAction's onSuccess so tests can invoke it directly.
 let capturedBulkOnSuccess: (() => void) | undefined;
@@ -102,23 +102,18 @@ vi.mock("./password-row", () => ({
   PasswordRow: ({
     entry,
     onActivate,
-    onToggleArchive,
-    onDeleteRequest,
   }: {
     entry: { id: string; title: string };
     isActive: boolean;
     onActivate: () => void;
-    onToggleArchive: () => void;
-    onDeleteRequest: () => void;
     selectionMode?: boolean;
   }) => {
     capturedRowActivate = onActivate;
-    capturedRowToggleArchive = onToggleArchive;
-    capturedRowDeleteRequest = onDeleteRequest;
     return (
       <div
         data-testid={`row-${entry.id}`}
         role="option"
+        aria-selected={false}
       >
         {entry.title}
       </div>
@@ -145,10 +140,22 @@ vi.mock("./master-detail-shell", () => ({
 }));
 
 // Mock PasswordDetailPane so tests don't need vault decrypt for the pane.
+// C2: manage actions (archive/delete) are driven from the pane now, so the pane mock
+// captures onArchive/onDelete for the master-detail INV-C4.3 tests.
 vi.mock("./password-detail-pane", () => ({
-  PasswordDetailPane: ({ entryId }: { entryId: string | null }) => (
-    <div data-testid="detail-pane" data-entry-id={entryId ?? ""} />
-  ),
+  PasswordDetailPane: ({
+    entryId,
+    onArchive,
+    onDelete,
+  }: {
+    entryId: string | null;
+    onArchive?: () => void;
+    onDelete?: () => void;
+  }) => {
+    capturedPaneArchive = onArchive;
+    capturedPaneDelete = onDelete;
+    return <div data-testid="detail-pane" data-entry-id={entryId ?? ""} />;
+  },
 }));
 
 vi.mock("@/hooks/vault/use-password-entry-detail", () => ({
@@ -190,9 +197,9 @@ describe("PasswordList", () => {
     capturedCardToggleFavorite = undefined;
     capturedCardToggleArchive = undefined;
     capturedCardDelete = undefined;
-    capturedRowToggleArchive = undefined;
-    capturedRowDeleteRequest = undefined;
     capturedRowActivate = undefined;
+    capturedPaneArchive = undefined;
+    capturedPaneDelete = undefined;
     capturedBulkOnSuccess = undefined;
     mockLayoutModeValue = "accordion";
   });
@@ -426,7 +433,7 @@ describe("PasswordList", () => {
     expect(onEntryRemoved).toHaveBeenCalledWith("e1");
   });
 
-  it("INV-C4.3: PasswordRow onToggleArchive fires onEntryRemoved (master-detail mode)", async () => {
+  it("INV-C4.3: detail-pane archive fires onEntryRemoved (master-detail mode)", async () => {
     setMockLayoutMode("master-detail");
     mockFetchApi.mockResolvedValue({
       ok: true,
@@ -445,20 +452,21 @@ describe("PasswordList", () => {
       />,
     );
 
-    // Precondition: row rendered
+    // Precondition: row rendered, then select it so the detail pane has an active entry.
     await waitFor(() => { expect(screen.getByTestId("row-e1")).toBeInTheDocument(); });
+    await act(async () => { capturedRowActivate?.(); });
     expect(onEntryRemoved).not.toHaveBeenCalled();
 
-    // Trigger: archive from the row (calls handleSetArchived internally)
+    // Trigger: archive from the detail pane (calls handleSetArchived internally)
     await act(async () => {
-      capturedRowToggleArchive?.();
+      capturedPaneArchive?.();
     });
 
     // Assert: removal signalled
     expect(onEntryRemoved).toHaveBeenCalledWith("e1");
   });
 
-  it("INV-C4.3: PasswordRow onDeleteRequest fires onEntryRemoved after confirm (master-detail mode)", async () => {
+  it("INV-C4.3: detail-pane delete fires onEntryRemoved after confirm (master-detail mode)", async () => {
     setMockLayoutMode("master-detail");
     mockFetchApi.mockResolvedValue({
       ok: true,
@@ -477,13 +485,14 @@ describe("PasswordList", () => {
       />,
     );
 
-    // Precondition: row rendered
+    // Precondition: row rendered, then select it so the detail pane has an active entry.
     await waitFor(() => { expect(screen.getByTestId("row-e1")).toBeInTheDocument(); });
+    await act(async () => { capturedRowActivate?.(); });
     expect(onEntryRemoved).not.toHaveBeenCalled();
 
-    // Trigger: request delete from the row — opens the confirm dialog.
+    // Trigger: request delete from the detail pane — opens the confirm dialog.
     act(() => {
-      capturedRowDeleteRequest?.();
+      capturedPaneDelete?.();
     });
 
     // Removal is deferred until the user confirms move-to-trash.

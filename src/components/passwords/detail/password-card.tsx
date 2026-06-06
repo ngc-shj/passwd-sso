@@ -217,7 +217,6 @@ export function PasswordCard({
   const isPasskey = entryType === ENTRY_TYPE.PASSKEY;
   const isBankAccount = entryType === ENTRY_TYPE.BANK_ACCOUNT;
   const isSoftwareLicense = entryType === ENTRY_TYPE.SOFTWARE_LICENSE;
-  const isSshKey = entryType === ENTRY_TYPE.SSH_KEY;
   const t = useTranslations("PasswordCard");
   const tDash = useTranslations("Dashboard");
   const tc = useTranslations("Common");
@@ -585,7 +584,6 @@ export function PasswordCard({
             canDelete={canDelete}
             canShare={canShare}
             fetchPassword={fetchPassword}
-            fetchContent={fetchContent}
             fetchCardField={fetchCardField}
             fetchIdentityField={fetchIdentityField}
             fetchPasskeyField={fetchPasskeyField}

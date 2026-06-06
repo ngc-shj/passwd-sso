@@ -32,7 +32,7 @@ export function SoftwareLicenseSection({ data, requireVerification, createGuarde
           <label className="text-sm text-muted-foreground">{t("softwareName")}</label>
           <div className="flex items-center gap-2">
             <span className="text-sm">{data.softwareName}</span>
-            <CopyButton getValue={() => data.softwareName ?? ""} />
+            <CopyButton getValue={() => data.softwareName ?? ""} fieldLabel={t("softwareName")} />
           </div>
         </div>
       )}
@@ -59,6 +59,7 @@ export function SoftwareLicenseSection({ data, requireVerification, createGuarde
                 data.requireReprompt ?? false,
                 () => data.licenseKey ?? "",
               )}
+              fieldLabel={t("licenseKey")}
             />
           </div>
           {showLicenseKey && (
@@ -81,7 +82,7 @@ export function SoftwareLicenseSection({ data, requireVerification, createGuarde
           <label className="text-sm text-muted-foreground">{t("licensee")}</label>
           <div className="flex items-center gap-2">
             <span className="text-sm">{data.licensee}</span>
-            <CopyButton getValue={() => data.licensee ?? ""} />
+            <CopyButton getValue={() => data.licensee ?? ""} fieldLabel={t("licensee")} />
           </div>
         </div>
       )}
@@ -92,7 +93,7 @@ export function SoftwareLicenseSection({ data, requireVerification, createGuarde
           <label className="text-sm text-muted-foreground">{t("email")}</label>
           <div className="flex items-center gap-2">
             <span className="text-sm">{data.email}</span>
-            <CopyButton getValue={() => data.email ?? ""} />
+            <CopyButton getValue={() => data.email ?? ""} fieldLabel={t("email")} />
           </div>
         </div>
       )}

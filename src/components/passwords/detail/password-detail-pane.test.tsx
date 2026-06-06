@@ -2,9 +2,19 @@
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import type { InlineDetailData } from "@/types/entry";
 import type { DisplayEntry } from "./password-list";
+
+// Polyfill ResizeObserver for jsdom (needed by Dropdown/Popper primitives).
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+}
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -353,5 +363,106 @@ describe("PasswordDetailPane header", () => {
     );
     expect(screen.queryByRole("button", { name: "moreActions" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "favorite" })).not.toBeInTheDocument();
+  });
+
+  // ── C3: Edit promoted to a visible header button (gated by onEdit) ────────────
+  it("C3: renders the header Edit button and fires onEdit when clicked", () => {
+    const onEdit = vi.fn();
+    render(
+      <PasswordDetailPane
+        entryId="entry-1"
+        entry={minimalEntry}
+        detailData={minimalDetailData}
+        loading={false}
+        error={null}
+        onEdit={onEdit}
+      />,
+    );
+    // Accessible name comes from the sr-only label (PasswordCard.edit → "edit").
+    const editBtn = screen.getByRole("button", { name: "edit" });
+    expect(editBtn).toBeInTheDocument();
+    fireEvent.click(editBtn);
+    expect(onEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it("C3: omits the header Edit button when onEdit is not provided (e.g. no edit permission)", () => {
+    render(
+      <PasswordDetailPane
+        entryId="entry-1"
+        entry={minimalEntry}
+        detailData={minimalDetailData}
+        loading={false}
+        error={null}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "edit" })).not.toBeInTheDocument();
+  });
+
+  // ── C5: the detail pane is the single home for manage actions. Opening the ⋮
+  // exposes Share/Delete (normal) and Restore/Delete-permanently (trash). These
+  // open the menu before asserting (Radix content is unmounted while closed). ────
+  it("C5: opens the overflow menu and fires Share + Delete (normal view)", async () => {
+    const user = userEvent.setup();
+    const onShare = vi.fn();
+    const onDelete = vi.fn();
+    render(
+      <PasswordDetailPane
+        entryId="entry-1"
+        entry={minimalEntry}
+        detailData={minimalDetailData}
+        loading={false}
+        error={null}
+        onShare={onShare}
+        onArchive={vi.fn()}
+        onDelete={onDelete}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "moreActions" }));
+    expect(screen.getByText("share")).toBeInTheDocument();
+    expect(screen.getByText("delete")).toBeInTheDocument();
+    await user.click(screen.getByText("share"));
+    expect(onShare).toHaveBeenCalledTimes(1);
+  });
+
+  it("C5: opens the overflow menu and exposes Restore + Delete-permanently (trash view)", async () => {
+    const user = userEvent.setup();
+    const onRestore = vi.fn();
+    const onDeletePermanently = vi.fn();
+    render(
+      <PasswordDetailPane
+        entryId="entry-1"
+        entry={minimalEntry}
+        detailData={minimalDetailData}
+        loading={false}
+        error={null}
+        isArchived
+        onRestore={onRestore}
+        onDeletePermanently={onDeletePermanently}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "moreActions" }));
+    expect(screen.getByText("restore")).toBeInTheDocument();
+    expect(screen.getByText("deletePermanently")).toBeInTheDocument();
+    await user.click(screen.getByText("restore"));
+    expect(onRestore).toHaveBeenCalledTimes(1);
+  });
+
+  it("C5: each manage item is gated independently (restore present, delete-perm absent)", async () => {
+    const user = userEvent.setup();
+    render(
+      <PasswordDetailPane
+        entryId="entry-1"
+        entry={minimalEntry}
+        detailData={minimalDetailData}
+        loading={false}
+        error={null}
+        isArchived
+        onRestore={vi.fn()}
+        // onDeletePermanently intentionally omitted
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "moreActions" }));
+    expect(screen.getByText("restore")).toBeInTheDocument();
+    expect(screen.queryByText("deletePermanently")).not.toBeInTheDocument();
   });
 });

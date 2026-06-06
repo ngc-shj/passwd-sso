@@ -56,7 +56,7 @@ export function SecureNoteSection({ data }: SectionProps) {
             <p className="font-mono whitespace-pre-wrap">{data.content}</p>
           )}
         </div>
-        <CopyButton getValue={() => data.content ?? ""} />
+        <CopyButton getValue={() => data.content ?? ""} fieldLabel={t("content")} />
       </div>
     </div>
   );

@@ -37,7 +37,7 @@ export function IdentitySection({ data, requireVerification, createGuardedGetter
         <label className="text-sm text-muted-foreground">{label}</label>
         <div className="flex items-center gap-2">
           <span className="text-sm">{value}</span>
-          <CopyButton getValue={() => value} />
+          <CopyButton getValue={() => value} fieldLabel={label} />
         </div>
       </div>
     ) : null;
@@ -60,6 +60,7 @@ export function IdentitySection({ data, requireVerification, createGuardedGetter
           </Button>
           <CopyButton
             getValue={createGuardedGetter(data.id, data.requireReprompt ?? false, () => value)}
+            fieldLabel={label}
           />
         </div>
       </div>
@@ -80,7 +81,7 @@ export function IdentitySection({ data, requireVerification, createGuardedGetter
           <label className="text-sm text-muted-foreground">{t("fullName")}</label>
           <div className="flex items-center gap-2">
             <span className="text-sm">{data.fullName}</span>
-            <CopyButton getValue={() => data.fullName ?? ""} />
+            <CopyButton getValue={() => data.fullName ?? ""} fieldLabel={t("fullName")} />
           </div>
         </div>
       )}
@@ -108,7 +109,7 @@ export function IdentitySection({ data, requireVerification, createGuardedGetter
           <label className="text-sm text-muted-foreground">{t("phone")}</label>
           <div className="flex items-center gap-2">
             <span className="text-sm">{data.phone}</span>
-            <CopyButton getValue={() => data.phone ?? ""} />
+            <CopyButton getValue={() => data.phone ?? ""} fieldLabel={t("phone")} />
           </div>
         </div>
       )}
@@ -119,7 +120,7 @@ export function IdentitySection({ data, requireVerification, createGuardedGetter
           <label className="text-sm text-muted-foreground">{t("email")}</label>
           <div className="flex items-center gap-2">
             <span className="text-sm">{data.email}</span>
-            <CopyButton getValue={() => data.email ?? ""} />
+            <CopyButton getValue={() => data.email ?? ""} fieldLabel={t("email")} />
           </div>
         </div>
       )}
@@ -162,6 +163,7 @@ export function IdentitySection({ data, requireVerification, createGuardedGetter
                 data.requireReprompt ?? false,
                 () => data.idNumber ?? "",
               )}
+              fieldLabel={t("idNumber")}
             />
           </div>
           {showIdNumber && (

@@ -52,6 +52,7 @@ export function CreditCardSection({ data, requireVerification, createGuardedGett
                 data.requireReprompt ?? false,
                 () => data.cardNumber ?? "",
               )}
+              fieldLabel={t("cardNumber")}
             />
           </div>
           {showCardNumber && (
@@ -66,7 +67,7 @@ export function CreditCardSection({ data, requireVerification, createGuardedGett
           <label className="text-sm text-muted-foreground">{t("cardholderName")}</label>
           <div className="flex items-center gap-2">
             <span className="text-sm">{data.cardholderName}</span>
-            <CopyButton getValue={() => data.cardholderName ?? ""} />
+            <CopyButton getValue={() => data.cardholderName ?? ""} fieldLabel={t("cardholderName")} />
           </div>
         </div>
       )}
@@ -111,6 +112,7 @@ export function CreditCardSection({ data, requireVerification, createGuardedGett
                 data.requireReprompt ?? false,
                 () => data.cvv ?? "",
               )}
+              fieldLabel={t("cvv")}
             />
           </div>
           {showCvv && (
