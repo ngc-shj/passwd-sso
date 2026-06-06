@@ -1,12 +1,18 @@
 import type { Page } from "@playwright/test";
+import { PasswordEntryPage } from "./password-entry.page";
 
 export class TrashPage {
-  constructor(private page: Page) {}
+  private entry: PasswordEntryPage;
+
+  constructor(private page: Page) {
+    this.entry = new PasswordEntryPage(page);
+  }
 
   /**
-   * The "Empty Trash" button that opens a confirmation dialog.
-   * Rendered by TrashList when entries exist.
-   * t("emptyTrash") = "Empty Trash" / "ゴミ箱を空にする"
+   * The "Empty Trash" button that opens a confirmation dialog. Rendered by the
+   * unified EntryListView when trash entries exist — in the detail pane (master-detail,
+   * no entry selected) or below the list (accordion).
+   * tTrash("emptyTrash") = "Empty Trash" / "ゴミ箱を空にする"
    */
   get emptyTrashButton() {
     return this.page.getByRole("button", { name: /Empty Trash|ゴミ箱を空にする/i });
@@ -22,31 +28,11 @@ export class TrashPage {
       .getByRole("button", { name: /Empty Trash|ゴミ箱を空にする/i });
   }
 
-  /** Entry list — each entry is a Card element containing the entry title. */
+  /** Trash entry list — layout-agnostic (master-detail rows / accordion cards). */
   get entryList() {
-    return this.page.locator("[data-slot='card']");
-  }
-
-  /**
-   * "Restore" button scoped to the card that contains the given title.
-   * t("restore") = "Restore" / "復元"
-   */
-  restoreButton(title: string) {
-    return this.page
-      .locator("[data-slot='card']")
-      .filter({ hasText: title })
-      .getByRole("button", { name: /^Restore$|^復元$/i });
-  }
-
-  /**
-   * "Delete Permanently" button scoped to the card that contains the given title.
-   * t("deletePermanently") = "Delete Permanently" / "完全に削除"
-   */
-  deletePermanentlyButton(title: string) {
-    return this.page
-      .locator("[data-slot='card']")
-      .filter({ hasText: title })
-      .getByRole("button", { name: /Delete Permanently|完全に削除/i });
+    return this.entry.isMasterDetail
+      ? this.page.getByRole("option")
+      : this.page.locator("[data-slot='card']");
   }
 
   /**
@@ -64,10 +50,10 @@ export class TrashPage {
   }
 
   /**
-   * Click the "Restore" button for the entry matching the given title.
-   * The restore is handled directly (no confirmation dialog).
+   * Restore the entry matching the title via its ⋮ menu (no confirmation dialog).
+   * The unified list surfaces Restore in the shared EntryActionsMenu for both layouts.
    */
   async restoreEntry(title: string): Promise<void> {
-    await this.restoreButton(title).click();
+    await this.entry.restoreEntry(title);
   }
 }

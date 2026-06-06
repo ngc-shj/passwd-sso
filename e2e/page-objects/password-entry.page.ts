@@ -41,11 +41,24 @@ export class PasswordEntryPage {
   }
 
   /**
-   * Return a locator scoped to the card containing the given title.
-   * Useful when multiple entries are visible — avoids ambiguous matches.
+   * True when the viewport renders the 3-pane master-detail layout. The breakpoint
+   * mirrors `useLayoutMode` (Tailwind `lg` = 1024px): ≥1024px → master-detail rows,
+   * below → accordion cards. Read from the configured viewport (sync, no DOM query).
+   */
+  get isMasterDetail(): boolean {
+    return (this.page.viewportSize()?.width ?? 0) >= 1024;
+  }
+
+  /**
+   * Return a locator scoped to the entry containing the given title — layout-agnostic.
+   * Master-detail renders entries as listbox rows (role="option"); the accordion
+   * renders them as cards ([data-slot='card']). Both embed the shared EntryActionsMenu,
+   * so the ⋮ menu / quick actions resolve identically once scoped here.
    */
   card(title: string | RegExp): Locator {
-    return this.page.locator("[data-slot='card']").filter({ hasText: title });
+    return this.isMasterDetail
+      ? this.page.getByRole("option").filter({ hasText: title })
+      : this.page.locator("[data-slot='card']").filter({ hasText: title });
   }
 
   /**
@@ -115,5 +128,21 @@ export class PasswordEntryPage {
     await this.deleteMenuItem.waitFor({ state: "visible", timeout: 5_000 });
     await this.deleteMenuItem.click();
     await this.deleteConfirmButton.click();
+  }
+
+  /** "Restore" / "復元" — trash-view ⋮ menu item, portal-rendered (page-scoped). */
+  get restoreMenuItem() {
+    return this.page.getByRole("menuitem", { name: /^Restore$|^復元$/i });
+  }
+
+  /**
+   * Open ⋮ menu → Restore (trash view; no confirmation dialog). The restore action
+   * lives in the shared EntryActionsMenu, so this works for both layouts and for
+   * personal + team vaults.
+   */
+  async restoreEntry(title?: string | RegExp): Promise<void> {
+    await this.moreMenuButton(title).click();
+    await this.restoreMenuItem.waitFor({ state: "visible", timeout: 5_000 });
+    await this.restoreMenuItem.click();
   }
 }

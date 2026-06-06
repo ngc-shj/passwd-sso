@@ -443,6 +443,19 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
     await handleSoftDelete(entry);
   }, [entries, handleSoftDelete]);
 
+  // C9 — accordion (PasswordCard) parity with the master-detail row's trash ⋮ actions.
+  const handleCardRestore = useCallback(async (id: string) => {
+    const entry = entries.find((e) => e.id === id);
+    if (!entry) return;
+    await handleRestore(entry);
+  }, [entries, handleRestore]);
+
+  const handleCardDeletePermanently = useCallback((id: string) => {
+    const entry = entries.find((e) => e.id === id);
+    if (!entry) return;
+    setDeletePermanentlyPending(entry);
+  }, [entries]);
+
   const handleToggleExpand = useCallback((id: string) => {
     const entry = entries.find((e) => e.id === id);
     if (activeEntry?.id === id) {
@@ -762,6 +775,16 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
               canShare={descriptor.rowActions.share && adapter.permissions.canShare}
               readOnly={descriptor.detailReadOnly}
               teamId={adapter.teamId}
+              onRestore={
+                descriptor.rowActions.restore && adapter.permissions.canDelete
+                  ? handleCardRestore
+                  : undefined
+              }
+              onDeletePermanently={
+                descriptor.rowActions.deletePermanently && adapter.permissions.canDelete
+                  ? handleCardDeletePermanently
+                  : undefined
+              }
               {...teamCardProps}
             />
           );

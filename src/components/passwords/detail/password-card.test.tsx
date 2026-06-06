@@ -167,4 +167,72 @@ describe("PasswordCard", () => {
 
     expect(onToggleFavorite).toHaveBeenCalledWith("e1", false);
   });
+
+  // The next-intl mock returns the key verbatim, so menu labels are the i18n keys.
+
+  it("invokes onRestore with the entry id from the ⋮ menu (trash view)", async () => {
+    const onRestore = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <PasswordCard
+        entry={baseEntry}
+        expanded={false}
+        onToggleFavorite={vi.fn()}
+        onToggleArchive={vi.fn()}
+        onDelete={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onRefresh={vi.fn()}
+        onRestore={onRestore}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "moreActions" }));
+    await user.click(screen.getByRole("menuitem", { name: "restore" }));
+
+    expect(onRestore).toHaveBeenCalledWith("e1");
+  });
+
+  it("invokes onDeletePermanently with the entry id from the ⋮ menu (trash view)", async () => {
+    const onDeletePermanently = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <PasswordCard
+        entry={baseEntry}
+        expanded={false}
+        onToggleFavorite={vi.fn()}
+        onToggleArchive={vi.fn()}
+        onDelete={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onRefresh={vi.fn()}
+        onDeletePermanently={onDeletePermanently}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "moreActions" }));
+    await user.click(screen.getByRole("menuitem", { name: "deletePermanently" }));
+
+    expect(onDeletePermanently).toHaveBeenCalledWith("e1");
+  });
+
+  it("omits the Restore menu item outside the trash view (no onRestore)", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <PasswordCard
+        entry={baseEntry}
+        expanded={false}
+        onToggleFavorite={vi.fn()}
+        onToggleArchive={vi.fn()}
+        onDelete={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onRefresh={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "moreActions" }));
+
+    expect(screen.queryByRole("menuitem", { name: "restore" })).not.toBeInTheDocument();
+  });
 });

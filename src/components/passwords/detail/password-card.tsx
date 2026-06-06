@@ -65,6 +65,10 @@ interface PasswordCardProps {
   onDelete: (id: string) => void;
   onToggleExpand: (id: string) => void;
   onRefresh: () => void;
+  // C9 trash affordances — parity with PasswordRow. Absent (undefined) outside the
+  // trash view, so the restore / permanent-delete menu items do not render there.
+  onRestore?: (id: string) => void;
+  onDeletePermanently?: (id: string) => void;
   // Optional: data providers for team mode (skip E2E decryption)
   getPassword?: () => Promise<string>;
   getDetail?: () => Promise<InlineDetailData>;
@@ -167,6 +171,8 @@ export function PasswordCard({
   onDelete,
   onToggleExpand,
   onRefresh,
+  onRestore,
+  onDeletePermanently,
   getPassword: getPasswordProp,
   getDetail: getDetailProp,
   getUrl: getUrlProp,
@@ -631,6 +637,10 @@ export function PasswordCard({
               toast.success(isArchived ? t("unarchived") : t("archived"));
             }}
             onDeleteRequest={() => setDeleteDialogOpen(true)}
+            onRestore={onRestore ? () => onRestore(id) : undefined}
+            onDeletePermanently={
+              onDeletePermanently ? () => onDeletePermanently(id) : undefined
+            }
             t={t}
           />
         </CardContent>
