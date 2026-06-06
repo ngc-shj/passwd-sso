@@ -20,7 +20,8 @@ const {
 
 vi.mock("@/lib/auth/session/auth-or-token", () => ({
   authOrToken: mockAuthOrToken,
-  hasUserId: (auth: { type: string }) => "userId" in auth,
+  // Mirror the real guard: requires the userId key AND a non-null value.
+  hasUserId: (auth: { userId?: unknown }) => "userId" in auth && auth.userId !== null,
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -108,6 +109,21 @@ describe("POST /api/vault/ssh/sign-authorize", () => {
     expect(res.status).toBe(403);
     const json = await res.json();
     expect(json.authorized).toBe(false);
+  });
+
+  it("returns 403 when mcp_token has a null userId", async () => {
+    // A real mcp_token can carry userId: null (machine identity). hasUserId
+    // rejects it; the route must not proceed to the entry lookup.
+    mockAuthOrToken.mockResolvedValue({
+      type: "mcp_token",
+      userId: null,
+      tenantId: "tenant-1",
+    });
+    const res = await POST(makeRequest({ keyId: VALID_KEY_ID, fingerprint: VALID_FINGERPRINT }));
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.authorized).toBe(false);
+    expect(mockPrismaPasswordEntry.findFirst).not.toHaveBeenCalled();
   });
 
   // ── Rate limiting ─────────────────────────────────────────────────────

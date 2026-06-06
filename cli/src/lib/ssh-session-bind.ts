@@ -228,10 +228,10 @@ function isAlgoConsistentWithKeyType(algoName: string, keyType: string): boolean
     case "ssh-ed25519":
       return algoName === "ssh-ed25519";
     case "ssh-rsa":
-      // Accept SHA-2 variants; tolerate legacy ssh-rsa (SHA-1) for compatibility
-      return algoName === "rsa-sha2-256"
-        || algoName === "rsa-sha2-512"
-        || algoName === "ssh-rsa";
+      // RSA host key: require SHA-2 signatures only. Modern OpenSSH (7.8+) emits
+      // rsa-sha2-256/512 for session-bind even with ssh-rsa host keys; the legacy
+      // ssh-rsa (SHA-1) signature algorithm is rejected (no SHA-1 in the trust path).
+      return algoName === "rsa-sha2-256" || algoName === "rsa-sha2-512";
     case "ecdsa-sha2-nistp256":
       return algoName === "ecdsa-sha2-nistp256";
     case "ecdsa-sha2-nistp384":
