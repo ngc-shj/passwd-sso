@@ -56,14 +56,9 @@ test.describe("Share Link", () => {
         timeout: 10_000,
       });
 
-      // Open ⋮ menu and click "Share Link"
-      await entryPage.moreMenuButton(TEST_ENTRY.title).click();
-      await page
-        .getByRole("menuitem", { name: /Share Link|リンクで共有/i })
-        .click();
-
-      // Share dialog should open
-      await page.locator("[role='dialog']").waitFor({ timeout: 5_000 });
+      // Open the Share Link dialog via the manage menu (detail pane in master-detail,
+      // card ⋮ in accordion). The entry is already selected above.
+      await entryPage.openShareDialog(TEST_ENTRY.title);
     });
 
     await test.step("create share link with 1-day expiry", async () => {

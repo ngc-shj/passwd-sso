@@ -44,9 +44,8 @@ test.describe("Archive", () => {
   test("archive the entry via ⋮ menu", async () => {
     const entryPage = new PasswordEntryPage(page);
 
-    // Open ⋮ menu and click Archive
-    await entryPage.moreMenuButton(entryTitle).click();
-    await page.getByRole("menuitem", { name: /^Archive$|^アーカイブ$/i }).click();
+    // Archive via the manage menu (detail pane in master-detail, card ⋮ in accordion)
+    await entryPage.archiveEntry(entryTitle);
 
     // Entry should disappear from main list
     await expect(page.getByText(entryTitle)).not.toBeVisible({ timeout: 10_000 });
@@ -63,9 +62,8 @@ test.describe("Archive", () => {
   test("unarchive returns entry to main list", async () => {
     const entryPage = new PasswordEntryPage(page);
 
-    // On archive view, click ⋮ menu and Unarchive
-    await entryPage.moreMenuButton(entryTitle).click();
-    await page.getByRole("menuitem", { name: /^Unarchive$|^アーカイブ解除$/i }).click();
+    // On the archive view, unarchive via the manage menu
+    await entryPage.unarchiveEntry(entryTitle);
 
     // Entry should disappear from archive view
     await expect(page.getByText(entryTitle)).not.toBeVisible({ timeout: 10_000 });
