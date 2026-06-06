@@ -186,6 +186,17 @@ describe("RSA-sha2-256 session-bind", () => {
     const badParsed = { ...parsed, signature: badSigBlob };
     expect(verifySessionBind(badParsed)).toBe(false);
   });
+
+  // Regression guard for S1: the legacy "ssh-rsa" signature algorithm name must
+  // be rejected by the allowlist. We sign with SHA-256 but label the blob "ssh-rsa"
+  // so the allowlist is the ONLY thing that decides — before S1 the allowlist
+  // admitted "ssh-rsa" and the SHA-256 verify would then succeed (true); after S1
+  // the allowlist rejects "ssh-rsa" outright (false). This isolates the allowlist
+  // change rather than relying on a hash mismatch.
+  it("verifySessionBind rejects a SHA-256 signature labeled with the legacy ssh-rsa algorithm", () => {
+    const legacyBlob = buildSshSig("ssh-rsa", rawSig); // rawSig is the SHA-256 signature
+    expect(verifySessionBind({ ...parsed, signature: legacyBlob })).toBe(false);
+  });
 });
 
 // ─── RSA-sha2-512 synthetic vector ───────────────────────────

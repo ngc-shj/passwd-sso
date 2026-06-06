@@ -59,3 +59,24 @@ None — all findings carried file:line evidence.
 - F2: Worst case = a future caller of `readString` forgets the fail-closed wrapper; Likelihood = low (all current callers wrapped); Cost = changing a shared primitive used by every protocol path = regression risk > benefit.
 - T3: expert confirmed the test already catches the leak path; no change.
 - **Orchestrator sign-off**: all three are inline-minor with no security-boundary or behavior impact.
+
+---
+
+# Code Review: ssh-agent-rfc9987 — Round 2 (incremental)
+Date: 2026-06-07
+
+## Changes from Previous Round
+Verified the Round-1 fixes (mcp.ts/time.ts refactor, S1 allowlist tightening, T2/T4 test changes, T1 descope).
+
+## Findings (Round 2)
+- **Functionality: No new findings.** Refactor confirmed value-preserving (all 6 TTL constants byte-identical; SEC_PER_* correct; no import cycle; consumers unaffected). S1 cross-branch clean.
+- **Security: S5 [Minor] — RESOLVED.** The S1 tightening shipped without a regression test (a revert re-adding `ssh-rsa` to the allowlist would not fail any test). Added a **mutation-verified** regression test: a SHA-256 RSA signature labeled `ssh-rsa` — passes with S1 applied, FAILS when S1 is reverted (confirmed by temporarily re-adding the case and observing the test fail). This also surfaced that the original `ssh-rsa` allowance was NOT cosmetic: it admitted a SHA-256 signature under a legacy label (label-confusion acceptance), now closed.
+- **Testing: No new findings.** Both Round-1 test additions mutation-verified by the testing expert (forcing the requireReprompt default to false breaks 3 assertions; reverting the hasUserId mock breaks the null-userId case).
+
+## Convergence
+Round 2 produced one Minor (S5), resolved with a test-only, mutation-verified regression guard. The production security boundary (S1) was unchanged in this round and confirmed correct by all three experts in Round 2. No production findings remain. All suites green: root 11080, CLI 303. **Converged.**
+
+## Resolution Status (Round 2)
+### S5 [Minor] missing S1 regression test — Fixed
+- Action: added a mutation-verified regression test (SHA-256 sig labeled `ssh-rsa` → false; fails on S1 revert).
+- File: cli/src/__tests__/unit/ssh-session-bind.test.ts (RSA-sha2-256 describe block)
