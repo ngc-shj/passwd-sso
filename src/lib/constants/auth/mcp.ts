@@ -13,6 +13,7 @@ export const MCP_SCOPE = {
   PASSWORDS_READ: "passwords:read",
   PASSWORDS_WRITE: "passwords:write",
   DELEGATION_CHECK: "delegation:check",
+  SSH_SIGN: "ssh:sign",
 } as const;
 
 export type McpScope = (typeof MCP_SCOPE)[keyof typeof MCP_SCOPE];
@@ -30,6 +31,7 @@ export const MCP_SCOPE_RISK: Record<McpScope, ScopeRiskLevel> = {
   [MCP_SCOPE.TEAM_CREDENTIALS_READ]: "use",
   [MCP_SCOPE.PASSWORDS_WRITE]: "write",
   [MCP_SCOPE.DELEGATION_CHECK]: "use",
+  [MCP_SCOPE.SSH_SIGN]: "use",
 };
 
 // OAuth 2.1 constants

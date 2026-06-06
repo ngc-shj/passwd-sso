@@ -17,7 +17,7 @@ const CALLBACK_TIMEOUT_MS = 120_000; // 2 minutes
 
 const CLI_CLIENT_NAME = "passwd-sso-cli";
 const CLI_SCOPES =
-  "credentials:list credentials:use vault:status vault:unlock-data passwords:read passwords:write";
+  "credentials:list credentials:use vault:status vault:unlock-data passwords:read passwords:write ssh:sign";
 
 const MCP_TOKEN_ENDPOINT = "/api/mcp/token";
 

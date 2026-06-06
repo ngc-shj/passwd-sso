@@ -12,7 +12,8 @@
     "vault:unlock-data": "Retrieve encrypted vault key",
     "passwords:read": "Read password entries",
     "passwords:write": "Create, update, and delete password entries",
-    "delegation:check": "Check delegation status"
+    "delegation:check": "Check delegation status",
+    "ssh:sign": "Sign SSH authentication challenges"
   },
   "errors": {
     "missingParams": "Missing required parameters",

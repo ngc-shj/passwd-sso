@@ -2,7 +2,7 @@
  * SSH agent protocol constants and framing helpers.
  *
  * Implements the subset of the SSH agent protocol needed for key listing
- * and signing operations. Reference: draft-miller-ssh-agent.
+ * and signing operations. Reference: RFC 9987 (SSH Agent Protocol).
  */
 
 // ─── Message types ────────────────────────────────────────────
@@ -10,11 +10,16 @@
 /** Client → Agent */
 export const SSH2_AGENTC_REQUEST_IDENTITIES = 11;
 export const SSH2_AGENTC_SIGN_REQUEST = 13;
+export const SSH_AGENTC_REMOVE_ALL_IDENTITIES = 19;
+export const SSH_AGENTC_EXTENSION = 27;
 
 /** Agent → Client */
 export const SSH2_AGENT_FAILURE = 5;
+export const SSH_AGENT_SUCCESS = 6;
 export const SSH2_AGENT_IDENTITIES_ANSWER = 12;
 export const SSH2_AGENT_SIGN_RESPONSE = 14;
+export const SSH_AGENT_EXTENSION_FAILURE = 28;
+export const SSH_AGENT_EXTENSION_RESPONSE = 29;
 
 // ─── Signature algorithm flags (SSH2_AGENTC_SIGN_REQUEST flags field) ─
 
@@ -128,4 +133,39 @@ export function buildSignResponse(signature: Buffer): Buffer {
   body[0] = SSH2_AGENT_SIGN_RESPONSE;
   sigString.copy(body, 1);
   return frameMessage(body);
+}
+
+/**
+ * Build an SSH_AGENT_SUCCESS response (RFC 9987 §4.1).
+ */
+export function buildSuccess(): Buffer {
+  const body = Buffer.alloc(1);
+  body[0] = SSH_AGENT_SUCCESS;
+  return frameMessage(body);
+}
+
+/**
+ * Build an SSH_AGENT_EXTENSION_RESPONSE (RFC 9987 §4.7).
+ *
+ * @param payload The extension-specific response payload bytes
+ */
+export function buildExtensionResponse(payload: Buffer): Buffer {
+  const body = Buffer.alloc(1 + payload.length);
+  body[0] = SSH_AGENT_EXTENSION_RESPONSE;
+  payload.copy(body, 1);
+  return frameMessage(body);
+}
+
+/**
+ * Parse an SSH_AGENTC_EXTENSION message buffer.
+ *
+ * @param msgBuf The full message body (msgBuf[0] is the SSH_AGENTC_EXTENSION type byte).
+ * @returns The extension name (utf-8) and the remaining bytes after the name string.
+ */
+export function readExtensionRequest(msgBuf: Buffer): { extName: string; rest: Buffer } {
+  // msgBuf[0] = type byte (SSH_AGENTC_EXTENSION); extension name starts at offset 1
+  const { data, nextOffset } = readString(msgBuf, 1);
+  const extName = data.toString("utf-8");
+  const rest = msgBuf.subarray(nextOffset);
+  return { extName, rest };
 }

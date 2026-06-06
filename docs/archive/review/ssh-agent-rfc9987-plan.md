@@ -269,6 +269,37 @@ All contracts `locked` after 3 review rounds converged (round 3: testing clean; 
 - **SC5** — `SSH_AGENTC_LOCK`/`UNLOCK (22/23)` mapping to vault lock/unlock: deferred (read-only agent refuses with FAILURE, RFC-compliant). Owner: future enhancement.
 - **SC6** — Per-command / sub-token scope minimization so the SSH agent can run with a sign-only token (`ssh:sign` + `passwords:read` + `vault:unlock-data`, no `credentials:use`): deferred. v1 uses the single shared `CLI_SCOPES` token (R2 F11). Owner: future PR (CLI token architecture).
 
+## Implementation Checklist (Step 2-1)
+
+**Server (Batch A):**
+- `prisma/schema.prisma` — add `SSH_KEY_SIGN`, `SSH_KEY_SIGN_DENIED` to `enum AuditAction` (after `DELEGATION_CHECK`, ~line 138 of enum).
+- `prisma/migrations/<ts>_add_ssh_key_sign_audit_actions/migration.sql` — mirror `20260606000000_add_bulk_purge_audit_action/migration.sql` (`ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS ...`). Run `npm run db:migrate` on dev DB (R21).
+- `src/lib/constants/audit/audit.ts` — add 2 actions (after :165), to `AUDIT_ACTION_VALUES` (after :352), `AUDIT_ACTION_GROUP.SSH = "group:ssh"` (after :411), new `group:ssh` array in `AUDIT_ACTION_GROUPS_PERSONAL` only (after :536). NOT TENANT/TEAM/webhook.
+- `messages/en/AuditLog.json` + `messages/ja/AuditLog.json` — `SSH_KEY_SIGN`, `SSH_KEY_SIGN_DENIED` action labels + `groupSsh` group label (ja: 保管庫, no katakana).
+- `src/lib/constants/auth/mcp.ts` — `MCP_SCOPE.SSH_SIGN = "ssh:sign"` (after :15) + `MCP_SCOPE_RISK` entry `"use"` (after :32).
+- `messages/en/McpConsent.json` + `messages/ja/McpConsent.json` — `scopeDescriptions["ssh:sign"]` (after :15).
+- `src/app/api/vault/ssh/sign-authorize/route.ts` — NEW. Mirror `src/app/api/vault/delegation/check/route.ts` (auth/scope/rate-limit/withBypassRls/audit), POST + body schema.
+- `src/app/api/vault/ssh/sign-authorize/route.test.ts` — NEW. Reuse delegation/check/route.test.ts harness.
+- `src/lib/constants/audit/audit.test.ts`, `src/lib/constants/auth/mcp.test.ts` — extend coverage assertions.
+- `CLAUDE.md` — add `/api/vault/ssh/sign-authorize` to the Vault endpoint table.
+
+**CLI protocol+crypto (Batch B):**
+- `cli/src/lib/ssh-agent-protocol.ts` — add constants (6/19/27/28/29), `buildSuccess`, `buildExtensionResponse`, `readExtensionRequest`; update `draft-miller`→RFC 9987.
+- `cli/src/lib/ssh-session-bind.ts` — NEW: `parseSessionBind`, `sshWirePublicKeyToKeyObject`, `verifySessionBind` (algorithm-bound, fail-closed), `fingerprintPublicKey`. Reuse JWK builders from `openssh-key-parser.ts`.
+- `cli/src/__tests__/unit/ssh-agent-protocol.test.ts` (extend), `cli/src/__tests__/unit/ssh-session-bind.test.ts` (NEW).
+
+**CLI wiring (Batch C, after B):**
+- `cli/src/lib/ssh-sign-authorizer.ts` — NEW: `authorizeSign` (fail-closed + reason-based re-login hint).
+- `cli/src/lib/ssh-confirm.ts` — NEW: `confirmSign` (isTTY gate + injectable prompt/isTTY deps).
+- `cli/src/lib/ssh-key-agent.ts` — add `requireReprompt: boolean` to `LoadedSshKey` (entryId already present :19), extend `loadKey`.
+- `cli/src/lib/ssh-agent-socket.ts` — connection-scoped `ConnectionContext`, async single-in-flight drain, dispatch table (REMOVE_ALL/EXTENSION/query/session-bind/SIGN-with-authorize+confirm), **export `handleConnection`+`handleMessage`**.
+- `cli/src/commands/agent.ts` — read `requireReprompt`, inject `authorizeSign`/`confirmSign` into the socket server, fingerprint mapping.
+- `cli/src/__tests__/unit/ssh-sign-authorizer.test.ts`, `ssh-confirm.test.ts`, `ssh-agent-socket.test.ts` — NEW.
+
+**Reuse (R1/R17 — do NOT reimplement):** `authOrToken`/`hasUserId`, `withBypassRls`+`BYPASS_PURPOSE.CROSS_TENANT_LOOKUP`, `createRateLimiter`/`checkRateLimitOrFail`, `logAuditAsync`+`personalAuditBase`+`resolveActorType`, `apiRequest`, `readString`/`encodeString`/`frameMessage`, JWK construction in `openssh-key-parser.ts`, `process.stdin.isTTY` (precedent `unlock.ts:38`).
+
+**Manual-test artifact (R35 Tier-1):** `docs/archive/review/ssh-agent-rfc9987-manual-test.md` — VC1/VC3/VC4 live paths.
+
 ## User operation scenarios
 
 1. **Normal git over SSH**: `eval $(passwd-sso agent --eval)`; `git push`. ssh sends session-bind (verified, stored), then SIGN_REQUEST → authorize 200 → sign → push succeeds; an `SSH_KEY_SIGN` audit row records the host-key fingerprint.

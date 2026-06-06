@@ -13,7 +13,9 @@ import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
 import { getEncryptionKey, getUserId, isUnlocked } from "../lib/vault-state.js";
 import { autoUnlockIfNeeded } from "./unlock.js";
 import { loadKey, clearKeys } from "../lib/ssh-key-agent.js";
-import { startAgent, stopAgent } from "../lib/ssh-agent-socket.js";
+import { startAgent, stopAgent, setAgentDeps } from "../lib/ssh-agent-socket.js";
+import { authorizeSign } from "../lib/ssh-sign-authorizer.js";
+import { confirmSign } from "../lib/ssh-confirm.js";
 import { decryptAgentCommand } from "./agent-decrypt.js";
 import * as output from "../lib/output.js";
 
@@ -26,6 +28,8 @@ interface VaultEntry {
     authTag: string;
   };
   aadVersion: number;
+  /** Whether each signature requires explicit user confirmation */
+  requireReprompt?: boolean;
 }
 
 interface SshKeyBlob {
@@ -114,6 +118,7 @@ export async function agentCommand(opts: AgentOptions): Promise<void> {
         publicKeyBlob,
         blob.comment ?? blob.title ?? "",
         blob.passphrase,
+        entry.requireReprompt,
       );
       loadedCount++;
     } catch (err) {
@@ -127,6 +132,9 @@ export async function agentCommand(opts: AgentOptions): Promise<void> {
     output.error("No valid SSH keys could be loaded.");
     process.exit(1);
   }
+
+  // Wire the real authorize/confirm implementations into the socket server.
+  setAgentDeps({ authorizeSign, confirmSign });
 
   // Start the agent socket
   const socketPath = startAgent();

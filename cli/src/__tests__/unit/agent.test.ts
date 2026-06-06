@@ -39,6 +39,15 @@ vi.mock("../../lib/ssh-key-agent.js", () => ({
 vi.mock("../../lib/ssh-agent-socket.js", () => ({
   startAgent: vi.fn(() => "/tmp/test-ssh.sock"),
   stopAgent: vi.fn(),
+  setAgentDeps: vi.fn(),
+}));
+
+vi.mock("../../lib/ssh-sign-authorizer.js", () => ({
+  authorizeSign: vi.fn(),
+}));
+
+vi.mock("../../lib/ssh-confirm.js", () => ({
+  confirmSign: vi.fn(),
 }));
 
 vi.mock("../../lib/output.js", () => ({
