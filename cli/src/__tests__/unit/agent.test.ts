@@ -106,6 +106,7 @@ describe("agentCommand", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("delegates to decryptAgentCommand when opts.decrypt is true", async () => {
@@ -280,7 +281,8 @@ describe("agentCommand", () => {
     const onSpy = vi
       .spyOn(process, "on")
       .mockImplementation(() => process as unknown as NodeJS.Process);
-    process.env._PSSO_SSH_DAEMON = "1";
+    // vi.stubEnv (auto-unstubbed via setup.ts afterEach) — no direct process.env mutation.
+    vi.stubEnv("_PSSO_SSH_DAEMON", "1");
     try {
       // runDaemonChild waits for an IPC message — do not await it.
       void agentCommand({});
@@ -288,7 +290,6 @@ describe("agentCommand", () => {
       // It must NOT unlock in the child (the key arrives via IPC).
       expect(autoUnlockIfNeeded).not.toHaveBeenCalled();
     } finally {
-      delete process.env._PSSO_SSH_DAEMON;
       onSpy.mockRestore();
     }
   });

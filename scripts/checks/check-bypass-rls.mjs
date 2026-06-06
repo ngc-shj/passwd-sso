@@ -153,6 +153,8 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/auth/access/delegation.ts", ["delegationSession"]],
   ["src/app/api/vault/delegation/route.ts", ["mcpAccessToken", "tenant", "passwordEntry", "delegationSession"]],
   ["src/app/api/vault/delegation/check/route.ts", ["delegationSession"]],
+  // SSH agent per-signature authorize: cross-tenant SSH_KEY lookup scoped by userId in WHERE
+  ["src/app/api/vault/ssh/sign-authorize/route.ts", ["passwordEntry"]],
   // MCP Connections: user's own token listing + revocation (userId + tenantId in WHERE)
   ["src/app/api/user/mcp-tokens/route.ts", ["mcpAccessToken", "mcpClient"]],
   ["src/app/api/user/mcp-tokens/[id]/route.ts", ["mcpAccessToken", "mcpRefreshToken", "delegationSession", "auditLog"]],
