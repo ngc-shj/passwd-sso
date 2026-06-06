@@ -137,6 +137,16 @@ vi.mock("lucide-react", () => ({
   Trash2: () => null,
 }));
 
+// Dialog — noop stub so entry-list-view's delete-permanently dialog does not render
+vi.mock("@/components/ui/dialog", () => ({
+  Dialog: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DialogContent: () => null,
+  DialogDescription: () => null,
+  DialogFooter: () => null,
+  DialogHeader: () => null,
+  DialogTitle: () => null,
+}));
+
 import { PasswordList } from "./detail/password-list";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

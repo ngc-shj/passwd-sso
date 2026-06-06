@@ -81,6 +81,9 @@ interface PasswordRowProps {
   onEdit: () => void;
   onToggleArchive: () => void;
   onDeleteRequest: () => void;
+  // C9 — trash-view affordances (INV-C9.3: absent for normal/archive rows).
+  onRestore?: () => void;
+  onDeletePermanently?: () => void;
 
   canEdit?: boolean;
   canDelete?: boolean;
@@ -131,6 +134,8 @@ export function PasswordRow({
   onEdit,
   onToggleArchive,
   onDeleteRequest,
+  onRestore,
+  onDeletePermanently,
   canEdit = true,
   canDelete = true,
   canShare = true,
@@ -237,6 +242,8 @@ export function PasswordRow({
           onEdit={onEdit}
           onToggleArchive={onToggleArchive}
           onDeleteRequest={onDeleteRequest}
+          onRestore={onRestore}
+          onDeletePermanently={onDeletePermanently}
           t={t}
         />
       </div>

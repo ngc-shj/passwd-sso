@@ -18,6 +18,14 @@ import type { Ref } from "react";
 import { useTranslations } from "next-intl";
 import { Archive, KeyRound, Loader2, Star, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 import type { VaultListAdapter, EntryListQuery } from "@/lib/vault/vault-list-adapter";
 import type { ListViewDescriptor } from "@/components/passwords/detail/entry-list-view-descriptors";
@@ -116,6 +124,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
   onVisibleEntriesChange,
 }: EntryListViewProps<E>) {
   const t = useTranslations("PasswordList");
+  const tTrash = useTranslations("Trash");
   const layoutMode = useLayoutMode();
 
   // INV-DEV1: assert descriptor × adapter compatibility on mount + when they change.
@@ -126,6 +135,9 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
   // INV-F1 / INV-S5: activeEntry AND selectionMode — owned here, reset atomically on query/view change.
   const [activeEntry, setActiveEntry] = useState<E | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
+
+  // C9 — delete-permanently confirm dialog state (INV-C9.2: confirm before DELETE).
+  const [deletePermanentlyPending, setDeletePermanentlyPending] = useState<E | null>(null);
 
   // INV-F1: detect query/descriptor.kind changes and clear both atomically during render.
   const viewKey = `${descriptor.kind}|${query.tagId ?? ""}|${query.folderId ?? ""}|${query.entryType ?? ""}`;
@@ -281,6 +293,35 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
       reload();
     }
   }, [adapter, onDataChange, onEntryRemoved, reload]);
+
+  // C9 — restore (no confirm per INV-C9.2).
+  const handleRestore = useCallback(async (entry: E) => {
+    setActiveEntry((prev) => (prev?.id === entry.id ? null : prev));
+    onEntryRemoved?.(entry.id);
+    try {
+      await adapter.restore(entry);
+      notifyVaultDataChanged();
+      onDataChange?.();
+    } catch {
+      reload();
+    }
+  }, [adapter, onDataChange, onEntryRemoved, reload]);
+
+  // C9 — delete permanently (confirm dialog shown first; this is called on confirm).
+  const handleDeletePermanentlyConfirmed = useCallback(async () => {
+    const entry = deletePermanentlyPending;
+    if (!entry) return;
+    setDeletePermanentlyPending(null);
+    setActiveEntry((prev) => (prev?.id === entry.id ? null : prev));
+    onEntryRemoved?.(entry.id);
+    try {
+      await adapter.deletePermanently(entry);
+      notifyVaultDataChanged();
+      onDataChange?.();
+    } catch {
+      reload();
+    }
+  }, [adapter, deletePermanentlyPending, onDataChange, onEntryRemoved, reload]);
 
   // ── Accordion toggle callbacks (legacy PasswordCard interface) ─────────────
 
@@ -481,6 +522,17 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
                 canEdit={descriptor.rowActions.edit && adapter.permissions.canEdit}
                 canDelete={descriptor.rowActions.trash && adapter.permissions.canDelete}
                 canShare={descriptor.rowActions.share && adapter.permissions.canShare}
+                // C9 — trash affordances (INV-C9.1: gated by descriptor + canDelete).
+                onRestore={
+                  descriptor.rowActions.restore && adapter.permissions.canDelete
+                    ? () => void handleRestore(entry)
+                    : undefined
+                }
+                onDeletePermanently={
+                  descriptor.rowActions.deletePermanently && adapter.permissions.canDelete
+                    ? () => setDeletePermanentlyPending(entry)
+                    : undefined
+                }
               />
             );
           }
@@ -508,11 +560,34 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
   );
 
   return (
-    <MasterDetailShell
-      layoutMode={layoutMode}
-      activeEntryId={activeEntry?.id ?? null}
-      listSlot={listSlot}
-      detailSlot={detailSlot}
-    />
+    <>
+      <MasterDetailShell
+        layoutMode={layoutMode}
+        activeEntryId={activeEntry?.id ?? null}
+        listSlot={listSlot}
+        detailSlot={detailSlot}
+      />
+      {/* C9 — delete-permanently confirm dialog (INV-C9.2). */}
+      <Dialog
+        open={!!deletePermanentlyPending}
+        onOpenChange={(open) => {
+          if (!open) setDeletePermanentlyPending(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{tTrash("deletePermanently")}</DialogTitle>
+            <DialogDescription>
+              {tTrash("deleteConfirm", { title: deletePermanentlyPending?.title ?? "" })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="destructive" onClick={() => void handleDeletePermanentlyConfirmed()}>
+              {tTrash("deletePermanently")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

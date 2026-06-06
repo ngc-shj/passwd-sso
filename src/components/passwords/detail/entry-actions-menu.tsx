@@ -18,6 +18,7 @@ import {
   Archive,
   ArchiveRestore,
   Trash2,
+  RotateCcw,
   Link as LinkIcon,
 } from "lucide-react";
 import { ENTRY_TYPE } from "@/lib/constants";
@@ -57,6 +58,10 @@ interface EntryActionsMenuProps {
   onEdit: () => void;
   onToggleArchive: () => void;
   onDeleteRequest: () => void;
+  // Trash-view affordances (C9 — gated by descriptor.rowActions + adapter.permissions.canDelete).
+  // When absent (normal/archive views), these menu items do NOT render (INV-C9.3).
+  onRestore?: () => void;
+  onDeletePermanently?: () => void;
   // i18n strings
   t: (key: string) => string;
 }
@@ -97,6 +102,8 @@ export function EntryActionsMenu({
   onEdit,
   onToggleArchive,
   onDeleteRequest,
+  onRestore,
+  onDeletePermanently,
   t,
 }: EntryActionsMenuProps) {
   const isNote = entryType === ENTRY_TYPE.SECURE_NOTE;
@@ -250,6 +257,31 @@ export function EntryActionsMenu({
                 >
                   <Trash2 className="h-4 w-4" />
                   {t("delete")}
+                </DropdownMenuItem>
+              </>
+            )}
+            {/* C9 — trash-view affordances (INV-C9.3: absent for normal/archive). */}
+            {onRestore && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={onRestore}>
+                  <RotateCcw className="h-4 w-4" />
+                  {t("restore")}
+                </DropdownMenuItem>
+              </>
+            )}
+            {onDeletePermanently && (
+              <>
+                {!onRestore && <DropdownMenuSeparator />}
+                <DropdownMenuItem
+                  variant="destructive"
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    onDeletePermanently();
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  {t("deletePermanently")}
                 </DropdownMenuItem>
               </>
             )}
