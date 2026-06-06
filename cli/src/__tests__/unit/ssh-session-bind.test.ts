@@ -73,18 +73,6 @@ function buildSessionBindPayload(
   ]);
 }
 
-/** Encode a BigInt as a minimal big-endian SSH mpint buffer (no leading zeros except sign). */
-function bigIntToMpint(n: bigint): Buffer {
-  const hex = n.toString(16);
-  const padded = hex.length % 2 ? "0" + hex : hex;
-  const raw = Buffer.from(padded, "hex");
-  // Prepend 0x00 if the high bit is set (positive mpint)
-  if (raw[0] !== undefined && raw[0] & 0x80) {
-    return Buffer.concat([Buffer.from([0x00]), raw]);
-  }
-  return raw;
-}
-
 /** Convert DER ECDSA signature to SSH format (string(r) || string(s)). */
 function derEcdsaToSsh(derSig: Buffer): Buffer {
   let offset = 0;

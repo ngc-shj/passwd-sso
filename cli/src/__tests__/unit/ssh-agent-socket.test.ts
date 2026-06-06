@@ -11,7 +11,6 @@ import {
   readUint32,
   encodeString,
   frameMessage,
-  buildIdentitiesAnswer,
   SSH2_AGENTC_REQUEST_IDENTITIES,
   SSH2_AGENTC_SIGN_REQUEST,
   SSH_AGENTC_REMOVE_ALL_IDENTITIES,
@@ -20,12 +19,6 @@ import {
   SSH2_AGENT_FAILURE,
   SSH_AGENT_EXTENSION_RESPONSE,
 } from "../../lib/ssh-agent-protocol.js";
-import {
-  generateKeyPairSync,
-  createPublicKey,
-  sign as cryptoSign,
-} from "node:crypto";
-
 // ─── Mock dependencies that the socket module imports ─────────────────────────
 
 vi.mock("../../lib/ssh-key-agent.js", () => ({
