@@ -199,6 +199,7 @@ export function PasswordRow({
     // tests must query aria-current, not a class name.
     <div
       role="option"
+      id={entry.id}
       aria-current={isActive ? "true" : undefined}
       aria-selected={isActive}
       onClick={handleClick}
@@ -246,6 +247,7 @@ export function PasswordRow({
             ].filter(Boolean).join(" ")}
             aria-label={isFavorite ? t("unfavorite") : t("favorite")}
             aria-pressed={isFavorite}
+            tabIndex={isActive ? 0 : -1}
           >
             <Star
               className={isFavorite ? "h-4 w-4 fill-yellow-400 text-yellow-400" : "h-4 w-4"}
@@ -253,10 +255,13 @@ export function PasswordRow({
           </button>
         )}
 
-        {/* Quick-copy + overflow menu — revealed on hover/active; stop propagation
-            so they don't activate the row */}
-        <div className={["shrink-0", actionReveal].filter(Boolean).join(" ")}>
+        {/* Quick-copy stays visible (the primary verb); the overflow ⋮ menu reveals on
+            hover/active. Both are mouse accelerators (tabIndex=-1 off the active row);
+            keyboard users use the detail-pane actions. Stop propagation so they don't
+            activate the row. */}
         <EntryActionsMenu
+          overflowClassName={actionReveal}
+          tabIndex={isActive ? 0 : -1}
           entryType={entryType}
           username={username}
           urlHost={urlHost}
@@ -292,7 +297,6 @@ export function PasswordRow({
           onDeletePermanently={onDeletePermanently}
           t={t}
         />
-        </div>
       </div>
 
       {/* Line 2: secondary info + tags (tags overflow, never crush the secondary line — INV-C6.2) */}

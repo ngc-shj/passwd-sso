@@ -14,8 +14,12 @@ import { Copy, Check } from "lucide-react";
 interface CopyButtonProps {
   getValue: () => Promise<string> | string;
   label?: string;
+  /** Accessible name for the icon-only button (WCAG 4.1.2). Defaults to the copy/copied label. */
+  ariaLabel?: string;
   variant?: "ghost" | "outline" | "default";
   size?: "icon" | "sm" | "default";
+  className?: string;
+  tabIndex?: number;
 }
 
 import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
@@ -23,8 +27,11 @@ import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
 export function CopyButton({
   getValue,
   label,
+  ariaLabel,
   variant = "ghost",
   size = "icon",
+  className,
+  tabIndex,
 }: CopyButtonProps) {
   const t = useTranslations("CopyButton");
   const [copied, setCopied] = useState(false);
@@ -64,7 +71,14 @@ export function CopyButton({
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant={variant} size={size} onClick={handleCopy}>
+          <Button
+            variant={variant}
+            size={size}
+            onClick={handleCopy}
+            className={className}
+            tabIndex={tabIndex}
+            aria-label={label ? undefined : (ariaLabel ?? (copied ? t("copied") : t("copy")))}
+          >
             {copied ? (
               <Check className="h-4 w-4 text-green-500" />
             ) : (

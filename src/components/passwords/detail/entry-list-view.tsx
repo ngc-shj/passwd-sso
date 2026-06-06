@@ -557,6 +557,40 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
       }}
       teamId={adapter.teamId}
       readOnly={descriptor.detailReadOnly || !adapter.permissions.canEdit}
+      // Persistent action home for the selected entry (gated identically to the row's ⋮).
+      showFavorite={descriptor.rowActions.favorite && adapter.supportsFavorite}
+      isFavorite={activeEntry?.isFavorite}
+      onToggleFavorite={
+        activeEntry && descriptor.rowActions.favorite && adapter.supportsFavorite
+          ? () => void handleSetFavorite(activeEntry, !activeEntry.isFavorite)
+          : undefined
+      }
+      onShare={
+        activeEntry && descriptor.rowActions.share && adapter.permissions.canShare
+          ? () => onRequestShare?.(activeEntry)
+          : undefined
+      }
+      isArchived={activeEntry?.isArchived}
+      onArchive={
+        activeEntry && descriptor.rowActions.archive && adapter.permissions.canEdit
+          ? () => void handleSetArchived(activeEntry, !activeEntry.isArchived)
+          : undefined
+      }
+      onDelete={
+        activeEntry && descriptor.rowActions.trash && adapter.permissions.canDelete
+          ? () => void handleSoftDelete(activeEntry)
+          : undefined
+      }
+      onRestore={
+        activeEntry && descriptor.rowActions.restore && adapter.permissions.canDelete
+          ? () => void handleRestore(activeEntry)
+          : undefined
+      }
+      onDeletePermanently={
+        activeEntry && descriptor.rowActions.deletePermanently && adapter.permissions.canDelete
+          ? () => setDeletePermanentlyPending(activeEntry)
+          : undefined
+      }
     />
   );
 
@@ -596,6 +630,14 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
       ref={listPaneRef}
       tabIndex={layoutMode === "master-detail" ? 0 : undefined}
       onKeyDown={handleListKeyDown}
+      // Listbox semantics for the master-detail row list: rows are role="option" with
+      // an id; focus stays on this container and aria-activedescendant tracks the active
+      // row (arrow keys move it). Row action buttons are roving (tabIndex=-1 off-active),
+      // so keyboard users aren't tabbed through hidden controls.
+      role={layoutMode === "master-detail" ? "listbox" : undefined}
+      aria-activedescendant={
+        layoutMode === "master-detail" ? (activeEntry?.id ?? undefined) : undefined
+      }
       className="outline-none h-full space-y-4 p-2"
     >
       {/* Accordion only: master-detail hosts this in the detail pane (emptyTrashInPane). */}

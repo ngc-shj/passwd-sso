@@ -314,4 +314,44 @@ describe("PasswordDetailPane header", () => {
     fireEvent.click(within(field).getByRole("button"));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("user@example.com"));
   });
+
+  // ── Persistent action home (the UX-review fix): Share/Archive/Delete + favorite
+  // live in the detail pane so the row ⋮ is a pure mouse accelerator. ────────────
+  it("renders the favorite toggle + overflow menu when handlers are provided, and fires favorite", () => {
+    const onToggleFavorite = vi.fn();
+    render(
+      <PasswordDetailPane
+        entryId="entry-1"
+        entry={minimalEntry}
+        detailData={minimalDetailData}
+        loading={false}
+        error={null}
+        showFavorite
+        isFavorite={false}
+        onToggleFavorite={onToggleFavorite}
+        onShare={vi.fn()}
+        onArchive={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    );
+    // ⋮ overflow trigger is present (keyboard-reachable home for share/archive/delete).
+    expect(screen.getByRole("button", { name: "moreActions" })).toBeInTheDocument();
+    // favorite toggle present and wired.
+    fireEvent.click(screen.getByRole("button", { name: "favorite" }));
+    expect(onToggleFavorite).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits the overflow menu + favorite when no action handlers are provided (read-only/none)", () => {
+    render(
+      <PasswordDetailPane
+        entryId="entry-1"
+        entry={minimalEntry}
+        detailData={minimalDetailData}
+        loading={false}
+        error={null}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "moreActions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "favorite" })).not.toBeInTheDocument();
+  });
 });

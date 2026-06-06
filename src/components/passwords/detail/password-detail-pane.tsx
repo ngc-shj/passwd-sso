@@ -1,11 +1,29 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Loader2, MousePointerClick } from "lucide-react";
+import {
+  Loader2,
+  MousePointerClick,
+  MoreVertical,
+  Star,
+  Archive,
+  ArchiveRestore,
+  Trash2,
+  RotateCcw,
+  Link as LinkIcon,
+} from "lucide-react";
 import { PasswordDetailInline } from "./password-detail-inline";
 import { EntryIcon } from "./entry-icon";
 import { CopyButton } from "../shared/copy-button";
 import { TagBadge } from "@/components/tags/tag-badge";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { InlineDetailData } from "@/types/entry";
@@ -47,6 +65,19 @@ interface PasswordDetailPaneProps {
   onRefresh?: () => void;
   teamId?: string;
   readOnly?: boolean;
+  // Persistent action home (the experts' fix): Share/Archive/Delete (or Restore/
+  // Delete-permanently in trash) + favorite live here, always reachable once an entry
+  // is selected — so the list row's ⋮ is a pure mouse accelerator. Each renders only
+  // when its handler is provided (gated by descriptor × permissions in EntryListView).
+  showFavorite?: boolean;
+  isFavorite?: boolean;
+  onToggleFavorite?: () => void;
+  onShare?: () => void;
+  isArchived?: boolean;
+  onArchive?: () => void;
+  onDelete?: () => void;
+  onRestore?: () => void;
+  onDeletePermanently?: () => void;
 }
 
 const MAX_VISIBLE_TAGS = 6;
@@ -86,9 +117,22 @@ export function PasswordDetailPane({
   onRefresh,
   teamId,
   readOnly,
+  showFavorite,
+  isFavorite,
+  onToggleFavorite,
+  onShare,
+  isArchived,
+  onArchive,
+  onDelete,
+  onRestore,
+  onDeletePermanently,
 }: PasswordDetailPaneProps) {
   const t = useTranslations("PasswordList");
   const td = useTranslations("PasswordDetail");
+  const tc = useTranslations("PasswordCard");
+  const tTrash = useTranslations("Trash");
+
+  const hasMenuActions = !!(onShare || onArchive || onDelete || onRestore || onDeletePermanently);
 
   // INV-C2.2: entryId === null → empty-state; never show stale previous data.
   if (entryId === null) {
@@ -119,6 +163,75 @@ export function PasswordDetailPane({
             <h2 className="min-w-0 flex-1 truncate text-lg font-semibold" data-testid="detail-pane-title">
               {entry.title}
             </h2>
+
+            {/* Persistent action home — always reachable once an entry is selected. */}
+            <div className="flex shrink-0 items-center gap-1">
+              {showFavorite && onToggleFavorite && (
+                <button
+                  type="button"
+                  onClick={onToggleFavorite}
+                  className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  aria-label={isFavorite ? tc("unfavorite") : tc("favorite")}
+                  aria-pressed={isFavorite}
+                >
+                  <Star className={isFavorite ? "h-4 w-4 fill-yellow-400 text-yellow-400" : "h-4 w-4"} />
+                </button>
+              )}
+              {hasMenuActions && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                      <MoreVertical className="h-4 w-4" />
+                      <span className="sr-only">{tc("moreActions")}</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {onShare && (
+                      <DropdownMenuItem onSelect={onShare}>
+                        <LinkIcon className="h-4 w-4" />
+                        {tc("share")}
+                      </DropdownMenuItem>
+                    )}
+                    {onArchive && (
+                      <DropdownMenuItem onSelect={onArchive}>
+                        {isArchived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
+                        {isArchived ? tc("unarchive") : tc("archive")}
+                      </DropdownMenuItem>
+                    )}
+                    {onRestore && (
+                      <DropdownMenuItem onSelect={onRestore}>
+                        <RotateCcw className="h-4 w-4" />
+                        {tTrash("restore")}
+                      </DropdownMenuItem>
+                    )}
+                    {onDelete && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onSelect={(e) => { e.preventDefault(); onDelete(); }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          {tc("delete")}
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                    {onDeletePermanently && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onSelect={(e) => { e.preventDefault(); onDeletePermanently(); }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          {tTrash("deletePermanently")}
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
           </div>
 
           {/* Username as a labeled, copyable field (same layout as the body fields).

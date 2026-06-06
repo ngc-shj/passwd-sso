@@ -62,6 +62,11 @@ interface EntryActionsMenuProps {
   // When absent (normal/archive views), these menu items do NOT render (INV-C9.3).
   onRestore?: () => void;
   onDeletePermanently?: () => void;
+  /** Applied to the overflow (⋮) trigger wrapper only — lets the row hide it until hover. */
+  overflowClassName?: string;
+  /** tabIndex for the quick-copy + overflow buttons. On a 3-pane row they are mouse
+   *  accelerators (tabIndex=-1); keyboard users use the detail-pane actions. */
+  tabIndex?: number;
   // i18n strings
   t: (key: string) => string;
 }
@@ -104,6 +109,8 @@ export function EntryActionsMenu({
   onDeleteRequest,
   onRestore,
   onDeletePermanently,
+  overflowClassName,
+  tabIndex,
   t,
 }: EntryActionsMenuProps) {
   const isNote = entryType === ENTRY_TYPE.SECURE_NOTE;
@@ -122,23 +129,23 @@ export function EntryActionsMenu({
         onPointerDown={(e) => e.stopPropagation()}
       >
         {!isNote && !isCreditCard && !isIdentity && !isPasskey && !isBankAccount && !isSoftwareLicense && !isSshKey && (
-          <CopyButton getValue={fetchPassword} />
+          <CopyButton tabIndex={tabIndex} getValue={fetchPassword} />
         )}
-        {isCreditCard && <CopyButton getValue={() => fetchCardField("cardNumber")} />}
-        {isIdentity && <CopyButton getValue={() => fetchIdentityField("idNumber")} />}
-        {isPasskey && <CopyButton getValue={() => fetchPasskeyField("credentialId")} />}
-        {isBankAccount && <CopyButton getValue={() => fetchBankField("accountNumber")} />}
-        {isSoftwareLicense && <CopyButton getValue={() => fetchLicenseField("licenseKey")} />}
-        {isSshKey && <CopyButton getValue={() => fetchSshField("fingerprint")} />}
+        {isCreditCard && <CopyButton tabIndex={tabIndex} getValue={() => fetchCardField("cardNumber")} />}
+        {isIdentity && <CopyButton tabIndex={tabIndex} getValue={() => fetchIdentityField("idNumber")} />}
+        {isPasskey && <CopyButton tabIndex={tabIndex} getValue={() => fetchPasskeyField("credentialId")} />}
+        {isBankAccount && <CopyButton tabIndex={tabIndex} getValue={() => fetchBankField("accountNumber")} />}
+        {isSoftwareLicense && <CopyButton tabIndex={tabIndex} getValue={() => fetchLicenseField("licenseKey")} />}
+        {isSshKey && <CopyButton tabIndex={tabIndex} getValue={() => fetchSshField("fingerprint")} />}
       </div>
       <div
-        className="pointer-events-auto"
+        className={["pointer-events-auto", overflowClassName].filter(Boolean).join(" ")}
         onClick={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
       >
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0">
+            <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" tabIndex={tabIndex}>
               <MoreVertical className="h-4 w-4" />
               <span className="sr-only">{t("moreActions")}</span>
             </Button>
