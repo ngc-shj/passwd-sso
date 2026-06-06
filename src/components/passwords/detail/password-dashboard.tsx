@@ -261,7 +261,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
         layoutMode === "master-detail" ? "h-full" : "flex-1",
       ].join(" ")}
     >
-      <div className={layoutMode === "master-detail" ? "mx-auto w-full max-w-[1600px]" : "mx-auto max-w-4xl w-full"}>
+      <div className={layoutMode === "master-detail" ? "mx-auto w-full max-w-[1280px]" : "mx-auto max-w-4xl w-full"}>
         <EntryListHeader
           icon={headerIcon}
           title={isPrimaryScopeLabel ? subtitle : t("personalVault")}
@@ -395,7 +395,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
           which owns the MasterDetailShell, detail pane, selection, and keyboard nav (C3/C7). */}
       <div className={[
         "flex-1 min-h-0",
-        layoutMode === "master-detail" ? "overflow-hidden mx-auto w-full max-w-[1600px]" : "mx-auto max-w-4xl w-full",
+        layoutMode === "master-detail" ? "overflow-hidden mx-auto w-full max-w-[1280px]" : "mx-auto max-w-4xl w-full",
       ].join(" ")}>
         <PasswordList
           searchQuery={searchQuery}
