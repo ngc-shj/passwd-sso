@@ -367,7 +367,9 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
     try {
       const detail = await adapter.buildGetDetail(entry)();
       const { totp: _totp, passwordHistory: _ph, id: _id, requireReprompt: _rp, ...safe } = detail;
-      setShareData(safe as Record<string, unknown>);
+      // The detail decrypt omits the title (it lives in the overview, map-detail-fields.ts),
+      // but the personal share schema requires it — inject it from the entry.
+      setShareData({ ...safe, title: entry.title } as Record<string, unknown>);
       setShareEntry(entry);
       setShareOpen(true);
     } catch {
