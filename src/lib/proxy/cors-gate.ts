@@ -27,6 +27,7 @@ export const EXTENSION_TOKEN_ROUTES: readonly string[] = [
   API_PATH.EXTENSION_KEY_RESET,     // POST (key reset) — Bearer + DPoP, no session cookie
   API_PATH.TENANT_ACCESS_REQUESTS,  // SA self-service JIT — validated by route handler via authOrToken
   API_PATH.VAULT_DELEGATION,        // Delegation check — CLI agent uses Bearer for /check
+  API_PATH.VAULT_SSH_SIGN_AUTHORIZE, // SSH agent per-signature authorize — CLI uses Bearer
 ];
 
 /**
