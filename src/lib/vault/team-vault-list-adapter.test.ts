@@ -22,6 +22,10 @@ vi.mock("@/lib/url-helpers", () => ({
   fetchApi: (...args: unknown[]) => mockFetchApi(...args),
 }));
 vi.mock("@/lib/events", () => ({ notifyTeamDataChanged: mockNotifyTeam }));
+vi.mock("next-intl", () => ({
+  useTranslations: () => (key: string, params?: Record<string, unknown>) =>
+    params ? `${key}:${JSON.stringify(params)}` : key,
+}));
 vi.mock("@/lib/team/team-vault-context", () => ({
   useTeamVault: () => ({
     getTeamEncryptionKey: mockGetTeamKey,
@@ -29,7 +33,7 @@ vi.mock("@/lib/team/team-vault-context", () => ({
   }),
 }));
 
-import { renderHook, waitFor } from "@testing-library/react";
+import { renderHook } from "@testing-library/react";
 import { decryptTeamOverview, useTeamVaultListAdapter } from "./team-vault-list-adapter";
 import type { TeamDisplayEntry } from "@/types/team-display-entry";
 
@@ -109,7 +113,7 @@ describe("useTeamVaultListAdapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetTeamKey.mockResolvedValue(STABLE_KEY);
-    mockFetchApi.mockResolvedValue({ ok: true, json: async () => ({}) });
+    mockFetchApi.mockResolvedValue({ ok: true, json: async () => [] });
   });
 
   it("keeps favorites for team (supportsFavorite=true) and team bulk scope", () => {
@@ -130,10 +134,38 @@ describe("useTeamVaultListAdapter", () => {
     expect(viewer).toEqual({ canCreate: false, canEdit: false, canDelete: false, canShare: false });
   });
 
-  it("becomes ready once the team key probe resolves", async () => {
+  it("reports ready:true (the team page gates on its own key probe)", () => {
     const { result } = renderHook(() => useTeamVaultListAdapter(TEAM_ID, "OWNER"));
-    await waitFor(() => expect(result.current.availability.ready).toBe(true));
-    expect(result.current.availability.reason).toBe("key-pending");
+    expect(result.current.availability.ready).toBe(true);
+  });
+
+  it("builds the team list URL per view + query (favorites/archive/trash/folder/tag/type)", async () => {
+    const { result } = renderHook(() => useTeamVaultListAdapter(TEAM_ID, "OWNER"));
+    const signal = new AbortController().signal;
+
+    await result.current.fetchOverviewEntries("favorites", {}, signal);
+    await result.current.fetchOverviewEntries("archive", {}, signal);
+    await result.current.fetchOverviewEntries("trash", {}, signal);
+    await result.current.fetchOverviewEntries(
+      "normal",
+      { tagId: "tg", folderId: "fd", entryType: "LOGIN" },
+      signal,
+    );
+
+    const urls = mockFetchApi.mock.calls.map((c) => c[0] as string);
+    expect(urls[0]).toBe(`/api/teams/${TEAM_ID}/passwords?favorites=true`);
+    expect(urls[1]).toBe(`/api/teams/${TEAM_ID}/passwords?archived=true`);
+    expect(urls[2]).toBe(`/api/teams/${TEAM_ID}/passwords?trash=true`);
+    expect(urls[3]).toBe(`/api/teams/${TEAM_ID}/passwords?tag=tg&folder=fd&type=LOGIN`);
+  });
+
+  it("returns [] (no fetch) when the team key is unavailable (key pending)", async () => {
+    mockGetTeamKey.mockResolvedValue(null);
+    const { result } = renderHook(() => useTeamVaultListAdapter(TEAM_ID, "OWNER"));
+    const out = await result.current.fetchOverviewEntries("normal", {}, new AbortController().signal);
+    expect(out).toEqual([]);
+    // No list fetch issued when the key is pending.
+    expect(mockFetchApi).not.toHaveBeenCalled();
   });
 
   it("routes mutations to the correct team endpoints (network-only)", async () => {

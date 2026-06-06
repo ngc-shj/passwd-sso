@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { useTranslations } from "next-intl";
 import { useTeamVault } from "@/lib/team/team-vault-context";
 import { decryptData } from "@/lib/crypto/crypto-client";
 import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
@@ -134,8 +135,8 @@ export async function decryptTeamOverview(
  * Returns a VaultListAdapter<TeamDisplayEntry> for a team vault, reproducing the
  * team page + TeamArchivedList + TeamTrashList data layer (F-R1/F-R2).
  *
- * Availability: team keys are fetched/unwrapped asynchronously (no sync flag), so
- * we probe getTeamEncryptionKey once and expose { ready, reason: "key-pending" }.
+ * Availability: the team page gates on its own key probe (banner XOR list), so the
+ * adapter reports ready:true — EntryListView only mounts once the key is available.
  * Permissions (page.tsx:303-306 verbatim): canCreate/canEdit = OWNER|ADMIN|MEMBER,
  * canDelete = OWNER|ADMIN, canShare = canEdit; VIEWER all-false.
  * Favorites are KEPT for team (deviation from the locked plan, user-approved):
@@ -143,17 +144,18 @@ export async function decryptTeamOverview(
  */
 export function useTeamVaultListAdapter(teamId: string, role: string): VaultListAdapter<TeamDisplayEntry> {
   const { getTeamEncryptionKey, getEntryDecryptionKey } = useTeamVault();
+  const t = useTranslations("Team");
 
-  // Async key probe → availability.ready (the page's keyPending derivation, moved
-  // into the adapter so EntryListView can gate on it).
-  const [keyReady, setKeyReady] = useState(false);
+  // getTeamEncryptionKey / getEntryDecryptionKey are session-derived and change
+  // identity on every next-auth re-render. Hold them in refs so the adapter memo
+  // stays stable (depends only on teamId/role/t) and does not re-fetch the whole
+  // list on every background session refresh.
+  const getTeamKeyRef = useRef(getTeamEncryptionKey);
+  const getEntryKeyRef = useRef(getEntryDecryptionKey);
   useEffect(() => {
-    let cancelled = false;
-    getTeamEncryptionKey(teamId)
-      .then((k) => { if (!cancelled) setKeyReady(!!k); })
-      .catch(() => { if (!cancelled) setKeyReady(false); });
-    return () => { cancelled = true; };
-  }, [teamId, getTeamEncryptionKey]);
+    getTeamKeyRef.current = getTeamEncryptionKey;
+    getEntryKeyRef.current = getEntryDecryptionKey;
+  });
 
   return useMemo(() => {
     const canEdit =
@@ -163,7 +165,7 @@ export function useTeamVaultListAdapter(teamId: string, role: string): VaultList
     const adapter: VaultListAdapter<TeamDisplayEntry> = {
       kind: "team",
       teamId,
-      availability: { ready: keyReady, reason: "key-pending" },
+      availability: { ready: true },
       permissions: {
         canCreate: canEdit,
         canEdit,
@@ -177,7 +179,7 @@ export function useTeamVaultListAdapter(teamId: string, role: string): VaultList
         query: EntryListQuery,
         signal: AbortSignal,
       ): Promise<TeamDisplayEntry[]> {
-        const teamKey = await getTeamEncryptionKey(teamId);
+        const teamKey = await getTeamKeyRef.current(teamId);
         if (!teamKey) return [];
 
         const params = new URLSearchParams();
@@ -193,11 +195,12 @@ export function useTeamVaultListAdapter(teamId: string, role: string): VaultList
         const res = await fetchApi(url, { signal });
         if (!res.ok) return [];
 
-        const data = (await res.json()) as Record<string, unknown>[];
+        const data = await res.json();
+        if (!Array.isArray(data)) return [];
         // F6: decrypt-failure → placeholder (do NOT skip), so decrypt in parallel.
         return Promise.all(
           data.map((rawEntry) =>
-            decryptTeamOverview(teamId, rawEntry, { getEntryDecryptionKey }),
+            decryptTeamOverview(teamId, rawEntry, { getEntryDecryptionKey: getEntryKeyRef.current }),
           ),
         );
       },
@@ -206,9 +209,16 @@ export function useTeamVaultListAdapter(teamId: string, role: string): VaultList
         const getDetail = buildTeamGetDetail(
           teamId,
           { id: entry.id, entryType: entry.entryType },
-          { getEntryDecryptionKey },
+          { getEntryDecryptionKey: getEntryKeyRef.current },
         );
         return () => getDetail();
+      },
+
+      // Accordion PasswordCard "created by" label (INV-C6.1 — team-specific).
+      createdByLabel(entry: TeamDisplayEntry) {
+        const by = entry.createdBy;
+        if (!by?.name) return undefined;
+        return t("createdBy", { name: by.email ? `${by.name} (${by.email})` : by.name });
       },
 
       // INV-C1.4: network-only mutations; view owns optimistic removal + notify.
@@ -260,5 +270,5 @@ export function useTeamVaultListAdapter(teamId: string, role: string): VaultList
       },
     };
     return adapter;
-  }, [teamId, role, keyReady, getTeamEncryptionKey, getEntryDecryptionKey]);
+  }, [teamId, role, t]);
 }

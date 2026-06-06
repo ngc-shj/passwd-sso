@@ -669,6 +669,22 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
               />
             );
           }
+          // Team accordion: PasswordCard's "team mode" (isTeamMode = !!getPassword)
+          // requires the team-aware fetchers so reveal/copy/expand decrypt against the
+          // TEAM vault, not the personal one. Personal omits them (self-fetches the
+          // personal endpoint). Derived from adapter.buildGetDetail (lazy, on demand).
+          const teamCardProps =
+            adapter.kind === "team"
+              ? {
+                  getDetail: () => adapter.buildGetDetail(entry)(),
+                  getPassword: async () => {
+                    const d = await adapter.buildGetDetail(entry)();
+                    return d.password || d.content || "";
+                  },
+                  getUrl: async () => (await adapter.buildGetDetail(entry)()).url,
+                  createdBy: adapter.createdByLabel?.(entry),
+                }
+              : {};
           return (
             <PasswordCard
               entry={entry as unknown as EntryCardData}
@@ -683,6 +699,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
               canShare={descriptor.rowActions.share && adapter.permissions.canShare}
               readOnly={descriptor.detailReadOnly}
               teamId={adapter.teamId}
+              {...teamCardProps}
             />
           );
         }}

@@ -165,4 +165,10 @@ export interface VaultListAdapter<E extends PasswordRowEntry & PasswordDetailPan
    * The view argument allows future view-specific scoping if needed.
    */
   bulkScope(view: EntryListViewKind): BulkScope;
+
+  /**
+   * Optional formatted "created by" label for the accordion PasswordCard
+   * (team only — INV-C6.1). Personal omits it (personal entries have no author).
+   */
+  createdByLabel?(entry: E): string | undefined;
 }

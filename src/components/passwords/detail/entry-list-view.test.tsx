@@ -9,7 +9,7 @@
  *   (f) Read-only pane for TRASH_VIEW (INV-C2.2)
  *   (g) Row restore/delete-perm render gated by descriptor.rowActions + canDelete
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 
@@ -68,9 +68,11 @@ vi.mock("@/lib/events", () => ({
   notifyVaultDataChanged: vi.fn(),
 }));
 
-// Use master-detail layout so PasswordRow is rendered (not PasswordCard).
+// Layout mode is mutable so a test can exercise the accordion (PasswordCard) path.
+// Defaults to master-detail so existing PasswordRow tests are unaffected.
+let mockLayoutMode: "master-detail" | "accordion" = "master-detail";
 vi.mock("@/hooks/use-layout-mode", () => ({
-  useLayoutMode: () => "master-detail",
+  useLayoutMode: () => mockLayoutMode,
 }));
 
 // Mock PasswordRow — captures restore/deletePermanently callbacks.
@@ -101,11 +103,13 @@ vi.mock("./password-row", () => ({
   },
 }));
 
-// Mock PasswordCard (accordion mode — not exercised in these tests).
+// Mock PasswordCard (accordion mode) — captures props for the team-accordion test.
+let capturedCardProps: Record<string, unknown> | undefined;
 vi.mock("./password-card", () => ({
-  PasswordCard: ({ entry }: { entry: { id: string; title: string } }) => (
-    <div data-testid={`card-${entry.id}`}>{entry.title}</div>
-  ),
+  PasswordCard: (props: { entry: { id: string; title: string } }) => {
+    capturedCardProps = props as Record<string, unknown>;
+    return <div data-testid={`card-${props.entry.id}`}>{props.entry.title}</div>;
+  },
 }));
 
 // Mock MasterDetailShell: render both slots so rows and pane are visible.
@@ -189,6 +193,10 @@ vi.mock("sonner", () => ({
 }));
 
 import { PasswordList } from "./password-list";
+import { EntryListView } from "./entry-list-view";
+import { NORMAL_VIEW } from "./entry-list-view-descriptors";
+import type { VaultListAdapter } from "@/lib/vault/vault-list-adapter";
+import type { TeamDisplayEntry } from "@/types/team-display-entry";
 
 // ── Factories ──────────────────────────────────────────────────────────────────
 
@@ -569,5 +577,71 @@ describe("EntryListView — keyboard navigation (INV-C7)", () => {
     });
 
     setTimeoutSpy.mockRestore();
+  });
+});
+
+// ── Accordion + team: PasswordCard must receive the team-aware fetchers so it
+// decrypts against the TEAM vault, not the personal one (regression guard for the
+// bug the triangulated review caught — INV-C6.1). ──────────────────────────────
+describe("EntryListView — accordion team PasswordCard wiring", () => {
+  beforeEach(() => {
+    mockLayoutMode = "accordion";
+    capturedCardProps = undefined;
+  });
+  afterAll(() => { mockLayoutMode = "master-detail"; });
+
+  function teamEntry(): TeamDisplayEntry {
+    return {
+      id: "te1", entryType: "LOGIN", title: "Team Entry",
+      username: null, urlHost: null, snippet: null, brand: null, lastFour: null,
+      cardholderName: null, fullName: null, idNumberLast4: null, relyingPartyId: null,
+      bankName: null, accountNumberLast4: null, softwareName: null, licensee: null,
+      keyType: null, fingerprint: null, requireReprompt: false, expiresAt: null,
+      isFavorite: false, isArchived: false, tags: [],
+      createdBy: { id: "u1", name: "Alice", email: "a@x", image: null },
+      updatedBy: { id: "u1", name: "Alice", email: "a@x" },
+      createdAt: "2026-01-01", updatedAt: "2026-01-02",
+    };
+  }
+
+  function teamAdapter(): VaultListAdapter<TeamDisplayEntry> {
+    return {
+      kind: "team",
+      teamId: "team-1",
+      availability: { ready: true },
+      permissions: { canCreate: true, canEdit: true, canDelete: true, canShare: true },
+      supportsFavorite: true,
+      fetchOverviewEntries: async () => [teamEntry()],
+      buildGetDetail: () => async () =>
+        ({ password: "pw", content: "", url: "https://x" }) as never,
+      setFavorite: async () => {}, setArchived: async () => {}, softDelete: async () => {},
+      restore: async () => {}, deletePermanently: async () => {}, emptyTrash: async () => {},
+      notifyDataChanged: () => {},
+      bulkScope: () => ({ type: "team", teamId: "team-1" }),
+      createdByLabel: () => "createdBy:Alice",
+    };
+  }
+
+  it("passes getPassword/getDetail/getUrl + createdBy to the team accordion card", async () => {
+    render(
+      <EntryListView<TeamDisplayEntry>
+        adapter={teamAdapter()}
+        descriptor={NORMAL_VIEW}
+        query={{ tagId: null, folderId: null, entryType: null }}
+        searchQuery=""
+        sortBy="updatedAt"
+        refreshKey={0}
+      />,
+    );
+
+    await waitFor(() => { expect(screen.getByTestId("card-te1")).toBeInTheDocument(); });
+
+    // Team mode is keyed on getPassword presence; without these the card would fall
+    // back to the PERSONAL endpoint/key (the bug).
+    expect(typeof capturedCardProps?.getPassword).toBe("function");
+    expect(typeof capturedCardProps?.getDetail).toBe("function");
+    expect(typeof capturedCardProps?.getUrl).toBe("function");
+    expect(capturedCardProps?.createdBy).toBe("createdBy:Alice");
+    expect(await (capturedCardProps?.getPassword as () => Promise<string>)()).toBe("pw");
   });
 });
