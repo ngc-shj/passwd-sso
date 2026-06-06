@@ -256,7 +256,6 @@ describe("PasswordList", () => {
         searchQuery=""
         tagId={null}
         refreshKey={0}
-        layoutMode="master-detail"
       />,
     );
 
@@ -279,7 +278,6 @@ describe("PasswordList", () => {
         searchQuery=""
         tagId={null}
         refreshKey={0}
-        layoutMode="accordion"
       />,
     );
 
@@ -321,7 +319,6 @@ describe("PasswordList", () => {
         refreshKey={0}
         favoritesOnly={true}
         onEntryRemoved={onEntryRemoved}
-        layoutMode="accordion"
       />,
     );
 
@@ -354,7 +351,6 @@ describe("PasswordList", () => {
         refreshKey={0}
         favoritesOnly={true}
         onEntryRemoved={onEntryRemoved}
-        layoutMode="accordion"
       />,
     );
 
@@ -383,7 +379,6 @@ describe("PasswordList", () => {
         tagId={null}
         refreshKey={0}
         onEntryRemoved={onEntryRemoved}
-        layoutMode="accordion"
       />,
     );
 
@@ -415,7 +410,6 @@ describe("PasswordList", () => {
         tagId={null}
         refreshKey={0}
         onEntryRemoved={onEntryRemoved}
-        layoutMode="accordion"
       />,
     );
 
@@ -448,7 +442,6 @@ describe("PasswordList", () => {
         tagId={null}
         refreshKey={0}
         onEntryRemoved={onEntryRemoved}
-        layoutMode="master-detail"
       />,
     );
 
@@ -481,7 +474,6 @@ describe("PasswordList", () => {
         tagId={null}
         refreshKey={0}
         onEntryRemoved={onEntryRemoved}
-        layoutMode="master-detail"
       />,
     );
 
@@ -508,8 +500,6 @@ describe("PasswordList", () => {
     });
     mockDecryptData.mockResolvedValueOnce(makeDecryptedOverview("Entry 1"));
     mockDecryptData.mockResolvedValueOnce(makeDecryptedOverview("Entry 2"));
-
-    const onActivate = vi.fn();
     const onEntryRemoved = vi.fn();
 
     const { rerender } = render(
@@ -517,10 +507,7 @@ describe("PasswordList", () => {
         searchQuery=""
         tagId={null}
         refreshKey={0}
-        activeEntryId="e1"
-        onActivate={onActivate}
         onEntryRemoved={onEntryRemoved}
-        layoutMode="accordion"
       />,
     );
 
@@ -540,10 +527,7 @@ describe("PasswordList", () => {
           searchQuery=""
           tagId={null}
           refreshKey={1}
-          activeEntryId="e1"
-          onActivate={onActivate}
           onEntryRemoved={onEntryRemoved}
-          layoutMode="accordion"
         />,
       );
     });
@@ -585,7 +569,6 @@ describe("PasswordList", () => {
         searchQuery=""
         tagId={null}
         refreshKey={0}
-        layoutMode="accordion"
       />,
     );
 

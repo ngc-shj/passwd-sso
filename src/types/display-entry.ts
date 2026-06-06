@@ -36,4 +36,6 @@ export interface DisplayEntry {
   expiresAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Present only for trash entries (INV-C5.1). */
+  deletedAt?: string;
 }

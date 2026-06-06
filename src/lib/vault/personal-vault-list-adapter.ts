@@ -96,6 +96,8 @@ export async function decryptPersonalOverview(
     expiresAt: (rawEntry.expiresAt as string | null) ?? null,
     createdAt: rawEntry.createdAt as string,
     updatedAt: rawEntry.updatedAt as string,
+    // INV-C5.1: deletedAt is present only for trash entries (from the raw server row).
+    ...(rawEntry.deletedAt != null ? { deletedAt: rawEntry.deletedAt as string } : {}),
   };
 }
 

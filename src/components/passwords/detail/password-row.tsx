@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { Star } from "lucide-react";
 import { TagBadge } from "@/components/tags/tag-badge";
 import { EntryIcon } from "./entry-icon";
 import { EntrySecondaryLine } from "./entry-secondary-line";
@@ -37,6 +38,7 @@ export interface PasswordRowEntry {
   fingerprint: string | null;
   tags: { name: string; color: string | null }[];
   isArchived: boolean;
+  isFavorite: boolean;
 }
 
 interface PasswordRowProps {
@@ -47,9 +49,9 @@ interface PasswordRowProps {
   onActivate: () => void;
 
   // Selection-mode props (driven by EntryListShell external-checkbox pattern).
-  // When selectionMode is true, the EntryListShell renders a checkbox before
-  // this component; INV-C6.3: title stays legible at min-w-[320px] because
-  // the checkbox+gap are budgeted outside this component by the shell.
+  // When selectionMode is true, the EntryListShell renders a checkbox before this
+  // component inside a flex-1 min-w-0 wrapper; the row fills the remaining width and
+  // its children truncate (INV-C6.3). The 320px legibility floor lives on the pane.
   selectionMode?: boolean;
   isSelected?: boolean;
   onToggleSelect?: (checked: boolean) => void;
@@ -85,6 +87,11 @@ interface PasswordRowProps {
   onRestore?: () => void;
   onDeletePermanently?: () => void;
 
+  // Favorite toggle — rendered only when showFavorite (gated by
+  // descriptor.rowActions.favorite × adapter.supportsFavorite in the parent).
+  showFavorite?: boolean;
+  onToggleFavorite?: () => void;
+
   canEdit?: boolean;
   canDelete?: boolean;
   canShare?: boolean;
@@ -103,7 +110,8 @@ interface PasswordRowProps {
  * (INV-C6.2). No chevron: selection replaces expand affordance (INV-C6.1).
  *
  * In selection mode, EntryListShell renders the external checkbox before this
- * component; the min-w-[320px] floor keeps the title legible (INV-C6.3).
+ * component; the row fills the remaining pane width and its children truncate
+ * (INV-C6.3 — the 320px legibility floor is enforced by the list pane, not the row).
  */
 export function PasswordRow({
   entry,
@@ -136,6 +144,8 @@ export function PasswordRow({
   onDeleteRequest,
   onRestore,
   onDeletePermanently,
+  showFavorite = false,
+  onToggleFavorite,
   canEdit = true,
   canDelete = true,
   canShare = true,
@@ -162,6 +172,7 @@ export function PasswordRow({
     fingerprint,
     tags,
     isArchived,
+    isFavorite,
   } = entry;
 
   const visibleTags = tags.slice(0, MAX_VISIBLE_TAGS);
@@ -184,7 +195,10 @@ export function PasswordRow({
       aria-selected={isActive}
       onClick={handleClick}
       className={[
-        "min-w-[320px] cursor-pointer select-none rounded-md px-3 py-2 transition-colors",
+        // No min-width here: the list pane (MasterDetailShell) enforces the 320px
+        // floor. A row min-width would exceed the padded pane content and force a
+        // horizontal scrollbar; instead the row fills the pane and its children truncate.
+        "min-w-0 cursor-pointer select-none rounded-md px-3 py-2 transition-colors",
         "hover:bg-accent/40",
         isActive
           ? "bg-accent border-l-2 border-l-primary"
@@ -208,6 +222,24 @@ export function PasswordRow({
         >
           {title}
         </span>
+
+        {/* Favorite toggle — only when the view+vault support it (INV-C2.1). */}
+        {showFavorite && onToggleFavorite && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleFavorite();
+            }}
+            className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label={isFavorite ? t("unfavorite") : t("favorite")}
+            aria-pressed={isFavorite}
+          >
+            <Star
+              className={isFavorite ? "h-4 w-4 fill-yellow-400 text-yellow-400" : "h-4 w-4"}
+            />
+          </button>
+        )}
 
         {/* Quick-copy + overflow menu — stop propagation so they don't activate the row */}
         <EntryActionsMenu

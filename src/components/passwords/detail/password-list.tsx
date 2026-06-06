@@ -17,6 +17,7 @@ import {
   NORMAL_VIEW,
   FAVORITES_VIEW,
   ARCHIVE_VIEW,
+  TRASH_VIEW,
 } from "@/components/passwords/detail/entry-list-view-descriptors";
 
 // ---------------------------------------------------------------------------
@@ -43,18 +44,18 @@ interface PasswordListProps {
   refreshKey: number;
   favoritesOnly?: boolean;
   archivedOnly?: boolean;
+  /** C7: select TRASH_VIEW (personal trash 3-pane) */
+  trashOnly?: boolean;
   sortBy?: SortOption;
   onDataChange?: () => void;
-  selectionMode?: boolean;
   onSelectedCountChange?: (count: number, allSelected: boolean, atLimit: boolean) => void;
   selectAllRef?: React.Ref<PasswordListHandle>;
-  // C4: active-entry model — kept for dashboard compat; now managed inside EntryListView
-  activeEntryId?: string | null;
-  onActivate?: (entry: import("@/types/display-entry").DisplayEntry | null) => void;
+  // Active-entry, selection mode, master-detail layout, and keyboard nav are all
+  // owned inside EntryListView now — the container no longer threads them through.
   onEntryRemoved?: (id: string) => void;
-  layoutMode?: "accordion" | "master-detail";
-  // C7: keyboard nav
-  onVisibleEntriesChange?: (entries: import("@/types/display-entry").DisplayEntry[]) => void;
+  // Edit/share are container-hosted dialogs; EntryListView raises these requests.
+  onRequestEdit?: (entry: import("@/types/display-entry").DisplayEntry) => void;
+  onRequestShare?: (entry: import("@/types/display-entry").DisplayEntry) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -69,21 +70,24 @@ export function PasswordList({
   refreshKey,
   favoritesOnly = false,
   archivedOnly = false,
+  trashOnly = false,
   sortBy = "updatedAt",
   onDataChange,
   onSelectedCountChange,
   selectAllRef,
-  onActivate,
   onEntryRemoved,
-  onVisibleEntriesChange,
+  onRequestEdit,
+  onRequestShare,
 }: PasswordListProps) {
   const adapter = usePersonalVaultListAdapter();
 
-  const descriptor = archivedOnly
-    ? ARCHIVE_VIEW
-    : favoritesOnly
-      ? FAVORITES_VIEW
-      : NORMAL_VIEW;
+  const descriptor = trashOnly
+    ? TRASH_VIEW
+    : archivedOnly
+      ? ARCHIVE_VIEW
+      : favoritesOnly
+        ? FAVORITES_VIEW
+        : NORMAL_VIEW;
 
   return (
     <EntryListView
@@ -96,14 +100,9 @@ export function PasswordList({
       onSelectedCountChange={onSelectedCountChange}
       listRef={selectAllRef as React.Ref<EntryListHandle>}
       onDataChange={onDataChange}
-      onRequestEdit={(entry) => onActivate?.(entry as import("@/types/display-entry").DisplayEntry)}
-      onRequestShare={(entry) => onActivate?.(entry as import("@/types/display-entry").DisplayEntry)}
+      onRequestEdit={onRequestEdit}
+      onRequestShare={onRequestShare}
       onEntryRemoved={onEntryRemoved}
-      onVisibleEntriesChange={
-        onVisibleEntriesChange as
-          | ((entries: import("@/types/display-entry").DisplayEntry[]) => void)
-          | undefined
-      }
     />
   );
 }

@@ -12,12 +12,17 @@
 import type { EntryListViewKind } from "@/lib/vault/vault-list-adapter";
 
 // ---------------------------------------------------------------------------
-// EntryBulkActionKind — the four bulk operation verbs supported across views.
+// EntryBulkActionKind — the bulk operation verbs supported across views.
 // The full BulkActionType from use-bulk-action.ts is identical; this alias
 // lives here so descriptor files have no dependency on the hook module.
 // ---------------------------------------------------------------------------
 
-export type EntryBulkActionKind = "archive" | "unarchive" | "trash" | "restore";
+export type EntryBulkActionKind =
+  | "archive"
+  | "unarchive"
+  | "trash"
+  | "restore"
+  | "deletePermanently";
 
 // ---------------------------------------------------------------------------
 // ListViewDescriptor — per-view policy consumed by EntryListView (C3).
@@ -176,7 +181,7 @@ export const TRASH_VIEW: ListViewDescriptor = {
     restore: true,
     deletePermanently: true,
   },
-  bulkActions: ["restore"],
+  bulkActions: ["restore", "deletePermanently"],
   showEmptyTrashButton: true,
   detailReadOnly: true,   // INV-C2.2: trash is read-only for ALL roles incl. OWNER (S6)
   removeOnUnfavorite: false,

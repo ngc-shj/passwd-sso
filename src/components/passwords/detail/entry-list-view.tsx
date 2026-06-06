@@ -13,8 +13,8 @@
  *   - getEntryDecryptionKey — team decryption belongs to the team adapter only
  */
 
-import { useState, useMemo, useEffect, useCallback, useImperativeHandle } from "react";
-import type { Ref } from "react";
+import { useState, useMemo, useEffect, useCallback, useImperativeHandle, useRef } from "react";
+import type { Ref, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useTranslations } from "next-intl";
 import { Archive, KeyRound, Loader2, Star, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -139,6 +139,10 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
   // C9 — delete-permanently confirm dialog state (INV-C9.2: confirm before DELETE).
   const [deletePermanentlyPending, setDeletePermanentlyPending] = useState<E | null>(null);
 
+  // Empty-trash confirm dialog state (shown when descriptor.showEmptyTrashButton is true).
+  const [emptyTrashConfirmOpen, setEmptyTrashConfirmOpen] = useState(false);
+  const [isEmptyingTrash, setIsEmptyingTrash] = useState(false);
+
   // INV-F1: detect query/descriptor.kind changes and clear both atomically during render.
   const viewKey = `${descriptor.kind}|${query.tagId ?? ""}|${query.folderId ?? ""}|${query.entryType ?? ""}`;
   const [prevViewKey, setPrevViewKey] = useState(viewKey);
@@ -193,6 +197,62 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
   useEffect(() => {
     onVisibleEntriesChange?.(entries);
   }, [entries, onVisibleEntriesChange]);
+
+  // Refresh the open detail pane when the container signals external data change
+  // (e.g. an edit dialog saved). refreshKey bumps on every reload; invalidate is a
+  // no-op when no entry is active, so re-decrypt only happens for the active entry.
+  useEffect(() => {
+    invalidateDetail();
+  }, [refreshKey, invalidateDetail]);
+
+  // ── Keyboard navigation (master-detail only) — owned here so every view (incl.
+  // trash/team) gets arrow-nav, not just the personal dashboard (commonization). ──
+  const arrowNavDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const listPaneRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => () => {
+    if (arrowNavDebounceRef.current) clearTimeout(arrowNavDebounceRef.current);
+  }, []);
+
+  const handleListKeyDown = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (layoutMode !== "master-detail") return;
+    if (selectionMode) return; // INV-C4.4
+
+    const target = e.target as HTMLElement;
+    const inInput = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable;
+
+    if (e.key === "Escape") {
+      listPaneRef.current?.focus();
+      e.stopPropagation();
+      return;
+    }
+    if (inInput) return; // INV-C7.2
+
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const direction = e.key;
+      if (arrowNavDebounceRef.current) clearTimeout(arrowNavDebounceRef.current);
+      // Debounce (~150ms) so holding ↓ doesn't fire N concurrent getDetail calls (INV-C7.4).
+      arrowNavDebounceRef.current = setTimeout(() => {
+        arrowNavDebounceRef.current = null;
+        const currentIdx = activeEntry ? entries.findIndex((en) => en.id === activeEntry.id) : -1;
+        const nextIdx = direction === "ArrowDown"
+          ? Math.min(currentIdx + 1, entries.length - 1)
+          : Math.max(currentIdx - 1, 0);
+        const next = entries[nextIdx];
+        if (next) setActiveEntry(next);
+      }, 150);
+      return;
+    }
+
+    if (e.key === "Enter" || e.key === "Tab") {
+      const detailEl = listPaneRef.current?.parentElement?.querySelector<HTMLElement>(
+        "[data-testid='master-detail-detail']",
+      );
+      detailEl?.focus();
+      e.preventDefault();
+    }
+  }, [layoutMode, selectionMode, entries, activeEntry]);
 
   // Bulk selection — uses all visible entries for selection.
   const entryIds = useMemo(() => entries.map((e) => e.id), [entries]);
@@ -323,6 +383,23 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
     }
   }, [adapter, deletePermanentlyPending, onDataChange, onEntryRemoved, reload]);
 
+  // Empty-trash: clears all trash entries; gated by descriptor.showEmptyTrashButton + canDelete.
+  const handleEmptyTrashConfirmed = useCallback(async () => {
+    setIsEmptyingTrash(true);
+    try {
+      await adapter.emptyTrash();
+      setEmptyTrashConfirmOpen(false);
+      notifyVaultDataChanged();
+      onDataChange?.();
+      reload();
+    } catch {
+      // Reload to show remaining entries on failure.
+      reload();
+    } finally {
+      setIsEmptyingTrash(false);
+    }
+  }, [adapter, onDataChange, reload]);
+
   // ── Accordion toggle callbacks (legacy PasswordCard interface) ─────────────
 
   const handleCardToggleFavorite = useCallback(async (id: string, current: boolean) => {
@@ -397,11 +474,70 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
     );
   }
 
+  // ── Bulk action bar buttons ─────────────────────────────────────────────────
+
+  // Bulk buttons are always rendered in selection mode and enabled only when
+  // 1+ entries are selected (disabled = inactive otherwise).
+  const noneSelected = selectedIds.size === 0;
+  const floatingActions = (
+    <>
+      {descriptor.bulkActions.includes("archive") && (
+        <Button variant="secondary" size="sm" disabled={noneSelected} onClick={() => requestAction("archive")}>
+          {t("moveSelectedToArchive")}
+        </Button>
+      )}
+      {descriptor.bulkActions.includes("unarchive") && (
+        <Button variant="secondary" size="sm" disabled={noneSelected} onClick={() => requestAction("unarchive")}>
+          {t("moveSelectedToUnarchive")}
+        </Button>
+      )}
+      {descriptor.bulkActions.includes("trash") && (
+        <Button variant="destructive" size="sm" disabled={noneSelected} onClick={() => requestAction("trash")}>
+          {t("moveSelectedToTrash")}
+        </Button>
+      )}
+      {descriptor.bulkActions.includes("restore") && (
+        <Button variant="secondary" size="sm" disabled={noneSelected} onClick={() => requestAction("restore")}>
+          {tTrash("restoreSelected")}
+        </Button>
+      )}
+      {descriptor.bulkActions.includes("deletePermanently") && (
+        <Button variant="destructive" size="sm" disabled={noneSelected} onClick={() => requestAction("deletePermanently")}>
+          {tTrash("deleteSelectedPermanently")}
+        </Button>
+      )}
+    </>
+  );
+
+  // Empty-trash button — shown when descriptor opts in and canDelete is true.
+  const showEmptyTrashButton =
+    descriptor.showEmptyTrashButton && adapter.permissions.canDelete;
+
+  // In master-detail, the empty-trash description + action live in the detail pane's
+  // no-selection state (below) rather than crowding the narrow list (matches the
+  // bulk-actions-in-pane decision); accordion keeps them at the top of the list.
+  const emptyTrashInPane = showEmptyTrashButton && layoutMode === "master-detail";
+
   // ── INV-S5: selection mode pane shows summary + no decrypt ──────────────────
 
   const detailSlot = layoutMode === "master-detail" && selectionMode ? (
-    <div className="flex flex-col items-center justify-center h-full py-16 text-center text-muted-foreground gap-3">
+    // In master-detail, the detail pane is idle during selection — host the bulk
+    // action buttons here (the list's FloatingActionBar is suppressed below) so they
+    // are prominent and don't crowd the narrow list.
+    <div className="flex flex-col items-center justify-center h-full py-16 text-center text-muted-foreground gap-4">
       <p className="text-sm">{t("selectedInPane", { count: selectedIds.size })}</p>
+      {/* Buttons always shown; disabled until 1+ selected. */}
+      <div className="flex flex-wrap items-center justify-center gap-2">{floatingActions}</div>
+    </div>
+  ) : emptyTrashInPane && !activeEntry ? (
+    // Trash, nothing selected: explain trash retention and host the destructive
+    // empty-trash action in the wide pane (decluttered from the list).
+    <div className="flex flex-col items-center justify-center h-full py-16 text-center gap-4 px-6">
+      <Trash2 className="h-10 w-10 text-muted-foreground/40" />
+      <p className="max-w-md text-sm text-muted-foreground">{tTrash("description")}</p>
+      <Button variant="destructive" size="sm" onClick={() => setEmptyTrashConfirmOpen(true)}>
+        {tTrash("emptyTrash")}
+      </Button>
     </div>
   ) : (
     <PasswordDetailPane
@@ -425,33 +561,6 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
     />
   );
 
-  // ── Bulk action bar buttons ─────────────────────────────────────────────────
-
-  const floatingActions = (
-    <>
-      {descriptor.bulkActions.includes("archive") && (
-        <Button variant="secondary" size="sm" onClick={() => requestAction("archive")}>
-          {t("moveSelectedToArchive")}
-        </Button>
-      )}
-      {descriptor.bulkActions.includes("unarchive") && (
-        <Button variant="secondary" size="sm" onClick={() => requestAction("unarchive")}>
-          {t("moveSelectedToUnarchive")}
-        </Button>
-      )}
-      {descriptor.bulkActions.includes("trash") && (
-        <Button variant="destructive" size="sm" onClick={() => requestAction("trash")}>
-          {t("moveSelectedToTrash")}
-        </Button>
-      )}
-      {descriptor.bulkActions.includes("restore") && (
-        <Button variant="secondary" size="sm" onClick={() => requestAction("restore")}>
-          {t("moveSelectedToUnarchive")}
-        </Button>
-      )}
-    </>
-  );
-
   const confirmDialog = {
     open: bulkDialogOpen,
     onOpenChange: setBulkDialogOpen,
@@ -461,16 +570,20 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
         : pendingAction === "unarchive"
           ? t("moveSelectedToUnarchive")
           : pendingAction === "restore"
-            ? t("moveSelectedToUnarchive")
-            : t("moveSelectedToTrash"),
+            ? tTrash("restoreSelected")
+            : pendingAction === "deletePermanently"
+              ? tTrash("deleteSelectedPermanently")
+              : t("moveSelectedToTrash"),
     description:
       pendingAction === "archive"
         ? t("bulkArchiveConfirm", { count: selectedIds.size })
         : pendingAction === "unarchive"
           ? t("bulkUnarchiveConfirm", { count: selectedIds.size })
           : pendingAction === "restore"
-            ? t("bulkUnarchiveConfirm", { count: selectedIds.size })
-            : t("bulkMoveConfirm", { count: selectedIds.size }),
+            ? tTrash("bulkRestoreConfirm", { count: selectedIds.size })
+            : pendingAction === "deletePermanently"
+              ? tTrash("bulkDeleteConfirm", { count: selectedIds.size })
+              : t("bulkMoveConfirm", { count: selectedIds.size }),
     cancelLabel: t("cancel"),
     confirmLabel: t("confirm"),
     processing: bulkProcessing,
@@ -480,7 +593,25 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
   // ── Row render ──────────────────────────────────────────────────────────────
 
   const listSlot = (
-    <div className="space-y-4 p-2">
+    <div
+      ref={listPaneRef}
+      tabIndex={layoutMode === "master-detail" ? 0 : undefined}
+      onKeyDown={handleListKeyDown}
+      className="outline-none h-full space-y-4 p-2"
+    >
+      {/* Accordion only: master-detail hosts this in the detail pane (emptyTrashInPane). */}
+      {showEmptyTrashButton && !emptyTrashInPane && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">{tTrash("description")}</p>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setEmptyTrashConfirmOpen(true)}
+          >
+            {tTrash("emptyTrash")}
+          </Button>
+        </div>
+      )}
       <EntryListShell
         entries={entries}
         selectionMode={selectionMode}
@@ -488,6 +619,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
         atLimit={atLimit}
         onToggleSelectOne={toggleSelectOne}
         selectEntryLabel={(title) => t("selectEntry", { title })}
+        hideFloatingBar={layoutMode === "master-detail"}
         renderEntry={(entry) => {
           if (layoutMode === "master-detail") {
             // INV-S1/S4: LAZY — buildRowCallbacks(entry) creates closures but
@@ -506,6 +638,8 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
                   }
                 }}
                 selectionMode={selectionMode}
+                showFavorite={descriptor.rowActions.favorite && adapter.supportsFavorite}
+                onToggleFavorite={() => void handleSetFavorite(entry, !entry.isFavorite)}
                 {...callbacks}
                 onShare={() => {
                   setActiveEntry(entry);
@@ -584,6 +718,25 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
           <DialogFooter>
             <Button variant="destructive" onClick={() => void handleDeletePermanentlyConfirmed()}>
               {tTrash("deletePermanently")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Empty-trash confirm dialog (gated by descriptor.showEmptyTrashButton + canDelete). */}
+      <Dialog open={emptyTrashConfirmOpen} onOpenChange={setEmptyTrashConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{tTrash("emptyTrash")}</DialogTitle>
+            <DialogDescription>{tTrash("emptyTrashConfirm")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="destructive"
+              disabled={isEmptyingTrash}
+              onClick={() => void handleEmptyTrashConfirmed()}
+            >
+              {isEmptyingTrash && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+              {tTrash("emptyTrash")}
             </Button>
           </DialogFooter>
         </DialogContent>
