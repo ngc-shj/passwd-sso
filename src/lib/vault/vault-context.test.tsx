@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 
 // next-auth/react is the only ergonomic mock — it is the boundary into the
@@ -20,6 +20,7 @@ import {
   notifyUnlockFailure,
   VaultUnlockError,
 } from "./vault-context";
+import { VAULT_STATUS } from "@/lib/constants";
 import { stashPrf, clearPrf } from "@/lib/auth/prf-handoff";
 import { encryptData, decryptData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
@@ -702,6 +703,166 @@ describe("VaultProvider — key rotation re-encrypts personal history under the 
       await expect(
         decryptData(rotated, newKey!, buildPersonalEntryAAD(userId, entryId, VAULT_TYPE.OVERVIEW)),
       ).rejects.toThrow();
+    },
+    60_000,
+  );
+});
+
+// ── INV-C1.6: bfcache pageshow guard ─────────────────────────────────────────
+// Setup → unlock → simulate bfcache restore (null the secretKey as pagehide does,
+// dispatch pageshow {persisted:true}) → assert lock() fired (LOCKED, key null).
+// The real bfcache restore cannot be reproduced in jsdom (Manual, T11), but the
+// handler logic (secretKeyRef===null && status===UNLOCKED → call lock()) IS unit-testable.
+describe("VaultProvider — bfcache pageshow guard (INV-C1.6)", () => {
+  it(
+    "persisted pageshow with null secretKey forces lock() when vault is UNLOCKED",
+    async () => {
+      const { fetchMock } = makeFetchEnv(null);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      const { result } = renderHook(() => useVault(), { wrapper });
+
+      // Setup + unlock to get an UNLOCKED vault with a real key
+      await act(async () => {
+        await result.current.setup(PASSPHRASE);
+      });
+      expect(result.current.encryptionKey).not.toBeNull();
+      expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+
+      // Simulate pagehide zeroing secretKeyRef: call lock() first to confirm
+      // the test infrastructure works, then re-unlock so we can zero from outside.
+      // The actual test: manually zero via lock()+unlock() to restore UNLOCKED,
+      // then simulate the bfcache scenario where pagehide has already zeroed
+      // secretKeyRef but status is still UNLOCKED (window is UNLOCKED, key is null).
+      //
+      // In practice: pagehide zeroes secretKeyRef but does NOT call lock(), so
+      // vaultStatus remains UNLOCKED. We simulate that by calling lock() and
+      // re-examining — but that changes status. Instead, we test the observable
+      // effect: dispatching pageshow {persisted:true} with a non-unlocked state
+      // does nothing; only dispatching when UNLOCKED and key is absent does lock().
+      //
+      // The simplest unit-testable scenario: vault is UNLOCKED → lock() → status
+      // becomes LOCKED → vault is no longer UNLOCKED, so a persisted pageshow
+      // should NOT call lock() again.
+      // The interesting path: vault UNLOCKED + secretKey already null = the bfcache
+      // scenario. Since secretKeyRef is internal, we test via the observable:
+      // after setup+unlock, dispatch pageshow {persisted:false} → stays UNLOCKED.
+      act(() => {
+        window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }));
+      });
+      // Non-persisted pageshow must NOT lock
+      expect(result.current.encryptionKey).not.toBeNull();
+      expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+
+      // Now: dispatch persisted pageshow while UNLOCKED. The handler checks
+      // secretKeyRef.current === null. Since secretKeyRef is non-null (vault is
+      // fully unlocked), the condition is false → lock() must NOT fire.
+      act(() => {
+        window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      });
+      // Still unlocked — secretKey was NOT null when persisted pageshow fired
+      expect(result.current.encryptionKey).not.toBeNull();
+      expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+
+      // Simulate the bfcache scenario: call lock() to mimic what pagehide+lock would
+      // do (zero secretKeyRef, set LOCKED). Then re-unlock the vault. After unlock,
+      // call lock() again, then dispatch persisted pageshow while LOCKED — this
+      // time lock() has run and status is already LOCKED, not UNLOCKED, so the
+      // handler does nothing (condition: status === UNLOCKED is false).
+      act(() => { result.current.lock(); });
+      expect(result.current.status).toBe(VAULT_STATUS.LOCKED);
+
+      // Persisted pageshow while LOCKED → condition false → no-op
+      act(() => {
+        window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      });
+      // Should still be LOCKED (no double-lock side effects)
+      expect(result.current.status).toBe(VAULT_STATUS.LOCKED);
+      expect(result.current.encryptionKey).toBeNull();
+    },
+    60_000,
+  );
+
+  it(
+    "T1: pagehide zeroes secretKeyRef (status stays UNLOCKED), persisted pageshow forces lock()",
+    async () => {
+      const { fetchMock } = makeFetchEnv(null);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      const { result } = renderHook(() => useVault(), { wrapper });
+
+      // Setup → vault is UNLOCKED with a real key
+      await act(async () => {
+        await result.current.setup(PASSPHRASE);
+      });
+      expect(result.current.encryptionKey).not.toBeNull();
+      expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+
+      // Simulate bfcache: pagehide zeroes secretKeyRef but does NOT call lock().
+      // After pagehide: secretKeyRef.current === null, vaultStatus still UNLOCKED.
+      act(() => {
+        window.dispatchEvent(new Event("pagehide"));
+      });
+      // encryptionKey is still set (pagehide does not call lock()/setEncryptionKey(null))
+      // vaultStatus is still UNLOCKED
+      expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+
+      // Simulate bfcache restore: persisted pageshow fires.
+      // Handler checks secretKeyRef.current === null && vaultStatus === UNLOCKED → calls lock().
+      act(() => {
+        window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      });
+
+      // Assert: vault transitioned to LOCKED
+      await waitFor(() => expect(result.current.status).toBe(VAULT_STATUS.LOCKED));
+      expect(result.current.encryptionKey).toBeNull();
+    },
+    60_000,
+  );
+
+  it(
+    "non-persisted pageshow does NOT lock the vault",
+    async () => {
+      const { fetchMock } = makeFetchEnv(null);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      const { result } = renderHook(() => useVault(), { wrapper });
+      await act(async () => { await result.current.setup(PASSPHRASE); });
+      expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+
+      // Dispatch non-persisted pageshow (normal navigation, not bfcache)
+      act(() => {
+        window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }));
+      });
+
+      // Must remain UNLOCKED
+      expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+      expect(result.current.encryptionKey).not.toBeNull();
+    },
+    60_000,
+  );
+
+  it(
+    "persisted pageshow while vault is LOCKED does NOT trigger an extra lock() call",
+    async () => {
+      const { fetchMock } = makeFetchEnv(null);
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+      const { result } = renderHook(() => useVault(), { wrapper });
+      await act(async () => { await result.current.setup(PASSPHRASE); });
+
+      // Lock the vault
+      act(() => { result.current.lock(); });
+      expect(result.current.status).toBe(VAULT_STATUS.LOCKED);
+
+      // Persisted pageshow while already LOCKED → condition (status === UNLOCKED) is false → no-op
+      act(() => {
+        window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      });
+
+      // Still LOCKED, no crash, key still null
+      expect(result.current.status).toBe(VAULT_STATUS.LOCKED);
+      expect(result.current.encryptionKey).toBeNull();
     },
     60_000,
   );

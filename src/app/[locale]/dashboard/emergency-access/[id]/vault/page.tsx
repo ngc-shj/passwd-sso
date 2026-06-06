@@ -23,6 +23,7 @@ import { fetchApi } from "@/lib/url-helpers";
 import { PasswordCard } from "@/components/passwords/detail/password-card";
 import type { EntryCardData } from "@/types/entry-card";
 import type { InlineDetailData } from "@/types/entry";
+import { mapDecryptedBlobToDetailFields } from "@/lib/vault/map-detail-fields";
 import type { EntryTagNameColor } from "@/lib/vault/entry-form-types";
 
 // No-op handler for read-only mode (stable reference across renders)
@@ -241,60 +242,15 @@ export default function EmergencyVaultPage() {
     return async (): Promise<InlineDetailData> => {
       const data = await decryptBlob(displayEntry.raw);
       return {
+        // Blob-sourced display fields via the shared mapper (commonized with the
+        // personal/team paths so no per-entry-type field can be dropped here).
+        ...mapDecryptedBlobToDetailFields(data as unknown as Record<string, unknown>),
+        // Caller-specific fields:
         id: displayEntry.raw.id,
         entryType: (displayEntry.raw.entryType as EntryTypeValue) ?? ENTRY_TYPE.LOGIN,
         requireReprompt: false,
-        password: data.password ?? "",
-        content: data.content,
-        isMarkdown: data.isMarkdown,
-        url: data.url ?? null,
         urlHost: displayEntry.card.urlHost,
-        notes: data.notes ?? null,
-        customFields: data.customFields ?? [],
         passwordHistory: data.passwordHistory ?? [],
-        totp: data.totp,
-        cardholderName: data.cardholderName,
-        cardNumber: data.cardNumber,
-        brand: data.brand,
-        expiryMonth: data.expiryMonth,
-        expiryYear: data.expiryYear,
-        cvv: data.cvv,
-        fullName: data.fullName,
-        address: data.address,
-        phone: data.phone,
-        email: data.email,
-        dateOfBirth: data.dateOfBirth,
-        nationality: data.nationality,
-        idNumber: data.idNumber,
-        issueDate: data.issueDate,
-        expiryDate: data.expiryDate,
-        relyingPartyId: data.relyingPartyId,
-        relyingPartyName: data.relyingPartyName,
-        username: data.username,
-        credentialId: data.credentialId,
-        creationDate: data.creationDate,
-        deviceInfo: data.deviceInfo,
-        bankName: data.bankName,
-        accountType: data.accountType,
-        accountHolderName: data.accountHolderName,
-        accountNumber: data.accountNumber,
-        routingNumber: data.routingNumber,
-        swiftBic: data.swiftBic,
-        iban: data.iban,
-        branchName: data.branchName,
-        softwareName: data.softwareName,
-        licenseKey: data.licenseKey,
-        version: data.version,
-        licensee: data.licensee,
-        purchaseDate: data.purchaseDate,
-        expirationDate: data.expirationDate,
-        privateKey: data.privateKey,
-        publicKey: data.publicKey,
-        keyType: data.keyType,
-        keySize: data.keySize,
-        fingerprint: data.fingerprint,
-        sshPassphrase: data.passphrase,
-        sshComment: data.comment,
         createdAt: displayEntry.raw.createdAt,
         updatedAt: displayEntry.raw.updatedAt,
       };

@@ -24,6 +24,13 @@ export function IdentitySection({ data, requireVerification, createGuardedGetter
   const { revealed: showIdNumber, handleReveal: handleRevealIdNumber, hide: hideIdNumber } =
     useRevealTimeout(requireVerification, data.id, data.requireReprompt ?? false);
 
+  // A residential address is classified sensitive (SENSITIVE_FIELDS.IDENTITY → address/
+  // addressLine1/addressLine2/postalCode), so the street/postal fields are masked here
+  // the same way the ID number is — consistent with link-sharing's HIDE_PASSWORD and
+  // with every other entry-type's detail section. One shared reveal toggles them together.
+  const { revealed: showAddress, handleReveal: handleRevealAddress, hide: hideAddress } =
+    useRevealTimeout(requireVerification, data.id, data.requireReprompt ?? false);
+
   const textRow = (label: string, value: string | null | undefined) =>
     value ? (
       <div className="space-y-1">
@@ -31,6 +38,29 @@ export function IdentitySection({ data, requireVerification, createGuardedGetter
         <div className="flex items-center gap-2">
           <span className="text-sm">{value}</span>
           <CopyButton getValue={() => value} />
+        </div>
+      </div>
+    ) : null;
+
+  // Masked variant for sensitive address/postal fields (dots + reveal + guarded copy).
+  const maskedRow = (label: string, value: string | null | undefined, colSpan = false) =>
+    value ? (
+      <div className={colSpan ? "col-span-2 space-y-1" : "space-y-1"}>
+        <label className="text-sm text-muted-foreground">{label}</label>
+        <div className="flex items-center gap-2">
+          <span className="text-sm whitespace-pre-wrap">{showAddress ? value : "••••••••"}</span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={showAddress ? hideAddress : handleRevealAddress}
+            aria-label={showAddress ? t("hide") : t("reveal")}
+          >
+            {showAddress ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </Button>
+          <CopyButton
+            getValue={createGuardedGetter(data.id, data.requireReprompt ?? false, () => value)}
+          />
         </div>
       </div>
     ) : null;
@@ -55,23 +85,21 @@ export function IdentitySection({ data, requireVerification, createGuardedGetter
         </div>
       )}
 
-      {/* Structured address */}
-      {textRow(t("addressLine1"), data.addressLine1)}
-      {textRow(t("addressLine2"), data.addressLine2)}
+      {/* Structured address — street/postal fields are sensitive (masked), city/state/
+          country are not (plaintext). */}
+      {maskedRow(t("addressLine1"), data.addressLine1)}
+      {maskedRow(t("addressLine2"), data.addressLine2)}
       {textRow(t("city"), data.city)}
       {textRow(t("state"), data.state)}
-      {textRow(t("postalCode"), data.postalCode)}
+      {maskedRow(t("postalCode"), data.postalCode)}
       {textRow(t("country"), data.country)}
 
-      {/* Address (legacy / combined) */}
-      {data.address && (
-        <div className="col-span-2 space-y-1">
-          <label className="text-sm text-muted-foreground">{t("address")}</label>
-          <div className="flex items-center gap-2">
-            <span className="text-sm whitespace-pre-wrap">{data.address}</span>
-            <CopyButton getValue={() => data.address ?? ""} />
-          </div>
-        </div>
+      {/* Address (legacy / combined) — sensitive, masked. */}
+      {maskedRow(t("address"), data.address, true)}
+
+      {/* Auto-hide hint shown once while any masked address field is revealed. */}
+      {showAddress && (data.addressLine1 || data.addressLine2 || data.postalCode || data.address) && (
+        <p className="col-span-2 text-xs text-muted-foreground">{t("autoHide")}</p>
       )}
 
       {/* Phone */}

@@ -51,7 +51,8 @@ test.describe("Share Link", () => {
       // Click card to expand inline details
       const entry = dashboard.entryByTitle(TEST_ENTRY.title);
       await entry.click();
-      await expect(page.getByText(TEST_ENTRY.username)).toBeVisible({
+      // master-detail shows the username in both the list row and the detail pane.
+      await expect(page.getByText(TEST_ENTRY.username).first()).toBeVisible({
         timeout: 10_000,
       });
 

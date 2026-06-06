@@ -13,7 +13,9 @@ export const DISPLAY_KEYS = [
   // CREDIT_CARD
   "cardholderName", "cardNumber", "brand", "expiryMonth", "expiryYear", "cvv",
   // IDENTITY
-  "fullName", "address", "phone", "email", "dateOfBirth", "nationality",
+  "fullName", "givenName", "familyName", "middleName", "familyNameKana", "givenNameKana",
+  "addressLine1", "addressLine2", "city", "state", "postalCode", "country",
+  "address", "phone", "email", "dateOfBirth", "nationality",
   "idNumber", "issueDate", "expiryDate",
   // PASSKEY
   "relyingPartyId", "relyingPartyName", "credentialId", "creationDate", "deviceInfo",

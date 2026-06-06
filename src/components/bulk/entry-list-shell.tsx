@@ -22,6 +22,8 @@ interface BaseProps<T extends { id: string; title: string }> {
   selectEntryLabel: (title: string) => string;
   /** Buttons inside the FloatingActionBar */
   floatingActions: ReactNode;
+  /** Suppress the bottom FloatingActionBar (e.g. master-detail hosts the actions in the detail pane). */
+  hideFloatingBar?: boolean;
   /** BulkActionConfirmDialog props */
   confirmDialog: {
     open: boolean;
@@ -65,6 +67,7 @@ export function EntryListShell<T extends { id: string; title: string }>(
     selectEntryLabel,
     renderEntry,
     floatingActions,
+    hideFloatingBar,
     confirmDialog,
     children,
   } = props;
@@ -112,9 +115,11 @@ export function EntryListShell<T extends { id: string; title: string }>(
         );
       })}
 
-      <FloatingActionBar visible={selectionMode && selectedIds.size > 0}>
-        {floatingActions}
-      </FloatingActionBar>
+      {!hideFloatingBar && (
+        <FloatingActionBar visible={selectionMode && selectedIds.size > 0}>
+          {floatingActions}
+        </FloatingActionBar>
+      )}
 
       <BulkActionConfirmDialog {...confirmDialog} />
 

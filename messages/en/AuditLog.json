@@ -32,6 +32,7 @@
   "ENTRY_BULK_ARCHIVE": "Bulk archived entries",
   "ENTRY_BULK_UNARCHIVE": "Bulk unarchived entries",
   "ENTRY_BULK_RESTORE": "Bulk restored entries",
+  "ENTRY_BULK_PURGE": "Bulk deleted entries permanently",
   "ENTRY_RESTORE": "Restored entry",
   "ENTRY_EXPORT": "Exported entries",
   "ATTACHMENT_UPLOAD": "Uploaded attachment",

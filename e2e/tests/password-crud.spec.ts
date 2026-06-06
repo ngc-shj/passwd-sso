@@ -44,7 +44,9 @@ test("Password CRUD lifecycle", async ({ context, page }) => {
     await entry.click();
 
     // Inline detail expands — should show decrypted details
-    await expect(page.getByText(TEST_ENTRY.username)).toBeVisible({
+    // master-detail shows the username in both the list row and the detail pane;
+    // the accordion shows it in the card. .first() asserts it is visible in either.
+    await expect(page.getByText(TEST_ENTRY.username).first()).toBeVisible({
       timeout: 10_000,
     });
   });
@@ -57,7 +59,9 @@ test("Password CRUD lifecycle", async ({ context, page }) => {
     await entry.click();
 
     // Wait for inline detail to expand (username visible)
-    await expect(page.getByText(TEST_ENTRY.username)).toBeVisible({
+    // master-detail shows the username in both the list row and the detail pane;
+    // the accordion shows it in the card. .first() asserts it is visible in either.
+    await expect(page.getByText(TEST_ENTRY.username).first()).toBeVisible({
       timeout: 10_000,
     });
 
@@ -87,7 +91,9 @@ test("Password CRUD lifecycle", async ({ context, page }) => {
     await entry.click();
 
     // Wait for inline detail to expand
-    await expect(page.getByText(TEST_ENTRY.username)).toBeVisible({
+    // master-detail shows the username in both the list row and the detail pane;
+    // the accordion shows it in the card. .first() asserts it is visible in either.
+    await expect(page.getByText(TEST_ENTRY.username).first()).toBeVisible({
       timeout: 10_000,
     });
 

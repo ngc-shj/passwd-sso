@@ -109,12 +109,12 @@ export function CategoriesSection({
               <Button
                 key={category.type}
                 variant={selectedTypeFilter === category.type ? "secondary" : "ghost"}
-                className="w-full justify-start gap-2"
+                className="w-full min-w-0 justify-start gap-2"
                 asChild
               >
-                <Link href={href} onClick={onNavigate}>
-                  <Icon className="h-4 w-4" />
-                  {t(category.labelKey)}
+                <Link href={href} onClick={onNavigate} className="min-w-0">
+                  <Icon className="h-4 w-4 shrink-0" />
+                  <span className="truncate">{t(category.labelKey)}</span>
                 </Link>
               </Button>
             );

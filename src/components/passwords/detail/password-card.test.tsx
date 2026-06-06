@@ -22,20 +22,14 @@ vi.mock("next-intl", () => ({
 }));
 
 vi.mock("@/lib/vault/vault-context", () => ({
-  useVault: () => ({ encryptionKey: STABLE_KEY, userId: "user-1" }),
+  useVault: () => ({ encryptionKey: STABLE_KEY, userId: "user-1", status: "UNLOCKED" }),
 }));
 
-vi.mock("@/lib/crypto/crypto-client", () => ({
-  decryptData: vi.fn(),
-}));
+// Decrypt mocks removed — they exercised logic that now lives in usePasswordEntryDetail.
+// Those mocks (decryptData, crypto-aad, fetchApi) now belong to use-password-entry-detail.test.tsx.
 
-vi.mock("@/lib/crypto/crypto-aad", () => ({
-  buildPersonalEntryAAD: vi.fn().mockReturnValue("aad"),
-  VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
-}));
-
-vi.mock("@/lib/url-helpers", () => ({
-  fetchApi: vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }),
+vi.mock("@/hooks/vault/use-password-entry-detail", () => ({
+  usePasswordEntryDetail: () => ({ detailData: null, loading: false, error: null, invalidate: vi.fn() }),
 }));
 
 vi.mock("@/components/share/share-dialog", () => ({
@@ -172,5 +166,73 @@ describe("PasswordCard", () => {
     await user.click(buttons[0]);
 
     expect(onToggleFavorite).toHaveBeenCalledWith("e1", false);
+  });
+
+  // The next-intl mock returns the key verbatim, so menu labels are the i18n keys.
+
+  it("invokes onRestore with the entry id from the ⋮ menu (trash view)", async () => {
+    const onRestore = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <PasswordCard
+        entry={baseEntry}
+        expanded={false}
+        onToggleFavorite={vi.fn()}
+        onToggleArchive={vi.fn()}
+        onDelete={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onRefresh={vi.fn()}
+        onRestore={onRestore}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "moreActions" }));
+    await user.click(screen.getByRole("menuitem", { name: "restore" }));
+
+    expect(onRestore).toHaveBeenCalledWith("e1");
+  });
+
+  it("invokes onDeletePermanently with the entry id from the ⋮ menu (trash view)", async () => {
+    const onDeletePermanently = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <PasswordCard
+        entry={baseEntry}
+        expanded={false}
+        onToggleFavorite={vi.fn()}
+        onToggleArchive={vi.fn()}
+        onDelete={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onRefresh={vi.fn()}
+        onDeletePermanently={onDeletePermanently}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "moreActions" }));
+    await user.click(screen.getByRole("menuitem", { name: "deletePermanently" }));
+
+    expect(onDeletePermanently).toHaveBeenCalledWith("e1");
+  });
+
+  it("omits the Restore menu item outside the trash view (no onRestore)", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <PasswordCard
+        entry={baseEntry}
+        expanded={false}
+        onToggleFavorite={vi.fn()}
+        onToggleArchive={vi.fn()}
+        onDelete={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onRefresh={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "moreActions" }));
+
+    expect(screen.queryByRole("menuitem", { name: "restore" })).not.toBeInTheDocument();
   });
 });

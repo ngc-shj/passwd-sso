@@ -286,6 +286,25 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // ─── bfcache restore guard (INV-C1.6) ────────────────────────
+  // When the browser restores a bfcache page, the pagehide handler has already
+  // zeroed secretKeyRef. If vaultStatus still reads UNLOCKED (the "never-overwrite"
+  // rule in checkVaultStatus prevented a re-lock), the pane would show decrypted
+  // state with a null key (S7). Call lock() to force LOCKED and unmount the pane.
+  // lock() zeroes wrappedKeyRef/salt and setEncryptionKey(null) — bare setVaultStatus
+  // alone would leave those refs resident (S11/S13).
+  useEffect(() => {
+    const handlePageshow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      // If the key is null but status still reads UNLOCKED, force a full lock transition.
+      if (secretKeyRef.current === null && vaultStatus === VAULT_STATUS.UNLOCKED) {
+        lock();
+      }
+    };
+    window.addEventListener("pageshow", handlePageshow);
+    return () => window.removeEventListener("pageshow", handlePageshow);
+  }, [vaultStatus, lock]);
+
   // ─── Setup (first time) ───────────────────────────────────────
 
   const setup = useCallback(async (passphrase: string) => {

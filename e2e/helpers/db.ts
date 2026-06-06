@@ -363,6 +363,7 @@ export async function seedVaultKey(
  *   ExtensionToken         → extension_tokens           (user_id)
  *   Session                → sessions                   (user_id)
  *   User                   → users
+ *   AuditOutbox            → audit_outbox               (tenant_id)
  *   TenantMember           → tenant_members             (tenant_id)
  *   Tenant                 → tenants
  */
@@ -375,6 +376,7 @@ export async function cleanup(): Promise<void> {
   );
   if (rows.length === 0) {
     // Still clean up tenant even if no users found
+    await p.query(`DELETE FROM audit_outbox WHERE tenant_id = $1`, [E2E_TENANT.id]);
     await p.query(
       `DELETE FROM tenant_members WHERE tenant_id = $1`,
       [E2E_TENANT.id]
@@ -472,6 +474,10 @@ export async function cleanup(): Promise<void> {
   await p.query(`DELETE FROM users WHERE id = ANY($1)`, [userIds]);
 
   // Phase 4: Tenant cleanup
+  // audit_outbox.tenant_id → tenants.id (FK). Audit events emitted during the run
+  // enqueue rows here keyed by tenant; drain them before deleting the tenant,
+  // otherwise the delete violates audit_outbox_tenant_id_fkey.
+  await p.query(`DELETE FROM audit_outbox WHERE tenant_id = $1`, [E2E_TENANT.id]);
   await p.query(
     `DELETE FROM tenant_members WHERE tenant_id = $1`,
     [E2E_TENANT.id]

@@ -1,18 +1,23 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, use } from "react";
+import { useEffect, useState, useRef, use } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
-import { PasswordCard } from "@/components/passwords/detail/password-card";
 import { EntryListHeader } from "@/components/passwords/entry/entry-list-header";
 import { EntrySortMenu } from "@/components/passwords/entry/entry-sort-menu";
 import { SearchBar } from "@/components/layout/search-bar";
-import type { InlineDetailData } from "@/components/passwords/detail/password-detail-inline";
+import { EntryListView, type EntryListHandle } from "@/components/passwords/detail/entry-list-view";
+import {
+  NORMAL_VIEW,
+  FAVORITES_VIEW,
+  ARCHIVE_VIEW,
+  TRASH_VIEW,
+} from "@/components/passwords/detail/entry-list-view-descriptors";
+import { useTeamVaultListAdapter } from "@/lib/vault/team-vault-list-adapter";
+import type { TeamDisplayEntry } from "@/types/team-display-entry";
 import { TeamNewDialog } from "@/components/team/management/team-new-dialog";
 import { TeamEditDialogLoader } from "@/components/team/management/team-edit-dialog-loader";
-import { TeamArchivedList, type TeamArchivedListHandle } from "@/components/team/management/team-archived-list";
-import { TeamTrashList, type TeamTrashListHandle } from "@/components/team/management/team-trash-list";
 import { TeamRoleBadge } from "@/components/team/management/team-role-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -24,22 +29,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, Clock, Landmark, KeySquare, CheckSquare, FolderOpen, Tag, Terminal } from "lucide-react";
-import { TEAM_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
+import { ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
-import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/vault/entry-sort";
+import type { EntrySortOption } from "@/lib/vault/entry-sort";
 import { buildFolderPath } from "@/lib/folder/folder-path";
 import { buildTagPath } from "@/lib/format/tag-tree";
 import type { FolderItem } from "@/components/folders/folder-tree";
 import { useTeamVault } from "@/lib/team/team-vault-context";
-import { decryptData } from "@/lib/crypto/crypto-client";
-import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
-import { useBulkSelection } from "@/hooks/bulk/use-bulk-selection";
 import { MAX_BULK_SELECTION } from "@/lib/bulk-selection-helpers";
-import { useBulkAction } from "@/hooks/bulk/use-bulk-action";
-import { useTeamEntryMutations } from "@/hooks/team/use-team-entry-mutations";
-import { EntryListShell } from "@/components/bulk/entry-list-shell";
 import { fetchApi } from "@/lib/url-helpers";
+import { useLayoutMode } from "@/hooks/use-layout-mode";
 
 interface TeamInfo {
   id: string;
@@ -48,36 +47,6 @@ interface TeamInfo {
   role: string;
   memberCount: number;
   passwordCount: number;
-}
-
-interface TeamPasswordEntry {
-  id: string;
-  entryType: EntryTypeValue;
-  title: string;
-  username: string | null;
-  urlHost: string | null;
-  snippet: string | null;
-  brand: string | null;
-  lastFour: string | null;
-  cardholderName: string | null;
-  fullName: string | null;
-  idNumberLast4: string | null;
-  relyingPartyId: string | null;
-  bankName: string | null;
-  accountNumberLast4: string | null;
-  softwareName: string | null;
-  licensee: string | null;
-  keyType: string | null;
-  fingerprint: string | null;
-  requireReprompt: boolean;
-  expiresAt: string | null;
-  isFavorite: boolean;
-  isArchived: boolean;
-  tags: { id: string; name: string; color: string | null }[];
-  createdBy: { id: string; name: string | null; email: string | null; image: string | null };
-  updatedBy: { id: string; name: string | null; email: string | null };
-  createdAt: string;
-  updatedAt: string;
 }
 
 export default function TeamDashboardPage({
@@ -94,29 +63,47 @@ export default function TeamDashboardPage({
   const t = useTranslations("Team");
   const tDash = useTranslations("Dashboard");
   const tl = useTranslations("PasswordList");
-  const { getTeamEncryptionKey, getEntryDecryptionKey } = useTeamVault();
+  const { getTeamEncryptionKey } = useTeamVault();
+
   const [team, setTeam] = useState<TeamInfo | null>(null);
-  const [passwords, setPasswords] = useState<TeamPasswordEntry[]>([]);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [keyPending, setKeyPending] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<EntrySortOption>("updatedAt");
   const [formOpen, setFormOpen] = useState(false);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [newEntryType, setNewEntryType] = useState<EntryTypeValue>(ENTRY_TYPE.LOGIN);
   const [editEntryId, setEditEntryId] = useState<string | null>(null);
+
+  // Header selection-mode mirror (EntryListView owns the actual selection state).
   const [selectionMode, setSelectionMode] = useState(false);
-  const archivedListRef = useRef<TeamArchivedListHandle>(null);
-  const trashListRef = useRef<TeamTrashListHandle>(null);
-  const [childSelectedCount, setChildSelectedCount] = useState(0);
-  const [childAllSelected, setChildAllSelected] = useState(false);
-  const [childAtLimit, setChildAtLimit] = useState(false);
+  const [selectedCount, setSelectedCount] = useState(0);
+  const [allSelected, setAllSelected] = useState(false);
+  const [selectionAtLimit, setSelectionAtLimit] = useState(false);
+  const listRef = useRef<EntryListHandle>(null);
+
   const isTeamArchive = activeScope === "archive";
   const isTeamTrash = activeScope === "trash";
   const isTeamFavorites = activeScope === "favorites";
   const isTeamSpecialView = isTeamArchive || isTeamTrash;
+
+  const layoutMode = useLayoutMode();
+  const isMasterDetail = layoutMode === "master-detail";
+
+  // C6 — the team vault adapter the shared EntryListView mounts.
+  const adapter = useTeamVaultListAdapter(teamId, team?.role ?? "");
+
+  // Key-pending banner: probe the team key directly so we can show the team-specific
+  // "key being distributed" card instead of the generic gate (preserves prior UX).
+  const [keyPending, setKeyPending] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    getTeamEncryptionKey(teamId)
+      .then((k) => { if (!cancelled) setKeyPending(!k); })
+      .catch(() => { if (!cancelled) setKeyPending(false); });
+    return () => { cancelled = true; };
+    // Key availability is independent of data mutations — do NOT depend on refreshKey,
+    // which would risk flashing the banner over the list after a mutation.
+  }, [teamId, getTeamEncryptionKey]);
 
   const [teamFolders, setTeamFolders] = useState<FolderItem[]>([]);
   const [teamTags, setTeamTags] = useState<{ id: string; name: string; color?: string | null; parentId?: string | null }[]>([]);
@@ -137,7 +124,8 @@ export default function TeamDashboardPage({
     })();
   }, [teamId]);
 
-  // Reset selection mode when view changes (during render, not in effect)
+  // INV-C4.2: reset the header's selection mirror when the view changes (during render).
+  // EntryListView clears its own activeEntry + selection on view change (INV-F1).
   const viewKey = `${activeScope}|${activeTagId}|${activeFolderId}|${activeEntryType}`;
   const [prevViewKey, setPrevViewKey] = useState(viewKey);
   if (prevViewKey !== viewKey) {
@@ -145,153 +133,47 @@ export default function TeamDashboardPage({
     setSelectionMode(false);
   }
 
-  const fetchTeam = async (): Promise<boolean> => {
-    try {
-      const res = await fetchApi(apiPath.teamById(teamId));
-      if (!res.ok) {
-        setTeam(null);
-        setLoadError(true);
-        return false;
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetchApi(apiPath.teamById(teamId));
+        if (cancelled) return;
+        if (!res.ok) { setTeam(null); setLoadError(true); return; }
+        setTeam(await res.json());
+        setLoadError(false);
+      } catch {
+        if (!cancelled) { setTeam(null); setLoadError(true); }
       }
-      const data = await res.json();
-      setTeam(data);
-      setLoadError(false);
-      return true;
-    } catch {
-      setTeam(null);
-      setLoadError(true);
-      return false;
-    }
+    })();
+    return () => { cancelled = true; };
+  }, [teamId]);
+
+  // ESC exits selection mode (EntryListView owns the list's own keydown handling).
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && selectionMode) {
+        setSelectionMode(false);
+        listRef.current?.exitSelectionMode();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [selectionMode]);
+
+  // Plain functions — the React Compiler memoizes them; manual useCallback here
+  // tripped its preserve-manual-memoization check.
+  const handleSelectedCountChange = (count: number, isAllSelected: boolean, isAtLimit: boolean) => {
+    setSelectedCount(count);
+    setAllSelected(isAllSelected);
+    setSelectionAtLimit(isAtLimit);
   };
 
-  const fetchPasswords = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (activeTagId) params.set("tag", activeTagId);
-      if (activeFolderId) params.set("folder", activeFolderId);
-      if (activeEntryType) params.set("type", activeEntryType);
-      if (isTeamFavorites) params.set("favorites", "true");
-      const qs = params.toString();
-      const url = `${apiPath.teamPasswords(teamId)}${qs ? `?${qs}` : ""}`;
-      const res = await fetchApi(url);
-      const data = await res.json();
-      if (!Array.isArray(data)) return;
+  const handleRequestEdit = (entry: TeamDisplayEntry) => {
+    setEditEntryId(entry.id);
+    setFormOpen(true);
+  };
 
-      const teamKey = await getTeamEncryptionKey(teamId);
-      if (!teamKey) {
-        setKeyPending(true);
-        setPasswords([]);
-        return;
-      }
-      setKeyPending(false);
-
-      const decrypted = await Promise.all(
-        data.map(async (entry: Record<string, unknown>) => {
-          try {
-            const entryId = entry.id as string;
-            const itemKeyVersion = (entry.itemKeyVersion as number) ?? 0;
-            const decryptKey = await getEntryDecryptionKey(teamId, entryId, {
-              itemKeyVersion,
-              encryptedItemKey: entry.encryptedItemKey as string | undefined,
-              itemKeyIv: entry.itemKeyIv as string | undefined,
-              itemKeyAuthTag: entry.itemKeyAuthTag as string | undefined,
-              teamKeyVersion: (entry.teamKeyVersion as number) ?? 1,
-            });
-            const aad = buildTeamEntryAAD(teamId, entryId, "overview", itemKeyVersion);
-            const json = await decryptData(
-              {
-                ciphertext: entry.encryptedOverview as string,
-                iv: entry.overviewIv as string,
-                authTag: entry.overviewAuthTag as string,
-              },
-              decryptKey,
-              aad,
-            );
-            const overview = JSON.parse(json);
-            return {
-              id: entry.id,
-              entryType: entry.entryType,
-              title: overview.title ?? "",
-              username: overview.username ?? null,
-              urlHost: overview.urlHost ?? null,
-              snippet: overview.snippet ?? null,
-              brand: overview.brand ?? null,
-              lastFour: overview.lastFour ?? null,
-              cardholderName: overview.cardholderName ?? null,
-              fullName: overview.fullName ?? null,
-              idNumberLast4: overview.idNumberLast4 ?? null,
-              relyingPartyId: overview.relyingPartyId ?? null,
-              bankName: overview.bankName ?? null,
-              accountNumberLast4: overview.accountNumberLast4 ?? null,
-              softwareName: overview.softwareName ?? null,
-              licensee: overview.licensee ?? null,
-              keyType: overview.keyType ?? null,
-              fingerprint: overview.fingerprint ?? null,
-              requireReprompt: entry.requireReprompt ?? false,
-              expiresAt: entry.expiresAt ?? null,
-              isFavorite: entry.isFavorite,
-              isArchived: entry.isArchived,
-              tags: entry.tags,
-              createdBy: entry.createdBy,
-              updatedBy: entry.updatedBy,
-              createdAt: entry.createdAt,
-              updatedAt: entry.updatedAt,
-            } as TeamPasswordEntry;
-          } catch {
-            return {
-              id: entry.id as string,
-              entryType: (entry.entryType ?? ENTRY_TYPE.LOGIN) as EntryTypeValue,
-              title: "(decryption failed)",
-              username: null,
-              urlHost: null,
-              snippet: null,
-              brand: null,
-              lastFour: null,
-              cardholderName: null,
-              fullName: null,
-              idNumberLast4: null,
-              relyingPartyId: null,
-              bankName: null,
-              accountNumberLast4: null,
-              softwareName: null,
-              licensee: null,
-              keyType: null,
-              fingerprint: null,
-              requireReprompt: (entry.requireReprompt as boolean) ?? false,
-              expiresAt: (entry.expiresAt as string | null) ?? null,
-              isFavorite: entry.isFavorite as boolean,
-              isArchived: entry.isArchived as boolean,
-              tags: (entry.tags ?? []) as TeamPasswordEntry["tags"],
-              createdBy: entry.createdBy as TeamPasswordEntry["createdBy"],
-              updatedBy: entry.updatedBy as TeamPasswordEntry["updatedBy"],
-              createdAt: entry.createdAt as string,
-              updatedAt: entry.updatedAt as string,
-            } as TeamPasswordEntry;
-          }
-        }),
-      );
-      setPasswords(decrypted);
-    } catch {
-      // network error
-    } finally {
-      setLoading(false);
-    }
-  }, [teamId, activeTagId, activeFolderId, activeEntryType, isTeamFavorites, getTeamEncryptionKey, getEntryDecryptionKey]);
-
-  useEffect(() => {
-    setLoadError(false);
-    (async () => {
-      const ok = await fetchTeam();
-      if (ok && !isTeamSpecialView) fetchPasswords();
-      else setLoading(false);
-    })();
-  }, [teamId, fetchPasswords, isTeamSpecialView]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const canCreate =
-    team?.role === TEAM_ROLE.OWNER || team?.role === TEAM_ROLE.ADMIN || team?.role === TEAM_ROLE.MEMBER;
-  const canDeletePerm = team?.role === TEAM_ROLE.OWNER || team?.role === TEAM_ROLE.ADMIN;
-  const canEditPerm = canCreate;
   const contextualEntryType = activeEntryType && Object.values(ENTRY_TYPE).includes(activeEntryType as EntryTypeValue)
     ? (activeEntryType as EntryTypeValue)
     : null;
@@ -318,7 +200,8 @@ export default function TeamDashboardPage({
         ? t("favorites")
         : activeCategoryLabel
           ?? folderLabel ?? tagLabel
-          ?? (activeFolderId || activeTagId ? "\u00A0" : t("passwords"));
+          ?? (activeFolderId || activeTagId ? " " : t("passwords"));
+
   const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
     LOGIN: <KeyRound className="h-6 w-6" />,
     SECURE_NOTE: <FileText className="h-6 w-6" />,
@@ -329,7 +212,6 @@ export default function TeamDashboardPage({
     SOFTWARE_LICENSE: <KeySquare className="h-6 w-6" />,
     SSH_KEY: <Terminal className="h-6 w-6" />,
   };
-
   const headerIcon = isTeamTrash
     ? <Trash2 className="h-6 w-6" />
     : isTeamArchive
@@ -345,239 +227,24 @@ export default function TeamDashboardPage({
               : <KeyRound className="h-6 w-6" />;
 
   const isTeamAll =
-    !isTeamTrash &&
-    !isTeamArchive &&
-    !isTeamFavorites &&
-    !activeCategoryLabel &&
-    !activeTagId &&
-    !activeFolderId;
-  const isCategorySelected = !!activeCategoryLabel;
-  const isFolderOrTagSelected = Boolean(activeTagId || activeFolderId);
+    !isTeamTrash && !isTeamArchive && !isTeamFavorites && !activeCategoryLabel && !activeTagId && !activeFolderId;
   const isPrimaryScopeLabel =
-    isTeamTrash ||
-    isTeamArchive ||
-    isTeamFavorites ||
-    isTeamAll ||
-    isCategorySelected ||
-    isFolderOrTagSelected;
+    isTeamTrash || isTeamArchive || isTeamFavorites || isTeamAll || !!activeCategoryLabel || Boolean(activeTagId || activeFolderId);
 
-  const handleToggleFavorite = async (id: string, current: boolean) => {
-    // Optimistic update
-    if (isTeamFavorites && current) {
-      setPasswords((prev) => prev.filter((e) => e.id !== id));
-    } else {
-      setPasswords((prev) =>
-        prev.map((e) => (e.id === id ? { ...e, isFavorite: !current } : e))
-      );
-    }
-    try {
-      const res = await fetchApi(apiPath.teamPasswordFavorite(teamId, id), {
-        method: "POST",
-      });
-      if (!res.ok) fetchPasswords();
-    } catch {
-      fetchPasswords();
-    }
-  };
+  const canCreate = adapter.permissions.canCreate;
+  const canDelete = adapter.permissions.canDelete;
 
-  const {
-    toggleArchive: handleToggleArchive,
-    deleteEntry: handleDelete,
-    handleSaved,
-  } = useTeamEntryMutations<TeamPasswordEntry>({
-    teamId,
-    setEntries: setPasswords,
-    refetchEntries: fetchPasswords,
-  });
-
-  const decryptFullBlob = useCallback(
-    async (id: string, raw: Record<string, unknown>) => {
-      const itemKeyVersion = (raw.itemKeyVersion as number) ?? 0;
-      const decryptKey = await getEntryDecryptionKey(teamId, id, {
-        itemKeyVersion,
-        encryptedItemKey: raw.encryptedItemKey as string | undefined,
-        itemKeyIv: raw.itemKeyIv as string | undefined,
-        itemKeyAuthTag: raw.itemKeyAuthTag as string | undefined,
-        teamKeyVersion: (raw.teamKeyVersion as number) ?? 1,
-      });
-      const aad = buildTeamEntryAAD(teamId, id, "blob", itemKeyVersion);
-      const json = await decryptData(
-        {
-          ciphertext: raw.encryptedBlob as string,
-          iv: raw.blobIv as string,
-          authTag: raw.blobAuthTag as string,
-        },
-        decryptKey,
-        aad,
-      );
-      return JSON.parse(json) as Record<string, unknown>;
-    },
-    [teamId, getEntryDecryptionKey],
-  );
-
-  const handleEdit = async (id: string) => {
-    setEditEntryId(id);
-    setFormOpen(true);
-  };
-
-  const createDetailFetcher = useCallback(
-    (id: string, eType?: EntryTypeValue) => async (): Promise<InlineDetailData> => {
-      const res = await fetchApi(apiPath.teamPasswordById(teamId, id));
-      if (!res.ok) {
-        throw new Error("Failed");
-      }
-      const raw = await res.json();
-      const blob = await decryptFullBlob(id, raw);
-      return {
-        id: raw.id,
-        title: (blob.title as string) ?? undefined,
-        entryType: eType,
-        password: (blob.password as string) ?? "",
-        content: blob.content as string | undefined,
-        isMarkdown: blob.isMarkdown as boolean | undefined,
-        url: (blob.url as string) ?? null,
-        urlHost: null,
-        notes: (blob.notes as string) ?? null,
-        customFields: (blob.customFields as EntryCustomField[]) ?? [],
-        passwordHistory: [],
-        totp: blob.totp as EntryTotp | undefined,
-        cardholderName: blob.cardholderName as string | undefined,
-        cardNumber: blob.cardNumber as string | undefined,
-        brand: blob.brand as string | undefined,
-        expiryMonth: blob.expiryMonth as string | undefined,
-        expiryYear: blob.expiryYear as string | undefined,
-        cvv: blob.cvv as string | undefined,
-        fullName: blob.fullName as string | undefined,
-        address: blob.address as string | undefined,
-        phone: blob.phone as string | undefined,
-        email: blob.email as string | undefined,
-        dateOfBirth: blob.dateOfBirth as string | undefined,
-        nationality: blob.nationality as string | undefined,
-        idNumber: blob.idNumber as string | undefined,
-        issueDate: blob.issueDate as string | undefined,
-        expiryDate: blob.expiryDate as string | undefined,
-        relyingPartyId: blob.relyingPartyId as string | undefined,
-        relyingPartyName: blob.relyingPartyName as string | undefined,
-        username: blob.username as string | undefined,
-        credentialId: blob.credentialId as string | undefined,
-        creationDate: blob.creationDate as string | undefined,
-        deviceInfo: blob.deviceInfo as string | undefined,
-        bankName: blob.bankName as string | undefined,
-        accountType: blob.accountType as string | undefined,
-        accountHolderName: blob.accountHolderName as string | undefined,
-        accountNumber: blob.accountNumber as string | undefined,
-        routingNumber: blob.routingNumber as string | undefined,
-        swiftBic: blob.swiftBic as string | undefined,
-        iban: blob.iban as string | undefined,
-        branchName: blob.branchName as string | undefined,
-        softwareName: blob.softwareName as string | undefined,
-        licenseKey: blob.licenseKey as string | undefined,
-        version: blob.version as string | undefined,
-        licensee: blob.licensee as string | undefined,
-        purchaseDate: blob.purchaseDate as string | undefined,
-        expirationDate: blob.expirationDate as string | undefined,
-        privateKey: blob.privateKey as string | undefined,
-        publicKey: blob.publicKey as string | undefined,
-        keyType: blob.keyType as string | undefined,
-        keySize: blob.keySize as number | undefined,
-        fingerprint: blob.fingerprint as string | undefined,
-        sshPassphrase: blob.passphrase as string | undefined,
-        sshComment: blob.comment as string | undefined,
-        createdAt: raw.createdAt,
-        updatedAt: raw.updatedAt,
-      };
-    },
-    [teamId, decryptFullBlob],
-  );
-
-  const createPasswordFetcher = useCallback(
-    (id: string) => async (): Promise<string> => {
-      const res = await fetchApi(apiPath.teamPasswordById(teamId, id));
-      if (!res.ok) {
-        throw new Error("Failed");
-      }
-      const raw = await res.json();
-      const blob = await decryptFullBlob(id, raw);
-      return (blob.password as string) ?? (blob.content as string) ?? "";
-    },
-    [teamId, decryptFullBlob],
-  );
-
-  const createUrlFetcher = useCallback(
-    (id: string) => async (): Promise<string | null> => {
-      const res = await fetchApi(apiPath.teamPasswordById(teamId, id));
-      if (!res.ok) {
-        throw new Error("Failed");
-      }
-      const raw = await res.json();
-      const blob = await decryptFullBlob(id, raw);
-      return (blob.url as string) ?? null;
-    },
-    [teamId, decryptFullBlob],
-  );
-
-  const filtered = passwords.filter((p) => {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      p.title.toLowerCase().includes(q) ||
-      p.username?.toLowerCase().includes(q) ||
-      p.urlHost?.toLowerCase().includes(q) ||
-      p.snippet?.toLowerCase().includes(q) ||
-      p.brand?.toLowerCase().includes(q) ||
-      p.lastFour?.toLowerCase().includes(q) ||
-      p.cardholderName?.toLowerCase().includes(q) ||
-      p.fullName?.toLowerCase().includes(q) ||
-      p.idNumberLast4?.toLowerCase().includes(q) ||
-      p.relyingPartyId?.toLowerCase().includes(q) ||
-      p.bankName?.toLowerCase().includes(q) ||
-      p.accountNumberLast4?.includes(q) ||
-      p.softwareName?.toLowerCase().includes(q) ||
-      p.licensee?.toLowerCase().includes(q) ||
-      p.keyType?.toLowerCase().includes(q) ||
-      p.fingerprint?.toLowerCase().includes(q)
-    );
-  });
-  const sortedFiltered = [...filtered].sort((a, b) =>
-    compareEntriesWithFavorite(a, b, sortBy)
-  );
-
-  // Bulk selection for main password list
-  const entryIds = sortedFiltered.map((e) => e.id);
-  const { selectedIds, allSelected, atLimit, toggleSelectOne, toggleSelectAll, clearSelection } =
-    useBulkSelection({
-      entryIds,
-      selectionMode,
-    });
-
-  // Bulk action for main password list
-  const {
-    dialogOpen: bulkDialogOpen,
-    setDialogOpen: setBulkDialogOpen,
-    pendingAction,
-    processing: bulkProcessing,
-    requestAction,
-    executeAction,
-  } = useBulkAction({
-    selectedIds,
-    scope: { type: "team", teamId },
-    t: tl,
-    onSuccess: () => {
-      clearSelection();
-      fetchPasswords();
-    },
-  });
-
-  // ESC key to exit selection mode
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && selectionMode) {
-        setSelectionMode(false);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [selectionMode]);
+  const descriptor = isTeamTrash
+    ? TRASH_VIEW
+    : isTeamArchive
+      ? ARCHIVE_VIEW
+      : isTeamFavorites
+        ? FAVORITES_VIEW
+        : NORMAL_VIEW;
+  // Archive/trash ignore tag/folder/type filters (matching the prior team behavior).
+  const query = isTeamSpecialView
+    ? { tagId: null, folderId: null, entryType: null }
+    : { tagId: activeTagId, folderId: activeFolderId, entryType: activeEntryType };
 
   if (loadError) {
     return (
@@ -585,25 +252,37 @@ export default function TeamDashboardPage({
         <div className="mx-auto max-w-4xl">
           <Card className="rounded-xl border bg-card/80 p-6">
             <div className="flex flex-col items-start gap-3">
-            <h1 className="text-xl font-semibold">{t("forbidden")}</h1>
-            <p className="text-sm text-muted-foreground">
-              {t("noTeamsDesc")}
-            </p>
-            <Button variant="ghost" asChild>
-              <Link href="/dashboard/teams">
-                {t("manage")}
-              </Link>
-            </Button>
-          </div>
+              <h1 className="text-xl font-semibold">{t("forbidden")}</h1>
+              <p className="text-sm text-muted-foreground">{t("noTeamsDesc")}</p>
+              <Button variant="ghost" asChild>
+                <Link href="/dashboard/teams">{t("manage")}</Link>
+              </Button>
+            </div>
           </Card>
         </div>
       </div>
     );
   }
 
+  const newEntryItems: { type: EntryTypeValue; icon: React.ReactNode; label: string }[] = [
+    { type: ENTRY_TYPE.LOGIN, icon: <KeyRound className="mr-2 h-4 w-4" />, label: t("newPassword") },
+    { type: ENTRY_TYPE.SECURE_NOTE, icon: <FileText className="mr-2 h-4 w-4" />, label: t("newSecureNote") },
+    { type: ENTRY_TYPE.CREDIT_CARD, icon: <CreditCard className="mr-2 h-4 w-4" />, label: t("newCreditCard") },
+    { type: ENTRY_TYPE.IDENTITY, icon: <IdCard className="mr-2 h-4 w-4" />, label: t("newIdentity") },
+    { type: ENTRY_TYPE.PASSKEY, icon: <Fingerprint className="mr-2 h-4 w-4" />, label: t("newPasskey") },
+    { type: ENTRY_TYPE.BANK_ACCOUNT, icon: <Landmark className="mr-2 h-4 w-4" />, label: t("newBankAccount") },
+    { type: ENTRY_TYPE.SOFTWARE_LICENSE, icon: <KeySquare className="mr-2 h-4 w-4" />, label: t("newSoftwareLicense") },
+    { type: ENTRY_TYPE.SSH_KEY, icon: <Terminal className="mr-2 h-4 w-4" />, label: t("newSshKey") },
+  ];
+
   return (
-    <div className="flex-1 p-4 md:p-6">
-      <div className="mx-auto max-w-4xl space-y-4">
+    <div
+      className={[
+        "flex flex-col min-h-0 p-4 md:p-6",
+        isMasterDetail ? "h-full" : "flex-1",
+      ].join(" ")}
+    >
+      <div className={isMasterDetail ? "mx-auto w-full max-w-[1024px]" : "mx-auto max-w-4xl w-full"}>
         <EntryListHeader
           icon={headerIcon}
           title={isPrimaryScopeLabel ? subtitle : (team?.name ?? "...")}
@@ -616,25 +295,16 @@ export default function TeamDashboardPage({
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2">
                   <Checkbox
-                    checked={isTeamSpecialView ? childAllSelected : allSelected}
-                    onCheckedChange={(v) => {
-                      const checked = Boolean(v);
-                      if (isTeamArchive) {
-                        archivedListRef.current?.toggleSelectAll(checked);
-                      } else if (isTeamTrash) {
-                        trashListRef.current?.toggleSelectAll(checked);
-                      } else {
-                        toggleSelectAll(checked);
-                      }
-                    }}
+                    checked={allSelected}
+                    onCheckedChange={(v) => listRef.current?.toggleSelectAll(Boolean(v))}
                     aria-label={tDash("selectAll")}
                   />
                   <span className="text-sm text-muted-foreground whitespace-nowrap">
-                    {(isTeamSpecialView ? childSelectedCount : selectedIds.size) > 0
-                      ? tl("selectedCount", { count: isTeamSpecialView ? childSelectedCount : selectedIds.size })
+                    {selectedCount > 0
+                      ? tl("selectedCount", { count: selectedCount })
                       : tDash("selectAll")}
                   </span>
-                  {(isTeamSpecialView ? childAtLimit : atLimit) && (
+                  {selectionAtLimit && (
                     <span className="text-xs text-amber-600 whitespace-nowrap">
                       {tl("selectionLimit", { max: MAX_BULK_SELECTION })}
                     </span>
@@ -643,18 +313,24 @@ export default function TeamDashboardPage({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setSelectionMode(false)}
+                  onClick={() => {
+                    setSelectionMode(false);
+                    listRef.current?.exitSelectionMode();
+                  }}
                 >
                   {tDash("close")}
                 </Button>
               </div>
             ) : (
               <>
-                {canDeletePerm && (
+                {canDelete && (
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setSelectionMode(true)}
+                    onClick={() => {
+                      setSelectionMode(true);
+                      listRef.current?.enterSelectionMode();
+                    }}
                   >
                     <CheckSquare className="h-4 w-4 mr-2" />
                     {tDash("select")}
@@ -681,38 +357,15 @@ export default function TeamDashboardPage({
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => { setEditEntryId(null); setNewEntryType(ENTRY_TYPE.LOGIN); setFormOpen(true); }}>
-                          <KeyRound className="mr-2 h-4 w-4" />
-                          {t("newPassword")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => { setEditEntryId(null); setNewEntryType(ENTRY_TYPE.SECURE_NOTE); setFormOpen(true); }}>
-                          <FileText className="mr-2 h-4 w-4" />
-                          {t("newSecureNote")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => { setEditEntryId(null); setNewEntryType(ENTRY_TYPE.CREDIT_CARD); setFormOpen(true); }}>
-                          <CreditCard className="mr-2 h-4 w-4" />
-                          {t("newCreditCard")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => { setEditEntryId(null); setNewEntryType(ENTRY_TYPE.IDENTITY); setFormOpen(true); }}>
-                          <IdCard className="mr-2 h-4 w-4" />
-                          {t("newIdentity")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => { setEditEntryId(null); setNewEntryType(ENTRY_TYPE.PASSKEY); setFormOpen(true); }}>
-                          <Fingerprint className="mr-2 h-4 w-4" />
-                          {t("newPasskey")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => { setEditEntryId(null); setNewEntryType(ENTRY_TYPE.BANK_ACCOUNT); setFormOpen(true); }}>
-                          <Landmark className="mr-2 h-4 w-4" />
-                          {t("newBankAccount")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => { setEditEntryId(null); setNewEntryType(ENTRY_TYPE.SOFTWARE_LICENSE); setFormOpen(true); }}>
-                          <KeySquare className="mr-2 h-4 w-4" />
-                          {t("newSoftwareLicense")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => { setEditEntryId(null); setNewEntryType(ENTRY_TYPE.SSH_KEY); setFormOpen(true); }}>
-                          <Terminal className="mr-2 h-4 w-4" />
-                          {t("newSshKey")}
-                        </DropdownMenuItem>
+                        {newEntryItems.map((item) => (
+                          <DropdownMenuItem
+                            key={item.type}
+                            onClick={() => { setEditEntryId(null); setNewEntryType(item.type); setFormOpen(true); }}
+                          >
+                            {item.icon}
+                            {item.label}
+                          </DropdownMenuItem>
+                        ))}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   )
@@ -722,7 +375,7 @@ export default function TeamDashboardPage({
           }
         />
 
-        <div className="flex items-center gap-2 rounded-xl border bg-card/80 p-3">
+        <div className="mb-4 flex items-center gap-2 rounded-xl border bg-card/80 p-3">
           <div className="flex-1">
             <SearchBar value={searchQuery} onChange={setSearchQuery} />
           </div>
@@ -736,141 +389,35 @@ export default function TeamDashboardPage({
             }}
           />
         </div>
+      </div>
 
-        {keyPending && !isTeamSpecialView && (
+      {/* Main content area — every view delegates to EntryListView (C8). */}
+      <div className={[
+        "flex-1 min-h-0",
+        isMasterDetail ? "overflow-hidden mx-auto w-full max-w-[1024px]" : "mx-auto max-w-4xl w-full",
+      ].join(" ")}>
+        {keyPending ? (
           <Card className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
             <div className="flex items-start gap-3">
               <Clock className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-600 dark:text-amber-400" />
               <div>
-                <p className="font-medium text-amber-800 dark:text-amber-300">
-                  {t("keyPendingTitle")}
-                </p>
-                <p className="mt-1 text-sm text-amber-700 dark:text-amber-400">
-                  {t("keyPendingDesc")}
-                </p>
+                <p className="font-medium text-amber-800 dark:text-amber-300">{t("keyPendingTitle")}</p>
+                <p className="mt-1 text-sm text-amber-700 dark:text-amber-400">{t("keyPendingDesc")}</p>
               </div>
             </div>
           </Card>
-        )}
-
-        {isTeamArchive && team ? (
-          <TeamArchivedList
-            ref={archivedListRef}
-            teamId={teamId}
-            teamName={team.name}
-            role={team.role}
-            searchQuery={searchQuery}
-            refreshKey={refreshKey}
-            sortBy={sortBy}
-            selectionMode={selectionMode}
-            onSelectedCountChange={(count, allSel, limit) => {
-              setChildSelectedCount(count);
-              setChildAllSelected(allSel);
-              setChildAtLimit(limit);
-            }}
-          />
-        ) : isTeamTrash && team ? (
-          <TeamTrashList
-            ref={trashListRef}
-            teamId={teamId}
-            teamName={team.name}
-            role={team.role}
-            searchQuery={searchQuery}
-            refreshKey={refreshKey}
-            sortBy={sortBy}
-            selectionMode={selectionMode}
-            onSelectedCountChange={(count, allSel, limit) => {
-              setChildSelectedCount(count);
-              setChildAllSelected(allSel);
-              setChildAtLimit(limit);
-            }}
-          />
-        ) : loading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-          </div>
-        ) : sortedFiltered.length === 0 ? (
-          <Card className="rounded-xl border bg-card/80 p-10">
-            <div className="flex flex-col items-center justify-center text-center">
-              <KeyRound className="mb-4 h-12 w-12 text-muted-foreground" />
-              <p className="text-muted-foreground">
-                {searchQuery ? tl("noMatch") : t("noPasswords")}
-              </p>
-              {!searchQuery && canCreate && (
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t("noPasswordsDesc")}
-                </p>
-              )}
-            </div>
-          </Card>
         ) : (
-          <EntryListShell
-            entries={sortedFiltered}
-            selectionMode={selectionMode}
-            selectedIds={selectedIds}
-            atLimit={atLimit}
-            onToggleSelectOne={toggleSelectOne}
-            selectEntryLabel={(title) => tl("selectEntry", { title })}
-            renderEntry={(entry) => (
-              <PasswordCard
-                entry={entry}
-                expanded={expandedId === entry.id}
-                onToggleFavorite={handleToggleFavorite}
-                onToggleArchive={handleToggleArchive}
-                onDelete={handleDelete}
-                onToggleExpand={(id) =>
-                  setExpandedId((prev) => (prev === id ? null : id))
-                }
-                onRefresh={() => {
-                  fetchPasswords();
-                  setExpandedId(null);
-                }}
-                getPassword={createPasswordFetcher(entry.id)}
-                getDetail={createDetailFetcher(entry.id, entry.entryType)}
-                getUrl={createUrlFetcher(entry.id)}
-                onEditClick={() => handleEdit(entry.id)}
-                canEdit={canEditPerm}
-                canDelete={canDeletePerm}
-                createdBy={
-                  entry.createdBy.name
-                    ? t("createdBy", { name: entry.createdBy.email ? `${entry.createdBy.name} (${entry.createdBy.email})` : entry.createdBy.name })
-                    : undefined
-                }
-                teamId={teamId}
-              />
-            )}
-            floatingActions={
-              <>
-                <Button variant="secondary" size="sm" onClick={() => requestAction("archive")}>
-                  <Archive className="h-4 w-4 mr-2" />
-                  {tl("moveSelectedToArchive")}
-                </Button>
-                <Button variant="destructive" size="sm" onClick={() => requestAction("trash")}>
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  {tl("moveSelectedToTrash")}
-                </Button>
-              </>
-            }
-            confirmDialog={{
-              open: bulkDialogOpen,
-              onOpenChange: setBulkDialogOpen,
-              title:
-                pendingAction === "archive"
-                  ? tl("moveSelectedToArchive")
-                  : pendingAction === "unarchive"
-                    ? tl("moveSelectedToUnarchive")
-                    : tl("moveSelectedToTrash"),
-              description:
-                pendingAction === "archive"
-                  ? tl("bulkArchiveConfirm", { count: selectedIds.size })
-                  : pendingAction === "unarchive"
-                    ? tl("bulkUnarchiveConfirm", { count: selectedIds.size })
-                    : tl("bulkMoveConfirm", { count: selectedIds.size }),
-              cancelLabel: tl("cancel"),
-              confirmLabel: tl("confirm"),
-              processing: bulkProcessing,
-              onConfirm: () => void executeAction(),
-            }}
+          <EntryListView<TeamDisplayEntry>
+            adapter={adapter}
+            descriptor={descriptor}
+            query={query}
+            searchQuery={searchQuery}
+            sortBy={sortBy}
+            refreshKey={refreshKey}
+            onSelectedCountChange={handleSelectedCountChange}
+            listRef={listRef}
+            onDataChange={() => setRefreshKey((k) => k + 1)}
+            onRequestEdit={handleRequestEdit}
           />
         )}
       </div>
@@ -880,11 +427,7 @@ export default function TeamDashboardPage({
           teamId={teamId}
           open={formOpen}
           onOpenChange={setFormOpen}
-          onSaved={() => {
-            handleSaved();
-            setExpandedId(null);
-            setRefreshKey((k) => k + 1);
-          }}
+          onSaved={() => setRefreshKey((k) => k + 1)}
           entryType={newEntryType}
           defaultFolderId={activeFolderId ?? null}
           defaultTags={matchedTag ? [{ id: matchedTag.id, name: matchedTag.name, color: matchedTag.color ?? null }] : undefined}
@@ -896,11 +439,7 @@ export default function TeamDashboardPage({
           id={editEntryId}
           open={formOpen}
           onOpenChange={setFormOpen}
-          onSaved={() => {
-            handleSaved();
-            setExpandedId(null);
-            setRefreshKey((k) => k + 1);
-          }}
+          onSaved={() => setRefreshKey((k) => k + 1)}
           defaultFolderId={activeFolderId ?? null}
           defaultTags={matchedTag ? [{ id: matchedTag.id, name: matchedTag.name, color: matchedTag.color ?? null }] : undefined}
         />

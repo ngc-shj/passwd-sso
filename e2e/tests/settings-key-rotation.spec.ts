@@ -114,9 +114,10 @@ test("Key rotation preserves existing vault entries", async ({
       timeout: 10_000,
     });
 
-    // Click to expand inline detail — decrypted data should be visible
+    // Click to expand inline detail — decrypted data should be visible.
+    // master-detail shows the username in both the list row and the detail pane.
     await dashboard.entryByTitle(testEntry.title).click();
-    await expect(page.getByText(testEntry.username)).toBeVisible({
+    await expect(page.getByText(testEntry.username).first()).toBeVisible({
       timeout: 10_000,
     });
   });
