@@ -185,6 +185,14 @@ export function PasswordRow({
     onActivate();
   };
 
+  // 3-pane declutter: quick-copy + overflow menu (and the un-favorited star) reveal
+  // on hover / keyboard focus / when the row is active. group-focus-within keeps them
+  // visible while the dropdown menu is open (the trigger retains focus). The active row
+  // and favorited stars stay visible so state is always legible.
+  const actionReveal = isActive
+    ? ""
+    : "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100";
+
   return (
     // aria-current="true" is the real a11y marker for the active row (NOT only a
     // styling class). This satisfies INV-C6 and avoids the phantom-match trap:
@@ -198,7 +206,7 @@ export function PasswordRow({
         // No min-width here: the list pane (MasterDetailShell) enforces the 320px
         // floor. A row min-width would exceed the padded pane content and force a
         // horizontal scrollbar; instead the row fills the pane and its children truncate.
-        "min-w-0 cursor-pointer select-none rounded-md px-3 py-2 transition-colors",
+        "group min-w-0 cursor-pointer select-none rounded-md px-3 py-2 transition-colors",
         "hover:bg-accent/40",
         isActive
           ? "bg-accent border-l-2 border-l-primary"
@@ -223,7 +231,8 @@ export function PasswordRow({
           {title}
         </span>
 
-        {/* Favorite toggle — only when the view+vault support it (INV-C2.1). */}
+        {/* Favorite toggle — only when the view+vault support it (INV-C2.1).
+            Favorited stars stay visible; un-favorited reveal on hover/active. */}
         {showFavorite && onToggleFavorite && (
           <button
             type="button"
@@ -231,7 +240,10 @@ export function PasswordRow({
               e.stopPropagation();
               onToggleFavorite();
             }}
-            className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className={[
+              "shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground",
+              isFavorite ? "" : actionReveal,
+            ].filter(Boolean).join(" ")}
             aria-label={isFavorite ? t("unfavorite") : t("favorite")}
             aria-pressed={isFavorite}
           >
@@ -241,7 +253,9 @@ export function PasswordRow({
           </button>
         )}
 
-        {/* Quick-copy + overflow menu — stop propagation so they don't activate the row */}
+        {/* Quick-copy + overflow menu — revealed on hover/active; stop propagation
+            so they don't activate the row */}
+        <div className={["shrink-0", actionReveal].filter(Boolean).join(" ")}>
         <EntryActionsMenu
           entryType={entryType}
           username={username}
@@ -278,6 +292,7 @@ export function PasswordRow({
           onDeletePermanently={onDeletePermanently}
           t={t}
         />
+        </div>
       </div>
 
       {/* Line 2: secondary info + tags (tags overflow, never crush the secondary line — INV-C6.2) */}

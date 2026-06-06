@@ -282,7 +282,7 @@ export default function TeamDashboardPage({
         isMasterDetail ? "h-full" : "flex-1",
       ].join(" ")}
     >
-      <div className={isMasterDetail ? "w-full" : "mx-auto max-w-4xl w-full"}>
+      <div className={isMasterDetail ? "mx-auto w-full max-w-[1600px]" : "mx-auto max-w-4xl w-full"}>
         <EntryListHeader
           icon={headerIcon}
           title={isPrimaryScopeLabel ? subtitle : (team?.name ?? "...")}
@@ -394,7 +394,7 @@ export default function TeamDashboardPage({
       {/* Main content area — every view delegates to EntryListView (C8). */}
       <div className={[
         "flex-1 min-h-0",
-        isMasterDetail ? "overflow-hidden" : "mx-auto max-w-4xl w-full",
+        isMasterDetail ? "overflow-hidden mx-auto w-full max-w-[1600px]" : "mx-auto max-w-4xl w-full",
       ].join(" ")}>
         {keyPending ? (
           <Card className="rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/30">
