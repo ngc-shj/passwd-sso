@@ -53,9 +53,9 @@ interface PasswordListProps {
   // Active-entry, selection mode, master-detail layout, and keyboard nav are all
   // owned inside EntryListView now — the container no longer threads them through.
   onEntryRemoved?: (id: string) => void;
-  // Edit/share are container-hosted dialogs; EntryListView raises these requests.
+  // Edit is a container-hosted dialog; EntryListView raises onRequestEdit. (Share is
+  // hosted inside EntryListView now.)
   onRequestEdit?: (entry: import("@/types/display-entry").DisplayEntry) => void;
-  onRequestShare?: (entry: import("@/types/display-entry").DisplayEntry) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,7 +77,6 @@ export function PasswordList({
   selectAllRef,
   onEntryRemoved,
   onRequestEdit,
-  onRequestShare,
 }: PasswordListProps) {
   const adapter = usePersonalVaultListAdapter();
 
@@ -101,7 +100,6 @@ export function PasswordList({
       listRef={selectAllRef as React.Ref<EntryListHandle>}
       onDataChange={onDataChange}
       onRequestEdit={onRequestEdit}
-      onRequestShare={onRequestShare}
       onEntryRemoved={onEntryRemoved}
     />
   );

@@ -44,8 +44,10 @@ import { PasswordDetailPane } from "@/components/passwords/detail/password-detai
 import { PasswordRow } from "@/components/passwords/detail/password-row";
 import { PasswordCard } from "@/components/passwords/detail/password-card";
 import { EntryListShell } from "@/components/bulk/entry-list-shell";
+import { ShareDialog } from "@/components/share/share-dialog";
 import { useLayoutMode } from "@/hooks/use-layout-mode";
 import { VAULT_STATUS } from "@/lib/constants";
+import { toast } from "sonner";
 
 // ---------------------------------------------------------------------------
 // EntryListHandle — imperative handle for parent (header "Select" button).
@@ -72,7 +74,6 @@ interface EntryListViewProps<E extends PasswordRowEntry & PasswordDetailPaneEntr
   listRef?: Ref<EntryListHandle>;
   onDataChange?: () => void;
   onRequestEdit?: (entry: E) => void;
-  onRequestShare?: (entry: E) => void;
   onEntryRemoved?: (id: string) => void;
   onVisibleEntriesChange?: (entries: E[]) => void;
 }
@@ -118,7 +119,6 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
   listRef,
   onDataChange,
   onRequestEdit,
-  onRequestShare,
   onEntryRemoved,
   onVisibleEntriesChange,
 }: EntryListViewProps<E>) {
@@ -141,6 +141,13 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
   // Empty-trash confirm dialog state (shown when descriptor.showEmptyTrashButton is true).
   const [emptyTrashConfirmOpen, setEmptyTrashConfirmOpen] = useState(false);
   const [isEmptyingTrash, setIsEmptyingTrash] = useState(false);
+
+  // Share dialog state — hosted here (vault-agnostic) so Share works in master-detail
+  // for both personal and team (the accordion PasswordCard hosts its own; the bare
+  // rows delegate here). decryptedData is the entry's detail minus secret/internal bits.
+  const [shareEntry, setShareEntry] = useState<E | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareData, setShareData] = useState<Record<string, unknown> | undefined>(undefined);
 
   // INV-F1: detect query/descriptor.kind changes and clear both atomically during render.
   const viewKey = `${descriptor.kind}|${query.tagId ?? ""}|${query.folderId ?? ""}|${query.entryType ?? ""}`;
@@ -352,6 +359,21 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
       reload();
     }
   }, [adapter, onDataChange, onEntryRemoved, reload]);
+
+  // Share — decrypt the entry's detail (lazy, on demand), strip secret/internal
+  // fields, then open the share dialog. Works for personal + team via the adapter.
+  const handleShare = useCallback(async (entry: E) => {
+    setActiveEntry(entry);
+    try {
+      const detail = await adapter.buildGetDetail(entry)();
+      const { totp: _totp, passwordHistory: _ph, id: _id, requireReprompt: _rp, ...safe } = detail;
+      setShareData(safe as Record<string, unknown>);
+      setShareEntry(entry);
+      setShareOpen(true);
+    } catch {
+      toast.error(t("loadError"));
+    }
+  }, [adapter, t]);
 
   // C9 — restore (no confirm per INV-C9.2).
   const handleRestore = useCallback(async (entry: E) => {
@@ -567,7 +589,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
       }
       onShare={
         activeEntry && descriptor.rowActions.share && adapter.permissions.canShare
-          ? () => onRequestShare?.(activeEntry)
+          ? () => void handleShare(activeEntry)
           : undefined
       }
       isArchived={activeEntry?.isArchived}
@@ -682,10 +704,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
                 showFavorite={descriptor.rowActions.favorite && adapter.supportsFavorite}
                 onToggleFavorite={() => void handleSetFavorite(entry, !entry.isFavorite)}
                 {...callbacks}
-                onShare={() => {
-                  setActiveEntry(entry);
-                  onRequestShare?.(entry);
-                }}
+                onShare={() => void handleShare(entry)}
                 onEdit={() => {
                   setActiveEntry(entry);
                   onRequestEdit?.(entry);
@@ -799,6 +818,18 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Share dialog — hosted here so Share works in master-detail for personal + team. */}
+      {shareEntry && (
+        <ShareDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          passwordEntryId={adapter.kind === "personal" ? shareEntry.id : undefined}
+          teamPasswordEntryId={adapter.kind === "team" ? shareEntry.id : undefined}
+          decryptedData={shareData}
+          entryType={shareEntry.entryType}
+          teamId={adapter.teamId}
+        />
+      )}
     </>
   );
 }
