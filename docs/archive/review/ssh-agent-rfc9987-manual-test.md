@@ -15,12 +15,14 @@ confirmation prompt (VC4). Everything else is covered by unit tests.
 ## Steps & Expected results
 
 ### 1. Identities + live signature (VC1, VC3)
-> NOTE: `passwd-sso agent` runs in the FOREGROUND (it does not fork/detach — unlike
-> the decrypt agent). Do NOT use `eval $(passwd-sso agent --eval)` — it hangs because
-> the process never exits. Use the two-terminal procedure below.
-1. Terminal 1: `passwd-sso agent` → prints the socket path and stays running.
-2. Terminal 2: `export SSH_AUTH_SOCK=<printed socket path>`.
-3. `ssh-add -l` → **Expected**: lists the vault SSH key fingerprint(s) (REQUEST_IDENTITIES).
+Two ways to start the agent:
+- **Detached (eval)**: `eval $(passwd-sso agent --eval)` → forks a detached daemon and sets
+  `SSH_AUTH_SOCK` + `SSH_AGENT_PID` in the current shell (a `trap` kills it on shell exit).
+  Prompts for the passphrase on stderr if the vault is locked and no `PSSO_PASSPHRASE`.
+- **Foreground**: `passwd-sso agent` → prints the socket path and stays running; in another
+  shell `export SSH_AUTH_SOCK=<printed path>`. Required for the `requireReprompt` TTY prompt.
+
+Then: `ssh-add -l` → **Expected**: lists the vault SSH key fingerprint(s) (REQUEST_IDENTITIES).
 3. `ssh -T git@github.com` (or any host trusting the key) →
    - **Expected**: OpenSSH sends `session-bind@openssh.com` (verified locally), then SIGN_REQUEST;
      the agent calls `POST /api/vault/ssh/sign-authorize`, signs locally, auth succeeds.
