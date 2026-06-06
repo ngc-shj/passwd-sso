@@ -45,7 +45,6 @@ import { PasswordRow } from "@/components/passwords/detail/password-row";
 import { PasswordCard } from "@/components/passwords/detail/password-card";
 import { EntryListShell } from "@/components/bulk/entry-list-shell";
 import { useLayoutMode } from "@/hooks/use-layout-mode";
-import { notifyVaultDataChanged } from "@/lib/events";
 import { VAULT_STATUS } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
@@ -322,7 +321,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
     }
     try {
       await adapter.setFavorite(entry, next);
-      notifyVaultDataChanged();
+      adapter.notifyDataChanged();
       onDataChange?.();
     } catch {
       reload();
@@ -335,7 +334,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
     onEntryRemoved?.(entry.id);
     try {
       await adapter.setArchived(entry, next);
-      notifyVaultDataChanged();
+      adapter.notifyDataChanged();
       onDataChange?.();
     } catch {
       reload();
@@ -347,7 +346,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
     onEntryRemoved?.(entry.id);
     try {
       await adapter.softDelete(entry);
-      notifyVaultDataChanged();
+      adapter.notifyDataChanged();
       onDataChange?.();
     } catch {
       reload();
@@ -360,7 +359,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
     onEntryRemoved?.(entry.id);
     try {
       await adapter.restore(entry);
-      notifyVaultDataChanged();
+      adapter.notifyDataChanged();
       onDataChange?.();
     } catch {
       reload();
@@ -376,7 +375,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
     onEntryRemoved?.(entry.id);
     try {
       await adapter.deletePermanently(entry);
-      notifyVaultDataChanged();
+      adapter.notifyDataChanged();
       onDataChange?.();
     } catch {
       reload();
@@ -389,7 +388,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
     try {
       await adapter.emptyTrash();
       setEmptyTrashConfirmOpen(false);
-      notifyVaultDataChanged();
+      adapter.notifyDataChanged();
       onDataChange?.();
       reload();
     } catch {

@@ -152,6 +152,14 @@ export interface VaultListAdapter<E extends PasswordRowEntry & PasswordDetailPan
   emptyTrash(): Promise<void>;
 
   /**
+   * Fire the vault's data-changed event after a successful mutation so sidebar
+   * live-counts stay in sync (INV-C1.4). Personal → notifyVaultDataChanged;
+   * team → notifyTeamDataChanged. EntryListView calls this instead of hardcoding
+   * a personal-only event, keeping the view vault-agnostic.
+   */
+  notifyDataChanged(): void;
+
+  /**
    * Returns the BulkScope object consumed by useBulkAction (existing hook).
    * Personal → { type: "personal" }. Team → { type: "team", teamId }.
    * The view argument allows future view-specific scoping if needed.

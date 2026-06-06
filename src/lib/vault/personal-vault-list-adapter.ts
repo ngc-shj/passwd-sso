@@ -9,6 +9,7 @@ import { fetchApi } from "@/lib/url-helpers";
 import { API_PATH, apiPath, ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import { filterTravelSafe } from "@/lib/auth/policy/travel-mode";
+import { notifyVaultDataChanged } from "@/lib/events";
 import { useTravelMode } from "@/hooks/use-travel-mode";
 import type { VaultListAdapter, EntryListViewKind, EntryListQuery } from "@/lib/vault/vault-list-adapter";
 import type { EntryTagNameColor } from "@/lib/vault/entry-form-types";
@@ -225,6 +226,10 @@ export function usePersonalVaultListAdapter(): VaultListAdapter<DisplayEntry> {
 
     bulkScope(_view: EntryListViewKind): BulkScope {
       return { type: "personal" };
+    },
+
+    notifyDataChanged() {
+      notifyVaultDataChanged();
     },
   }), [encryptionKey, userId, travelModeActive]);
 
