@@ -15,8 +15,12 @@ confirmation prompt (VC4). Everything else is covered by unit tests.
 ## Steps & Expected results
 
 ### 1. Identities + live signature (VC1, VC3)
-1. `eval $(passwd-sso agent --eval)` → sets `SSH_AUTH_SOCK`, prints agent pid.
-2. `ssh-add -l` → **Expected**: lists the vault SSH key fingerprint(s) (REQUEST_IDENTITIES).
+> NOTE: `passwd-sso agent` runs in the FOREGROUND (it does not fork/detach — unlike
+> the decrypt agent). Do NOT use `eval $(passwd-sso agent --eval)` — it hangs because
+> the process never exits. Use the two-terminal procedure below.
+1. Terminal 1: `passwd-sso agent` → prints the socket path and stays running.
+2. Terminal 2: `export SSH_AUTH_SOCK=<printed socket path>`.
+3. `ssh-add -l` → **Expected**: lists the vault SSH key fingerprint(s) (REQUEST_IDENTITIES).
 3. `ssh -T git@github.com` (or any host trusting the key) →
    - **Expected**: OpenSSH sends `session-bind@openssh.com` (verified locally), then SIGN_REQUEST;
      the agent calls `POST /api/vault/ssh/sign-authorize`, signs locally, auth succeeds.
@@ -46,6 +50,13 @@ confirmation prompt (VC4). Everything else is covered by unit tests.
 ## Rollback
 - Stop the agent (Ctrl-C / kill the pid); `unset SSH_AUTH_SOCK`.
 - The migration is additive (enum values only); no data rollback needed. To remove the feature, revert the branch.
+
+## Actual results (2026-06-07, local dev, operator: repo owner)
+- §1 `ssh-add -l` → vault key listed (REQUEST_IDENTITIES) ✓
+- Core SIGN path verified via `ssh-keygen -Y sign -f <agent.pub> -n test <file>` (exercises SIGN_REQUEST → server authorize → local sign without needing GitHub): `Write signature to …sig` ✓
+- Audit (audit_outbox): `SSH_KEY_SIGN` / actorType `MCP_AGENT` / metadata `{"fingerprint":"SHA256:…"}` ✓ (`host` null — `ssh-keygen -Y sign` sends no session-bind, expected). `MCP_CONSENT_GRANT` shows the token carries `ssh:sign`.
+- **Bug found + fixed during this verification**: `/api/vault/ssh/sign-authorize` was missing from the proxy Bearer-bypass list (`EXTENSION_TOKEN_ROUTES`), so the CLI Bearer call was 401'd by the proxy before reaching the handler. Fixed in `fix(proxy): register ssh sign-authorize as a Bearer-bypass route` + cors-gate regression test. Route unit tests mock `authOrToken` and never traverse the proxy, so this only surfaced in live verification.
+- Still `blocked-deferred`: live `ssh -T` session-bind path (VC1 — requires the vault key registered on a real host) and the requireReprompt real-TTY prompt (VC4). Core authorize+audit (VC3) now `verified-local`.
 
 ## Notes
 - Per-sign authorize adds one HTTP round-trip per signature; if the server is unreachable, signing fails closed (ssh cannot authenticate) — expected behavior of the audited model.
