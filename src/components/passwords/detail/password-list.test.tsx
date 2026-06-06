@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent, within } from "@testing-library/react";
 import type { DisplayEntry } from "./password-list";
 
 const { mockFetchApi, mockDecryptData, STABLE_KEY } = vi.hoisted(() => ({
@@ -458,7 +458,7 @@ describe("PasswordList", () => {
     expect(onEntryRemoved).toHaveBeenCalledWith("e1");
   });
 
-  it("INV-C4.3: PasswordRow onDeleteRequest fires onEntryRemoved (master-detail mode)", async () => {
+  it("INV-C4.3: PasswordRow onDeleteRequest fires onEntryRemoved after confirm (master-detail mode)", async () => {
     setMockLayoutMode("master-detail");
     mockFetchApi.mockResolvedValue({
       ok: true,
@@ -481,12 +481,21 @@ describe("PasswordList", () => {
     await waitFor(() => { expect(screen.getByTestId("row-e1")).toBeInTheDocument(); });
     expect(onEntryRemoved).not.toHaveBeenCalled();
 
-    // Trigger: delete from the row
-    await act(async () => {
+    // Trigger: request delete from the row — opens the confirm dialog.
+    act(() => {
       capturedRowDeleteRequest?.();
     });
 
-    // Assert: removal signalled
+    // Removal is deferred until the user confirms move-to-trash.
+    expect(onEntryRemoved).not.toHaveBeenCalled();
+
+    // Confirm in the dialog (button name = Common.delete key).
+    const dialog = await screen.findByRole("dialog");
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "delete" }));
+    });
+
+    // Assert: removal signalled after confirm
     expect(onEntryRemoved).toHaveBeenCalledWith("e1");
   });
 

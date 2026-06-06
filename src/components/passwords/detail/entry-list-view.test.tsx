@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent, within } from "@testing-library/react";
 
 if (typeof globalThis.ResizeObserver === "undefined") {
   globalThis.ResizeObserver = class {
@@ -33,6 +33,7 @@ const { mockFetchApi, mockDecryptData, mockBuildAAD, STABLE_KEY } = vi.hoisted((
 // Per-test callbacks captured from PasswordRow mocks
 let capturedRowRestore: (() => void) | undefined;
 let capturedRowDeletePermanently: (() => void) | undefined;
+let capturedRowDeleteRequest: (() => void) | undefined;
 let capturedBulkOnSuccess: (() => void) | undefined;
 
 vi.mock("next-intl", () => ({
@@ -82,14 +83,17 @@ vi.mock("./password-row", () => ({
     onActivate,
     onRestore,
     onDeletePermanently,
+    onDeleteRequest,
   }: {
     entry: { id: string; title: string };
     onActivate?: () => void;
     onRestore?: () => void;
     onDeletePermanently?: () => void;
+    onDeleteRequest?: () => void;
   }) => {
     capturedRowRestore = onRestore;
     capturedRowDeletePermanently = onDeletePermanently;
+    capturedRowDeleteRequest = onDeleteRequest;
     return (
       <div
         data-testid={`row-${entry.id}`}
@@ -229,6 +233,7 @@ describe("EntryListView — TRASH_VIEW (T2 coverage migration + NET-NEW)", () =>
     mockBuildAAD.mockReset().mockReturnValue("aad-bytes");
     capturedRowRestore = undefined;
     capturedRowDeletePermanently = undefined;
+    capturedRowDeleteRequest = undefined;
     capturedBulkOnSuccess = undefined;
   });
 
@@ -356,6 +361,59 @@ describe("EntryListView — TRASH_VIEW (T2 coverage migration + NET-NEW)", () =>
         },
       );
       expect(deleteCall).toBeDefined();
+    });
+  });
+
+  // ── (d2) NET-NEW: soft-delete (move-to-trash) confirm dialog ────────────────
+  // Master-detail row/detail delete must confirm before trashing (parity with the
+  // accordion card). Precondition: normal entry rendered; row exposes onDeleteRequest.
+  // Trigger: request delete → dialog appears, nothing deleted yet.
+  // Assert: confirm → adapter.softDelete (DELETE, no ?permanent).
+  it("NET-NEW: move-to-trash shows confirm dialog and calls softDelete on confirm", async () => {
+    mockFetchApi.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [makeServerEntry("entry-1", { deletedAt: null })],
+    });
+    mockDecryptData.mockResolvedValueOnce(makeDecryptedOverview("GitHub"));
+
+    render(<PasswordList searchQuery="" tagId={null} refreshKey={0} />);
+
+    await waitFor(() => { expect(screen.getByText("GitHub")).toBeInTheDocument(); });
+
+    // Precondition: PasswordRow received the soft-delete request callback.
+    expect(capturedRowDeleteRequest).toBeDefined();
+
+    // Trigger: request delete — opens the confirm dialog, does NOT delete yet.
+    act(() => { capturedRowDeleteRequest?.(); });
+
+    await waitFor(() => {
+      expect(screen.getByText("deleteConfirm:{\"title\":\"GitHub\"}")).toBeInTheDocument();
+    });
+    // Deferred: no DELETE issued until the user confirms.
+    expect(
+      mockFetchApi.mock.calls.some(
+        (args: unknown[]) => (args[1] as RequestInit | undefined)?.method === "DELETE",
+      ),
+    ).toBe(false);
+
+    // Setup: soft-delete DELETE + the reload fetch.
+    mockFetchApi.mockResolvedValueOnce({ ok: true });
+    mockFetchApi.mockResolvedValueOnce({ ok: true, json: async () => [] });
+
+    // Trigger: confirm in the dialog (button name = Common.delete key).
+    const dialog = screen.getByRole("dialog");
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "delete" }));
+    });
+
+    // Assert: a soft-delete DELETE (no ?permanent) was issued.
+    await waitFor(() => {
+      const softDelete = mockFetchApi.mock.calls.find((args: unknown[]) => {
+        const url = args[0] as string;
+        const opts = args[1] as RequestInit | undefined;
+        return opts?.method === "DELETE" && !url.includes("permanent");
+      });
+      expect(softDelete).toBeDefined();
     });
   });
 

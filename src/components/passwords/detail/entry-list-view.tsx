@@ -124,6 +124,8 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
 }: EntryListViewProps<E>) {
   const t = useTranslations("PasswordList");
   const tTrash = useTranslations("Trash");
+  const tCard = useTranslations("PasswordCard");
+  const tc = useTranslations("Common");
   const layoutMode = useLayoutMode();
 
   // INV-DEV1: assert descriptor × adapter compatibility on mount + when they change.
@@ -134,6 +136,10 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
   // INV-F1 / INV-S5: activeEntry AND selectionMode — owned here, reset atomically on query/view change.
   const [activeEntry, setActiveEntry] = useState<E | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
+
+  // Soft-delete (move-to-trash) confirm dialog state. Mirrors the accordion
+  // PasswordCard's own confirm so both layouts confirm before trashing.
+  const [softDeletePending, setSoftDeletePending] = useState<E | null>(null);
 
   // C9 — delete-permanently confirm dialog state (INV-C9.2: confirm before DELETE).
   const [deletePermanentlyPending, setDeletePermanentlyPending] = useState<E | null>(null);
@@ -615,7 +621,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
       }
       onDelete={
         activeEntry && descriptor.rowActions.trash && adapter.permissions.canDelete
-          ? () => void handleSoftDelete(activeEntry)
+          ? () => setSoftDeletePending(activeEntry)
           : undefined
       }
       onRestore={
@@ -727,7 +733,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
                 onToggleArchive={() => {
                   void handleSetArchived(entry, !entry.isArchived);
                 }}
-                onDeleteRequest={() => void handleSoftDelete(entry)}
+                onDeleteRequest={() => setSoftDeletePending(entry)}
                 canEdit={descriptor.rowActions.edit && adapter.permissions.canEdit}
                 canDelete={descriptor.rowActions.trash && adapter.permissions.canDelete}
                 canShare={descriptor.rowActions.share && adapter.permissions.canShare}
@@ -803,6 +809,37 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
         listSlot={listSlot}
         detailSlot={detailSlot}
       />
+      {/* Soft-delete (move-to-trash) confirm dialog — parity with the accordion card. */}
+      <Dialog
+        open={!!softDeletePending}
+        onOpenChange={(open) => {
+          if (!open) setSoftDeletePending(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{tCard("delete")}</DialogTitle>
+            <DialogDescription>
+              {tCard("deleteConfirm", { title: softDeletePending?.title ?? "" })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSoftDeletePending(null)}>
+              {tc("cancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                const entry = softDeletePending;
+                setSoftDeletePending(null);
+                if (entry) void handleSoftDelete(entry);
+              }}
+            >
+              {tc("delete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {/* C9 — delete-permanently confirm dialog (INV-C9.2). */}
       <Dialog
         open={!!deletePermanentlyPending}
