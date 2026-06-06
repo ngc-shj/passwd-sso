@@ -30,6 +30,8 @@ export function getActionLabel(
       return t("ENTRY_BULK_UNARCHIVE" as never);
     case AUDIT_ACTION.ENTRY_BULK_RESTORE:
       return t("ENTRY_BULK_RESTORE" as never);
+    case AUDIT_ACTION.ENTRY_BULK_PURGE:
+      return t("ENTRY_BULK_PURGE" as never);
     case AUDIT_ACTION.ENTRY_TRASH:
       return t("ENTRY_TRASH" as never);
     case AUDIT_ACTION.ENTRY_PERMANENT_DELETE:

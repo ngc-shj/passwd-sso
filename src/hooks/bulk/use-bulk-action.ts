@@ -10,7 +10,7 @@ import { notifyTeamDataChanged } from "@/lib/events";
 // Types
 // ---------------------------------------------------------------------------
 
-export type BulkActionType = "trash" | "archive" | "unarchive" | "restore";
+export type BulkActionType = "trash" | "archive" | "unarchive" | "restore" | "deletePermanently";
 
 export type BulkScope =
   | { type: "personal" }
@@ -59,6 +59,8 @@ function resolveEndpoint(scope: BulkScope, action: BulkActionType): string {
         return apiPath.teamPasswordsBulkArchive(teamId);
       case "restore":
         return apiPath.teamPasswordsBulkRestore(teamId);
+      case "deletePermanently":
+        return apiPath.teamPasswordsBulkPurge(teamId);
     }
   }
   switch (action) {
@@ -69,6 +71,8 @@ function resolveEndpoint(scope: BulkScope, action: BulkActionType): string {
       return apiPath.passwordsBulkArchive();
     case "restore":
       return apiPath.passwordsBulkRestore();
+    case "deletePermanently":
+      return apiPath.passwordsBulkPurge();
   }
 }
 
@@ -91,6 +95,7 @@ function extractCount(
     json.unarchivedCount ??
     json.movedCount ??
     json.restoredCount ??
+    json.deletedCount ??
     fallback) as number;
 }
 
@@ -99,6 +104,7 @@ const TOAST_KEYS: Record<BulkActionType, { success: string; error: string }> = {
   unarchive: { success: "bulkUnarchived", error: "bulkUnarchiveFailed" },
   trash: { success: "bulkMovedToTrash", error: "bulkMoveFailed" },
   restore: { success: "bulkRestored", error: "bulkRestoreFailed" },
+  deletePermanently: { success: "bulkDeleted", error: "bulkDeleteFailed" },
 };
 
 // Exported for testing

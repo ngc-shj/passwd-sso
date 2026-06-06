@@ -32,6 +32,7 @@
   "ENTRY_BULK_ARCHIVE": "エントリー一括アーカイブ",
   "ENTRY_BULK_UNARCHIVE": "エントリー一括アーカイブ解除",
   "ENTRY_BULK_RESTORE": "エントリー一括復元",
+  "ENTRY_BULK_PURGE": "エントリー一括完全削除",
   "ENTRY_RESTORE": "エントリー復元",
   "ENTRY_EXPORT": "エクスポート実行",
   "ATTACHMENT_UPLOAD": "添付ファイルのアップロード",

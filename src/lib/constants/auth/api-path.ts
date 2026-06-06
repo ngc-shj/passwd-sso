@@ -11,6 +11,7 @@ export const API_PATH = {
   PASSWORDS_BULK_TRASH: "/api/passwords/bulk-trash",
   PASSWORDS_BULK_ARCHIVE: "/api/passwords/bulk-archive",
   PASSWORDS_BULK_RESTORE: "/api/passwords/bulk-restore",
+  PASSWORDS_BULK_PURGE: "/api/passwords/bulk-purge",
   PASSWORDS_BULK_IMPORT: "/api/passwords/bulk-import",
   PASSWORDS_EMPTY_TRASH: "/api/passwords/empty-trash",
   PASSWORDS_GENERATE: "/api/passwords/generate",
@@ -130,6 +131,7 @@ export const apiPath = {
   passwordsBulkTrash: () => API_PATH.PASSWORDS_BULK_TRASH,
   passwordsBulkArchive: () => API_PATH.PASSWORDS_BULK_ARCHIVE,
   passwordsBulkRestore: () => API_PATH.PASSWORDS_BULK_RESTORE,
+  passwordsBulkPurge: () => API_PATH.PASSWORDS_BULK_PURGE,
   passwordsBulkImport: () => API_PATH.PASSWORDS_BULK_IMPORT,
   teamPasswordsBulkImport: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-import`,
   passwordsEmptyTrash: () => API_PATH.PASSWORDS_EMPTY_TRASH,
@@ -164,6 +166,7 @@ export const apiPath = {
   teamPasswordsBulkTrash: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-trash`,
   teamPasswordsBulkArchive: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-archive`,
   teamPasswordsBulkRestore: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-restore`,
+  teamPasswordsBulkPurge: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-purge`,
   teamPasswordsEmptyTrash: (teamId: string) => `/api/teams/${teamId}/passwords/empty-trash`,
   tenantScimTokens: () => API_PATH.TENANT_SCIM_TOKENS,
   tenantScimTokenById: (tokenId: string) =>
