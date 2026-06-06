@@ -56,11 +56,12 @@ interface PasswordRowProps {
   isSelected?: boolean;
   onToggleSelect?: (checked: boolean) => void;
 
-  // Action callbacks for the overflow menu (EntryActionsMenu).
-  // These fetch callbacks are provided by the parent — PasswordRow does NOT
-  // own any decryption state (vault-agnostic, INV-C6.4).
+  // Copy fetchers/handlers for the accelerator overflow menu (EntryActionsMenu).
+  // The 3-pane row is a copy/select accelerator only — manage actions (Edit/Share/
+  // Archive/Delete/Restore) live in the detail pane, not the row (C2). These fetch
+  // callbacks are provided by the parent — PasswordRow does NOT own any decryption
+  // state (vault-agnostic, INV-C6.4).
   fetchPassword: () => Promise<string>;
-  fetchContent: () => Promise<string>;
   fetchCardField: (field: "cardNumber" | "cvv") => Promise<string>;
   fetchIdentityField: (field: "idNumber") => Promise<string>;
   fetchPasskeyField: (field: "credentialId" | "username") => Promise<string>;
@@ -79,22 +80,11 @@ interface PasswordRowProps {
   onCopyPublicKey: () => void;
   onCopyIdNumber: () => void;
   onOpenUrl: () => void;
-  onShare: () => void;
-  onEdit: () => void;
-  onToggleArchive: () => void;
-  onDeleteRequest: () => void;
-  // C9 — trash-view affordances (INV-C9.3: absent for normal/archive rows).
-  onRestore?: () => void;
-  onDeletePermanently?: () => void;
 
   // Favorite toggle — rendered only when showFavorite (gated by
   // descriptor.rowActions.favorite × adapter.supportsFavorite in the parent).
   showFavorite?: boolean;
   onToggleFavorite?: () => void;
-
-  canEdit?: boolean;
-  canDelete?: boolean;
-  canShare?: boolean;
 }
 
 /**
@@ -119,7 +109,6 @@ export function PasswordRow({
   onActivate,
   selectionMode = false,
   fetchPassword,
-  fetchContent,
   fetchCardField,
   fetchIdentityField,
   fetchPasskeyField,
@@ -138,17 +127,8 @@ export function PasswordRow({
   onCopyPublicKey,
   onCopyIdNumber,
   onOpenUrl,
-  onShare,
-  onEdit,
-  onToggleArchive,
-  onDeleteRequest,
-  onRestore,
-  onDeletePermanently,
   showFavorite = false,
   onToggleFavorite,
-  canEdit = true,
-  canDelete = true,
-  canShare = true,
 }: PasswordRowProps) {
   const t = useTranslations("PasswordCard");
 
@@ -260,17 +240,14 @@ export function PasswordRow({
             keyboard users use the detail-pane actions. Stop propagation so they don't
             activate the row. */}
         <EntryActionsMenu
+          variant="accelerator"
           overflowClassName={actionReveal}
           tabIndex={isActive ? 0 : -1}
           entryType={entryType}
           username={username}
           urlHost={urlHost}
           isArchived={isArchived}
-          canEdit={canEdit}
-          canDelete={canDelete}
-          canShare={canShare}
           fetchPassword={fetchPassword}
-          fetchContent={fetchContent}
           fetchCardField={fetchCardField}
           fetchIdentityField={fetchIdentityField}
           fetchPasskeyField={fetchPasskeyField}
@@ -289,12 +266,6 @@ export function PasswordRow({
           onCopyPublicKey={onCopyPublicKey}
           onCopyIdNumber={onCopyIdNumber}
           onOpenUrl={onOpenUrl}
-          onShare={onShare}
-          onEdit={onEdit}
-          onToggleArchive={onToggleArchive}
-          onDeleteRequest={onDeleteRequest}
-          onRestore={onRestore}
-          onDeletePermanently={onDeletePermanently}
           t={t}
         />
       </div>

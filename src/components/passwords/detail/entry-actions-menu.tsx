@@ -29,12 +29,20 @@ interface EntryActionsMenuProps {
   username?: string | null;
   urlHost?: string | null;
   isArchived: boolean;
-  canEdit: boolean;
-  canDelete: boolean;
-  canShare: boolean;
+  /**
+   * "full" (default) — quick-copy + copy items + Share/Edit/Archive/Delete/Restore/
+   * Delete-permanently. Used by the accordion (PasswordCard).
+   * "accelerator" — quick-copy + copy items ONLY (the row's manage actions live in the
+   * detail pane in the 3-pane layout). Used by PasswordRow.
+   */
+  variant?: "full" | "accelerator";
+  // Capability flags + manage callbacks are only consumed in the "full" variant.
+  // They stay optional so the accelerator caller can omit them entirely.
+  canEdit?: boolean;
+  canDelete?: boolean;
+  canShare?: boolean;
   // Copy value fetchers (per entry type)
   fetchPassword: () => Promise<string>;
-  fetchContent: () => Promise<string>;
   fetchCardField: (field: "cardNumber" | "cvv") => Promise<string>;
   fetchIdentityField: (field: "idNumber") => Promise<string>;
   fetchPasskeyField: (field: "credentialId" | "username") => Promise<string>;
@@ -54,10 +62,10 @@ interface EntryActionsMenuProps {
   onCopyPublicKey: () => void;
   onCopyIdNumber: () => void;
   onOpenUrl: () => void;
-  onShare: () => void;
-  onEdit: () => void;
-  onToggleArchive: () => void;
-  onDeleteRequest: () => void;
+  onShare?: () => void;
+  onEdit?: () => void;
+  onToggleArchive?: () => void;
+  onDeleteRequest?: () => void;
   // Trash-view affordances (C9 — gated by descriptor.rowActions + adapter.permissions.canDelete).
   // When absent (normal/archive views), these menu items do NOT render (INV-C9.3).
   onRestore?: () => void;
@@ -80,11 +88,11 @@ export function EntryActionsMenu({
   username,
   urlHost,
   isArchived,
+  variant = "full",
   canEdit,
   canDelete,
   canShare,
   fetchPassword,
-  fetchContent,
   fetchCardField,
   fetchIdentityField,
   fetchPasskeyField,
@@ -121,6 +129,11 @@ export function EntryActionsMenu({
   const isSoftwareLicense = entryType === ENTRY_TYPE.SOFTWARE_LICENSE;
   const isSshKey = entryType === ENTRY_TYPE.SSH_KEY;
 
+  // INV-C1.2: the accelerator variant renders zero manage items even if a manage
+  // callback is accidentally forwarded — the 3-pane row's manage actions live in the
+  // detail pane (the persistent action home).
+  const showManageActions = variant === "full";
+
   return (
     <div className="flex items-center shrink-0 pointer-events-none">
       <div
@@ -128,15 +141,15 @@ export function EntryActionsMenu({
         onClick={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
       >
-        {!isNote && !isCreditCard && !isIdentity && !isPasskey && !isBankAccount && !isSoftwareLicense && !isSshKey && (
-          <CopyButton tabIndex={tabIndex} getValue={fetchPassword} />
+        {entryType === ENTRY_TYPE.LOGIN && (
+          <CopyButton tabIndex={tabIndex} ariaLabel={t("copyPassword")} getValue={fetchPassword} />
         )}
-        {isCreditCard && <CopyButton tabIndex={tabIndex} getValue={() => fetchCardField("cardNumber")} />}
-        {isIdentity && <CopyButton tabIndex={tabIndex} getValue={() => fetchIdentityField("idNumber")} />}
-        {isPasskey && <CopyButton tabIndex={tabIndex} getValue={() => fetchPasskeyField("credentialId")} />}
-        {isBankAccount && <CopyButton tabIndex={tabIndex} getValue={() => fetchBankField("accountNumber")} />}
-        {isSoftwareLicense && <CopyButton tabIndex={tabIndex} getValue={() => fetchLicenseField("licenseKey")} />}
-        {isSshKey && <CopyButton tabIndex={tabIndex} getValue={() => fetchSshField("fingerprint")} />}
+        {isCreditCard && <CopyButton tabIndex={tabIndex} ariaLabel={t("copyCardNumber")} getValue={() => fetchCardField("cardNumber")} />}
+        {isIdentity && <CopyButton tabIndex={tabIndex} ariaLabel={t("copyIdNumber")} getValue={() => fetchIdentityField("idNumber")} />}
+        {isPasskey && <CopyButton tabIndex={tabIndex} ariaLabel={t("copyCredentialId")} getValue={() => fetchPasskeyField("credentialId")} />}
+        {isBankAccount && <CopyButton tabIndex={tabIndex} ariaLabel={t("copyAccountNumber")} getValue={() => fetchBankField("accountNumber")} />}
+        {isSoftwareLicense && <CopyButton tabIndex={tabIndex} ariaLabel={t("copyLicenseKey")} getValue={() => fetchLicenseField("licenseKey")} />}
+        {isSshKey && <CopyButton tabIndex={tabIndex} ariaLabel={t("copyFingerprint")} getValue={() => fetchSshField("fingerprint")} />}
       </div>
       <div
         className={["pointer-events-auto", overflowClassName].filter(Boolean).join(" ")}
@@ -226,70 +239,74 @@ export function EntryActionsMenu({
                 )}
               </>
             )}
-            {canShare && (
+            {showManageActions && (
               <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={onShare}>
-                  <LinkIcon className="h-4 w-4" />
-                  {t("share")}
-                </DropdownMenuItem>
-              </>
-            )}
-            {canEdit && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={onEdit}>
-                  <Edit className="h-4 w-4" />
-                  {t("edit")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={onToggleArchive}>
-                  {isArchived ? (
-                    <ArchiveRestore className="h-4 w-4" />
-                  ) : (
-                    <Archive className="h-4 w-4" />
-                  )}
-                  {isArchived ? t("unarchive") : t("archive")}
-                </DropdownMenuItem>
-              </>
-            )}
-            {canDelete && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  variant="destructive"
-                  onSelect={(e) => {
-                    e.preventDefault();
-                    onDeleteRequest();
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  {t("delete")}
-                </DropdownMenuItem>
-              </>
-            )}
-            {/* C9 — trash-view affordances (INV-C9.3: absent for normal/archive). */}
-            {onRestore && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={onRestore}>
-                  <RotateCcw className="h-4 w-4" />
-                  {t("restore")}
-                </DropdownMenuItem>
-              </>
-            )}
-            {onDeletePermanently && (
-              <>
-                {!onRestore && <DropdownMenuSeparator />}
-                <DropdownMenuItem
-                  variant="destructive"
-                  onSelect={(e) => {
-                    e.preventDefault();
-                    onDeletePermanently();
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  {t("deletePermanently")}
-                </DropdownMenuItem>
+                {canShare && onShare && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={onShare}>
+                      <LinkIcon className="h-4 w-4" />
+                      {t("share")}
+                    </DropdownMenuItem>
+                  </>
+                )}
+                {canEdit && onEdit && onToggleArchive && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={onEdit}>
+                      <Edit className="h-4 w-4" />
+                      {t("edit")}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={onToggleArchive}>
+                      {isArchived ? (
+                        <ArchiveRestore className="h-4 w-4" />
+                      ) : (
+                        <Archive className="h-4 w-4" />
+                      )}
+                      {isArchived ? t("unarchive") : t("archive")}
+                    </DropdownMenuItem>
+                  </>
+                )}
+                {canDelete && onDeleteRequest && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        onDeleteRequest();
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      {t("delete")}
+                    </DropdownMenuItem>
+                  </>
+                )}
+                {/* C9 — trash-view affordances (INV-C9.3: absent for normal/archive). */}
+                {onRestore && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={onRestore}>
+                      <RotateCcw className="h-4 w-4" />
+                      {t("restore")}
+                    </DropdownMenuItem>
+                  </>
+                )}
+                {onDeletePermanently && (
+                  <>
+                    {!onRestore && <DropdownMenuSeparator />}
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        onDeletePermanently();
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      {t("deletePermanently")}
+                    </DropdownMenuItem>
+                  </>
+                )}
               </>
             )}
           </DropdownMenuContent>

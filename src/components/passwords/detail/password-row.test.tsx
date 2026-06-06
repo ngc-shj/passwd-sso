@@ -97,10 +97,6 @@ const defaultRowProps = {
   onCopyPublicKey: vi.fn(),
   onCopyIdNumber: vi.fn(),
   onOpenUrl: vi.fn(),
-  onShare: vi.fn(),
-  onEdit: vi.fn(),
-  onToggleArchive: vi.fn(),
-  onDeleteRequest: vi.fn(),
 };
 
 describe("PasswordRow", () => {
@@ -211,6 +207,32 @@ describe("PasswordRow", () => {
     );
     // The MoreVertical menu trigger has sr-only text "moreActions"
     expect(screen.getByText("moreActions")).toBeInTheDocument();
+  });
+
+  // C2: the 3-pane row uses the "accelerator" EntryActionsMenu variant — copy items
+  // only. Manage actions (edit/share/archive/delete) live in the detail pane, not the
+  // row. The absence assertions OPEN the menu first (Radix content is unmounted while
+  // closed) and pair with a present copy item, so they cannot pass vacuously.
+  it("C2: the accelerator row menu has copy items but NOT manage actions", async () => {
+    const user = userEvent.setup();
+    render(
+      <PasswordRow
+        entry={makeEntry()}
+        isActive={false}
+        onActivate={vi.fn()}
+        {...defaultRowProps}
+      />,
+    );
+    await user.click(screen.getByText("moreActions"));
+    // Present (proves the menu actually opened): login copy items.
+    expect(screen.getByText("copyPassword")).toBeInTheDocument();
+    // Absent: every manage action moved to the detail pane.
+    expect(screen.queryByText("edit")).not.toBeInTheDocument();
+    expect(screen.queryByText("share")).not.toBeInTheDocument();
+    expect(screen.queryByText("archive")).not.toBeInTheDocument();
+    expect(screen.queryByText("delete")).not.toBeInTheDocument();
+    expect(screen.queryByText("restore")).not.toBeInTheDocument();
+    expect(screen.queryByText("deletePermanently")).not.toBeInTheDocument();
   });
 
   it("renders tags on line 2", () => {
@@ -378,24 +400,18 @@ describe("PasswordRow secondary-line parity with EntrySecondaryLine (T12/T15, IN
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// C9 — INV-C9.3: trash-view affordances (restore / delete-permanently)
-//
-// These tests verify the gating contract:
-//   - When onRestore/onDeletePermanently are provided → menu items render.
-//   - When absent (normal/archive row) → they do NOT render.
-// The test also verifies that the normal-row delete item ("delete" key) is
-// still present when canDelete=true, confirming the non-trash menu is unchanged.
+// C2 — the 3-pane row is a copy/select accelerator. Trash affordances (restore /
+// delete-permanently) and all other manage actions moved to the detail pane; the row's
+// accelerator menu never renders them regardless of view. The trash-affordance gating
+// contract is now exercised at the pane level (password-detail-pane.test.tsx) and the
+// list/view level (entry-list-view.test.tsx).
 // ──────────────────────────────────────────────────────────────────────────────
-describe("C9 — PasswordRow trash affordances (INV-C9.3)", () => {
-  const onRestore = vi.fn();
-  const onDeletePermanently = vi.fn();
-
+describe("C2 — PasswordRow accelerator menu excludes trash affordances", () => {
   async function openMenu(user: ReturnType<typeof userEvent.setup>) {
-    const trigger = screen.getByText("moreActions");
-    await user.click(trigger);
+    await user.click(screen.getByText("moreActions"));
   }
 
-  it("INV-C9.3: normal row (no onRestore/onDeletePermanently) does NOT render restore or delete-permanently items", async () => {
+  it("never renders restore / delete-permanently on the row (any view)", async () => {
     const user = userEvent.setup();
     render(
       <PasswordRow
@@ -403,117 +419,14 @@ describe("C9 — PasswordRow trash affordances (INV-C9.3)", () => {
         isActive={false}
         onActivate={vi.fn()}
         {...defaultRowProps}
-        canDelete={true}
       />,
     );
     await openMenu(user);
-    // Normal delete is present
-    expect(screen.getByText("delete")).toBeInTheDocument();
-    // Trash-specific items are absent
+    // Present (proves the menu opened): a copy item.
+    expect(screen.getByText("copyPassword")).toBeInTheDocument();
+    // Trash + delete affordances are detail-pane-only.
     expect(screen.queryByText("restore")).not.toBeInTheDocument();
     expect(screen.queryByText("deletePermanently")).not.toBeInTheDocument();
-  });
-
-  it("renders restore menu item when onRestore is provided", async () => {
-    const user = userEvent.setup();
-    render(
-      <PasswordRow
-        entry={makeEntry()}
-        isActive={false}
-        onActivate={vi.fn()}
-        {...defaultRowProps}
-        canDelete={false}
-        onRestore={onRestore}
-      />,
-    );
-    await openMenu(user);
-    expect(screen.getByText("restore")).toBeInTheDocument();
-  });
-
-  it("calls onRestore when restore menu item is selected", async () => {
-    const user = userEvent.setup();
-    const mockRestore = vi.fn();
-    render(
-      <PasswordRow
-        entry={makeEntry()}
-        isActive={false}
-        onActivate={vi.fn()}
-        {...defaultRowProps}
-        canDelete={false}
-        onRestore={mockRestore}
-      />,
-    );
-    await openMenu(user);
-    await user.click(screen.getByText("restore"));
-    expect(mockRestore).toHaveBeenCalledOnce();
-  });
-
-  it("renders deletePermanently menu item when onDeletePermanently is provided", async () => {
-    const user = userEvent.setup();
-    render(
-      <PasswordRow
-        entry={makeEntry()}
-        isActive={false}
-        onActivate={vi.fn()}
-        {...defaultRowProps}
-        canDelete={false}
-        onDeletePermanently={onDeletePermanently}
-      />,
-    );
-    await openMenu(user);
-    expect(screen.getByText("deletePermanently")).toBeInTheDocument();
-  });
-
-  it("calls onDeletePermanently when delete-permanently menu item is selected", async () => {
-    const user = userEvent.setup();
-    const mockDeletePermanently = vi.fn();
-    render(
-      <PasswordRow
-        entry={makeEntry()}
-        isActive={false}
-        onActivate={vi.fn()}
-        {...defaultRowProps}
-        canDelete={false}
-        onDeletePermanently={mockDeletePermanently}
-      />,
-    );
-    await openMenu(user);
-    await user.click(screen.getByText("deletePermanently"));
-    expect(mockDeletePermanently).toHaveBeenCalledOnce();
-  });
-
-  it("INV-C9.3 mutation-resistant: removing the onRestore/onDeletePermanently props makes the items disappear", async () => {
-    const user = userEvent.setup();
-    // Render WITH both props
-    const { rerender } = render(
-      <PasswordRow
-        entry={makeEntry()}
-        isActive={false}
-        onActivate={vi.fn()}
-        {...defaultRowProps}
-        canDelete={false}
-        onRestore={onRestore}
-        onDeletePermanently={onDeletePermanently}
-      />,
-    );
-    await openMenu(user);
-    expect(screen.getByText("restore")).toBeInTheDocument();
-    expect(screen.getByText("deletePermanently")).toBeInTheDocument();
-
-    // Re-render WITHOUT the props (simulate switching away from trash view)
-    rerender(
-      <PasswordRow
-        entry={makeEntry()}
-        isActive={false}
-        onActivate={vi.fn()}
-        {...defaultRowProps}
-        canDelete={true}
-      />,
-    );
-    // Menu is now open for the re-rendered row — items must be absent
-    expect(screen.queryByText("restore")).not.toBeInTheDocument();
-    expect(screen.queryByText("deletePermanently")).not.toBeInTheDocument();
-    // Normal delete is still present
-    expect(screen.getByText("delete")).toBeInTheDocument();
+    expect(screen.queryByText("delete")).not.toBeInTheDocument();
   });
 });

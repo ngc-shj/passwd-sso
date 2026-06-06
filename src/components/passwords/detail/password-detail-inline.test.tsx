@@ -10,7 +10,11 @@ vi.mock("next-intl", () => ({
 }));
 
 vi.mock("../entry/attachment-section", () => ({
-  AttachmentSection: () => <div data-testid="attachment-section" />,
+  // Surface readOnly so C4 can assert attachments stay editable when only the
+  // body-footer Edit button is suppressed.
+  AttachmentSection: ({ readOnly }: { readOnly?: boolean }) => (
+    <div data-testid="attachment-section" data-readonly={String(!!readOnly)} />
+  ),
 }));
 
 vi.mock("@/components/team/forms/team-attachment-section", () => ({
@@ -148,6 +152,22 @@ describe("PasswordDetailInline", () => {
     const editBtn = screen.getByRole("button", { name: /edit/i });
     await user.click(editBtn);
     expect(onEdit).toHaveBeenCalledTimes(1);
+  });
+
+  // ── C4: 3-pane suppresses the body-footer Edit button (header owns it) but keeps
+  // onEdit flowing so attachments/history stay editable (INV-C4.2). ──────────────
+  it("C4: showEditButton={false} hides the footer Edit but keeps attachments editable", () => {
+    render(
+      <PasswordDetailInline
+        data={{ ...baseData, entryType: ENTRY_TYPE.LOGIN }}
+        onEdit={vi.fn()}
+        showEditButton={false}
+      />,
+    );
+    // Footer Edit button suppressed (Edit lives in the pane header).
+    expect(screen.queryByRole("button", { name: /edit/i })).not.toBeInTheDocument();
+    // onEdit still flows → attachments remain editable (not read-only).
+    expect(screen.getByTestId("attachment-section")).toHaveAttribute("data-readonly", "false");
   });
 
   it("renders TeamAttachmentSection when teamId is provided", () => {

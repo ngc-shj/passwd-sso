@@ -30,10 +30,12 @@ const { mockFetchApi, mockDecryptData, mockBuildAAD, STABLE_KEY } = vi.hoisted((
   STABLE_KEY: {} as CryptoKey,
 }));
 
-// Per-test callbacks captured from PasswordRow mocks
-let capturedRowRestore: (() => void) | undefined;
-let capturedRowDeletePermanently: (() => void) | undefined;
-let capturedRowDeleteRequest: (() => void) | undefined;
+// Per-test callbacks. C2: manage actions (restore / delete-permanently / soft-delete)
+// moved off the row into the detail pane, so they are captured from the pane mock.
+// The row mock only exposes onActivate (select).
+let capturedPaneRestore: (() => void) | undefined;
+let capturedPaneDeletePermanently: (() => void) | undefined;
+let capturedPaneDelete: (() => void) | undefined;
 let capturedBulkOnSuccess: (() => void) | undefined;
 
 vi.mock("next-intl", () => ({
@@ -81,19 +83,10 @@ vi.mock("./password-row", () => ({
   PasswordRow: ({
     entry,
     onActivate,
-    onRestore,
-    onDeletePermanently,
-    onDeleteRequest,
   }: {
     entry: { id: string; title: string };
     onActivate?: () => void;
-    onRestore?: () => void;
-    onDeletePermanently?: () => void;
-    onDeleteRequest?: () => void;
   }) => {
-    capturedRowRestore = onRestore;
-    capturedRowDeletePermanently = onDeletePermanently;
-    capturedRowDeleteRequest = onDeleteRequest;
     return (
       <div
         data-testid={`row-${entry.id}`}
@@ -132,15 +125,35 @@ vi.mock("./master-detail-shell", () => ({
   ),
 }));
 
-// Mock PasswordDetailPane — expose readOnly as data-attr so tests can verify it.
+// Mock PasswordDetailPane — expose readOnly as data-attr so tests can verify it, and
+// capture the manage callbacks (restore / delete-permanently / soft-delete) since they
+// moved off the row into the pane (C2). They are only defined once an entry is active,
+// so tests select a row first.
 vi.mock("./password-detail-pane", () => ({
-  PasswordDetailPane: ({ entryId, readOnly }: { entryId: string | null; readOnly?: boolean }) => (
-    <div
-      data-testid="detail-pane"
-      data-entry-id={entryId ?? ""}
-      data-readonly={String(readOnly ?? false)}
-    />
-  ),
+  PasswordDetailPane: ({
+    entryId,
+    readOnly,
+    onRestore,
+    onDeletePermanently,
+    onDelete,
+  }: {
+    entryId: string | null;
+    readOnly?: boolean;
+    onRestore?: () => void;
+    onDeletePermanently?: () => void;
+    onDelete?: () => void;
+  }) => {
+    capturedPaneRestore = onRestore;
+    capturedPaneDeletePermanently = onDeletePermanently;
+    capturedPaneDelete = onDelete;
+    return (
+      <div
+        data-testid="detail-pane"
+        data-entry-id={entryId ?? ""}
+        data-readonly={String(readOnly ?? false)}
+      />
+    );
+  },
 }));
 
 vi.mock("@/hooks/vault/use-password-entry-detail", () => ({
@@ -231,9 +244,9 @@ describe("EntryListView — TRASH_VIEW (T2 coverage migration + NET-NEW)", () =>
     mockFetchApi.mockReset();
     mockDecryptData.mockReset();
     mockBuildAAD.mockReset().mockReturnValue("aad-bytes");
-    capturedRowRestore = undefined;
-    capturedRowDeletePermanently = undefined;
-    capturedRowDeleteRequest = undefined;
+    capturedPaneRestore = undefined;
+    capturedPaneDeletePermanently = undefined;
+    capturedPaneDelete = undefined;
     capturedBulkOnSuccess = undefined;
   });
 
@@ -331,11 +344,14 @@ describe("EntryListView — TRASH_VIEW (T2 coverage migration + NET-NEW)", () =>
 
     await waitFor(() => { expect(screen.getByText("GitHub")).toBeInTheDocument(); });
 
-    // Precondition: PasswordRow received onDeletePermanently callback.
-    expect(capturedRowDeletePermanently).toBeDefined();
+    // Select the entry so the detail pane (which owns manage actions) is active.
+    act(() => { fireEvent.click(screen.getByTestId("row-entry-1")); });
+
+    // Precondition: the detail pane received onDeletePermanently callback.
+    expect(capturedPaneDeletePermanently).toBeDefined();
 
     // Trigger: click delete-permanently (opens confirm dialog).
-    act(() => { capturedRowDeletePermanently?.(); });
+    act(() => { capturedPaneDeletePermanently?.(); });
 
     // Assert: confirm dialog visible (description is unique).
     await waitFor(() => {
@@ -380,11 +396,14 @@ describe("EntryListView — TRASH_VIEW (T2 coverage migration + NET-NEW)", () =>
 
     await waitFor(() => { expect(screen.getByText("GitHub")).toBeInTheDocument(); });
 
-    // Precondition: PasswordRow received the soft-delete request callback.
-    expect(capturedRowDeleteRequest).toBeDefined();
+    // Select the entry so the detail pane (which owns the delete action) is active.
+    act(() => { fireEvent.click(screen.getByTestId("row-entry-1")); });
+
+    // Precondition: the detail pane received the soft-delete request callback.
+    expect(capturedPaneDelete).toBeDefined();
 
     // Trigger: request delete — opens the confirm dialog, does NOT delete yet.
-    act(() => { capturedRowDeleteRequest?.(); });
+    act(() => { capturedPaneDelete?.(); });
 
     await waitFor(() => {
       expect(screen.getByText("deleteConfirm:{\"title\":\"GitHub\"}")).toBeInTheDocument();
@@ -499,7 +518,7 @@ describe("EntryListView — TRASH_VIEW (T2 coverage migration + NET-NEW)", () =>
   //
   // Verify by mutation: setting canDelete=false in the adapter (not tested here — adapter is
   // real; guard is exercised by the descriptor×adapter intersection in EntryListView).
-  it("TRASH_VIEW rows: restore and delete-perm callbacks provided to PasswordRow (T2-g)", async () => {
+  it("TRASH_VIEW detail pane: restore and delete-perm callbacks provided (T2-g)", async () => {
     mockFetchApi.mockResolvedValueOnce({
       ok: true,
       json: async () => [makeServerEntry("entry-1")],
@@ -510,9 +529,12 @@ describe("EntryListView — TRASH_VIEW (T2 coverage migration + NET-NEW)", () =>
 
     await waitFor(() => { expect(screen.getByTestId("row-entry-1")).toBeInTheDocument(); });
 
+    // Select the entry so the detail pane (the persistent action home) is active.
+    act(() => { fireEvent.click(screen.getByTestId("row-entry-1")); });
+
     // Assert: both callbacks present (TRASH_VIEW.rowActions.restore=true + canDelete=true).
-    expect(capturedRowRestore).toBeDefined();
-    expect(capturedRowDeletePermanently).toBeDefined();
+    expect(capturedPaneRestore).toBeDefined();
+    expect(capturedPaneDeletePermanently).toBeDefined();
   });
 
   // ── Restore callback removes entry from list (C9 — no confirm required) ──────
@@ -530,12 +552,15 @@ describe("EntryListView — TRASH_VIEW (T2 coverage migration + NET-NEW)", () =>
 
     await waitFor(() => { expect(screen.getByTestId("row-entry-1")).toBeInTheDocument(); });
 
+    // Select the entry so the detail pane (which owns restore) is active.
+    act(() => { fireEvent.click(screen.getByTestId("row-entry-1")); });
+
     // Setup: mock restore POST + reload fetch.
     mockFetchApi.mockResolvedValueOnce({ ok: true });
     mockFetchApi.mockResolvedValueOnce({ ok: true, json: async () => [] });
 
     // Trigger: invoke restore.
-    await act(async () => { capturedRowRestore?.(); });
+    await act(async () => { capturedPaneRestore?.(); });
 
     // Assert: POST to restore endpoint called.
     await waitFor(() => {

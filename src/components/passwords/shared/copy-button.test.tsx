@@ -45,4 +45,10 @@ describe("CopyButton", () => {
     render(<CopyButton getValue={() => "x"} label="Copy URL" />);
     expect(screen.getByText("Copy URL")).toBeInTheDocument();
   });
+
+  it("uses ariaLabel as the accessible name so users know WHAT is copied", () => {
+    render(<CopyButton getValue={() => "x"} ariaLabel="Copy password" />);
+    // Accessible name reflects what gets copied (not the generic "copy" key).
+    expect(screen.getByRole("button", { name: "Copy password" })).toBeInTheDocument();
+  });
 });

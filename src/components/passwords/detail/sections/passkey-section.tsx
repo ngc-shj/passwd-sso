@@ -32,7 +32,7 @@ export function PasskeySection({ data, requireVerification, createGuardedGetter 
           <label className="text-sm text-muted-foreground">{t("relyingPartyId")}</label>
           <div className="flex items-center gap-2">
             <span className="text-sm">{data.relyingPartyId}</span>
-            <CopyButton getValue={() => data.relyingPartyId ?? ""} />
+            <CopyButton getValue={() => data.relyingPartyId ?? ""} fieldLabel={t("relyingPartyId")} />
           </div>
         </div>
       )}
@@ -51,7 +51,7 @@ export function PasskeySection({ data, requireVerification, createGuardedGetter 
           <label className="text-sm text-muted-foreground">{t("username")}</label>
           <div className="flex items-center gap-2">
             <span className="text-sm">{data.username}</span>
-            <CopyButton getValue={() => data.username ?? ""} />
+            <CopyButton getValue={() => data.username ?? ""} fieldLabel={t("username")} />
           </div>
         </div>
       )}
@@ -78,6 +78,7 @@ export function PasskeySection({ data, requireVerification, createGuardedGetter 
                 data.requireReprompt ?? false,
                 () => data.credentialId ?? "",
               )}
+              fieldLabel={t("credentialId")}
             />
           </div>
           {showCredentialId && (

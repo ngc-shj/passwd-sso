@@ -16,6 +16,13 @@ interface CopyButtonProps {
   label?: string;
   /** Accessible name for the icon-only button (WCAG 4.1.2). Defaults to the copy/copied label. */
   ariaLabel?: string;
+  /**
+   * Name of the field being copied. When set (and no explicit ariaLabel), the
+   * accessible name AND tooltip become "Copy {fieldLabel}" so the user knows WHAT
+   * lands on the clipboard — instead of a generic "Copy". Pass the same label text
+   * shown next to the value.
+   */
+  fieldLabel?: string;
   variant?: "ghost" | "outline" | "default";
   size?: "icon" | "sm" | "default";
   className?: string;
@@ -28,6 +35,7 @@ export function CopyButton({
   getValue,
   label,
   ariaLabel,
+  fieldLabel,
   variant = "ghost",
   size = "icon",
   className,
@@ -35,6 +43,11 @@ export function CopyButton({
 }: CopyButtonProps) {
   const t = useTranslations("CopyButton");
   const [copied, setCopied] = useState(false);
+
+  // Precedence: explicit ariaLabel > field-named ("Copy {field}") > generic "Copy".
+  // After a copy, both the accessible name and the tooltip announce "Copied".
+  const idleLabel = ariaLabel ?? (fieldLabel ? t("copyNamed", { name: fieldLabel }) : t("copy"));
+  const stateLabel = copied ? t("copied") : idleLabel;
 
   const handleCopy = useCallback(async () => {
     try {
@@ -77,7 +90,7 @@ export function CopyButton({
             onClick={handleCopy}
             className={className}
             tabIndex={tabIndex}
-            aria-label={label ? undefined : (ariaLabel ?? (copied ? t("copied") : t("copy")))}
+            aria-label={label ? undefined : stateLabel}
           >
             {copied ? (
               <Check className="h-4 w-4 text-green-500" />
@@ -88,7 +101,7 @@ export function CopyButton({
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          {copied ? t("copied") : t("copy")}
+          {stateLabel}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

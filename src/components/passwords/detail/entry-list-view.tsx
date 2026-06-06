@@ -725,29 +725,10 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
                 showFavorite={descriptor.rowActions.favorite && adapter.supportsFavorite}
                 onToggleFavorite={() => void handleSetFavorite(entry, !entry.isFavorite)}
                 {...callbacks}
-                onShare={() => void handleShare(entry)}
-                onEdit={() => {
-                  setActiveEntry(entry);
-                  onRequestEdit?.(entry);
-                }}
-                onToggleArchive={() => {
-                  void handleSetArchived(entry, !entry.isArchived);
-                }}
-                onDeleteRequest={() => setSoftDeletePending(entry)}
-                canEdit={descriptor.rowActions.edit && adapter.permissions.canEdit}
-                canDelete={descriptor.rowActions.trash && adapter.permissions.canDelete}
-                canShare={descriptor.rowActions.share && adapter.permissions.canShare}
-                // C9 — trash affordances (INV-C9.1: gated by descriptor + canDelete).
-                onRestore={
-                  descriptor.rowActions.restore && adapter.permissions.canDelete
-                    ? () => void handleRestore(entry)
-                    : undefined
-                }
-                onDeletePermanently={
-                  descriptor.rowActions.deletePermanently && adapter.permissions.canDelete
-                    ? () => setDeletePermanentlyPending(entry)
-                    : undefined
-                }
+                // Manage actions (Edit/Share/Archive/Delete/Restore/Delete-permanently)
+                // are NOT on the 3-pane row — they live in the detail pane (the
+                // persistent action home, wired in detailSlot below). The row is a
+                // copy/select accelerator only (C2).
               />
             );
           }

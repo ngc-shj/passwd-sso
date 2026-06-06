@@ -47,7 +47,7 @@ export function SshKeySection({ data, requireVerification, createGuardedGetter }
           <label className="text-sm text-muted-foreground">{t("fingerprint")}</label>
           <div className="flex items-center gap-2">
             <span className="font-mono text-sm break-all">{data.fingerprint}</span>
-            <CopyButton getValue={() => data.fingerprint ?? ""} />
+            <CopyButton getValue={() => data.fingerprint ?? ""} fieldLabel={t("fingerprint")} />
           </div>
         </div>
       )}
@@ -60,7 +60,7 @@ export function SshKeySection({ data, requireVerification, createGuardedGetter }
             <pre className="rounded-lg border bg-muted/30 p-3 text-xs font-mono whitespace-pre-wrap break-all flex-1 overflow-hidden">
               {data.publicKey}
             </pre>
-            <CopyButton getValue={() => data.publicKey ?? ""} />
+            <CopyButton getValue={() => data.publicKey ?? ""} fieldLabel={t("publicKey")} />
           </div>
         </div>
       )}
@@ -88,6 +88,7 @@ export function SshKeySection({ data, requireVerification, createGuardedGetter }
                   data.requireReprompt ?? false,
                   () => data.privateKey ?? "",
                 )}
+                fieldLabel={t("privateKey")}
               />
             </div>
           </div>
@@ -119,6 +120,7 @@ export function SshKeySection({ data, requireVerification, createGuardedGetter }
                 data.requireReprompt ?? false,
                 () => data.sshPassphrase ?? "",
               )}
+              fieldLabel={t("passphrase")}
             />
           </div>
           {showSshPassphrase && (
@@ -133,7 +135,7 @@ export function SshKeySection({ data, requireVerification, createGuardedGetter }
           <label className="text-sm text-muted-foreground">{t("comment")}</label>
           <div className="flex items-center gap-2">
             <span className="text-sm">{data.sshComment}</span>
-            <CopyButton getValue={() => data.sshComment ?? ""} />
+            <CopyButton getValue={() => data.sshComment ?? ""} fieldLabel={t("comment")} />
           </div>
         </div>
       )}

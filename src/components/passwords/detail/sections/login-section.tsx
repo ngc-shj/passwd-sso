@@ -65,6 +65,7 @@ export function LoginSection({ data, requireVerification, createGuardedGetter }:
               data.requireReprompt ?? false,
               () => data.password,
             )}
+            fieldLabel={t("password")}
           />
         </div>
         {showPassword && (
@@ -103,7 +104,7 @@ export function LoginSection({ data, requireVerification, createGuardedGetter }:
               // A03-1: javascript: / data: etc. — render as plain text.
               <span className="text-sm break-all">{data.url}</span>
             )}
-            <CopyButton getValue={() => data.url!} />
+            <CopyButton getValue={() => data.url!} fieldLabel={t("url")} />
           </div>
         </div>
       )}
@@ -183,6 +184,7 @@ export function LoginSection({ data, requireVerification, createGuardedGetter }:
                       )
                     : () => Promise.resolve(field.value)
                 }
+                fieldLabel={field.label}
               />
               )}
             </div>
@@ -240,6 +242,7 @@ export function LoginSection({ data, requireVerification, createGuardedGetter }:
                       data.requireReprompt ?? false,
                       () => entry.password,
                     )}
+                    fieldLabel={t("password")}
                   />
                 </div>
               ))}

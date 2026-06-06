@@ -34,9 +34,15 @@ interface PasswordDetailInlineProps {
   teamId?: string;
   /** When true, skip remote fetches (history, attachments) — used for emergency vault */
   readOnly?: boolean;
+  /**
+   * Whether to render the body-footer Edit button. Default true (accordion/PasswordCard).
+   * The 3-pane PasswordDetailPane passes false because Edit is promoted to its header
+   * (C4) — onEdit still flows through so attachment/history editability is preserved.
+   */
+  showEditButton?: boolean;
 }
 
-export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTeamId, readOnly }: PasswordDetailInlineProps) {
+export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTeamId, readOnly, showEditButton = true }: PasswordDetailInlineProps) {
   const t = useTranslations("PasswordDetail");
   const tc = useTranslations("Common");
   const locale = useLocale();
@@ -143,7 +149,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
             {formatDateTime(data.updatedAt, locale)}
           </p>
         </div>
-        {onEdit && (
+        {onEdit && showEditButton && (
           <Button variant="outline" size="sm" onClick={onEdit}>
             <Edit className="h-4 w-4 mr-1" />
             {tc("edit")}
