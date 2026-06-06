@@ -24,7 +24,8 @@ let capturedRowActivate: (() => void) | undefined;
 let capturedBulkOnSuccess: (() => void) | undefined;
 
 vi.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, params?: Record<string, unknown>) =>
+    params ? `${key}:${JSON.stringify(params)}` : key,
 }));
 
 vi.mock("@/lib/vault/vault-context", () => ({
@@ -46,6 +47,17 @@ vi.mock("@/lib/crypto/crypto-aad", () => ({
 
 vi.mock("@/hooks/use-travel-mode", () => ({
   useTravelMode: () => ({ active: false }),
+}));
+
+// Mock useLayoutMode so jsdom doesn't fail on window.matchMedia.
+// Individual tests override this by calling setMockLayoutMode.
+let mockLayoutModeValue: "accordion" | "master-detail" = "accordion";
+function setMockLayoutMode(mode: "accordion" | "master-detail") {
+  mockLayoutModeValue = mode;
+}
+
+vi.mock("@/hooks/use-layout-mode", () => ({
+  useLayoutMode: () => mockLayoutModeValue,
 }));
 
 // T3: mock useBulkAction to expose the onSuccess callback.
@@ -114,6 +126,40 @@ vi.mock("./password-row", () => ({
   },
 }));
 
+// Mock MasterDetailShell so we can test layouts without real DOM shell behavior.
+vi.mock("./master-detail-shell", () => ({
+  MasterDetailShell: ({
+    listSlot,
+    detailSlot,
+  }: {
+    listSlot: React.ReactNode;
+    detailSlot: React.ReactNode;
+    layoutMode?: string;
+    activeEntryId?: string | null;
+  }) => (
+    <div data-testid="master-detail-shell">
+      {listSlot}
+      {detailSlot}
+    </div>
+  ),
+}));
+
+// Mock PasswordDetailPane so tests don't need vault decrypt for the pane.
+vi.mock("./password-detail-pane", () => ({
+  PasswordDetailPane: ({ entryId }: { entryId: string | null }) => (
+    <div data-testid="detail-pane" data-entry-id={entryId ?? ""} />
+  ),
+}));
+
+vi.mock("@/hooks/vault/use-password-entry-detail", () => ({
+  usePasswordEntryDetail: () => ({
+    detailData: null,
+    loading: false,
+    error: null,
+    invalidate: vi.fn(),
+  }),
+}));
+
 // ── Minimal server payload factory ───────────────────────────────────────────
 
 function makeServerEntry(id: string, overrides: Record<string, unknown> = {}) {
@@ -148,6 +194,7 @@ describe("PasswordList", () => {
     capturedRowDeleteRequest = undefined;
     capturedRowActivate = undefined;
     capturedBulkOnSuccess = undefined;
+    mockLayoutModeValue = "accordion";
   });
 
   // ── Smoke tests (existing) ───────────────────────────────────────────────────
@@ -197,6 +244,7 @@ describe("PasswordList", () => {
   // ── layoutMode rendering ─────────────────────────────────────────────────────
 
   it('layoutMode "master-detail" renders PasswordRow (NOT PasswordCard)', async () => {
+    setMockLayoutMode("master-detail");
     mockFetchApi.mockResolvedValueOnce({
       ok: true,
       json: async () => [makeServerEntry("e1")],
@@ -385,6 +433,7 @@ describe("PasswordList", () => {
   });
 
   it("INV-C4.3: PasswordRow onToggleArchive fires onEntryRemoved (master-detail mode)", async () => {
+    setMockLayoutMode("master-detail");
     mockFetchApi.mockResolvedValue({
       ok: true,
       json: async () => [makeServerEntry("e1")],
@@ -407,7 +456,7 @@ describe("PasswordList", () => {
     await waitFor(() => { expect(screen.getByTestId("row-e1")).toBeInTheDocument(); });
     expect(onEntryRemoved).not.toHaveBeenCalled();
 
-    // Trigger: archive from the row (calls handleToggleArchive internally)
+    // Trigger: archive from the row (calls handleSetArchived internally)
     await act(async () => {
       capturedRowToggleArchive?.();
     });
@@ -417,6 +466,7 @@ describe("PasswordList", () => {
   });
 
   it("INV-C4.3: PasswordRow onDeleteRequest fires onEntryRemoved (master-detail mode)", async () => {
+    setMockLayoutMode("master-detail");
     mockFetchApi.mockResolvedValue({
       ok: true,
       json: async () => [makeServerEntry("e1")],
@@ -449,10 +499,6 @@ describe("PasswordList", () => {
   });
 
   // ── INV-C4.3 bulk: membership check after re-fetch ───────────────────────────
-  // After a bulk action's onSuccess, fetchPasswords() re-fetches. If activeEntryId
-  // is absent from the refreshed list, onActivate(null) must be called.
-  // We simulate this by: rendering with activeEntryId set, triggering a re-render
-  // with refreshKey that fetches a list NOT containing the activeEntryId.
 
   it("INV-C4.3 bulk: after re-fetch where active entry is gone, onActivate(null) is called", async () => {
     // First fetch: returns e1 and e2
@@ -488,38 +534,6 @@ describe("PasswordList", () => {
     });
     mockDecryptData.mockResolvedValueOnce(makeDecryptedOverview("Entry 2"));
 
-    // Re-render with new refreshKey to trigger re-fetch
-    // We also need to simulate the bulk action's onSuccess path.
-    // The bulk membership check runs in useBulkAction.onSuccess → fetchPasswords().then(...)
-    // Since we don't have a way to directly trigger onSuccess from outside, we test via
-    // refreshKey change which calls fetchPasswords(). After the re-fetch, if activeEntryId
-    // is not in the new list, onActivate(null) is called.
-    // NOTE: The actual bulk-path membership check is in useBulkAction.onSuccess callback,
-    // not in the fetchPasswords effect. So this test actually verifies via the
-    // alternative path: the list re-fetches via refreshKey, but that doesn't have
-    // the membership check... Let's verify the actual membership-check path:
-    // In password-list.tsx line 288-292:
-    //   onSuccess: () => {
-    //     clearSelection();
-    //     void fetchPasswords().then((refreshed) => {
-    //       if (activeEntryId && !refreshed.some((e) => e.id === activeEntryId)) {
-    //         onActivate?.(null);
-    //       }
-    //     });
-    //   }
-    // This is only triggered via useBulkAction's onSuccess, which we can't call directly.
-    // We need to trigger the bulk confirm dialog. Instead, let's verify the behavior
-    // by directly checking that fetchPasswords returns a list without e1 and
-    // onActivate(null) would be called by verifying the logic through re-fetch.
-    // The cleanest approach: check that the component correctly propagates activeEntryId
-    // to the PasswordCard (accordion) — showing the active entry is tracked.
-    // For the bulk path, we rely on code inspection + integration tests (as noted in plan).
-
-    // What we CAN test: render with activeEntryId="e1", fetch list without e1 via refreshKey,
-    // and the component should still hold activeEntryId externally (it's a prop, not internal state).
-    // The membership-check path is internal to the onSuccess callback.
-    // This test validates the observable: the list re-renders correctly after bulk refresh.
-
     await act(async () => {
       rerender(
         <PasswordList
@@ -541,19 +555,23 @@ describe("PasswordList", () => {
     });
 
     // The membership check lives in useBulkAction onSuccess, not in the refreshKey path.
-    // That path is tested via integration tests (project_integration_test_gap note).
     // Here we confirm no crash and the list renders correctly post-refresh.
   });
 
   // ── T3: Bulk membership check via useBulkAction.onSuccess path ──────────────
   // INV-C4.3 (bulk): when bulk onSuccess fires and the re-fetch returns a list
-  // that does NOT contain the active entry, onActivate(null) must be called.
+  // that does NOT contain the active entry, the list reloads correctly.
   //
-  // VERIFY by mutation: breaking the membership check at password-list.tsx
-  // (the `if (activeEntryId && !refreshed.some(...)) onActivate?.(null)` block)
-  // must make this test fail.
+  // NOTE: In the new architecture, the active entry state lives in EntryListView,
+  // not in PasswordList. The bulk onSuccess now calls reload() to trigger a
+  // re-fetch. The active-entry-absent check is handled via onEntryRemoved or
+  // the refreshed list showing the entry is gone.
+  // The key assertion preserved: after bulk onSuccess, the list re-fetches.
+  //
+  // VERIFY by mutation: breaking onSuccess in useBulkAction hook (removing the
+  // clearSelection() + reload()) must make this test fail.
 
-  it("T3 INV-C4.3 bulk: onSuccess triggers fetchPasswords; if active entry absent, onActivate(null) fires", async () => {
+  it("T3 INV-C4.3 bulk: onSuccess triggers reload; list re-renders with new data", async () => {
     // Initial fetch: e1 and e2 present
     mockFetchApi.mockResolvedValueOnce({
       ok: true,
@@ -562,20 +580,16 @@ describe("PasswordList", () => {
     mockDecryptData.mockResolvedValueOnce(makeDecryptedOverview("Entry 1"));
     mockDecryptData.mockResolvedValueOnce(makeDecryptedOverview("Entry 2"));
 
-    const onActivate = vi.fn();
-
     render(
       <PasswordList
         searchQuery=""
         tagId={null}
         refreshKey={0}
-        activeEntryId="e1"
-        onActivate={onActivate}
         layoutMode="accordion"
       />,
     );
 
-    // Precondition: e1 is rendered (it is the active entry)
+    // Precondition: e1 and e2 are rendered
     await waitFor(() => { expect(screen.getByTestId("card-e1")).toBeInTheDocument(); });
 
     // onSuccess re-fetch: e1 is gone (bulk-deleted), only e2 remains
@@ -591,9 +605,10 @@ describe("PasswordList", () => {
       capturedBulkOnSuccess?.();
     });
 
-    // Assert: the membership check found e1 absent → onActivate(null) was called
+    // Assert: the list re-fetched and now shows only e2
     await waitFor(() => {
-      expect(onActivate).toHaveBeenCalledWith(null);
+      expect(screen.queryByTestId("card-e1")).not.toBeInTheDocument();
+      expect(screen.getByTestId("card-e2")).toBeInTheDocument();
     });
   });
 });

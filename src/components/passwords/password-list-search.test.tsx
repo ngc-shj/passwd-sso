@@ -48,13 +48,16 @@ vi.mock("@/lib/auth/policy/travel-mode", () => ({
 
 vi.mock("@/lib/vault/entry-sort", () => ({
   compareEntriesWithFavorite: () => 0,
+  compareEntriesByDeletedAt: () => 0,
 }));
 
 vi.mock("@/hooks/bulk/use-bulk-selection", () => ({
   useBulkSelection: () => ({
     selectedIds: new Set<string>(),
     atLimit: false,
+    allSelected: false,
     toggleSelectOne: vi.fn(),
+    toggleSelectAll: vi.fn(),
     clearSelection: vi.fn(),
   }),
 }));
@@ -70,11 +73,41 @@ vi.mock("@/hooks/bulk/use-bulk-action", () => ({
   }),
 }));
 
+// Mock useLayoutMode so jsdom doesn't fail on window.matchMedia.
+vi.mock("@/hooks/use-layout-mode", () => ({
+  useLayoutMode: () => "accordion",
+}));
+
 // Render each entry title as a simple div so we can assert which entries are visible
 vi.mock("@/components/passwords/detail/password-card", () => ({
   PasswordCard: ({ entry }: { entry: { title: string } }) => (
     <div data-testid="password-card">{entry.title}</div>
   ),
+}));
+
+vi.mock("@/components/passwords/detail/password-row", () => ({
+  PasswordRow: ({ entry }: { entry: { title: string } }) => (
+    <div data-testid="password-row">{entry.title}</div>
+  ),
+}));
+
+vi.mock("@/components/passwords/detail/master-detail-shell", () => ({
+  MasterDetailShell: ({ listSlot }: { listSlot: React.ReactNode }) => (
+    <div>{listSlot}</div>
+  ),
+}));
+
+vi.mock("@/components/passwords/detail/password-detail-pane", () => ({
+  PasswordDetailPane: () => null,
+}));
+
+vi.mock("@/hooks/vault/use-password-entry-detail", () => ({
+  usePasswordEntryDetail: () => ({
+    detailData: null,
+    loading: false,
+    error: null,
+    invalidate: vi.fn(),
+  }),
 }));
 
 vi.mock("@/components/bulk/bulk-action-confirm-dialog", () => ({
@@ -101,6 +134,7 @@ vi.mock("lucide-react", () => ({
   KeyRound: () => null,
   Star: () => null,
   Archive: () => null,
+  Trash2: () => null,
 }));
 
 import { PasswordList } from "./detail/password-list";
