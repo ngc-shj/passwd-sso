@@ -48,7 +48,7 @@
     "@types/node": "^22.15.3",
     "tsx": "^4.19.4",
     "typescript": "^5.9.0-beta",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.8"
   },
   "overrides": {
     "postcss": ">=8.5.10"
