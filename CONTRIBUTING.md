@@ -20,7 +20,7 @@ The following must NOT move into any `scripts/<subdir>/`:
 
 - **Runtime entrypoints**: `audit-outbox-worker.ts` (referenced by `Dockerfile:25`, `docker-compose.override.yml:35`)
 - **Operator / incident-response**: `purge-history.sh`, `purge-audit-logs.sh`, `rotate-master-key.sh`, `set-outbox-worker-password.sh`
-- **Other operational**: `deploy.sh`, `scim-smoke.sh`, `mcp-reauth.sh`, `generate-icons.sh`, `bump-version.sh`
+- **Other operational**: `deploy.sh`, `dev.sh`, `scim-smoke.sh`, `mcp-reauth.sh`, `generate-icons.sh`, `bump-version.sh`
 - **Data fixtures**: `rls-smoke-*.sql`, `tenant-team-*.sql`, `license-allowlist.json`
 - **Admin-only refactor tools** (CODEOWNERS-gated): `move-and-rewrite-imports.mjs`, `verify-move-only-diff.mjs`, `verify-allowlist-rename-only.mjs`, `refactor-phase-verify.mjs`, `check-codeowners-drift.mjs`, `check-blame-ignore-revs.mjs`
 - **CI orchestrator** (CODEOWNERS-gated): `pre-pr.sh`
