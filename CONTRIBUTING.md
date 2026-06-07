@@ -18,10 +18,11 @@ The following files must NOT move out of the repository root:
 
 The following must NOT move into any `scripts/<subdir>/`:
 
-- **Runtime entrypoints**: `audit-outbox-worker.ts` (referenced by `Dockerfile:25`, `docker-compose.override.yml:35`)
-- **Operator / incident-response**: `purge-history.sh`, `purge-audit-logs.sh`, `rotate-master-key.sh`, `set-outbox-worker-password.sh`
+- **Runtime entrypoints** (baked into the image / referenced by compose `command:`): `audit-outbox-worker.ts` (`Dockerfile:39`, `docker-compose.override.yml:42`), `dcr-cleanup-worker.ts` (`Dockerfile:45`, `docker-compose.override.yml:73`), `audit-chain-verify-worker.ts` (`package.json` `worker:audit-chain-verify`)
+- **Operator / incident-response**: `purge-history.sh`, `purge-audit-logs.sh`, `rotate-master-key.sh`, `set-outbox-worker-password.sh`, `set-dcr-cleanup-worker-password.sh` (the latter referenced by `scripts/env-allowlist.ts` and `scripts/__tests__/set-dcr-cleanup-worker-password.test.mjs`)
 - **Other operational**: `deploy.sh`, `dev.sh`, `scim-smoke.sh`, `mcp-reauth.sh`, `generate-icons.sh`, `bump-version.sh`
-- **Data fixtures**: `rls-smoke-*.sql`, `tenant-team-*.sql`, `license-allowlist.json`
+- **Data fixtures**: `rls-smoke-*.sql`, `rls-cross-tenant-*` (`*.sql` / `*.sh` / `*.manifest`, consumed by `.github/workflows/ci.yml` + `scripts/pre-pr.sh`), `tenant-team-*.sql`, `license-allowlist.json` (read by `scripts/checks/check-licenses.mjs` via `../license-allowlist.json`)
+- **Static-gate scripts / env tooling** (path hardcoded by CI, `pre-pr.sh`, or sibling imports): `check-state-mutation-centralization.{sh,ts}`, `migrate-prf-per-credential-salt.sh` (read by the `pre-pr.sh` PRF read-only integrity check), `env-descriptions.ts`, `env-allowlist.ts` (CODEOWNERS-gated, SEC-4), `scripts/lib/*` (e.g. `hex-leak-scan.mjs` invoked by `pre-pr.sh`)
 - **Admin-only refactor tools** (CODEOWNERS-gated): `move-and-rewrite-imports.mjs`, `verify-move-only-diff.mjs`, `verify-allowlist-rename-only.mjs`, `refactor-phase-verify.mjs`, `check-codeowners-drift.mjs`, `check-blame-ignore-revs.mjs`
 - **CI orchestrator** (CODEOWNERS-gated): `pre-pr.sh`
 - **Manual smoke tests**: `scripts/manual-tests/*` stays at that path
@@ -37,9 +38,9 @@ The following stay at `src/lib/` root. Moving any of them requires updating the 
 | `prisma.ts` | Singleton Prisma client import target |
 | `redis.ts` | Singleton Redis client; also preserves integration-test gate regex |
 | `env.ts` | Bootstrap-sequence-sensitive |
-| `load-env.ts` | Bootstrap-sequence-sensitive |
+| `load-env.ts` | 6 out-of-`src` importers (2 `e2e/*`, 4 `scripts/*`) depend on the `@/lib/load-env` alias path |
 | `password-generator.ts` | Single-instance server-side generator |
-| `notification.ts` | RLS-allowlisted |
+| `notification.ts` | RLS-bypass-allowlisted (`scripts/checks/check-bypass-rls.mjs:67`, CI-gated) |
 | `webhook-dispatcher.ts` | Pinned by `.github/workflows/ci.yml` hardcoded `grep -v` |
 | `url-helpers.ts` | Pinned by `.github/workflows/ci.yml` hardcoded `grep -v` |
 

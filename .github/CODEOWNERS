@@ -26,6 +26,16 @@
 /src/lib/tenant/**                           @ngc-shj
 # F26 (Round 2): preemptive rule for src/lib/constants/auth/ split in PR 4.
 /src/lib/constants/auth/**                   @ngc-shj
+# directory-structure-review (S2/S4): genuine security boundaries previously
+# un-gated. proxy/** is the active CSRF / session / CORS / security-header
+# enforcement layer; security/** is rate-limit / CSP / safe-href. NOTE: both
+# proxy/security-headers.ts and security/security-headers.ts exist (distinct
+# files, same basename) — both gated here to the same owner, no ambiguity.
+/src/lib/proxy/**                            @ngc-shj
+/src/lib/security/**                         @ngc-shj
+/src/lib/prisma.ts                           @ngc-shj
+/src/lib/webhook-dispatcher.ts               @ngc-shj
+/src/lib/env.ts                              @ngc-shj
 /.github/workflows/                          @ngc-shj
 /.github/CODEOWNERS                          @ngc-shj
 /.git-blame-ignore-revs                      @ngc-shj
