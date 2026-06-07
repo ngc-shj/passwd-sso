@@ -1,0 +1,28 @@
+[Unit]
+Description=passwd-sso (Docker Compose stack)
+Documentation=https://github.com/ngc-shj/passwd-sso/blob/main/infra/systemd/README.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Edit to the directory holding docker-compose.yml and the .env file.
+WorkingDirectory=/opt/passwd-sso
+# Best-effort image refresh on (re)start. The leading '-' keeps a registry
+# hiccup from blocking the boot.
+ExecStartPre=-/usr/bin/docker compose -f docker-compose.yml pull
+# Foreground (no -d) so systemd supervises the process. --abort-on-container-exit
+# makes compose exit non-zero when any container dies, which is what trips
+# Restart=on-failure — without it a crashed app/redis would leave compose
+# running and systemd would believe the service is healthy.
+ExecStart=/usr/bin/docker compose -f docker-compose.yml up --abort-on-container-exit
+ExecStop=/usr/bin/docker compose -f docker-compose.yml down
+Restart=on-failure
+RestartSec=10
+# SIGTERM the compose process only; ExecStop performs the orderly teardown.
+KillMode=mixed
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target
