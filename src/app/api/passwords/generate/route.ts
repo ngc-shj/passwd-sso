@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { generatePassword, generatePassphrase } from "@/lib/password-generator";
+import { generatePassword, generatePassphrase } from "@/lib/generator/password-generator";
 import { generateRequestSchema } from "@/lib/validations";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";

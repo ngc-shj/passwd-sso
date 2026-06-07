@@ -27,7 +27,7 @@ The following must NOT move into any `scripts/<subdir>/`:
 - **CI orchestrator** (CODEOWNERS-gated): `pre-pr.sh`
 - **Manual smoke tests**: `scripts/manual-tests/*` stays at that path
 
-### Root-of-`src/lib/` pinned (10 files)
+### Root-of-`src/lib/` pinned (9 files)
 
 The following stay at `src/lib/` root. Moving any of them requires updating the CI path filters / static grep exclusions and is out of scope for mechanical splits:
 
@@ -39,7 +39,6 @@ The following stay at `src/lib/` root. Moving any of them requires updating the 
 | `redis.ts` | Singleton Redis client; also preserves integration-test gate regex |
 | `env.ts` | Bootstrap-sequence-sensitive |
 | `load-env.ts` | 6 out-of-`src` importers (2 `e2e/*`, 4 `scripts/*`) depend on the `@/lib/load-env` alias path |
-| `password-generator.ts` | Single-instance server-side generator |
 | `notification.ts` | RLS-bypass-allowlisted (`scripts/checks/check-bypass-rls.mjs:67`, CI-gated) |
 | `webhook-dispatcher.ts` | Pinned by `.github/workflows/ci.yml` hardcoded `grep -v` |
 | `url-helpers.ts` | Pinned by `.github/workflows/ci.yml` hardcoded `grep -v` |

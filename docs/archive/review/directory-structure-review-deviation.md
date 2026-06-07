@@ -20,3 +20,33 @@
 
 No other deviations. C1, C3, and the S3 `pre-pr.sh` hardening were implemented as
 specified in the locked plan.
+
+## Phase B (C4 — move `password-generator.ts` → `src/lib/generator/`)
+
+### D2 — removed an orphaned `vitest.config.ts` coverage.include entry (pre-existing)
+- **Not in the plan**: `refactor-phase-verify`'s `check-vitest-coverage-include`
+  (runs only on `refactor/*` branches) failed on a stale entry
+  `"src/lib/inject-extension-bridge-code.ts"` — that file was deleted in `#492`
+  (`24a20026`) and is absent from `origin/main`'s tree; the coverage entry was
+  never cleaned up.
+- **Action**: removed the orphaned line from `vitest.config.ts`.
+- **Why fix here**: `vitest.config.ts` is already in this PR's diff (the codemod
+  rewrote the `password-generator` coverage path), so the pre-existing stale entry
+  is in-scope per Anti-Deferral; and the refactor gate (a required CI check on
+  `refactor/*`) cannot pass while the orphan exists. Unrelated to the move itself.
+
+### N1 — `.git-blame-ignore-revs`: no self-referential move-SHA entry added
+- **Plan C4 said**: append the move-commit SHA to `.git-blame-ignore-revs` (VEC4).
+- **Implemented**: no entry added on the branch. Rationale: a commit cannot
+  reference its own (post-amend) SHA, and this repo squash-merges standalone PRs
+  (e.g. `#521`), so any branch SHA would be orphaned on `main`. The repo's actual
+  pattern adds the *prior* phase's known SHA in a multi-phase branch, or the SHA
+  lands via the merge commit. `check-blame-ignore-revs` passed (it validates only
+  listed SHAs; HEAD need not be listed). The move is a 2-file rename that
+  `git blame --follow` already tracks. **Post-merge action** (optional): append the
+  squashed `main` SHA to `.git-blame-ignore-revs` if blame-ignore is desired —
+  noted in the PR body. No gate depends on it.
+
+### Note — `.refactor-phase-verify-baseline`
+- Bumped the local (gitignored) baseline to current `origin/main`
+  (`77eb6b5d…`) so the stale-branch guard passes; not a committed change.
