@@ -278,8 +278,8 @@ export default function TeamDashboardPage({
   return (
     <div
       className={[
-        "flex flex-col min-h-0 p-4 md:p-6",
-        isMasterDetail ? "h-full" : "flex-1",
+        "flex flex-col flex-1 p-4 md:p-6",
+        isMasterDetail ? "min-h-0" : "",
       ].join(" ")}
     >
       <div className={isMasterDetail ? "mx-auto w-full max-w-[1024px]" : "mx-auto max-w-4xl w-full"}>
