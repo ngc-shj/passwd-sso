@@ -48,7 +48,7 @@ vi.mock("@/lib/emergency-access/emergency-access-context", () => ({
   confirmPendingEmergencyGrants: vi.fn(),
 }));
 
-import { VaultProvider, useVault } from "./vault/vault-context";
+import { VaultProvider, useVault } from "./vault-context";
 
 function VaultStatusDisplay() {
   const { status } = useVault();
