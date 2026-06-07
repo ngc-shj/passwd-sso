@@ -252,13 +252,14 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
   }, []);
 
   return (
-    // master-detail: h-full fills the (block, overflow-auto) <main>'s definite flex height so
-    // the list/detail panes scroll independently (INV-C5.1) instead of <main> scrolling the
-    // whole view as one. accordion: flex-1 keeps the page-level scroll (<main> scrolls).
+    // <main> is a flex column (banner(s) + this view). master-detail: flex-1 min-h-0 takes the
+    // height remaining below any banner so the list/detail panes scroll independently (INV-C5.1)
+    // instead of <main> scrolling the whole view. accordion: flex-1 (no min-h-0) lets the view
+    // grow with its content so <main> provides the page-level scroll.
     <div
       className={[
-        "flex flex-col min-h-0 p-4 md:p-6",
-        layoutMode === "master-detail" ? "h-full" : "flex-1",
+        "flex flex-col flex-1 p-4 md:p-6",
+        layoutMode === "master-detail" ? "min-h-0" : "",
       ].join(" ")}
     >
       <div className={layoutMode === "master-detail" ? "mx-auto w-full max-w-[1024px]" : "mx-auto max-w-4xl w-full"}>
