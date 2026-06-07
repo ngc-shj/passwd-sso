@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("./url-helpers", () => ({
+vi.mock("@/lib/url-helpers", () => ({
   BASE_PATH: "/passwd-sso",
 }));
 

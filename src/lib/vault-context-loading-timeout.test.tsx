@@ -37,13 +37,13 @@ vi.mock("./crypto-client", () => ({}));
 vi.mock("./crypto-emergency", () => ({}));
 vi.mock("./crypto-team", () => ({}));
 vi.mock("./webauthn-client", () => ({}));
-vi.mock("./team/team-vault-context", () => ({
+vi.mock("@/lib/team/team-vault-context", () => ({
   TeamVaultProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
-vi.mock("./vault/auto-lock-context", () => ({
+vi.mock("@/lib/vault/auto-lock-context", () => ({
   AutoLockProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
-vi.mock("./emergency-access/emergency-access-context", () => ({
+vi.mock("@/lib/emergency-access/emergency-access-context", () => ({
   EmergencyAccessProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   confirmPendingEmergencyGrants: vi.fn(),
 }));

@@ -1,0 +1,8 @@
+{
+  "phaseName": "directory-structure-review-phase-c-orphan-test-relocation",
+  "moves": [
+    { "from": "src/lib/callback-url-basepath.test.ts",        "to": "src/lib/auth/session/callback-url-basepath.test.ts" },
+    { "from": "src/lib/vault-unlock-error.test.ts",           "to": "src/lib/vault/vault-unlock-error.test.ts" },
+    { "from": "src/lib/vault-context-loading-timeout.test.tsx", "to": "src/lib/vault/vault-context-loading-timeout.test.tsx" }
+  ]
+}
