@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.4.56](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.55...passwd-sso-v0.4.56) (2026-06-07)
+
+
+### Features
+
+* add dev.sh compose helper and systemd self-host unit ([#519](https://github.com/ngc-shj/passwd-sso/issues/519)) ([97ee716](https://github.com/ngc-shj/passwd-sso/commit/97ee7166ecc286053a1950628e981a88f4c0daeb))
+* RFC 9987 audited SSH agent with per-signature authorization ([#518](https://github.com/ngc-shj/passwd-sso/issues/518)) ([7aa321c](https://github.com/ngc-shj/passwd-sso/commit/7aa321c4f8923f62ac81348f8403a81b49b32a1b))
+* **vault:** reorganize 3-pane action buttons and label copy actions ([#516](https://github.com/ngc-shj/passwd-sso/issues/516)) ([14bbbe1](https://github.com/ngc-shj/passwd-sso/commit/14bbbe1fedf05cf7b849bf645fdf5421486ca5e8))
+* **vault:** three-pane master-detail layout for desktop vault (personal + team) ([#515](https://github.com/ngc-shj/passwd-sso/issues/515)) ([6e47d1d](https://github.com/ngc-shj/passwd-sso/commit/6e47d1d31855db05d1b516a0df30938b45d30a1f))
+
+
+### Bug Fixes
+
+* **ci:** add gitleaks secret-scan job and fix Dockerfile version compare ([#512](https://github.com/ngc-shj/passwd-sso/issues/512)) ([1e9c6b7](https://github.com/ngc-shj/passwd-sso/commit/1e9c6b7a95f21e7fd1db89365bf4cae8ae86e548))
+* **ci:** pin Actions to SHAs, gate static checks in CI, pin Dockerfile prisma ([#510](https://github.com/ngc-shj/passwd-sso/issues/510)) ([b9232e1](https://github.com/ngc-shj/passwd-sso/commit/b9232e12b49e8f39c628240f8516d60cc5b154b9))
+* **dashboard:** contain vault scroll inside detail pane when banner shown ([#524](https://github.com/ngc-shj/passwd-sso/issues/524)) ([9529d66](https://github.com/ngc-shj/passwd-sso/commit/9529d66421911459808e1c3fa2ceec4808d0ce7b))
+* **deps:** patch hono and vitest security advisories ([#517](https://github.com/ngc-shj/passwd-sso/issues/517)) ([a33cbbb](https://github.com/ngc-shj/passwd-sso/commit/a33cbbb8a97ed1f54b4d21f7b5367baee45ea7e8))
+
+
+### Code Refactoring
+
+* **generator:** move password-generator into src/lib/generator/ ([#522](https://github.com/ngc-shj/passwd-sso/issues/522)) ([88c8a85](https://github.com/ngc-shj/passwd-sso/commit/88c8a859e743963b88b5e84d8f1dc27bb7c438d1))
+* **tests:** co-locate orphan src/lib tests + drop a duplicate ([#523](https://github.com/ngc-shj/passwd-sso/issues/523)) ([862611a](https://github.com/ngc-shj/passwd-sso/commit/862611ab86d329020dd973d22ba0667b136f27eb))
+
 ## [0.4.55](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.54...passwd-sso-v0.4.55) (2026-05-31)
 
 
