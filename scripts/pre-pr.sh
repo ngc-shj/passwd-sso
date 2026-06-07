@@ -177,8 +177,11 @@ run_step "Static: no-deprecated-logAudit" bash -c 'if grep -rn "logAudit(" src/ 
 run_step "Static: prf-salt-migration-script-readonly" bash -c '
   SCRIPT="scripts/migrate-prf-per-credential-salt.sh"
   if [ ! -f "$SCRIPT" ]; then
-    echo "OK (script not present yet)"
-    exit 0
+    # The script exists and is load-bearing (A02-8 C9 read-only invariant). A
+    # missing file means it was moved/deleted, which would silently disable this
+    # gate — fail closed instead. CONTRIBUTING.md pins it at scripts/ root.
+    echo "ERROR: $SCRIPT not found at its pinned path — move it back or update this gate"
+    exit 1
   fi
   # Extract just the SQL block(s) between `<<EOF` markers and the closing tag.
   # Any of UPDATE/INSERT/DELETE/TRUNCATE inside that block fails the check.

@@ -35,6 +35,13 @@ const ROSTER_GLOBS = [
   "src/lib/tenant-context.ts",
   "src/lib/tenant/**",
   "src/lib/constants/auth/**",
+  // directory-structure-review (S1): self-protect the new CODEOWNERS gates so a
+  // future deletion of these rules is caught by the drift check.
+  "src/lib/proxy/**",
+  "src/lib/security/**",
+  "src/lib/prisma.ts",
+  "src/lib/webhook-dispatcher.ts",
+  "src/lib/env.ts",
 
   // Refactor-tool orchestrator + guards (stay at scripts/ root).
   "scripts/pre-pr.sh",
