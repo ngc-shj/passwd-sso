@@ -5,11 +5,11 @@
  */
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("./url-helpers", () => ({
+vi.mock("@/lib/url-helpers", () => ({
   BASE_PATH: "/passwd-sso",
 }));
 
-import { callbackUrlToHref } from "./auth/session/callback-url";
+import { callbackUrlToHref } from "./callback-url";
 
 describe("callbackUrlToHref (BASE_PATH=/passwd-sso)", () => {
   it("strips basePath and locale prefix", () => {

@@ -50,3 +50,38 @@ specified in the locked plan.
 ### Note — `.refactor-phase-verify-baseline`
 - Bumped the local (gitignored) baseline to current `origin/main`
   (`77eb6b5d…`) so the stale-branch guard passes; not a committed change.
+
+## Phase C (C5 delete + C6 relocate + C7 investigate)
+
+### D3 — C6 vi.mock prep: aliased only the *live* mocks, left the dead ones
+- **Plan C4/C6 said**: convert all 7 relative `vi.mock` in
+  `vault-context-loading-timeout.test.tsx` to `@/lib` aliases and DELETE the dead
+  `crypto-emergency` mock.
+- **Implemented**: aliased only the 3 *live* mocks
+  (`team-vault-context`, `auto-lock-context`, `emergency-access-context`) plus
+  `url-helpers` in `callback-url-basepath.test.ts`. Left the 4 dead mocks
+  (`./crypto-client`, `./crypto-emergency`, `./crypto-team`, `./webauthn-client`)
+  **unchanged**, and did NOT delete any mock line.
+- **Why**: closer analysis showed those 4 mock specifiers already do not match
+  `vault-context.tsx`'s imports (it loads `../crypto/*` and `../auth/webauthn/*`,
+  not `./crypto-*`) — they are dead no-ops at both the old and new path. (1)
+  *Activating* them by aliasing to the real modules with `() => ({})` would
+  replace real crypto with empty stubs the loading-timeout test never needs, a
+  behavior change and a regression risk. (2) *Deleting* a `vi.mock` line is a body
+  change that `verify-move-only-diff` would flag (it blanks vi.mock *specifiers*
+  but a removed call is a real body diff), so a deletion would force a separate
+  prep PR. Leaving them is the behavior-preserving, move-only-safe choice. Phase 3
+  review (all three experts) confirmed leaving them is correct. Cleanup of the
+  dead mocks is a minor follow-up: `TODO(directory-structure-review): drop the 4
+  dead ./crypto-*/webauthn-client vi.mock no-ops in vault-context-loading-timeout.test.tsx`.
+
+### C7 — `validations.test.ts`: confirmed NOT redundant, left in place
+- Verified (review T7) the root `src/lib/validations.test.ts` holds unique
+  assertions absent from `src/lib/validations/validations.test.ts` (aadVersion
+  defaults/boundaries; passkey share-link fields). **No deletion/move.** Follow-up:
+  `TODO(directory-structure-review): merge unique src/lib/validations.test.ts
+  assertions into validations/validations.test.ts, then remove the root file`.
+
+### N2 — `.git-blame-ignore-revs`: no self-referential entry (same as Phase B N1)
+- Not added; squash-merge would orphan it; no gate depends on it. The relocated
+  tests are content-changed renames that `git blame --follow` tracks.
