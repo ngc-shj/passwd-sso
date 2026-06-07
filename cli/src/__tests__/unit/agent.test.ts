@@ -76,7 +76,6 @@ const { getEncryptionKey, getUserId, getSecretKeyBytes } = await import("../../l
 const { apiRequest } = await import("../../lib/api-client.js");
 const { decryptData } = await import("../../lib/crypto.js");
 const { loadKey } = await import("../../lib/ssh-key-agent.js");
-const { startAgent } = await import("../../lib/ssh-agent-socket.js");
 const output = await import("../../lib/output.js");
 
 const { agentCommand } = await import("../../commands/agent.js");
