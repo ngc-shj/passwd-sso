@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { ChildProcess } from "node:child_process";
 
 // --- Mocks ---
+vi.mock("node:child_process", () => ({
+  spawn: vi.fn(),
+}));
+
 vi.mock("./agent-decrypt.js", () => ({
   decryptAgentCommand: vi.fn(),
 }));
@@ -11,11 +16,15 @@ vi.mock("../../commands/agent-decrypt.js", () => ({
 
 vi.mock("../../commands/unlock.js", () => ({
   autoUnlockIfNeeded: vi.fn(),
+  readPassphrase: vi.fn(),
+  unlockWithPassphrase: vi.fn(),
 }));
 
 vi.mock("../../lib/vault-state.js", () => ({
   getEncryptionKey: vi.fn(),
   getUserId: vi.fn(),
+  getSecretKeyBytes: vi.fn(),
+  setEncryptionKey: vi.fn(),
   isUnlocked: vi.fn(),
 }));
 
@@ -25,6 +34,9 @@ vi.mock("../../lib/api-client.js", () => ({
 
 vi.mock("../../lib/crypto.js", () => ({
   decryptData: vi.fn(),
+  hexEncode: vi.fn(() => "deadbeef"),
+  hexDecode: vi.fn(() => new Uint8Array(0)),
+  deriveEncryptionKey: vi.fn(),
 }));
 
 vi.mock("../../lib/crypto-aad.js", () => ({
@@ -39,6 +51,15 @@ vi.mock("../../lib/ssh-key-agent.js", () => ({
 vi.mock("../../lib/ssh-agent-socket.js", () => ({
   startAgent: vi.fn(() => "/tmp/test-ssh.sock"),
   stopAgent: vi.fn(),
+  setAgentDeps: vi.fn(),
+}));
+
+vi.mock("../../lib/ssh-sign-authorizer.js", () => ({
+  authorizeSign: vi.fn(),
+}));
+
+vi.mock("../../lib/ssh-confirm.js", () => ({
+  confirmSign: vi.fn(),
 }));
 
 vi.mock("../../lib/output.js", () => ({
@@ -48,9 +69,10 @@ vi.mock("../../lib/output.js", () => ({
   warn: vi.fn(),
 }));
 
+const { spawn } = await import("node:child_process");
 const { decryptAgentCommand } = await import("../../commands/agent-decrypt.js");
 const { autoUnlockIfNeeded } = await import("../../commands/unlock.js");
-const { getEncryptionKey, getUserId } = await import("../../lib/vault-state.js");
+const { getEncryptionKey, getUserId, getSecretKeyBytes } = await import("../../lib/vault-state.js");
 const { apiRequest } = await import("../../lib/api-client.js");
 const { decryptData } = await import("../../lib/crypto.js");
 const { loadKey } = await import("../../lib/ssh-key-agent.js");
@@ -84,6 +106,7 @@ describe("agentCommand", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("delegates to decryptAgentCommand when opts.decrypt is true", async () => {
@@ -207,46 +230,67 @@ describe("agentCommand", () => {
     );
   });
 
-  it("in eval mode, outputs SSH_AUTH_SOCK shell command", async () => {
-    const mockKey = { type: "secret" } as unknown as CryptoKey;
+  it("in eval mode, forks a detached daemon and prints SSH_AUTH_SOCK on the child's socketPath", async () => {
     vi.mocked(autoUnlockIfNeeded).mockResolvedValue(true);
-    vi.mocked(getEncryptionKey).mockReturnValue(mockKey);
+    vi.mocked(getSecretKeyBytes).mockReturnValue(new Uint8Array([1, 2, 3]));
     vi.mocked(getUserId).mockReturnValue("user-1");
-    vi.mocked(apiRequest).mockResolvedValue({
-      ok: true,
-      status: 200,
-      data: [
-        {
-          id: "entry-1",
-          entryType: "SSH_KEY",
-          encryptedBlob: { ciphertext: "aa", iv: "bb", authTag: "cc" },
-          aadVersion: 0,
-        },
-      ],
-    });
 
-    vi.mocked(decryptData).mockResolvedValue(
-      JSON.stringify({
-        privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n-----END OPENSSH PRIVATE KEY-----",
-        publicKey: "ssh-ed25519 AAAA comment",
-        comment: "test key",
+    // Fake detached child: capture event handlers so the test can drive them.
+    const handlers: Record<string, (arg?: unknown) => void> = {};
+    const fakeChild = {
+      pid: 4242,
+      send: vi.fn(),
+      on: vi.fn((event: string, cb: (arg?: unknown) => void) => {
+        handlers[event] = cb;
+      }),
+      unref: vi.fn(),
+      disconnect: vi.fn(),
+      kill: vi.fn(),
+    };
+    vi.mocked(spawn).mockReturnValue(fakeChild as unknown as ChildProcess);
+
+    // forkDaemon registers handlers and returns (no infinite wait in the parent).
+    await agentCommand({ eval: true });
+
+    // Spawned detached with the daemon env flag and the vault secret sent via IPC.
+    expect(spawn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Array),
+      expect.objectContaining({
+        detached: true,
+        env: expect.objectContaining({ _PSSO_SSH_DAEMON: "1" }),
       }),
     );
+    expect(fakeChild.send).toHaveBeenCalledWith({ secretHex: "deadbeef", userId: "user-1" });
 
-    vi.mocked(loadKey).mockResolvedValue(undefined);
-    vi.mocked(startAgent).mockReturnValue("/tmp/eval-test.sock");
+    // When the child reports its socket path, the parent prints the export
+    // lines and exits(0) so `eval $(...)` returns.
+    expect(() => handlers["message"]({ socketPath: "/tmp/eval.sock" })).toThrow(
+      "process.exit(0)",
+    );
+    expect(stdoutOutput).toContain("SSH_AUTH_SOCK='/tmp/eval.sock'");
+    expect(stdoutOutput).toContain("SSH_AGENT_PID='4242'");
+    expect(fakeChild.unref).toHaveBeenCalled();
+    expect(fakeChild.disconnect).toHaveBeenCalled();
+    expect(exitCode).toBe(0);
+  });
 
-    // agentCommand never resolves (waits forever) — we just check before the infinite wait
-    // by having it throw after setInterval is set. Use a quick timeout to observe output.
-    await Promise.race([
-      agentCommand({ eval: true }).catch(() => "exited"),
-      new Promise<string>((resolve) =>
-        setTimeout(() => resolve("timeout"), 100),
-      ),
-    ]);
-
-    // Should have output SSH_AUTH_SOCK line before waiting
-    expect(stdoutOutput).toContain("SSH_AUTH_SOCK=");
-    expect(stdoutOutput).toContain("/tmp/eval-test.sock");
+  it("routes to the daemon child when _PSSO_SSH_DAEMON is set (registers IPC handler)", () => {
+    // Mock process.on to a no-op so runDaemonChild's listener is NOT registered
+    // on the real process — otherwise it would intercept vitest's own IPC.
+    const onSpy = vi
+      .spyOn(process, "on")
+      .mockImplementation(() => process as unknown as NodeJS.Process);
+    // vi.stubEnv (auto-unstubbed via setup.ts afterEach) — no direct process.env mutation.
+    vi.stubEnv("_PSSO_SSH_DAEMON", "1");
+    try {
+      // runDaemonChild waits for an IPC message — do not await it.
+      void agentCommand({});
+      expect(onSpy).toHaveBeenCalledWith("message", expect.any(Function));
+      // It must NOT unlock in the child (the key arrives via IPC).
+      expect(autoUnlockIfNeeded).not.toHaveBeenCalled();
+    } finally {
+      onSpy.mockRestore();
+    }
   });
 });

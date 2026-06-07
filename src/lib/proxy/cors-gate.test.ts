@@ -37,6 +37,7 @@ describe("isBearerBypassRoute — Bearer-bypass detection truth table", () => {
     { path: "/api/tenant/access-requests", expected: true, reason: "SA JIT" },
     { path: "/api/vault/delegation", expected: true, reason: "vault delegation exact" },
     { path: "/api/vault/delegation/check", expected: true, reason: "vault delegation child" },
+    { path: "/api/vault/ssh/sign-authorize", expected: true, reason: "SSH agent sign-authorize — CLI Bearer" },
 
     // Deny (NOT Bearer-bypass)
     { path: "/api/teams", expected: false, reason: "teams not in list" },

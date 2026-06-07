@@ -17,6 +17,8 @@ import { parseOpenSshPrivateKey } from "./openssh-key-parser.js";
 export interface LoadedSshKey {
   /** Entry ID from the vault */
   entryId: string;
+  /** Whether each signature requires explicit user confirmation */
+  requireReprompt: boolean;
   /** PEM-encoded private key */
   pem: string;
   /** Optional passphrase for encrypted keys */
@@ -36,7 +38,7 @@ const loadedKeys = new Map<string, LoadedSshKey>();
 /**
  * Load a PEM private key into memory.
  *
- * @returns The public key blob for identity listing
+ * @returns The loaded key record
  */
 export async function loadKey(
   entryId: string,
@@ -44,6 +46,7 @@ export async function loadKey(
   publicKeyBlob: Buffer,
   comment: string,
   passphrase?: string,
+  requireReprompt?: boolean,
 ): Promise<LoadedSshKey> {
   let keyObject: KeyObject;
   try {
@@ -58,8 +61,12 @@ export async function loadKey(
 
   const keyType = detectKeyType(keyObject);
 
+  // Non-boolean requireReprompt (serializer regression) defaults deny-side to true.
+  const reprompt = typeof requireReprompt === "boolean" ? requireReprompt : true;
+
   const loaded: LoadedSshKey = {
     entryId,
+    requireReprompt: reprompt,
     pem,
     passphrase,
     publicKeyBlob,

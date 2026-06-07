@@ -10,6 +10,15 @@ export const MS_PER_HOUR = 60 * MS_PER_MINUTE;
 /** Milliseconds per day. */
 export const MS_PER_DAY = 24 * MS_PER_HOUR;
 
+/** Seconds per minute. */
+export const SEC_PER_MINUTE = 60;
+
+/** Seconds per hour. */
+export const SEC_PER_HOUR = 60 * SEC_PER_MINUTE;
+
+/** Seconds per day. */
+export const SEC_PER_DAY = 24 * SEC_PER_HOUR;
+
 /**
  * Post-approval execution TTL. Short window mitigates email-channel disclosure
  * (S3 — once approved, the URL+token sits in the target's mailbox). Capped

@@ -61,6 +61,14 @@ describe("MCP_SCOPE_RISK", () => {
   it("delegation:check is risk level 'use'", () => {
     expect(MCP_SCOPE_RISK[MCP_SCOPE.DELEGATION_CHECK]).toBe("use");
   });
+
+  it("ssh:sign is risk level 'use'", () => {
+    expect(MCP_SCOPE_RISK[MCP_SCOPE.SSH_SIGN]).toBe("use");
+  });
+
+  it("MCP_SCOPE.SSH_SIGN equals 'ssh:sign'", () => {
+    expect(MCP_SCOPE.SSH_SIGN).toBe("ssh:sign");
+  });
 });
 
 describe("MCP token constants", () => {

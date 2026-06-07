@@ -40,6 +40,7 @@ export const API_PATH = {
   VAULT_RECOVERY_KEY_RECOVER: "/api/vault/recovery-key/recover",
   VAULT_RESET: "/api/vault/reset",
   VAULT_ADMIN_RESET: "/api/vault/admin-reset",
+  VAULT_SSH_SIGN_AUTHORIZE: "/api/vault/ssh/sign-authorize",
   EMERGENCY_ACCESS: "/api/emergency-access",
   EMERGENCY_ACCESS_ACCEPT: "/api/emergency-access/accept",
   EMERGENCY_ACCESS_REJECT: "/api/emergency-access/reject",

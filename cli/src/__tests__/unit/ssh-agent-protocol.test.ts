@@ -8,9 +8,17 @@ import {
   buildFailure,
   buildIdentitiesAnswer,
   buildSignResponse,
+  buildSuccess,
+  buildExtensionResponse,
+  readExtensionRequest,
   SSH2_AGENT_FAILURE,
   SSH2_AGENT_IDENTITIES_ANSWER,
   SSH2_AGENT_SIGN_RESPONSE,
+  SSH_AGENT_SUCCESS,
+  SSH_AGENTC_REMOVE_ALL_IDENTITIES,
+  SSH_AGENTC_EXTENSION,
+  SSH_AGENT_EXTENSION_FAILURE,
+  SSH_AGENT_EXTENSION_RESPONSE,
 } from "../../lib/ssh-agent-protocol";
 
 describe("readUint32 / writeUint32", () => {
@@ -116,5 +124,110 @@ describe("buildSignResponse", () => {
     // After type byte, there should be an encoded string (the signature)
     const sigLen = readUint32(msg, 5);
     expect(sigLen).toBe(sig.length);
+  });
+});
+
+// ─── RFC 9987 constant values ─────────────────────────────────
+
+describe("RFC 9987 constants", () => {
+  it("SSH_AGENT_SUCCESS is 6", () => {
+    expect(SSH_AGENT_SUCCESS).toBe(6);
+  });
+
+  it("SSH_AGENTC_REMOVE_ALL_IDENTITIES is 19", () => {
+    expect(SSH_AGENTC_REMOVE_ALL_IDENTITIES).toBe(19);
+  });
+
+  it("SSH_AGENTC_EXTENSION is 27", () => {
+    expect(SSH_AGENTC_EXTENSION).toBe(27);
+  });
+
+  it("SSH_AGENT_EXTENSION_FAILURE is 28", () => {
+    expect(SSH_AGENT_EXTENSION_FAILURE).toBe(28);
+  });
+
+  it("SSH_AGENT_EXTENSION_RESPONSE is 29", () => {
+    expect(SSH_AGENT_EXTENSION_RESPONSE).toBe(29);
+  });
+});
+
+// ─── buildSuccess ─────────────────────────────────────────────
+
+describe("buildSuccess", () => {
+  it("returns framed success message with body length 1", () => {
+    const msg = buildSuccess();
+    expect(readUint32(msg, 0)).toBe(1); // body length = 1 byte
+    expect(msg[4]).toBe(SSH_AGENT_SUCCESS); // 6
+  });
+
+  it("total frame length is 5 (4-byte prefix + 1-byte type)", () => {
+    expect(buildSuccess().length).toBe(5);
+  });
+});
+
+// ─── buildExtensionResponse ───────────────────────────────────
+
+describe("buildExtensionResponse", () => {
+  it("frames SSH_AGENT_EXTENSION_RESPONSE byte + payload", () => {
+    const payload = Buffer.from([0x01, 0x02, 0x03]);
+    const msg = buildExtensionResponse(payload);
+
+    // 4-byte length prefix + 1 type byte + 3 payload bytes
+    expect(msg.length).toBe(8);
+    expect(readUint32(msg, 0)).toBe(4); // body length = 1 + 3
+    expect(msg[4]).toBe(SSH_AGENT_EXTENSION_RESPONSE); // 29
+    expect(msg[5]).toBe(0x01);
+    expect(msg[6]).toBe(0x02);
+    expect(msg[7]).toBe(0x03);
+  });
+
+  it("accepts empty payload", () => {
+    const msg = buildExtensionResponse(Buffer.alloc(0));
+    expect(msg.length).toBe(5);
+    expect(readUint32(msg, 0)).toBe(1);
+    expect(msg[4]).toBe(SSH_AGENT_EXTENSION_RESPONSE);
+  });
+});
+
+// ─── readExtensionRequest ─────────────────────────────────────
+
+describe("readExtensionRequest", () => {
+  it("parses extension name and rest from a correctly framed buffer", () => {
+    const extName = "session-bind@openssh.com";
+    const restData = Buffer.from([0xAB, 0xCD]);
+
+    // Build a message body: byte(type) + string(extName) + restData
+    const nameBuf = encodeString(extName);
+    const msgBuf = Buffer.concat([
+      Buffer.from([SSH_AGENTC_EXTENSION]),
+      nameBuf,
+      restData,
+    ]);
+
+    const result = readExtensionRequest(msgBuf);
+    expect(result.extName).toBe(extName);
+    expect(Buffer.compare(result.rest, restData)).toBe(0);
+  });
+
+  it("round-trips a short extension name with no extra data", () => {
+    const extName = "query";
+    const nameBuf = encodeString(extName);
+    const msgBuf = Buffer.concat([
+      Buffer.from([SSH_AGENTC_EXTENSION]),
+      nameBuf,
+    ]);
+
+    const result = readExtensionRequest(msgBuf);
+    expect(result.extName).toBe(extName);
+    expect(result.rest.length).toBe(0);
+  });
+
+  it("uses utf-8 decoding for the extension name", () => {
+    const extName = "test@example.com";
+    const msgBuf = Buffer.concat([
+      Buffer.from([SSH_AGENTC_EXTENSION]),
+      encodeString(extName),
+    ]);
+    expect(readExtensionRequest(msgBuf).extName).toBe(extName);
   });
 });

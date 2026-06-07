@@ -1,4 +1,10 @@
-import { MS_PER_MINUTE } from "../time";
+import {
+  MS_PER_MINUTE,
+  MS_PER_HOUR,
+  SEC_PER_MINUTE,
+  SEC_PER_HOUR,
+  SEC_PER_DAY,
+} from "../time";
 
 export const MCP_TOKEN_PREFIX = "mcp_";
 export const MCP_CLIENT_ID_PREFIX = "mcpc_";
@@ -13,6 +19,7 @@ export const MCP_SCOPE = {
   PASSWORDS_READ: "passwords:read",
   PASSWORDS_WRITE: "passwords:write",
   DELEGATION_CHECK: "delegation:check",
+  SSH_SIGN: "ssh:sign",
 } as const;
 
 export type McpScope = (typeof MCP_SCOPE)[keyof typeof MCP_SCOPE];
@@ -30,12 +37,13 @@ export const MCP_SCOPE_RISK: Record<McpScope, ScopeRiskLevel> = {
   [MCP_SCOPE.TEAM_CREDENTIALS_READ]: "use",
   [MCP_SCOPE.PASSWORDS_WRITE]: "write",
   [MCP_SCOPE.DELEGATION_CHECK]: "use",
+  [MCP_SCOPE.SSH_SIGN]: "use",
 };
 
 // OAuth 2.1 constants
-export const MCP_CODE_EXPIRY_SEC = 300; // 5 minutes
-export const MCP_TOKEN_EXPIRY_SEC = 3600; // 1 hour
-export const MCP_TOKEN_MAX_EXPIRY_SEC = 86400; // 24 hours
+export const MCP_CODE_EXPIRY_SEC = 5 * SEC_PER_MINUTE;
+export const MCP_TOKEN_EXPIRY_SEC = SEC_PER_HOUR;
+export const MCP_TOKEN_MAX_EXPIRY_SEC = SEC_PER_DAY;
 
 // Limits
 export const MAX_MCP_CLIENTS_PER_TENANT = 10;
@@ -65,10 +73,10 @@ export const LOOPBACK_REDIRECT_RE = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):
 
 // DCR (Dynamic Client Registration) constants
 export const MCP_REFRESH_TOKEN_PREFIX = "mcpr_";
-export const MCP_REFRESH_TOKEN_EXPIRY_SEC = 604800; // 7 days
-export const MCP_DCR_UNCLAIMED_EXPIRY_SEC = 86400; // 24 hours
+export const MCP_REFRESH_TOKEN_EXPIRY_SEC = 7 * SEC_PER_DAY;
+export const MCP_DCR_UNCLAIMED_EXPIRY_SEC = SEC_PER_DAY;
 export const MAX_UNCLAIMED_DCR_CLIENTS = 100;
-export const DCR_RATE_LIMIT_WINDOW_MS = 3_600_000; // 1 hour
+export const DCR_RATE_LIMIT_WINDOW_MS = MS_PER_HOUR;
 export const DCR_RATE_LIMIT_MAX = 20; // per IP (/64 for IPv6)
 
 // Refresh-token exchange failure reasons (returned to caller in `reason`

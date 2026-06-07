@@ -12,7 +12,8 @@
     "vault:unlock-data": "暗号化された保管庫キーの取得",
     "passwords:read": "パスワードエントリの読み取り",
     "passwords:write": "パスワードエントリの作成・更新・削除",
-    "delegation:check": "委任状態を確認"
+    "delegation:check": "委任状態を確認",
+    "ssh:sign": "SSH 認証チャレンジへの署名"
   },
   "errors": {
     "missingParams": "必須パラメータが不足しています",

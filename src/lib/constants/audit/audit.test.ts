@@ -228,6 +228,23 @@ describe("audit constants", () => {
     expect(AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.MAINTENANCE]).toBeUndefined();
   });
 
+  it("SSH group exists only in PERSONAL scope (not TEAM, not TENANT)", () => {
+    expect(AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.SSH]).toBeDefined();
+    expect(AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.SSH]).toBeUndefined();
+    expect(AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.SSH]).toBeUndefined();
+  });
+
+  it("SSH group contains SSH_KEY_SIGN and SSH_KEY_SIGN_DENIED", () => {
+    const sshGroup = AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.SSH];
+    expect(sshGroup).toContain(AUDIT_ACTION.SSH_KEY_SIGN);
+    expect(sshGroup).toContain(AUDIT_ACTION.SSH_KEY_SIGN_DENIED);
+  });
+
+  it("SSH group is excluded from tenant webhook event groups", () => {
+    expect(TENANT_WEBHOOK_EVENT_GROUPS[AUDIT_ACTION_GROUP.SSH]).toBeUndefined();
+    expect(TEAM_WEBHOOK_EVENT_GROUPS[AUDIT_ACTION_GROUP.SSH]).toBeUndefined();
+  });
+
   it("MAINTENANCE group is excluded from webhook event groups", () => {
     expect(TENANT_WEBHOOK_EVENT_GROUPS[AUDIT_ACTION_GROUP.MAINTENANCE]).toBeUndefined();
     expect(TEAM_WEBHOOK_EVENT_GROUPS[AUDIT_ACTION_GROUP.MAINTENANCE]).toBeUndefined();

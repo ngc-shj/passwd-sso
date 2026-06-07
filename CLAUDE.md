@@ -178,6 +178,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/vault/delegation` | GET, POST, DELETE | Delegation session CRUD (list/create/revoke-all) |
 | `/api/vault/delegation/[id]` | DELETE | Revoke single delegation session |
 | `/api/vault/delegation/check` | GET | Authorization check for CLI agent decrypt |
+| `/api/vault/ssh/sign-authorize` | POST | Authorize + audit a single SSH-agent signature |
 
 #### Passwords & Entries
 
