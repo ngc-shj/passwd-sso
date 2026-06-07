@@ -1,0 +1,7 @@
+{
+  "phaseName": "directory-structure-review-phase-b-password-generator",
+  "moves": [
+    { "from": "src/lib/password-generator.ts",      "to": "src/lib/generator/password-generator.ts" },
+    { "from": "src/lib/password-generator.test.ts", "to": "src/lib/generator/password-generator.test.ts" }
+  ]
+}

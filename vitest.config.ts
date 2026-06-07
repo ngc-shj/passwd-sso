@@ -26,7 +26,7 @@ export default defineConfig({
         "src/lib/crypto/crypto-server.ts",
         "src/lib/crypto/crypto-team.ts",
         "src/lib/team/team-vault-core.tsx",
-        "src/lib/password-generator.ts",
+        "src/lib/generator/password-generator.ts",
         "src/lib/email/**/*.ts",
         "src/lib/auth/session/auth-adapter.ts",
         "src/lib/auth/tokens/scim-token.ts",
@@ -52,7 +52,6 @@ export default defineConfig({
         "src/lib/mcp/**/*.ts",
         "src/lib/security/password-policy-validation.ts",
         "src/lib/auth/tokens/extension-token.ts",
-        "src/lib/inject-extension-bridge-code.ts",
       ],
       exclude: [
         "src/app/api/auth/\\[...nextauth\\]/**",
