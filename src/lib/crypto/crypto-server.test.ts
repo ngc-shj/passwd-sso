@@ -345,17 +345,32 @@ describe("crypto-server", () => {
       ).toThrow();
     });
 
-    it("decrypts legacy no-AAD ciphertext via fallback", () => {
-      // Rows created before S4 have no AAD. encryptServerData with no aad
-      // simulates that; decryptShareData must still recover them.
+    it("rejects no-AAD ciphertext (legacy fallback removed)", () => {
+      // No share/send rows predate AAD binding, so the no-AAD fallback was
+      // removed. A ciphertext encrypted without the tenant AAD must NOT decrypt
+      // — otherwise such rows would remain transplantable across tenants.
       const version = getCurrentMasterKeyVersion();
-      const legacy = encryptServerData("legacy", getMasterKeyByVersion(version));
-      const decrypted = decryptShareData(
-        { ...legacy },
-        version,
-        "tenant-a",
-      );
-      expect(decrypted).toBe("legacy");
+      const noAad = encryptServerData("legacy", getMasterKeyByVersion(version));
+      expect(() =>
+        decryptShareData({ ...noAad }, version, "tenant-a"),
+      ).toThrow();
+    });
+  });
+
+  describe("encryptShareBinary / decryptShareBinary", () => {
+    it("rejects a ciphertext substituted across tenants (AAD binding)", () => {
+      const encrypted = encryptShareBinary(Buffer.from("secret-bytes"), "tenant-a");
+      expect(() =>
+        decryptShareBinary(encrypted, encrypted.masterKeyVersion, "tenant-b"),
+      ).toThrow();
+    });
+
+    it("rejects no-AAD ciphertext (legacy fallback removed)", () => {
+      const version = getCurrentMasterKeyVersion();
+      const noAad = encryptServerBinary(Buffer.from("legacy"), getMasterKeyByVersion(version));
+      expect(() =>
+        decryptShareBinary({ ...noAad }, version, "tenant-a"),
+      ).toThrow();
     });
   });
 

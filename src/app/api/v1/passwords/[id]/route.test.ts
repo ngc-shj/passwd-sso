@@ -13,7 +13,6 @@ const {
   mockHistoryDeleteMany,
   mockFolderFindFirst,
   mockTagCount,
-  mockTransaction,
   mockLogAudit,
   mockWithTenantRls,
 } = vi.hoisted(() => ({
@@ -28,7 +27,6 @@ const {
   mockHistoryDeleteMany: vi.fn(),
   mockFolderFindFirst: vi.fn(),
   mockTagCount: vi.fn(),
-  mockTransaction: vi.fn(),
   mockLogAudit: vi.fn(),
   mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
@@ -48,7 +46,6 @@ vi.mock("@/lib/prisma", () => ({
     },
     folder: { findFirst: mockFolderFindFirst },
     tag: { count: mockTagCount },
-    $transaction: mockTransaction,
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withTenantRls: mockWithTenantRls }));
@@ -167,17 +164,6 @@ describe("GET /api/v1/passwords/[id]", () => {
 });
 
 describe("PUT /api/v1/passwords/[id]", () => {
-  const txMock = {
-    passwordEntryHistory: {
-      create: vi.fn().mockResolvedValue({}),
-      findMany: vi.fn().mockResolvedValue([]),
-      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
-    },
-    passwordEntry: {
-      update: vi.fn(),
-    },
-  };
-
   const updateBody = {
     encryptedBlob: { ciphertext: "new-blob", iv: "a".repeat(24), authTag: "b".repeat(32) },
     encryptedOverview: { ciphertext: "new-over", iv: "c".repeat(24), authTag: "d".repeat(32) },
@@ -205,13 +191,13 @@ describe("PUT /api/v1/passwords/[id]", () => {
     mockCheck.mockResolvedValue({ allowed: true });
     mockEnforceAccessRestriction.mockResolvedValue(null);
     mockEntryFindUnique.mockResolvedValue(ownedEntry);
-    txMock.passwordEntryHistory.create.mockResolvedValue({});
-    txMock.passwordEntryHistory.findMany.mockResolvedValue([]);
-    txMock.passwordEntryHistory.deleteMany.mockResolvedValue({ count: 0 });
-    txMock.passwordEntry.update.mockResolvedValue(updatedEntry);
-    mockTransaction.mockImplementation(
-      async (fn: (tx: typeof txMock) => Promise<unknown>) => fn(txMock),
-    );
+    // withTenantRls runs its callback inside a tenant-scoped transaction and
+    // passes a tx client; the mock routes tx → the prisma mock, so writes land
+    // on the top-level mockHistory*/mockEntryUpdate fns (no $transaction).
+    mockHistoryCreate.mockResolvedValue({});
+    mockHistoryFindMany.mockResolvedValue([]);
+    mockHistoryDeleteMany.mockResolvedValue({ count: 0 });
+    mockEntryUpdate.mockResolvedValue(updatedEntry);
   });
 
   it("returns 401 when API key is missing or invalid", async () => {
@@ -234,7 +220,7 @@ describe("PUT /api/v1/passwords/[id]", () => {
     expect(status).toBe(404);
   });
 
-  it("updates entry and creates history snapshot in a single transaction", async () => {
+  it("updates entry and snapshots history when the blob changes", async () => {
     const res = await PUT(
       createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, { body: updateBody }),
       createParams({ id: PW_ID }),
@@ -245,9 +231,7 @@ describe("PUT /api/v1/passwords/[id]", () => {
     expect(json.id).toBe(PW_ID);
     expect(json.keyVersion).toBe(2);
 
-    // History snapshot created inside transaction
-    expect(mockTransaction).toHaveBeenCalled();
-    expect(txMock.passwordEntryHistory.create).toHaveBeenCalledWith(
+    expect(mockHistoryCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           entryId: PW_ID,
@@ -257,6 +241,7 @@ describe("PUT /api/v1/passwords/[id]", () => {
         }),
       }),
     );
+    expect(mockEntryUpdate).toHaveBeenCalled();
 
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "ENTRY_UPDATE", targetId: PW_ID }),
@@ -264,7 +249,7 @@ describe("PUT /api/v1/passwords/[id]", () => {
   });
 
   it("trims history to newest 20 when over limit", async () => {
-    txMock.passwordEntryHistory.findMany.mockResolvedValue(
+    mockHistoryFindMany.mockResolvedValue(
       Array.from({ length: 21 }, (_, i) => ({ id: `hist-${i}` })),
     );
 
@@ -273,13 +258,13 @@ describe("PUT /api/v1/passwords/[id]", () => {
       createParams({ id: PW_ID }),
     );
 
-    expect(txMock.passwordEntryHistory.deleteMany).toHaveBeenCalledWith({
+    expect(mockHistoryDeleteMany).toHaveBeenCalledWith({
       where: { id: { in: ["hist-0"] } },
     });
   });
 
-  it("does not create history snapshot when only metadata changes (no encryptedBlob)", async () => {
-    txMock.passwordEntry.update.mockResolvedValue({ ...updatedEntry, isFavorite: true });
+  it("does not snapshot history when only metadata changes (no encryptedBlob)", async () => {
+    mockEntryUpdate.mockResolvedValue({ ...updatedEntry, isFavorite: true });
 
     await PUT(
       createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, {
@@ -288,14 +273,78 @@ describe("PUT /api/v1/passwords/[id]", () => {
       createParams({ id: PW_ID }),
     );
 
-    // Transaction is always used for atomicity, but history.create is skipped when no blob changes
-    expect(mockTransaction).toHaveBeenCalled();
-    expect(txMock.passwordEntryHistory.create).not.toHaveBeenCalled();
+    expect(mockHistoryCreate).not.toHaveBeenCalled();
+    expect(mockEntryUpdate).toHaveBeenCalled();
   });
 
-  it("returns response without breaking when select clause omits some fields", async () => {
-    // The updated entry from the transaction uses include: { tags: { select: { id: true } } }
-    // so tags is present and the response shape should be valid
+  it("rejects a keyVersion change without re-encryption (C7) with 409", async () => {
+    // ownedEntry.keyVersion === 1; bumping to 2 without an encryptedBlob is the
+    // metadata/ciphertext desync the guard must reject.
+    const res = await PUT(
+      createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, {
+        body: { keyVersion: 2 },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(409);
+    expect(json.error).toBe("KEY_VERSION_WITHOUT_REENCRYPT");
+    expect(mockEntryUpdate).not.toHaveBeenCalled();
+  });
+
+  it("rejects an aadVersion change without re-encryption (C7) with 409", async () => {
+    // ownedEntry.aadVersion === 0; bumping to 1 without an encryptedBlob.
+    const res = await PUT(
+      createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, {
+        body: { aadVersion: 1 },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(409);
+    expect(json.error).toBe("KEY_VERSION_WITHOUT_REENCRYPT");
+    expect(mockEntryUpdate).not.toHaveBeenCalled();
+  });
+
+  it("allows a keyVersion change when an encryptedBlob is supplied (re-encryption)", async () => {
+    const res = await PUT(
+      createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, { body: updateBody }),
+      createParams({ id: PW_ID }),
+    );
+    const { status } = await parseResponse(res);
+    expect(status).toBe(200);
+    expect(mockEntryUpdate).toHaveBeenCalled();
+  });
+
+  it("returns 400 when folderId is not owned by the user", async () => {
+    mockFolderFindFirst.mockResolvedValue(null);
+    const res = await PUT(
+      createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, {
+        body: { folderId: "folder-x" },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(mockEntryUpdate).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when tagIds include a tag not owned by the user", async () => {
+    mockTagCount.mockResolvedValue(1); // only 1 of the 2 requested tags is owned
+    const res = await PUT(
+      createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, {
+        body: { tagIds: ["tag-x", "tag-y"] },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(mockEntryUpdate).not.toHaveBeenCalled();
+  });
+
+  it("returns a valid response shape (tagIds, encryptedOverview)", async () => {
     const res = await PUT(
       createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, { body: updateBody }),
       createParams({ id: PW_ID }),
@@ -365,8 +414,7 @@ describe("DELETE /api/v1/passwords/[id]", () => {
     );
   });
 
-  it("permanently deletes when ?permanent=true", async () => {
-    mockEntryDelete.mockResolvedValue({});
+  it("rejects ?permanent=true with 403 (no step-up over API key)", async () => {
     const res = await DELETE(
       createRequest("DELETE", `http://localhost/api/v1/passwords/${PW_ID}`, {
         searchParams: { permanent: "true" },
@@ -374,11 +422,11 @@ describe("DELETE /api/v1/passwords/[id]", () => {
       createParams({ id: PW_ID }),
     );
     const { status, json } = await parseResponse(res);
-    expect(status).toBe(200);
-    expect(json.success).toBe(true);
-    expect(mockEntryDelete).toHaveBeenCalledWith({ where: { id: PW_ID } });
-    expect(mockLogAudit).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "ENTRY_PERMANENT_DELETE" }),
-    );
+    expect(status).toBe(403);
+    expect(json.error).toBe("FORBIDDEN");
+    // Rejected before any DB access — no delete, no soft-delete, no audit.
+    expect(mockEntryDelete).not.toHaveBeenCalled();
+    expect(mockEntryUpdate).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 });
