@@ -44,13 +44,16 @@ function decryptGcm(
   key: Buffer,
   ciphertextHex: string,
   ivHex: string,
-  authTagHex: string
+  authTagHex: string,
+  tenantId: string
 ): string {
   const decipher = createDecipheriv(
     "aes-256-gcm",
     key,
     Buffer.from(ivHex, "hex")
   );
+  // Seed binds share-data:v1:<tenantId> as AAD; decryption must match.
+  decipher.setAAD(Buffer.from(`share-data:v1:${tenantId}`, "utf8"));
   decipher.setAuthTag(Buffer.from(authTagHex, "hex"));
   const decrypted = Buffer.concat([
     decipher.update(Buffer.from(ciphertextHex, "hex")),
@@ -162,7 +165,7 @@ describe("seedShareLink", () => {
     const iv = params[6] as string;
     const authTag = params[7] as string;
 
-    const plaintext = decryptGcm(MASTER_KEY, ciphertext, iv, authTag);
+    const plaintext = decryptGcm(MASTER_KEY, ciphertext, iv, authTag, E2E_TENANT.id);
     const data = JSON.parse(plaintext);
 
     expect(data.title).toBe(BASE_OPTIONS.title);
@@ -182,7 +185,7 @@ describe("seedShareLink", () => {
     const iv = params[6] as string;
     const authTag = params[7] as string;
 
-    const plaintext = decryptGcm(MASTER_KEY, ciphertext, iv, authTag);
+    const plaintext = decryptGcm(MASTER_KEY, ciphertext, iv, authTag, E2E_TENANT.id);
     const data = JSON.parse(plaintext);
     expect(data.title).toBe("E2E Shared Entry");
   });
@@ -218,7 +221,7 @@ describe("seedShareLink", () => {
 
     // Decryption with V1 key (MASTER_KEY) should succeed
     expect(() =>
-      decryptGcm(MASTER_KEY, ciphertext, iv, authTag)
+      decryptGcm(MASTER_KEY, ciphertext, iv, authTag, E2E_TENANT.id)
     ).not.toThrow();
   });
 });
