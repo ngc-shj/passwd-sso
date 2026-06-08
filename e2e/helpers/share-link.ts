@@ -2,7 +2,8 @@
  * Database helper for seeding PasswordShare (share link) rows in E2E tests.
  *
  * The encrypted_data field is encrypted with the SHARE_MASTER_KEY from env,
- * replicating the logic in src/lib/crypto-server.ts encryptShareData().
+ * replicating the logic in src/lib/crypto/crypto-server.ts encryptShareData() —
+ * including the tenant-bound AAD (decryptShareData() requires it, no fallback).
  */
 import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { E2E_TENANT, getPool } from "./db";
@@ -20,14 +21,22 @@ function getShareMasterKey(): Buffer {
   return Buffer.from(hex, "hex");
 }
 
+/** AAD binding the share ciphertext to its tenant — must match shareAad() in
+ *  src/lib/crypto/crypto-server.ts byte-for-byte, or decryptShareData() fails. */
+function shareAad(tenantId: string): Buffer {
+  return Buffer.from(`share-data:v1:${tenantId}`, "utf8");
+}
+
 function encryptWithMasterKey(
-  plaintext: string
+  plaintext: string,
+  tenantId: string
 ): { ciphertext: string; iv: string; authTag: string } {
   const key = getShareMasterKey();
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", key, iv, {
     authTagLength: 16,
   });
+  cipher.setAAD(shareAad(tenantId));
   const ciphertext = Buffer.concat([
     cipher.update(plaintext, "utf8"),
     cipher.final(),
@@ -72,7 +81,7 @@ export async function seedShareLink(
     notes: "Seeded by E2E global-setup",
     entryType: "LOGIN",
   });
-  const encrypted = encryptWithMasterKey(shareDataPayload);
+  const encrypted = encryptWithMasterKey(shareDataPayload, tenantId);
 
   // Expires 24 hours from now
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();

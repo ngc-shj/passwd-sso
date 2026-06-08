@@ -159,6 +159,32 @@ describe("classifyRoute — exchange route exact match", () => {
   });
 });
 
+describe("classifyRoute — SESSION_REQUIRED prefix boundary (sibling-collision guard)", () => {
+  it("classifies /api/passwords exactly as API_SESSION_REQUIRED", () => {
+    expect(classifyRoute("/api/passwords").kind).toBe(
+      ROUTE_POLICY_KIND.API_SESSION_REQUIRED,
+    );
+  });
+
+  it("classifies /api/passwords/123 (child segment) as API_SESSION_REQUIRED", () => {
+    expect(classifyRoute("/api/passwords/123").kind).toBe(
+      ROUTE_POLICY_KIND.API_SESSION_REQUIRED,
+    );
+  });
+
+  it("does NOT capture /api/passwords-export under the passwords prefix", () => {
+    expect(classifyRoute("/api/passwords-export").kind).toBe(
+      ROUTE_POLICY_KIND.API_DEFAULT,
+    );
+  });
+
+  it("does NOT capture /api/tags-export under the tags prefix", () => {
+    expect(classifyRoute("/api/tags-export").kind).toBe(
+      ROUTE_POLICY_KIND.API_DEFAULT,
+    );
+  });
+});
+
 describe("isApiRoute", () => {
   it("returns true for /api/* paths", () => {
     expect(isApiRoute("/api/foo")).toBe(true);

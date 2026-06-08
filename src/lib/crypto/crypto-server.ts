@@ -198,17 +198,13 @@ export function encryptShareData(plaintext: string, tenantId: string): ServerEnc
 
 /**
  * Decrypt share data with the specified master key version (AES-256-GCM).
- * Tries the tenant-bound AAD first; on auth failure falls back to no-AAD so
- * rows created before AAD binding (legacy) still decrypt. A new AAD-bound
- * ciphertext substituted across tenants fails both paths and is rejected.
+ * Requires the tenant-bound AAD: a ciphertext substituted across tenants fails
+ * the GCM auth check and throws. All share/send rows are AAD-bound (the binding
+ * predates any real data), so there is no no-AAD legacy fallback to weaken it.
  */
 export function decryptShareData(encrypted: ServerEncryptedData, masterKeyVersion: number, tenantId: string): string {
   const masterKey = getMasterKeyByVersion(masterKeyVersion);
-  try {
-    return decryptServerData(encrypted, masterKey, shareAad(tenantId));
-  } catch {
-    return decryptServerData(encrypted, masterKey);
-  }
+  return decryptServerData(encrypted, masterKey, shareAad(tenantId));
 }
 
 /**
@@ -223,14 +219,10 @@ export function encryptShareBinary(data: Buffer, tenantId: string): ServerEncryp
   return { ...encryptServerBinary(data, masterKey, shareAad(tenantId)), masterKeyVersion: version };
 }
 
-/** Decrypt binary data with the specified master key version (AES-256-GCM). Legacy no-AAD fallback as in decryptShareData. */
+/** Decrypt binary data with the specified master key version (AES-256-GCM). Requires the tenant-bound AAD; see decryptShareData. */
 export function decryptShareBinary(encrypted: ServerEncryptedBinary, masterKeyVersion: number, tenantId: string): Buffer {
   const masterKey = getMasterKeyByVersion(masterKeyVersion);
-  try {
-    return decryptServerBinary(encrypted, masterKey, shareAad(tenantId));
-  } catch {
-    return decryptServerBinary(encrypted, masterKey);
-  }
+  return decryptServerBinary(encrypted, masterKey, shareAad(tenantId));
 }
 
 // ─── Access Password (for password-protected shares) ────────────

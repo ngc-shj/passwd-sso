@@ -82,6 +82,17 @@ const SESSION_REQUIRED_EXACT_PATHS: readonly string[] = [
 ];
 
 /**
+ * Boundary-aware prefix match: a path belongs to `prefix` only when it equals
+ * the prefix exactly or continues with a `/` segment boundary. Without this,
+ * `startsWith("/api/passwords")` would also capture an unrelated sibling like
+ * `/api/passwords-export`. Mirrors the matcher in `cors-gate.ts`
+ * (`isBearerBypassRoute`) so both gates classify paths identically.
+ */
+function pathMatchesPrefix(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+/**
  * Classify a request pathname. The CALLER is responsible for handling
  * preflight (OPTIONS method) before consulting this function — the
  * `preflight` kind is only returned when the caller pre-flags the
@@ -143,7 +154,7 @@ export function classifyRoute(pathname: string): RoutePolicy {
   // stays "api-session-required" either way.
   if (
     SESSION_REQUIRED_EXACT_PATHS.includes(pathname) ||
-    SESSION_REQUIRED_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+    SESSION_REQUIRED_PREFIXES.some((prefix) => pathMatchesPrefix(pathname, prefix))
   ) {
     return { kind: ROUTE_POLICY_KIND.API_SESSION_REQUIRED };
   }

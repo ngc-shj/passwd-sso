@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import {
-  collectEntryAttachmentRefs,
-  deleteAttachmentBlobs,
-} from "@/lib/blob-store/cleanup";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { updateE2EPasswordSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/http/api-error-codes";
@@ -174,6 +170,16 @@ async function handlePUT(
     updateData.overviewIv = encryptedOverview.iv;
     updateData.overviewAuthTag = encryptedOverview.authTag;
   }
+  // C7: keyVersion / aadVersion cannot change without re-encryption. If either
+  // differs from the stored value and encryptedBlob is absent, reject — mirrors
+  // the guard in the session API (src/app/api/passwords/[id]/route.ts) so v1
+  // cannot create a record whose crypto metadata no longer matches its blob.
+  const keyVersionChanged = keyVersion !== undefined && keyVersion !== existing.keyVersion;
+  const aadVersionChanged = aadVersion !== undefined && aadVersion !== existing.aadVersion;
+  if ((keyVersionChanged || aadVersionChanged) && !encryptedBlob) {
+    return errorResponse(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
+  }
+
   if (keyVersion !== undefined) updateData.keyVersion = keyVersion;
   if (aadVersion !== undefined) updateData.aadVersion = aadVersion;
   if (folderId !== undefined) updateData.folderId = folderId;
@@ -186,40 +192,40 @@ async function handlePUT(
     updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
   }
 
-  // Snapshot history and update entry in a single transaction
-  const updated = await withTenantRls(prisma, tenantId, async (tx) =>
-    prisma.$transaction(async (tx) => {
-      if (encryptedBlob) {
-        await tx.passwordEntryHistory.create({
-          data: {
-            entryId: id,
-            tenantId: existing.tenantId,
-            encryptedBlob: existing.encryptedBlob,
-            blobIv: existing.blobIv,
-            blobAuthTag: existing.blobAuthTag,
-            keyVersion: existing.keyVersion,
-            aadVersion: existing.aadVersion,
-          },
-        });
-        // Trim to max 20 history entries (stable sort: changedAt asc, id asc)
-        const all = await tx.passwordEntryHistory.findMany({
-          where: { entryId: id },
-          orderBy: [{ changedAt: "asc" }, { id: "asc" }],
-          select: { id: true },
-        });
-        if (all.length > 20) {
-          await tx.passwordEntryHistory.deleteMany({
-            where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
-          });
-        }
-      }
-      return tx.passwordEntry.update({
-        where: { id },
-        data: updateData,
-        include: { tags: { select: { id: true } } },
+  // Snapshot history and update entry. withTenantRls already runs the callback
+  // inside a tenant-scoped transaction, so tx IS the transaction client — no
+  // nested $transaction is needed (it would only fold back into the same tx).
+  const updated = await withTenantRls(prisma, tenantId, async (tx) => {
+    if (encryptedBlob) {
+      await tx.passwordEntryHistory.create({
+        data: {
+          entryId: id,
+          tenantId: existing.tenantId,
+          encryptedBlob: existing.encryptedBlob,
+          blobIv: existing.blobIv,
+          blobAuthTag: existing.blobAuthTag,
+          keyVersion: existing.keyVersion,
+          aadVersion: existing.aadVersion,
+        },
       });
-    }),
-  );
+      // Trim to max 20 history entries (stable sort: changedAt asc, id asc)
+      const all = await tx.passwordEntryHistory.findMany({
+        where: { entryId: id },
+        orderBy: [{ changedAt: "asc" }, { id: "asc" }],
+        select: { id: true },
+      });
+      if (all.length > 20) {
+        await tx.passwordEntryHistory.deleteMany({
+          where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
+        });
+      }
+    }
+    return tx.passwordEntry.update({
+      where: { id },
+      data: updateData,
+      include: { tags: { select: { id: true } } },
+    });
+  });
 
   await logAuditAsync({
     ...personalAuditBase(req, userId),
@@ -265,7 +271,16 @@ async function handleDELETE(
   const { id } = await params;
 
   const { searchParams } = new URL(req.url);
-  const permanent = searchParams.get("permanent") === "true";
+  // Permanent (irreversible) deletion requires step-up authentication, which
+  // API keys cannot satisfy. The session API gates permanent delete behind a
+  // fresh-credential check; v1 therefore only soft-deletes. Permanent purge
+  // stays in the web app.
+  if (searchParams.get("permanent") === "true") {
+    return errorResponseWithMessage(
+      API_ERROR.FORBIDDEN,
+      "Permanent deletion is not available via the v1 API. Use the web app, which requires step-up authentication.",
+    );
+  }
 
   const existing = await withTenantRls(prisma, tenantId, async (tx) =>
     tx.passwordEntry.findUnique({ where: { id }, select: { userId: true } }),
@@ -275,32 +290,19 @@ async function handleDELETE(
     return notFound();
   }
 
-  if (permanent) {
-    const refs = await withTenantRls(prisma, tenantId, async (tx) => {
-      // Capture external blob refs before the cascade delete removes the rows
-      const attachmentRefs = await collectEntryAttachmentRefs(tx, {
-        kind: "personal",
-        entryIds: [id],
-      });
-      await tx.passwordEntry.delete({ where: { id } });
-      return attachmentRefs;
-    });
-    await deleteAttachmentBlobs(refs);
-  } else {
-    await withTenantRls(prisma, tenantId, async (tx) =>
-      tx.passwordEntry.update({
-        where: { id },
-        data: { deletedAt: new Date() },
-      }),
-    );
-  }
+  await withTenantRls(prisma, tenantId, async (tx) =>
+    tx.passwordEntry.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    }),
+  );
 
   await logAuditAsync({
     ...personalAuditBase(req, userId),
-    action: permanent ? AUDIT_ACTION.ENTRY_PERMANENT_DELETE : AUDIT_ACTION.ENTRY_TRASH,
+    action: AUDIT_ACTION.ENTRY_TRASH,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: id,
-    metadata: { permanent },
+    metadata: { permanent: false },
   });
 
   return NextResponse.json({ success: true });
