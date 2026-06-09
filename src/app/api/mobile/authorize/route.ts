@@ -41,6 +41,7 @@ import { extractRequestMeta } from "@/lib/audit/audit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getAppOrigin, resolveBasePath } from "@/lib/url-helpers";
 import { DEFAULT_LOCALE } from "@/i18n/locales";
+import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { BRIDGE_CODE_TTL_MS } from "@/lib/constants";
 import { generateShareToken } from "@/lib/crypto/crypto-server";
 import { requireRecentSession } from "@/lib/auth/session/step-up";
@@ -119,9 +120,17 @@ async function handleGET(req: NextRequest): Promise<Response> {
   const { state, code_challenge: codeChallenge, device_jkt: deviceJkt } =
     parsed.data;
 
-  // 3. Resolve the user's tenant via the RLS wrapper's tenantId callback —
-  // saves a redundant SELECT on the users table.
   const userId = session.user.id;
+
+  // 3. Tenant network-boundary enforcement. This route is classified
+  // api-default at the proxy (not session-gated there, so the user can be
+  // bounced to sign-in), so the IP access restriction the proxy applies to
+  // session-required routes must be enforced here — matching /api/mobile/token.
+  const accessDenied = await enforceAccessRestriction(req, userId);
+  if (accessDenied) return accessDenied;
+
+  // 4. Resolve the user's tenant via the RLS wrapper's tenantId callback —
+  // saves a redundant SELECT on the users table.
   const code = generateShareToken();
   const codeHash = hashToken(code);
   const now = new Date();

@@ -78,7 +78,12 @@ const SESSION_REQUIRED_PREFIXES: readonly string[] = [
 const SESSION_REQUIRED_EXACT_PATHS: readonly string[] = [
   API_PATH.MCP_AUTHORIZE,
   API_PATH.MCP_AUTHORIZE_CONSENT,
-  API_PATH.MOBILE_AUTHORIZE,
+  // NOTE: /api/mobile/authorize is intentionally NOT session-gated here. It is
+  // reached inside an ephemeral ASWebAuthenticationSession with no session
+  // cookie on first arrival; the proxy session gate would 401 it before the
+  // handler can redirect the user to sign-in. Classified as api-default — the
+  // route handler self-enforces auth (redirect to sign-in when unauthenticated)
+  // and tenant IP access restriction, matching /api/mobile/token.
 ];
 
 /**

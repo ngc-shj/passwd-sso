@@ -256,8 +256,12 @@ describe("handleApiAuth — session-required + access restriction", () => {
     );
   });
 
-  it("applies access restriction to /api/mobile/authorize after proxy classification", async () => {
-    mockResolveUserTenantId.mockResolvedValueOnce("t-1");
+  it("does NOT apply proxy session/IP gate to /api/mobile/authorize (api-default; handler self-enforces)", async () => {
+    // /api/mobile/authorize is reached inside an ephemeral
+    // ASWebAuthenticationSession with no session cookie on first arrival, so it
+    // is classified api-default and must pass the proxy without a 401/403 gate;
+    // the route handler self-enforces auth (redirect to sign-in) and tenant IP
+    // access restriction, matching /api/mobile/token.
     mockCheckAccessWithAudit.mockResolvedValueOnce({
       allowed: false,
       reason: "IP not in allowed CIDRs",
@@ -267,15 +271,9 @@ describe("handleApiAuth — session-required + access restriction", () => {
         Cookie: "authjs.session-token=sess",
       }),
     );
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBe("ACCESS_DENIED");
-    expect(mockCheckAccessWithAudit).toHaveBeenCalledWith(
-      "t-1",
-      null,
-      "u-1",
-      expect.any(NextRequest),
-    );
+    expect(res.status).not.toBe(401);
+    expect(res.status).not.toBe(403);
+    expect(mockCheckAccessWithAudit).not.toHaveBeenCalled();
   });
 });
 

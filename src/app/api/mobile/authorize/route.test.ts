@@ -10,6 +10,7 @@ const {
   mockWithUserTenantRls,
   mockGetAppOrigin,
   mockRequireRecentSession,
+  mockEnforceAccessRestriction,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockMobileBridgeCodeCreate: vi.fn(),
@@ -20,9 +21,14 @@ const {
   ),
   mockGetAppOrigin: vi.fn(() => "https://example.test"),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
+  mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
+  enforceAccessRestriction: mockEnforceAccessRestriction,
+}));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -89,6 +95,7 @@ describe("GET /api/mobile/authorize", () => {
         fn("22222222-2222-2222-2222-222222222222"),
     );
     mockRequireRecentSession.mockResolvedValue(null);
+    mockEnforceAccessRestriction.mockResolvedValue(null);
     mockMobileBridgeCodeCreate.mockResolvedValue({ id: "00000000-0000-4000-8000-000000000003" });
   });
 
@@ -122,6 +129,15 @@ describe("GET /api/mobile/authorize", () => {
     // callbackUrl points back to the authorize endpoint so Auth.js returns here
     // after sign-in to issue the bridge code on the second pass.
     expect(u.searchParams.get("callbackUrl")).toContain("/api/mobile/authorize");
+    expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
+  });
+
+  it("returns the access-restriction denial when the client IP is not allowed", async () => {
+    mockEnforceAccessRestriction.mockResolvedValueOnce(
+      Response.json({ error: "ACCESS_DENIED" }, { status: 403 }),
+    );
+    const res = await GET(createRequest("GET", buildUrl(VALID)));
+    expect(res.status).toBe(403);
     expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
   });
 
