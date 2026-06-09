@@ -10,7 +10,9 @@ public struct VaultUnlockData: Sendable, Codable, Equatable {
   public let secretKeyIv: String
   public let secretKeyAuthTag: String
   public let keyVersion: Int
-  public let kdfType: String
+  // Server (Prisma) stores kdfType as an Int (0 = PBKDF2-SHA256, 1 = Argon2id),
+  // serialized as a JSON number — decoding it as String fails the whole struct.
+  public let kdfType: Int
   public let kdfIterations: Int
   /// User ID bound to the vault; used as AAD input for personal entries (aadVersion >= 1).
   public let userId: String

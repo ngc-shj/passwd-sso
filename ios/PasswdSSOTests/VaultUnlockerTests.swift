@@ -21,13 +21,15 @@ private func makeVaultUnlockData(
   let secretKey = Data(repeating: 0x42, count: 32)
   let (cipher, iv, tag) = try encryptAESGCM(plaintext: secretKey, key: wrappingKey)
 
+  // Server stores these fields as hex (matching the web crypto-client), and
+  // kdfType as an Int (0 = PBKDF2-SHA256).
   let data = VaultUnlockData(
-    accountSalt: saltData.base64EncodedString(),
-    encryptedSecretKey: cipher.base64EncodedString(),
-    secretKeyIv: iv.base64EncodedString(),
-    secretKeyAuthTag: tag.base64EncodedString(),
+    accountSalt: hexEncode(saltData),
+    encryptedSecretKey: hexEncode(cipher),
+    secretKeyIv: hexEncode(iv),
+    secretKeyAuthTag: hexEncode(tag),
     keyVersion: 1,
-    kdfType: "PBKDF2-SHA256",
+    kdfType: 0,
     kdfIterations: iterations,
     userId: "test-user-42"
   )
@@ -78,7 +80,10 @@ private actor StubVaultUnlocker {
       throw VaultUnlockError.serverResponseInvalid
     }
 
-    guard let saltData = Data(base64Encoded: unlockData.accountSalt) else {
+    let saltData: Data
+    do {
+      saltData = try hexDecode(unlockData.accountSalt)
+    } catch {
       throw VaultUnlockError.serverResponseInvalid
     }
 
@@ -88,11 +93,14 @@ private actor StubVaultUnlocker {
       iterations: unlockData.kdfIterations
     )
 
-    guard
-      let encKeyCipher = Data(base64Encoded: unlockData.encryptedSecretKey),
-      let encKeyIV = Data(base64Encoded: unlockData.secretKeyIv),
-      let encKeyTag = Data(base64Encoded: unlockData.secretKeyAuthTag)
-    else {
+    let encKeyCipher: Data
+    let encKeyIV: Data
+    let encKeyTag: Data
+    do {
+      encKeyCipher = try hexDecode(unlockData.encryptedSecretKey)
+      encKeyIV = try hexDecode(unlockData.secretKeyIv)
+      encKeyTag = try hexDecode(unlockData.secretKeyAuthTag)
+    } catch {
       throw VaultUnlockError.serverResponseInvalid
     }
 

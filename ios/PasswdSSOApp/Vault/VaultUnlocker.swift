@@ -52,8 +52,12 @@ public actor VaultUnlocker {
       throw VaultUnlockError.serverResponseInvalid
     }
 
-    // Step 2: decode salt and derive wrapping key
-    guard let saltData = Data(base64Encoded: unlockData.accountSalt) else {
+    // Step 2: decode salt and derive wrapping key. The server stores these
+    // fields as hex (matching the web crypto-client), NOT base64.
+    let saltData: Data
+    do {
+      saltData = try hexDecode(unlockData.accountSalt)
+    } catch {
       throw VaultUnlockError.serverResponseInvalid
     }
 
@@ -68,12 +72,15 @@ public actor VaultUnlocker {
       throw VaultUnlockError.cryptoFailed
     }
 
-    // Step 3: decrypt encryptedSecretKey
-    guard
-      let encKeyCipher = Data(base64Encoded: unlockData.encryptedSecretKey),
-      let encKeyIV = Data(base64Encoded: unlockData.secretKeyIv),
-      let encKeyTag = Data(base64Encoded: unlockData.secretKeyAuthTag)
-    else {
+    // Step 3: decrypt encryptedSecretKey (hex-encoded fields, see Step 2).
+    let encKeyCipher: Data
+    let encKeyIV: Data
+    let encKeyTag: Data
+    do {
+      encKeyCipher = try hexDecode(unlockData.encryptedSecretKey)
+      encKeyIV = try hexDecode(unlockData.secretKeyIv)
+      encKeyTag = try hexDecode(unlockData.secretKeyAuthTag)
+    } catch {
       throw VaultUnlockError.serverResponseInvalid
     }
 
