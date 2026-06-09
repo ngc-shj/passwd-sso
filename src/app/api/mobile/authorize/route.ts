@@ -30,12 +30,13 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto/crypto-server";
-import { zodValidationError } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, zodValidationError } from "@/lib/http/api-response";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { extractRequestMeta } from "@/lib/audit/audit";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { BASE_PATH } from "@/lib/url-helpers";
+import { getAppOrigin, resolveBasePath } from "@/lib/url-helpers";
 import { DEFAULT_LOCALE } from "@/i18n/locales";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { BRIDGE_CODE_TTL_MS } from "@/lib/constants";
@@ -71,17 +72,26 @@ const AuthorizeQuerySchema = z.object({
  * never from request headers — matching the canonicalHtu host policy.
  */
 function redirectToSignIn(req: NextRequest): Response {
-  // Mirror the proxy page-route sign-in redirect (page-route.ts). NextURL's
-  // pathname has basePath stripped, so prepend BASE_PATH to rebuild the
-  // basePath-qualified callback target; cloning + setting the sign-in pathname
-  // lets NextURL re-apply basePath to the sign-in URL itself. No locale prefix
-  // ends up on the API callback (it lives outside the [locale] segment).
-  const callbackTarget = `${BASE_PATH}${req.nextUrl.pathname}${req.nextUrl.search}`;
-  const signInUrl = req.nextUrl.clone();
-  signInUrl.search = "";
-  signInUrl.pathname = `/${DEFAULT_LOCALE}/auth/signin`;
+  // Origin/basePath come from configured env (APP_URL/AUTH_URL), NOT the
+  // request: this handler runs in the app server behind a reverse proxy, so
+  // req.nextUrl.host is the internal upstream (e.g. localhost:3001). Only the
+  // request PATH is taken from req.nextUrl (basePath stripped by Next, so we
+  // re-add basePath). The callback target is basePath-qualified and carries no
+  // locale prefix — the API route lives outside the [locale] segment.
+  const origin = getAppOrigin();
+  if (!origin) return errorResponse(API_ERROR.INTERNAL_ERROR);
+  let signInUrl: URL;
+  let basePath: string;
+  try {
+    const base = new URL(origin);
+    basePath = resolveBasePath(base);
+    signInUrl = new URL(`${base.origin}${basePath}/${DEFAULT_LOCALE}/auth/signin`);
+  } catch {
+    return errorResponse(API_ERROR.INTERNAL_ERROR);
+  }
+  const callbackTarget = `${basePath}${req.nextUrl.pathname}${req.nextUrl.search}`;
   signInUrl.searchParams.set("callbackUrl", callbackTarget);
-  return NextResponse.redirect(signInUrl, 302);
+  return NextResponse.redirect(signInUrl.toString(), 302);
 }
 
 async function handleGET(req: NextRequest): Promise<Response> {
