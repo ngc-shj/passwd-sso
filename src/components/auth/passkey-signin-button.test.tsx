@@ -36,6 +36,7 @@ vi.mock("@/hooks/use-callback-url", () => ({
 
 vi.mock("@/lib/auth/session/callback-url", () => ({
   callbackUrlToHref: (cb: string) => cb,
+  isApiCallbackUrl: (cb: string) => cb.startsWith("/api/"),
 }));
 
 vi.mock("@/lib/url-helpers", () => ({

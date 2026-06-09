@@ -9,7 +9,7 @@ import { isWebAuthnSupported, startPasskeyAuthentication } from "@/lib/auth/weba
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { useCallbackUrl } from "@/hooks/use-callback-url";
-import { callbackUrlToHref } from "@/lib/auth/session/callback-url";
+import { callbackUrlToHref, isApiCallbackUrl } from "@/lib/auth/session/callback-url";
 import { stashPrf } from "@/lib/auth/prf-handoff";
 
 export function PasskeySignInButton() {
@@ -91,8 +91,15 @@ export function PasskeySignInButton() {
       // 5. Set flag for vault auto-unlock after dashboard navigation
       sessionStorage.setItem("psso:webauthn-signin", "1");
 
-      // 6. Navigate to callback destination (preserves ext_connect for extension)
-      router.push(callbackUrlToHref(callbackUrl));
+      // 6. Navigate to callback destination (preserves ext_connect for extension).
+      // API callbacks (e.g. iOS /api/mobile/authorize) live outside the [locale]
+      // segment; the next-intl router would inject the active locale and 404, so
+      // navigate to those plainly.
+      if (isApiCallbackUrl(callbackUrl)) {
+        window.location.assign(callbackUrl);
+      } else {
+        router.push(callbackUrlToHref(callbackUrl));
+      }
     } catch (err) {
       if (err instanceof Error && err.message === "AUTHENTICATION_CANCELLED") {
         setError(t("passkeySignInCancelled"));
