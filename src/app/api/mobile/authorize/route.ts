@@ -139,25 +139,27 @@ async function handleGET(req: NextRequest): Promise<Response> {
   const expiresAt = new Date(now.getTime() + BRIDGE_CODE_TTL_MS);
   const meta = extractRequestMeta(req);
 
-  await withUserTenantRls(userId, async (tenantId) =>
-    withBypassRls(
-      prisma,
-      async (tx) =>
-        tx.mobileBridgeCode.create({
-          data: {
-            codeHash,
-            userId,
-            tenantId,
-            state,
-            codeChallenge,
-            deviceJkt,
-            expiresAt,
-            ip: meta.ip,
-            userAgent: meta.userAgent,
-          },
-        }),
-      BYPASS_PURPOSE.TOKEN_LIFECYCLE,
-    ),
+  // Resolve the tenant first, then persist the bridge code. withBypassRls must
+  // NOT nest inside withUserTenantRls (RLS guard, tenant-rls.ts) — so the bypass
+  // insert runs at top level, after the tenant RLS scope has exited.
+  const tenantId = await withUserTenantRls(userId, async (tid) => tid);
+  await withBypassRls(
+    prisma,
+    async (tx) =>
+      tx.mobileBridgeCode.create({
+        data: {
+          codeHash,
+          userId,
+          tenantId,
+          state,
+          codeChallenge,
+          deviceJkt,
+          expiresAt,
+          ip: meta.ip,
+          userAgent: meta.userAgent,
+        },
+      }),
+    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
   );
 
   // 5. Redirect the ASWebAuthenticationSession to the iOS app's custom URL
