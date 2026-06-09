@@ -21,7 +21,6 @@ enum AppState {
 // MARK: - Root view
 
 struct RootView: View {
-  let onCoordinatorReady: (AuthCoordinator) -> Void
   /// Called when vault is unlocked so the app shell can wire foreground sync + drain.
   let onVaultReady: (HostSyncService, RollbackFlagDrain, SymmetricKey, String) -> Void
 
@@ -37,7 +36,6 @@ struct RootView: View {
         ServerURLSetupView { config in
           let tokenStore = HostTokenStore()
           let coordinator = AuthCoordinator(serverConfig: config, tokenStore: tokenStore)
-          onCoordinatorReady(coordinator)
           appState = .signIn(serverConfig: config, coordinator: coordinator)
         }
 
@@ -122,7 +120,7 @@ struct RootView: View {
   // MARK: - Vault locked / unlock entry
 
   private func vaultLockedScreen(serverConfig: ServerConfig, apiClient: MobileAPIClient) -> some View {
-    let bks = BridgeKeyStore(accessGroup: "\(serverConfig.teamId).com.passwd-sso.shared")
+    let bks = BridgeKeyStore(accessGroup: "\(serverConfig.teamId).jp.jpng.passwd-sso.shared")
     let wks = AppGroupWrappedKeyStore()
     let unlocker = VaultUnlocker(
       apiClient: apiClient,
@@ -222,7 +220,7 @@ struct RootView: View {
   }
 
   private func makeFallbackSyncService(apiClient: MobileAPIClient) -> HostSyncService {
-    let bks = BridgeKeyStore(accessGroup: "TEAMID.com.passwd-sso.shared")
+    let bks = BridgeKeyStore(accessGroup: "TEAMID.jp.jpng.passwd-sso.shared")
     let wks = AppGroupWrappedKeyStore()
     let fetcher = EntryFetcher(apiClient: apiClient)
     let cacheURL = (try? AppGroupContainer.cacheFileURL()) ?? URL(fileURLWithPath: "/dev/null")

@@ -1,7 +1,7 @@
 name: PasswdSSO
 
 options:
-  bundleIdPrefix: com.passwd-sso
+  bundleIdPrefix: jp.jpng.passwd-sso
   deploymentTarget:
     iOS: "17.0"
   developmentLanguage: en
@@ -17,7 +17,7 @@ settings:
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_STRICT_CONCURRENCY: complete
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_TEAM: "9BL8SUVCSG"
+    DEVELOPMENT_TEAM: "4789NDA9RQ"
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     GCC_TREAT_WARNINGS_AS_ERRORS: YES
     SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
@@ -37,7 +37,7 @@ targets:
           - "README.md"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.passwd-sso.Shared
+        PRODUCT_BUNDLE_IDENTIFIER: jp.jpng.passwd-sso.Shared
         DEFINES_MODULE: YES
         SKIP_INSTALL: YES
         GENERATE_INFOPLIST_FILE: YES
@@ -60,6 +60,15 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSRequiresIPhoneOS: true
+        # Custom URL scheme for the OAuth sign-in callback. The server 302s the
+        # ASWebAuthenticationSession to `passwd-sso://auth/callback?code&state`;
+        # iOS captures it by scheme — works for ANY self-hosted server host,
+        # unlike Universal Links which require the host baked into the
+        # entitlement at sign time.
+        CFBundleURLTypes:
+          - CFBundleURLName: jp.jpng.passwd-sso.auth
+            CFBundleURLSchemes:
+              - passwd-sso
         UILaunchScreen:
           UIColorName: ""
         UISupportedInterfaceOrientations:
@@ -70,18 +79,12 @@ targets:
       path: PasswdSSOApp/PasswdSSOApp.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.passwd-sso.shared
+          - group.jp.jpng.passwd-sso.shared
         keychain-access-groups:
-          - $(AppIdentifierPrefix)com.passwd-sso.shared
-        # com.apple.developer.associated-domains intentionally omitted —
-        # Apple Personal Team doesn't grant this capability, and including
-        # it causes the provisioning system to reject the WHOLE entitlements
-        # file, falling back to adhoc signing (empty entitlements). For paid
-        # Apple Developer Program: re-add `applinks:<your-server>` here so
-        # Universal Link OAuth callback can fire.
+          - $(AppIdentifierPrefix)jp.jpng.passwd-sso.shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.passwd-sso
+        PRODUCT_BUNDLE_IDENTIFIER: jp.jpng.passwd-sso
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: "0.1.0"
         TARGETED_DEVICE_FAMILY: "1"
@@ -131,12 +134,12 @@ targets:
         # https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.authentication-services.autofill-credential-provider
         com.apple.developer.authentication-services.autofill-credential-provider: true
         com.apple.security.application-groups:
-          - group.com.passwd-sso.shared
+          - group.jp.jpng.passwd-sso.shared
         keychain-access-groups:
-          - $(AppIdentifierPrefix)com.passwd-sso.shared
+          - $(AppIdentifierPrefix)jp.jpng.passwd-sso.shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.passwd-sso.PasswdSSOAutofillExtension
+        PRODUCT_BUNDLE_IDENTIFIER: jp.jpng.passwd-sso.PasswdSSOAutofillExtension
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: "0.1.0"
         TARGETED_DEVICE_FAMILY: "1"
@@ -162,12 +165,12 @@ targets:
       path: PasswdSSOTests/PasswdSSOTests.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.passwd-sso.shared
+          - group.jp.jpng.passwd-sso.shared
         keychain-access-groups:
-          - $(AppIdentifierPrefix)com.passwd-sso.shared
+          - $(AppIdentifierPrefix)jp.jpng.passwd-sso.shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.passwd-sso.PasswdSSOTests
+        PRODUCT_BUNDLE_IDENTIFIER: jp.jpng.passwd-sso.PasswdSSOTests
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/PasswdSSOApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PasswdSSOApp
         BUNDLE_LOADER: $(TEST_HOST)
         CURRENT_PROJECT_VERSION: 1
@@ -190,7 +193,7 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.passwd-sso.PasswdSSOUITests
+        PRODUCT_BUNDLE_IDENTIFIER: jp.jpng.passwd-sso.PasswdSSOUITests
         TEST_TARGET_NAME: PasswdSSOApp
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: "0.1.0"

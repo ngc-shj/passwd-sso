@@ -82,7 +82,7 @@ private func makeBridgeKeyBlob(
   keychain: any KeychainAccessor = MockKeychainAccessor()
 ) throws -> (BridgeKeyStore, BridgeKeyStore.Blob) {
   let store = BridgeKeyStore(
-    accessGroup: "test.com.passwd-sso.shared",
+    accessGroup: "test.jp.jpng.passwd-sso.shared",
     keychain: keychain
   )
   let blob = try store.create()
@@ -275,7 +275,7 @@ final class CredentialResolverTests: XCTestCase {
     // BridgeKeyStore with nothing in Keychain → readForFill → .notFound → .vaultLocked
     let emptyKeychain = MockKeychainAccessor()
     let bridgeKeyStore = BridgeKeyStore(
-      accessGroup: "test.com.passwd-sso.shared",
+      accessGroup: "test.jp.jpng.passwd-sso.shared",
       keychain: emptyKeychain
     )
     let resolver = CredentialResolver(
@@ -530,7 +530,7 @@ final class CredentialResolverTests: XCTestCase {
   func testResolveCandidates_singleKeychainRead() async throws {
     let counting = CountingKeychainAccessor()
     let bridgeKeyStore = BridgeKeyStore(
-      accessGroup: "test.com.passwd-sso.shared",
+      accessGroup: "test.jp.jpng.passwd-sso.shared",
       keychain: counting
     )
     let blob = try bridgeKeyStore.create()

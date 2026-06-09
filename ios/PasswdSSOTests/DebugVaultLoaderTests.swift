@@ -23,7 +23,7 @@ final class DebugVaultLoaderTests: XCTestCase {
     cacheURL = tmpDir.appending(path: "encryptedEntries.cache", directoryHint: .notDirectory)
     keychain = MockKeychainAccessor()
     bridgeKeyStore = BridgeKeyStore(
-      accessGroup: "test.com.passwd-sso.shared",
+      accessGroup: "test.jp.jpng.passwd-sso.shared",
       keychain: keychain
     )
     wrappedKeyStore = TempDirWrappedKeyStore(baseDir: tmpDir)

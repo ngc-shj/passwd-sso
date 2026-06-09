@@ -18,7 +18,7 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
 
   private let defaults: UserDefaults
 
-  init(defaults: UserDefaults = UserDefaults(suiteName: "group.com.passwd-sso.shared") ?? .standard) {
+  init(defaults: UserDefaults = UserDefaults(suiteName: "group.jp.jpng.passwd-sso.shared") ?? .standard) {
     self.defaults = defaults
   }
 

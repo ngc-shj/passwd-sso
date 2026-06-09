@@ -92,13 +92,13 @@ describe("GET /api/mobile/authorize", () => {
     mockMobileBridgeCodeCreate.mockResolvedValue({ id: "00000000-0000-4000-8000-000000000003" });
   });
 
-  it("redirects to the canonical Universal-Link with code+state on a valid request", async () => {
+  it("redirects to the iOS custom-scheme callback with code+state on a valid request", async () => {
     const res = await GET(createRequest("GET", buildUrl(VALID)));
     expect(res.status).toBe(302);
     const loc = res.headers.get("location") ?? "";
     const u = new URL(loc);
-    expect(u.origin).toBe("https://example.test");
-    expect(u.pathname).toBe("/api/mobile/authorize/redirect");
+    expect(u.protocol).toBe("passwd-sso:");
+    expect(`${u.protocol}//${u.host}${u.pathname}`).toBe("passwd-sso://auth/callback");
     expect(u.searchParams.get("code")).toBe("f".repeat(64));
     expect(u.searchParams.get("state")).toBe(VALID.state);
     expect(mockMobileBridgeCodeCreate).toHaveBeenCalledTimes(1);
@@ -111,10 +111,17 @@ describe("GET /api/mobile/authorize", () => {
     });
   });
 
-  it("returns 401 when no Auth.js session is present", async () => {
+  it("redirects to the sign-in page (callbackUrl=self) when no Auth.js session is present", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await GET(createRequest("GET", buildUrl(VALID)));
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(302);
+    const loc = res.headers.get("location") ?? "";
+    const u = new URL(loc);
+    expect(u.origin).toBe("https://example.test");
+    expect(u.pathname).toBe("/ja/auth/signin");
+    // callbackUrl points back to the authorize endpoint so Auth.js returns here
+    // after sign-in to issue the bridge code on the second pass.
+    expect(u.searchParams.get("callbackUrl")).toContain("/api/mobile/authorize");
     expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
   });
 
@@ -181,7 +188,7 @@ describe("GET /api/mobile/authorize", () => {
 
     expect(res.status).toBe(302);
     const loc = res.headers.get("location") ?? "";
-    expect(loc.startsWith("https://example.test/api/mobile/authorize/redirect")).toBe(true);
+    expect(loc.startsWith("passwd-sso://auth/callback")).toBe(true);
     expect(loc).not.toContain("attacker.example");
   });
 

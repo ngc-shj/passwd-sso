@@ -9,7 +9,7 @@ import Foundation
 /// launches to prevent bypassing the rate limit.
 public enum DeviceIdentifier {
   private static let key = "com.passwd-sso.deviceId"
-  private static let suiteName = "group.com.passwd-sso.shared"
+  private static let suiteName = "group.jp.jpng.passwd-sso.shared"
 
   /// Returns the stable device identifier, creating one if absent.
   public static func stable() -> String {

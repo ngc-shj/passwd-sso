@@ -704,23 +704,23 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					2503D778597BD5A5391105AA = {
-						DevelopmentTeam = 9BL8SUVCSG;
+						DevelopmentTeam = 4789NDA9RQ;
 						ProvisioningStyle = Automatic;
 					};
 					2C6807B4DF933E0960205C53 = {
-						DevelopmentTeam = 9BL8SUVCSG;
+						DevelopmentTeam = 4789NDA9RQ;
 						ProvisioningStyle = Automatic;
 					};
 					3408C5C581C8391A1AAB6ABA = {
-						DevelopmentTeam = 9BL8SUVCSG;
+						DevelopmentTeam = 4789NDA9RQ;
 						ProvisioningStyle = Automatic;
 					};
 					84BF354B2F15CE0C8F36B493 = {
-						DevelopmentTeam = 9BL8SUVCSG;
+						DevelopmentTeam = 4789NDA9RQ;
 						ProvisioningStyle = Automatic;
 					};
 					DF33BBB1A677F99934E83F7D = {
-						DevelopmentTeam = 9BL8SUVCSG;
+						DevelopmentTeam = 4789NDA9RQ;
 						ProvisioningStyle = Automatic;
 						TestTargetID = 3408C5C581C8391A1AAB6ABA;
 					};
@@ -927,7 +927,7 @@
 					"@loader_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.PasswdSSOUITests";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.PasswdSSOUITests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = PasswdSSOApp;
@@ -946,7 +946,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.PasswdSSOAutofillExtension";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.PasswdSSOAutofillExtension";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -968,7 +968,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.Shared";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.Shared";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -1011,7 +1011,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = 9BL8SUVCSG;
+				DEVELOPMENT_TEAM = 4789NDA9RQ;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -1055,7 +1055,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.PasswdSSOAutofillExtension";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.PasswdSSOAutofillExtension";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -1074,7 +1074,7 @@
 					"@loader_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.PasswdSSOTests";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.PasswdSSOTests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PasswdSSOApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PasswdSSOApp";
@@ -1093,7 +1093,7 @@
 					"@loader_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.PasswdSSOUITests";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.PasswdSSOUITests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = PasswdSSOApp;
@@ -1135,7 +1135,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = 9BL8SUVCSG;
+				DEVELOPMENT_TEAM = 4789NDA9RQ;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -1173,7 +1173,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -1192,7 +1192,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -1211,7 +1211,7 @@
 					"@loader_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.PasswdSSOTests";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.PasswdSSOTests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PasswdSSOApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PasswdSSOApp";
@@ -1234,7 +1234,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.Shared";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.Shared";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
