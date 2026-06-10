@@ -130,47 +130,23 @@ async function handlePUT(
     }
   }
 
-  // Verify tag ownership
+  // Verify tag ownership. Normalize duplicates first: a caller-supplied
+  // duplicate (e.g. ["t1","t1"]) should not count as a missing tag —
+  // tag.count returns distinct row count, so compare against the deduped
+  // input length, not the raw array length. Mirrors team-password-service.ts.
   if (tagIds?.length) {
+    const uniqueTagIds = [...new Set(tagIds)];
     const ownedCount = await withUserTenantRls(userId, async () =>
-      prisma.tag.count({ where: { id: { in: tagIds }, userId } }),
+      prisma.tag.count({ where: { id: { in: uniqueTagIds }, userId } }),
     );
-    if (ownedCount !== tagIds.length) {
+    if (ownedCount !== uniqueTagIds.length) {
       return validationError({ message: "Invalid tagIds" });
     }
   }
 
   const updateData: Record<string, unknown> = {};
 
-  // If encryptedBlob is changing, snapshot the current version to history
   if (encryptedBlob) {
-    await withUserTenantRls(userId, async () =>
-      prisma.$transaction(async (tx) => {
-      await tx.passwordEntryHistory.create({
-        data: {
-          entryId: id,
-          tenantId: existing.tenantId,
-          encryptedBlob: existing.encryptedBlob,
-          blobIv: existing.blobIv,
-          blobAuthTag: existing.blobAuthTag,
-          keyVersion: existing.keyVersion,
-          aadVersion: existing.aadVersion,
-        },
-      });
-      // Trim to max 20 entries (stable sort: changedAt asc, id asc)
-      const all = await tx.passwordEntryHistory.findMany({
-        where: { entryId: id },
-        orderBy: [{ changedAt: "asc" }, { id: "asc" }],
-        select: { id: true },
-      });
-      if (all.length > 20) {
-        await tx.passwordEntryHistory.deleteMany({
-          where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
-        });
-      }
-      }),
-    );
-
     updateData.encryptedBlob = encryptedBlob.ciphertext;
     updateData.blobIv = encryptedBlob.iv;
     updateData.blobAuthTag = encryptedBlob.authTag;
@@ -200,13 +176,65 @@ async function handlePUT(
     updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
   }
 
-  const updated = await withUserTenantRls(userId, async () =>
-    prisma.passwordEntry.update({
-      where: { id },
-      data: updateData,
-      include: { tags: { select: { id: true } } },
-    }),
-  );
+  // Row type for the FOR UPDATE snapshot read (personal password_entries).
+  type PersonalBlobRow = {
+    encrypted_blob: string;
+    blob_iv: string;
+    blob_auth_tag: string;
+    key_version: number;
+    aad_version: number;
+  };
+
+  // If the blob is changing, snapshot + update must be atomic and lost-update-safe:
+  // acquire a PK row lock inside the same tenant-scoped transaction so concurrent
+  // PUTs serialise here and each writer snapshots the immediately-preceding committed
+  // blob (not the outside-tx `existing` read, which may be stale under contention).
+  const updated = await (encryptedBlob
+    ? withUserTenantRls(userId, async () =>
+        prisma.$transaction(async (tx) => {
+          const [cur] = await tx.$queryRaw<PersonalBlobRow[]>`
+            SELECT encrypted_blob, blob_iv, blob_auth_tag, key_version, aad_version
+            FROM password_entries
+            WHERE id = ${id}::uuid
+            FOR UPDATE
+          `;
+          // Snapshot the current committed blob into history
+          await tx.passwordEntryHistory.create({
+            data: {
+              entryId: id,
+              tenantId: existing.tenantId,
+              encryptedBlob: cur.encrypted_blob,
+              blobIv: cur.blob_iv,
+              blobAuthTag: cur.blob_auth_tag,
+              keyVersion: cur.key_version,
+              aadVersion: cur.aad_version,
+            },
+          });
+          // Trim to max 20 entries (stable sort: changedAt asc, id asc)
+          const all = await tx.passwordEntryHistory.findMany({
+            where: { entryId: id },
+            orderBy: [{ changedAt: "asc" }, { id: "asc" }],
+            select: { id: true },
+          });
+          if (all.length > 20) {
+            await tx.passwordEntryHistory.deleteMany({
+              where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
+            });
+          }
+          return tx.passwordEntry.update({
+            where: { id },
+            data: updateData,
+            include: { tags: { select: { id: true } } },
+          });
+        }),
+      )
+    : withUserTenantRls(userId, async () =>
+        prisma.passwordEntry.update({
+          where: { id },
+          data: updateData,
+          include: { tags: { select: { id: true } } },
+        }),
+      ));
 
   await logAuditAsync({
     ...personalAuditBase(req, userId),

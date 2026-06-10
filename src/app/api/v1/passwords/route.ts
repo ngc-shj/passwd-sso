@@ -140,9 +140,14 @@ async function handlePOST(req: NextRequest) {
       if (!folder) return { error: "INVALID_FOLDER" as const };
     }
 
+    // Normalize duplicates: a caller-supplied duplicate (e.g. ["t1","t1"])
+    // should not count as a missing tag — tag.count returns distinct row count,
+    // so compare against the deduped input length, not the raw array length.
+    // Mirrors team-password-service.ts.
     if (tagIds?.length) {
-      const ownedCount = await tx.tag.count({ where: { id: { in: tagIds }, userId } });
-      if (ownedCount !== tagIds.length) return { error: "INVALID_TAGS" as const };
+      const uniqueTagIds = [...new Set(tagIds)];
+      const ownedCount = await tx.tag.count({ where: { id: { in: uniqueTagIds }, userId } });
+      if (ownedCount !== uniqueTagIds.length) return { error: "INVALID_TAGS" as const };
     }
 
     const entry = await tx.passwordEntry.create({

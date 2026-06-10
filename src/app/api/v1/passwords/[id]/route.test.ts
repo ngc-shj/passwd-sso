@@ -13,23 +13,47 @@ const {
   mockHistoryDeleteMany,
   mockFolderFindFirst,
   mockTagCount,
+  mockQueryRaw,
   mockLogAudit,
   mockWithTenantRls,
-} = vi.hoisted(() => ({
-  mockValidateApiKeyOnly: vi.fn(),
-  mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
-  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockEntryFindUnique: vi.fn(),
-  mockEntryUpdate: vi.fn(),
-  mockEntryDelete: vi.fn(),
-  mockHistoryCreate: vi.fn(),
-  mockHistoryFindMany: vi.fn().mockResolvedValue([]),
-  mockHistoryDeleteMany: vi.fn(),
-  mockFolderFindFirst: vi.fn(),
-  mockTagCount: vi.fn(),
-  mockLogAudit: vi.fn(),
-  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
-}));
+} = vi.hoisted(() => {
+  // curRow returned by $queryRaw FOR UPDATE — values are DISTINCT from ownedEntry
+  // so field-level assertions can detect if the handler reads from `existing` instead.
+  const curRow = {
+    encrypted_blob: "cur-v1-blob",
+    blob_iv: "cur-v1-iv",
+    blob_auth_tag: "cur-v1-tag",
+    key_version: 9,
+    aad_version: 7,
+  };
+  const mockQueryRaw = vi.fn().mockResolvedValue([curRow]);
+
+  return {
+    mockValidateApiKeyOnly: vi.fn(),
+    mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
+    mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
+    mockEntryFindUnique: vi.fn(),
+    mockEntryUpdate: vi.fn(),
+    mockEntryDelete: vi.fn(),
+    mockHistoryCreate: vi.fn(),
+    mockHistoryFindMany: vi.fn().mockResolvedValue([]),
+    mockHistoryDeleteMany: vi.fn(),
+    mockFolderFindFirst: vi.fn(),
+    mockTagCount: vi.fn(),
+    mockQueryRaw,
+    mockLogAudit: vi.fn(),
+    mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+  };
+});
+
+// curRow values accessible in test assertions (must match the vi.hoisted values)
+const V1_CUR_ROW = {
+  encrypted_blob: "cur-v1-blob",
+  blob_iv: "cur-v1-iv",
+  blob_auth_tag: "cur-v1-tag",
+  key_version: 9,
+  aad_version: 7,
+};
 
 vi.mock("@/lib/auth/tokens/api-key", () => ({ validateApiKeyOnly: mockValidateApiKeyOnly }));
 vi.mock("@/lib/auth/policy/access-restriction", () => ({ enforceAccessRestriction: mockEnforceAccessRestriction }));
@@ -46,6 +70,7 @@ vi.mock("@/lib/prisma", () => ({
     },
     folder: { findFirst: mockFolderFindFirst },
     tag: { count: mockTagCount },
+    $queryRaw: mockQueryRaw,
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withTenantRls: mockWithTenantRls }));
@@ -231,13 +256,16 @@ describe("PUT /api/v1/passwords/[id]", () => {
     expect(json.id).toBe(PW_ID);
     expect(json.keyVersion).toBe(2);
 
+    // C1: snapshot fields come from the FOR UPDATE re-read (V1_CUR_ROW), not from existing
     expect(mockHistoryCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           entryId: PW_ID,
-          encryptedBlob: ownedEntry.encryptedBlob,
-          blobIv: ownedEntry.blobIv,
-          blobAuthTag: ownedEntry.blobAuthTag,
+          encryptedBlob: V1_CUR_ROW.encrypted_blob,
+          blobIv: V1_CUR_ROW.blob_iv,
+          blobAuthTag: V1_CUR_ROW.blob_auth_tag,
+          keyVersion: V1_CUR_ROW.key_version,
+          aadVersion: V1_CUR_ROW.aad_version,
         }),
       }),
     );
@@ -313,7 +341,75 @@ describe("PUT /api/v1/passwords/[id]", () => {
     );
     const { status } = await parseResponse(res);
     expect(status).toBe(200);
+    // blob-changing path: update goes through mockEntryUpdate (tx is the prisma mock)
     expect(mockEntryUpdate).toHaveBeenCalled();
+  });
+
+  // C1: FOR UPDATE snapshot source and SQL text guard
+  it("C1: $queryRaw FOR UPDATE is issued before History.create on blob-changing PUT", async () => {
+    const callOrder: string[] = [];
+    mockQueryRaw.mockImplementation(() => {
+      callOrder.push("$queryRaw");
+      return Promise.resolve([V1_CUR_ROW]);
+    });
+    mockHistoryCreate.mockImplementation(() => {
+      callOrder.push("historyCreate");
+      return Promise.resolve({});
+    });
+
+    await PUT(
+      createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, { body: updateBody }),
+      createParams({ id: PW_ID }),
+    );
+
+    expect(callOrder.indexOf("$queryRaw")).toBeLessThan(callOrder.indexOf("historyCreate"));
+  });
+
+  it("C1: FOR UPDATE SQL contains table name and required crypto columns", async () => {
+    await PUT(
+      createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, { body: updateBody }),
+      createParams({ id: PW_ID }),
+    );
+
+    expect(mockQueryRaw).toHaveBeenCalled();
+    const [tpl] = mockQueryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
+    const sql = tpl.join("?");
+    expect(sql).toMatch(/FOR UPDATE/i);
+    expect(sql).toMatch(/password_entries/i);
+    expect(sql).toMatch(/encrypted_blob/i);
+    expect(sql).toMatch(/blob_iv/i);
+    expect(sql).toMatch(/blob_auth_tag/i);
+    expect(sql).toMatch(/key_version/i);
+    expect(sql).toMatch(/aad_version/i);
+  });
+
+  it("C1: all 5 crypto fields in History.create come from $queryRaw result, not from existing", async () => {
+    await PUT(
+      createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, { body: updateBody }),
+      createParams({ id: PW_ID }),
+    );
+
+    const histData = mockHistoryCreate.mock.calls[0][0].data;
+    expect(histData.encryptedBlob).toBe(V1_CUR_ROW.encrypted_blob);
+    expect(histData.blobIv).toBe(V1_CUR_ROW.blob_iv);
+    expect(histData.blobAuthTag).toBe(V1_CUR_ROW.blob_auth_tag);
+    expect(histData.keyVersion).toBe(V1_CUR_ROW.key_version);
+    expect(histData.aadVersion).toBe(V1_CUR_ROW.aad_version);
+    // Distinct-from-ownedEntry sanity check
+    expect(histData.encryptedBlob).not.toBe(ownedEntry.encryptedBlob);
+    expect(histData.keyVersion).not.toBe(ownedEntry.keyVersion);
+  });
+
+  it("C1: metadata-only PUT issues no $queryRaw and no History.create", async () => {
+    await PUT(
+      createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, {
+        body: { isFavorite: true },
+      }),
+      createParams({ id: PW_ID }),
+    );
+
+    expect(mockQueryRaw).not.toHaveBeenCalled();
+    expect(mockHistoryCreate).not.toHaveBeenCalled();
   });
 
   it("returns 400 when folderId is not owned by the user", async () => {
@@ -335,6 +431,39 @@ describe("PUT /api/v1/passwords/[id]", () => {
     const res = await PUT(
       createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, {
         body: { tagIds: ["tag-x", "tag-y"] },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(mockEntryUpdate).not.toHaveBeenCalled();
+  });
+
+  it("C3: succeeds when tagIds contain duplicates but are all owned (count mock returns 1 for [t1,t1])", async () => {
+    // tag.count returns distinct row count; t1 is owned once → count=1.
+    // Before the fix, ownedCount(1) !== tagIds.length(2) → 400.
+    // After the fix, ownedCount(1) !== uniqueTagIds.length(1) → success.
+    const ownedTagId = "00000000-0000-4000-a000-000000000001";
+    mockTagCount.mockResolvedValue(1);
+    const res = await PUT(
+      createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, {
+        body: { tagIds: [ownedTagId, ownedTagId] },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    const { status } = await parseResponse(res);
+    expect(status).toBe(200);
+  });
+
+  it("C3: still rejects when tagIds reference an unowned tag", async () => {
+    // t1 owned, t2-unowned → count=1 but uniqueTagIds.length=2 → 400
+    const ownedTagId = "00000000-0000-4000-a000-000000000001";
+    const unownedTagId = "00000000-0000-4000-a000-000000000002";
+    mockTagCount.mockResolvedValue(1);
+    const res = await PUT(
+      createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, {
+        body: { tagIds: [ownedTagId, unownedTagId] },
       }),
       createParams({ id: PW_ID }),
     );

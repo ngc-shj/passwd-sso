@@ -9,6 +9,7 @@ const {
   mockTeamPasswordEntryHistoryCreate,
   mockTeamPasswordEntryHistoryFindMany,
   mockTeamPasswordEntryHistoryDeleteMany,
+  mockTxQueryRaw,
   mockTransaction,
 } = vi.hoisted(() => {
   const mockTeamFindUnique = vi.fn();
@@ -20,7 +21,23 @@ const {
   const mockTeamPasswordEntryHistoryFindMany = vi.fn();
   const mockTeamPasswordEntryHistoryDeleteMany = vi.fn();
 
+  // curRow for the FOR UPDATE re-read — values DISTINCT from BASE_EXISTING_ENTRY
+  // so field-level assertions detect if the snapshot was sourced from existingEntry instead.
+  const teamCurRow = {
+    encrypted_blob: "cur-team-blob",
+    blob_iv: "cur-team-iv",
+    blob_auth_tag: "cur-team-tag",
+    aad_version: 11,
+    team_key_version: 5,
+    item_key_version: 2,
+    encrypted_item_key: "cur-ik-cipher",
+    item_key_iv: "cur-ik-iv",
+    item_key_auth_tag: "cur-ik-tag",
+  };
+  const mockTxQueryRaw = vi.fn().mockResolvedValue([teamCurRow]);
+
   const txClient = {
+    $queryRaw: mockTxQueryRaw,
     teamPasswordEntryHistory: {
       create: mockTeamPasswordEntryHistoryCreate,
       findMany: mockTeamPasswordEntryHistoryFindMany,
@@ -44,6 +61,7 @@ const {
     mockTeamPasswordEntryHistoryCreate,
     mockTeamPasswordEntryHistoryFindMany,
     mockTeamPasswordEntryHistoryDeleteMany,
+    mockTxQueryRaw,
     mockTransaction,
   };
 });
@@ -331,12 +349,27 @@ describe("createTeamPassword", () => {
 // updateTeamPassword
 // ---------------------------------------------------------------------------
 
+// curRow values accessible in test assertions (must match the vi.hoisted values)
+const TEAM_CUR_ROW = {
+  encrypted_blob: "cur-team-blob",
+  blob_iv: "cur-team-iv",
+  blob_auth_tag: "cur-team-tag",
+  aad_version: 11,
+  team_key_version: 5,
+  item_key_version: 2,
+  encrypted_item_key: "cur-ik-cipher",
+  item_key_iv: "cur-ik-iv",
+  item_key_auth_tag: "cur-ik-tag",
+};
+
 describe("updateTeamPassword", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    // Re-apply the transaction implementation after reset
+    // Re-apply $queryRaw and transaction implementation after reset
+    mockTxQueryRaw.mockResolvedValue([TEAM_CUR_ROW]);
     mockTransaction.mockImplementation(async (fn) =>
       fn({
+        $queryRaw: mockTxQueryRaw,
         teamPasswordEntryHistory: {
           create: mockTeamPasswordEntryHistoryCreate,
           findMany: mockTeamPasswordEntryHistoryFindMany,
@@ -486,7 +519,9 @@ describe("updateTeamPassword", () => {
     expect(mockTeamPasswordEntryHistoryCreate).toHaveBeenCalledOnce();
     const historyData = mockTeamPasswordEntryHistoryCreate.mock.calls[0][0].data;
     expect(historyData.entryId).toBe(PASSWORD_ID);
-    expect(historyData.encryptedBlob).toBe(BASE_EXISTING_ENTRY.encryptedBlob);
+    // C1: snapshot blob fields must come from TEAM_CUR_ROW (FOR UPDATE re-read)
+    expect(historyData.encryptedBlob).toBe(TEAM_CUR_ROW.encrypted_blob);
+    // changedById stays as the current userId (NOT from cur)
     expect(historyData.changedById).toBe(USER_ID);
   });
 
@@ -754,5 +789,122 @@ describe("updateTeamPassword", () => {
     // Should not throw — same version is a no-op, not a change
     const result = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input);
     expect(result).toEqual({ id: PASSWORD_ID, tags: [] });
+  });
+
+  // C1: FOR UPDATE snapshot source and SQL text guard
+  it("C1: $queryRaw is called before History.create on full (blob-changing) update", async () => {
+    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([]);
+    mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
+
+    const callOrder: string[] = [];
+    mockTxQueryRaw.mockImplementation(() => {
+      callOrder.push("$queryRaw");
+      return Promise.resolve([TEAM_CUR_ROW]);
+    });
+    mockTeamPasswordEntryHistoryCreate.mockImplementation(() => {
+      callOrder.push("historyCreate");
+      return Promise.resolve({});
+    });
+
+    const input: UpdateTeamPasswordInput = {
+      encryptedBlob: ENCRYPTED_BLOB,
+      encryptedOverview: ENCRYPTED_OVERVIEW,
+      aadVersion: 1,
+      teamKeyVersion: 3,
+      itemKeyVersion: 0,
+      userId: USER_ID,
+      existingEntry: BASE_EXISTING_ENTRY,
+    };
+
+    await updateTeamPassword(TEAM_ID, PASSWORD_ID, input);
+
+    expect(callOrder.indexOf("$queryRaw")).toBeLessThan(callOrder.indexOf("historyCreate"));
+  });
+
+  it("C1: FOR UPDATE SQL contains table name, team_id predicate, and required crypto columns", async () => {
+    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
+    mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([]);
+    mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
+
+    const input: UpdateTeamPasswordInput = {
+      encryptedBlob: ENCRYPTED_BLOB,
+      encryptedOverview: ENCRYPTED_OVERVIEW,
+      aadVersion: 1,
+      teamKeyVersion: 3,
+      itemKeyVersion: 0,
+      userId: USER_ID,
+      existingEntry: BASE_EXISTING_ENTRY,
+    };
+
+    await updateTeamPassword(TEAM_ID, PASSWORD_ID, input);
+
+    expect(mockTxQueryRaw).toHaveBeenCalled();
+    const [tpl] = mockTxQueryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
+    const sql = tpl.join("?");
+    expect(sql).toMatch(/FOR UPDATE/i);
+    expect(sql).toMatch(/team_password_entries/i);
+    expect(sql).toMatch(/team_id/i);
+    expect(sql).toMatch(/encrypted_blob/i);
+    expect(sql).toMatch(/blob_iv/i);
+    expect(sql).toMatch(/blob_auth_tag/i);
+    expect(sql).toMatch(/aad_version/i);
+    expect(sql).toMatch(/team_key_version/i);
+    expect(sql).toMatch(/item_key_version/i);
+    expect(sql).toMatch(/encrypted_item_key/i);
+    expect(sql).toMatch(/item_key_iv/i);
+    expect(sql).toMatch(/item_key_auth_tag/i);
+  });
+
+  it("C1: all 9 crypto fields in History.create come from $queryRaw result, not from existingEntry", async () => {
+    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTeamPasswordEntryHistoryCreate.mockResolvedValue({});
+    mockTeamPasswordEntryHistoryFindMany.mockResolvedValue([]);
+    mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
+
+    const input: UpdateTeamPasswordInput = {
+      encryptedBlob: ENCRYPTED_BLOB,
+      encryptedOverview: ENCRYPTED_OVERVIEW,
+      aadVersion: 1,
+      teamKeyVersion: 3,
+      itemKeyVersion: 0,
+      userId: USER_ID,
+      existingEntry: BASE_EXISTING_ENTRY,
+    };
+
+    await updateTeamPassword(TEAM_ID, PASSWORD_ID, input);
+
+    const histData = mockTeamPasswordEntryHistoryCreate.mock.calls[0][0].data;
+    // All 9 crypto fields must come from TEAM_CUR_ROW (not BASE_EXISTING_ENTRY)
+    expect(histData.encryptedBlob).toBe(TEAM_CUR_ROW.encrypted_blob);
+    expect(histData.blobIv).toBe(TEAM_CUR_ROW.blob_iv);
+    expect(histData.blobAuthTag).toBe(TEAM_CUR_ROW.blob_auth_tag);
+    expect(histData.aadVersion).toBe(TEAM_CUR_ROW.aad_version);
+    expect(histData.teamKeyVersion).toBe(TEAM_CUR_ROW.team_key_version);
+    expect(histData.itemKeyVersion).toBe(TEAM_CUR_ROW.item_key_version);
+    expect(histData.encryptedItemKey).toBe(TEAM_CUR_ROW.encrypted_item_key);
+    expect(histData.itemKeyIv).toBe(TEAM_CUR_ROW.item_key_iv);
+    expect(histData.itemKeyAuthTag).toBe(TEAM_CUR_ROW.item_key_auth_tag);
+    // Distinct-from-existingEntry sanity check
+    expect(histData.encryptedBlob).not.toBe(BASE_EXISTING_ENTRY.encryptedBlob);
+    expect(histData.aadVersion).not.toBe(BASE_EXISTING_ENTRY.aadVersion);
+    // changedById must be the current userId, NOT from cur
+    expect(histData.changedById).toBe(USER_ID);
+  });
+
+  it("C1: metadata-only update issues no $queryRaw and no History.create", async () => {
+    mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
+
+    const input: UpdateTeamPasswordInput = {
+      isArchived: true,
+      userId: USER_ID,
+      existingEntry: BASE_EXISTING_ENTRY,
+    };
+
+    await updateTeamPassword(TEAM_ID, PASSWORD_ID, input);
+
+    expect(mockTxQueryRaw).not.toHaveBeenCalled();
+    expect(mockTeamPasswordEntryHistoryCreate).not.toHaveBeenCalled();
   });
 });

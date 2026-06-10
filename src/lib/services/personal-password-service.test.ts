@@ -118,4 +118,34 @@ describe("createPersonalPasswordEntry", () => {
       connect: [{ id: "tag-1" }, { id: "tag-2" }],
     });
   });
+
+  it("C3: succeeds when tagIds contain duplicates but are all owned (count mock returns 1 for [t1,t1])", async () => {
+    // tag.count returns distinct row count; t1 is owned once → count=1.
+    // Before the fix, ownedCount(1) !== tagIds.length(2) → TAGS_NOT_OWNED.
+    // After the fix, ownedCount(1) !== uniqueTagIds.length(1) → success.
+    mockTagCount.mockResolvedValue(1);
+
+    const result = await createPersonalPasswordEntry(
+      db,
+      USER_ID,
+      TENANT_ID,
+      baseInput({ tagIds: ["t1", "t1"] }),
+    );
+
+    expect(result).toEqual({ ok: true, entry: expect.anything() });
+  });
+
+  it("C3: still rejects when tagIds reference an unowned tag", async () => {
+    // t1 owned, t2-unowned → count=1 but uniqueTagIds.length=2 → TAGS_NOT_OWNED
+    mockTagCount.mockResolvedValue(1);
+
+    const result = await createPersonalPasswordEntry(
+      db,
+      USER_ID,
+      TENANT_ID,
+      baseInput({ tagIds: ["t1", "t2-unowned"] }),
+    );
+
+    expect(result).toEqual({ ok: false, reason: "TAGS_NOT_OWNED" });
+  });
 });

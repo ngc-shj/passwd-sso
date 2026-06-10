@@ -1,4 +1,9 @@
+import { MS_PER_MINUTE } from "../time";
+
 export const API_KEY_PREFIX = "api_";
+
+/** Throttle interval for lastUsedAt writes — parity with SA_TOKEN_LAST_USED_THROTTLE_MS */
+export const API_KEY_LAST_USED_THROTTLE_MS = 5 * MS_PER_MINUTE;
 
 export const API_KEY_SCOPE = {
   PASSWORDS_READ: "passwords:read",

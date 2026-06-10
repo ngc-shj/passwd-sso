@@ -53,9 +53,14 @@ export async function createPersonalPasswordEntry(
     if (!folder) return { ok: false, reason: "FOLDER_NOT_FOUND" };
   }
 
+  // Normalize duplicates: a caller-supplied duplicate (e.g. ["t1","t1"])
+  // should not count as a missing tag — tag.count returns distinct row count,
+  // so compare against the deduped input length, not the raw array length.
+  // Mirrors team-password-service.ts.
   if (tagIds?.length) {
-    const ownedCount = await db.tag.count({ where: { id: { in: tagIds }, userId } });
-    if (ownedCount !== tagIds.length) return { ok: false, reason: "TAGS_NOT_OWNED" };
+    const uniqueTagIds = [...new Set(tagIds)];
+    const ownedCount = await db.tag.count({ where: { id: { in: uniqueTagIds }, userId } });
+    if (ownedCount !== uniqueTagIds.length) return { ok: false, reason: "TAGS_NOT_OWNED" };
   }
 
   const entry = await db.passwordEntry.create({

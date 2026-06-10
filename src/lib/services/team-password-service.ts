@@ -505,22 +505,48 @@ export async function updateTeamPassword(
     updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
   }
 
-  // Snapshot + update in a single transaction for atomicity (F-9)
+  // Row type for the FOR UPDATE snapshot read (team_password_entries).
+  // item_key_* columns are nullable.
+  type TeamBlobRow = {
+    encrypted_blob: string;
+    blob_iv: string;
+    blob_auth_tag: string;
+    aad_version: number;
+    team_key_version: number;
+    item_key_version: number;
+    encrypted_item_key: string | null;
+    item_key_iv: string | null;
+    item_key_auth_tag: string | null;
+  };
+
+  // Snapshot + update in a single transaction for atomicity (F-9).
+  // When the blob is changing, acquire a PK + team_id row lock first so
+  // concurrent PUTs serialise here and each writer snapshots the immediately-
+  // preceding committed blob (not the caller-supplied `existingEntry` read
+  // from outside the transaction, which may be stale under contention).
   return prisma.$transaction(async (tx) => {
     if (isFullUpdate) {
+      const [cur] = await tx.$queryRaw<TeamBlobRow[]>`
+        SELECT encrypted_blob, blob_iv, blob_auth_tag,
+               aad_version, team_key_version, item_key_version,
+               encrypted_item_key, item_key_iv, item_key_auth_tag
+        FROM team_password_entries
+        WHERE id = ${passwordId}::uuid AND team_id = ${teamId}::uuid
+        FOR UPDATE
+      `;
       await tx.teamPasswordEntryHistory.create({
         data: {
           entryId: passwordId,
           tenantId: existingEntry.tenantId,
-          encryptedBlob: existingEntry.encryptedBlob,
-          blobIv: existingEntry.blobIv,
-          blobAuthTag: existingEntry.blobAuthTag,
-          aadVersion: existingEntry.aadVersion,
-          teamKeyVersion: existingEntry.teamKeyVersion,
-          itemKeyVersion: existingEntry.itemKeyVersion,
-          encryptedItemKey: existingEntry.encryptedItemKey,
-          itemKeyIv: existingEntry.itemKeyIv,
-          itemKeyAuthTag: existingEntry.itemKeyAuthTag,
+          encryptedBlob: cur.encrypted_blob,
+          blobIv: cur.blob_iv,
+          blobAuthTag: cur.blob_auth_tag,
+          aadVersion: cur.aad_version,
+          teamKeyVersion: cur.team_key_version,
+          itemKeyVersion: cur.item_key_version,
+          encryptedItemKey: cur.encrypted_item_key,
+          itemKeyIv: cur.item_key_iv,
+          itemKeyAuthTag: cur.item_key_auth_tag,
           changedById: userId,
         },
       });

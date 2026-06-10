@@ -268,11 +268,25 @@ describe("GET /api/passwords/[id]", () => {
 });
 
 describe("PUT /api/passwords/[id]", () => {
+  // cur row returned by $queryRaw FOR UPDATE — values are DISTINCT from ownedEntry
+  // so field-level assertions can detect if the handler reads from `existing` instead.
+  const curRow = {
+    encrypted_blob: "cur-blob-cipher",
+    blob_iv: "cur-blob-iv",
+    blob_auth_tag: "cur-blob-tag",
+    key_version: 2,
+    aad_version: 3,
+  };
+
   const txMock = {
+    $queryRaw: vi.fn().mockResolvedValue([curRow]),
     passwordEntryHistory: {
       create: vi.fn().mockResolvedValue({}),
       findMany: vi.fn().mockResolvedValue([]),
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    passwordEntry: {
+      update: vi.fn(),
     },
   };
 
@@ -284,6 +298,21 @@ describe("PUT /api/passwords/[id]", () => {
     mockPrismaFolder.findFirst.mockResolvedValue({ id: "folder-1" });
     mockPrismaTag.count.mockResolvedValue(1);
     mockAuditCreate.mockResolvedValue({});
+    txMock.$queryRaw.mockResolvedValue([curRow]);
+    txMock.passwordEntryHistory.create.mockResolvedValue({});
+    txMock.passwordEntryHistory.findMany.mockResolvedValue([]);
+    txMock.passwordEntryHistory.deleteMany.mockResolvedValue({ count: 0 });
+    txMock.passwordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      encryptedOverview: "new-over",
+      overviewIv: "c".repeat(24),
+      overviewAuthTag: "d".repeat(32),
+      keyVersion: 1,
+      aadVersion: 0,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
     mockPrismaTransaction.mockImplementation(async (fn: (tx: typeof txMock) => Promise<unknown>) => fn(txMock));
   });
 
@@ -331,16 +360,7 @@ describe("PUT /api/passwords/[id]", () => {
 
   it("updates password entry successfully", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
-    mockPrismaPasswordEntry.update.mockResolvedValue({
-      id: PW_ID,
-      encryptedOverview: "new-over",
-      overviewIv: "c".repeat(24),
-      overviewAuthTag: "d".repeat(32),
-      keyVersion: 1,
-      tags: [],
-      createdAt: now,
-      updatedAt: now,
-    });
+    // blob-changing path: result comes from txMock.passwordEntry.update (already configured in beforeEach)
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, { body: updateBody }),
@@ -396,9 +416,52 @@ describe("PUT /api/passwords/[id]", () => {
     expect(res.status).toBe(400);
   });
 
+  it("C3: succeeds when tagIds contain duplicates but are all owned (count mock returns 1 for [t1,t1])", async () => {
+    // tag.count returns distinct row count; t1 is owned once → count=1.
+    // Before the fix, ownedCount(1) !== tagIds.length(2) → 400.
+    // After the fix, ownedCount(1) !== uniqueTagIds.length(1) → success.
+    const ownedTagId = "00000000-0000-4000-a000-000000000001";
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    mockPrismaTag.count.mockResolvedValue(1);
+    // metadata-only path (no blob): update goes through mockPrismaPasswordEntry.update
+    mockPrismaPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      encryptedOverview: "overview-cipher",
+      overviewIv: "overview-iv",
+      overviewAuthTag: "overview-tag",
+      keyVersion: 1,
+      tags: [{ id: ownedTagId }],
+      createdAt: now,
+      updatedAt: now,
+    });
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: { tagIds: [ownedTagId, ownedTagId] },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("C3: still rejects when tagIds reference an unowned tag", async () => {
+    // t1 owned, t2-unowned → count=1 but uniqueTagIds.length=2 → 400
+    const ownedTagId = "00000000-0000-4000-a000-000000000001";
+    const unownedTagId = "00000000-0000-4000-a000-000000000002";
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    mockPrismaTag.count.mockResolvedValue(1);
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: { tagIds: [ownedTagId, unownedTagId] },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("stores aadVersion when provided in update body", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
-    mockPrismaPasswordEntry.update.mockResolvedValue({
+    // blob-changing path: update goes through txMock.passwordEntry.update
+    txMock.passwordEntry.update.mockResolvedValue({
       id: PW_ID,
       encryptedOverview: "new-over",
       overviewIv: "c".repeat(24),
@@ -419,7 +482,7 @@ describe("PUT /api/passwords/[id]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.aadVersion).toBe(1);
-    expect(mockPrismaPasswordEntry.update).toHaveBeenCalledWith(
+    expect(txMock.passwordEntry.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ aadVersion: 1 }),
       }),
@@ -539,16 +602,6 @@ describe("PUT /api/passwords/[id]", () => {
 
   it("creates history snapshot when encryptedBlob is updated", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
-    mockPrismaPasswordEntry.update.mockResolvedValue({
-      id: PW_ID,
-      encryptedOverview: "new-over",
-      overviewIv: "c".repeat(24),
-      overviewAuthTag: "d".repeat(32),
-      keyVersion: 1,
-      tags: [],
-      createdAt: now,
-      updatedAt: now,
-    });
 
     const updateBodyWithBlob = {
       encryptedBlob: { ciphertext: "new-blob", iv: "a".repeat(24), authTag: "b".repeat(32) },
@@ -561,14 +614,18 @@ describe("PUT /api/passwords/[id]", () => {
       createParams({ id: PW_ID }),
     );
 
-    // Should have called $transaction to create history snapshot
+    // $transaction and $queryRaw FOR UPDATE must be called
     expect(mockPrismaTransaction).toHaveBeenCalled();
+    expect(txMock.$queryRaw).toHaveBeenCalled();
+    // Snapshot fields must come from curRow (the FOR UPDATE result), NOT from ownedEntry
     expect(txMock.passwordEntryHistory.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         entryId: PW_ID,
-        encryptedBlob: ownedEntry.encryptedBlob,
-        blobIv: ownedEntry.blobIv,
-        blobAuthTag: ownedEntry.blobAuthTag,
+        encryptedBlob: curRow.encrypted_blob,
+        blobIv: curRow.blob_iv,
+        blobAuthTag: curRow.blob_auth_tag,
+        keyVersion: curRow.key_version,
+        aadVersion: curRow.aad_version,
       }),
     });
   });
@@ -578,16 +635,7 @@ describe("PUT /api/passwords/[id]", () => {
     txMock.passwordEntryHistory.findMany.mockResolvedValue(
       Array.from({ length: 21 }, (_, index) => ({ id: `hist-${index}` })),
     );
-    mockPrismaPasswordEntry.update.mockResolvedValue({
-      id: PW_ID,
-      encryptedOverview: "new-over",
-      overviewIv: "c".repeat(24),
-      overviewAuthTag: "d".repeat(32),
-      keyVersion: 1,
-      tags: [],
-      createdAt: now,
-      updatedAt: now,
-    });
+    // blob-changing path: update goes through txMock.passwordEntry.update
 
     await PUT(
       createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, { body: updateBody }),
@@ -603,6 +651,7 @@ describe("PUT /api/passwords/[id]", () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
     mockPrismaTag.count.mockResolvedValue(2);
     const tagIds = ["00000000-0000-4000-a000-000000000001", "00000000-0000-4000-a000-000000000002"];
+    // metadata-only path (no encryptedBlob): update goes through mockPrismaPasswordEntry.update
     mockPrismaPasswordEntry.update.mockResolvedValue({
       id: PW_ID,
       encryptedOverview: "overview-cipher",
@@ -709,6 +758,95 @@ describe("PUT /api/passwords/[id]", () => {
       createParams({ id: PW_ID }),
     );
     expect(res.status).toBe(200);
+  });
+
+  // C1: FOR UPDATE snapshot source and SQL text guard
+  it("C1: $queryRaw is called before History.create on blob-changing PUT", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    const callOrder: string[] = [];
+    txMock.$queryRaw.mockImplementation(() => {
+      callOrder.push("$queryRaw");
+      return Promise.resolve([curRow]);
+    });
+    txMock.passwordEntryHistory.create.mockImplementation(() => {
+      callOrder.push("historyCreate");
+      return Promise.resolve({});
+    });
+
+    await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, { body: updateBody }),
+      createParams({ id: PW_ID }),
+    );
+
+    expect(callOrder.indexOf("$queryRaw")).toBeLessThan(callOrder.indexOf("historyCreate"));
+  });
+
+  it("C1: FOR UPDATE SQL contains table name and required crypto columns", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+
+    await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, { body: updateBody }),
+      createParams({ id: PW_ID }),
+    );
+
+    expect(txMock.$queryRaw).toHaveBeenCalled();
+    // Extract the TemplateStringsArray (first arg) and join its static parts
+    const [tpl] = txMock.$queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
+    const sql = tpl.join("?");
+    expect(sql).toMatch(/FOR UPDATE/i);
+    expect(sql).toMatch(/password_entries/i);
+    expect(sql).toMatch(/encrypted_blob/i);
+    expect(sql).toMatch(/blob_iv/i);
+    expect(sql).toMatch(/blob_auth_tag/i);
+    expect(sql).toMatch(/key_version/i);
+    expect(sql).toMatch(/aad_version/i);
+  });
+
+  it("C1: all 5 crypto fields in History.create come from $queryRaw result, not from existing", async () => {
+    // curRow values are intentionally distinct from ownedEntry values
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+
+    await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, { body: updateBody }),
+      createParams({ id: PW_ID }),
+    );
+
+    const histData = txMock.passwordEntryHistory.create.mock.calls[0][0].data;
+    // Each field must equal curRow value (not ownedEntry value)
+    expect(histData.encryptedBlob).toBe(curRow.encrypted_blob);
+    expect(histData.blobIv).toBe(curRow.blob_iv);
+    expect(histData.blobAuthTag).toBe(curRow.blob_auth_tag);
+    expect(histData.keyVersion).toBe(curRow.key_version);
+    expect(histData.aadVersion).toBe(curRow.aad_version);
+    // Distinct-from-ownedEntry sanity check
+    expect(histData.encryptedBlob).not.toBe(ownedEntry.encryptedBlob);
+    expect(histData.blobIv).not.toBe(ownedEntry.blobIv);
+    expect(histData.keyVersion).not.toBe(ownedEntry.keyVersion);
+  });
+
+  it("C1: metadata-only PUT issues no $queryRaw and no History.create", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    mockPrismaPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      encryptedOverview: "overview-cipher",
+      overviewIv: "overview-iv",
+      overviewAuthTag: "overview-tag",
+      keyVersion: 1,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: { isFavorite: true },
+      }),
+      createParams({ id: PW_ID }),
+    );
+
+    expect(txMock.$queryRaw).not.toHaveBeenCalled();
+    expect(txMock.passwordEntryHistory.create).not.toHaveBeenCalled();
+    expect(mockPrismaTransaction).not.toHaveBeenCalled();
   });
 });
 

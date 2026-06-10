@@ -380,6 +380,35 @@ describe("POST /api/v1/passwords", () => {
     expect(status).toBe(400);
   });
 
+  it("C3: succeeds when tagIds contain duplicates but are all owned (count mock returns 1 for [t1,t1])", async () => {
+    // tag.count returns distinct row count; t1 is owned once → count=1.
+    // Before the fix, ownedCount(1) !== tagIds.length(2) → 400.
+    // After the fix, ownedCount(1) !== uniqueTagIds.length(1) → success.
+    const ownedTagId = "00000000-0000-4000-a000-000000000001";
+    mockTagCount.mockResolvedValue(1);
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/v1/passwords", {
+        body: { ...validBody, tagIds: [ownedTagId, ownedTagId] },
+      }),
+    );
+    const { status } = await parseResponse(res);
+    expect(status).toBe(201);
+  });
+
+  it("C3: still rejects when tagIds reference an unowned tag", async () => {
+    // t1 owned, t2-unowned → count=1 but uniqueTagIds.length=2 → 400
+    const ownedTagId = "00000000-0000-4000-a000-000000000001";
+    const unownedTagId = "00000000-0000-4000-a000-000000000002";
+    mockTagCount.mockResolvedValue(1);
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/v1/passwords", {
+        body: { ...validBody, tagIds: [ownedTagId, unownedTagId] },
+      }),
+    );
+    const { status } = await parseResponse(res);
+    expect(status).toBe(400);
+  });
+
   it("creates entry and returns 201 with correct shape", async () => {
     const res = await POST(
       createRequest("POST", "http://localhost/api/v1/passwords", { body: validBody }),
