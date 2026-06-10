@@ -456,19 +456,16 @@ final class CredentialResolverTests: XCTestCase {
     )
 
     let ident = ServiceIdentifier(identifier: "https://mail.google.com", isURL: true)
-    let candidates = try await resolver.resolveCandidates(for: [ident])
+    let result = try await resolver.resolveCandidates(for: [ident])
 
-    XCTAssertEqual(candidates.count, 3, "Should return all entries")
-    // Matched entries (entry-1, entry-2) should come first
-    XCTAssertTrue(
-      candidates.prefix(2).map(\.id).contains("entry-1"),
-      "entry-1 (mail.google.com exact) should be in first 2"
+    // matched = host matches only (entry-1 exact, entry-2 subdomain); entry-3 excluded.
+    XCTAssertEqual(
+      Set(result.matched.map(\.id)), ["entry-1", "entry-2"],
+      "matched should be exactly the host-matching entries"
     )
-    XCTAssertTrue(
-      candidates.prefix(2).map(\.id).contains("entry-2"),
-      "entry-2 (google.com subdomain) should be in first 2"
-    )
-    XCTAssertEqual(candidates.last?.id, "entry-3", "Non-matching entry should be last")
+    // all = full set, matched first then unmatched.
+    XCTAssertEqual(result.all.count, 3, "all should contain every entry")
+    XCTAssertEqual(result.all.last?.id, "entry-3", "Non-matching entry should be last in all")
   }
 
   // MARK: - Stale team key filtering
@@ -770,7 +767,7 @@ final class CredentialResolverTests: XCTestCase {
     let resolver = CredentialResolver(
       bridgeKeyStore: bridgeKeyStore, wrappedKeyStore: mockWKS, cacheURL: cacheURL
     )
-    let candidates = try await resolver.resolveCandidates(for: [])
+    let candidates = try await resolver.resolveCandidates(for: []).all
     XCTAssertEqual(candidates.count, 1, "aadVersion=0 entry must decrypt cleanly")
     XCTAssertEqual(candidates[0].id, "p-0")
   }
@@ -803,7 +800,7 @@ final class CredentialResolverTests: XCTestCase {
     let resolver = CredentialResolver(
       bridgeKeyStore: bridgeKeyStore, wrappedKeyStore: mockWKS, cacheURL: cacheURL
     )
-    let candidates = try? await resolver.resolveCandidates(for: [])
+    let candidates = (try? await resolver.resolveCandidates(for: []))?.all
     // The entry is silently filtered (decrypt fails), so candidates is empty or nil
     XCTAssertTrue(
       candidates?.isEmpty != false,
@@ -845,7 +842,7 @@ final class CredentialResolverTests: XCTestCase {
     let resolver = CredentialResolver(
       bridgeKeyStore: bridgeKeyStore, wrappedKeyStore: mockWKS, cacheURL: cacheURL
     )
-    let candidates = try await resolver.resolveCandidates(for: [])
+    let candidates = try await resolver.resolveCandidates(for: []).all
     XCTAssertEqual(candidates.count, 1, "Team entry itemKeyVersion=0 must decrypt with teamKey")
     XCTAssertEqual(candidates[0].id, "te-0")
   }
@@ -883,7 +880,7 @@ final class CredentialResolverTests: XCTestCase {
     let resolver = CredentialResolver(
       bridgeKeyStore: bridgeKeyStore, wrappedKeyStore: mockWKS, cacheURL: cacheURL
     )
-    let candidates = try await resolver.resolveCandidates(for: [])
+    let candidates = try await resolver.resolveCandidates(for: []).all
     XCTAssertEqual(candidates.count, 1, "Team entry itemKeyVersion=1 must unwrap ItemKey")
     XCTAssertEqual(candidates[0].id, "te-1")
   }
@@ -937,7 +934,7 @@ final class CredentialResolverTests: XCTestCase {
     )
     // Entry must be silently filtered; noEntries thrown since cache is non-empty but all fail
     do {
-      let candidates = try await resolver.resolveCandidates(for: [])
+      let candidates = try await resolver.resolveCandidates(for: []).all
       XCTAssertTrue(candidates.isEmpty, "Missing ItemKey must cause entry to be filtered")
     } catch CredentialResolver.Error.noEntries {
       // Also acceptable: resolver surfaces noEntries when all entries are filtered
@@ -991,7 +988,7 @@ final class CredentialResolverTests: XCTestCase {
       bridgeKeyStore: bridgeKeyStore, wrappedKeyStore: mockWKS, cacheURL: cacheURL
     )
     do {
-      let candidates = try await resolver.resolveCandidates(for: [])
+      let candidates = try await resolver.resolveCandidates(for: []).all
       XCTAssertTrue(candidates.isEmpty, "Wrong AAD must cause entry to be filtered")
     } catch CredentialResolver.Error.noEntries {
       // Also acceptable

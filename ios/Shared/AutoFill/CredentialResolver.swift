@@ -2,6 +2,54 @@ import AuthenticationServices
 import CryptoKit
 import Foundation
 
+// MARK: - Candidate result
+
+/// Result of resolving AutoFill candidates for a set of service identifiers.
+/// `matched` is host-matched entries only (the default picker view); `all` is
+/// every decrypted summary with matched ones first (for the picker's search).
+public struct CandidateResult: Sendable {
+  public let matched: [VaultEntrySummary]
+  public let all: [VaultEntrySummary]
+
+  public init(matched: [VaultEntrySummary], all: [VaultEntrySummary]) {
+    self.matched = matched
+    self.all = all
+  }
+}
+
+/// Partition decrypted summaries into host-matched vs. the full matched-first set.
+/// Pure (no crypto/Keychain) so it is unit-testable in isolation.
+public func partitionCandidates(
+  _ summaries: [VaultEntrySummary],
+  tabHosts: [String]
+) -> CandidateResult {
+  var matched: [VaultEntrySummary] = []
+  var unmatched: [VaultEntrySummary] = []
+  for summary in summaries {
+    let isMatch = tabHosts.contains { host in
+      (!summary.urlHost.isEmpty && isHostMatch(stored: summary.urlHost, current: host))
+        || summary.additionalUrlHosts.contains { isHostMatch(stored: $0, current: host) }
+    }
+    if isMatch {
+      matched.append(summary)
+    } else {
+      unmatched.append(summary)
+    }
+  }
+  return CandidateResult(matched: matched, all: matched + unmatched)
+}
+
+/// Case-insensitive search predicate for the picker search field: matches when
+/// the trimmed query is a substring of the entry's title, username, or urlHost.
+/// An empty/whitespace query returns false (the caller shows `matched` instead).
+public func summaryMatchesSearch(_ summary: VaultEntrySummary, query: String) -> Bool {
+  let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+  guard !q.isEmpty else { return false }
+  return summary.title.lowercased().contains(q)
+    || summary.username.lowercased().contains(q)
+    || summary.urlHost.lowercased().contains(q)
+}
+
 // MARK: - Sendable service identifier
 
 /// Sendable mirror of ASCredentialServiceIdentifier for crossing actor boundaries.
@@ -71,12 +119,12 @@ public actor CredentialResolver {
 
   // MARK: - Public API
 
-  /// Returns matching entry summaries (decrypted overviews) for a given set of service identifiers.
-  /// Performs a SINGLE bridge_key Keychain read (one biometric prompt) per call.
+  /// Returns matched + full entry summaries (decrypted overviews) for a given set of service
+  /// identifiers. Performs a SINGLE bridge_key Keychain read (one biometric prompt) per call.
   /// Vault_key derived from bridge_key is zeroed before this method returns.
   public func resolveCandidates(
     for serviceIdentifiers: [ServiceIdentifier]
-  ) async throws -> [VaultEntrySummary] {
+  ) async throws -> CandidateResult {
     currentBlob = nil
 
     // Single biometric Keychain read.
@@ -188,7 +236,7 @@ public actor CredentialResolver {
       throw Error.noEntries
     }
 
-    // Filter and sort by URL host match.
+    // Extract hosts (URL identifiers → normalized host; bundle IDs → as-is).
     let tabHosts = serviceIdentifiers.compactMap { ident -> String? in
       if ident.isURL {
         return extractHost(ident.identifier)
@@ -197,25 +245,10 @@ public actor CredentialResolver {
       }
     }
 
-    var matched: [VaultEntrySummary] = []
-    var unmatched: [VaultEntrySummary] = []
-
-    for summary in summaries {
-      let isMatch = tabHosts.contains { host in
-        isHostMatch(stored: summary.urlHost, current: host)
-        || summary.additionalUrlHosts.contains { isHostMatch(stored: $0, current: host) }
-      }
-      if isMatch {
-        matched.append(summary)
-      } else {
-        unmatched.append(summary)
-      }
-    }
-
     // Store blob so decryptEntryDetail can reuse it within the same fill without re-prompting.
     currentBlob = blob
 
-    return matched + unmatched
+    return partitionCandidates(summaries, tabHosts: tabHosts)
   }
 
   /// Decrypts one entry's full blob (used after the user picks from the list).
