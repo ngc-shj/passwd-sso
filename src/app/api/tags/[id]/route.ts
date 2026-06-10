@@ -8,7 +8,7 @@ import { parseBody } from "@/lib/http/parse-body";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { validateParentChain, TagTreeError } from "@/lib/format/tag-tree";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, errorResponseWithMessage, forbidden, notFound, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, notFound, unauthorized } from "@/lib/http/api-response";
 
 // PUT /api/tags/[id] - Update a tag
 async function handlePUT(
@@ -28,8 +28,9 @@ async function handlePUT(
   if (!existing) {
     return notFound();
   }
+  // A01-4: collapse 403 → 404 to remove the existence oracle
   if (existing.userId !== session.user.id) {
-    return forbidden();
+    return notFound();
   }
 
   const result = await parseBody(req, updateTagSchema);
@@ -133,8 +134,9 @@ async function handleDELETE(
   if (!existing) {
     return notFound();
   }
+  // A01-4: collapse 403 → 404 to remove the existence oracle
   if (existing.userId !== session.user.id) {
-    return forbidden();
+    return notFound();
   }
 
   await withUserTenantRls(session.user.id, async () =>

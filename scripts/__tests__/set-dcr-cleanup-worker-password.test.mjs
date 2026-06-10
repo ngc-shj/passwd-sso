@@ -3,8 +3,8 @@
  *
  * Coverage:
  *   T1 — exits 1 with structured error when stdin is empty
- *   T2 — DRY_RUN=1 + --print-args-file: exits 0 and args file contains
- *        the password in "-v new_password=<value>" form
+ *   T2 — DRY_RUN=1 + --print-args-file: exits 0, the password reaches psql
+ *        via stdin SQL, and never appears in psql argv
  *   T3 — password value never appears in /proc/<pid>/cmdline of the wrapper
  *        bash process (best-effort; skipped with TODO if /proc is unavailable)
  */
@@ -42,7 +42,7 @@ describe("set-dcr-cleanup-worker-password.sh", () => {
     expect(result.stderr).toContain("password expected on stdin");
   });
 
-  it("with DRY_RUN=1 + --print-args-file + stdin 'secret': exits 0 and args file records -v new_password=secret", () => {
+  it("with DRY_RUN=1 + --print-args-file + stdin 'secret': exits 0, password reaches psql via stdin and not via argv", () => {
     const tmpDir = mkdtempSync(resolve(tmpdir(), "dcr-test-"));
     const argsFile = resolve(tmpDir, "args.json");
 
@@ -57,16 +57,17 @@ describe("set-dcr-cleanup-worker-password.sh", () => {
 
       expect(result.status).toBe(0);
 
-      const argsJson = readFileSync(argsFile, "utf8").trim();
-      const args = JSON.parse(argsJson);
+      const invocation = JSON.parse(readFileSync(argsFile, "utf8").trim());
+      const { args, stdin } = invocation;
 
       expect(Array.isArray(args)).toBe(true);
       expect(args[0]).toBe("psql");
-
-      // The args array must contain "-v" followed by "new_password=secret".
-      const vIdx = args.indexOf("-v");
-      expect(vIdx).toBeGreaterThan(-1);
-      expect(args[vIdx + 1]).toBe("new_password=secret");
+      // SQL is fed via stdin ("-f -"); the password must NOT be in argv.
+      expect(args).toContain("-f");
+      expect(args).toContain("-");
+      expect(JSON.stringify(args)).not.toContain("secret");
+      // The stdin SQL carries the password as a quoted literal.
+      expect(stdin).toContain("PASSWORD 'secret'");
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -99,8 +100,8 @@ describe("set-dcr-cleanup-worker-password.sh", () => {
       // psql subprocess. We verify that the bash wrapper's own argv (captured from
       // /proc at spawn time) does not contain the password. Because spawnSync is
       // synchronous and the process has already exited, we use the argsFile output
-      // to confirm the password was passed via the -v flag (not concatenated into
-      // the script's own argv by the shell).
+      // to confirm the password was passed via psql's stdin (never via argv,
+      // which is world-readable through /proc/<pid>/cmdline).
       const result = spawnScript(
         ["--print-args-file", argsFile],
         {
@@ -116,10 +117,33 @@ describe("set-dcr-cleanup-worker-password.sh", () => {
       expect(result.stdout).not.toContain(sentinel);
       expect(result.stderr).not.toContain(sentinel);
 
-      // Confirm the password IS correctly captured in the args file.
-      const args = JSON.parse(readFileSync(argsFile, "utf8").trim());
-      const vIdx = args.indexOf("-v");
-      expect(args[vIdx + 1]).toBe(`new_password=${sentinel}`);
+      // Confirm the password IS captured in the stdin SQL — and only there.
+      const { args, stdin } = JSON.parse(readFileSync(argsFile, "utf8").trim());
+      expect(stdin).toContain(`PASSWORD '${sentinel}'`);
+      expect(JSON.stringify(args)).not.toContain(sentinel);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("escapes single quotes in the password when building the SQL literal", () => {
+    const tmpDir = mkdtempSync(resolve(tmpdir(), "pw-escape-test-"));
+    const argsFile = resolve(tmpDir, "args.json");
+
+    try {
+      const result = spawnScript(
+        ["--print-args-file", argsFile],
+        {
+          input: "se'cret",
+          env: { DRY_RUN: "1" },
+        },
+      );
+
+      expect(result.status).toBe(0);
+
+      const { stdin } = JSON.parse(readFileSync(argsFile, "utf8").trim());
+      // SQL standard escaping: ' doubles to '' inside the literal.
+      expect(stdin).toContain("PASSWORD 'se''cret'");
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }

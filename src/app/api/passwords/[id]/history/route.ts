@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { unauthorized, notFound, forbidden } from "@/lib/http/api-response";
+import { unauthorized, notFound } from "@/lib/http/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { HISTORY_PAGE_SIZE } from "@/lib/validations/common.server";
@@ -28,8 +28,9 @@ async function handleGET(
   if (!entry) {
     return notFound();
   }
+  // A01-4: collapse 403 → 404 to remove the existence oracle
   if (entry.userId !== session.user.id) {
-    return forbidden();
+    return notFound();
   }
 
   const histories = await withUserTenantRls(session.user.id, async () =>

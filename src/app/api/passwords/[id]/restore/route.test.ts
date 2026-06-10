@@ -45,7 +45,7 @@ describe("POST /api/passwords/[id]/restore", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 403 when entry belongs to another user", async () => {
+  it("returns 404 when entry belongs to another user (A01-4: no existence oracle)", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue({
       id: PW_ID,
       userId: "other-user",
@@ -55,7 +55,7 @@ describe("POST /api/passwords/[id]/restore", () => {
       createRequest("POST", `http://localhost:3000/api/passwords/${PW_ID}/restore`),
       createParams({ id: PW_ID }),
     );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it("returns 400 when entry is not in trash", async () => {

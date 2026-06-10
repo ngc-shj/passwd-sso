@@ -46,8 +46,10 @@ BODY=$(cat <<EOJSON
 EOJSON
 )
 
+# The Authorization header is passed to curl via --config on a process
+# substitution FD, not via argv: command-line arguments are world-readable
+# through /proc/<pid>/cmdline (`ps`) while curl runs.
 CURL_OPTS=(-sS -w "\n%{http_code}" -X POST \
-  -H "Authorization: Bearer ${ADMIN_API_TOKEN}" \
   -H "Content-Type: application/json" \
   --data "${BODY}")
 if [[ "${INSECURE:-false}" == "true" ]]; then
@@ -55,7 +57,9 @@ if [[ "${INSECURE:-false}" == "true" ]]; then
   CURL_OPTS+=(--insecure)
 fi
 
-RESPONSE=$(curl "${CURL_OPTS[@]}" "${APP_URL}/api/maintenance/purge-audit-logs")
+RESPONSE=$(curl "${CURL_OPTS[@]}" \
+  --config <(printf 'header = "Authorization: Bearer %s"\n' "$ADMIN_API_TOKEN") \
+  "${APP_URL}/api/maintenance/purge-audit-logs")
 
 HTTP_STATUS=$(printf '%s' "$RESPONSE" | tail -n1)
 BODY_RESPONSE=$(printf '%s' "$RESPONSE" | sed '$d')

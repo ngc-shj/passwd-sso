@@ -30,13 +30,18 @@ export { SESSION_CACHE_TTL_MS } from "@/lib/auth/session/session-cache";
  * deployment's useSecureCookies + basePath combination.
  */
 export function extractSessionToken(cookie: string): string {
+  // Parse into name/value pairs and match names exactly. A plain
+  // indexOf("name=") substring scan would also match attacker-settable
+  // cookie names that merely END with a known name (e.g.
+  // "evil-authjs.session-token=x").
+  const entries = cookie.split(";");
   for (const name of ALL_KNOWN_SESSION_COOKIE_NAMES) {
-    const prefix = `${name}=`;
-    const idx = cookie.indexOf(prefix);
-    if (idx !== -1) {
-      const start = idx + prefix.length;
-      const end = cookie.indexOf(";", start);
-      return end === -1 ? cookie.slice(start) : cookie.slice(start, end);
+    for (const entry of entries) {
+      const eq = entry.indexOf("=");
+      if (eq === -1) continue;
+      if (entry.slice(0, eq).trim() === name) {
+        return entry.slice(eq + 1).trim();
+      }
     }
   }
   return "";

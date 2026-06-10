@@ -40,7 +40,7 @@ cleanup() {
     curl "${CURL_FLAGS[@]}" \
       -o /dev/null \
       -X DELETE \
-      -H "Authorization: Bearer $SCIM_TOKEN" \
+      --config <(printf 'header = "Authorization: Bearer %s"\n' "$SCIM_TOKEN") \
       -H "Accept: application/scim+json" \
       "$SCIM_BASE_URL/Users/$USER_ID" || true
   fi
@@ -64,7 +64,7 @@ http_json() {
       -o "$body_file" \
       -w "%{http_code}" \
       -X "$method" \
-      -H "Authorization: Bearer $SCIM_TOKEN" \
+      --config <(printf 'header = "Authorization: Bearer %s"\n' "$SCIM_TOKEN") \
       -H "Content-Type: application/scim+json" \
       -H "Accept: application/scim+json" \
       "$SCIM_BASE_URL$path" \
@@ -74,7 +74,7 @@ http_json() {
       -o "$body_file" \
       -w "%{http_code}" \
       -X "$method" \
-      -H "Authorization: Bearer $SCIM_TOKEN" \
+      --config <(printf 'header = "Authorization: Bearer %s"\n' "$SCIM_TOKEN") \
       -H "Accept: application/scim+json" \
       "$SCIM_BASE_URL$path")
   fi

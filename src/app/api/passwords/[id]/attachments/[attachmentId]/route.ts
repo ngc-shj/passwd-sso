@@ -7,7 +7,7 @@ import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, notFound, unauthorized } from "@/lib/http/api-response";
 
 type RouteContext = {
   params: Promise<{ id: string; attachmentId: string }>;
@@ -35,8 +35,9 @@ async function handleGET(
   if (!entry) {
     return notFound();
   }
+  // A01-4: collapse 403 → 404 to remove the existence oracle
   if (entry.userId !== session.user.id) {
-    return forbidden();
+    return notFound();
   }
 
   const attachment = await withUserTenantRls(session.user.id, async () =>
@@ -99,8 +100,9 @@ async function handleDELETE(
   if (!entry) {
     return notFound();
   }
+  // A01-4: collapse 403 → 404 to remove the existence oracle
   if (entry.userId !== session.user.id) {
-    return forbidden();
+    return notFound();
   }
 
   const attachment = await withUserTenantRls(session.user.id, async () =>

@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { updateFolderSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, unauthorized, notFound, forbidden } from "@/lib/http/api-response";
+import { errorResponse, unauthorized, notFound } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import {
   validateParentFolder,
@@ -43,8 +43,9 @@ async function handlePUT(
   if (!existing) {
     return notFound();
   }
+  // A01-4: collapse 403 → 404 to remove the existence oracle
   if (existing.userId !== session.user.id) {
-    return forbidden();
+    return notFound();
   }
 
   const result = await parseBody(req, updateFolderSchema);
@@ -190,8 +191,9 @@ async function handleDELETE(
   if (!existing) {
     return notFound();
   }
+  // A01-4: collapse 403 → 404 to remove the existence oracle
   if (existing.userId !== session.user.id) {
-    return forbidden();
+    return notFound();
   }
 
   // Collect children and detect name conflicts at the target parent level.

@@ -114,13 +114,13 @@ describe("GET /api/passwords/[id]/attachments/[attachmentId]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 403 when entry belongs to another user", async () => {
+  it("returns 404 when entry belongs to another user (A01-4: no existence oracle)", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue({ userId: "other-user" });
     const res = await GET(
       createRequest("GET", "http://localhost:3000/api/passwords/pw-1/attachments/att-1"),
       createParams("pw-1", "att-1")
     );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it("returns 404 when attachment not found", async () => {
@@ -222,13 +222,13 @@ describe("DELETE /api/passwords/[id]/attachments/[attachmentId]", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns 403 when attachment belongs to another user's entry", async () => {
+  it("returns 404 when attachment belongs to another user's entry (A01-4: no existence oracle)", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue({ userId: "other-user" });
     const res = await DELETE(
       createRequest("DELETE", "http://localhost:3000/api/passwords/pw-1/attachments/att-1"),
       createParams("pw-1", "att-1")
     );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it("returns 404 when attachment not found", async () => {

@@ -125,10 +125,16 @@ export async function POST(req: NextRequest) {
         // replacement, deny → retry would always hit a name conflict.
         // We delete the OLD client and claim the NEW one so that Claude Code's
         // client_id matches (it only knows the latest registered client_id).
+        // Replacement is limited to clients the SAME user claimed: otherwise
+        // any tenant member could break another member's working MCP client
+        // (and its issued tokens) just by registering a same-name DCR client.
         const existing = await tx.mcpClient.findFirst({
           where: { tenantId: userTenantId, name: clientName, isDcr: true },
         });
         if (existing) {
+          if (existing.createdById !== session.user.id) {
+            return { error: "name_conflict" as const };
+          }
           await tx.mcpClient.delete({ where: { id: existing.id } });
         }
         // Atomic CAS: only claim if still unclaimed
@@ -146,6 +152,16 @@ export async function POST(req: NextRequest) {
     if (claimResult.error === "tenant_cap") {
       return NextResponse.json(
         { error: "invalid_client", error_description: "tenant_cap" },
+        { status: 400 },
+      );
+    }
+    if (claimResult.error === "name_conflict") {
+      return NextResponse.json(
+        {
+          error: "invalid_client",
+          error_description:
+            "A DCR client with this name was claimed by another user in your tenant",
+        },
         { status: 400 },
       );
     }

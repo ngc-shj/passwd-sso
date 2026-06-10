@@ -36,6 +36,7 @@ vi.mock("@/lib/prisma", () => ({
         mcpClient: {
           count: mockPrismaCount,
           create: mockPrismaCreate,
+          deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
         },
       }),
     ),

@@ -52,12 +52,17 @@ async function handleGET(request: Request) {
     });
   }
 
-  const res = await fetch(
-    `https://api.pwnedpasswords.com/range/${prefix}`,
-    {
+  let res: Response;
+  try {
+    res = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`, {
       headers: { "Add-Padding": "true" },
-    }
-  );
+      // Bound upstream latency so a slow HIBP response cannot pile up
+      // handler invocations (matches the webhook delivery timeout).
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    return errorResponse(API_ERROR.UPSTREAM_ERROR);
+  }
 
   if (!res.ok) {
     return errorResponse(API_ERROR.UPSTREAM_ERROR);

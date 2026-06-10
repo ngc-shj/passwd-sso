@@ -18,8 +18,10 @@
 #
 # Flags:
 #   --print-args-file <path>  (only honoured when DRY_RUN=1) Write the resolved
-#                             psql args as a JSON array to <path> (mode 0600).
-#                             Used by tests to assert the password reaches psql.
+#                             psql invocation as a JSON object
+#                             {"args": [...], "stdin": "<sql>"} to <path>
+#                             (mode 0600). Used by tests to assert the password
+#                             reaches psql via stdin and never via argv.
 #
 # Password input:
 #   The password must be provided on stdin. If stdin is a tty or empty, the
@@ -69,31 +71,35 @@ if [[ -z "$new_password" ]]; then
   exit 1
 fi
 
+# Embed the password as a properly quoted SQL literal ('' escaping) and feed
+# the statement to psql on STDIN. Passing it as a psql argument (-v) would
+# expose it in /proc/<pid>/cmdline (`ps`) for the lifetime of the psql call.
+escaped_password="${new_password//\'/\'\'}"
+SQL="ALTER ROLE passwd_anchor_publisher WITH PASSWORD '${escaped_password}';"
+
 PSQL_ARGS=(
   "$MIGRATION_DATABASE_URL"
-  -v "new_password=${new_password}"
-  -c "ALTER ROLE passwd_anchor_publisher WITH PASSWORD :'new_password';"
+  -f -
 )
 
 if [[ "$DRY_RUN" == "1" ]]; then
   # Print sanitised representation (password redacted).
-  echo "[DRY_RUN] would invoke: psql \"${MIGRATION_DATABASE_URL}\" -v new_password=<REDACTED> -c \"ALTER ROLE passwd_anchor_publisher WITH PASSWORD :'new_password';\"" >&2
+  echo "[DRY_RUN] would invoke: psql \"${MIGRATION_DATABASE_URL}\" -f - <<< \"ALTER ROLE passwd_anchor_publisher WITH PASSWORD '<REDACTED>';\"" >&2
 
   if [[ -n "$PRINT_ARGS_FILE" ]]; then
-    # Write actual args (including password) to file for test assertion only.
-    # umask 077 ensures mode 0600.
+    # Write actual args + stdin payload (including password) to file for test
+    # assertion only. umask 077 ensures mode 0600.
     (
       umask 077
       python3 -c "
 import json, sys
-args = [\"psql\"] + sys.argv[1:]
-print(json.dumps(args))
-" "$MIGRATION_DATABASE_URL" -v "new_password=${new_password}" -c "ALTER ROLE passwd_anchor_publisher WITH PASSWORD :'new_password';" > "$PRINT_ARGS_FILE"
+print(json.dumps({\"args\": [\"psql\"] + sys.argv[1:-1], \"stdin\": sys.argv[-1]}))
+" "${PSQL_ARGS[@]}" "$SQL" > "$PRINT_ARGS_FILE"
     )
   fi
   exit 0
 fi
 
-psql "${PSQL_ARGS[@]}"
+printf '%s\n' "$SQL" | psql "${PSQL_ARGS[@]}"
 
 echo "[set-audit-anchor-publisher-password] OK — password updated for passwd_anchor_publisher"

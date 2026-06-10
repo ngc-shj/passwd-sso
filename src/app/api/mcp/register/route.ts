@@ -138,6 +138,14 @@ async function handlePOST(req: NextRequest) {
   try {
     client = await withBypassRls(prisma, async (tx) =>
       prisma.$transaction(async (tx) => {
+        // Lazy cleanup: drop expired unclaimed clients before counting so the
+        // global cap cannot stay exhausted when dcr-cleanup-worker is down
+        // (otherwise a burst of registrations would deny DCR service-wide
+        // until the worker drains them).
+        await tx.mcpClient.deleteMany({
+          where: { isDcr: true, tenantId: null, dcrExpiresAt: { lt: new Date() } },
+        });
+
         // Global cap: reject if too many unclaimed DCR clients exist
         const unclaimedCount = await tx.mcpClient.count({
           where: { isDcr: true, tenantId: null },

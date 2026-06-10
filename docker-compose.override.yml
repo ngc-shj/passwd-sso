@@ -1,18 +1,20 @@
 # Development overrides - automatically merged with docker-compose.yml
 # This file exposes ports for local development.
+# Ports are bound to 127.0.0.1 so dev databases/services (with fixed or no
+# credentials) are not reachable from the LAN.
 # Do NOT use in production.
 services:
   db:
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
 
   jackson:
     ports:
-      - "5225:5225"
+      - "127.0.0.1:5225:5225"
 
   redis:
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
 
   audit-outbox-worker:
     build:
@@ -78,8 +80,8 @@ services:
   mailpit:
     image: axllent/mailpit:latest
     ports:
-      - "1025:1025"   # SMTP
-      - "8025:8025"   # Web UI
+      - "127.0.0.1:1025:1025"   # SMTP
+      - "127.0.0.1:8025:8025"   # Web UI
 
   minio:
     image: minio/minio:RELEASE.2024-10-13T13-34-11Z
@@ -88,8 +90,8 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
     command: server /data --console-address ":9001"
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     # No persistent volume: ephemeral storage for dev/test only
     networks:
       - internal

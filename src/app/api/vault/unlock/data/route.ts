@@ -5,6 +5,7 @@ import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { checkAuth } from "@/lib/auth/session/check-auth";
+import { checkLockout } from "@/lib/auth/policy/account-lockout";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { errorResponse } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
@@ -14,7 +15,9 @@ import { withTenantRls } from "@/lib/tenant-rls";
 export const runtime = "nodejs";
 
 // Higher limit than vault/unlock — this endpoint only returns encrypted data
-// and cannot be used for brute-force (passphrase verification is separate).
+// and cannot be used for ONLINE brute-force (passphrase verification is
+// separate). Offline brute-force via the returned blob is gated by the
+// account lockout check below plus the client-side KDF cost.
 // 120 req/5min accounts for ~40 E2E unlock calls + CI retries (×2) + headroom.
 const vaultUnlockDataLimiter = createRateLimiter({
   windowMs: 5 * MS_PER_MINUTE,
@@ -33,6 +36,17 @@ async function handleGET(req: NextRequest) {
   if (!authResult.ok) return authResult.response;
   const { userId } = authResult.auth;
   const tenantId = "tenantId" in authResult.auth ? authResult.auth.tenantId : null;
+
+  // Honor the same account lockout as /api/vault/unlock: while locked,
+  // refuse to hand out the encrypted secret key material. Without this,
+  // a session-holding attacker could fetch the wrapped key once and move
+  // to offline passphrase brute-force, making the unlock lockout moot.
+  const lockoutStatus = await checkLockout(userId);
+  if (lockoutStatus.locked) {
+    return errorResponse(API_ERROR.ACCOUNT_LOCKED, undefined, {
+      lockedUntil: lockoutStatus.lockedUntil,
+    });
+  }
 
   const blocked = await checkRateLimitOrFail({
     req,

@@ -12,5 +12,10 @@ if (dsn) {
     beforeSend(event) {
       return scrubSentryEvent(event as unknown as Record<string, unknown>) as unknown as typeof event;
     },
+    // Transactions bypass beforeSend — scrub them too so capability URLs
+    // (e.g. /s/<token>) never reach Sentry via trace payloads.
+    beforeSendTransaction(event) {
+      return scrubSentryEvent(event as unknown as Record<string, unknown>) as unknown as typeof event;
+    },
   });
 }

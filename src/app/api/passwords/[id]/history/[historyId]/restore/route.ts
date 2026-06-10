@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, notFound, unauthorized } from "@/lib/http/api-response";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_METADATA_KEY } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -38,8 +38,9 @@ async function handlePOST(
   if (!entry) {
     return notFound();
   }
+  // A01-4: collapse 403 → 404 to remove the existence oracle
   if (entry.userId !== session.user.id) {
-    return forbidden();
+    return notFound();
   }
 
   const history = await withUserTenantRls(session.user.id, async () =>

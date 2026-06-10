@@ -13,10 +13,14 @@ import {
   isSecureCookieFromAuthUrl,
 } from "@/lib/auth/session/cookie-name";
 
-// Rate limiters for magic link email (per-email address)
+// Rate limiters for magic link email (per-email address).
+// Fail closed on Redis errors: this limiter gates outbound email sending,
+// so failing open during a Redis outage would allow mail-bombing arbitrary
+// addresses through the sign-in form.
 const magicLinkEmailLimiter = createRateLimiter({
   windowMs: 10 * MS_PER_MINUTE,
   max: 3,
+  failClosedOnRedisError: true,
 });
 
 const allowedGoogleDomains = parseAllowedGoogleDomains();
@@ -102,6 +106,10 @@ export default {
                 }
               : "smtp://localhost:1025",
             from: process.env.EMAIL_FROM || "noreply@localhost",
+            // Sign-in links are single-use, but cap their lifetime at 15
+            // minutes (Auth.js default is 24h) to shrink the window for
+            // intercepted or forwarded emails.
+            maxAge: 15 * 60,
             async sendVerificationRequest({ identifier: email, url }) {
               // Rate limit per email address (3 emails per 10 minutes)
               const rl = await magicLinkEmailLimiter.check(

@@ -720,6 +720,20 @@ describe("extractSessionToken", () => {
       "__Secure-authjs.session-token=secure-tok; authjs.session-token=plain-tok";
     expect(_extractSessionToken(cookie)).toBe("secure-tok");
   });
+
+  // Regression: cookie names must match exactly. An attacker-settable cookie
+  // whose name merely ENDS with a known session cookie name must not be
+  // picked up by a substring scan.
+  it("ignores attacker cookie names that end with a known session cookie name", () => {
+    const cookie = "evil-authjs.session-token=attacker-value";
+    expect(_extractSessionToken(cookie)).toBe("");
+  });
+
+  it("extracts the real token even when an evil-suffixed name appears first", () => {
+    const cookie =
+      "evil-authjs.session-token=attacker-value; authjs.session-token=real-token";
+    expect(_extractSessionToken(cookie)).toBe("real-token");
+  });
 });
 
 describe("proxy — access restriction", () => {
