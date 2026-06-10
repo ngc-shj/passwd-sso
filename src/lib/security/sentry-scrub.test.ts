@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { scrubObject, scrubSentryEvent, sanitizeUrl, TOKEN_ROUTE_PATTERNS } from "./sentry-scrub";
+import { scrubObject, scrubSentryEvent, sanitizeUrl, redactCapabilityPaths, TOKEN_ROUTE_PATTERNS } from "./sentry-scrub";
 
 describe("scrubObject", () => {
   it("redacts top-level sensitive keys", () => {
@@ -514,5 +514,74 @@ describe("sanitizeUrl", () => {
 
   it("TOKEN_ROUTE_PATTERNS is exported and non-empty", () => {
     expect(TOKEN_ROUTE_PATTERNS.length).toBeGreaterThan(0);
+  });
+});
+
+// S6 acceptance fixtures — capability URLs inside free-text fields
+// (exception.values[].value and event.message) must be partially redacted
+// via redactCapabilityPaths only; ?/# and surrounding text must survive.
+describe("S6 — capability URL redaction in free-text fields", () => {
+  it("redactCapabilityPaths replaces /s/<token> in free text, leaving ?/# intact", () => {
+    const input = "fetch https://x.example.com/s/capToken123?retry=1 failed with 404";
+    const result = redactCapabilityPaths(input);
+    expect(result).toBe("fetch https://x.example.com/s/[redacted]?retry=1 failed with 404");
+    expect(result).not.toContain("capToken123");
+    // query string and surrounding text must survive
+    expect(result).toContain("?retry=1");
+    expect(result).toContain("failed with 404");
+  });
+
+  it("exception.values[].value with capability URL is partially redacted", () => {
+    const token = "exceptionCapToken";
+    const event = {
+      exception: {
+        values: [
+          {
+            type: "FetchError",
+            value: `fetch https://app.example.com/s/${token} failed: network error`,
+            stacktrace: { frames: [] },
+          },
+        ],
+      },
+    };
+    const result = scrubSentryEvent(event);
+    const exc = result.exception as Record<string, unknown>;
+    const values = exc.values as Array<Record<string, unknown>>;
+    expect(values[0].value).toBe("fetch https://app.example.com/s/[redacted] failed: network error");
+    expect(String(values[0].value)).not.toContain(token);
+    // surrounding text survives
+    expect(String(values[0].value)).toContain("failed: network error");
+  });
+
+  it("event.message with capability URL is partially redacted", () => {
+    const token = "msgCapToken456";
+    const event = {
+      message: `Error loading https://app.example.com/s/${token}: 403 Forbidden`,
+    };
+    const result = scrubSentryEvent(event);
+    expect(result.message).toBe("Error loading https://app.example.com/s/[redacted]: 403 Forbidden");
+    expect(String(result.message)).not.toContain(token);
+    // surrounding text survives
+    expect(String(result.message)).toContain("403 Forbidden");
+  });
+
+  it("exception.values[].value without capability URL is unchanged", () => {
+    const event = {
+      exception: {
+        values: [
+          { type: "Error", value: "Cannot read property of undefined", stacktrace: null },
+        ],
+      },
+    };
+    const result = scrubSentryEvent(event);
+    const exc = result.exception as Record<string, unknown>;
+    const values = exc.values as Array<Record<string, unknown>>;
+    expect(values[0].value).toBe("Cannot read property of undefined");
+  });
+
+  it("event.message without capability URL is unchanged", () => {
+    const event = { message: "Application started successfully" };
+    const result = scrubSentryEvent(event);
+    expect(result.message).toBe("Application started successfully");
   });
 });

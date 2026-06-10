@@ -458,8 +458,8 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(mockTxDelete).toHaveBeenCalledWith({ where: { id: "old-client-id" } });
   });
 
-  // T2: owner-scoped findFirst must include createdById and id: { not: clientIdDb }
-  it("T2: owner-scoped findFirst where includes createdById and id:not guard", async () => {
+  // T2: owner-scoped findFirst must include createdById + shared id:not guard
+  it("T2: owner-scoped findFirst where includes createdById and shared id:not guard", async () => {
     const claimTarget = { ...VALID_CLIENT, id: "claim-target-id", isDcr: true, tenantId: null };
     mockFindFirst.mockResolvedValueOnce(claimTarget);
     mockMcpClientCount.mockResolvedValueOnce(0);
@@ -508,6 +508,47 @@ describe("POST /api/mcp/authorize/consent", () => {
     const location = res.headers.get("location") ?? "";
     expect(location).toContain("code=");
     // No delete must have been called — the claim target itself is excluded
+    expect(mockTxDelete).not.toHaveBeenCalled();
+    expect(mockCreateAuthorizationCode).toHaveBeenCalledOnce();
+  });
+
+  // F6: same-user double-submit — the claim target is already claimed by this user.
+  // The foreignOwned lookup must also exclude the claim target (via sameNameWhereBase),
+  // so the flow reaches already_claimed recovery, NOT name_conflict.
+  it("F6: same-user double-submit reaches already_claimed recovery, not name_conflict", async () => {
+    // Unclaimed DCR client (the new registration attempt)
+    const claimTarget = { ...VALID_CLIENT, id: "claim-target-id", isDcr: true, tenantId: null };
+    mockFindFirst.mockResolvedValueOnce(claimTarget);
+    mockMcpClientCount.mockResolvedValueOnce(0);
+    // owner-scoped findFirst: no OTHER same-name own client (null — claim target excluded by id:not)
+    mockTxFindFirst.mockResolvedValueOnce(null);
+    // foreignOwned findFirst: also null — claim target excluded by id:not,
+    // and no other same-name row exists
+    mockTxFindFirst.mockResolvedValueOnce(null);
+    // CAS updateMany returns 0 — already claimed by this user
+    mockMcpClientUpdateMany.mockResolvedValueOnce({ count: 0 });
+    // already_claimed refetch: returns this user's already-claimed client
+    mockMcpClientFindUnique.mockResolvedValueOnce({
+      ...VALID_CLIENT,
+      id: "claim-target-id",
+      isDcr: true,
+      tenantId: VALID_USER.tenantId,
+    });
+
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    // Must NOT respond with name_conflict — must reach the already_claimed path
+    // and succeed with an authorization code redirect
+    const json = res.status !== 302 ? await res.json() : null;
+    expect(json?.error_description).not.toBe("name_conflict");
+    expect(res.status).toBe(302);
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("code=");
+    // No delete of any foreign client
     expect(mockTxDelete).not.toHaveBeenCalled();
     expect(mockCreateAuthorizationCode).toHaveBeenCalledOnce();
   });

@@ -72,4 +72,20 @@ RT5 → T2/T3 (recurrence in integration/mock form), RT3 ✓, R19 ✓, test-titl
 
 ## Resolution Status
 
-(updated after fixes)
+### Round 1 — all 17 findings fixed in commit `c42f29b0` (no skips)
+
+- F1 [Major] navigation scrub-loss — fixed (base on scrubbed data); red-green verified. `sentry-scrub.ts`
+- S2/F2 [Major] residual URL carriers — fixed: Referer/referer sanitized, URL_KEY_NAMES + url.full/http.target, URL_WIPE for url.query/url.path, all breadcrumb data.url, contexts.trace.data processed; 5 new red-able fixtures. `sentry-scrub.ts` + tests
+- S1/F5 [Major] rotation-path C13 — fixed: shared `checkTenantMembership` helper; exchangeRefreshToken Phase-1 check → invalid_grant; mobile refresh route check → 401; bypass-rls allowlist synced; 6 new tests incl. SA-bound skip; follow-up R19 miss in `src/__tests__/lib/mcp/refresh-token.test.ts` also fixed.
+- S3 [Minor] initdb fallback — fail-closed (\warn + NOLOGIN); siblings 02/03 share the legacy fail-open pattern (compose-guarded; noted, not modified — same standalone-initdb exposure class, tracked for follow-up).
+- S4 [Minor] sentinel control plane — requirepass appended + REDIS_SENTINEL_PASSWORD wired to app (redis.ts already passes sentinelPassword); render-verified; manual-test updated (VE2).
+- S5 [Minor] cookie dequote — fixed + tests.
+- F3 [Minor] consent self-claim race — `id: { not: clientIdDb }` + test.
+- F4 [Minor] REDIS_PASSWORD description note + .env.example regenerated; check:env-docs green.
+- T1 [Major] failClosed wiring test via createRateLimiter capture — red-green verified.
+- T2 [Major] consent where/delete assertions — red-green verified (createdById removal now fails tests).
+- T3 [Major] integration test now exercises the real Prisma deleteMany/count shapes.
+- T4 [Major] signal assertion — red-green verified.
+- T5 [Major] navigation/query_string fixtures added (within the S2 fixture set).
+- T6/T7/T8/T9 [Minor] all fixed as specified (env teeth via vi.stubEnv after hygiene-gate conversion; stderr-redaction asserts; html asserts; split tx mock proving in-transaction).
+- Gate re-run: pre-pr.sh 31/31 PASS (after fixing a type error, the refresh-token.test R19 miss, and converting redis.test.ts to vi.stubEnv per the test-hygiene gate).

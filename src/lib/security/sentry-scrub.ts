@@ -19,11 +19,15 @@
  */
 export const TOKEN_ROUTE_PATTERNS: ReadonlyArray<[RegExp, string]> = [
   // Share/Send short links: /s/<token>
-  [/\/s\/[^/?#]+/g, "/s/[redacted]"],
+  // [^\s/?#:]+ rather than [^/?#]+ so the pattern works correctly in
+  // free-text fields (exception.value, event.message) where a URL path
+  // segment may be followed by a space or a colon (e.g. ": 403 Forbidden")
+  // rather than only /?#.
+  [/\/s\/[^\s/?#:]+/g, "/s/[redacted]"],
   // Team invite: /dashboard/teams/invite/<token>
-  [/\/dashboard\/teams\/invite\/[^/?#]+/g, "/dashboard/teams/invite/[redacted]"],
+  [/\/dashboard\/teams\/invite\/[^\s/?#:]+/g, "/dashboard/teams/invite/[redacted]"],
   // Emergency-access invite: /dashboard/emergency-access/invite/<token>
-  [/\/dashboard\/emergency-access\/invite\/[^/?#]+/g, "/dashboard/emergency-access/invite/[redacted]"],
+  [/\/dashboard\/emergency-access\/invite\/[^\s/?#:]+/g, "/dashboard/emergency-access/invite/[redacted]"],
 ];
 
 const SENSITIVE_PATTERNS = [
@@ -48,6 +52,19 @@ const REDACTED = "[Redacted]";
 function isSensitiveKey(key: string): boolean {
   const lower = key.toLowerCase();
   return SENSITIVE_PATTERNS.some((p) => lower.includes(p));
+}
+
+/**
+ * Apply TOKEN_ROUTE_PATTERNS replacements to a free-text string.
+ * Unlike sanitizeUrl, this does NOT strip ?/# — those are meaningful
+ * in free-form messages (e.g. fetch-failure strings).
+ */
+export function redactCapabilityPaths(s: string): string {
+  let result = s;
+  for (const [pattern, replacement] of TOKEN_ROUTE_PATTERNS) {
+    result = result.replace(pattern, replacement);
+  }
+  return result;
 }
 
 /**
@@ -96,9 +113,7 @@ export function sanitizeUrl(value: string): string {
   if (qIdx !== -1) result = result.slice(0, qIdx);
 
   // Redact capability path segments
-  for (const [pattern, replacement] of TOKEN_ROUTE_PATTERNS) {
-    result = result.replace(pattern, replacement);
-  }
+  result = redactCapabilityPaths(result);
 
   return result;
 }
@@ -213,13 +228,17 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
     }
   }
 
-  // Scrub exception stack local variables
+  // Scrub exception stack local variables and redact capability paths in value strings
   if (Array.isArray(e.exception)) {
     for (const frame of e.exception as Array<Record<string, unknown>>) {
       if (frame.values && Array.isArray(frame.values)) {
         for (const v of frame.values as Array<Record<string, unknown>>) {
           if (v.stacktrace && typeof v.stacktrace === "object") {
             v.stacktrace = scrubObject(v.stacktrace);
+          }
+          // Redact capability URLs embedded in exception message text
+          if (typeof v.value === "string") {
+            v.value = redactCapabilityPaths(v.value);
           }
         }
       }
@@ -231,8 +250,17 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
         if (v.stacktrace && typeof v.stacktrace === "object") {
           v.stacktrace = scrubObject(v.stacktrace);
         }
+        // Redact capability URLs embedded in exception message text
+        if (typeof v.value === "string") {
+          v.value = redactCapabilityPaths(v.value);
+        }
       }
     }
+  }
+
+  // Redact capability URLs embedded in top-level event message text
+  if (typeof e.message === "string") {
+    e.message = redactCapabilityPaths(e.message);
   }
 
   // Scrub spans (transaction events) — each span's data object through key-based scrubObject,

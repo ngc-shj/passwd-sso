@@ -123,6 +123,15 @@ export async function POST(req: NextRequest) {
           if (tenantClientCount >= MAX_MCP_CLIENTS_PER_TENANT) {
             return { error: "tenant_cap" as const };
           }
+          // Shared exclusion: same-tenant, same-name DCR client that is NOT the
+          // claim target itself. Spread into both owner-scoped and foreign-owned
+          // lookups so the exclusion is defined once and cannot diverge.
+          const sameNameWhereBase = {
+            tenantId: userTenantId,
+            name: clientName,
+            isDcr: true,
+            id: { not: clientIdDb },
+          } as const;
           // If the requester's own same-name DCR client exists, replace it.
           // Claude Code registers a new client on each auth attempt — without
           // replacement, deny → retry would always hit a name conflict.
@@ -130,7 +139,7 @@ export async function POST(req: NextRequest) {
           // client_id matches (it only knows the latest registered client_id).
           // C7: only delete a row owned by this user (createdById === session.user.id).
           const existing = await tx.mcpClient.findFirst({
-            where: { tenantId: userTenantId, name: clientName, isDcr: true, createdById: session.user.id, id: { not: clientIdDb } },
+            where: { ...sameNameWhereBase, createdById: session.user.id },
           });
           if (existing) {
             await tx.mcpClient.delete({ where: { id: existing.id } });
@@ -138,8 +147,10 @@ export async function POST(req: NextRequest) {
             // C7: detect foreign-owned name collision — the unique constraint
             // (tenantId, name) would make the claim write fail at the DB level.
             // Reject early with a user-facing consent error instead of a 500.
+            // Also excludes the claim target itself (via sameNameWhereBase) so that
+            // a same-user double-submit is not misreported as name_conflict.
             const foreignOwned = await tx.mcpClient.findFirst({
-              where: { tenantId: userTenantId, name: clientName, isDcr: true },
+              where: sameNameWhereBase,
             });
             if (foreignOwned) {
               return { error: "name_conflict" as const };

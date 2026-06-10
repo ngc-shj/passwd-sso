@@ -237,19 +237,21 @@ describe("auth.config Google domain validation", () => {
   });
 });
 
+const { mockCreateRateLimiter } = vi.hoisted(() => ({
+  mockCreateRateLimiter: vi.fn(() => ({ check: vi.fn(), clear: vi.fn() })),
+}));
+
+vi.mock("@/lib/security/rate-limit", () => ({
+  createRateLimiter: mockCreateRateLimiter,
+}));
+
 describe("auth.config rate limiter: magic-link failClosedOnRedisError", () => {
   // T1: verify that createRateLimiter is called with failClosedOnRedisError: true
   // for the magic-link limiter (windowMs 10*MS_PER_MINUTE, max 3).
-  const { mockCreateRateLimiter } = vi.hoisted(() => ({
-    mockCreateRateLimiter: vi.fn(() => ({ check: vi.fn(), clear: vi.fn() })),
-  }));
 
   beforeEach(() => {
     vi.resetModules();
     vi.unstubAllEnvs();
-    vi.mock("@/lib/security/rate-limit", () => ({
-      createRateLimiter: mockCreateRateLimiter,
-    }));
   });
 
   afterEach(() => {
