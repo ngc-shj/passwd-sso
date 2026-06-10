@@ -91,7 +91,7 @@ final class BridgeKeyStoreTests: XCTestCase {
   private func makeStore() -> (BridgeKeyStore, MockKeychainAccessor) {
     let mock = MockKeychainAccessor()
     let store = BridgeKeyStore(
-      accessGroup: "test.com.passwd-sso.shared",
+      accessGroup: "test.jp.jpng.passwd-sso.shared",
       keychain: mock
     )
     return (store, mock)

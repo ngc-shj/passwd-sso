@@ -72,3 +72,15 @@ export function callbackUrlToHref(callbackUrl: string): string {
   }
   return stripLocalePrefix(path);
 }
+
+/**
+ * True when the resolved callbackUrl targets an API route (e.g. the iOS
+ * `/api/mobile/authorize` OAuth handler). API routes live outside the
+ * `[locale]` segment, but next-intl's localized router (`router.push`)
+ * prepends the active locale to every path — producing `/<locale>/api/...`,
+ * which 404s. Callers must navigate to API callbacks with a plain
+ * `window.location` (full path incl. basePath, no locale) instead.
+ */
+export function isApiCallbackUrl(callbackUrl: string): boolean {
+  return callbackUrlToHref(callbackUrl).startsWith("/api/");
+}

@@ -10,6 +10,9 @@ const {
   mockWithUserTenantRls,
   mockGetAppOrigin,
   mockRequireRecentSession,
+  mockEnforceAccessRestriction,
+  mockCheckRateLimitOrFail,
+  mockLogAuditAsync,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockMobileBridgeCodeCreate: vi.fn(),
@@ -20,9 +23,16 @@ const {
   ),
   mockGetAppOrigin: vi.fn(() => "https://example.test"),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
+  mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
+  mockCheckRateLimitOrFail: vi.fn().mockResolvedValue(null),
+  mockLogAuditAsync: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
+  enforceAccessRestriction: mockEnforceAccessRestriction,
+}));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -58,6 +68,22 @@ vi.mock("@/lib/auth/session/step-up", () => ({
   requireRecentSession: mockRequireRecentSession,
 }));
 
+vi.mock("@/lib/security/rate-limit-audit", () => ({
+  checkRateLimitOrFail: mockCheckRateLimitOrFail,
+}));
+
+vi.mock("@/lib/audit/audit", () => ({
+  extractRequestMeta: () => ({ ip: "1.2.3.4", userAgent: "test", acceptLanguage: null }),
+  logAuditAsync: mockLogAuditAsync,
+  personalAuditBase: (_req: unknown, userId: string) => ({
+    scope: "PERSONAL",
+    userId,
+    ip: "1.2.3.4",
+    userAgent: "test",
+    acceptLanguage: null,
+  }),
+}));
+
 import { GET } from "./route";
 
 // C6: device_jkt is the RFC 7638 JWK thumbprint (43 base64url chars). The
@@ -89,16 +115,19 @@ describe("GET /api/mobile/authorize", () => {
         fn("22222222-2222-2222-2222-222222222222"),
     );
     mockRequireRecentSession.mockResolvedValue(null);
+    mockEnforceAccessRestriction.mockResolvedValue(null);
+    mockCheckRateLimitOrFail.mockResolvedValue(null);
+    mockLogAuditAsync.mockResolvedValue(undefined);
     mockMobileBridgeCodeCreate.mockResolvedValue({ id: "00000000-0000-4000-8000-000000000003" });
   });
 
-  it("redirects to the canonical Universal-Link with code+state on a valid request", async () => {
+  it("redirects to the iOS custom-scheme callback with code+state on a valid request", async () => {
     const res = await GET(createRequest("GET", buildUrl(VALID)));
     expect(res.status).toBe(302);
     const loc = res.headers.get("location") ?? "";
     const u = new URL(loc);
-    expect(u.origin).toBe("https://example.test");
-    expect(u.pathname).toBe("/api/mobile/authorize/redirect");
+    expect(u.protocol).toBe("passwd-sso:");
+    expect(`${u.protocol}//${u.host}${u.pathname}`).toBe("passwd-sso://auth/callback");
     expect(u.searchParams.get("code")).toBe("f".repeat(64));
     expect(u.searchParams.get("state")).toBe(VALID.state);
     expect(mockMobileBridgeCodeCreate).toHaveBeenCalledTimes(1);
@@ -109,12 +138,65 @@ describe("GET /api/mobile/authorize", () => {
       codeChallenge: VALID.code_challenge,
       deviceJkt: VALID.device_jkt,
     });
+    // Bridge-code issuance is audited; the code itself is never logged.
+    expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditAsync.mock.calls[0][0]).toMatchObject({
+      action: "MOBILE_BRIDGE_CODE_ISSUED",
+      targetType: "MobileBridgeCode",
+      metadata: { deviceJkt: VALID.device_jkt },
+    });
   });
 
-  it("returns 401 when no Auth.js session is present", async () => {
+  it("redirects to the sign-in page (callbackUrl=self) when no Auth.js session is present", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await GET(createRequest("GET", buildUrl(VALID)));
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(302);
+    const loc = res.headers.get("location") ?? "";
+    const u = new URL(loc);
+    expect(u.origin).toBe("https://example.test");
+    expect(u.pathname).toBe("/ja/auth/signin");
+    // callbackUrl points back to the authorize endpoint so Auth.js returns here
+    // after sign-in to issue the bridge code on the second pass.
+    expect(u.searchParams.get("callbackUrl")).toContain("/api/mobile/authorize");
+    expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
+  });
+
+  it("returns the access-restriction denial when the client IP is not allowed", async () => {
+    mockEnforceAccessRestriction.mockResolvedValueOnce(
+      Response.json({ error: "ACCESS_DENIED" }, { status: 403 }),
+    );
+    const res = await GET(createRequest("GET", buildUrl(VALID)));
+    expect(res.status).toBe(403);
+    expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
+  });
+
+  it("returns the rate-limit response and writes no code when the per-user limiter blocks", async () => {
+    mockCheckRateLimitOrFail.mockResolvedValueOnce(
+      Response.json({ error: "RATE_LIMITED" }, { status: 429 }),
+    );
+    const res = await GET(createRequest("GET", buildUrl(VALID)));
+    expect(res.status).toBe(429);
+    expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
+  });
+
+  it("fails closed with 503 and writes no code when the limiter reports redisErrored", async () => {
+    // The authorize limiter is fail-closed on Redis error, so when Redis is
+    // unavailable (redisErrored) checkRateLimitOrFail returns a 503
+    // SERVICE_UNAVAILABLE response. The route must propagate it before issuing
+    // any bridge code (fail closed, not open).
+    mockCheckRateLimitOrFail.mockResolvedValueOnce(
+      Response.json({ error: "SERVICE_UNAVAILABLE" }, { status: 503 }),
+    );
+    const res = await GET(createRequest("GET", buildUrl(VALID)));
+    expect(res.status).toBe(503);
+    expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 when no app origin is configured and the request is unauthenticated", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockGetAppOrigin.mockReturnValue(undefined as unknown as string);
+    const res = await GET(createRequest("GET", buildUrl(VALID)));
+    expect(res.status).toBe(500);
     expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
   });
 
@@ -181,7 +263,7 @@ describe("GET /api/mobile/authorize", () => {
 
     expect(res.status).toBe(302);
     const loc = res.headers.get("location") ?? "";
-    expect(loc.startsWith("https://example.test/api/mobile/authorize/redirect")).toBe(true);
+    expect(loc.startsWith("passwd-sso://auth/callback")).toBe(true);
     expect(loc).not.toContain("attacker.example");
   });
 

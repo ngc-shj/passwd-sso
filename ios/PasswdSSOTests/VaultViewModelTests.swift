@@ -109,9 +109,9 @@ final class VaultViewModelTests: XCTestCase {
     // Assert DPoP header is present.
     XCTAssertNotNil(req.value(forHTTPHeaderField: "DPoP"))
 
-    // Assert Authorization uses DPoP scheme.
+    // Assert Authorization uses Bearer scheme for resource calls (C9/I1).
     let auth = try XCTUnwrap(req.value(forHTTPHeaderField: "Authorization"))
-    XCTAssertTrue(auth.hasPrefix("DPoP "))
+    XCTAssertTrue(auth.hasPrefix("Bearer "))
 
     // Assert body contains non-empty ciphertext fields.
     let body = try XCTUnwrap(capturedBody)

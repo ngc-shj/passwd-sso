@@ -308,6 +308,9 @@ public actor CredentialResolver {
     return detail
   }
 
+  // Blob → model decode is shared with the host app via EntryBlobDecoder
+  // (ios/Shared/Models/EntryBlobDecoder.swift) — do NOT reintroduce a local copy.
+
   // MARK: - Private helpers
 
   private func decryptSummary(
@@ -326,12 +329,11 @@ public actor CredentialResolver {
         tag: tagData,
         key: key,
         aad: aad
-      ),
-      let decoded = try? JSONDecoder().decode(VaultEntrySummary.self, from: plaintext)
+      )
     else {
       return nil
     }
-    return decoded
+    return EntryBlobDecoder.summary(plaintext: plaintext, entryId: entry.id, teamId: entry.teamId)
   }
 
   private func decryptDetail(
@@ -350,12 +352,11 @@ public actor CredentialResolver {
         tag: tagData,
         key: key,
         aad: aad
-      ),
-      let decoded = try? JSONDecoder().decode(VaultEntryDetail.self, from: plaintext)
+      )
     else {
       return nil
     }
-    return decoded
+    return EntryBlobDecoder.detail(plaintext: plaintext, entryId: entry.id, teamId: entry.teamId)
   }
 
   /// Build the AAD for a cache entry at decrypt time.

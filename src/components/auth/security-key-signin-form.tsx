@@ -13,7 +13,7 @@ import {
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { useCallbackUrl } from "@/hooks/use-callback-url";
-import { callbackUrlToHref } from "@/lib/auth/session/callback-url";
+import { callbackUrlToHref, isApiCallbackUrl } from "@/lib/auth/session/callback-url";
 import { stashPrf } from "@/lib/auth/prf-handoff";
 
 export function SecurityKeySignInForm() {
@@ -99,7 +99,14 @@ export function SecurityKeySignInForm() {
       }
 
       sessionStorage.setItem("psso:webauthn-signin", "1");
-      router.push(callbackUrlToHref(callbackUrl));
+      // API callbacks (e.g. iOS /api/mobile/authorize) live outside the [locale]
+      // segment; the next-intl router would inject the active locale and 404, so
+      // navigate to those plainly.
+      if (isApiCallbackUrl(callbackUrl)) {
+        window.location.assign(callbackUrl);
+      } else {
+        router.push(callbackUrlToHref(callbackUrl));
+      }
     } catch (err) {
       if (err instanceof Error && err.message === "AUTHENTICATION_CANCELLED") {
         setError(t("securityKeySignInCancelled"));

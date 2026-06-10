@@ -59,6 +59,43 @@ final class EntryEncrypterTests: XCTestCase {
     XCTAssertEqual(decodedOverview, sampleOverview)
   }
 
+  // MARK: - Web-only overview flags survive encode→decode (T5 / F2 / F3 write-back)
+
+  /// Guards the ENCODE side of the requireReprompt/travelSafe preservation: a
+  /// CodingKeys rename or property drift on OverviewPlaintext would silently
+  /// drop these on iOS re-encrypt. Uses travelSafe=false (the explicit
+  /// travel-unsafe case) to also guard against it collapsing to absent.
+  func testEncryptPersonalEntry_preservesRequireRepromptAndTravelSafe() throws {
+    // tags intentionally empty: this test targets the requireReprompt/travelSafe
+    // write-back. (A separate finding tracks that iOS encodes tags as [String]
+    // while the decoder expects [{name,color}] objects — non-empty tags would
+    // fail to re-decode; see the review log.)
+    let overview = OverviewPlaintext(
+      title: "My Login",
+      username: "alice",
+      urlHost: "example.com",
+      hasTOTP: true,
+      requireReprompt: true,
+      travelSafe: false,
+      tags: []
+    )
+    let (_, overviewEnc) = try encryptPersonalEntry(
+      entryId: entryId, userId: userId, vaultKey: vaultKey,
+      detail: sampleDetail, overview: overview
+    )
+    let overviewAAD = try buildPersonalEntryAAD(
+      userId: userId, entryId: entryId, vaultType: VaultType.overview)
+    let overviewData = try decryptAESGCMEncoded(
+      encrypted: overviewEnc, key: vaultKey, aad: overviewAAD)
+
+    let summary = try XCTUnwrap(
+      EntryBlobDecoder.summary(plaintext: overviewData, entryId: entryId, teamId: nil)
+    )
+    XCTAssertTrue(summary.requireReprompt, "requireReprompt must survive iOS re-encrypt")
+    XCTAssertEqual(summary.travelSafe, false, "explicit travelSafe=false must survive (not become nil)")
+    XCTAssertTrue(summary.hasTOTP)
+  }
+
   // MARK: - Wrong AAD fails
 
   func testEncryptPersonalEntry_wrongAADFails() throws {

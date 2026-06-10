@@ -10,7 +10,9 @@ public struct VaultUnlockData: Sendable, Codable, Equatable {
   public let secretKeyIv: String
   public let secretKeyAuthTag: String
   public let keyVersion: Int
-  public let kdfType: String
+  // Server (Prisma) stores kdfType as an Int (0 = PBKDF2-SHA256, 1 = Argon2id),
+  // serialized as a JSON number — decoding it as String fails the whole struct.
+  public let kdfType: Int
   public let kdfIterations: Int
   /// User ID bound to the vault; used as AAD input for personal entries (aadVersion >= 1).
   public let userId: String
@@ -83,7 +85,7 @@ public struct UpdateEntryRequest: Sendable, Codable {
 ///
 /// The client owns DPoP proof construction per request and echoes the last
 /// `DPoP-Nonce` header the server issued. Concurrent calls are serialized by `actor`.
-public actor MobileAPIClient {
+public actor MobileAPIClient: VaultUnlockDataSource {
   let serverURL: URL
   let signer: DPoPSigner
   let jwk: [String: String]
@@ -239,7 +241,7 @@ public actor MobileAPIClient {
 
     var request = URLRequest(url: endpoint)
     request.httpMethod = "GET"
-    request.setValue("DPoP \(accessToken)", forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
     request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
 
     let (data, response) = try await performHTTP(request)
@@ -262,11 +264,10 @@ public actor MobileAPIClient {
   /// Fetch encrypted team entries (flat response format) for a given team.
   /// Requires a valid access token (DPoP-signed).
   public func fetchTeamEntries(teamId: String) async throws -> [TeamEncryptedEntry] {
-    let endpointPath = "/api/teams/\(teamId)/passwords?include=blob"
     guard let (accessToken, _) = try tokenStore.loadAccess() else {
       throw MobileAPIError.serverError(status: 401)
     }
-    guard let endpointURL = URL(string: endpointPath, relativeTo: serverURL) else {
+    guard let endpointURL = resourceURL(path: "/api/teams/\(teamId)/passwords", query: "include=blob") else {
       throw MobileAPIError.serverError(status: 400)
     }
     let htu = canonicalHTU(url: endpointURL)
@@ -284,7 +285,7 @@ public actor MobileAPIClient {
     )
     var request = URLRequest(url: endpointURL)
     request.httpMethod = "GET"
-    request.setValue("DPoP \(accessToken)", forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
     request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
     let (data, response) = try await performHTTP(request)
     let http = response as! HTTPURLResponse
@@ -308,7 +309,8 @@ public actor MobileAPIClient {
       throw MobileAPIError.serverError(status: 401)
     }
 
-    guard let endpointURL = URL(string: endpointPath, relativeTo: serverURL) else {
+    guard let parsed = URLComponents(string: endpointPath),
+          let endpointURL = resourceURL(path: parsed.path, query: parsed.percentEncodedQuery) else {
       throw MobileAPIError.serverError(status: 400)
     }
     let htu = canonicalHTU(url: endpointURL)
@@ -328,7 +330,7 @@ public actor MobileAPIClient {
 
     var request = URLRequest(url: endpointURL)
     request.httpMethod = "GET"
-    request.setValue("DPoP \(accessToken)", forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
     request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
 
     let (data, response) = try await performHTTP(request)
@@ -378,7 +380,7 @@ public actor MobileAPIClient {
     var request = URLRequest(url: endpoint)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.setValue("DPoP \(accessToken)", forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
     request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
     request.httpBody = bodyData
 
@@ -428,7 +430,7 @@ public actor MobileAPIClient {
     var request = URLRequest(url: endpoint)
     request.httpMethod = "PUT"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.setValue("DPoP \(accessToken)", forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
     request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
     request.httpBody = bodyData
 
@@ -499,6 +501,20 @@ public actor MobileAPIClient {
     default:
       throw MobileAPIError.serverError(status: status)
     }
+  }
+
+  /// Build a basePath-preserving URL for a resource `path` (+ optional
+  /// percent-encoded `query`). `serverURL.appending(path:)` keeps the
+  /// deployment basePath (e.g. `/passwd-sso`); `URL(string:relativeTo:)` with
+  /// an absolute (leading-`/`) path DROPS it, which 404s and breaks the DPoP
+  /// htu. All resource calls must build URLs through this helper.
+  func resourceURL(path: String, query: String? = nil) -> URL? {
+    let base = serverURL.appending(path: path, directoryHint: .notDirectory)
+    guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+      return nil
+    }
+    components.percentEncodedQuery = query
+    return components.url
   }
 
   /// Strip query/fragment for the canonical htu value per RFC 9449 §4.2.

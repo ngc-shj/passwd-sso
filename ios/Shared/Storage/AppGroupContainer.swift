@@ -8,7 +8,7 @@ public enum AppGroupContainerError: Error, Equatable {
 /// Centralises App Group container URL construction.
 /// Both host app and AutoFill extension access the same group identifier.
 public struct AppGroupContainer: Sendable {
-  public static let identifier = "group.com.passwd-sso.shared"
+  public static let identifier = "group.jp.jpng.passwd-sso.shared"
 
   /// Returns the root URL of the shared App Group container.
   public static func url() throws -> URL {
