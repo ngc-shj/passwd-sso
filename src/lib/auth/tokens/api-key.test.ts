@@ -35,6 +35,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { parseApiKeyScopes, hasApiKeyScope, validateApiKey } from "./api-key";
+import { API_KEY_LAST_USED_THROTTLE_MS } from "@/lib/constants/auth/api-key";
 
 // ─── parseApiKeyScopes ───────────────────────────────────────
 
@@ -163,8 +164,7 @@ describe("validateApiKey — deactivated-user (C13)", () => {
 
 describe("validateApiKey — lastUsedAt throttle (C4)", () => {
   const ACTIVE_MEMBER = { deactivatedAt: null };
-  // 5 minutes in ms (matches API_KEY_LAST_USED_THROTTLE_MS)
-  const THROTTLE_MS = 5 * 60 * 1_000;
+  const THROTTLE_MS = API_KEY_LAST_USED_THROTTLE_MS;
 
   beforeEach(() => {
     vi.clearAllMocks();

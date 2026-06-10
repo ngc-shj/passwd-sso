@@ -223,6 +223,8 @@ describe("PUT /api/v1/passwords/[id]", () => {
     mockHistoryFindMany.mockResolvedValue([]);
     mockHistoryDeleteMany.mockResolvedValue({ count: 0 });
     mockEntryUpdate.mockResolvedValue(updatedEntry);
+    // Restore default FOR UPDATE result (clearAllMocks clears it each run)
+    mockQueryRaw.mockResolvedValue([V1_CUR_ROW]);
   });
 
   it("returns 401 when API key is missing or invalid", async () => {
@@ -398,6 +400,21 @@ describe("PUT /api/v1/passwords/[id]", () => {
     // Distinct-from-ownedEntry sanity check
     expect(histData.encryptedBlob).not.toBe(ownedEntry.encryptedBlob);
     expect(histData.keyVersion).not.toBe(ownedEntry.keyVersion);
+  });
+
+  // F1: race — entry deleted between early read and FOR UPDATE lock
+  it("F1: returns 404 when $queryRaw FOR UPDATE returns empty (concurrent delete)", async () => {
+    mockQueryRaw.mockResolvedValue([]); // row gone by the time the lock fires
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, { body: updateBody }),
+      createParams({ id: PW_ID }),
+    );
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(404);
+    // update must NOT have been called — the handler must abort before writing
+    expect(mockEntryUpdate).not.toHaveBeenCalled();
   });
 
   it("C1: metadata-only PUT issues no $queryRaw and no History.create", async () => {

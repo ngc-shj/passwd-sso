@@ -198,6 +198,8 @@ async function handlePUT(
             WHERE id = ${id}::uuid
             FOR UPDATE
           `;
+          // Entry may be concurrently deleted between the early read and this lock.
+          if (!cur) return null;
           // Snapshot the current committed blob into history
           await tx.passwordEntryHistory.create({
             data: {
@@ -235,6 +237,10 @@ async function handlePUT(
           include: { tags: { select: { id: true } } },
         }),
       ));
+
+  // Null sentinel: the blob-tx path returns null when the entry was concurrently
+  // deleted between the early findUnique and the FOR UPDATE lock.
+  if (!updated) return notFound();
 
   await logAuditAsync({
     ...personalAuditBase(req, userId),

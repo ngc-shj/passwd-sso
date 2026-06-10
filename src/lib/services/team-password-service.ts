@@ -534,6 +534,8 @@ export async function updateTeamPassword(
         WHERE id = ${passwordId}::uuid AND team_id = ${teamId}::uuid
         FOR UPDATE
       `;
+      // Entry may be concurrently deleted between the caller's read and this lock.
+      if (!cur) throw new TeamPasswordServiceError(API_ERROR.NOT_FOUND, 404);
       await tx.teamPasswordEntryHistory.create({
         data: {
           entryId: passwordId,

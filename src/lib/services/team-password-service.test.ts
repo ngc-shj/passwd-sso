@@ -907,4 +907,27 @@ describe("updateTeamPassword", () => {
     expect(mockTxQueryRaw).not.toHaveBeenCalled();
     expect(mockTeamPasswordEntryHistoryCreate).not.toHaveBeenCalled();
   });
+
+  // F1: race — entry deleted between caller's read and FOR UPDATE lock
+  it("F1: throws TeamPasswordServiceError (NOT_FOUND, 404) when $queryRaw FOR UPDATE returns empty (concurrent delete)", async () => {
+    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 3 });
+    mockTxQueryRaw.mockResolvedValue([]); // row gone by the time the lock fires
+
+    const input: UpdateTeamPasswordInput = {
+      encryptedBlob: ENCRYPTED_BLOB,
+      encryptedOverview: ENCRYPTED_OVERVIEW,
+      aadVersion: 1,
+      teamKeyVersion: 3,
+      itemKeyVersion: 0,
+      userId: USER_ID,
+      existingEntry: BASE_EXISTING_ENTRY,
+    };
+
+    const err = await updateTeamPassword(TEAM_ID, PASSWORD_ID, input).catch((e) => e);
+    expect(err).toBeInstanceOf(TeamPasswordServiceError);
+    expect(err.code).toBe(API_ERROR.NOT_FOUND);
+    expect(err.statusHint).toBe(404);
+    // update must NOT have been called — the handler must abort before writing
+    expect(mockTeamPasswordEntryUpdate).not.toHaveBeenCalled();
+  });
 });

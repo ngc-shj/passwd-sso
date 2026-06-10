@@ -824,6 +824,21 @@ describe("PUT /api/passwords/[id]", () => {
     expect(histData.keyVersion).not.toBe(ownedEntry.keyVersion);
   });
 
+  // F1: race — entry deleted between early read and FOR UPDATE lock
+  it("F1: returns 404 when $queryRaw FOR UPDATE returns empty (concurrent delete)", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    txMock.$queryRaw.mockResolvedValue([]); // row gone by the time the lock fires
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, { body: updateBody }),
+      createParams({ id: PW_ID }),
+    );
+
+    expect(res.status).toBe(404);
+    // update must NOT have been called — the handler must abort before writing
+    expect(txMock.passwordEntry.update).not.toHaveBeenCalled();
+  });
+
   it("C1: metadata-only PUT issues no $queryRaw and no History.create", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
     mockPrismaPasswordEntry.update.mockResolvedValue({
