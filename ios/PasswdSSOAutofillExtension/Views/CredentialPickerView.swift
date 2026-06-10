@@ -7,12 +7,26 @@ import SwiftUI
 /// Per plan §"App-side AutoFill (resolves S24)": for app-bundle-ID requests (non-URL),
 /// the bundle ID is shown prominently and an extra confirmation tap is required.
 struct CredentialPickerView: View {
-  let candidates: [VaultEntrySummary]
+  /// Host-matched entries, shown by default.
+  let matched: [VaultEntrySummary]
+  /// Every entry (matched first), searched when the search field is non-empty.
+  let all: [VaultEntrySummary]
   let serviceIdentifiers: [ASCredentialServiceIdentifier]
   let onSelect: (VaultEntrySummary) -> Void
   let onCancel: () -> Void
 
   @State private var pendingAppSideSelection: VaultEntrySummary?
+  @State private var searchText: String = ""
+
+  private var isSearching: Bool {
+    !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  /// Default view shows `matched`; an active search filters across `all`.
+  private var displayed: [VaultEntrySummary] {
+    guard isSearching else { return matched }
+    return all.filter { summaryMatchesSearch($0, query: searchText) }
+  }
 
   // The `.app` IdentifierType is iOS 26+ only and isn't present in iOS 18 SDKs.
   // Reference its rawValue (1) instead of the symbol `.app` so this file
@@ -36,7 +50,7 @@ struct CredentialPickerView: View {
   var body: some View {
     NavigationStack {
       Group {
-        if candidates.isEmpty {
+        if displayed.isEmpty {
           emptyView
         } else {
           candidateList
@@ -44,6 +58,7 @@ struct CredentialPickerView: View {
       }
       .navigationTitle("passwd-sso")
       .navigationBarTitleDisplayMode(.inline)
+      .searchable(text: $searchText, prompt: "Search all entries")
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Cancel", action: onCancel)
@@ -62,19 +77,24 @@ struct CredentialPickerView: View {
       Image(systemName: "key.slash")
         .font(.system(size: 44))
         .foregroundStyle(.secondary)
-      Text("No matching credentials")
-        .font(.headline)
-      Text("No passwords stored for this site.")
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-        .multilineTextAlignment(.center)
+      if isSearching {
+        Text("No matches")
+          .font(.headline)
+      } else {
+        Text("No passwords for this site")
+          .font(.headline)
+        Text("Search to browse all entries.")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+      }
     }
     .padding()
     .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 
   private var candidateList: some View {
-    List(candidates) { summary in
+    List(displayed) { summary in
       Button {
         handleSelection(summary)
       } label: {

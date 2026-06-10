@@ -27,8 +27,15 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
   }()
 
   // MARK: - Password fill (Step 8)
+  //
+  // Deployment target is iOS 17.0, so iOS always calls the iOS 17+ method
+  // variants below; the legacy ASPasswordCredentialIdentity-based overrides are
+  // never invoked and are intentionally absent. The requestParameters list
+  // variant is the one iOS 18/26 actually calls — without it the picker was
+  // presented blank (no prepare* ran). It delegates to the shared presentation.
 
-  override func prepareCredentialList(for serviceIdentifiers: [ASCredentialServiceIdentifier]) {
+  /// Shared password-list presentation, called by the iOS 17+ entry point.
+  private func presentCredentialList(for serviceIdentifiers: [ASCredentialServiceIdentifier]) {
     // Convert to Sendable ServiceIdentifier before the actor hop.
     let sendable = serviceIdentifiers.map { ServiceIdentifier(from: $0) }
     let originalIdents = serviceIdentifiers.map {
@@ -36,8 +43,12 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     }
     Task { @MainActor in
       do {
-        let candidates = try await resolver.resolveCandidates(for: sendable)
-        presentPicker(with: candidates, serviceIdentifiers: originalIdents)
+        let result = try await resolver.resolveCandidates(for: sendable)
+        presentPicker(
+          matched: result.matched,
+          all: result.all,
+          serviceIdentifiers: originalIdents
+        )
       } catch CredentialResolver.Error.vaultLocked {
         presentLockedSheet()
       } catch {
@@ -46,9 +57,33 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     }
   }
 
-  /// Per plan §"Per-fill biometric": per-fill biometric is required. Always require user interaction.
+  override func prepareCredentialList(for serviceIdentifiers: [ASCredentialServiceIdentifier]) {
+    presentCredentialList(for: serviceIdentifiers)
+  }
+
+  /// iOS 17+ passkey-aware list entry point — the variant iOS 18/26 actually
+  /// invokes. Passkeys are unsupported, so the request parameters are ignored
+  /// and we present the password list.
+  @available(iOS 17.0, *)
+  override func prepareCredentialList(
+    for serviceIdentifiers: [ASCredentialServiceIdentifier],
+    requestParameters: ASPasskeyCredentialRequestParameters
+  ) {
+    presentCredentialList(for: serviceIdentifiers)
+  }
+
+  override func prepareInterfaceForExtensionConfiguration() {
+    // Configuration UI — not needed for credential provider; no-op.
+  }
+
+  // MARK: - Single-credential fill (iOS 17+)
+
+  /// Per-fill biometric is mandatory: never fill silently. Always require user
+  /// interaction so the subsequent prepare-to-provide path runs the biometric
+  /// Keychain read.
+  @available(iOS 17.0, *)
   override func provideCredentialWithoutUserInteraction(
-    for credentialIdentity: ASPasswordCredentialIdentity
+    for credentialRequest: any ASCredentialRequest
   ) {
     extensionContext.cancelRequest(
       withError: NSError(
@@ -59,24 +94,26 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
   }
 
   /// Single-credential path: iOS already knows which credential to provide.
+  @available(iOS 17.0, *)
   override func prepareInterfaceToProvideCredential(
-    for credentialIdentity: ASPasswordCredentialIdentity
+    for credentialRequest: any ASCredentialRequest
   ) {
+    // Only password requests are supported; cancel passkey assertions rather
+    // than completing them with the wrong credential type.
+    guard credentialRequest.type == .password else {
+      cancel(with: nil)
+      return
+    }
+    let recordId = credentialRequest.credentialIdentity.recordIdentifier ?? ""
     Task { @MainActor in
       do {
-        let detail = try await resolver.decryptEntryDetail(
-          entryId: credentialIdentity.recordIdentifier ?? ""
-        )
+        let detail = try await resolver.decryptEntryDetail(entryId: recordId)
         let credential = ASPasswordCredential(user: detail.username, password: detail.password)
         extensionContext.completeRequest(withSelectedCredential: credential)
       } catch {
         cancel(with: error)
       }
     }
-  }
-
-  override func prepareInterfaceForExtensionConfiguration() {
-    // Configuration UI — not needed for credential provider; no-op.
   }
 
   // MARK: - TOTP fill (Step 9, iOS 17+)
@@ -91,9 +128,17 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     }
     Task { @MainActor in
       do {
-        let candidates = try await resolver.resolveCandidates(for: sendable)
-        let withTOTP = candidates.filter { $0.hasTOTP }
-        presentOneTimeCodePicker(with: withTOTP, serviceIdentifiers: originalIdents)
+        let result = try await resolver.resolveCandidates(for: sendable)
+        // Default view = host-matched entries flagged as having TOTP. Search
+        // spans all entries WITHOUT the hasTOTP gate, because the overview-blob
+        // hasTOTP marker is unreliable for legacy entries (see
+        // TODO(ios-autofill-hastotp)); completeTOTPFill guards on the actual
+        // decrypted secret, so a non-TOTP pick is a safe no-op.
+        presentOneTimeCodePicker(
+          matched: result.matched.filter { $0.hasTOTP },
+          all: result.all,
+          serviceIdentifiers: originalIdents
+        )
       } catch CredentialResolver.Error.vaultLocked {
         presentLockedSheet()
       } catch {
@@ -106,11 +151,13 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
 
   @MainActor
   private func presentPicker(
-    with candidates: [VaultEntrySummary],
+    matched: [VaultEntrySummary],
+    all: [VaultEntrySummary],
     serviceIdentifiers: [ASCredentialServiceIdentifier]
   ) {
     let view = CredentialPickerView(
-      candidates: candidates,
+      matched: matched,
+      all: all,
       serviceIdentifiers: serviceIdentifiers,
       onSelect: { [weak self] summary in
         self?.completePasswordFill(for: summary)
@@ -124,11 +171,13 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
 
   @MainActor
   private func presentOneTimeCodePicker(
-    with candidates: [VaultEntrySummary],
+    matched: [VaultEntrySummary],
+    all: [VaultEntrySummary],
     serviceIdentifiers: [ASCredentialServiceIdentifier]
   ) {
     let view = OneTimeCodePickerView(
-      candidates: candidates,
+      matched: matched,
+      all: all,
       serviceIdentifiers: serviceIdentifiers,
       onSelect: { [weak self] summary in
         self?.completeTOTPFill(for: summary)

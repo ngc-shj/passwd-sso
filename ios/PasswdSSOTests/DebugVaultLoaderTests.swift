@@ -62,7 +62,7 @@ final class DebugVaultLoaderTests: XCTestCase {
       identifier: "https://github.com/login",
       isURL: true
     )
-    let candidates = try await resolver.resolveCandidates(for: [ident])
+    let candidates = try await resolver.resolveCandidates(for: [ident]).all
 
     let githubEntry = candidates.first { $0.urlHost == "github.com" }
     XCTAssertNotNil(githubEntry, "Expected at least one entry with urlHost == 'github.com'")
@@ -75,7 +75,7 @@ final class DebugVaultLoaderTests: XCTestCase {
 
     let resolver = makeResolver()
     let ident = ServiceIdentifier(identifier: "https://github.com/login", isURL: true)
-    let candidates = try await resolver.resolveCandidates(for: [ident])
+    let candidates = try await resolver.resolveCandidates(for: [ident]).all
 
     guard let githubSummary = candidates.first(where: { $0.urlHost == "github.com" }) else {
       XCTFail("No github.com candidate found")
@@ -127,7 +127,7 @@ final class DebugVaultLoaderTests: XCTestCase {
 
     let resolver = makeResolver()
     // Resolve all with no filter
-    let all = try await resolver.resolveCandidates(for: [])
+    let all = try await resolver.resolveCandidates(for: []).all
     XCTAssertEqual(all.count, 3, "Expected exactly 3 fixture entries")
 
     let hosts = Set(all.map(\.urlHost))
@@ -142,7 +142,7 @@ final class DebugVaultLoaderTests: XCTestCase {
     _ = try await loadFixture()
 
     let resolver = makeResolver()
-    let all = try await resolver.resolveCandidates(for: [])
+    let all = try await resolver.resolveCandidates(for: []).all
 
     // The overview blob does not carry TOTP info, so hasTOTP is always false in the summary.
     // TOTP secret is only available after decryptEntryDetail (from the full blob).

@@ -5,15 +5,31 @@ import SwiftUI
 /// Presents a list of vault entries that have TOTP secrets for the user to pick from.
 /// On selection, generates the current TOTP code and returns it via `onSelect`.
 struct OneTimeCodePickerView: View {
-  let candidates: [VaultEntrySummary]
+  /// Host-matched entries flagged with TOTP, shown by default.
+  let matched: [VaultEntrySummary]
+  /// Every entry (matched first); searched without a hasTOTP gate so a
+  /// mis-flagged TOTP entry stays reachable (completeTOTPFill guards on the
+  /// decrypted secret).
+  let all: [VaultEntrySummary]
   let serviceIdentifiers: [ASCredentialServiceIdentifier]
   let onSelect: (VaultEntrySummary) -> Void
   let onCancel: () -> Void
 
+  @State private var searchText: String = ""
+
+  private var isSearching: Bool {
+    !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  private var displayed: [VaultEntrySummary] {
+    guard isSearching else { return matched }
+    return all.filter { summaryMatchesSearch($0, query: searchText) }
+  }
+
   var body: some View {
     NavigationStack {
       Group {
-        if candidates.isEmpty {
+        if displayed.isEmpty {
           emptyView
         } else {
           candidateList
@@ -21,6 +37,7 @@ struct OneTimeCodePickerView: View {
       }
       .navigationTitle("passwd-sso")
       .navigationBarTitleDisplayMode(.inline)
+      .searchable(text: $searchText, prompt: "Search all entries")
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Cancel", action: onCancel)
@@ -36,19 +53,24 @@ struct OneTimeCodePickerView: View {
       Image(systemName: "number.circle.fill")
         .font(.system(size: 44))
         .foregroundStyle(.secondary)
-      Text("No matching one-time codes")
-        .font(.headline)
-      Text("No TOTP entries stored for this site.")
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-        .multilineTextAlignment(.center)
+      if isSearching {
+        Text("No matches")
+          .font(.headline)
+      } else {
+        Text("No one-time codes for this site")
+          .font(.headline)
+        Text("Search to browse all entries.")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+      }
     }
     .padding()
     .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 
   private var candidateList: some View {
-    List(candidates) { summary in
+    List(displayed) { summary in
       Button {
         onSelect(summary)
       } label: {
