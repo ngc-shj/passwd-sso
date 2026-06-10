@@ -217,3 +217,26 @@ no leak. No new security findings.
   so iOS edits cannot preserve colors without a deeper change). Awaiting user decision on scope.
 
 Verification: full iOS suite 233 passed (F3 + T5). Round 3 fixed F3/T5; F4 (Major) escalated.
+
+## Round 4 (F4 disposition)
+
+Investigating F4's fix revealed it is the tip of a systemic problem: iOS editing
+(`EntryPlaintext`/`OverviewPlaintext`) re-encodes with a schema that diverges from the web /
+`EntryBlobDecoder` on MULTIPLE fields — `tags` (string array vs `[{name,color}]` → decode
+throws → entry vanishes), `totp` (`totpSecret` string vs `totp` object → secret dropped), and
+`generatorSettings`/`customFields`/`passwordHistory` (not written → lost). So iOS editing is
+broadly data-destructive, not just a tag-shape nit.
+
+**Resolution (user decision: option A + track):** iOS on-device editing is DISABLED —
+`EntryDetailView`'s Edit button now shows "Editing entries on iPhone isn't supported yet —
+please use the web app." for all entries; the edit form is never reached (fail-safe, stops the
+data loss). `VaultViewModel.saveEntry` is retained (quarantine comment) as the basis for the
+proper fix. The full-fidelity round-trip fix is tracked in **issue #528**. The travelSafe
+three-state (F3) and write-back test (T5) from Round 3 remain in place for the eventual re-enable.
+
+Verification: full iOS suite 233 passed. Edit disabled; no corrupting save path reachable.
+
+## Review complete
+Rounds: 4. Findings: Critical 0, Major 7 (M1–M6 + F4), Minor 14 — all resolved, rejected with
+justification, or (F4) mitigated + tracked (#528). Security clean throughout. Final verification:
+vitest 11099, next build green, iOS suite 233, check:ios-diag green.

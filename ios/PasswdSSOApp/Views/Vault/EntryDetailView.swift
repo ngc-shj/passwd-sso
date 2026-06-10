@@ -21,7 +21,7 @@ struct EntryDetailView: View {
   @State private var isPasswordVisible: Bool = false
   @State private var isScreenRecording: Bool = false
   @State private var isShowingEditForm: Bool = false
-  @State private var showTeamEntryAlert: Bool = false
+  @State private var showEditNotSupportedAlert: Bool = false
 
   @Environment(\.dismiss) private var dismiss
 
@@ -62,11 +62,12 @@ struct EntryDetailView: View {
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
         Button("Edit") {
-          if summary.teamId != nil {
-            showTeamEntryAlert = true
-          } else {
-            isShowingEditForm = true
-          }
+          // Editing on iPhone is disabled: the iOS re-encrypt path uses a
+          // lossy blob schema (string tags break decode → entry vanishes; totp,
+          // generator settings, custom fields and password history are dropped).
+          // Re-enable only after the full-fidelity round-trip lands (see the
+          // tracked issue). Until then, route all edits to the web app.
+          showEditNotSupportedAlert = true
         }
       }
     }
@@ -84,11 +85,11 @@ struct EntryDetailView: View {
         )
       }
     }
-    .alert("Team Entry", isPresented: $showTeamEntryAlert) {
+    .alert("Editing on iPhone", isPresented: $showEditNotSupportedAlert) {
       Button("OK", role: .cancel) {}
     } message: {
       Text(
-        "Editing team entries is not yet supported on iPhone. Please use the web app."
+        "Editing entries on iPhone isn't supported yet. Please use the web app."
       )
     }
     .onAppear {

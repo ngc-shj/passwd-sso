@@ -149,6 +149,13 @@ public enum VaultViewModelError: Error, Equatable {
 extension VaultViewModel {
   /// Save edited entry. Re-encrypts with vault_key + personal AAD; calls API; triggers sync.
   /// Throws `VaultViewModelError.teamEditNotSupported` for team entries.
+  ///
+  /// NOT WIRED TO THE UI: editing is disabled in `EntryDetailView` because the
+  /// re-encrypt schema is lossy (string tags break decode → entry vanishes; totp,
+  /// generatorSettings, customFields, passwordHistory are dropped). This method
+  /// is retained as the basis for the full-fidelity round-trip fix tracked in
+  /// the iOS-edit data-loss issue; do not re-enable the UI edit path until that
+  /// lands.
   public func saveEntry(
     entryId: String,
     userId: String,
