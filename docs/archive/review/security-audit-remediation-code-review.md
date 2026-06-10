@@ -1,7 +1,20 @@
 # Code Review: security-audit-remediation
 
-Date: 2026-06-10
-Review round: 1
+Date: 2026-06-11
+Review round: 3 (cumulative; rounds appended)
+
+## Round 2 (incremental, on commit `c42f29b0`)
+
+All 17 Round-1 findings verified **resolved** (functionality re-traced scrubber pass composition for double-processing — none; security re-verified helper semantics equivalence, mobile check placement, sentinel peer-auth model, dequote edges; testing spot-verified every new test's detection power incl. reasoning the Referer fixture red against the pre-fix scrubber). New findings → fixed in `9a0ee0da`:
+
+- **F6 [Minor]** `foreignOwned` lookup lacked the self-exclusion guard → same-user double-submit misreported as name_conflict instead of reaching the already_claimed recovery. Fixed via shared `sameNameWhereBase` (class-level fix: the invariant lives in ONE where object spread into both lookups) + new test.
+- **S6 [Minor]** auto-captured `exception.values[].value` / `event.message` free text could carry capability URLs. Fixed: `redactCapabilityPaths()` helper (TOKEN_ROUTE_PATTERNS only — no query truncation on free text; char class tightened to `[^\s/?#:]`), applied to both; reused by sanitizeUrl; red-able fixtures.
+- **T10 [Minor]** integration tests don't run under pre-pr on this branch name — both PR-owned integration files explicitly re-run against real Postgres: 5/5 PASS.
+- **T11 [Info]** limiter vi.mock moved to top level. **T12/F7 [Info]** recorded, no action (existing-pattern parity / SDK-guaranteed shape).
+
+Post-round: merged `origin/main` (#529 iOS host-server integration + codeql bump) — zero file overlap with this branch; `npx prisma generate` re-run; pre-pr now 32/32 PASS (includes the new iOS gate from main).
+
+## Round 1
 
 ## Changes from Previous Round
 

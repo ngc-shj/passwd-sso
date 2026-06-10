@@ -579,6 +579,30 @@ describe("S6 — capability URL redaction in free-text fields", () => {
     expect(values[0].value).toBe("Cannot read property of undefined");
   });
 
+  // T14: Array.isArray(e.exception) branch — exception as a bare array of { value } entries
+  it("exception as bare array applies redactCapabilityPaths to each entry value", () => {
+    const token = "bareArrayToken999";
+    const event = {
+      exception: [
+        {
+          values: [
+            {
+              type: "FetchError",
+              value: `fetch https://app.example.com/s/${token} failed: timeout`,
+            },
+          ],
+        },
+      ],
+    };
+    const result = scrubSentryEvent(event);
+    const exc = result.exception as Array<Record<string, unknown>>;
+    const values = exc[0].values as Array<Record<string, unknown>>;
+    expect(values[0].value).toBe("fetch https://app.example.com/s/[redacted] failed: timeout");
+    expect(String(values[0].value)).not.toContain(token);
+    // surrounding text must survive
+    expect(String(values[0].value)).toContain("failed: timeout");
+  });
+
   it("event.message without capability URL is unchanged", () => {
     const event = { message: "Application started successfully" };
     const result = scrubSentryEvent(event);

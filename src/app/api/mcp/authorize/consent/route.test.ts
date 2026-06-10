@@ -551,6 +551,22 @@ describe("POST /api/mcp/authorize/consent", () => {
     // No delete of any foreign client
     expect(mockTxDelete).not.toHaveBeenCalled();
     expect(mockCreateAuthorizationCode).toHaveBeenCalledOnce();
+
+    // Verify the SECOND mockTxFindFirst call (foreignOwned lookup) explicitly
+    // contains { id: { not: "claim-target-id" }, isDcr: true } and does NOT
+    // include createdById — confirming sameNameWhereBase is used without the
+    // owner-scoped createdById filter.
+    expect(mockTxFindFirst).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { not: "claim-target-id" },
+          isDcr: true,
+        }),
+      }),
+    );
+    const secondCallArgs = mockTxFindFirst.mock.calls[1][0] as { where: Record<string, unknown> };
+    expect(secondCallArgs.where).not.toHaveProperty("createdById");
   });
 
   // (c) P2002 unique-violation race maps to consent error (not a 500).
