@@ -170,9 +170,11 @@ struct EntryEditForm: View {
       // AutoFill one-time-code picker still finds the entry after an iOS edit.
       hasTOTP: totpSecret.isEmpty ? nil : true,
       // Preserve web-only flags the iOS form does not edit. requireReprompt is
-      // always written (matching the web overview shape); travelSafe only when set.
+      // always written (matching the web overview shape); travelSafe is passed
+      // through verbatim (nil → omitted, true/false preserved) so an explicit
+      // travel-unsafe entry is not flipped back to travel-safe.
       requireReprompt: summary.requireReprompt,
-      travelSafe: summary.travelSafe ? true : nil,
+      travelSafe: summary.travelSafe,
       tags: parsedTags
     )
 

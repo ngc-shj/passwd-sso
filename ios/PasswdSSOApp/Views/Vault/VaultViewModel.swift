@@ -197,7 +197,7 @@ extension VaultViewModel {
       tags: overview.tags,
       hasTOTP: detail.totpSecret != nil,
       requireReprompt: overview.requireReprompt ?? false,
-      travelSafe: overview.travelSafe ?? false
+      travelSafe: overview.travelSafe
     )
     if let idx = allSummaries.firstIndex(where: { $0.id == entryId }) {
       allSummaries[idx] = updatedSummary

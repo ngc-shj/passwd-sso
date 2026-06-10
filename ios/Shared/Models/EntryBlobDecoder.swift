@@ -82,7 +82,8 @@ public enum EntryBlobDecoder {
       lastAccessedAt: nil,
       hasTOTP: p.hasTOTP ?? false,
       requireReprompt: p.requireReprompt ?? false,
-      travelSafe: p.travelSafe ?? false
+      // Keep travelSafe three-state (nil = absent): preserved verbatim on edit.
+      travelSafe: p.travelSafe
     )
   }
 

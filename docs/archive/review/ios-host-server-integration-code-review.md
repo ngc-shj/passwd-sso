@@ -189,3 +189,31 @@ Verification: full iOS suite 231 passed; authorize route test 15 passed; check:i
 Termination: Round 2 yielded only Minor findings, all fixed or rejected-with-justification.
 Note: F2 touched a security-relevant flag (requireReprompt) — but as a strict-safety
 preservation (it STOPS iOS from dropping the flag), not a new boundary. Round 2 closes.
+
+## Round 3 (re-review of the round-2 fix diff 956989dd..HEAD)
+
+Security: F2 downgrade closure VERIFIED (all VaultEntrySummary→EntryEditForm paths go through
+blob decode; no residual drop path). Also found requireReprompt is ALSO a DB column and the
+web enforces via the DB column (iOS never sends it in the PUT body), so the actual auth-control
+was never at risk from iOS edits — F2 is fidelity-correctness, defence-in-depth. F1 fails closed,
+no leak. No new security findings.
+
+- **F3 [Minor] FIXED** — the round-2 F2 fix itself had a bug: `travelSafe: summary.travelSafe ? true : nil`
+  collapsed an explicit `false` (travel-unsafe) to absent, which the web reads as travel-safe —
+  flipping a travel-unsafe entry back to safe on the next web load. Fixed by making
+  `VaultEntrySummary.travelSafe` three-state (`Bool?`) and passing it through verbatim
+  (nil→omit, true/false preserved). Tests updated + explicit-false guard added.
+- **T5 [Minor] FIXED** — F2's encode (write-back) path was untested; added
+  `EntryEncrypterTests.testEncryptPersonalEntry_preservesRequireRepromptAndTravelSafe`
+  (encrypt→decrypt→summary round-trip) to guard against CodingKeys/rename drift.
+- **F4 [Major] NEW — ESCALATED (pre-existing, surfaced by T5)** — iOS encodes entry `tags` as
+  `[String]` (both `OverviewPlaintext` and `EntryPlaintext`), but `EntryBlobDecoder`
+  (and the web) expect `[{name,color}]` objects. All existing tests use empty tags, so this was
+  never caught. Consequence: editing a TAGGED entry on iOS rewrites the blobs with string tags →
+  the next `EntryBlobDecoder.summary`/`detail` decode FAILS → the entry disappears from the iOS
+  list and its detail won't decrypt. Not introduced by these fixes (OverviewPlaintext/EntryPlaintext
+  always used [String]); it is in files this PR touched, so it is in scope. Proposed fix: encode
+  iOS tags as `[{name, color: nil}]` objects (names preserved; colors are already dropped at decode,
+  so iOS edits cannot preserve colors without a deeper change). Awaiting user decision on scope.
+
+Verification: full iOS suite 233 passed (F3 + T5). Round 3 fixed F3/T5; F4 (Major) escalated.

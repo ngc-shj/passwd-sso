@@ -59,16 +59,26 @@ final class EntryBlobDecoderTests: XCTestCase {
       EntryBlobDecoder.summary(plaintext: data(json), entryId: "e3b", teamId: nil)
     )
     XCTAssertTrue(summary.requireReprompt)
-    XCTAssertTrue(summary.travelSafe)
+    XCTAssertEqual(summary.travelSafe, true)
   }
 
-  func testSummaryDefaultsRequireRepromptAndTravelSafeFalseWhenAbsent() throws {
+  func testSummaryDecodesExplicitTravelSafeFalseAsFalseNotNil() throws {
+    // An explicit travel-unsafe entry must decode to `false`, NOT nil — else an
+    // iOS edit would omit the key and the web would read absent as travel-safe.
+    let json = #"{"title":"T","urlHost":"x.com","tags":[],"travelSafe":false}"#
+    let summary = try XCTUnwrap(
+      EntryBlobDecoder.summary(plaintext: data(json), entryId: "e3d", teamId: nil)
+    )
+    XCTAssertEqual(summary.travelSafe, false)
+  }
+
+  func testSummaryDefaultsRequireRepromptFalseAndTravelSafeNilWhenAbsent() throws {
     let json = #"{"title":"T","urlHost":"x.com","tags":[]}"#
     let summary = try XCTUnwrap(
       EntryBlobDecoder.summary(plaintext: data(json), entryId: "e3c", teamId: nil)
     )
     XCTAssertFalse(summary.requireReprompt)
-    XCTAssertFalse(summary.travelSafe)
+    XCTAssertNil(summary.travelSafe)
   }
 
   func testSummaryDefaultsHasTOTPFalseWhenMarkerAbsent() throws {
