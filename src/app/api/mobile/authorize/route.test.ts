@@ -179,6 +179,19 @@ describe("GET /api/mobile/authorize", () => {
     expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
   });
 
+  it("fails closed with 503 and writes no code when the limiter reports redisErrored", async () => {
+    // authorizeLimiter is created with failClosedOnRedisError: true, so when
+    // Redis is unavailable (redisErrored) checkRateLimitOrFail returns a 503
+    // SERVICE_UNAVAILABLE response. The route must propagate it before issuing
+    // any bridge code (fail closed, not open).
+    mockCheckRateLimitOrFail.mockResolvedValueOnce(
+      Response.json({ error: "SERVICE_UNAVAILABLE" }, { status: 503 }),
+    );
+    const res = await GET(createRequest("GET", buildUrl(VALID)));
+    expect(res.status).toBe(503);
+    expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
+  });
+
   it("returns 500 when no app origin is configured and the request is unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     mockGetAppOrigin.mockReturnValue(undefined as unknown as string);
