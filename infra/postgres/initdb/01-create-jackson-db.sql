@@ -12,8 +12,8 @@ SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'jackson_user'
   \if :{?jackson_password}
     CREATE ROLE jackson_user WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD :'jackson_password';
   \else
-    -- Fallback for local dev when PASSWD_JACKSON_PASSWORD is not set
-    CREATE ROLE jackson_user WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD 'jackson_pass';
+    \warn 'PASSWD_JACKSON_PASSWORD is not set — skipping jackson_user LOGIN role creation. Set the env var and rerun initdb (or create the role manually).'
+    CREATE ROLE jackson_user WITH NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
   \endif
 \endif
 

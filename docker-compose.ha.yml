@@ -9,7 +9,7 @@ x-sentinel: &sentinel
   # Runtime-env expansion ($$REDIS_PASSWORD) keeps the real value out of compose
   # render-time interpolation and thus out of long-lived process argv.
   # chmod 600 on the copied conf prevents world-readable password exposure.
-  entrypoint: ["/bin/sh", "-c", "cp /etc/sentinel-template.conf /tmp/sentinel.conf && chmod 600 /tmp/sentinel.conf && echo \"sentinel auth-pass mymaster $$REDIS_PASSWORD\" >> /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf"]
+  entrypoint: ["/bin/sh", "-c", "cp /etc/sentinel-template.conf /tmp/sentinel.conf && chmod 600 /tmp/sentinel.conf && echo \"sentinel auth-pass mymaster $$REDIS_PASSWORD\" >> /tmp/sentinel.conf && echo \"requirepass $$REDIS_PASSWORD\" >> /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf"]
   environment:
     REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
   volumes:
@@ -78,6 +78,7 @@ services:
       - REDIS_SENTINEL=true
       - REDIS_SENTINEL_HOSTS=sentinel-1:26379,sentinel-2:26379,sentinel-3:26379
       - REDIS_SENTINEL_MASTER_NAME=mymaster
+      - REDIS_SENTINEL_PASSWORD=${REDIS_PASSWORD}
     depends_on:
       sentinel-1:
         condition: service_started

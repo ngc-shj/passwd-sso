@@ -110,7 +110,8 @@ const ALLOWED_USAGE = new Map([
   // because the row predates the issued session (parity with extension exchange).
   ["src/app/api/mobile/token/route.ts", ["mobileBridgeCode"]],
   // iOS token refresh: cross-tenant token row read for family-absolute check.
-  ["src/app/api/mobile/token/refresh/route.ts", ["tenant", "extensionToken"]],
+  // C13: deactivated-user rejection requires tenantMember lookup.
+  ["src/app/api/mobile/token/refresh/route.ts", ["tenant", "extensionToken", "tenantMember"]],
   // Team policy route: pre-write tenant cap check (cross-tenant read of tenant row)
   ["src/app/api/teams/[teamId]/policy/route.ts", ["team"]],
   ["src/app/api/maintenance/purge-audit-logs/route.ts", ["tenant", "auditLog"]],

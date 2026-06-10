@@ -103,7 +103,9 @@ export function sanitizeUrl(value: string): string {
   return result;
 }
 
-const URL_KEY_NAMES = new Set(["url", "http.url"]);
+const URL_KEY_NAMES = new Set(["url", "http.url", "url.full", "http.target"]);
+// url.query and url.path values are bare path/query strings — wipe entirely like request.query_string
+const URL_WIPE_KEY_NAMES = new Set(["url.query", "url.path"]);
 
 /**
  * Sentry `beforeSend` / `beforeSendTransaction` hook that scrubs sensitive data from events.
@@ -117,9 +119,29 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
     e.extra = scrubObject(e.extra);
   }
 
-  // Scrub contexts
+  // Scrub contexts — general key-based scrub, then apply URL sanitization to trace.data
   if (e.contexts && typeof e.contexts === "object") {
     e.contexts = scrubObject(e.contexts);
+    const contexts = e.contexts as Record<string, unknown>;
+    if (contexts.trace && typeof contexts.trace === "object") {
+      const trace = contexts.trace as Record<string, unknown>;
+      if (trace.data && typeof trace.data === "object") {
+        const traceData = trace.data as Record<string, unknown>;
+        const scrubbed: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(traceData)) {
+          if (isSensitiveKey(key)) {
+            scrubbed[key] = REDACTED;
+          } else if (URL_KEY_NAMES.has(key) && typeof value === "string") {
+            scrubbed[key] = sanitizeUrl(value as string);
+          } else if (URL_WIPE_KEY_NAMES.has(key)) {
+            scrubbed[key] = "";
+          } else {
+            scrubbed[key] = scrubObject(value);
+          }
+        }
+        trace.data = scrubbed;
+      }
+    }
   }
 
   // Scrub breadcrumbs — Sentry uses { values: BreadcrumbItem[] } format.
@@ -133,9 +155,14 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
         if (bc.data && typeof bc.data === "object") {
           updated = { ...updated, data: scrubObject(bc.data) };
         }
-        // Sanitize navigation breadcrumb from/to values
-        if (bc.category === "navigation" && typeof bc.data === "object" && bc.data !== null) {
-          const navData = bc.data as Record<string, unknown>;
+        // Apply sanitizeUrl to any data.url string (all categories)
+        const currentData = updated.data as Record<string, unknown> | undefined;
+        if (currentData && typeof currentData.url === "string") {
+          updated = { ...updated, data: { ...currentData, url: sanitizeUrl(currentData.url) } };
+        }
+        // Sanitize navigation breadcrumb from/to — base on already-scrubbed data
+        if (bc.category === "navigation") {
+          const navData = (updated.data ?? {}) as Record<string, unknown>;
           const sanitizedNav: Record<string, unknown> = { ...navData };
           if (typeof navData.from === "string") sanitizedNav.from = sanitizeUrl(navData.from);
           if (typeof navData.to === "string") sanitizedNav.to = sanitizeUrl(navData.to);
@@ -160,6 +187,15 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
     if (typeof request.query_string === "string" && request.query_string.length > 0) {
       // Strip the entire query string — it may carry token params
       request.query_string = "";
+    }
+    // Sanitize Referer header if present — may contain capability path tokens
+    if (request.headers && typeof request.headers === "object") {
+      const headers = request.headers as Record<string, unknown>;
+      for (const key of ["Referer", "referer"]) {
+        if (typeof headers[key] === "string") {
+          headers[key] = sanitizeUrl(headers[key] as string);
+        }
+      }
     }
   }
 
@@ -211,6 +247,8 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
             scrubbed[key] = REDACTED;
           } else if (URL_KEY_NAMES.has(key) && typeof value === "string") {
             scrubbed[key] = sanitizeUrl(value);
+          } else if (URL_WIPE_KEY_NAMES.has(key)) {
+            scrubbed[key] = "";
           } else {
             scrubbed[key] = scrubObject(value);
           }

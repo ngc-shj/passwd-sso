@@ -81,6 +81,21 @@ describe("extractSessionToken", () => {
       extractSessionToken("authjs.session-token=abc==def="),
     ).toBe("abc==def=");
   });
+
+  // S5: Auth.js cookie.parse wraps some values in double quotes;
+  // dequote so cache key is canonical (quoted and unquoted don't alias).
+  it("S5: dequotes a double-quoted token value", () => {
+    expect(
+      extractSessionToken('authjs.session-token="tok-quoted"'),
+    ).toBe("tok-quoted");
+  });
+
+  it("S5: does not strip unmatched or single double-quote", () => {
+    // value that starts with " but doesn't end with it — not a quoted value
+    expect(
+      extractSessionToken('authjs.session-token="tok-no-close'),
+    ).toBe('"tok-no-close');
+  });
 });
 
 describe("hasSessionCookie", () => {

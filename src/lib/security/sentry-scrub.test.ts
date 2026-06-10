@@ -359,6 +359,136 @@ describe("C11 — transaction event scrubbing", () => {
   });
 });
 
+// F1 + S2 acceptance fixtures — each MUST fail when the corresponding production lines are commented out.
+describe("F1 / S2 — new coverage", () => {
+  // F1: navigation breadcrumb from/to must be based on already-scrubbed data (not raw bc.data)
+  it("F1: navigation from/to sanitized from scrubbed data — /s/<token> and ?token= removed", () => {
+    const event = {
+      breadcrumbs: {
+        values: [
+          {
+            category: "navigation",
+            data: {
+              from: "/s/rawShareToken123",
+              to: "/dashboard?token=magicLinkAbc",
+              tokenKey: "should-be-redacted",
+            },
+          },
+        ],
+      },
+    };
+    const result = scrubSentryEvent(event);
+    const bcs = result.breadcrumbs as { values: Array<Record<string, unknown>> };
+    const data = bcs.values[0].data as Record<string, unknown>;
+    // from: /s/ token segment redacted
+    expect(data.from).toBe("/s/[redacted]");
+    // to: query string stripped
+    expect(data.to).toBe("/dashboard");
+    expect(String(data.to)).not.toContain("token=");
+    // sensitive key in data also redacted (scrubObject ran first)
+    expect(data.tokenKey).toBe("[Redacted]");
+  });
+
+  // S2(a): request.headers Referer with invite path token — path must be redacted
+  it("S2(a): request.headers.Referer with team invite path is sanitized", () => {
+    const inviteToken = "inviteToken256hexABCDEF";
+    const event = {
+      request: {
+        url: "/dashboard",
+        headers: {
+          "Content-Type": "application/json",
+          Referer: `https://example.com/ja/dashboard/teams/invite/${inviteToken}`,
+          "X-Safe-Header": "safe-value",
+        },
+      },
+    };
+    const result = scrubSentryEvent(event);
+    const headers = (result.request as Record<string, unknown>).headers as Record<string, unknown>;
+    expect(headers["Referer"]).toBe("https://example.com/ja/dashboard/teams/invite/[redacted]");
+    expect(String(headers["Referer"])).not.toContain(inviteToken);
+    // Other headers untouched
+    expect(headers["Content-Type"]).toBe("application/json");
+    expect(headers["X-Safe-Header"]).toBe("safe-value");
+  });
+
+  // S2(b): span data url.full sanitized, http.target sanitized, url.query wiped, url.path wiped
+  it("S2(b): span data url.full with /s/<token> is sanitized", () => {
+    const event = {
+      spans: [
+        {
+          op: "http.client",
+          data: {
+            "url.full": "https://example.com/s/shareTokenXYZ?utm=1",
+            "http.target": "/s/shareTokenXYZ?utm=1",
+            "url.query": "token=abc&foo=bar",
+            "url.path": "/s/shareTokenXYZ",
+            "http.method": "GET",
+          },
+        },
+      ],
+    };
+    const result = scrubSentryEvent(event);
+    const spanData = (result.spans as Array<Record<string, unknown>>)[0].data as Record<string, unknown>;
+    // url.full: query stripped + path token redacted
+    expect(spanData["url.full"]).toBe("https://example.com/s/[redacted]");
+    // http.target: same treatment
+    expect(spanData["http.target"]).toBe("/s/[redacted]");
+    // url.query: wiped entirely
+    expect(spanData["url.query"]).toBe("");
+    // url.path: wiped entirely
+    expect(spanData["url.path"]).toBe("");
+    // other keys untouched
+    expect(spanData["http.method"]).toBe("GET");
+  });
+
+  // S2(c): fetch-category breadcrumb data.url with token path is sanitized
+  it("S2(c): fetch breadcrumb data.url with /s/<token> is sanitized", () => {
+    const event = {
+      breadcrumbs: [
+        {
+          category: "fetch",
+          data: {
+            url: "https://example.com/s/fetchToken999?q=1",
+            method: "GET",
+          },
+        },
+      ],
+    };
+    const result = scrubSentryEvent(event);
+    const bc = result.breadcrumbs![0] as Record<string, unknown>;
+    const data = bc.data as Record<string, unknown>;
+    expect(data.url).toBe("https://example.com/s/[redacted]");
+    expect(String(data.url)).not.toContain("fetchToken999");
+    expect(data.method).toBe("GET");
+  });
+
+  // S2(d): contexts.trace.data sensitive key + url.full sanitized
+  it("S2(d): contexts.trace.data sensitive key redacted and url.full sanitized", () => {
+    const event = {
+      contexts: {
+        trace: {
+          op: "http.server",
+          data: {
+            "url.full": "https://example.com/s/traceToken111?x=y",
+            "http.method": "GET",
+            secretKey: "trace-secret-value",
+          },
+        },
+      },
+    };
+    const result = scrubSentryEvent(event);
+    const trace = ((result.contexts as Record<string, unknown>).trace as Record<string, unknown>);
+    const data = trace.data as Record<string, unknown>;
+    // url.full: sanitized
+    expect(data["url.full"]).toBe("https://example.com/s/[redacted]");
+    expect(String(data["url.full"])).not.toContain("traceToken111");
+    // secretKey: redacted
+    expect(data.secretKey).toBe("[Redacted]");
+    // safe key: preserved
+    expect(data["http.method"]).toBe("GET");
+  });
+});
+
 describe("sanitizeUrl", () => {
   it("strips query string", () => {
     expect(sanitizeUrl("https://example.com/path?foo=bar&baz=qux")).toBe("https://example.com/path");

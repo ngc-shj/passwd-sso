@@ -202,8 +202,10 @@ npm run check:env-docs
 **Expected:**
 
 - Step 1–2: The rendered config contains `--requirepass` on the master (`redis`) service, both replicas (`redis-replica-1`, `redis-replica-2`), and `--masterauth` on all three. `REDISCLI_AUTH` env is present on each Redis service (for healthcheck auth without argv exposure).
-- Step 2: Sentinel service sections include `REDIS_PASSWORD:` in their `environment` block (runtime-expansion wiring) and the entrypoint string contains the literal `$REDIS_PASSWORD` (dollar-sign, not the expanded value — runtime expansion, not compose render-time baking).
+- Step 2: Sentinel service sections include `REDIS_PASSWORD:` in their `environment` block (runtime-expansion wiring) and the entrypoint string contains the literal `$REDIS_PASSWORD` (dollar-sign, not the expanded value — runtime expansion, not compose render-time baking). The entrypoint also contains a `requirepass $$REDIS_PASSWORD` append line so sentinels require authentication from peers. `REDIS_SENTINEL_PASSWORD` is present in the `app` service environment (wired from `REDIS_PASSWORD`).
 - Step 3: The entrypoint for sentinel services shows the `chmod 600` step and `exec redis-sentinel` (no dangling `sh` process).
+
+**Note on live sentinel-to-sentinel auth (VE2):** All sentinels share the same `requirepass` value. Sentinel peers authenticate to each other using their own configured password. Full failover verification under sentinel auth requires a running HA stack and is operator-verified (VE2 — not reproducible in CI).
 
 **Optional live check (VE2 — requires HA stack running):**
 

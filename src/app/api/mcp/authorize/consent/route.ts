@@ -130,7 +130,7 @@ export async function POST(req: NextRequest) {
           // client_id matches (it only knows the latest registered client_id).
           // C7: only delete a row owned by this user (createdById === session.user.id).
           const existing = await tx.mcpClient.findFirst({
-            where: { tenantId: userTenantId, name: clientName, isDcr: true, createdById: session.user.id },
+            where: { tenantId: userTenantId, name: clientName, isDcr: true, createdById: session.user.id, id: { not: clientIdDb } },
           });
           if (existing) {
             await tx.mcpClient.delete({ where: { id: existing.id } });

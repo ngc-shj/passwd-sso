@@ -11,6 +11,7 @@ const {
   mockMcpClientUpdateMany,
   mockMcpClientFindUnique,
   mockTxFindFirst,
+  mockTxDelete,
   mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -23,6 +24,7 @@ const {
   mockMcpClientUpdateMany: vi.fn().mockResolvedValue({ count: 1 }),
   mockMcpClientFindUnique: vi.fn(),
   mockTxFindFirst: vi.fn().mockResolvedValue(null),
+  mockTxDelete: vi.fn().mockResolvedValue({}),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
@@ -47,7 +49,7 @@ vi.mock("@/lib/prisma", () => ({
           findFirst: mockTxFindFirst,
           updateMany: mockMcpClientUpdateMany,
           deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
-          delete: vi.fn().mockResolvedValue({}),
+          delete: mockTxDelete,
         },
       }),
     ),
@@ -131,6 +133,7 @@ describe("POST /api/mcp/authorize/consent", () => {
     mockFindFirst.mockResolvedValue(VALID_CLIENT);
     mockFindUnique.mockResolvedValue(VALID_USER);
     mockTxFindFirst.mockResolvedValue(null); // default: no existing same-name client
+    mockTxDelete.mockResolvedValue({});
     mockMcpClientCount.mockResolvedValue(0);
     mockMcpClientUpdateMany.mockResolvedValue({ count: 1 });
     mockRequireRecentSession.mockResolvedValue(null);
@@ -427,6 +430,7 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(json.error).toBe("invalid_client");
     expect(json.error_description).toBe("name_conflict");
     // User A's client must not have been deleted
+    expect(mockTxDelete).not.toHaveBeenCalled();
     expect(mockMcpClientUpdateMany).not.toHaveBeenCalled();
     expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
   });
@@ -448,6 +452,63 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(res.status).toBe(302);
     const location = res.headers.get("location") ?? "";
     expect(location).toContain("code=");
+    expect(mockCreateAuthorizationCode).toHaveBeenCalledOnce();
+    // The old client row must have been deleted
+    expect(mockTxDelete).toHaveBeenCalledOnce();
+    expect(mockTxDelete).toHaveBeenCalledWith({ where: { id: "old-client-id" } });
+  });
+
+  // T2: owner-scoped findFirst must include createdById and id: { not: clientIdDb }
+  it("T2: owner-scoped findFirst where includes createdById and id:not guard", async () => {
+    const claimTarget = { ...VALID_CLIENT, id: "claim-target-id", isDcr: true, tenantId: null };
+    mockFindFirst.mockResolvedValueOnce(claimTarget);
+    mockMcpClientCount.mockResolvedValueOnce(0);
+    mockTxFindFirst.mockResolvedValueOnce(null);
+    mockMcpClientUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    await POST(req as unknown as import("next/server").NextRequest);
+
+    // Assert owner-scoped findFirst was called with createdById + id:not guard
+    expect(mockTxFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          createdById: VALID_SESSION.user.id,
+          id: expect.objectContaining({ not: "claim-target-id" }),
+        }),
+      }),
+    );
+  });
+
+  // T2 red-green: temporarily removing createdById from the route's where must
+  // make the above assertion fail. This test documents the regression-guard.
+  // Verification: edit route to remove createdById → T2 test turns red → restore.
+
+  // T2: self-target — claiming when the only same-name own client IS the claim
+  // target (id matches) must NOT delete anything (the id:not guard excludes it).
+  it("T2: same-target self-claim does not delete the claim target itself", async () => {
+    // claimTarget IS the client being claimed (same id)
+    const claimTarget = { ...VALID_CLIENT, id: "claim-target-id", isDcr: true, tenantId: null };
+    mockFindFirst.mockResolvedValueOnce(claimTarget);
+    mockMcpClientCount.mockResolvedValueOnce(0);
+    // tx.findFirst with id:{ not: "claim-target-id" } → returns null (no OTHER same-name own client)
+    mockTxFindFirst.mockResolvedValueOnce(null);
+    mockMcpClientUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(302);
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("code=");
+    // No delete must have been called — the claim target itself is excluded
+    expect(mockTxDelete).not.toHaveBeenCalled();
     expect(mockCreateAuthorizationCode).toHaveBeenCalledOnce();
   });
 

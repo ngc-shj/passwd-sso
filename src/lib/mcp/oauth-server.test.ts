@@ -5,6 +5,7 @@ import {
   createAuthorizationCode,
   exchangeCodeForToken,
   validateMcpToken,
+  exchangeRefreshToken,
 } from "./oauth-server";
 
 // ─── Mock Prisma ──────────────────────────────────────────────
@@ -696,6 +697,126 @@ describe("validateMcpToken", () => {
     if (result.ok) {
       expect(result.data.userId).toBe("user-uuid");
     }
+  });
+
+  // ── C13 in exchangeRefreshToken ───────────────────────────
+
+  it("C13(e): deactivated user in exchangeRefreshToken ⇒ invalid_grant", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    const baseRt = {
+      id: "rt-id",
+      tokenHash: "hashed:rt",
+      rotatedAt: null,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 3600_000),
+      clientId: "client-uuid",
+      tenantId: "tenant-uuid",
+      userId: "user-uuid",
+      serviceAccountId: null,
+      familyId: "fam-uuid",
+      accessTokenId: "at-id",
+      scope: "credentials:list",
+      mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true },
+    };
+    (prisma as Record<string, unknown>).mcpRefreshToken = {
+      findUnique: vi.fn().mockResolvedValue(baseRt),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      create: vi.fn().mockResolvedValue({ id: "new-rt-id" }),
+    };
+    (prisma as Record<string, unknown>).mcpAccessToken = {
+      create: vi.fn().mockResolvedValue({ id: "new-at-id" }),
+      update: vi.fn().mockResolvedValue({}),
+    };
+    (prisma as Record<string, unknown>).tenantMember = {
+      findUnique: vi.fn().mockResolvedValue({ deactivatedAt: new Date("2025-01-01") }),
+    };
+
+    const result = await exchangeRefreshToken(
+      { refreshToken: "rt", clientId: "mcpc_test", clientSecretHash: "" },
+      { prisma: prisma as never },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("invalid_grant");
+  });
+
+  it("C13(f): active user in exchangeRefreshToken ⇒ rotates successfully", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    const baseRt = {
+      id: "rt-id",
+      tokenHash: "hashed:rt2",
+      rotatedAt: null,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 3600_000),
+      clientId: "client-uuid",
+      tenantId: "tenant-uuid",
+      userId: "user-uuid",
+      serviceAccountId: null,
+      familyId: "fam-uuid",
+      accessTokenId: "at-id",
+      scope: "credentials:list",
+      mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true },
+    };
+    (prisma as Record<string, unknown>).mcpRefreshToken = {
+      findUnique: vi.fn().mockResolvedValue(baseRt),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      create: vi.fn().mockResolvedValue({ id: "new-rt-id" }),
+    };
+    (prisma as Record<string, unknown>).mcpAccessToken = {
+      create: vi.fn().mockResolvedValue({ id: "new-at-id" }),
+      update: vi.fn().mockResolvedValue({}),
+    };
+    (prisma as Record<string, unknown>).tenantMember = {
+      findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
+    };
+
+    const result = await exchangeRefreshToken(
+      { refreshToken: "rt2", clientId: "mcpc_test", clientSecretHash: "" },
+      { prisma: prisma as never },
+    );
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("C13(g): SA-bound (userId:null) in exchangeRefreshToken ⇒ rotates (no membership check)", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    const mockTenantMemberFindUnique = vi.fn();
+    const baseRt = {
+      id: "rt-id",
+      tokenHash: "hashed:rt3",
+      rotatedAt: null,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 3600_000),
+      clientId: "client-uuid",
+      tenantId: "tenant-uuid",
+      userId: null,
+      serviceAccountId: "sa-uuid",
+      familyId: "fam-uuid",
+      accessTokenId: "at-id",
+      scope: "credentials:list",
+      mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true },
+    };
+    (prisma as Record<string, unknown>).mcpRefreshToken = {
+      findUnique: vi.fn().mockResolvedValue(baseRt),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      create: vi.fn().mockResolvedValue({ id: "new-rt-id" }),
+    };
+    (prisma as Record<string, unknown>).mcpAccessToken = {
+      create: vi.fn().mockResolvedValue({ id: "new-at-id" }),
+      update: vi.fn().mockResolvedValue({}),
+    };
+    (prisma as Record<string, unknown>).tenantMember = {
+      findUnique: mockTenantMemberFindUnique,
+    };
+
+    const result = await exchangeRefreshToken(
+      { refreshToken: "rt3", clientId: "mcpc_test", clientSecretHash: "" },
+      { prisma: prisma as never },
+    );
+
+    expect(result.ok).toBe(true);
+    // SA-bound: membership query must NOT be called
+    expect(mockTenantMemberFindUnique).not.toHaveBeenCalled();
   });
 
   it("C13(d): userId:null SA-bound token ⇒ valid (membership query NOT called)", async () => {

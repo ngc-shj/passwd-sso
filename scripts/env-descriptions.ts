@@ -596,7 +596,9 @@ export const descriptions: Record<
     description:
       "Password for Redis requirepass authentication (Sentinel data-node auth).\n" +
       "In non-Sentinel mode the password is embedded in REDIS_URL.\n" +
-      "Must use URL-safe characters only (hex recommended).",
+      "Must use URL-safe characters only (hex recommended).\n" +
+      "NOTE: docker-compose deployments REQUIRE this variable — the compose files\n" +
+      "use a :? guard that aborts startup when it is missing.",
     secret: true,
   },
 

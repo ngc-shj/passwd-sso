@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { SEC_PER_MINUTE } from "@/lib/constants/time";
+import { SEC_PER_MINUTE, MS_PER_MINUTE } from "@/lib/constants/time";
 
 describe("auth.config basePath handling", () => {
   beforeEach(() => {
@@ -234,6 +234,38 @@ describe("auth.config Google domain validation", () => {
         profile: {},
       }),
     ).toBe(true);
+  });
+});
+
+describe("auth.config rate limiter: magic-link failClosedOnRedisError", () => {
+  // T1: verify that createRateLimiter is called with failClosedOnRedisError: true
+  // for the magic-link limiter (windowMs 10*MS_PER_MINUTE, max 3).
+  const { mockCreateRateLimiter } = vi.hoisted(() => ({
+    mockCreateRateLimiter: vi.fn(() => ({ check: vi.fn(), clear: vi.fn() })),
+  }));
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+    vi.mock("@/lib/security/rate-limit", () => ({
+      createRateLimiter: mockCreateRateLimiter,
+    }));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("T1: magic-link limiter is created with failClosedOnRedisError:true", async () => {
+    await import("@/auth.config");
+
+    const magicLinkCall = mockCreateRateLimiter.mock.calls.find(
+      ([opts]) =>
+        opts.windowMs === 10 * MS_PER_MINUTE && opts.max === 3,
+    );
+    expect(magicLinkCall).toBeDefined();
+    expect(magicLinkCall![0]).toMatchObject({ failClosedOnRedisError: true });
   });
 });
 

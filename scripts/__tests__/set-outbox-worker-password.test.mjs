@@ -58,9 +58,9 @@ describe("set-outbox-worker-password.sh", () => {
 
       expect(result.status).toBe(0);
 
-      // argv must NOT expose the password.
-      expect(result.stdout).not.toContain("new_password=");
-      expect(result.stderr).not.toContain("new_password=secret");
+      // The redacted DRY_RUN line must appear in stderr and must not contain the plaintext password.
+      expect(result.stderr).toContain("<REDACTED>");
+      expect(result.stderr).not.toContain("secret");
 
       // The captured stdin SQL must contain the real password value.
       const sql = readFileSync(sqlFile, "utf8");

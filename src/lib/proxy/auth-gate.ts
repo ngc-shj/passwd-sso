@@ -38,7 +38,14 @@ export function extractSessionToken(cookie: string): string {
       if (eqIdx === -1) continue;
       const cookieName = trimmed.slice(0, eqIdx);
       if (cookieName === name) {
-        return trimmed.slice(eqIdx + 1);
+        const raw = trimmed.slice(eqIdx + 1);
+        // Auth.js cookie.parse wraps values in double quotes for some cookie
+        // names; dequote so the session cache never aliases quoted/unquoted
+        // variants of the same token (S5).
+        if (raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2) {
+          return raw.slice(1, -1);
+        }
+        return raw;
       }
     }
   }

@@ -307,27 +307,21 @@ describe("DCR register lazy cleanup (real DB)", () => {
 
   /**
    * Executes the same deleteMany-then-count transaction that register/route.ts
-   * runs. Returns the count after cleanup.
+   * runs, using the production Prisma query shapes from that route.
    */
   async function runRegisterTx(): Promise<{ countAfterCleanup: number; deletedCount: number }> {
     return ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
 
-      // Mirror of C6 lazy cleanup in register/route.ts
-      const deleted = await tx.$queryRawUnsafe<{ cnt: bigint }[]>(
-        `WITH del AS (
-           DELETE FROM mcp_clients
-           WHERE is_dcr = true AND tenant_id IS NULL AND dcr_expires_at < now()
-           RETURNING id
-         )
-         SELECT COUNT(*) AS cnt FROM del`,
-      );
-      const deletedCount = Number(deleted[0]?.cnt ?? 0);
+      // Exact Prisma shapes from register/route.ts C6 lazy cleanup
+      const deleteResult = await tx.mcpClient.deleteMany({
+        where: { isDcr: true, tenantId: null, dcrExpiresAt: { lt: new Date() } },
+      });
+      const deletedCount = deleteResult.count;
 
-      const remaining = await tx.$queryRawUnsafe<{ cnt: bigint }[]>(
-        `SELECT COUNT(*) AS cnt FROM mcp_clients WHERE is_dcr = true AND tenant_id IS NULL`,
-      );
-      const countAfterCleanup = Number(remaining[0]?.cnt ?? 0);
+      const countAfterCleanup = await tx.mcpClient.count({
+        where: { isDcr: true, tenantId: null },
+      });
       return { countAfterCleanup, deletedCount };
     });
   }

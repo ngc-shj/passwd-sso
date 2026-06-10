@@ -17,9 +17,10 @@
 #                           invoking psql. For testing only.
 #
 # Flags:
-#   --print-args-file <path>  (only honoured when DRY_RUN=1) Write the resolved
-#                             psql args as a JSON array to <path> (mode 0600).
-#                             Used by tests to assert the password reaches psql.
+#   --print-args-file <path>  (only honoured when DRY_RUN=1) Write the generated
+#                             stdin SQL (ALTER ROLE with quoted password) to <path>
+#                             (mode 0600). Used by tests to assert the password
+#                             reaches psql without argv exposure.
 #
 # Password input:
 #   The password must be provided on stdin. If stdin is a tty or empty, the

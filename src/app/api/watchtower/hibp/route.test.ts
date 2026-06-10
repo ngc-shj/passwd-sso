@@ -63,6 +63,11 @@ describe("GET /api/watchtower/hibp", () => {
     expect(res.status).toBe(200);
     const text = await res.text();
     expect(text).toContain("0123456789ABCDE:5");
+    // Verify fetch is called with a timeout signal so requests do not hang indefinitely.
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it("returns 502 when HIBP API fails", async () => {
