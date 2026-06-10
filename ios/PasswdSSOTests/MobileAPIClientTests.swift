@@ -388,6 +388,65 @@ final class MobileAPIClientTests: XCTestCase {
     XCTAssertFalse(body.encryptedOverview.ciphertext.isEmpty)
   }
 
+  // MARK: - resourceURL basePath preservation (m7 / C13.4)
+
+  func testResourceURL_preservesDeploymentBasePath() async throws {
+    let client = MobileAPIClient(
+      serverURL: URL(string: "https://host.example/passwd-sso")!,
+      signer: FakeSigner(),
+      jwk: knownJWK,
+      tokenStore: tokenStore,
+      urlSession: session
+    )
+    let url = await client.resourceURL(path: "/api/passwords")
+    XCTAssertEqual(
+      url?.absoluteString, "https://host.example/passwd-sso/api/passwords",
+      "resourceURL must keep the deployment basePath (serverURL.appending), not drop it"
+    )
+
+    let withQuery = await client.resourceURL(
+      path: "/api/teams/t1/passwords", query: "include=blob")
+    XCTAssertEqual(
+      withQuery?.absoluteString,
+      "https://host.example/passwd-sso/api/teams/t1/passwords?include=blob"
+    )
+    // canonicalHTU (DPoP htu) strips the query but keeps the basePath.
+    let htu = await client.canonicalHTU(url: try XCTUnwrap(withQuery))
+    XCTAssertEqual(htu, "https://host.example/passwd-sso/api/teams/t1/passwords")
+  }
+
+  // MARK: - fetchVaultUnlockData Bearer scheme (m5 / C13.2)
+
+  func testFetchVaultUnlockData_usesBearerScheme() async throws {
+    seedAccessToken()
+    var capturedRequest: URLRequest?
+    let url = serverURL.appending(path: "/api/vault/unlock/data", directoryHint: .notDirectory)
+    let json = #"""
+    {"accountSalt":"aa","encryptedSecretKey":"bb","secretKeyIv":"cc",
+     "secretKeyAuthTag":"dd","keyVersion":1,"kdfType":0,"kdfIterations":600000,
+     "userId":"u-1"}
+    """#
+    MockURLProtocol.requestHandler = { request in
+      capturedRequest = request
+      return (Data(json.utf8), httpResponse(status: 200, url: url))
+    }
+    let client = MobileAPIClient(
+      serverURL: serverURL,
+      signer: FakeSigner(),
+      jwk: knownJWK,
+      tokenStore: tokenStore,
+      urlSession: session
+    )
+
+    _ = try await client.fetchVaultUnlockData()
+
+    let req = try XCTUnwrap(capturedRequest)
+    let auth = try XCTUnwrap(req.value(forHTTPHeaderField: "Authorization"))
+    XCTAssertTrue(auth.hasPrefix("Bearer "), "vault-unlock-data must use Bearer (not DPoP) scheme")
+    XCTAssertFalse(auth.hasPrefix("DPoP "))
+    XCTAssertNotNil(req.value(forHTTPHeaderField: "DPoP"), "DPoP proof header must still be set")
+  }
+
   func testUpdateEntry_athIsSHA256OfAccessToken() async throws {
     let accessToken = "acc_ath_test"
     try? tokenStore.saveTokens(access: accessToken, refresh: "ref_ath", expiresAt: Date().addingTimeInterval(3600))

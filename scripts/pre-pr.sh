@@ -132,6 +132,7 @@ run_step "Static: api-error-body-drift" bash scripts/checks/check-api-error-body
 run_step "Static: fail-closed-routes-have-test" bash scripts/checks/check-fail-closed-routes-have-test.sh
 run_step "Static: actions-sha-pinned" bash scripts/checks/check-actions-sha-pinned.sh
 run_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-prisma-pin.sh
+run_step "Static: ios-no-diagnostic-logging" bash scripts/checks/check-ios-no-diagnostic-logging.sh
 if [ "$STATIC_ONLY" != "1" ]; then
   run_step "Lint"                   npx eslint .
 fi

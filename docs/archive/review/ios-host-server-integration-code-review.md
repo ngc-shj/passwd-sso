@@ -106,5 +106,53 @@ real emails/IPs in new docs).
 R19 partial (M3), RT1 → M2 (Critical-class, rated Major: code device-verified), RT2 (C13.3/4
 testable, not untestable), RT3 minor (m9), RT4 clean, RT5 → M2.
 
-## Resolution Status
-(pending — see fix round)
+## Resolution Status (round 1 — all findings resolved)
+
+Verification: vitest 11099 passed; next build green; iOS full suite 228 passed.
+
+### M1 [Major] TOTP AutoFill always empty — FIXED
+- Added `hasTOTP` presence marker to the web overview blob (`personal-entry-payload.ts`);
+  `EntryBlobDecoder.summary` reads it; `OverviewPlaintext` + `EntryEditForm` preserve it
+  (and `additionalUrlHosts`) on iOS re-encrypt (covers m4). Tests: personal-entry-payload.test.ts,
+  EntryBlobDecoderTests (hasTOTP), commit 4dca2669.
+### M2 [Major] real VaultUnlocker untested — FIXED
+- `VaultUnlockDataSource` protocol; `MobileAPIClient` conforms; real `VaultUnlocker` under test;
+  `StubVaultUnlocker` deleted. Files: VaultUnlocker.swift, MobileAPIClient.swift, VaultUnlockerTests.swift.
+### M3 [Major] isApiCallbackUrl / window.location branch untested — FIXED
+- callback-url.test.ts isApiCallbackUrl cases; passkey/security-key tests exercise the
+  window.location.assign API-callback branch (18 passed).
+### M4 [Major] EntryBlobDecoder no unit tests — FIXED
+- New EntryBlobDecoderTests.swift (9 tests: null fields, absent password, tag objects, hasTOTP, malformed).
+### M5 [Major] kdfType JSON-decode untested — FIXED
+- VaultUnlockerTests: integer kdfType decodes; string kdfType throws.
+### M6 [Major] cross-platform vault-unlock fixture absent — FIXED
+- scripts/generate-vault-unlock-fixture.mjs (Web Crypto PBKDF2-SHA256 600k → AES-GCM, matching
+  crypto-client kdfType=0) → extension/test/fixtures/vault-unlock-fixture.json; VaultUnlockerTests
+  `testUnlockDecodesWebGeneratedFixture` feeds it to the REAL VaultUnlocker and asserts the derived
+  vault key (cross-platform hex parity). Passes.
+
+### Minors
+- m1 [Minor] sign-in page API-callback redirect — FIXED (signin/page.tsx uses next/navigation redirect
+  for isApiCallbackUrl, no locale injection).
+- m2 [Minor] /api/mobile/authorize no rate limiter — FIXED (per-user `authorizeLimiter` +
+  checkRateLimitOrFail; test: rate-limit-blocked).
+- m3 [Minor] bridge-code issuance not audited — FIXED (MOBILE_BRIDGE_CODE_ISSUED audit action: enum +
+  groups + i18n en/ja + Prisma enum + migration 20260610000000 + MOBILE_BRIDGE_CODE target type +
+  logAuditAsync; test asserts emit).
+- m4 [Minor] additionalUrlHosts dropped on iOS edit — FIXED (see M1; also fixed the more serious
+  stored-blob fidelity loss on iOS re-encrypt).
+- m5 [Minor] Bearer scheme untested — FIXED (MobileAPIClientTests testFetchVaultUnlockData_usesBearerScheme).
+- m6 [Minor] PSSO_DIAG CI guard absent — FIXED (scripts/checks/check-ios-no-diagnostic-logging.sh,
+  `npm run check:ios-diag`, wired into pre-pr.sh; also guards DPoP-on-access-token + base64-unlock regressions).
+- m7 [Minor] canonicalHTU/resourceURL basePath untested — FIXED (testResourceURL_preservesDeploymentBasePath).
+- m9 [Minor] callbackScheme constant untested — FIXED (AuthCoordinatorTests testCallbackSchemeMatchesRegisteredScheme).
+- m10 [Minor] redirectToSignIn null-origin 500 untested — FIXED (authorize route test).
+- m8 [Minor] AAD encrypt→decrypt round-trip — COVERED by existing CredentialResolverTests
+  (encrypt-with-AAD → resolve/decrypt is an integration round-trip) + AADParityTests golden vectors.
+  No new test added; existing coverage exercises the path. (Anti-Deferral: not deferred — judged
+  already-covered; worst case if wrong = AAD wiring regression, caught by CredentialResolverTests failing.)
+- m11 [Minor] hasTOTP assertion in CredentialResolverTests — COVERED by new EntryBlobDecoderTests
+  (testSummaryReadsAdditionalUrlHostsAndTOTPMarker directly asserts hasTOTP from the overview blob),
+  which is the canonical decode path. CredentialResolverTests fixture comment left as-is.
+
+Termination: all Critical/Major fixed; all Minor fixed or covered. Round 1 closes.
