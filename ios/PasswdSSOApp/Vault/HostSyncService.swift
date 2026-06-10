@@ -103,7 +103,8 @@ public actor HostSyncService {
     return SyncReport(
       entriesFetched: allCacheEntries.count,
       cacheBytesWritten: bytesWritten,
-      lastSuccessfulRefreshAt: now
+      lastSuccessfulRefreshAt: now,
+      cacheData: cacheData
     )
   }
 }
@@ -137,7 +138,11 @@ extension MobileAPIClient {
 
     var request = URLRequest(url: endpoint)
     request.httpMethod = "GET"
-    request.setValue("DPoP \(accessToken)", forHTTPHeaderField: "Authorization")
+    // Access token uses the Bearer scheme; the DPoP proof is the separate
+    // `DPoP` header. The server extracts the token via `^Bearer` (authOrToken /
+    // validateExtensionToken) and validates the proof (ath + cnf.jkt). Only the
+    // refresh-token call uses the `DPoP` Authorization scheme.
+    request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
     request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
 
     let (data, response) = try await performHTTP(request)

@@ -1,5 +1,26 @@
 import { describe, expect, it } from "vitest";
 import { buildPasswordHistory, buildPersonalEntryPayload } from "@/lib/vault/personal-entry-payload";
+import type { GeneratorSettings } from "@/lib/generator/generator-prefs";
+
+const BASE_GENERATOR_SETTINGS: GeneratorSettings = {
+  mode: "password",
+  length: 16,
+  uppercase: true,
+  lowercase: true,
+  numbers: true,
+  symbolGroups: {
+    hashEtc: false,
+    punctuation: false,
+    quotes: false,
+    slashDash: false,
+    mathCompare: false,
+    brackets: false,
+  },
+  excludeAmbiguous: false,
+  includeChars: "",
+  excludeChars: "",
+  passphrase: { wordCount: 4, separator: "-", capitalize: false, includeNumber: false },
+};
 
 describe("buildPasswordHistory", () => {
   it("prepends previous password when changed", () => {
@@ -75,6 +96,33 @@ describe("buildPersonalEntryPayload", () => {
     expect((full.customFields as unknown[]).length).toBe(1);
     expect(overview.urlHost).toBe("example.com");
     expect(overview.requireReprompt).toBe(true);
+    // No TOTP → marker absent from overview (iOS reads absent as hasTOTP=false).
+    expect(overview).not.toHaveProperty("hasTOTP");
+  });
+
+  it("marks the overview blob with hasTOTP when a TOTP secret is present", () => {
+    const { fullBlob, overviewBlob } = buildPersonalEntryPayload({
+      title: "WithTOTP",
+      username: "u",
+      password: "pw",
+      url: "https://example.com",
+      notes: "",
+      selectedTags: [],
+      generatorSettings: BASE_GENERATOR_SETTINGS,
+      customFields: [],
+      totp: { secret: "JBSWY3DPEHPK3PXP" },
+      requireReprompt: false,
+      existingHistory: [],
+    });
+
+    const full = JSON.parse(fullBlob) as Record<string, unknown>;
+    const overview = JSON.parse(overviewBlob) as Record<string, unknown>;
+
+    // Full blob carries the secret; overview only carries the presence marker
+    // (the iOS one-time-code picker filters on it without decrypting the full blob).
+    expect(full.totp).toEqual({ secret: "JBSWY3DPEHPK3PXP" });
+    expect(overview.hasTOTP).toBe(true);
+    expect(overview).not.toHaveProperty("totp");
   });
 
   it("includes travelSafe in both blobs when provided", () => {

@@ -12,6 +12,16 @@ public struct VaultEntrySummary: Codable, Sendable, Equatable, Identifiable {
   public let lastAccessedAt: Date?
   /// True when the entry has a TOTP secret (used to filter the TOTP AutoFill picker).
   public let hasTOTP: Bool
+  /// Web-only overview flags, carried so an iOS edit can preserve them on
+  /// re-encrypt (see EntryBlobDecoder / OverviewPlaintext). Dropping
+  /// requireReprompt would silently remove a master-passphrase re-prompt.
+  /// `requireReprompt` is always present in the web overview blob, so a plain
+  /// Bool (absent → false) suffices. `travelSafe` is THREE-state — the web
+  /// writes it only when set and reads absent as travel-safe, so it must stay
+  /// optional: collapsing an explicit `false` to absent would flip a
+  /// travel-unsafe entry back to travel-safe on the next web load.
+  public let requireReprompt: Bool
+  public let travelSafe: Bool?
 
   public init(
     id: String,
@@ -22,7 +32,9 @@ public struct VaultEntrySummary: Codable, Sendable, Equatable, Identifiable {
     tags: [String] = [],
     teamId: String? = nil,
     lastAccessedAt: Date? = nil,
-    hasTOTP: Bool = false
+    hasTOTP: Bool = false,
+    requireReprompt: Bool = false,
+    travelSafe: Bool? = nil
   ) {
     self.id = id
     self.title = title
@@ -33,5 +45,7 @@ public struct VaultEntrySummary: Codable, Sendable, Equatable, Identifiable {
     self.teamId = teamId
     self.lastAccessedAt = lastAccessedAt
     self.hasTOTP = hasTOTP
+    self.requireReprompt = requireReprompt
+    self.travelSafe = travelSafe
   }
 }

@@ -22,18 +22,6 @@ public enum AuthError: Error, Equatable {
   case storeFailed
 }
 
-// MARK: - WebAuth session parameters (Sendable for crossing isolation boundaries)
-
-private struct WebAuthParams: Sendable {
-  let url: URL
-  let host: String
-  /// Full callback path INCLUDING any basePath the server is mounted under
-  /// (e.g. "/passwd-sso/api/mobile/authorize/redirect"). Must match the
-  /// AASA components.path on the server and the URL the server actually
-  /// 302s to — otherwise iOS will not deliver the .https callback.
-  let callbackPath: String
-}
-
 // MARK: - Coordinator
 
 /// Orchestrates the iOS host-app authentication flow:
@@ -48,6 +36,12 @@ public actor AuthCoordinator {
   private let serverConfig: ServerConfig
   let tokenStore: HostTokenStore
   private let dpopKeyLabel = "com.passwd-sso.dpop.host"
+  /// Custom URL scheme the server redirects the ASWebAuthenticationSession to
+  /// on successful sign-in (`passwd-sso://auth/callback?code&state`). Captured
+  /// by scheme, so it works against any self-hosted server host — no Universal
+  /// Link / associated-domains entitlement required. Must match the
+  /// CFBundleURLSchemes entry in Info.plist.
+  static let callbackScheme = "passwd-sso"
   /// Set after the first successful call to getOrCreateDPoPKey.
   private var loadedKey: SecKey?
 
@@ -82,17 +76,8 @@ public actor AuthCoordinator {
       deviceJkt: deviceJkt
     )
 
-    guard let host = serverConfig.baseURL.host else {
-      throw AuthError.webAuthFailed("server URL has no host")
-    }
-    // serverConfig.baseURL.path holds the basePath (e.g. "/passwd-sso") or
-    // "" for root-mounted deployments. parseAndValidate trims trailing slash.
-    let basePath = serverConfig.baseURL.path
-    let callbackPath = "\(basePath)/api/mobile/authorize/redirect"
-    let params = WebAuthParams(url: authorizeURL, host: host, callbackPath: callbackPath)
-
     let callbackURL = try await AuthCoordinator.launchWebAuthSession(
-      params: params,
+      url: authorizeURL,
       presentationContext: presentationContext
     )
 
@@ -150,79 +135,42 @@ public actor AuthCoordinator {
     return try exportPublicKeyJWK(key: key)
   }
 
-  /// Called by `PasswdSSOAppApp.onOpenURL` when a Universal Link arrives.
-  ///
-  /// The `pendingContinuation` is consumed here. The actor ensures no race
-  /// with the session callback because both paths hop through the actor.
-  /// However, if `ASWebAuthenticationSession`'s completion handler fires after
-  /// `handleUniversalLink`, the double-resume is handled by the continuation's
-  /// one-shot semantics (second call no-ops after the first resolves it).
-  public func handleUniversalLink(_ url: URL) {
-    // No pending continuation to wake — already consumed by the session callback
-    // or not yet set. For iOS 17.4+, the .https callback fires before the
-    // Universal Link; this path is the iOS 17.0–17.3 fallback.
-    _ = url  // URL is delivered through SignInView's .onOpenURL only for 17.0–17.3.
-  }
-
   // MARK: - Static session launcher (@MainActor-isolated)
 
   /// Creates and starts the `ASWebAuthenticationSession` on the main actor.
+  ///
+  /// Uses a custom URL scheme callback (`passwd-sso://`) so sign-in works
+  /// against any self-hosted server host. The session captures the redirect by
+  /// scheme — no Universal Link / associated-domains entitlement, and no
+  /// per-host configuration baked into the app at sign time.
   ///
   /// This is a static method so it can be called from the actor without
   /// violating Swift 6 Sendable rules — all inputs are `Sendable`; the
   /// presentation context is consumed only inside `@MainActor`.
   @MainActor
   private static func launchWebAuthSession(
-    params: WebAuthParams,
+    url: URL,
     presentationContext: ASWebAuthenticationPresentationContextProviding
   ) async throws -> URL {
     try await withCheckedThrowingContinuation { continuation in
-      let session: ASWebAuthenticationSession
-
-      // iOS 17.4+: use the `.https` callback to avoid any custom URL scheme.
-      if #available(iOS 17.4, *) {
-        session = ASWebAuthenticationSession(
-          url: params.url,
-          callback: .https(host: params.host, path: params.callbackPath)
-        ) { callbackURL, error in
-          if let error {
-            let nsError = error as NSError
-            if nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
-              continuation.resume(throwing: AuthError.webAuthCancelled)
-            } else {
-              continuation.resume(throwing: AuthError.webAuthFailed(error.localizedDescription))
-            }
-            return
+      let session = ASWebAuthenticationSession(
+        url: url,
+        callbackURLScheme: callbackScheme
+      ) { callbackURL, error in
+        if let error {
+          let nsError = error as NSError
+          if nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
+            continuation.resume(throwing: AuthError.webAuthCancelled)
+          } else {
+            continuation.resume(throwing: AuthError.webAuthFailed(error.localizedDescription))
           }
-          guard let callbackURL else {
-            continuation.resume(throwing: AuthError.webAuthFailed("nil callback URL"))
-            return
-          }
-          continuation.resume(returning: callbackURL)
+          return
         }
-      } else {
-        // iOS 17.0–17.3: callbackURLScheme must be nil (no custom scheme allowed).
-        // The Universal Link callback arrives via `.onOpenURL` in the app delegate;
-        // in the simulator this flow may not complete without a physical server.
-        session = ASWebAuthenticationSession(
-          url: params.url,
-          callbackURLScheme: nil
-        ) { callbackURL, error in
-          if let error {
-            let nsError = error as NSError
-            if nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
-              continuation.resume(throwing: AuthError.webAuthCancelled)
-            } else {
-              continuation.resume(throwing: AuthError.webAuthFailed(error.localizedDescription))
-            }
-            return
-          }
-          guard let callbackURL else {
-            continuation.resume(throwing: AuthError.webAuthFailed("nil callback URL"))
-            return
-          }
-          continuation.resume(returning: callbackURL)
+        guard let callbackURL else {
+          continuation.resume(throwing: AuthError.webAuthFailed("nil callback URL"))
+          return
         }
+        continuation.resume(returning: callbackURL)
       }
 
       session.prefersEphemeralWebBrowserSession = true

@@ -6,11 +6,11 @@
 	<true/>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.com.passwd-sso.shared</string>
+		<string>group.jp.jpng.passwd-sso.shared</string>
 	</array>
 	<key>keychain-access-groups</key>
 	<array>
-		<string>$(AppIdentifierPrefix)com.passwd-sso.shared</string>
+		<string>$(AppIdentifierPrefix)jp.jpng.passwd-sso.shared</string>
 	</array>
 </dict>
 </plist>

@@ -80,7 +80,7 @@ public final class BridgeKeyStore: Sendable {
     case keychainError(OSStatus)
   }
 
-  private let accessGroup: String
+  private let accessGroup: String?
   private let serviceKeyV2: String
   private let serviceMetaV2: String
   private let serviceLegacy: String
@@ -93,7 +93,7 @@ public final class BridgeKeyStore: Sendable {
   /// derived as `<service>-v2` (key) and the same string with "bridge-key"
   /// → "bridge-meta" plus "-v2" (meta). Tests follow the same convention.
   public init(
-    accessGroup: String,
+    accessGroup: String? = nil,
     service: String = "com.passwd-sso.bridge-key",
     keychain: KeychainAccessor = SystemKeychainAccessor()
   ) {
@@ -270,13 +270,23 @@ public final class BridgeKeyStore: Sendable {
   // MARK: - Private helpers — V2
 
   private func baseQuery(service: String) -> [String: Any] {
-    [
+    var query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
       kSecAttrAccount as String: "blob",
-      kSecAttrAccessGroup as String: accessGroup,
       kSecAttrSynchronizable as String: false,
     ]
+    // Only pin an explicit access group when one is supplied. When nil, the
+    // item lands in the app's DEFAULT keychain access group, which — given the
+    // single `$(AppIdentifierPrefix)…shared` keychain-access-groups entitlement
+    // — is exactly the app↔extension shared group. A literal team prefix cannot
+    // be hardcoded (it is Apple-assigned and changes), and an App Group id is
+    // NOT a valid keychain access group; both produce errSecMissingEntitlement
+    // on device. Omitting the attribute is how HostTokenStore already works.
+    if let accessGroup, !accessGroup.isEmpty {
+      query[kSecAttrAccessGroup as String] = accessGroup
+    }
+    return query
   }
 
   private func legacyBaseQuery() -> [String: Any] {

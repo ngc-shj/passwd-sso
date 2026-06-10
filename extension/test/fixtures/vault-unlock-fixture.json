@@ -1,0 +1,13 @@
+{
+  "_comment": "Web-Crypto-generated (PBKDF2-SHA256 600k → AES-256-GCM), matching crypto-client kdfType=0. Regenerate via scripts/generate-vault-unlock-fixture.mjs.",
+  "passphrase": "cross-platform-test-passphrase",
+  "accountSalt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "encryptedSecretKey": "8d2955d56ab419b5c032b840257a04208680346d56089cb2ebbaba4f95d2556c",
+  "secretKeyIv": "111111111111111111111111",
+  "secretKeyAuthTag": "be3e87dc1869dfc5bec01a356a8df1bc",
+  "keyVersion": 1,
+  "kdfType": 0,
+  "kdfIterations": 600000,
+  "userId": "cross-platform-user",
+  "expectedSecretKeyHex": "4242424242424242424242424242424242424242424242424242424242424242"
+}

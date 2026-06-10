@@ -18,8 +18,14 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
 
   private let defaults: UserDefaults
 
-  init(defaults: UserDefaults = UserDefaults(suiteName: "group.com.passwd-sso.shared") ?? .standard) {
+  init(defaults: UserDefaults = UserDefaults(suiteName: "group.jp.jpng.passwd-sso.shared") ?? .standard) {
     self.defaults = defaults
+    // Pre-fill the last successfully-probed server URL so it isn't re-typed
+    // on every launch.
+    if let data = defaults.data(forKey: "serverConfig"),
+       let config = try? JSONDecoder().decode(ServerConfig.self, from: data) {
+      self.urlText = config.baseURL.absoluteString
+    }
   }
 
   @MainActor

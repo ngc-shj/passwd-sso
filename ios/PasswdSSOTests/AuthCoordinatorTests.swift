@@ -13,6 +13,15 @@ import XCTest
 /// kSecAttrTokenIDSecureEnclave attribute — same API surface, hardware-agnostic.
 final class AuthCoordinatorTests: XCTestCase {
 
+  // MARK: - callbackScheme invariant (m9)
+
+  /// The custom URL scheme must match the server's IOS_CALLBACK_URL
+  /// ("passwd-sso://auth/callback") and the app's CFBundleURLSchemes. A change
+  /// here silently breaks the ASWebAuthenticationSession callback capture.
+  func testCallbackSchemeMatchesRegisteredScheme() {
+    XCTAssertEqual(AuthCoordinator.callbackScheme, "passwd-sso")
+  }
+
   // MARK: - currentSigner_returnsValidSigner
 
   func testCurrentSigner_noKeyLoaded_throws() async {

@@ -7,7 +7,11 @@ import UIKit
 /// Main vault list view — shows decrypted entry summaries.
 @MainActor
 struct VaultListView: View {
-  @Bindable var viewModel: VaultViewModel
+  // Owned by the view (created once, survives parent re-renders). Passing an
+  // inline-constructed VaultViewModel from the parent caused a fresh, empty
+  // model to replace the loaded one on the next re-render (e.g. the foreground
+  // re-sync), showing "No entries" despite a fully-decoded cache.
+  @State private var viewModel = VaultViewModel()
   let cacheData: CacheData
   let vaultKey: SymmetricKey
   let userId: String

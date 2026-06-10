@@ -163,6 +163,18 @@ struct EntryEditForm: View {
       title: title,
       username: username,
       urlHost: urlHost.isEmpty ? nil : urlHost,
+      // iOS does not edit URL custom fields, so preserve the original entry's
+      // additionalUrlHosts rather than dropping them on re-encrypt.
+      additionalUrlHosts: summary.additionalUrlHosts.isEmpty ? nil : summary.additionalUrlHosts,
+      // Keep the overview TOTP marker in sync with the edited secret so the
+      // AutoFill one-time-code picker still finds the entry after an iOS edit.
+      hasTOTP: totpSecret.isEmpty ? nil : true,
+      // Preserve web-only flags the iOS form does not edit. requireReprompt is
+      // always written (matching the web overview shape); travelSafe is passed
+      // through verbatim (nil → omitted, true/false preserved) so an explicit
+      // travel-unsafe entry is not flipped back to travel-safe.
+      requireReprompt: summary.requireReprompt,
+      travelSafe: summary.travelSafe,
       tags: parsedTags
     )
 

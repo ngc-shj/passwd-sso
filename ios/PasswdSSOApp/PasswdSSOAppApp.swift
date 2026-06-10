@@ -4,9 +4,9 @@ import SwiftUI
 
 @main
 struct PasswdSSOAppApp: App {
-  // AuthCoordinator is created inside RootView once the server URL is known.
-  // We keep a reference here solely to forward Universal Link callbacks.
-  @State private var activeCoordinator: AuthCoordinator?
+  // The OAuth sign-in callback (passwd-sso:// custom scheme) is captured
+  // directly by ASWebAuthenticationSession inside AuthCoordinator, so the app
+  // shell does not need to forward any incoming URLs.
   @State private var activeSyncService: HostSyncService?
   @State private var activeDrain: RollbackFlagDrain?
   @State private var currentVaultKey: SymmetricKey?
@@ -18,9 +18,6 @@ struct PasswdSSOAppApp: App {
     WindowGroup {
       ZStack {
         RootView(
-          onCoordinatorReady: { coordinator in
-            activeCoordinator = coordinator
-          },
           onVaultReady: { syncService, drain, vaultKey, userId in
             activeSyncService = syncService
             activeDrain = drain
@@ -28,13 +25,6 @@ struct PasswdSSOAppApp: App {
             currentUserId = userId
           }
         )
-        .onOpenURL { url in
-          // Forward Universal Link callbacks to the active coordinator.
-          // The coordinator's handleUniversalLink is a no-op if no session is pending.
-          if let coordinator = activeCoordinator {
-            Task { await coordinator.handleUniversalLink(url) }
-          }
-        }
 
         // App-Switcher snapshot blur: overlay when scene is .inactive (the transition
         // used by the App Switcher). Using .inactive rather than .background because iOS

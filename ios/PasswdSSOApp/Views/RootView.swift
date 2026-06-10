@@ -9,19 +9,22 @@ enum AppState {
   case signIn(serverConfig: ServerConfig, coordinator: AuthCoordinator)
   case signedIn(serverConfig: ServerConfig, tokens: TokenPair, apiClient: MobileAPIClient)
   case vaultUnlocked(
+    serverConfig: ServerConfig,
     vaultKey: SymmetricKey,
     userId: String,
     cacheData: CacheData,
     autoLockService: AutoLockService,
     apiClient: MobileAPIClient
   )
-  case vaultLocked
+  // Locked but still signed in: re-unlock needs only the passphrase, keeping the
+  // server config + token (no OAuth re-sign-in). Carries serverConfig/apiClient
+  // so the passphrase screen can call /api/vault/unlock/data again.
+  case vaultLocked(serverConfig: ServerConfig, apiClient: MobileAPIClient)
 }
 
 // MARK: - Root view
 
 struct RootView: View {
-  let onCoordinatorReady: (AuthCoordinator) -> Void
   /// Called when vault is unlocked so the app shell can wire foreground sync + drain.
   let onVaultReady: (HostSyncService, RollbackFlagDrain, SymmetricKey, String) -> Void
 
@@ -37,7 +40,6 @@ struct RootView: View {
         ServerURLSetupView { config in
           let tokenStore = HostTokenStore()
           let coordinator = AuthCoordinator(serverConfig: config, tokenStore: tokenStore)
-          onCoordinatorReady(coordinator)
           appState = .signIn(serverConfig: config, coordinator: coordinator)
         }
 
@@ -47,9 +49,8 @@ struct RootView: View {
       case .signedIn(let serverConfig, _, let apiClient):
         vaultLockedScreen(serverConfig: serverConfig, apiClient: apiClient)
 
-      case .vaultUnlocked(let vaultKey, let userId, let cacheData, let autoLockService, let apiClient):
+      case .vaultUnlocked(let serverConfig, let vaultKey, let userId, let cacheData, let autoLockService, let apiClient):
         VaultListView(
-          viewModel: VaultViewModel(),
           cacheData: cacheData,
           vaultKey: vaultKey,
           userId: userId,
@@ -59,26 +60,23 @@ struct RootView: View {
         )
         .onChange(of: autoLockService.state) { _, newState in
           if newState == .locked {
-            appState = .vaultLocked
+            // Lock drops the vault key + bridge key, but keeps the server config
+            // and token: re-unlock needs only the passphrase, not a full sign-in.
+            appState = .vaultLocked(serverConfig: serverConfig, apiClient: apiClient)
           }
         }
 
-      case .vaultLocked:
-        // Auto-lock dropped bridge_key from Keychain; vault must be re-unlocked
-        // (in production via passphrase, in DEBUG via fixture reload).
-        // Keep "passwd-sso" text for UITest compatibility.
-        VStack(spacing: 24) {
-          Text("passwd-sso")
-            .font(.largeTitle.bold())
-          Text("Vault locked")
-            .foregroundStyle(.secondary)
+      case .vaultLocked(let serverConfig, let apiClient):
+        // Re-unlock via passphrase (token still valid). The "Sign in again"
+        // fallback covers an expired/invalid token.
+        VStack(spacing: 16) {
+          vaultLockedScreen(serverConfig: serverConfig, apiClient: apiClient)
           Button("Sign in again") {
-            // Reset to setup so the user can re-enter passphrase (or use DEBUG fixture).
             appState = .setup
           }
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(.bordered)
+          .padding(.bottom)
         }
-        .padding()
       }
     }
   }
@@ -122,7 +120,7 @@ struct RootView: View {
   // MARK: - Vault locked / unlock entry
 
   private func vaultLockedScreen(serverConfig: ServerConfig, apiClient: MobileAPIClient) -> some View {
-    let bks = BridgeKeyStore(accessGroup: "\(serverConfig.teamId).com.passwd-sso.shared")
+    let bks = BridgeKeyStore()
     let wks = AppGroupWrappedKeyStore()
     let unlocker = VaultUnlocker(
       apiClient: apiClient,
@@ -176,7 +174,7 @@ struct RootView: View {
     // Drain any flags from previous AutoFill cycles before the first sync.
     await drain.drainPendingFlags(vaultKey: vaultKey)
 
-    _ = try? await syncService.runSync(vaultKey: vaultKey, userId: unlockResult.userId)
+    let syncReport = try? await syncService.runSync(vaultKey: vaultKey, userId: unlockResult.userId)
 
     let tokenStore = HostTokenStore()
     let autoLockService = AutoLockService(
@@ -186,14 +184,19 @@ struct RootView: View {
       cacheURL: cacheURL
     )
 
-    let blob = try? bridgeKeyStore.readDirect()
     let cacheData: CacheData
-    if let blob, let data = try? readCacheFile(
+    if let freshCache = syncReport?.cacheData {
+      // Use the cache the sync just built in-memory. Re-reading the encrypted
+      // file here races the write on the first unlock (fresh bridge-key
+      // counter/UUID window), which left the list empty until a second unlock.
+      cacheData = freshCache
+    } else if let blob = try? bridgeKeyStore.readDirect(), let data = try? readCacheFile(
       path: cacheURL,
       vaultKey: vaultKey,
       expectedHostInstallUUID: blob.hostInstallUUID,
       expectedCounter: blob.cacheVersionCounter
     ) {
+      // Sync failed (e.g. offline) — fall back to the last persisted cache.
       cacheData = data
     } else {
       cacheData = CacheData(
@@ -213,6 +216,7 @@ struct RootView: View {
 
     autoLockService.startTimer()
     appState = .vaultUnlocked(
+      serverConfig: serverConfig,
       vaultKey: vaultKey,
       userId: unlockResult.userId,
       cacheData: cacheData,
@@ -222,7 +226,7 @@ struct RootView: View {
   }
 
   private func makeFallbackSyncService(apiClient: MobileAPIClient) -> HostSyncService {
-    let bks = BridgeKeyStore(accessGroup: "TEAMID.com.passwd-sso.shared")
+    let bks = BridgeKeyStore()
     let wks = AppGroupWrappedKeyStore()
     let fetcher = EntryFetcher(apiClient: apiClient)
     let cacheURL = (try? AppGroupContainer.cacheFileURL()) ?? URL(fileURLWithPath: "/dev/null")
@@ -277,7 +281,7 @@ struct RootView: View {
       jwk: [:],
       tokenStore: HostTokenStore()
     )
-    let bks = BridgeKeyStore(accessGroup: AppGroupContainer.identifier)
+    let bks = BridgeKeyStore()
     let wks = AppGroupWrappedKeyStore()
     let cacheURL = (try? AppGroupContainer.cacheFileURL()) ?? URL(fileURLWithPath: "/dev/null")
     let autoLockService = AutoLockService(
@@ -288,6 +292,7 @@ struct RootView: View {
     )
     autoLockService.startTimer()
     appState = .vaultUnlocked(
+      serverConfig: serverConfig,
       vaultKey: state.vaultKey,
       userId: state.userId,
       cacheData: state.cacheData,
@@ -298,11 +303,6 @@ struct RootView: View {
   #endif
 }
 
-// MARK: - ServerConfig TeamID placeholder
-
-private extension ServerConfig {
-  var teamId: String { "TEAMID" }
-}
 
 // MARK: - No-op DPoP signer (replaces PlaceholderDPoPSigner)
 

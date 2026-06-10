@@ -117,7 +117,9 @@ public enum VaultViewModelError: Error, Equatable {
         key: vaultKey,
         aad: aad
       )
-      return try JSONDecoder().decode(VaultEntrySummary.self, from: plaintext)
+      // Shared decode: the server blob lacks `id` (injected from the cache row)
+      // and uses null/omitted fields — direct decode into VaultEntrySummary fails.
+      return EntryBlobDecoder.summary(plaintext: plaintext, entryId: entry.id, teamId: entry.teamId)
     } catch {
       return nil
     }
@@ -135,7 +137,7 @@ public enum VaultViewModelError: Error, Equatable {
         key: vaultKey,
         aad: aad
       )
-      return try JSONDecoder().decode(VaultEntryDetail.self, from: plaintext)
+      return EntryBlobDecoder.detail(plaintext: plaintext, entryId: entry.id, teamId: entry.teamId)
     } catch {
       return nil
     }
@@ -147,6 +149,13 @@ public enum VaultViewModelError: Error, Equatable {
 extension VaultViewModel {
   /// Save edited entry. Re-encrypts with vault_key + personal AAD; calls API; triggers sync.
   /// Throws `VaultViewModelError.teamEditNotSupported` for team entries.
+  ///
+  /// NOT WIRED TO THE UI: editing is disabled in `EntryDetailView` because the
+  /// re-encrypt schema is lossy (string tags break decode → entry vanishes; totp,
+  /// generatorSettings, customFields, passwordHistory are dropped). This method
+  /// is retained as the basis for the full-fidelity round-trip fix tracked in
+  /// the iOS-edit data-loss issue; do not re-enable the UI edit path until that
+  /// lands.
   public func saveEntry(
     entryId: String,
     userId: String,
@@ -191,8 +200,11 @@ extension VaultViewModel {
       title: overview.title,
       username: overview.username,
       urlHost: overview.urlHost ?? "",
+      additionalUrlHosts: overview.additionalUrlHosts ?? [],
       tags: overview.tags,
-      hasTOTP: detail.totpSecret != nil
+      hasTOTP: detail.totpSecret != nil,
+      requireReprompt: overview.requireReprompt ?? false,
+      travelSafe: overview.travelSafe
     )
     if let idx = allSummaries.firstIndex(where: { $0.id == entryId }) {
       allSummaries[idx] = updatedSummary

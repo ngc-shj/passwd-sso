@@ -152,9 +152,42 @@ public enum DebugVaultLoader {
 
   // MARK: - Private helpers
 
-  /// Build fixture CacheEntries with VaultEntrySummary/VaultEntryDetail JSON,
+  // MARK: - Server-shaped blob payload structs
+
+  // Mirrors the server JSON from src/lib/vault/personal-entry-payload.ts.
+  // These must match OverviewBlobPayload/FullBlobPayload in CredentialResolver so the
+  // DEBUG path exercises the same decode path as real server data.
+
+  private struct OverviewBlob: Encodable {
+    let title: String
+    let username: String?
+    let urlHost: String?
+    let tags: [TagBlob]
+  }
+
+  private struct FullBlob: Encodable {
+    let title: String
+    let username: String?
+    let password: String
+    let url: String?
+    let notes: String?
+    let tags: [TagBlob]
+    let totp: TotpBlob?
+  }
+
+  private struct TagBlob: Encodable {
+    let name: String
+    let color: String?
+  }
+
+  private struct TotpBlob: Encodable {
+    let secret: String
+  }
+
+  /// Build fixture CacheEntries with server-shaped JSON blobs,
   /// encrypted with vault_key + per-field buildPersonalEntryAAD(userId, entryId, vaultType).
-  /// Uses the same encryption format as CredentialResolver expects at decrypt time.
+  /// Encodes OverviewBlob/FullBlob (server shape) so CredentialResolver's new
+  /// OverviewBlobPayload/FullBlobPayload decode path is exercised correctly.
   private static func buildFixtureCacheEntries(
     vaultKey: SymmetricKey,
     userId: String
@@ -165,27 +198,31 @@ public enum DebugVaultLoader {
       let overviewAAD = try buildPersonalEntryAAD(
         userId: userId, entryId: fixture.id, vaultType: VaultType.overview)
 
-      let summary = VaultEntrySummary(
-        id: fixture.id,
+      // Server overview blob: { title, username, urlHost, tags:[{name,color}] }
+      // id is NOT in the blob — CredentialResolver injects it from CacheEntry.id.
+      let overviewBlob = OverviewBlob(
         title: fixture.title,
         username: fixture.username,
         urlHost: fixture.host,
-        hasTOTP: fixture.totpSecret != nil
+        tags: []
       )
-      let detail = VaultEntryDetail(
-        id: fixture.id,
+
+      // Server full blob: { title, username, password, url, notes, tags, totp:{secret} }
+      // id and urlHost are NOT in the full blob.
+      let totpBlob: TotpBlob? = fixture.totpSecret.map { TotpBlob(secret: $0) }
+      let fullBlob = FullBlob(
         title: fixture.title,
         username: fixture.username,
-        urlHost: fixture.host,
         password: fixture.password,
         url: fixture.urlString,
         notes: "",
-        totpSecret: fixture.totpSecret
+        tags: [],
+        totp: totpBlob
       )
 
       let encoder = JSONEncoder()
-      let overviewData = try encoder.encode(summary)
-      let detailData = try encoder.encode(detail)
+      let overviewData = try encoder.encode(overviewBlob)
+      let detailData = try encoder.encode(fullBlob)
 
       let overviewEncrypted = try encryptAESGCMEncoded(
         plaintext: overviewData, key: vaultKey, aad: overviewAAD

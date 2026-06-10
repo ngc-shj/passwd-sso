@@ -13,6 +13,7 @@
 		0A36948197E80ACA5ED17F22 /* DPoPProofBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBF559B979642506D203C806 /* DPoPProofBuilderTests.swift */; };
 		0F7754D416476CE6B1AE0C81 /* EntryEncrypter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 988D60F3AE7755637CFCFDD7 /* EntryEncrypter.swift */; };
 		1600D1BA3846CDCAEA02EF7E /* HostSyncServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD016B2D5D9999A41CCA92F /* HostSyncServiceTests.swift */; };
+		1633001879A14FC075CBC4A3 /* EntryBlobDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80BC3E2908650479CBBE6D07 /* EntryBlobDecoderTests.swift */; };
 		1AB309165A8AB5830B2AE4DD /* VaultEntrySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06E4377840A9A939A6B88D9A /* VaultEntrySummary.swift */; };
 		1ACA702DAFCBA5F5EDD82475 /* BridgeKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0EAAD69A5C2E24912DEB8D1 /* BridgeKeyStore.swift */; };
 		1C61EBA902B63AA436EDFED4 /* VaultListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF803DEFD9DF8AF7683EE422 /* VaultListView.swift */; };
@@ -85,6 +86,7 @@
 		E0E33F33FBEB6BBA6CC22D06 /* KDFTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A24C3EFD4C6BA4ACDA40380 /* KDFTests.swift */; };
 		E1FA345EE6BF6D38163AD937 /* DebugVaultLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FED91E37F4E8005AEF7E9B6 /* DebugVaultLoaderTests.swift */; };
 		E300850EF22C24B05B82D25B /* SecureEnclaveKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120E0D108C572BDFE0A5E79E /* SecureEnclaveKey.swift */; };
+		E3E4F08803D9E1580F7BE6CD /* EntryBlobDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50EA48EEB5CB57F3E901EBE5 /* EntryBlobDecoder.swift */; };
 		E425C49CE0F5257C1821EB50 /* VaultEntryDetail.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00236EB9F799A708CF1C4FC /* VaultEntryDetail.swift */; };
 		E61FA83E34E321C09B0D7176 /* TOTPVectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CB624E102C09D08D7B9BB8D /* TOTPVectorTests.swift */; };
 		E6242A08FB6CD768CBCED638 /* StaleBlobRecoveryServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65EFD0AD3F8896F5D18F2967 /* StaleBlobRecoveryServiceTests.swift */; };
@@ -198,6 +200,7 @@
 		4A24C3EFD4C6BA4ACDA40380 /* KDFTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KDFTests.swift; sourceTree = "<group>"; };
 		4F631B3CA954B4A2A4EC5714 /* PasswdSSOAutofillExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PasswdSSOAutofillExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		5008EABA0367B0BB5E55052F /* LockStateReducer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockStateReducer.swift; sourceTree = "<group>"; };
+		50EA48EEB5CB57F3E901EBE5 /* EntryBlobDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryBlobDecoder.swift; sourceTree = "<group>"; };
 		544AC22B1D47CCD69051F85B /* HostSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostSyncService.swift; sourceTree = "<group>"; };
 		588F0525C544FC2740478510 /* RollbackFlagDrain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RollbackFlagDrain.swift; sourceTree = "<group>"; };
 		5D592E6D1C88CF478A0AC739 /* ServerConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConfig.swift; sourceTree = "<group>"; };
@@ -214,6 +217,7 @@
 		77B346160EEA436AAF564277 /* EntryFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryFetcher.swift; sourceTree = "<group>"; };
 		77C0E5B05F04FC285CE89519 /* BackgroundSyncCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSyncCoordinatorTests.swift; sourceTree = "<group>"; };
 		7AFCE015CCAE07263B30B8B4 /* LockStateReducerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockStateReducerTests.swift; sourceTree = "<group>"; };
+		80BC3E2908650479CBBE6D07 /* EntryBlobDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryBlobDecoderTests.swift; sourceTree = "<group>"; };
 		81279161CAE5152A36AAAC35 /* WrappedKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WrappedKeyStore.swift; sourceTree = "<group>"; };
 		8901EA2724A715ACFBEEDBEF /* TeamContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamContext.swift; sourceTree = "<group>"; };
 		8AC8C547AA2FF81B4A670924 /* CredentialResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialResolverTests.swift; sourceTree = "<group>"; };
@@ -304,6 +308,7 @@
 				8AC8C547AA2FF81B4A670924 /* CredentialResolverTests.swift */,
 				3FED91E37F4E8005AEF7E9B6 /* DebugVaultLoaderTests.swift */,
 				EBF559B979642506D203C806 /* DPoPProofBuilderTests.swift */,
+				80BC3E2908650479CBBE6D07 /* EntryBlobDecoderTests.swift */,
 				24CD914CFF8AD6DD6DAB0129 /* EntryCacheFileTests.swift */,
 				628885DD1B6E8E32503A7DD9 /* EntryEncrypterTests.swift */,
 				28A274ABCE6A2833F3A66EF5 /* EntryFetcherTests.swift */,
@@ -572,6 +577,7 @@
 		F7356EF35B04FC0D0B740CC4 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				50EA48EEB5CB57F3E901EBE5 /* EntryBlobDecoder.swift */,
 				C40C54B860C6D1B296674038 /* LockState.swift */,
 				5D592E6D1C88CF478A0AC739 /* ServerConfig.swift */,
 				2113CB60ADE2776FF6176EA2 /* SessionState.swift */,
@@ -704,23 +710,23 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					2503D778597BD5A5391105AA = {
-						DevelopmentTeam = 9BL8SUVCSG;
+						DevelopmentTeam = 4789NDA9RQ;
 						ProvisioningStyle = Automatic;
 					};
 					2C6807B4DF933E0960205C53 = {
-						DevelopmentTeam = 9BL8SUVCSG;
+						DevelopmentTeam = 4789NDA9RQ;
 						ProvisioningStyle = Automatic;
 					};
 					3408C5C581C8391A1AAB6ABA = {
-						DevelopmentTeam = 9BL8SUVCSG;
+						DevelopmentTeam = 4789NDA9RQ;
 						ProvisioningStyle = Automatic;
 					};
 					84BF354B2F15CE0C8F36B493 = {
-						DevelopmentTeam = 9BL8SUVCSG;
+						DevelopmentTeam = 4789NDA9RQ;
 						ProvisioningStyle = Automatic;
 					};
 					DF33BBB1A677F99934E83F7D = {
-						DevelopmentTeam = 9BL8SUVCSG;
+						DevelopmentTeam = 4789NDA9RQ;
 						ProvisioningStyle = Automatic;
 						TestTargetID = 3408C5C581C8391A1AAB6ABA;
 					};
@@ -804,6 +810,7 @@
 				B8E8B10956121151C6DF7F9C /* CredentialResolverTests.swift in Sources */,
 				0A36948197E80ACA5ED17F22 /* DPoPProofBuilderTests.swift in Sources */,
 				E1FA345EE6BF6D38163AD937 /* DebugVaultLoaderTests.swift in Sources */,
+				1633001879A14FC075CBC4A3 /* EntryBlobDecoderTests.swift in Sources */,
 				EF9407000E17ADEB5E667D88 /* EntryCacheFileTests.swift in Sources */,
 				96A710A8F83E4FEB146E39D4 /* EntryEncrypterTests.swift in Sources */,
 				53BABB8B7A6B12FE9A269D87 /* EntryFetcherTests.swift in Sources */,
@@ -838,6 +845,7 @@
 				CCF7AB22A048CA0D633DC740 /* CredentialResolver.swift in Sources */,
 				65B588E2DB548D9142568179 /* CryptoUtils.swift in Sources */,
 				72BD7556CC6BAD53BD1F093D /* DPoPProofBuilder.swift in Sources */,
+				E3E4F08803D9E1580F7BE6CD /* EntryBlobDecoder.swift in Sources */,
 				89EF5EABFE7C000262E67616 /* EntryCacheFile.swift in Sources */,
 				0F7754D416476CE6B1AE0C81 /* EntryEncrypter.swift in Sources */,
 				3582DA3CD5414790F589E168 /* HostTokenStore.swift in Sources */,
@@ -927,7 +935,7 @@
 					"@loader_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.PasswdSSOUITests";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.PasswdSSOUITests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = PasswdSSOApp;
@@ -937,6 +945,7 @@
 		11EDE73C5DBB889818593C3D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = PasswdSSOAutofillExtension/PasswdSSOAutofillExtension.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = PasswdSSOAutofillExtension/Info.plist;
@@ -946,7 +955,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.PasswdSSOAutofillExtension";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.PasswdSSOAutofillExtension";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -955,6 +964,7 @@
 		14112134CA4053FB17F06284 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_IDENTITY = "";
 				CURRENT_PROJECT_VERSION = 1;
 				DEFINES_MODULE = YES;
@@ -968,7 +978,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.Shared";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.Shared";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -1011,7 +1021,8 @@
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = 9BL8SUVCSG;
+				DEVELOPMENT_TEAM = 4789NDA9RQ;
+				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -1046,6 +1057,7 @@
 		390336A74B1028070C0B1886 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = PasswdSSOAutofillExtension/PasswdSSOAutofillExtension.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = PasswdSSOAutofillExtension/Info.plist;
@@ -1055,7 +1067,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.PasswdSSOAutofillExtension";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.PasswdSSOAutofillExtension";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -1074,7 +1086,7 @@
 					"@loader_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.PasswdSSOTests";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.PasswdSSOTests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PasswdSSOApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PasswdSSOApp";
@@ -1093,7 +1105,7 @@
 					"@loader_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.PasswdSSOUITests";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.PasswdSSOUITests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = PasswdSSOApp;
@@ -1135,7 +1147,8 @@
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = 9BL8SUVCSG;
+				DEVELOPMENT_TEAM = 4789NDA9RQ;
+				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -1173,7 +1186,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -1192,7 +1205,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -1211,7 +1224,7 @@
 					"@loader_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.PasswdSSOTests";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.PasswdSSOTests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PasswdSSOApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PasswdSSOApp";
@@ -1221,6 +1234,7 @@
 		FC31A1CE26512D17384B8D0A /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_IDENTITY = "";
 				CURRENT_PROJECT_VERSION = 1;
 				DEFINES_MODULE = YES;
@@ -1234,7 +1248,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.passwd-sso.Shared";
+				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.Shared";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
