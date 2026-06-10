@@ -170,7 +170,7 @@ If the app is served at the domain root (no base path), the discovery endpoint i
 5. Client receives authorization code, exchanges for `access_token` + `refresh_token`
 6. Client uses `access_token` for MCP requests, `refresh_token` for renewal
 
-> **Client types**: Both public clients (`token_endpoint_auth_method: "none"`, e.g. Claude Code CLI) and confidential clients (`client_secret_post`) are supported. Public clients skip `client_secret` at registration and token exchange. Same-name re-registration (e.g. Claude Code retrying) issues a new `client_id` each time — unclaimed duplicates expire after 24h.
+> **Client types**: Both public clients (`token_endpoint_auth_method: "none"`, e.g. Claude Code CLI) and confidential clients (`client_secret_post`) are supported. Public clients skip `client_secret` at registration and token exchange. Same-name re-registration (e.g. Claude Code retrying) issues a new `client_id` each time — unclaimed duplicates expire after 1 h.
 
 #### Refresh Token Rotation
 
@@ -183,7 +183,7 @@ If the app is served at the domain root (no base path), the discovery endpoint i
 
 - DCR-registered clients start with `tenantId = null` (unclaimed)
 - At consent time, the client is "claimed" — bound to the user's tenant
-- Unclaimed clients expire after 24 hours (auto-cleanup)
+- Unclaimed clients expire after 1 hour (auto-cleanup via lazy sweep at registration time)
 - Rate limited: 20 registrations per IP per hour (IPv6 uses /64 prefix)
 - Global cap: 100 unclaimed clients system-wide
 

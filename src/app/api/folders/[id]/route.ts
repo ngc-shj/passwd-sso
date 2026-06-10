@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { updateFolderSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, unauthorized, notFound, forbidden } from "@/lib/http/api-response";
+import { errorResponse, unauthorized, notFound } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import {
   validateParentFolder,
@@ -44,7 +44,9 @@ async function handlePUT(
     return notFound();
   }
   if (existing.userId !== session.user.id) {
-    return forbidden();
+    // A01-4: 403 vs 404 difference leaks "ID exists in tenant" oracle to
+    // attacker. RLS should already null this branch; defense-in-depth.
+    return notFound();
   }
 
   const result = await parseBody(req, updateFolderSchema);
@@ -191,7 +193,9 @@ async function handleDELETE(
     return notFound();
   }
   if (existing.userId !== session.user.id) {
-    return forbidden();
+    // A01-4: 403 vs 404 difference leaks "ID exists in tenant" oracle to
+    // attacker. RLS should already null this branch; defense-in-depth.
+    return notFound();
   }
 
   // Collect children and detect name conflicts at the target parent level.

@@ -9,6 +9,7 @@ const {
   mockWithUserTenantRls,
   mockWithTenantRls,
   mockRateLimitCheck,
+  mockCheckLockout,
 } = vi.hoisted(() => ({
   mockCheckAuth: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn() },
@@ -16,8 +17,12 @@ const {
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
+  mockCheckLockout: vi.fn(),
 }));
 vi.mock("@/lib/auth/session/check-auth", () => ({ checkAuth: mockCheckAuth }));
+vi.mock("@/lib/auth/policy/account-lockout", () => ({
+  checkLockout: mockCheckLockout,
+}));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn().mockReturnValue({ check: mockRateLimitCheck, clear: vi.fn() }),
 }));
@@ -59,12 +64,27 @@ describe("GET /api/vault/unlock/data", () => {
     vi.clearAllMocks();
     mockCheckAuth.mockResolvedValue(authOk());
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
+    mockCheckLockout.mockResolvedValue({ locked: false, lockedUntil: null });
   });
 
   it("returns 401 when unauthenticated", async () => {
     mockCheckAuth.mockResolvedValue(authFail());
     const res = await GET(req());
     expect(res.status).toBe(401);
+  });
+
+  it("returns ACCOUNT_LOCKED when user is locked out, without performing key-material DB lookup", async () => {
+    const lockedUntil = new Date(Date.now() + 60_000);
+    mockCheckLockout.mockResolvedValue({ locked: true, lockedUntil });
+
+    const res = await GET(req());
+    const json = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("ACCOUNT_LOCKED");
+    expect(json.lockedUntil).toBe(lockedUntil.toISOString());
+    // No key-material lookup should occur when locked
+    expect(mockPrismaUser.findUnique).not.toHaveBeenCalled();
   });
 
   it("accepts extension token with vault:unlock-data scope", async () => {

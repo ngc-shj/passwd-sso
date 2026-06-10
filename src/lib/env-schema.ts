@@ -154,6 +154,9 @@ export const envObject = z.object({
   VERIFIER_PEPPER_KEY_V9: hex64.optional(),
   VERIFIER_PEPPER_KEY_V10: hex64.optional(),
   REDIS_URL: nonEmpty.optional(),
+  // Optional: used by the Sentinel-mode client for data-node auth.
+  // Non-Sentinel deployments embed the password in REDIS_URL instead.
+  REDIS_PASSWORD: z.string().optional(),
 
   // --- Application URL ---
   APP_URL: z

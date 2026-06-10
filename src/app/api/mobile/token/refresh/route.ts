@@ -149,6 +149,22 @@ async function handlePOST(req: NextRequest): Promise<Response> {
   if (!oldRow || oldRow.clientKind !== "IOS_APP") {
     return unauthorized();
   }
+
+  // C13: reject deactivated users before proceeding.
+  // Lookup is tenant-scoped to the token's own tenantId.
+  const member = await withBypassRls(
+    prisma,
+    async (tx) =>
+      tx.tenantMember.findUnique({
+        where: { tenantId_userId: { tenantId: oldRow.tenantId, userId: oldRow.userId } },
+        select: { deactivatedAt: true },
+      }),
+    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+  );
+  if (!member || member.deactivatedAt !== null) {
+    return unauthorized();
+  }
+
   if (!oldRow.cnfJkt) {
     // Defensive — IOS_APP rows MUST have cnfJkt set. If we ever read a
     // row without it, something else has corrupted state.

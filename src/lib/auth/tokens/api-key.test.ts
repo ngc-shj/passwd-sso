@@ -1,5 +1,42 @@
-import { describe, it, expect } from "vitest";
-import { parseApiKeyScopes, hasApiKeyScope } from "./api-key";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// ─── Hoisted mocks ───────────────────────────────────────────
+
+const { mockApiKeyFindUnique, mockTenantMemberFindUnique, mockApiKeyUpdate } = vi.hoisted(() => ({
+  mockApiKeyFindUnique: vi.fn(),
+  mockTenantMemberFindUnique: vi.fn(),
+  mockApiKeyUpdate: vi.fn().mockResolvedValue({}),
+}));
+
+const { mockWithBypassRls } = vi.hoisted(() => ({
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: (tx: unknown) => unknown) => fn({
+    apiKey: {
+      findUnique: mockApiKeyFindUnique,
+      update: mockApiKeyUpdate,
+    },
+    tenantMember: {
+      findUnique: mockTenantMemberFindUnique,
+    },
+  })),
+}));
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: {},
+}));
+
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  withBypassRls: mockWithBypassRls,
+}));
+
+vi.mock("@/lib/crypto/crypto-server", () => ({
+  hashToken: (t: string) => `hashed_${t}`,
+}));
+
+import { createRequest } from "@/__tests__/helpers/request-builder";
+import { parseApiKeyScopes, hasApiKeyScope, validateApiKey } from "./api-key";
+
+// ─── parseApiKeyScopes ───────────────────────────────────────
 
 describe("parseApiKeyScopes", () => {
   it("parses valid CSV scopes", () => {
@@ -31,6 +68,8 @@ describe("parseApiKeyScopes", () => {
   });
 });
 
+// ─── hasApiKeyScope ──────────────────────────────────────────
+
 describe("hasApiKeyScope", () => {
   it("returns true when scope is present", () => {
     expect(hasApiKeyScope(["passwords:read", "tags:read"], "passwords:read")).toBe(true);
@@ -42,5 +81,77 @@ describe("hasApiKeyScope", () => {
 
   it("returns false for empty scopes array", () => {
     expect(hasApiKeyScope([], "passwords:read")).toBe(false);
+  });
+});
+
+// ─── validateApiKey — deactivated-user checks (C13) ─────────
+
+const VALID_KEY = "api_validkeyvalue";
+const TENANT_ID = "tenant-00000000-0000-4000-8000-000000000001";
+const USER_ID = "user-00000000-0000-4000-8000-000000000001";
+
+const VALID_KEY_ROW = {
+  id: "key-id",
+  userId: USER_ID,
+  tenantId: TENANT_ID,
+  scope: "passwords:read",
+  expiresAt: new Date(Date.now() + 3_600_000),
+  revokedAt: null,
+};
+
+function makeReq(token = VALID_KEY) {
+  return createRequest("GET", "http://localhost/api/v1/passwords", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+describe("validateApiKey — deactivated-user (C13)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("(a) deactivated-in-token-tenant ⇒ API_KEY_INVALID", async () => {
+    mockApiKeyFindUnique.mockResolvedValue(VALID_KEY_ROW);
+    mockTenantMemberFindUnique.mockResolvedValue({ deactivatedAt: new Date("2025-01-01") });
+
+    const result = await validateApiKey(makeReq());
+    expect(result).toEqual({ ok: false, error: "API_KEY_INVALID" });
+  });
+
+  it("(b) deactivated in token tenant but ACTIVE in another tenant ⇒ API_KEY_INVALID", async () => {
+    // The check is tenant-scoped to the token's tenantId — there is only one
+    // findUnique call (for TENANT_ID). A deactivated row there is sufficient.
+    mockApiKeyFindUnique.mockResolvedValue(VALID_KEY_ROW);
+    mockTenantMemberFindUnique.mockResolvedValue({ deactivatedAt: new Date("2025-01-01") });
+
+    const result = await validateApiKey(makeReq());
+    expect(result).toEqual({ ok: false, error: "API_KEY_INVALID" });
+
+    // Verify the membership lookup used the token's own tenantId
+    expect(mockTenantMemberFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId_userId: { tenantId: TENANT_ID, userId: USER_ID } },
+      }),
+    );
+  });
+
+  it("(c) active membership ⇒ valid", async () => {
+    mockApiKeyFindUnique.mockResolvedValue(VALID_KEY_ROW);
+    mockTenantMemberFindUnique.mockResolvedValue({ deactivatedAt: null });
+
+    const result = await validateApiKey(makeReq());
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.userId).toBe(USER_ID);
+      expect(result.data.tenantId).toBe(TENANT_ID);
+    }
+  });
+
+  it("no membership row (fail-closed) ⇒ API_KEY_INVALID", async () => {
+    mockApiKeyFindUnique.mockResolvedValue(VALID_KEY_ROW);
+    mockTenantMemberFindUnique.mockResolvedValue(null);
+
+    const result = await validateApiKey(makeReq());
+    expect(result).toEqual({ ok: false, error: "API_KEY_INVALID" });
   });
 });

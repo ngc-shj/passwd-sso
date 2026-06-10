@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { SEC_PER_MINUTE, MS_PER_MINUTE } from "@/lib/constants/time";
 
 describe("auth.config basePath handling", () => {
   beforeEach(() => {
@@ -233,5 +234,70 @@ describe("auth.config Google domain validation", () => {
         profile: {},
       }),
     ).toBe(true);
+  });
+});
+
+const { mockCreateRateLimiter } = vi.hoisted(() => ({
+  mockCreateRateLimiter: vi.fn(() => ({ check: vi.fn(), clear: vi.fn() })),
+}));
+
+vi.mock("@/lib/security/rate-limit", () => ({
+  createRateLimiter: mockCreateRateLimiter,
+}));
+
+describe("auth.config rate limiter: magic-link failClosedOnRedisError", () => {
+  // T1: verify that createRateLimiter is called with failClosedOnRedisError: true
+  // for the magic-link limiter (windowMs 10*MS_PER_MINUTE, max 3).
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("T1: magic-link limiter is created with failClosedOnRedisError:true", async () => {
+    await import("@/auth.config");
+
+    const magicLinkCall = mockCreateRateLimiter.mock.calls.find(
+      ([opts]) =>
+        opts.windowMs === 10 * MS_PER_MINUTE && opts.max === 3,
+    );
+    expect(magicLinkCall).toBeDefined();
+    expect(magicLinkCall![0]).toMatchObject({ failClosedOnRedisError: true });
+  });
+});
+
+describe("auth.config magic-link provider settings", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("Nodemailer provider maxAge equals 15 * SEC_PER_MINUTE", async () => {
+    vi.stubEnv("EMAIL_PROVIDER", "nodemailer");
+    // vi.resetModules() is called in beforeEach — fresh import picks up the stub
+    const config = (await import("@/auth.config")).default;
+    const nodemailerProvider = config.providers.find(
+      (p): p is { id: string; maxAge?: number } =>
+        typeof p === "object" && p !== null && "id" in p && (p as { id: string }).id === "nodemailer",
+    );
+
+    expect(nodemailerProvider).toBeDefined();
+    // maxAge is seconds; 15 * SEC_PER_MINUTE = 15 * 60 = 900
+    expect(nodemailerProvider?.maxAge).toBe(15 * SEC_PER_MINUTE);
+  });
+
+  it("MAGIC_LINK_TTL_MINUTES is 15 (equals 15 * SEC_PER_MINUTE / SEC_PER_MINUTE)", async () => {
+    const { MAGIC_LINK_TTL_MINUTES } = await import("@/lib/constants/auth/magic-link");
+    // This constant is the single source of truth shared by the provider and the email template
+    expect(MAGIC_LINK_TTL_MINUTES).toBe(15);
   });
 });

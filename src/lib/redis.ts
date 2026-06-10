@@ -26,6 +26,8 @@ export function getRedis(): Redis | null {
         sentinels,
         name: masterName,
         sentinelPassword: sentinelPassword || undefined,
+        // Authenticate to data nodes (requirepass); distinct from sentinelPassword.
+        password: process.env.REDIS_PASSWORD || undefined,
         ...(useTls ? { tls: {}, sentinelTLS: {} } : {}),
         lazyConnect: true,
       });

@@ -5,12 +5,13 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { HIBP_RATE_MAX, RATE_WINDOW_MS } from "@/lib/validations/common.server";
-import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
 const PREFIX_REGEX = /^[0-9A-F]{5}$/;
 const CACHE_TTL_MS = 5 * MS_PER_MINUTE;
+const FETCH_TIMEOUT_MS = 10 * MS_PER_SECOND;
 const MAX_CACHE_ENTRIES = 5_000;
 
 type CacheEntry = { expiresAt: number; body: string };
@@ -52,12 +53,24 @@ async function handleGET(request: Request) {
     });
   }
 
-  const res = await fetch(
-    `https://api.pwnedpasswords.com/range/${prefix}`,
-    {
-      headers: { "Add-Padding": "true" },
+  let res: Response;
+  try {
+    res = await fetch(
+      `https://api.pwnedpasswords.com/range/${prefix}`,
+      {
+        headers: { "Add-Padding": "true" },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      }
+    );
+  } catch (err) {
+    // AbortSignal.timeout throws a TimeoutError (name === "TimeoutError") on expiry,
+    // or an AbortError on manual abort. Both map to upstream failure.
+    const name = err instanceof Error ? err.name : "";
+    if (name === "TimeoutError" || name === "AbortError") {
+      return errorResponse(API_ERROR.UPSTREAM_ERROR);
     }
-  );
+    throw err;
+  }
 
   if (!res.ok) {
     return errorResponse(API_ERROR.UPSTREAM_ERROR);

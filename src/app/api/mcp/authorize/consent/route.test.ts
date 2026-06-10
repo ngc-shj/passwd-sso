@@ -11,6 +11,7 @@ const {
   mockMcpClientUpdateMany,
   mockMcpClientFindUnique,
   mockTxFindFirst,
+  mockTxDelete,
   mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -23,6 +24,7 @@ const {
   mockMcpClientUpdateMany: vi.fn().mockResolvedValue({ count: 1 }),
   mockMcpClientFindUnique: vi.fn(),
   mockTxFindFirst: vi.fn().mockResolvedValue(null),
+  mockTxDelete: vi.fn().mockResolvedValue({}),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
@@ -47,7 +49,7 @@ vi.mock("@/lib/prisma", () => ({
           findFirst: mockTxFindFirst,
           updateMany: mockMcpClientUpdateMany,
           deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
-          delete: vi.fn().mockResolvedValue({}),
+          delete: mockTxDelete,
         },
       }),
     ),
@@ -74,6 +76,7 @@ vi.mock("@/lib/auth/session/step-up", () => ({
 }));
 
 import { POST } from "@/app/api/mcp/authorize/consent/route";
+import { Prisma } from "@prisma/client";
 
 const VALID_SESSION = { user: { id: "user-uuid-123" } };
 
@@ -130,6 +133,7 @@ describe("POST /api/mcp/authorize/consent", () => {
     mockFindFirst.mockResolvedValue(VALID_CLIENT);
     mockFindUnique.mockResolvedValue(VALID_USER);
     mockTxFindFirst.mockResolvedValue(null); // default: no existing same-name client
+    mockTxDelete.mockResolvedValue({});
     mockMcpClientCount.mockResolvedValue(0);
     mockMcpClientUpdateMany.mockResolvedValue({ count: 1 });
     mockRequireRecentSession.mockResolvedValue(null);
@@ -395,6 +399,198 @@ describe("POST /api/mcp/authorize/consent", () => {
         targetId: VALID_CLIENT.id,
       }),
     );
+    expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
+  });
+
+  // C7 acceptance tests
+
+  // (a) User B consenting with a name matching user A's DCR client does NOT
+  //     delete A's client and gets a consent error.
+  it("C7(a): foreign-owned same-name DCR client blocks consent without deleting the owner's client", async () => {
+    const userBSession = { user: { id: "user-b-uuid" } };
+    mockAuth.mockResolvedValue(userBSession);
+    // Unclaimed DCR client registered by nobody yet (tenantId null)
+    mockFindFirst.mockResolvedValueOnce({ ...VALID_CLIENT, isDcr: true, tenantId: null });
+    mockMcpClientCount.mockResolvedValueOnce(0);
+    // tx.findFirst with createdById = user-b-uuid → null (user B has no own same-name client)
+    // tx.findFirst without createdById → foreign-owned client exists
+    const foreignClient = { id: "user-a-client-id", createdById: "user-a-uuid" };
+    mockTxFindFirst
+      .mockResolvedValueOnce(null)         // createdById check: user B owns nothing
+      .mockResolvedValueOnce(foreignClient); // foreign-owned check: user A's client
+
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("invalid_client");
+    expect(json.error_description).toBe("name_conflict");
+    // User A's client must not have been deleted
+    expect(mockTxDelete).not.toHaveBeenCalled();
+    expect(mockMcpClientUpdateMany).not.toHaveBeenCalled();
+    expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
+  });
+
+  // (b) User A re-claiming their own DCR client still replaces their own row.
+  it("C7(b): user re-claiming own DCR client name replaces the old row and succeeds", async () => {
+    mockFindFirst.mockResolvedValueOnce({ ...VALID_CLIENT, isDcr: true, tenantId: null });
+    mockMcpClientCount.mockResolvedValueOnce(0);
+    // tx.findFirst with createdById = session.user.id → user's own existing client
+    mockTxFindFirst.mockResolvedValueOnce({ id: "old-client-id", createdById: VALID_SESSION.user.id });
+    mockMcpClientUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(302);
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("code=");
+    expect(mockCreateAuthorizationCode).toHaveBeenCalledOnce();
+    // The old client row must have been deleted
+    expect(mockTxDelete).toHaveBeenCalledOnce();
+    expect(mockTxDelete).toHaveBeenCalledWith({ where: { id: "old-client-id" } });
+  });
+
+  // T2: owner-scoped findFirst must include createdById + shared id:not guard
+  it("T2: owner-scoped findFirst where includes createdById and shared id:not guard", async () => {
+    const claimTarget = { ...VALID_CLIENT, id: "claim-target-id", isDcr: true, tenantId: null };
+    mockFindFirst.mockResolvedValueOnce(claimTarget);
+    mockMcpClientCount.mockResolvedValueOnce(0);
+    mockTxFindFirst.mockResolvedValueOnce(null);
+    mockMcpClientUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    await POST(req as unknown as import("next/server").NextRequest);
+
+    // Assert owner-scoped findFirst was called with createdById + id:not guard
+    expect(mockTxFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          createdById: VALID_SESSION.user.id,
+          id: expect.objectContaining({ not: "claim-target-id" }),
+        }),
+      }),
+    );
+  });
+
+  // T2 red-green: temporarily removing createdById from the route's where must
+  // make the above assertion fail. This test documents the regression-guard.
+  // Verification: edit route to remove createdById → T2 test turns red → restore.
+
+  // T2: self-target — claiming when the only same-name own client IS the claim
+  // target (id matches) must NOT delete anything (the id:not guard excludes it).
+  it("T2: same-target self-claim does not delete the claim target itself", async () => {
+    // claimTarget IS the client being claimed (same id)
+    const claimTarget = { ...VALID_CLIENT, id: "claim-target-id", isDcr: true, tenantId: null };
+    mockFindFirst.mockResolvedValueOnce(claimTarget);
+    mockMcpClientCount.mockResolvedValueOnce(0);
+    // tx.findFirst with id:{ not: "claim-target-id" } → returns null (no OTHER same-name own client)
+    mockTxFindFirst.mockResolvedValueOnce(null);
+    mockMcpClientUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(302);
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("code=");
+    // No delete must have been called — the claim target itself is excluded
+    expect(mockTxDelete).not.toHaveBeenCalled();
+    expect(mockCreateAuthorizationCode).toHaveBeenCalledOnce();
+  });
+
+  // F6: same-user double-submit — the claim target is already claimed by this user.
+  // The foreignOwned lookup must also exclude the claim target (via sameNameWhereBase),
+  // so the flow reaches already_claimed recovery, NOT name_conflict.
+  it("F6: same-user double-submit reaches already_claimed recovery, not name_conflict", async () => {
+    // Unclaimed DCR client (the new registration attempt)
+    const claimTarget = { ...VALID_CLIENT, id: "claim-target-id", isDcr: true, tenantId: null };
+    mockFindFirst.mockResolvedValueOnce(claimTarget);
+    mockMcpClientCount.mockResolvedValueOnce(0);
+    // owner-scoped findFirst: no OTHER same-name own client (null — claim target excluded by id:not)
+    mockTxFindFirst.mockResolvedValueOnce(null);
+    // foreignOwned findFirst: also null — claim target excluded by id:not,
+    // and no other same-name row exists
+    mockTxFindFirst.mockResolvedValueOnce(null);
+    // CAS updateMany returns 0 — already claimed by this user
+    mockMcpClientUpdateMany.mockResolvedValueOnce({ count: 0 });
+    // already_claimed refetch: returns this user's already-claimed client
+    mockMcpClientFindUnique.mockResolvedValueOnce({
+      ...VALID_CLIENT,
+      id: "claim-target-id",
+      isDcr: true,
+      tenantId: VALID_USER.tenantId,
+    });
+
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    // Must NOT respond with name_conflict — must reach the already_claimed path
+    // and succeed with an authorization code redirect
+    const json = res.status !== 302 ? await res.json() : null;
+    expect(json?.error_description).not.toBe("name_conflict");
+    expect(res.status).toBe(302);
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("code=");
+    // No delete of any foreign client
+    expect(mockTxDelete).not.toHaveBeenCalled();
+    expect(mockCreateAuthorizationCode).toHaveBeenCalledOnce();
+
+    // Verify the SECOND mockTxFindFirst call (foreignOwned lookup) explicitly
+    // contains { id: { not: "claim-target-id" }, isDcr: true } and does NOT
+    // include createdById — confirming sameNameWhereBase is used without the
+    // owner-scoped createdById filter.
+    expect(mockTxFindFirst).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { not: "claim-target-id" },
+          isDcr: true,
+        }),
+      }),
+    );
+    const secondCallArgs = mockTxFindFirst.mock.calls[1][0] as { where: Record<string, unknown> };
+    expect(secondCallArgs.where).not.toHaveProperty("createdById");
+  });
+
+  // (c) P2002 unique-violation race maps to consent error (not a 500).
+  it("C7(c): P2002 unique violation during claim maps to name_conflict consent error", async () => {
+    mockFindFirst.mockResolvedValueOnce({ ...VALID_CLIENT, isDcr: true, tenantId: null });
+    // $transaction throws P2002 (concurrent foreign claim won the race)
+    const p2002 = new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002",
+      clientVersion: "5.0.0",
+    });
+    // Override $transaction to throw P2002
+    const { prisma: mockPrismaModule } = await import("@/lib/prisma");
+    vi.mocked(mockPrismaModule.$transaction).mockRejectedValueOnce(p2002);
+
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("invalid_client");
+    expect(json.error_description).toBe("name_conflict");
     expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
   });
 });

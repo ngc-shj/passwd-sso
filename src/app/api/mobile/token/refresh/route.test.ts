@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const {
   mockExtensionTokenFindUnique,
+  mockTenantMemberFindUnique,
   mockWithBypassRls,
   mockCheck,
   mockRefreshIosToken,
@@ -12,6 +13,7 @@ const {
   mockEnforceAccessRestriction,
 } = vi.hoisted(() => ({
   mockExtensionTokenFindUnique: vi.fn(),
+  mockTenantMemberFindUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
   mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockRefreshIosToken: vi.fn(),
@@ -22,6 +24,7 @@ const {
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     extensionToken: { findUnique: mockExtensionTokenFindUnique },
+    tenantMember: { findUnique: mockTenantMemberFindUnique },
   },
 }));
 
@@ -143,6 +146,7 @@ describe("POST /api/mobile/token/refresh", () => {
     mockEnforceAccessRestriction.mockResolvedValue(null);
     mockWithBypassRls.mockImplementation(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p));
     mockExtensionTokenFindUnique.mockResolvedValue(existingRow());
+    mockTenantMemberFindUnique.mockResolvedValue({ deactivatedAt: null });
     mockVerifyDpop.mockResolvedValue(happyDpop());
     mockRefreshIosToken.mockResolvedValue({
       ok: true,
@@ -255,6 +259,34 @@ describe("POST /api/mobile/token/refresh", () => {
     expect(status).toBe(403);
     expect(json.error).toBe("ACCESS_DENIED");
     expect(mockRefreshIosToken).not.toHaveBeenCalled();
+  });
+
+  // ── C13: deactivated-user rejection ──────────────────────────
+  it("C13: deactivated user ⇒ 401 unauthorized (before DPoP/rate-limit)", async () => {
+    mockTenantMemberFindUnique.mockResolvedValueOnce({ deactivatedAt: new Date("2025-01-01") });
+    const res = await POST(makeRequest());
+    const { status, json } = await parseJson(res);
+    expect(status).toBe(401);
+    expect(json.error).toBe("UNAUTHORIZED");
+    // refreshIosToken must NOT be called for deactivated users
+    expect(mockRefreshIosToken).not.toHaveBeenCalled();
+  });
+
+  it("C13: no membership row ⇒ 401 unauthorized", async () => {
+    mockTenantMemberFindUnique.mockResolvedValueOnce(null);
+    const res = await POST(makeRequest());
+    const { status, json } = await parseJson(res);
+    expect(status).toBe(401);
+    expect(json.error).toBe("UNAUTHORIZED");
+    expect(mockRefreshIosToken).not.toHaveBeenCalled();
+  });
+
+  it("C13: active membership ⇒ unchanged (proceeds to DPoP and rotation)", async () => {
+    mockTenantMemberFindUnique.mockResolvedValueOnce({ deactivatedAt: null });
+    const res = await POST(makeRequest());
+    const { status } = await parseJson(res);
+    expect(status).toBe(200);
+    expect(mockRefreshIosToken).toHaveBeenCalledOnce();
   });
 
   it("returns 401 when the bearer header does not match the body refresh_token", async () => {

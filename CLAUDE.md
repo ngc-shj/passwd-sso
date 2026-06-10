@@ -126,7 +126,7 @@ route handlers own application-layer concerns.
 - Service accounts as first-class non-human identities with `sa_` prefix tokens
 - MCP Gateway at `/api/mcp` — Streamable HTTP transport for AI tool integration
 - OAuth 2.1 Authorization Code + PKCE for MCP client authentication
-- Dynamic Client Registration (DCR, RFC 7591) at `/api/mcp/register` — clients register without pre-configuration; unclaimed clients expire after 24h
+- Dynamic Client Registration (DCR, RFC 7591) at `/api/mcp/register` — clients register without pre-configuration; unclaimed clients expire after 1 h
 - Refresh token rotation: each exchange issues a new token pair grouped by `familyId`; old access token revoked atomically; replay detection revokes the entire family
 - Token revocation: `POST /api/mcp/revoke` (RFC 7009) — revokes access or refresh tokens; revoking a refresh token revokes the entire rotation family
 - Cross-actor audit: `actorType` enum (HUMAN/SERVICE_ACCOUNT/MCP_AGENT/SYSTEM) on all audit log entries

@@ -89,7 +89,7 @@ describe("PUT /api/folders/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 403 when folder belongs to another user", async () => {
+  it("returns 404 when folder belongs to another user", async () => {
     mockPrismaFolder.findUnique.mockResolvedValue({
       ...ownedFolder,
       userId: "other-user",
@@ -100,7 +100,7 @@ describe("PUT /api/folders/[id]", () => {
       }),
       createParams({ id: FOLDER_ID }),
     );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it("updates folder name successfully", async () => {
@@ -225,7 +225,7 @@ describe("DELETE /api/folders/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 403 when folder belongs to another user", async () => {
+  it("returns 404 when folder belongs to another user", async () => {
     mockPrismaFolder.findUnique.mockResolvedValue({
       ...ownedFolder,
       userId: "other-user",
@@ -234,7 +234,7 @@ describe("DELETE /api/folders/[id]", () => {
       createRequest("DELETE", `http://localhost:3000/api/folders/${FOLDER_ID}`),
       createParams({ id: FOLDER_ID }),
     );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it("deletes folder and promotes children", async () => {

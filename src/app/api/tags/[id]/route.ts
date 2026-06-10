@@ -8,7 +8,7 @@ import { parseBody } from "@/lib/http/parse-body";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { validateParentChain, TagTreeError } from "@/lib/format/tag-tree";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, errorResponseWithMessage, forbidden, notFound, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, notFound, unauthorized } from "@/lib/http/api-response";
 
 // PUT /api/tags/[id] - Update a tag
 async function handlePUT(
@@ -29,7 +29,9 @@ async function handlePUT(
     return notFound();
   }
   if (existing.userId !== session.user.id) {
-    return forbidden();
+    // A01-4: 403 vs 404 difference leaks "ID exists in tenant" oracle to
+    // attacker. RLS should already null this branch; defense-in-depth.
+    return notFound();
   }
 
   const result = await parseBody(req, updateTagSchema);
@@ -134,7 +136,9 @@ async function handleDELETE(
     return notFound();
   }
   if (existing.userId !== session.user.id) {
-    return forbidden();
+    // A01-4: 403 vs 404 difference leaks "ID exists in tenant" oracle to
+    // attacker. RLS should already null this branch; defense-in-depth.
+    return notFound();
   }
 
   await withUserTenantRls(session.user.id, async () =>

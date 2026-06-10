@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
@@ -112,40 +113,83 @@ export async function POST(req: NextRequest) {
     const clientIdDb = foundClient.id;
     const clientName = foundClient.name;
 
-    const claimResult = await withBypassRls(prisma, async (tx) =>
-      prisma.$transaction(async (tx) => {
-        const tenantClientCount = await tx.mcpClient.count({
-          where: { tenantId: userTenantId },
-        });
-        if (tenantClientCount >= MAX_MCP_CLIENTS_PER_TENANT) {
-          return { error: "tenant_cap" as const };
-        }
-        // If a same-name DCR client already exists in this tenant, replace it.
-        // Claude Code registers a new client on each auth attempt — without
-        // replacement, deny → retry would always hit a name conflict.
-        // We delete the OLD client and claim the NEW one so that Claude Code's
-        // client_id matches (it only knows the latest registered client_id).
-        const existing = await tx.mcpClient.findFirst({
-          where: { tenantId: userTenantId, name: clientName, isDcr: true },
-        });
-        if (existing) {
-          await tx.mcpClient.delete({ where: { id: existing.id } });
-        }
-        // Atomic CAS: only claim if still unclaimed
-        const updated = await tx.mcpClient.updateMany({
-          where: { id: clientIdDb, tenantId: { equals: null } },
-          data: { tenantId: userTenantId, createdById: session.user.id, dcrExpiresAt: null },
-        });
-        if (updated.count === 0) {
-          return { error: "already_claimed" as const };
-        }
-        return { error: null as null };
-      }),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+    let claimResult: { error: "tenant_cap" | "name_conflict" | "already_claimed" | null };
+    try {
+      claimResult = await withBypassRls(prisma, async (tx) =>
+        prisma.$transaction(async (tx) => {
+          const tenantClientCount = await tx.mcpClient.count({
+            where: { tenantId: userTenantId },
+          });
+          if (tenantClientCount >= MAX_MCP_CLIENTS_PER_TENANT) {
+            return { error: "tenant_cap" as const };
+          }
+          // Shared exclusion: same-tenant, same-name DCR client that is NOT the
+          // claim target itself. Spread into both owner-scoped and foreign-owned
+          // lookups so the exclusion is defined once and cannot diverge.
+          const sameNameWhereBase = {
+            tenantId: userTenantId,
+            name: clientName,
+            isDcr: true,
+            id: { not: clientIdDb },
+          } as const;
+          // If the requester's own same-name DCR client exists, replace it.
+          // Claude Code registers a new client on each auth attempt — without
+          // replacement, deny → retry would always hit a name conflict.
+          // We delete the OLD client and claim the NEW one so that Claude Code's
+          // client_id matches (it only knows the latest registered client_id).
+          // C7: only delete a row owned by this user (createdById === session.user.id).
+          const existing = await tx.mcpClient.findFirst({
+            where: { ...sameNameWhereBase, createdById: session.user.id },
+          });
+          if (existing) {
+            await tx.mcpClient.delete({ where: { id: existing.id } });
+          } else {
+            // C7: detect foreign-owned name collision — the unique constraint
+            // (tenantId, name) would make the claim write fail at the DB level.
+            // Reject early with a user-facing consent error instead of a 500.
+            // Also excludes the claim target itself (via sameNameWhereBase) so that
+            // a same-user double-submit is not misreported as name_conflict.
+            const foreignOwned = await tx.mcpClient.findFirst({
+              where: sameNameWhereBase,
+            });
+            if (foreignOwned) {
+              return { error: "name_conflict" as const };
+            }
+          }
+          // Atomic CAS: only claim if still unclaimed
+          const updated = await tx.mcpClient.updateMany({
+            where: { id: clientIdDb, tenantId: { equals: null } },
+            data: { tenantId: userTenantId, createdById: session.user.id, dcrExpiresAt: null },
+          });
+          if (updated.count === 0) {
+            return { error: "already_claimed" as const };
+          }
+          return { error: null as null };
+        }),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+    } catch (err) {
+      // C7: a concurrent foreign claim can win the race and cause a P2002 unique
+      // violation on (tenantId, name). Map to the same consent error — not a 500.
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === "P2002"
+      ) {
+        claimResult = { error: "name_conflict" as const };
+      } else {
+        throw err;
+      }
+    }
 
     if (claimResult.error === "tenant_cap") {
       return NextResponse.json(
         { error: "invalid_client", error_description: "tenant_cap" },
+        { status: 400 },
+      );
+    }
+    // C7: foreign-owned name collision — reject without deleting the other user's client.
+    if (claimResult.error === "name_conflict") {
+      return NextResponse.json(
+        { error: "invalid_client", error_description: "name_conflict" },
         { status: 400 },
       );
     }

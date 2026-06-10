@@ -9,7 +9,7 @@
  */
 
 import { randomBytes, createHash, randomUUID, timingSafeEqual } from "node:crypto";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
@@ -378,6 +378,13 @@ export async function exchangeRefreshToken(
         return { type: "invalid_client" as const };
       }
 
+      // C13: reject deactivated users before issuing new tokens.
+      // SA-bound tokens (userId === null) skip — no TenantMember row.
+      if (rt.userId !== null) {
+        const memberStatus = await checkTenantMembership(tx, rt.tenantId, rt.userId);
+        if (!memberStatus) return { type: "deactivated_user" as const };
+      }
+
       // Generate new tokens up-front so we can include the new hash in the CAS
       const newAccessToken = MCP_TOKEN_PREFIX + randomBytes(32).toString("base64url");
       const newAccessTokenHash = hashToken(newAccessToken);
@@ -477,6 +484,8 @@ export async function exchangeRefreshToken(
       return { ok: false, error: "invalid_grant", reason: REFRESH_EXCHANGE_REASON.EXPIRED };
     case "invalid_client":
       return { ok: false, error: "invalid_client" };
+    case "deactivated_user":
+      return { ok: false, error: "invalid_grant" };
     case "replay":
     case "race_lost": {
       // Fail-closed family revocation in a transaction independent of Phase 1
@@ -540,6 +549,28 @@ async function revokeFamilyOutOfBand(
   }
 }
 
+// ─── Shared membership helper ─────────────────────────────────
+
+/**
+ * Returns true iff the user has an active TenantMember row in the given
+ * tenant (deactivatedAt IS NULL). Used by both validateMcpToken and
+ * exchangeRefreshToken to enforce C13 deactivated-user rejection.
+ *
+ * Accepts a transactional or plain Prisma client so callers can reuse
+ * their existing bypass-RLS transaction instead of opening a new one.
+ */
+async function checkTenantMembership(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  userId: string,
+): Promise<boolean> {
+  const member = await tx.tenantMember.findUnique({
+    where: { tenantId_userId: { tenantId, userId } },
+    select: { deactivatedAt: true },
+  });
+  return member !== null && member.deactivatedAt === null;
+}
+
 // ─── Token validation ─────────────────────────────────────────
 
 export async function validateMcpToken(
@@ -575,6 +606,17 @@ export async function validateMcpToken(
   // A07-4: third McpClient lookup site — reject inactive clients so an admin's
   // "Deactivate client" action takes immediate effect, not just after token TTL.
   if (!record.mcpClient.isActive) return { ok: false, error: "invalid_token" };
+
+  // C13: reject deactivated users — tenant-scoped to the token's own tenant.
+  // SA-bound tokens (userId === null) skip the membership check: they are
+  // non-human identities with no TenantMember row.
+  // Fail-closed: no active membership row ⇒ invalid (cross-tenant bypass guard).
+  if (record.userId !== null) {
+    const active = await withBypassRls(prisma, (tx) =>
+      checkTenantMembership(tx, record.tenantId, record.userId as string),
+    BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+    if (!active) return { ok: false, error: "invalid_token" };
+  }
 
   // Throttled lastUsedAt update (fire-and-forget)
   const shouldUpdate =

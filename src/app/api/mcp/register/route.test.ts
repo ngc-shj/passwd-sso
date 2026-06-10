@@ -4,6 +4,8 @@ import { createRequest, parseResponse } from "../../../../__tests__/helpers/requ
 const {
   mockPrismaCount,
   mockPrismaCreate,
+  mockPrismaDeleteMany,
+  mockTxDeleteMany,
   mockWithBypassRls,
   mockRateLimiterCheck,
   mockExtractClientIp,
@@ -12,10 +14,14 @@ const {
 } = vi.hoisted(() => {
   const mockCount = vi.fn();
   const mockCreate = vi.fn();
+  const mockDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
+  const mockTxDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
   const mockWithBypassRls = vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p));
   return {
     mockPrismaCount: mockCount,
     mockPrismaCreate: mockCreate,
+    mockPrismaDeleteMany: mockDeleteMany,
+    mockTxDeleteMany,
     mockWithBypassRls,
     mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
     mockExtractClientIp: vi.fn().mockReturnValue("127.0.0.1"),
@@ -29,13 +35,14 @@ vi.mock("@/lib/prisma", () => ({
     mcpClient: {
       count: mockPrismaCount,
       create: mockPrismaCreate,
-      deleteMany: vi.fn().mockResolvedValue({}),
+      deleteMany: mockPrismaDeleteMany,
     },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) =>
       fn({
         mcpClient: {
           count: mockPrismaCount,
           create: mockPrismaCreate,
+          deleteMany: mockTxDeleteMany,
         },
       }),
     ),
@@ -79,6 +86,8 @@ describe("POST /api/mcp/register", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRateLimiterCheck.mockResolvedValue({ allowed: true });
+    mockPrismaDeleteMany.mockResolvedValue({ count: 0 });
+    mockTxDeleteMany.mockResolvedValue({ count: 0 });
     mockPrismaCount.mockResolvedValue(0);
     mockPrismaCreate.mockResolvedValue(MOCK_CREATED_CLIENT);
     // withBypassRls executes the callback inline; first call is count, second is create
@@ -309,11 +318,37 @@ describe("POST /api/mcp/register", () => {
 
     expect(status).toBe(503);
     expect(json.error).toBe("temporarily_unavailable");
-    // C3 acceptance: 503 body must include the literal "dcr-cleanup-worker"
-    // so an operator hitting registration outages knows which process to
-    // check. Tests pin the literal because the C3 removal of the
-    // probabilistic cleanup made the worker the sole cleanup path.
-    expect(json.error_description).toContain("dcr-cleanup-worker");
+    // C6: cap is now self-healing; message reflects the 1-hour window, not the worker.
+    expect(json.error_description).toContain("unclaimed");
+    expect(json.error_description).not.toContain("dcr-cleanup-worker");
+  });
+
+  // C6 acceptance: deleteMany called with exact where before count (invocationCallOrder)
+  // T9: tx-side deleteMany (mockTxDeleteMany) is distinct from top-level mockPrismaDeleteMany,
+  // proving the operation executes inside the transaction.
+  it("C6: calls deleteMany with expired-unclaimed where before count inside transaction", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: VALID_BODY,
+    });
+    await POST(req);
+
+    // T9: top-level prisma.mcpClient.deleteMany must NOT have been called directly —
+    // only the tx-scoped version runs inside the transaction.
+    expect(mockPrismaDeleteMany).not.toHaveBeenCalled();
+
+    // T9 + C6: tx deleteMany must be called with the exact C6 where clause
+    expect(mockTxDeleteMany).toHaveBeenCalledOnce();
+    const deleteManyCall = mockTxDeleteMany.mock.calls[0]?.[0] as {
+      where: { isDcr: boolean; tenantId: null; dcrExpiresAt: { lt: unknown } };
+    };
+    expect(deleteManyCall.where.isDcr).toBe(true);
+    expect(deleteManyCall.where.tenantId).toBeNull();
+    expect(deleteManyCall.where.dcrExpiresAt.lt).toBeInstanceOf(Date);
+
+    // deleteMany must be called BEFORE count (invocationCallOrder guard)
+    const deleteManyOrder = mockTxDeleteMany.mock.invocationCallOrder[0]!;
+    const countOrder = mockPrismaCount.mock.invocationCallOrder[0]!;
+    expect(deleteManyOrder).toBeLessThan(countOrder);
   });
 
   it("returns 400 when request body is invalid JSON", async () => {

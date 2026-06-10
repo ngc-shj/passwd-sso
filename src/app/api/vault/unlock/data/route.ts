@@ -10,6 +10,7 @@ import { errorResponse } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { withTenantRls } from "@/lib/tenant-rls";
+import { checkLockout } from "@/lib/auth/policy/account-lockout";
 
 export const runtime = "nodejs";
 
@@ -33,6 +34,14 @@ async function handleGET(req: NextRequest) {
   if (!authResult.ok) return authResult.response;
   const { userId } = authResult.auth;
   const tenantId = "tenantId" in authResult.auth ? authResult.auth.tenantId : null;
+
+  // Lockout check — mirrors /api/vault/unlock locked-branch response verbatim
+  const lockoutStatus = await checkLockout(userId);
+  if (lockoutStatus.locked) {
+    return errorResponse(API_ERROR.ACCOUNT_LOCKED, undefined, {
+      lockedUntil: lockoutStatus.lockedUntil,
+    });
+  }
 
   const blocked = await checkRateLimitOrFail({
     req,

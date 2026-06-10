@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { magicLinkEmail } from "./magic-link";
+import { MAGIC_LINK_TTL_MINUTES } from "@/lib/constants/auth/magic-link";
 
 describe("magicLinkEmail", () => {
   const testUrl = "https://example.com/auth/verify?token=abc123";
@@ -35,9 +36,28 @@ describe("magicLinkEmail", () => {
     expect(result.html).toContain("&lt;script&gt;");
   });
 
-  it("includes expiry notice in text body", () => {
+  it("includes expiry notice in text body derived from MAGIC_LINK_TTL_MINUTES constant", () => {
     const result = magicLinkEmail(testUrl, "en");
-    expect(result.text).toContain("24 hours");
+    expect(result.text).toContain(`${MAGIC_LINK_TTL_MINUTES} minutes`);
+    expect(result.text).not.toContain("24 hours");
+  });
+
+  it("includes expiry notice in html body derived from MAGIC_LINK_TTL_MINUTES constant (en)", () => {
+    const result = magicLinkEmail(testUrl, "en");
+    expect(result.html).toContain(`${MAGIC_LINK_TTL_MINUTES} minutes`);
+    expect(result.html).not.toContain("24 hours");
+  });
+
+  it("includes expiry notice in ja text body derived from MAGIC_LINK_TTL_MINUTES constant", () => {
+    const result = magicLinkEmail(testUrl, "ja");
+    expect(result.text).toContain(`${MAGIC_LINK_TTL_MINUTES}分間有効`);
+    expect(result.text).not.toContain("24時間有効");
+  });
+
+  it("includes expiry notice in html body derived from MAGIC_LINK_TTL_MINUTES constant (ja)", () => {
+    const result = magicLinkEmail(testUrl, "ja");
+    expect(result.html).toContain(`${MAGIC_LINK_TTL_MINUTES}分間有効`);
+    expect(result.html).not.toContain("24時間有効");
   });
 
   it("includes ignore notice in text body", () => {

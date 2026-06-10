@@ -83,7 +83,7 @@ describe("POST /api/passwords/[id]/history/[historyId]/restore", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 403 when entry belongs to another user", async () => {
+  it("returns 404 when entry belongs to another user", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue({
       ...ownedEntry,
       userId: "other-user",
@@ -92,7 +92,7 @@ describe("POST /api/passwords/[id]/history/[historyId]/restore", () => {
       createRequest("POST", `http://localhost:3000/api/passwords/${ENTRY_ID}/history/${HISTORY_ID}/restore`),
       createParams({ id: ENTRY_ID, historyId: HISTORY_ID }),
     );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it("returns 404 when history entry not found", async () => {

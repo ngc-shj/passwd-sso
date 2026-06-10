@@ -47,7 +47,6 @@ EOJSON
 )
 
 CURL_OPTS=(-sS -w "\n%{http_code}" -X POST \
-  -H "Authorization: Bearer ${ADMIN_API_TOKEN}" \
   -H "Content-Type: application/json" \
   --data "${BODY}")
 if [[ "${INSECURE:-false}" == "true" ]]; then
@@ -55,7 +54,11 @@ if [[ "${INSECURE:-false}" == "true" ]]; then
   CURL_OPTS+=(--insecure)
 fi
 
-RESPONSE=$(curl "${CURL_OPTS[@]}" "${APP_URL}/api/maintenance/purge-history")
+# Pass Authorization header via --config stdin to keep the token out of argv.
+RESPONSE=$(curl --config - "${CURL_OPTS[@]}" "${APP_URL}/api/maintenance/purge-history" <<EOF
+header = "Authorization: Bearer ${ADMIN_API_TOKEN}"
+EOF
+)
 
 HTTP_STATUS=$(printf '%s' "$RESPONSE" | tail -n1)
 BODY_RESPONSE=$(printf '%s' "$RESPONSE" | sed '$d')

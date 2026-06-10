@@ -30,25 +30,15 @@ describe("getRedis", () => {
     mocks.RedisMock.mockClear();
   });
 
-  afterEach(() => {
-    delete process.env.REDIS_URL;
-    delete process.env.REDIS_SENTINEL;
-    delete process.env.REDIS_SENTINEL_HOSTS;
-    delete process.env.REDIS_SENTINEL_MASTER_NAME;
-    delete process.env.REDIS_SENTINEL_PASSWORD;
-    delete process.env.REDIS_SENTINEL_TLS;
-    delete globalAny.redisClient;
-  });
-
   it("returns null when REDIS_URL is not set", async () => {
-    delete process.env.REDIS_URL;
+    vi.stubEnv("REDIS_URL", undefined);
     const { getRedis } = await import("@/lib/redis");
     const result = getRedis();
     expect(result).toBeNull();
   });
 
   it("creates a Redis client when REDIS_URL is set", async () => {
-    process.env.REDIS_URL = "redis://localhost:6379";
+    vi.stubEnv("REDIS_URL", "redis://localhost:6379");
     const { getRedis } = await import("@/lib/redis");
     const result = getRedis();
     expect(result).not.toBeNull();
@@ -56,7 +46,7 @@ describe("getRedis", () => {
   });
 
   it("returns the same singleton on repeated calls", async () => {
-    process.env.REDIS_URL = "redis://localhost:6379";
+    vi.stubEnv("REDIS_URL", "redis://localhost:6379");
     const { getRedis } = await import("@/lib/redis");
     const a = getRedis();
     const b = getRedis();
@@ -65,24 +55,24 @@ describe("getRedis", () => {
   });
 
   it("registers an error handler to suppress errors", async () => {
-    process.env.REDIS_URL = "redis://localhost:6379";
+    vi.stubEnv("REDIS_URL", "redis://localhost:6379");
     const { getRedis } = await import("@/lib/redis");
     getRedis();
     expect(mocks.onFn).toHaveBeenCalledWith("error", expect.any(Function));
   });
 
   it("calls connect after creating the client", async () => {
-    process.env.REDIS_URL = "redis://localhost:6379";
+    vi.stubEnv("REDIS_URL", "redis://localhost:6379");
     const { getRedis } = await import("@/lib/redis");
     getRedis();
     expect(mocks.connectFn).toHaveBeenCalled();
   });
 
   it("creates a sentinel-mode Redis client when REDIS_SENTINEL=true", async () => {
-    process.env.REDIS_URL = "redis://localhost:6379";
-    process.env.REDIS_SENTINEL = "true";
-    process.env.REDIS_SENTINEL_HOSTS = "sentinel1:26379,sentinel2:26380";
-    process.env.REDIS_SENTINEL_MASTER_NAME = "main";
+    vi.stubEnv("REDIS_URL", "redis://localhost:6379");
+    vi.stubEnv("REDIS_SENTINEL", "true");
+    vi.stubEnv("REDIS_SENTINEL_HOSTS", "sentinel1:26379,sentinel2:26380");
+    vi.stubEnv("REDIS_SENTINEL_MASTER_NAME", "main");
     const { getRedis } = await import("@/lib/redis");
     getRedis();
     expect(mocks.RedisMock).toHaveBeenCalledWith(
@@ -98,9 +88,9 @@ describe("getRedis", () => {
   });
 
   it("uses default port 26379 when sentinel host has no port", async () => {
-    process.env.REDIS_URL = "redis://localhost:6379";
-    process.env.REDIS_SENTINEL = "true";
-    process.env.REDIS_SENTINEL_HOSTS = "sentinel-host";
+    vi.stubEnv("REDIS_URL", "redis://localhost:6379");
+    vi.stubEnv("REDIS_SENTINEL", "true");
+    vi.stubEnv("REDIS_SENTINEL_HOSTS", "sentinel-host");
     const { getRedis } = await import("@/lib/redis");
     getRedis();
     expect(mocks.RedisMock).toHaveBeenCalledWith(
@@ -111,10 +101,10 @@ describe("getRedis", () => {
   });
 
   it("uses default master name 'mymaster' when REDIS_SENTINEL_MASTER_NAME is not set", async () => {
-    process.env.REDIS_URL = "redis://localhost:6379";
-    process.env.REDIS_SENTINEL = "true";
-    process.env.REDIS_SENTINEL_HOSTS = "sentinel:26379";
-    delete process.env.REDIS_SENTINEL_MASTER_NAME;
+    vi.stubEnv("REDIS_URL", "redis://localhost:6379");
+    vi.stubEnv("REDIS_SENTINEL", "true");
+    vi.stubEnv("REDIS_SENTINEL_HOSTS", "sentinel:26379");
+    vi.stubEnv("REDIS_SENTINEL_MASTER_NAME", undefined);
     const { getRedis } = await import("@/lib/redis");
     getRedis();
     expect(mocks.RedisMock).toHaveBeenCalledWith(
@@ -123,10 +113,10 @@ describe("getRedis", () => {
   });
 
   it("includes TLS options when REDIS_SENTINEL_TLS=true", async () => {
-    process.env.REDIS_URL = "redis://localhost:6379";
-    process.env.REDIS_SENTINEL = "true";
-    process.env.REDIS_SENTINEL_HOSTS = "sentinel:26379";
-    process.env.REDIS_SENTINEL_TLS = "true";
+    vi.stubEnv("REDIS_URL", "redis://localhost:6379");
+    vi.stubEnv("REDIS_SENTINEL", "true");
+    vi.stubEnv("REDIS_SENTINEL_HOSTS", "sentinel:26379");
+    vi.stubEnv("REDIS_SENTINEL_TLS", "true");
     const { getRedis } = await import("@/lib/redis");
     getRedis();
     expect(mocks.RedisMock).toHaveBeenCalledWith(
@@ -135,14 +125,42 @@ describe("getRedis", () => {
   });
 
   it("includes sentinelPassword when REDIS_SENTINEL_PASSWORD is set", async () => {
-    process.env.REDIS_URL = "redis://localhost:6379";
-    process.env.REDIS_SENTINEL = "true";
-    process.env.REDIS_SENTINEL_HOSTS = "sentinel:26379";
-    process.env.REDIS_SENTINEL_PASSWORD = "s3cr3t";
+    vi.stubEnv("REDIS_URL", "redis://localhost:6379");
+    vi.stubEnv("REDIS_SENTINEL", "true");
+    vi.stubEnv("REDIS_SENTINEL_HOSTS", "sentinel:26379");
+    vi.stubEnv("REDIS_SENTINEL_PASSWORD", "s3cr3t");
     const { getRedis } = await import("@/lib/redis");
     getRedis();
     expect(mocks.RedisMock).toHaveBeenCalledWith(
       expect.objectContaining({ sentinelPassword: "s3cr3t" }),
+    );
+  });
+
+  it("passes password to Sentinel-mode client for data-node auth when REDIS_PASSWORD is set", async () => {
+    vi.stubEnv("REDIS_URL", "redis://localhost:6379");
+    vi.stubEnv("REDIS_SENTINEL", "true");
+    vi.stubEnv("REDIS_SENTINEL_HOSTS", "sentinel:26379");
+    vi.stubEnv("REDIS_PASSWORD", "data-node-pass");
+    const { getRedis } = await import("@/lib/redis");
+    getRedis();
+    expect(mocks.RedisMock).toHaveBeenCalledWith(
+      expect.objectContaining({ password: "data-node-pass" }),
+    );
+  });
+
+  it("does not pass password option in non-Sentinel mode (password embedded in URL)", async () => {
+    vi.stubEnv("REDIS_URL", "redis://:embedded-pass@localhost:6379");
+    // REDIS_SENTINEL not set → non-Sentinel branch
+    vi.stubEnv("REDIS_SENTINEL", undefined);
+    // Set REDIS_PASSWORD to ensure the assertion has teeth: even when the env var
+    // is present, non-Sentinel mode must not pass it as a constructor option.
+    vi.stubEnv("REDIS_PASSWORD", "should-not-be-used");
+    const { getRedis } = await import("@/lib/redis");
+    getRedis();
+    // Non-Sentinel constructor receives (url, options) — no password key in options.
+    expect(mocks.RedisMock).toHaveBeenCalledWith(
+      "redis://:embedded-pass@localhost:6379",
+      expect.not.objectContaining({ password: expect.anything() }),
     );
   });
 });
@@ -150,39 +168,34 @@ describe("getRedis", () => {
 describe("validateRedisConfig", () => {
   beforeEach(() => {
     vi.resetModules();
-    delete process.env.REDIS_URL;
-    delete process.env.NODE_ENV;
-  });
-
-  afterEach(() => {
-    delete process.env.REDIS_URL;
-    delete process.env.NODE_ENV;
+    vi.stubEnv("REDIS_URL", undefined);
+    vi.stubEnv("NODE_ENV", undefined);
   });
 
   it("throws in production when REDIS_URL is not set", async () => {
-    process.env.NODE_ENV = "production";
-    delete process.env.REDIS_URL;
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("REDIS_URL", undefined);
     const { validateRedisConfig } = await import("@/lib/redis");
     expect(() => validateRedisConfig()).toThrow("REDIS_URL is required in production");
   });
 
   it("does not throw in production when REDIS_URL is set", async () => {
-    process.env.NODE_ENV = "production";
-    process.env.REDIS_URL = "redis://localhost:6379";
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("REDIS_URL", "redis://localhost:6379");
     const { validateRedisConfig } = await import("@/lib/redis");
     expect(() => validateRedisConfig()).not.toThrow();
   });
 
   it("does not throw in development when REDIS_URL is not set", async () => {
-    process.env.NODE_ENV = "development";
-    delete process.env.REDIS_URL;
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("REDIS_URL", undefined);
     const { validateRedisConfig } = await import("@/lib/redis");
     expect(() => validateRedisConfig()).not.toThrow();
   });
 
   it("does not throw in test environment when REDIS_URL is not set", async () => {
-    process.env.NODE_ENV = "test";
-    delete process.env.REDIS_URL;
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("REDIS_URL", undefined);
     const { validateRedisConfig } = await import("@/lib/redis");
     expect(() => validateRedisConfig()).not.toThrow();
   });

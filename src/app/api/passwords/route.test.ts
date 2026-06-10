@@ -60,6 +60,8 @@ vi.mock("@/lib/prisma", () => ({
     user: mockPrismaUser,
     auditLog: { create: mockAuditCreate },
     extensionToken: { findUnique: mockExtTokenFindUnique, update: mockExtTokenUpdate },
+    // C13: active membership by default so token validation passes the deactivation check.
+    tenantMember: { findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }) },
   },
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({

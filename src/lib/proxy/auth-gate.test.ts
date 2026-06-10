@@ -56,6 +56,46 @@ describe("extractSessionToken", () => {
   it("handles token at end of cookie string without trailing semicolon", () => {
     expect(extractSessionToken("a=b; authjs.session-token=last")).toBe("last");
   });
+
+  it("ignores suffix-colliding cookie name (evil-authjs.session-token)", () => {
+    expect(
+      extractSessionToken("evil-authjs.session-token=evil-value"),
+    ).toBe("");
+  });
+
+  it("finds legitimate cookie even when a colliding name appears first", () => {
+    const cookie =
+      "evil-authjs.session-token=evil-value; authjs.session-token=real-value";
+    expect(extractSessionToken(cookie)).toBe("real-value");
+  });
+
+  it("handles leading whitespace on a cookie segment", () => {
+    expect(
+      extractSessionToken("foo=bar;  authjs.session-token=spaced"),
+    ).toBe("spaced");
+  });
+
+  it("preserves '=' characters inside cookie value", () => {
+    // Base64-encoded or padded values may contain '='
+    expect(
+      extractSessionToken("authjs.session-token=abc==def="),
+    ).toBe("abc==def=");
+  });
+
+  // S5: Auth.js cookie.parse wraps some values in double quotes;
+  // dequote so cache key is canonical (quoted and unquoted don't alias).
+  it("S5: dequotes a double-quoted token value", () => {
+    expect(
+      extractSessionToken('authjs.session-token="tok-quoted"'),
+    ).toBe("tok-quoted");
+  });
+
+  it("S5: does not strip unmatched or single double-quote", () => {
+    // value that starts with " but doesn't end with it — not a quoted value
+    expect(
+      extractSessionToken('authjs.session-token="tok-no-close'),
+    ).toBe('"tok-no-close');
+  });
 });
 
 describe("hasSessionCookie", () => {

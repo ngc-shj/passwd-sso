@@ -590,6 +590,17 @@ export const descriptions: Record<
     description: "Enable TLS for Redis Sentinel connections. Default: false.",
     example: "false",
   },
+  REDIS_PASSWORD: {
+    group: "Redis",
+    order: 7,
+    description:
+      "Password for Redis requirepass authentication (Sentinel data-node auth).\n" +
+      "In non-Sentinel mode the password is embedded in REDIS_URL.\n" +
+      "Must use URL-safe characters only (hex recommended).\n" +
+      "NOTE: docker-compose deployments REQUIRE this variable — the compose files\n" +
+      "use a :? guard that aborts startup when it is missing.",
+    secret: true,
+  },
 
   // ── Outbox worker ─────────────────────────────────────────────────────────
 

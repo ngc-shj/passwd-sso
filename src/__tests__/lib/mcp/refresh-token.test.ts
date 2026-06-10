@@ -156,6 +156,10 @@ describe("exchangeRefreshToken", () => {
       const mockRefreshUpdate = overrides.refreshUpdate ?? vi.fn().mockResolvedValue({});
 
       (prisma as Record<string, unknown>).$transaction = async (fn: (tx: unknown) => unknown) => fn(prisma);
+      // C13: active membership default so happy-path and CAS tests pass.
+      (prisma as Record<string, unknown>).tenantMember = {
+        findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
+      };
       (prisma as Record<string, unknown>).mcpRefreshToken = {
         findUnique: vi.fn().mockResolvedValue(overrides.rt !== undefined ? overrides.rt : VALID_RT),
         updateMany: mockRefreshUpdateMany,

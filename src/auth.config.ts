@@ -7,6 +7,7 @@ import { sendEmail } from "@/lib/email";
 import { magicLinkEmail } from "@/lib/email/templates/magic-link";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { MAGIC_LINK_TTL_SEC } from "@/lib/constants/auth/magic-link";
 import { getLogger } from "@/lib/logger";
 import {
   getSessionCookieName,
@@ -17,6 +18,7 @@ import {
 const magicLinkEmailLimiter = createRateLimiter({
   windowMs: 10 * MS_PER_MINUTE,
   max: 3,
+  failClosedOnRedisError: true,
 });
 
 const allowedGoogleDomains = parseAllowedGoogleDomains();
@@ -90,19 +92,25 @@ export default {
     // Magic Link (Email authentication)
     ...(process.env.EMAIL_PROVIDER
       ? [
-          Nodemailer({
-            server: process.env.SMTP_HOST
-              ? {
-                  host: process.env.SMTP_HOST,
-                  port: Number(process.env.SMTP_PORT || 587),
-                  auth: {
-                    user: process.env.SMTP_USER || "",
-                    pass: process.env.SMTP_PASS || "",
-                  },
-                }
-              : "smtp://localhost:1025",
-            from: process.env.EMAIL_FROM || "noreply@localhost",
-            async sendVerificationRequest({ identifier: email, url }) {
+          {
+            ...Nodemailer({
+              server: process.env.SMTP_HOST
+                ? {
+                    host: process.env.SMTP_HOST,
+                    port: Number(process.env.SMTP_PORT || 587),
+                    auth: {
+                      user: process.env.SMTP_USER || "",
+                      pass: process.env.SMTP_PASS || "",
+                    },
+                  }
+                : "smtp://localhost:1025",
+              from: process.env.EMAIL_FROM || "noreply@localhost",
+            }),
+            // Override the provider's default 24h TTL with our 15-minute policy.
+            // Nodemailer() hardcodes maxAge in the returned object; spread + override
+            // is the correct pattern for auth/core providers.
+            maxAge: MAGIC_LINK_TTL_SEC,
+            async sendVerificationRequest({ identifier: email, url }: { identifier: string; url: string }) {
               // Rate limit per email address (3 emails per 10 minutes)
               const rl = await magicLinkEmailLimiter.check(
                 `rl:magic_link:${email.toLowerCase()}`,
@@ -119,7 +127,7 @@ export default {
               const { subject, html, text } = magicLinkEmail(url, locale);
               await sendEmail({ to: email, subject, html, text });
             },
-          }),
+          },
         ]
       : []),
     // WebAuthn sign-in is handled by a custom route (/api/auth/passkey/verify)

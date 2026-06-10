@@ -51,6 +51,10 @@ vi.mock("@/lib/prisma", () => ({
     tenant: {
       findUnique: vi.fn().mockResolvedValue({ extensionTokenIdleTimeoutMinutes: 15 }),
     },
+    // C13: active membership by default so token validation passes the deactivation check.
+    tenantMember: {
+      findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
+    },
   },
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({

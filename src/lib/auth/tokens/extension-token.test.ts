@@ -3,8 +3,10 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
-const { mockFindUnique } = vi.hoisted(() => ({
+const { mockFindUnique, mockTenantMemberFindUnique } = vi.hoisted(() => ({
   mockFindUnique: vi.fn(),
+  // C13: active membership by default so existing valid-token tests pass.
+  mockTenantMemberFindUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
 }));
 const { mockWithBypassRls } = vi.hoisted(() => ({
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
@@ -46,6 +48,8 @@ vi.mock("@/lib/prisma", () => ({
       updateMany: mockUpdateMany,
     },
     tenant: { findUnique: mockTenantFindUnique },
+    // C13: tenantMember mock; active by default so existing tests pass.
+    tenantMember: { findUnique: mockTenantMemberFindUnique },
     $transaction: mockTransaction,
   },
 }));
@@ -124,6 +128,8 @@ describe("hasScope", () => {
 describe("validateExtensionToken", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // C13: restore active-membership default after each test clears mocks.
+    mockTenantMemberFindUnique.mockResolvedValue({ deactivatedAt: null });
   });
 
   it("returns INVALID when no Authorization header", async () => {
@@ -371,6 +377,146 @@ describe("validateExtensionToken", () => {
     });
     const result = await validateExtensionToken(req);
     // IOS_APP callers expect EXTENSION_TOKEN_INVALID for source-compat.
+    expect(result).toEqual({ ok: false, error: "EXTENSION_TOKEN_INVALID" });
+  });
+
+  // ── C13: deactivated-user rejection ───────────────────────
+
+  it("C13(a): deactivated-in-token-tenant ⇒ EXTENSION_TOKEN_INVALID (BROWSER_EXTENSION)", async () => {
+    mockFindUnique.mockResolvedValue({
+      id: "t1",
+      userId: "u1",
+      tenantId: "ten1",
+      scope: "passwords:read",
+      expiresAt: new Date("2030-01-01"),
+      revokedAt: null,
+      familyId: FAMILY_ID,
+      familyCreatedAt: new Date(),
+      clientKind: "BROWSER_EXTENSION",
+      cnfJkt: VALID_CNF_JKT,
+    });
+    mockTenantMemberFindUnique.mockResolvedValue({ deactivatedAt: new Date("2025-01-01") });
+
+    const req = createRequest("GET", "http://localhost/api/passwords", {
+      headers: { Authorization: `Bearer ${"a".repeat(64)}` },
+    });
+    const result = await validateExtensionToken(req);
+    expect(result).toEqual({ ok: false, error: "EXTENSION_TOKEN_INVALID" });
+    // DPoP helper must NOT be called — rejected before dispatch
+    expect(mockValidateTokenDpop).not.toHaveBeenCalled();
+  });
+
+  it("C13(b): deactivated in token tenant (cross-tenant guard) ⇒ EXTENSION_TOKEN_INVALID", async () => {
+    mockFindUnique.mockResolvedValue({
+      id: "t1",
+      userId: "u1",
+      tenantId: "ten1",
+      scope: "passwords:read",
+      expiresAt: new Date("2030-01-01"),
+      revokedAt: null,
+      familyId: FAMILY_ID,
+      familyCreatedAt: new Date(),
+      clientKind: "BROWSER_EXTENSION",
+      cnfJkt: VALID_CNF_JKT,
+    });
+    // The lookup is scoped to the token's tenantId — a deactivated row there is invalid
+    mockTenantMemberFindUnique.mockResolvedValue({ deactivatedAt: new Date("2025-01-01") });
+
+    const req = createRequest("GET", "http://localhost/api/passwords", {
+      headers: { Authorization: `Bearer ${"a".repeat(64)}` },
+    });
+    const result = await validateExtensionToken(req);
+    expect(result).toEqual({ ok: false, error: "EXTENSION_TOKEN_INVALID" });
+    expect(mockTenantMemberFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId_userId: { tenantId: "ten1", userId: "u1" } },
+      }),
+    );
+  });
+
+  it("C13(c): active membership ⇒ passes deactivation check (BROWSER_EXTENSION)", async () => {
+    const expiresAt = new Date("2030-01-01");
+    const familyCreatedAt = new Date();
+    mockFindUnique.mockResolvedValue({
+      id: "t1",
+      userId: "u1",
+      tenantId: "ten1",
+      scope: "passwords:read",
+      expiresAt,
+      revokedAt: null,
+      familyId: FAMILY_ID,
+      familyCreatedAt,
+      clientKind: "BROWSER_EXTENSION",
+      cnfJkt: VALID_CNF_JKT,
+    });
+    mockTenantMemberFindUnique.mockResolvedValue({ deactivatedAt: null });
+    mockValidateTokenDpop.mockResolvedValue({
+      ok: true,
+      data: {
+        tokenId: "t1",
+        userId: "u1",
+        tenantId: "ten1",
+        scopes: ["passwords:read"],
+        expiresAt,
+        familyId: FAMILY_ID,
+        familyCreatedAt,
+        cnfJkt: VALID_CNF_JKT,
+      },
+    });
+
+    const req = createRequest("GET", "http://localhost/api/passwords", {
+      headers: {
+        Authorization: `Bearer ${"a".repeat(64)}`,
+        DPoP: "valid.dpop.proof",
+      },
+    });
+    const result = await validateExtensionToken(req);
+    expect(result.ok).toBe(true);
+  });
+
+  it("C13 IOS_APP path: deactivated-in-token-tenant ⇒ EXTENSION_TOKEN_INVALID", async () => {
+    mockFindUnique.mockResolvedValue({
+      id: "t1",
+      userId: "u1",
+      tenantId: "ten1",
+      scope: "passwords:read",
+      expiresAt: new Date("2030-01-01"),
+      revokedAt: null,
+      familyId: FAMILY_ID,
+      familyCreatedAt: new Date(),
+      clientKind: "IOS_APP",
+      cnfJkt: VALID_CNF_JKT,
+    });
+    mockTenantMemberFindUnique.mockResolvedValue({ deactivatedAt: new Date("2025-01-01") });
+
+    const req = createRequest("GET", "http://localhost/api/passwords", {
+      headers: { Authorization: `Bearer ${"a".repeat(64)}` },
+    });
+    const result = await validateExtensionToken(req);
+    expect(result).toEqual({ ok: false, error: "EXTENSION_TOKEN_INVALID" });
+    // DPoP helper must NOT be called
+    expect(mockValidateTokenDpop).not.toHaveBeenCalled();
+  });
+
+  it("C13 no-membership (fail-closed) ⇒ EXTENSION_TOKEN_INVALID", async () => {
+    mockFindUnique.mockResolvedValue({
+      id: "t1",
+      userId: "u1",
+      tenantId: "ten1",
+      scope: "passwords:read",
+      expiresAt: new Date("2030-01-01"),
+      revokedAt: null,
+      familyId: FAMILY_ID,
+      familyCreatedAt: new Date(),
+      clientKind: "BROWSER_EXTENSION",
+      cnfJkt: VALID_CNF_JKT,
+    });
+    mockTenantMemberFindUnique.mockResolvedValue(null);
+
+    const req = createRequest("GET", "http://localhost/api/passwords", {
+      headers: { Authorization: `Bearer ${"a".repeat(64)}` },
+    });
+    const result = await validateExtensionToken(req);
     expect(result).toEqual({ ok: false, error: "EXTENSION_TOKEN_INVALID" });
   });
 });

@@ -138,6 +138,11 @@ async function handlePOST(req: NextRequest) {
   try {
     client = await withBypassRls(prisma, async (tx) =>
       prisma.$transaction(async (tx) => {
+        // Lazy cleanup: remove expired unclaimed DCR clients before counting.
+        // Removes the hard dependency on dcr-cleanup-worker for cap recovery.
+        await tx.mcpClient.deleteMany({
+          where: { isDcr: true, tenantId: null, dcrExpiresAt: { lt: new Date() } },
+        });
         // Global cap: reject if too many unclaimed DCR clients exist
         const unclaimedCount = await tx.mcpClient.count({
           where: { isDcr: true, tenantId: null },
@@ -168,7 +173,7 @@ async function handlePOST(req: NextRequest) {
         {
           error: "temporarily_unavailable",
           error_description:
-            "Global DCR client cap reached — ensure dcr-cleanup-worker is running.",
+            "Too many unclaimed client registrations in the last hour — try again later.",
         },
         { status: 503 },
       );

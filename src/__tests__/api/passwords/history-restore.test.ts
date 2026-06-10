@@ -65,8 +65,8 @@ describe("POST /api/passwords/[id]/history/[historyId]/restore", () => {
     const req = createRequest("POST", "http://localhost/api/passwords/p1/history/h1/restore");
     const res = await POST(req, createParams({ id: "p1", historyId: "h1" }));
     const { status, json } = await parseResponse(res);
-    expect(status).toBe(403);
-    expect(json.error).toBe("FORBIDDEN");
+    expect(status).toBe(404);
+    expect(json.error).toBe("NOT_FOUND");
   });
 
   it("returns 404 when history entry not found", async () => {

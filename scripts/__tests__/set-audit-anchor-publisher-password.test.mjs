@@ -1,5 +1,5 @@
 /**
- * Tests for scripts/set-dcr-cleanup-worker-password.sh
+ * Tests for scripts/set-audit-anchor-publisher-password.sh
  *
  * Coverage:
  *   T1 — exits 1 with structured error when stdin is empty
@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
-const SCRIPT = resolve(REPO_ROOT, "scripts", "set-dcr-cleanup-worker-password.sh");
+const SCRIPT = resolve(REPO_ROOT, "scripts", "set-audit-anchor-publisher-password.sh");
 const FAKE_DB_URL = "postgresql://superuser:superpass@localhost:5432/passwd_sso";
 
 function spawnScript(args = [], opts = {}) {
@@ -35,7 +35,7 @@ function spawnScript(args = [], opts = {}) {
   });
 }
 
-describe("set-dcr-cleanup-worker-password.sh", () => {
+describe("set-audit-anchor-publisher-password.sh", () => {
   it("exits 1 with structured error when stdin is empty", () => {
     const result = spawnScript([], { input: "" });
 
@@ -44,7 +44,7 @@ describe("set-dcr-cleanup-worker-password.sh", () => {
   });
 
   it("with DRY_RUN=1 + --print-args-file + stdin 'secret': argv must NOT contain new_password=, SQL file contains the password", () => {
-    const tmpDir = mkdtempSync(resolve(tmpdir(), "dcr-test-"));
+    const tmpDir = mkdtempSync(resolve(tmpdir(), "anchor-test-"));
     const sqlFile = resolve(tmpDir, "sql.txt");
 
     try {
@@ -65,14 +65,14 @@ describe("set-dcr-cleanup-worker-password.sh", () => {
       // The captured stdin SQL must contain the real password value.
       const sql = readFileSync(sqlFile, "utf8");
       expect(sql).toContain("'secret'");
-      expect(sql).toContain("passwd_dcr_cleanup_worker");
+      expect(sql).toContain("passwd_anchor_publisher");
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
   it("single-quote in password is doubled in the SQL (SQL-safe quoting)", () => {
-    const tmpDir = mkdtempSync(resolve(tmpdir(), "dcr-test-quote-"));
+    const tmpDir = mkdtempSync(resolve(tmpdir(), "anchor-test-quote-"));
     const sqlFile = resolve(tmpDir, "sql.txt");
 
     try {
@@ -95,7 +95,7 @@ describe("set-dcr-cleanup-worker-password.sh", () => {
   });
 
   it("literal $ in password passes through unchanged in the SQL", () => {
-    const tmpDir = mkdtempSync(resolve(tmpdir(), "dcr-test-dollar-"));
+    const tmpDir = mkdtempSync(resolve(tmpdir(), "anchor-test-dollar-"));
     const sqlFile = resolve(tmpDir, "sql.txt");
 
     try {
@@ -117,9 +117,9 @@ describe("set-dcr-cleanup-worker-password.sh", () => {
   });
 
   it("password value never appears in the bash wrapper's stdout or stderr", () => {
-    const tmpDir = mkdtempSync(resolve(tmpdir(), "dcr-test-leak-"));
+    const tmpDir = mkdtempSync(resolve(tmpdir(), "anchor-test-leak-"));
     const sqlFile = resolve(tmpDir, "sql.txt");
-    const sentinel = "super-secret-cmdline-check-12345";
+    const sentinel = "super-secret-cmdline-check-anchor-12345";
 
     try {
       const result = spawnScript(

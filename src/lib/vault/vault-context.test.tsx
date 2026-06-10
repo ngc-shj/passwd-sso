@@ -19,6 +19,7 @@ import {
   useVault,
   notifyUnlockFailure,
   VaultUnlockError,
+  throwIfUnlockDataLocked,
 } from "./vault-context";
 import { VAULT_STATUS } from "@/lib/constants";
 import { stashPrf, clearPrf } from "@/lib/auth/prf-handoff";
@@ -202,6 +203,52 @@ describe("notifyUnlockFailure (named export)", () => {
   });
 });
 
+// ── throwIfUnlockDataLocked (named export, no React) ───────────────────
+describe("throwIfUnlockDataLocked (named export)", () => {
+  it("throws VaultUnlockError(ACCOUNT_LOCKED) when response body has error=ACCOUNT_LOCKED", async () => {
+    const res = {
+      json: async () => ({ error: "ACCOUNT_LOCKED", lockedUntil: "2099-06-01T00:00:00.000Z" }),
+    } as unknown as Response;
+
+    await expect(throwIfUnlockDataLocked(res)).rejects.toBeInstanceOf(VaultUnlockError);
+  });
+
+  it("includes lockedUntil on the thrown error", async () => {
+    const res = {
+      json: async () => ({ error: "ACCOUNT_LOCKED", lockedUntil: "2099-06-01T00:00:00.000Z" }),
+    } as unknown as Response;
+
+    await expect(throwIfUnlockDataLocked(res)).rejects.toMatchObject({
+      code: "ACCOUNT_LOCKED",
+      lockedUntil: "2099-06-01T00:00:00.000Z",
+    });
+  });
+
+  it("resolves without throwing for non-ACCOUNT_LOCKED error bodies", async () => {
+    const res = {
+      json: async () => ({ error: "VAULT_NOT_SETUP" }),
+    } as unknown as Response;
+
+    await expect(throwIfUnlockDataLocked(res)).resolves.toBeUndefined();
+  });
+
+  it("resolves without throwing when body has no error field", async () => {
+    const res = {
+      json: async () => ({}),
+    } as unknown as Response;
+
+    await expect(throwIfUnlockDataLocked(res)).resolves.toBeUndefined();
+  });
+
+  it("resolves without throwing when json() rejects", async () => {
+    const res = {
+      json: async () => { throw new Error("invalid json"); },
+    } as unknown as Response;
+
+    await expect(throwIfUnlockDataLocked(res)).resolves.toBeUndefined();
+  });
+});
+
 // ── Full setup → lock → unlock → verify round-trip in a single test ──
 // React-state contamination across tests is a known issue with renderHook
 // when the Provider sets up multiple effect-based listeners (pagehide, auto-
@@ -347,6 +394,59 @@ describe("VaultProvider — verifyPassphrase before unlock", () => {
       valid = await result.current.verifyPassphrase(PASSPHRASE);
     });
     expect(valid).toBe(false);
+  });
+});
+
+describe("VaultProvider — unlock() ACCOUNT_LOCKED wiring", () => {
+  it("throws VaultUnlockError(ACCOUNT_LOCKED) when unlock/data returns ACCOUNT_LOCKED", async () => {
+    globalThis.fetch = vi.fn(async (url: string) => {
+      const path = typeof url === "string" ? url : "";
+      if (path === "/api/vault/status") {
+        return { ok: true, json: async () => ({ setupRequired: false, hasRecoveryKey: false, vaultAutoLockMinutes: null, tenantMinPasswordLength: 0, tenantRequireUppercase: false, tenantRequireLowercase: false, tenantRequireNumbers: false, tenantRequireSymbols: false }) };
+      }
+      if (path === "/api/vault/unlock/data") {
+        return { ok: false, status: 403, json: async () => ({ error: "ACCOUNT_LOCKED", lockedUntil: "2099-06-01T00:00:00.000Z" }) };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    }) as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useVault(), { wrapper });
+    await act(async () => { await Promise.resolve(); });
+
+    await act(async () => {
+      await expect(result.current.unlock("any-passphrase")).rejects.toMatchObject({
+        code: "ACCOUNT_LOCKED",
+        lockedUntil: "2099-06-01T00:00:00.000Z",
+      });
+    });
+  });
+});
+
+describe("VaultProvider — unlockWithPasskey() ACCOUNT_LOCKED wiring", () => {
+  it("throws VaultUnlockError(ACCOUNT_LOCKED) when unlock/data returns ACCOUNT_LOCKED (startPasskeyAuthentication not reached)", async () => {
+    globalThis.fetch = vi.fn(async (url: string) => {
+      const path = typeof url === "string" ? url : "";
+      if (path === "/api/vault/status") {
+        return { ok: true, json: async () => ({ setupRequired: false, hasRecoveryKey: false, vaultAutoLockMinutes: null, tenantMinPasswordLength: 0, tenantRequireUppercase: false, tenantRequireLowercase: false, tenantRequireNumbers: false, tenantRequireSymbols: false }) };
+      }
+      if (path === "/api/vault/unlock/data") {
+        return { ok: false, status: 403, json: async () => ({ error: "ACCOUNT_LOCKED", lockedUntil: "2099-06-01T00:00:00.000Z" }) };
+      }
+      if (path === "/api/webauthn/authenticate/options") {
+        return { ok: true, json: async () => ({ options: {}, prfSalt: "aa".repeat(32) }) };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    }) as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useVault(), { wrapper });
+    await act(async () => { await Promise.resolve(); });
+
+    await act(async () => {
+      await expect(result.current.unlockWithPasskey()).rejects.toMatchObject({
+        code: "ACCOUNT_LOCKED",
+        lockedUntil: "2099-06-01T00:00:00.000Z",
+      });
+    });
   });
 });
 
@@ -556,6 +656,38 @@ describe("VaultProvider — unlockWithStoredPrf (in-memory PRF hand-off)", () =>
     },
     60_000,
   );
+
+  it("throws VaultUnlockError(ACCOUNT_LOCKED) and zeroizes prfOutput when unlock/data returns ACCOUNT_LOCKED", async () => {
+    clearPrf();
+    const prfOutput = new Uint8Array(32).fill(0x5a);
+    stashPrf({
+      prfOutput,
+      prfData: { prfEncryptedSecretKey: "ct", prfSecretKeyIv: "iv", prfSecretKeyAuthTag: "tag" },
+    });
+
+    globalThis.fetch = vi.fn(async (url: string) => {
+      const path = typeof url === "string" ? url : "";
+      if (path === "/api/vault/status") {
+        return { ok: true, json: async () => ({ setupRequired: false, hasRecoveryKey: false, vaultAutoLockMinutes: null, tenantMinPasswordLength: 0, tenantRequireUppercase: false, tenantRequireLowercase: false, tenantRequireNumbers: false, tenantRequireSymbols: false }) };
+      }
+      if (path === "/api/vault/unlock/data") {
+        return { ok: false, status: 403, json: async () => ({ error: "ACCOUNT_LOCKED", lockedUntil: "2099-06-01T00:00:00.000Z" }) };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    }) as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useVault(), { wrapper });
+    await act(async () => { await Promise.resolve(); });
+
+    await act(async () => {
+      await expect(result.current.unlockWithStoredPrf()).rejects.toMatchObject({
+        code: "ACCOUNT_LOCKED",
+        lockedUntil: "2099-06-01T00:00:00.000Z",
+      });
+    });
+    // prfOutput must be zeroized on the throw path
+    expect(prfOutput.every((b) => b === 0)).toBe(true);
+  });
 });
 
 describe("VaultProvider — session-driven status", () => {

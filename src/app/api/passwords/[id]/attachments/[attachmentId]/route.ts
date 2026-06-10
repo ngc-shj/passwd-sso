@@ -7,7 +7,7 @@ import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, notFound, unauthorized } from "@/lib/http/api-response";
 
 type RouteContext = {
   params: Promise<{ id: string; attachmentId: string }>;
@@ -36,7 +36,9 @@ async function handleGET(
     return notFound();
   }
   if (entry.userId !== session.user.id) {
-    return forbidden();
+    // A01-4: 403 vs 404 difference leaks "ID exists in tenant" oracle to
+    // attacker. RLS should already null this branch; defense-in-depth.
+    return notFound();
   }
 
   const attachment = await withUserTenantRls(session.user.id, async () =>
@@ -100,7 +102,9 @@ async function handleDELETE(
     return notFound();
   }
   if (entry.userId !== session.user.id) {
-    return forbidden();
+    // A01-4: 403 vs 404 difference leaks "ID exists in tenant" oracle to
+    // attacker. RLS should already null this branch; defense-in-depth.
+    return notFound();
   }
 
   const attachment = await withUserTenantRls(session.user.id, async () =>

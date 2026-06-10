@@ -1,31 +1,36 @@
 import { emailLayout, escapeHtml } from "./layout";
+import { MAGIC_LINK_TTL_MINUTES } from "@/lib/constants/auth/magic-link";
 
-const LABELS = {
-  ja: {
-    subject: "サインインリンク",
-    heading: "サインインリンク",
-    body: "以下のボタンをクリックしてサインインしてください。",
-    button: "サインイン",
-    expires: "このリンクは24時間有効です。",
-    ignore: "このメールに心当たりがない場合は、無視してください。",
-    fallback: "ボタンが動作しない場合は、以下のURLをブラウザに貼り付けてください:",
-    textBody: "以下のリンクからサインインしてください:",
-    textExpires: "このリンクは24時間有効です。",
-    textIgnore: "このメールに心当たりがない場合は、無視してください。",
-  },
-  en: {
-    subject: "Sign-in link",
-    heading: "Sign-in link",
-    body: "Click the button below to sign in.",
-    button: "Sign in",
-    expires: "This link is valid for 24 hours.",
-    ignore: "If you did not request this email, you can safely ignore it.",
-    fallback: "If the button doesn't work, paste this URL into your browser:",
-    textBody: "Sign in using the link below:",
-    textExpires: "This link is valid for 24 hours.",
-    textIgnore: "If you did not request this email, you can safely ignore it.",
-  },
-} as const;
+function buildLabels(ttlMinutes: number) {
+  return {
+    ja: {
+      subject: "サインインリンク",
+      heading: "サインインリンク",
+      body: "以下のボタンをクリックしてサインインしてください。",
+      button: "サインイン",
+      expires: `このリンクは${ttlMinutes}分間有効です。`,
+      ignore: "このメールに心当たりがない場合は、無視してください。",
+      fallback: "ボタンが動作しない場合は、以下のURLをブラウザに貼り付けてください:",
+      textBody: "以下のリンクからサインインしてください:",
+      textExpires: `このリンクは${ttlMinutes}分間有効です。`,
+      textIgnore: "このメールに心当たりがない場合は、無視してください。",
+    },
+    en: {
+      subject: "Sign-in link",
+      heading: "Sign-in link",
+      body: "Click the button below to sign in.",
+      button: "Sign in",
+      expires: `This link is valid for ${ttlMinutes} minutes.`,
+      ignore: "If you did not request this email, you can safely ignore it.",
+      fallback: "If the button doesn't work, paste this URL into your browser:",
+      textBody: "Sign in using the link below:",
+      textExpires: `This link is valid for ${ttlMinutes} minutes.`,
+      textIgnore: "If you did not request this email, you can safely ignore it.",
+    },
+  } as const;
+}
+
+const LABELS = buildLabels(MAGIC_LINK_TTL_MINUTES);
 
 function getLabels(locale: string) {
   return locale === "ja" ? LABELS.ja : LABELS.en;
