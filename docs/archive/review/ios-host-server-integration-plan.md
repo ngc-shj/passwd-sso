@@ -150,10 +150,22 @@ Completed contracts are marked with their commit. Remaining contracts (C9+) are 
 | C6  | env-origin sign-in redirect                                  | locked |
 | C7  | RLS nesting fix                                              | locked |
 | C8  | Vault unlock hex + kdfType Int                              | locked |
-| C9  | iOS Authorization Bearer scheme (incl. HostSyncService:140)  | pending |
-| C10a| basePath-safe resource URLs + htu                           | locked |
-| C10b| Entry blob model shape (id injected, nullable fields)       | locked |
-| C10c| TOTP field shape                                            | locked |
-| C11 | Remove PSSO_DIAG diagnostics + guard                        | pending |
+| C9  | iOS Authorization Bearer scheme (incl. HostSyncService:140)  | done |
+| C10a| basePath-safe resource URLs + htu                           | done |
+| C10b| Entry blob model shape (shared EntryBlobDecoder, optional fields) | done |
+| C10c| TOTP field shape                                            | done |
+| C11 | Remove PSSO_DIAG diagnostics                                | done |
 | C12 | Team vault read over Bearer — DEFERRED (TODO tracked)       | deferred |
-| C13 | Regression tests (T1–T11)                                   | locked |
+| C13 | Regression tests (T1–T11)                                   | done |
+
+### Device-discovered contracts (found only by on-device testing; all done, commit 7bcb2698)
+| ID  | Subject                                                              | Status |
+|-----|---------------------------------------------------------------------|--------|
+| C14 | NSFaceIDUsageDescription (LAContext hard-crash without it)           | done |
+| C15 | BridgeKeyStore default keychain access group (TEAMID/App-Group id were unentitled on device → unlock failed) | done |
+| C16 | Use sync's in-memory CacheData (read-after-write raced fresh bridge-key counter → first-unlock empty list) | done |
+| C17 | VaultListView owns VaultViewModel via @State (inline model replaced empty on foreground re-sync → "No entries") | done |
+| C18 | password/url/notes/username optional in detail decode (non-LOGIN entries stuck on "decrypting") + retry state | done |
+| C19 | UX: lock → passphrase screen (not URL setup), keeps config+token; URL pre-fill; unlock spinner through initial sync | done |
+
+Note: AutoFill extension (section A), Universal Link OAuth on the public host, and the side-channel/adversarial scenarios (C/D) remain per the original verification-status doc. This pass delivered the personal-vault host-app read path (B9–B10) end-to-end on a real device.
