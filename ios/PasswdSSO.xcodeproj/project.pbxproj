@@ -85,6 +85,7 @@
 		E0E33F33FBEB6BBA6CC22D06 /* KDFTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A24C3EFD4C6BA4ACDA40380 /* KDFTests.swift */; };
 		E1FA345EE6BF6D38163AD937 /* DebugVaultLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FED91E37F4E8005AEF7E9B6 /* DebugVaultLoaderTests.swift */; };
 		E300850EF22C24B05B82D25B /* SecureEnclaveKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120E0D108C572BDFE0A5E79E /* SecureEnclaveKey.swift */; };
+		E3E4F08803D9E1580F7BE6CD /* EntryBlobDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50EA48EEB5CB57F3E901EBE5 /* EntryBlobDecoder.swift */; };
 		E425C49CE0F5257C1821EB50 /* VaultEntryDetail.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00236EB9F799A708CF1C4FC /* VaultEntryDetail.swift */; };
 		E61FA83E34E321C09B0D7176 /* TOTPVectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CB624E102C09D08D7B9BB8D /* TOTPVectorTests.swift */; };
 		E6242A08FB6CD768CBCED638 /* StaleBlobRecoveryServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65EFD0AD3F8896F5D18F2967 /* StaleBlobRecoveryServiceTests.swift */; };
@@ -198,6 +199,7 @@
 		4A24C3EFD4C6BA4ACDA40380 /* KDFTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KDFTests.swift; sourceTree = "<group>"; };
 		4F631B3CA954B4A2A4EC5714 /* PasswdSSOAutofillExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PasswdSSOAutofillExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		5008EABA0367B0BB5E55052F /* LockStateReducer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockStateReducer.swift; sourceTree = "<group>"; };
+		50EA48EEB5CB57F3E901EBE5 /* EntryBlobDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryBlobDecoder.swift; sourceTree = "<group>"; };
 		544AC22B1D47CCD69051F85B /* HostSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostSyncService.swift; sourceTree = "<group>"; };
 		588F0525C544FC2740478510 /* RollbackFlagDrain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RollbackFlagDrain.swift; sourceTree = "<group>"; };
 		5D592E6D1C88CF478A0AC739 /* ServerConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerConfig.swift; sourceTree = "<group>"; };
@@ -572,6 +574,7 @@
 		F7356EF35B04FC0D0B740CC4 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				50EA48EEB5CB57F3E901EBE5 /* EntryBlobDecoder.swift */,
 				C40C54B860C6D1B296674038 /* LockState.swift */,
 				5D592E6D1C88CF478A0AC739 /* ServerConfig.swift */,
 				2113CB60ADE2776FF6176EA2 /* SessionState.swift */,
@@ -838,6 +841,7 @@
 				CCF7AB22A048CA0D633DC740 /* CredentialResolver.swift in Sources */,
 				65B588E2DB548D9142568179 /* CryptoUtils.swift in Sources */,
 				72BD7556CC6BAD53BD1F093D /* DPoPProofBuilder.swift in Sources */,
+				E3E4F08803D9E1580F7BE6CD /* EntryBlobDecoder.swift in Sources */,
 				89EF5EABFE7C000262E67616 /* EntryCacheFile.swift in Sources */,
 				0F7754D416476CE6B1AE0C81 /* EntryEncrypter.swift in Sources */,
 				3582DA3CD5414790F589E168 /* HostTokenStore.swift in Sources */,

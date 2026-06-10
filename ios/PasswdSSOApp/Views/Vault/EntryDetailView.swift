@@ -17,6 +17,7 @@ struct EntryDetailView: View {
   let hostSyncService: HostSyncService
 
   @State private var detail: VaultEntryDetail?
+  @State private var loadFailed: Bool = false
   @State private var isPasswordVisible: Bool = false
   @State private var isScreenRecording: Bool = false
   @State private var isShowingEditForm: Bool = false
@@ -37,6 +38,20 @@ struct EntryDetailView: View {
         .background(.regularMaterial)
       } else if let detail {
         detailContent(detail)
+      } else if loadFailed {
+        VStack(spacing: 12) {
+          Image(systemName: "exclamationmark.triangle")
+            .font(.largeTitle)
+            .foregroundStyle(.secondary)
+          Text("Couldn't decrypt this entry.")
+            .foregroundStyle(.secondary)
+          Button("Retry") {
+            loadFailed = false
+            loadDetail()
+          }
+          .buttonStyle(.bordered)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
         ProgressView("Decrypting…")
           .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -182,12 +197,14 @@ struct EntryDetailView: View {
   // MARK: - Private
 
   private func loadDetail() {
-    detail = viewModel.loadDetail(
+    let loaded = viewModel.loadDetail(
       for: summary.id,
       cacheData: cacheData,
       vaultKey: vaultKey,
       userId: userId
     )
+    detail = loaded
+    loadFailed = (loaded == nil)
   }
 
   /// Copy to pasteboard with localOnly + 60s expiration per plan §"Side-Channel Controls".

@@ -18,11 +18,23 @@ public struct SyncReport: Sendable, Equatable {
   public let entriesFetched: Int
   public let cacheBytesWritten: Int
   public let lastSuccessfulRefreshAt: Date
+  /// The freshly-built (plaintext) cache the sync just wrote. Consumers should
+  /// use this directly rather than re-reading the encrypted cache file right
+  /// after a write — the immediate read-back can miss on the first unlock
+  /// (counter/UUID consistency window after a fresh bridge key). `nil` for
+  /// background syncs that don't surface the cache.
+  public let cacheData: CacheData?
 
-  public init(entriesFetched: Int, cacheBytesWritten: Int, lastSuccessfulRefreshAt: Date) {
+  public init(
+    entriesFetched: Int,
+    cacheBytesWritten: Int,
+    lastSuccessfulRefreshAt: Date,
+    cacheData: CacheData? = nil
+  ) {
     self.entriesFetched = entriesFetched
     self.cacheBytesWritten = cacheBytesWritten
     self.lastSuccessfulRefreshAt = lastSuccessfulRefreshAt
+    self.cacheData = cacheData
   }
 }
 

@@ -8,9 +8,11 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
   // MARK: - Resolver
 
   private lazy var resolver: CredentialResolver = {
-    let bridgeKeyStore = BridgeKeyStore(
-      accessGroup: AppGroupContainer.identifier
-    )
+    // No explicit access group: the item lives in the app's default keychain
+    // access group (the single `$(AppIdentifierPrefix)…shared` entitlement),
+    // which the host app shares. An App Group id is not a valid keychain
+    // access group on device.
+    let bridgeKeyStore = BridgeKeyStore()
     let wrappedKeyStore = AppGroupWrappedKeyStore()
     let cacheURL = (try? AppGroupContainer.cacheFileURL()) ?? URL(fileURLWithPath: "/dev/null")
     let flagDir = (try? AppGroupContainer.url()

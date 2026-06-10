@@ -60,6 +60,9 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSRequiresIPhoneOS: true
+        # Required for the LAContext biometric gate (vault unlock / entry
+        # reveal). iOS hard-crashes any Face ID access without this key.
+        NSFaceIDUsageDescription: passwd-sso uses Face ID to confirm it's you before unlocking your vault and revealing credentials.
         # Custom URL scheme for the OAuth sign-in callback. The server 302s the
         # ASWebAuthenticationSession to `passwd-sso://auth/callback?code&state`;
         # iOS captures it by scheme — works for ANY self-hosted server host,

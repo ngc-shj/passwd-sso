@@ -117,7 +117,9 @@ public enum VaultViewModelError: Error, Equatable {
         key: vaultKey,
         aad: aad
       )
-      return try JSONDecoder().decode(VaultEntrySummary.self, from: plaintext)
+      // Shared decode: the server blob lacks `id` (injected from the cache row)
+      // and uses null/omitted fields — direct decode into VaultEntrySummary fails.
+      return EntryBlobDecoder.summary(plaintext: plaintext, entryId: entry.id, teamId: entry.teamId)
     } catch {
       return nil
     }
@@ -135,7 +137,7 @@ public enum VaultViewModelError: Error, Equatable {
         key: vaultKey,
         aad: aad
       )
-      return try JSONDecoder().decode(VaultEntryDetail.self, from: plaintext)
+      return EntryBlobDecoder.detail(plaintext: plaintext, entryId: entry.id, teamId: entry.teamId)
     } catch {
       return nil
     }

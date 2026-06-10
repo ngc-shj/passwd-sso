@@ -76,6 +76,38 @@ final class CountingKeychainAccessor: KeychainAccessor, @unchecked Sendable {
   }
 }
 
+// MARK: - Server-shaped blob payload structs for tests
+
+// These mirror the server blob shapes (OverviewBlobPayload/FullBlobPayload in CredentialResolver)
+// so that test fixtures exercise the same decode path as real server data.
+
+private struct TestOverviewBlob: Encodable {
+  let title: String
+  let username: String?
+  let urlHost: String?
+  let additionalUrlHosts: [String]?
+  let tags: [TestTagBlob]
+}
+
+private struct TestFullBlob: Encodable {
+  let title: String
+  let username: String?
+  let password: String
+  let url: String?
+  let notes: String?
+  let tags: [TestTagBlob]
+  let totp: TestTotpBlob?
+}
+
+private struct TestTagBlob: Encodable {
+  let name: String
+  let color: String?
+}
+
+private struct TestTotpBlob: Encodable {
+  let secret: String
+}
+
 // MARK: - Test helpers
 
 private func makeBridgeKeyBlob(
@@ -132,23 +164,45 @@ private func wrapAndSaveVaultKey(
   return wrapped
 }
 
-/// Encrypt a summary struct into EncryptedData (hex-encoded), with optional AAD.
+/// Encrypt a VaultEntrySummary as a server-shaped overview blob (OverviewBlobPayload format)
+/// into EncryptedData (hex-encoded), with optional AAD.
+/// id and hasTOTP are NOT encoded (not in the server blob shape).
 private func encryptSummary(
   _ summary: VaultEntrySummary,
   key: SymmetricKey,
   aad: Data? = nil
 ) throws -> EncryptedData {
-  let data = try JSONEncoder().encode(summary)
+  let blob = TestOverviewBlob(
+    title: summary.title,
+    username: summary.username.isEmpty ? nil : summary.username,
+    urlHost: summary.urlHost.isEmpty ? nil : summary.urlHost,
+    additionalUrlHosts: summary.additionalUrlHosts.isEmpty ? nil : summary.additionalUrlHosts,
+    tags: []
+  )
+  let data = try JSONEncoder().encode(blob)
   return try encryptAESGCMEncoded(plaintext: data, key: key, aad: aad)
 }
 
-/// Encrypt a detail struct into EncryptedData (hex-encoded), with optional AAD.
+/// Encrypt a VaultEntryDetail as a server-shaped full blob (FullBlobPayload format)
+/// into EncryptedData (hex-encoded), with optional AAD.
+/// id and urlHost are NOT encoded (not in the server full blob shape).
+/// totpSecret is encoded as totp:{secret:...} object.
 private func encryptDetail(
   _ detail: VaultEntryDetail,
   key: SymmetricKey,
   aad: Data? = nil
 ) throws -> EncryptedData {
-  let data = try JSONEncoder().encode(detail)
+  let totpBlob: TestTotpBlob? = detail.totpSecret.map { TestTotpBlob(secret: $0) }
+  let blob = TestFullBlob(
+    title: detail.title,
+    username: detail.username.isEmpty ? nil : detail.username,
+    password: detail.password,
+    url: detail.url.isEmpty ? nil : detail.url,
+    notes: detail.notes.isEmpty ? nil : detail.notes,
+    tags: [],
+    totp: totpBlob
+  )
+  let data = try JSONEncoder().encode(blob)
   return try encryptAESGCMEncoded(plaintext: data, key: key, aad: aad)
 }
 

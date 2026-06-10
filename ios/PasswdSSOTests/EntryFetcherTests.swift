@@ -6,18 +6,19 @@ import XCTest
 // MARK: - Helpers for EntryFetcherTests
 
 /// Personal entry response — nested EncryptedData objects.
+/// IVs are 24 hex chars (12 bytes = correct AES-GCM IV size). (C13.5)
 private func makePersonalEntryJSON(id: String) -> String {
   return """
   {
     "id": "\(id)",
     "encryptedOverview": {
       "ciphertext": "aabbcc",
-      "iv": "aabbccddeeff00112233445566778899",
+      "iv": "aabbccddeeff001122334455",
       "authTag": "00112233445566778899aabbccddeeff"
     },
     "encryptedBlob": {
       "ciphertext": "ddeeff",
-      "iv": "aabbccddeeff001122334455667788aa",
+      "iv": "aabbccddeeff001122334466",
       "authTag": "00112233445566778899aabbccddeeff"
     },
     "keyVersion": 1,
@@ -30,15 +31,16 @@ private func makePersonalEntryJSON(id: String) -> String {
 }
 
 /// Team entry response — flat ciphertext/iv/authTag fields.
+/// IVs are 24 hex chars (12 bytes = correct AES-GCM IV size). (C13.5)
 private func makeTeamEntryJSON(id: String) -> String {
   return """
   {
     "id": "\(id)",
     "encryptedOverview": "aabbcc",
-    "overviewIv": "aabbccddeeff00112233445566778899",
+    "overviewIv": "aabbccddeeff001122334455",
     "overviewAuthTag": "00112233445566778899aabbccddeeff",
     "encryptedBlob": "ddeeff",
-    "blobIv": "aabbccddeeff001122334455667788aa",
+    "blobIv": "aabbccddeeff001122334466",
     "blobAuthTag": "00112233445566778899aabbccddeeff",
     "aadVersion": 1,
     "teamKeyVersion": 1,
@@ -107,11 +109,11 @@ final class EntryFetcherTests: XCTestCase {
     let responseData = makePersonalEntriesResponseData(ids: ["e1", "e2", "e3"])
 
     MockURLProtocol.requestHandler = { request in
-      // Verify Authorization header
+      // Verify Authorization header uses Bearer for resource calls (C9/I1 / C13.2).
       let auth = request.value(forHTTPHeaderField: "Authorization")
-      XCTAssertTrue(auth?.hasPrefix("DPoP ") ?? false, "Should have DPoP Authorization")
+      XCTAssertTrue(auth?.hasPrefix("Bearer ") ?? false, "Should have Bearer Authorization for resource calls")
 
-      // Verify DPoP header present
+      // Verify DPoP header present (proof still sent alongside Bearer scheme).
       let dpop = request.value(forHTTPHeaderField: "DPoP")
       XCTAssertNotNil(dpop, "Should have DPoP proof header")
 

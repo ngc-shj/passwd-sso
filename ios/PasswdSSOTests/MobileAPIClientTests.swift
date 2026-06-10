@@ -271,6 +271,56 @@ final class MobileAPIClientTests: XCTestCase {
     }
   }
 
+  // MARK: - refreshToken DPoP scheme (C13.2 / T11 / RT4)
+
+  /// Verifies that refreshToken() sends Authorization: DPoP <refreshToken>
+  /// (not Bearer). The refresh route extracts via /^DPoP\s+/ (extractDpopBearer).
+  func testRefreshToken_usesDPoPScheme() async throws {
+    let refreshToken = "ref_dpop_test"
+    try? tokenStore.saveTokens(
+      access: "acc_dpop_test",
+      refresh: refreshToken,
+      expiresAt: Date().addingTimeInterval(3600)
+    )
+
+    var capturedRequest: URLRequest?
+    let refreshURL = serverURL.appending(
+      path: "/api/mobile/token/refresh",
+      directoryHint: .notDirectory
+    )
+
+    MockURLProtocol.requestHandler = { request in
+      capturedRequest = request
+      return (tokenResponseJSON(), httpResponse(status: 200, url: refreshURL))
+    }
+
+    let client = MobileAPIClient(
+      serverURL: serverURL,
+      signer: FakeSigner(),
+      jwk: knownJWK,
+      tokenStore: tokenStore,
+      urlSession: session
+    )
+
+    _ = try await client.refreshToken()
+
+    let req = try XCTUnwrap(capturedRequest)
+
+    // The refresh request must use DPoP scheme (not Bearer).
+    let auth = try XCTUnwrap(req.value(forHTTPHeaderField: "Authorization"))
+    XCTAssertTrue(
+      auth.hasPrefix("DPoP "),
+      "refreshToken must use Authorization: DPoP <refreshToken>, not Bearer"
+    )
+    XCTAssertFalse(
+      auth.hasPrefix("Bearer "),
+      "refreshToken must NOT use Bearer scheme"
+    )
+
+    // DPoP proof must also be present.
+    XCTAssertNotNil(req.value(forHTTPHeaderField: "DPoP"), "DPoP proof header must be set")
+  }
+
   // MARK: - updateEntry
 
   private func makeUpdateRequest() -> UpdateEntryRequest {
@@ -325,9 +375,9 @@ final class MobileAPIClientTests: XCTestCase {
     // DPoP header must be present.
     XCTAssertNotNil(req.value(forHTTPHeaderField: "DPoP"))
 
-    // Authorization header must start with "DPoP ".
+    // Authorization header must start with "Bearer " for resource calls (C9/I1).
     let auth = try XCTUnwrap(req.value(forHTTPHeaderField: "Authorization"))
-    XCTAssertTrue(auth.hasPrefix("DPoP "), "Authorization must use DPoP scheme")
+    XCTAssertTrue(auth.hasPrefix("Bearer "), "Authorization must use Bearer scheme for resource calls")
 
     // Body must contain all required fields.
     let bodyData = try XCTUnwrap(req.httpBody ?? readStream(req.httpBodyStream))
@@ -501,9 +551,9 @@ final class MobileAPIClientTests: XCTestCase {
     // DPoP header must be present with ath.
     XCTAssertNotNil(req.value(forHTTPHeaderField: "DPoP"), "DPoP header must be set")
 
-    // Authorization must use DPoP scheme.
+    // Authorization must use Bearer scheme for resource calls (C9/I1).
     let auth = try XCTUnwrap(req.value(forHTTPHeaderField: "Authorization"))
-    XCTAssertTrue(auth.hasPrefix("DPoP "), "Authorization must use DPoP scheme")
+    XCTAssertTrue(auth.hasPrefix("Bearer "), "Authorization must use Bearer scheme for resource calls")
 
     // Body must contain all required fields.
     let bodyData = try XCTUnwrap(req.httpBody ?? readStream(req.httpBodyStream))

@@ -55,15 +55,19 @@ struct VaultUnlockView: View {
     do {
       let result = try await unlocker.unlock(passphrase: passphrase)
       passphrase = ""
+      // Keep isLoading = true on success: the parent runs the initial entry
+      // sync before swapping in the vault list. Resetting here would re-show
+      // this passphrase screen (without the spinner) during that ~1s gap.
       await MainActor.run {
         onUnlocked(result)
       }
     } catch VaultUnlockError.invalidPassphrase {
       errorMessage = "Incorrect passphrase. Please try again."
       passphrase = ""
+      isLoading = false
     } catch {
       errorMessage = "Unable to unlock vault. Check your connection and try again."
+      isLoading = false
     }
-    isLoading = false
   }
 }
