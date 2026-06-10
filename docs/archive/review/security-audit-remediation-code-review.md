@@ -14,6 +14,12 @@ All 17 Round-1 findings verified **resolved** (functionality re-traced scrubber 
 
 Post-round: merged `origin/main` (#529 iOS host-server integration + codeql bump) — zero file overlap with this branch; `npx prisma generate` re-run; pre-pr now 32/32 PASS (includes the new iOS gate from main).
 
+## Round 3 (verification, on `9a0ee0da` + main merge)
+
+Functionality: **No findings** (F6 flow re-traced incl. already_claimed recovery; char-class change proven non-weakening — all three token kinds are 64-char lowercase hex; #529 semantic-interaction check clean). Security: **No findings** (#529's bridge-code flow needs no C13 — 60s single-use CAS + step-up at issuance, downstream tokens C13-covered at use AND rotation; no bypass of cookie hardening or unlock/data lockout; S6 char class bypass-free). Testing: mutation-tested the round-2 fixes — S6 fixtures all red under 3 mutations (healthy), but **T13**: the F6 test stayed GREEN with the guard reverted (order-based mock, where-blind); **T14 [Minor]**: array-form exception branch decorative.
+
+→ Fixed in `5bbb973c`: T13 nth-call where assertion (+createdById absence) — red verified under guard removal; T14 bare-array fixture — red verified under branch removal.
+
 ## Round 1
 
 ## Changes from Previous Round
@@ -102,3 +108,7 @@ RT5 → T2/T3 (recurrence in integration/mock form), RT3 ✓, R19 ✓, test-titl
 - T5 [Major] navigation/query_string fixtures added (within the S2 fixture set).
 - T6/T7/T8/T9 [Minor] all fixed as specified (env teeth via vi.stubEnv after hygiene-gate conversion; stderr-redaction asserts; html asserts; split tx mock proving in-transaction).
 - Gate re-run: pre-pr.sh 31/31 PASS (after fixing a type error, the refresh-token.test R19 miss, and converting redis.test.ts to vi.stubEnv per the test-hygiene gate).
+
+## Round 4 (final verification)
+
+All three experts: **No findings** on the `5bbb973c` test-only diff. Code review CLOSED after 4 rounds. Cumulative: Round 1 — 17 findings (8 Major / 9 Minor, dedup'd), Round 2 — 4 (2 Minor / 2 Info), Round 3 — 2 (T13 detection-power, T14 Minor); all resolved with red/mutation evidence; zero skipped or deferred findings requiring Anti-Deferral entries beyond the documented scope-exclusion (C8 admin-reset/breakglass) and the recorded sibling note (initdb 02/03 legacy fallback — compose-guarded, follow-up).
