@@ -101,6 +101,18 @@ export async function validateApiKey(
     return { ok: false, error: "API_KEY_EXPIRED" };
   }
 
+  // C13: reject deactivated users — tenant-scoped to the token's own tenant.
+  // Fail-closed: no active membership row ⇒ invalid (cross-tenant bypass guard).
+  const member = await withBypassRls(prisma, async (tx) =>
+    tx.tenantMember.findUnique({
+      where: { tenantId_userId: { tenantId: key.tenantId, userId: key.userId } },
+      select: { deactivatedAt: true },
+    }),
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  if (!member || member.deactivatedAt !== null) {
+    return { ok: false, error: "API_KEY_INVALID" };
+  }
+
   // Best-effort lastUsedAt update (non-blocking)
   void withBypassRls(prisma, async (tx) =>
     tx.apiKey.update({

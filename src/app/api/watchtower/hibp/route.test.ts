@@ -100,4 +100,43 @@ describe("GET /api/watchtower/hibp", () => {
     );
     expect(mockCheck).toHaveBeenCalledWith("rl:hibp:user-123");
   });
+
+  it("returns 502 when fetch times out (TimeoutError)", async () => {
+    const timeoutError = Object.assign(new Error("The operation timed out."), { name: "TimeoutError" });
+    mockFetch.mockRejectedValue(timeoutError);
+
+    // Use a prefix not used in other tests to avoid the in-memory cache
+    const res = await GET(
+      createRequest("GET", "http://localhost:3000/api/watchtower/hibp", {
+        searchParams: { prefix: "00000" },
+      }),
+    );
+    expect(res.status).toBe(502);
+  });
+
+  it("returns 502 when fetch is aborted (AbortError)", async () => {
+    const abortError = Object.assign(new Error("The user aborted a request."), { name: "AbortError" });
+    mockFetch.mockRejectedValue(abortError);
+
+    // Use a prefix not used in other tests to avoid the in-memory cache
+    const res = await GET(
+      createRequest("GET", "http://localhost:3000/api/watchtower/hibp", {
+        searchParams: { prefix: "11111" },
+      }),
+    );
+    expect(res.status).toBe(502);
+  });
+
+  it("re-throws unexpected fetch errors", async () => {
+    mockFetch.mockRejectedValue(new Error("unexpected network error"));
+
+    // Use a prefix not used in other tests to avoid the in-memory cache
+    await expect(
+      GET(
+        createRequest("GET", "http://localhost:3000/api/watchtower/hibp", {
+          searchParams: { prefix: "22222" },
+        }),
+      ),
+    ).rejects.toThrow("unexpected network error");
+  });
 });

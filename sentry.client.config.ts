@@ -12,5 +12,8 @@ if (dsn) {
     beforeSend(event) {
       return scrubSentryEvent(event as unknown as Record<string, unknown>) as unknown as typeof event;
     },
+    beforeSendTransaction(event) {
+      return scrubSentryEvent(event as unknown as Record<string, unknown>) as unknown as typeof event;
+    },
   });
 }

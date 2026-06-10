@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { SEC_PER_MINUTE } from "@/lib/constants/time";
 
 describe("auth.config basePath handling", () => {
   beforeEach(() => {
@@ -233,5 +234,36 @@ describe("auth.config Google domain validation", () => {
         profile: {},
       }),
     ).toBe(true);
+  });
+});
+
+describe("auth.config magic-link provider settings", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("Nodemailer provider maxAge equals 15 * SEC_PER_MINUTE", async () => {
+    vi.stubEnv("EMAIL_PROVIDER", "nodemailer");
+    // vi.resetModules() is called in beforeEach — fresh import picks up the stub
+    const config = (await import("@/auth.config")).default;
+    const nodemailerProvider = config.providers.find(
+      (p): p is { id: string; maxAge?: number } =>
+        typeof p === "object" && p !== null && "id" in p && (p as { id: string }).id === "nodemailer",
+    );
+
+    expect(nodemailerProvider).toBeDefined();
+    // maxAge is seconds; 15 * SEC_PER_MINUTE = 15 * 60 = 900
+    expect(nodemailerProvider?.maxAge).toBe(15 * SEC_PER_MINUTE);
+  });
+
+  it("MAGIC_LINK_TTL_MINUTES is 15 (equals 15 * SEC_PER_MINUTE / SEC_PER_MINUTE)", async () => {
+    const { MAGIC_LINK_TTL_MINUTES } = await import("@/lib/constants/auth/magic-link");
+    // This constant is the single source of truth shared by the provider and the email template
+    expect(MAGIC_LINK_TTL_MINUTES).toBe(15);
   });
 });

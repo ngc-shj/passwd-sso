@@ -67,6 +67,19 @@ export class VaultUnlockError extends Error {
 }
 
 /**
+ * Parse a non-OK response from /api/vault/unlock/data and throw
+ * VaultUnlockError(ACCOUNT_LOCKED) when the envelope signals lockout.
+ * Called from all three unlock-data fetch sites so the behaviour is uniform.
+ * @throws {VaultUnlockError} when error === ACCOUNT_LOCKED
+ */
+export async function throwIfUnlockDataLocked(res: Response): Promise<void> {
+  const body = await res.json().catch(() => ({}));
+  if (body.error === API_ERROR.ACCOUNT_LOCKED) {
+    throw new VaultUnlockError(API_ERROR.ACCOUNT_LOCKED, body.lockedUntil);
+  }
+}
+
+/**
  * Notify the server of a failed unlock attempt (for lockout tracking).
  * Sends a dummy authHash so the server records the failure and
  * returns lockout status (403) or rate-limit (429) if applicable.
@@ -392,6 +405,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         if (dataRes.status === 401) {
           throw new VaultUnlockError(API_ERROR.UNAUTHORIZED);
         }
+        await throwIfUnlockDataLocked(dataRes);
         return false;
       }
       const vaultData = await dataRes.json();
@@ -523,6 +537,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         if (dataRes.status === 401 || optionsRes.status === 401) {
           throw new VaultUnlockError(API_ERROR.UNAUTHORIZED);
         }
+        if (!dataRes.ok) await throwIfUnlockDataLocked(dataRes);
         return false;
       }
 
@@ -695,6 +710,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         if (dataRes.status === 401) {
           throw new VaultUnlockError(API_ERROR.UNAUTHORIZED);
         }
+        await throwIfUnlockDataLocked(dataRes);
         return false;
       }
       const vaultData = await dataRes.json();

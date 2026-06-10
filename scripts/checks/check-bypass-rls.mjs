@@ -28,7 +28,7 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/audit/audit-outbox.ts", ["auditOutbox"]],
   ["src/lib/audit/audit-user-lookup.ts", ["user"]],
   ["src/lib/auth/tokens/scim-token.ts", ["scimToken"]],
-  ["src/lib/auth/tokens/extension-token.ts", ["extensionToken", "tenant"]],
+  ["src/lib/auth/tokens/extension-token.ts", ["extensionToken", "tenant", "tenantMember"]],
   // C5: shared DPoP validate helper for IOS_APP + BROWSER_EXTENSION rows.
   // Updates lastUsedAt / lastUsedIp / lastUsedUserAgent on the resolved row.
   ["src/lib/auth/dpop/validate-token-dpop.ts", ["extensionToken"]],
@@ -71,7 +71,7 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/auth/access/team-auth.ts", ["teamMember"]],
   ["src/lib/vault/vault-reset.ts", ["*"]], // vault wipe: deletes across many tables in $transaction
   ["src/app/api/vault/admin-reset/route.ts", ["adminVaultReset"]],
-  ["src/lib/auth/tokens/api-key.ts", ["apiKey"]],
+  ["src/lib/auth/tokens/api-key.ts", ["apiKey", "tenantMember"]],
   ["src/lib/auth/webauthn/webauthn-authorize.ts", ["webAuthnCredential"]],
   ["src/app/api/auth/passkey/verify/route.ts", ["user", "session"]],
   ["src/app/api/auth/passkey/options/email/route.ts", ["user", "webAuthnCredential"]],
@@ -140,7 +140,7 @@ const ALLOWED_USAGE = new Map([
   // Operator-token validator: cross-tenant lookup is required because the
   // bearer-token caller has no tenant context until the token row resolves it
   ["src/lib/auth/tokens/operator-token.ts", ["operatorToken"]],
-  ["src/lib/mcp/oauth-server.ts", ["mcpAuthorizationCode", "mcpAccessToken", "mcpRefreshToken"]],
+  ["src/lib/mcp/oauth-server.ts", ["mcpAuthorizationCode", "mcpAccessToken", "mcpRefreshToken", "tenantMember"]],
   ["src/app/api/mcp/authorize/route.ts", ["mcpClient", "user"]],
   ["src/app/api/mcp/register/route.ts", ["mcpClient"]],
   ["src/app/api/mcp/authorize/consent/route.ts", ["mcpClient", "user"]],

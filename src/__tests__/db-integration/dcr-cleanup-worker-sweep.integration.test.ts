@@ -16,6 +16,7 @@ import {
 } from "@/workers/audit-outbox-worker";
 import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE, AUDIT_METADATA_KEY } from "@/lib/constants/audit/audit";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
+import { MAX_UNCLAIMED_DCR_CLIENTS } from "@/lib/constants/auth/mcp";
 
 describe("dcr-cleanup-worker sweepOnce (real DB)", () => {
   let ctx: TestContext;
@@ -245,5 +246,129 @@ describe("dcr-cleanup-worker sweepOnce (real DB)", () => {
     });
     expect(anchors).toHaveLength(1);
     expect(Number(anchors[0].chain_seq)).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// NOTE: This describe intentionally lives in this file because both suites
+// mutate the global unclaimed-DCR namespace (mcp_clients WHERE is_dcr AND
+// tenant_id IS NULL). File co-location guarantees serial execution under
+// vitest file-parallelism — running them in separate files causes them to
+// clobber each other's beforeEach seed/clear in parallel workers.
+describe("DCR register lazy cleanup (real DB)", () => {
+  let ctx: TestContext;
+  let seededClientIds: string[];
+
+  beforeAll(async () => {
+    ctx = await createTestContext();
+  });
+  afterAll(async () => {
+    await ctx.cleanup();
+  });
+  beforeEach(async () => {
+    seededClientIds = [];
+    // Clear all pre-existing unclaimed DCR rows so counts are deterministic.
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `DELETE FROM mcp_clients WHERE is_dcr = true AND tenant_id IS NULL`,
+      );
+    });
+  });
+  afterEach(async () => {
+    if (seededClientIds.length > 0) {
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        for (const id of seededClientIds) {
+          await tx.$executeRawUnsafe(
+            `DELETE FROM mcp_clients WHERE id = $1::uuid`,
+            id,
+          );
+        }
+      });
+    }
+  });
+
+  async function insertUnclaimedDcrClient(expiresAt: string): Promise<string> {
+    const id = randomUUID();
+    const clientIdStr = `test-cl-${id.slice(0, 12)}`;
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO mcp_clients (id, client_id, client_secret_hash, name, redirect_uris, allowed_scopes, is_dcr, tenant_id, dcr_expires_at, created_at, updated_at)
+         VALUES ($1::uuid, $2, '', $3, '{}', 'credentials:list', true, NULL, ${expiresAt}, now(), now())`,
+        id,
+        clientIdStr,
+        `client-${id.slice(0, 8)}`,
+      );
+    });
+    seededClientIds.push(id);
+    return id;
+  }
+
+  /**
+   * Executes the same deleteMany-then-count transaction that register/route.ts
+   * runs. Returns the count after cleanup.
+   */
+  async function runRegisterTx(): Promise<{ countAfterCleanup: number; deletedCount: number }> {
+    return ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+
+      // Mirror of C6 lazy cleanup in register/route.ts
+      const deleted = await tx.$queryRawUnsafe<{ cnt: bigint }[]>(
+        `WITH del AS (
+           DELETE FROM mcp_clients
+           WHERE is_dcr = true AND tenant_id IS NULL AND dcr_expires_at < now()
+           RETURNING id
+         )
+         SELECT COUNT(*) AS cnt FROM del`,
+      );
+      const deletedCount = Number(deleted[0]?.cnt ?? 0);
+
+      const remaining = await tx.$queryRawUnsafe<{ cnt: bigint }[]>(
+        `SELECT COUNT(*) AS cnt FROM mcp_clients WHERE is_dcr = true AND tenant_id IS NULL`,
+      );
+      const countAfterCleanup = Number(remaining[0]?.cnt ?? 0);
+      return { countAfterCleanup, deletedCount };
+    });
+  }
+
+  it("expired unclaimed rows are removed by lazy cleanup, count falls below cap", async () => {
+    // Seed 100 expired unclaimed rows
+    for (let i = 0; i < MAX_UNCLAIMED_DCR_CLIENTS; i++) {
+      await insertUnclaimedDcrClient("now() - interval '1 hour'");
+    }
+
+    // Sanity: 100 rows exist before cleanup
+    const beforeCount = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      const rows = await tx.$queryRawUnsafe<{ cnt: bigint }[]>(
+        `SELECT COUNT(*) AS cnt FROM mcp_clients WHERE is_dcr = true AND tenant_id IS NULL`,
+      );
+      return Number(rows[0]?.cnt ?? 0);
+    });
+    expect(beforeCount).toBe(MAX_UNCLAIMED_DCR_CLIENTS);
+
+    const { countAfterCleanup, deletedCount } = await runRegisterTx();
+
+    // All 100 expired rows deleted
+    expect(deletedCount).toBe(MAX_UNCLAIMED_DCR_CLIENTS);
+    // Count is now below cap — a new registration would succeed
+    expect(countAfterCleanup).toBe(0);
+    expect(countAfterCleanup).toBeLessThan(MAX_UNCLAIMED_DCR_CLIENTS);
+  });
+
+  it("fresh (non-expired) unclaimed rows survive cleanup and reach cap, blocking registration", async () => {
+    // Seed 100 fresh unclaimed rows (expire in 1 hour)
+    for (let i = 0; i < MAX_UNCLAIMED_DCR_CLIENTS; i++) {
+      await insertUnclaimedDcrClient("now() + interval '1 hour'");
+    }
+
+    const { countAfterCleanup, deletedCount } = await runRegisterTx();
+
+    // No expired rows — nothing deleted
+    expect(deletedCount).toBe(0);
+    // All 100 rows survive — count equals cap, registration would return 503
+    expect(countAfterCleanup).toBe(MAX_UNCLAIMED_DCR_CLIENTS);
+    expect(countAfterCleanup).toBeGreaterThanOrEqual(MAX_UNCLAIMED_DCR_CLIENTS);
   });
 });

@@ -70,13 +70,13 @@ describe("PUT /api/folders/[id]", () => {
     expect(status).toBe(404);
   });
 
-  it("returns 403 when folder belongs to another user", async () => {
+  it("returns 404 when folder belongs to another user (A01-4: no existence oracle)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFolderFindUnique.mockResolvedValue({ id: "f1", userId: "other-user", parentId: null, name: "Old" });
     const req = createRequest("PUT", "http://localhost/api/folders/f1", { body: { name: "x" } });
     const res = await PUT(req, createParams({ id: "f1" }));
     const { status } = await parseResponse(res);
-    expect(status).toBe(403);
+    expect(status).toBe(404);
   });
 
   it("returns 400 for invalid JSON body", async () => {
@@ -261,13 +261,13 @@ describe("DELETE /api/folders/[id]", () => {
     expect(status).toBe(404);
   });
 
-  it("returns 403 when folder belongs to another user", async () => {
+  it("returns 404 when folder belongs to another user (A01-4: no existence oracle)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFolderFindUnique.mockResolvedValue({ id: "f1", userId: "other", parentId: null, name: "F" });
     const req = createRequest("DELETE", "http://localhost/api/folders/f1");
     const res = await DELETE(req, createParams({ id: "f1" }));
     const { status } = await parseResponse(res);
-    expect(status).toBe(403);
+    expect(status).toBe(404);
   });
 
   it("deletes folder and promotes children", async () => {

@@ -74,7 +74,7 @@ export const LOOPBACK_REDIRECT_RE = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):
 // DCR (Dynamic Client Registration) constants
 export const MCP_REFRESH_TOKEN_PREFIX = "mcpr_";
 export const MCP_REFRESH_TOKEN_EXPIRY_SEC = 7 * SEC_PER_DAY;
-export const MCP_DCR_UNCLAIMED_EXPIRY_SEC = SEC_PER_DAY;
+export const MCP_DCR_UNCLAIMED_EXPIRY_SEC = SEC_PER_HOUR;
 export const MAX_UNCLAIMED_DCR_CLIENTS = 100;
 export const DCR_RATE_LIMIT_WINDOW_MS = MS_PER_HOUR;
 export const DCR_RATE_LIMIT_MAX = 20; // per IP (/64 for IPv6)

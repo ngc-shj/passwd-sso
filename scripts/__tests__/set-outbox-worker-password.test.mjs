@@ -1,13 +1,13 @@
 /**
- * Tests for scripts/set-outbox-worker-password.sh (T19 — first-time coverage
- * after the S6 stdin-based password fix).
+ * Tests for scripts/set-outbox-worker-password.sh
  *
  * Coverage:
  *   T1 — exits 1 with structured error when stdin is empty
- *   T2 — DRY_RUN=1 + --print-args-file: exits 0 and args file contains
- *        the password in "-v new_password=<value>" form
- *   T3 — password value never appears in /proc/<pid>/cmdline of the wrapper
- *        bash process (best-effort; skipped with TODO if /proc is unavailable)
+ *   T2 — DRY_RUN=1 + --print-args-file: exits 0, argv does NOT contain
+ *        new_password=, and the captured stdin SQL contains the plain password
+ *   T3 — password with a single quote: SQL file doubles it (SQL-safe quoting)
+ *   T4 — password with a literal $: passes through unchanged in the SQL
+ *   T5 — password value never appears in bash wrapper's stdout/stderr
  */
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -43,13 +43,13 @@ describe("set-outbox-worker-password.sh", () => {
     expect(result.stderr).toContain("password expected on stdin");
   });
 
-  it("with DRY_RUN=1 + --print-args-file + stdin 'secret': exits 0 and args file records -v new_password=secret", () => {
+  it("with DRY_RUN=1 + --print-args-file + stdin 'secret': argv must NOT contain new_password=, SQL file contains the password", () => {
     const tmpDir = mkdtempSync(resolve(tmpdir(), "outbox-test-"));
-    const argsFile = resolve(tmpDir, "args.json");
+    const sqlFile = resolve(tmpDir, "sql.txt");
 
     try {
       const result = spawnScript(
-        ["--print-args-file", argsFile],
+        ["--print-args-file", sqlFile],
         {
           input: "secret",
           env: { DRY_RUN: "1" },
@@ -58,52 +58,72 @@ describe("set-outbox-worker-password.sh", () => {
 
       expect(result.status).toBe(0);
 
-      const argsJson = readFileSync(argsFile, "utf8").trim();
-      const args = JSON.parse(argsJson);
+      // argv must NOT expose the password.
+      expect(result.stdout).not.toContain("new_password=");
+      expect(result.stderr).not.toContain("new_password=secret");
 
-      expect(Array.isArray(args)).toBe(true);
-      expect(args[0]).toBe("psql");
-
-      // The args array must contain "-v" followed by "new_password=secret".
-      const vIdx = args.indexOf("-v");
-      expect(vIdx).toBeGreaterThan(-1);
-      expect(args[vIdx + 1]).toBe("new_password=secret");
+      // The captured stdin SQL must contain the real password value.
+      const sql = readFileSync(sqlFile, "utf8");
+      expect(sql).toContain("'secret'");
+      expect(sql).toContain("passwd_outbox_worker");
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
-  it("password value never appears in the bash wrapper's argv (best-effort /proc check)", () => {
-    // This test relies on /proc/<pid>/cmdline being available (Linux).
-    // On platforms where /proc is unavailable the assertion is skipped.
-    const procAvailable = (() => {
-      try {
-        readFileSync("/proc/self/cmdline");
-        return true;
-      } catch {
-        return false;
-      }
-    })();
+  it("single-quote in password is doubled in the SQL (SQL-safe quoting)", () => {
+    const tmpDir = mkdtempSync(resolve(tmpdir(), "outbox-test-quote-"));
+    const sqlFile = resolve(tmpDir, "sql.txt");
 
-    if (!procAvailable) {
-      // TODO: implement a cross-platform alternative if macOS support is needed.
-      console.warn("Skipping /proc cmdline check — /proc not available on this platform");
-      return;
+    try {
+      const result = spawnScript(
+        ["--print-args-file", sqlFile],
+        {
+          input: "it's'a'test",
+          env: { DRY_RUN: "1" },
+        },
+      );
+
+      expect(result.status).toBe(0);
+
+      const sql = readFileSync(sqlFile, "utf8");
+      // Each ' in the original must become '' in the SQL string literal.
+      expect(sql).toContain("'it''s''a''test'");
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
 
-    const tmpDir = mkdtempSync(resolve(tmpdir(), "outbox-test-cmdline-"));
-    const argsFile = resolve(tmpDir, "args.json");
+  it("literal $ in password passes through unchanged in the SQL", () => {
+    const tmpDir = mkdtempSync(resolve(tmpdir(), "outbox-test-dollar-"));
+    const sqlFile = resolve(tmpDir, "sql.txt");
+
+    try {
+      const result = spawnScript(
+        ["--print-args-file", sqlFile],
+        {
+          input: "pa$$word",
+          env: { DRY_RUN: "1" },
+        },
+      );
+
+      expect(result.status).toBe(0);
+
+      const sql = readFileSync(sqlFile, "utf8");
+      expect(sql).toContain("'pa$$word'");
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("password value never appears in the bash wrapper's stdout or stderr", () => {
+    const tmpDir = mkdtempSync(resolve(tmpdir(), "outbox-test-leak-"));
+    const sqlFile = resolve(tmpDir, "sql.txt");
     const sentinel = "super-secret-cmdline-check-outbox-12345";
 
     try {
-      // DRY_RUN=1 exits immediately after writing the args file — no long-running
-      // psql subprocess. We verify that the bash wrapper's own argv (captured from
-      // /proc at spawn time) does not contain the password. Because spawnSync is
-      // synchronous and the process has already exited, we use the argsFile output
-      // to confirm the password was passed via the -v flag (not concatenated into
-      // the script's own argv by the shell).
       const result = spawnScript(
-        ["--print-args-file", argsFile],
+        ["--print-args-file", sqlFile],
         {
           input: sentinel,
           env: { DRY_RUN: "1" },
@@ -112,15 +132,13 @@ describe("set-outbox-worker-password.sh", () => {
 
       expect(result.status).toBe(0);
 
-      // The password must not appear in the wrapper's stdout or stderr output
-      // (which would indicate the shell emitted it via set -x tracing or similar).
+      // The password must not appear in stdout/stderr (no set -x leakage, etc.).
       expect(result.stdout).not.toContain(sentinel);
       expect(result.stderr).not.toContain(sentinel);
 
-      // Confirm the password IS correctly captured in the args file.
-      const args = JSON.parse(readFileSync(argsFile, "utf8").trim());
-      const vIdx = args.indexOf("-v");
-      expect(args[vIdx + 1]).toBe(`new_password=${sentinel}`);
+      // Confirm the password IS correctly captured in the SQL file.
+      const sql = readFileSync(sqlFile, "utf8");
+      expect(sql).toContain(`'${sentinel}'`);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }

@@ -163,6 +163,27 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
   },
   {
     type: "literal",
+    key: "PASSWD_JACKSON_PASSWORD",
+    justification:
+      "Password for the jackson_user NOSUPERUSER DB role used by BoxyHQ SAML Jackson. " +
+      "Consumed by docker-compose (PASSWD_JACKSON_PASSWORD env on db service for initdb AND " +
+      "DB_URL on the jackson service). Not read by the Next.js app.",
+    consumers: [
+      "docker-compose.yml",
+      "infra/postgres/initdb",
+    ],
+    reviewedAt: "2026-06-10",
+    includeInExample: true,
+    requiredForConsumer: true,
+    description:
+      "Password for the jackson_user NOSUPERUSER DB role (BoxyHQ SAML Jackson).\n" +
+      "Used by docker-compose to compose DB_URL for the jackson container, AND by\n" +
+      "infra/postgres/initdb to create the role on first boot.\n" +
+      "Generate with: openssl rand -hex 24",
+    secret: true,
+  },
+  {
+    type: "literal",
     key: "PASSWD_DCR_CLEANUP_WORKER_PASSWORD",
     justification:
       "Password for the passwd_dcr_cleanup_worker NOSUPERUSER DB role used by the DCR cleanup worker. " +

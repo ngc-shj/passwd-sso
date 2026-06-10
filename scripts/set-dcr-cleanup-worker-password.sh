@@ -69,31 +69,26 @@ if [[ -z "$new_password" ]]; then
   exit 1
 fi
 
-PSQL_ARGS=(
-  "$MIGRATION_DATABASE_URL"
-  -v "new_password=${new_password}"
-  -c "ALTER ROLE passwd_dcr_cleanup_worker WITH PASSWORD :'new_password';"
-)
+# SQL-safe quoting: double every single quote in the password.
+escaped="${new_password//\'/\'\'}"
 
 if [[ "$DRY_RUN" == "1" ]]; then
   # Print sanitised representation (password redacted).
-  echo "[DRY_RUN] would invoke: psql \"${MIGRATION_DATABASE_URL}\" -v new_password=<REDACTED> -c \"ALTER ROLE passwd_dcr_cleanup_worker WITH PASSWORD :'new_password';\"" >&2
+  echo "[DRY_RUN] would invoke: psql \"${MIGRATION_DATABASE_URL}\" -f - (stdin: ALTER ROLE passwd_dcr_cleanup_worker WITH PASSWORD '<REDACTED>';)" >&2
 
   if [[ -n "$PRINT_ARGS_FILE" ]]; then
-    # Write actual args (including password) to file for test assertion only.
-    # umask 077 ensures mode 0600.
+    # Write the generated stdin SQL (with quote-doubled password) to file for
+    # test assertion only. umask 077 ensures mode 0600.
     (
       umask 077
-      python3 -c "
-import json, sys
-args = [\"psql\"] + sys.argv[1:]
-print(json.dumps(args))
-" "$MIGRATION_DATABASE_URL" -v "new_password=${new_password}" -c "ALTER ROLE passwd_dcr_cleanup_worker WITH PASSWORD :'new_password';" > "$PRINT_ARGS_FILE"
+      printf "ALTER ROLE passwd_dcr_cleanup_worker WITH PASSWORD '%s';\n" "$escaped" > "$PRINT_ARGS_FILE"
     )
   fi
   exit 0
 fi
 
-psql "${PSQL_ARGS[@]}"
+psql "$MIGRATION_DATABASE_URL" -f - <<EOF
+ALTER ROLE passwd_dcr_cleanup_worker WITH PASSWORD '$escaped';
+EOF
 
 echo "[set-dcr-cleanup-worker-password] OK — password updated for passwd_dcr_cleanup_worker"

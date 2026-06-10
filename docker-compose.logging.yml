@@ -30,8 +30,8 @@ services:
       - ./infra/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
       - ./infra/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
     ports:
-      - "24224:24224"
-      - "24224:24224/udp"
+      - "127.0.0.1:24224:24224"
+      - "127.0.0.1:24224:24224/udp"
     healthcheck:
       # fluent/fluent-bit image does not include /bin/sh or curl.
       # Use a binary that is guaranteed to exist in the container.

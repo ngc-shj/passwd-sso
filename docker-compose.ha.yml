@@ -6,7 +6,12 @@
 
 x-sentinel: &sentinel
   image: redis:7-alpine
-  entrypoint: ["/bin/sh", "-c", "cp /etc/sentinel-template.conf /tmp/sentinel.conf && redis-sentinel /tmp/sentinel.conf"]
+  # Runtime-env expansion ($$REDIS_PASSWORD) keeps the real value out of compose
+  # render-time interpolation and thus out of long-lived process argv.
+  # chmod 600 on the copied conf prevents world-readable password exposure.
+  entrypoint: ["/bin/sh", "-c", "cp /etc/sentinel-template.conf /tmp/sentinel.conf && chmod 600 /tmp/sentinel.conf && echo \"sentinel auth-pass mymaster $$REDIS_PASSWORD\" >> /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf"]
+  environment:
+    REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
   volumes:
     - ./infra/redis/sentinel.conf:/etc/sentinel-template.conf:ro
   depends_on:
@@ -21,18 +26,20 @@ x-sentinel: &sentinel
     - internal
 
 services:
-  # Override base redis to act as master with explicit role
+  # Override base redis command to include requirepass and masterauth for post-failover rejoin.
   redis:
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}", "--masterauth", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
 
   redis-replica-1:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes", "--replicaof", "redis", "6379"]
+    command: ["redis-server", "--appendonly", "yes", "--replicaof", "redis", "6379", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}", "--masterauth", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     depends_on:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -42,12 +49,14 @@ services:
 
   redis-replica-2:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes", "--replicaof", "redis", "6379"]
+    command: ["redis-server", "--appendonly", "yes", "--replicaof", "redis", "6379", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}", "--masterauth", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     depends_on:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -65,7 +74,7 @@ services:
   # Override app environment for Sentinel mode
   app:
     environment:
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
       - REDIS_SENTINEL=true
       - REDIS_SENTINEL_HOSTS=sentinel-1:26379,sentinel-2:26379,sentinel-3:26379
       - REDIS_SENTINEL_MASTER_NAME=mymaster

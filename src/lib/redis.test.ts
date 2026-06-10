@@ -37,6 +37,7 @@ describe("getRedis", () => {
     delete process.env.REDIS_SENTINEL_MASTER_NAME;
     delete process.env.REDIS_SENTINEL_PASSWORD;
     delete process.env.REDIS_SENTINEL_TLS;
+    delete process.env.REDIS_PASSWORD;
     delete globalAny.redisClient;
   });
 
@@ -143,6 +144,32 @@ describe("getRedis", () => {
     getRedis();
     expect(mocks.RedisMock).toHaveBeenCalledWith(
       expect.objectContaining({ sentinelPassword: "s3cr3t" }),
+    );
+  });
+
+  it("passes password to Sentinel-mode client for data-node auth when REDIS_PASSWORD is set", async () => {
+    process.env.REDIS_URL = "redis://localhost:6379";
+    process.env.REDIS_SENTINEL = "true";
+    process.env.REDIS_SENTINEL_HOSTS = "sentinel:26379";
+    process.env.REDIS_PASSWORD = "data-node-pass";
+    const { getRedis } = await import("@/lib/redis");
+    getRedis();
+    expect(mocks.RedisMock).toHaveBeenCalledWith(
+      expect.objectContaining({ password: "data-node-pass" }),
+    );
+  });
+
+  it("does not pass password option in non-Sentinel mode (password embedded in URL)", async () => {
+    process.env.REDIS_URL = "redis://:embedded-pass@localhost:6379";
+    // REDIS_SENTINEL not set → non-Sentinel branch
+    delete process.env.REDIS_SENTINEL;
+    const { getRedis } = await import("@/lib/redis");
+    globalAny.redisClient = undefined;
+    getRedis();
+    // Non-Sentinel constructor receives (url, options) — no password key in options.
+    expect(mocks.RedisMock).toHaveBeenCalledWith(
+      "redis://:embedded-pass@localhost:6379",
+      expect.not.objectContaining({ password: expect.anything() }),
     );
   });
 });

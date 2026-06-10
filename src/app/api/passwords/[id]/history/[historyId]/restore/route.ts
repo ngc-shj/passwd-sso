@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, notFound, unauthorized } from "@/lib/http/api-response";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_METADATA_KEY } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -39,7 +39,9 @@ async function handlePOST(
     return notFound();
   }
   if (entry.userId !== session.user.id) {
-    return forbidden();
+    // A01-4: 403 vs 404 difference leaks "ID exists in tenant" oracle to
+    // attacker. RLS should already null this branch; defense-in-depth.
+    return notFound();
   }
 
   const history = await withUserTenantRls(session.user.id, async () =>

@@ -576,6 +576,22 @@ export async function validateMcpToken(
   // "Deactivate client" action takes immediate effect, not just after token TTL.
   if (!record.mcpClient.isActive) return { ok: false, error: "invalid_token" };
 
+  // C13: reject deactivated users — tenant-scoped to the token's own tenant.
+  // SA-bound tokens (userId === null) skip the membership check: they are
+  // non-human identities with no TenantMember row.
+  // Fail-closed: no active membership row ⇒ invalid (cross-tenant bypass guard).
+  if (record.userId !== null) {
+    const member = await withBypassRls(prisma, async (tx) =>
+      tx.tenantMember.findUnique({
+        where: { tenantId_userId: { tenantId: record.tenantId, userId: record.userId as string } },
+        select: { deactivatedAt: true },
+      }),
+    BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+    if (!member || member.deactivatedAt !== null) {
+      return { ok: false, error: "invalid_token" };
+    }
+  }
+
   // Throttled lastUsedAt update (fire-and-forget)
   const shouldUpdate =
     !record.lastUsedAt ||

@@ -20,7 +20,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://passwd_app:${PASSWD_APP_PASSWORD:?PASSWD_APP_PASSWORD is required}@db:5432/passwd_sso
       - JACKSON_URL=http://jackson:5225
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
     depends_on:
       db:
         condition: service_healthy
@@ -45,6 +45,7 @@ services:
       PASSWD_APP_PASSWORD: ${PASSWD_APP_PASSWORD:?PASSWD_APP_PASSWORD is required}
       PASSWD_OUTBOX_WORKER_PASSWORD: ${PASSWD_OUTBOX_WORKER_PASSWORD:?PASSWD_OUTBOX_WORKER_PASSWORD is required}
       PASSWD_DCR_CLEANUP_WORKER_PASSWORD: ${PASSWD_DCR_CLEANUP_WORKER_PASSWORD:?PASSWD_DCR_CLEANUP_WORKER_PASSWORD is required}
+      PASSWD_JACKSON_PASSWORD: ${PASSWD_JACKSON_PASSWORD:?PASSWD_JACKSON_PASSWORD is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/postgres/initdb:/docker-entrypoint-initdb.d:ro
@@ -64,7 +65,7 @@ services:
       JACKSON_API_KEYS: ${JACKSON_API_KEY:?JACKSON_API_KEY is required}
       DB_ENGINE: sql
       DB_TYPE: postgres
-      DB_URL: postgresql://passwd_user:${PASSWD_SUPERUSER_PASSWORD:?PASSWD_SUPERUSER_PASSWORD is required}@db:5432/jackson
+      DB_URL: postgresql://jackson_user:${PASSWD_JACKSON_PASSWORD:?PASSWD_JACKSON_PASSWORD is required}@db:5432/jackson
       NEXTAUTH_URL: http://localhost:5225
       EXTERNAL_URL: http://localhost:5225
       NEXTAUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
@@ -108,11 +109,14 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
+    environment:
+      # redis-cli reads REDISCLI_AUTH so the password is not exposed in healthcheck argv.
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
       interval: 5s
       timeout: 3s
       retries: 5

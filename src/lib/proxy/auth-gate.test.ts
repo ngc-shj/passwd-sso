@@ -56,6 +56,31 @@ describe("extractSessionToken", () => {
   it("handles token at end of cookie string without trailing semicolon", () => {
     expect(extractSessionToken("a=b; authjs.session-token=last")).toBe("last");
   });
+
+  it("ignores suffix-colliding cookie name (evil-authjs.session-token)", () => {
+    expect(
+      extractSessionToken("evil-authjs.session-token=evil-value"),
+    ).toBe("");
+  });
+
+  it("finds legitimate cookie even when a colliding name appears first", () => {
+    const cookie =
+      "evil-authjs.session-token=evil-value; authjs.session-token=real-value";
+    expect(extractSessionToken(cookie)).toBe("real-value");
+  });
+
+  it("handles leading whitespace on a cookie segment", () => {
+    expect(
+      extractSessionToken("foo=bar;  authjs.session-token=spaced"),
+    ).toBe("spaced");
+  });
+
+  it("preserves '=' characters inside cookie value", () => {
+    // Base64-encoded or padded values may contain '='
+    expect(
+      extractSessionToken("authjs.session-token=abc==def="),
+    ).toBe("abc==def=");
+  });
 });
 
 describe("hasSessionCookie", () => {

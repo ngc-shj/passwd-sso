@@ -52,8 +52,8 @@ describe("GET /api/passwords/[id]/history", () => {
     const req = createRequest("GET", "http://localhost/api/passwords/p1/history");
     const res = await GET(req, createParams({ id: "p1" }));
     const { status, json } = await parseResponse(res);
-    expect(status).toBe(403);
-    expect(json.error).toBe("FORBIDDEN");
+    expect(status).toBe(404);
+    expect(json.error).toBe("NOT_FOUND");
   });
 
   it("returns history entries with encrypted blobs", async () => {

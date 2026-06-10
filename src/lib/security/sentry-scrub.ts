@@ -2,12 +2,29 @@
  * Event-level scrubbing for Sentry.
  *
  * Recursively strips values for keys matching sensitive patterns
- * from Sentry EVENT objects (extra, contexts, breadcrumbs, request body).
- * Used in Sentry's `beforeSend` hook (sentry.server.config.ts, sentry.client.config.ts).
+ * from Sentry EVENT objects (extra, contexts, breadcrumbs, request body,
+ * spans). Also sanitizes URLs to remove query strings, fragments, and
+ * capability path segments.
+ * Used in Sentry's `beforeSend` and `beforeSendTransaction` hooks.
  *
  * Complementary to src/lib/sentry-sanitize.ts which scrubs Error.message
  * and Error.stack BEFORE passing to captureException().
  */
+
+/**
+ * Token-carrying route patterns whose path segments must be redacted.
+ * Each entry: [pattern, replacement]. Non-anchored so locale prefixes
+ * like /ja/... or /en/... match transparently.
+ * Extend this list when adding new capability routes.
+ */
+export const TOKEN_ROUTE_PATTERNS: ReadonlyArray<[RegExp, string]> = [
+  // Share/Send short links: /s/<token>
+  [/\/s\/[^/?#]+/g, "/s/[redacted]"],
+  // Team invite: /dashboard/teams/invite/<token>
+  [/\/dashboard\/teams\/invite\/[^/?#]+/g, "/dashboard/teams/invite/[redacted]"],
+  // Emergency-access invite: /dashboard/emergency-access/invite/<token>
+  [/\/dashboard\/emergency-access\/invite\/[^/?#]+/g, "/dashboard/emergency-access/invite/[redacted]"],
+];
 
 const SENSITIVE_PATTERNS = [
   "password",
@@ -63,8 +80,34 @@ export function scrubObject(obj: unknown, depth = 0): unknown {
 }
 
 /**
- * Sentry `beforeSend` hook that scrubs sensitive data from events.
- * Exported for use in sentry.client.config.ts and instrumentation.ts.
+ * Strip query strings, fragments, and capability path segments from a URL string.
+ * Returns the sanitized URL, or the original value if it does not look like a URL.
+ */
+export function sanitizeUrl(value: string): string {
+  let result = value;
+
+  // Strip fragment first (fragments are not sent by the server but the
+  // browser-side Sentry SDK captures window.location.href which includes them)
+  const fragIdx = result.indexOf("#");
+  if (fragIdx !== -1) result = result.slice(0, fragIdx);
+
+  // Strip query string
+  const qIdx = result.indexOf("?");
+  if (qIdx !== -1) result = result.slice(0, qIdx);
+
+  // Redact capability path segments
+  for (const [pattern, replacement] of TOKEN_ROUTE_PATTERNS) {
+    result = result.replace(pattern, replacement);
+  }
+
+  return result;
+}
+
+const URL_KEY_NAMES = new Set(["url", "http.url"]);
+
+/**
+ * Sentry `beforeSend` / `beforeSendTransaction` hook that scrubs sensitive data from events.
+ * Exported for use in sentry.client.config.ts and sentry.server.config.ts.
  */
 export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T {
   const e = event as Record<string, unknown>;
@@ -79,16 +122,26 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
     e.contexts = scrubObject(e.contexts);
   }
 
-  // Scrub breadcrumbs — Sentry uses { values: BreadcrumbItem[] } format
+  // Scrub breadcrumbs — Sentry uses { values: BreadcrumbItem[] } format.
+  // Also sanitize navigation breadcrumb from/to URLs.
   if (e.breadcrumbs && typeof e.breadcrumbs === "object") {
     const bcs = e.breadcrumbs as { values?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>;
     const items = Array.isArray(bcs) ? bcs : bcs.values;
     if (Array.isArray(items)) {
       const scrubbed = items.map((bc) => {
+        let updated = bc;
         if (bc.data && typeof bc.data === "object") {
-          return { ...bc, data: scrubObject(bc.data) };
+          updated = { ...updated, data: scrubObject(bc.data) };
         }
-        return bc;
+        // Sanitize navigation breadcrumb from/to values
+        if (bc.category === "navigation" && typeof bc.data === "object" && bc.data !== null) {
+          const navData = bc.data as Record<string, unknown>;
+          const sanitizedNav: Record<string, unknown> = { ...navData };
+          if (typeof navData.from === "string") sanitizedNav.from = sanitizeUrl(navData.from);
+          if (typeof navData.to === "string") sanitizedNav.to = sanitizeUrl(navData.to);
+          updated = { ...updated, data: sanitizedNav };
+        }
+        return updated;
       });
       if (Array.isArray(bcs)) {
         e.breadcrumbs = scrubbed;
@@ -98,8 +151,19 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
     }
   }
 
-  // Scrub request body (may be object or serialized JSON string)
+  // Sanitize request.url and request.query_string
   const request = e.request as Record<string, unknown> | undefined;
+  if (request) {
+    if (typeof request.url === "string") {
+      request.url = sanitizeUrl(request.url);
+    }
+    if (typeof request.query_string === "string" && request.query_string.length > 0) {
+      // Strip the entire query string — it may carry token params
+      request.query_string = "";
+    }
+  }
+
+  // Scrub request body (may be object or serialized JSON string)
   if (request?.data) {
     if (typeof request.data === "object") {
       request.data = scrubObject(request.data);
@@ -131,6 +195,27 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
         if (v.stacktrace && typeof v.stacktrace === "object") {
           v.stacktrace = scrubObject(v.stacktrace);
         }
+      }
+    }
+  }
+
+  // Scrub spans (transaction events) — each span's data object through key-based scrubObject,
+  // and URL-named keys through sanitizeUrl
+  if (Array.isArray(e.spans)) {
+    for (const span of e.spans as Array<Record<string, unknown>>) {
+      if (span.data && typeof span.data === "object") {
+        const spanData = span.data as Record<string, unknown>;
+        const scrubbed: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(spanData)) {
+          if (isSensitiveKey(key)) {
+            scrubbed[key] = REDACTED;
+          } else if (URL_KEY_NAMES.has(key) && typeof value === "string") {
+            scrubbed[key] = sanitizeUrl(value);
+          } else {
+            scrubbed[key] = scrubObject(value);
+          }
+        }
+        span.data = scrubbed;
       }
     }
   }

@@ -74,6 +74,7 @@ vi.mock("@/lib/auth/session/step-up", () => ({
 }));
 
 import { POST } from "@/app/api/mcp/authorize/consent/route";
+import { Prisma } from "@prisma/client";
 
 const VALID_SESSION = { user: { id: "user-uuid-123" } };
 
@@ -395,6 +396,83 @@ describe("POST /api/mcp/authorize/consent", () => {
         targetId: VALID_CLIENT.id,
       }),
     );
+    expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
+  });
+
+  // C7 acceptance tests
+
+  // (a) User B consenting with a name matching user A's DCR client does NOT
+  //     delete A's client and gets a consent error.
+  it("C7(a): foreign-owned same-name DCR client blocks consent without deleting the owner's client", async () => {
+    const userBSession = { user: { id: "user-b-uuid" } };
+    mockAuth.mockResolvedValue(userBSession);
+    // Unclaimed DCR client registered by nobody yet (tenantId null)
+    mockFindFirst.mockResolvedValueOnce({ ...VALID_CLIENT, isDcr: true, tenantId: null });
+    mockMcpClientCount.mockResolvedValueOnce(0);
+    // tx.findFirst with createdById = user-b-uuid → null (user B has no own same-name client)
+    // tx.findFirst without createdById → foreign-owned client exists
+    const foreignClient = { id: "user-a-client-id", createdById: "user-a-uuid" };
+    mockTxFindFirst
+      .mockResolvedValueOnce(null)         // createdById check: user B owns nothing
+      .mockResolvedValueOnce(foreignClient); // foreign-owned check: user A's client
+
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("invalid_client");
+    expect(json.error_description).toBe("name_conflict");
+    // User A's client must not have been deleted
+    expect(mockMcpClientUpdateMany).not.toHaveBeenCalled();
+    expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
+  });
+
+  // (b) User A re-claiming their own DCR client still replaces their own row.
+  it("C7(b): user re-claiming own DCR client name replaces the old row and succeeds", async () => {
+    mockFindFirst.mockResolvedValueOnce({ ...VALID_CLIENT, isDcr: true, tenantId: null });
+    mockMcpClientCount.mockResolvedValueOnce(0);
+    // tx.findFirst with createdById = session.user.id → user's own existing client
+    mockTxFindFirst.mockResolvedValueOnce({ id: "old-client-id", createdById: VALID_SESSION.user.id });
+    mockMcpClientUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(302);
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("code=");
+    expect(mockCreateAuthorizationCode).toHaveBeenCalledOnce();
+  });
+
+  // (c) P2002 unique-violation race maps to consent error (not a 500).
+  it("C7(c): P2002 unique violation during claim maps to name_conflict consent error", async () => {
+    mockFindFirst.mockResolvedValueOnce({ ...VALID_CLIENT, isDcr: true, tenantId: null });
+    // $transaction throws P2002 (concurrent foreign claim won the race)
+    const p2002 = new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002",
+      clientVersion: "5.0.0",
+    });
+    // Override $transaction to throw P2002
+    const { prisma: mockPrismaModule } = await import("@/lib/prisma");
+    vi.mocked(mockPrismaModule.$transaction).mockRejectedValueOnce(p2002);
+
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("invalid_client");
+    expect(json.error_description).toBe("name_conflict");
     expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
   });
 });

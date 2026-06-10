@@ -30,13 +30,16 @@ export { SESSION_CACHE_TTL_MS } from "@/lib/auth/session/session-cache";
  * deployment's useSecureCookies + basePath combination.
  */
 export function extractSessionToken(cookie: string): string {
+  const segments = cookie.split(";");
   for (const name of ALL_KNOWN_SESSION_COOKIE_NAMES) {
-    const prefix = `${name}=`;
-    const idx = cookie.indexOf(prefix);
-    if (idx !== -1) {
-      const start = idx + prefix.length;
-      const end = cookie.indexOf(";", start);
-      return end === -1 ? cookie.slice(start) : cookie.slice(start, end);
+    for (const segment of segments) {
+      const trimmed = segment.trim();
+      const eqIdx = trimmed.indexOf("=");
+      if (eqIdx === -1) continue;
+      const cookieName = trimmed.slice(0, eqIdx);
+      if (cookieName === name) {
+        return trimmed.slice(eqIdx + 1);
+      }
     }
   }
   return "";

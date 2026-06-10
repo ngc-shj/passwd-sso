@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { scrubObject, scrubSentryEvent } from "./sentry-scrub";
+import { scrubObject, scrubSentryEvent, sanitizeUrl, TOKEN_ROUTE_PATTERNS } from "./sentry-scrub";
 
 describe("scrubObject", () => {
   it("redacts top-level sensitive keys", () => {
@@ -268,5 +268,121 @@ describe("scrubSentryEvent", () => {
     const event = { message: "test error" };
     const result = scrubSentryEvent(event);
     expect(result.message).toBe("test error");
+  });
+});
+
+// C11 acceptance fixtures — each MUST fail before the sentry-scrub.ts changes
+// (red-green verified by stashing sentry-scrub.ts and re-running the suite).
+describe("C11 — transaction event scrubbing", () => {
+  // (a) sensitive key in spans[].data is redacted
+  it("(a) redacts sensitive key in spans[].data", () => {
+    const event = {
+      spans: [
+        {
+          op: "db.query",
+          data: {
+            "db.statement": "SELECT 1",
+            password: "secret-value",
+            safeField: "visible",
+          },
+        },
+      ],
+    };
+    const result = scrubSentryEvent(event);
+    const spanData = (result.spans as Array<Record<string, unknown>>)[0].data as Record<string, unknown>;
+    expect(spanData["db.statement"]).toBe("SELECT 1");
+    expect(spanData.safeField).toBe("visible");
+    expect(spanData.password).toBe("[Redacted]");
+  });
+
+  // (b) http.url with /s/<token> in the PATH is redacted
+  it("(b) redacts /s/<token> capability path in http.url span data", () => {
+    const token = "abc123xyz456789";
+    const event = {
+      spans: [
+        {
+          op: "http.client",
+          data: {
+            "http.url": `https://example.com/s/${token}`,
+            "http.method": "GET",
+          },
+        },
+      ],
+    };
+    const result = scrubSentryEvent(event);
+    const spanData = (result.spans as Array<Record<string, unknown>>)[0].data as Record<string, unknown>;
+    expect(spanData["http.url"]).toBe("https://example.com/s/[redacted]");
+    expect(spanData["http.method"]).toBe("GET");
+  });
+
+  // (c) query-carried token is stripped from request.url
+  it("(c) strips query string from request.url (query-carried token)", () => {
+    const event = {
+      request: {
+        url: "https://example.com/api/auth/callback/email?token=magic-link-token-xyz&callbackUrl=%2Fdashboard",
+        method: "GET",
+      },
+    };
+    const result = scrubSentryEvent(event);
+    const reqUrl = (result.request as Record<string, unknown>).url as string;
+    expect(reqUrl).toBe("https://example.com/api/auth/callback/email");
+    expect(reqUrl).not.toContain("token=");
+  });
+
+  // (d) invite-path token redacted — fixture uses locale-prefixed URL /ja/...
+  it("(d) redacts team invite token in locale-prefixed path /ja/dashboard/teams/invite/<token>", () => {
+    const inviteToken = "rawInviteToken256bitHex123456789abcdef";
+    const event = {
+      request: {
+        url: `https://example.com/ja/dashboard/teams/invite/${inviteToken}`,
+        method: "GET",
+      },
+    };
+    const result = scrubSentryEvent(event);
+    const reqUrl = (result.request as Record<string, unknown>).url as string;
+    expect(reqUrl).toBe("https://example.com/ja/dashboard/teams/invite/[redacted]");
+    expect(reqUrl).not.toContain(inviteToken);
+  });
+
+  // (e) fragment #token=... is stripped
+  it("(e) strips fragment (#token=...) from request.url", () => {
+    const event = {
+      request: {
+        url: "https://example.com/dashboard/vault/admin-reset#token=reset-capability-token",
+        method: "GET",
+      },
+    };
+    const result = scrubSentryEvent(event);
+    const reqUrl = (result.request as Record<string, unknown>).url as string;
+    expect(reqUrl).toBe("https://example.com/dashboard/vault/admin-reset");
+    expect(reqUrl).not.toContain("#token=");
+  });
+});
+
+describe("sanitizeUrl", () => {
+  it("strips query string", () => {
+    expect(sanitizeUrl("https://example.com/path?foo=bar&baz=qux")).toBe("https://example.com/path");
+  });
+
+  it("strips fragment", () => {
+    expect(sanitizeUrl("https://example.com/path#section")).toBe("https://example.com/path");
+  });
+
+  it("strips both query and fragment", () => {
+    expect(sanitizeUrl("https://example.com/path?q=1#frag")).toBe("https://example.com/path");
+  });
+
+  it("redacts /s/<token> path segment", () => {
+    expect(sanitizeUrl("https://app.example.com/s/abc123token")).toBe("https://app.example.com/s/[redacted]");
+  });
+
+  it("redacts emergency-access invite token", () => {
+    expect(sanitizeUrl("https://app.example.com/en/dashboard/emergency-access/invite/TOKEN_VALUE")).toBe(
+      "https://app.example.com/en/dashboard/emergency-access/invite/[redacted]"
+    );
+  });
+
+  it("TOKEN_ROUTE_PATTERNS is exported and non-empty", () => {
+    expect(TOKEN_ROUTE_PATTERNS.length).toBeGreaterThan(0);
   });
 });

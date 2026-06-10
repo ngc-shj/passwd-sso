@@ -95,6 +95,18 @@ export async function validateExtensionToken(
     return { ok: false, error: "EXTENSION_TOKEN_EXPIRED" };
   }
 
+  // C13: reject deactivated users — tenant-scoped to the token's own tenant.
+  // Fail-closed: no active membership row ⇒ invalid (cross-tenant bypass guard).
+  const member = await withBypassRls(prisma, async (tx) =>
+    tx.tenantMember.findUnique({
+      where: { tenantId_userId: { tenantId: token.tenantId, userId: token.userId } },
+      select: { deactivatedAt: true },
+    }),
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  if (!member || member.deactivatedAt !== null) {
+    return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
+  }
+
   // ── iOS-host-app dispatch ──────────────────────────────────
   // IOS_APP rows without cnfJkt cannot be DPoP-validated; reject early
   // so ValidatedExtensionToken.cnfJkt is always non-null by construction.

@@ -48,13 +48,13 @@ describe("PUT /api/tags/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 403 when tag belongs to another user", async () => {
+  it("returns 404 when tag belongs to another user", async () => {
     mockPrismaTag.findUnique.mockResolvedValue({ id: TAG_ID, userId: "other-user" });
     const res = await PUT(
       createRequest("PUT", "http://localhost:3000/api/tags/tag-123", { body: { name: "New" } }),
       createParams({ id: TAG_ID }),
     );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it("returns 400 on invalid body", async () => {
@@ -182,13 +182,13 @@ describe("DELETE /api/tags/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 403 when tag belongs to another user", async () => {
+  it("returns 404 when tag belongs to another user", async () => {
     mockPrismaTag.findUnique.mockResolvedValue({ id: TAG_ID, userId: "other-user", name: "X", parentId: null });
     const res = await DELETE(
       createRequest("DELETE", "http://localhost:3000/api/tags/tag-123"),
       createParams({ id: TAG_ID }),
     );
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 
   it("deletes tag successfully", async () => {
