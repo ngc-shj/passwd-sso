@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Full-bleed opaque brand background (iOS masks the corners itself;
+       the marketing icon must carry no alpha). -->
+  <rect x="0" y="0" width="1024" height="1024" fill="#5B57D6"/>
+
+  <!-- Keyhole emblem (reused motif from public/icon.svg), recentered for full-bleed. -->
+  <circle cx="512" cy="430" r="140" fill="white"/>
+  <path fill="white"
+        d="M457 520
+           L567 520
+           L612 720
+           L412 720
+           Z"/>
+</svg>

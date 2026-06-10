@@ -108,6 +108,11 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: "0.1.0"
         TARGETED_DEVICE_FAMILY: "1"
+        # Single-size (1024) AppIcon in PasswdSSOApp/Assets.xcassets. xcodegen
+        # also auto-derives this from the AppIcon.appiconset presence; the
+        # explicit line locks intent and keeps project.yml authoritative for CI
+        # (which regenerates the .xcodeproj from this file).
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     dependencies:
       - target: Shared
         embed: true
