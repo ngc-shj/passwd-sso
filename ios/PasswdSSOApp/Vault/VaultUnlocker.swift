@@ -60,6 +60,15 @@ public actor VaultUnlocker {
       throw VaultUnlockError.serverResponseInvalid
     }
 
+    // Step 1b: this client only derives the PBKDF2 (kdfType 0) wrapping key.
+    // An Argon2id vault (kdfType 1) would silently derive a wrong key and
+    // surface as a misleading "invalid passphrase"; fail with a clear error
+    // instead so the caller can distinguish "unsupported vault KDF" from a
+    // genuine passphrase mistake.
+    guard unlockData.kdfType == 0 else {
+      throw VaultUnlockError.serverResponseInvalid
+    }
+
     // Step 2: decode salt and derive wrapping key. The server stores these
     // fields as hex (matching the web crypto-client), NOT base64.
     let saltData: Data

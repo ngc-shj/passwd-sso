@@ -195,7 +195,9 @@ extension VaultViewModel {
       urlHost: overview.urlHost ?? "",
       additionalUrlHosts: overview.additionalUrlHosts ?? [],
       tags: overview.tags,
-      hasTOTP: detail.totpSecret != nil
+      hasTOTP: detail.totpSecret != nil,
+      requireReprompt: overview.requireReprompt ?? false,
+      travelSafe: overview.travelSafe ?? false
     )
     if let idx = allSummaries.firstIndex(where: { $0.id == entryId }) {
       allSummaries[idx] = updatedSummary

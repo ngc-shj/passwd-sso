@@ -169,6 +169,10 @@ struct EntryEditForm: View {
       // Keep the overview TOTP marker in sync with the edited secret so the
       // AutoFill one-time-code picker still finds the entry after an iOS edit.
       hasTOTP: totpSecret.isEmpty ? nil : true,
+      // Preserve web-only flags the iOS form does not edit. requireReprompt is
+      // always written (matching the web overview shape); travelSafe only when set.
+      requireReprompt: summary.requireReprompt,
+      travelSafe: summary.travelSafe ? true : nil,
       tags: parsedTags
     )
 

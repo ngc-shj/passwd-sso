@@ -25,6 +25,12 @@ public enum EntryBlobDecoder {
     // (→ nil → false) for non-LOGIN entries and for entries encrypted before
     // the marker shipped.
     let hasTOTP: Bool?
+    // Web-only overview fields the iOS form does not edit. Decoded so an iOS
+    // re-encrypt can preserve them — dropping requireReprompt would silently
+    // remove a master-passphrase re-prompt requirement (security downgrade);
+    // dropping travelSafe would lose the entry's travel-mode visibility.
+    let requireReprompt: Bool?
+    let travelSafe: Bool?
   }
 
   private struct FullBlobPayload: Decodable {
@@ -74,7 +80,9 @@ public enum EntryBlobDecoder {
       tags: p.tags?.map { $0.name } ?? [],
       teamId: teamId,
       lastAccessedAt: nil,
-      hasTOTP: p.hasTOTP ?? false
+      hasTOTP: p.hasTOTP ?? false,
+      requireReprompt: p.requireReprompt ?? false,
+      travelSafe: p.travelSafe ?? false
     )
   }
 

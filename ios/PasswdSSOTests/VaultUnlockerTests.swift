@@ -230,6 +230,38 @@ final class VaultUnlockerTests: XCTestCase {
     )
   }
 
+  // MARK: - Unsupported KDF (kdfType != 0)
+
+  /// An Argon2id vault (kdfType 1) is not derivable by this PBKDF2-only client;
+  /// it must fail with serverResponseInvalid, NOT a misleading invalidPassphrase.
+  func testUnlockRejectsUnsupportedKdfType() async throws {
+    var (unlockData, _) = try makeVaultUnlockData(passphrase: "p")
+    unlockData = VaultUnlockData(
+      accountSalt: unlockData.accountSalt,
+      encryptedSecretKey: unlockData.encryptedSecretKey,
+      secretKeyIv: unlockData.secretKeyIv,
+      secretKeyAuthTag: unlockData.secretKeyAuthTag,
+      keyVersion: unlockData.keyVersion,
+      kdfType: 1, // Argon2id — unsupported on iOS
+      kdfIterations: unlockData.kdfIterations,
+      userId: unlockData.userId
+    )
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .success(unlockData)),
+      bridgeKeyStore: BridgeKeyStore(
+        accessGroup: "test", service: "com.passwd-sso.test.bridge-key", keychain: MockKeychain()),
+      wrappedKeyStore: TempDirWrappedKeyStore(baseDir: tmpDir)
+    )
+    do {
+      _ = try await unlocker.unlock(passphrase: "p")
+      XCTFail("Expected serverResponseInvalid for unsupported kdfType")
+    } catch VaultUnlockError.serverResponseInvalid {
+      // Expected
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
   // MARK: - Cross-platform parity (M6 / C13.3)
 
   private struct VaultUnlockFixture: Decodable {

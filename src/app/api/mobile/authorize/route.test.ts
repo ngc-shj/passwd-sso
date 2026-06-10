@@ -73,7 +73,7 @@ vi.mock("@/lib/security/rate-limit-audit", () => ({
 }));
 
 vi.mock("@/lib/audit/audit", () => ({
-  extractRequestMeta: () => ({ ip: "1.2.3.4", userAgent: "test" }),
+  extractRequestMeta: () => ({ ip: "1.2.3.4", userAgent: "test", acceptLanguage: null }),
   logAuditAsync: mockLogAuditAsync,
   personalAuditBase: (_req: unknown, userId: string) => ({
     scope: "PERSONAL",

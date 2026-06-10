@@ -52,6 +52,25 @@ final class EntryBlobDecoderTests: XCTestCase {
     XCTAssertTrue(summary.hasTOTP)
   }
 
+  func testSummaryDecodesRequireRepromptAndTravelSafe() throws {
+    // Web-only overview flags must be decoded so an iOS edit can preserve them.
+    let json = #"{"title":"T","urlHost":"x.com","tags":[],"requireReprompt":true,"travelSafe":true}"#
+    let summary = try XCTUnwrap(
+      EntryBlobDecoder.summary(plaintext: data(json), entryId: "e3b", teamId: nil)
+    )
+    XCTAssertTrue(summary.requireReprompt)
+    XCTAssertTrue(summary.travelSafe)
+  }
+
+  func testSummaryDefaultsRequireRepromptAndTravelSafeFalseWhenAbsent() throws {
+    let json = #"{"title":"T","urlHost":"x.com","tags":[]}"#
+    let summary = try XCTUnwrap(
+      EntryBlobDecoder.summary(plaintext: data(json), entryId: "e3c", teamId: nil)
+    )
+    XCTAssertFalse(summary.requireReprompt)
+    XCTAssertFalse(summary.travelSafe)
+  }
+
   func testSummaryDefaultsHasTOTPFalseWhenMarkerAbsent() throws {
     // Entry encrypted before the hasTOTP marker shipped (or a non-LOGIN entry).
     let json = #"{"title":"NoMarker","urlHost":"x.com","tags":[]}"#

@@ -32,6 +32,9 @@ check_pattern() {
 }
 
 check_pattern "PSSO_DIAG diagnostic logging" "PSSO_DIAG"
+# Intentionally narrow: matches the specific regression (access token sent with
+# the DPoP scheme). It must NOT broaden to `DPoP \(` because the token-refresh
+# path legitimately uses `Authorization: DPoP \(refreshToken)`.
 check_pattern "DPoP scheme on access token (must be Bearer)" "DPoP \\(accessToken)"
 check_pattern "base64-decode of vault-unlock data (fields are hex)" "Data(base64Encoded: unlockData"
 

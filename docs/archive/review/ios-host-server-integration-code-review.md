@@ -156,3 +156,36 @@ Verification: vitest 11099 passed; next build green; iOS full suite 228 passed.
   which is the canonical decode path. CredentialResolverTests fixture comment left as-is.
 
 Termination: all Critical/Major fixed; all Minor fixed or covered. Round 1 closes.
+
+## Round 2 (incremental re-review of the round-1 fix diff f10da95a..HEAD)
+
+Security expert: **no new findings** — rate limiter placement/keying, audit action +
+migration, sign-in redirect (no open-redirect), and the hasTOTP marker are all verified
+safe; the round-1 RLS-nesting fix is intact. Functionality: all round-1 fixes verified
+correct & complete; M6 fixture algorithm confirmed to match crypto-client kdfType=0. No
+Critical/Major. New Minor findings:
+
+- **F1 [Minor] FIXED** — `VaultUnlocker.unlock` did not guard `kdfType != 0`; an Argon2id
+  vault would surface as a misleading "invalid passphrase". Added a `kdfType == 0` guard
+  (→ serverResponseInvalid) + test `testUnlockRejectsUnsupportedKdfType`.
+- **F2 [Minor, security-relevant] FIXED** — iOS re-encrypt dropped the web-only overview
+  fields `requireReprompt` (master-passphrase re-prompt) and `travelSafe`, silently
+  downgrading them on the next web load. Now decoded in `EntryBlobDecoder` →
+  `VaultEntrySummary` and preserved through `EntryEditForm`/`OverviewPlaintext` on
+  re-encrypt (same preserve-on-edit pattern as additionalUrlHosts/hasTOTP). Tests added.
+- **T4 [Minor] FIXED** — authorize test's `extractRequestMeta` mock was missing
+  `acceptLanguage` (shape drift); added `acceptLanguage: null`.
+- **T1 [Minor] REJECTED** — the fixture multi-fallback URL lookup matches the established
+  codebase pattern (URLMatchingTests/TOTPVectorTests use `fixtures/<name>` as the primary
+  form successfully); defensive, test passes. No change.
+- **T2 [Minor] REJECTED** — claim that the fixture `encryptedSecretKey` is 31 bytes is a
+  miscount; verified 64 hex chars = 32 bytes (correct AES-GCM ciphertext). M6 test is valid.
+- **T3 [Minor] REJECTED (with clarifying comment)** — broadening the DPoP guard to `DPoP \(`
+  would false-positive on the legitimate `Authorization: DPoP \(refreshToken)` refresh path.
+  The narrow `\(accessToken)` pattern is intentional; added a comment to the guard script.
+
+Verification: full iOS suite 231 passed; authorize route test 15 passed; check:ios-diag green.
+
+Termination: Round 2 yielded only Minor findings, all fixed or rejected-with-justification.
+Note: F2 touched a security-relevant flag (requireReprompt) — but as a strict-safety
+preservation (it STOPS iOS from dropping the flag), not a new boundary. Round 2 closes.

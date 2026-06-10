@@ -44,6 +44,8 @@ public struct OverviewPlaintext: Sendable, Codable, Equatable {
   // additional URL hosts (AutoFill domain match) or the TOTP picker marker.
   public let additionalUrlHosts: [String]?
   public let hasTOTP: Bool?
+  public let requireReprompt: Bool?
+  public let travelSafe: Bool?
   public let tags: [String]
 
   public init(
@@ -52,6 +54,8 @@ public struct OverviewPlaintext: Sendable, Codable, Equatable {
     urlHost: String? = nil,
     additionalUrlHosts: [String]? = nil,
     hasTOTP: Bool? = nil,
+    requireReprompt: Bool? = nil,
+    travelSafe: Bool? = nil,
     tags: [String] = []
   ) {
     self.title = title
@@ -59,6 +63,8 @@ public struct OverviewPlaintext: Sendable, Codable, Equatable {
     self.urlHost = urlHost
     self.additionalUrlHosts = additionalUrlHosts
     self.hasTOTP = hasTOTP
+    self.requireReprompt = requireReprompt
+    self.travelSafe = travelSafe
     self.tags = tags
   }
 }
