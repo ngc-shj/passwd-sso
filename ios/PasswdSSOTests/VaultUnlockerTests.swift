@@ -36,9 +36,12 @@ private func makeVaultUnlockData(
   return (data, secretKey)
 }
 
-// MARK: - Stub API client that returns VaultUnlockData without network
+// MARK: - Stub data source that returns VaultUnlockData without network
 
-private actor StubVaultAPIClient {
+/// Conforms to the production `VaultUnlockDataSource` protocol so the REAL
+/// `VaultUnlocker` actor drives the unlock crypto path (hex decode, PBKDF2,
+/// AES-GCM) — a regression in `VaultUnlocker.unlock` now turns these tests red.
+private actor StubVaultAPIClient: VaultUnlockDataSource {
   enum Mode { case success(VaultUnlockData); case wrongPassphrase }
   let mode: Mode
 
@@ -49,87 +52,6 @@ private actor StubVaultAPIClient {
     case .success(let data): return data
     case .wrongPassphrase: throw MobileAPIError.serverError(status: 401)
     }
-  }
-}
-
-// MARK: - VaultUnlocker that injects a stub API client
-
-/// A testable VaultUnlocker that bypasses MobileAPIClient.
-private actor StubVaultUnlocker {
-  private let stubClient: StubVaultAPIClient
-  private let bridgeKeyStore: BridgeKeyStore
-  private let wrappedKeyStore: WrappedKeyStore
-
-  init(
-    stubClient: StubVaultAPIClient,
-    bridgeKeyStore: BridgeKeyStore,
-    wrappedKeyStore: any WrappedKeyStore
-  ) {
-    self.stubClient = stubClient
-    self.bridgeKeyStore = bridgeKeyStore
-    self.wrappedKeyStore = wrappedKeyStore
-  }
-
-  func unlock(passphrase: String) async throws -> UnlockResult {
-    let unlockData: VaultUnlockData
-    do {
-      unlockData = try await stubClient.fetchVaultUnlockData()
-    } catch MobileAPIError.serverError(let status) where status == 401 {
-      throw VaultUnlockError.invalidPassphrase
-    } catch {
-      throw VaultUnlockError.serverResponseInvalid
-    }
-
-    let saltData: Data
-    do {
-      saltData = try hexDecode(unlockData.accountSalt)
-    } catch {
-      throw VaultUnlockError.serverResponseInvalid
-    }
-
-    let wrappingKey = try deriveWrappingKeyPBKDF2(
-      passphrase: passphrase,
-      salt: saltData,
-      iterations: unlockData.kdfIterations
-    )
-
-    let encKeyCipher: Data
-    let encKeyIV: Data
-    let encKeyTag: Data
-    do {
-      encKeyCipher = try hexDecode(unlockData.encryptedSecretKey)
-      encKeyIV = try hexDecode(unlockData.secretKeyIv)
-      encKeyTag = try hexDecode(unlockData.secretKeyAuthTag)
-    } catch {
-      throw VaultUnlockError.serverResponseInvalid
-    }
-
-    let secretKey: Data
-    do {
-      secretKey = try decryptAESGCM(
-        ciphertext: encKeyCipher,
-        iv: encKeyIV,
-        tag: encKeyTag,
-        key: wrappingKey
-      )
-    } catch {
-      throw VaultUnlockError.invalidPassphrase
-    }
-
-    let vaultKey = try deriveEncryptionKey(secretKey: secretKey)
-    let blob = try bridgeKeyStore.create()
-    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
-    let vaultKeyBytes = vaultKey.withUnsafeBytes { Data($0) }
-    let (cipher, iv, tag) = try encryptAESGCM(plaintext: vaultKeyBytes, key: cacheKey)
-
-    let wrapped = WrappedVaultKey(
-      ciphertext: cipher,
-      iv: iv,
-      authTag: tag,
-      issuedAt: Date()
-    )
-    try wrappedKeyStore.saveVaultKey(wrapped)
-    return UnlockResult(vaultKey: vaultKey, userId: unlockData.userId)
   }
 }
 
@@ -166,8 +88,8 @@ final class VaultUnlockerTests: XCTestCase {
     let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
 
     let stubClient = StubVaultAPIClient(mode: .success(unlockData))
-    let unlocker = StubVaultUnlocker(
-      stubClient: stubClient,
+    let unlocker = VaultUnlocker(
+      apiClient: stubClient,
       bridgeKeyStore: bks,
       wrappedKeyStore: wks
     )
@@ -195,8 +117,8 @@ final class VaultUnlockerTests: XCTestCase {
     let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
 
     let stubClient = StubVaultAPIClient(mode: .success(unlockData))
-    let unlocker = StubVaultUnlocker(
-      stubClient: stubClient,
+    let unlocker = VaultUnlocker(
+      apiClient: stubClient,
       bridgeKeyStore: bks,
       wrappedKeyStore: wks
     )
@@ -223,8 +145,8 @@ final class VaultUnlockerTests: XCTestCase {
     let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
 
     let stubClient = StubVaultAPIClient(mode: .success(unlockData))
-    let unlocker = StubVaultUnlocker(
-      stubClient: stubClient,
+    let unlocker = VaultUnlocker(
+      apiClient: stubClient,
       bridgeKeyStore: bks,
       wrappedKeyStore: wks
     )
@@ -262,8 +184,8 @@ final class VaultUnlockerTests: XCTestCase {
     let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
 
     let stubClient = StubVaultAPIClient(mode: .success(unlockData))
-    let unlocker = StubVaultUnlocker(
-      stubClient: stubClient,
+    let unlocker = VaultUnlocker(
+      apiClient: stubClient,
       bridgeKeyStore: bks,
       wrappedKeyStore: wks
     )
@@ -279,6 +201,35 @@ final class VaultUnlockerTests: XCTestCase {
     }
   }
 
+  // MARK: - VaultUnlockData JSON decoding (kdfType is an Int, not a String)
+
+  /// The server sends `kdfType` as an integer (0 = PBKDF2-SHA256). Decoding it
+  /// as a Swift `Int` is the C8 fix; a JSON integer must decode successfully.
+  func testVaultUnlockDataDecodesIntegerKdfType() throws {
+    let json = #"""
+    {"accountSalt":"aa","encryptedSecretKey":"bb","secretKeyIv":"cc",
+     "secretKeyAuthTag":"dd","keyVersion":1,"kdfType":0,"kdfIterations":600000,
+     "userId":"u-1"}
+    """#
+    let decoded = try JSONDecoder().decode(VaultUnlockData.self, from: Data(json.utf8))
+    XCTAssertEqual(decoded.kdfType, 0)
+    XCTAssertEqual(decoded.kdfIterations, 600000)
+    XCTAssertEqual(decoded.userId, "u-1")
+  }
+
+  /// A string `kdfType` (the pre-fix server-shape assumption) must NOT decode —
+  /// guards against reverting `VaultUnlockData.kdfType` to `String`.
+  func testVaultUnlockDataRejectsStringKdfType() {
+    let json = #"""
+    {"accountSalt":"aa","encryptedSecretKey":"bb","secretKeyIv":"cc",
+     "secretKeyAuthTag":"dd","keyVersion":1,"kdfType":"PBKDF2-SHA256",
+     "kdfIterations":600000,"userId":"u-1"}
+    """#
+    XCTAssertThrowsError(
+      try JSONDecoder().decode(VaultUnlockData.self, from: Data(json.utf8))
+    )
+  }
+
   func testServerReturns401throwsInvalidPassphrase() async {
     let keychain = MockKeychain()
     let bks = BridgeKeyStore(
@@ -289,8 +240,8 @@ final class VaultUnlockerTests: XCTestCase {
     let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
 
     let stubClient = StubVaultAPIClient(mode: .wrongPassphrase)
-    let unlocker = StubVaultUnlocker(
-      stubClient: stubClient,
+    let unlocker = VaultUnlocker(
+      apiClient: stubClient,
       bridgeKeyStore: bks,
       wrappedKeyStore: wks
     )

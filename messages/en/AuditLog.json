@@ -237,6 +237,7 @@
   "EXTENSION_TOKEN_EXCHANGE_FAILURE": "Client app token exchange failed",
   "EXTENSION_TOKEN_LEGACY_ISSUANCE_BLOCKED": "Blocked legacy extension token issuance attempt",
   "OAUTH_ACCOUNT_TOKEN_DECRYPT_FAILURE": "OAuth account token tampering detected",
+  "MOBILE_BRIDGE_CODE_ISSUED": "Mobile pairing code issued",
   "MOBILE_TOKEN_ISSUED": "Mobile token issued",
   "MOBILE_TOKEN_REFRESHED": "Mobile token refreshed",
   "MOBILE_TOKEN_REVOKED": "Mobile token revoked",

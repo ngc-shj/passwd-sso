@@ -10,12 +10,14 @@ const {
   mockRouterPush,
   mockFetch,
   mockStashPrf,
+  mockUseCallbackUrl,
 } = vi.hoisted(() => ({
   mockStartPasskeyAuthentication: vi.fn(),
   mockIsWebAuthnSupported: vi.fn(() => true),
   mockRouterPush: vi.fn(),
   mockFetch: vi.fn(),
   mockStashPrf: vi.fn(),
+  mockUseCallbackUrl: vi.fn(() => "/dashboard"),
 }));
 
 vi.mock("@/lib/auth/prf-handoff", () => ({
@@ -31,7 +33,7 @@ vi.mock("@/i18n/navigation", () => ({
 }));
 
 vi.mock("@/hooks/use-callback-url", () => ({
-  useCallbackUrl: () => "/dashboard",
+  useCallbackUrl: () => mockUseCallbackUrl(),
 }));
 
 vi.mock("@/lib/auth/session/callback-url", () => ({
@@ -75,6 +77,7 @@ describe("PasskeySignInButton — §Sec-7 WebAuthn / PRF", () => {
     vi.clearAllMocks();
     sessionStorage.clear();
     mockIsWebAuthnSupported.mockReturnValue(true);
+    mockUseCallbackUrl.mockReturnValue("/dashboard");
   });
 
   it("renders nothing when WebAuthn is not supported", () => {
@@ -133,6 +136,40 @@ describe("PasskeySignInButton — §Sec-7 WebAuthn / PRF", () => {
     expect(prfBytes.some((b) => b !== 0)).toBe(true);
 
     expect(mockRouterPush).toHaveBeenCalledWith("/dashboard");
+  });
+
+  it("(success, API callbackUrl) navigates via window.location.assign, NOT the locale router", async () => {
+    // iOS OAuth flow: callbackUrl is /api/mobile/authorize. The locale router
+    // would prepend /<locale> and 404; the component must use window.location.
+    mockUseCallbackUrl.mockReturnValue("/api/mobile/authorize?client_kind=ios&state=x");
+    // window.location.assign is non-configurable in jsdom, so replace the whole
+    // location object for this test and restore it afterwards.
+    const origLocation = window.location;
+    const assignSpy = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { assign: assignSpy, href: "http://localhost/", origin: "http://localhost" },
+    });
+
+    mockStartPasskeyAuthentication.mockResolvedValueOnce({
+      responseJSON: { id: "cred-1" },
+      prfOutput: makePrfSentinel(),
+    });
+    mockFetch
+      .mockResolvedValueOnce(okJson({ options: {}, challengeId: "ch-1", prfSalt: "salt" }))
+      .mockResolvedValueOnce(okJson({ ok: true }));
+
+    render(<PasskeySignInButton />);
+    fireEvent.click(screen.getByRole("button", { name: /signInWithPasskey/ }));
+
+    try {
+      await waitFor(() => {
+        expect(assignSpy).toHaveBeenCalledWith("/api/mobile/authorize?client_kind=ios&state=x");
+      });
+      expect(mockRouterPush).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, "location", { configurable: true, value: origLocation });
+    }
   });
 
   it("(no PRF bundle) does NOT hand off and zeroizes the obtained buffer", async () => {

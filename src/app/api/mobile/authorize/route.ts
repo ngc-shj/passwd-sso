@@ -34,16 +34,28 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, zodValidationError } from "@/lib/http/api-response";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { extractRequestMeta } from "@/lib/audit/audit";
+import { extractRequestMeta, logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getAppOrigin, resolveBasePath } from "@/lib/url-helpers";
 import { DEFAULT_LOCALE } from "@/i18n/locales";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
-import { BRIDGE_CODE_TTL_MS } from "@/lib/constants";
+import { BRIDGE_CODE_TTL_MS, MS_PER_MINUTE } from "@/lib/constants";
 import { generateShareToken } from "@/lib/crypto/crypto-server";
 import { requireRecentSession } from "@/lib/auth/session/step-up";
+import { createRateLimiter } from "@/lib/security/rate-limit";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 
 export const runtime = "nodejs";
+
+// Bridge-code issuance is authenticated + step-up gated, but a valid session
+// could still flood single-use code rows. Cap per authenticated user, mirroring
+// the /api/mobile/token limiter.
+const authorizeLimiter = createRateLimiter({
+  windowMs: 15 * MS_PER_MINUTE,
+  max: 10,
+  failClosedOnRedisError: true,
+});
 
 // base64url-no-padding regex; accept lengths used by the iOS host app.
 // state: 32 random bytes → 43 chars; code_challenge: 32-byte SHA-256 → 43 chars;
@@ -131,6 +143,18 @@ async function handleGET(req: NextRequest): Promise<Response> {
   const accessDenied = await enforceAccessRestriction(req, userId);
   if (accessDenied) return accessDenied;
 
+  // 3b. Rate-limit authenticated code issuance per user (caps bridge-code-row
+  // flood from a valid session). Keyed by userId, not IP, since the route is
+  // only reachable post-auth.
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: authorizeLimiter,
+    key: `rl:mobile_authorize:${userId}`,
+    scope: "mobile.authorize",
+    userId,
+  });
+  if (blocked) return blocked;
+
   // 4. Resolve the user's tenant via the RLS wrapper's tenantId callback —
   // saves a redundant SELECT on the users table.
   const code = generateShareToken();
@@ -143,7 +167,7 @@ async function handleGET(req: NextRequest): Promise<Response> {
   // NOT nest inside withUserTenantRls (RLS guard, tenant-rls.ts) — so the bypass
   // insert runs at top level, after the tenant RLS scope has exited.
   const tenantId = await withUserTenantRls(userId, async (tid) => tid);
-  await withBypassRls(
+  const created = await withBypassRls(
     prisma,
     async (tx) =>
       tx.mobileBridgeCode.create({
@@ -161,6 +185,17 @@ async function handleGET(req: NextRequest): Promise<Response> {
       }),
     BYPASS_PURPOSE.TOKEN_LIFECYCLE,
   );
+
+  // Audit the device-pairing initiation (step 1). deviceJkt is a public JWK
+  // thumbprint; the bridge code itself is never logged.
+  await logAuditAsync({
+    ...personalAuditBase(req, userId),
+    action: AUDIT_ACTION.MOBILE_BRIDGE_CODE_ISSUED,
+    tenantId,
+    targetType: AUDIT_TARGET_TYPE.MOBILE_BRIDGE_CODE,
+    targetId: created.id,
+    metadata: { deviceJkt },
+  });
 
   // 5. Redirect the ASWebAuthenticationSession to the iOS app's custom URL
   // scheme with the bridge code. The scheme is a fixed server constant (never

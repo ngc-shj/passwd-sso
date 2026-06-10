@@ -37,17 +37,28 @@ public struct OverviewPlaintext: Sendable, Codable, Equatable {
   public let title: String
   public let username: String
   public let urlHost: String?
+  // Optional → omitted from the encoded blob when nil, matching the web
+  // client's overview shape (`...(hosts.length && {additionalUrlHosts})`,
+  // `...(totp && {hasTOTP:true})`). Preserving these on an iOS re-encrypt is
+  // required so editing an entry on iPhone does not silently drop the
+  // additional URL hosts (AutoFill domain match) or the TOTP picker marker.
+  public let additionalUrlHosts: [String]?
+  public let hasTOTP: Bool?
   public let tags: [String]
 
   public init(
     title: String,
     username: String,
     urlHost: String? = nil,
+    additionalUrlHosts: [String]? = nil,
+    hasTOTP: Bool? = nil,
     tags: [String] = []
   ) {
     self.title = title
     self.username = username
     self.urlHost = urlHost
+    self.additionalUrlHosts = additionalUrlHosts
+    self.hasTOTP = hasTOTP
     self.tags = tags
   }
 }

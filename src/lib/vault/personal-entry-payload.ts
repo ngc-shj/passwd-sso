@@ -76,6 +76,12 @@ export function buildPersonalEntryPayload(
     ...(additionalUrlHosts.length > 0 && { additionalUrlHosts }),
     tags,
     requireReprompt: input.requireReprompt,
+    // TOTP presence marker for the list/overview view. The overview blob is
+    // decrypted by the iOS AutoFill resolver to filter the one-time-code
+    // picker (it does not decrypt the full blob at resolve time). Existing
+    // entries encrypted before this field shipped lack the marker until their
+    // next save — they fall back to hasTOTP=false on iOS.
+    ...(input.totp && { hasTOTP: true }),
     ...(input.travelSafe !== undefined && { travelSafe: input.travelSafe }),
   });
 

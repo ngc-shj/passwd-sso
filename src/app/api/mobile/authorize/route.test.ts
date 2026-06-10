@@ -11,6 +11,8 @@ const {
   mockGetAppOrigin,
   mockRequireRecentSession,
   mockEnforceAccessRestriction,
+  mockCheckRateLimitOrFail,
+  mockLogAuditAsync,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockMobileBridgeCodeCreate: vi.fn(),
@@ -22,6 +24,8 @@ const {
   mockGetAppOrigin: vi.fn(() => "https://example.test"),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
   mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
+  mockCheckRateLimitOrFail: vi.fn().mockResolvedValue(null),
+  mockLogAuditAsync: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -64,6 +68,22 @@ vi.mock("@/lib/auth/session/step-up", () => ({
   requireRecentSession: mockRequireRecentSession,
 }));
 
+vi.mock("@/lib/security/rate-limit-audit", () => ({
+  checkRateLimitOrFail: mockCheckRateLimitOrFail,
+}));
+
+vi.mock("@/lib/audit/audit", () => ({
+  extractRequestMeta: () => ({ ip: "1.2.3.4", userAgent: "test" }),
+  logAuditAsync: mockLogAuditAsync,
+  personalAuditBase: (_req: unknown, userId: string) => ({
+    scope: "PERSONAL",
+    userId,
+    ip: "1.2.3.4",
+    userAgent: "test",
+    acceptLanguage: null,
+  }),
+}));
+
 import { GET } from "./route";
 
 // C6: device_jkt is the RFC 7638 JWK thumbprint (43 base64url chars). The
@@ -96,6 +116,8 @@ describe("GET /api/mobile/authorize", () => {
     );
     mockRequireRecentSession.mockResolvedValue(null);
     mockEnforceAccessRestriction.mockResolvedValue(null);
+    mockCheckRateLimitOrFail.mockResolvedValue(null);
+    mockLogAuditAsync.mockResolvedValue(undefined);
     mockMobileBridgeCodeCreate.mockResolvedValue({ id: "00000000-0000-4000-8000-000000000003" });
   });
 
@@ -115,6 +137,13 @@ describe("GET /api/mobile/authorize", () => {
       state: VALID.state,
       codeChallenge: VALID.code_challenge,
       deviceJkt: VALID.device_jkt,
+    });
+    // Bridge-code issuance is audited; the code itself is never logged.
+    expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditAsync.mock.calls[0][0]).toMatchObject({
+      action: "MOBILE_BRIDGE_CODE_ISSUED",
+      targetType: "MobileBridgeCode",
+      metadata: { deviceJkt: VALID.device_jkt },
     });
   });
 
@@ -138,6 +167,23 @@ describe("GET /api/mobile/authorize", () => {
     );
     const res = await GET(createRequest("GET", buildUrl(VALID)));
     expect(res.status).toBe(403);
+    expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
+  });
+
+  it("returns the rate-limit response and writes no code when the per-user limiter blocks", async () => {
+    mockCheckRateLimitOrFail.mockResolvedValueOnce(
+      Response.json({ error: "RATE_LIMITED" }, { status: 429 }),
+    );
+    const res = await GET(createRequest("GET", buildUrl(VALID)));
+    expect(res.status).toBe(429);
+    expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 when no app origin is configured and the request is unauthenticated", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockGetAppOrigin.mockReturnValue(undefined as unknown as string);
+    const res = await GET(createRequest("GET", buildUrl(VALID)));
+    expect(res.status).toBe(500);
     expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
   });
 

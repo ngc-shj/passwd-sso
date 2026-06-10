@@ -13,6 +13,7 @@
 		0A36948197E80ACA5ED17F22 /* DPoPProofBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBF559B979642506D203C806 /* DPoPProofBuilderTests.swift */; };
 		0F7754D416476CE6B1AE0C81 /* EntryEncrypter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 988D60F3AE7755637CFCFDD7 /* EntryEncrypter.swift */; };
 		1600D1BA3846CDCAEA02EF7E /* HostSyncServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD016B2D5D9999A41CCA92F /* HostSyncServiceTests.swift */; };
+		1633001879A14FC075CBC4A3 /* EntryBlobDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80BC3E2908650479CBBE6D07 /* EntryBlobDecoderTests.swift */; };
 		1AB309165A8AB5830B2AE4DD /* VaultEntrySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06E4377840A9A939A6B88D9A /* VaultEntrySummary.swift */; };
 		1ACA702DAFCBA5F5EDD82475 /* BridgeKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0EAAD69A5C2E24912DEB8D1 /* BridgeKeyStore.swift */; };
 		1C61EBA902B63AA436EDFED4 /* VaultListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF803DEFD9DF8AF7683EE422 /* VaultListView.swift */; };
@@ -216,6 +217,7 @@
 		77B346160EEA436AAF564277 /* EntryFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryFetcher.swift; sourceTree = "<group>"; };
 		77C0E5B05F04FC285CE89519 /* BackgroundSyncCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSyncCoordinatorTests.swift; sourceTree = "<group>"; };
 		7AFCE015CCAE07263B30B8B4 /* LockStateReducerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockStateReducerTests.swift; sourceTree = "<group>"; };
+		80BC3E2908650479CBBE6D07 /* EntryBlobDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryBlobDecoderTests.swift; sourceTree = "<group>"; };
 		81279161CAE5152A36AAAC35 /* WrappedKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WrappedKeyStore.swift; sourceTree = "<group>"; };
 		8901EA2724A715ACFBEEDBEF /* TeamContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamContext.swift; sourceTree = "<group>"; };
 		8AC8C547AA2FF81B4A670924 /* CredentialResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialResolverTests.swift; sourceTree = "<group>"; };
@@ -306,6 +308,7 @@
 				8AC8C547AA2FF81B4A670924 /* CredentialResolverTests.swift */,
 				3FED91E37F4E8005AEF7E9B6 /* DebugVaultLoaderTests.swift */,
 				EBF559B979642506D203C806 /* DPoPProofBuilderTests.swift */,
+				80BC3E2908650479CBBE6D07 /* EntryBlobDecoderTests.swift */,
 				24CD914CFF8AD6DD6DAB0129 /* EntryCacheFileTests.swift */,
 				628885DD1B6E8E32503A7DD9 /* EntryEncrypterTests.swift */,
 				28A274ABCE6A2833F3A66EF5 /* EntryFetcherTests.swift */,
@@ -807,6 +810,7 @@
 				B8E8B10956121151C6DF7F9C /* CredentialResolverTests.swift in Sources */,
 				0A36948197E80ACA5ED17F22 /* DPoPProofBuilderTests.swift in Sources */,
 				E1FA345EE6BF6D38163AD937 /* DebugVaultLoaderTests.swift in Sources */,
+				1633001879A14FC075CBC4A3 /* EntryBlobDecoderTests.swift in Sources */,
 				EF9407000E17ADEB5E667D88 /* EntryCacheFileTests.swift in Sources */,
 				96A710A8F83E4FEB146E39D4 /* EntryEncrypterTests.swift in Sources */,
 				53BABB8B7A6B12FE9A269D87 /* EntryFetcherTests.swift in Sources */,

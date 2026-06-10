@@ -21,6 +21,7 @@ export const AUDIT_TARGET_TYPE = {
   ACCESS_REQUEST: "AccessRequest",
   MCP_CLIENT: "McpClient",
   EXTENSION_TOKEN: "ExtensionToken",
+  MOBILE_BRIDGE_CODE: "MobileBridgeCode",
   OPERATOR_TOKEN: "OperatorToken",
   // Identifies the rate-limit scope (e.g. "vault.unlock") on a
   // RATE_LIMIT_FAIL_CLOSED audit row, so SIEM can group fail-closed

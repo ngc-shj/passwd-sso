@@ -1,8 +1,13 @@
 import { redirect } from "@/i18n/navigation";
+import { redirect as nextRedirect } from "next/navigation";
 import { auth } from "@/auth";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { APP_NAME } from "@/lib/constants";
-import { resolveCallbackUrl, callbackUrlToHref } from "@/lib/auth/session/callback-url";
+import {
+  resolveCallbackUrl,
+  callbackUrlToHref,
+  isApiCallbackUrl,
+} from "@/lib/auth/session/callback-url";
 import { getAppOrigin } from "@/lib/url-helpers";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -46,6 +51,13 @@ export default async function SignInPage({
       // Malformed env var — fall back to empty origin (relative paths only)
     }
     const resolved = resolveCallbackUrl(rawCallbackUrl ?? null, origin);
+    if (isApiCallbackUrl(resolved)) {
+      // API routes (e.g. the iOS /api/mobile/authorize OAuth handler) live
+      // outside the [locale] segment. next-intl's redirect() would inject the
+      // active locale (→ /<locale>/api/... → 404), so use the plain redirect
+      // with the basePath-qualified path as-is (no locale prefix).
+      nextRedirect(resolved);
+    }
     // Strip basePath + locale: next-intl redirect() re-adds both
     const href = callbackUrlToHref(resolved);
     redirect({ href, locale });

@@ -16,6 +16,14 @@ public struct UnlockResult: Sendable, Equatable {
   public let userId: String
 }
 
+/// Source of the encrypted vault-unlock material. `MobileAPIClient` is the
+/// production conformer (`GET /api/vault/unlock/data`); tests inject a stub so
+/// the REAL `VaultUnlocker` crypto path (hex decode, PBKDF2, AES-GCM) is
+/// exercised without a network call.
+public protocol VaultUnlockDataSource: Sendable {
+  func fetchVaultUnlockData() async throws -> VaultUnlockData
+}
+
 /// Orchestrates the vault unlock flow:
 ///   1. Fetch /api/vault/unlock/data with the host's access token.
 ///   2. Derive wrapping key from passphrase + accountSalt + kdfIterations.
@@ -25,12 +33,12 @@ public struct UnlockResult: Sendable, Equatable {
 ///   6. Encrypt vault_key under bridge_key via deriveCacheVaultKey. Store as WrappedVaultKey.
 ///   7. Returns the in-memory vault_key (never persisted plain).
 public actor VaultUnlocker {
-  private let apiClient: MobileAPIClient
+  private let apiClient: any VaultUnlockDataSource
   private let bridgeKeyStore: BridgeKeyStore
   private let wrappedKeyStore: WrappedKeyStore
 
   public init(
-    apiClient: MobileAPIClient,
+    apiClient: any VaultUnlockDataSource,
     bridgeKeyStore: BridgeKeyStore,
     wrappedKeyStore: any WrappedKeyStore
   ) {

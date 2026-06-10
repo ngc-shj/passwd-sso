@@ -85,7 +85,7 @@ public struct UpdateEntryRequest: Sendable, Codable {
 ///
 /// The client owns DPoP proof construction per request and echoes the last
 /// `DPoP-Nonce` header the server issued. Concurrent calls are serialized by `actor`.
-public actor MobileAPIClient {
+public actor MobileAPIClient: VaultUnlockDataSource {
   let serverURL: URL
   let signer: DPoPSigner
   let jwk: [String: String]

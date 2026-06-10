@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveCallbackUrl, callbackUrlToHref } from "./callback-url";
+import { resolveCallbackUrl, callbackUrlToHref, isApiCallbackUrl } from "./callback-url";
 
 const ORIGIN = "https://example.com";
 const DEFAULT = "/dashboard";
@@ -98,5 +98,25 @@ describe("callbackUrlToHref", () => {
 
   it("returns / for root path", () => {
     expect(callbackUrlToHref("/")).toBe("/");
+  });
+});
+
+describe("isApiCallbackUrl", () => {
+  it("returns true for the iOS mobile authorize API callback", () => {
+    expect(isApiCallbackUrl("/api/mobile/authorize?client_kind=ios&state=x")).toBe(true);
+  });
+
+  it("returns true for a locale-prefixed API callback (locale stripped first)", () => {
+    // The proxy may produce a locale-prefixed callbackUrl; callbackUrlToHref
+    // strips the locale before the /api/ check.
+    expect(isApiCallbackUrl("/ja/api/mobile/authorize")).toBe(true);
+  });
+
+  it("returns false for a normal dashboard callback", () => {
+    expect(isApiCallbackUrl("/dashboard?ext_connect=1")).toBe(false);
+  });
+
+  it("returns false for a locale-prefixed dashboard callback", () => {
+    expect(isApiCallbackUrl("/ja/dashboard")).toBe(false);
   });
 });

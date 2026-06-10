@@ -193,6 +193,7 @@ extension VaultViewModel {
       title: overview.title,
       username: overview.username,
       urlHost: overview.urlHost ?? "",
+      additionalUrlHosts: overview.additionalUrlHosts ?? [],
       tags: overview.tags,
       hasTOTP: detail.totpSecret != nil
     )

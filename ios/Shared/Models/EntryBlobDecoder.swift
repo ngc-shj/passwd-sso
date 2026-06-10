@@ -21,6 +21,10 @@ public enum EntryBlobDecoder {
     let urlHost: String?
     let additionalUrlHosts: [String]?
     let tags: [TagPayload]?
+    // TOTP presence marker written by the web client's overview blob. Absent
+    // (→ nil → false) for non-LOGIN entries and for entries encrypted before
+    // the marker shipped.
+    let hasTOTP: Bool?
   }
 
   private struct FullBlobPayload: Decodable {
@@ -49,10 +53,10 @@ public enum EntryBlobDecoder {
   }
 
   /// Reconstruct a list-view summary from an overview-blob plaintext. `id` and
-  /// `teamId` come from the cache row, not the blob. `hasTOTP` is `false`: the
-  /// overview blob carries no TOTP marker and the cache row has none, so the
-  /// TOTP-only AutoFill picker filter is degraded; the full blob still yields
-  /// the TOTP secret in `detail(...)`.
+  /// `teamId` come from the cache row, not the blob. `hasTOTP` comes from the
+  /// overview blob's TOTP presence marker (written by the web client); it
+  /// drives the one-time-code AutoFill picker filter. Entries encrypted before
+  /// the marker shipped decode to `false` until their next save.
   public static func summary(
     plaintext: Data,
     entryId: String,
@@ -70,7 +74,7 @@ public enum EntryBlobDecoder {
       tags: p.tags?.map { $0.name } ?? [],
       teamId: teamId,
       lastAccessedAt: nil,
-      hasTOTP: false
+      hasTOTP: p.hasTOTP ?? false
     )
   }
 

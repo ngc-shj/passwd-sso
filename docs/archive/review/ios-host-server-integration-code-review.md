@@ -1,0 +1,110 @@
+# Code Review: ios-host-server-integration
+
+Date: 2026-06-10
+Review round: 1
+Branch: feat/ios-custom-scheme-oauth (54 files, +1524 -456)
+
+## Changes from Previous Round
+Initial review.
+
+## Summary
+No Critical findings. Security review is substantively clean: the RLS-nesting fix
+(withBypassRls no longer nested inside withUserTenantRls) is verified correct and
+complete across all sites; open-redirect analysis found no vector (IOS_CALLBACK_URL
+is a hardcoded server constant, redirect origin from env not request host,
+resolveCallbackUrl enforces same-origin); the decryptShareData/Binary no-AAD fallback
+removal is a security improvement (closed a cross-tenant decrypt path). PKCE (RFC 8252
+§8.1) mitigates custom-scheme interception.
+
+Remaining findings are 1 functional limitation (TOTP AutoFill) + C13 test-coverage
+gaps (the code is device-verified working; these guard against future regression).
+
+## Consolidated Findings (deduplicated across experts)
+
+### Major
+
+- **M1 (F1) — TOTP AutoFill picker is always empty.** `EntryBlobDecoder.summary` hardcodes
+  `hasTOTP: false` (overview blob has no TOTP marker), and the extension filters the OTP
+  picker by `hasTOTP == true` → intersection always empty. The extension advertises
+  `ProvidesOneTimeCodes: true` but TOTP AutoFill never offers any entry.
+  Files: `ios/Shared/Models/EntryBlobDecoder.swift:73`, `CredentialProviderViewController.swift:95`.
+  Decision needed: (a) add a TOTP marker to the overview blob server-side + propagate, or
+  (b) detail-decrypt at resolve time, or (c) drop `ProvidesOneTimeCodes` until implemented
+  (don't advertise a broken capability).
+
+- **M2 (F2/T1) — Real `VaultUnlocker` is never tested; tests drive a hand-rolled
+  `StubVaultUnlocker` that re-implements unlock (hex/PBKDF2/AES-GCM).** A revert of the
+  hex/kdfType fix in the real type would not turn any test red (RT1/RT5).
+  File: `ios/PasswdSSOTests/VaultUnlockerTests.swift:58-134`. Plan item C13.1.
+  Fix: extract a `VaultUnlockDataSource` protocol, inject into the real `VaultUnlocker`,
+  test the real type, delete the stub.
+
+- **M3 (T2) — `isApiCallbackUrl` untested + passkey/security-key `window.location.assign`
+  branch never exercised.** Component test mocks `useCallbackUrl: () => "/dashboard"`, so the
+  API-callback branch (the whole point of C4) is never hit. A regression silently breaks the
+  iOS OAuth flow.
+  Files: `src/lib/auth/session/callback-url.ts:84`, `passkey-signin-button.test.tsx`,
+  `security-key-signin-form.test.tsx`.
+
+- **M4 (T3) — `EntryBlobDecoder` (new shared decoder) has no dedicated unit tests** for
+  server-shaped blobs: null `username`/`url`/`notes`, omitted `additionalUrlHosts`, absent
+  `password` (non-LOGIN), `tags` as `{name,color}` objects, malformed JSON → nil. The
+  `password ?? ""` fallback (the C10b fix) is unguarded.
+  File: `ios/Shared/Models/EntryBlobDecoder.swift` (no test file).
+
+- **M5 (T4) — `kdfType` JSON-decode is not tested at the decode level.** Tests build
+  `VaultUnlockData(kdfType: 0)` in Swift directly, bypassing JSONDecoder; the actual pre-fix
+  break (server int `0` vs Swift `String`) is not exercised.
+  File: `ios/PasswdSSOTests/VaultUnlockerTests.swift:31`.
+
+- **M6 (F3) — C13.3 cross-platform vault-unlock fixture absent.** No server-generated hex
+  fixture fed to the iOS unlock path; hex parity is iOS-only (not cross-platform).
+  (Depends on M2's protocol injection.)
+
+### Minor
+
+- **m1 (F8/S2) — sign-in page server redirect locale-injects API callbackUrls.** Already-
+  authenticated user hitting `/[locale]/auth/signin?callbackUrl=/api/mobile/authorize`
+  → next-intl `redirect({href,locale})` → `/ja/api/mobile/authorize` → 404. Unreachable in
+  the iOS ephemeral-session flow; security impact none (resolveCallbackUrl validates), UX 404.
+  File: `src/app/[locale]/auth/signin/page.tsx:50-51`. Fix: apply `isApiCallbackUrl` here too.
+- **m2 (S1) — `/api/mobile/authorize` has no per-IP rate limiter** (cf. `/api/mobile/token` has
+  10/15min). Authenticated + step-up gated; abuse = bridge-code-row write flood. Fix: add
+  `checkRateLimitOrFail`.
+- **m3 (S3) — bridge code issuance not audited** (cf. token route emits MOBILE_TOKEN_ISSUED).
+  Fix: `logAuditAsync(MOBILE_BRIDGE_CODE_ISSUED)` on success.
+- **m4 (F9) — `VaultViewModel.updateSummaryAfterEdit` drops `additionalUrlHosts`** in the
+  optimistic in-memory update (defaults to []); brief AutoFill match gap until next sync.
+  File: `ios/PasswdSSOApp/Views/Vault/VaultViewModel.swift:191`.
+- **m5 (F6/T8) — `fetchTeamMemberships` / `fetchVaultUnlockData` Bearer scheme untested.** The
+  HostSyncService:140/145 scheme fix has no regression guard.
+- **m6 (F7/T7) — PSSO_DIAG CI grep guard not implemented** (C13.7). Production clean now, no
+  mechanical barrier to reintroduction.
+- **m7 (F4) — C13.4 canonicalHTU basePath parity test absent.** `resourceURL` basePath
+  correctness unguarded.
+- **m8 (F5) — C13.6 web-encrypt→iOS-decrypt AAD round-trip test absent** (only golden-vector
+  AAD parity exists).
+- **m9 (T5) — AuthCoordinator `callbackScheme` constant untested** (+ server IOS_CALLBACK_URL
+  constant not asserted).
+- **m10 (T6) — `redirectToSignIn` null-origin 500 branch untested.**
+- **m11 (T9) — CredentialResolverTests passes `hasTOTP:true` fixture that the decoder ignores;
+  the overwrite-to-false is unasserted.** Also: DebugVaultLoader comment references stale
+  `CredentialResolver` instead of `EntryBlobDecoder`.
+
+## Recurring Issue Check
+### Functionality
+R1 reported (M2), R2 clean, R3 clean (one residual → m1), R5 clean, R10 clean, R12 clean,
+R17 clean (resourceURL/EntryBlobDecoder adopted), R19 clean, R20 clean (tx atomicity preserved),
+R21 → C13 gaps M2/M4/M5/M6, R23 N/A, R24 clean (AAD tightening, no data), R25 clean (keychain
+names intentionally not renamed; app-group renamed consistently across 5 targets), R37 note only.
+### Security
+R3 PASS, R5 PASS (nested $transaction removal correct), R9 PASS, R13 PASS, R14 PASS, R18 PASS,
+R31 PASS (v1 permanent-delete now 403), RS1 PASS (timingSafeEqual in token routes), RS2 PARTIAL
+(m2), RS3 PASS (Zod AuthorizeQuerySchema), RS4 PASS (jp.jpng = org/App-Group id, not PII; no
+real emails/IPs in new docs).
+### Testing
+R19 partial (M3), RT1 → M2 (Critical-class, rated Major: code device-verified), RT2 (C13.3/4
+testable, not untestable), RT3 minor (m9), RT4 clean, RT5 → M2.
+
+## Resolution Status
+(pending — see fix round)
