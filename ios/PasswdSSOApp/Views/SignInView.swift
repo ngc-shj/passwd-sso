@@ -65,6 +65,7 @@ struct SignInView: View {
           .frame(maxWidth: .infinity)
       }
       .buttonStyle(.borderedProminent)
+      .controlSize(.large)
       .disabled(state == .signingIn)
 
       #if DEBUG
@@ -72,6 +73,7 @@ struct SignInView: View {
         Task { await loadDebugVault() }
       }
       .buttonStyle(.bordered)
+      .controlSize(.large)
       .tint(.orange)
       .disabled(state == .signingIn)
       #endif

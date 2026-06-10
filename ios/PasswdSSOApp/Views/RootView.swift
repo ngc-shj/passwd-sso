@@ -75,6 +75,7 @@ struct RootView: View {
             appState = .setup
           }
           .buttonStyle(.bordered)
+          .controlSize(.large)
           .padding(.bottom)
         }
       }

@@ -23,10 +23,14 @@ struct VaultUnlockView: View {
         .multilineTextAlignment(.center)
 
       SecureField("Master passphrase", text: $passphrase)
-        .textFieldStyle(.roundedBorder)
         .textContentType(.password)
         .submitLabel(.go)
         .onSubmit { Task { await attemptUnlock() } }
+        // Match the ServerURLSetupView URL-field baseline (≈52pt tap height)
+        // rather than the compact .roundedBorder style.
+        .padding()
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
 
       if let error = errorMessage {
         Text(error)
@@ -38,6 +42,7 @@ struct VaultUnlockView: View {
         Task { await attemptUnlock() }
       }
       .buttonStyle(.borderedProminent)
+      .controlSize(.large)
       .disabled(passphrase.isEmpty || isLoading)
 
       if isLoading {

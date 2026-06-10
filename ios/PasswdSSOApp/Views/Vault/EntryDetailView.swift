@@ -50,6 +50,7 @@ struct EntryDetailView: View {
             loadDetail()
           }
           .buttonStyle(.bordered)
+          .controlSize(.large)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
@@ -153,7 +154,8 @@ struct EntryDetailView: View {
           autoLockService.recordActivity()
         } label: {
           Image(systemName: "doc.on.doc")
-            .imageScale(.small)
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .tint(.accentColor)
@@ -178,7 +180,8 @@ struct EntryDetailView: View {
           autoLockService.recordActivity()
         } label: {
           Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
-            .imageScale(.small)
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
 
@@ -187,7 +190,8 @@ struct EntryDetailView: View {
           autoLockService.recordActivity()
         } label: {
           Image(systemName: "doc.on.doc")
-            .imageScale(.small)
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .tint(.accentColor)
