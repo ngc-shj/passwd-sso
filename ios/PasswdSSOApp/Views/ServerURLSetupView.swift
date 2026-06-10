@@ -165,6 +165,7 @@ struct ServerURLSetupView: View {
           }
         }
         .buttonStyle(.borderedProminent)
+        .controlSize(.large)
         .disabled(viewModel.urlText.isEmpty || {
           if case .probing = viewModel.state { return true }
           return false

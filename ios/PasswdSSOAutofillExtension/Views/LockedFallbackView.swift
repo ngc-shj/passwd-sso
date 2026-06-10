@@ -32,6 +32,7 @@ struct LockedFallbackView: View {
           onOpen()
         }
         .buttonStyle(.borderedProminent)
+        .controlSize(.large)
         .padding(.top, 8)
 
         Spacer()

@@ -43,6 +43,7 @@ struct TOTPCodeView: View {
         copyToClipboard()
       }
       .buttonStyle(.borderedProminent)
+      .controlSize(.large)
       .disabled(currentCode == "------")
     }
     .onAppear {

@@ -126,10 +126,12 @@ struct CredentialPickerView: View {
           onSelect(summary)
         }
         .buttonStyle(.borderedProminent)
+        .controlSize(.large)
 
         Button("Cancel", role: .cancel) {
           pendingAppSideSelection = nil
         }
+        .controlSize(.large)
         .foregroundStyle(.red)
       }
       .padding()
