@@ -22,6 +22,12 @@ settings:
     GCC_TREAT_WARNINGS_AS_ERRORS: YES
     SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
     GENERATE_INFOPLIST_FILE: NO
+    # Xcode 16+ defaults this to YES for Debug, splitting target code into a
+    # separate `.debug.dylib`. That breaks AutoFill (and other) app extensions:
+    # the extension is signed/embedded but iOS won't surface it in
+    # Settings → AutoFill & Passwords. Disable so the extension code lives in
+    # its main binary and registers correctly.
+    ENABLE_DEBUG_DYLIB: NO
 
 configFiles:
   Debug: Configs/Common.xcconfig
@@ -39,6 +45,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: jp.jpng.passwd-sso.Shared
         DEFINES_MODULE: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
         GENERATE_INFOPLIST_FILE: YES
         CURRENT_PROJECT_VERSION: 1
@@ -81,6 +88,16 @@ targets:
     entitlements:
       path: PasswdSSOApp/PasswdSSOApp.entitlements
       properties:
+        # Apple mandates this entitlement on BOTH the AutoFill extension and
+        # its host app ("Do this for both your Password AutoFill extension and
+        # its host app"):
+        # https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.authentication-services.autofill-credential-provider
+        # Every shipping credential manager (Bitwarden, KeePassium, Strongbox,
+        # Proton Pass, …) carries it on the host target too. Without it,
+        # AuthenticationServicesAgent rejects the host↔extension relationship
+        # and the provider never works (and may not be listed in
+        # Settings → General → AutoFill & Passwords).
+        com.apple.developer.authentication-services.autofill-credential-provider: true
         com.apple.security.application-groups:
           - group.jp.jpng.passwd-sso.shared
         keychain-access-groups:
@@ -116,6 +133,9 @@ targets:
         CFBundleDisplayName: passwd-sso AutoFill
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # The extension reads bridge_key behind a per-fill LAContext biometric
+        # prompt; iOS hard-crashes any Face ID access without this key.
+        NSFaceIDUsageDescription: passwd-sso uses Face ID to confirm it's you before filling a credential.
         NSExtension:
           NSExtensionPointIdentifier: com.apple.authentication-services-credential-provider-ui
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).CredentialProviderViewController
@@ -143,6 +163,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: jp.jpng.passwd-sso.PasswdSSOAutofillExtension
+        APPLICATION_EXTENSION_API_ONLY: YES
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: "0.1.0"
         TARGETED_DEVICE_FAMILY: "1"

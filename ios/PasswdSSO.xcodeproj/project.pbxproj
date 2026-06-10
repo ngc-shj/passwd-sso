@@ -941,6 +941,7 @@
 		11EDE73C5DBB889818593C3D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = PasswdSSOAutofillExtension/PasswdSSOAutofillExtension.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = PasswdSSOAutofillExtension/Info.plist;
@@ -959,6 +960,7 @@
 		14112134CA4053FB17F06284 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_IDENTITY = "";
 				CURRENT_PROJECT_VERSION = 1;
 				DEFINES_MODULE = YES;
@@ -1016,6 +1018,7 @@
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 4789NDA9RQ;
+				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -1050,6 +1053,7 @@
 		390336A74B1028070C0B1886 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = PasswdSSOAutofillExtension/PasswdSSOAutofillExtension.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				INFOPLIST_FILE = PasswdSSOAutofillExtension/Info.plist;
@@ -1140,6 +1144,7 @@
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 4789NDA9RQ;
+				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -1225,6 +1230,7 @@
 		FC31A1CE26512D17384B8D0A /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_IDENTITY = "";
 				CURRENT_PROJECT_VERSION = 1;
 				DEFINES_MODULE = YES;
