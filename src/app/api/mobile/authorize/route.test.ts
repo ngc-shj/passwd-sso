@@ -180,8 +180,8 @@ describe("GET /api/mobile/authorize", () => {
   });
 
   it("fails closed with 503 and writes no code when the limiter reports redisErrored", async () => {
-    // authorizeLimiter is created with failClosedOnRedisError: true, so when
-    // Redis is unavailable (redisErrored) checkRateLimitOrFail returns a 503
+    // The authorize limiter is fail-closed on Redis error, so when Redis is
+    // unavailable (redisErrored) checkRateLimitOrFail returns a 503
     // SERVICE_UNAVAILABLE response. The route must propagate it before issuing
     // any bridge code (fail closed, not open).
     mockCheckRateLimitOrFail.mockResolvedValueOnce(
