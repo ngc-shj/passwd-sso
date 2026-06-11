@@ -173,7 +173,7 @@ async function handlePOST(req: NextRequest) {
         {
           error: "temporarily_unavailable",
           error_description:
-            "Too many unclaimed client registrations in the last hour — try again later.",
+            "Too many unclaimed client registrations right now — try again later.",
         },
         { status: 503 },
       );

@@ -74,8 +74,13 @@ export const LOOPBACK_REDIRECT_RE = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):
 // DCR (Dynamic Client Registration) constants
 export const MCP_REFRESH_TOKEN_PREFIX = "mcpr_";
 export const MCP_REFRESH_TOKEN_EXPIRY_SEC = 7 * SEC_PER_DAY;
-export const MCP_DCR_UNCLAIMED_EXPIRY_SEC = SEC_PER_HOUR;
-export const MAX_UNCLAIMED_DCR_CLIENTS = 100;
+// 15-min unclaimed hold window — generous for the register→consent→claim human
+// flow while draining 4× faster than the old 1-hour window (see plan).
+export const MCP_DCR_UNCLAIMED_EXPIRY_SEC = 15 * SEC_PER_MINUTE;
+// Table-bloat backstop, not a tight chokepoint — the real growth bound is the
+// 15-min TTL + lazy-cleanup + 20/h-per-/64 rate limit; 1000 gives ~10× headroom
+// over realistic legit volume so normal traffic never reaches this ceiling.
+export const MAX_UNCLAIMED_DCR_CLIENTS = 1000;
 export const DCR_RATE_LIMIT_WINDOW_MS = MS_PER_HOUR;
 export const DCR_RATE_LIMIT_MAX = 20; // per IP (/64 for IPv6)
 
