@@ -192,9 +192,6 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
   @MainActor
   private func presentLockedSheet() {
     let view = LockedFallbackView(
-      onOpen: { [weak self] in
-        self?.openHostApp()
-      },
       onDismiss: { [weak self] in
         self?.cancel(with: nil)
       }
@@ -234,18 +231,6 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
       } catch {
         cancel(with: error)
       }
-    }
-  }
-
-  // MARK: - Host-app deep link (iOS 17+)
-
-  private func openHostApp() {
-    if #available(iOS 17.0, *) {
-      // extensionContext.open is not available to credential provider extensions;
-      // dismiss so the user can switch to the host app manually.
-      cancel(with: nil)
-    } else {
-      cancel(with: nil)
     }
   }
 
