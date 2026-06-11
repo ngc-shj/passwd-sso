@@ -235,6 +235,44 @@ final class AutoLockServiceTests: XCTestCase {
     XCTAssertEqual(service.state, .unlocked)
   }
 
+  func testTickWithLogoutActionSignsOut() throws {
+    let tmpDir = makeTmpDir()
+    defer { try? FileManager.default.removeItem(at: tmpDir) }
+    let keychain = MockKeychain()
+    seedKeychain(keychain)
+
+    // A wrapped key over the same temp dir the service's store uses; signOut
+    // clears it, whereas lock would keep it.
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    try wks.saveVaultKey(
+      WrappedVaultKey(
+        ciphertext: Data([0x01]),
+        iv: Data(repeating: 0x01, count: 12),
+        authTag: Data(repeating: 0x01, count: 16),
+        issuedAt: Date()
+      )
+    )
+
+    let clock = TestClock(start: Date(timeIntervalSinceReferenceDate: 1000))
+    let service = makeService(tmpDir: tmpDir, keychain: keychain, autoLockMinutes: 15, clock: clock)
+    service.timeoutAction = .logout
+
+    service.startTimer()
+    service.stopTimer()
+    clock.advance(by: 15 * 60)
+    service.tick()
+
+    XCTAssertEqual(service.state, .loggedOut)
+    XCTAssertNil(
+      keychain.store["com.passwd-sso.test.bridge-key-v2:blob"],
+      "bridge_key should be deleted on logout timeout"
+    )
+    XCTAssertNil(
+      try wks.loadVaultKey(),
+      "wrapped keys should be cleared by signOut (unlike lock)"
+    )
+  }
+
   // MARK: - autoLockMinutes clamping
 
   func testAutoLockMinutesClamped() {

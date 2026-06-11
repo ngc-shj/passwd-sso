@@ -6,7 +6,8 @@ import Shared
 @Observable @MainActor public final class AutoLockService {
   public enum State: Sendable, Equatable {
     case unlocked
-    case locked
+    case locked      // idle lock / manual Lock — tokens kept, re-unlock with passphrase
+    case loggedOut   // logout-on-timeout — tokens cleared, must sign in again
   }
 
   public private(set) var state: State = .locked
@@ -16,6 +17,11 @@ import Shared
   }
 
   private var _autoLockMinutes: Int = 15
+
+  /// What the idle timeout does at the boundary: lock (keep tokens/cache) or
+  /// logout (full sign-out). Applied from AppSettingsStore at each unlock.
+  /// Internal (not public) because VaultTimeoutAction is an app-level type.
+  var timeoutAction: VaultTimeoutAction = .lock
   private var lastActivityAt: Date = Date()
   private var timer: Foundation.Timer?
   private let reducer: LockStateReducer
@@ -76,6 +82,8 @@ import Shared
   }
 
   /// Full sign-out: lock + delete tokens + clear cache + clear wrapped blobs.
+  /// Ends in `.loggedOut` (not `.locked`) so the app routes to sign-in rather
+  /// than the passphrase re-unlock screen (which has no token to re-unlock with).
   public func signOut() {
     lock()
     try? tokenStore.deleteAll()
@@ -84,6 +92,7 @@ import Shared
     if fm.fileExists(atPath: cacheURL.path) {
       try? fm.removeItem(at: cacheURL)
     }
+    state = .loggedOut
   }
 
   // MARK: - Private
@@ -93,7 +102,10 @@ import Shared
     guard state == .unlocked else { return }
     let elapsed = clock.now.timeIntervalSince(lastActivityAt)
     if elapsed >= Double(_autoLockMinutes * 60) {
-      lock()
+      switch timeoutAction {
+      case .lock: lock()
+      case .logout: signOut()
+      }
     }
   }
 }

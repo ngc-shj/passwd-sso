@@ -117,6 +117,46 @@ Non-functional / security:
 - Pick "Never" → AutoFill stays available until the user taps Lock or signs out.
 - Relaunch the app → the chosen timeout persists.
 
+## Addendum — settings parity with the browser extension (user-directed)
+
+Port the remaining iOS-meaningful settings from the extension's `StorageSchema`
+([extension/src/lib/storage.ts](extension/src/lib/storage.ts)) into the same Settings screen. Exact
+options/defaults mirror the extension. Browser-only settings (`showBadgeCount`, `enableContextMenu`)
+are N/A on iOS; `showSavePrompt`/`showUpdatePrompt`/`enableInlineSuggestions`/`autoCopyTotp` are
+tracked as separate larger efforts (OS-mechanism differences).
+
+### C5 — Vault timeout action (lock / logout) (locked)
+- `enum VaultTimeoutAction: String { case lock, logout }`, default `.lock` (matches extension).
+- Stored in `AppSettingsStore` (rename of `AutoLockSettingsStore`); `AutoLockService` gains a
+  `timeoutAction` property applied at unlock sites alongside `autoLockMinutes`. `tick()` at the idle
+  boundary calls `lock()` when `.lock`, `signOut()` when `.logout`.
+- Acceptance (unit): with `.logout`, a boundary tick calls signOut (tokens + cache + wrapped keys
+  cleared, bridge_key deleted); with `.lock`, it calls lock (bridge_key deleted, tokens/cache kept).
+  Default is `.lock`.
+
+### C6 — Clipboard auto-clear seconds (locked)
+- `clipboardClearSeconds` from the extension's fixed options **[10, 20, 30, 60, 120, 300]**, default
+  **30** (extension default; iOS currently hardcodes 60). Stored in `AppSettingsStore`, clamped to
+  the nearest valid option, absent → 30.
+- Consumers: `EntryDetailView.copySecurely` and `TOTPCodeView.copyToClipboard` read
+  `AppSettingsStore().clipboardClearSeconds` for the pasteboard `expirationDate` (replacing the
+  hardcoded 60).
+- Acceptance (unit): store round-trip + default-30 + invalid→30; the copy sites use the stored value.
+
+### C7 — Theme (system / light / dark) (locked)
+- `enum AppTheme: String { case system, light, dark }`, default `.system` (matches extension).
+- Applied app-wide reactively via `@AppStorage("appTheme", store: <app-group suite>)` in
+  `PasswdSSOAppApp` → `.preferredColorScheme(theme.colorScheme)` (system → nil). SettingsView's theme
+  Picker binds the same `@AppStorage` so changes apply live without relaunch.
+- Acceptance: build clean; manual — switching theme updates the UI immediately and persists.
+
+### C8 — AppSettingsStore rename + SettingsView sections (locked)
+- `AutoLockSettingsStore` → `AppSettingsStore` holding `autoLockMinutes`, `vaultTimeoutAction`,
+  `clipboardClearSeconds` (theme via `@AppStorage`). Existing autoLock tests updated to the new name.
+- SettingsView grows three more rows: Vault timeout action (Lock/Logout), Clipboard auto-clear
+  (10/20/30/60/120/300 s), Theme (System/Light/Dark). RootView applies `autoLockMinutes` +
+  `timeoutAction` at both unlock sites.
+
 ## Go/No-Go Gate
 | ID  | Subject                                          | Status |
 |-----|--------------------------------------------------|--------|
