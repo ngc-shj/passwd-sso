@@ -288,23 +288,6 @@ describe("DCR register lazy cleanup (real DB)", () => {
     }
   });
 
-  async function insertUnclaimedDcrClient(expiresAt: string): Promise<string> {
-    const id = randomUUID();
-    const clientIdStr = `test-cl-${id.slice(0, 12)}`;
-    await ctx.su.prisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
-      await tx.$executeRawUnsafe(
-        `INSERT INTO mcp_clients (id, client_id, client_secret_hash, name, redirect_uris, allowed_scopes, is_dcr, tenant_id, dcr_expires_at, created_at, updated_at)
-         VALUES ($1::uuid, $2, '', $3, '{}', 'credentials:list', true, NULL, ${expiresAt}, now(), now())`,
-        id,
-        clientIdStr,
-        `client-${id.slice(0, 8)}`,
-      );
-    });
-    seededClientIds.push(id);
-    return id;
-  }
-
   /**
    * Executes the same deleteMany-then-count transaction that register/route.ts
    * runs, using the production Prisma query shapes from that route.
