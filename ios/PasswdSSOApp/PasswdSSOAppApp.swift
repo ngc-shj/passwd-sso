@@ -13,6 +13,7 @@ struct PasswdSSOAppApp: App {
   @State private var currentUserId: String?
 
   @Environment(\.scenePhase) private var scenePhase
+  @AppStorage("appTheme", store: .appGroup) private var theme: AppTheme = .system
 
   var body: some Scene {
     WindowGroup {
@@ -51,6 +52,7 @@ struct PasswdSSOAppApp: App {
           }
         }
       }
+      .preferredColorScheme(theme.colorScheme)
     }
   }
 }

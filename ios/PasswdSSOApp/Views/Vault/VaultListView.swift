@@ -20,6 +20,7 @@ struct VaultListView: View {
   let hostSyncService: HostSyncService
 
   @State private var isScreenRecording: Bool = false
+  @State private var isShowingSettings: Bool = false
 
   var body: some View {
     NavigationStack {
@@ -32,11 +33,25 @@ struct VaultListView: View {
       }
       .navigationTitle("passwd-sso")
       .toolbar {
+        // Gear on the leading edge, away from the destructive trailing Lock
+        // button, to avoid mistaps.
+        ToolbarItem(placement: .navigationBarLeading) {
+          Button {
+            autoLockService.recordActivity()
+            isShowingSettings = true
+          } label: {
+            Image(systemName: "gearshape")
+          }
+          .accessibilityLabel("Settings")
+        }
         ToolbarItem(placement: .navigationBarTrailing) {
           Button("Lock", role: .destructive) {
             autoLockService.lock()
           }
         }
+      }
+      .sheet(isPresented: $isShowingSettings) {
+        SettingsView(autoLockService: autoLockService)
       }
       .searchable(
         text: $viewModel.searchQuery,

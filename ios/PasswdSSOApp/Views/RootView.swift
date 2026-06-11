@@ -59,10 +59,16 @@ struct RootView: View {
           hostSyncService: hostSyncService ?? makeFallbackSyncService(apiClient: apiClient)
         )
         .onChange(of: autoLockService.state) { _, newState in
-          if newState == .locked {
+          switch newState {
+          case .locked:
             // Lock drops the vault key + bridge key, but keeps the server config
             // and token: re-unlock needs only the passphrase, not a full sign-in.
             appState = .vaultLocked(serverConfig: serverConfig, apiClient: apiClient)
+          case .loggedOut:
+            // Logout-on-timeout cleared tokens/cache — route to setup/sign-in.
+            appState = .setup
+          case .unlocked:
+            break
           }
         }
 
@@ -215,6 +221,7 @@ struct RootView: View {
 
     onVaultReady(syncService, drain, vaultKey, unlockResult.userId)
 
+    applyPersistedTimeout(to: autoLockService)
     autoLockService.startTimer()
     appState = .vaultUnlocked(
       serverConfig: serverConfig,
@@ -224,6 +231,15 @@ struct RootView: View {
       autoLockService: autoLockService,
       apiClient: apiClient
     )
+  }
+
+  /// Restore the persisted auto-lock timeout onto a freshly-created service
+  /// before its timer starts. Applied at every unlock site (real + DEBUG).
+  @MainActor
+  private func applyPersistedTimeout(to service: AutoLockService) {
+    let store = AppSettingsStore()
+    service.autoLockMinutes = store.minutes
+    service.timeoutAction = store.vaultTimeoutAction
   }
 
   private func makeFallbackSyncService(apiClient: MobileAPIClient) -> HostSyncService {
@@ -291,6 +307,7 @@ struct RootView: View {
       tokenStore: HostTokenStore(),
       cacheURL: cacheURL
     )
+    applyPersistedTimeout(to: autoLockService)
     autoLockService.startTimer()
     appState = .vaultUnlocked(
       serverConfig: serverConfig,

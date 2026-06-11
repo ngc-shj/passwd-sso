@@ -78,11 +78,12 @@ struct TOTPCodeView: View {
   }
 
   private func copyToClipboard() {
+    let seconds = Double(AppSettingsStore().clipboardClearSeconds)
     UIPasteboard.general.setItems(
       [[UIPasteboard.typeAutomatic: currentCode]],
       options: [
         .localOnly: true,
-        .expirationDate: Date().addingTimeInterval(60),
+        .expirationDate: Date().addingTimeInterval(seconds),
       ]
     )
     withAnimation { copyConfirmed = true }
