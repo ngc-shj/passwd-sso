@@ -13,7 +13,7 @@ public struct VaultEntrySummary: Codable, Sendable, Equatable, Identifiable {
   /// True when the entry has a TOTP secret (used to filter the TOTP AutoFill picker).
   public let hasTOTP: Bool
   /// Web-only overview flags, carried so an iOS edit can preserve them on
-  /// re-encrypt (see EntryBlobDecoder / OverviewPlaintext). Dropping
+  /// re-encrypt (see EntryBlobDecoder / PersonalEntryBlobBuilder). Dropping
   /// requireReprompt would silently remove a master-passphrase re-prompt.
   /// `requireReprompt` is always present in the web overview blob, so a plain
   /// Bool (absent → false) suffices. `travelSafe` is THREE-state — the web

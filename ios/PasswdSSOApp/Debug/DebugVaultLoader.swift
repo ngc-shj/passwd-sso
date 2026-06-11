@@ -23,6 +23,7 @@ public enum DebugVaultLoader {
   public struct LoadedState: Sendable {
     public let vaultKey: SymmetricKey
     public let userId: String
+    public let keyVersion: Int
     public let cacheData: CacheData
   }
 
@@ -132,6 +133,7 @@ public enum DebugVaultLoader {
     return LoadedState(
       vaultKey: vaultKey,
       userId: fixtureUserId,
+      keyVersion: 1,
       cacheData: cacheData
     )
   }

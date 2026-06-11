@@ -3,18 +3,25 @@ import Foundation
 import Shared
 import SwiftUI
 
-/// Form view for editing a personal vault entry.
-/// Presents editable fields for title, username, password, url, notes, totpSecret, and tags.
+// MARK: - EntryForm
+
+/// Unified form for creating and editing personal vault entries.
+/// Mode `.create` presents an empty form; `.edit` pre-fills from an existing entry.
+/// Tags are not editable on iOS (preserved server-side); a footnote explains this.
 @MainActor
-struct EntryEditForm: View {
-  let summary: VaultEntrySummary
-  let initialDetail: VaultEntryDetail
+struct EntryForm: View {
+  enum Mode {
+    case create
+    case edit(summary: VaultEntrySummary, initial: VaultEntryDetail)
+  }
+
+  let mode: Mode
   let vaultKey: SymmetricKey
   let userId: String
+  let keyVersion: Int
   @Bindable var viewModel: VaultViewModel
   let apiClient: MobileAPIClient
   let hostSyncService: HostSyncService
-  let onSaved: () -> Void
 
   @State private var title: String
   @State private var username: String
@@ -22,7 +29,6 @@ struct EntryEditForm: View {
   @State private var url: String
   @State private var notes: String
   @State private var totpSecret: String
-  @State private var tagsText: String
 
   @State private var isSaving: Bool = false
   @State private var saveError: String? = nil
@@ -30,31 +36,38 @@ struct EntryEditForm: View {
   @Environment(\.dismiss) private var dismiss
 
   init(
-    summary: VaultEntrySummary,
-    initialDetail: VaultEntryDetail,
+    mode: Mode,
     vaultKey: SymmetricKey,
     userId: String,
+    keyVersion: Int,
     viewModel: VaultViewModel,
     apiClient: MobileAPIClient,
-    hostSyncService: HostSyncService,
-    onSaved: @escaping () -> Void
+    hostSyncService: HostSyncService
   ) {
-    self.summary = summary
-    self.initialDetail = initialDetail
+    self.mode = mode
     self.vaultKey = vaultKey
     self.userId = userId
+    self.keyVersion = keyVersion
     self.viewModel = viewModel
     self.apiClient = apiClient
     self.hostSyncService = hostSyncService
-    self.onSaved = onSaved
 
-    _title = State(initialValue: initialDetail.title)
-    _username = State(initialValue: initialDetail.username)
-    _password = State(initialValue: initialDetail.password)
-    _url = State(initialValue: initialDetail.url)
-    _notes = State(initialValue: initialDetail.notes)
-    _totpSecret = State(initialValue: initialDetail.totpSecret ?? "")
-    _tagsText = State(initialValue: initialDetail.tags.joined(separator: ", "))
+    switch mode {
+    case .create:
+      _title = State(initialValue: "")
+      _username = State(initialValue: "")
+      _password = State(initialValue: "")
+      _url = State(initialValue: "")
+      _notes = State(initialValue: "")
+      _totpSecret = State(initialValue: "")
+    case .edit(_, let initial):
+      _title = State(initialValue: initial.title)
+      _username = State(initialValue: initial.username)
+      _password = State(initialValue: initial.password)
+      _url = State(initialValue: initial.url)
+      _notes = State(initialValue: initial.notes)
+      _totpSecret = State(initialValue: initial.totpSecret ?? "")
+    }
   }
 
   var body: some View {
@@ -94,10 +107,10 @@ struct EntryEditForm: View {
             .autocorrectionDisabled()
         }
 
-        Section("Tags") {
-          TextField("tag1, tag2, tag3", text: $tagsText)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
+        Section {
+          Text("Tags, custom fields, generator settings, and password history are kept on save — edit those in the web app.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
 
         if let error = saveError {
@@ -108,7 +121,7 @@ struct EntryEditForm: View {
           }
         }
       }
-      .navigationTitle("Edit Entry")
+      .navigationTitle(navigationTitle)
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
@@ -118,7 +131,7 @@ struct EntryEditForm: View {
           Button("Save") {
             Task { await save() }
           }
-          .disabled(!hasChanges || isSaving)
+          .disabled(!canSave || isSaving)
         }
       }
       .disabled(isSaving)
@@ -127,21 +140,31 @@ struct EntryEditForm: View {
 
   // MARK: - Private
 
-  private var hasChanges: Bool {
-    title != initialDetail.title ||
-    username != initialDetail.username ||
-    password != initialDetail.password ||
-    url != initialDetail.url ||
-    notes != initialDetail.notes ||
-    totpSecret != (initialDetail.totpSecret ?? "") ||
-    tagsText != initialDetail.tags.joined(separator: ", ")
+  private var navigationTitle: String {
+    switch mode {
+    case .create: return "New Entry"
+    case .edit: return "Edit Entry"
+    }
   }
 
-  private var parsedTags: [String] {
-    tagsText
-      .split(separator: ",")
-      .map { $0.trimmingCharacters(in: .whitespaces) }
-      .filter { !$0.isEmpty }
+  private var canSave: Bool {
+    switch mode {
+    case .create:
+      // Allow save when title or password is non-empty.
+      return !title.isEmpty || !password.isEmpty
+    case .edit(_, let initial):
+      return hasChanges(from: initial)
+    }
+  }
+
+  private func hasChanges(from initial: VaultEntryDetail) -> Bool {
+    title != initial.title ||
+    username != initial.username ||
+    password != initial.password ||
+    url != initial.url ||
+    notes != initial.notes ||
+    totpSecret != (initial.totpSecret ?? "")
+    // Tags excluded — not editable on iOS.
   }
 
   private func save() async {
@@ -149,46 +172,37 @@ struct EntryEditForm: View {
     saveError = nil
     defer { isSaving = false }
 
-    let urlHost = URL(string: url)?.host ?? ""
-    let detail = EntryPlaintext(
+    let fields = EditableEntryFields(
       title: title,
       username: username,
       password: password,
-      url: url.isEmpty ? nil : url,
-      notes: notes.isEmpty ? nil : notes,
-      totpSecret: totpSecret.isEmpty ? nil : totpSecret,
-      tags: parsedTags
-    )
-    let overview = OverviewPlaintext(
-      title: title,
-      username: username,
-      urlHost: urlHost.isEmpty ? nil : urlHost,
-      // iOS does not edit URL custom fields, so preserve the original entry's
-      // additionalUrlHosts rather than dropping them on re-encrypt.
-      additionalUrlHosts: summary.additionalUrlHosts.isEmpty ? nil : summary.additionalUrlHosts,
-      // Keep the overview TOTP marker in sync with the edited secret so the
-      // AutoFill one-time-code picker still finds the entry after an iOS edit.
-      hasTOTP: totpSecret.isEmpty ? nil : true,
-      // Preserve web-only flags the iOS form does not edit. requireReprompt is
-      // always written (matching the web overview shape); travelSafe is passed
-      // through verbatim (nil → omitted, true/false preserved) so an explicit
-      // travel-unsafe entry is not flipped back to travel-safe.
-      requireReprompt: summary.requireReprompt,
-      travelSafe: summary.travelSafe,
-      tags: parsedTags
+      url: url,
+      notes: notes,
+      totpSecret: totpSecret
     )
 
     do {
-      try await viewModel.saveEntry(
-        entryId: summary.id,
-        userId: userId,
-        detail: detail,
-        overview: overview,
-        vaultKey: vaultKey,
-        apiClient: apiClient,
-        hostSyncService: hostSyncService
-      )
-      onSaved()
+      switch mode {
+      case .create:
+        try await viewModel.createEntry(
+          userId: userId,
+          fields: fields,
+          vaultKey: vaultKey,
+          keyVersion: keyVersion,
+          apiClient: apiClient,
+          hostSyncService: hostSyncService
+        )
+      case .edit(let summary, _):
+        try await viewModel.saveEntry(
+          entryId: summary.id,
+          userId: userId,
+          fields: fields,
+          vaultKey: vaultKey,
+          keyVersion: keyVersion,
+          apiClient: apiClient,
+          hostSyncService: hostSyncService
+        )
+      }
       dismiss()
     } catch {
       saveError = "Save failed: \(error.localizedDescription)"

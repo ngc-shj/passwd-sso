@@ -10,7 +10,8 @@ import XCTest
 /// The test creates real PBKDF2 + AES-GCM material so the full crypto path is exercised.
 private func makeVaultUnlockData(
   passphrase: String,
-  iterations: Int = 1
+  iterations: Int = 1,
+  keyVersion: Int = 1
 ) throws -> (data: VaultUnlockData, secretKey: Data) {
   let saltData = Data(repeating: 0xAA, count: 32)
   let wrappingKey = try deriveWrappingKeyPBKDF2(
@@ -28,7 +29,7 @@ private func makeVaultUnlockData(
     encryptedSecretKey: hexEncode(cipher),
     secretKeyIv: hexEncode(iv),
     secretKeyAuthTag: hexEncode(tag),
-    keyVersion: 1,
+    keyVersion: keyVersion,
     kdfType: 0,
     kdfIterations: iterations,
     userId: "test-user-42"
@@ -328,6 +329,29 @@ final class VaultUnlockerTests: XCTestCase {
       "web-generated unlock material must derive the same vault key on iOS"
     )
     XCTAssertEqual(result.userId, fixture.userId)
+  }
+
+  // MARK: - keyVersion threading (C4 / T11)
+
+  /// Passes a DISTINCT keyVersion (7) and asserts result.keyVersion == 7, proving
+  /// the field is threaded from unlockData.keyVersion rather than hardcoded.
+  func testUnlockThreadsKeyVersionFromUnlockData() async throws {
+    let (unlockData, _) = try makeVaultUnlockData(passphrase: "test-pass", keyVersion: 7)
+
+    let bks = BridgeKeyStore(
+      accessGroup: "test",
+      service: "com.passwd-sso.test.kv.bridge-key",
+      keychain: MockKeychain()
+    )
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .success(unlockData)),
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks
+    )
+
+    let result = try await unlocker.unlock(passphrase: "test-pass")
+    XCTAssertEqual(result.keyVersion, 7, "keyVersion must be threaded from unlockData, not hardcoded")
   }
 
   func testServerReturns401throwsInvalidPassphrase() async {

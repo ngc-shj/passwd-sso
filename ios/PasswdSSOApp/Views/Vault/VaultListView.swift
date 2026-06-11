@@ -15,12 +15,15 @@ struct VaultListView: View {
   let cacheData: CacheData
   let vaultKey: SymmetricKey
   let userId: String
+  let keyVersion: Int
   let autoLockService: AutoLockService
   let apiClient: MobileAPIClient
   let hostSyncService: HostSyncService
 
   @State private var isScreenRecording: Bool = false
   @State private var isShowingSettings: Bool = false
+  @State private var isShowingCreateForm: Bool = false
+  @FocusState private var searchFocused: Bool
 
   var body: some View {
     NavigationStack {
@@ -33,34 +36,50 @@ struct VaultListView: View {
       }
       .navigationTitle("passwd-sso")
       .toolbar {
-        // Gear on the leading edge, away from the destructive trailing Lock
-        // button, to avoid mistaps.
-        ToolbarItem(placement: .navigationBarLeading) {
-          Button {
-            autoLockService.recordActivity()
-            isShowingSettings = true
+        // Matches the iOS 26 native Passwords app: secondary actions live behind
+        // a single top-right "⋯" menu; the primary Create (+) action and search
+        // move to the bottom bar (see `bottomBar`). One top-right control means
+        // no two toolbar items can merge into one glass capsule.
+        ToolbarItem(placement: .topBarTrailing) {
+          Menu {
+            Button {
+              autoLockService.recordActivity()
+              isShowingSettings = true
+            } label: {
+              Label("Settings", systemImage: "gearshape")
+            }
+            Button(role: .destructive) {
+              autoLockService.lock()
+            } label: {
+              Label("Lock", systemImage: "lock")
+            }
           } label: {
-            Image(systemName: "gearshape")
+            Image(systemName: "ellipsis.circle")
           }
-          .accessibilityLabel("Settings")
+          .accessibilityLabel("More")
         }
-        ToolbarItem(placement: .navigationBarTrailing) {
-          Button("Lock", role: .destructive) {
-            autoLockService.lock()
-          }
+      }
+      .safeAreaInset(edge: .bottom) {
+        if !isScreenRecording {
+          bottomBar
         }
       }
       .sheet(isPresented: $isShowingSettings) {
         SettingsView(autoLockService: autoLockService)
       }
-      .searchable(
-        text: $viewModel.searchQuery,
-        placement: .navigationBarDrawer(displayMode: .always),
-        prompt: "Search entries"
-      )
-      // Activity tracking moved to explicit action sites (Lock button,
-      // search-query change, navigation) so it never competes with
-      // NavigationLink hit-testing inside the List.
+      .sheet(isPresented: $isShowingCreateForm) {
+        EntryForm(
+          mode: .create,
+          vaultKey: vaultKey,
+          userId: userId,
+          keyVersion: keyVersion,
+          viewModel: viewModel,
+          apiClient: apiClient,
+          hostSyncService: hostSyncService
+        )
+      }
+      // Search moved from the top navigation drawer to the bottom bar (native
+      // Passwords-app pattern). Activity tracking stays on query change.
       .onChange(of: viewModel.searchQuery) { _, _ in
         autoLockService.recordActivity()
       }
@@ -76,6 +95,57 @@ struct VaultListView: View {
     }
   }
 
+  // MARK: - Bottom bar (search + create)
+
+  /// Native Passwords-app pattern: a search field fills the bottom bar with the
+  /// Create (+) button on the trailing side. + is hidden under a team filter
+  /// (team create unsupported). Pinned via `.safeAreaInset(edge: .bottom)`.
+  private var bottomBar: some View {
+    HStack(spacing: 12) {
+      HStack(spacing: 6) {
+        Image(systemName: "magnifyingglass")
+          .foregroundStyle(.secondary)
+        TextField("Search", text: $viewModel.searchQuery)
+          .textFieldStyle(.plain)
+          .textInputAutocapitalization(.never)
+          .autocorrectionDisabled()
+          .focused($searchFocused)
+          .submitLabel(.search)
+        if !viewModel.searchQuery.isEmpty {
+          Button {
+            viewModel.searchQuery = ""
+          } label: {
+            Image(systemName: "xmark.circle.fill")
+              .foregroundStyle(.secondary)
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("Clear search")
+        }
+      }
+      .padding(.horizontal, 12)
+      .frame(minHeight: 44)
+      .background(Color(.secondarySystemBackground), in: Capsule())
+
+      if viewModel.filterTeamId == nil {
+        Button {
+          autoLockService.recordActivity()
+          isShowingCreateForm = true
+        } label: {
+          Image(systemName: "plus")
+            .font(.title2)
+            .frame(width: 44, height: 44)
+            .background(Color(.secondarySystemBackground), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .tint(.accentColor)
+        .accessibilityLabel("Create entry")
+      }
+    }
+    .padding(.horizontal)
+    .padding(.vertical, 8)
+    .background(.bar)
+  }
+
   // MARK: - Entry list
 
   private var entryList: some View {
@@ -86,6 +156,7 @@ struct VaultListView: View {
           cacheData: cacheData,
           vaultKey: vaultKey,
           userId: userId,
+          keyVersion: keyVersion,
           autoLockService: autoLockService,
           viewModel: viewModel,
           apiClient: apiClient,
