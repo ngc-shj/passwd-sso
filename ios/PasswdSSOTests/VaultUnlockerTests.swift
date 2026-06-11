@@ -340,7 +340,7 @@ final class VaultUnlockerTests: XCTestCase {
 
     let bks = BridgeKeyStore(
       accessGroup: "test",
-      service: "com.passwd-sso.test.bridge-key-kv",
+      service: "com.passwd-sso.test.kv.bridge-key",
       keychain: MockKeychain()
     )
     let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
