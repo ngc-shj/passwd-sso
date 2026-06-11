@@ -546,6 +546,23 @@ describe("C2 — transaction name, span.description, contexts.trace.description 
   });
 });
 
+// C11 acceptance fixtures — tags scrubbing
+// MUST fail against the pre-change scrubber (before e.tags handling was added).
+describe("C11 — tags scrubbing", () => {
+  it("redacts capability URL in tags.transaction and preserves non-capability tags", () => {
+    const event = {
+      tags: {
+        transaction: "/s/<token>",
+        env: "production",
+      },
+    };
+    const result = scrubSentryEvent(event);
+    const tags = (result as Record<string, unknown>).tags as Record<string, unknown>;
+    expect(tags.transaction).toBe("/s/[redacted]");
+    expect(tags.env).toBe("production");
+  });
+});
+
 describe("sanitizeUrl", () => {
   it("strips query string", () => {
     expect(sanitizeUrl("https://example.com/path?foo=bar&baz=qux")).toBe("https://example.com/path");

@@ -299,5 +299,16 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
     e.transaction = redactCapabilityPaths(e.transaction);
   }
 
+  // Redact capability paths from tags — Sentry auto-copies transaction into tags.transaction,
+  // and custom tags could carry capability URLs.
+  if (e.tags && typeof e.tags === "object" && !Array.isArray(e.tags)) {
+    const tags = e.tags as Record<string, unknown>;
+    for (const key of Object.keys(tags)) {
+      if (typeof tags[key] === "string") {
+        tags[key] = redactCapabilityPaths(tags[key] as string);
+      }
+    }
+  }
+
   return event;
 }
