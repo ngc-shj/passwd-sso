@@ -339,7 +339,8 @@ describe("DCR register lazy cleanup (real DB)", () => {
       for (let i = 0; i < MAX_UNCLAIMED_DCR_CLIENTS; i++) {
         const id = randomUUID();
         seededClientIds.push(id);
-        values.push(id, `test-bulk-exp-${id.slice(0, 8)}`, `client-bulk-exp-${i}`);
+        // client_id (@unique): use the full uuid to avoid birthday collisions at 1000 rows; name follows
+        values.push(id, `client-bulk-exp-${id}`, `name-bulk-exp-${i}`);
       }
       await tx.$executeRawUnsafe(
         `INSERT INTO mcp_clients (id, client_id, client_secret_hash, name, redirect_uris, allowed_scopes, is_dcr, tenant_id, dcr_expires_at, created_at, updated_at) VALUES ${valuePlaceholders}`,
@@ -378,7 +379,8 @@ describe("DCR register lazy cleanup (real DB)", () => {
       for (let i = 0; i < MAX_UNCLAIMED_DCR_CLIENTS; i++) {
         const id = randomUUID();
         seededClientIds.push(id);
-        values.push(id, `test-bulk-fresh-${id.slice(0, 8)}`, `client-bulk-fresh-${i}`);
+        // client_id (@unique): use the full uuid to avoid birthday collisions at 1000 rows; name follows
+        values.push(id, `client-bulk-fresh-${id}`, `name-bulk-fresh-${i}`);
       }
       await tx.$executeRawUnsafe(
         `INSERT INTO mcp_clients (id, client_id, client_secret_hash, name, redirect_uris, allowed_scopes, is_dcr, tenant_id, dcr_expires_at, created_at, updated_at) VALUES ${valuePlaceholders}`,
