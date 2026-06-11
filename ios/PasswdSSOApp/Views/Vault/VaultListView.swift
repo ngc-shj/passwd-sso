@@ -15,12 +15,14 @@ struct VaultListView: View {
   let cacheData: CacheData
   let vaultKey: SymmetricKey
   let userId: String
+  let keyVersion: Int
   let autoLockService: AutoLockService
   let apiClient: MobileAPIClient
   let hostSyncService: HostSyncService
 
   @State private var isScreenRecording: Bool = false
   @State private var isShowingSettings: Bool = false
+  @State private var isShowingCreateForm: Bool = false
 
   var body: some View {
     NavigationStack {
@@ -33,9 +35,17 @@ struct VaultListView: View {
       }
       .navigationTitle("passwd-sso")
       .toolbar {
-        // Gear on the leading edge, away from the destructive trailing Lock
-        // button, to avoid mistaps.
-        ToolbarItem(placement: .navigationBarLeading) {
+        // Layout rationale:
+        //  - Create (+) sits ALONE on the trailing edge — the conventional iOS
+        //    spot for the primary "add" action (Mail/Notes/Contacts), isolated
+        //    from the destructive Lock so the two never sit adjacent.
+        //  - Settings (gear) and Lock are the vault-management actions, on the
+        //    leading edge as SEPARATE items. iOS 26's toolbar auto-merges
+        //    adjacent same-edge items into one glass capsule, so a ToolbarSpacer
+        //    splits them into two independent capsules. On iOS < 26 there are no
+        //    capsules, so they render as distinct controls without the spacer.
+        //  - Create is hidden while a team filter is active (team create unsupported).
+        ToolbarItem(placement: .topBarLeading) {
           Button {
             autoLockService.recordActivity()
             isShowingSettings = true
@@ -44,14 +54,39 @@ struct VaultListView: View {
           }
           .accessibilityLabel("Settings")
         }
-        ToolbarItem(placement: .navigationBarTrailing) {
+        if #available(iOS 26.0, *) {
+          ToolbarSpacer(.fixed, placement: .topBarLeading)
+        }
+        ToolbarItem(placement: .topBarLeading) {
           Button("Lock", role: .destructive) {
             autoLockService.lock()
+          }
+        }
+        if viewModel.filterTeamId == nil {
+          ToolbarItem(placement: .topBarTrailing) {
+            Button {
+              autoLockService.recordActivity()
+              isShowingCreateForm = true
+            } label: {
+              Image(systemName: "plus")
+            }
+            .accessibilityLabel("Create entry")
           }
         }
       }
       .sheet(isPresented: $isShowingSettings) {
         SettingsView(autoLockService: autoLockService)
+      }
+      .sheet(isPresented: $isShowingCreateForm) {
+        EntryForm(
+          mode: .create,
+          vaultKey: vaultKey,
+          userId: userId,
+          keyVersion: keyVersion,
+          viewModel: viewModel,
+          apiClient: apiClient,
+          hostSyncService: hostSyncService
+        )
       }
       .searchable(
         text: $viewModel.searchQuery,
@@ -86,6 +121,7 @@ struct VaultListView: View {
           cacheData: cacheData,
           vaultKey: vaultKey,
           userId: userId,
+          keyVersion: keyVersion,
           autoLockService: autoLockService,
           viewModel: viewModel,
           apiClient: apiClient,

@@ -9,11 +9,13 @@ public enum VaultUnlockError: Error, Equatable {
   case cryptoFailed
 }
 
-/// Result of a successful vault unlock; carries the in-memory vault key and the
-/// userId needed for AAD construction on personal entries (aadVersion >= 1).
+/// Result of a successful vault unlock; carries the in-memory vault key, the
+/// userId needed for AAD construction on personal entries (aadVersion >= 1),
+/// and the live keyVersion from the server unlock data.
 public struct UnlockResult: Sendable, Equatable {
   public let vaultKey: SymmetricKey
   public let userId: String
+  public let keyVersion: Int
 }
 
 /// Source of the encrypted vault-unlock material. `MobileAPIClient` is the
@@ -142,7 +144,7 @@ public actor VaultUnlocker {
     )
     try wrappedKeyStore.saveVaultKey(wrapped)
 
-    // Step 7: return in-memory vault_key + userId
-    return UnlockResult(vaultKey: vaultKey, userId: unlockData.userId)
+    // Step 7: return in-memory vault_key + userId + live keyVersion
+    return UnlockResult(vaultKey: vaultKey, userId: unlockData.userId, keyVersion: unlockData.keyVersion)
   }
 }

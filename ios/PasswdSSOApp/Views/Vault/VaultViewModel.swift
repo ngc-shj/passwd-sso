@@ -7,6 +7,12 @@ import Shared
 public enum VaultViewModelError: Error, Equatable {
   /// Editing team entries from the iOS app is not supported in MVP.
   case teamEditNotSupported
+  /// The VM cache is not yet loaded (vault not unlocked or sync not run).
+  case cacheUnavailable
+  /// The entry's encrypted blobs could not be decrypted (wrong key or corrupted entry).
+  case entryNotDecryptable
+  /// The server returned an id that does not match the client-generated entryId (AAD desync).
+  case entryIdMismatch
 }
 
 /// Observable view-model for the vault list and detail screens.
@@ -19,6 +25,10 @@ public enum VaultViewModelError: Error, Equatable {
   public var filterTeamId: String? = nil  // nil = all, non-nil = specific team
 
   var allSummaries: [VaultEntrySummary] = []
+
+  /// The most recently loaded cache. Set by `loadFromCache` and refreshed after
+  /// every successful write+sync so `saveEntry`/`loadDetail` always read fresh data.
+  public private(set) var cacheData: CacheData?
 
   // MARK: - Filtered results
 
@@ -52,6 +62,7 @@ public enum VaultViewModelError: Error, Equatable {
   /// shape; the previous `[EncryptedEntry]` decode path was a dead Step-7
   /// type that never matched the on-disk format.
   public func loadFromCache(cacheData: CacheData, vaultKey: SymmetricKey, userId: String) {
+    self.cacheData = cacheData
     guard let entries = try? JSONDecoder().decode([CacheEntry].self, from: cacheData.entries) else {
       return
     }
@@ -142,30 +153,88 @@ public enum VaultViewModelError: Error, Equatable {
       return nil
     }
   }
+
+  /// Decrypt both blobs for an entry using its STORED aadVersion (handles legacy
+  /// aadVersion 0). Returns raw plaintext Data (not decoded) so the caller can
+  /// pass it to PersonalEntryBlobBuilder.applyEdits. Returns nil on any error —
+  /// never throws or crashes (caller converts nil to entryNotDecryptable).
+  private func rawPlaintexts(
+    for entryId: String,
+    cacheData: CacheData,
+    vaultKey: SymmetricKey,
+    userId: String
+  ) -> (blob: Data, overview: Data)? {
+    guard let entries = try? JSONDecoder().decode([CacheEntry].self, from: cacheData.entries),
+          let entry = entries.first(where: { $0.id == entryId }) else {
+      return nil
+    }
+    do {
+      let blobAAD = try buildEntryAAD(entry: entry, userId: userId, vaultType: VaultType.blob)
+      let overviewAAD = try buildEntryAAD(entry: entry, userId: userId, vaultType: VaultType.overview)
+      let blobData = try decryptAESGCMEncoded(encrypted: entry.encryptedBlob, key: vaultKey, aad: blobAAD)
+      let overviewData = try decryptAESGCMEncoded(encrypted: entry.encryptedOverview, key: vaultKey, aad: overviewAAD)
+      return (blob: blobData, overview: overviewData)
+    } catch {
+      return nil
+    }
+  }
 }
 
-// MARK: - Save entry
+// MARK: - Create + save entry
 
 extension VaultViewModel {
-  /// Save edited entry. Re-encrypts with vault_key + personal AAD; calls API; triggers sync.
-  /// Throws `VaultViewModelError.teamEditNotSupported` for team entries.
-  ///
-  /// NOT WIRED TO THE UI: editing is disabled in `EntryDetailView` because the
-  /// re-encrypt schema is lossy (string tags break decode → entry vanishes; totp,
-  /// generatorSettings, customFields, passwordHistory are dropped). This method
-  /// is retained as the basis for the full-fidelity round-trip fix tracked in
-  /// the iOS-edit data-loss issue; do not re-enable the UI edit path until that
-  /// lands.
+  /// Create a new personal LOGIN entry: encrypt, POST, assert server id == entryId,
+  /// sync, and refresh allSummaries from the sync's fresh cache.
+  public func createEntry(
+    userId: String,
+    fields: EditableEntryFields,
+    vaultKey: SymmetricKey,
+    keyVersion: Int,
+    apiClient: MobileAPIClient,
+    hostSyncService: HostSyncService
+  ) async throws {
+    let entryId = UUID().uuidString.lowercased()
+    let (blobData, overviewData) = try PersonalEntryBlobBuilder.buildCreate(fields: fields)
+
+    let blobAAD = try buildPersonalEntryAAD(userId: userId, entryId: entryId, vaultType: VaultType.blob)
+    let overviewAAD = try buildPersonalEntryAAD(userId: userId, entryId: entryId, vaultType: VaultType.overview)
+    let blobEnc = try encryptAESGCMEncoded(plaintext: blobData, key: vaultKey, aad: blobAAD)
+    let overviewEnc = try encryptAESGCMEncoded(plaintext: overviewData, key: vaultKey, aad: overviewAAD)
+
+    let liveKeyVersion = max(1, keyVersion)
+    let createReq = CreateEntryRequest(
+      id: entryId,
+      encryptedBlob: blobEnc,
+      encryptedOverview: overviewEnc,
+      keyVersion: liveKeyVersion,
+      aadVersion: 1,
+      entryType: "LOGIN"
+    )
+    let serverId = try await apiClient.createEntry(body: createReq)
+
+    // S2: server id must equal client-generated entryId (AAD is bound to it).
+    guard serverId == entryId else {
+      throw VaultViewModelError.entryIdMismatch
+    }
+
+    // Refresh from sync — no optimistic prepend; allSummaries rebuilt from the cache.
+    let report = try await hostSyncService.runSync(vaultKey: vaultKey, userId: userId)
+    if let freshCache = report.cacheData {
+      loadFromCache(cacheData: freshCache, vaultKey: vaultKey, userId: userId)
+    }
+  }
+
+  /// Save an edited personal entry: decrypt existing blobs using stored aadVersion,
+  /// apply edits (preserve-unknown round-trip), re-encrypt with live keyVersion +
+  /// aadVersion 1, PUT, sync, and refresh allSummaries.
   public func saveEntry(
     entryId: String,
     userId: String,
-    detail: EntryPlaintext,
-    overview: OverviewPlaintext,
+    fields: EditableEntryFields,
     vaultKey: SymmetricKey,
+    keyVersion: Int,
     apiClient: MobileAPIClient,
-    hostSyncService: HostSyncService,
-    aadVersion: Int = 1,
-    keyVersion: Int = 1
+    hostSyncService: HostSyncService
   ) async throws {
     // Reject team entries — out of scope for MVP.
     if let summary = allSummaries.first(where: { $0.id == entryId }),
@@ -173,41 +242,40 @@ extension VaultViewModel {
       throw VaultViewModelError.teamEditNotSupported
     }
 
-    // Re-encrypt with personal AAD.
-    let (blobEnc, overviewEnc) = try encryptPersonalEntry(
-      entryId: entryId,
-      userId: userId,
-      vaultKey: vaultKey,
-      detail: detail,
-      overview: overview
+    guard let cache = cacheData else {
+      throw VaultViewModelError.cacheUnavailable
+    }
+
+    guard let raw = rawPlaintexts(for: entryId, cacheData: cache, vaultKey: vaultKey, userId: userId) else {
+      throw VaultViewModelError.entryNotDecryptable
+    }
+
+    let (newBlobData, newOverviewData) = try PersonalEntryBlobBuilder.applyEdits(
+      blob: raw.blob,
+      overview: raw.overview,
+      fields: fields
     )
 
-    // Commit to server.
+    // Re-encrypt with personal AAD (aadVersion 1) and the live vault key.
+    let blobAAD = try buildPersonalEntryAAD(userId: userId, entryId: entryId, vaultType: VaultType.blob)
+    let overviewAAD = try buildPersonalEntryAAD(userId: userId, entryId: entryId, vaultType: VaultType.overview)
+    let blobEnc = try encryptAESGCMEncoded(plaintext: newBlobData, key: vaultKey, aad: blobAAD)
+    let overviewEnc = try encryptAESGCMEncoded(plaintext: newOverviewData, key: vaultKey, aad: overviewAAD)
+
+    let liveKeyVersion = max(1, keyVersion)
     let updateReq = UpdateEntryRequest(
       encryptedBlob: blobEnc,
       encryptedOverview: overviewEnc,
-      keyVersion: keyVersion,
-      aadVersion: aadVersion
+      keyVersion: liveKeyVersion,
+      aadVersion: 1
+      // tagIds omitted → server keeps the existing tag relation (route:175)
     )
     try await apiClient.updateEntry(entryId: entryId, body: updateReq)
 
     // Refresh cache after server confirms success.
-    _ = try await hostSyncService.runSync(vaultKey: vaultKey, userId: userId)
-
-    // Update in-memory summaries optimistically.
-    let updatedSummary = VaultEntrySummary(
-      id: entryId,
-      title: overview.title,
-      username: overview.username,
-      urlHost: overview.urlHost ?? "",
-      additionalUrlHosts: overview.additionalUrlHosts ?? [],
-      tags: overview.tags,
-      hasTOTP: detail.totpSecret != nil,
-      requireReprompt: overview.requireReprompt ?? false,
-      travelSafe: overview.travelSafe
-    )
-    if let idx = allSummaries.firstIndex(where: { $0.id == entryId }) {
-      allSummaries[idx] = updatedSummary
+    let report = try await hostSyncService.runSync(vaultKey: vaultKey, userId: userId)
+    if let freshCache = report.cacheData {
+      loadFromCache(cacheData: freshCache, vaultKey: vaultKey, userId: userId)
     }
   }
 }

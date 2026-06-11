@@ -58,6 +58,33 @@ public enum MobileAPIError: Error, Equatable {
   case networkError(URLError)
 }
 
+// MARK: - Entry create request
+
+public struct CreateEntryRequest: Sendable, Codable {
+  public let id: String                 // client-generated UUIDv4 (REQUIRED for aadVersion >= 1)
+  public let encryptedBlob: EncryptedData
+  public let encryptedOverview: EncryptedData
+  public let keyVersion: Int
+  public let aadVersion: Int             // 1
+  public let entryType: String           // "LOGIN"
+
+  public init(
+    id: String,
+    encryptedBlob: EncryptedData,
+    encryptedOverview: EncryptedData,
+    keyVersion: Int,
+    aadVersion: Int,
+    entryType: String
+  ) {
+    self.id = id
+    self.encryptedBlob = encryptedBlob
+    self.encryptedOverview = encryptedOverview
+    self.keyVersion = keyVersion
+    self.aadVersion = aadVersion
+    self.entryType = entryType
+  }
+}
+
 // MARK: - Entry update request
 
 public struct UpdateEntryRequest: Sendable, Codable {
@@ -399,6 +426,57 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     }
   }
 
+  /// Create a new personal entry via POST /api/passwords.
+  /// Requires a valid access token (DPoP-signed with ath).
+  /// On 401 + new DPoP-Nonce, retries once with the fresh nonce.
+  /// Returns the server-stored entry id (must equal the client-generated id).
+  public func createEntry(body: CreateEntryRequest) async throws -> String {
+    guard let (accessToken, _) = try tokenStore.loadAccess() else {
+      throw MobileAPIError.serverError(status: 401)
+    }
+
+    let endpoint = serverURL.appending(
+      path: "/api/passwords",
+      directoryHint: .notDirectory
+    )
+    let htu = canonicalHTU(url: endpoint)
+    let ath = sha256Base64URL(accessToken)
+
+    let localJWK = jwk
+    let localSigner = signer
+    let nonce = try? tokenStore.loadNonce()
+    let proof = try await buildDPoPProof(
+      htm: "POST",
+      htu: htu,
+      jwk: localJWK,
+      ath: ath,
+      nonce: nonce,
+      signer: localSigner
+    )
+
+    let bodyData = try JSONEncoder().encode(body)
+    var request = URLRequest(url: endpoint)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+    request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
+    request.httpBody = bodyData
+
+    return try await performCreateHTTP(request) { newNonce in
+      let retryProof = try await buildDPoPProof(
+        htm: "POST",
+        htu: htu,
+        jwk: localJWK,
+        ath: ath,
+        nonce: newNonce,
+        signer: localSigner
+      )
+      var retryRequest = request
+      retryRequest.setValue(retryProof.jws, forHTTPHeaderField: "DPoP")
+      return retryRequest
+    }
+  }
+
   /// Update an existing personal entry via PUT /api/passwords/{entryId}.
   /// Requires a valid access token (DPoP-signed with ath).
   /// On 401 + new DPoP-Nonce, retries once with the fresh nonce.
@@ -570,4 +648,50 @@ public actor MobileAPIClient: VaultUnlockDataSource {
       throw MobileAPIError.serverError(status: status)
     }
   }
+
+  /// Perform a create (POST) request that returns a body with an `id` field.
+  /// Accepts 200 or 201 as success. On 401 + new nonce, retries once.
+  private func performCreateHTTP(
+    _ request: URLRequest,
+    makeRetry: ((String) async throws -> URLRequest)? = nil
+  ) async throws -> String {
+    let (data, response) = try await performHTTP(request)
+    let http = response as! HTTPURLResponse
+
+    if let newNonce = http.value(forHTTPHeaderField: "DPoP-Nonce") {
+      try? tokenStore.saveNonce(newNonce)
+    }
+
+    if http.statusCode == 401,
+       let makeRetry,
+       let newNonce = http.value(forHTTPHeaderField: "DPoP-Nonce") {
+      let retryRequest = try await makeRetry(newNonce)
+      let (retryData, retryResponse) = try await performHTTP(retryRequest)
+      let retryHTTP = retryResponse as! HTTPURLResponse
+      if let retryNonce = retryHTTP.value(forHTTPHeaderField: "DPoP-Nonce") {
+        try? tokenStore.saveNonce(retryNonce)
+      }
+      return try decodeCreateResponse(retryData, status: retryHTTP.statusCode)
+    }
+
+    return try decodeCreateResponse(data, status: http.statusCode)
+  }
+
+  private func decodeCreateResponse(_ data: Data, status: Int) throws -> String {
+    switch status {
+    case 200, 201:
+      let resp = try JSONDecoder().decode(CreateEntryResponse.self, from: data)
+      return resp.id
+    case 404:
+      throw MobileAPIError.notFound
+    default:
+      throw MobileAPIError.serverError(status: status)
+    }
+  }
+}
+
+// MARK: - Private response types
+
+private struct CreateEntryResponse: Decodable {
+  let id: String
 }

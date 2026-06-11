@@ -489,6 +489,54 @@ final class MobileAPIClientTests: XCTestCase {
     XCTAssertEqual(payload["ath"]?.value as? String, expectedAth)
   }
 
+  func testCreateEntry_athIsSHA256OfAccessTokenAndHtmIsPost() async throws {
+    let accessToken = "acc_create_ath"
+    try? tokenStore.saveTokens(access: accessToken, refresh: "ref_create_ath", expiresAt: Date().addingTimeInterval(3600))
+
+    var capturedRequest: URLRequest?
+    let createURL = serverURL.appending(path: "/api/passwords", directoryHint: .notDirectory)
+    MockURLProtocol.requestHandler = { request in
+      capturedRequest = request
+      return (Data(#"{"id":"e1"}"#.utf8), httpResponse(status: 201, url: createURL))
+    }
+
+    let client = MobileAPIClient(
+      serverURL: serverURL,
+      signer: FakeSigner(),
+      jwk: knownJWK,
+      tokenStore: tokenStore,
+      urlSession: session
+    )
+
+    let enc = EncryptedData(
+      ciphertext: "aabbcc",
+      iv: "112233445566778899aabbcc",
+      authTag: "deadbeefdeadbeefdeadbeefdeadbeef"
+    )
+    let body = CreateEntryRequest(
+      id: "e1", encryptedBlob: enc, encryptedOverview: enc,
+      keyVersion: 1, aadVersion: 1, entryType: "LOGIN"
+    )
+    let returnedId = try await client.createEntry(body: body)
+    XCTAssertEqual(returnedId, "e1")
+
+    let req = try XCTUnwrap(capturedRequest)
+    XCTAssertEqual(req.httpMethod, "POST")
+    // DPoP proof JWS payload must carry ath = SHA-256(access_token) and htm = POST.
+    let dpop = try XCTUnwrap(req.value(forHTTPHeaderField: "DPoP"))
+    let parts = dpop.split(separator: ".")
+    XCTAssertEqual(parts.count, 3, "DPoP must be a 3-part JWS")
+    var b64 = String(parts[1])
+    let rem = b64.count % 4
+    if rem != 0 { b64 += String(repeating: "=", count: 4 - rem) }
+    let payloadData = try XCTUnwrap(Data(base64Encoded: b64.replacingOccurrences(of: "-", with: "+")
+      .replacingOccurrences(of: "_", with: "/")))
+    let payload = try JSONDecoder().decode([String: AnyDecodable].self, from: payloadData)
+    let expectedAth = await client.sha256Base64URL(accessToken)
+    XCTAssertEqual(payload["ath"]?.value as? String, expectedAth)
+    XCTAssertEqual(payload["htm"]?.value as? String, "POST")
+  }
+
   func testUpdateEntry_persistsNonceFromResponse() async throws {
     seedAccessToken()
 

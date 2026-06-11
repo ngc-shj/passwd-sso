@@ -11,6 +11,7 @@ struct EntryDetailView: View {
   let cacheData: CacheData
   let vaultKey: SymmetricKey
   let userId: String
+  let keyVersion: Int
   let autoLockService: AutoLockService
   @Bindable var viewModel: VaultViewModel
   let apiClient: MobileAPIClient
@@ -21,7 +22,6 @@ struct EntryDetailView: View {
   @State private var isPasswordVisible: Bool = false
   @State private var isScreenRecording: Bool = false
   @State private var isShowingEditForm: Bool = false
-  @State private var showEditNotSupportedAlert: Bool = false
 
   @Environment(\.dismiss) private var dismiss
 
@@ -63,35 +63,25 @@ struct EntryDetailView: View {
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
         Button("Edit") {
-          // Editing on iPhone is disabled: the iOS re-encrypt path uses a
-          // lossy blob schema (string tags break decode → entry vanishes; totp,
-          // generator settings, custom fields and password history are dropped).
-          // Re-enable only after the full-fidelity round-trip lands (see the
-          // tracked issue). Until then, route all edits to the web app.
-          showEditNotSupportedAlert = true
+          isShowingEditForm = true
         }
       }
     }
-    .sheet(isPresented: $isShowingEditForm) {
+    // Re-decrypt from the VM's now-fresh cache when the edit sheet closes, so a
+    // just-saved edit is reflected immediately (the VM refreshes cacheData after
+    // the PUT+sync; without this trigger the view keeps showing pre-edit values).
+    .sheet(isPresented: $isShowingEditForm, onDismiss: { loadDetail() }) {
       if let detail {
-        EntryEditForm(
-          summary: summary,
-          initialDetail: detail,
+        EntryForm(
+          mode: .edit(summary: summary, initial: detail),
           vaultKey: vaultKey,
           userId: userId,
+          keyVersion: keyVersion,
           viewModel: viewModel,
           apiClient: apiClient,
-          hostSyncService: hostSyncService,
-          onSaved: { loadDetail() }
+          hostSyncService: hostSyncService
         )
       }
-    }
-    .alert("Editing on iPhone", isPresented: $showEditNotSupportedAlert) {
-      Button("OK", role: .cancel) {}
-    } message: {
-      Text(
-        "Editing entries on iPhone isn't supported yet. Please use the web app."
-      )
     }
     .onAppear {
       loadDetail()
@@ -111,54 +101,75 @@ struct EntryDetailView: View {
 
   private func detailContent(_ d: VaultEntryDetail) -> some View {
     List {
-      if !d.username.isEmpty {
-        fieldRow(label: "Username", value: d.username, isSensitive: false)
-      }
-
+      // Show the same fields as the edit form (even when empty) so opening Edit
+      // doesn't surprise the user with rows that weren't there. Empty fields
+      // render a muted "Not set" rather than being hidden.
+      fieldRow(label: "Username", value: d.username)
       passwordRow(d.password)
+      fieldRow(label: "URL", value: d.url)
 
-      if !d.url.isEmpty {
-        fieldRow(label: "URL", value: d.url, isSensitive: false)
-      }
-
-      if !d.notes.isEmpty {
-        Section("Notes") {
+      Section("Notes") {
+        if d.notes.isEmpty {
+          notSetText
+        } else {
           Text(d.notes)
             .font(.caption)
             .privacySensitive()
         }
       }
 
-      if let totpSecret = d.totpSecret, !totpSecret.isEmpty {
-        Section("One-Time Code") {
+      Section("One-Time Code") {
+        if let totpSecret = d.totpSecret, !totpSecret.isEmpty {
           TOTPCodeView(params: TOTPParams(secret: totpSecret))
+        } else {
+          notSetText
         }
+      }
+
+      // Read-only display of preserved-but-not-iOS-editable data, so the user
+      // can see these values still exist after an iOS edit.
+      if !d.tags.isEmpty {
+        Section("Tags") {
+          Text(d.tags.joined(separator: ", "))
+            .font(.body)
+        }
+      }
+
+      Section {
+        Text("Tags, custom fields, generator settings, and password history are kept when you save an edit here — edit those in the web app.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
       }
     }
     .listStyle(.insetGrouped)
   }
 
-  private func fieldRow(label: String, value: String, isSensitive: Bool) -> some View {
+  private var notSetText: some View {
+    Text("Not set")
+      .font(.body)
+      .foregroundStyle(.secondary)
+  }
+
+  private func fieldRow(label: String, value: String) -> some View {
     Section(label) {
-      HStack {
-        if isSensitive {
-          SecureField("", text: .constant(value))
-            .disabled(true)
-        } else {
+      if value.isEmpty {
+        notSetText
+      } else {
+        HStack {
           Text(value)
             .font(.body)
+          Spacer()
+          Button {
+            copySecurely(value: value)
+            autoLockService.recordActivity()
+          } label: {
+            Image(systemName: "doc.on.doc")
+              .frame(minWidth: 44, minHeight: 44)
+              .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          .tint(.accentColor)
         }
-        Spacer()
-        Button {
-          copySecurely(value: value)
-          autoLockService.recordActivity()
-        } label: {
-          Image(systemName: "doc.on.doc")
-            .frame(minWidth: 44, minHeight: 44)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .tint(.accentColor)
       }
     }
   }
@@ -202,9 +213,13 @@ struct EntryDetailView: View {
   // MARK: - Private
 
   private func loadDetail() {
+    // Read from the VM's fresh cache first (set after any create/edit+sync);
+    // fall back to the prop captured at navigation time only when no VM cache
+    // is available yet. The prop goes stale after a write refreshes the VM cache.
+    let effectiveCacheData = viewModel.cacheData ?? cacheData
     let loaded = viewModel.loadDetail(
       for: summary.id,
-      cacheData: cacheData,
+      cacheData: effectiveCacheData,
       vaultKey: vaultKey,
       userId: userId
     )

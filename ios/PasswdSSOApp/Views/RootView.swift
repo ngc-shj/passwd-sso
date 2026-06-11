@@ -12,6 +12,7 @@ enum AppState {
     serverConfig: ServerConfig,
     vaultKey: SymmetricKey,
     userId: String,
+    keyVersion: Int,
     cacheData: CacheData,
     autoLockService: AutoLockService,
     apiClient: MobileAPIClient
@@ -49,11 +50,12 @@ struct RootView: View {
       case .signedIn(let serverConfig, _, let apiClient):
         vaultLockedScreen(serverConfig: serverConfig, apiClient: apiClient)
 
-      case .vaultUnlocked(let serverConfig, let vaultKey, let userId, let cacheData, let autoLockService, let apiClient):
+      case .vaultUnlocked(let serverConfig, let vaultKey, let userId, let keyVersion, let cacheData, let autoLockService, let apiClient):
         VaultListView(
           cacheData: cacheData,
           vaultKey: vaultKey,
           userId: userId,
+          keyVersion: keyVersion,
           autoLockService: autoLockService,
           apiClient: apiClient,
           hostSyncService: hostSyncService ?? makeFallbackSyncService(apiClient: apiClient)
@@ -233,6 +235,7 @@ struct RootView: View {
       serverConfig: serverConfig,
       vaultKey: vaultKey,
       userId: unlockResult.userId,
+      keyVersion: unlockResult.keyVersion,
       cacheData: cacheData,
       autoLockService: autoLockService,
       apiClient: apiClient
@@ -334,6 +337,7 @@ struct RootView: View {
       serverConfig: serverConfig,
       vaultKey: state.vaultKey,
       userId: state.userId,
+      keyVersion: state.keyVersion,
       cacheData: state.cacheData,
       autoLockService: autoLockService,
       apiClient: debugApiClient
