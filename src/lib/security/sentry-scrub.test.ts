@@ -489,6 +489,63 @@ describe("F1 / S2 — new coverage", () => {
   });
 });
 
+// C2 acceptance fixtures — each MUST fail before the sentry-scrub.ts C2 changes
+// (red-green verified by reverting the 3 new lines and re-running the suite).
+describe("C2 — transaction name, span.description, contexts.trace.description scrubbing", () => {
+  // (a) event.transaction with /s/<token> is redacted
+  it("(a) redacts /s/<token> in event.transaction", () => {
+    const token = "shareTokenC2a123";
+    const event = { transaction: `/s/${token}` };
+    const result = scrubSentryEvent(event);
+    expect((result as Record<string, unknown>).transaction).toBe("/s/[redacted]");
+  });
+
+  // (b) span.description with capability path is redacted
+  it("(b) redacts team invite token in span.description", () => {
+    const token = "inviteTokenC2b456";
+    const event = {
+      spans: [
+        {
+          op: "http.client",
+          description: `/dashboard/teams/invite/${token}`,
+        },
+      ],
+    };
+    const result = scrubSentryEvent(event);
+    const span = (result.spans as Array<Record<string, unknown>>)[0];
+    expect(span.description).toBe("/dashboard/teams/invite/[redacted]");
+  });
+
+  // (c) contexts.trace.description with /s/<token> is redacted
+  it("(c) redacts /s/<token> in contexts.trace.description", () => {
+    const token = "traceTokenC2c789";
+    const event = {
+      contexts: {
+        trace: {
+          op: "http.server",
+          description: `/s/${token}`,
+        },
+      },
+    };
+    const result = scrubSentryEvent(event);
+    const trace = ((result.contexts as Record<string, unknown>).trace as Record<string, unknown>);
+    expect(trace.description).toBe("/s/[redacted]");
+    // trace.op (categorical) must be preserved unchanged
+    expect(trace.op).toBe("http.server");
+  });
+
+  // (T3) suffix preserved: redactCapabilityPaths, not sanitizeUrl
+  // sanitizeUrl would strip the suffix; redactCapabilityPaths must keep it
+  it("(T3) keeps suffix after token in transaction name (proves redactCapabilityPaths not sanitizeUrl)", () => {
+    const token = "suffixTokenC2d";
+    const event = { transaction: `GET /s/${token} (cached)` };
+    const result = scrubSentryEvent(event);
+    const txn = (result as Record<string, unknown>).transaction as string;
+    expect(txn).toBe("GET /s/[redacted] (cached)");
+    expect(txn).not.toContain(token);
+  });
+});
+
 describe("sanitizeUrl", () => {
   it("strips query string", () => {
     expect(sanitizeUrl("https://example.com/path?foo=bar&baz=qux")).toBe("https://example.com/path");

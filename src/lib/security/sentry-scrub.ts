@@ -156,6 +156,10 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
         }
         trace.data = scrubbed;
       }
+      // Redact capability paths from root-span description (free-text span name)
+      if (typeof trace.description === "string") {
+        trace.description = redactCapabilityPaths(trace.description);
+      }
     }
   }
 
@@ -283,7 +287,16 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
         }
         span.data = scrubbed;
       }
+      // Redact capability paths from span description (free-text span name)
+      if (typeof span.description === "string") {
+        span.description = redactCapabilityPaths(span.description);
+      }
     }
+  }
+
+  // Redact capability paths from top-level transaction name
+  if (typeof e.transaction === "string") {
+    e.transaction = redactCapabilityPaths(e.transaction);
   }
 
   return event;

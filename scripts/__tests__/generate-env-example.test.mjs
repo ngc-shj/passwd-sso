@@ -171,4 +171,20 @@ describe("generate-env-example.ts", () => {
     const trContent = readFileSync(rTr.outPath, "utf8");
     expect(enContent).toBe(trContent);
   });
+
+  it("C4: REDIS_PASSWORD renders uncommented with NOTE comment retained (requiredForCompose)", () => {
+    // Pins the C4 rendering so a future generator refactor cannot silently
+    // revert REDIS_PASSWORD to a commented-out form (check:env-docs alone
+    // does not catch comment-vs-uncomment).
+    const result = runGenerator();
+    expect(result.status).toBe(0);
+    const content = readFileSync(result.outPath, "utf8");
+
+    // Must be uncommented (mirrors JACKSON_API_KEY requiredForConsumer test).
+    expect(content).toMatch(/^REDIS_PASSWORD=/m);
+    // Must NOT appear in any commented form.
+    expect(content).not.toMatch(/^# ?REDIS_PASSWORD=/m);
+    // NOTE comment from the sidecar description must be retained.
+    expect(content).toContain("NOTE: docker-compose deployments REQUIRE this variable");
+  });
 });

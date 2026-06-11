@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ioredis default export is used as a constructor: `new Redis(...)`.
 // The mock must use a regular function (not an arrow function) so it can be

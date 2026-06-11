@@ -36,6 +36,10 @@ export type SidecarEntry = {
   example?: string;
   secret?: boolean;
   scope?: "runtime" | "build" | "framework-set";
+  /** When true, .env.example renders this key uncommented even if it has no
+   *  Zod default and is not isAlwaysRequired — it is required for any
+   *  docker-compose deployment (compose :? guard aborts startup without it). */
+  requiredForCompose?: boolean;
 };
 
 export const descriptions: Record<
@@ -600,6 +604,7 @@ export const descriptions: Record<
       "NOTE: docker-compose deployments REQUIRE this variable — the compose files\n" +
       "use a :? guard that aborts startup when it is missing.",
     secret: true,
+    requiredForCompose: true,
   },
 
   // ── Outbox worker ─────────────────────────────────────────────────────────
