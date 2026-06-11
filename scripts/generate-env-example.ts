@@ -199,10 +199,12 @@ for (const { key, groupIndex } of entries) {
   //   - the key has a Zod .default() — it always has a runtime value; OR
   //   - the key is always-required (no default, no .optional()) — CF4 fix:
   //     developers doing `cp .env.example .env.local && npm run dev` must see
-  //     the assignment uncommented so the template shows what to fill in.
+  //     the assignment uncommented so the template shows what to fill in; OR
+  //   - the sidecar marks it requiredForCompose — Zod-optional at app level
+  //     but the compose :? guard aborts startup without it (e.g. REDIS_PASSWORD).
   // Emit commented when the key is truly optional (may be left unset at boot).
   const emitUncommented =
-    hasZodDefault(null as never, key) || isAlwaysRequired(key);
+    hasZodDefault(null as never, key) || isAlwaysRequired(key) || sidecar.requiredForCompose === true;
 
   if (emitUncommented) {
     lines.push(`${key}=${guardedExample ?? ""}`);
