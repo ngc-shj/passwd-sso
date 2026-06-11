@@ -71,18 +71,18 @@ import Shared
     timer = nil
   }
 
-  /// Drop vault_key from memory, delete bridge_key_blob from Keychain.
-  /// Keeps cache + wrapped blobs (so AutoFill shows "Open passwd-sso to refresh").
+  /// Drop vault_key from memory (keeps bridge_key so biometric re-unlock is available);
+  /// keeps cache + wrapped blobs.
   public func lock() {
     stopTimer()
     state = .locked
-    try? bridgeKeyStore.delete()
   }
 
   /// Full sign-out: lock + delete tokens + clear cache + clear wrapped blobs.
   /// Ends in `.loggedOut` (not `.locked`) so the app routes to sign-in rather
   /// than the passphrase re-unlock screen (which has no token to re-unlock with).
   public func signOut() {
+    try? bridgeKeyStore.delete()
     lock()
     try? tokenStore.deleteAll()
     try? wrappedKeyStore.clearAll()

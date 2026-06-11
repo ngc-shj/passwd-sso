@@ -56,6 +56,70 @@ private actor StubVaultAPIClient: VaultUnlockDataSource {
   }
 }
 
+// MARK: - Helpers for biometric unlock tests
+
+/// Wrap vaultKey under cacheKey and save into a TempDirWrappedKeyStore.
+private func wrapAndSaveVaultKeyToStore(
+  vaultKey: SymmetricKey,
+  cacheKey: SymmetricKey,
+  store: TempDirWrappedKeyStore
+) throws {
+  let vaultKeyBytes = vaultKey.withUnsafeBytes { Data($0) }
+  let (cipher, iv, tag) = try encryptAESGCM(plaintext: vaultKeyBytes, key: cacheKey)
+  let wrapped = WrappedVaultKey(ciphertext: cipher, iv: iv, authTag: tag, issuedAt: Date())
+  try store.saveVaultKey(wrapped)
+}
+
+/// Build a minimal personal CacheEntry for biometric unlock tests.
+private func makePersonalCacheEntryForBiometricTest(
+  vaultKey: SymmetricKey,
+  userId: String,
+  keyVersion: Int
+) throws -> CacheEntry {
+  // Minimal blobs — content doesn't matter, only the container structure does.
+  let (cipher, iv, tag) = try encryptAESGCM(
+    plaintext: "{}".data(using: .utf8)!,
+    key: vaultKey
+  )
+  let encrypted = EncryptedData(ciphertext: hexEncode(cipher), iv: hexEncode(iv), authTag: hexEncode(tag))
+  return CacheEntry(
+    id: "biometric-entry-1",
+    teamId: nil,
+    aadVersion: 0,
+    keyVersion: keyVersion,
+    encryptedBlob: encrypted,
+    encryptedOverview: encrypted
+  )
+}
+
+/// Write an encrypted cache file for biometric unlock tests.
+private func buildCacheFileForBiometricTest(
+  at url: URL,
+  entries: [CacheEntry],
+  vaultKey: SymmetricKey,
+  hostInstallUUID: Data,
+  counter: UInt64,
+  userId: String,
+  now: Date
+) throws {
+  let entriesData = try JSONEncoder().encode(entries)
+  let header = CacheHeader(
+    cacheVersionCounter: counter,
+    cacheIssuedAt: now,
+    lastSuccessfulRefreshAt: now,
+    entryCount: UInt32(entries.count),
+    hostInstallUUID: hostInstallUUID,
+    userId: userId
+  )
+  let cacheData = CacheData(header: header, entries: entriesData)
+  try writeCacheFile(
+    data: cacheData,
+    vaultKey: vaultKey,
+    hostInstallUUID: hostInstallUUID,
+    path: url
+  )
+}
+
 // MARK: - Tests
 
 final class VaultUnlockerTests: XCTestCase {
@@ -92,7 +156,8 @@ final class VaultUnlockerTests: XCTestCase {
     let unlocker = VaultUnlocker(
       apiClient: stubClient,
       bridgeKeyStore: bks,
-      wrappedKeyStore: wks
+      wrappedKeyStore: wks,
+      cacheURL: tmpDir.appending(path: "test.cache", directoryHint: .notDirectory)
     )
 
     let result = try await unlocker.unlock(passphrase: passphrase)
@@ -121,7 +186,8 @@ final class VaultUnlockerTests: XCTestCase {
     let unlocker = VaultUnlocker(
       apiClient: stubClient,
       bridgeKeyStore: bks,
-      wrappedKeyStore: wks
+      wrappedKeyStore: wks,
+      cacheURL: tmpDir.appending(path: "test.cache", directoryHint: .notDirectory)
     )
 
     let result = try await unlocker.unlock(passphrase: passphrase)
@@ -149,7 +215,8 @@ final class VaultUnlockerTests: XCTestCase {
     let unlocker = VaultUnlocker(
       apiClient: stubClient,
       bridgeKeyStore: bks,
-      wrappedKeyStore: wks
+      wrappedKeyStore: wks,
+      cacheURL: tmpDir.appending(path: "test.cache", directoryHint: .notDirectory)
     )
 
     _ = try await unlocker.unlock(passphrase: passphrase)
@@ -188,7 +255,8 @@ final class VaultUnlockerTests: XCTestCase {
     let unlocker = VaultUnlocker(
       apiClient: stubClient,
       bridgeKeyStore: bks,
-      wrappedKeyStore: wks
+      wrappedKeyStore: wks,
+      cacheURL: tmpDir.appending(path: "test.cache", directoryHint: .notDirectory)
     )
 
     // Unlock with wrong passphrase — PBKDF2 will derive a different key, AES-GCM decryption will fail
@@ -251,7 +319,8 @@ final class VaultUnlockerTests: XCTestCase {
       apiClient: StubVaultAPIClient(mode: .success(unlockData)),
       bridgeKeyStore: BridgeKeyStore(
         accessGroup: "test", service: "com.passwd-sso.test.bridge-key", keychain: MockKeychain()),
-      wrappedKeyStore: TempDirWrappedKeyStore(baseDir: tmpDir)
+      wrappedKeyStore: TempDirWrappedKeyStore(baseDir: tmpDir),
+      cacheURL: tmpDir.appending(path: "test.cache", directoryHint: .notDirectory)
     )
     do {
       _ = try await unlocker.unlock(passphrase: "p")
@@ -314,7 +383,8 @@ final class VaultUnlockerTests: XCTestCase {
     let unlocker = VaultUnlocker(
       apiClient: StubVaultAPIClient(mode: .success(unlockData)),
       bridgeKeyStore: bks,
-      wrappedKeyStore: wks
+      wrappedKeyStore: wks,
+      cacheURL: tmpDir.appending(path: "test.cache", directoryHint: .notDirectory)
     )
 
     let result = try await unlocker.unlock(passphrase: fixture.passphrase)
@@ -347,7 +417,8 @@ final class VaultUnlockerTests: XCTestCase {
     let unlocker = VaultUnlocker(
       apiClient: StubVaultAPIClient(mode: .success(unlockData)),
       bridgeKeyStore: bks,
-      wrappedKeyStore: wks
+      wrappedKeyStore: wks,
+      cacheURL: tmpDir.appending(path: "test.cache", directoryHint: .notDirectory)
     )
 
     let result = try await unlocker.unlock(passphrase: "test-pass")
@@ -367,7 +438,8 @@ final class VaultUnlockerTests: XCTestCase {
     let unlocker = VaultUnlocker(
       apiClient: stubClient,
       bridgeKeyStore: bks,
-      wrappedKeyStore: wks
+      wrappedKeyStore: wks,
+      cacheURL: tmpDir.appending(path: "test.cache", directoryHint: .notDirectory)
     )
 
     do {
@@ -378,5 +450,241 @@ final class VaultUnlockerTests: XCTestCase {
     } catch {
       XCTFail("Unexpected error: \(error)")
     }
+  }
+
+  // MARK: - unlockWithBiometrics happy path (RT1/RT5 — T2/T4)
+
+  /// Seed a real bridge_key + real wrapped vault key + real encrypted cache file,
+  /// then call unlockWithBiometrics and assert vaultKey / userId / keyVersion.
+  /// keyVersion=3 is a DISTINCT value so we prove it's read from the cache,
+  /// not defaulted to 1.
+  func testUnlockWithBiometricsHappyPath() async throws {
+    let keychain = MockKeychainAccessor()
+    let bks = BridgeKeyStore(
+      accessGroup: "test.jp.jpng.passwd-sso.shared",
+      keychain: keychain
+    )
+    let blob = try bks.create()
+
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    try wrapAndSaveVaultKeyToStore(vaultKey: vaultKey, cacheKey: cacheKey, store: wks)
+
+    let cacheURL = tmpDir.appending(path: "biometric.cache", directoryHint: .notDirectory)
+    let entry = try makePersonalCacheEntryForBiometricTest(
+      vaultKey: vaultKey,
+      userId: "biometric-user-1",
+      keyVersion: 3
+    )
+    try buildCacheFileForBiometricTest(
+      at: cacheURL,
+      entries: [entry],
+      vaultKey: vaultKey,
+      hostInstallUUID: blob.hostInstallUUID,
+      counter: blob.cacheVersionCounter,
+      userId: "biometric-user-1",
+      now: Date()
+    )
+
+    // Inject a fixed now so the cache isn't stale.
+    let testNow = Date()
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .wrongPassphrase),  // offline — must not be called
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      cacheURL: cacheURL,
+      now: { testNow }
+    )
+
+    let result = try await unlocker.unlockWithBiometrics(reason: "test")
+
+    let expectedKeyBytes = vaultKey.withUnsafeBytes { Data($0) }
+    let resultKeyBytes = result.vaultKey.withUnsafeBytes { Data($0) }
+    XCTAssertEqual(resultKeyBytes, expectedKeyBytes, "vault key must match the seeded key")
+    XCTAssertEqual(result.userId, "biometric-user-1", "userId must come from the cache header")
+    XCTAssertEqual(result.keyVersion, 3, "keyVersion must be read from personal cache entry, not defaulted")
+  }
+
+  // MARK: - unlockWithBiometrics error paths
+
+  func testUnlockWithBiometrics_missingWrappedKey_throwsBiometricUnavailable() async throws {
+    let keychain = MockKeychainAccessor()
+    let bks = BridgeKeyStore(
+      accessGroup: "test.jp.jpng.passwd-sso.shared",
+      keychain: keychain
+    )
+    _ = try bks.create()  // bridge_key present, but no wrapped vault key
+
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    let cacheURL = tmpDir.appending(path: "missing-wk.cache", directoryHint: .notDirectory)
+    let testNow = Date()
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .wrongPassphrase),
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      cacheURL: cacheURL,
+      now: { testNow }
+    )
+
+    do {
+      _ = try await unlocker.unlockWithBiometrics(reason: "test")
+      XCTFail("Expected biometricUnavailable")
+    } catch VaultUnlockError.biometricUnavailable {
+      // Expected
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
+  func testUnlockWithBiometrics_unreadableCache_throwsCacheUnreadable() async throws {
+    let keychain = MockKeychainAccessor()
+    let bks = BridgeKeyStore(
+      accessGroup: "test.jp.jpng.passwd-sso.shared",
+      keychain: keychain
+    )
+    let blob = try bks.create()
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    try wrapAndSaveVaultKeyToStore(vaultKey: vaultKey, cacheKey: cacheKey, store: wks)
+
+    // Build a cache with an empty userId — triggers .cacheUnreadable guard.
+    let cacheURL = tmpDir.appending(path: "empty-userid.cache", directoryHint: .notDirectory)
+    try buildCacheFileForBiometricTest(
+      at: cacheURL,
+      entries: [],
+      vaultKey: vaultKey,
+      hostInstallUUID: blob.hostInstallUUID,
+      counter: blob.cacheVersionCounter,
+      userId: "",  // empty userId
+      now: Date()
+    )
+
+    let testNow = Date()
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .wrongPassphrase),
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      cacheURL: cacheURL,
+      now: { testNow }
+    )
+
+    do {
+      _ = try await unlocker.unlockWithBiometrics(reason: "test")
+      XCTFail("Expected cacheUnreadable")
+    } catch VaultUnlockError.cacheUnreadable {
+      // Expected
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
+  // MARK: - biometricUnlockAvailable (RT5 — T3/T6)
+
+  func testBiometricUnlockAvailable_trueWhenBothPresent() throws {
+    let keychain = MockKeychainAccessor()
+    let bks = BridgeKeyStore(
+      accessGroup: "test.jp.jpng.passwd-sso.shared",
+      keychain: keychain
+    )
+    let blob = try bks.create()
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    try wrapAndSaveVaultKeyToStore(vaultKey: vaultKey, cacheKey: cacheKey, store: wks)
+
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .wrongPassphrase),
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      cacheURL: tmpDir.appending(path: "avail.cache", directoryHint: .notDirectory)
+    )
+
+    XCTAssertTrue(unlocker.biometricUnlockAvailable())
+  }
+
+  func testBiometricUnlockAvailable_falseWhenBridgeKeyAbsent() throws {
+    let keychain = MockKeychainAccessor()
+    let bks = BridgeKeyStore(
+      accessGroup: "test.jp.jpng.passwd-sso.shared",
+      keychain: keychain
+    )
+    // No create() — bridge_key absent
+
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    // Seed a wrapped key even though bridge_key is absent — should still be false
+    let dummyVaultKey = SymmetricKey(size: .bits256)
+    let dummyCacheKey = SymmetricKey(size: .bits256)
+    try wrapAndSaveVaultKeyToStore(vaultKey: dummyVaultKey, cacheKey: dummyCacheKey, store: wks)
+
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .wrongPassphrase),
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      cacheURL: tmpDir.appending(path: "avail2.cache", directoryHint: .notDirectory)
+    )
+
+    XCTAssertFalse(unlocker.biometricUnlockAvailable(), "must be false when bridge_key is absent")
+  }
+
+  func testBiometricUnlockAvailable_falseWhenWrappedKeyAbsent() throws {
+    let keychain = MockKeychainAccessor()
+    let bks = BridgeKeyStore(
+      accessGroup: "test.jp.jpng.passwd-sso.shared",
+      keychain: keychain
+    )
+    _ = try bks.create()  // bridge_key present
+
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    // No wrapped key saved
+
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .wrongPassphrase),
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      cacheURL: tmpDir.appending(path: "avail3.cache", directoryHint: .notDirectory)
+    )
+
+    XCTAssertFalse(unlocker.biometricUnlockAvailable(), "must be false when wrapped key is absent")
+  }
+
+  // MARK: - biometricUnlockAvailable only touches bridge-meta-v2 (T3)
+
+  func testBiometricUnlockAvailable_onlyTouchesBridgeMeta() throws {
+    let keychain = MockKeychainAccessor()
+    let bks = BridgeKeyStore(
+      accessGroup: "test.jp.jpng.passwd-sso.shared",
+      keychain: keychain
+    )
+    let blob = try bks.create()
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+    keychain.accessedServices = []  // reset after create()
+
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    try wrapAndSaveVaultKeyToStore(vaultKey: vaultKey, cacheKey: cacheKey, store: wks)
+
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .wrongPassphrase),
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      cacheURL: tmpDir.appending(path: "meta-only.cache", directoryHint: .notDirectory)
+    )
+
+    _ = unlocker.biometricUnlockAvailable()
+
+    // Only the no-ACL meta service should be accessed (readDirect only reads meta)
+    XCTAssertFalse(
+      keychain.accessedServices.contains("jp.jpng.passwd-sso.shared.bridge-key-v2"),
+      "biometricUnlockAvailable must NOT read the biometric-gated bridge-key-v2 item"
+    )
+    XCTAssertTrue(
+      keychain.accessedServices.contains(where: { $0.hasSuffix("bridge-meta-v2") }),
+      "biometricUnlockAvailable must read the bridge-meta-v2 item"
+    )
   }
 }

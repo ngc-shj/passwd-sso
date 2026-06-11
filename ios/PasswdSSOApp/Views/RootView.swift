@@ -1,4 +1,5 @@
 import CryptoKit
+import LocalAuthentication
 import Shared
 import SwiftUI
 
@@ -134,13 +135,54 @@ struct RootView: View {
   private func vaultLockedScreen(serverConfig: ServerConfig, apiClient: MobileAPIClient) -> some View {
     let bks = BridgeKeyStore()
     let wks = AppGroupWrappedKeyStore()
+    let cacheURL = (try? AppGroupContainer.cacheFileURL()) ?? URL(fileURLWithPath: "/dev/null")
     let unlocker = VaultUnlocker(
       apiClient: apiClient,
       bridgeKeyStore: bks,
-      wrappedKeyStore: wks
+      wrappedKeyStore: wks,
+      cacheURL: cacheURL
     )
 
-    return VaultUnlockView(unlocker: unlocker) { result in
+    // Compute biometric availability synchronously (nonisolated, no actor hop).
+    let laContext = LAContext()
+    let biometricsAvailable = unlocker.biometricUnlockAvailable()
+      && laContext.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
+
+    // Human-readable label derived from the detected biometry type.
+    let biometryLabel: String
+    switch laContext.biometryType {
+    case .faceID:  biometryLabel = "Face ID"
+    case .touchID: biometryLabel = "Touch ID"
+    default:       biometryLabel = "biometrics"
+    }
+
+    let biometricUnlock: (@MainActor @Sendable () async -> Void)?
+    if biometricsAvailable {
+      biometricUnlock = { @MainActor @Sendable in
+        do {
+          let result = try await unlocker.unlockWithBiometrics(
+            reason: "Unlock your passwd-sso vault."
+          )
+          await handleVaultUnlocked(
+            unlockResult: result,
+            serverConfig: serverConfig,
+            apiClient: apiClient,
+            bridgeKeyStore: bks,
+            wrappedKeyStore: wks
+          )
+        } catch {
+          // Biometric cancel/fail → silent fallback to passphrase
+        }
+      }
+    } else {
+      biometricUnlock = nil
+    }
+
+    return VaultUnlockView(
+      unlocker: unlocker,
+      biometricUnlock: biometricUnlock,
+      biometryLabel: biometryLabel
+    ) { result in
       Task { @MainActor in
         await handleVaultUnlocked(
           unlockResult: result,

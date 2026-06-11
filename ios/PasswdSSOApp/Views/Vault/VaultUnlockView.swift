@@ -4,13 +4,33 @@ import Shared
 import SwiftUI
 
 /// Passphrase entry screen that drives VaultUnlocker.
+/// When `biometricUnlock` is non-nil, a "Unlock with \(biometryLabel)" button is shown
+/// above the passphrase field and auto-triggered once on appear.
 struct VaultUnlockView: View {
   let unlocker: VaultUnlocker
   let onUnlocked: @MainActor (UnlockResult) -> Void
+  /// Non-nil when biometric re-unlock is available. Nil = passphrase-only.
+  let biometricUnlock: (@MainActor @Sendable () async -> Void)?
+  /// Human-readable biometry label derived from LAContext.biometryType by the caller.
+  let biometryLabel: String
 
   @State private var passphrase: String = ""
   @State private var isLoading: Bool = false
   @State private var errorMessage: String?
+  /// One-shot guard: auto-prompt fires at most once per appearance.
+  @State private var hasAutoPrompted: Bool = false
+
+  init(
+    unlocker: VaultUnlocker,
+    biometricUnlock: (@MainActor @Sendable () async -> Void)? = nil,
+    biometryLabel: String = "biometrics",
+    onUnlocked: @MainActor @escaping (UnlockResult) -> Void
+  ) {
+    self.unlocker = unlocker
+    self.biometricUnlock = biometricUnlock
+    self.biometryLabel = biometryLabel
+    self.onUnlocked = onUnlocked
+  }
 
   var body: some View {
     VStack(spacing: 24) {
@@ -21,6 +41,17 @@ struct VaultUnlockView: View {
         .font(.body)
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
+
+      if let biometricUnlock {
+        Button {
+          Task { @MainActor in await biometricUnlock() }
+        } label: {
+          Label("Unlock with \(biometryLabel)", systemImage: "faceid")
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+      }
 
       SecureField("Master passphrase", text: $passphrase)
         .textContentType(.password)
@@ -41,7 +72,7 @@ struct VaultUnlockView: View {
       Button("Unlock") {
         Task { await attemptUnlock() }
       }
-      .buttonStyle(.borderedProminent)
+      .buttonStyle(.bordered)
       .controlSize(.large)
       .disabled(passphrase.isEmpty || isLoading)
 
@@ -50,6 +81,13 @@ struct VaultUnlockView: View {
       }
     }
     .padding(32)
+    .onAppear {
+      // Auto-invoke biometric prompt once. A one-shot guard prevents re-prompting
+      // on every re-render (e.g. foreground/background transitions during unlock).
+      guard !hasAutoPrompted, let biometricUnlock else { return }
+      hasAutoPrompted = true
+      Task { @MainActor in await biometricUnlock() }
+    }
   }
 
   // MARK: - Private
