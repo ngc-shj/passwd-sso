@@ -327,12 +327,28 @@ describe("DCR register lazy cleanup (real DB)", () => {
   }
 
   it("expired unclaimed rows are removed by lazy cleanup, count falls below cap", async () => {
-    // Seed 100 expired unclaimed rows
-    for (let i = 0; i < MAX_UNCLAIMED_DCR_CLIENTS; i++) {
-      await insertUnclaimedDcrClient("now() - interval '1 hour'");
-    }
+    // Seed MAX_UNCLAIMED_DCR_CLIENTS expired unclaimed rows via a single bulk INSERT
+    // so the seed cost is constant regardless of the cap value (T2).
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      const valuePlaceholders = Array.from({ length: MAX_UNCLAIMED_DCR_CLIENTS }, (_, i) => {
+        const base = i * 3 + 1;
+        return `($${base}::uuid, $${base + 1}, 'hash', $${base + 2}, '{}', 'credentials:list', true, NULL, now() - interval '1 hour', now(), now())`;
+      }).join(", ");
+      const values: string[] = [];
+      for (let i = 0; i < MAX_UNCLAIMED_DCR_CLIENTS; i++) {
+        const id = randomUUID();
+        seededClientIds.push(id);
+        // client_id (@unique): use the full uuid to avoid birthday collisions at 1000 rows; name follows
+        values.push(id, `client-bulk-exp-${id}`, `name-bulk-exp-${i}`);
+      }
+      await tx.$executeRawUnsafe(
+        `INSERT INTO mcp_clients (id, client_id, client_secret_hash, name, redirect_uris, allowed_scopes, is_dcr, tenant_id, dcr_expires_at, created_at, updated_at) VALUES ${valuePlaceholders}`,
+        ...values,
+      );
+    });
 
-    // Sanity: 100 rows exist before cleanup
+    // Sanity: MAX rows exist before cleanup
     const beforeCount = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       const rows = await tx.$queryRawUnsafe<{ cnt: bigint }[]>(
@@ -344,7 +360,7 @@ describe("DCR register lazy cleanup (real DB)", () => {
 
     const { countAfterCleanup, deletedCount } = await runRegisterTx();
 
-    // All 100 expired rows deleted
+    // All expired rows deleted
     expect(deletedCount).toBe(MAX_UNCLAIMED_DCR_CLIENTS);
     // Count is now below cap — a new registration would succeed
     expect(countAfterCleanup).toBe(0);
@@ -352,16 +368,31 @@ describe("DCR register lazy cleanup (real DB)", () => {
   });
 
   it("fresh (non-expired) unclaimed rows survive cleanup and reach cap, blocking registration", async () => {
-    // Seed 100 fresh unclaimed rows (expire in 1 hour)
-    for (let i = 0; i < MAX_UNCLAIMED_DCR_CLIENTS; i++) {
-      await insertUnclaimedDcrClient("now() + interval '1 hour'");
-    }
+    // Seed MAX_UNCLAIMED_DCR_CLIENTS fresh unclaimed rows via a single bulk INSERT (T2).
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      const valuePlaceholders = Array.from({ length: MAX_UNCLAIMED_DCR_CLIENTS }, (_, i) => {
+        const base = i * 3 + 1;
+        return `($${base}::uuid, $${base + 1}, 'hash', $${base + 2}, '{}', 'credentials:list', true, NULL, now() + interval '1 hour', now(), now())`;
+      }).join(", ");
+      const values: string[] = [];
+      for (let i = 0; i < MAX_UNCLAIMED_DCR_CLIENTS; i++) {
+        const id = randomUUID();
+        seededClientIds.push(id);
+        // client_id (@unique): use the full uuid to avoid birthday collisions at 1000 rows; name follows
+        values.push(id, `client-bulk-fresh-${id}`, `name-bulk-fresh-${i}`);
+      }
+      await tx.$executeRawUnsafe(
+        `INSERT INTO mcp_clients (id, client_id, client_secret_hash, name, redirect_uris, allowed_scopes, is_dcr, tenant_id, dcr_expires_at, created_at, updated_at) VALUES ${valuePlaceholders}`,
+        ...values,
+      );
+    });
 
     const { countAfterCleanup, deletedCount } = await runRegisterTx();
 
     // No expired rows — nothing deleted
     expect(deletedCount).toBe(0);
-    // All 100 rows survive — count equals cap, registration would return 503
+    // All rows survive — count equals cap, registration would return 503
     expect(countAfterCleanup).toBe(MAX_UNCLAIMED_DCR_CLIENTS);
     expect(countAfterCleanup).toBeGreaterThanOrEqual(MAX_UNCLAIMED_DCR_CLIENTS);
   });

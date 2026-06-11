@@ -68,6 +68,7 @@ vi.mock("@/lib/audit/audit", () => ({
 
 import { POST } from "@/app/api/mcp/register/route";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { MAX_UNCLAIMED_DCR_CLIENTS } from "@/lib/constants/auth/mcp";
 
 // A07-4: DCR is public-only — token_endpoint_auth_method must be the literal "none".
 const VALID_BODY = {
@@ -307,8 +308,8 @@ describe("POST /api/mcp/register", () => {
   });
 
   it("returns 503 when MAX_UNCLAIMED_DCR_CLIENTS cap is reached", async () => {
-    // $transaction injects tx with mockPrismaCount — set it to return cap value
-    mockPrismaCount.mockResolvedValueOnce(100);
+    // $transaction injects tx with mockPrismaCount — set it to the cap value (RT3)
+    mockPrismaCount.mockResolvedValueOnce(MAX_UNCLAIMED_DCR_CLIENTS);
 
     const req = createRequest("POST", "http://localhost/api/mcp/register", {
       body: VALID_BODY,
@@ -318,9 +319,22 @@ describe("POST /api/mcp/register", () => {
 
     expect(status).toBe(503);
     expect(json.error).toBe("temporarily_unavailable");
-    // C6: cap is now self-healing; message reflects the 1-hour window, not the worker.
+    // C6: cap is now self-healing; message is time-window-independent.
     expect(json.error_description).toContain("unclaimed");
     expect(json.error_description).not.toContain("dcr-cleanup-worker");
+  });
+
+  it("returns 201 when count is one below MAX_UNCLAIMED_DCR_CLIENTS cap", async () => {
+    // below-cap: count = MAX - 1 must not trigger the 503 path
+    mockPrismaCount.mockResolvedValueOnce(MAX_UNCLAIMED_DCR_CLIENTS - 1);
+
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: VALID_BODY,
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(201);
   });
 
   // C6 acceptance: deleteMany called with exact where before count (invocationCallOrder)
