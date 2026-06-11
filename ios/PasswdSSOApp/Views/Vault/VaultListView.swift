@@ -23,6 +23,7 @@ struct VaultListView: View {
   @State private var isScreenRecording: Bool = false
   @State private var isShowingSettings: Bool = false
   @State private var isShowingCreateForm: Bool = false
+  @FocusState private var searchFocused: Bool
 
   var body: some View {
     NavigationStack {
@@ -35,40 +36,32 @@ struct VaultListView: View {
       }
       .navigationTitle("passwd-sso")
       .toolbar {
-        // Layout rationale:
-        //  - Create (+) sits ALONE on the trailing edge — the conventional iOS
-        //    spot for the primary "add" action (Mail/Notes/Contacts), isolated
-        //    from the destructive Lock so the two never sit adjacent.
-        //  - Settings (gear) and Lock are the vault-management actions on the
-        //    leading edge. (ToolbarSpacer would split them into separate glass
-        //    capsules on iOS 26, but it's an iOS-26-only symbol absent from the
-        //    iOS-18 SDK that CI builds against — so it cannot be referenced even
-        //    behind #available. On iOS < 26 they render as distinct controls.)
-        //  - Create is hidden while a team filter is active (team create unsupported).
-        ToolbarItem(placement: .topBarLeading) {
-          Button {
-            autoLockService.recordActivity()
-            isShowingSettings = true
-          } label: {
-            Image(systemName: "gearshape")
-          }
-          .accessibilityLabel("Settings")
-        }
-        ToolbarItem(placement: .topBarLeading) {
-          Button("Lock", role: .destructive) {
-            autoLockService.lock()
-          }
-        }
-        if viewModel.filterTeamId == nil {
-          ToolbarItem(placement: .topBarTrailing) {
+        // Matches the iOS 26 native Passwords app: secondary actions live behind
+        // a single top-right "⋯" menu; the primary Create (+) action and search
+        // move to the bottom bar (see `bottomBar`). One top-right control means
+        // no two toolbar items can merge into one glass capsule.
+        ToolbarItem(placement: .topBarTrailing) {
+          Menu {
             Button {
               autoLockService.recordActivity()
-              isShowingCreateForm = true
+              isShowingSettings = true
             } label: {
-              Image(systemName: "plus")
+              Label("Settings", systemImage: "gearshape")
             }
-            .accessibilityLabel("Create entry")
+            Button(role: .destructive) {
+              autoLockService.lock()
+            } label: {
+              Label("Lock", systemImage: "lock")
+            }
+          } label: {
+            Image(systemName: "ellipsis.circle")
           }
+          .accessibilityLabel("More")
+        }
+      }
+      .safeAreaInset(edge: .bottom) {
+        if !isScreenRecording {
+          bottomBar
         }
       }
       .sheet(isPresented: $isShowingSettings) {
@@ -85,14 +78,8 @@ struct VaultListView: View {
           hostSyncService: hostSyncService
         )
       }
-      .searchable(
-        text: $viewModel.searchQuery,
-        placement: .navigationBarDrawer(displayMode: .always),
-        prompt: "Search entries"
-      )
-      // Activity tracking moved to explicit action sites (Lock button,
-      // search-query change, navigation) so it never competes with
-      // NavigationLink hit-testing inside the List.
+      // Search moved from the top navigation drawer to the bottom bar (native
+      // Passwords-app pattern). Activity tracking stays on query change.
       .onChange(of: viewModel.searchQuery) { _, _ in
         autoLockService.recordActivity()
       }
@@ -106,6 +93,57 @@ struct VaultListView: View {
     ) { _ in
       updateScreenRecordingState()
     }
+  }
+
+  // MARK: - Bottom bar (search + create)
+
+  /// Native Passwords-app pattern: a search field fills the bottom bar with the
+  /// Create (+) button on the trailing side. + is hidden under a team filter
+  /// (team create unsupported). Pinned via `.safeAreaInset(edge: .bottom)`.
+  private var bottomBar: some View {
+    HStack(spacing: 12) {
+      HStack(spacing: 6) {
+        Image(systemName: "magnifyingglass")
+          .foregroundStyle(.secondary)
+        TextField("Search", text: $viewModel.searchQuery)
+          .textFieldStyle(.plain)
+          .textInputAutocapitalization(.never)
+          .autocorrectionDisabled()
+          .focused($searchFocused)
+          .submitLabel(.search)
+        if !viewModel.searchQuery.isEmpty {
+          Button {
+            viewModel.searchQuery = ""
+          } label: {
+            Image(systemName: "xmark.circle.fill")
+              .foregroundStyle(.secondary)
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("Clear search")
+        }
+      }
+      .padding(.horizontal, 12)
+      .frame(minHeight: 44)
+      .background(Color(.secondarySystemBackground), in: Capsule())
+
+      if viewModel.filterTeamId == nil {
+        Button {
+          autoLockService.recordActivity()
+          isShowingCreateForm = true
+        } label: {
+          Image(systemName: "plus")
+            .font(.title2)
+            .frame(width: 44, height: 44)
+            .background(Color(.secondarySystemBackground), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .tint(.accentColor)
+        .accessibilityLabel("Create entry")
+      }
+    }
+    .padding(.horizontal)
+    .padding(.vertical, 8)
+    .background(.bar)
   }
 
   // MARK: - Entry list
