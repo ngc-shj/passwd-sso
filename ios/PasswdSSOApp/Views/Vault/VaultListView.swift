@@ -39,11 +39,11 @@ struct VaultListView: View {
         //  - Create (+) sits ALONE on the trailing edge — the conventional iOS
         //    spot for the primary "add" action (Mail/Notes/Contacts), isolated
         //    from the destructive Lock so the two never sit adjacent.
-        //  - Settings (gear) and Lock are the vault-management actions, on the
-        //    leading edge as SEPARATE items. iOS 26's toolbar auto-merges
-        //    adjacent same-edge items into one glass capsule, so a ToolbarSpacer
-        //    splits them into two independent capsules. On iOS < 26 there are no
-        //    capsules, so they render as distinct controls without the spacer.
+        //  - Settings (gear) and Lock are the vault-management actions on the
+        //    leading edge. (ToolbarSpacer would split them into separate glass
+        //    capsules on iOS 26, but it's an iOS-26-only symbol absent from the
+        //    iOS-18 SDK that CI builds against — so it cannot be referenced even
+        //    behind #available. On iOS < 26 they render as distinct controls.)
         //  - Create is hidden while a team filter is active (team create unsupported).
         ToolbarItem(placement: .topBarLeading) {
           Button {
@@ -53,9 +53,6 @@ struct VaultListView: View {
             Image(systemName: "gearshape")
           }
           .accessibilityLabel("Settings")
-        }
-        if #available(iOS 26.0, *) {
-          ToolbarSpacer(.fixed, placement: .topBarLeading)
         }
         ToolbarItem(placement: .topBarLeading) {
           Button("Lock", role: .destructive) {
