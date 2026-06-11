@@ -1,10 +1,10 @@
 import AuthenticationServices
 import SwiftUI
 
-/// Shown when the vault is locked (bridge_key not in Keychain).
-/// Prompts the user to open the host app to unlock.
+/// Shown when the vault is locked (bridge_key not in Keychain). Credential
+/// provider extensions have no supported API to launch the host app, so this
+/// only instructs the user to open passwd-sso manually, then dismisses.
 struct LockedFallbackView: View {
-  let onOpen: () -> Void
   let onDismiss: () -> Void
 
   var body: some View {
@@ -21,15 +21,15 @@ struct LockedFallbackView: View {
             .font(.title2)
             .fontWeight(.semibold)
 
-          Text("Open passwd-sso to unlock your vault, then return here to fill.")
+          Text("Open the passwd-sso app and unlock your vault, then come back here to fill.")
             .font(.subheadline)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
             .padding(.horizontal)
         }
 
-        Button("Open passwd-sso") {
-          onOpen()
+        Button("OK") {
+          onDismiss()
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
