@@ -18,6 +18,10 @@ struct VaultUnlockView: View {
   let biometricUnlock: (@MainActor @Sendable () async -> Void)?
   /// Human-readable biometry label derived from LAContext.biometryType by the caller.
   let biometryLabel: String
+  /// True when this screen is reached by ENTERING the app (sign-in / launch) — auto-prompt
+  /// on appear. False when reached by an in-app lock (explicit Lock / idle timeout) — stay
+  /// locked on appear (a later foreground re-entry still auto-prompts via scenePhase).
+  let autoPromptOnAppear: Bool
 
   @Environment(\.scenePhase) private var scenePhase
   @State private var passphrase: String = ""
@@ -32,11 +36,13 @@ struct VaultUnlockView: View {
     unlocker: VaultUnlocker,
     biometricUnlock: (@MainActor @Sendable () async -> Void)? = nil,
     biometryLabel: String = "biometrics",
+    autoPromptOnAppear: Bool = false,
     onUnlocked: @MainActor @escaping (UnlockResult) -> Void
   ) {
     self.unlocker = unlocker
     self.biometricUnlock = biometricUnlock
     self.biometryLabel = biometryLabel
+    self.autoPromptOnAppear = autoPromptOnAppear
     self.onUnlocked = onUnlocked
   }
 
@@ -89,19 +95,30 @@ struct VaultUnlockView: View {
       }
     }
     .padding(32)
+    .onAppear {
+      // Sign-in / app-entry arrival → auto-prompt. An in-app lock (autoPromptOnAppear
+      // == false) surfaces this screen without prompting (stays locked).
+      if autoPromptOnAppear { fireBiometricPrompt() }
+    }
     .onChange(of: scenePhase) { _, newPhase in
       switch newPhase {
       case .background:
-        // A real app exit — arm auto-prompt for the next foreground entry.
+        // A real app exit — arm auto-prompt for the next foreground re-entry.
         autoPromptArmed = true
       case .active:
-        guard autoPromptArmed, !isLoading, let biometricUnlock else { return }
+        guard autoPromptArmed else { return }
         autoPromptArmed = false
-        Task { @MainActor in await biometricUnlock() }
+        fireBiometricPrompt()
       default:
         break
       }
     }
+  }
+
+  /// Invoke the biometric unlock once, if available and not already unlocking.
+  private func fireBiometricPrompt() {
+    guard !isLoading, let biometricUnlock else { return }
+    Task { @MainActor in await biometricUnlock() }
   }
 
   // MARK: - Private

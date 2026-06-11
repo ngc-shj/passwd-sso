@@ -49,7 +49,8 @@ struct RootView: View {
         makeSignInView(config: config, coordinator: coordinator)
 
       case .signedIn(let serverConfig, _, let apiClient):
-        vaultLockedScreen(serverConfig: serverConfig, apiClient: apiClient)
+        // Arriving via sign-in / app entry → auto-prompt Face ID on appear.
+        vaultLockedScreen(serverConfig: serverConfig, apiClient: apiClient, autoPromptOnAppear: true)
 
       case .vaultUnlocked(let serverConfig, let vaultKey, let userId, let keyVersion, let cacheData, let autoLockService, let apiClient):
         VaultListView(
@@ -82,7 +83,10 @@ struct RootView: View {
         // Re-unlock via passphrase (token still valid). The "Sign in again"
         // fallback covers an expired/invalid token.
         VStack(spacing: 16) {
-          vaultLockedScreen(serverConfig: serverConfig, apiClient: apiClient)
+          // Reached by an in-app lock (explicit Lock / idle timeout) → do NOT
+          // auto-prompt on appear (it would re-unlock instantly while the user
+          // is present). A real foreground re-entry still auto-prompts (scenePhase).
+          vaultLockedScreen(serverConfig: serverConfig, apiClient: apiClient, autoPromptOnAppear: false)
           Button("Sign in again") {
             appState = .setup
           }
@@ -132,7 +136,11 @@ struct RootView: View {
 
   // MARK: - Vault locked / unlock entry
 
-  private func vaultLockedScreen(serverConfig: ServerConfig, apiClient: MobileAPIClient) -> some View {
+  private func vaultLockedScreen(
+    serverConfig: ServerConfig,
+    apiClient: MobileAPIClient,
+    autoPromptOnAppear: Bool
+  ) -> some View {
     let bks = BridgeKeyStore()
     let wks = AppGroupWrappedKeyStore()
     let cacheURL = (try? AppGroupContainer.cacheFileURL()) ?? URL(fileURLWithPath: "/dev/null")
@@ -181,7 +189,8 @@ struct RootView: View {
     return VaultUnlockView(
       unlocker: unlocker,
       biometricUnlock: biometricUnlock,
-      biometryLabel: biometryLabel
+      biometryLabel: biometryLabel,
+      autoPromptOnAppear: autoPromptOnAppear
     ) { result in
       Task { @MainActor in
         await handleVaultUnlocked(
