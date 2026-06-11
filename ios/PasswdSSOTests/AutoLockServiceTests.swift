@@ -168,6 +168,8 @@ final class AutoLockServiceTests: XCTestCase {
     service.startTimer()
     service.signOut()
 
+    // Ends in .loggedOut (not .locked) so the app routes to sign-in.
+    XCTAssertEqual(service.state, .loggedOut)
     // V2 bridge-key + bridge-meta items should be gone
     XCTAssertNil(keychain.store["com.passwd-sso.test.bridge-key-v2:blob"])
     XCTAssertNil(keychain.store["com.passwd-sso.test.bridge-meta-v2:blob"])
@@ -199,11 +201,21 @@ final class AutoLockServiceTests: XCTestCase {
 
   // MARK: - Idle auto-lock (tick)
 
-  func testTickLocksAtBoundary() {
+  func testTickLocksAtBoundary() throws {
     let tmpDir = makeTmpDir()
     defer { try? FileManager.default.removeItem(at: tmpDir) }
     let keychain = MockKeychain()
     seedKeychain(keychain)
+    // A wrapped key that .lock (unlike .logout) must KEEP.
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    try wks.saveVaultKey(
+      WrappedVaultKey(
+        ciphertext: Data([0x01]),
+        iv: Data(repeating: 0x01, count: 12),
+        authTag: Data(repeating: 0x01, count: 16),
+        issuedAt: Date()
+      )
+    )
     let clock = TestClock(start: Date(timeIntervalSinceReferenceDate: 1000))
     let service = makeService(tmpDir: tmpDir, keychain: keychain, autoLockMinutes: 15, clock: clock)
 
@@ -216,6 +228,10 @@ final class AutoLockServiceTests: XCTestCase {
     XCTAssertNil(
       keychain.store["com.passwd-sso.test.bridge-key-v2:blob"],
       "bridge-key should be deleted when the idle boundary is reached"
+    )
+    XCTAssertNotNil(
+      try wks.loadVaultKey(),
+      "wrapped key should survive a .lock timeout (unlike .logout)"
     )
   }
 

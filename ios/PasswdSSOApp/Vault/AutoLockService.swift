@@ -47,12 +47,10 @@ import Shared
     self.cacheURL = cacheURL
   }
 
-  /// Record user interaction — resets the idle timer.
+  /// Record user interaction — resets the idle timer. The next `tick()` reads
+  /// the updated `lastActivityAt`; no state change is needed here.
   public func recordActivity() {
     lastActivityAt = clock.now
-    if state == .unlocked {
-      // No state change needed; the tick will check the new lastActivityAt.
-    }
   }
 
   /// Start the 1-second tick timer. Call after unlock.
