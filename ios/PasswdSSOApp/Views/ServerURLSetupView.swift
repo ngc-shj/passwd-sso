@@ -32,7 +32,7 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
   func continueButtonTapped() async {
     let trimmed = urlText.trimmingCharacters(in: .whitespacesAndNewlines)
     guard let url = parseAndValidate(trimmed) else {
-      state = .probeFailed("Enter a valid https:// URL (http:// allowed for localhost).")
+      state = .probeFailed(String(localized: "Enter a valid https:// URL (http:// allowed for localhost)."))
       return
     }
 
@@ -112,7 +112,7 @@ private enum ProbeError: LocalizedError {
 
   var errorDescription: String? {
     switch self {
-    case .unreachable(let url): "Could not reach \(url). Check the URL and your network."
+    case .unreachable(let url): String(localized: "Could not reach \(url). Check the URL and your network.")
     }
   }
 }

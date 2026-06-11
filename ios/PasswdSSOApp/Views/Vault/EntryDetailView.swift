@@ -150,7 +150,9 @@ struct EntryDetailView: View {
       .foregroundStyle(.secondary)
   }
 
-  private func fieldRow(label: String, value: String) -> some View {
+  // LocalizedStringKey (not String) so `Section(_:)` binds the localizing
+  // overload — callers pass literals ("Username"/"URL") that must translate.
+  private func fieldRow(label: LocalizedStringKey, value: String) -> some View {
     Section(label) {
       if value.isEmpty {
         notSetText

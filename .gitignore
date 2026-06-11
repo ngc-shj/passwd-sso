@@ -116,6 +116,7 @@ docs/temp/
 # iOS / Xcode
 ios/build/
 ios/DerivedData/
+ios/.build*/
 ios/*.xcodeproj/xcuserdata/
 ios/*.xcodeproj/project.xcworkspace/xcuserdata/
 ios/*.xcworkspace/xcuserdata/
