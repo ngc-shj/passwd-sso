@@ -64,9 +64,12 @@ struct RootView: View {
             // Lock drops the vault key + bridge key, but keeps the server config
             // and token: re-unlock needs only the passphrase, not a full sign-in.
             appState = .vaultLocked(serverConfig: serverConfig, apiClient: apiClient)
+            // Clear QuickType identities — no inline hints for a locked vault.
+            Task { await CredentialIdentityRegistrar().clear() }
           case .loggedOut:
             // Logout-on-timeout cleared tokens/cache — route to setup/sign-in.
             appState = .setup
+            Task { await CredentialIdentityRegistrar().clear() }
           case .unlocked:
             break
           }
@@ -221,6 +224,9 @@ struct RootView: View {
 
     onVaultReady(syncService, drain, vaultKey, unlockResult.userId)
 
+    // Register QuickType inline-suggestion identities for the just-synced set.
+    await refreshCredentialIdentities(cacheData: cacheData, vaultKey: vaultKey, userId: unlockResult.userId)
+
     applyPersistedTimeout(to: autoLockService)
     autoLockService.startTimer()
     appState = .vaultUnlocked(
@@ -240,6 +246,17 @@ struct RootView: View {
     let store = AppSettingsStore()
     service.autoLockMinutes = store.minutes
     service.timeoutAction = store.vaultTimeoutAction
+  }
+
+  /// Replace the QuickType credential-identity set from the freshly-synced
+  /// personal entries. Identities exist only while unlocked (cleared on
+  /// lock/logout/background/launch).
+  @MainActor
+  private func refreshCredentialIdentities(
+    cacheData: CacheData, vaultKey: SymmetricKey, userId: String
+  ) async {
+    let summaries = decryptPersonalOverviews(from: cacheData, vaultKey: vaultKey, userId: userId)
+    await CredentialIdentityRegistrar().replace(with: summaries)
   }
 
   private func makeFallbackSyncService(apiClient: MobileAPIClient) -> HostSyncService {
@@ -309,6 +326,10 @@ struct RootView: View {
     )
     applyPersistedTimeout(to: autoLockService)
     autoLockService.startTimer()
+    let cacheData = state.cacheData
+    let vaultKey = state.vaultKey
+    let userId = state.userId
+    Task { await refreshCredentialIdentities(cacheData: cacheData, vaultKey: vaultKey, userId: userId) }
     appState = .vaultUnlocked(
       serverConfig: serverConfig,
       vaultKey: state.vaultKey,
