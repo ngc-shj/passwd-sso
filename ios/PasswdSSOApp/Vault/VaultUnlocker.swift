@@ -22,6 +22,10 @@ public struct UnlockResult: Sendable, Equatable {
   public let vaultKey: SymmetricKey
   public let userId: String
   public let keyVersion: Int
+  /// Tenant-enforced auto-lock minutes from the passphrase unlock's fresh policy
+  /// fetch; nil from the biometric/offline path (which reuses the persisted value).
+  /// NOT defaulted — both construction sites must state it explicitly.
+  public let tenantAutoLockMinutes: Int?
 }
 
 /// Source of the encrypted vault-unlock material. `MobileAPIClient` is the
@@ -157,7 +161,12 @@ public actor VaultUnlocker {
     try wrappedKeyStore.saveVaultKey(wrapped)
 
     // Step 7: return in-memory vault_key + userId + live keyVersion
-    return UnlockResult(vaultKey: vaultKey, userId: unlockData.userId, keyVersion: unlockData.keyVersion)
+    return UnlockResult(
+      vaultKey: vaultKey,
+      userId: unlockData.userId,
+      keyVersion: unlockData.keyVersion,
+      tenantAutoLockMinutes: unlockData.vaultAutoLockMinutes
+    )
   }
 
   /// Re-unlock the vault biometrically without a network round-trip.
@@ -214,7 +223,14 @@ public actor VaultUnlocker {
     let entries = (try? JSONDecoder().decode([CacheEntry].self, from: cache.entries)) ?? []
     let keyVersion = max(1, entries.first(where: { $0.teamId == nil })?.keyVersion ?? 1)
 
-    return UnlockResult(vaultKey: vaultKey, userId: cache.header.userId, keyVersion: keyVersion)
+    // Biometric/offline path: no fresh policy fetch — pass nil so the persisted
+    // tenant value is reused (RootView applies it non-authoritatively).
+    return UnlockResult(
+      vaultKey: vaultKey,
+      userId: cache.header.userId,
+      keyVersion: keyVersion,
+      tenantAutoLockMinutes: nil
+    )
   }
 
   /// Returns true when biometric re-unlock is likely available:

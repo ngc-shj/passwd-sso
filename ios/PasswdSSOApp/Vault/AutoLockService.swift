@@ -13,7 +13,9 @@ import Shared
   public private(set) var state: State = .locked
   public var autoLockMinutes: Int {
     get { _autoLockMinutes }
-    set { _autoLockMinutes = max(1, min(60, newValue)) }
+    // Ceiling is the shared max (24h), NOT 60: a tenant policy may enforce a
+    // longer interval than the user picker offers, and it must not be truncated.
+    set { _autoLockMinutes = max(AutoLockLimits.floorMinutes, min(AutoLockLimits.maxMinutes, newValue)) }
   }
 
   private var _autoLockMinutes: Int = 15

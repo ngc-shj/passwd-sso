@@ -109,4 +109,89 @@ final class AppSettingsStoreTests: XCTestCase {
     store.clipboardClearSeconds = 301
     XCTAssertEqual(store.clipboardClearSeconds, 30)
   }
+
+  // MARK: - Tenant auto-lock policy
+
+  func testTenantAbsentReturnsNil() {
+    XCTAssertNil(AppSettingsStore(defaults: defaults).tenantAutoLockMinutes)
+  }
+
+  func testTenantRoundTrip() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.tenantAutoLockMinutes = 120
+    XCTAssertEqual(store.tenantAutoLockMinutes, 120)
+  }
+
+  func testTenantBelowMinReturnsNil() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.tenantAutoLockMinutes = 4  // < 5 → fail-closed to nil
+    XCTAssertNil(store.tenantAutoLockMinutes)
+  }
+
+  func testTenantAboveMaxReturnsNil() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.tenantAutoLockMinutes = 2000  // > 1440 → fail-closed to nil
+    XCTAssertNil(store.tenantAutoLockMinutes)
+  }
+
+  func testTenantZeroReturnsNil() {
+    defaults.set(0, forKey: "tenantAutoLockMinutes")
+    XCTAssertNil(AppSettingsStore(defaults: defaults).tenantAutoLockMinutes)
+  }
+
+  func testEffectiveUsesTenantWhenPresent() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.minutes = 30
+    store.tenantAutoLockMinutes = 120
+    XCTAssertEqual(store.effectiveAutoLockMinutes, 120)
+  }
+
+  func testEffectiveUsesMinutesWhenNoTenant() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.minutes = 30
+    XCTAssertEqual(store.effectiveAutoLockMinutes, 30)
+  }
+
+  func testApplyTenantPolicyAuthoritativeWritesValue() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.applyTenantPolicy(120, policyAuthoritative: true)
+    XCTAssertEqual(store.tenantAutoLockMinutes, 120)
+  }
+
+  func testApplyTenantPolicyAuthoritativeNilClears() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.tenantAutoLockMinutes = 120
+    store.applyTenantPolicy(nil, policyAuthoritative: true)  // server removed policy
+    XCTAssertNil(store.tenantAutoLockMinutes)
+  }
+
+  func testApplyTenantPolicyNonAuthoritativeNilRetainsPersisted() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.tenantAutoLockMinutes = 120
+    store.applyTenantPolicy(nil, policyAuthoritative: false)  // biometric/offline path
+    XCTAssertEqual(store.tenantAutoLockMinutes, 120)
+  }
+
+  func testApplyTenantPolicyNonAuthoritativeIgnoresValue() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.applyTenantPolicy(99, policyAuthoritative: false)  // no-op regardless of value
+    XCTAssertNil(store.tenantAutoLockMinutes)
+  }
+
+  func testClearTenantPolicyRemovesKey() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.tenantAutoLockMinutes = 120
+    store.clearTenantPolicy()
+    XCTAssertNil(store.tenantAutoLockMinutes)
+  }
+
+  func testTenantDoesNotMutateUserMinutes() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.minutes = 30
+    store.applyTenantPolicy(120, policyAuthoritative: true)
+    XCTAssertEqual(store.minutes, 30)  // user setting untouched
+    XCTAssertEqual(store.effectiveAutoLockMinutes, 120)
+    store.clearTenantPolicy()
+    XCTAssertEqual(store.effectiveAutoLockMinutes, 30)  // restored after policy removed
+  }
 }

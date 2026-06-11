@@ -11,7 +11,8 @@ import XCTest
 private func makeVaultUnlockData(
   passphrase: String,
   iterations: Int = 1,
-  keyVersion: Int = 1
+  keyVersion: Int = 1,
+  vaultAutoLockMinutes: Int? = nil
 ) throws -> (data: VaultUnlockData, secretKey: Data) {
   let saltData = Data(repeating: 0xAA, count: 32)
   let wrappingKey = try deriveWrappingKeyPBKDF2(
@@ -32,7 +33,8 @@ private func makeVaultUnlockData(
     keyVersion: keyVersion,
     kdfType: 0,
     kdfIterations: iterations,
-    userId: "test-user-42"
+    userId: "test-user-42",
+    vaultAutoLockMinutes: vaultAutoLockMinutes
   )
   return (data, secretKey)
 }
@@ -299,6 +301,41 @@ final class VaultUnlockerTests: XCTestCase {
     )
   }
 
+  func testVaultUnlockDataDecodesTenantAutoLockMinutes() throws {
+    let base = #"{"accountSalt":"aa","encryptedSecretKey":"bb","secretKeyIv":"cc","secretKeyAuthTag":"dd","keyVersion":1,"kdfType":0,"kdfIterations":600000,"userId":"u-1""#
+    // Present
+    let present = try JSONDecoder().decode(
+      VaultUnlockData.self, from: Data((base + #","vaultAutoLockMinutes":120}"#).utf8))
+    XCTAssertEqual(present.vaultAutoLockMinutes, 120)
+    // Explicit null → nil
+    let null = try JSONDecoder().decode(
+      VaultUnlockData.self, from: Data((base + #","vaultAutoLockMinutes":null}"#).utf8))
+    XCTAssertNil(null.vaultAutoLockMinutes)
+    // Absent (older server) → nil
+    let absent = try JSONDecoder().decode(VaultUnlockData.self, from: Data((base + "}").utf8))
+    XCTAssertNil(absent.vaultAutoLockMinutes)
+  }
+
+  /// Passes a DISTINCT tenant value (120) and asserts it is threaded into the
+  /// result, proving the field flows decode → unlock → UnlockResult.
+  func testUnlockThreadsTenantAutoLockMinutesFromUnlockData() async throws {
+    let (unlockData, _) = try makeVaultUnlockData(passphrase: "test-pass", vaultAutoLockMinutes: 120)
+    let bks = BridgeKeyStore(
+      accessGroup: "test",
+      service: "com.passwd-sso.test.tenant.bridge-key",
+      keychain: MockKeychain()
+    )
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .success(unlockData)),
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      cacheURL: tmpDir.appending(path: "test.cache", directoryHint: .notDirectory)
+    )
+    let result = try await unlocker.unlock(passphrase: "test-pass")
+    XCTAssertEqual(result.tenantAutoLockMinutes, 120, "tenant minutes must thread from unlockData")
+  }
+
   // MARK: - Unsupported KDF (kdfType != 0)
 
   /// An Argon2id vault (kdfType 1) is not derivable by this PBKDF2-only client;
@@ -505,6 +542,7 @@ final class VaultUnlockerTests: XCTestCase {
     XCTAssertEqual(resultKeyBytes, expectedKeyBytes, "vault key must match the seeded key")
     XCTAssertEqual(result.userId, "biometric-user-1", "userId must come from the cache header")
     XCTAssertEqual(result.keyVersion, 3, "keyVersion must be read from personal cache entry, not defaulted")
+    XCTAssertNil(result.tenantAutoLockMinutes, "biometric/offline path fetches no fresh policy → nil")
   }
 
   // MARK: - unlockWithBiometrics error paths

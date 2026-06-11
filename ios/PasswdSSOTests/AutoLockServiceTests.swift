@@ -298,10 +298,15 @@ final class AutoLockServiceTests: XCTestCase {
     let service = makeService(tmpDir: tmpDir, keychain: keychain)
 
     service.autoLockMinutes = 0
-    XCTAssertEqual(service.autoLockMinutes, 1)
+    XCTAssertEqual(service.autoLockMinutes, 1)  // floor
 
-    service.autoLockMinutes = 100
-    XCTAssertEqual(service.autoLockMinutes, 60)
+    // A tenant policy may enforce > 60 (up to the 24h max); the applied value
+    // must NOT truncate to the user-picker's 60-cap.
+    service.autoLockMinutes = 120
+    XCTAssertEqual(service.autoLockMinutes, 120)
+
+    service.autoLockMinutes = 2000
+    XCTAssertEqual(service.autoLockMinutes, 1440)  // ceiling = 24h
 
     service.autoLockMinutes = 5
     XCTAssertEqual(service.autoLockMinutes, 5)

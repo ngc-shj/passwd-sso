@@ -71,8 +71,11 @@ struct RootView: View {
             // Clear QuickType identities — no inline hints for a locked vault.
             Task { await CredentialIdentityRegistrar().clear() }
           case .loggedOut:
-            // Logout-on-timeout cleared tokens/cache — route to setup/sign-in.
+            // Manual Sign Out or logout-on-timeout cleared tokens/cache — route
+            // to setup/sign-in. Single chokepoint for clearing the tenant policy
+            // (mirrors the extension clearing it on disconnect).
             appState = .setup
+            AppSettingsStore().clearTenantPolicy()
             Task { await CredentialIdentityRegistrar().clear() }
           case .unlocked:
             break
@@ -177,7 +180,9 @@ struct RootView: View {
             serverConfig: serverConfig,
             apiClient: apiClient,
             bridgeKeyStore: bks,
-            wrappedKeyStore: wks
+            wrappedKeyStore: wks,
+            // Offline path: no fresh policy fetch — must not clear a persisted value.
+            policyAuthoritative: false
           )
         } catch {
           // Biometric cancel/fail → silent fallback to passphrase
@@ -199,7 +204,9 @@ struct RootView: View {
           serverConfig: serverConfig,
           apiClient: apiClient,
           bridgeKeyStore: bks,
-          wrappedKeyStore: wks
+          wrappedKeyStore: wks,
+          // Passphrase unlock freshly fetched the policy — authoritative.
+          policyAuthoritative: true
         )
       }
     }
@@ -211,8 +218,15 @@ struct RootView: View {
     serverConfig: ServerConfig,
     apiClient: MobileAPIClient,
     bridgeKeyStore: BridgeKeyStore,
-    wrappedKeyStore: any WrappedKeyStore
+    wrappedKeyStore: any WrappedKeyStore,
+    policyAuthoritative: Bool
   ) async {
+    // Persist the tenant auto-lock policy BEFORE applyPersistedTimeout reads the
+    // effective interval. Biometric (non-authoritative) is a no-op so it can't
+    // wipe the value persisted by the last passphrase unlock.
+    AppSettingsStore().applyTenantPolicy(
+      unlockResult.tenantAutoLockMinutes, policyAuthoritative: policyAuthoritative
+    )
     let vaultKey = unlockResult.vaultKey
 
     let fetcher = EntryFetcher(apiClient: apiClient)
@@ -299,7 +313,8 @@ struct RootView: View {
   @MainActor
   private func applyPersistedTimeout(to service: AutoLockService) {
     let store = AppSettingsStore()
-    service.autoLockMinutes = store.minutes
+    // Effective = tenant override (if any) else the user's setting.
+    service.autoLockMinutes = store.effectiveAutoLockMinutes
     service.timeoutAction = store.vaultTimeoutAction
   }
 
