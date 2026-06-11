@@ -214,6 +214,7 @@ struct RootView: View {
 
     onVaultReady(syncService, drain, vaultKey, unlockResult.userId)
 
+    applyPersistedTimeout(to: autoLockService)
     autoLockService.startTimer()
     appState = .vaultUnlocked(
       serverConfig: serverConfig,
@@ -223,6 +224,13 @@ struct RootView: View {
       autoLockService: autoLockService,
       apiClient: apiClient
     )
+  }
+
+  /// Restore the persisted auto-lock timeout onto a freshly-created service
+  /// before its timer starts. Applied at every unlock site (real + DEBUG).
+  @MainActor
+  private func applyPersistedTimeout(to service: AutoLockService) {
+    service.autoLockMinutes = AutoLockSettingsStore().minutes
   }
 
   private func makeFallbackSyncService(apiClient: MobileAPIClient) -> HostSyncService {
@@ -290,6 +298,7 @@ struct RootView: View {
       tokenStore: HostTokenStore(),
       cacheURL: cacheURL
     )
+    applyPersistedTimeout(to: autoLockService)
     autoLockService.startTimer()
     appState = .vaultUnlocked(
       serverConfig: serverConfig,

@@ -15,7 +15,7 @@ import Shared
     set { _autoLockMinutes = max(1, min(60, newValue)) }
   }
 
-  private var _autoLockMinutes: Int = 5
+  private var _autoLockMinutes: Int = 15
   private var lastActivityAt: Date = Date()
   private var timer: Foundation.Timer?
   private let reducer: LockStateReducer
@@ -88,7 +88,8 @@ import Shared
 
   // MARK: - Private
 
-  private func tick() {
+  // internal (not private) so tests can drive the elapsed-lock path deterministically.
+  func tick() {
     guard state == .unlocked else { return }
     let elapsed = clock.now.timeIntervalSince(lastActivityAt)
     if elapsed >= Double(_autoLockMinutes * 60) {

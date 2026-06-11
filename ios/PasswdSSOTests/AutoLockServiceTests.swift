@@ -13,7 +13,8 @@ final class AutoLockServiceTests: XCTestCase {
   private func makeService(
     tmpDir: URL,
     keychain: MockKeychain,
-    autoLockMinutes: Int = 5
+    autoLockMinutes: Int = 5,
+    clock: Clock = SystemClock()
   ) -> AutoLockService {
     let bks = BridgeKeyStore(
       accessGroup: "test",
@@ -27,6 +28,7 @@ final class AutoLockServiceTests: XCTestCase {
     )
     let cacheURL = tmpDir.appending(path: "test.cache", directoryHint: .notDirectory)
     let service = AutoLockService(
+      clock: clock,
       bridgeKeyStore: bks,
       wrappedKeyStore: wks,
       tokenStore: tokenStore,
@@ -173,6 +175,64 @@ final class AutoLockServiceTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
     // Wrapped keys should be gone
     XCTAssertNil(try wks.loadVaultKey())
+  }
+
+  // MARK: - Default timeout
+
+  func testDefaultAutoLockMinutesIsFifteen() {
+    let tmpDir = makeTmpDir()
+    defer { try? FileManager.default.removeItem(at: tmpDir) }
+    let keychain = MockKeychain()
+    // Construct directly (makeService overrides the default), so this asserts
+    // the service's own default.
+    let service = AutoLockService(
+      bridgeKeyStore: BridgeKeyStore(
+        accessGroup: "test", service: "com.passwd-sso.test.bridge-key", keychain: keychain
+      ),
+      wrappedKeyStore: TempDirWrappedKeyStore(baseDir: tmpDir),
+      tokenStore: HostTokenStore(service: "com.passwd-sso.test.tokens", keychain: keychain),
+      cacheURL: tmpDir.appending(path: "test.cache", directoryHint: .notDirectory)
+    )
+
+    XCTAssertEqual(service.autoLockMinutes, 15)
+  }
+
+  // MARK: - Idle auto-lock (tick)
+
+  func testTickLocksAtBoundary() {
+    let tmpDir = makeTmpDir()
+    defer { try? FileManager.default.removeItem(at: tmpDir) }
+    let keychain = MockKeychain()
+    seedKeychain(keychain)
+    let clock = TestClock(start: Date(timeIntervalSinceReferenceDate: 1000))
+    let service = makeService(tmpDir: tmpDir, keychain: keychain, autoLockMinutes: 15, clock: clock)
+
+    service.startTimer()
+    service.stopTimer()  // avoid the live 1s timer racing the manual tick
+    clock.advance(by: 15 * 60)
+    service.tick()
+
+    XCTAssertEqual(service.state, .locked)
+    XCTAssertNil(
+      keychain.store["com.passwd-sso.test.bridge-key-v2:blob"],
+      "bridge-key should be deleted when the idle boundary is reached"
+    )
+  }
+
+  func testTickDoesNotLockJustBeforeBoundary() {
+    let tmpDir = makeTmpDir()
+    defer { try? FileManager.default.removeItem(at: tmpDir) }
+    let keychain = MockKeychain()
+    seedKeychain(keychain)
+    let clock = TestClock(start: Date(timeIntervalSinceReferenceDate: 1000))
+    let service = makeService(tmpDir: tmpDir, keychain: keychain, autoLockMinutes: 15, clock: clock)
+
+    service.startTimer()
+    service.stopTimer()
+    clock.advance(by: 15 * 60 - 1)
+    service.tick()
+
+    XCTAssertEqual(service.state, .unlocked)
   }
 
   // MARK: - autoLockMinutes clamping
