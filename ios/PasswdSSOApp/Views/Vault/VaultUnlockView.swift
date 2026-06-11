@@ -5,7 +5,9 @@ import SwiftUI
 
 /// Passphrase entry screen that drives VaultUnlocker.
 /// When `biometricUnlock` is non-nil, a "Unlock with \(biometryLabel)" button is shown
-/// above the passphrase field and auto-triggered once on appear.
+/// above the passphrase field. It is NOT auto-triggered: locking must show the lock
+/// screen and stay locked until the user explicitly taps the button (auto-prompting on
+/// appear re-unlocked instantly the moment the user locked while looking at the device).
 struct VaultUnlockView: View {
   let unlocker: VaultUnlocker
   let onUnlocked: @MainActor (UnlockResult) -> Void
@@ -17,8 +19,6 @@ struct VaultUnlockView: View {
   @State private var passphrase: String = ""
   @State private var isLoading: Bool = false
   @State private var errorMessage: String?
-  /// One-shot guard: auto-prompt fires at most once per appearance.
-  @State private var hasAutoPrompted: Bool = false
 
   init(
     unlocker: VaultUnlocker,
@@ -81,13 +81,6 @@ struct VaultUnlockView: View {
       }
     }
     .padding(32)
-    .onAppear {
-      // Auto-invoke biometric prompt once. A one-shot guard prevents re-prompting
-      // on every re-render (e.g. foreground/background transitions during unlock).
-      guard !hasAutoPrompted, let biometricUnlock else { return }
-      hasAutoPrompted = true
-      Task { @MainActor in await biometricUnlock() }
-    }
   }
 
   // MARK: - Private

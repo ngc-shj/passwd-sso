@@ -9,11 +9,11 @@ Device-only verification for the SwiftUI + LAContext + keychain paths the unit t
 
 ## Scenario 1 — Auto-lock → Face ID re-unlock
 - Steps: unlock with passphrase → leave the app idle past the auto-lock timeout → return to the app.
-- Expected: the vault-locked screen appears AND the Face ID sheet prompts automatically; success → vault unlocked, list shown, NO passphrase typed.
+- Expected: the vault-locked screen appears and STAYS; tap "Unlock with Face ID" → Face ID → vault unlocked, list shown, NO passphrase typed.
 
 ## Scenario 2 — Manual Lock → Face ID re-unlock
-- Steps: tap the Lock button → on the locked screen tap "Unlock with Face ID" (or it auto-prompts) → authenticate.
-- Expected: unlocked without passphrase.
+- Steps: tap the Lock button.
+- Expected: the lock screen appears AND STAYS locked — it must NOT auto-prompt Face ID and instantly re-unlock (the device-reported bug). Then tap "Unlock with Face ID" → authenticate → unlocked without passphrase.
 
 ## Scenario 3 — Biometric cancel → passphrase fallback
 - Steps: on the locked screen, cancel the Face ID prompt.
