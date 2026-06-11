@@ -36,9 +36,14 @@ struct PasswdSSOAppApp: App {
             .ignoresSafeArea()
         }
       }
+      // Identity register/clear are fire-and-forget Tasks. On scene thrash the
+      // `.active` re-sync+register is the last writer once the app settles
+      // foreground, so any transient inconsistency self-heals; the `.background`
+      // clear is the privacy boundary (the blur overlay covers `.inactive`).
       .onChange(of: scenePhase) { _, newPhase in
-        // Per plan §"Foreground sync (primary path)": drain flags then re-sync on foreground.
-        if newPhase == .active {
+        switch newPhase {
+        case .active:
+          // Per plan §"Foreground sync (primary path)": drain flags then re-sync.
           Task {
             guard let vaultKey = currentVaultKey else { return }
             // 1. Drain any rollback flags written by the AutoFill extension.
@@ -48,11 +53,31 @@ struct PasswdSSOAppApp: App {
             // 2. Re-sync the encrypted-entries cache.
             guard let syncService = activeSyncService,
                   let userId = currentUserId else { return }
-            _ = try? await syncService.runSync(vaultKey: vaultKey, userId: userId)
+            let report = try? await syncService.runSync(vaultKey: vaultKey, userId: userId)
+            // 3. Re-register QuickType identities for the freshly-synced set.
+            if let cacheData = report?.cacheData {
+              let summaries = decryptPersonalOverviews(
+                from: cacheData, vaultKey: vaultKey, userId: userId
+              )
+              await CredentialIdentityRegistrar().replace(with: summaries)
+            }
           }
+        case .background:
+          // No inline-suggestion identities while not foreground+unlocked.
+          Task { await CredentialIdentityRegistrar().clear() }
+        case .inactive:
+          break
+        @unknown default:
+          break
         }
       }
       .preferredColorScheme(theme.colorScheme)
+      .task {
+        // Launch invariant: a crash/reboot can strand identities in the OS store
+        // (it survives termination). Clear at launch so "vault locked ⇒ no inline
+        // suggestions" holds; they repopulate only after a successful unlock+sync.
+        await CredentialIdentityRegistrar().clear()
+      }
     }
   }
 }
