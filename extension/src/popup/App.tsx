@@ -6,7 +6,28 @@ import { LoginPrompt } from "./components/LoginPrompt";
 import { VaultUnlock } from "./components/VaultUnlock";
 import { MatchList } from "./components/MatchList";
 
-type AppState = "loading" | "not_logged_in" | "logged_in" | "vault_unlocked";
+type AppState = "loading" | "error" | "not_logged_in" | "logged_in" | "vault_unlocked";
+
+// MV3 service workers can be torn down between popup opens; the first
+// GET_STATUS may reject ("message channel closed") or hang while the SW wakes
+// and rehydrates. Guard with a timeout + a few retries so the popup never
+// strands on the loading spinner.
+const STATUS_TIMEOUT_MS = 3000;
+const MAX_STATUS_RETRIES = 2;
+const STATUS_RETRY_DELAY_MS = 250;
+
+function fetchStatus() {
+  const status = sendMessage({ type: "GET_STATUS" });
+  // If the timeout wins the race, the SW reply may still reject later
+  // ("message channel closed"). Attach a no-op handler so that late rejection
+  // does not surface as an unhandledrejection.
+  status.catch(() => {});
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("GET_STATUS timeout")), STATUS_TIMEOUT_MS);
+  });
+  return Promise.race([status, timeout]).finally(() => clearTimeout(timer));
+}
 
 async function notifyVaultStateChanged(): Promise<void> {
   try {
@@ -25,16 +46,28 @@ export function App() {
   const containerMinHeight =
     state === "vault_unlocked" ? "min-h-[480px]" : "min-h-[260px]";
 
-  const refreshStatus = useCallback(() => {
-    sendMessage({ type: "GET_STATUS" }).then((res) => {
-      if (!res.hasToken) {
-        setState("not_logged_in");
-      } else if (res.vaultUnlocked) {
-        setState("vault_unlocked");
-      } else {
-        setState("logged_in");
-      }
-    });
+  // allowError=false is used by background refreshes (storage events): a
+  // transient failure there must leave the current view intact rather than
+  // clobbering a working screen with the error pane.
+  const refreshStatus = useCallback((attempt = 0, allowError = true) => {
+    fetchStatus()
+      .then((res) => {
+        if (!res.hasToken) {
+          setState("not_logged_in");
+        } else if (res.vaultUnlocked) {
+          setState("vault_unlocked");
+        } else {
+          setState("logged_in");
+        }
+      })
+      .catch(() => {
+        if (attempt < MAX_STATUS_RETRIES) {
+          setTimeout(() => refreshStatus(attempt + 1, allowError), STATUS_RETRY_DELAY_MS);
+        } else if (allowError) {
+          // Surface a manual retry instead of spinning forever.
+          setState("error");
+        }
+      });
   }, []);
 
   useEffect(() => {
@@ -56,7 +89,7 @@ export function App() {
       areaName: string,
     ) => {
       if (areaName === "session" && SESSION_KEY in changes) {
-        refreshStatus();
+        refreshStatus(0, false);
       }
     };
     chrome.storage.onChanged.addListener(listener);
@@ -64,12 +97,25 @@ export function App() {
   }, [refreshStatus]);
 
   const handleLock = async () => {
-    await sendMessage({ type: "LOCK_VAULT" });
+    // Locking is fail-secure: a torn-down SW has already lost the in-memory
+    // key, so reflect the locked state locally even if the message rejects.
+    try {
+      await sendMessage({ type: "LOCK_VAULT" });
+    } catch {
+      // SW unreachable — treat as locked.
+    }
     setState("logged_in");
   };
 
   const handleDisconnect = async () => {
-    await sendMessage({ type: "CLEAR_TOKEN" });
+    // CLEAR_TOKEN revokes the token server-side; if it never reached the SW,
+    // do NOT claim "disconnected" — surface the error so the user can retry.
+    try {
+      await sendMessage({ type: "CLEAR_TOKEN" });
+    } catch {
+      setState("error");
+      return;
+    }
     setState("not_logged_in");
   };
 
@@ -113,6 +159,21 @@ export function App() {
         {state === "loading" && (
           <div className="flex items-center justify-center h-full">
             <p className="text-gray-500">{t("popup.loading")}</p>
+          </div>
+        )}
+        {state === "error" && (
+          <div className="flex flex-col items-center justify-center gap-3 h-full text-center">
+            <p className="text-sm text-gray-500">{t("popup.statusError")}</p>
+            <button
+              type="button"
+              onClick={() => {
+                setState("loading");
+                refreshStatus();
+              }}
+              className="px-3 py-1.5 text-sm rounded-md bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            >
+              {t("popup.retry")}
+            </button>
           </div>
         )}
         {state === "not_logged_in" && <LoginPrompt />}
