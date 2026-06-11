@@ -36,6 +36,10 @@ struct PasswdSSOAppApp: App {
             .ignoresSafeArea()
         }
       }
+      // Identity register/clear are fire-and-forget Tasks. On scene thrash the
+      // `.active` re-sync+register is the last writer once the app settles
+      // foreground, so any transient inconsistency self-heals; the `.background`
+      // clear is the privacy boundary (the blur overlay covers `.inactive`).
       .onChange(of: scenePhase) { _, newPhase in
         switch newPhase {
         case .active:

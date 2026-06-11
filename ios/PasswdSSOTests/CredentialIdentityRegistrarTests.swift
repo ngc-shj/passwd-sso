@@ -1,3 +1,5 @@
+import CryptoKit
+import Foundation
 import XCTest
 
 @testable import Shared
@@ -115,6 +117,89 @@ final class CredentialIdentityRegistrarTests: XCTestCase {
 
     let count = await store.removeAllCount
     XCTAssertEqual(count, 1)
+  }
+
+  // MARK: - decryptPersonalOverviews
+
+  func testDecryptPersonalOverviews_returnsPersonalSummaries() throws {
+    let vaultKey = SymmetricKey(size: .bits256)
+    let userId = "user-1"
+    let entries = [
+      try personalEntry(id: "p0", urlHost: "amazon.co.jp", username: "a", userId: userId,
+                        aadVersion: 0, vaultKey: vaultKey),
+      try personalEntry(id: "p1", urlHost: "github.com", username: "g", userId: userId,
+                        aadVersion: 1, vaultKey: vaultKey),
+    ]
+    let cache = try makeCache(entries, userId: userId)
+
+    let summaries = decryptPersonalOverviews(from: cache, vaultKey: vaultKey, userId: userId)
+
+    XCTAssertEqual(Set(summaries.map(\.id)), ["p0", "p1"])
+    XCTAssertEqual(summaries.first { $0.id == "p1" }?.urlHost, "github.com")
+    XCTAssertEqual(summaries.first { $0.id == "p1" }?.username, "g")
+  }
+
+  func testDecryptPersonalOverviews_excludesTeamEntries() throws {
+    let vaultKey = SymmetricKey(size: .bits256)
+    let userId = "user-1"
+    let personal = try personalEntry(id: "p0", urlHost: "amazon.co.jp", username: "a",
+                                     userId: userId, aadVersion: 1, vaultKey: vaultKey)
+    // A team entry is skipped before decrypt (teamId != nil); its blobs are dummy.
+    let dummy = try encryptAESGCMEncoded(plaintext: Data("{}".utf8), key: vaultKey, aad: nil)
+    let team = CacheEntry(id: "t0", teamId: "team-1", aadVersion: 0,
+                          encryptedBlob: dummy, encryptedOverview: dummy)
+    let cache = try makeCache([personal, team], userId: userId)
+
+    let summaries = decryptPersonalOverviews(from: cache, vaultKey: vaultKey, userId: userId)
+
+    XCTAssertEqual(summaries.map(\.id), ["p0"], "team entries must be excluded")
+  }
+
+  func testDecryptPersonalOverviews_wrongUserIdExcluded() throws {
+    let vaultKey = SymmetricKey(size: .bits256)
+    // aadVersion>=1 entry bound to userId "A"; decrypting with "B" → AAD mismatch → skipped.
+    let entry = try personalEntry(id: "p0", urlHost: "a.com", username: "u", userId: "A",
+                                  aadVersion: 1, vaultKey: vaultKey)
+    let cache = try makeCache([entry], userId: "B")
+
+    let summaries = decryptPersonalOverviews(from: cache, vaultKey: vaultKey, userId: "B")
+
+    XCTAssertTrue(summaries.isEmpty, "AAD-bound entry must not decrypt under the wrong userId")
+  }
+
+  // MARK: - Cache fixtures
+
+  private struct TestOverviewBlob: Encodable {
+    let title: String
+    let username: String?
+    let urlHost: String?
+  }
+
+  private func personalEntry(
+    id: String, urlHost: String, username: String, userId: String,
+    aadVersion: Int, vaultKey: SymmetricKey
+  ) throws -> CacheEntry {
+    let plaintext = try JSONEncoder().encode(
+      TestOverviewBlob(title: "T", username: username, urlHost: urlHost)
+    )
+    let aad: Data? = aadVersion >= 1
+      ? try buildPersonalEntryAAD(userId: userId, entryId: id, vaultType: VaultType.overview)
+      : nil
+    let overview = try encryptAESGCMEncoded(plaintext: plaintext, key: vaultKey, aad: aad)
+    let dummyBlob = try encryptAESGCMEncoded(plaintext: Data("{}".utf8), key: vaultKey, aad: nil)
+    return CacheEntry(
+      id: id, teamId: nil, aadVersion: aadVersion,
+      encryptedBlob: dummyBlob, encryptedOverview: overview
+    )
+  }
+
+  private func makeCache(_ entries: [CacheEntry], userId: String) throws -> CacheData {
+    let header = CacheHeader(
+      cacheVersionCounter: 1, cacheIssuedAt: Date(), lastSuccessfulRefreshAt: Date(),
+      entryCount: UInt32(entries.count), hostInstallUUID: Data(repeating: 0, count: 16),
+      userId: userId
+    )
+    return CacheData(header: header, entries: try JSONEncoder().encode(entries))
   }
 }
 

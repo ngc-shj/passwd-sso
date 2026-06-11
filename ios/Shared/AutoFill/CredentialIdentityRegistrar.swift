@@ -5,10 +5,14 @@ import Foundation
 // MARK: - Personal overview decryption (for registration)
 
 /// Decrypt the overview summaries of PERSONAL entries from a cache, using the
-/// user's vault_key. Mirrors the host VaultViewModel's personal-overview decrypt
-/// (same AAD rules + EntryBlobDecoder). Team entries (which need team keys) are
-/// skipped — QuickType registration covers the personal set the host decrypts.
-/// Used to feed `CredentialIdentityRegistrar.replace` after each sync.
+/// user's vault_key. Team entries (which need team keys) are skipped — QuickType
+/// registration covers the personal set the host decrypts. Used to feed
+/// `CredentialIdentityRegistrar.replace` after each sync.
+///
+/// NOTE: the AAD rules here (aadVersion >= 1 → buildPersonalEntryAAD, else nil)
+/// MUST stay in sync with `VaultViewModel.decryptOverview` — if the server bumps
+/// the AAD shape, update BOTH or QuickType silently stops decrypting (empty
+/// suggestion set).
 public func decryptPersonalOverviews(
   from cacheData: CacheData,
   vaultKey: SymmetricKey,
