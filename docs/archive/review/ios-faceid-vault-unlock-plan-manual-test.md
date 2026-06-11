@@ -7,13 +7,18 @@ Device-only verification for the SwiftUI + LAContext + keychain paths the unit t
 - Signed in, vault unlocked once with the master passphrase (this creates the `bridge_key` + `wrapped-vault-key.json`).
 - Auto-lock timeout set to a short value (e.g. 1 min) with timeout action = "Lock" (not "Log Out").
 
-## Scenario 1 — Auto-lock → Face ID re-unlock
-- Steps: unlock with passphrase → leave the app idle past the auto-lock timeout → return to the app.
-- Expected: the vault-locked screen appears and STAYS; tap "Unlock with Face ID" → Face ID → vault unlocked, list shown, NO passphrase typed.
+## Scenario 1 — Manual Lock → stays locked (no instant re-unlock)
+- Steps: while unlocked, tap the Lock button (⋯ menu).
+- Expected: the lock screen appears AND STAYS locked — it must NOT auto-prompt Face ID and instantly re-unlock (the device-reported bug). Tap "Unlock with Face ID" → authenticate → unlocked.
 
-## Scenario 2 — Manual Lock → Face ID re-unlock
-- Steps: tap the Lock button.
-- Expected: the lock screen appears AND STAYS locked — it must NOT auto-prompt Face ID and instantly re-unlock (the device-reported bug). Then tap "Unlock with Face ID" → authenticate → unlocked without passphrase.
+## Scenario 2 — Idle timeout while present → stays locked
+- Steps: unlock → keep the app foreground but don't touch it past the auto-lock timeout (action = Lock).
+- Expected: the lock screen appears and STAYS (no instant re-unlock even if your face is in view). Tap the button (or background+return, Scenario 3) to unlock.
+
+## Scenario 3 — Foreground re-entry → Face ID auto-prompts
+- Steps: from a locked vault, background the app (Home / app switcher) then return to it.
+- Expected: Face ID prompts AUTOMATICALLY on return; success → unlocked, NO passphrase. (This is the wanted convenience — auto-prompt fires on a real background→foreground re-entry, not on the in-app lock.)
+- Negative check: pulling Control Center (a `.inactive`→`.active` blip without backgrounding) on the lock screen must NOT auto-prompt.
 
 ## Scenario 3 — Biometric cancel → passphrase fallback
 - Steps: on the locked screen, cancel the Face ID prompt.
