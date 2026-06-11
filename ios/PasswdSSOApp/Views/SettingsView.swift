@@ -11,9 +11,9 @@ extension AppTheme {
 
   var label: String {
     switch self {
-    case .system: "System"
-    case .light: "Light"
-    case .dark: "Dark"
+    case .system: String(localized: "System")
+    case .light: String(localized: "Light")
+    case .dark: String(localized: "Dark")
     }
   }
 }
@@ -78,10 +78,9 @@ struct SettingsView: View {
         } header: {
           Text("Security")
         } footer: {
-          Text(
-            "The vault locks after this much idle time (\"Log Out\" also clears the session). "
-              + "AutoFill needs the app unlocked within this window; each fill still requires Face ID."
-          )
+          // Single string literal (not `+` concatenation) so it binds the
+          // LocalizedStringKey overload and extracts as one catalog key.
+          Text("The vault locks after this much idle time (\"Log Out\" also clears the session). AutoFill needs the app unlocked within this window; each fill still requires Face ID.")
         }
 
         Section("Clipboard") {

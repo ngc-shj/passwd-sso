@@ -140,7 +140,9 @@ struct EntryForm: View {
 
   // MARK: - Private
 
-  private var navigationTitle: String {
+  // LocalizedStringKey (not String) so `.navigationTitle(_:)` binds the
+  // localizing overload — a String variable would render untranslated.
+  private var navigationTitle: LocalizedStringKey {
     switch mode {
     case .create: return "New Entry"
     case .edit: return "Edit Entry"
@@ -205,7 +207,7 @@ struct EntryForm: View {
       }
       dismiss()
     } catch {
-      saveError = "Save failed: \(error.localizedDescription)"
+      saveError = String(localized: "Save failed: \(error.localizedDescription)")
     }
   }
 }
