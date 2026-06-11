@@ -37,12 +37,16 @@ vi.mock("@/lib/logger", () => {
 });
 
 import { GET } from "./route";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 
 const USER_ID = "user-1";
 const TENANT_ID = "tenant-1";
 const API_KEY_ID = "key-1";
 
 const validApiKey = { userId: USER_ID, tenantId: TENANT_ID, apiKeyId: API_KEY_ID };
+// SA tokens have userId=null; rateLimitKey is the serviceAccountId
+const saApiKey = { userId: null, tenantId: TENANT_ID, rateLimitKey: "sa-1", apiKeyId: "sa-1" };
 
 describe("GET /api/v1/vault/status", () => {
   beforeEach(() => {
@@ -145,6 +149,72 @@ describe("GET /api/v1/vault/status", () => {
       expect.anything(),
       TENANT_ID,
       expect.any(Function),
+    );
+  });
+});
+
+describe("GET /api/v1/vault/status — SA token path (C2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockValidateApiKeyOnly.mockResolvedValue({ ok: true, data: saApiKey });
+    mockCheck.mockResolvedValue({ allowed: true });
+    mockEnforceAccessRestriction.mockResolvedValue(null);
+  });
+
+  it("returns the denial response when enforceAccessRestriction denies an SA token", async () => {
+    const { NextResponse } = await import("next/server");
+    const denial = NextResponse.json({ error: "ACCESS_RESTRICTED" }, { status: 403 });
+    mockEnforceAccessRestriction.mockResolvedValue(denial);
+
+    const res = await GET(createRequest("GET", "http://localhost/api/v1/vault/status"));
+
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("ACCESS_RESTRICTED");
+    // Must NOT fall through to the { initialized: false } response
+    expect(json.initialized).toBeUndefined();
+  });
+
+  it("calls enforceAccessRestriction with SYSTEM_ACTOR_ID and SERVICE_ACCOUNT actor type for SA tokens", async () => {
+    await GET(createRequest("GET", "http://localhost/api/v1/vault/status"));
+
+    expect(mockEnforceAccessRestriction).toHaveBeenCalledWith(
+      expect.anything(),
+      SYSTEM_ACTOR_ID,
+      TENANT_ID,
+      ACTOR_TYPE.SERVICE_ACCOUNT,
+    );
+  });
+
+  it("returns { initialized: false, keyVersion: null } when SA token is allowed", async () => {
+    const res = await GET(createRequest("GET", "http://localhost/api/v1/vault/status"));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json.initialized).toBe(false);
+    expect(json.keyVersion).toBeNull();
+    // SA tokens skip the user vault query
+    expect(mockWithTenantRls).not.toHaveBeenCalled();
+  });
+
+  it("does not call enforceAccessRestriction with SYSTEM_ACTOR_ID on the human path", async () => {
+    // Reset to human token
+    mockValidateApiKeyOnly.mockResolvedValue({ ok: true, data: validApiKey });
+    mockUserFindUnique.mockResolvedValue({ encryptedSecretKey: "enc-key", keyVersion: 1 });
+
+    await GET(createRequest("GET", "http://localhost/api/v1/vault/status"));
+
+    // Human path calls enforceAccessRestriction with userId, not SYSTEM_ACTOR_ID
+    expect(mockEnforceAccessRestriction).toHaveBeenCalledWith(
+      expect.anything(),
+      USER_ID,
+      TENANT_ID,
+    );
+    expect(mockEnforceAccessRestriction).not.toHaveBeenCalledWith(
+      expect.anything(),
+      SYSTEM_ACTOR_ID,
+      expect.anything(),
+      expect.anything(),
     );
   });
 });

@@ -5,6 +5,7 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import {
   API_KEY_PREFIX,
   API_KEY_SCOPE,
+  API_KEY_LAST_USED_THROTTLE_MS,
   type ApiKeyScope,
 } from "@/lib/constants/auth/api-key";
 
@@ -87,6 +88,7 @@ export async function validateApiKey(
         scope: true,
         expiresAt: true,
         revokedAt: true,
+        lastUsedAt: true,
       },
     }),
   BYPASS_PURPOSE.TOKEN_LIFECYCLE);
@@ -113,13 +115,18 @@ export async function validateApiKey(
     return { ok: false, error: "API_KEY_INVALID" };
   }
 
-  // Best-effort lastUsedAt update (non-blocking)
-  void withBypassRls(prisma, async (tx) =>
-    tx.apiKey.update({
-      where: { id: key.id },
-      data: { lastUsedAt: new Date() },
-    }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE).catch(() => {});
+  // Throttled lastUsedAt update (non-blocking) — parity with SA token
+  const shouldUpdate =
+    !key.lastUsedAt ||
+    Date.now() - key.lastUsedAt.getTime() > API_KEY_LAST_USED_THROTTLE_MS;
+  if (shouldUpdate) {
+    void withBypassRls(prisma, async (tx) =>
+      tx.apiKey.update({
+        where: { id: key.id },
+        data: { lastUsedAt: new Date() },
+      }),
+    BYPASS_PURPOSE.TOKEN_LIFECYCLE).catch(() => {});
+  }
 
   return {
     ok: true,

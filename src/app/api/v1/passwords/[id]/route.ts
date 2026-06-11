@@ -148,12 +148,16 @@ async function handlePUT(
     }
   }
 
-  // Verify tag ownership
+  // Verify tag ownership. Normalize duplicates: a caller-supplied duplicate
+  // (e.g. ["t1","t1"]) should not count as a missing tag — tag.count returns
+  // distinct row count, so compare against the deduped input length, not the
+  // raw array length. Mirrors team-password-service.ts.
   if (tagIds?.length) {
+    const uniqueTagIds = [...new Set(tagIds)];
     const ownedCount = await withTenantRls(prisma, tenantId, async (tx) =>
-      tx.tag.count({ where: { id: { in: tagIds }, userId } }),
+      tx.tag.count({ where: { id: { in: uniqueTagIds }, userId } }),
     );
-    if (ownedCount !== tagIds.length) {
+    if (ownedCount !== uniqueTagIds.length) {
       return validationError({ message: "Invalid tagIds" });
     }
   }
@@ -192,20 +196,40 @@ async function handlePUT(
     updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
   }
 
-  // Snapshot history and update entry. withTenantRls already runs the callback
+  // Row type for the FOR UPDATE snapshot read (personal password_entries).
+  type PersonalBlobRow = {
+    encrypted_blob: string;
+    blob_iv: string;
+    blob_auth_tag: string;
+    key_version: number;
+    aad_version: number;
+  };
+
+  // Snapshot history and update entry.  withTenantRls already runs the callback
   // inside a tenant-scoped transaction, so tx IS the transaction client — no
   // nested $transaction is needed (it would only fold back into the same tx).
+  // When the blob changes, acquire a PK row lock first: concurrent PUTs serialise
+  // here, so each writer snapshots the immediately-preceding committed blob
+  // (not the stale outside-tx `existing` read).
   const updated = await withTenantRls(prisma, tenantId, async (tx) => {
     if (encryptedBlob) {
+      const [cur] = await tx.$queryRaw<PersonalBlobRow[]>`
+        SELECT encrypted_blob, blob_iv, blob_auth_tag, key_version, aad_version
+        FROM password_entries
+        WHERE id = ${id}::uuid
+        FOR UPDATE
+      `;
+      // Entry may be concurrently deleted between the early read and this lock.
+      if (!cur) return null;
       await tx.passwordEntryHistory.create({
         data: {
           entryId: id,
           tenantId: existing.tenantId,
-          encryptedBlob: existing.encryptedBlob,
-          blobIv: existing.blobIv,
-          blobAuthTag: existing.blobAuthTag,
-          keyVersion: existing.keyVersion,
-          aadVersion: existing.aadVersion,
+          encryptedBlob: cur.encrypted_blob,
+          blobIv: cur.blob_iv,
+          blobAuthTag: cur.blob_auth_tag,
+          keyVersion: cur.key_version,
+          aadVersion: cur.aad_version,
         },
       });
       // Trim to max 20 history entries (stable sort: changedAt asc, id asc)
@@ -226,6 +250,10 @@ async function handlePUT(
       include: { tags: { select: { id: true } } },
     });
   });
+
+  // Null sentinel: the blob-tx path returns null when the entry was concurrently
+  // deleted between the early findUnique and the FOR UPDATE lock.
+  if (!updated) return notFound();
 
   await logAuditAsync({
     ...personalAuditBase(req, userId),

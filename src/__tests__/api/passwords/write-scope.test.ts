@@ -167,16 +167,7 @@ describe("passwords:write scope", () => {
         keyVersion: 1,
         aadVersion: 1,
       });
-      mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
-        await fn({
-          passwordEntryHistory: {
-            create: mockHistoryCreate.mockResolvedValue({}),
-            findMany: mockHistoryFindMany.mockResolvedValue([]),
-            deleteMany: mockHistoryDeleteMany.mockResolvedValue({}),
-          },
-        });
-      });
-      mockUpdate.mockResolvedValue({
+      const mockTxUpdate = vi.fn().mockResolvedValue({
         id: "p1",
         encryptedOverview: "1122",
         overviewIv: "3344",
@@ -189,6 +180,25 @@ describe("passwords:write scope", () => {
         tags: [],
         createdAt: new Date(),
         updatedAt: new Date(),
+      });
+      mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
+        return fn({
+          $queryRaw: vi.fn().mockResolvedValue([{
+            encrypted_blob: "old",
+            blob_iv: "old",
+            blob_auth_tag: "old",
+            key_version: 1,
+            aad_version: 1,
+          }]),
+          passwordEntryHistory: {
+            create: mockHistoryCreate.mockResolvedValue({}),
+            findMany: mockHistoryFindMany.mockResolvedValue([]),
+            deleteMany: mockHistoryDeleteMany.mockResolvedValue({}),
+          },
+          passwordEntry: {
+            update: mockTxUpdate,
+          },
+        });
       });
 
       const req = createRequest("PUT", "http://localhost/api/passwords/p1", { body: updateBody });
@@ -235,16 +245,7 @@ describe("passwords:write scope", () => {
         keyVersion: 1,
         aadVersion: 1,
       });
-      mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
-        await fn({
-          passwordEntryHistory: {
-            create: mockHistoryCreate.mockResolvedValue({}),
-            findMany: mockHistoryFindMany.mockResolvedValue([]),
-            deleteMany: mockHistoryDeleteMany.mockResolvedValue({}),
-          },
-        });
-      });
-      mockUpdate.mockResolvedValue({
+      const mockTxUpdate2 = vi.fn().mockResolvedValue({
         id: "p1",
         encryptedOverview: "1122",
         overviewIv: "3344",
@@ -257,6 +258,25 @@ describe("passwords:write scope", () => {
         tags: [],
         createdAt: new Date(),
         updatedAt: new Date(),
+      });
+      mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
+        return fn({
+          $queryRaw: vi.fn().mockResolvedValue([{
+            encrypted_blob: "old",
+            blob_iv: "old",
+            blob_auth_tag: "old",
+            key_version: 1,
+            aad_version: 1,
+          }]),
+          passwordEntryHistory: {
+            create: mockHistoryCreate.mockResolvedValue({}),
+            findMany: mockHistoryFindMany.mockResolvedValue([]),
+            deleteMany: mockHistoryDeleteMany.mockResolvedValue({}),
+          },
+          passwordEntry: {
+            update: mockTxUpdate2,
+          },
+        });
       });
 
       const req = createRequest("PUT", "http://localhost/api/passwords/p1", {

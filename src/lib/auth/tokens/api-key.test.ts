@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
@@ -35,6 +35,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { parseApiKeyScopes, hasApiKeyScope, validateApiKey } from "./api-key";
+import { API_KEY_LAST_USED_THROTTLE_MS } from "@/lib/constants/auth/api-key";
 
 // ─── parseApiKeyScopes ───────────────────────────────────────
 
@@ -97,6 +98,9 @@ const VALID_KEY_ROW = {
   scope: "passwords:read",
   expiresAt: new Date(Date.now() + 3_600_000),
   revokedAt: null,
+  // R19: lastUsedAt must be present so the throttle guard evaluates correctly.
+  // Without it, the field reads as undefined (stale) → always-update, masking throttle.
+  lastUsedAt: null,
 };
 
 function makeReq(token = VALID_KEY) {
@@ -153,5 +157,74 @@ describe("validateApiKey — deactivated-user (C13)", () => {
 
     const result = await validateApiKey(makeReq());
     expect(result).toEqual({ ok: false, error: "API_KEY_INVALID" });
+  });
+});
+
+// ─── validateApiKey — lastUsedAt throttle (C4) ───────────────
+
+describe("validateApiKey — lastUsedAt throttle (C4)", () => {
+  const ACTIVE_MEMBER = { deactivatedAt: null };
+  const THROTTLE_MS = API_KEY_LAST_USED_THROTTLE_MS;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    mockTenantMemberFindUnique.mockResolvedValue(ACTIVE_MEMBER);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("null lastUsedAt ⇒ update is issued", async () => {
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    mockApiKeyFindUnique.mockResolvedValue({
+      ...VALID_KEY_ROW,
+      expiresAt: new Date("2027-01-01T00:00:00Z"),
+      lastUsedAt: null,
+    });
+
+    await validateApiKey(makeReq());
+
+    expect(mockApiKeyUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("stale lastUsedAt (>5 min ago) ⇒ update is issued", async () => {
+    vi.setSystemTime(new Date("2026-01-01T00:10:00Z")); // now = T+10min
+    mockApiKeyFindUnique.mockResolvedValue({
+      ...VALID_KEY_ROW,
+      expiresAt: new Date("2027-01-01T00:00:00Z"),
+      lastUsedAt: new Date("2026-01-01T00:00:00Z"), // 10 min ago (> threshold)
+    });
+
+    await validateApiKey(makeReq());
+
+    expect(mockApiKeyUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("recent lastUsedAt (within 5 min) ⇒ update is NOT issued", async () => {
+    vi.setSystemTime(new Date("2026-01-01T00:04:00Z")); // now = T+4min
+    mockApiKeyFindUnique.mockResolvedValue({
+      ...VALID_KEY_ROW,
+      expiresAt: new Date("2027-01-01T00:00:00Z"),
+      lastUsedAt: new Date("2026-01-01T00:00:00Z"), // 4 min ago (within threshold)
+    });
+
+    await validateApiKey(makeReq());
+
+    expect(mockApiKeyUpdate).not.toHaveBeenCalled();
+  });
+
+  it("lastUsedAt exactly at threshold boundary ⇒ update is NOT issued", async () => {
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z").getTime() + THROTTLE_MS);
+    mockApiKeyFindUnique.mockResolvedValue({
+      ...VALID_KEY_ROW,
+      expiresAt: new Date("2027-01-01T00:00:00Z"),
+      lastUsedAt: new Date("2026-01-01T00:00:00Z"), // exactly THROTTLE_MS ago (not >)
+    });
+
+    await validateApiKey(makeReq());
+
+    expect(mockApiKeyUpdate).not.toHaveBeenCalled();
   });
 });

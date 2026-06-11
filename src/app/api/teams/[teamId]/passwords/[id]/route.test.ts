@@ -229,8 +229,24 @@ describe("GET /api/teams/[teamId]/passwords/[id]", () => {
   });
 });
 
+// curRow for the C1 FOR UPDATE re-read — values DISTINCT from makeEntryForPUT()
+// so that field-level assertions can detect if the snapshot was sourced from
+// existingEntry instead of the in-tx $queryRaw result.
+const teamCurRow = {
+  encrypted_blob: "cur-team-blob",
+  blob_iv: "cur-team-iv",
+  blob_auth_tag: "cur-team-tag",
+  aad_version: 11,
+  team_key_version: 5,
+  item_key_version: 2,
+  encrypted_item_key: "cur-ik-cipher",
+  item_key_iv: "cur-ik-iv",
+  item_key_auth_tag: "cur-ik-tag",
+};
+
 describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
   const txMock = {
+    $queryRaw: vi.fn().mockResolvedValue([teamCurRow]),
     teamPasswordEntryHistory: {
       create: vi.fn().mockResolvedValue({}),
       findMany: vi.fn().mockResolvedValue([]),
@@ -248,6 +264,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     mockHasTeamPermission.mockReturnValue(true);
     mockAuditLogCreate.mockResolvedValue({});
     mockPrismaTeam.findUnique.mockResolvedValue({ teamKeyVersion: 1 });
+    txMock.$queryRaw.mockResolvedValue([teamCurRow]);
     txMock.teamPasswordEntryHistory.create.mockResolvedValue({});
     txMock.teamPasswordEntryHistory.findMany.mockResolvedValue([]);
     txMock.teamPasswordEntryHistory.deleteMany.mockResolvedValue({ count: 0 });
@@ -412,16 +429,17 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     expect(json.id).toBe(PW_ID);
     expect(json.entryType).toBe(ENTRY_TYPE.LOGIN);
 
-    // Verify old blob saved to history (inside transaction)
+    // Verify blob saved to history comes from $queryRaw FOR UPDATE result (C1),
+    // not from the outside-tx existingEntry read (which would be makeEntryForPUT() values).
     expect(txMock.teamPasswordEntryHistory.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           entryId: PW_ID,
-          encryptedBlob: "old-blob",
-          blobIv: "e".repeat(24),
-          blobAuthTag: "f".repeat(32),
-          aadVersion: 1,
-          teamKeyVersion: 1,
+          encryptedBlob: teamCurRow.encrypted_blob,
+          blobIv: teamCurRow.blob_iv,
+          blobAuthTag: teamCurRow.blob_auth_tag,
+          aadVersion: teamCurRow.aad_version,
+          teamKeyVersion: teamCurRow.team_key_version,
         }),
       }),
     );
