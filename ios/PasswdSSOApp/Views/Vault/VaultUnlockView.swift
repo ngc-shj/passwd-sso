@@ -4,13 +4,47 @@ import Shared
 import SwiftUI
 
 /// Passphrase entry screen that drives VaultUnlocker.
+/// When `biometricUnlock` is non-nil, a "Unlock with \(biometryLabel)" button is shown
+/// above the passphrase field, and biometric unlock auto-prompts ONLY on a genuine
+/// foreground RE-ENTRY (background → active), never when the vault locks while the app
+/// is already active (explicit Lock or idle timeout). Auto-prompting on appear re-unlocked
+/// instantly the moment the user locked while looking at the device; gating on a real
+/// foreground transition keeps in-app locks "stuck" on the lock screen while still
+/// auto-prompting when the user comes back to the app.
 struct VaultUnlockView: View {
   let unlocker: VaultUnlocker
   let onUnlocked: @MainActor (UnlockResult) -> Void
+  /// Non-nil when biometric re-unlock is available. Nil = passphrase-only.
+  let biometricUnlock: (@MainActor @Sendable () async -> Void)?
+  /// Human-readable biometry label derived from LAContext.biometryType by the caller.
+  let biometryLabel: String
+  /// True when this screen is reached by ENTERING the app (sign-in / launch) — auto-prompt
+  /// on appear. False when reached by an in-app lock (explicit Lock / idle timeout) — stay
+  /// locked on appear (a later foreground re-entry still auto-prompts via scenePhase).
+  let autoPromptOnAppear: Bool
 
+  @Environment(\.scenePhase) private var scenePhase
   @State private var passphrase: String = ""
   @State private var isLoading: Bool = false
+  /// Armed only by a `.background` phase, so auto-prompt fires on the next `.active`
+  /// (a real foreground re-entry) — NOT when the lock screen first appears in-app
+  /// (no scene transition) and NOT on a `.inactive`→`.active` blip (Control Center).
+  @State private var autoPromptArmed: Bool = false
   @State private var errorMessage: String?
+
+  init(
+    unlocker: VaultUnlocker,
+    biometricUnlock: (@MainActor @Sendable () async -> Void)? = nil,
+    biometryLabel: String = "biometrics",
+    autoPromptOnAppear: Bool = false,
+    onUnlocked: @MainActor @escaping (UnlockResult) -> Void
+  ) {
+    self.unlocker = unlocker
+    self.biometricUnlock = biometricUnlock
+    self.biometryLabel = biometryLabel
+    self.autoPromptOnAppear = autoPromptOnAppear
+    self.onUnlocked = onUnlocked
+  }
 
   var body: some View {
     VStack(spacing: 24) {
@@ -21,6 +55,17 @@ struct VaultUnlockView: View {
         .font(.body)
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
+
+      if let biometricUnlock {
+        Button {
+          Task { @MainActor in await biometricUnlock() }
+        } label: {
+          Label("Unlock with \(biometryLabel)", systemImage: "faceid")
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+      }
 
       SecureField("Master passphrase", text: $passphrase)
         .textContentType(.password)
@@ -41,7 +86,7 @@ struct VaultUnlockView: View {
       Button("Unlock") {
         Task { await attemptUnlock() }
       }
-      .buttonStyle(.borderedProminent)
+      .buttonStyle(.bordered)
       .controlSize(.large)
       .disabled(passphrase.isEmpty || isLoading)
 
@@ -50,6 +95,30 @@ struct VaultUnlockView: View {
       }
     }
     .padding(32)
+    .onAppear {
+      // Sign-in / app-entry arrival → auto-prompt. An in-app lock (autoPromptOnAppear
+      // == false) surfaces this screen without prompting (stays locked).
+      if autoPromptOnAppear { fireBiometricPrompt() }
+    }
+    .onChange(of: scenePhase) { _, newPhase in
+      switch newPhase {
+      case .background:
+        // A real app exit — arm auto-prompt for the next foreground re-entry.
+        autoPromptArmed = true
+      case .active:
+        guard autoPromptArmed else { return }
+        autoPromptArmed = false
+        fireBiometricPrompt()
+      default:
+        break
+      }
+    }
+  }
+
+  /// Invoke the biometric unlock once, if available and not already unlocking.
+  private func fireBiometricPrompt() {
+    guard !isLoading, let biometricUnlock else { return }
+    Task { @MainActor in await biometricUnlock() }
   }
 
   // MARK: - Private

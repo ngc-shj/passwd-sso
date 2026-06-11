@@ -7,6 +7,12 @@ public enum VaultUnlockError: Error, Equatable {
   case serverResponseInvalid
   case bridgeKeyCreationFailed
   case cryptoFailed
+  /// Biometric re-unlock requested but no wrapped vault key or bridge_key found.
+  case biometricUnavailable
+  /// LAContext / keychain biometry error during re-unlock.
+  case biometricFailed
+  /// Vault key recovered via biometrics but cache header userId is missing/empty.
+  case cacheUnreadable
 }
 
 /// Result of a successful vault unlock; carries the in-memory vault key, the
@@ -38,15 +44,21 @@ public actor VaultUnlocker {
   private let apiClient: any VaultUnlockDataSource
   private let bridgeKeyStore: BridgeKeyStore
   private let wrappedKeyStore: WrappedKeyStore
+  private let cacheURL: URL
+  private let now: @Sendable () -> Date
 
   public init(
     apiClient: any VaultUnlockDataSource,
     bridgeKeyStore: BridgeKeyStore,
-    wrappedKeyStore: any WrappedKeyStore
+    wrappedKeyStore: any WrappedKeyStore,
+    cacheURL: URL,
+    now: @Sendable @escaping () -> Date = { Date() }
   ) {
     self.apiClient = apiClient
     self.bridgeKeyStore = bridgeKeyStore
     self.wrappedKeyStore = wrappedKeyStore
+    self.cacheURL = cacheURL
+    self.now = now
   }
 
   /// Perform the unlock flow. Returns vault_key + userId on success.
@@ -146,5 +158,79 @@ public actor VaultUnlocker {
 
     // Step 7: return in-memory vault_key + userId + live keyVersion
     return UnlockResult(vaultKey: vaultKey, userId: unlockData.userId, keyVersion: unlockData.keyVersion)
+  }
+
+  /// Re-unlock the vault biometrically without a network round-trip.
+  ///
+  /// Sequence: biometric bridge_key read → derive cache vault key → decrypt wrapped vault key
+  /// → read encrypted cache to recover userId + keyVersion → return UnlockResult.
+  /// Throws `.biometricFailed` on LAContext/keychain errors, `.biometricUnavailable` when
+  /// the wrapped key is absent, `.cacheUnreadable` when the cache header userId is empty.
+  public func unlockWithBiometrics(reason: String) async throws -> UnlockResult {
+    // Step 1: biometric read of bridge_key
+    let blob: BridgeKeyStore.Blob
+    do {
+      blob = try bridgeKeyStore.readForFill(reason: reason)
+    } catch BridgeKeyStore.Error.biometryFailed {
+      throw VaultUnlockError.biometricFailed
+    } catch BridgeKeyStore.Error.notFound {
+      throw VaultUnlockError.biometricUnavailable
+    }
+
+    // Step 2: derive the cache vault key from bridge_key
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+
+    // Step 3: load the wrapped vault key
+    guard let wrappedKey = try wrappedKeyStore.loadVaultKey() else {
+      throw VaultUnlockError.biometricUnavailable
+    }
+
+    // Step 4: decrypt wrapped vault key to recover vault_key bytes
+    var vaultKeyData = try decryptAESGCM(
+      ciphertext: wrappedKey.ciphertext,
+      iv: wrappedKey.iv,
+      tag: wrappedKey.authTag,
+      key: cacheKey
+    )
+    defer { zeroData(&vaultKeyData) }
+
+    let vaultKey = SymmetricKey(data: vaultKeyData)
+
+    // Step 5: read encrypted cache to recover userId and keyVersion
+    let cache = try readCacheFile(
+      path: cacheURL,
+      vaultKey: vaultKey,
+      expectedHostInstallUUID: blob.hostInstallUUID,
+      expectedCounter: blob.cacheVersionCounter,
+      now: now()
+    )
+
+    // Guard against empty userId — would silently corrupt personal-entry AAD
+    guard !cache.header.userId.isEmpty else {
+      throw VaultUnlockError.cacheUnreadable
+    }
+
+    // Step 6: recover keyVersion from the first personal entry in the cache
+    let entries = (try? JSONDecoder().decode([CacheEntry].self, from: cache.entries)) ?? []
+    let keyVersion = max(1, entries.first(where: { $0.teamId == nil })?.keyVersion ?? 1)
+
+    return UnlockResult(vaultKey: vaultKey, userId: cache.header.userId, keyVersion: keyVersion)
+  }
+
+  /// Returns true when biometric re-unlock is likely available:
+  /// bridge_key meta is present (non-zero counter) AND wrapped vault key is stored.
+  /// Uses only the no-ACL meta read — no biometric prompt is triggered.
+  public nonisolated func biometricUnlockAvailable() -> Bool {
+    let counterNonZero = ((try? bridgeKeyStore.readDirect())?.cacheVersionCounter ?? 0) != 0
+    guard counterNonZero else { return false }
+    return (try? wrappedKeyStore.loadVaultKey()) != nil
+  }
+
+  // MARK: - Private helpers
+
+  private func zeroData(_ data: inout Data) {
+    _ = data.withUnsafeMutableBytes { ptr in
+      ptr.initializeMemory(as: UInt8.self, repeating: 0)
+    }
   }
 }

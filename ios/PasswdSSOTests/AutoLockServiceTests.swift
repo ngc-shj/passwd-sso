@@ -85,7 +85,7 @@ final class AutoLockServiceTests: XCTestCase {
     XCTAssertEqual(service.state, .locked)
   }
 
-  func testLockDeletesBridgeKeyBlob() {
+  func testLockPreservesBridgeKeyBlob() {
     let tmpDir = makeTmpDir()
     defer { try? FileManager.default.removeItem(at: tmpDir) }
     let keychain = MockKeychain()
@@ -95,13 +95,13 @@ final class AutoLockServiceTests: XCTestCase {
     service.startTimer()
     service.lock()
 
-    XCTAssertNil(
+    XCTAssertNotNil(
       keychain.store["com.passwd-sso.test.bridge-key-v2:blob"],
-      "bridge-key-v2 should be deleted after lock"
+      "bridge-key-v2 must survive lock() so biometric re-unlock is available"
     )
-    XCTAssertNil(
+    XCTAssertNotNil(
       keychain.store["com.passwd-sso.test.bridge-meta-v2:blob"],
-      "bridge-meta-v2 should be deleted after lock"
+      "bridge-meta-v2 must survive lock() so biometric re-unlock is available"
     )
   }
 
@@ -225,9 +225,9 @@ final class AutoLockServiceTests: XCTestCase {
     service.tick()
 
     XCTAssertEqual(service.state, .locked)
-    XCTAssertNil(
+    XCTAssertNotNil(
       keychain.store["com.passwd-sso.test.bridge-key-v2:blob"],
-      "bridge-key should be deleted when the idle boundary is reached"
+      "bridge-key must survive a .lock idle timeout so biometric re-unlock is available"
     )
     XCTAssertNotNil(
       try wks.loadVaultKey(),
