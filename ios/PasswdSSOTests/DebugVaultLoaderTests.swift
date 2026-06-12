@@ -24,7 +24,8 @@ final class DebugVaultLoaderTests: XCTestCase {
     keychain = MockKeychainAccessor()
     bridgeKeyStore = BridgeKeyStore(
       accessGroup: "test.jp.jpng.passwd-sso.shared",
-      keychain: keychain
+      keychain: keychain,
+      evaluatesBiometricExplicitly: false
     )
     wrappedKeyStore = TempDirWrappedKeyStore(baseDir: tmpDir)
   }

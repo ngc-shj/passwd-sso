@@ -1,5 +1,6 @@
 import Foundation
 import LocalAuthentication
+import OSLog
 import Security
 
 // Storage layout: TWO Keychain items in the same App Group.
@@ -54,6 +55,12 @@ public struct SystemKeychainAccessor: KeychainAccessor, Sendable {
 
 public final class BridgeKeyStore: Sendable {
 
+  // Diagnostic only — logs the raw OSStatus on a readForFill failure so the
+  // AutoFill "vault locked" symptom can be traced to its true cause (item
+  // missing vs. biometry failure vs. interaction-not-allowed/entitlement) via
+  // Console.app. No key material is ever logged.
+  private static let log = Logger(subsystem: "jp.jpng.passwd-sso", category: "autofill")
+
   /// Logical bundle of bridge-key + counter/uuid. After the V2 split, the
   /// two Keychain items back this struct: `bridgeKey` comes from
   /// `bridge-key-v2` (biometric-gated), and `cacheVersionCounter` +
@@ -85,6 +92,10 @@ public final class BridgeKeyStore: Sendable {
   private let serviceMetaV2: String
   private let serviceLegacy: String
   private let keychain: KeychainAccessor
+  /// Whether `readForFillAuthenticated` performs the real LAContext biometric
+  /// evaluation. Production = true. Tests inject false so the unit suite (fake
+  /// keychain, no real biometrics) exercises the read path without prompting.
+  private let evaluatesBiometricExplicitly: Bool
 
   /// `service` is treated as the LEGACY service name (used for migration
   /// reads only). The two V2 service names are derived from it.
@@ -95,7 +106,8 @@ public final class BridgeKeyStore: Sendable {
   public init(
     accessGroup: String? = nil,
     service: String = "com.passwd-sso.bridge-key",
-    keychain: KeychainAccessor = SystemKeychainAccessor()
+    keychain: KeychainAccessor = SystemKeychainAccessor(),
+    evaluatesBiometricExplicitly: Bool = true
   ) {
     precondition(service.hasSuffix("bridge-key"),
                  "BridgeKeyStore service name must end in 'bridge-key'")
@@ -105,6 +117,7 @@ public final class BridgeKeyStore: Sendable {
     self.serviceMetaV2 = service
       .replacingOccurrences(of: "bridge-key", with: "bridge-meta") + "-v2"
     self.keychain = keychain
+    self.evaluatesBiometricExplicitly = evaluatesBiometricExplicitly
   }
 
   // MARK: - Public API
@@ -149,11 +162,56 @@ public final class BridgeKeyStore: Sendable {
   /// triggers a fresh biometric authentication instead of reusing iOS's
   /// auth cache. On legacy state, transparently migrate to v2 layout
   /// before returning.
+  ///
+  /// Relies on the keychain to implicitly trigger the biometric UI. This works
+  /// in foreground (host app) and in the AutoFill *list* context, but NOT in the
+  /// AutoFill "provide credential" context (passkey assertion / QuickType direct
+  /// fill), where it returns errSecInteractionNotAllowed (-25308). Those callers
+  /// must use `readForFillAuthenticated` instead.
   public func readForFill(reason: String) throws -> Blob {
     let context = LAContext()
     context.touchIDAuthenticationAllowableReuseDuration = 0
     context.localizedReason = reason
+    return try readBlob(usingContext: context)
+  }
 
+  /// Like `readForFill`, but explicitly evaluates the biometric access control
+  /// FIRST and reads the keychain with the resulting authenticated context.
+  ///
+  /// The AutoFill "provide credential" entry points (`prepareInterfaceToProvide-
+  /// Credential` for a passkey assertion, and the passkey list) present no UI of
+  /// their own before the read, so the keychain's implicit biometric prompt is
+  /// disallowed (errSecInteractionNotAllowed / -25308). An explicit
+  /// `evaluateAccessControl` CAN present the prompt in that context; the
+  /// subsequent keychain read then reuses the authenticated context.
+  public func readForFillAuthenticated(reason: String) async throws -> Blob {
+    let context = LAContext()
+    context.touchIDAuthenticationAllowableReuseDuration = 0
+    context.localizedReason = reason
+
+    if evaluatesBiometricExplicitly,
+       let accessControl = SecAccessControlCreateWithFlags(
+         kCFAllocatorDefault,
+         kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+         .biometryCurrentSet,
+         nil
+       ) {
+      do {
+        try await context.evaluateAccessControl(
+          accessControl, operation: .useItem, localizedReason: reason
+        )
+      } catch {
+        Self.log.error("readForFillAuthenticated: evaluateAccessControl failed: \(String(describing: error), privacy: .public)")
+        throw Error.biometryFailed
+      }
+    }
+    return try readBlob(usingContext: context)
+  }
+
+  /// Shared keychain read for both `readForFill` variants. `context` is whatever
+  /// the caller prepared (implicitly- or explicitly-evaluated); it gates the
+  /// biometric `bridge-key-v2` read and is reused for the legacy-migration read.
+  private func readBlob(usingContext context: LAContext) throws -> Blob {
     // 1. Read bridge_key (biometric-gated).
     var keyQuery: [String: Any] = baseQuery(service: serviceKeyV2)
     keyQuery[kSecReturnData as String] = true
@@ -165,12 +223,15 @@ public final class BridgeKeyStore: Sendable {
       if let migrated = try tryMigrateLegacyBlob(context: context) {
         return migrated
       }
+      Self.log.error("readForFill: bridge-key-v2 not found (status=\(keyStatus, privacy: .public)), no legacy item")
       throw Error.notFound
     }
     if keyStatus == errSecUserCanceled || keyStatus == errSecAuthFailed {
+      Self.log.error("readForFill: biometry failed (status=\(keyStatus, privacy: .public))")
       throw Error.biometryFailed
     }
     guard keyStatus == errSecSuccess, let keyBytes = keyData else {
+      Self.log.error("readForFill: keychain error (status=\(keyStatus, privacy: .public))")
       throw Error.keychainError(keyStatus)
     }
     guard keyBytes.count == bridgeKeyV2Size else { throw Error.invalidBlob }

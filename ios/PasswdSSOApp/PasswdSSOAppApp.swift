@@ -75,8 +75,16 @@ struct PasswdSSOAppApp: App {
             }
           }
         case .background:
-          // No inline-suggestion identities while not foreground+unlocked.
-          Task { await CredentialIdentityRegistrar().clear() }
+          // Do NOT clear credential identities on background. Using a passkey
+          // requires leaving passwd-sso for the relying-party app (e.g. Safari),
+          // which backgrounds us — clearing here unregistered the passkey before
+          // the ceremony reached it, so iOS fell back to the non-interactive
+          // prepareCredentialList path where the biometric bridge_key read is
+          // disallowed (errSecInteractionNotAllowed / -25308 → "Vault is Locked").
+          // Identities are non-secret metadata (the fill is still biometric-gated
+          // in the extension); they are cleared on vault lock / sign-out (RootView)
+          // and at launch (crash recovery), which is the real privacy boundary.
+          break
         case .inactive:
           break
         @unknown default:

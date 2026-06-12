@@ -158,7 +158,8 @@ private func makeBridgeKeyBlob(
 ) throws -> (BridgeKeyStore, BridgeKeyStore.Blob) {
   let store = BridgeKeyStore(
     accessGroup: "test.jp.jpng.passwd-sso.shared",
-    keychain: keychain
+    keychain: keychain,
+    evaluatesBiometricExplicitly: false
   )
   let blob = try store.create()
   return (store, blob)
@@ -373,7 +374,8 @@ final class CredentialResolverTests: XCTestCase {
     let emptyKeychain = MockKeychainAccessor()
     let bridgeKeyStore = BridgeKeyStore(
       accessGroup: "test.jp.jpng.passwd-sso.shared",
-      keychain: emptyKeychain
+      keychain: emptyKeychain,
+      evaluatesBiometricExplicitly: false
     )
     let resolver = CredentialResolver(
       bridgeKeyStore: bridgeKeyStore,
@@ -625,7 +627,8 @@ final class CredentialResolverTests: XCTestCase {
     let counting = CountingKeychainAccessor()
     let bridgeKeyStore = BridgeKeyStore(
       accessGroup: "test.jp.jpng.passwd-sso.shared",
-      keychain: counting
+      keychain: counting,
+      evaluatesBiometricExplicitly: false
     )
     let blob = try bridgeKeyStore.create()
     let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
@@ -674,7 +677,8 @@ final class CredentialResolverTests: XCTestCase {
   ) throws -> (CredentialResolver, CountingKeychainAccessor) {
     let counting = CountingKeychainAccessor()
     let bridgeKeyStore = BridgeKeyStore(
-      accessGroup: "test.jp.jpng.passwd-sso.shared", keychain: counting
+      accessGroup: "test.jp.jpng.passwd-sso.shared", keychain: counting,
+      evaluatesBiometricExplicitly: false
     )
     let blob = try bridgeKeyStore.create()
     let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)

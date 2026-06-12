@@ -1,9 +1,22 @@
 import AuthenticationServices
+import OSLog
 import Shared
 import SwiftUI
 import UIKit
 
 final class CredentialProviderViewController: ASCredentialProviderViewController {
+
+  // Diagnostic only — confirms the extension is invoked and which branch runs,
+  // so the AutoFill "vault locked" symptom is traceable in Console.app.
+  private static let log = Logger(subsystem: "jp.jpng.passwd-sso", category: "autofill")
+
+  // Work deferred until the extension view is foreground (viewDidAppear) — the
+  // reliable point for the biometric keychain read (`evaluateAccessControl`),
+  // which fails with -1004 ("not running foreground") when run earlier. Both the
+  // passkey assertion (provide path) and the passkey list's resolveCandidates use
+  // this. `foregroundWorkStarted` guards viewDidAppear firing more than once.
+  private var pendingForegroundWork: (() -> Void)?
+  private var foregroundWorkStarted = false
 
   // MARK: - Resolver
 
@@ -95,6 +108,22 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
       clientDataHash: requestParameters.clientDataHash,
       userVerificationRequired: requestParameters.userVerificationPreference == .required
     )
+    // Defer resolveCandidates (a biometric keychain read) to viewDidAppear — it
+    // fails with -1004 when run before the extension is foreground.
+    pendingForegroundWork = { [weak self] in
+      self?.runPasskeyList(sendable: sendable, originalIdents: originalIdents, request: request)
+    }
+    presentSwiftUI(PasskeyFillProgressView())
+  }
+
+  /// Resolve passkey candidates (foreground biometric) and present the picker.
+  @available(iOS 17.0, *)
+  @MainActor
+  private func runPasskeyList(
+    sendable: [ServiceIdentifier],
+    originalIdents: [ASCredentialServiceIdentifier],
+    request: PasskeyAssertionRequest
+  ) {
     Task { @MainActor in
       do {
         let result = try await resolver.resolveCandidates(for: sendable)
@@ -172,21 +201,34 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         clientDataHash: passkeyRequest.clientDataHash,
         userVerificationRequired: passkeyRequest.userVerificationPreference == .required
       )
-      completePasskeyAssertion(entryId: recordId, request: request)
+      // Defer the biometric to viewDidAppear (the reliable foreground point):
+      // running it synchronously here fails with -1004 ("Caller is not running
+      // foreground"). Present a spinner now; viewDidAppear runs the assertion.
+      pendingForegroundWork = { [weak self] in
+        self?.completePasskeyAssertion(entryId: recordId, request: request)
+      }
+      presentSwiftUI(PasskeyFillProgressView())
     default:
       cancel(with: nil)
     }
   }
 
   /// Resolve the chosen passkey entry, build the assertion, and complete the
-  /// request. signCount is 0; UV/UP are true (every fill is biometric-gated).
+  /// request. UV/UP are true (every fill is biometric-gated); signCount comes from
+  /// the persisted monotonic store; BE/BS are set (iOS treats provider passkeys as
+  /// synced and the system rejects the assertion without the backup-state flag).
   @available(iOS 17.0, *)
   private func completePasskeyAssertion(entryId: String, request: PasskeyAssertionRequest) {
     Task { @MainActor in
       do {
         var material = try await resolver.decryptPasskeyMaterial(entryId: entryId)
         defer { material.zeroPrivateKey() }
-        let outputs = try buildPasskeyAssertion(material: material, request: request)
+        // Persisted, monotonic sign count so consecutive offline assertions are
+        // accepted by the RP's counter check.
+        let signCount = PasskeySignCountStore().next(
+          credentialId: material.credentialId, floor: material.signCount
+        )
+        let outputs = try buildPasskeyAssertion(material: material, request: request, signCount: signCount)
         let credential = ASPasskeyAssertionCredential(
           userHandle: outputs.userHandle,
           relyingParty: outputs.relyingParty,
@@ -195,8 +237,12 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
           authenticatorData: outputs.authenticatorData,
           credentialID: outputs.credentialID
         )
-        await extensionContext.completeAssertionRequest(using: credential)
+        let delivered = await extensionContext.completeAssertionRequest(using: credential)
+        if !delivered {
+          Self.log.error("completePasskeyAssertion: system rejected the assertion (completeAssertionRequest returned false)")
+        }
       } catch {
+        Self.log.error("completePasskeyAssertion FAILED: \(String(describing: error), privacy: .public)")
         cancel(with: error)
       }
     }
@@ -290,6 +336,16 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     presentSwiftUI(view)
   }
 
+  /// The extension is reliably foreground here, so a deferred passkey assertion's
+  /// biometric (`evaluateAccessControl`) can run without -1004. Consume once.
+  override func viewDidAppear(_ animated: Bool) {
+    super.viewDidAppear(animated)
+    guard let work = pendingForegroundWork, !foregroundWorkStarted else { return }
+    foregroundWorkStarted = true
+    pendingForegroundWork = nil
+    work()
+  }
+
   @MainActor
   private func presentLockedSheet() {
     let view = LockedFallbackView(
@@ -339,6 +395,13 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
 
   @MainActor
   private func presentSwiftUI<V: View>(_ view: V) {
+    // Replace any previously-presented child (e.g. the foreground spinner) so a
+    // single hosted view is shown at a time (spinner → picker / locked sheet).
+    for child in children {
+      child.willMove(toParent: nil)
+      child.view.removeFromSuperview()
+      child.removeFromParent()
+    }
     let host = UIHostingController(rootView: view)
     addChild(host)
     host.view.translatesAutoresizingMaskIntoConstraints = false

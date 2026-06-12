@@ -1,6 +1,12 @@
 import AuthenticationServices
 import CryptoKit
 import Foundation
+import OSLog
+
+// Diagnostic only — traces the QuickType passkey registration lifecycle
+// (detection counts + register/clear timing) so a "passkey not offered in the
+// system sheet" symptom is debuggable in Console.app. No secrets logged.
+private let identityLog = Logger(subsystem: "jp.jpng.passwd-sso", category: "autofill")
 
 // MARK: - Personal overview decryption (for registration)
 
@@ -75,7 +81,10 @@ public func buildPasskeyIdentitySpecs(
       let material = EntryBlobDecoder.passkeyMaterial(plaintext: blobPlain, entryId: entry.id),
       let credentialID = try? base64URLDecode(credentialIdStr), !credentialID.isEmpty,
       let userHandle = try? base64URLDecode(material.userHandle), !userHandle.isEmpty
-    else { continue }
+    else {
+      identityLog.error("buildPasskeyIdentitySpecs: passkey candidate (rpId=\(rpId, privacy: .public)) dropped — blob material/credentialID/userHandle decode failed")
+      continue
+    }
     result.append(
       PasskeyIdentitySpec(
         relyingPartyIdentifier: rpId,
@@ -249,7 +258,10 @@ public struct CredentialIdentityRegistrar: Sendable {
     with summaries: [VaultEntrySummary],
     passkeys: [PasskeyIdentitySpec] = []
   ) async {
-    guard await store.isEnabled() else { return }
+    guard await store.isEnabled() else {
+      identityLog.error("replace: AutoFill provider DISABLED in Settings — nothing registered")
+      return
+    }
     await store.replace(passwords: Self.specs(from: summaries), passkeys: passkeys)
   }
 

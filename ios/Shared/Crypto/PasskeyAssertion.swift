@@ -23,19 +23,24 @@ public struct PasskeyAssertionMaterial: Sendable, Equatable {
   public let credentialId: String   // base64url, as stored
   public let userHandle: String     // base64url, as stored (may be empty)
   public var privateKeyJWK: Data    // raw UTF-8 bytes of the stringified JWK
+  /// Last signCount the RP saw (stored in the blob, synced from the extension).
+  /// The assertion emits `signCount + 1` to satisfy RP counter monotonicity.
+  public let signCount: UInt32
 
   public init(
     entryId: String,
     relyingPartyId: String,
     credentialId: String,
     userHandle: String,
-    privateKeyJWK: Data
+    privateKeyJWK: Data,
+    signCount: UInt32 = 0
   ) {
     self.entryId = entryId
     self.relyingPartyId = relyingPartyId
     self.credentialId = credentialId
     self.userHandle = userHandle
     self.privateKeyJWK = privateKeyJWK
+    self.signCount = signCount
   }
 
   /// Best-effort overwrite of the JWK bytes after the signing key is built.
@@ -81,14 +86,20 @@ public func decodeP256PrivateKeyJWK(_ jwkJSON: Data) throws -> P256.Signing.Priv
 
 private let kFlagUserPresent: UInt8 = 0x01
 private let kFlagUserVerified: UInt8 = 0x04
+private let kFlagBackupEligible: UInt8 = 0x08
+private let kFlagBackupState: UInt8 = 0x10
 
 /// Build assertion authenticatorData: SHA256(rpId)(32) ‖ flags(1) ‖ signCount(4, BE).
-/// No attested-credential-data / extensions. signCount is a parameter for
-/// testability; the production path always passes 0 (non-tracking authenticator).
+/// No attested-credential-data / extensions. `backupEligible`/`backupState`
+/// (BE/BS) — iOS AutoFill treats provider passkeys as synced and the completion
+/// (`completeAssertionRequest`) appears to require BS; they must also stay
+/// consistent with how the credential was registered at the RP.
 public func buildAssertionAuthenticatorData(
   rpId: String,
   userPresent: Bool,
   userVerified: Bool,
+  backupEligible: Bool = false,
+  backupState: Bool = false,
   signCount: UInt32
 ) -> Data {
   var out = Data()
@@ -97,6 +108,8 @@ public func buildAssertionAuthenticatorData(
   var flags: UInt8 = 0
   if userPresent { flags |= kFlagUserPresent }
   if userVerified { flags |= kFlagUserVerified }
+  if backupEligible { flags |= kFlagBackupEligible }
+  if backupState { flags |= kFlagBackupState }
   out.append(flags)
   out.append(UInt8((signCount >> 24) & 0xff))
   out.append(UInt8((signCount >> 16) & 0xff))
@@ -106,8 +119,8 @@ public func buildAssertionAuthenticatorData(
 }
 
 /// Sign authenticatorData ‖ clientDataHash with ECDSA-P256-SHA256 and return the
-/// DER (ASN.1) signature — `.derRepresentation`, which is what
-/// ASPasskeyAssertionCredential.signature expects (passed unchanged to the RP).
+/// DER (ASN.1) signature — `.derRepresentation`, the WebAuthn standard the RP
+/// verifies (the browser extension's assertions use DER and the RP accepts them).
 public func signPasskeyAssertion(
   privateKey: P256.Signing.PrivateKey,
   authenticatorData: Data,
@@ -165,7 +178,8 @@ public struct PasskeyAssertionOutputs: Sendable, Equatable {
 /// to downgrade (always UV=true).
 public func buildPasskeyAssertion(
   material: PasskeyAssertionMaterial,
-  request: PasskeyAssertionRequest
+  request: PasskeyAssertionRequest,
+  signCount: UInt32
 ) throws -> PasskeyAssertionOutputs {
   guard material.relyingPartyId == request.relyingPartyId else {
     throw PasskeyCryptoError.rpIdMismatch
@@ -174,11 +188,16 @@ public func buildPasskeyAssertion(
     throw PasskeyCryptoError.malformedCredentialId
   }
   let privateKey = try decodeP256PrivateKeyJWK(material.privateKeyJWK)
+  // The RP enforces counter monotonicity, so `signCount` MUST exceed the last
+  // value it saw. The caller computes it from PasskeySignCountStore (persisted
+  // per-credential so consecutive offline assertions keep increasing).
   let authData = buildAssertionAuthenticatorData(
     rpId: request.relyingPartyId,
     userPresent: true,
     userVerified: true,
-    signCount: 0
+    backupEligible: true,
+    backupState: true,
+    signCount: signCount
   )
   let signature = try signPasskeyAssertion(
     privateKey: privateKey,
