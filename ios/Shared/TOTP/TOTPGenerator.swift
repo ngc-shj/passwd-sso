@@ -26,6 +26,17 @@ public struct TOTPParams: Sendable, Equatable {
     self.digits = digits
     self.period = period
   }
+
+  /// Build from stored-blob values (algorithm as a string, optional digits/period).
+  /// Unknown/absent algorithm → SHA1; absent digits/period → 6 / 30 (RFC 6238 defaults).
+  public init(secret: String, algorithm: String?, digits: Int?, period: Int?) {
+    self.init(
+      secret: secret,
+      algorithm: algorithm.flatMap { TOTPAlgorithm(rawValue: $0.uppercased()) } ?? .sha1,
+      digits: digits ?? 6,
+      period: period ?? 30
+    )
+  }
 }
 
 public enum TOTPError: Error, Equatable {

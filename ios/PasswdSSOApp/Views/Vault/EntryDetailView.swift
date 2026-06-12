@@ -232,13 +232,6 @@ struct EntryDetailView: View {
   /// Copy to pasteboard with localOnly + a configurable auto-clear expiration
   /// (AppSettingsStore.clipboardClearSeconds) per plan §"Side-Channel Controls".
   private func copySecurely(value: String) {
-    let seconds = Double(AppSettingsStore().clipboardClearSeconds)
-    UIPasteboard.general.setItems(
-      [[UIPasteboard.typeAutomatic: value]],
-      options: [
-        .localOnly: true,
-        .expirationDate: Date().addingTimeInterval(seconds),
-      ]
-    )
+    SecureClipboard.copy(value, clearAfter: AppSettingsStore().clipboardClearSeconds)
   }
 }

@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import Shared
 
 @testable import PasswdSSOApp
 
@@ -150,6 +151,29 @@ final class AppSettingsStoreTests: XCTestCase {
     let store = AppSettingsStore(defaults: defaults)
     store.minutes = 30
     XCTAssertEqual(store.effectiveAutoLockMinutes, 30)
+  }
+
+  // MARK: - Auto-copy TOTP (default OFF / opt-in)
+
+  func testAutoCopyTotpAbsentReturnsFalse() {
+    XCTAssertFalse(AppSettingsStore(defaults: defaults).autoCopyTotp)
+  }
+
+  func testAutoCopyTotpRoundTrip() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.autoCopyTotp = true
+    XCTAssertTrue(store.autoCopyTotp)
+    store.autoCopyTotp = false
+    XCTAssertFalse(store.autoCopyTotp)
+  }
+
+  /// The host app and the AutoFill extension instantiate separate stores over the
+  /// same App Group suite; what one writes the other must read.
+  func testAutoCopyTotpReadsAcrossSeparateStoresOnSameSuite() {
+    let appSide = AppSettingsStore(defaults: defaults)
+    let extensionSide = AppSettingsStore(defaults: UserDefaults(suiteName: suiteName)!)
+    appSide.autoCopyTotp = true
+    XCTAssertTrue(extensionSide.autoCopyTotp)
   }
 
   func testApplyTenantPolicyAuthoritativeWritesValue() {

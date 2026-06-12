@@ -1,4 +1,5 @@
 import SwiftUI
+import Shared
 
 extension AppTheme {
   var colorScheme: ColorScheme? {
@@ -74,6 +75,16 @@ struct SettingsView: View {
     )
   }
 
+  private var autoCopyTotpSelection: Binding<Bool> {
+    Binding(
+      get: { store.autoCopyTotp },
+      set: { newValue in
+        store.autoCopyTotp = newValue
+        autoLockService.recordActivity()
+      }
+    )
+  }
+
   var body: some View {
     NavigationStack {
       Form {
@@ -103,12 +114,17 @@ struct SettingsView: View {
           }
         }
 
-        Section("Clipboard") {
+        Section {
           Picker("Auto-Clear", selection: clipboardSelection) {
             ForEach(AppSettingsStore.clipboardOptions, id: \.self) { seconds in
               Text("\(seconds) seconds").tag(seconds)
             }
           }
+          Toggle("Auto-copy TOTP after fill", isOn: autoCopyTotpSelection)
+        } header: {
+          Text("Clipboard")
+        } footer: {
+          Text("When on, filling a login that has a one-time-code copies the current code to the clipboard so you can paste it. The clipboard clears after the time above and never syncs to your other devices.")
         }
 
         Section("Appearance") {

@@ -1,6 +1,40 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Auto-copy TOTP after fill" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto-copy TOTP after fill"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "入力後にTOTPを自動コピー"
+          }
+        }
+      }
+    },
+    "When on, filling a login that has a one-time-code copies the current code to the clipboard so you can paste it. The clipboard clears after the time above and never syncs to your other devices." : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When on, filling a login that has a one-time-code copies the current code to the clipboard so you can paste it. The clipboard clears after the time above and never syncs to your other devices."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オンにすると、ワンタイムコードを持つログインを入力した際に、現在のコードをクリップボードにコピーします。クリップボードは上記の時間が経過すると消去され、ほかのデバイスには同期されません。"
+          }
+        }
+      }
+    },
     "%@" : {
       "comment" : "Xcode-editor extraction placeholder for the TOTP countdown Int; the compiler emits the %lld key. Pure number — not translated.",
       "shouldTranslate" : false

@@ -78,14 +78,7 @@ struct TOTPCodeView: View {
   }
 
   private func copyToClipboard() {
-    let seconds = Double(AppSettingsStore().clipboardClearSeconds)
-    UIPasteboard.general.setItems(
-      [[UIPasteboard.typeAutomatic: currentCode]],
-      options: [
-        .localOnly: true,
-        .expirationDate: Date().addingTimeInterval(seconds),
-      ]
-    )
+    SecureClipboard.copy(currentCode, clearAfter: AppSettingsStore().clipboardClearSeconds)
     withAnimation { copyConfirmed = true }
     Task { @MainActor in
       try? await Task.sleep(nanoseconds: 2_000_000_000)
