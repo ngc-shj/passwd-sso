@@ -40,3 +40,27 @@ RS1 (token storage accessibility unchanged), RS2 (rotation replay — single-fli
 RT1 (URL-routing mock, separate counters, realistic TokenExchangeResponse), RT2 (no untestable suggestions adopted; C4 sign-in routing left to manual), RT3 (clock seam + ≥2s margins), RT4 (exact `==` counts), RT5 (per-test reset).
 
 ## Resolution Status — all Round-1 findings resolved; build clean, 331 tests pass.
+
+---
+
+# Round 2 (incremental verification of round-1 fixes)
+
+Date: 2026-06-12
+
+## Result: READY TO LOCK — no blocking findings
+
+Verified the fix commit (b9a6c00d). All round-1 fixes correct, complete, regression-free:
+- **F1/S1**: team-fetch `do/catch` re-throws `authenticationRequired`; personal path still propagates; `async let` cancellation clean (personal-throws cancels team automatically). No Swift 6 issue.
+- **F2**: `freshNonce` gating is bounded at exactly ≤3 (initial → nonce-retry if fresh nonce → refresh-retry → throw); `nonce` signing var still updated from `freshNonce` so the retry echoes the server nonce (T4 asserts this).
+- **F3**: no caller depended on the old `serverError(401)` from `refreshToken()`; `doRefreshAndPersist` remaps it identically; no test regressed.
+- **S3**: `HostTokenStore().deleteAll()` before `.setup` does not break re-sign-in (sign-in mints fresh tokens, reads nothing first); no race (main-actor `@State` mutation).
+- **S2**: comment-only.
+- **Tests**: T1 (`==` non-vacuous), T3 (writeLog absolute-index ordering valid), T4 (nonce-echo exercises the `nonce = n` assignment), G1 (networkError guard non-vacuous) all genuinely assert the intended behavior; none weakened.
+
+## Non-blocking nits (left as-is — consistent with existing codebase patterns)
+- HostSyncService catch+rethrow could use a `where` clause (safe as-is, enum case has no associated value).
+- RootView `try? HostTokenStore().deleteAll()` swallows a keychain error — matches the existing sign-out `try?` pattern.
+- T3 `suffix(from:)` absolute-index semantics — correct; a one-line comment would aid future readers.
+
+Review loop terminated: Round 2 returned no blocking findings.
+
