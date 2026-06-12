@@ -216,6 +216,52 @@ export async function unwrapSecretKeyWithPrf(
   return new Uint8Array(decrypted);
 }
 
+// ─── In-flight ceremony guard ──────────────────────────────
+//
+// Chrome (and other browsers) service only ONE WebAuthn ceremony — create()
+// OR get() — at a time. A second modal request issued while a prior one is
+// still pending is silently dropped: no OS prompt appears and the call hangs
+// until the stale request resolves or its 120s abort fires. This strands the
+// user on a spinner with no dialog. It happens when a ceremony is left pending
+// after the user navigates away (SPA route change) or retries before the first
+// request settled.
+//
+// Track the active controller so a new ceremony aborts a stale one, and expose
+// `abortInFlightCeremony` for component unmount cleanup.
+let inFlightCeremonyAbort: AbortController | null = null;
+
+const CEREMONY_TIMEOUT_MS = 120_000;
+
+/**
+ * Start a WebAuthn ceremony: abort any prior in-flight request, then register
+ * and return a fresh AbortController with an auto-abort safety timer. Always
+ * pair with {@link endCeremony} (in both the success and error paths) so the
+ * timer is cleared and the registration is released.
+ */
+function beginCeremony(): { abort: AbortController; timer: ReturnType<typeof setTimeout> } {
+  // Cancel a stale ceremony so this one can surface its prompt.
+  inFlightCeremonyAbort?.abort();
+  const abort = new AbortController();
+  inFlightCeremonyAbort = abort;
+  const timer = setTimeout(() => abort.abort(), CEREMONY_TIMEOUT_MS);
+  return { abort, timer };
+}
+
+function endCeremony(abort: AbortController, timer: ReturnType<typeof setTimeout>): void {
+  clearTimeout(timer);
+  if (inFlightCeremonyAbort === abort) inFlightCeremonyAbort = null;
+}
+
+/**
+ * Abort any in-flight passkey ceremony. Call from component unmount cleanup so
+ * a request left pending after navigation cannot silently block the next
+ * modal prompt.
+ */
+export function abortInFlightCeremony(): void {
+  inFlightCeremonyAbort?.abort();
+  inFlightCeremonyAbort = null;
+}
+
 // ─── Registration ──────────────────────────────────────────
 
 export interface PasskeyRegistrationResult {
@@ -237,8 +283,7 @@ export async function startPasskeyRegistration(
     };
   }
 
-  const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), 120_000);
+  const { abort, timer } = beginCeremony();
 
   let credential: PublicKeyCredential | null;
   try {
@@ -247,7 +292,7 @@ export async function startPasskeyRegistration(
       signal: abort.signal,
     })) as PublicKeyCredential | null;
   } catch (err) {
-    clearTimeout(timer);
+    endCeremony(abort, timer);
     if (
       err instanceof DOMException &&
       (err.name === "AbortError" || err.name === "NotAllowedError")
@@ -262,7 +307,7 @@ export async function startPasskeyRegistration(
     }
     throw err;
   }
-  clearTimeout(timer);
+  endCeremony(abort, timer);
 
   if (!credential) throw new Error("REGISTRATION_CANCELLED");
 
@@ -348,8 +393,7 @@ export async function startPasskeyAuthentication(
     (publicKeyOptions as any).extensions = extensions;
   }
 
-  const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), 120_000);
+  const { abort, timer } = beginCeremony();
 
   let credential: PublicKeyCredential | null;
   try {
@@ -358,7 +402,7 @@ export async function startPasskeyAuthentication(
       signal: abort.signal,
     })) as PublicKeyCredential | null;
   } catch (err) {
-    clearTimeout(timer);
+    endCeremony(abort, timer);
     if (
       err instanceof DOMException &&
       (err.name === "AbortError" || err.name === "NotAllowedError")
@@ -370,7 +414,7 @@ export async function startPasskeyAuthentication(
     }
     throw err;
   }
-  clearTimeout(timer);
+  endCeremony(abort, timer);
 
   if (!credential) throw new Error("AUTHENTICATION_CANCELLED");
 

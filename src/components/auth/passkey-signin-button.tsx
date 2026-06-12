@@ -5,7 +5,11 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
 import { Loader2, Fingerprint } from "lucide-react";
-import { isWebAuthnSupported, startPasskeyAuthentication } from "@/lib/auth/webauthn/webauthn-client";
+import {
+  isWebAuthnSupported,
+  startPasskeyAuthentication,
+  abortInFlightCeremony,
+} from "@/lib/auth/webauthn/webauthn-client";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { useCallbackUrl } from "@/hooks/use-callback-url";
@@ -22,6 +26,9 @@ export function PasskeySignInButton() {
 
   useEffect(() => {
     setSupported(isWebAuthnSupported());
+    // Release any ceremony left pending if the user navigates away mid-prompt,
+    // so it can't silently block the next passkey attempt.
+    return abortInFlightCeremony;
   }, []);
 
   const handlePasskeySignIn = async () => {
