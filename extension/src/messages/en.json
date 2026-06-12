@@ -3,6 +3,8 @@
     "title": "passwd-sso",
     "settings": "Settings",
     "loading": "Loading...",
+    "statusError": "Couldn't reach the extension. Please try again.",
+    "retry": "Retry",
     "signIn": "Allow the connection in passwd-sso to use the extension.",
     "openApp": "Connect",
     "unlockDescription": "Enter your passphrase to unlock the vault.",
