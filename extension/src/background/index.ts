@@ -100,6 +100,16 @@ let tenantAutoLockMinutes: number | null = null;
 // persisted through SW restart via session-storage.
 let personalKeyVersion: number | null = null;
 
+// Set true once any mutator (applyToken / clearToken→clearVault / clearVault /
+// vault unlock) establishes authoritative token/vault state. A slow
+// hydrateFromSession() that is still in flight when a message proceeds past
+// awaitHydrationBounded() must NOT clobber (resurrect) what the user/flow just
+// changed — e.g. re-deriving encryptionKey after an explicit LOCK_VAULT, or
+// restoring a token after CLEAR_TOKEN. hydrateFromSession() checks this at each
+// resume-after-await point and bails. Only meaningful during the single
+// startup hydration; never reset (hydration runs once per SW lifetime).
+let hydrationSuperseded = false;
+
 // ── Team key state ──────────────────────────────────────────────
 let ecdhPrivateKeyBytes: Uint8Array | null = null;
 /** Encrypted ECDH data for session persistence (re-unwrap on SW restart) */
@@ -285,6 +295,7 @@ export function applyToken(
   expiresAt: number,
   cnfJkt: string,
 ): void {
+  hydrationSuperseded = true;
   const tokenChanged = currentToken !== null && currentToken !== token;
   if (tokenChanged) {
     // A new token may represent a different auth session/user.
@@ -310,6 +321,7 @@ export function applyToken(
 }
 
 function clearVault(): void {
+  hydrationSuperseded = true;
   encryptionKey = null;
   currentUserId = null;
   currentVaultSecretKeyHex = null;
@@ -431,6 +443,11 @@ async function hydrateFromSession(): Promise<void> {
     return;
   }
 
+  // A mutator may have run during the bounded message wait (awaitHydrationBounded)
+  // while this slow hydration was still awaiting storage. It owns the authoritative
+  // state now — bail rather than overwrite it. Re-checked after each later await.
+  if (hydrationSuperseded) return;
+
   currentToken = state.token;
   tokenExpiresAt = state.expiresAt;
   currentUserId = state.userId ?? null;
@@ -445,6 +462,7 @@ async function hydrateFromSession(): Promise<void> {
   // Mismatch → the key was reset mid-session; clear state so the user reconnects.
   try {
     const idbJkt = await getDpopThumbprint();
+    if (hydrationSuperseded) return;
     if (state.tokenCnfJkt !== idbJkt) {
       await clearSession();
       return;
@@ -459,8 +477,12 @@ async function hydrateFromSession(): Promise<void> {
   if (currentVaultSecretKeyHex) {
     try {
       const secretKey = hexDecode(currentVaultSecretKeyHex);
-      encryptionKey = await deriveEncryptionKey(secretKey);
+      const derived = await deriveEncryptionKey(secretKey);
       secretKey.fill(0);
+      // An explicit LOCK_VAULT / CLEAR_TOKEN ran while we derived — do NOT
+      // resurrect the vault key the user just cleared.
+      if (hydrationSuperseded) return;
+      encryptionKey = derived;
     } catch {
       encryptionKey = null;
       currentVaultSecretKeyHex = null;
@@ -473,10 +495,12 @@ async function hydrateFromSession(): Promise<void> {
         const secretKeyForEcdh = hexDecode(currentVaultSecretKeyHex!);
         const ecdhWrappingKey = await deriveEcdhWrappingKey(secretKeyForEcdh);
         secretKeyForEcdh.fill(0);
-        ecdhPrivateKeyBytes = await unwrapEcdhPrivateKey(
+        const unwrapped = await unwrapEcdhPrivateKey(
           state.ecdhEncrypted,
           ecdhWrappingKey,
         );
+        if (hydrationSuperseded) return;
+        ecdhPrivateKeyBytes = unwrapped;
         ecdhEncryptedData = state.ecdhEncrypted;
       } catch {
         ecdhPrivateKeyBytes = null;
@@ -1942,6 +1966,9 @@ async function handleMessage(
           }
         }
 
+        // Authoritative unlock state — a slow startup hydration must not
+        // overwrite it (or relock by racing in its own null write).
+        hydrationSuperseded = true;
         encryptionKey = encKey;
         currentUserId = data.userId || null;
         personalKeyVersion = typeof data.keyVersion === "number" ? data.keyVersion : 1;
