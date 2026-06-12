@@ -60,6 +60,24 @@ public struct EncryptedEntry: Sendable, Codable, Equatable {
     case folderId
     case requireReprompt
   }
+
+  /// Convert a personal entry to a CacheEntry for the App Group cache. Single
+  /// source of truth for the mapping (used by HostSyncService and tests) so the
+  /// entryType propagation can't silently diverge.
+  public func toPersonalCacheEntry() -> CacheEntry {
+    CacheEntry(
+      id: id,
+      teamId: nil,
+      aadVersion: aadVersion,
+      keyVersion: keyVersion,
+      teamKeyVersion: nil,
+      itemKeyVersion: nil,
+      encryptedItemKey: nil,
+      encryptedBlob: encryptedBlob,
+      encryptedOverview: encryptedOverview,
+      entryType: entryType
+    )
+  }
 }
 
 // MARK: - Team wire model (matches /api/teams/[teamId]/passwords flat response shape)

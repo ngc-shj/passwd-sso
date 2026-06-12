@@ -37,6 +37,58 @@ public func decryptPersonalOverviews(
   return result
 }
 
+/// Build QuickType passkey identity specs from PERSONAL passkey entries. Mirrors
+/// `decryptPersonalOverviews`' signature/timing so the two call sites can invoke
+/// both from the same place (post-sync, vaultKey in scope). For each personal
+/// passkey (overview `relyingPartyId != nil`), additionally decrypt the FULL blob
+/// to recover the userHandle (which lives only in the full blob). Entries whose
+/// credentialId fails to decode OR whose userHandle is empty are skipped —
+/// `ASPasskeyCredentialIdentity` requires a non-empty userHandle.
+public func buildPasskeyIdentitySpecs(
+  from cacheData: CacheData,
+  vaultKey: SymmetricKey,
+  userId: String
+) -> [PasskeyIdentitySpec] {
+  guard let entries = try? JSONDecoder().decode([CacheEntry].self, from: cacheData.entries) else {
+    return []
+  }
+  var result: [PasskeyIdentitySpec] = []
+  for entry in entries where entry.teamId == nil {
+    let overviewAAD: Data? = entry.aadVersion >= 1
+      ? (try? buildPersonalEntryAAD(userId: userId, entryId: entry.id, vaultType: VaultType.overview))
+      : nil
+    guard
+      let overviewPlain = try? decryptAESGCMEncoded(
+        encrypted: entry.encryptedOverview, key: vaultKey, aad: overviewAAD
+      ),
+      let summary = EntryBlobDecoder.summary(plaintext: overviewPlain, entryId: entry.id, teamId: nil),
+      let rpId = summary.relyingPartyId,
+      let credentialIdStr = summary.credentialId
+    else { continue }
+    let blobAAD: Data? = entry.aadVersion >= 1
+      ? (try? buildPersonalEntryAAD(userId: userId, entryId: entry.id, vaultType: VaultType.blob))
+      : nil
+    guard
+      let blobPlain = try? decryptAESGCMEncoded(
+        encrypted: entry.encryptedBlob, key: vaultKey, aad: blobAAD
+      ),
+      let material = EntryBlobDecoder.passkeyMaterial(plaintext: blobPlain, entryId: entry.id),
+      let credentialID = try? base64URLDecode(credentialIdStr), !credentialID.isEmpty,
+      let userHandle = try? base64URLDecode(material.userHandle), !userHandle.isEmpty
+    else { continue }
+    result.append(
+      PasskeyIdentitySpec(
+        relyingPartyIdentifier: rpId,
+        userName: summary.username,
+        credentialID: credentialID,
+        userHandle: userHandle,
+        recordIdentifier: entry.id
+      )
+    )
+  }
+  return result
+}
+
 // MARK: - Sendable identity spec
 
 /// Sendable description of one QuickType credential identity: the site host,
@@ -56,19 +108,57 @@ public struct CredentialIdentitySpec: Sendable, Equatable {
   }
 }
 
+/// Sendable description of one QuickType PASSKEY identity. Carries the raw
+/// (base64url-decoded) credentialID + userHandle bytes the OS needs to render
+/// the passkey in the system passkey sheet. No private key here — the actual
+/// assertion (after the user picks) goes through the extension's biometric-gated
+/// decrypt by recordIdentifier.
+public struct PasskeyIdentitySpec: Sendable, Equatable {
+  public let relyingPartyIdentifier: String
+  public let userName: String
+  public let credentialID: Data
+  public let userHandle: Data
+  public let recordIdentifier: String
+
+  public init(
+    relyingPartyIdentifier: String,
+    userName: String,
+    credentialID: Data,
+    userHandle: Data,
+    recordIdentifier: String
+  ) {
+    self.relyingPartyIdentifier = relyingPartyIdentifier
+    self.userName = userName
+    self.credentialID = credentialID
+    self.userHandle = userHandle
+    self.recordIdentifier = recordIdentifier
+  }
+}
+
 // MARK: - Store seam (DI for tests)
 
 /// Thin seam over `ASCredentialIdentityStore` so the registration/clear wiring
 /// is unit-testable with a fake (matching the BridgeKeyStore/Clock DI pattern).
 public protocol CredentialIdentityStoring: Sendable {
   func isEnabled() async -> Bool
-  func replace(with specs: [CredentialIdentitySpec]) async
+  /// Atomically replace the WHOLE identity set (passwords + passkeys) in one
+  /// call, so a password-only refresh with `passkeys: []` also clears stale
+  /// passkey identities (lifecycle parity).
+  func replace(passwords: [CredentialIdentitySpec], passkeys: [PasskeyIdentitySpec]) async
   func removeAll() async
 }
 
+extension CredentialIdentityStoring {
+  /// Back-compat password-only wrapper for callers/tests that don't deal in passkeys.
+  public func replace(with passwords: [CredentialIdentitySpec]) async {
+    await replace(passwords: passwords, passkeys: [])
+  }
+}
+
 /// Production store: forwards to `ASCredentialIdentityStore.shared`. Builds the
-/// `ASPasswordCredentialIdentity` objects from the Sendable specs internally so
-/// no non-Sendable AuthenticationServices type crosses an actor boundary.
+/// `ASPasswordCredentialIdentity` / `ASPasskeyCredentialIdentity` objects from
+/// the Sendable specs internally so no non-Sendable AuthenticationServices type
+/// crosses an actor boundary.
 public struct SystemCredentialIdentityStore: CredentialIdentityStoring {
   public init() {}
 
@@ -80,14 +170,30 @@ public struct SystemCredentialIdentityStore: CredentialIdentityStoring {
     }
   }
 
-  public func replace(with specs: [CredentialIdentitySpec]) async {
-    let identities = specs.map { spec in
+  public func replace(
+    passwords: [CredentialIdentitySpec],
+    passkeys: [PasskeyIdentitySpec]
+  ) async {
+    var identities: [any ASCredentialIdentity] = passwords.map { spec in
       ASPasswordCredentialIdentity(
         serviceIdentifier: ASCredentialServiceIdentifier(identifier: spec.host, type: .domain),
         user: spec.user,
         recordIdentifier: spec.recordIdentifier
       )
     }
+    for spec in passkeys {
+      identities.append(
+        ASPasskeyCredentialIdentity(
+          relyingPartyIdentifier: spec.relyingPartyIdentifier,
+          userName: spec.userName,
+          credentialID: spec.credentialID,
+          userHandle: spec.userHandle,
+          recordIdentifier: spec.recordIdentifier
+        )
+      )
+    }
+    // iOS 17+ heterogeneous-array API (ObjC `replaceCredentialIdentityEntries:`,
+    // Swift name `replaceCredentialIdentities(_:)`) — one atomic replace of both kinds.
     try? await ASCredentialIdentityStore.shared.replaceCredentialIdentities(identities)
   }
 
@@ -136,11 +242,15 @@ public struct CredentialIdentityRegistrar: Sendable {
     return result
   }
 
-  /// Replace the registered identity set with the given summaries' specs.
+  /// Replace the registered identity set with the given summaries' password specs
+  /// plus the supplied passkey specs (one atomic replace covering both kinds).
   /// No-op when the AutoFill provider is disabled in Settings.
-  public func replace(with summaries: [VaultEntrySummary]) async {
+  public func replace(
+    with summaries: [VaultEntrySummary],
+    passkeys: [PasskeyIdentitySpec] = []
+  ) async {
     guard await store.isEnabled() else { return }
-    await store.replace(with: Self.specs(from: summaries))
+    await store.replace(passwords: Self.specs(from: summaries), passkeys: passkeys)
   }
 
   /// Remove all registered identities (always runs; removeAll is a no-op when

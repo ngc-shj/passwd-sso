@@ -22,6 +22,12 @@ public struct VaultEntrySummary: Codable, Sendable, Equatable, Identifiable {
   /// travel-unsafe entry back to travel-safe on the next web load.
   public let requireReprompt: Bool
   public let travelSafe: Bool?
+  /// Passkey overview fields (PASSKEY entries only; nil otherwise). A summary is
+  /// a passkey iff `relyingPartyId != nil`. credentialId/relyingPartyId come from
+  /// the overview blob; the user handle lives only in the full blob (see
+  /// buildPasskeyIdentitySpecs).
+  public let relyingPartyId: String?
+  public let credentialId: String?
 
   public init(
     id: String,
@@ -34,7 +40,9 @@ public struct VaultEntrySummary: Codable, Sendable, Equatable, Identifiable {
     lastAccessedAt: Date? = nil,
     hasTOTP: Bool = false,
     requireReprompt: Bool = false,
-    travelSafe: Bool? = nil
+    travelSafe: Bool? = nil,
+    relyingPartyId: String? = nil,
+    credentialId: String? = nil
   ) {
     self.id = id
     self.title = title
@@ -47,5 +55,7 @@ public struct VaultEntrySummary: Codable, Sendable, Equatable, Identifiable {
     self.hasTOTP = hasTOTP
     self.requireReprompt = requireReprompt
     self.travelSafe = travelSafe
+    self.relyingPartyId = relyingPartyId
+    self.credentialId = credentialId
   }
 }

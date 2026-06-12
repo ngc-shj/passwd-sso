@@ -14,6 +14,10 @@ struct CredentialPickerView: View {
   let serviceIdentifiers: [ASCredentialServiceIdentifier]
   let onSelect: (VaultEntrySummary) -> Void
   let onCancel: () -> Void
+  /// Empty-state headline. Defaults to the password copy; the passkey list
+  /// passes a passkey-specific string so a no-match passkey ceremony isn't
+  /// mislabelled as "No passwords".
+  var emptyStateText: LocalizedStringKey = "No passwords for this site"
 
   @State private var pendingAppSideSelection: VaultEntrySummary?
   @State private var searchText: String = ""
@@ -81,7 +85,7 @@ struct CredentialPickerView: View {
         Text("No matches")
           .font(.headline)
       } else {
-        Text("No passwords for this site")
+        Text(emptyStateText)
           .font(.headline)
         Text("Search to browse all entries.")
           .font(.subheadline)

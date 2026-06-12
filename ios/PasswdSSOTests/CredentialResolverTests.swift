@@ -108,6 +108,49 @@ private struct TestTotpBlob: Encodable {
   let secret: String
 }
 
+private struct PasskeyTestOverviewBlob: Encodable {
+  let title: String
+  let username: String?
+  let relyingPartyId: String
+  let credentialId: String
+}
+
+private struct PasskeyTestFullBlob: Encodable {
+  let title: String
+  let username: String?
+  let relyingPartyId: String
+  let credentialId: String
+  let passkeyPrivateKeyJwk: String
+  let passkeyUserHandle: String
+}
+
+/// Build a personal PASSKEY CacheEntry (overview + full blob) with AAD binding.
+private func makePasskeyCacheEntry(
+  id: String, rpId: String, credentialID: Data, userHandle: Data,
+  key: SymmetricKey, userId: String
+) throws -> CacheEntry {
+  let credIdB64 = base64URLEncode(credentialID)
+  let userHandleB64 = base64URLEncode(userHandle)
+  let overviewData = try JSONEncoder().encode(
+    PasskeyTestOverviewBlob(title: "T", username: "alice", relyingPartyId: rpId, credentialId: credIdB64)
+  )
+  let fullData = try JSONEncoder().encode(
+    PasskeyTestFullBlob(
+      title: "T", username: "alice", relyingPartyId: rpId, credentialId: credIdB64,
+      passkeyPrivateKeyJwk: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"d\":\"abc\"}",
+      passkeyUserHandle: userHandleB64
+    )
+  )
+  let overviewAAD = try buildPersonalEntryAAD(userId: userId, entryId: id, vaultType: VaultType.overview)
+  let blobAAD = try buildPersonalEntryAAD(userId: userId, entryId: id, vaultType: VaultType.blob)
+  return CacheEntry(
+    id: id, teamId: nil, aadVersion: 1, keyVersion: 1,
+    encryptedBlob: try encryptAESGCMEncoded(plaintext: fullData, key: key, aad: blobAAD),
+    encryptedOverview: try encryptAESGCMEncoded(plaintext: overviewData, key: key, aad: overviewAAD),
+    entryType: "PASSKEY"
+  )
+}
+
 // MARK: - Test helpers
 
 private func makeBridgeKeyBlob(
@@ -618,6 +661,112 @@ final class CredentialResolverTests: XCTestCase {
       counting.copyMatchingCallCount,
       2,
       "resolveCandidates must use exactly TWO Keychain reads (one biometric prompt + one no-ACL meta)"
+    )
+  }
+
+  // MARK: - decryptPasskeyMaterial (C6)
+
+  /// Build a resolver over a cache containing the given entries, with the bridge
+  /// blob + wrapped vault key wired up. Returns the resolver and the counting
+  /// keychain so the caller can assert read counts.
+  private func makePasskeyResolver(
+    entries: [CacheEntry], vaultKey: SymmetricKey, userId: String
+  ) throws -> (CredentialResolver, CountingKeychainAccessor) {
+    let counting = CountingKeychainAccessor()
+    let bridgeKeyStore = BridgeKeyStore(
+      accessGroup: "test.jp.jpng.passwd-sso.shared", keychain: counting
+    )
+    let blob = try bridgeKeyStore.create()
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let mockWKS = MockWrappedKeyStore()
+    try wrapAndSaveVaultKey(vaultKey: vaultKey, cacheKey: cacheKey, store: mockWKS)
+    try buildCacheFile(
+      at: cacheURL, entries: entries, vaultKey: vaultKey,
+      hostInstallUUID: blob.hostInstallUUID, counter: blob.cacheVersionCounter, userId: userId
+    )
+    counting.copyMatchingCallCount = 0  // reset after create
+    let resolver = CredentialResolver(
+      bridgeKeyStore: bridgeKeyStore, wrappedKeyStore: mockWKS, cacheURL: cacheURL
+    )
+    return (resolver, counting)
+  }
+
+  func testDecryptPasskeyMaterial_returnsMaterial() async throws {
+    let vaultKey = SymmetricKey(size: .bits256)
+    let userId = "test-user-id"
+    let credentialID = Data([1, 2, 3, 4])
+    let userHandle = Data([9, 8, 7, 6])
+    let entry = try makePasskeyCacheEntry(
+      id: "pk1", rpId: "github.com", credentialID: credentialID, userHandle: userHandle,
+      key: vaultKey, userId: userId
+    )
+    let (resolver, _) = try makePasskeyResolver(entries: [entry], vaultKey: vaultKey, userId: userId)
+
+    // No prior resolveCandidates — exercises the standalone readForFill path.
+    let material = try await resolver.decryptPasskeyMaterial(entryId: "pk1")
+
+    XCTAssertEqual(material.relyingPartyId, "github.com")
+    XCTAssertEqual(material.credentialId, base64URLEncode(credentialID))
+    XCTAssertEqual(material.userHandle, base64URLEncode(userHandle))
+  }
+
+  func testDecryptPasskeyMaterial_loginEntry_throwsEntryNotFound() async throws {
+    let vaultKey = SymmetricKey(size: .bits256)
+    let userId = "test-user-id"
+    let login = try makePersonalCacheEntry(
+      summary: VaultEntrySummary(id: "p0", title: "T", username: "u", urlHost: "a.com"),
+      detail: VaultEntryDetail(id: "p0", title: "T", username: "u", urlHost: "", password: "pw", url: "a.com"),
+      key: vaultKey, userId: userId, aadVersion: 1
+    )
+    let (resolver, _) = try makePasskeyResolver(entries: [login], vaultKey: vaultKey, userId: userId)
+
+    do {
+      _ = try await resolver.decryptPasskeyMaterial(entryId: "p0")
+      XCTFail("Expected entryNotFound for a non-passkey entry")
+    } catch CredentialResolver.Error.entryNotFound {
+      // expected
+    }
+  }
+
+  func testDecryptPasskeyMaterial_teamEntry_throwsEntryNotFound() async throws {
+    // Team passkeys are out of scope (I5): the teamId guard fires before any
+    // team-key decryption, so a team entry id is rejected as entryNotFound.
+    let vaultKey = SymmetricKey(size: .bits256)
+    let userId = "test-user-id"
+    let dummy = try encryptAESGCMEncoded(plaintext: Data("{}".utf8), key: vaultKey, aad: nil)
+    let team = CacheEntry(
+      id: "t0", teamId: "team-1", aadVersion: 0,
+      encryptedBlob: dummy, encryptedOverview: dummy
+    )
+    let (resolver, _) = try makePasskeyResolver(entries: [team], vaultKey: vaultKey, userId: userId)
+
+    do {
+      _ = try await resolver.decryptPasskeyMaterial(entryId: "t0")
+      XCTFail("Expected entryNotFound for a team entry")
+    } catch CredentialResolver.Error.entryNotFound {
+      // expected
+    }
+  }
+
+  func testDecryptPasskeyMaterial_singleBiometricRead() async throws {
+    // resolveCandidates retains the bridge blob; decryptPasskeyMaterial reuses it,
+    // so the two-call (one biometric + one meta) invariant holds across both.
+    let vaultKey = SymmetricKey(size: .bits256)
+    let userId = "test-user-id"
+    let entry = try makePasskeyCacheEntry(
+      id: "pk1", rpId: "github.com", credentialID: Data([1, 2, 3, 4]),
+      userHandle: Data([9, 8, 7, 6]), key: vaultKey, userId: userId
+    )
+    let (resolver, counting) = try makePasskeyResolver(
+      entries: [entry], vaultKey: vaultKey, userId: userId
+    )
+
+    _ = try await resolver.resolveCandidates(for: [])
+    _ = try await resolver.decryptPasskeyMaterial(entryId: "pk1")
+
+    XCTAssertEqual(
+      counting.copyMatchingCallCount, 2,
+      "resolveCandidates + decryptPasskeyMaterial must share one biometric read (2 keychain reads total)"
     )
   }
 
