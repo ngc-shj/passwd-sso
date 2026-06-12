@@ -1,6 +1,6 @@
 # Code Review: ios-codebase-review
 Date: 2026-06-13
-Review round: 2
+Review round: 4 (final — all experts: No findings)
 Scope: entire `ios/` tree (~15K LOC Swift, app + AutoFill extension + Shared + tests), standalone Phase 3 review (no plan/deviation log). Branch `fix/ios-passkey-autofill` (2 commits beyond main) given extra scrutiny.
 Ollama pre-screening/seeds: unavailable (Ollama down) — all experts performed full review; manual dedup by orchestrator.
 
@@ -279,6 +279,20 @@ New findings:
 - Security expert: escalate: false (equal to pre-existing pattern).
 
 ### A1/A2 (informational): 600k fixture cost documented in VaultUnlockerTests comment; epochSeconds pre-1970 clamp untested (unreachable in practice — no action).
+
+## Round 3 (incremental review of commit be17a22c)
+
+Functionality and Security experts: No findings (full verification of the F8 rethrow, the registrar DI default, and the new tests — kind preserved verbatim, no integrity-check weakening, context carries counters/timestamps only, no PII in fixtures).
+
+### T10 [Major]: F8 rethrow path untested — Fixed
+- The existing tamper test flips a midpoint byte that lands in the HEADER blob, so the entries-blob rejection path (valid header → entries auth-tag failure → context rethrow) had zero coverage.
+- Action: added `testEntriesBlobCorruption_carriesHeaderContext` (EntryCacheFileTests) — corrupts the file's last byte (always inside the entries auth tag), asserts `kind == .authtagInvalid` AND `context.observedCounter == counter` + non-nil dates. Fails without the F8 fix (helpers throw `.unavailable`). Committed as 7ad2067e.
+
+## Round 4 (final confirmation of commit 7ad2067e)
+
+Diff is test-only (verified via diff stat — no production code). Testing expert confirmed all four properties of the new test (deterministic entries-auth-tag corruption, genuine F8-path exercise, assertions fail without the fix, no flakiness): **No findings.** Functionality/Security scope untouched by a test-only diff; their Round-3 "No findings" verdicts stand.
+
+**Loop terminated: all experts report No findings.**
 
 ## Round 1 verification
 - xcodebuild build-for-testing: TEST BUILD SUCCEEDED
