@@ -271,6 +271,31 @@ describe("background message flow", () => {
     );
   });
 
+  it("GET_STATUS responds even when session hydration hangs (bounded wait — popup never strands)", async () => {
+    // Reload the SW with a hydrate that never settles (e.g. a wedged IndexedDB
+    // read). Without the bounded wait, handleMessage would await forever and
+    // GET_STATUS never returns — the popup spins on its loading state.
+    vi.resetModules();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockReturnValue(new Promise(() => {}));
+    vi.useFakeTimers();
+    try {
+      await loadBackground();
+
+      const respPromise = sendMessage({ type: "GET_STATUS" });
+      // Drive past HYDRATION_TIMEOUT_MS so the bounded wait releases.
+      await vi.advanceTimersByTimeAsync(5_000);
+      const status = await respPromise;
+
+      expect(status).toEqual(
+        expect.objectContaining({ type: "GET_STATUS", hasToken: false, vaultUnlocked: false }),
+      );
+    } finally {
+      vi.useRealTimers();
+      sessionStorageMocks.loadSession.mockResolvedValue(null);
+    }
+  });
+
   it("sends stop-keepalive on LOCK_VAULT", async () => {
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });

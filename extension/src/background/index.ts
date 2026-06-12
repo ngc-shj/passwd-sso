@@ -584,6 +584,24 @@ void configureSessionStorageAccess();
 // Hydrate on SW startup
 const hydrationPromise = hydrateFromSession().catch(() => {});
 
+// Upper bound a message handler's wait for hydration. hydrateFromSession()
+// reads IndexedDB + runs crypto; if any of that wedges, an unbounded
+// `await hydrationPromise` in handleMessage blocks GET_STATUS forever and the
+// popup spins on its loading state with no Lock/Sign-out buttons. Cap the wait
+// so handlers proceed (in a not-yet-hydrated state) rather than hang — the
+// popup retries and a later message re-checks once hydration settles. The
+// alarm path keeps the unbounded await (a delayed token refresh is harmless,
+// and proceeding early there could wrongly clear a token mid-hydration).
+const HYDRATION_TIMEOUT_MS = 5_000; // 5 seconds
+
+function awaitHydrationBounded(): Promise<void> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, HYDRATION_TIMEOUT_MS);
+  });
+  return Promise.race([hydrationPromise, timeout]).finally(() => clearTimeout(timer));
+}
+
 // Initialize setting caches on SW startup
 getSettings().then((s) => {
   const v = validateSettings(s);
@@ -1786,8 +1804,9 @@ async function handleMessage(
 ): Promise<void> {
   // Wait for session hydration to complete before processing any message.
   // This prevents race conditions where the SW restarts and messages arrive
-  // before in-memory state (token, encryptionKey) is restored.
-  await hydrationPromise;
+  // before in-memory state (token, encryptionKey) is restored. Bounded so a
+  // wedged hydrate can't hang GET_STATUS and strand the popup spinner.
+  await awaitHydrationBounded();
 
   switch (message.type) {
     case EXT_MSG.START_CONNECT: {
