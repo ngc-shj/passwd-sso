@@ -136,6 +136,7 @@ struct ServerURLSetupView: View {
           .foregroundStyle(.secondary)
 
         TextField("https://my.passwd-sso.example", text: $viewModel.urlText)
+          .accessibilityIdentifier("server-setup-url-field")
           .keyboardType(.URL)
           .textInputAutocapitalization(.never)
           .autocorrectionDisabled()
@@ -166,6 +167,7 @@ struct ServerURLSetupView: View {
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
+        .accessibilityIdentifier("server-setup-primary-button")
         .disabled(viewModel.urlText.isEmpty || {
           if case .probing = viewModel.state { return true }
           return false
