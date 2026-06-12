@@ -43,7 +43,17 @@ public actor HostSyncService {
     async let teamMemberships = apiClient.fetchTeamMemberships()
 
     let personal = try await personalEntries
-    let teams = (try? await teamMemberships) ?? []
+    // A transient team-membership failure is tolerable (proceed with no teams),
+    // but a dead refresh token (authenticationRequired) MUST surface so the caller
+    // routes to re-sign-in (C4) rather than silently syncing personal-only.
+    let teams: [TeamMembership]
+    do {
+      teams = try await teamMemberships
+    } catch MobileAPIError.authenticationRequired {
+      throw MobileAPIError.authenticationRequired
+    } catch {
+      teams = []
+    }
 
     // Convert personal entries to CacheEntry (with aadVersion/keyVersion propagated)
     var allCacheEntries: [CacheEntry] = personal.map { entry in
@@ -112,47 +122,11 @@ public actor HostSyncService {
 // MARK: - MobileAPIClient extension for team memberships
 
 extension MobileAPIClient {
+  /// Fetch team memberships from GET /api/teams.
+  /// Uses performAuthedGET for the full C3 retry ladder (nonce→refresh, fixes F3).
   func fetchTeamMemberships() async throws -> [TeamMembership] {
-    guard let (accessToken, _) = try tokenStore.loadAccess() else {
-      throw MobileAPIError.serverError(status: 401)
-    }
-
-    let endpoint = serverURL.appending(
-      path: "/api/teams",
-      directoryHint: .notDirectory
-    )
-    let htu = canonicalHTU(url: endpoint)
-    let ath = sha256Base64URL(accessToken)
-
-    let localJWK = jwk
-    let localSigner = signer
-    let nonce = try? tokenStore.loadNonce()
-    let proof = try await buildDPoPProof(
-      htm: "GET",
-      htu: htu,
-      jwk: localJWK,
-      ath: ath,
-      nonce: nonce,
-      signer: localSigner
-    )
-
-    var request = URLRequest(url: endpoint)
-    request.httpMethod = "GET"
-    // Access token uses the Bearer scheme; the DPoP proof is the separate
-    // `DPoP` header. The server extracts the token via `^Bearer` (authOrToken /
-    // validateExtensionToken) and validates the proof (ath + cnf.jkt). Only the
-    // refresh-token call uses the `DPoP` Authorization scheme.
-    request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-    request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
-
-    let (data, response) = try await performHTTP(request)
-    let http = response as! HTTPURLResponse
-
-    guard http.statusCode == 200 else {
-      throw MobileAPIError.serverError(status: http.statusCode)
-    }
-
+    let endpoint = serverURL.appending(path: "/api/teams", directoryHint: .notDirectory)
+    let data = try await performAuthedGET(url: endpoint)
     return try JSONDecoder().decode([TeamMembership].self, from: data)
   }
-
 }
