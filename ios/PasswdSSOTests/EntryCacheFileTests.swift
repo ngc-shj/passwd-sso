@@ -101,6 +101,43 @@ final class EntryCacheFileTests: XCTestCase {
 
   // MARK: - Rejection tests
 
+  /// Corrupt ONLY the entries blob (the file's last byte is inside its auth
+  /// tag) so the header decrypts cleanly first — the rejection must then carry
+  /// the decrypted header's values in the context, not `.unavailable`.
+  func testEntriesBlobCorruption_carriesHeaderContext() throws {
+    let url = tmpURL()
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let header = makeHeader(entryCount: 1)
+    let data = CacheData(header: header, entries: makeEntriesJSON(count: 1))
+    try writeCacheFile(data: data, vaultKey: vaultKey, hostInstallUUID: hostInstallUUID, path: url)
+
+    var fileBytes = try Data(contentsOf: url)
+    fileBytes[fileBytes.count - 1] ^= 0xFF
+    try fileBytes.write(to: url)
+
+    XCTAssertThrowsError(
+      try readCacheFile(
+        path: url,
+        vaultKey: vaultKey,
+        expectedHostInstallUUID: hostInstallUUID,
+        expectedCounter: counter
+      )
+    ) { error in
+      guard case EntryCacheError.rejection(let kind, let context) = error else {
+        XCTFail("Expected rejection, got \(error)")
+        return
+      }
+      XCTAssertEqual(kind, .authtagInvalid)
+      XCTAssertEqual(
+        context.observedCounter, counter,
+        "entries-blob rejection must carry the decrypted header's counter"
+      )
+      XCTAssertNotNil(context.headerIssuedAt)
+      XCTAssertNotNil(context.lastSuccessfulRefreshAt)
+    }
+  }
+
   func testRejectsTamperedAuthTag() throws {
     let url = tmpURL()
     defer { try? FileManager.default.removeItem(at: url) }
