@@ -30,7 +30,9 @@ struct VaultListView: View {
     NavigationStack {
       Group {
         if isScreenRecording {
-          screenRecordingOverlay
+          ScreenRecordingOverlay()
+        } else if viewModel.searchQuery.isEmpty {
+          categoryGrid
         } else {
           entryList
         }
@@ -168,7 +170,84 @@ struct VaultListView: View {
     .background(.bar)
   }
 
-  // MARK: - Entry list
+  // MARK: - Category landing grid
+
+  /// One card per displayed category. Type cards (and Codes/Favorites) appear
+  /// only when non-empty; All is always shown; one card per distinct tag.
+  private struct LandingItem: Identifiable {
+    let id: String
+    let category: VaultCategory
+    let symbol: String
+    let label: String
+    let count: Int
+  }
+
+  private var displayedCategories: [LandingItem] {
+    let counts = categoryCounts(viewModel.allSummaries)
+    var items: [LandingItem] = [
+      LandingItem(id: "all", category: .all, symbol: "tray.full",
+                  label: String(localized: "All"), count: counts[.all] ?? 0),
+    ]
+    for type in EntryTypeCategory.allCases {
+      let count = counts[.type(type)] ?? 0
+      if count > 0 {
+        items.append(LandingItem(id: "type-\(type.rawValue)", category: .type(type),
+                                 symbol: type.sfSymbol, label: type.localizedLabel, count: count))
+      }
+    }
+    if let count = counts[.codes], count > 0 {
+      items.append(LandingItem(id: "codes", category: .codes, symbol: "clock",
+                               label: String(localized: "Codes"), count: count))
+    }
+    if let count = counts[.favorites], count > 0 {
+      items.append(LandingItem(id: "favorites", category: .favorites, symbol: "star",
+                               label: String(localized: "Favorites"), count: count))
+    }
+    for tag in distinctTags(viewModel.allSummaries) {
+      items.append(LandingItem(id: "tag-\(tag)", category: .tag(tag), symbol: "tag",
+                               label: tag, count: counts[.tag(tag)] ?? 0))
+    }
+    return items
+  }
+
+  private var categoryGrid: some View {
+    ScrollView {
+      LazyVGrid(
+        columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
+        spacing: 12
+      ) {
+        ForEach(displayedCategories) { item in
+          NavigationLink {
+            VaultCategoryListView(
+              category: item.category,
+              navigationTitle: item.label,
+              cacheData: cacheData,
+              vaultKey: vaultKey,
+              userId: userId,
+              keyVersion: keyVersion,
+              autoLockService: autoLockService,
+              viewModel: viewModel,
+              apiClient: apiClient,
+              hostSyncService: hostSyncService
+            )
+          } label: {
+            CategoryCard(symbol: item.symbol, label: item.label, count: item.count)
+          }
+          .buttonStyle(.plain)
+        }
+      }
+      .padding()
+    }
+    .overlay {
+      if viewModel.allSummaries.isEmpty {
+        Text("No entries")
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      }
+    }
+  }
+
+  // MARK: - Entry list (search results)
 
   private var entryList: some View {
     List(viewModel.filteredSummaries) { summary in
@@ -185,49 +264,17 @@ struct VaultListView: View {
           hostSyncService: hostSyncService
         )
       } label: {
-        entryRow(summary)
+        EntrySummaryRow(summary: summary)
       }
     }
     .listStyle(.plain)
     .overlay {
       if viewModel.filteredSummaries.isEmpty {
-        emptyState
+        Text("No matches")
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
     }
-  }
-
-  private func entryRow(_ summary: VaultEntrySummary) -> some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text(summary.title)
-        .font(.body)
-        .lineLimit(1)
-      Text(summary.username)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-    }
-    .padding(.vertical, 2)
-  }
-
-  private var emptyState: some View {
-    VStack(spacing: 8) {
-      Text(viewModel.searchQuery.isEmpty ? "No entries" : "No matches")
-        .foregroundStyle(.secondary)
-    }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-  }
-
-  // MARK: - Screen recording overlay
-
-  private var screenRecordingOverlay: some View {
-    VStack(spacing: 16) {
-      Image(systemName: "eye.slash")
-        .font(.largeTitle)
-      Text("Recording — content hidden")
-        .font(.headline)
-    }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(.regularMaterial)
   }
 
   private func updateScreenRecordingState() {

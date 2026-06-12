@@ -75,7 +75,8 @@ public struct EncryptedEntry: Sendable, Codable, Equatable {
       encryptedItemKey: nil,
       encryptedBlob: encryptedBlob,
       encryptedOverview: encryptedOverview,
-      entryType: entryType
+      entryType: entryType,
+      isFavorite: isFavorite
     )
   }
 }
