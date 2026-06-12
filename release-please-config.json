@@ -23,6 +23,10 @@
           "type": "json",
           "path": "extension/package.json",
           "jsonpath": "$.version"
+        },
+        {
+          "type": "generic",
+          "path": "ios/project.yml"
         }
       ]
     }
