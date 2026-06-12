@@ -25,6 +25,10 @@ vault containing at least one LOGIN entry that has a TOTP secret.
    matches the app's displayed code (param fidelity).
 
 ## Adversarial
+- **Corrupted TOTP secret still fills.** With the toggle ON, fill an entry whose `totpSecret` is invalid
+  base32 (or otherwise un-generatable). → the username/password fill STILL completes normally; nothing is
+  copied; no crash. (Verifies the best-effort invariant the VC path can't unit-test against the sealed
+  `ASCredentialProviderExtensionContext`; the `totpToCopy`-returns-nil half is unit-covered.)
 - **Foreground-app clipboard read.** With the toggle ON, after a fill the calling app foregrounds and
   could read `UIPasteboard`. Confirm the exposure is bounded: the value is `.localOnly` (Step 7) and
   expires (Step 5). This is why the default is OFF (opt-in).

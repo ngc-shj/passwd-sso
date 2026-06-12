@@ -120,7 +120,12 @@ struct EntryDetailView: View {
 
       Section("One-Time Code") {
         if let totpSecret = d.totpSecret, !totpSecret.isEmpty {
-          TOTPCodeView(params: TOTPParams(secret: totpSecret))
+          TOTPCodeView(params: TOTPParams(
+            secret: totpSecret,
+            algorithm: d.totpAlgorithm,
+            digits: d.totpDigits,
+            period: d.totpPeriod
+          ))
         } else {
           notSetText
         }

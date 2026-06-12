@@ -46,4 +46,22 @@ final class AutoCopyTOTPTests: XCTestCase {
     )
     XCTAssertEqual(code, "94287082")
   }
+
+  /// Algorithm strings are normalized case-insensitively (relies on `.uppercased()`).
+  func testLowercaseAlgorithmStillMapsToSHA1() {
+    let code = totpToCopy(
+      detail: detail(totpSecret: rfcSecret, algorithm: "sha1", digits: 8, period: 30),
+      autoCopy: true, now: t59
+    )
+    XCTAssertEqual(code, "94287082")
+  }
+
+  /// Unknown/garbage algorithm falls back to SHA1 (mirrors the wire default).
+  func testUnknownAlgorithmFallsBackToSHA1() {
+    let code = totpToCopy(
+      detail: detail(totpSecret: rfcSecret, algorithm: "BOGUS", digits: 8, period: 30),
+      autoCopy: true, now: t59
+    )
+    XCTAssertEqual(code, "94287082")
+  }
 }

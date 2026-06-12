@@ -113,6 +113,22 @@ final class EntryBlobDecoderTests: XCTestCase {
     XCTAssertEqual(detail.notes, "hi")
     XCTAssertEqual(detail.tags, ["work"])
     XCTAssertEqual(detail.totpSecret, "JBSWY3DPEHPK3PXP")
+    XCTAssertEqual(detail.totpDigits, 6)
+    XCTAssertEqual(detail.totpPeriod, 30)
+    XCTAssertNil(detail.totpAlgorithm)  // absent in JSON
+  }
+
+  func testDetailDecodesTOTPAlgorithmDigitsPeriod() throws {
+    let json = #"""
+    {"title":"Login","username":"a","password":"p",
+     "totp":{"secret":"JBSWY3DPEHPK3PXP","algorithm":"SHA256","digits":8,"period":60}}
+    """#
+    let detail = try XCTUnwrap(
+      EntryBlobDecoder.detail(plaintext: data(json), entryId: "e6b", teamId: nil)
+    )
+    XCTAssertEqual(detail.totpAlgorithm, "SHA256")
+    XCTAssertEqual(detail.totpDigits, 8)
+    XCTAssertEqual(detail.totpPeriod, 60)
   }
 
   func testDetailDecodesNonLoginBlobWithAbsentPassword() throws {

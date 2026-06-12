@@ -15,36 +15,37 @@ private final class MockPasteboardWriter: PasteboardWriter {
 }
 
 final class SecureClipboardTests: XCTestCase {
-  func testCopySetsValueLocalOnlyAndFutureExpiration() {
+  func testCopySetsValueLocalOnlyAndFutureExpiration() throws {
     let writer = MockPasteboardWriter()
     let before = Date()
     SecureClipboard.copy("hunter2", clearAfter: 30, writer: writer)
 
     XCTAssertEqual(writer.lastValue, "hunter2")
     XCTAssertEqual(writer.lastOptions?[.localOnly] as? Bool, true)
-    let expiry = try? XCTUnwrap(writer.lastOptions?[.expirationDate] as? Date)
-    XCTAssertNotNil(expiry)
-    XCTAssertGreaterThan(expiry!, before)
-    XCTAssertLessThanOrEqual(expiry!.timeIntervalSince(before), 31)
+    let expiry = try XCTUnwrap(writer.lastOptions?[.expirationDate] as? Date)
+    XCTAssertGreaterThan(expiry, before)
+    XCTAssertLessThanOrEqual(expiry.timeIntervalSince(before), 31)
   }
 
-  func testCopyClampsBelowMinimum() {
+  func testCopyClampsBelowMinimum() throws {
     let writer = MockPasteboardWriter()
     let before = Date()
     SecureClipboard.copy("x", clearAfter: 0, writer: writer)
-    let expiry = writer.lastOptions?[.expirationDate] as? Date
+    XCTAssertEqual(writer.lastOptions?[.localOnly] as? Bool, true)
+    let expiry = try XCTUnwrap(writer.lastOptions?[.expirationDate] as? Date)
     // Clamped up to minClearSeconds (1), so still in the future, not in the past.
-    XCTAssertGreaterThan(expiry ?? .distantPast, before)
-    XCTAssertLessThanOrEqual((expiry ?? .distantFuture).timeIntervalSince(before), 2)
+    XCTAssertGreaterThan(expiry, before)
+    XCTAssertLessThanOrEqual(expiry.timeIntervalSince(before), 2)
   }
 
-  func testCopyClampsAboveMaximum() {
+  func testCopyClampsAboveMaximum() throws {
     let writer = MockPasteboardWriter()
     let before = Date()
     SecureClipboard.copy("x", clearAfter: 100_000, writer: writer)
-    let expiry = writer.lastOptions?[.expirationDate] as? Date
+    XCTAssertEqual(writer.lastOptions?[.localOnly] as? Bool, true)
+    let expiry = try XCTUnwrap(writer.lastOptions?[.expirationDate] as? Date)
     XCTAssertLessThanOrEqual(
-      (expiry ?? .distantFuture).timeIntervalSince(before),
+      expiry.timeIntervalSince(before),
       Double(SecureClipboard.maxClearSeconds) + 1
     )
   }
