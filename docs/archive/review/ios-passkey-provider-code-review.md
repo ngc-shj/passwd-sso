@@ -81,3 +81,26 @@ RT1 (mock-reality: pinned-d + byte-exact authData + double-encoded JWK fixture) 
 ### T4 [Info] standalone-path comment
 - Action: added comment in `testDecryptPasskeyMaterial_returnsMaterial`.
 - Modified: ios/PasswdSSOTests/CredentialResolverTests.swift
+
+---
+
+# Round 2 (incremental verification of round-1 fixes)
+
+Date: 2026-06-12
+
+## Changes from Previous Round
+Verified the round-1 fix commit (700aa800). Two reviewers (functionality+testing, security).
+
+## Result: No findings
+
+- **S1 fix sound**: `decodeP256PrivateKeyJWK` is fully synchronous; `defer { scalar.resetBytes }` fires at scope exit AFTER `P256.Signing.PrivateKey(rawRepresentation:)` has synchronously copied the bytes and after `return key` — no use-after-zero. On the malformed path the defer still zeroes. Verified.
+- **F2 fix fail-closed**: `.emptyUserHandle` guard prevents any outputs escaping with an invalid handle; bare error case carries no key bytes; caller maps to `ASExtensionError`. (Non-finding noted: signing runs before the guard — wasted ECDSA on a dead path; no security impact, left as-is to avoid churn.)
+- **F3**: two CredentialPickerView call sites only (password default + passkey override); catalog has en+ja "translated" → `testExtensionCatalogHasJapaneseForEveryKey` passes.
+- **New tests** non-vacuous and exercise the guarded paths.
+- Key-custody chain complete: privateKeyJWK Data zeroed (completePasskeyAssertion), raw scalar zeroed (S1), only the JSONDecoder-internal `d` String remains unzeroable (acknowledged Swift/Foundation limitation, documented in-code).
+
+## Recurring Issue Check (round-2 delta)
+- R1/RT1/RT5: no regression. RS1 (timing/secret handling): scalar zeroing now complete. No new findings across R1-R37 / RS1-RS4 / RT1-RT5 for the fix delta.
+
+Review loop terminated: all reviewers returned "No findings" at round 2.
+
