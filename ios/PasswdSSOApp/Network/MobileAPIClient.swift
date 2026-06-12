@@ -16,6 +16,9 @@ public struct VaultUnlockData: Sendable, Codable, Equatable {
   public let kdfIterations: Int
   /// User ID bound to the vault; used as AAD input for personal entries (aadVersion >= 1).
   public let userId: String
+  /// Tenant-enforced auto-lock interval (minutes), or nil when the tenant sets no
+  /// policy. Optional → the synthesized decoder treats null/absent as nil.
+  public let vaultAutoLockMinutes: Int?
 
   enum CodingKeys: String, CodingKey {
     case accountSalt
@@ -26,6 +29,32 @@ public struct VaultUnlockData: Sendable, Codable, Equatable {
     case kdfType
     case kdfIterations
     case userId
+    case vaultAutoLockMinutes
+  }
+
+  // Explicit memberwise init with vaultAutoLockMinutes defaulted LAST so existing
+  // call sites (tests) compile unchanged. The synthesized Decodable init(from:)
+  // is unaffected (we do not hand-write it).
+  public init(
+    accountSalt: String,
+    encryptedSecretKey: String,
+    secretKeyIv: String,
+    secretKeyAuthTag: String,
+    keyVersion: Int,
+    kdfType: Int,
+    kdfIterations: Int,
+    userId: String,
+    vaultAutoLockMinutes: Int? = nil
+  ) {
+    self.accountSalt = accountSalt
+    self.encryptedSecretKey = encryptedSecretKey
+    self.secretKeyIv = secretKeyIv
+    self.secretKeyAuthTag = secretKeyAuthTag
+    self.keyVersion = keyVersion
+    self.kdfType = kdfType
+    self.kdfIterations = kdfIterations
+    self.userId = userId
+    self.vaultAutoLockMinutes = vaultAutoLockMinutes
   }
 }
 

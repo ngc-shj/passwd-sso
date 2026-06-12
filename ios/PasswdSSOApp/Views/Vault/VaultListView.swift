@@ -23,6 +23,7 @@ struct VaultListView: View {
   @State private var isScreenRecording: Bool = false
   @State private var isShowingSettings: Bool = false
   @State private var isShowingCreateForm: Bool = false
+  @State private var isShowingSignOutConfirm: Bool = false
   @FocusState private var searchFocused: Bool
 
   var body: some View {
@@ -53,6 +54,13 @@ struct VaultListView: View {
             } label: {
               Label("Lock", systemImage: "lock")
             }
+            Button(role: .destructive) {
+              // Confirm before sign-out (unlike Lock): it clears tokens/cache and
+              // requires a full re-sign-in. Dialog is presented at body level.
+              isShowingSignOutConfirm = true
+            } label: {
+              Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+            }
           } label: {
             Image(systemName: "ellipsis.circle")
           }
@@ -82,6 +90,20 @@ struct VaultListView: View {
       // Passwords-app pattern). Activity tracking stays on query change.
       .onChange(of: viewModel.searchQuery) { _, _ in
         autoLockService.recordActivity()
+      }
+      // Anchored at body level (NOT inside the Menu, where dismissal races the
+      // menu collapse). signOut() ends in .loggedOut → RootView routes to setup.
+      .confirmationDialog(
+        "Sign out of passwd-sso?",
+        isPresented: $isShowingSignOutConfirm,
+        titleVisibility: .visible
+      ) {
+        Button("Sign Out", role: .destructive) {
+          autoLockService.signOut()
+        }
+        Button("Cancel", role: .cancel) {}
+      } message: {
+        Text("This clears the local session. You'll need to sign in and unlock again.")
       }
     }
     .onAppear {

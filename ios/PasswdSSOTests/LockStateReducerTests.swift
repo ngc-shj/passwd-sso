@@ -67,9 +67,15 @@ final class LockStateReducerTests: XCTestCase {
     XCTAssertEqual(state.autoLockMinutes, 1)
   }
 
-  func testAutoLockMinutesClampedTo60() {
+  func testAutoLockMinutesNotTruncatedTo60() {
+    // A tenant policy may enforce > 60 (up to 24h); LockState must not truncate.
     let state = LockState(lockedAt: nil, autoLockMinutes: 120)
-    XCTAssertEqual(state.autoLockMinutes, 60)
+    XCTAssertEqual(state.autoLockMinutes, 120)
+  }
+
+  func testAutoLockMinutesClampedToMax() {
+    let state = LockState(lockedAt: nil, autoLockMinutes: 2000)
+    XCTAssertEqual(state.autoLockMinutes, 1440)
   }
 
   // MARK: - TestClock advances correctly

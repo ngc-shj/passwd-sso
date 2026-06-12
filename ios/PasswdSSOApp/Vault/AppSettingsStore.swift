@@ -1,4 +1,5 @@
 import Foundation
+import Shared
 
 /// What happens when the idle vault timeout fires (mirrors the extension's
 /// `vaultTimeoutAction`).
@@ -39,6 +40,7 @@ struct AppSettingsStore {
     static let autoLockMinutes = "autoLockMinutes"
     static let vaultTimeoutAction = "vaultTimeoutAction"
     static let clipboardClearSeconds = "clipboardClearSeconds"
+    static let tenantAutoLockMinutes = "tenantAutoLockMinutes"
   }
 
   private let defaults: UserDefaults
@@ -71,6 +73,50 @@ struct AppSettingsStore {
     nonmutating set {
       defaults.set(newValue.rawValue, forKey: Key.vaultTimeoutAction)
     }
+  }
+
+  /// Tenant-enforced auto-lock interval (minutes), from the server policy
+  /// (`/api/vault/unlock/data` → `vaultAutoLockMinutes`). When present it
+  /// OVERRIDES the user's `minutes` (it is not a cap). Fail-closed: a stored
+  /// value outside `[tenantMinMinutes, maxMinutes]`, or absent, → `nil` (no
+  /// override → the user setting applies). It is a non-secret policy integer, so
+  /// App Group UserDefaults (not Keychain) is the right store; client-side
+  /// auto-lock is defense-in-depth, the enforced boundary is the server-side
+  /// token idle timeout.
+  var tenantAutoLockMinutes: Int? {
+    get {
+      guard defaults.object(forKey: Key.tenantAutoLockMinutes) != nil else { return nil }
+      let raw = defaults.integer(forKey: Key.tenantAutoLockMinutes)
+      return (raw >= AutoLockLimits.tenantMinMinutes && raw <= AutoLockLimits.maxMinutes) ? raw : nil
+    }
+    nonmutating set {
+      if let value = newValue {
+        defaults.set(value, forKey: Key.tenantAutoLockMinutes)
+      } else {
+        defaults.removeObject(forKey: Key.tenantAutoLockMinutes)
+      }
+    }
+  }
+
+  /// The auto-lock interval actually applied: tenant override when present,
+  /// else the user's setting. Single precedence point (the getter already
+  /// guarantees `[tenantMin, max]`-or-nil, so no second clamp here).
+  var effectiveAutoLockMinutes: Int { tenantAutoLockMinutes ?? minutes }
+
+  /// Apply a tenant policy received at unlock. `policyAuthoritative` is true only
+  /// for the passphrase unlock (which freshly fetched the policy); the biometric
+  /// offline path passes false so it never wipes a previously-persisted value.
+  /// - authoritative + value → write; authoritative + nil → clear (server removed
+  ///   the policy); non-authoritative → no-op (regardless of value).
+  nonmutating func applyTenantPolicy(_ value: Int?, policyAuthoritative: Bool) {
+    guard policyAuthoritative else { return }
+    tenantAutoLockMinutes = value
+  }
+
+  /// Remove the tenant policy (sign-out / logout). Mirrors the extension clearing
+  /// `tenantAutoLockMinutes` on disconnect.
+  nonmutating func clearTenantPolicy() {
+    tenantAutoLockMinutes = nil
   }
 
   /// Clipboard auto-clear delay in seconds, from the fixed option set. Absent or

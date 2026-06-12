@@ -758,6 +758,22 @@
         }
       }
     },
+    "Set by your organization." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set by your organization."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "組織によって設定されています。"
+          }
+        }
+      }
+    },
     "Settings" : {
       "localizations" : {
         "en" : {
@@ -806,6 +822,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "passwd-sso にサインイン"
+          }
+        }
+      }
+    },
+    "Sign Out" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sign Out"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サインアウト"
+          }
+        }
+      }
+    },
+    "Sign out of passwd-sso?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sign out of passwd-sso?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "passwd-sso からサインアウトしますか？"
           }
         }
       }
@@ -918,6 +966,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "テーマ"
+          }
+        }
+      }
+    },
+    "This clears the local session. You'll need to sign in and unlock again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This clears the local session. You'll need to sign in and unlock again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ローカルセッションが消去されます。再度サインインしてロックを解除する必要があります。"
           }
         }
       }
