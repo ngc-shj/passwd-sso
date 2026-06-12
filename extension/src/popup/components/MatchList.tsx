@@ -275,14 +275,14 @@ export function MatchList({ tabUrl }: Props) {
             className="h-8 px-2.5 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-xs text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600 focus:border-gray-900 dark:focus:border-gray-400 transition-shadow"
           />
 
-          {isSearching && searchResults.length === 0 && (
-            <p className="text-sm text-gray-500 dark:text-gray-400">{t("popup.noResults", { query })}</p>
-          )}
-
           {isSearching && (
             <div className="text-xs font-medium text-gray-500 dark:text-gray-400">
               {t("popup.searchResults")}
             </div>
+          )}
+
+          {isSearching && searchResults.length === 0 && (
+            <p className="text-sm text-gray-500 dark:text-gray-400">{t("popup.noResults", { query })}</p>
           )}
 
           {isSearching && searchResults.length > 0 && (

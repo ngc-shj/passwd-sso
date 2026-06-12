@@ -852,9 +852,13 @@ describe("MatchList", () => {
     const input = await screen.findByPlaceholderText("Search...");
     fireEvent.change(input, { target: { value: "zzznomatch" } });
 
-    expect(await screen.findByText("Search results")).toBeInTheDocument();
+    const header = await screen.findByText("Search results");
     expect(screen.queryByText(/Matches for/)).toBeNull();
-    expect(screen.getByText(/no results for/i)).toBeInTheDocument();
+    const noResults = screen.getByText(/no results for/i);
+    // I7: the no-results message appears beneath the header
+    expect(
+      header.compareDocumentPosition(noResults) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   // A9a: Cross-domain LOGIN search result has Copy and TOTP but no Fill (row-scoped)
@@ -907,6 +911,8 @@ describe("MatchList", () => {
     const row = title.closest("li") as HTMLElement;
     const rowScope = within(row);
     expect(rowScope.getByRole("button", { name: "Fill" })).toBeInTheDocument();
+    // I7: the "Other entries" header is suppressed while searching
+    expect(screen.queryByText("Other entries")).toBeNull();
   });
 
   // A1: cross-site LOGIN entry appears in search results and no-results is suppressed
@@ -937,6 +943,7 @@ describe("MatchList", () => {
 
     expect(await screen.findByText("AWS Console")).toBeInTheDocument();
     expect(screen.queryByText(/no results for/i)).toBeNull();
+    expect(screen.getByText("Search results")).toBeInTheDocument();
   });
 
   // A2: tabUrl=null with query renders matching entries; no Fill buttons; Copy available for LOGIN
