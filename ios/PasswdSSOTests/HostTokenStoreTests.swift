@@ -10,10 +10,18 @@ final class FakeKeychain: KeychainAccessor, @unchecked Sendable {
   private var store: [String: Data] = [:]
   private let lock = NSLock()
 
+  /// Records each account name written via `add` or `update`, in order.
+  /// Used to assert write ordering (e.g. refresh_token before access_token).
+  var writeLog: [String] = []
+
   private func key(for query: [String: Any]) -> String {
     let service = query[kSecAttrService as String] as? String ?? ""
     let account = query[kSecAttrAccount as String] as? String ?? ""
     return "\(service):\(account)"
+  }
+
+  private func account(for query: [String: Any]) -> String {
+    query[kSecAttrAccount as String] as? String ?? ""
   }
 
   func add(query: [String: Any]) -> OSStatus {
@@ -21,6 +29,7 @@ final class FakeKeychain: KeychainAccessor, @unchecked Sendable {
     let k = key(for: query)
     guard store[k] == nil else { return errSecDuplicateItem }
     store[k] = query[kSecValueData as String] as? Data
+    writeLog.append(account(for: query))
     return errSecSuccess
   }
 
@@ -38,6 +47,7 @@ final class FakeKeychain: KeychainAccessor, @unchecked Sendable {
     if let newData = attributes[kSecValueData as String] as? Data {
       store[k] = newData
     }
+    writeLog.append(account(for: query))
     return errSecSuccess
   }
 

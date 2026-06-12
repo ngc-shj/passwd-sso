@@ -43,7 +43,17 @@ public actor HostSyncService {
     async let teamMemberships = apiClient.fetchTeamMemberships()
 
     let personal = try await personalEntries
-    let teams = (try? await teamMemberships) ?? []
+    // A transient team-membership failure is tolerable (proceed with no teams),
+    // but a dead refresh token (authenticationRequired) MUST surface so the caller
+    // routes to re-sign-in (C4) rather than silently syncing personal-only.
+    let teams: [TeamMembership]
+    do {
+      teams = try await teamMemberships
+    } catch MobileAPIError.authenticationRequired {
+      throw MobileAPIError.authenticationRequired
+    } catch {
+      teams = []
+    }
 
     // Convert personal entries to CacheEntry (with aadVersion/keyVersion propagated)
     var allCacheEntries: [CacheEntry] = personal.map { entry in

@@ -787,6 +787,7 @@ final class TokenRefreshTests: XCTestCase {
         return (tokenResponseJSON(accessToken: "acc_new", refreshToken: "ref_new", expiresIn: 3600),
                 httpResponse(status: 200, url: refreshURL))
       }
+      self?.resourceCallCount += 1
       return (vaultJSON, httpResponse(status: 200, url: vaultURL))
     }
 
@@ -794,6 +795,7 @@ final class TokenRefreshTests: XCTestCase {
     _ = try await client.fetchVaultUnlockData()
 
     XCTAssertEqual(refreshCallCount, 1, "Should refresh exactly once when token is within skew")
+    XCTAssertEqual(resourceCallCount, 1, "Resource endpoint must be hit exactly once after refresh")
 
     // Store must hold the new pair.
     let loaded = try XCTUnwrap(try tokenStore.loadAccess())
@@ -922,7 +924,8 @@ final class TokenRefreshTests: XCTestCase {
       }
       self?.resourceCallCount += 1
       self?.capturedRequests.append(request)
-      // First resource call: 401 (no nonce header → skip nonce retry, go straight to refresh).
+      // First resource call: 401 (no nonce header → freshNonce is nil → skip nonce retry,
+      // go straight to refresh). Bounded at exactly 2 resource calls + 1 refresh.
       if (self?.resourceCallCount ?? 0) == 1 {
         return (Data(), httpResponse(status: 401, url: resourceURL))
       }
@@ -933,8 +936,8 @@ final class TokenRefreshTests: XCTestCase {
     let entries = try await client.fetchEntries(endpoint: "/api/passwords")
 
     XCTAssertEqual(entries.count, 1)
-    XCTAssertLessThanOrEqual(resourceCallCount, 2, "Resource hit must be bounded (≤2)")
-    XCTAssertLessThanOrEqual(refreshCallCount, 1, "Refresh hit must be bounded (≤1)")
+    XCTAssertEqual(resourceCallCount, 2, "Resource must be hit exactly twice (initial 401 + refresh-retry)")
+    XCTAssertEqual(refreshCallCount, 1, "Refresh must be called exactly once")
   }
 
   // MARK: - fetchEntries: refresh endpoint 401 → throws authenticationRequired (bounded)
@@ -952,6 +955,8 @@ final class TokenRefreshTests: XCTestCase {
         return (Data(), httpResponse(status: 401, url: refreshURL))
       }
       self?.resourceCallCount += 1
+      // 401 with no nonce header → freshNonce is nil → nonce retry skipped → refresh attempted.
+      // Refresh also returns 401 → throws authenticationRequired. Exactly 1 resource + 1 refresh.
       return (Data(), httpResponse(status: 401, url: resourceURL))
     }
 
@@ -962,8 +967,8 @@ final class TokenRefreshTests: XCTestCase {
     } catch MobileAPIError.authenticationRequired {
       // Expected.
     }
-    XCTAssertLessThanOrEqual(resourceCallCount, 2, "Resource hit must be bounded (≤2)")
-    XCTAssertLessThanOrEqual(refreshCallCount, 1, "Refresh hit must be bounded (≤1)")
+    XCTAssertEqual(resourceCallCount, 1, "Resource must be hit exactly once before refresh fails")
+    XCTAssertEqual(refreshCallCount, 1, "Refresh must be attempted exactly once")
   }
 
   // MARK: - Reactive ath rebuild: ath changes from old to new token after refresh
@@ -1020,6 +1025,8 @@ final class TokenRefreshTests: XCTestCase {
     MockURLProtocol.requestHandler = { [weak self] request in
       if request.url?.path == "/api/mobile/token/refresh" {
         self?.refreshCallCount += 1
+        // expiresIn: 3600 is explicit; now is fixed, so after refresh the new token
+        // expires at now+3600 (outside the 60s skew), so the second call returns without refreshing.
         return (tokenResponseJSON(accessToken: "acc_seq_new", refreshToken: "ref_seq_new", expiresIn: 3600),
                 httpResponse(status: 200, url: refreshURL))
       }
@@ -1027,7 +1034,6 @@ final class TokenRefreshTests: XCTestCase {
       return (self!.entriesJSON, httpResponse(status: 200, url: resourceURL))
     }
 
-    // Use a now that advances past skew after first refresh (new token has 3600s expiry).
     let client = makeClient()
     let entries1 = try await client.fetchEntries(endpoint: "/api/passwords")
     let entries2 = try await client.fetchEntries(endpoint: "/api/passwords")
@@ -1047,6 +1053,10 @@ final class TokenRefreshTests: XCTestCase {
     let refreshURL = serverURL.appending(path: "/api/mobile/token/refresh", directoryHint: .notDirectory)
     let resourceURL = serverURL.appending(path: "/api/passwords", directoryHint: .notDirectory)
 
+    // Per F2: nonce-retry fires only when the CURRENT response carries a fresh DPoP-Nonce
+    // (`freshNonce != nil`). Call 2 must carry a fresh nonce to trigger the nonce-retry path;
+    // if call 2 carries no nonce, `didNonceRetry` stays false but `didRefreshRetry` gates
+    // the refresh. The ladder is bounded at ≤3 HTTP resource calls + ≤1 refresh.
     MockURLProtocol.requestHandler = { [weak self] request in
       if request.url?.path == "/api/mobile/token/refresh" {
         self?.refreshCallCount += 1
@@ -1054,12 +1064,14 @@ final class TokenRefreshTests: XCTestCase {
                 httpResponse(status: 200, url: refreshURL))
       }
       self?.resourceCallCount += 1
+      self?.capturedRequests.append(request)
       switch self?.resourceCallCount {
       case 1:
-        // First call: 401 + new nonce → triggers nonce retry.
+        // First call: 401 + fresh DPoP-Nonce → `freshNonce != nil` → triggers nonce retry.
         return (Data(), httpResponse(status: 401, url: resourceURL, headers: ["DPoP-Nonce": "srv-nonce-1"]))
       case 2:
-        // Nonce retry: still 401 (no nonce now) → triggers refresh.
+        // Nonce retry: still 401 (no nonce in THIS response) → `freshNonce` is nil →
+        // nonce branch skipped (`didNonceRetry` is already true anyway) → triggers refresh.
         return (Data(), httpResponse(status: 401, url: resourceURL))
       default:
         // After refresh: 200.
@@ -1073,14 +1085,22 @@ final class TokenRefreshTests: XCTestCase {
     XCTAssertEqual(entries.count, 1)
     XCTAssertEqual(refreshCallCount, 1, "Refresh should be called exactly once")
     XCTAssertEqual(resourceCallCount, 3, "Expected: initial → nonce-retry → refresh-retry")
+
+    // Assert the retried request (call 2) echoed the server nonce from call 1's response.
+    XCTAssertEqual(capturedRequests.count, 3, "Must have captured all 3 resource requests")
+    let nonceOnCall2 = try decodeDPoPNonce(
+      try XCTUnwrap(capturedRequests[1].value(forHTTPHeaderField: "DPoP")))
+    XCTAssertEqual(nonceOnCall2, "srv-nonce-1",
+                   "Nonce-retry (call 2) must echo the server nonce returned on call 1")
   }
 
   // MARK: - HostTokenStore safe write order
 
   func testSaveTokens_safeWriteOrder_refreshBeforeAccess() throws {
-    // The safe write order writes refresh first, then access last.
-    // We verify by checking what is stored after a simulated partial write
-    // (FakeKeychain stores all writes, so we can verify order via the actual store state).
+    // The safe write order writes refresh first, then expiry, then access last.
+    // A partial write (crash mid-sequence) must never leave a new access token paired
+    // with an old refresh token (replay detection → family revoke → forced sign-out).
+    // We verify the ORDER by inspecting FakeKeychain.writeLog for each write operation.
     let expiresAt = fixedNow.addingTimeInterval(3600)
     try tokenStore.saveTokens(access: "acc_safe", refresh: "ref_safe", expiresAt: expiresAt)
 
@@ -1090,6 +1110,15 @@ final class TokenRefreshTests: XCTestCase {
     XCTAssertEqual(access.token, "acc_safe")
     XCTAssertEqual(refresh, "ref_safe")
 
+    // Assert write ORDER: refresh_token must be written BEFORE access_token.
+    let log = keychain.writeLog
+    let refreshIdx = try XCTUnwrap(log.firstIndex(of: "refresh_token"),
+                                   "refresh_token must appear in write log")
+    let accessIdx = try XCTUnwrap(log.firstIndex(of: "access_token"),
+                                  "access_token must appear in write log")
+    XCTAssertLessThan(refreshIdx, accessIdx,
+                      "refresh_token must be written before access_token (safe write order)")
+
     // Overwrite with a second pair to verify update path also maintains order.
     let expiresAt2 = fixedNow.addingTimeInterval(7200)
     try tokenStore.saveTokens(access: "acc_safe2", refresh: "ref_safe2", expiresAt: expiresAt2)
@@ -1097,11 +1126,55 @@ final class TokenRefreshTests: XCTestCase {
     let refresh2 = try XCTUnwrap(try tokenStore.loadRefresh())
     XCTAssertEqual(access2.token, "acc_safe2")
     XCTAssertEqual(refresh2, "ref_safe2")
+
+    // Assert write ORDER also holds on update path.
+    let log2 = keychain.writeLog
+    let writes = log2.suffix(from: log.count) // only the second saveTokens writes
+    let refreshIdx2 = try XCTUnwrap(writes.firstIndex(of: "refresh_token"),
+                                    "refresh_token must appear in update log")
+    let accessIdx2 = try XCTUnwrap(writes.firstIndex(of: "access_token"),
+                                   "access_token must appear in update log")
+    XCTAssertLessThan(refreshIdx2, accessIdx2,
+                      "refresh_token must be written before access_token on update path")
   }
 
-  // MARK: - Helper: decode DPoP JWS payload and extract ath claim
+  // MARK: - G1: URLError on refresh endpoint surfaces as networkError (not authenticationRequired)
 
-  private func decodeDPoPAth(_ jws: String) throws -> String {
+  func testFetchEntries_refreshNetworkError_surfacesAsNetworkError() async throws {
+    // Token is expired (within skew) so a proactive refresh will be attempted.
+    let expiresAt = fixedNow.addingTimeInterval(30)
+    try tokenStore.saveTokens(access: "acc_netfail", refresh: "ref_netfail", expiresAt: expiresAt)
+
+    let resourceURL = serverURL.appending(path: "/api/passwords", directoryHint: .notDirectory)
+
+    MockURLProtocol.requestHandler = { [weak self] request in
+      if request.url?.path == "/api/mobile/token/refresh" {
+        self?.refreshCallCount += 1
+        // Simulate a network-level failure (not an HTTP error) on the refresh endpoint.
+        throw URLError(.notConnectedToInternet)
+      }
+      self?.resourceCallCount += 1
+      return (self!.entriesJSON, httpResponse(status: 200, url: resourceURL))
+    }
+
+    let client = makeClient()
+    do {
+      _ = try await client.fetchEntries(endpoint: "/api/passwords")
+      XCTFail("Expected networkError to be thrown")
+    } catch MobileAPIError.networkError(let urlError) {
+      XCTAssertEqual(urlError.code, .notConnectedToInternet,
+                     "URLError code must be preserved in the networkError wrapper")
+    } catch MobileAPIError.authenticationRequired {
+      XCTFail("URLError on refresh must NOT be reclassified as authenticationRequired")
+    }
+    XCTAssertEqual(refreshCallCount, 1, "Refresh must be attempted exactly once")
+    XCTAssertEqual(resourceCallCount, 0,
+                   "Resource endpoint must not be reached when refresh fails with network error")
+  }
+
+  // MARK: - Helpers: decode DPoP JWS payload claims
+
+  private func decodeDPoPPayload(_ jws: String) throws -> [String: AnyDecodable] {
     let parts = jws.split(separator: ".")
     XCTAssertEqual(parts.count, 3, "DPoP must be a 3-part JWS")
     var b64 = String(parts[1])
@@ -1110,8 +1183,18 @@ final class TokenRefreshTests: XCTestCase {
     let payloadData = try XCTUnwrap(Data(base64Encoded: b64
       .replacingOccurrences(of: "-", with: "+")
       .replacingOccurrences(of: "_", with: "/")))
-    let payload = try JSONDecoder().decode([String: AnyDecodable].self, from: payloadData)
+    return try JSONDecoder().decode([String: AnyDecodable].self, from: payloadData)
+  }
+
+  private func decodeDPoPAth(_ jws: String) throws -> String {
+    let payload = try decodeDPoPPayload(jws)
     return try XCTUnwrap(payload["ath"]?.value as? String)
+  }
+
+  private func decodeDPoPNonce(_ jws: String) throws -> String {
+    let payload = try decodeDPoPPayload(jws)
+    return try XCTUnwrap(payload["nonce"]?.value as? String,
+                         "DPoP payload must contain a 'nonce' claim")
   }
 }
 

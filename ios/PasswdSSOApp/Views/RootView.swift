@@ -256,7 +256,9 @@ struct RootView: View {
     do {
       syncReport = try await syncService.runSync(vaultKey: vaultKey, userId: unlockResult.userId)
     } catch MobileAPIError.authenticationRequired {
-      // Refresh token is dead — the only recovery is re-sign-in.
+      // Refresh token is dead — the only recovery is re-sign-in. Clear the dead
+      // tokens (parity with the explicit sign-out path) so no stale credential lingers.
+      try? HostTokenStore().deleteAll()
       appState = .setup
       AppSettingsStore().clearTenantPolicy()
       Task { await CredentialIdentityRegistrar().clear() }

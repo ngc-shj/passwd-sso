@@ -225,7 +225,8 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   /// with `ath` = SHA-256(refresh_token), as specified in the server route contract.
   public func refreshToken() async throws -> TokenExchangeResponse {
     guard let refreshToken = try tokenStore.loadRefresh() else {
-      throw MobileAPIError.serverError(status: 401)
+      // No refresh token = auth-dead; surface the right taxonomy even to direct callers.
+      throw MobileAPIError.authenticationRequired
     }
 
     let refreshURL = serverURL.appending(
@@ -254,6 +255,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     var request = URLRequest(url: refreshURL)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    // SECURITY: never log this request or its headers — Authorization carries the refresh token.
     request.setValue("DPoP \(refreshToken)", forHTTPHeaderField: "Authorization")
     request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
     request.httpBody = bodyData
@@ -531,7 +533,10 @@ public actor MobileAPIClient: VaultUnlockDataSource {
       request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
       let (data, response) = try await performHTTP(request)
       let http = response as! HTTPURLResponse
-      if let n = http.value(forHTTPHeaderField: "DPoP-Nonce") {
+      // A nonce in THIS response is the actual challenge signal; a stale stored
+      // nonce must NOT trigger a nonce-retry (keeps the ladder bounded at ≤3).
+      let freshNonce = http.value(forHTTPHeaderField: "DPoP-Nonce")
+      if let n = freshNonce {
         try? tokenStore.saveNonce(n)
         nonce = n
       }
@@ -539,7 +544,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
       case 200:
         return data
       case 401:
-        if !didNonceRetry, nonce != nil {
+        if !didNonceRetry, freshNonce != nil {
           // Nonce challenge: re-sign the same token with the new nonce, retry once.
           didNonceRetry = true
           continue
