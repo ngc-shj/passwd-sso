@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.4.57](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.56...passwd-sso-v0.4.57) (2026-06-12)
+
+
+### Features
+
+* **extension:** search all vault entries from the popup search box ([#553](https://github.com/ngc-shj/passwd-sso/issues/553)) ([967826a](https://github.com/ngc-shj/passwd-sso/commit/967826a138144cbd8671577502fb9a4111fcd402))
+* **ios:** add app icon (full-bleed brand keyhole) ([#531](https://github.com/ngc-shj/passwd-sso/issues/531)) ([6327a25](https://github.com/ngc-shj/passwd-sso/commit/6327a259bf42521d355ddf0391caf9baacd77d2c))
+* **ios:** Face ID vault unlock (biometric host re-unlock) ([#542](https://github.com/ngc-shj/passwd-sso/issues/542)) ([756e5cc](https://github.com/ngc-shj/passwd-sso/commit/756e5ccbd3c12077b664ca9e4240f615507fff28))
+* **ios:** host-server integration (custom-scheme OAuth, personal vault, AutoFill) ([#529](https://github.com/ngc-shj/passwd-sso/issues/529)) ([ab8e2b2](https://github.com/ngc-shj/passwd-sso/commit/ab8e2b2cb3c89c9580fcfd2f0db8c200423b70fd))
+* **ios:** localize app + AutoFill extension (en + ja via String Catalog) ([#543](https://github.com/ngc-shj/passwd-sso/issues/543)) ([a3415ac](https://github.com/ngc-shj/passwd-sso/commit/a3415aca871edee09d1b844e11e4b62bd6928467))
+* **ios:** manual Sign Out + tenant auto-lock override ([#544](https://github.com/ngc-shj/passwd-sso/issues/544)) ([0e7db75](https://github.com/ngc-shj/passwd-sso/commit/0e7db75efe79c404e149e37af5a66afa5f80554e))
+* **ios:** meet 44pt HIG tap targets across views ([#532](https://github.com/ngc-shj/passwd-sso/issues/532)) ([609f299](https://github.com/ngc-shj/passwd-sso/commit/609f2999fb05088e9d095970ba51597fff10aa0f))
+* **ios:** passkey (WebAuthn) provider — assertion-only AutoFill ([#549](https://github.com/ngc-shj/passwd-sso/issues/549)) ([fc4d568](https://github.com/ngc-shj/passwd-sso/commit/fc4d5686205da006ba985c74e375303ade0c7ca5))
+* **ios:** QuickType inline AutoFill suggestions (ASCredentialIdentityStore) ([#537](https://github.com/ngc-shj/passwd-sso/issues/537)) ([6141399](https://github.com/ngc-shj/passwd-sso/commit/614139960cbd0dca671873896b41cf3eeaad2ab9))
+* **ios:** settings screen with extension parity (auto-lock, timeout action, clipboard, theme) ([#535](https://github.com/ngc-shj/passwd-sso/issues/535)) ([7608f61](https://github.com/ngc-shj/passwd-sso/commit/7608f61856b1f8078f7dca47cc18898cc9056470))
+
+
+### Bug Fixes
+
+* **api:** align v1 password API crypto guards with session API ([#525](https://github.com/ngc-shj/passwd-sso/issues/525)) ([5893bb7](https://github.com/ngc-shj/passwd-sso/commit/5893bb75f08800feb262169ea9cffe7b7ee7859d))
+* **extension:** bound the service-worker hydration wait so GET_STATUS can't hang ([#551](https://github.com/ngc-shj/passwd-sso/issues/551)) ([8683d89](https://github.com/ngc-shj/passwd-sso/commit/8683d896ff44ba6722a877293fd6f45247385203))
+* **extension:** route expired-session reauth to full sign-in; add verifying label + cancel ([#550](https://github.com/ngc-shj/passwd-sso/issues/550)) ([36e8990](https://github.com/ngc-shj/passwd-sso/commit/36e8990dc2371dbca948220638a20f826acb7a4e))
+* **ext:** recover popup from stuck "loading" when service worker is unreachable ([#545](https://github.com/ngc-shj/passwd-sso/issues/545)) ([74e646a](https://github.com/ngc-shj/passwd-sso/commit/74e646ab36bc990d5b82c90fcf6251909075c308))
+* **hardening:** post-[#530](https://github.com/ngc-shj/passwd-sso/issues/530) follow-ups (Redis HA, Sentry scrub, Jackson connect isolation, env-example, CodeQL) ([#536](https://github.com/ngc-shj/passwd-sso/issues/536)) ([024ee44](https://github.com/ngc-shj/passwd-sso/commit/024ee44dd909554346363293878687a4e7838f44))
+* **ios:** AutoFill credential list (iOS 17+ methods) + matched-only picker with search ([#533](https://github.com/ngc-shj/passwd-sso/issues/533)) ([8a54937](https://github.com/ngc-shj/passwd-sso/commit/8a54937c71c70932954690da2e8fe642e7601a11))
+* **ios:** honest "Vault is Locked" AutoFill copy (no fake "Open app" button) ([#539](https://github.com/ngc-shj/passwd-sso/issues/539)) ([98ef98d](https://github.com/ngc-shj/passwd-sso/commit/98ef98ddb24a53aca21e978b64aa2df6f06680f3))
+* **ios:** passkey AutoFill backgrounding + AutoFill hardening (full-tree review, -1004 deferral, search guards) ([#552](https://github.com/ngc-shj/passwd-sso/issues/552)) ([0a0e27c](https://github.com/ngc-shj/passwd-sso/commit/0a0e27c7190ab5986fa1448398f9a79ffd0a18dc))
+* **ios:** refresh access token on sync so unlock reflects web updates ([#547](https://github.com/ngc-shj/passwd-sso/issues/547)) ([41d8fd4](https://github.com/ngc-shj/passwd-sso/commit/41d8fd49336794c709da786f22e47c15453cdb7d))
+* **mcp:** mitigate DCR cross-tenant DoS at the root (TTL 15min + cap 1000) ([#538](https://github.com/ngc-shj/passwd-sso/issues/538)) ([f9ee31f](https://github.com/ngc-shj/passwd-sso/commit/f9ee31f4639c76a13c2c95616b77838e11ef537f))
+* **passwords:** lost-update-safe history snapshot + v1/api-key consistency ([#534](https://github.com/ngc-shj/passwd-sso/issues/534)) ([cee9734](https://github.com/ngc-shj/passwd-sso/commit/cee973487ac8bcd35505b2dc9abd9f02c5f5975c))
+* **security:** remediate 2026-06 audit short + mid-term findings (C1–C13) ([#530](https://github.com/ngc-shj/passwd-sso/issues/530)) ([40e23fa](https://github.com/ngc-shj/passwd-sso/commit/40e23fa38492a932ef7b057b2752a2a32ecd2fe6))
+* **webauthn:** abort stale in-flight ceremony so the passkey prompt always surfaces ([#546](https://github.com/ngc-shj/passwd-sso/issues/546)) ([f3edfac](https://github.com/ngc-shj/passwd-sso/commit/f3edfac1a2f7b93c3dab72198a4529dc3a8c96b8))
+
 ## [0.4.56](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.55...passwd-sso-v0.4.56) (2026-06-07)
 
 
