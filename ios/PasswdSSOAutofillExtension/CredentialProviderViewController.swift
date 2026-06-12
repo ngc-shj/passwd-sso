@@ -101,12 +101,15 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         let matches = filterPasskeyCandidates(result.all, rpId: request.relyingPartyId)
         let view = CredentialPickerView(
           matched: matches,
+          // Search stays within passkey candidates — offering a non-passkey
+          // entry in a passkey ceremony would be wrong, so `all` == `matches`.
           all: matches,
           serviceIdentifiers: originalIdents,
           onSelect: { [weak self] summary in
             self?.completePasskeyAssertion(entryId: summary.id, request: request)
           },
-          onCancel: { [weak self] in self?.cancel(with: nil) }
+          onCancel: { [weak self] in self?.cancel(with: nil) },
+          emptyStateText: "No passkeys for this site"
         )
         presentSwiftUI(view)
       } catch CredentialResolver.Error.vaultLocked {

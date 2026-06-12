@@ -9,6 +9,7 @@ public enum PasskeyCryptoError: Error, Equatable {
   case malformedPrivateScalar  // d absent or not exactly 32 bytes after base64url-decode
   case rpIdMismatch            // stored rpId != request rpId (defense-in-depth)
   case malformedCredentialId
+  case emptyUserHandle         // ASPasskeyAssertionCredential requires a non-empty userHandle
 }
 
 // MARK: - Assertion material (decrypted from the full blob)
@@ -64,9 +65,12 @@ public func decodeP256PrivateKeyJWK(_ jwkJSON: Data) throws -> P256.Signing.Priv
   guard jwk.kty == "EC", jwk.crv == "P-256" else {
     throw PasskeyCryptoError.unsupportedKeyType
   }
-  guard let scalar = try? base64URLDecode(jwk.d), scalar.count == 32 else {
+  guard var scalar = try? base64URLDecode(jwk.d), scalar.count == 32 else {
     throw PasskeyCryptoError.malformedPrivateScalar
   }
+  // Zero the raw private scalar once the key is constructed (the inner JSON
+  // String the decoder materialised cannot be zeroed; this covers the Data).
+  defer { scalar.resetBytes(in: 0..<scalar.count) }
   guard let key = try? P256.Signing.PrivateKey(rawRepresentation: scalar) else {
     throw PasskeyCryptoError.malformedPrivateScalar
   }
@@ -181,8 +185,13 @@ public func buildPasskeyAssertion(
     authenticatorData: authData,
     clientDataHash: request.clientDataHash
   )
-  // userHandle may be empty (stored that way); base64url-decode best-effort.
-  let userHandle = (try? base64URLDecode(material.userHandle)) ?? Data()
+  // ASPasskeyAssertionCredential requires a non-empty userHandle. Registration
+  // already skips empty-userHandle entries (C5), but guard here too so a
+  // residual/pre-migration identity fails cleanly instead of crashing the
+  // AuthenticationServices framework on an empty handle.
+  guard let userHandle = try? base64URLDecode(material.userHandle), !userHandle.isEmpty else {
+    throw PasskeyCryptoError.emptyUserHandle
+  }
   return PasskeyAssertionOutputs(
     userHandle: userHandle,
     relyingParty: request.relyingPartyId,

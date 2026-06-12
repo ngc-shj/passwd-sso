@@ -237,6 +237,21 @@ final class CredentialIdentityRegistrarTests: XCTestCase {
     XCTAssertTrue(specs.isEmpty, "empty userHandle must be skipped (ASPasskeyCredentialIdentity requires it)")
   }
 
+  func testBuildPasskeyIdentitySpecs_skipsEmptyCredentialId() throws {
+    let vaultKey = SymmetricKey(size: .bits256)
+    let userId = "user-1"
+    let entry = try passkeyEntry(
+      id: "pk1", rpId: "webauthn.io", username: "alice",
+      credentialID: Data(), userHandle: Data([5, 6, 7, 8]),  // empty credentialID → skip
+      userId: userId, vaultKey: vaultKey
+    )
+    let cache = try makeCache([entry], userId: userId)
+
+    let specs = buildPasskeyIdentitySpecs(from: cache, vaultKey: vaultKey, userId: userId)
+
+    XCTAssertTrue(specs.isEmpty, "empty credentialID must be skipped")
+  }
+
   func testBuildPasskeyIdentitySpecs_ignoresLoginEntries() throws {
     let vaultKey = SymmetricKey(size: .bits256)
     let userId = "user-1"

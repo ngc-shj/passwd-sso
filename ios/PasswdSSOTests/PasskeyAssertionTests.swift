@@ -78,6 +78,20 @@ final class PasskeyAssertionTests: XCTestCase {
     }
   }
 
+  func testDecodeJWK_toleratesExtraWebCryptoFields() throws {
+    // Web Crypto exportKey("jwk") emits key_ops/ext; JSONDecoder must ignore them.
+    let key = pinnedKey()
+    let pub = key.publicKey.x963Representation
+    let jwk = """
+      {"kty":"EC","crv":"P-256","d":"\(base64URLEncode(key.rawRepresentation))",\
+      "x":"\(base64URLEncode(pub.subdata(in: 1..<33)))",\
+      "y":"\(base64URLEncode(pub.subdata(in: 33..<65)))",\
+      "key_ops":["sign"],"ext":true}
+      """
+    let decoded = try decodeP256PrivateKeyJWK(Data(jwk.utf8))
+    XCTAssertEqual(decoded.rawRepresentation, key.rawRepresentation)
+  }
+
   // MARK: - sign / verify round trip + DER
 
   func testSignPasskeyAssertion_producesVerifiableDERSignature() throws {
@@ -173,6 +187,20 @@ final class PasskeyAssertionTests: XCTestCase {
     )
     XCTAssertThrowsError(try buildPasskeyAssertion(material: mat, request: request)) { error in
       XCTAssertEqual(error as? PasskeyCryptoError, .malformedCredentialId)
+    }
+  }
+
+  func testBuildPasskeyAssertion_emptyUserHandleThrows() {
+    // A residual/pre-migration entry with empty userHandle must fail cleanly,
+    // not crash AuthenticationServices on an empty handle.
+    let key = pinnedKey()
+    let mat = material(rpId: "webauthn.io", key: key, userHandle: "")
+    let request = PasskeyAssertionRequest(
+      relyingPartyId: "webauthn.io", clientDataHash: Data(repeating: 0x11, count: 32),
+      userVerificationRequired: true
+    )
+    XCTAssertThrowsError(try buildPasskeyAssertion(material: mat, request: request)) { error in
+      XCTAssertEqual(error as? PasskeyCryptoError, .emptyUserHandle)
     }
   }
 

@@ -197,6 +197,17 @@ final class EntryBlobDecoderTests: XCTestCase {
     XCTAssertNil(EntryBlobDecoder.passkeyMaterial(plaintext: data(json), entryId: "pk1"))
   }
 
+  func testPasskeyMaterialReturnsNilWhenJWKIsBareObject() {
+    // passkeyPrivateKeyJwk MUST be a JSON string (double-encoded). A bare JWK
+    // object at that field is a type mismatch → decode fails → nil (T5 guard).
+    let json = #"""
+    {"relyingPartyId":"github.com","credentialId":"AQIDBA",\#
+    "passkeyPrivateKeyJwk":{"kty":"EC","crv":"P-256","d":"abc"},\#
+    "passkeyUserHandle":"BQYHCA"}
+    """#
+    XCTAssertNil(EntryBlobDecoder.passkeyMaterial(plaintext: data(json), entryId: "pk1"))
+  }
+
   // MARK: - CacheEntry.entryType backward compat (C4)
 
   func testCacheEntryDecodesNilEntryTypeFromLegacyJSON() throws {

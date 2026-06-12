@@ -702,6 +702,7 @@ final class CredentialResolverTests: XCTestCase {
     )
     let (resolver, _) = try makePasskeyResolver(entries: [entry], vaultKey: vaultKey, userId: userId)
 
+    // No prior resolveCandidates — exercises the standalone readForFill path.
     let material = try await resolver.decryptPasskeyMaterial(entryId: "pk1")
 
     XCTAssertEqual(material.relyingPartyId, "github.com")

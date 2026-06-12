@@ -117,6 +117,22 @@
         }
       }
     },
+    "No passkeys for this site" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No passkeys for this site"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このサイトのパスキーはありません"
+          }
+        }
+      }
+    },
     "No passwords for this site" : {
       "localizations" : {
         "en" : {
