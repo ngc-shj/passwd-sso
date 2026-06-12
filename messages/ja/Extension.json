@@ -15,6 +15,8 @@
   "connectReauthTitle": "ブラウザでの再認証が必要です",
   "connectReauthDescription": "Web セッションは有効ですが、拡張機能を接続するには再認証が必要です。ブラウザで本人確認を行ってから、もう一度お試しください。",
   "connectReauthAction": "Passkey で再認証",
+  "connectReauthVerifying": "Passkey で確認中...",
+  "connectReauthCancel": "キャンセル",
   "connectReauthCancelled": "再認証がキャンセルされました。もう一度お試しください。",
   "connectReauthFailed": "再認証に失敗しました。もう一度お試しください。",
   "connectReauthStillRequired": "再認証後も接続を継続できませんでした。もう一度お試しください。",

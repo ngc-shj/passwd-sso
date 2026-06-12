@@ -15,6 +15,8 @@
   "connectReauthTitle": "Browser reauthentication required",
   "connectReauthDescription": "Your web session is still signed in, but it is not fresh enough to connect the extension. Reauthenticate in the browser, then try again.",
   "connectReauthAction": "Reauthenticate with passkey",
+  "connectReauthVerifying": "Verifying with passkey...",
+  "connectReauthCancel": "Cancel",
   "connectReauthCancelled": "Reauthentication was cancelled. Please try again.",
   "connectReauthFailed": "Reauthentication failed. Please try again.",
   "connectReauthStillRequired": "The extension still requires reauthentication after retrying. Please try again.",
