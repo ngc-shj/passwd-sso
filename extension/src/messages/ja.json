@@ -32,7 +32,9 @@
     "httpWarning": "このページは HTTP です。安全でないページへの入力にはリスクがあります。",
     "unlockSite": "現在のサイト: {host}",
     "badgeCard": "カード",
-    "badgeIdentity": "個人情報"
+    "badgeIdentity": "個人情報",
+    "searchResults": "検索結果",
+    "badgePasskey": "パスキー"
   },
   "options": {
     "title": "設定",

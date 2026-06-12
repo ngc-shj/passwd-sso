@@ -6,7 +6,7 @@ Branch: `feature/extension-search-all-vault`
 ## Project context
 
 - Type: web app + browser extension (this change: **extension popup only**)
-- Test infrastructure: unit tests (Vitest, jsdom + @testing-library/react for popup components) + integration tests + CI/CD
+- Test infrastructure: unit tests (Vitest, jsdom + `@testing-library/react` for popup components) + integration tests + CI/CD
   - Extension tests are a SEPARATE Vitest project: run via `npm test` inside `extension/` (root `npx vitest run` does NOT include them). CI: `extension-ci` job is path-gated on `extension/**` and picks up new tests automatically.
 - Verification environment constraints:
   - **VE1** (`verifiable-local`, manual): real-browser behavior of the popup (Chrome extension loaded unpacked) cannot be exercised by Vitest. All search/filter logic is pure client-side React state and IS unit-testable; only the visual smoke check is manual.
@@ -138,7 +138,7 @@ Not affected (verified): `extension/src/background/index.ts` (fetch/cache/decryp
 - Location: `extension/src/__tests__/popup/MatchList.test.tsx` (existing file, existing harness/mocks; `@vitest-environment jsdom` docblock already present).
 - Test inventory (one behavioral assertion per test):
   - A1, A2 written first as regression tests — confirmed to FAIL against the pre-change component before implementing.
-  - A3a, A3b, A4, A5, A8, A9a, A9b as specified in C1/C2 (A9a/A9b use `within()` from @testing-library/react for row-scoped button assertions).
+  - A3a, A3b, A4, A5, A8, A9a, A9b as specified in C1/C2 (A9a/A9b use `within()` from `@testing-library/react` for row-scoped button assertions).
   - Existing tests `filters entries by search query` and `shows no results message when search yields no entries` remain; their semantics stay valid under search-all (verified in round-1 review).
 - Test-quality constraints:
   - Fixtures use `EXT_ENTRY_TYPE.*` constants, never string literals (RT3; do not replicate the pre-existing `"SECURE_NOTE"` literals at lines 207/370).
@@ -182,6 +182,22 @@ Not affected (verified): `extension/src/background/index.ts` (fetch/cache/decryp
 | SC4 | Web-app search behavior | Already full-vault; untouched |
 | SC5 | Host-match enforcement inside `performAutofillForEntry` AND sender validation on the raw `AUTOFILL` message handler (the handler does not distinguish popup vs content-script senders — pre-existing, verified in round-2 review; not widened by this PR) | `TODO(extension-search-all-vault): SW-layer host check + AUTOFILL sender validation` — follow-up; render-time gating preserves the existing security model in this PR, and the SW change touches the shared autofill path used by inline suggestions (separate risk surface requiring its own review) |
 | SC6 | `normalizeHost` strips `www.` unconditionally ([url-matching.ts:13-15](../../../extension/src/lib/url-matching.ts#L13-L15)) — an entry stored with `urlHost = "www.<tld>"` would suffix-match any host under that TLD. Pre-existing, in an UNCHANGED file; theoretical (no legitimate credential stores a bare TLD host). Worst case: credential fill offered across a TLD for a pathological stored host. Likelihood: very low. Cost to fix here: touches host-matching semantics shared by all autofill paths — needs its own review | `TODO(extension-search-all-vault): normalizeHost TLD guard` — follow-up |
+
+## Implementation Checklist (Phase 2-1)
+
+Files to modify (verified complete; no parallel implementations — popup files have no `.js`/`-lib.ts` pair):
+- [ ] `extension/src/popup/components/MatchList.tsx` — `isSearching`/`searchResults`/`entryMatchesTab`/`canFill`, header logic (I7), no-results condition, `renderEntryRow(e, variant)` extraction (delete both duplicated `<li>` blocks), PASSKEY badge case, `displayHost` inner-shadow rename (I10)
+- [ ] `extension/src/messages/en.json` — `popup.searchResults` ("Search results"), `popup.badgePasskey` ("Passkey")
+- [ ] `extension/src/messages/ja.json` — `popup.searchResults` (検索結果), `popup.badgePasskey` (パスキー)
+- [ ] `extension/src/__tests__/popup/MatchList.test.tsx` — A1/A2 (fail-first), A3a/A3b, A4, A5, A8, A9a/A9b; duplicate test-name rename (lines 176/684); `within` import
+
+Shared assets that MUST be reused (no reimplementation — R1):
+- `sortByUrlMatch`, `isHostMatch`, `extractHost` — `extension/src/lib/url-matching.ts`
+- `EXT_ENTRY_TYPE` — `extension/src/lib/constants.ts` (PASSKEY at line 50; use constants in fixtures, RT3)
+- `t()` — `extension/src/lib/i18n.ts`; existing `filterEntries` stays in-component
+- Existing styles: section-header className `text-xs font-medium text-gray-500 dark:text-gray-400`; badge span pattern from `entryTypeBadge`; row `key` scheme `` `${e.teamId ?? "personal"}-${e.id}` ``
+
+CI gate parity (Phase 2-1 step 7): root CI gates (lint, RLS/crypto/env checks) are covered by `scripts/pre-pr.sh`; the `extension-ci` job (`npm ci && npm test && npm run build` in `extension/`) is NOT in pre-pr.sh — run both commands manually in Phase 2-4 (also listed in Testing strategy). Selected en title strings for test selectors: Fill="Fill", Copy="Copy", TOTP button title=`copyTotp` ("TOTP").
 
 ## User operation scenarios
 
