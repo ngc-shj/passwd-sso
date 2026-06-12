@@ -92,8 +92,8 @@ struct CredentialPickerView: View {
     }
     .sheet(item: $pendingConfirmation) { confirmation in
       switch confirmation {
-      case .appSide(let summary):
-        appSideConfirmationSheet(for: summary)
+      case .appSide(let summary, let mismatched):
+        appSideConfirmationSheet(for: summary, mismatched: mismatched)
       case .hostMismatch(let summary):
         hostMismatchConfirmationSheet(for: summary)
       }
@@ -145,28 +145,45 @@ struct CredentialPickerView: View {
     .listStyle(.insetGrouped)
   }
 
-  private func appSideConfirmationSheet(for summary: VaultEntrySummary) -> some View {
+  private func appSideConfirmationSheet(for summary: VaultEntrySummary, mismatched: Bool) -> some View {
     NavigationStack {
       VStack(spacing: 24) {
-        Image(systemName: "app.badge.checkmark")
+        Image(systemName: mismatched ? "exclamationmark.triangle" : "app.badge.checkmark")
           .font(.system(size: 48))
-          .foregroundStyle(.blue)
+          .foregroundStyle(mismatched ? AnyShapeStyle(.orange) : AnyShapeStyle(.blue))
 
         if let bundleID {
           Text("Fill for app?")
             .font(.headline)
+          if mismatched {
+            // Same warning content as the host-mismatch sheet: the entry's
+            // stored host does not match this app.
+            Text("**\(summary.title)** is saved for:\n\(storedHostText(for: summary))")
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+              .multilineTextAlignment(.center)
+          }
           Text("Fill **\(summary.username)** for app:\n\(bundleID)")
             .font(.subheadline)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
         }
 
-        Button("Fill") {
-          pendingConfirmation = nil
-          onSelect(summary)
+        if mismatched {
+          Button("Fill Anyway") {
+            pendingConfirmation = nil
+            onSelect(summary)
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.large)
+        } else {
+          Button("Fill") {
+            pendingConfirmation = nil
+            onSelect(summary)
+          }
+          .buttonStyle(.borderedProminent)
+          .controlSize(.large)
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
 
         Button("Cancel", role: .cancel) {
           pendingConfirmation = nil
@@ -231,10 +248,13 @@ struct CredentialPickerView: View {
   // MARK: - Selection logic
 
   private func handleSelection(_ summary: VaultEntrySummary) {
+    let mismatched = !matchedIds.contains(summary.id)
     if isAppSideRequest {
-      // Extra confirmation tap required for app-side fills.
-      pendingConfirmation = .appSide(summary)
-    } else if !matchedIds.contains(summary.id) {
+      // Extra confirmation tap required for app-side fills. The mismatch
+      // warning is folded into the same sheet — it must not be swallowed by
+      // the app-side precedence.
+      pendingConfirmation = .appSide(summary, mismatched: mismatched)
+    } else if mismatched {
       // Non-host-matched entry reached via search — confirm before filling.
       pendingConfirmation = .hostMismatch(summary)
     } else {
@@ -246,12 +266,12 @@ struct CredentialPickerView: View {
 // MARK: - Pending confirmation
 
 private enum FillConfirmation: Identifiable {
-  case appSide(VaultEntrySummary)
+  case appSide(VaultEntrySummary, mismatched: Bool)
   case hostMismatch(VaultEntrySummary)
 
   var id: String {
     switch self {
-    case .appSide(let summary): return "app-\(summary.id)"
+    case .appSide(let summary, _): return "app-\(summary.id)"
     case .hostMismatch(let summary): return "host-\(summary.id)"
     }
   }
