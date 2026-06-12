@@ -85,6 +85,9 @@ public enum MobileAPIError: Error, Equatable {
   case notFound
   case serverError(status: Int)
   case networkError(URLError)
+  /// The refresh token is dead (no refresh token, or refresh endpoint returned 401/dpopInvalid).
+  /// The only recovery is re-sign-in.
+  case authenticationRequired
 }
 
 // MARK: - Entry create request
@@ -147,19 +150,22 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   let jwk: [String: String]
   let tokenStore: HostTokenStore
   private let urlSession: URLSession
+  private let now: @Sendable () -> Date
 
   public init(
     serverURL: URL,
     signer: DPoPSigner,
     jwk: [String: String],
     tokenStore: HostTokenStore,
-    urlSession: URLSession = .shared
+    urlSession: URLSession = .shared,
+    now: @Sendable @escaping () -> Date = { Date() }
   ) {
     self.serverURL = serverURL
     self.signer = signer
     self.jwk = jwk
     self.tokenStore = tokenStore
     self.urlSession = urlSession
+    self.now = now
   }
 
   // MARK: - Public API
@@ -270,148 +276,38 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   // MARK: - Protected resource API
 
   /// Fetch vault unlock data from GET /api/vault/unlock/data.
-  /// Requires a valid access token (DPoP-signed).
+  /// Requires a valid access token (DPoP-signed). Applies the full C3 retry ladder.
   public func fetchVaultUnlockData() async throws -> VaultUnlockData {
-    guard let (accessToken, _) = try tokenStore.loadAccess() else {
-      throw MobileAPIError.serverError(status: 401)
-    }
-
-    let endpoint = serverURL.appending(
-      path: "/api/vault/unlock/data",
-      directoryHint: .notDirectory
-    )
-    let htu = canonicalHTU(url: endpoint)
-    let ath = sha256Base64URL(accessToken)
-
-    let localJWK = jwk
-    let localSigner = signer
-    let nonce = try? tokenStore.loadNonce()
-    let proof = try await buildDPoPProof(
-      htm: "GET",
-      htu: htu,
-      jwk: localJWK,
-      ath: ath,
-      nonce: nonce,
-      signer: localSigner
-    )
-
-    var request = URLRequest(url: endpoint)
-    request.httpMethod = "GET"
-    request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-    request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
-
-    let (data, response) = try await performHTTP(request)
-    let http = response as! HTTPURLResponse
-
-    if let newNonce = http.value(forHTTPHeaderField: "DPoP-Nonce") {
-      try? tokenStore.saveNonce(newNonce)
-    }
-
-    switch http.statusCode {
-    case 200:
-      return try JSONDecoder().decode(VaultUnlockData.self, from: data)
-    case 401:
-      throw MobileAPIError.serverError(status: 401)
-    default:
-      throw MobileAPIError.serverError(status: http.statusCode)
-    }
+    let url = serverURL.appending(path: "/api/vault/unlock/data", directoryHint: .notDirectory)
+    let data = try await performAuthedGET(url: url)
+    return try JSONDecoder().decode(VaultUnlockData.self, from: data)
   }
 
   /// Fetch encrypted team entries (flat response format) for a given team.
-  /// Requires a valid access token (DPoP-signed).
+  /// Requires a valid access token (DPoP-signed). Applies the full C3 retry ladder.
   public func fetchTeamEntries(teamId: String) async throws -> [TeamEncryptedEntry] {
-    guard let (accessToken, _) = try tokenStore.loadAccess() else {
-      throw MobileAPIError.serverError(status: 401)
-    }
     guard let endpointURL = resourceURL(path: "/api/teams/\(teamId)/passwords", query: "include=blob") else {
       throw MobileAPIError.serverError(status: 400)
     }
-    let htu = canonicalHTU(url: endpointURL)
-    let ath = sha256Base64URL(accessToken)
-    let localJWK = jwk
-    let localSigner = signer
-    let nonce = try? tokenStore.loadNonce()
-    let proof = try await buildDPoPProof(
-      htm: "GET",
-      htu: htu,
-      jwk: localJWK,
-      ath: ath,
-      nonce: nonce,
-      signer: localSigner
-    )
-    var request = URLRequest(url: endpointURL)
-    request.httpMethod = "GET"
-    request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-    request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
-    let (data, response) = try await performHTTP(request)
-    let http = response as! HTTPURLResponse
-    if let newNonce = http.value(forHTTPHeaderField: "DPoP-Nonce") {
-      try? tokenStore.saveNonce(newNonce)
-    }
-    switch http.statusCode {
-    case 200:
-      return try JSONDecoder().decode([TeamEncryptedEntry].self, from: data)
-    case 401:
-      throw MobileAPIError.serverError(status: 401)
-    default:
-      throw MobileAPIError.serverError(status: http.statusCode)
-    }
+    let data = try await performAuthedGET(url: endpointURL)
+    return try JSONDecoder().decode([TeamEncryptedEntry].self, from: data)
   }
 
   /// Fetch encrypted entries from a GET endpoint (personal or team).
-  /// Requires a valid access token (DPoP-signed).
+  /// Requires a valid access token (DPoP-signed). Applies the full C3 retry ladder.
   public func fetchEntries(endpoint endpointPath: String) async throws -> [EncryptedEntry] {
-    guard let (accessToken, _) = try tokenStore.loadAccess() else {
-      throw MobileAPIError.serverError(status: 401)
-    }
-
     guard let parsed = URLComponents(string: endpointPath),
           let endpointURL = resourceURL(path: parsed.path, query: parsed.percentEncodedQuery) else {
       throw MobileAPIError.serverError(status: 400)
     }
-    let htu = canonicalHTU(url: endpointURL)
-    let ath = sha256Base64URL(accessToken)
-
-    let localJWK = jwk
-    let localSigner = signer
-    let nonce = try? tokenStore.loadNonce()
-    let proof = try await buildDPoPProof(
-      htm: "GET",
-      htu: htu,
-      jwk: localJWK,
-      ath: ath,
-      nonce: nonce,
-      signer: localSigner
-    )
-
-    var request = URLRequest(url: endpointURL)
-    request.httpMethod = "GET"
-    request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-    request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
-
-    let (data, response) = try await performHTTP(request)
-    let http = response as! HTTPURLResponse
-
-    if let newNonce = http.value(forHTTPHeaderField: "DPoP-Nonce") {
-      try? tokenStore.saveNonce(newNonce)
-    }
-
-    switch http.statusCode {
-    case 200:
-      return try JSONDecoder().decode([EncryptedEntry].self, from: data)
-    case 401:
-      throw MobileAPIError.serverError(status: 401)
-    default:
-      throw MobileAPIError.serverError(status: http.statusCode)
-    }
+    let data = try await performAuthedGET(url: endpointURL)
+    return try JSONDecoder().decode([EncryptedEntry].self, from: data)
   }
 
   /// POST /api/mobile/cache-rollback-report with DPoP-signed access token.
   /// On 401 + new DPoP-Nonce, retries once.
   public func postCacheRollbackReport(_ body: CacheRollbackReportBody) async throws {
-    guard let (accessToken, _) = try tokenStore.loadAccess() else {
-      throw MobileAPIError.serverError(status: 401)
-    }
+    let accessToken = try await validAccessToken()
 
     let endpoint = serverURL.appending(
       path: "/api/mobile/cache-rollback-report",
@@ -460,9 +356,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   /// On 401 + new DPoP-Nonce, retries once with the fresh nonce.
   /// Returns the server-stored entry id (must equal the client-generated id).
   public func createEntry(body: CreateEntryRequest) async throws -> String {
-    guard let (accessToken, _) = try tokenStore.loadAccess() else {
-      throw MobileAPIError.serverError(status: 401)
-    }
+    let accessToken = try await validAccessToken()
 
     let endpoint = serverURL.appending(
       path: "/api/passwords",
@@ -510,9 +404,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   /// Requires a valid access token (DPoP-signed with ath).
   /// On 401 + new DPoP-Nonce, retries once with the fresh nonce.
   public func updateEntry(entryId: String, body: UpdateEntryRequest) async throws {
-    guard let (accessToken, _) = try tokenStore.loadAccess() else {
-      throw MobileAPIError.serverError(status: 401)
-    }
+    let accessToken = try await validAccessToken()
 
     let endpoint = serverURL.appending(
       path: "/api/passwords/\(entryId)",
@@ -553,6 +445,115 @@ public actor MobileAPIClient: VaultUnlockDataSource {
       var retryRequest = request
       retryRequest.setValue(retryProof.jws, forHTTPHeaderField: "DPoP")
       return retryRequest
+    }
+  }
+
+  // MARK: - Token management (C1/C2)
+
+  /// Proactive refresh skew: refresh the access token when it is within this many seconds of expiry.
+  private let refreshSkewSeconds: TimeInterval = 60
+
+  /// In-flight single-flight refresh task. Nil when no refresh is in progress.
+  private var refreshTask: Task<String, Error>?
+
+  /// Atomically persist a rotated token pair; uses now() for expiresAt.
+  private func persist(_ r: TokenExchangeResponse) throws {
+    try tokenStore.saveTokens(
+      access: r.accessToken,
+      refresh: r.refreshToken,
+      expiresAt: now().addingTimeInterval(TimeInterval(r.expiresIn))
+    )
+  }
+
+  /// Calls refreshToken(), persists the result, and returns the new access token.
+  /// Any refresh endpoint error is translated to .authenticationRequired.
+  private func doRefreshAndPersist() async throws -> String {
+    do {
+      let r = try await refreshToken()
+      try persist(r)
+      return r.accessToken
+    } catch let e as MobileAPIError {
+      if case .networkError = e { throw e }
+      throw MobileAPIError.authenticationRequired
+    } catch {
+      throw MobileAPIError.authenticationRequired
+    }
+  }
+
+  /// Single-flight refresh gate. Joins an in-flight refresh if one is running,
+  /// returns the already-rotated token if someone else just refreshed, or
+  /// starts exactly one refresh and returns the new access token.
+  private func ensureRefreshed(staleToken: String) async throws -> String {
+    // Join in-flight refresh (actors are reentrant at await — this is reachable).
+    if let task = refreshTask { return try await task.value }
+    // Already rotated by a prior concurrent call — return the current token.
+    if let (current, _) = try? tokenStore.loadAccess(), current != staleToken { return current }
+    let task = Task { try await self.doRefreshAndPersist() }
+    refreshTask = task
+    defer { refreshTask = nil }
+    return try await task.value
+  }
+
+  /// Returns a non-expired access token.
+  /// Throws .authenticationRequired when no token is stored or the refresh fails.
+  private func validAccessToken() async throws -> String {
+    guard let (token, expiresAt) = try tokenStore.loadAccess() else {
+      throw MobileAPIError.authenticationRequired
+    }
+    if expiresAt > now().addingTimeInterval(refreshSkewSeconds) { return token }
+    return try await ensureRefreshed(staleToken: token)
+  }
+
+  // MARK: - Shared authenticated GET (C1 + C3)
+
+  /// Performs an authenticated GET request with the full C3 retry ladder:
+  ///   1. Initial request with a proactively-valid access token.
+  ///   2. On 401: nonce-retry (once, if a new nonce arrived).
+  ///   3. On still 401: token-refresh via single-flight gate, rebuild ath, retry once.
+  ///   4. Still 401 → throws .authenticationRequired.
+  /// Saves any DPoP-Nonce the server sends on every response.
+  func performAuthedGET(url: URL) async throws -> Data {
+    let initial = try await validAccessToken()
+    let htu = canonicalHTU(url: url)
+    let localJWK = jwk
+    let localSigner = signer
+    var token = initial
+    var nonce = try? tokenStore.loadNonce()
+    var didNonceRetry = false, didRefreshRetry = false
+    while true {
+      let proof = try await buildDPoPProof(
+        htm: "GET", htu: htu, jwk: localJWK, ath: sha256Base64URL(token),
+        nonce: nonce, signer: localSigner
+      )
+      var request = URLRequest(url: url)
+      request.httpMethod = "GET"
+      request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+      request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
+      let (data, response) = try await performHTTP(request)
+      let http = response as! HTTPURLResponse
+      if let n = http.value(forHTTPHeaderField: "DPoP-Nonce") {
+        try? tokenStore.saveNonce(n)
+        nonce = n
+      }
+      switch http.statusCode {
+      case 200:
+        return data
+      case 401:
+        if !didNonceRetry, nonce != nil {
+          // Nonce challenge: re-sign the same token with the new nonce, retry once.
+          didNonceRetry = true
+          continue
+        }
+        if !didRefreshRetry {
+          // Token rejected: refresh via single-flight gate, rebuild ath with the new token.
+          didRefreshRetry = true
+          token = try await ensureRefreshed(staleToken: token)
+          continue
+        }
+        throw MobileAPIError.authenticationRequired
+      default:
+        throw MobileAPIError.serverError(status: http.statusCode)
+      }
     }
   }
 

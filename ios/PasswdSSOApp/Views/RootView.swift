@@ -252,7 +252,19 @@ struct RootView: View {
     // Drain any flags from previous AutoFill cycles before the first sync.
     await drain.drainPendingFlags(vaultKey: vaultKey)
 
-    let syncReport = try? await syncService.runSync(vaultKey: vaultKey, userId: unlockResult.userId)
+    let syncReport: SyncReport?
+    do {
+      syncReport = try await syncService.runSync(vaultKey: vaultKey, userId: unlockResult.userId)
+    } catch MobileAPIError.authenticationRequired {
+      // Refresh token is dead — the only recovery is re-sign-in.
+      appState = .setup
+      AppSettingsStore().clearTenantPolicy()
+      Task { await CredentialIdentityRegistrar().clear() }
+      return
+    } catch {
+      // Transient error (network, server) — fall back to the persisted cache.
+      syncReport = nil
+    }
 
     let tokenStore = HostTokenStore()
     let autoLockService = AutoLockService(

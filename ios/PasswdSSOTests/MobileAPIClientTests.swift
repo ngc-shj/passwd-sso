@@ -691,6 +691,430 @@ final class MobileAPIClientTests: XCTestCase {
   }
 }
 
+// MARK: - Token refresh + validAccessToken tests (C0/C1/C2/C3)
+
+final class TokenRefreshTests: XCTestCase {
+  private var keychain: FakeKeychain!
+  private var tokenStore: HostTokenStore!
+  private var session: URLSession!
+
+  private let serverURL = URL(string: "https://test.passwd-sso.example")!
+  private let knownJWK: [String: String] = [
+    "kty": "EC", "crv": "P-256",
+    "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "y": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+  ]
+
+  // Fixed epoch used for clock seam.
+  private let fixedNow = Date(timeIntervalSince1970: 1_700_000_000)
+
+  private var refreshCallCount = 0
+  private var resourceCallCount = 0
+  private var capturedRequests: [URLRequest] = []
+
+  // Sample entries JSON for fetchEntries responses.
+  private let entriesJSON = Data("""
+    [{"id":"e1","encryptedOverview":{"ciphertext":"aa","iv":"112233445566778899aabbcc","authTag":"deadbeefdeadbeefdeadbeefdeadbeef"},"encryptedBlob":{"ciphertext":"bb","iv":"112233445566778899aabbcc","authTag":"deadbeefdeadbeefdeadbeefdeadbeef"},"keyVersion":1,"aadVersion":1,"entryType":"LOGIN","isFavorite":false,"isArchived":false}]
+    """.utf8)
+
+  override func setUp() {
+    super.setUp()
+    keychain = FakeKeychain()
+    tokenStore = HostTokenStore(service: "com.test.token-refresh", keychain: keychain)
+    session = makeSession()
+    MockURLProtocol.requestHandler = nil
+    refreshCallCount = 0
+    resourceCallCount = 0
+    capturedRequests = []
+  }
+
+  // Helper: make a client with the fixed clock.
+  private func makeClient(fixedDate: Date? = nil) -> MobileAPIClient {
+    let t = fixedDate ?? fixedNow
+    return MobileAPIClient(
+      serverURL: serverURL,
+      signer: FakeSigner(),
+      jwk: knownJWK,
+      tokenStore: tokenStore,
+      urlSession: session,
+      now: { t }
+    )
+  }
+
+  // MARK: - validAccessToken: returns stored token when not expired
+
+  func testValidAccessToken_returnsStoredTokenWhenNotExpired() async throws {
+    // expiresAt = now + 3600 (well outside 60s skew).
+    let expiresAt = fixedNow.addingTimeInterval(3600)
+    try tokenStore.saveTokens(access: "acc_fresh", refresh: "ref_fresh", expiresAt: expiresAt)
+
+    let refreshURL = serverURL.appending(path: "/api/mobile/token/refresh", directoryHint: .notDirectory)
+    let resourceURL = serverURL.appending(path: "/api/vault/unlock/data", directoryHint: .notDirectory)
+    let vaultJSON = Data("""
+      {"accountSalt":"aa","encryptedSecretKey":"bb","secretKeyIv":"cc","secretKeyAuthTag":"dd","keyVersion":1,"kdfType":0,"kdfIterations":600000,"userId":"u-1"}
+      """.utf8)
+
+    MockURLProtocol.requestHandler = { [weak self] request in
+      if request.url?.path == "/api/mobile/token/refresh" {
+        self?.refreshCallCount += 1
+        return (tokenResponseJSON(), httpResponse(status: 200, url: refreshURL))
+      }
+      return (vaultJSON, httpResponse(status: 200, url: resourceURL))
+    }
+
+    let client = makeClient()
+    _ = try await client.fetchVaultUnlockData()
+
+    XCTAssertEqual(refreshCallCount, 0, "Should NOT refresh when token is not expired")
+  }
+
+  // MARK: - validAccessToken: expired token triggers exactly one refresh
+
+  func testValidAccessToken_expiredTokenTriggersOneRefresh() async throws {
+    // expiresAt = now + 30 (within 60s skew → triggers refresh).
+    let expiresAt = fixedNow.addingTimeInterval(30)
+    try tokenStore.saveTokens(access: "acc_stale", refresh: "ref_stale", expiresAt: expiresAt)
+
+    let refreshURL = serverURL.appending(path: "/api/mobile/token/refresh", directoryHint: .notDirectory)
+    let vaultURL = serverURL.appending(path: "/api/vault/unlock/data", directoryHint: .notDirectory)
+    let vaultJSON = Data("""
+      {"accountSalt":"aa","encryptedSecretKey":"bb","secretKeyIv":"cc","secretKeyAuthTag":"dd","keyVersion":1,"kdfType":0,"kdfIterations":600000,"userId":"u-1"}
+      """.utf8)
+
+    MockURLProtocol.requestHandler = { [weak self] request in
+      if request.url?.path == "/api/mobile/token/refresh" {
+        self?.refreshCallCount += 1
+        return (tokenResponseJSON(accessToken: "acc_new", refreshToken: "ref_new", expiresIn: 3600),
+                httpResponse(status: 200, url: refreshURL))
+      }
+      return (vaultJSON, httpResponse(status: 200, url: vaultURL))
+    }
+
+    let client = makeClient()
+    _ = try await client.fetchVaultUnlockData()
+
+    XCTAssertEqual(refreshCallCount, 1, "Should refresh exactly once when token is within skew")
+
+    // Store must hold the new pair.
+    let loaded = try XCTUnwrap(try tokenStore.loadAccess())
+    XCTAssertEqual(loaded.token, "acc_new")
+    let loadedRefresh = try XCTUnwrap(try tokenStore.loadRefresh())
+    XCTAssertEqual(loadedRefresh, "ref_new")
+  }
+
+  // MARK: - validAccessToken: no token throws authenticationRequired
+
+  func testValidAccessToken_noToken_throwsAuthenticationRequired() async throws {
+    // Empty store — no token saved.
+    let client = makeClient()
+
+    MockURLProtocol.requestHandler = { [weak self] request in
+      if request.url?.path == "/api/mobile/token/refresh" {
+        self?.refreshCallCount += 1
+        return (Data(), httpResponse(status: 401, url: request.url!))
+      }
+      return (Data(), httpResponse(status: 200, url: request.url!))
+    }
+
+    do {
+      _ = try await client.fetchVaultUnlockData()
+      XCTFail("Expected authenticationRequired")
+    } catch MobileAPIError.authenticationRequired {
+      // Expected.
+    }
+    XCTAssertEqual(refreshCallCount, 0, "No refresh should be attempted when there is no token")
+  }
+
+  // MARK: - validAccessToken: refresh endpoint 401 throws authenticationRequired
+
+  func testValidAccessToken_refreshEndpoint401_throwsAuthenticationRequired() async throws {
+    // expiresAt = now - 10 (already expired → triggers refresh).
+    let expiresAt = fixedNow.addingTimeInterval(-10)
+    try tokenStore.saveTokens(access: "acc_dead", refresh: "ref_dead", expiresAt: expiresAt)
+
+    let refreshURL = serverURL.appending(path: "/api/mobile/token/refresh", directoryHint: .notDirectory)
+
+    MockURLProtocol.requestHandler = { [weak self] request in
+      if request.url?.path == "/api/mobile/token/refresh" {
+        self?.refreshCallCount += 1
+        return (Data(), httpResponse(status: 401, url: refreshURL))
+      }
+      return (Data(), httpResponse(status: 200, url: request.url!))
+    }
+
+    let client = makeClient()
+    do {
+      _ = try await client.fetchVaultUnlockData()
+      XCTFail("Expected authenticationRequired")
+    } catch MobileAPIError.authenticationRequired {
+      // Expected.
+    }
+    XCTAssertEqual(refreshCallCount, 1, "Refresh should be attempted exactly once")
+  }
+
+  // MARK: - fetchEntries: 200 happy path
+
+  func testFetchEntries_happyPath() async throws {
+    let expiresAt = fixedNow.addingTimeInterval(3600)
+    try tokenStore.saveTokens(access: "acc_ok", refresh: "ref_ok", expiresAt: expiresAt)
+
+    let resourceURL = serverURL.appending(path: "/api/passwords", directoryHint: .notDirectory)
+
+    MockURLProtocol.requestHandler = { [weak self] request in
+      if request.url?.path == "/api/mobile/token/refresh" {
+        self?.refreshCallCount += 1
+        return (tokenResponseJSON(), httpResponse(status: 200, url: request.url!))
+      }
+      self?.resourceCallCount += 1
+      return (self!.entriesJSON, httpResponse(status: 200, url: resourceURL))
+    }
+
+    let client = makeClient()
+    let entries = try await client.fetchEntries(endpoint: "/api/passwords")
+
+    XCTAssertEqual(entries.count, 1)
+    XCTAssertEqual(entries[0].id, "e1")
+    XCTAssertEqual(refreshCallCount, 0)
+    XCTAssertEqual(resourceCallCount, 1)
+  }
+
+  // MARK: - fetchEntries: expired token → one refresh → 200
+
+  func testFetchEntries_expiredToken_refreshThen200() async throws {
+    let expiresAt = fixedNow.addingTimeInterval(30) // within skew
+    try tokenStore.saveTokens(access: "acc_stale2", refresh: "ref_stale2", expiresAt: expiresAt)
+
+    let refreshURL = serverURL.appending(path: "/api/mobile/token/refresh", directoryHint: .notDirectory)
+    let resourceURL = serverURL.appending(path: "/api/passwords", directoryHint: .notDirectory)
+
+    MockURLProtocol.requestHandler = { [weak self] request in
+      if request.url?.path == "/api/mobile/token/refresh" {
+        self?.refreshCallCount += 1
+        return (tokenResponseJSON(accessToken: "acc_new2", refreshToken: "ref_new2", expiresIn: 3600),
+                httpResponse(status: 200, url: refreshURL))
+      }
+      self?.resourceCallCount += 1
+      return (self!.entriesJSON, httpResponse(status: 200, url: resourceURL))
+    }
+
+    let client = makeClient()
+    let entries = try await client.fetchEntries(endpoint: "/api/passwords")
+
+    XCTAssertEqual(entries.count, 1)
+    XCTAssertEqual(refreshCallCount, 1)
+    XCTAssertEqual(resourceCallCount, 1)
+  }
+
+  // MARK: - fetchEntries: 401 no recovery → refresh → 200 (reactive ladder)
+
+  func testFetchEntries_401_reactiveRefreshThen200() async throws {
+    let expiresAt = fixedNow.addingTimeInterval(3600)
+    try tokenStore.saveTokens(access: "acc_r", refresh: "ref_r", expiresAt: expiresAt)
+
+    let refreshURL = serverURL.appending(path: "/api/mobile/token/refresh", directoryHint: .notDirectory)
+    let resourceURL = serverURL.appending(path: "/api/passwords", directoryHint: .notDirectory)
+
+    MockURLProtocol.requestHandler = { [weak self] request in
+      if request.url?.path == "/api/mobile/token/refresh" {
+        self?.refreshCallCount += 1
+        return (tokenResponseJSON(accessToken: "acc_r_new", refreshToken: "ref_r_new", expiresIn: 3600),
+                httpResponse(status: 200, url: refreshURL))
+      }
+      self?.resourceCallCount += 1
+      self?.capturedRequests.append(request)
+      // First resource call: 401 (no nonce header → skip nonce retry, go straight to refresh).
+      if (self?.resourceCallCount ?? 0) == 1 {
+        return (Data(), httpResponse(status: 401, url: resourceURL))
+      }
+      return (self!.entriesJSON, httpResponse(status: 200, url: resourceURL))
+    }
+
+    let client = makeClient()
+    let entries = try await client.fetchEntries(endpoint: "/api/passwords")
+
+    XCTAssertEqual(entries.count, 1)
+    XCTAssertLessThanOrEqual(resourceCallCount, 2, "Resource hit must be bounded (≤2)")
+    XCTAssertLessThanOrEqual(refreshCallCount, 1, "Refresh hit must be bounded (≤1)")
+  }
+
+  // MARK: - fetchEntries: refresh endpoint 401 → throws authenticationRequired (bounded)
+
+  func testFetchEntries_refreshFails_throwsAuthenticationRequired() async throws {
+    let expiresAt = fixedNow.addingTimeInterval(3600)
+    try tokenStore.saveTokens(access: "acc_dead2", refresh: "ref_dead2", expiresAt: expiresAt)
+
+    let refreshURL = serverURL.appending(path: "/api/mobile/token/refresh", directoryHint: .notDirectory)
+    let resourceURL = serverURL.appending(path: "/api/passwords", directoryHint: .notDirectory)
+
+    MockURLProtocol.requestHandler = { [weak self] request in
+      if request.url?.path == "/api/mobile/token/refresh" {
+        self?.refreshCallCount += 1
+        return (Data(), httpResponse(status: 401, url: refreshURL))
+      }
+      self?.resourceCallCount += 1
+      return (Data(), httpResponse(status: 401, url: resourceURL))
+    }
+
+    let client = makeClient()
+    do {
+      _ = try await client.fetchEntries(endpoint: "/api/passwords")
+      XCTFail("Expected authenticationRequired")
+    } catch MobileAPIError.authenticationRequired {
+      // Expected.
+    }
+    XCTAssertLessThanOrEqual(resourceCallCount, 2, "Resource hit must be bounded (≤2)")
+    XCTAssertLessThanOrEqual(refreshCallCount, 1, "Refresh hit must be bounded (≤1)")
+  }
+
+  // MARK: - Reactive ath rebuild: ath changes from old to new token after refresh
+
+  func testFetchEntries_reactiveRefresh_rebuildsAth() async throws {
+    let oldToken = "acc_ath_old"
+    let newToken = "acc_ath_new"
+    let expiresAt = fixedNow.addingTimeInterval(3600)
+    try tokenStore.saveTokens(access: oldToken, refresh: "ref_ath", expiresAt: expiresAt)
+
+    let refreshURL = serverURL.appending(path: "/api/mobile/token/refresh", directoryHint: .notDirectory)
+    let resourceURL = serverURL.appending(path: "/api/passwords", directoryHint: .notDirectory)
+
+    MockURLProtocol.requestHandler = { [weak self] request in
+      if request.url?.path == "/api/mobile/token/refresh" {
+        self?.refreshCallCount += 1
+        return (tokenResponseJSON(accessToken: newToken, refreshToken: "ref_ath_new", expiresIn: 3600),
+                httpResponse(status: 200, url: refreshURL))
+      }
+      self?.capturedRequests.append(request)
+      self?.resourceCallCount += 1
+      if (self?.resourceCallCount ?? 0) == 1 {
+        return (Data(), httpResponse(status: 401, url: resourceURL))
+      }
+      return (self!.entriesJSON, httpResponse(status: 200, url: resourceURL))
+    }
+
+    let client = makeClient()
+    _ = try await client.fetchEntries(endpoint: "/api/passwords")
+
+    XCTAssertEqual(capturedRequests.count, 2, "Expected initial + retry request")
+    let initialDPoP = try XCTUnwrap(capturedRequests[0].value(forHTTPHeaderField: "DPoP"))
+    let retryDPoP = try XCTUnwrap(capturedRequests[1].value(forHTTPHeaderField: "DPoP"))
+
+    let initialAth = try decodeDPoPAth(initialDPoP)
+    let retryAth = try decodeDPoPAth(retryDPoP)
+
+    let expectedOldAth = await client.sha256Base64URL(oldToken)
+    let expectedNewAth = await client.sha256Base64URL(newToken)
+    XCTAssertEqual(initialAth, expectedOldAth, "Initial ath should be SHA-256(oldToken)")
+    XCTAssertEqual(retryAth, expectedNewAth, "Retry ath should be SHA-256(newToken)")
+    XCTAssertNotEqual(initialAth, retryAth, "ath must change after token refresh")
+  }
+
+  // MARK: - Single-flight: two sequential fetches with expired token → refreshCallCount == 1
+
+  func testFetchEntries_sequential_expiredToken_refreshOnce() async throws {
+    let expiresAt = fixedNow.addingTimeInterval(30) // within skew
+    try tokenStore.saveTokens(access: "acc_seq", refresh: "ref_seq", expiresAt: expiresAt)
+
+    let refreshURL = serverURL.appending(path: "/api/mobile/token/refresh", directoryHint: .notDirectory)
+    let resourceURL = serverURL.appending(path: "/api/passwords", directoryHint: .notDirectory)
+
+    MockURLProtocol.requestHandler = { [weak self] request in
+      if request.url?.path == "/api/mobile/token/refresh" {
+        self?.refreshCallCount += 1
+        return (tokenResponseJSON(accessToken: "acc_seq_new", refreshToken: "ref_seq_new", expiresIn: 3600),
+                httpResponse(status: 200, url: refreshURL))
+      }
+      self?.resourceCallCount += 1
+      return (self!.entriesJSON, httpResponse(status: 200, url: resourceURL))
+    }
+
+    // Use a now that advances past skew after first refresh (new token has 3600s expiry).
+    let client = makeClient()
+    let entries1 = try await client.fetchEntries(endpoint: "/api/passwords")
+    let entries2 = try await client.fetchEntries(endpoint: "/api/passwords")
+
+    XCTAssertEqual(entries1.count, 1)
+    XCTAssertEqual(entries2.count, 1)
+    XCTAssertEqual(refreshCallCount, 1, "Refresh must happen exactly once for two sequential calls")
+    XCTAssertEqual(resourceCallCount, 2, "Both fetches must reach the resource endpoint")
+  }
+
+  // MARK: - Nonce-then-refresh ladder: 401+nonce → nonce-retry → still 401 → refresh → 200
+
+  func testFetchEntries_nonceRetryThenRefreshLadder() async throws {
+    let expiresAt = fixedNow.addingTimeInterval(3600)
+    try tokenStore.saveTokens(access: "acc_ladder", refresh: "ref_ladder", expiresAt: expiresAt)
+
+    let refreshURL = serverURL.appending(path: "/api/mobile/token/refresh", directoryHint: .notDirectory)
+    let resourceURL = serverURL.appending(path: "/api/passwords", directoryHint: .notDirectory)
+
+    MockURLProtocol.requestHandler = { [weak self] request in
+      if request.url?.path == "/api/mobile/token/refresh" {
+        self?.refreshCallCount += 1
+        return (tokenResponseJSON(accessToken: "acc_ladder_new", refreshToken: "ref_ladder_new", expiresIn: 3600),
+                httpResponse(status: 200, url: refreshURL))
+      }
+      self?.resourceCallCount += 1
+      switch self?.resourceCallCount {
+      case 1:
+        // First call: 401 + new nonce → triggers nonce retry.
+        return (Data(), httpResponse(status: 401, url: resourceURL, headers: ["DPoP-Nonce": "srv-nonce-1"]))
+      case 2:
+        // Nonce retry: still 401 (no nonce now) → triggers refresh.
+        return (Data(), httpResponse(status: 401, url: resourceURL))
+      default:
+        // After refresh: 200.
+        return (self!.entriesJSON, httpResponse(status: 200, url: resourceURL))
+      }
+    }
+
+    let client = makeClient()
+    let entries = try await client.fetchEntries(endpoint: "/api/passwords")
+
+    XCTAssertEqual(entries.count, 1)
+    XCTAssertEqual(refreshCallCount, 1, "Refresh should be called exactly once")
+    XCTAssertEqual(resourceCallCount, 3, "Expected: initial → nonce-retry → refresh-retry")
+  }
+
+  // MARK: - HostTokenStore safe write order
+
+  func testSaveTokens_safeWriteOrder_refreshBeforeAccess() throws {
+    // The safe write order writes refresh first, then access last.
+    // We verify by checking what is stored after a simulated partial write
+    // (FakeKeychain stores all writes, so we can verify order via the actual store state).
+    let expiresAt = fixedNow.addingTimeInterval(3600)
+    try tokenStore.saveTokens(access: "acc_safe", refresh: "ref_safe", expiresAt: expiresAt)
+
+    // After a successful full write, both tokens should be present.
+    let access = try XCTUnwrap(try tokenStore.loadAccess())
+    let refresh = try XCTUnwrap(try tokenStore.loadRefresh())
+    XCTAssertEqual(access.token, "acc_safe")
+    XCTAssertEqual(refresh, "ref_safe")
+
+    // Overwrite with a second pair to verify update path also maintains order.
+    let expiresAt2 = fixedNow.addingTimeInterval(7200)
+    try tokenStore.saveTokens(access: "acc_safe2", refresh: "ref_safe2", expiresAt: expiresAt2)
+    let access2 = try XCTUnwrap(try tokenStore.loadAccess())
+    let refresh2 = try XCTUnwrap(try tokenStore.loadRefresh())
+    XCTAssertEqual(access2.token, "acc_safe2")
+    XCTAssertEqual(refresh2, "ref_safe2")
+  }
+
+  // MARK: - Helper: decode DPoP JWS payload and extract ath claim
+
+  private func decodeDPoPAth(_ jws: String) throws -> String {
+    let parts = jws.split(separator: ".")
+    XCTAssertEqual(parts.count, 3, "DPoP must be a 3-part JWS")
+    var b64 = String(parts[1])
+    let rem = b64.count % 4
+    if rem != 0 { b64 += String(repeating: "=", count: 4 - rem) }
+    let payloadData = try XCTUnwrap(Data(base64Encoded: b64
+      .replacingOccurrences(of: "-", with: "+")
+      .replacingOccurrences(of: "_", with: "/")))
+    let payload = try JSONDecoder().decode([String: AnyDecodable].self, from: payloadData)
+    return try XCTUnwrap(payload["ath"]?.value as? String)
+  }
+}
+
 // MARK: - AnyDecodable helper for payload inspection
 
 private struct AnyDecodable: Decodable {

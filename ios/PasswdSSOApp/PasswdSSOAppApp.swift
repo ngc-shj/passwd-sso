@@ -53,7 +53,16 @@ struct PasswdSSOAppApp: App {
             // 2. Re-sync the encrypted-entries cache.
             guard let syncService = activeSyncService,
                   let userId = currentUserId else { return }
-            let report = try? await syncService.runSync(vaultKey: vaultKey, userId: userId)
+            let report: SyncReport?
+            do {
+              report = try await syncService.runSync(vaultKey: vaultKey, userId: userId)
+            } catch MobileAPIError.authenticationRequired {
+              // Refresh token dead — no recovery in background; just stop.
+              return
+            } catch {
+              // Transient error — keep using cached data; do nothing.
+              return
+            }
             // 3. Re-register QuickType identities for the freshly-synced set.
             if let cacheData = report?.cacheData {
               let summaries = decryptPersonalOverviews(

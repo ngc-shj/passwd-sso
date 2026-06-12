@@ -221,8 +221,9 @@ final class EntryFetcherTests: XCTestCase {
     do {
       _ = try await fetcher.fetchPersonal()
       XCTFail("Expected error on 401")
-    } catch MobileAPIError.serverError(let status) {
-      XCTAssertEqual(status, 401)
+    } catch MobileAPIError.authenticationRequired {
+      // 401 on the resource exhausts the retry ladder (no refresh token stored) →
+      // authenticationRequired is the correct post-C3 behavior.
     } catch {
       XCTFail("Unexpected error: \(error)")
     }

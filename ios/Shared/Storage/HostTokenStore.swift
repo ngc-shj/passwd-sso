@@ -37,9 +37,14 @@ public final class HostTokenStore: Sendable {
 
   public func saveTokens(access: String, refresh: String, expiresAt: Date) throws {
     let expiryString = ISO8601DateFormatter().string(from: expiresAt)
-    try save(string: access, account: .accessToken)
+    // Write order: refresh FIRST, expiry SECOND, access LAST.
+    // A partial write (crash mid-sequence) must never leave a new access token paired
+    // with an old refresh token — that would trigger replay detection on the next
+    // refresh (old refresh reused → family revoke → forced sign-out). Writing refresh
+    // before access ensures (new-or-old refresh) is always ≥ epoch of the access token.
     try save(string: refresh, account: .refreshToken)
     try save(string: expiryString, account: .accessTokenExpiry)
+    try save(string: access, account: .accessToken)
   }
 
   public func loadAccess() throws -> (token: String, expiresAt: Date)? {

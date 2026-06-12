@@ -76,10 +76,14 @@ final class BackgroundSyncRunner: @unchecked Sendable {
     do {
       _ = try await service.runSync(vaultKey: key, userId: uid)
       box.task.setTaskCompleted(success: true)
+      BackgroundSyncTask.scheduleNext()
+    } catch MobileAPIError.authenticationRequired {
+      // Refresh token is dead — do not reschedule; a dead token won't recover by retrying.
+      box.task.setTaskCompleted(success: false)
     } catch {
       box.task.setTaskCompleted(success: false)
+      BackgroundSyncTask.scheduleNext()
     }
-    BackgroundSyncTask.scheduleNext()
   }
 }
 
