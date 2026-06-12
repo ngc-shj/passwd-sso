@@ -6,6 +6,7 @@ import "@testing-library/jest-dom/vitest";
 const {
   mockStartPasskeyAuthentication,
   mockIsWebAuthnSupported,
+  mockAbortInFlightCeremony,
   mockRouterPush,
   mockFetch,
   mockStashPrf,
@@ -13,6 +14,7 @@ const {
 } = vi.hoisted(() => ({
   mockStartPasskeyAuthentication: vi.fn(),
   mockIsWebAuthnSupported: vi.fn(() => true),
+  mockAbortInFlightCeremony: vi.fn(),
   mockRouterPush: vi.fn(),
   mockFetch: vi.fn(),
   mockStashPrf: vi.fn(),
@@ -50,6 +52,7 @@ vi.mock("@/lib/auth/webauthn/webauthn-client", () => ({
   startPasskeyAuthentication: (
     ...args: unknown[]
   ) => mockStartPasskeyAuthentication(...args),
+  abortInFlightCeremony: () => mockAbortInFlightCeremony(),
 }));
 
 import { SecurityKeySignInForm } from "./security-key-signin-form";
@@ -79,6 +82,13 @@ describe("SecurityKeySignInForm — §Sec-7 WebAuthn / PRF", () => {
     mockIsWebAuthnSupported.mockReturnValue(false);
     const { container } = render(<SecurityKeySignInForm />);
     expect(container.firstChild).toBeNull();
+  });
+
+  it("aborts any in-flight ceremony on unmount (releases a ceremony stranded by navigation)", () => {
+    const { unmount } = render(<SecurityKeySignInForm />);
+    expect(mockAbortInFlightCeremony).not.toHaveBeenCalled();
+    unmount();
+    expect(mockAbortInFlightCeremony).toHaveBeenCalledTimes(1);
   });
 
   it("disables the submit button until an email is entered (R26 disabled cue)", () => {

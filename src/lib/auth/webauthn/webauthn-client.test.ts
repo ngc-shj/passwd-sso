@@ -242,6 +242,136 @@ describe("startPasskeyAuthentication PRF extension wiring", () => {
   });
 });
 
+// In-flight ceremony guard: Chrome services only one WebAuthn ceremony at a
+// time and silently drops a concurrent modal request. The guard must abort a
+// stale pending ceremony so a new one (or a retry) can surface its prompt.
+describe("startPasskeyAuthentication in-flight ceremony guard", () => {
+  const AUTH_OPTIONS: Record<string, unknown> = {
+    challenge: "Y2hhbGxlbmdl",
+    rpId: "localhost",
+    allowCredentials: [],
+  };
+
+  function credentialResult() {
+    return {
+      id: "cred-id",
+      rawId: new Uint8Array(8).buffer,
+      type: "public-key",
+      response: {
+        clientDataJSON: new Uint8Array(8).buffer,
+        authenticatorData: new Uint8Array(8).buffer,
+        signature: new Uint8Array(8).buffer,
+        userHandle: null,
+      },
+      getClientExtensionResults: () => ({}),
+    };
+  }
+
+  // A get()/create() that never settles on its own — only the abort signal
+  // can reject it, mirroring a real ceremony waiting for an OS prompt.
+  function hangingUntilAbort() {
+    return ({ signal }: { signal: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () =>
+          reject(new DOMException("aborted", "AbortError")),
+        );
+      });
+  }
+
+  // Resolve to the promise's value or a TIMED_OUT sentinel if it does not
+  // settle within `ms`. Keeps a regression (guard removed → stale ceremony
+  // never aborted) failing fast with a clear assertion instead of stalling on
+  // vitest's 10s testTimeout.
+  const TIMED_OUT = Symbol("timed-out");
+  function within<T>(p: Promise<T>, ms = 500): Promise<T | typeof TIMED_OUT> {
+    let timer: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
+      timer = setTimeout(() => resolve(TIMED_OUT), ms);
+    });
+    return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+  }
+
+  beforeEach(async () => {
+    const { abortInFlightCeremony } = await import("./webauthn-client");
+    abortInFlightCeremony();
+  });
+
+  it("aborts a stale pending ceremony when a new one starts; the new one resolves", async () => {
+    const get = vi
+      .fn()
+      .mockImplementationOnce(hangingUntilAbort())
+      .mockImplementationOnce(async () => credentialResult());
+    vi.stubGlobal("navigator", { ...globalThis.navigator, credentials: { get } });
+
+    const { startPasskeyAuthentication } = await import("./webauthn-client");
+
+    const first = startPasskeyAuthentication(AUTH_OPTIONS);
+    const firstSettled = first.then(
+      () => "resolved",
+      (e: unknown) => e,
+    );
+
+    const second = await startPasskeyAuthentication(AUTH_OPTIONS);
+
+    const firstOutcome = await within(firstSettled);
+    expect(firstOutcome).toBeInstanceOf(Error);
+    expect((firstOutcome as Error).message).toBe("AUTHENTICATION_CANCELLED");
+    expect(second.responseJSON).toBeTruthy();
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  it("abortInFlightCeremony() cancels the in-flight ceremony", async () => {
+    const get = vi.fn(hangingUntilAbort());
+    vi.stubGlobal("navigator", { ...globalThis.navigator, credentials: { get } });
+
+    const { startPasskeyAuthentication, abortInFlightCeremony } = await import(
+      "./webauthn-client"
+    );
+
+    const pending = startPasskeyAuthentication(AUTH_OPTIONS);
+    const settled = pending.then(
+      () => "resolved",
+      (e: unknown) => e,
+    );
+
+    abortInFlightCeremony();
+
+    const outcome = await within(settled);
+    expect(outcome).toBeInstanceOf(Error);
+    expect((outcome as Error).message).toBe("AUTHENTICATION_CANCELLED");
+  });
+
+  it("a new authentication aborts a stale pending registration (shared create/get guard)", async () => {
+    const create = vi.fn(hangingUntilAbort());
+    const get = vi.fn(async () => credentialResult());
+    vi.stubGlobal("navigator", {
+      ...globalThis.navigator,
+      credentials: { create, get },
+    });
+
+    const { startPasskeyRegistration, startPasskeyAuthentication } = await import(
+      "./webauthn-client"
+    );
+
+    const reg = startPasskeyRegistration({
+      rp: { id: "localhost", name: "x" },
+      user: { id: "dXNlcg", name: "u", displayName: "U" },
+      challenge: "Y2hhbGxlbmdl",
+      pubKeyCredParams: [],
+    });
+    const regSettled = reg.then(
+      () => "resolved",
+      (e: unknown) => e,
+    );
+
+    await startPasskeyAuthentication(AUTH_OPTIONS);
+
+    const regOutcome = await within(regSettled);
+    expect(regOutcome).toBeInstanceOf(Error);
+    expect((regOutcome as Error).message).toBe("REGISTRATION_CANCELLED");
+  });
+});
+
 describe("isWebAuthnSupported", () => {
   it("returns true when window.PublicKeyCredential is defined", () => {
     // jsdom does not ship PublicKeyCredential; stub it for this test.

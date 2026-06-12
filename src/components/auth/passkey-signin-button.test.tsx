@@ -7,6 +7,7 @@ import "@testing-library/jest-dom/vitest";
 const {
   mockStartPasskeyAuthentication,
   mockIsWebAuthnSupported,
+  mockAbortInFlightCeremony,
   mockRouterPush,
   mockFetch,
   mockStashPrf,
@@ -14,6 +15,7 @@ const {
 } = vi.hoisted(() => ({
   mockStartPasskeyAuthentication: vi.fn(),
   mockIsWebAuthnSupported: vi.fn(() => true),
+  mockAbortInFlightCeremony: vi.fn(),
   mockRouterPush: vi.fn(),
   mockFetch: vi.fn(),
   mockStashPrf: vi.fn(),
@@ -52,6 +54,7 @@ vi.mock("@/lib/auth/webauthn/webauthn-client", () => ({
   startPasskeyAuthentication: (
     ...args: unknown[]
   ) => mockStartPasskeyAuthentication(...args),
+  abortInFlightCeremony: () => mockAbortInFlightCeremony(),
 }));
 
 import { PasskeySignInButton } from "./passkey-signin-button";
@@ -89,6 +92,13 @@ describe("PasskeySignInButton — §Sec-7 WebAuthn / PRF", () => {
   it("renders the sign-in-with-passkey button when supported (R26: enabled by default)", () => {
     render(<PasskeySignInButton />);
     expect(screen.getByRole("button", { name: /signInWithPasskey/ })).not.toBeDisabled();
+  });
+
+  it("aborts any in-flight ceremony on unmount (releases a ceremony stranded by navigation)", () => {
+    const { unmount } = render(<PasskeySignInButton />);
+    expect(mockAbortInFlightCeremony).not.toHaveBeenCalled();
+    unmount();
+    expect(mockAbortInFlightCeremony).toHaveBeenCalledTimes(1);
   });
 
   it("(success) hands the live PRF buffer to the in-memory channel (NOT sessionStorage) WITHOUT zeroizing it", async () => {

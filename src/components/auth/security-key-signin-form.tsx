@@ -9,6 +9,7 @@ import { Loader2, KeyRound } from "lucide-react";
 import {
   isWebAuthnSupported,
   startPasskeyAuthentication,
+  abortInFlightCeremony,
 } from "@/lib/auth/webauthn/webauthn-client";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
@@ -27,6 +28,9 @@ export function SecurityKeySignInForm() {
 
   useEffect(() => {
     setSupported(isWebAuthnSupported());
+    // Release any ceremony left pending if the user navigates away mid-prompt,
+    // so it can't silently block the next passkey attempt.
+    return abortInFlightCeremony;
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
