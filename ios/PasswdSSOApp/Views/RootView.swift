@@ -1,5 +1,6 @@
 import CryptoKit
 import LocalAuthentication
+import OSLog
 import Shared
 import SwiftUI
 
@@ -255,16 +256,17 @@ struct RootView: View {
     let syncReport: SyncReport?
     do {
       syncReport = try await syncService.runSync(vaultKey: vaultKey, userId: unlockResult.userId)
-    } catch MobileAPIError.authenticationRequired {
-      // Refresh token is dead — the only recovery is re-sign-in. Clear the dead
-      // tokens (parity with the explicit sign-out path) so no stale credential lingers.
-      try? HostTokenStore().deleteAll()
-      appState = .setup
-      AppSettingsStore().clearTenantPolicy()
-      Task { await CredentialIdentityRegistrar().clear() }
-      return
     } catch {
-      // Transient error (network, server) — fall back to the persisted cache.
+      // The user has just unlocked with a valid vault key + session. A sync
+      // failure here (network, server, or auth) must NOT bounce them back to
+      // sign-in or wipe tokens mid-unlock — that produced a sign-in loop. Fall
+      // back to the persisted cache; the access-token refresh (C1) already makes
+      // the sync succeed across a normal token expiry. A genuinely dead refresh
+      // token surfaces as stale data, recoverable by an explicit manual Sign Out.
+      // Diagnostic only (no secrets — MobileAPIError cases carry no token data):
+      // captures WHY an unlock-time sync failed so a stale-data report is debuggable.
+      Logger(subsystem: "jp.jpng.passwd-sso", category: "sync")
+        .error("unlock-time runSync failed: \(String(describing: error), privacy: .public)")
       syncReport = nil
     }
 

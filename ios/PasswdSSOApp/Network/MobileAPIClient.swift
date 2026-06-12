@@ -555,7 +555,13 @@ public actor MobileAPIClient: VaultUnlockDataSource {
           token = try await ensureRefreshed(staleToken: token)
           continue
         }
-        throw MobileAPIError.authenticationRequired
+        // Refresh SUCCEEDED (ensureRefreshed would have thrown otherwise) yet the
+        // resource still 401s — this is NOT a dead session (the token is valid),
+        // it's a resource/authorization-level rejection. Surface it as a transient
+        // serverError so callers fall back to cached data, NOT authenticationRequired
+        // (which would route to re-sign-in / wipe tokens). Only a failed refresh
+        // (ensureRefreshed → authenticationRequired) means the session is dead.
+        throw MobileAPIError.serverError(status: 401)
       default:
         throw MobileAPIError.serverError(status: http.statusCode)
       }
