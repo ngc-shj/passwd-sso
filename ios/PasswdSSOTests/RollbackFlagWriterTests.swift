@@ -31,6 +31,7 @@ final class RollbackFlagWriterTests: XCTestCase {
       expectedCounter: 42,
       observedCounter: 99,
       headerIssuedAt: Date(timeIntervalSince1970: 1_000_000),
+      lastSuccessfulRefreshAt: Date(timeIntervalSince1970: 1_000_100),
       rejectionKind: kind
     )
   }
@@ -88,6 +89,7 @@ final class RollbackFlagWriterTests: XCTestCase {
       expectedCounter: 100,
       observedCounter: 200,
       headerIssuedAt: nil,
+      lastSuccessfulRefreshAt: nil,
       rejectionKind: .headerStale
     )
     try await flagWriter.writeFlag(payload: secondPayload, vaultKey: secondVaultKey)

@@ -18,7 +18,7 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
 
   private let defaults: UserDefaults
 
-  init(defaults: UserDefaults = UserDefaults(suiteName: "group.jp.jpng.passwd-sso.shared") ?? .standard) {
+  init(defaults: UserDefaults = UserDefaults(suiteName: AppGroupContainer.identifier) ?? .standard) {
     self.defaults = defaults
     // Pre-fill the last successfully-probed server URL so it isn't re-typed
     // on every launch.
@@ -136,6 +136,7 @@ struct ServerURLSetupView: View {
           .foregroundStyle(.secondary)
 
         TextField("https://my.passwd-sso.example", text: $viewModel.urlText)
+          .accessibilityIdentifier("server-setup-url-field")
           .keyboardType(.URL)
           .textInputAutocapitalization(.never)
           .autocorrectionDisabled()
@@ -166,6 +167,7 @@ struct ServerURLSetupView: View {
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
+        .accessibilityIdentifier("server-setup-primary-button")
         .disabled(viewModel.urlText.isEmpty || {
           if case .probing = viewModel.state { return true }
           return false

@@ -122,12 +122,13 @@ private struct PasskeyTestFullBlob: Encodable {
   let credentialId: String
   let passkeyPrivateKeyJwk: String
   let passkeyUserHandle: String
+  let passkeySignCount: Int?
 }
 
 /// Build a personal PASSKEY CacheEntry (overview + full blob) with AAD binding.
 private func makePasskeyCacheEntry(
   id: String, rpId: String, credentialID: Data, userHandle: Data,
-  key: SymmetricKey, userId: String
+  key: SymmetricKey, userId: String, signCount: Int? = nil
 ) throws -> CacheEntry {
   let credIdB64 = base64URLEncode(credentialID)
   let userHandleB64 = base64URLEncode(userHandle)
@@ -138,7 +139,8 @@ private func makePasskeyCacheEntry(
     PasskeyTestFullBlob(
       title: "T", username: "alice", relyingPartyId: rpId, credentialId: credIdB64,
       passkeyPrivateKeyJwk: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"d\":\"abc\"}",
-      passkeyUserHandle: userHandleB64
+      passkeyUserHandle: userHandleB64,
+      passkeySignCount: signCount
     )
   )
   let overviewAAD = try buildPersonalEntryAAD(userId: userId, entryId: id, vaultType: VaultType.overview)
@@ -158,7 +160,8 @@ private func makeBridgeKeyBlob(
 ) throws -> (BridgeKeyStore, BridgeKeyStore.Blob) {
   let store = BridgeKeyStore(
     accessGroup: "test.jp.jpng.passwd-sso.shared",
-    keychain: keychain
+    keychain: keychain,
+    evaluatesBiometricExplicitly: false
   )
   let blob = try store.create()
   return (store, blob)
@@ -373,7 +376,8 @@ final class CredentialResolverTests: XCTestCase {
     let emptyKeychain = MockKeychainAccessor()
     let bridgeKeyStore = BridgeKeyStore(
       accessGroup: "test.jp.jpng.passwd-sso.shared",
-      keychain: emptyKeychain
+      keychain: emptyKeychain,
+      evaluatesBiometricExplicitly: false
     )
     let resolver = CredentialResolver(
       bridgeKeyStore: bridgeKeyStore,
@@ -625,7 +629,8 @@ final class CredentialResolverTests: XCTestCase {
     let counting = CountingKeychainAccessor()
     let bridgeKeyStore = BridgeKeyStore(
       accessGroup: "test.jp.jpng.passwd-sso.shared",
-      keychain: counting
+      keychain: counting,
+      evaluatesBiometricExplicitly: false
     )
     let blob = try bridgeKeyStore.create()
     let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
@@ -674,7 +679,8 @@ final class CredentialResolverTests: XCTestCase {
   ) throws -> (CredentialResolver, CountingKeychainAccessor) {
     let counting = CountingKeychainAccessor()
     let bridgeKeyStore = BridgeKeyStore(
-      accessGroup: "test.jp.jpng.passwd-sso.shared", keychain: counting
+      accessGroup: "test.jp.jpng.passwd-sso.shared", keychain: counting,
+      evaluatesBiometricExplicitly: false
     )
     let blob = try bridgeKeyStore.create()
     let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
@@ -708,6 +714,24 @@ final class CredentialResolverTests: XCTestCase {
     XCTAssertEqual(material.relyingPartyId, "github.com")
     XCTAssertEqual(material.credentialId, base64URLEncode(credentialID))
     XCTAssertEqual(material.userHandle, base64URLEncode(userHandle))
+    XCTAssertEqual(material.signCount, 0, "absent passkeySignCount must decode as floor 0")
+  }
+
+  /// The server-synced sign count must survive the full path
+  /// blob JSON -> decryptPasskeyMaterial -> material.signCount, because the
+  /// extension feeds it into PasskeySignCountStore.next(credentialId:floor:).
+  func testDecryptPasskeyMaterial_decodesSignCountFromBlob() async throws {
+    let vaultKey = SymmetricKey(size: .bits256)
+    let userId = "test-user-id"
+    let entry = try makePasskeyCacheEntry(
+      id: "pk1", rpId: "github.com", credentialID: Data([1, 2, 3, 4]),
+      userHandle: Data([9, 8, 7, 6]), key: vaultKey, userId: userId, signCount: 50
+    )
+    let (resolver, _) = try makePasskeyResolver(entries: [entry], vaultKey: vaultKey, userId: userId)
+
+    let material = try await resolver.decryptPasskeyMaterial(entryId: "pk1")
+
+    XCTAssertEqual(material.signCount, 50)
   }
 
   func testDecryptPasskeyMaterial_loginEntry_throwsEntryNotFound() async throws {

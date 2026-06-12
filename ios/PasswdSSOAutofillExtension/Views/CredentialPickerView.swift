@@ -6,6 +6,13 @@ import SwiftUI
 ///
 /// Per plan §"App-side AutoFill (resolves S24)": for app-bundle-ID requests (non-URL),
 /// the bundle ID is shown prominently and an extra confirmation tap is required.
+///
+/// Search spans ALL entries (matched first). Two guards mirror the browser
+/// extension's canFill policy:
+/// - selecting a NON-host-matched entry requires a mismatch confirmation
+///   (one-tap injection into a phishing page must not be possible);
+/// - passkey entries surfaced by a password-ceremony search are display-only
+///   (filling one would inject an empty password).
 struct CredentialPickerView: View {
   /// Host-matched entries, shown by default.
   let matched: [VaultEntrySummary]
@@ -18,8 +25,11 @@ struct CredentialPickerView: View {
   /// passes a passkey-specific string so a no-match passkey ceremony isn't
   /// mislabelled as "No passwords".
   var emptyStateText: LocalizedStringKey = "No passwords for this site"
+  /// The passkey ceremony passes true — its rows ARE the selectable passkeys.
+  /// In the password ceremony (default false) passkey entries are display-only.
+  var passkeysSelectable: Bool = false
 
-  @State private var pendingAppSideSelection: VaultEntrySummary?
+  @State private var pendingConfirmation: FillConfirmation?
   @State private var searchText: String = ""
 
   private var isSearching: Bool {
@@ -30,6 +40,10 @@ struct CredentialPickerView: View {
   private var displayed: [VaultEntrySummary] {
     guard isSearching else { return matched }
     return all.filter { summaryMatchesSearch($0, query: searchText) }
+  }
+
+  private var matchedIds: Set<String> {
+    Set(matched.map(\.id))
   }
 
   // The `.app` IdentifierType is iOS 26+ only and isn't present in iOS 18 SDKs.
@@ -51,6 +65,13 @@ struct CredentialPickerView: View {
     }?.identifier
   }
 
+  /// Host of the page being filled (URL-type request), for the mismatch sheet.
+  private var requestHost: String? {
+    serviceIdentifiers
+      .first { $0.type.rawValue != Self.appServiceIdentifierTypeRawValue }
+      .map { URL(string: $0.identifier)?.host ?? $0.identifier }
+  }
+
   var body: some View {
     NavigationStack {
       Group {
@@ -69,8 +90,13 @@ struct CredentialPickerView: View {
         }
       }
     }
-    .sheet(item: $pendingAppSideSelection) { summary in
-      appSideConfirmationSheet(for: summary)
+    .sheet(item: $pendingConfirmation) { confirmation in
+      switch confirmation {
+      case .appSide(let summary, let mismatched):
+        appSideConfirmationSheet(for: summary, mismatched: mismatched)
+      case .hostMismatch(let summary):
+        hostMismatchConfirmationSheet(for: summary)
+      }
     }
   }
 
@@ -98,42 +124,69 @@ struct CredentialPickerView: View {
   }
 
   private var candidateList: some View {
-    List(displayed) { summary in
-      Button {
-        handleSelection(summary)
-      } label: {
-        CredentialRowView(summary: summary)
+    List {
+      Section {
+        ForEach(displayed) { summary in
+          let displayOnly = !passkeysSelectable && summary.relyingPartyId != nil
+          Button {
+            handleSelection(summary)
+          } label: {
+            CredentialRowView(summary: summary, displayOnly: displayOnly)
+          }
+          .buttonStyle(.plain)
+          .disabled(displayOnly)
+        }
+      } header: {
+        if isSearching {
+          Text("Search Results")
+        }
       }
-      .buttonStyle(.plain)
     }
     .listStyle(.insetGrouped)
   }
 
-  private func appSideConfirmationSheet(for summary: VaultEntrySummary) -> some View {
+  private func appSideConfirmationSheet(for summary: VaultEntrySummary, mismatched: Bool) -> some View {
     NavigationStack {
       VStack(spacing: 24) {
-        Image(systemName: "app.badge.checkmark")
+        Image(systemName: mismatched ? "exclamationmark.triangle" : "app.badge.checkmark")
           .font(.system(size: 48))
-          .foregroundStyle(.blue)
+          .foregroundStyle(mismatched ? AnyShapeStyle(.orange) : AnyShapeStyle(.blue))
 
         if let bundleID {
           Text("Fill for app?")
             .font(.headline)
+          if mismatched {
+            // Same warning content as the host-mismatch sheet: the entry's
+            // stored host does not match this app.
+            Text("**\(summary.title)** is saved for:\n\(storedHostText(for: summary))")
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+              .multilineTextAlignment(.center)
+          }
           Text("Fill **\(summary.username)** for app:\n\(bundleID)")
             .font(.subheadline)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
         }
 
-        Button("Fill") {
-          pendingAppSideSelection = nil
-          onSelect(summary)
+        if mismatched {
+          Button("Fill Anyway") {
+            pendingConfirmation = nil
+            onSelect(summary)
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.large)
+        } else {
+          Button("Fill") {
+            pendingConfirmation = nil
+            onSelect(summary)
+          }
+          .buttonStyle(.borderedProminent)
+          .controlSize(.large)
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
 
         Button("Cancel", role: .cancel) {
-          pendingAppSideSelection = nil
+          pendingConfirmation = nil
         }
         .controlSize(.large)
         .foregroundStyle(.red)
@@ -145,14 +198,81 @@ struct CredentialPickerView: View {
     .presentationDetents([.medium])
   }
 
+  /// Mismatch guard (canFill parity with the browser extension): an entry found
+  /// via search whose hosts do NOT match the page being filled gets an explicit
+  /// warning instead of a one-tap fill.
+  private func hostMismatchConfirmationSheet(for summary: VaultEntrySummary) -> some View {
+    NavigationStack {
+      VStack(spacing: 24) {
+        Image(systemName: "exclamationmark.triangle")
+          .font(.system(size: 48))
+          .foregroundStyle(.orange)
+
+        Text("Fill on a different site?")
+          .font(.headline)
+        Text("**\(summary.title)** is saved for:\n\(storedHostText(for: summary))")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+        if let requestHost {
+          Text("This site is:\n\(requestHost)")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+        }
+
+        Button("Fill Anyway") {
+          pendingConfirmation = nil
+          onSelect(summary)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+
+        Button("Cancel", role: .cancel) {
+          pendingConfirmation = nil
+        }
+        .controlSize(.large)
+        .foregroundStyle(.red)
+      }
+      .padding()
+      .navigationTitle("Confirm Fill")
+      .navigationBarTitleDisplayMode(.inline)
+    }
+    .presentationDetents([.medium])
+  }
+
+  private func storedHostText(for summary: VaultEntrySummary) -> String {
+    summary.urlHost.isEmpty ? "—" : summary.urlHost
+  }
+
   // MARK: - Selection logic
 
   private func handleSelection(_ summary: VaultEntrySummary) {
+    let mismatched = !matchedIds.contains(summary.id)
     if isAppSideRequest {
-      // Extra confirmation tap required for app-side fills.
-      pendingAppSideSelection = summary
+      // Extra confirmation tap required for app-side fills. The mismatch
+      // warning is folded into the same sheet — it must not be swallowed by
+      // the app-side precedence.
+      pendingConfirmation = .appSide(summary, mismatched: mismatched)
+    } else if mismatched {
+      // Non-host-matched entry reached via search — confirm before filling.
+      pendingConfirmation = .hostMismatch(summary)
     } else {
       onSelect(summary)
+    }
+  }
+}
+
+// MARK: - Pending confirmation
+
+private enum FillConfirmation: Identifiable {
+  case appSide(VaultEntrySummary, mismatched: Bool)
+  case hostMismatch(VaultEntrySummary)
+
+  var id: String {
+    switch self {
+    case .appSide(let summary, _): return "app-\(summary.id)"
+    case .hostMismatch(let summary): return "host-\(summary.id)"
     }
   }
 }
@@ -161,23 +281,41 @@ struct CredentialPickerView: View {
 
 private struct CredentialRowView: View {
   let summary: VaultEntrySummary
+  var displayOnly: Bool = false
+
+  private var isPasskey: Bool { summary.relyingPartyId != nil }
+
+  /// Passkey summaries usually carry the host in relyingPartyId, not urlHost.
+  private var hostLine: String {
+    summary.urlHost.isEmpty ? (summary.relyingPartyId ?? "") : summary.urlHost
+  }
 
   var body: some View {
     HStack(spacing: 12) {
-      Image(systemName: "key.fill")
+      Image(systemName: isPasskey ? "person.badge.key.fill" : "key.fill")
         .foregroundStyle(.blue)
         .frame(width: 28)
 
       VStack(alignment: .leading, spacing: 2) {
-        Text(summary.title)
-          .font(.body)
-          .lineLimit(1)
+        HStack(spacing: 6) {
+          Text(summary.title)
+            .font(.body)
+            .lineLimit(1)
+          if isPasskey {
+            Text("Passkey")
+              .font(.caption2.weight(.semibold))
+              .padding(.horizontal, 6)
+              .padding(.vertical, 2)
+              .background(Capsule().fill(Color.blue.opacity(0.15)))
+              .foregroundStyle(.blue)
+          }
+        }
         Text(summary.username)
           .font(.subheadline)
           .foregroundStyle(.secondary)
           .lineLimit(1)
-        if !summary.urlHost.isEmpty {
-          Text(summary.urlHost)
+        if !hostLine.isEmpty {
+          Text(hostLine)
             .font(.caption)
             .foregroundStyle(.tertiary)
             .lineLimit(1)
@@ -187,5 +325,8 @@ private struct CredentialRowView: View {
       Spacer()
     }
     .padding(.vertical, 4)
+    // Display-only passkey rows are visually dimmed so the disabled state has
+    // a visible cue (the fill itself happens through the passkey ceremony).
+    .opacity(displayOnly ? 0.45 : 1)
   }
 }

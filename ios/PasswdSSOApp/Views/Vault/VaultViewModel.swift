@@ -221,6 +221,9 @@ extension VaultViewModel {
     let report = try await hostSyncService.runSync(vaultKey: vaultKey, userId: userId)
     if let freshCache = report.cacheData {
       loadFromCache(cacheData: freshCache, vaultKey: vaultKey, userId: userId)
+      // Keep QuickType identities in step with the mutation — without this the
+      // new/edited entry is missing from AutoFill until the next foreground sync.
+      await refreshCredentialIdentities(from: freshCache, vaultKey: vaultKey, userId: userId)
     }
   }
 
@@ -276,6 +279,9 @@ extension VaultViewModel {
     let report = try await hostSyncService.runSync(vaultKey: vaultKey, userId: userId)
     if let freshCache = report.cacheData {
       loadFromCache(cacheData: freshCache, vaultKey: vaultKey, userId: userId)
+      // Keep QuickType identities in step with the mutation — without this the
+      // new/edited entry is missing from AutoFill until the next foreground sync.
+      await refreshCredentialIdentities(from: freshCache, vaultKey: vaultKey, userId: userId)
     }
   }
 }

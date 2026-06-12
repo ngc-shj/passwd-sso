@@ -50,25 +50,32 @@ final class KDFTests: XCTestCase {
 
   // MARK: - HKDF Encryption Key
 
-  /// Known vector computed via Node.js:
-  ///   const hkdf = require('crypto').hkdfSync;
-  ///   const out = hkdf('sha256', Buffer.alloc(32,1), Buffer.alloc(32,0),
-  ///                    'passwd-sso-enc-v1', 32);
+  /// Cross-platform known vectors, independently derived via Node.js (the web
+  /// client must derive byte-identical keys or it cannot decrypt iOS output):
+  ///   crypto.hkdfSync('sha256', Buffer.alloc(32,1), Buffer.alloc(32,0),
+  ///                   Buffer.from('passwd-sso-enc-v1'), 32)
   func testHKDFEncryptionKeyKnownVector() throws {
     let secretKey = Data(repeating: 0x01, count: 32)
-    // Expected: computed from Node.js crypto.hkdfSync with the same params
-    // Node: crypto.hkdfSync('sha256', Buffer.alloc(32,1), Buffer.alloc(32,0),
-    //       Buffer.from('passwd-sso-enc-v1'), 32).toString('hex')
-    // = 5e57823d7eaa6e5fbb42d5c617d3c5e2fd42a8b7e2c3e9adf8e1bb1cdcb21d4
-    // Note: actual value verified against CryptoKit HKDF at implementation time.
+
     let key = try deriveEncryptionKey(secretKey: secretKey)
     let bytes = key.withUnsafeBytes { Data($0) }
 
-    XCTAssertEqual(bytes.count, 32)
-    // Verify determinism
-    let key2 = try deriveEncryptionKey(secretKey: secretKey)
-    let bytes2 = key2.withUnsafeBytes { Data($0) }
-    XCTAssertEqual(bytes, bytes2)
+    XCTAssertEqual(
+      hexEncode(bytes),
+      "ee19d55b4004660e5dd36900b72924489eec589579e01ff0335053764a72a437"
+    )
+  }
+
+  /// Same Node derivation with info 'passwd-sso-auth-v1'.
+  func testHKDFAuthKeyKnownVector() throws {
+    let secretKey = Data(repeating: 0x01, count: 32)
+
+    let authKey = try deriveAuthKey(secretKey: secretKey)
+
+    XCTAssertEqual(
+      hexEncode(authKey),
+      "232f65f5af41330dd0546d70d5c04734a5d693717fa0ee4ac875750dd121aba1"
+    )
   }
 
   func testHKDFEncAndAuthKeysAreDifferent() throws {

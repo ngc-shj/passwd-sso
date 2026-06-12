@@ -85,6 +85,13 @@ targets:
           - UIInterfaceOrientationPortrait
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
+        # BGTaskScheduler rejects register()/submit() for identifiers not
+        # declared here, and BGProcessingTaskRequest additionally requires the
+        # "processing" background mode (BackgroundSyncTask.identifier).
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.passwd-sso.cache-sync
+        UIBackgroundModes:
+          - processing
     entitlements:
       path: PasswdSSOApp/PasswdSSOApp.entitlements
       properties:
@@ -252,6 +259,22 @@ schemes:
       config: Release
     analyze:
       config: Debug
+
+  # Debug-only scheme for the AutoFill credential provider extension. Running it
+  # launches a chosen host app (e.g. Safari) and attaches Xcode to the extension
+  # process when iOS invokes it — so the extension's os_log/Logger output appears
+  # in the Xcode console and breakpoints work (the App scheme cannot attach to the
+  # separate extension process). launchAutomaticallySubstyle 2 marks it as an
+  # app-extension run target.
+  PasswdSSOAutofillExtension:
+    build:
+      targets:
+        PasswdSSOAutofillExtension: all
+        Shared: all
+    run:
+      config: Debug
+      askForAppToLaunch: true
+      launchAutomaticallySubstyle: "2"
 
   Shared:
     build:

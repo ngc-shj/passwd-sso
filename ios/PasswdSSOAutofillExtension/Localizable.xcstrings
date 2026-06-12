@@ -1,6 +1,40 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "**%@** is saved for:\n%@" : {
+      "comment" : "%1$@ = entry title, %2$@ = stored host. Keep the **…** markdown bold.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "**%@** is saved for:\n%@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "**%@** の保存先:\n%@"
+          }
+        }
+      }
+    },
+    "Authenticating…" : {
+      "comment" : "A label displayed while a passkey assertion is being generated.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Authenticating…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "認証中…"
+          }
+        }
+      }
+    },
     "Cancel" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -31,6 +65,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "入力の確認"
+          }
+        }
+      }
+    },
+    "Continue" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continue"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "続ける"
           }
         }
       }
@@ -69,6 +120,23 @@
         }
       }
     },
+    "Fill Anyway" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fill Anyway"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このまま入力"
+          }
+        }
+      }
+    },
     "Fill for app?" : {
       "localizations" : {
         "en" : {
@@ -81,6 +149,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "アプリに入力しますか？"
+          }
+        }
+      }
+    },
+    "Fill on a different site?" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fill on a different site?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "別のサイトに入力しますか？"
           }
         }
       }
@@ -118,6 +202,7 @@
       }
     },
     "No passkeys for this site" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -134,6 +219,7 @@
       }
     },
     "No passwords for this site" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -182,6 +268,22 @@
         }
       }
     },
+    "Passkey" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passkey"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パスキー"
+          }
+        }
+      }
+    },
     "Search all entries" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -199,6 +301,22 @@
         }
       }
     },
+    "Search Results" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search Results"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "検索結果"
+          }
+        }
+      }
+    },
     "Search to browse all entries." : {
       "localizations" : {
         "en" : {
@@ -211,6 +329,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "すべてのエントリを表示するには検索してください。"
+          }
+        }
+      }
+    },
+    "Sign in with your passkey" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sign in with your passkey"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パスキーでサインイン"
+          }
+        }
+      }
+    },
+    "This site is:\n%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This site is:\n%@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このサイト:\n%@"
           }
         }
       }
@@ -232,5 +383,5 @@
       }
     }
   },
-  "version" : "1.0"
+  "version" : "1.1"
 }

@@ -5,23 +5,42 @@ import Foundation
 
 /// Payload written to the rollback-flag file by the AutoFill extension on cache rejection.
 /// The host-app drain (Step 11) reads this, verifies HMAC, and posts to the server.
+/// `observedCounter` / `headerIssuedAt` / `lastSuccessfulRefreshAt` are nil when the
+/// rejection happened before the cache header could be decrypted (e.g. AAD failure on a
+/// rolled-back file) — only header-readable rejections carry real observed values.
 public struct RollbackFlagPayload: Sendable, Codable, Equatable {
   public let expectedCounter: UInt64
-  public let observedCounter: UInt64
+  public let observedCounter: UInt64?
   public let headerIssuedAt: Date?
+  public let lastSuccessfulRefreshAt: Date?
   public let rejectionKind: CacheRejectionKind
 
   public init(
     expectedCounter: UInt64,
-    observedCounter: UInt64,
+    observedCounter: UInt64?,
     headerIssuedAt: Date?,
+    lastSuccessfulRefreshAt: Date?,
     rejectionKind: CacheRejectionKind
   ) {
     self.expectedCounter = expectedCounter
     self.observedCounter = observedCounter
     self.headerIssuedAt = headerIssuedAt
+    self.lastSuccessfulRefreshAt = lastSuccessfulRefreshAt
     self.rejectionKind = rejectionKind
   }
+}
+
+/// Single HKDF derivation shared by writer and verifier — a divergent copy on
+/// either side would silently reject every flag as forged.
+private func deriveRollbackFlagMacKey(from vaultKey: SymmetricKey) -> SymmetricKey {
+  let info = "rollback-flag-mac".data(using: .utf8)!
+  let salt = Data(repeating: 0, count: 32)
+  return HKDF<SHA256>.deriveKey(
+    inputKeyMaterial: vaultKey,
+    salt: salt,
+    info: info,
+    outputByteCount: 32
+  )
 }
 
 /// Writes a MAC-protected rollback flag to App Group.
@@ -46,7 +65,7 @@ public struct AppGroupRollbackFlagWriter: RollbackFlagWriter, Sendable {
       directoryHint: .notDirectory
     )
 
-    let macKey = deriveMacKey(from: vaultKey)
+    let macKey = deriveRollbackFlagMacKey(from: vaultKey)
     let payloadJSON = try encodePayloadCanonically(payload)
     let mac = computeHMAC(key: macKey, data: payloadJSON)
     let macBase64 = mac.base64URLEncoded()
@@ -75,17 +94,6 @@ public struct AppGroupRollbackFlagWriter: RollbackFlagWriter, Sendable {
     encoder.outputFormatting = .sortedKeys
     encoder.dateEncodingStrategy = .secondsSince1970
     return try encoder.encode(payload)
-  }
-
-  private func deriveMacKey(from vaultKey: SymmetricKey) -> SymmetricKey {
-    let info = "rollback-flag-mac".data(using: .utf8)!
-    let salt = Data(repeating: 0, count: 32)
-    return HKDF<SHA256>.deriveKey(
-      inputKeyMaterial: vaultKey,
-      salt: salt,
-      info: info,
-      outputByteCount: 32
-    )
   }
 
   private func computeHMAC(key: SymmetricKey, data: Data) -> Data {
@@ -121,12 +129,12 @@ public enum RollbackFlagVerifier {
       throw RollbackFlagError.macMismatch
     }
 
-    let macKey = deriveMacKey(from: vaultKey)
+    let macKey = deriveRollbackFlagMacKey(from: vaultKey)
     var h = HMAC<SHA256>(key: macKey)
     h.update(data: payloadData)
     let actualMAC = Data(h.finalize())
 
-    guard actualMAC == expectedMACData else {
+    guard constantTimeEquals(actualMAC, expectedMACData) else {
       throw RollbackFlagError.macMismatch
     }
 
@@ -136,16 +144,6 @@ public enum RollbackFlagVerifier {
     return VerifiedFlag(payload: payload)
   }
 
-  private static func deriveMacKey(from vaultKey: SymmetricKey) -> SymmetricKey {
-    let info = "rollback-flag-mac".data(using: .utf8)!
-    let salt = Data(repeating: 0, count: 32)
-    return HKDF<SHA256>.deriveKey(
-      inputKeyMaterial: vaultKey,
-      salt: salt,
-      info: info,
-      outputByteCount: 32
-    )
-  }
 }
 
 public enum RollbackFlagError: Error, Equatable {

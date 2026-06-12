@@ -103,7 +103,6 @@ final class PasskeyAssertionTests: XCTestCase {
     let der = try signPasskeyAssertion(
       privateKey: key, authenticatorData: authData, clientDataHash: clientDataHash
     )
-    // The signature is DER (ASN.1) — parse via derRepresentation and verify.
     let signature = try P256.Signing.ECDSASignature(derRepresentation: der)
     var signed = authData
     signed.append(clientDataHash)
@@ -113,11 +112,13 @@ final class PasskeyAssertionTests: XCTestCase {
   // MARK: - buildPasskeyAssertion (C6)
 
   private func material(rpId: String, key: P256.Signing.PrivateKey,
-                        credentialId: String = "AQIDBA", userHandle: String = "BQYHCA")
+                        credentialId: String = "AQIDBA", userHandle: String = "BQYHCA",
+                        signCount: UInt32 = 0)
     -> PasskeyAssertionMaterial {
     PasskeyAssertionMaterial(
       entryId: "e1", relyingPartyId: rpId, credentialId: credentialId,
-      userHandle: userHandle, privateKeyJWK: Data(jwkString(for: key).utf8)
+      userHandle: userHandle, privateKeyJWK: Data(jwkString(for: key).utf8),
+      signCount: signCount
     )
   }
 
@@ -129,7 +130,7 @@ final class PasskeyAssertionTests: XCTestCase {
       clientDataHash: Data(repeating: 0xAB, count: 32),
       userVerificationRequired: true
     )
-    XCTAssertThrowsError(try buildPasskeyAssertion(material: mat, request: request)) { error in
+    XCTAssertThrowsError(try buildPasskeyAssertion(material: mat, request: request, signCount: 1)) { error in
       XCTAssertEqual(error as? PasskeyCryptoError, .rpIdMismatch)
     }
   }
@@ -142,7 +143,7 @@ final class PasskeyAssertionTests: XCTestCase {
     let request = PasskeyAssertionRequest(
       relyingPartyId: rpId, clientDataHash: clientDataHash, userVerificationRequired: true
     )
-    let outputs = try buildPasskeyAssertion(material: mat, request: request)
+    let outputs = try buildPasskeyAssertion(material: mat, request: request, signCount: 1)
 
     XCTAssertEqual(outputs.relyingParty, rpId)
     // authData rpIdHash is from the OS-provided rpId.
@@ -150,32 +151,42 @@ final class PasskeyAssertionTests: XCTestCase {
                    Data(SHA256.hash(data: Data(rpId.utf8))))
     XCTAssertEqual(outputs.credentialID, try base64URLDecode("AQIDBA"))
     XCTAssertEqual(outputs.userHandle, try base64URLDecode("BQYHCA"))
-    // Signature verifies under the stored key.
+    // Signature verifies under the stored key (DER).
     let signature = try P256.Signing.ECDSASignature(derRepresentation: outputs.signature)
     var signed = outputs.authenticatorData
     signed.append(clientDataHash)
     XCTAssertTrue(key.publicKey.isValidSignature(signature, for: signed))
   }
 
-  func testBuildPasskeyAssertion_signCountAlwaysZero() throws {
+  func testBuildPasskeyAssertion_emitsGivenSignCount() throws {
+    // The caller (via PasskeySignCountStore) computes the monotonic count; the
+    // builder emits it verbatim in authenticatorData's big-endian counter field.
+    let key = pinnedKey()
+    let rpId = "webauthn.io"
+    let req = PasskeyAssertionRequest(
+      relyingPartyId: rpId, clientDataHash: Data(repeating: 0x01, count: 32),
+      userVerificationRequired: true)
+
+    let outputs = try buildPasskeyAssertion(
+      material: material(rpId: rpId, key: key), request: req, signCount: 0x01020304)
+    XCTAssertEqual(Array(outputs.authenticatorData.subdata(in: 33..<37)),
+                   [0x01, 0x02, 0x03, 0x04])
+  }
+
+  func testBuildPasskeyAssertion_setsUVUPandBackupFlags() throws {
+    // Production assertion flags: UP|UV|BE|BS = 0x1D. iOS AutoFill treats provider
+    // passkeys as synced and the completion appears to require the backup flags.
     let key = pinnedKey()
     let rpId = "webauthn.io"
     let mat = material(rpId: rpId, key: key)
-    let out1 = try buildPasskeyAssertion(
+    let outputs = try buildPasskeyAssertion(
       material: mat,
       request: PasskeyAssertionRequest(
-        relyingPartyId: rpId, clientDataHash: Data(repeating: 0x01, count: 32),
-        userVerificationRequired: true)
+        relyingPartyId: rpId, clientDataHash: Data(repeating: 0x11, count: 32),
+        userVerificationRequired: true),
+      signCount: 1
     )
-    let out2 = try buildPasskeyAssertion(
-      material: mat,
-      request: PasskeyAssertionRequest(
-        relyingPartyId: rpId, clientDataHash: Data(repeating: 0x02, count: 32),
-        userVerificationRequired: true)
-    )
-    XCTAssertEqual(Array(out1.authenticatorData.subdata(in: 33..<37)), [0, 0, 0, 0])
-    XCTAssertEqual(out1.authenticatorData.subdata(in: 33..<37),
-                   out2.authenticatorData.subdata(in: 33..<37))
+    XCTAssertEqual(outputs.authenticatorData[32], 0x1D, "UP|UV|BE|BS = 0x1D")
   }
 
   func testBuildPasskeyAssertion_emptyCredentialIdThrows() {
@@ -185,7 +196,7 @@ final class PasskeyAssertionTests: XCTestCase {
       relyingPartyId: "webauthn.io", clientDataHash: Data(repeating: 0x11, count: 32),
       userVerificationRequired: true
     )
-    XCTAssertThrowsError(try buildPasskeyAssertion(material: mat, request: request)) { error in
+    XCTAssertThrowsError(try buildPasskeyAssertion(material: mat, request: request, signCount: 1)) { error in
       XCTAssertEqual(error as? PasskeyCryptoError, .malformedCredentialId)
     }
   }
@@ -199,7 +210,7 @@ final class PasskeyAssertionTests: XCTestCase {
       relyingPartyId: "webauthn.io", clientDataHash: Data(repeating: 0x11, count: 32),
       userVerificationRequired: true
     )
-    XCTAssertThrowsError(try buildPasskeyAssertion(material: mat, request: request)) { error in
+    XCTAssertThrowsError(try buildPasskeyAssertion(material: mat, request: request, signCount: 1)) { error in
       XCTAssertEqual(error as? PasskeyCryptoError, .emptyUserHandle)
     }
   }

@@ -42,7 +42,7 @@ public actor StaleBlobRecoveryService {
         expectedHostInstallUUID: blob.hostInstallUUID,
         expectedCounter: expectedCounter
       )
-    } catch EntryCacheError.rejection(let kind) {
+    } catch EntryCacheError.rejection(let kind, _) {
       // Any rejection means this is not a simple forward-counter stale-blob case.
       // Log rejection kind for observability but don't throw.
       _ = kind

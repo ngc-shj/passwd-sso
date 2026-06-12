@@ -56,9 +56,10 @@ public func loadDPoPKey(label: String) throws -> SecKey {
   ]
   var result: CFTypeRef?
   let status = SecItemCopyMatching(query as CFDictionary, &result)
-  guard status == errSecSuccess, let key = result else {
+  guard status == errSecSuccess, let key = result, CFGetTypeID(key) == SecKeyGetTypeID() else {
     throw SecureEnclaveKeyError.keyNotFound
   }
+  // Safe: the CFTypeID check above proves the ref is a SecKey.
   // swiftlint:disable:next force_cast
   return (key as! SecKey)
 }

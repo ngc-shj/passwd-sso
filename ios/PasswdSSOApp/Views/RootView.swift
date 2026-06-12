@@ -309,7 +309,7 @@ struct RootView: View {
     onVaultReady(syncService, drain, vaultKey, unlockResult.userId)
 
     // Register QuickType inline-suggestion identities for the just-synced set.
-    await refreshCredentialIdentities(cacheData: cacheData, vaultKey: vaultKey, userId: unlockResult.userId)
+    await refreshCredentialIdentities(from: cacheData, vaultKey: vaultKey, userId: unlockResult.userId)
 
     applyPersistedTimeout(to: autoLockService)
     autoLockService.startTimer()
@@ -332,18 +332,6 @@ struct RootView: View {
     // Effective = tenant override (if any) else the user's setting.
     service.autoLockMinutes = store.effectiveAutoLockMinutes
     service.timeoutAction = store.vaultTimeoutAction
-  }
-
-  /// Replace the QuickType credential-identity set from the freshly-synced
-  /// personal entries. Identities exist only while unlocked (cleared on
-  /// lock/logout/background/launch).
-  @MainActor
-  private func refreshCredentialIdentities(
-    cacheData: CacheData, vaultKey: SymmetricKey, userId: String
-  ) async {
-    let summaries = decryptPersonalOverviews(from: cacheData, vaultKey: vaultKey, userId: userId)
-    let passkeys = buildPasskeyIdentitySpecs(from: cacheData, vaultKey: vaultKey, userId: userId)
-    await CredentialIdentityRegistrar().replace(with: summaries, passkeys: passkeys)
   }
 
   private func makeFallbackSyncService(apiClient: MobileAPIClient) -> HostSyncService {
@@ -416,7 +404,7 @@ struct RootView: View {
     let cacheData = state.cacheData
     let vaultKey = state.vaultKey
     let userId = state.userId
-    Task { await refreshCredentialIdentities(cacheData: cacheData, vaultKey: vaultKey, userId: userId) }
+    Task { await refreshCredentialIdentities(from: cacheData, vaultKey: vaultKey, userId: userId) }
     appState = .vaultUnlocked(
       serverConfig: serverConfig,
       vaultKey: state.vaultKey,

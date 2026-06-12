@@ -1,6 +1,7 @@
 import AuthenticationServices
 import CryptoKit
 import Foundation
+import OSLog
 
 // MARK: - Candidate result
 
@@ -75,6 +76,11 @@ public struct ServiceIdentifier: Sendable {
 /// Per plan §"Vault key zeroing": vault_key is zeroed before this actor method returns.
 public actor CredentialResolver {
 
+  // Diagnostic only — records WHICH of the three vault-locked sub-causes fired
+  // (bridge_key read, wrapped-key absent, or unwrap failure) so the AutoFill
+  // "vault locked" symptom is traceable in Console.app. No key material logged.
+  private static let log = Logger(subsystem: "jp.jpng.passwd-sso", category: "autofill")
+
   // MARK: - Error
 
   public enum Error: Swift.Error, Equatable {
@@ -130,10 +136,11 @@ public actor CredentialResolver {
     // Single biometric Keychain read.
     let blob: BridgeKeyStore.Blob
     do {
-      blob = try bridgeKeyStore.readForFill(reason: "Fill credential from passwd-sso vault")
-    } catch BridgeKeyStore.Error.notFound, BridgeKeyStore.Error.biometryFailed {
-      throw Error.vaultLocked
+      blob = try await bridgeKeyStore.readForFillAuthenticated(reason: "Fill credential from passwd-sso vault")
     } catch {
+      // BridgeKeyStore.readForFill already logged the raw OSStatus; record the
+      // mapped cause here so the resolver-level branch is unambiguous.
+      Self.log.error("resolveCandidates: vaultLocked at bridge_key read: \(String(describing: error), privacy: .public)")
       throw Error.vaultLocked
     }
 
@@ -142,6 +149,7 @@ public actor CredentialResolver {
 
     // Load the wrapped vault_key written by VaultUnlocker at unlock time.
     guard let wrapped = try? wrappedKeyStore.loadVaultKey() else {
+      Self.log.error("resolveCandidates: vaultLocked — wrapped vault key absent (loadVaultKey nil)")
       throw Error.vaultLocked
     }
 
@@ -154,6 +162,7 @@ public actor CredentialResolver {
         key: cacheKey
       )
     else {
+      Self.log.error("resolveCandidates: vaultLocked — vault key unwrap failed (AES-GCM decrypt nil)")
       throw Error.vaultLocked
     }
     var mutableVaultKeyData = vaultKeyData
@@ -170,9 +179,9 @@ public actor CredentialResolver {
         expectedCounter: blob.cacheVersionCounter,
         now: now()
       )
-    } catch EntryCacheError.rejection(let kind) {
+    } catch EntryCacheError.rejection(let kind, let context) {
       // Write a MAC-protected rollback flag for the host-app drain (Step 11 posts it).
-      await writeRollbackFlag(kind: kind, blob: blob, vaultKey: vaultKey)
+      await writeRollbackFlag(kind: kind, context: context, blob: blob, vaultKey: vaultKey)
       throw Error.cacheRejected(kind)
     } catch {
       throw Error.cacheUnavailable
@@ -261,7 +270,7 @@ public actor CredentialResolver {
       blob = retained
     } else {
       do {
-        blob = try bridgeKeyStore.readForFill(reason: "Fill credential from passwd-sso vault")
+        blob = try await bridgeKeyStore.readForFillAuthenticated(reason: "Fill credential from passwd-sso vault")
       } catch {
         throw Error.vaultLocked
       }
@@ -297,8 +306,8 @@ public actor CredentialResolver {
         expectedCounter: blob.cacheVersionCounter,
         now: now()
       )
-    } catch EntryCacheError.rejection(let kind) {
-      await writeRollbackFlag(kind: kind, blob: blob, vaultKey: vaultKey)
+    } catch EntryCacheError.rejection(let kind, let context) {
+      await writeRollbackFlag(kind: kind, context: context, blob: blob, vaultKey: vaultKey)
       throw Error.cacheRejected(kind)
     } catch {
       throw Error.cacheUnavailable
@@ -352,7 +361,7 @@ public actor CredentialResolver {
       blob = retained
     } else {
       do {
-        blob = try bridgeKeyStore.readForFill(reason: "Fill credential from passwd-sso vault")
+        blob = try await bridgeKeyStore.readForFillAuthenticated(reason: "Fill credential from passwd-sso vault")
       } catch {
         throw Error.vaultLocked
       }
@@ -386,8 +395,8 @@ public actor CredentialResolver {
         expectedCounter: blob.cacheVersionCounter,
         now: now()
       )
-    } catch EntryCacheError.rejection(let kind) {
-      await writeRollbackFlag(kind: kind, blob: blob, vaultKey: vaultKey)
+    } catch EntryCacheError.rejection(let kind, let context) {
+      await writeRollbackFlag(kind: kind, context: context, blob: blob, vaultKey: vaultKey)
       throw Error.cacheRejected(kind)
     } catch {
       throw Error.cacheUnavailable
@@ -555,14 +564,16 @@ public actor CredentialResolver {
 
   private func writeRollbackFlag(
     kind: CacheRejectionKind,
+    context: CacheRejectionContext,
     blob: BridgeKeyStore.Blob,
     vaultKey: SymmetricKey
   ) async {
     guard let writer = rollbackFlagWriter else { return }
     let payload = RollbackFlagPayload(
       expectedCounter: blob.cacheVersionCounter,
-      observedCounter: blob.cacheVersionCounter,
-      headerIssuedAt: nil,
+      observedCounter: context.observedCounter,
+      headerIssuedAt: context.headerIssuedAt,
+      lastSuccessfulRefreshAt: context.lastSuccessfulRefreshAt,
       rejectionKind: kind
     )
     try? await writer.writeFlag(payload: payload, vaultKey: vaultKey)

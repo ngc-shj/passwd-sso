@@ -87,6 +87,14 @@ public actor VaultUnlocker {
       throw VaultUnlockError.serverResponseInvalid
     }
 
+    // The server pins PBKDF2 at 600k iterations (crypto-client.ts). Enforce
+    // that as a floor: a MITM'd or rogue server sending e.g. `1` would
+    // silently reduce the wrapping key to a single hash, making offline
+    // brute-force of the passphrase trivial against captured key material.
+    guard unlockData.kdfIterations >= pbkdf2Iterations else {
+      throw VaultUnlockError.serverResponseInvalid
+    }
+
     // Step 2: decode salt and derive wrapping key. The server stores these
     // fields as hex (matching the web crypto-client), NOT base64.
     let saltData: Data

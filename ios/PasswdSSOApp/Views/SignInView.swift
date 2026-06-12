@@ -66,6 +66,7 @@ struct SignInView: View {
       }
       .buttonStyle(.borderedProminent)
       .controlSize(.large)
+      .accessibilityIdentifier("sign-in-primary-button")
       .disabled(state == .signingIn)
 
       #if DEBUG

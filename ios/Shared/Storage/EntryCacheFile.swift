@@ -50,8 +50,31 @@ public struct CacheData: Sendable, Equatable {
   }
 }
 
+/// Header-derived diagnostics attached to a cache rejection, threaded into the
+/// rollback-flag payload so the server report carries the actually-observed
+/// values. Fields are nil when the failure happened before the header could be
+/// decrypted — a rolled-back file fails header AAD, so its on-disk counter is
+/// cryptographically unknowable.
+public struct CacheRejectionContext: Sendable, Equatable {
+  public let observedCounter: UInt64?
+  public let headerIssuedAt: Date?
+  public let lastSuccessfulRefreshAt: Date?
+
+  public init(
+    observedCounter: UInt64? = nil,
+    headerIssuedAt: Date? = nil,
+    lastSuccessfulRefreshAt: Date? = nil
+  ) {
+    self.observedCounter = observedCounter
+    self.headerIssuedAt = headerIssuedAt
+    self.lastSuccessfulRefreshAt = lastSuccessfulRefreshAt
+  }
+
+  public static let unavailable = CacheRejectionContext()
+}
+
 public enum EntryCacheError: Error, Equatable {
-  case rejection(CacheRejectionKind)
+  case rejection(CacheRejectionKind, CacheRejectionContext)
   case ioError(String)
 }
 
@@ -148,12 +171,12 @@ public func readCacheFile(
   do {
     fileData = try Data(contentsOf: path)
   } catch {
-    throw EntryCacheError.rejection(.headerMissing)
+    throw EntryCacheError.rejection(.headerMissing, .unavailable)
   }
 
   // Minimum viable file: magic(4) + version(1) + reserved(3) + hdrLen(4) = 12 bytes
   guard fileData.count >= 12 else {
-    throw EntryCacheError.rejection(.headerMissing)
+    throw EntryCacheError.rejection(.headerMissing, .unavailable)
   }
 
   // Validate magic + version
@@ -164,33 +187,33 @@ public func readCacheFile(
     fileData[3] == fileMagic[3],
     fileData[4] == fileFormatVersion
   else {
-    throw EntryCacheError.rejection(.headerInvalid)
+    throw EntryCacheError.rejection(.headerInvalid, .unavailable)
   }
 
   var offset = fileHeaderSize
 
   // Parse encrypted header length
   guard fileData.count >= offset + 4 else {
-    throw EntryCacheError.rejection(.headerInvalid)
+    throw EntryCacheError.rejection(.headerInvalid, .unavailable)
   }
   let headerLen = Int(readBEUInt32(fileData, at: offset))
   offset += 4
 
   guard fileData.count >= offset + headerLen else {
-    throw EntryCacheError.rejection(.headerInvalid)
+    throw EntryCacheError.rejection(.headerInvalid, .unavailable)
   }
   let encryptedHeaderBlob = fileData[offset..<(offset + headerLen)]
   offset += headerLen
 
   // Parse encrypted entries length
   guard fileData.count >= offset + 4 else {
-    throw EntryCacheError.rejection(.headerInvalid)
+    throw EntryCacheError.rejection(.headerInvalid, .unavailable)
   }
   let entriesLen = Int(readBEUInt32(fileData, at: offset))
   offset += 4
 
   guard fileData.count >= offset + entriesLen else {
-    throw EntryCacheError.rejection(.headerInvalid)
+    throw EntryCacheError.rejection(.headerInvalid, .unavailable)
   }
   let encryptedEntriesBlob = fileData[offset..<(offset + entriesLen)]
 
@@ -204,39 +227,55 @@ public func readCacheFile(
     expectedCounter: expectedCounter
   )
 
+  // Header decrypted — rejections from here on can report its actual values.
+  let headerContext = CacheRejectionContext(
+    observedCounter: header.cacheVersionCounter,
+    headerIssuedAt: header.cacheIssuedAt,
+    lastSuccessfulRefreshAt: header.lastSuccessfulRefreshAt
+  )
+
   // Validate counter
   guard header.cacheVersionCounter == expectedCounter else {
-    throw EntryCacheError.rejection(.counterMismatch)
+    throw EntryCacheError.rejection(.counterMismatch, headerContext)
   }
 
   // Validate clock skew: cacheIssuedAt > now + 30s
   if header.cacheIssuedAt > now.addingTimeInterval(30) {
-    throw EntryCacheError.rejection(.headerClockSkew)
+    throw EntryCacheError.rejection(.headerClockSkew, headerContext)
   }
 
   // Validate staleness: issuedAt > 1h old AND lastSuccessfulRefreshAt > 24h old
   let oneHourAgo = now.addingTimeInterval(-3600)
   let twentyFourHoursAgo = now.addingTimeInterval(-86400)
   if header.cacheIssuedAt < oneHourAgo && header.lastSuccessfulRefreshAt < twentyFourHoursAgo {
-    throw EntryCacheError.rejection(.headerStale)
+    throw EntryCacheError.rejection(.headerStale, headerContext)
   }
 
   // Decrypt entries with AAD reconstructed from the (now-trusted) header.
-  let entriesAAD = try buildCacheEntriesAAD(
-    counter: header.cacheVersionCounter,
-    hostInstallUUID: header.hostInstallUUID,
-    userId: header.userId
-  )
-  let entriesData = try decryptEntriesBlob(
-    Data(encryptedEntriesBlob),
-    vaultKey: vaultKey,
-    aad: entriesAAD
-  )
+  // The helpers throw with .unavailable (they cannot see the header); re-attach
+  // headerContext here so an entries-blob rejection still reports the observed
+  // header values in the rollback flag.
+  let entriesData: Data
+  let entryCount: Int
+  do {
+    let entriesAAD = try buildCacheEntriesAAD(
+      counter: header.cacheVersionCounter,
+      hostInstallUUID: header.hostInstallUUID,
+      userId: header.userId
+    )
+    entriesData = try decryptEntriesBlob(
+      Data(encryptedEntriesBlob),
+      vaultKey: vaultKey,
+      aad: entriesAAD
+    )
+    entryCount = try countJSONArrayElements(entriesData)
+  } catch EntryCacheError.rejection(let kind, _) {
+    throw EntryCacheError.rejection(kind, headerContext)
+  }
 
   // Validate entry count
-  let entryCount = try countJSONArrayElements(entriesData)
   guard entryCount == Int(header.entryCount) else {
-    throw EntryCacheError.rejection(.entryCountMismatch)
+    throw EntryCacheError.rejection(.entryCountMismatch, headerContext)
   }
 
   return CacheData(header: header, entries: entriesData)
@@ -267,7 +306,7 @@ internal func buildCacheEntriesAAD(
 ) throws -> Data {
   let userIdBytes = Array(userId.utf8)
   guard userIdBytes.count <= 0xFFFF else {
-    throw EntryCacheError.rejection(.headerInvalid)
+    throw EntryCacheError.rejection(.headerInvalid, .unavailable)
   }
   var aad = Data(capacity: 8 + 8 + 16 + 2 + userIdBytes.count)
   aad.append(contentsOf: Array("CACHEENT".utf8))
@@ -301,7 +340,7 @@ private func decryptAndParseHeader(
 ) throws -> CacheHeader {
   // Blob = IV(12) || ciphertext || tag(16)
   guard blob.count >= 12 + 16 else {
-    throw EntryCacheError.rejection(.headerInvalid)
+    throw EntryCacheError.rejection(.headerInvalid, .unavailable)
   }
   let iv = Data(blob[0..<12])
   let tag = Data(blob[(blob.count - 16)...])
@@ -322,7 +361,7 @@ private func decryptAndParseHeader(
   } catch {
     // Auth failure — could be AAD mismatch or tag invalid.
     // Try with a different UUID to distinguish.
-    throw EntryCacheError.rejection(.authtagInvalid)
+    throw EntryCacheError.rejection(.authtagInvalid, .unavailable)
   }
 
   return try parseHeaderJSON(plaintext)
@@ -330,7 +369,7 @@ private func decryptAndParseHeader(
 
 private func parseHeaderJSON(_ data: Data) throws -> CacheHeader {
   guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-    throw EntryCacheError.rejection(.headerInvalid)
+    throw EntryCacheError.rejection(.headerInvalid, .unavailable)
   }
   guard
     let counter = obj["cacheVersionCounter"] as? UInt64 ??
@@ -341,7 +380,7 @@ private func parseHeaderJSON(_ data: Data) throws -> CacheHeader {
     let uuidHex = obj["hostInstallUUID"] as? String,
     let userId = obj["userId"] as? String
   else {
-    throw EntryCacheError.rejection(.headerInvalid)
+    throw EntryCacheError.rejection(.headerInvalid, .unavailable)
   }
 
   let entryCount: UInt32
@@ -350,14 +389,14 @@ private func parseHeaderJSON(_ data: Data) throws -> CacheHeader {
   } else if let ec = entryCountAny as? Int {
     entryCount = UInt32(ec)
   } else {
-    throw EntryCacheError.rejection(.headerInvalid)
+    throw EntryCacheError.rejection(.headerInvalid, .unavailable)
   }
 
   let uuidData: Data
   do {
     uuidData = try hexDecode(uuidHex)
   } catch {
-    throw EntryCacheError.rejection(.headerInvalid)
+    throw EntryCacheError.rejection(.headerInvalid, .unavailable)
   }
 
   return CacheHeader(
@@ -373,7 +412,7 @@ private func parseHeaderJSON(_ data: Data) throws -> CacheHeader {
 private func decryptEntriesBlob(_ blob: Data, vaultKey: SymmetricKey, aad: Data) throws -> Data {
   // Blob = IV(12) || ciphertext || tag(16)
   guard blob.count >= 12 + 16 else {
-    throw EntryCacheError.rejection(.headerInvalid)
+    throw EntryCacheError.rejection(.headerInvalid, .unavailable)
   }
   let iv = Data(blob[0..<12])
   let tag = Data(blob[(blob.count - 16)...])
@@ -382,13 +421,13 @@ private func decryptEntriesBlob(_ blob: Data, vaultKey: SymmetricKey, aad: Data)
   do {
     return try decryptAESGCM(ciphertext: ciphertext, iv: iv, tag: tag, key: vaultKey, aad: aad)
   } catch {
-    throw EntryCacheError.rejection(.authtagInvalid)
+    throw EntryCacheError.rejection(.authtagInvalid, .unavailable)
   }
 }
 
 private func countJSONArrayElements(_ data: Data) throws -> Int {
   guard let array = try? JSONSerialization.jsonObject(with: data) as? [Any] else {
-    throw EntryCacheError.rejection(.entryCountMismatch)
+    throw EntryCacheError.rejection(.entryCountMismatch, .unavailable)
   }
   return array.count
 }

@@ -9,12 +9,17 @@ private let hkdfAuthInfo = "passwd-sso-auth-v1"
 private let hkdfCacheInfo = "passwd-sso-cache-v1"
 private let hkdfZeroSalt = Data(repeating: 0, count: 32)
 
+/// PBKDF2 iteration count pinned by the parent server (crypto-client.ts).
+/// Doubles as the minimum a client accepts from a server-supplied unlock
+/// response — anything lower is treated as a tampered/invalid response.
+public let pbkdf2Iterations = 600_000
+
 /// Derive a 256-bit wrapping key from passphrase + salt using PBKDF2-SHA256.
 /// iterations defaults to 600,000 to match the parent server-side value.
 public func deriveWrappingKeyPBKDF2(
   passphrase: String,
   salt: Data,
-  iterations: Int = 600_000
+  iterations: Int = pbkdf2Iterations
 ) throws -> SymmetricKey {
   guard let passphraseData = passphrase.data(using: .utf8) else {
     throw KDFError.invalidPassphrase

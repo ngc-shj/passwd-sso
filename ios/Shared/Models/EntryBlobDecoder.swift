@@ -58,6 +58,9 @@ public enum EntryBlobDecoder {
     let credentialId: String?
     let passkeyPrivateKeyJwk: String?
     let passkeyUserHandle: String?
+    // Monotonic signature counter the extension increments + persists per
+    // assertion. The RP enforces monotonicity; the assertion emits this + 1.
+    let passkeySignCount: Int?
   }
 
   private struct TagPayload: Decodable {
@@ -127,7 +130,8 @@ public enum EntryBlobDecoder {
       relyingPartyId: rpId,
       credentialId: credentialId,
       userHandle: p.passkeyUserHandle ?? "",
-      privateKeyJWK: jwkData
+      privateKeyJWK: jwkData,
+      signCount: UInt32(clamping: max(0, p.passkeySignCount ?? 0))
     )
   }
 

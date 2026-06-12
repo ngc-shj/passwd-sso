@@ -185,6 +185,30 @@ final class EntryBlobDecoderTests: XCTestCase {
                    #"{"kty":"EC","crv":"P-256","d":"abc","x":"xx","y":"yy"}"#)
   }
 
+  func testPasskeyMaterialDecodesSignCount() throws {
+    let json = #"{"relyingPartyId":"github.com","credentialId":"AQIDBA","passkeyPrivateKeyJwk":"{}","passkeyUserHandle":"BQYHCA","passkeySignCount":42}"#
+    let material = try XCTUnwrap(
+      EntryBlobDecoder.passkeyMaterial(plaintext: data(json), entryId: "pk1")
+    )
+    XCTAssertEqual(material.signCount, 42)
+  }
+
+  func testPasskeyMaterialSignCountDefaultsToZeroWhenAbsent() throws {
+    let json = #"{"relyingPartyId":"github.com","credentialId":"AQIDBA","passkeyPrivateKeyJwk":"{}","passkeyUserHandle":"BQYHCA"}"#
+    let material = try XCTUnwrap(
+      EntryBlobDecoder.passkeyMaterial(plaintext: data(json), entryId: "pk1")
+    )
+    XCTAssertEqual(material.signCount, 0)
+  }
+
+  func testPasskeyMaterialNegativeSignCountClampsToZero() throws {
+    let json = #"{"relyingPartyId":"github.com","credentialId":"AQIDBA","passkeyPrivateKeyJwk":"{}","passkeyUserHandle":"BQYHCA","passkeySignCount":-5}"#
+    let material = try XCTUnwrap(
+      EntryBlobDecoder.passkeyMaterial(plaintext: data(json), entryId: "pk1")
+    )
+    XCTAssertEqual(material.signCount, 0)
+  }
+
   func testPasskeyMaterialReturnsNilWhenNotPasskey() {
     // LOGIN blob: no relyingPartyId / no passkeyPrivateKeyJwk.
     let json = #"{"title":"Acme","username":"u","password":"p","url":"acme.com"}"#
