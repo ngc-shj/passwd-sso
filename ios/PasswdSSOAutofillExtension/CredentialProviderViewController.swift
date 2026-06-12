@@ -151,7 +151,8 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
             self?.completePasskeyAssertion(entryId: summary.id, request: request)
           },
           onCancel: { [weak self] in self?.cancel(with: nil) },
-          emptyStateText: "No passkeys for this site"
+          emptyStateText: "No passkeys for this site",
+          passkeysSelectable: true
         )
         presentSwiftUI(view)
       } catch CredentialResolver.Error.vaultLocked {

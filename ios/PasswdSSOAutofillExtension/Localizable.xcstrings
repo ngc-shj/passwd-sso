@@ -1,289 +1,386 @@
 {
-  "sourceLanguage" : "en",
-  "strings" : {
-    "Authenticating…" : {
-      "comment" : "A label displayed while a passkey assertion is being generated.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Authenticating…"
+  "sourceLanguage": "en",
+  "strings": {
+    "Authenticating…": {
+      "comment": "A label displayed while a passkey assertion is being generated.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Authenticating…"
           }
         },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "認証中…"
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "認証中…"
           }
         }
       }
     },
-    "Cancel" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cancel"
+    "Cancel": {
+      "extractionState": "stale",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
           }
         },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "キャンセル"
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "キャンセル"
           }
         }
       }
     },
-    "Confirm Fill" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Confirm Fill"
+    "Confirm Fill": {
+      "extractionState": "stale",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm Fill"
           }
         },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "入力の確認"
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "入力の確認"
           }
         }
       }
     },
-    "Continue" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Continue"
+    "Continue": {
+      "extractionState": "stale",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue"
           }
         },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "続ける"
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "続ける"
           }
         }
       }
     },
-    "Fill" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Fill"
+    "Fill": {
+      "extractionState": "stale",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fill"
           }
         },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "入力"
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "入力"
           }
         }
       }
     },
-    "Fill **%@** for app:\n%@" : {
-      "comment" : "%1$@ = username, %2$@ = app bundle ID. Keep the **…** markdown bold.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Fill **%@** for app:\n%@"
+    "Fill **%@** for app:\n%@": {
+      "comment": "%1$@ = username, %2$@ = app bundle ID. Keep the **…** markdown bold.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fill **%@** for app:\n%@"
           }
         },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アプリに **%1$@** を入力:\n%2$@"
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アプリに **%1$@** を入力:\n%2$@"
           }
         }
       }
     },
-    "Fill for app?" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Fill for app?"
+    "Fill for app?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fill for app?"
           }
         },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "アプリに入力しますか？"
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アプリに入力しますか？"
           }
         }
       }
     },
-    "No matches" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No matches"
+    "No matches": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No matches"
           }
         },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "一致する項目がありません"
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一致する項目がありません"
           }
         }
       }
     },
-    "No one-time codes for this site" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No one-time codes for this site"
+    "No one-time codes for this site": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No one-time codes for this site"
           }
         },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "このサイトのワンタイムコードはありません"
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このサイトのワンタイムコードはありません"
           }
         }
       }
     },
-    "No passkeys for this site" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No passkeys for this site"
+    "No passkeys for this site": {
+      "extractionState": "stale",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No passkeys for this site"
           }
         },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "このサイトのパスキーはありません"
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このサイトのパスキーはありません"
           }
         }
       }
     },
-    "No passwords for this site" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No passwords for this site"
+    "No passwords for this site": {
+      "extractionState": "stale",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No passwords for this site"
           }
         },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "このサイトのパスワードはありません"
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このサイトのパスワードはありません"
           }
         }
       }
     },
-    "OK" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "OK"
+    "OK": {
+      "extractionState": "stale",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
           }
         },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "OK"
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
           }
         }
       }
     },
-    "Open the passwd-sso app and unlock your vault, then come back here to fill." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open the passwd-sso app and unlock your vault, then come back here to fill."
+    "Open the passwd-sso app and unlock your vault, then come back here to fill.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open the passwd-sso app and unlock your vault, then come back here to fill."
           }
         },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "passwd-sso アプリを開いて保管庫のロックを解除し、ここに戻って入力してください。"
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "passwd-sso アプリを開いて保管庫のロックを解除し、ここに戻って入力してください。"
           }
         }
       }
     },
-    "Search all entries" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Search all entries"
+    "Search all entries": {
+      "extractionState": "stale",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search all entries"
           }
         },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "すべてのエントリを検索"
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべてのエントリを検索"
           }
         }
       }
     },
-    "Search to browse all entries." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Search to browse all entries."
+    "Search to browse all entries.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search to browse all entries."
           }
         },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "すべてのエントリを表示するには検索してください。"
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべてのエントリを表示するには検索してください。"
           }
         }
       }
     },
-    "Sign in with your passkey" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sign in with your passkey"
+    "Sign in with your passkey": {
+      "extractionState": "stale",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in with your passkey"
           }
         },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "パスキーでサインイン"
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "パスキーでサインイン"
           }
         }
       }
     },
-    "Vault is Locked" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Vault is Locked"
+    "Vault is Locked": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vault is Locked"
           }
         },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "保管庫はロックされています"
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保管庫はロックされています"
+          }
+        }
+      }
+    },
+    "Search Results": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search Results"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "検索結果"
+          }
+        }
+      }
+    },
+    "Passkey": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Passkey"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "パスキー"
+          }
+        }
+      }
+    },
+    "Fill on a different site?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fill on a different site?"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "別のサイトに入力しますか？"
+          }
+        }
+      }
+    },
+    "**%@** is saved for:\n%@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "**%@** is saved for:\n%@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "**%@** の保存先:\n%@"
+          }
+        }
+      },
+      "comment": "%1$@ = entry title, %2$@ = stored host. Keep the **…** markdown bold."
+    },
+    "This site is:\n%@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This site is:\n%@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このサイト:\n%@"
+          }
+        }
+      }
+    },
+    "Fill Anyway": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fill Anyway"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このまま入力"
           }
         }
       }
     }
   },
-  "version" : "1.1"
+  "version": "1.1"
 }
