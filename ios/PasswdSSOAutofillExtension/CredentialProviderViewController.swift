@@ -12,9 +12,11 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
 
   // Work deferred until the extension view is foreground (viewDidAppear) — the
   // reliable point for the biometric keychain read (`evaluateAccessControl`),
-  // which fails with -1004 ("not running foreground") when run earlier. Both the
-  // passkey assertion (provide path) and the passkey list's resolveCandidates use
-  // this. `foregroundWorkStarted` guards viewDidAppear firing more than once.
+  // which fails with -1004 ("not running foreground") when run earlier. EVERY
+  // fill path (password list, password provide, TOTP list, passkey list, passkey
+  // provide) must route its first biometric through this deferral — a direct
+  // call from prepare* surfaces as a bogus "Vault is Locked" sheet.
+  // `foregroundWorkStarted` guards viewDidAppear firing more than once.
   private var pendingForegroundWork: (() -> Void)?
   private var foregroundWorkStarted = false
 
@@ -54,6 +56,20 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     let originalIdents = serviceIdentifiers.map {
       ASCredentialServiceIdentifier(identifier: $0.identifier, type: $0.type)
     }
+    // Defer resolveCandidates (a biometric keychain read) to viewDidAppear —
+    // running it here fails with -1004 ("Caller is not running foreground"),
+    // which used to surface as a bogus "Vault is Locked" sheet.
+    deferToForeground { [weak self] in
+      self?.runPasswordList(sendable: sendable, originalIdents: originalIdents)
+    }
+  }
+
+  /// Resolve password candidates (foreground biometric) and present the picker.
+  @MainActor
+  private func runPasswordList(
+    sendable: [ServiceIdentifier],
+    originalIdents: [ASCredentialServiceIdentifier]
+  ) {
     Task { @MainActor in
       do {
         let result = try await resolver.resolveCandidates(for: sendable)
@@ -108,12 +124,9 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
       clientDataHash: requestParameters.clientDataHash,
       userVerificationRequired: requestParameters.userVerificationPreference == .required
     )
-    // Defer resolveCandidates (a biometric keychain read) to viewDidAppear — it
-    // fails with -1004 when run before the extension is foreground.
-    pendingForegroundWork = { [weak self] in
+    deferToForeground { [weak self] in
       self?.runPasskeyList(sendable: sendable, originalIdents: originalIdents, request: request)
     }
-    presentSwiftUI(PasskeyFillProgressView())
   }
 
   /// Resolve passkey candidates (foreground biometric) and present the picker.
@@ -178,14 +191,8 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     switch credentialRequest.type {
     case .password:
       let recordId = credentialRequest.credentialIdentity.recordIdentifier ?? ""
-      Task { @MainActor in
-        do {
-          let detail = try await resolver.decryptEntryDetail(entryId: recordId)
-          let credential = ASPasswordCredential(user: detail.username, password: detail.password)
-          extensionContext.completeRequest(withSelectedCredential: credential)
-        } catch {
-          cancel(with: error)
-        }
+      deferToForeground { [weak self] in
+        self?.completePasswordProvide(recordId: recordId)
       }
     case .passkeyAssertion:
       guard
@@ -201,15 +208,25 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         clientDataHash: passkeyRequest.clientDataHash,
         userVerificationRequired: passkeyRequest.userVerificationPreference == .required
       )
-      // Defer the biometric to viewDidAppear (the reliable foreground point):
-      // running it synchronously here fails with -1004 ("Caller is not running
-      // foreground"). Present a spinner now; viewDidAppear runs the assertion.
-      pendingForegroundWork = { [weak self] in
+      deferToForeground { [weak self] in
         self?.completePasskeyAssertion(entryId: recordId, request: request)
       }
-      presentSwiftUI(PasskeyFillProgressView())
     default:
       cancel(with: nil)
+    }
+  }
+
+  /// Decrypt the single requested entry (foreground biometric) and complete.
+  @MainActor
+  private func completePasswordProvide(recordId: String) {
+    Task { @MainActor in
+      do {
+        let detail = try await resolver.decryptEntryDetail(entryId: recordId)
+        let credential = ASPasswordCredential(user: detail.username, password: detail.password)
+        extensionContext.completeRequest(withSelectedCredential: credential)
+      } catch {
+        cancel(with: error)
+      }
     }
   }
 
@@ -273,6 +290,18 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     let originalIdents = serviceIdentifiers.map {
       ASCredentialServiceIdentifier(identifier: $0.identifier, type: $0.type)
     }
+    deferToForeground { [weak self] in
+      self?.runOneTimeCodeList(sendable: sendable, originalIdents: originalIdents)
+    }
+  }
+
+  /// Resolve TOTP candidates (foreground biometric) and present the picker.
+  @available(iOS 17.0, *)
+  @MainActor
+  private func runOneTimeCodeList(
+    sendable: [ServiceIdentifier],
+    originalIdents: [ASCredentialServiceIdentifier]
+  ) {
     Task { @MainActor in
       do {
         let result = try await resolver.resolveCandidates(for: sendable)
@@ -336,8 +365,18 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     presentSwiftUI(view)
   }
 
-  /// The extension is reliably foreground here, so a deferred passkey assertion's
-  /// biometric (`evaluateAccessControl`) can run without -1004. Consume once.
+  /// Route a fill's first biometric through the viewDidAppear deferral: show
+  /// the progress view now, run `work` once the extension is reliably
+  /// foreground. Every prepare* entry point MUST use this instead of calling
+  /// the resolver directly — see `pendingForegroundWork`.
+  @MainActor
+  private func deferToForeground(_ work: @escaping () -> Void) {
+    pendingForegroundWork = work
+    presentSwiftUI(FillProgressView())
+  }
+
+  /// The extension is reliably foreground here, so a deferred fill's biometric
+  /// (`evaluateAccessControl`) can run without -1004. Consume once.
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
     guard let work = pendingForegroundWork, !foregroundWorkStarted else { return }

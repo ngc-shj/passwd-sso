@@ -13,7 +13,6 @@
 		06F0C988BE4B8925A0DC5C4A /* Shared.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 296B0035C443158058EA4866 /* Shared.framework */; };
 		0A26FC6678B43677C57CEB9D /* PersonalEntryBlobBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32E806A6C00D78F85B1ABC89 /* PersonalEntryBlobBuilder.swift */; };
 		0A36948197E80ACA5ED17F22 /* DPoPProofBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBF559B979642506D203C806 /* DPoPProofBuilderTests.swift */; };
-		0AF416D1BC981E6EAC49B25D /* PasskeyFillProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91BB120E27E457BB38E3B58D /* PasskeyFillProgressView.swift */; };
 		0DF2C117B49A7A20E36940F0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F05C70517947F52709908366 /* SettingsView.swift */; };
 		0F7754D416476CE6B1AE0C81 /* EntryEncrypter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 988D60F3AE7755637CFCFDD7 /* EntryEncrypter.swift */; };
 		1600D1BA3846CDCAEA02EF7E /* HostSyncServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD016B2D5D9999A41CCA92F /* HostSyncServiceTests.swift */; };
@@ -55,6 +54,7 @@
 		69C540BACD28B65D0DDB74A3 /* PasswdSSOAppApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C025655D57D0A2807DB8625 /* PasswdSSOAppApp.swift */; };
 		6B44D4F2F57D13671BE9B2C3 /* Shared.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 296B0035C443158058EA4866 /* Shared.framework */; };
 		6C09DE06209A534D059F5B02 /* BackgroundSyncCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77C0E5B05F04FC285CE89519 /* BackgroundSyncCoordinatorTests.swift */; };
+		7137C82C408AFD5699037F0A /* FillProgressView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6E3257A1A8F07C9FCFF37BA /* FillProgressView.swift */; };
 		72BD7556CC6BAD53BD1F093D /* DPoPProofBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FEC5AE0DBB56D25F0537D3C /* DPoPProofBuilder.swift */; };
 		765B1E34A07F76D0203E28D3 /* RollbackFlagWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7546B006E2E44B4AB2F80A42 /* RollbackFlagWriter.swift */; };
 		77BB29B71060E99C8B62A235 /* PersonalEntryBlobBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1FBE5BA0C4B6D7DE1B50B32 /* PersonalEntryBlobBuilderTests.swift */; };
@@ -253,7 +253,6 @@
 		8AFD6C1D7BB52C3C67DF3BD2 /* EntryCacheFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryCacheFile.swift; sourceTree = "<group>"; };
 		8C6E4E71B2DDEE6BBA03CBF4 /* LockedFallbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockedFallbackView.swift; sourceTree = "<group>"; };
 		8F6C27CE52EFE55D86666E7C /* URLMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = URLMatcher.swift; sourceTree = "<group>"; };
-		91BB120E27E457BB38E3B58D /* PasskeyFillProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasskeyFillProgressView.swift; sourceTree = "<group>"; };
 		920CAD5E7129591C09F8C23C /* CredentialProviderViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialProviderViewController.swift; sourceTree = "<group>"; };
 		92BFAE8E878C252FF7DF4D68 /* URLMatchingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = URLMatchingTests.swift; sourceTree = "<group>"; };
 		9597EAEFA6081B3BDBA1FAFF /* DeviceIdentifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentifier.swift; sourceTree = "<group>"; };
@@ -276,6 +275,7 @@
 		C330CB177E3117289263E7F5 /* AutoFillCandidateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoFillCandidateTests.swift; sourceTree = "<group>"; };
 		C40C54B860C6D1B296674038 /* LockState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockState.swift; sourceTree = "<group>"; };
 		C579D0D8BCA69B900181743B /* VaultUnlocker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultUnlocker.swift; sourceTree = "<group>"; };
+		C6E3257A1A8F07C9FCFF37BA /* FillProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FillProgressView.swift; sourceTree = "<group>"; };
 		C9E896E2CA0264206A65A0B8 /* ServerTrustService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerTrustService.swift; sourceTree = "<group>"; };
 		CC4B0DD9996CF6B29E2CEA6A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		CFD016B2D5D9999A41CCA92F /* HostSyncServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostSyncServiceTests.swift; sourceTree = "<group>"; };
@@ -563,9 +563,9 @@
 			isa = PBXGroup;
 			children = (
 				D2A5F488711333940497135A /* CredentialPickerView.swift */,
+				C6E3257A1A8F07C9FCFF37BA /* FillProgressView.swift */,
 				8C6E4E71B2DDEE6BBA03CBF4 /* LockedFallbackView.swift */,
 				D57AF6A21C048387AB2FC0C5 /* OneTimeCodePickerView.swift */,
-				91BB120E27E457BB38E3B58D /* PasskeyFillProgressView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -970,9 +970,9 @@
 			files = (
 				9336583B6F1252ACEB331AC4 /* CredentialPickerView.swift in Sources */,
 				C145708F7E61F3A78658F1CC /* CredentialProviderViewController.swift in Sources */,
+				7137C82C408AFD5699037F0A /* FillProgressView.swift in Sources */,
 				F376E57211FDE0E03F285949 /* LockedFallbackView.swift in Sources */,
 				5B65C54AB593A685DC452BA4 /* OneTimeCodePickerView.swift in Sources */,
-				0AF416D1BC981E6EAC49B25D /* PasskeyFillProgressView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
