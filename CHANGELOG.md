@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.58](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.57...passwd-sso-v0.4.58) (2026-06-12)
+
+
+### Features
+
+* **ios:** auto-copy TOTP to clipboard after AutoFill login (opt-in) ([#555](https://github.com/ngc-shj/passwd-sso/issues/555)) ([82b29dc](https://github.com/ngc-shj/passwd-sso/commit/82b29dcf04c1bc4a4b16495edab7eb7d926a09af))
+* **ios:** category landing grid for the vault ([#559](https://github.com/ngc-shj/passwd-sso/issues/559)) ([6a4d87a](https://github.com/ngc-shj/passwd-sso/commit/6a4d87a4cc5c4fe6e69c6c634df8052bc8d17a00))
+
+
+### Bug Fixes
+
+* **ios:** sync MARKETING_VERSION to released 0.4.57 ([#556](https://github.com/ngc-shj/passwd-sso/issues/556)) ([ba64d20](https://github.com/ngc-shj/passwd-sso/commit/ba64d20362a4e704e0544ed78974797508a9310c))
+
 ## [0.4.57](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.56...passwd-sso-v0.4.57) (2026-06-12)
 
 
