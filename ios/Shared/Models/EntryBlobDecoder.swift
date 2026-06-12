@@ -158,6 +158,9 @@ public enum EntryBlobDecoder {
       url: p.url ?? "",
       notes: p.notes ?? "",
       totpSecret: p.totp?.secret,
+      totpAlgorithm: p.totp?.algorithm,
+      totpDigits: p.totp?.digits,
+      totpPeriod: p.totp?.period,
       generatorSettings: nil
     )
   }

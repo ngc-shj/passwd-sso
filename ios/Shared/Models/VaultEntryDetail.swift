@@ -14,6 +14,9 @@ public struct VaultEntryDetail: Codable, Sendable, Equatable, Identifiable {
   public let url: String
   public let notes: String
   public let totpSecret: String?
+  public let totpAlgorithm: String?
+  public let totpDigits: Int?
+  public let totpPeriod: Int?
   public let generatorSettings: GeneratorSettings?
 
   public struct GeneratorSettings: Codable, Sendable, Equatable {
@@ -51,6 +54,9 @@ public struct VaultEntryDetail: Codable, Sendable, Equatable, Identifiable {
     url: String,
     notes: String = "",
     totpSecret: String? = nil,
+    totpAlgorithm: String? = nil,
+    totpDigits: Int? = nil,
+    totpPeriod: Int? = nil,
     generatorSettings: GeneratorSettings? = nil
   ) {
     self.id = id
@@ -65,6 +71,9 @@ public struct VaultEntryDetail: Codable, Sendable, Equatable, Identifiable {
     self.url = url
     self.notes = notes
     self.totpSecret = totpSecret
+    self.totpAlgorithm = totpAlgorithm
+    self.totpDigits = totpDigits
+    self.totpPeriod = totpPeriod
     self.generatorSettings = generatorSettings
   }
 }

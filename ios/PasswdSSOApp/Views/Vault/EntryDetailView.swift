@@ -120,7 +120,12 @@ struct EntryDetailView: View {
 
       Section("One-Time Code") {
         if let totpSecret = d.totpSecret, !totpSecret.isEmpty {
-          TOTPCodeView(params: TOTPParams(secret: totpSecret))
+          TOTPCodeView(params: TOTPParams(
+            secret: totpSecret,
+            algorithm: d.totpAlgorithm,
+            digits: d.totpDigits,
+            period: d.totpPeriod
+          ))
         } else {
           notSetText
         }
@@ -232,13 +237,6 @@ struct EntryDetailView: View {
   /// Copy to pasteboard with localOnly + a configurable auto-clear expiration
   /// (AppSettingsStore.clipboardClearSeconds) per plan §"Side-Channel Controls".
   private func copySecurely(value: String) {
-    let seconds = Double(AppSettingsStore().clipboardClearSeconds)
-    UIPasteboard.general.setItems(
-      [[UIPasteboard.typeAutomatic: value]],
-      options: [
-        .localOnly: true,
-        .expirationDate: Date().addingTimeInterval(seconds),
-      ]
-    )
+    SecureClipboard.copy(value, clearAfter: AppSettingsStore().clipboardClearSeconds)
   }
 }

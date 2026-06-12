@@ -224,6 +224,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
       do {
         let detail = try await resolver.decryptEntryDetail(entryId: recordId)
         let credential = ASPasswordCredential(user: detail.username, password: detail.password)
+        autoCopyTotpIfEnabled(detail)
         extensionContext.completeRequest(withSelectedCredential: credential)
       } catch {
         cancel(with: error)
@@ -398,11 +399,24 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
 
   // MARK: - Completion
 
+  /// Best-effort: after a login fill, copy the entry's current TOTP code to the
+  /// clipboard when the user opted in. Must run BEFORE `completeRequest`, which
+  /// dismisses (and may tear down) the extension. Never throws — a TOTP failure
+  /// must not affect the password fill.
+  @MainActor
+  private func autoCopyTotpIfEnabled(_ detail: VaultEntryDetail) {
+    let settings = AppSettingsStore()
+    if let code = totpToCopy(detail: detail, autoCopy: settings.autoCopyTotp, now: Date()) {
+      SecureClipboard.copy(code, clearAfter: settings.clipboardClearSeconds)
+    }
+  }
+
   private func completePasswordFill(for summary: VaultEntrySummary) {
     Task { @MainActor in
       do {
         let detail = try await resolver.decryptEntryDetail(entryId: summary.id)
         let credential = ASPasswordCredential(user: detail.username, password: detail.password)
+        autoCopyTotpIfEnabled(detail)
         extensionContext.completeRequest(withSelectedCredential: credential)
       } catch {
         cancel(with: error)
@@ -418,7 +432,15 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
           cancel(with: nil)
           return
         }
-        let code = try generateTOTPCode(params: TOTPParams(secret: secret), at: Date())
+        let code = try generateTOTPCode(
+          params: TOTPParams(
+            secret: secret,
+            algorithm: detail.totpAlgorithm,
+            digits: detail.totpDigits,
+            period: detail.totpPeriod
+          ),
+          at: Date()
+        )
         if #available(iOS 18.0, *) {
           let credential = ASOneTimeCodeCredential(code: code)
           await extensionContext.completeOneTimeCodeRequest(using: credential)
