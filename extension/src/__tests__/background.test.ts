@@ -271,6 +271,83 @@ describe("background message flow", () => {
     );
   });
 
+  it("GET_STATUS responds even when session hydration hangs (bounded wait — popup never strands)", async () => {
+    // Reload the SW with a hydrate that never settles (e.g. a wedged IndexedDB
+    // read). Without the bounded wait, handleMessage would await forever and
+    // GET_STATUS never returns — the popup spins on its loading state.
+    vi.resetModules();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockReturnValue(new Promise(() => {}));
+    vi.useFakeTimers();
+    try {
+      await loadBackground();
+
+      const respPromise = sendMessage({ type: "GET_STATUS" });
+      // Drive past HYDRATION_TIMEOUT_MS so the bounded wait releases.
+      await vi.advanceTimersByTimeAsync(5_000);
+      const status = await respPromise;
+
+      expect(status).toEqual(
+        expect.objectContaining({
+          type: "GET_STATUS",
+          hasToken: false,
+          vaultUnlocked: false,
+          expiresAt: null,
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+      sessionStorageMocks.loadSession.mockResolvedValue(null);
+    }
+  });
+
+  it("does not resurrect the vault key when LOCK_VAULT runs during a slow hydration (S1 race)", async () => {
+    // Startup hydration restores a vault that WOULD derive encryptionKey, but
+    // it is slow (parked at deriveEncryptionKey). The bounded message wait lets
+    // LOCK_VAULT proceed and clear the vault; the late-completing hydration must
+    // NOT re-derive the key the user just locked.
+    vi.resetModules();
+    chromeMock = installChromeMock();
+    sessionStorageMocks.loadSession.mockResolvedValue({
+      token: "hydrated-tok",
+      expiresAt: 9_999_999_999_999,
+      userId: "user-1",
+      vaultSecretKey: "00",
+      tokenCnfJkt: STATIC_TEST_JKT,
+      tenantAutoLockMinutes: null,
+      personalKeyVersion: 1,
+    } as unknown as SessionState);
+    let releaseDerive!: (k: unknown) => void;
+    cryptoMocks.deriveEncryptionKey.mockReturnValue(
+      new Promise((r) => {
+        releaseDerive = r;
+      }),
+    );
+    vi.useFakeTimers();
+    try {
+      await loadBackground();
+      await vi.advanceTimersByTimeAsync(0); // park hydration at deriveEncryptionKey
+
+      // LOCK_VAULT proceeds after the 5s bounded wait, clearing the vault.
+      const lockResp = sendMessage({ type: "LOCK_VAULT" });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await lockResp;
+
+      // Hydration's deriveEncryptionKey now resolves — the guard must bail.
+      releaseDerive("enc-key");
+      await vi.advanceTimersByTimeAsync(0);
+
+      const status = await sendMessage({ type: "GET_STATUS" });
+      expect(status).toEqual(
+        expect.objectContaining({ type: "GET_STATUS", vaultUnlocked: false }),
+      );
+    } finally {
+      vi.useRealTimers();
+      sessionStorageMocks.loadSession.mockResolvedValue(null);
+      cryptoMocks.deriveEncryptionKey.mockResolvedValue("enc-key");
+    }
+  });
+
   it("sends stop-keepalive on LOCK_VAULT", async () => {
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
