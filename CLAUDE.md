@@ -508,7 +508,7 @@ feature PR → merge to main → release-please auto-updates Release PR
 How it works:
 1. Every push to main, release-please analyzes new conventional commits
 2. It creates/updates a "Release PR" with version bump + CHANGELOG
-3. The Release PR updates `package.json`, `cli/package.json`, `extension/package.json` automatically
+3. The Release PR updates `package.json`, `cli/package.json`, `extension/package.json`, and `ios/project.yml` (`MARKETING_VERSION`, via `x-release-please-version` annotations) automatically
 4. When you merge the Release PR, a GitHub Release + git tag is created
 Config files: `release-please-config.json`, `.release-please-manifest.json`
 
@@ -528,6 +528,7 @@ npm run version:bump -- 0.3.0  # Explicit version
 | `package.json` | Single source of truth (SSOT) |
 | `cli/package.json` | Synced by `bump-version.sh` |
 | `extension/package.json` | Synced by `bump-version.sh` |
+| `ios/project.yml` (`MARKETING_VERSION` ×5 targets) | Synced by release-please generic updater (`# x-release-please-version` line annotations) and `bump-version.sh`; xcodegen propagates into Info.plist via `$(MARKETING_VERSION)`. `CURRENT_PROJECT_VERSION` (build number) stays manual |
 | `cli/src/index.ts` | Reads `cli/package.json` at runtime via `createRequire` |
 | `extension/manifest.config.ts` | Imports root `package.json` at build time |
 | `src/lib/openapi-spec.ts` | Independent API version (`1.0.0`) — not synced |

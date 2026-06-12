@@ -102,10 +102,15 @@ jobs:
           ROOT_VER=$(node -p "require('./package.json').version") || exit 1
           CLI_VER=$(node -p "require('./cli/package.json').version") || exit 1
           EXT_VER=$(node -p "require('./extension/package.json').version") || exit 1
+          # All MARKETING_VERSION lines in project.yml must carry one value
+          # (sort -u collapses them; >1 distinct value fails the comparison).
+          IOS_VER=$(grep -o 'MARKETING_VERSION: "[0-9.]*"' ios/project.yml \
+            | grep -o '[0-9][0-9.]*' | sort -u | tr '\n' ' ' | sed 's/ $//')
 
           echo "Root:      $ROOT_VER"
           echo "CLI:       $CLI_VER"
           echo "Extension: $EXT_VER"
+          echo "iOS:       $IOS_VER"
 
           FAIL=0
           if [ "$CLI_VER" != "$ROOT_VER" ]; then
@@ -114,6 +119,10 @@ jobs:
           fi
           if [ "$EXT_VER" != "$ROOT_VER" ]; then
             echo "::error::Extension version ($EXT_VER) does not match root ($ROOT_VER)"
+            FAIL=1
+          fi
+          if [ "$IOS_VER" != "$ROOT_VER" ]; then
+            echo "::error::iOS MARKETING_VERSION ($IOS_VER) does not match root ($ROOT_VER)"
             FAIL=1
           fi
           exit $FAIL

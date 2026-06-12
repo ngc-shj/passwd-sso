@@ -114,6 +114,19 @@ for PKG in "$ROOT/package.json" "$ROOT/cli/package.json" "$ROOT/extension/packag
   echo "Updated: $PKG → $VERSION"
 done
 
+# Sync the iOS app's marketing version (xcodegen project.yml is the SSoT for
+# build settings; CI regenerates the pbxproj from it). Matches the lines
+# annotated for release-please's generic updater.
+node -e "
+  const fs = require('fs');
+  const p = process.argv[1];
+  let s = fs.readFileSync(p, 'utf8');
+  s = s.replace(/MARKETING_VERSION: \"[0-9]+\.[0-9]+\.[0-9]+\"/g,
+                'MARKETING_VERSION: \"' + process.argv[2] + '\"');
+  fs.writeFileSync(p, s);
+" "$ROOT/ios/project.yml" "$VERSION"
+echo "Updated: $ROOT/ios/project.yml → $VERSION"
+
 # Sync lock files
 for DIR in "$ROOT" "$ROOT/cli" "$ROOT/extension"; do
   if [ -f "$DIR/package-lock.json" ]; then
@@ -126,7 +139,7 @@ echo ""
 echo "Version bumped to $VERSION"
 echo ""
 echo "Next steps:"
-echo "  git add package.json cli/package.json extension/package.json"
+echo "  git add package.json cli/package.json extension/package.json ios/project.yml"
 echo "  git add package-lock.json cli/package-lock.json extension/package-lock.json"
 echo "  git commit -m 'chore: bump version to $VERSION'"
 echo "  git tag v$VERSION"
