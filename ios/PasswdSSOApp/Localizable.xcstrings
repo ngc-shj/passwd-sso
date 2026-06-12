@@ -1,6 +1,193 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "All" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべて"
+          }
+        }
+      }
+    },
+    "Logins" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Logins"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ログイン"
+          }
+        }
+      }
+    },
+    "Secure Notes" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Secure Notes"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "セキュアメモ"
+          }
+        }
+      }
+    },
+    "Credit Cards" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Credit Cards"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "クレジットカード"
+          }
+        }
+      }
+    },
+    "Identities" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identities"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "個人情報"
+          }
+        }
+      }
+    },
+    "Bank Accounts" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bank Accounts"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "銀行口座"
+          }
+        }
+      }
+    },
+    "SSH Keys" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH Keys"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSHキー"
+          }
+        }
+      }
+    },
+    "Software Licenses" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Software Licenses"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ソフトウェアライセンス"
+          }
+        }
+      }
+    },
+    "Passkeys" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passkeys"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パスキー"
+          }
+        }
+      }
+    },
+    "Codes" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codes"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コード"
+          }
+        }
+      }
+    },
+    "Favorites" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Favorites"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "お気に入り"
+          }
+        }
+      }
+    },
     "Auto-copy TOTP after fill" : {
       "extractionState" : "translated",
       "localizations" : {

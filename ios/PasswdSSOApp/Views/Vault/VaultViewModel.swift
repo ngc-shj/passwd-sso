@@ -21,7 +21,6 @@ public enum VaultViewModelError: Error, Equatable {
 @Observable @MainActor public final class VaultViewModel {
   public private(set) var summaries: [VaultEntrySummary] = []
   public var searchQuery: String = ""
-  public var filterFavoritesOnly: Bool = false
   public var filterTeamId: String? = nil  // nil = all, non-nil = specific team
 
   var allSummaries: [VaultEntrySummary] = []
@@ -41,10 +40,6 @@ public enum VaultViewModelError: Error, Equatable {
         $0.username.lowercased().contains(q) ||
         $0.urlHost.lowercased().contains(q)
       }
-    }
-    if filterFavoritesOnly {
-      // Summary doesn't carry isFavorite; filtering by text only for now.
-      // isFavorite lives in the encrypted blob — used for display only in detail.
     }
     if let teamId = filterTeamId {
       result = result.filter { $0.teamId == teamId }
@@ -130,7 +125,13 @@ public enum VaultViewModelError: Error, Equatable {
       )
       // Shared decode: the server blob lacks `id` (injected from the cache row)
       // and uses null/omitted fields — direct decode into VaultEntrySummary fails.
-      return EntryBlobDecoder.summary(plaintext: plaintext, entryId: entry.id, teamId: entry.teamId)
+      return EntryBlobDecoder.summary(
+        plaintext: plaintext,
+        entryId: entry.id,
+        teamId: entry.teamId,
+        entryType: entry.entryType,
+        isFavorite: entry.isFavorite ?? false
+      )
     } catch {
       return nil
     }

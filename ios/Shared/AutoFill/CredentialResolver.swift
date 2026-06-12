@@ -612,6 +612,10 @@ public struct CacheEntry: Codable, Sendable {
   /// only as a fast pre-classifier — passkey detection falls back to the
   /// decrypted overview's relyingPartyId, so nil never causes a miss.
   public let entryType: String?
+  /// Server favorite flag (non-secret metadata, like `entryType`). Optional/
+  /// nil-tolerant: caches written before this field existed, and team rows,
+  /// decode to nil → treated as not-favorite.
+  public let isFavorite: Bool?
 
   public init(
     id: String,
@@ -623,7 +627,8 @@ public struct CacheEntry: Codable, Sendable {
     encryptedItemKey: EncryptedData? = nil,
     encryptedBlob: EncryptedData,
     encryptedOverview: EncryptedData,
-    entryType: String? = nil
+    entryType: String? = nil,
+    isFavorite: Bool? = nil
   ) {
     self.id = id
     self.teamId = teamId
@@ -635,5 +640,6 @@ public struct CacheEntry: Codable, Sendable {
     self.encryptedBlob = encryptedBlob
     self.encryptedOverview = encryptedOverview
     self.entryType = entryType
+    self.isFavorite = isFavorite
   }
 }

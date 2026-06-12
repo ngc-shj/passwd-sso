@@ -80,10 +80,16 @@ public enum EntryBlobDecoder {
   /// overview blob's TOTP presence marker (written by the web client); it
   /// drives the one-time-code AutoFill picker filter. Entries encrypted before
   /// the marker shipped decode to `false` until their next save.
+  /// `entryType`/`isFavorite` are non-secret server metadata that live on the
+  /// cache row (not in the encrypted overview blob), so the caller supplies them
+  /// from the `CacheEntry`. They default so the AutoFill call sites — which don't
+  /// need them — stay unchanged.
   public static func summary(
     plaintext: Data,
     entryId: String,
-    teamId: String?
+    teamId: String?,
+    entryType: String? = nil,
+    isFavorite: Bool = false
   ) -> VaultEntrySummary? {
     guard let p = try? JSONDecoder().decode(OverviewBlobPayload.self, from: plaintext) else {
       return nil
@@ -102,7 +108,9 @@ public enum EntryBlobDecoder {
       // Keep travelSafe three-state (nil = absent): preserved verbatim on edit.
       travelSafe: p.travelSafe,
       relyingPartyId: p.relyingPartyId,
-      credentialId: p.credentialId
+      credentialId: p.credentialId,
+      entryType: entryType,
+      isFavorite: isFavorite
     )
   }
 

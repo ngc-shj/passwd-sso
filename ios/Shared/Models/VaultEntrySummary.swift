@@ -28,6 +28,11 @@ public struct VaultEntrySummary: Codable, Sendable, Equatable, Identifiable {
   /// buildPasskeyIdentitySpecs).
   public let relyingPartyId: String?
   public let credentialId: String?
+  /// Server entry type ("LOGIN", "PASSKEY", …); nil for legacy cache rows. Drives
+  /// the category landing grid. Comes from the cache row, not the overview blob.
+  public let entryType: String?
+  /// Server favorite flag (cache-row metadata, not in the encrypted blob).
+  public let isFavorite: Bool
 
   public init(
     id: String,
@@ -42,7 +47,9 @@ public struct VaultEntrySummary: Codable, Sendable, Equatable, Identifiable {
     requireReprompt: Bool = false,
     travelSafe: Bool? = nil,
     relyingPartyId: String? = nil,
-    credentialId: String? = nil
+    credentialId: String? = nil,
+    entryType: String? = nil,
+    isFavorite: Bool = false
   ) {
     self.id = id
     self.title = title
@@ -57,5 +64,7 @@ public struct VaultEntrySummary: Codable, Sendable, Equatable, Identifiable {
     self.travelSafe = travelSafe
     self.relyingPartyId = relyingPartyId
     self.credentialId = credentialId
+    self.entryType = entryType
+    self.isFavorite = isFavorite
   }
 }
