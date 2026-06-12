@@ -1,6 +1,6 @@
 # Code Review: ios-codebase-review
 Date: 2026-06-13
-Review round: 1
+Review round: 2
 Scope: entire `ios/` tree (~15K LOC Swift, app + AutoFill extension + Shared + tests), standalone Phase 3 review (no plan/deviation log). Branch `fix/ios-passkey-autofill` (2 commits beyond main) given extra scrutiny.
 Ollama pre-screening/seeds: unavailable (Ollama down) — all experts performed full review; manual dedup by orchestrator.
 
@@ -248,6 +248,37 @@ None — all findings carried file:line evidence; no VAGUE / NO-EVIDENCE / UNTES
 - Evidence: `"${new_password//\'/\'\'}"` emits `\'\'` (backslashes preserved) on bash 3.2 (macOS /bin/bash) but `''` on bash ≥ 4.3 (CI ubuntu) — quote-removal semantics of the replacement string changed in bash 4.3. Reproduced: password `it's'a'test` → `PASSWORD 'it\'\'s\'\'a\'\'test'` (wrong password set; no injection).
 - Action: hold the quote in a variable (`q="'"; escaped="${new_password//${q}/${q}${q}}"`) — version-independent. All 3 sibling scripts fixed (R3 propagation). scripts/__tests__: 147 passed / 0 failed.
 - Note: per CLAUDE.md "Fix ALL errors", fixed despite being outside the iOS review scope; tests only failed locally (macOS bash 3.2), CI bash 5 masked the bug while production operators running the documented `scripts/...sh` invocation on macOS would hit it.
+
+## Round 2 (incremental review of commit 2ee00b20)
+
+All three experts verified every Round-1 fix as correct/secure (full per-item verification tables in the experts' outputs; orchestrator retained the verdicts). Baseline note: the user asked whether the review baseline is `ios-main` — verified that merge-base(main, HEAD) == merge-base(ios-main, HEAD) == fc4d5686, so the diff baseline is identical either way, and the review scope was the whole `ios/` tree regardless.
+
+New findings:
+
+### F8 [Minor]: entries-blob rejection discards the already-decrypted header context — Fixed
+- File: ios/Shared/Storage/EntryCacheFile.swift (post-header helpers throw `.unavailable`)
+- Action: readCacheFile wraps buildCacheEntriesAAD / decryptEntriesBlob / countJSONArrayElements in do/catch and rethrows with `headerContext`, so an entries-blob corruption report carries the observed header values.
+
+### T7 [Major]: second saturation test vacuous (passes under old wrapping impl) — Fixed
+- Action: renamed to `testFloorJustBelowMaxEmitsMaxByNormalIncrement` with a doc comment stating it is boundary arithmetic; the discriminating regression coverage is `testFloorAtUInt32MaxSaturatesInsteadOfWrapping` (its second assertion fails under wrapping).
+
+### T8 [Major]: refreshCredentialIdentities not injectable / untested — Fixed
+- Action: added `registrar: CredentialIdentityRegistrar = CredentialIdentityRegistrar()` parameter; new end-to-end test `testRefreshCredentialIdentities_replacesPasswordsAndPasskeysFromCache` (encrypted cache fixture → FakeIdentityStore observes replace with correct password/passkey specs).
+- Modified files: ios/Shared/AutoFill/CredentialIdentityRegistrar.swift, ios/PasswdSSOTests/CredentialIdentityRegistrarTests.swift
+
+### T9 [Minor]: BackgroundSyncContext uncovered — Fixed
+- Action: new ios/PasswdSSOTests/BackgroundSyncContextTests.swift (nil-before-update / values-after-update / overwrite). Note: first run crashed on BridgeKeyStore's service-name precondition (`…bridge-key` suffix required) — stub service renamed; documents the precondition for future fixture writers.
+
+### S5 [Minor]: BackgroundSyncContext retains vault key after lock/sign-out — Accepted
+- **Anti-Deferral check**: acceptable risk (quantified)
+- **Justification**:
+  - Worst case: one spurious BG sync attempt after sign-out using a revoked token; fails with authenticationRequired and does not reschedule. No data written, nothing exfiltrated. The key also remains in the pre-existing `@State currentVaultKey` (equal exposure — the new code is not worse than the established pattern).
+  - Likelihood: low (requires sign-out with a pending BGTask inside its ~15-min window).
+  - Cost to fix: requires a new onVaultLocked/onSignOut callback chain from RootView to the App plus clearing BOTH holders; touches the passkey-ceremony lifecycle this branch just stabilized — regression risk exceeds the marginal gain.
+- **Orchestrator sign-off**: accepted. Tracked: TODO(ios-codebase-review): clear BackgroundSyncContext + App vault-key @State on lock/sign-out when an onVaultLocked callback is introduced.
+- Security expert: escalate: false (equal to pre-existing pattern).
+
+### A1/A2 (informational): 600k fixture cost documented in VaultUnlockerTests comment; epochSeconds pre-1970 clamp untested (unreachable in practice — no action).
 
 ## Round 1 verification
 - xcodebuild build-for-testing: TEST BUILD SUCCEEDED

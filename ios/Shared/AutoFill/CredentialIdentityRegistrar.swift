@@ -107,11 +107,12 @@ public func buildPasskeyIdentitySpecs(
 public func refreshCredentialIdentities(
   from cacheData: CacheData,
   vaultKey: SymmetricKey,
-  userId: String
+  userId: String,
+  registrar: CredentialIdentityRegistrar = CredentialIdentityRegistrar()
 ) async {
   let summaries = decryptPersonalOverviews(from: cacheData, vaultKey: vaultKey, userId: userId)
   let passkeys = buildPasskeyIdentitySpecs(from: cacheData, vaultKey: vaultKey, userId: userId)
-  await CredentialIdentityRegistrar().replace(with: summaries, passkeys: passkeys)
+  await registrar.replace(with: summaries, passkeys: passkeys)
 }
 
 // MARK: - Sendable identity spec

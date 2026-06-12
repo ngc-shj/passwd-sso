@@ -8,6 +8,9 @@ import XCTest
 
 /// Simulates a vault unlock by providing pre-computed encrypted key material.
 /// The test creates real PBKDF2 + AES-GCM material so the full crypto path is exercised.
+// NOTE: the default iteration count is the REAL 600k (pbkdf2Iterations) — the
+// unlock floor rejects anything lower, and weakening production for test speed
+// is prohibited. Cost: ~0.2s PBKDF2 per fixture on Apple Silicon.
 private func makeVaultUnlockData(
   passphrase: String,
   iterations: Int = pbkdf2Iterations,

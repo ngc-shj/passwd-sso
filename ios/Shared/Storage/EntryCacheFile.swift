@@ -252,19 +252,28 @@ public func readCacheFile(
   }
 
   // Decrypt entries with AAD reconstructed from the (now-trusted) header.
-  let entriesAAD = try buildCacheEntriesAAD(
-    counter: header.cacheVersionCounter,
-    hostInstallUUID: header.hostInstallUUID,
-    userId: header.userId
-  )
-  let entriesData = try decryptEntriesBlob(
-    Data(encryptedEntriesBlob),
-    vaultKey: vaultKey,
-    aad: entriesAAD
-  )
+  // The helpers throw with .unavailable (they cannot see the header); re-attach
+  // headerContext here so an entries-blob rejection still reports the observed
+  // header values in the rollback flag.
+  let entriesData: Data
+  let entryCount: Int
+  do {
+    let entriesAAD = try buildCacheEntriesAAD(
+      counter: header.cacheVersionCounter,
+      hostInstallUUID: header.hostInstallUUID,
+      userId: header.userId
+    )
+    entriesData = try decryptEntriesBlob(
+      Data(encryptedEntriesBlob),
+      vaultKey: vaultKey,
+      aad: entriesAAD
+    )
+    entryCount = try countJSONArrayElements(entriesData)
+  } catch EntryCacheError.rejection(let kind, _) {
+    throw EntryCacheError.rejection(kind, headerContext)
+  }
 
   // Validate entry count
-  let entryCount = try countJSONArrayElements(entriesData)
   guard entryCount == Int(header.entryCount) else {
     throw EntryCacheError.rejection(.entryCountMismatch, headerContext)
   }

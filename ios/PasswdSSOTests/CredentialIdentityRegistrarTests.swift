@@ -288,6 +288,38 @@ final class CredentialIdentityRegistrarTests: XCTestCase {
     let passkeyUserHandle: String
   }
 
+  // MARK: - refreshCredentialIdentities (shared one-step helper)
+
+  /// End-to-end through the shared helper: cache -> overview/passkey decrypt ->
+  /// registrar.replace, with the store injected so the call is observable.
+  func testRefreshCredentialIdentities_replacesPasswordsAndPasskeysFromCache() async throws {
+    let vaultKey = SymmetricKey(size: .bits256)
+    let userId = "u-refresh"
+    let login = try personalEntry(
+      id: "e1", urlHost: "acme.com", username: "alice", userId: userId,
+      aadVersion: 1, vaultKey: vaultKey
+    )
+    let passkey = try passkeyEntry(
+      id: "pk1", rpId: "github.com", username: "bob",
+      credentialID: Data([1, 2]), userHandle: Data([3, 4]),
+      userId: userId, vaultKey: vaultKey
+    )
+    let cache = try makeCache([login, passkey], userId: userId)
+    let store = FakeIdentityStore(enabled: true)
+    let registrar = CredentialIdentityRegistrar(store: store)
+
+    await refreshCredentialIdentities(
+      from: cache, vaultKey: vaultKey, userId: userId, registrar: registrar
+    )
+
+    let passwords = await store.replacedPasswordSpecs
+    let passkeys = await store.replacedPasskeySpecs
+    XCTAssertEqual(passwords?.map(\.host), ["acme.com"])
+    XCTAssertEqual(passwords?.first?.user, "alice")
+    XCTAssertEqual(passkeys?.map(\.relyingPartyIdentifier), ["github.com"])
+    XCTAssertEqual(passkeys?.first?.recordIdentifier, "pk1")
+  }
+
   private func passkeyEntry(
     id: String, rpId: String, username: String,
     credentialID: Data, userHandle: Data,

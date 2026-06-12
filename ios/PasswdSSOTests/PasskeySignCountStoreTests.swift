@@ -58,7 +58,10 @@ final class PasskeySignCountStoreTests: XCTestCase {
     XCTAssertEqual(second, UInt32.max, "persisted max must not wrap on the next use")
   }
 
-  func testFloorJustBelowMaxEmitsMax() {
+  /// Boundary arithmetic only — max-1 + 1 == max under BOTH the old wrapping
+  /// and the saturating implementation; the saturation regression itself is
+  /// caught by testFloorAtUInt32MaxSaturatesInsteadOfWrapping above.
+  func testFloorJustBelowMaxEmitsMaxByNormalIncrement() {
     let store = PasskeySignCountStore(defaults: defaults)
     XCTAssertEqual(store.next(credentialId: "cred", floor: .max - 1), UInt32.max)
   }
