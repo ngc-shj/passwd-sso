@@ -98,6 +98,22 @@ public func buildPasskeyIdentitySpecs(
   return result
 }
 
+// MARK: - One-step refresh
+
+/// Decrypt personal summaries + passkey specs from a fresh cache and replace
+/// the OS credential-identity store in one step. Single entry point for every
+/// refresh site (foreground sync, vault unlock, entry create/save) so the
+/// summaries/passkeys/replace sequence cannot drift between call sites.
+public func refreshCredentialIdentities(
+  from cacheData: CacheData,
+  vaultKey: SymmetricKey,
+  userId: String
+) async {
+  let summaries = decryptPersonalOverviews(from: cacheData, vaultKey: vaultKey, userId: userId)
+  let passkeys = buildPasskeyIdentitySpecs(from: cacheData, vaultKey: vaultKey, userId: userId)
+  await CredentialIdentityRegistrar().replace(with: summaries, passkeys: passkeys)
+}
+
 // MARK: - Sendable identity spec
 
 /// Sendable description of one QuickType credential identity: the site host,

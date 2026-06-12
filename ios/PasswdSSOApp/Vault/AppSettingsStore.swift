@@ -20,7 +20,7 @@ extension UserDefaults {
   /// UserDefaults is thread-safe but not `Sendable`; the unsafe annotation
   /// vouches for that across the concurrency checker.
   nonisolated(unsafe) static let appGroup =
-    UserDefaults(suiteName: "group.jp.jpng.passwd-sso.shared") ?? .standard
+    UserDefaults(suiteName: AppGroupContainer.identifier) ?? .standard
 }
 
 /// Persists app settings in the App Group suite. Mirrors the browser

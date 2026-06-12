@@ -18,7 +18,7 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
 
   private let defaults: UserDefaults
 
-  init(defaults: UserDefaults = UserDefaults(suiteName: "group.jp.jpng.passwd-sso.shared") ?? .standard) {
+  init(defaults: UserDefaults = UserDefaults(suiteName: AppGroupContainer.identifier) ?? .standard) {
     self.defaults = defaults
     // Pre-fill the last successfully-probed server URL so it isn't re-typed
     // on every launch.

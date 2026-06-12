@@ -9,9 +9,11 @@ import Shared
 public enum BackgroundSyncTask {
   public static let identifier = "com.passwd-sso.cache-sync"
 
-  /// Register on app launch. Must be called before the app finishes launching.
+  /// Register on app launch. Must be called before the app finishes launching
+  /// (PasswdSSOAppApp.init — once per process), which is long before a vault
+  /// unlock exists, so all state is resolved lazily at task-launch time.
   public static func register(
-    syncService: HostSyncService,
+    syncService: @Sendable @escaping () -> HostSyncService?,
     vaultKey: @Sendable @escaping () -> SymmetricKey?,
     userId: @Sendable @escaping () -> String?
   ) {
@@ -33,16 +35,57 @@ public enum BackgroundSyncTask {
   }
 }
 
+// MARK: - Context bridge
+
+/// Mutable bridge between the SwiftUI app state and the BGTask launch handler.
+/// BGTaskScheduler requires the handler to be registered before the app
+/// finishes launching — long before a vault unlock can produce the sync
+/// service and key — so the handler reads through this holder lazily.
+public final class BackgroundSyncContext: @unchecked Sendable {
+  private let lock = NSLock()
+  private var syncService: HostSyncService?
+  private var vaultKey: SymmetricKey?
+  private var userId: String?
+
+  public init() {}
+
+  public func update(syncService: HostSyncService, vaultKey: SymmetricKey, userId: String) {
+    lock.lock()
+    defer { lock.unlock() }
+    self.syncService = syncService
+    self.vaultKey = vaultKey
+    self.userId = userId
+  }
+
+  public func currentSyncService() -> HostSyncService? {
+    lock.lock()
+    defer { lock.unlock() }
+    return syncService
+  }
+
+  public func currentVaultKey() -> SymmetricKey? {
+    lock.lock()
+    defer { lock.unlock() }
+    return vaultKey
+  }
+
+  public func currentUserId() -> String? {
+    lock.lock()
+    defer { lock.unlock() }
+    return userId
+  }
+}
+
 // MARK: - Runner (Sendable wrapper)
 
 /// Wraps the sync-service call in a type that can cross concurrency domains.
 final class BackgroundSyncRunner: @unchecked Sendable {
-  private let syncService: HostSyncService
+  private let syncService: @Sendable () -> HostSyncService?
   private let vaultKey: @Sendable () -> SymmetricKey?
   private let userId: @Sendable () -> String?
 
   init(
-    syncService: HostSyncService,
+    syncService: @Sendable @escaping () -> HostSyncService?,
     vaultKey: @Sendable @escaping () -> SymmetricKey?,
     userId: @Sendable @escaping () -> String?
   ) {
@@ -54,21 +97,21 @@ final class BackgroundSyncRunner: @unchecked Sendable {
   func run(task bgTask: BGTask) {
     // Box the BGTask so the detached closure can capture it safely.
     let box = TaskBox(task: bgTask)
-    let service = syncService
+    let serviceProvider = syncService
     let keyProvider = vaultKey
     let userIdProvider = userId
     Task {
-      await runAsync(box: box, service: service, keyProvider: keyProvider, userIdProvider: userIdProvider)
+      await runAsync(box: box, serviceProvider: serviceProvider, keyProvider: keyProvider, userIdProvider: userIdProvider)
     }
   }
 
   private func runAsync(
     box: TaskBox,
-    service: HostSyncService,
+    serviceProvider: @Sendable () -> HostSyncService?,
     keyProvider: @Sendable () -> SymmetricKey?,
     userIdProvider: @Sendable () -> String?
   ) async {
-    guard let key = keyProvider(), let uid = userIdProvider() else {
+    guard let service = serviceProvider(), let key = keyProvider(), let uid = userIdProvider() else {
       box.task.setTaskCompleted(success: false)
       BackgroundSyncTask.scheduleNext()
       return

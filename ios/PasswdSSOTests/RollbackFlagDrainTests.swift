@@ -34,6 +34,7 @@ final class RollbackFlagDrainTests: XCTestCase {
       expectedCounter: 10,
       observedCounter: 99,
       headerIssuedAt: Date(timeIntervalSince1970: 1_700_000_000),
+      lastSuccessfulRefreshAt: Date(timeIntervalSince1970: 1_700_000_100),
       rejectionKind: kind
     )
   }
@@ -97,9 +98,53 @@ final class RollbackFlagDrainTests: XCTestCase {
     let body = try XCTUnwrap(capturedBody, "API POST body must be captured")
     XCTAssertEqual(body.deviceId, "device-abc")
     XCTAssertEqual(body.expectedCounter, payload.expectedCounter)
-    XCTAssertEqual(body.observedCounter, payload.observedCounter)
+    XCTAssertEqual(body.observedCounter, 99)
+    // Wire format: server schema requires epoch-second integers.
+    XCTAssertEqual(body.headerIssuedAt, 1_700_000_000)
+    XCTAssertEqual(body.lastSuccessfulRefreshAt, 1_700_000_100)
     XCTAssertEqual(body.rejectionKind, CacheRejectionKind.counterMismatch.rawValue)
     XCTAssertFalse(FileManager.default.fileExists(atPath: flagURL.path), "Flag file must be deleted on 200")
+  }
+
+  // MARK: - drainPendingFlags_nilContext_requiredKeysPresentAsZero
+
+  /// The server schema (Zod .strict()) REQUIRES observedCounter / headerIssuedAt /
+  /// lastSuccessfulRefreshAt as nonnegative integers. JSONEncoder drops nil
+  /// optionals, so unknown context values must be encoded as literal 0 — a body
+  /// with missing keys is rejected with 400 and the drain retries forever.
+  func testDrainPendingFlags_nilContext_requiredKeysPresentAsZero() async throws {
+    let payload = RollbackFlagPayload(
+      expectedCounter: 10,
+      observedCounter: nil,
+      headerIssuedAt: nil,
+      lastSuccessfulRefreshAt: nil,
+      rejectionKind: .authtagInvalid
+    )
+    try await writeFlagFile(payload: payload, key: vaultKey)
+
+    var capturedJSON: [String: Any]?
+    let reportURL = URL(string: "https://test.example/api/mobile/cache-rollback-report")!
+    MockURLProtocol.requestHandler = { request in
+      if let data = request.httpBody ?? drainReadStream(request.httpBodyStream) {
+        capturedJSON = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+      }
+      return (Data(), HTTPURLResponse(url: reportURL, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!)
+    }
+
+    let (client, tokenStore) = makeDrainClient()
+    seedDrainToken(tokenStore)
+    let drain = RollbackFlagDrain(
+      apiClient: client,
+      flagDirectory: tmpDir,
+      deviceId: { "device-nil" }
+    )
+
+    await drain.drainPendingFlags(vaultKey: vaultKey)
+
+    let json = try XCTUnwrap(capturedJSON, "API POST body must be captured")
+    XCTAssertEqual(json["observedCounter"] as? Int, 0)
+    XCTAssertEqual(json["headerIssuedAt"] as? Int, 0)
+    XCTAssertEqual(json["lastSuccessfulRefreshAt"] as? Int, 0)
   }
 
   // MARK: - drainPendingFlags_forgedHMAC_postsAsFlagForged

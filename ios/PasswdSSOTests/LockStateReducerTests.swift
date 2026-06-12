@@ -4,28 +4,24 @@ import XCTest
 final class LockStateReducerTests: XCTestCase {
 
   private let reducer = LockStateReducer()
-  private let baseState = LockState(lockedAt: nil, autoLockMinutes: 5)
 
-  // MARK: - Auto-lock fires at boundary
+  // MARK: - autoLockTick is a no-op in the reducer
 
-  func testAutoLockFiresAtBoundaryWithTestClock() {
+  /// The reducer does not track last-activity internally — `.autoLockTick` must
+  /// pass the state through verbatim. The actual time-boundary locking is
+  /// driven by AutoLockService.tick() (covered in AutoLockServiceTests).
+  func testAutoLockTickIsNoOpInReducer_lockingDrivenByAutoLockService() {
     let start = Date(timeIntervalSinceReferenceDate: 0)
     let clock = TestClock(start: start)
 
     var state = LockState(lockedAt: nil, autoLockMinutes: 5)
-
-    // Simulate unlock at t=0
     state = reducer.reduce(state, event: .unlock(at: clock.now), autoLockMinutes: 5)
-    XCTAssertNil(state.lockedAt)
 
-    // Advance 4 minutes 59 seconds — should still be unlocked
-    clock.advance(by: 4 * 60 + 59)
-    state = reducer.reduce(state, event: .autoLockTick(now: clock.now), autoLockMinutes: 5)
-    XCTAssertNil(state.lockedAt)
+    // Tick far past the 5-minute boundary — the reducer must NOT lock.
+    clock.advance(by: 60 * 60)
+    let ticked = reducer.reduce(state, event: .autoLockTick(now: clock.now), autoLockMinutes: 5)
 
-    // Manual lock at boundary
-    state = reducer.reduce(state, event: .manualLock, autoLockMinutes: 5)
-    XCTAssertNotNil(state.lockedAt)
+    XCTAssertEqual(ticked, state, ".autoLockTick must return the state unchanged")
   }
 
   // MARK: - User activity resets idle timer

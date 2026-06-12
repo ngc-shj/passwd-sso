@@ -10,7 +10,7 @@ import XCTest
 /// The test creates real PBKDF2 + AES-GCM material so the full crypto path is exercised.
 private func makeVaultUnlockData(
   passphrase: String,
-  iterations: Int = 1,
+  iterations: Int = pbkdf2Iterations,
   keyVersion: Int = 1,
   vaultAutoLockMinutes: Int? = nil
 ) throws -> (data: VaultUnlockData, secretKey: Data) {
@@ -362,6 +362,31 @@ final class VaultUnlockerTests: XCTestCase {
     do {
       _ = try await unlocker.unlock(passphrase: "p")
       XCTFail("Expected serverResponseInvalid for unsupported kdfType")
+    } catch VaultUnlockError.serverResponseInvalid {
+      // Expected
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
+  // MARK: - kdfIterations floor (S1)
+
+  /// A MITM'd or rogue server sending a tiny iteration count would silently
+  /// weaken the wrapping key to a near-single hash, making offline passphrase
+  /// brute-force trivial — the client must reject anything below the pinned
+  /// 600k floor as an invalid response, before deriving anything.
+  func testUnlockRejectsKdfIterationsBelowFloor() async throws {
+    let (unlockData, _) = try makeVaultUnlockData(passphrase: "p", iterations: 1)
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .success(unlockData)),
+      bridgeKeyStore: BridgeKeyStore(
+        accessGroup: "test", service: "com.passwd-sso.test.bridge-key", keychain: MockKeychain()),
+      wrappedKeyStore: TempDirWrappedKeyStore(baseDir: tmpDir),
+      cacheURL: tmpDir.appending(path: "test.cache", directoryHint: .notDirectory)
+    )
+    do {
+      _ = try await unlocker.unlock(passphrase: "p")
+      XCTFail("Expected serverResponseInvalid for kdfIterations below the 600k floor")
     } catch VaultUnlockError.serverResponseInvalid {
       // Expected
     } catch {

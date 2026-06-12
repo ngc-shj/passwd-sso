@@ -55,13 +55,12 @@ public actor RollbackFlagDrain {
     // Attempt HMAC verification; on failure report flag_forged.
     if let verified = try? RollbackFlagVerifier.verify(fileData: fileData, vaultKey: vaultKey) {
       let payload = verified.payload
-      let issuedAtISO: String? = payload.headerIssuedAt.map { isoString(from: $0) }
       let body = CacheRollbackReportBody(
         deviceId: deviceId(),
         expectedCounter: payload.expectedCounter,
-        observedCounter: payload.observedCounter,
-        headerIssuedAt: issuedAtISO,
-        lastSuccessfulRefreshAt: nil,
+        observedCounter: payload.observedCounter ?? 0,
+        headerIssuedAt: epochSeconds(payload.headerIssuedAt),
+        lastSuccessfulRefreshAt: epochSeconds(payload.lastSuccessfulRefreshAt),
         rejectionKind: payload.rejectionKind.rawValue
       )
       return (body, payload.rejectionKind.rawValue)
@@ -83,8 +82,8 @@ public actor RollbackFlagDrain {
           deviceId: deviceId(),
           expectedCounter: partial.expectedCounter ?? 0,
           observedCounter: partial.observedCounter ?? 0,
-          headerIssuedAt: nil,
-          lastSuccessfulRefreshAt: nil,
+          headerIssuedAt: 0,
+          lastSuccessfulRefreshAt: 0,
           rejectionKind: "flag_forged"
         )
       }
@@ -93,27 +92,29 @@ public actor RollbackFlagDrain {
       deviceId: deviceId(),
       expectedCounter: 0,
       observedCounter: 0,
-      headerIssuedAt: nil,
-      lastSuccessfulRefreshAt: nil,
+      headerIssuedAt: 0,
+      lastSuccessfulRefreshAt: 0,
       rejectionKind: "flag_forged"
     )
   }
 
-  private func isoString(from date: Date) -> String {
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    return formatter.string(from: date)
+  private func epochSeconds(_ date: Date?) -> Int {
+    date.map { max(0, Int($0.timeIntervalSince1970)) } ?? 0
   }
 }
 
 // MARK: - Report body
 
+/// Wire format for POST /api/mobile/cache-rollback-report. The server schema
+/// (route.ts ReportRequestSchema) is Zod `.strict()` with ALL fields required:
+/// `headerIssuedAt` / `lastSuccessfulRefreshAt` are nonnegative integers
+/// (epoch seconds; 0 = unknown), so optionals must not be omitted here.
 public struct CacheRollbackReportBody: Sendable, Codable {
   public let deviceId: String
   public let expectedCounter: UInt64
   public let observedCounter: UInt64
-  public let headerIssuedAt: String?
-  public let lastSuccessfulRefreshAt: String?
+  public let headerIssuedAt: Int
+  public let lastSuccessfulRefreshAt: Int
   public let rejectionKind: String
 }
 

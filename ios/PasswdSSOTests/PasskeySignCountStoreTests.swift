@@ -43,4 +43,23 @@ final class PasskeySignCountStoreTests: XCTestCase {
     XCTAssertEqual(store.next(credentialId: "b", floor: 0), 1)
     XCTAssertEqual(store.next(credentialId: "a", floor: 0), 2)
   }
+
+  // MARK: - UInt32.max boundary
+
+  /// A wrap to 0 would permanently fail the RP's monotonicity check (0 is never
+  /// greater than the last-seen count) — the store must saturate, not wrap.
+  func testFloorAtUInt32MaxSaturatesInsteadOfWrapping() {
+    let store = PasskeySignCountStore(defaults: defaults)
+
+    let first = store.next(credentialId: "cred", floor: .max)
+    let second = store.next(credentialId: "cred", floor: 0)
+
+    XCTAssertEqual(first, UInt32.max)
+    XCTAssertEqual(second, UInt32.max, "persisted max must not wrap on the next use")
+  }
+
+  func testFloorJustBelowMaxEmitsMax() {
+    let store = PasskeySignCountStore(defaults: defaults)
+    XCTAssertEqual(store.next(credentialId: "cred", floor: .max - 1), UInt32.max)
+  }
 }

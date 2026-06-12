@@ -1,4 +1,5 @@
 import Foundation
+import Shared
 
 /// Stable per-install device identifier, stored in the App Group UserDefaults.
 ///
@@ -9,7 +10,7 @@ import Foundation
 /// launches to prevent bypassing the rate limit.
 public enum DeviceIdentifier {
   private static let key = "com.passwd-sso.deviceId"
-  private static let suiteName = "group.jp.jpng.passwd-sso.shared"
+  private static let suiteName = AppGroupContainer.identifier
 
   /// Returns the stable device identifier, creating one if absent.
   public static func stable() -> String {

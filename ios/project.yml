@@ -85,6 +85,13 @@ targets:
           - UIInterfaceOrientationPortrait
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
+        # BGTaskScheduler rejects register()/submit() for identifiers not
+        # declared here, and BGProcessingTaskRequest additionally requires the
+        # "processing" background mode (BackgroundSyncTask.identifier).
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.passwd-sso.cache-sync
+        UIBackgroundModes:
+          - processing
     entitlements:
       path: PasswdSSOApp/PasswdSSOApp.entitlements
       properties:

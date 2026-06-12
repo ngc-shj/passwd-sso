@@ -123,7 +123,7 @@ final class EntryCacheFileTests: XCTestCase {
         expectedCounter: counter
       )
     ) { error in
-      guard case EntryCacheError.rejection(let kind) = error else {
+      guard case EntryCacheError.rejection(let kind, _) = error else {
         XCTFail("Expected rejection, got \(error)")
         return
       }
@@ -152,7 +152,7 @@ final class EntryCacheFileTests: XCTestCase {
         expectedCounter: counter
       )
     ) { error in
-      if case EntryCacheError.rejection(let kind) = error {
+      if case EntryCacheError.rejection(let kind, _) = error {
         XCTAssertEqual(kind, .authtagInvalid)
       } else {
         XCTFail("Expected rejection(aadMismatch or authtagInvalid), got \(error)")
@@ -177,7 +177,7 @@ final class EntryCacheFileTests: XCTestCase {
         expectedCounter: 99  // wrong
       )
     ) { error in
-      if case EntryCacheError.rejection(let kind) = error {
+      if case EntryCacheError.rejection(let kind, _) = error {
         // authtagInvalid because AAD includes counter
         XCTAssertEqual(kind, .authtagInvalid)
       } else {
@@ -205,7 +205,7 @@ final class EntryCacheFileTests: XCTestCase {
         now: Date()
       )
     ) { error in
-      if case EntryCacheError.rejection(let kind) = error {
+      if case EntryCacheError.rejection(let kind, _) = error {
         XCTAssertEqual(kind, .headerClockSkew)
       } else {
         XCTFail("Expected .headerClockSkew, got \(error)")
@@ -232,7 +232,7 @@ final class EntryCacheFileTests: XCTestCase {
         now: Date()
       )
     ) { error in
-      if case EntryCacheError.rejection(let kind) = error {
+      if case EntryCacheError.rejection(let kind, _) = error {
         XCTAssertEqual(kind, .headerStale)
       } else {
         XCTFail("Expected .headerStale, got \(error)")
@@ -257,7 +257,7 @@ final class EntryCacheFileTests: XCTestCase {
         expectedCounter: counter
       )
     ) { error in
-      if case EntryCacheError.rejection(let kind) = error {
+      if case EntryCacheError.rejection(let kind, _) = error {
         XCTAssertEqual(kind, .entryCountMismatch)
       } else {
         XCTFail("Expected .entryCountMismatch, got \(error)")
@@ -290,7 +290,7 @@ final class EntryCacheFileTests: XCTestCase {
         expectedCounter: counter
       )
     ) { error in
-      if case EntryCacheError.rejection(let kind) = error {
+      if case EntryCacheError.rejection(let kind, _) = error {
         XCTAssertEqual(kind, .headerInvalid)
       } else {
         XCTFail("Expected .headerInvalid, got \(error)")
@@ -314,7 +314,7 @@ final class EntryCacheFileTests: XCTestCase {
         expectedCounter: counter
       )
     ) { error in
-      if case EntryCacheError.rejection(let kind) = error {
+      if case EntryCacheError.rejection(let kind, _) = error {
         XCTAssertTrue(
           kind == .headerMissing || kind == .headerInvalid,
           "Expected headerMissing or headerInvalid, got \(kind)"
@@ -336,7 +336,7 @@ final class EntryCacheFileTests: XCTestCase {
         expectedCounter: counter
       )
     ) { error in
-      if case EntryCacheError.rejection(let kind) = error {
+      if case EntryCacheError.rejection(let kind, _) = error {
         XCTAssertEqual(kind, .headerMissing)
       } else {
         XCTFail("Expected .headerMissing, got \(error)")
@@ -366,7 +366,7 @@ final class EntryCacheFileTests: XCTestCase {
         expectedCounter: counter
       )
     ) { error in
-      if case EntryCacheError.rejection(let kind) = error {
+      if case EntryCacheError.rejection(let kind, _) = error {
         XCTAssertEqual(kind, .headerMissing)
       } else {
         XCTFail("Expected .headerMissing (not using .tmp), got \(error)")
@@ -465,7 +465,7 @@ final class EntryCacheFileTests: XCTestCase {
         expectedCounter: counter
       )
     ) { error in
-      if case EntryCacheError.rejection(let kind) = error {
+      if case EntryCacheError.rejection(let kind, _) = error {
         XCTAssertEqual(kind, .headerInvalid, "Missing userId should produce headerInvalid")
       } else {
         XCTFail("Expected rejection(.headerInvalid), got \(error)")
@@ -550,7 +550,7 @@ final class EntryCacheFileTests: XCTestCase {
         expectedCounter: 11
       )
     ) { error in
-      guard case EntryCacheError.rejection(let kind) = error else {
+      guard case EntryCacheError.rejection(let kind, _) = error else {
         XCTFail("Expected rejection, got \(error)")
         return
       }
@@ -599,7 +599,7 @@ final class EntryCacheFileTests: XCTestCase {
         expectedCounter: counter
       )
     ) { error in
-      guard case EntryCacheError.rejection(let kind) = error else {
+      guard case EntryCacheError.rejection(let kind, _) = error else {
         XCTFail("Expected rejection, got \(error)")
         return
       }
@@ -744,7 +744,7 @@ final class EntryCacheFileTests: XCTestCase {
       hostInstallUUID: Data(repeating: 0, count: 16),
       userId: userId
     )) { error in
-      guard case EntryCacheError.rejection(let kind) = error else {
+      guard case EntryCacheError.rejection(let kind, _) = error else {
         XCTFail("Expected rejection, got \(error)")
         return
       }

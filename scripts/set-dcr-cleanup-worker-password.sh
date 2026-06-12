@@ -70,8 +70,11 @@ if [[ -z "$new_password" ]]; then
   exit 1
 fi
 
-# SQL-safe quoting: double every single quote in the password.
-escaped="${new_password//\'/\'\'}"
+# SQL-safe quoting: double every single quote in the password. The quote is
+# held in a variable because a backslash-escaped quote in the replacement
+# (\'\') keeps its backslash on bash >= 4.3, corrupting the SQL literal.
+q="'"
+escaped="${new_password//${q}/${q}${q}}"
 
 if [[ "$DRY_RUN" == "1" ]]; then
   # Print sanitised representation (password redacted).

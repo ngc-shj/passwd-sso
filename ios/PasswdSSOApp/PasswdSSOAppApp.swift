@@ -12,8 +12,21 @@ struct PasswdSSOAppApp: App {
   @State private var currentVaultKey: SymmetricKey?
   @State private var currentUserId: String?
 
+  private let backgroundSyncContext = BackgroundSyncContext()
+
   @Environment(\.scenePhase) private var scenePhase
   @AppStorage("appTheme", store: .appGroup) private var theme: AppTheme = .system
+
+  init() {
+    // BGTaskScheduler mandates registering the launch handler before the app
+    // finishes launching; the sync state arrives later via onVaultReady.
+    let context = backgroundSyncContext
+    BackgroundSyncTask.register(
+      syncService: { context.currentSyncService() },
+      vaultKey: { context.currentVaultKey() },
+      userId: { context.currentUserId() }
+    )
+  }
 
   var body: some Scene {
     WindowGroup {
@@ -24,6 +37,10 @@ struct PasswdSSOAppApp: App {
             activeDrain = drain
             currentVaultKey = vaultKey
             currentUserId = userId
+            backgroundSyncContext.update(
+              syncService: syncService, vaultKey: vaultKey, userId: userId
+            )
+            BackgroundSyncTask.scheduleNext()
           }
         )
 
@@ -65,13 +82,9 @@ struct PasswdSSOAppApp: App {
             }
             // 3. Re-register QuickType identities for the freshly-synced set.
             if let cacheData = report?.cacheData {
-              let summaries = decryptPersonalOverviews(
+              await refreshCredentialIdentities(
                 from: cacheData, vaultKey: vaultKey, userId: userId
               )
-              let passkeys = buildPasskeyIdentitySpecs(
-                from: cacheData, vaultKey: vaultKey, userId: userId
-              )
-              await CredentialIdentityRegistrar().replace(with: summaries, passkeys: passkeys)
             }
           }
         case .background:
@@ -84,7 +97,12 @@ struct PasswdSSOAppApp: App {
           // Identities are non-secret metadata (the fill is still biometric-gated
           // in the extension); they are cleared on vault lock / sign-out (RootView)
           // and at launch (crash recovery), which is the real privacy boundary.
-          break
+          //
+          // Refresh the pending BGTask request so the 15-min cache top-up window
+          // starts from the moment we actually went to background.
+          if backgroundSyncContext.currentVaultKey() != nil {
+            BackgroundSyncTask.scheduleNext()
+          }
         case .inactive:
           break
         @unknown default:

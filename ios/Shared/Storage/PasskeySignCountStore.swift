@@ -23,7 +23,11 @@ public struct PasskeySignCountStore {
   public func next(credentialId: String, floor: UInt32) -> UInt32 {
     let key = Self.key(for: credentialId)
     let local = UInt32(clamping: defaults.integer(forKey: key))
-    let next = max(local, floor) &+ 1
+    // Saturate at UInt32.max instead of wrapping: a wrap to 0 would permanently
+    // fail the RP's monotonicity check (0 is never greater than the last-seen
+    // count). Saturation is equally degenerate but bounded and explicit.
+    let base = max(local, floor)
+    let next = base == UInt32.max ? UInt32.max : base + 1
     defaults.set(Int(next), forKey: key)
     return next
   }

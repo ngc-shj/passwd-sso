@@ -645,8 +645,8 @@ final class MobileAPIClientTests: XCTestCase {
       deviceId: "device-test-001",
       expectedCounter: 42,
       observedCounter: 99,
-      headerIssuedAt: "2026-05-02T00:00:00.000Z",
-      lastSuccessfulRefreshAt: nil,
+      headerIssuedAt: 1_746_144_000,
+      lastSuccessfulRefreshAt: 0,
       rejectionKind: "counter_mismatch"
     )
     try await client.postCacheRollbackReport(body)
@@ -668,8 +668,8 @@ final class MobileAPIClientTests: XCTestCase {
     XCTAssertEqual(decoded.deviceId, "device-test-001")
     XCTAssertEqual(decoded.expectedCounter, 42)
     XCTAssertEqual(decoded.observedCounter, 99)
-    XCTAssertEqual(decoded.headerIssuedAt, "2026-05-02T00:00:00.000Z")
-    XCTAssertNil(decoded.lastSuccessfulRefreshAt)
+    XCTAssertEqual(decoded.headerIssuedAt, 1_746_144_000)
+    XCTAssertEqual(decoded.lastSuccessfulRefreshAt, 0)
     XCTAssertEqual(decoded.rejectionKind, "counter_mismatch")
 
     // DPoP proof must contain ath claim.

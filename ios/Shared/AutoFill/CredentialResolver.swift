@@ -179,9 +179,9 @@ public actor CredentialResolver {
         expectedCounter: blob.cacheVersionCounter,
         now: now()
       )
-    } catch EntryCacheError.rejection(let kind) {
+    } catch EntryCacheError.rejection(let kind, let context) {
       // Write a MAC-protected rollback flag for the host-app drain (Step 11 posts it).
-      await writeRollbackFlag(kind: kind, blob: blob, vaultKey: vaultKey)
+      await writeRollbackFlag(kind: kind, context: context, blob: blob, vaultKey: vaultKey)
       throw Error.cacheRejected(kind)
     } catch {
       throw Error.cacheUnavailable
@@ -306,8 +306,8 @@ public actor CredentialResolver {
         expectedCounter: blob.cacheVersionCounter,
         now: now()
       )
-    } catch EntryCacheError.rejection(let kind) {
-      await writeRollbackFlag(kind: kind, blob: blob, vaultKey: vaultKey)
+    } catch EntryCacheError.rejection(let kind, let context) {
+      await writeRollbackFlag(kind: kind, context: context, blob: blob, vaultKey: vaultKey)
       throw Error.cacheRejected(kind)
     } catch {
       throw Error.cacheUnavailable
@@ -395,8 +395,8 @@ public actor CredentialResolver {
         expectedCounter: blob.cacheVersionCounter,
         now: now()
       )
-    } catch EntryCacheError.rejection(let kind) {
-      await writeRollbackFlag(kind: kind, blob: blob, vaultKey: vaultKey)
+    } catch EntryCacheError.rejection(let kind, let context) {
+      await writeRollbackFlag(kind: kind, context: context, blob: blob, vaultKey: vaultKey)
       throw Error.cacheRejected(kind)
     } catch {
       throw Error.cacheUnavailable
@@ -564,14 +564,16 @@ public actor CredentialResolver {
 
   private func writeRollbackFlag(
     kind: CacheRejectionKind,
+    context: CacheRejectionContext,
     blob: BridgeKeyStore.Blob,
     vaultKey: SymmetricKey
   ) async {
     guard let writer = rollbackFlagWriter else { return }
     let payload = RollbackFlagPayload(
       expectedCounter: blob.cacheVersionCounter,
-      observedCounter: blob.cacheVersionCounter,
-      headerIssuedAt: nil,
+      observedCounter: context.observedCounter,
+      headerIssuedAt: context.headerIssuedAt,
+      lastSuccessfulRefreshAt: context.lastSuccessfulRefreshAt,
       rejectionKind: kind
     )
     try? await writer.writeFlag(payload: payload, vaultKey: vaultKey)
