@@ -18,6 +18,7 @@ import { CheckCircle2, XCircle, Loader2, KeyRound } from "lucide-react";
 import { withBasePath } from "@/lib/url-helpers";
 import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
 import { canUsePasskeyRecovery } from "@/lib/auth/webauthn/can-use-passkey-recovery";
+import { abortInFlightCeremony } from "@/lib/auth/webauthn/webauthn-client";
 import { signOut } from "next-auth/react";
 
 /**
@@ -115,17 +116,32 @@ export function AutoExtensionConnect() {
     await connect();
   }, [connect]);
 
+  // Sign out and bounce to the full sign-in page, preserving ext_connect so the
+  // extension connection resumes after a fresh sign-in. Used both when the user
+  // has no passkey (recent-session path) and when the web session has fully
+  // expired (reauth options returns 401) — passkey reauth can never succeed
+  // without a session, so looping on the prompt would strand the user.
+  const redirectToFullSignIn = useCallback(async () => {
+    const currentUrl = new URL(window.location.href);
+    currentUrl.searchParams.set(EXT_CONNECT_PARAM, "1");
+    const callbackUrl = `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`;
+    const signInPath = `${withBasePath(`/${locale}/auth/signin`)}?callbackUrl=${encodeURIComponent(callbackUrl)}`;
+    await signOut({ callbackUrl: signInPath });
+  }, [locale]);
+
+  // Abort the in-flight passkey ceremony so the user can escape a stuck
+  // "verifying" state. reauthenticateWithPasskey then resolves to
+  // AUTHENTICATION_CANCELLED, which handleRetry surfaces as a retry prompt.
+  const handleCancelReauth = () => {
+    abortInFlightCeremony();
+  };
+
   const handleRetry = async () => {
     if (!requiresReauth) {
       if (requiresRecentSession) {
         setReauthenticating(true);
         try {
-          const currentUrl = new URL(window.location.href);
-          currentUrl.searchParams.set(EXT_CONNECT_PARAM, "1");
-          const callbackUrl =
-            `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`;
-          const signInPath = `${withBasePath(`/${locale}/auth/signin`)}?callbackUrl=${encodeURIComponent(callbackUrl)}`;
-          await signOut({ callbackUrl: signInPath });
+          await redirectToFullSignIn();
         } finally {
           setReauthenticating(false);
         }
@@ -140,6 +156,13 @@ export function AutoExtensionConnect() {
     try {
       const result = await reauthenticateWithPasskey();
       if (!result.ok) {
+        // Session fully expired (not merely stale): reauth options 401'd, so a
+        // passkey ceremony can never complete. Route to a full sign-in instead
+        // of leaving the user clicking the passkey button forever.
+        if (result.error === "UNAUTHORIZED") {
+          await redirectToFullSignIn();
+          return;
+        }
         setReauthError(
           result.error === "AUTHENTICATION_CANCELLED"
             ? t("connectReauthCancelled")
@@ -292,7 +315,7 @@ export function AutoExtensionConnect() {
                   {reauthenticating ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      {t("connecting")}
+                      {requiresReauth ? t("connectReauthVerifying") : t("connecting")}
                     </>
                   ) : requiresReauth ? (
                     t("connectReauthAction")
@@ -303,13 +326,23 @@ export function AutoExtensionConnect() {
                   )}
                 </Button>
               )}
-              <Button
-                variant="ghost"
-                onClick={() => setStatus(CONNECT_STATUS.IDLE)}
-                className="w-full"
-              >
-                {t("goToDashboard")}
-              </Button>
+              {reauthenticating && requiresReauth ? (
+                <Button
+                  variant="ghost"
+                  onClick={handleCancelReauth}
+                  className="w-full"
+                >
+                  {t("connectReauthCancel")}
+                </Button>
+              ) : (
+                <Button
+                  variant="ghost"
+                  onClick={() => setStatus(CONNECT_STATUS.IDLE)}
+                  className="w-full"
+                >
+                  {t("goToDashboard")}
+                </Button>
+              )}
             </div>
           )}
         </CardContent>

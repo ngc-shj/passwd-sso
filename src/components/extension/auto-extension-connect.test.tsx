@@ -20,11 +20,13 @@ const {
   mockReauthenticateWithPasskey,
   mockSignOut,
   mockCanUsePasskeyRecovery,
+  mockAbortInFlightCeremony,
 } = vi.hoisted(() => ({
   mockRequestExtensionConnect: vi.fn() as ReturnType<typeof vi.fn>,
   mockReauthenticateWithPasskey: vi.fn(),
   mockSignOut: vi.fn(),
   mockCanUsePasskeyRecovery: vi.fn(),
+  mockAbortInFlightCeremony: vi.fn(),
 }));
 
 vi.mock("next-intl", () => ({
@@ -47,6 +49,9 @@ vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
 }));
 vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
   canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+vi.mock("@/lib/auth/webauthn/webauthn-client", () => ({
+  abortInFlightCeremony: mockAbortInFlightCeremony,
 }));
 vi.mock("@/lib/url-helpers", async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
@@ -286,6 +291,54 @@ describe("AutoExtensionConnect", () => {
     await waitFor(() => {
       expect(screen.getByText("connectReauthCancelled")).toBeInTheDocument();
     });
+  });
+
+  it("routes an expired session (reauth 401) to a full sign-in instead of looping on the passkey prompt", async () => {
+    setSearchParams("?ext_connect=1");
+    mockRequestExtensionConnect.mockResolvedValue({
+      ok: false,
+      errorCode: "SESSION_STEP_UP_REQUIRED",
+    });
+    mockCanUsePasskeyRecovery.mockResolvedValue(true);
+    // The web session expired between connect and reauth: reauth options 401'd.
+    mockReauthenticateWithPasskey.mockResolvedValue({
+      ok: false,
+      error: "UNAUTHORIZED",
+    });
+    await renderAndClickAllow();
+    await waitFor(() => {
+      expect(screen.getByText("connectReauthTitle")).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByText("connectReauthAction"));
+    await waitFor(() => {
+      expect(mockSignOut).toHaveBeenCalledTimes(1);
+    });
+    // Must NOT fall into the generic retry-the-passkey loop.
+    expect(screen.queryByText("connectReauthFailed")).not.toBeInTheDocument();
+  });
+
+  it("shows a passkey-verifying label and a cancel control that aborts the in-flight ceremony", async () => {
+    setSearchParams("?ext_connect=1");
+    mockRequestExtensionConnect.mockResolvedValue({
+      ok: false,
+      errorCode: "SESSION_STEP_UP_REQUIRED",
+    });
+    mockCanUsePasskeyRecovery.mockResolvedValue(true);
+    // Keep the ceremony pending so the verifying/cancel UI stays visible.
+    mockReauthenticateWithPasskey.mockReturnValue(new Promise(() => {}));
+    await renderAndClickAllow();
+    await waitFor(() => {
+      expect(screen.getByText("connectReauthTitle")).toBeInTheDocument();
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByText("connectReauthAction"));
+    // Label reflects passkey verification, not a generic "connecting".
+    await waitFor(() => {
+      expect(screen.getByText("connectReauthVerifying")).toBeInTheDocument();
+    });
+    await user.click(screen.getByText("connectReauthCancel"));
+    expect(mockAbortInFlightCeremony).toHaveBeenCalledTimes(1);
   });
 
   it("redirects to sign-in when stale session for a non-passkey user", async () => {
