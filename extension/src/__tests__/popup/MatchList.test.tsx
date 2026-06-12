@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { EXT_ENTRY_TYPE } from "../../lib/constants";
 
 const mockSendMessage = vi.fn();
@@ -681,7 +681,7 @@ describe("MatchList", () => {
     expect(screen.queryByText("Other Login")).toBeNull();
   });
 
-  it("shows no entries when tabUrl is null (non-web page)", async () => {
+  it("shows no entries when tabUrl is null (non-web page) — all types hidden without query", async () => {
     mockSendMessage.mockResolvedValueOnce({
       type: "FETCH_PASSWORDS",
       entries: [
@@ -707,5 +707,266 @@ describe("MatchList", () => {
     await screen.findByPlaceholderText("Search...");
     expect(screen.queryByText("Login Entry")).toBeNull();
     expect(screen.queryByText("Card Entry")).toBeNull();
+  });
+
+  // A3a: PASSKEY entry appears in search results as display-only (badge shown, no Fill/Copy/TOTP)
+  it("A3a: PASSKEY entry appears in search results as a display-only row with badge", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "pk-1",
+          title: "My Passkey Account",
+          username: "alice@example.com",
+          urlHost: "example.com",
+          entryType: EXT_ENTRY_TYPE.PASSKEY,
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl="https://example.com" />);
+    const input = await screen.findByPlaceholderText("Search...");
+    fireEvent.change(input, { target: { value: "passkey account" } });
+
+    expect(await screen.findByText("My Passkey Account")).toBeInTheDocument();
+    expect(screen.getByText("Passkey")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Fill" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "TOTP" })).toBeNull();
+  });
+
+  // A3b: With empty query, PASSKEY entry is absent from the rendered output
+  it("A3b: PASSKEY entry is absent from default view (empty query)", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "login-1",
+          title: "Regular Login",
+          username: "alice",
+          urlHost: "example.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+        {
+          id: "pk-1",
+          title: "My Passkey Account",
+          username: "alice@example.com",
+          urlHost: "example.com",
+          entryType: EXT_ENTRY_TYPE.PASSKEY,
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl="https://example.com" />);
+    await screen.findByText("Regular Login");
+    expect(screen.queryByText("My Passkey Account")).toBeNull();
+  });
+
+  // A4: Empty query renders site-context header, matched/other sections; no search results header
+  it("A4: empty query renders site-context header and hides search results header", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "login-1",
+          title: "Example Login",
+          username: "alice",
+          urlHost: "example.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+        {
+          id: "card-1",
+          title: "My Card",
+          username: "",
+          urlHost: "",
+          entryType: EXT_ENTRY_TYPE.CREDIT_CARD,
+        },
+        {
+          id: "other-login",
+          title: "Other Site Login",
+          username: "bob",
+          urlHost: "other.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl="https://example.com" />);
+    await screen.findByText("Example Login");
+
+    expect(screen.getByText("Matches for example.com")).toBeInTheDocument();
+    expect(screen.getByText("Other entries")).toBeInTheDocument();
+    expect(screen.queryByText("Search results")).toBeNull();
+    expect(screen.queryByText("Other Site Login")).toBeNull();
+  });
+
+  // A5: Tab-matching entry precedes non-matching entry in DOM order during search
+  it("A5: tab-matching entry precedes cross-domain entry in search results", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "other-1",
+          title: "GitLab",
+          username: "bob",
+          urlHost: "gitlab.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+        {
+          id: "match-1",
+          title: "GitHub",
+          username: "alice",
+          urlHost: "github.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl="https://github.com" />);
+    const input = await screen.findByPlaceholderText("Search...");
+    fireEvent.change(input, { target: { value: "git" } });
+
+    await screen.findByText("GitHub");
+    const titles = screen.getAllByRole("listitem").map((li) => li.textContent);
+    const githubIdx = titles.findIndex((t) => t?.includes("GitHub"));
+    const gitlabIdx = titles.findIndex((t) => t?.includes("GitLab"));
+    expect(githubIdx).toBeLessThan(gitlabIdx);
+  });
+
+  // A8: Non-empty query renders search results header; site-context header absent; header present even when empty
+  it("A8: search results header renders when searching; site-context header suppressed", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "login-1",
+          title: "Example",
+          username: "alice",
+          urlHost: "example.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl="https://example.com" />);
+    const input = await screen.findByPlaceholderText("Search...");
+    fireEvent.change(input, { target: { value: "zzznomatch" } });
+
+    const header = await screen.findByText("Search results");
+    expect(screen.queryByText(/Matches for/)).toBeNull();
+    const noResults = screen.getByText(/no results for/i);
+    // I7: the no-results message appears beneath the header
+    expect(
+      header.compareDocumentPosition(noResults) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  // A9a: Cross-domain LOGIN search result has Copy and TOTP but no Fill (row-scoped)
+  it("A9a: cross-domain LOGIN search result has Copy and TOTP but no Fill", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "aws-1",
+          title: "AWS Console",
+          username: "alice",
+          urlHost: "aws.amazon.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl="https://github.com" />);
+    const input = await screen.findByPlaceholderText("Search...");
+    fireEvent.change(input, { target: { value: "aws" } });
+
+    const title = await screen.findByText("AWS Console");
+    const row = title.closest("li") as HTMLElement;
+    const rowScope = within(row);
+    expect(rowScope.queryByRole("button", { name: "Fill" })).toBeNull();
+    expect(rowScope.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    expect(rowScope.getByRole("button", { name: "TOTP" })).toBeInTheDocument();
+  });
+
+  // A9b: CREDIT_CARD search result on a web page has Fill button (row-scoped)
+  it("A9b: CREDIT_CARD search result on a web page has Fill button", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "card-1",
+          title: "Visa Card",
+          username: "",
+          urlHost: "",
+          entryType: EXT_ENTRY_TYPE.CREDIT_CARD,
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl="https://shop.example.com" />);
+    const input = await screen.findByPlaceholderText("Search...");
+    fireEvent.change(input, { target: { value: "visa" } });
+
+    const title = await screen.findByText("Visa Card");
+    const row = title.closest("li") as HTMLElement;
+    const rowScope = within(row);
+    expect(rowScope.getByRole("button", { name: "Fill" })).toBeInTheDocument();
+    // I7: the "Other entries" header is suppressed while searching
+    expect(screen.queryByText("Other entries")).toBeNull();
+  });
+
+  // A1: cross-site LOGIN entry appears in search results and no-results is suppressed
+  it("A1: cross-site LOGIN entry appears when searching from a different tab host", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "gh-1",
+          title: "GitHub",
+          username: "alice",
+          urlHost: "github.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+        {
+          id: "aws-1",
+          title: "AWS Console",
+          username: "bob",
+          urlHost: "aws.amazon.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl="https://github.com" />);
+    const input = await screen.findByPlaceholderText("Search...");
+    fireEvent.change(input, { target: { value: "aws" } });
+
+    expect(await screen.findByText("AWS Console")).toBeInTheDocument();
+    expect(screen.queryByText(/no results for/i)).toBeNull();
+    expect(screen.getByText("Search results")).toBeInTheDocument();
+  });
+
+  // A2: tabUrl=null with query renders matching entries; no Fill buttons; Copy available for LOGIN
+  it("A2: search with tabUrl=null renders matching entries without Fill buttons", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "bank-1",
+          title: "Bank Login",
+          username: "alice",
+          urlHost: "bank.example.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl={null} />);
+    const input = await screen.findByPlaceholderText("Search...");
+    fireEvent.change(input, { target: { value: "bank" } });
+
+    expect(await screen.findByText("Bank Login")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Fill" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
   });
 });
