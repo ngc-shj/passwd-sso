@@ -20,7 +20,7 @@ struct VaultListView: View {
   let apiClient: MobileAPIClient
   let hostSyncService: HostSyncService
 
-  @State private var isScreenRecording: Bool = false
+  @State private var isScreenRecording: Bool = UIScreen.main.isCaptured
   @State private var isShowingSettings: Bool = false
   @State private var isShowingCreateForm: Bool = false
   @State private var isShowingSignOutConfirm: Bool = false
@@ -183,7 +183,9 @@ struct VaultListView: View {
   }
 
   private var displayedCategories: [LandingItem] {
-    let counts = categoryCounts(viewModel.allSummaries)
+    // Use filteredSummaries (== allSummaries while not searching, but also honors
+    // any team filter) so card counts match the entries the pushed list shows.
+    let counts = categoryCounts(viewModel.filteredSummaries)
     var items: [LandingItem] = [
       LandingItem(id: "all", category: .all, symbol: "tray.full",
                   label: String(localized: "All"), count: counts[.all] ?? 0),
@@ -203,7 +205,7 @@ struct VaultListView: View {
       items.append(LandingItem(id: "favorites", category: .favorites, symbol: "star",
                                label: String(localized: "Favorites"), count: count))
     }
-    for tag in distinctTags(viewModel.allSummaries) {
+    for tag in distinctTags(viewModel.filteredSummaries) {
       items.append(LandingItem(id: "tag-\(tag)", category: .tag(tag), symbol: "tag",
                                label: tag, count: counts[.tag(tag)] ?? 0))
     }
@@ -239,7 +241,7 @@ struct VaultListView: View {
       .padding()
     }
     .overlay {
-      if viewModel.allSummaries.isEmpty {
+      if viewModel.filteredSummaries.isEmpty {
         Text("No entries")
           .foregroundStyle(.secondary)
           .frame(maxWidth: .infinity, maxHeight: .infinity)

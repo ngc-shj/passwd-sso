@@ -65,7 +65,9 @@ struct VaultCategoryListView: View {
   let apiClient: MobileAPIClient
   let hostSyncService: HostSyncService
 
-  @State private var isScreenRecording = false
+  // Seed synchronously so an already-active recording never shows a frame of
+  // entries before onAppear flips the flag.
+  @State private var isScreenRecording = UIScreen.main.isCaptured
 
   // Compose with the live search query (filteredSummaries) then the category.
   private var entries: [VaultEntrySummary] {

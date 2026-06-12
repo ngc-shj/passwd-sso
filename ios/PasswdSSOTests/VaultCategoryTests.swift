@@ -24,7 +24,9 @@ final class VaultCategoryTests: XCTestCase {
     XCTAssertFalse(matches(login, .type(.passkey)))
     XCTAssertTrue(matches(passkey, .type(.passkey)))
     XCTAssertTrue(matches(summary(id: "c", hasTOTP: true), .codes))
+    XCTAssertFalse(matches(summary(id: "c2", hasTOTP: false), .codes))
     XCTAssertTrue(matches(summary(id: "d", isFavorite: true), .favorites))
+    XCTAssertFalse(matches(summary(id: "d2", isFavorite: false), .favorites))
     XCTAssertTrue(matches(summary(id: "e", tags: ["work"]), .tag("work")))
     XCTAssertFalse(matches(summary(id: "f", tags: ["home"]), .tag("work")))
   }
@@ -63,6 +65,10 @@ final class VaultCategoryTests: XCTestCase {
     let counts = categoryCounts([summary(id: "a", entryType: "LOGIN")])
     XCTAssertNil(counts[.type(.creditCard)], "empty type must not appear")
     XCTAssertNil(counts[.type(.passkey)])
+    // Codes/Favorites are always present (at 0) so the view's `if count > 0`
+    // guard keys off a real number, not a nil/absent distinction.
+    XCTAssertEqual(counts[.codes], 0)
+    XCTAssertEqual(counts[.favorites], 0)
   }
 
   func testDistinctTagsSortedUnique() {

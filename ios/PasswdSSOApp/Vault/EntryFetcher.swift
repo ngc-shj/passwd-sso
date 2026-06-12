@@ -135,7 +135,9 @@ public struct TeamEncryptedEntry: Sendable, Codable, Equatable {
       itemKeyVersion: itemKeyVersion,
       encryptedItemKey: itemKeyData,
       encryptedBlob: blobData,
-      encryptedOverview: overviewData
+      encryptedOverview: overviewData,
+      // entryType is not on the team wire model (nil → Login); isFavorite is.
+      isFavorite: isFavorite
     )
   }
 }

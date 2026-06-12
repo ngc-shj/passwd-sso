@@ -28,7 +28,7 @@ final class CacheEntryPropagationTests: XCTestCase {
   /// Legacy cache rows written before isFavorite existed decode to nil.
   func testCacheEntryDecodesNilIsFavoriteFromLegacyJSON() throws {
     let json = #"""
-    {"id":"e3","aadVersion":1,"keyVersion":1,
+    {"id":"e3","aadVersion":0,"keyVersion":0,
      "encryptedBlob":{"ciphertext":"aa","iv":"bb","authTag":"cc"},
      "encryptedOverview":{"ciphertext":"aa","iv":"bb","authTag":"cc"}}
     """#

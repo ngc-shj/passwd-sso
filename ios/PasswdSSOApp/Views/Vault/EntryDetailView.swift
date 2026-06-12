@@ -20,7 +20,7 @@ struct EntryDetailView: View {
   @State private var detail: VaultEntryDetail?
   @State private var loadFailed: Bool = false
   @State private var isPasswordVisible: Bool = false
-  @State private var isScreenRecording: Bool = false
+  @State private var isScreenRecording: Bool = UIScreen.main.isCaptured
   @State private var isShowingEditForm: Bool = false
 
   @Environment(\.dismiss) private var dismiss
@@ -28,14 +28,7 @@ struct EntryDetailView: View {
   var body: some View {
     Group {
       if isScreenRecording {
-        VStack(spacing: 16) {
-          Image(systemName: "eye.slash")
-            .font(.largeTitle)
-          Text("Recording — content hidden")
-            .font(.headline)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.regularMaterial)
+        ScreenRecordingOverlay()
       } else if let detail {
         detailContent(detail)
       } else if loadFailed {
