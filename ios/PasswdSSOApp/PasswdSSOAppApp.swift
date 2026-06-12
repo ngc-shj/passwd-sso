@@ -68,7 +68,10 @@ struct PasswdSSOAppApp: App {
               let summaries = decryptPersonalOverviews(
                 from: cacheData, vaultKey: vaultKey, userId: userId
               )
-              await CredentialIdentityRegistrar().replace(with: summaries)
+              let passkeys = buildPasskeyIdentitySpecs(
+                from: cacheData, vaultKey: vaultKey, userId: userId
+              )
+              await CredentialIdentityRegistrar().replace(with: summaries, passkeys: passkeys)
             }
           }
         case .background:

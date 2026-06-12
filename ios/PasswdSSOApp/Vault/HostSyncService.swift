@@ -55,20 +55,9 @@ public actor HostSyncService {
       teams = []
     }
 
-    // Convert personal entries to CacheEntry (with aadVersion/keyVersion propagated)
-    var allCacheEntries: [CacheEntry] = personal.map { entry in
-      CacheEntry(
-        id: entry.id,
-        teamId: nil,
-        aadVersion: entry.aadVersion,
-        keyVersion: entry.keyVersion,
-        teamKeyVersion: nil,
-        itemKeyVersion: nil,
-        encryptedItemKey: nil,
-        encryptedBlob: entry.encryptedBlob,
-        encryptedOverview: entry.encryptedOverview
-      )
-    }
+    // Convert personal entries to CacheEntry (aadVersion/keyVersion/entryType
+    // propagated via the single-source-of-truth mapping on EncryptedEntry).
+    var allCacheEntries: [CacheEntry] = personal.map { $0.toPersonalCacheEntry() }
 
     // Fetch team entries sequentially to avoid overwhelming the server
     for team in teams {

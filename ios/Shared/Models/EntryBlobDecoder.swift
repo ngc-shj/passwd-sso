@@ -31,6 +31,10 @@ public enum EntryBlobDecoder {
     // dropping travelSafe would lose the entry's travel-mode visibility.
     let requireReprompt: Bool?
     let travelSafe: Bool?
+    // PASSKEY overview fields (present only for entryType==PASSKEY). Their
+    // presence classifies an entry as a passkey on iOS (rpId != nil).
+    let relyingPartyId: String?
+    let credentialId: String?
   }
 
   private struct FullBlobPayload: Decodable {
@@ -44,6 +48,16 @@ public enum EntryBlobDecoder {
     let notes: String?
     let tags: [TagPayload]?
     let totp: TotpPayload?
+  }
+
+  /// Full-blob fields needed to build a passkey assertion. Decoded separately
+  /// so the LOGIN detail path stays untouched. `passkeyPrivateKeyJwk` is itself
+  /// a JSON string (double-encoded) holding the EC JWK.
+  private struct PasskeyFullBlobPayload: Decodable {
+    let relyingPartyId: String?
+    let credentialId: String?
+    let passkeyPrivateKeyJwk: String?
+    let passkeyUserHandle: String?
   }
 
   private struct TagPayload: Decodable {
@@ -83,7 +97,37 @@ public enum EntryBlobDecoder {
       hasTOTP: p.hasTOTP ?? false,
       requireReprompt: p.requireReprompt ?? false,
       // Keep travelSafe three-state (nil = absent): preserved verbatim on edit.
-      travelSafe: p.travelSafe
+      travelSafe: p.travelSafe,
+      relyingPartyId: p.relyingPartyId,
+      credentialId: p.credentialId
+    )
+  }
+
+  /// Decode a passkey's FULL blob into assertion material. Returns nil unless
+  /// relyingPartyId, credentialId AND passkeyPrivateKeyJwk are all present (i.e.
+  /// the blob is a usable passkey). The inner JWK may carry extra Web-Crypto
+  /// fields (`key_ops`/`ext`) — JSONDecoder ignores unknown keys.
+  public static func passkeyMaterial(
+    plaintext: Data,
+    entryId: String
+  ) -> PasskeyAssertionMaterial? {
+    guard let p = try? JSONDecoder().decode(PasskeyFullBlobPayload.self, from: plaintext) else {
+      return nil
+    }
+    guard
+      let rpId = p.relyingPartyId,
+      let credentialId = p.credentialId,
+      let jwk = p.passkeyPrivateKeyJwk,
+      let jwkData = jwk.data(using: .utf8)
+    else {
+      return nil
+    }
+    return PasskeyAssertionMaterial(
+      entryId: entryId,
+      relyingPartyId: rpId,
+      credentialId: credentialId,
+      userHandle: p.passkeyUserHandle ?? "",
+      privateKeyJWK: jwkData
     )
   }
 

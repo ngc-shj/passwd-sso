@@ -342,7 +342,8 @@ struct RootView: View {
     cacheData: CacheData, vaultKey: SymmetricKey, userId: String
   ) async {
     let summaries = decryptPersonalOverviews(from: cacheData, vaultKey: vaultKey, userId: userId)
-    await CredentialIdentityRegistrar().replace(with: summaries)
+    let passkeys = buildPasskeyIdentitySpecs(from: cacheData, vaultKey: vaultKey, userId: userId)
+    await CredentialIdentityRegistrar().replace(with: summaries, passkeys: passkeys)
   }
 
   private func makeFallbackSyncService(apiClient: MobileAPIClient) -> HostSyncService {

@@ -180,6 +180,17 @@ final class HostSyncServiceTests: XCTestCase {
     let blob = try bks.readDirect()
     XCTAssertEqual(blob.cacheVersionCounter, 6)
   }
+
+  func testPersonalCacheEntryPropagatesEntryType() {
+    let enc = EncryptedData(ciphertext: "00", iv: "00", authTag: "00")
+    let passkey = EncryptedEntry(
+      id: "pk1", encryptedOverview: enc, encryptedBlob: enc, entryType: "PASSKEY"
+    )
+    XCTAssertEqual(passkey.toPersonalCacheEntry().entryType, "PASSKEY")
+
+    let login = EncryptedEntry(id: "e1", encryptedOverview: enc, encryptedBlob: enc)
+    XCTAssertEqual(login.toPersonalCacheEntry().entryType, "LOGIN")
+  }
 }
 
 // MARK: - Stub that avoids network calls
@@ -214,17 +225,9 @@ private actor StubHostSyncService {
     let blob = try bridgeKeyStore.readDirect()
     let newCounter = blob.cacheVersionCounter &+ 1
 
-    // Convert EncryptedEntry → CacheEntry (personal, aadVersion from entry)
-    let cacheEntries: [CacheEntry] = entries.map { entry in
-      CacheEntry(
-        id: entry.id,
-        teamId: nil,
-        aadVersion: entry.aadVersion,
-        keyVersion: entry.keyVersion,
-        encryptedBlob: entry.encryptedBlob,
-        encryptedOverview: entry.encryptedOverview
-      )
-    }
+    // Convert EncryptedEntry → CacheEntry via the production mapping (same call
+    // HostSyncService.runSync uses).
+    let cacheEntries: [CacheEntry] = entries.map { $0.toPersonalCacheEntry() }
 
     let encoder = JSONEncoder()
     let entriesJSON = try encoder.encode(cacheEntries)

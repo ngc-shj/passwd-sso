@@ -341,6 +341,91 @@ public actor CredentialResolver {
     return detail
   }
 
+  /// Decrypts one PERSONAL passkey entry's full blob into assertion material.
+  /// Parallels `decryptEntryDetail`: reuses the bridge_key retained from the
+  /// preceding `resolveCandidates` (single biometric read), zeroes vault_key
+  /// before returning. Throws `entryNotFound` for team entries OR non-passkey
+  /// entries (no rpId / no private key in the blob).
+  public func decryptPasskeyMaterial(entryId: String) async throws -> PasskeyAssertionMaterial {
+    let blob: BridgeKeyStore.Blob
+    if let retained = currentBlob {
+      blob = retained
+    } else {
+      do {
+        blob = try bridgeKeyStore.readForFill(reason: "Fill credential from passwd-sso vault")
+      } catch {
+        throw Error.vaultLocked
+      }
+    }
+    currentBlob = nil  // consume after one use
+
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    guard let wrapped = try? wrappedKeyStore.loadVaultKey() else {
+      throw Error.vaultLocked
+    }
+    guard
+      let vaultKeyData = try? decryptAESGCM(
+        ciphertext: wrapped.ciphertext,
+        iv: wrapped.iv,
+        tag: wrapped.authTag,
+        key: cacheKey
+      )
+    else {
+      throw Error.vaultLocked
+    }
+    var mutableVaultKeyData = vaultKeyData
+    defer { zeroData(&mutableVaultKeyData) }
+    let vaultKey = SymmetricKey(data: vaultKeyData)
+
+    let cacheData: CacheData
+    do {
+      cacheData = try readCacheFile(
+        path: cacheURL,
+        vaultKey: vaultKey,
+        expectedHostInstallUUID: blob.hostInstallUUID,
+        expectedCounter: blob.cacheVersionCounter,
+        now: now()
+      )
+    } catch EntryCacheError.rejection(let kind) {
+      await writeRollbackFlag(kind: kind, blob: blob, vaultKey: vaultKey)
+      throw Error.cacheRejected(kind)
+    } catch {
+      throw Error.cacheUnavailable
+    }
+
+    let allEntries: [CacheEntry]
+    do {
+      allEntries = try JSONDecoder().decode([CacheEntry].self, from: cacheData.entries)
+    } catch {
+      throw Error.cacheUnavailable
+    }
+
+    guard let entry = allEntries.first(where: { $0.id == entryId }) else {
+      throw Error.entryNotFound
+    }
+    // Personal entries only (team passkeys out of scope).
+    guard entry.teamId == nil else { throw Error.entryNotFound }
+
+    let userId = cacheData.header.userId
+    let aad = buildEntryAAD(entry: entry, vaultType: VaultType.blob, userId: userId)
+    guard
+      let ivData = try? hexDecode(entry.encryptedBlob.iv),
+      let cipherData = try? hexDecode(entry.encryptedBlob.ciphertext),
+      let tagData = try? hexDecode(entry.encryptedBlob.authTag),
+      let plaintext = try? decryptAESGCM(
+        ciphertext: cipherData,
+        iv: ivData,
+        tag: tagData,
+        key: vaultKey,
+        aad: aad
+      ),
+      let material = EntryBlobDecoder.passkeyMaterial(plaintext: plaintext, entryId: entry.id)
+    else {
+      throw Error.entryNotFound
+    }
+    return material
+  }
+
   // Blob → model decode is shared with the host app via EntryBlobDecoder
   // (ios/Shared/Models/EntryBlobDecoder.swift) — do NOT reintroduce a local copy.
 
@@ -511,6 +596,11 @@ public struct CacheEntry: Codable, Sendable {
   public let encryptedItemKey: EncryptedData?
   public let encryptedBlob: EncryptedData
   public let encryptedOverview: EncryptedData
+  /// Server entry type (e.g. "LOGIN", "PASSKEY"). Optional/nil-tolerant: caches
+  /// written before this field existed, and all team rows, decode to nil. Used
+  /// only as a fast pre-classifier — passkey detection falls back to the
+  /// decrypted overview's relyingPartyId, so nil never causes a miss.
+  public let entryType: String?
 
   public init(
     id: String,
@@ -521,7 +611,8 @@ public struct CacheEntry: Codable, Sendable {
     itemKeyVersion: Int? = nil,
     encryptedItemKey: EncryptedData? = nil,
     encryptedBlob: EncryptedData,
-    encryptedOverview: EncryptedData
+    encryptedOverview: EncryptedData,
+    entryType: String? = nil
   ) {
     self.id = id
     self.teamId = teamId
@@ -532,5 +623,6 @@ public struct CacheEntry: Codable, Sendable {
     self.encryptedItemKey = encryptedItemKey
     self.encryptedBlob = encryptedBlob
     self.encryptedOverview = encryptedOverview
+    self.entryType = entryType
   }
 }

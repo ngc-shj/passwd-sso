@@ -97,8 +97,39 @@ final class CredentialIdentityRegistrarTests: XCTestCase {
     let registrar = CredentialIdentityRegistrar(store: store)
     await registrar.replace(with: [summary("e1", urlHost: "a.com", username: "u")])
 
-    let replaced = await store.replacedSpecs
+    let replaced = await store.replacedPasswordSpecs
     XCTAssertEqual(replaced, [CredentialIdentitySpec(host: "a.com", user: "u", recordIdentifier: "e1")])
+  }
+
+  func testReplace_passwordOnly_leavesNoStalePasskeyIdentities() async {
+    // Back-compat wrapper must pass an EMPTY passkeys array (one atomic replace
+    // clears any previously-registered passkey identities).
+    let store = FakeIdentityStore(enabled: true)
+    let registrar = CredentialIdentityRegistrar(store: store)
+    await registrar.replace(with: [summary("e1", urlHost: "a.com", username: "u")])
+
+    let passwords = await store.replacedPasswordSpecs
+    let passkeys = await store.replacedPasskeySpecs
+    XCTAssertEqual(passwords?.count, 1)
+    XCTAssertEqual(passkeys, [], "password-only replace must clear passkey identities")
+  }
+
+  func testReplace_withPasskeys_registersBothKinds() async {
+    let store = FakeIdentityStore(enabled: true)
+    let registrar = CredentialIdentityRegistrar(store: store)
+    let spec = PasskeyIdentitySpec(
+      relyingPartyIdentifier: "webauthn.io", userName: "alice",
+      credentialID: Data([1, 2, 3, 4]), userHandle: Data([5, 6, 7, 8]),
+      recordIdentifier: "pk1"
+    )
+    await registrar.replace(
+      with: [summary("e1", urlHost: "a.com", username: "u")], passkeys: [spec]
+    )
+
+    let passwords = await store.replacedPasswordSpecs
+    let passkeys = await store.replacedPasskeySpecs
+    XCTAssertEqual(passwords?.count, 1)
+    XCTAssertEqual(passkeys, [spec])
   }
 
   func testReplace_whenDisabled_isNoOp() async {
@@ -167,12 +198,108 @@ final class CredentialIdentityRegistrarTests: XCTestCase {
     XCTAssertTrue(summaries.isEmpty, "AAD-bound entry must not decrypt under the wrong userId")
   }
 
+  // MARK: - buildPasskeyIdentitySpecs
+
+  func testBuildPasskeyIdentitySpecs_buildsSpecFromPasskeyEntry() throws {
+    let vaultKey = SymmetricKey(size: .bits256)
+    let userId = "user-1"
+    let credentialID = Data([1, 2, 3, 4])
+    let userHandle = Data([9, 8, 7, 6])
+    let entry = try passkeyEntry(
+      id: "pk1", rpId: "webauthn.io", username: "alice",
+      credentialID: credentialID, userHandle: userHandle,
+      userId: userId, vaultKey: vaultKey
+    )
+    let cache = try makeCache([entry], userId: userId)
+
+    let specs = buildPasskeyIdentitySpecs(from: cache, vaultKey: vaultKey, userId: userId)
+
+    XCTAssertEqual(specs, [
+      PasskeyIdentitySpec(
+        relyingPartyIdentifier: "webauthn.io", userName: "alice",
+        credentialID: credentialID, userHandle: userHandle, recordIdentifier: "pk1"
+      )
+    ])
+  }
+
+  func testBuildPasskeyIdentitySpecs_skipsEmptyUserHandle() throws {
+    let vaultKey = SymmetricKey(size: .bits256)
+    let userId = "user-1"
+    let entry = try passkeyEntry(
+      id: "pk1", rpId: "webauthn.io", username: "alice",
+      credentialID: Data([1, 2, 3, 4]), userHandle: Data(),  // empty → skip
+      userId: userId, vaultKey: vaultKey
+    )
+    let cache = try makeCache([entry], userId: userId)
+
+    let specs = buildPasskeyIdentitySpecs(from: cache, vaultKey: vaultKey, userId: userId)
+
+    XCTAssertTrue(specs.isEmpty, "empty userHandle must be skipped (ASPasskeyCredentialIdentity requires it)")
+  }
+
+  func testBuildPasskeyIdentitySpecs_ignoresLoginEntries() throws {
+    let vaultKey = SymmetricKey(size: .bits256)
+    let userId = "user-1"
+    let login = try personalEntry(id: "p0", urlHost: "a.com", username: "u",
+                                  userId: userId, aadVersion: 1, vaultKey: vaultKey)
+    let cache = try makeCache([login], userId: userId)
+
+    let specs = buildPasskeyIdentitySpecs(from: cache, vaultKey: vaultKey, userId: userId)
+
+    XCTAssertTrue(specs.isEmpty, "LOGIN entries (no relyingPartyId) are not passkeys")
+  }
+
   // MARK: - Cache fixtures
 
   private struct TestOverviewBlob: Encodable {
     let title: String
     let username: String?
     let urlHost: String?
+  }
+
+  private struct TestPasskeyOverviewBlob: Encodable {
+    let title: String
+    let username: String?
+    let relyingPartyId: String
+    let credentialId: String
+  }
+
+  private struct TestPasskeyFullBlob: Encodable {
+    let title: String
+    let username: String?
+    let relyingPartyId: String
+    let credentialId: String
+    let passkeyPrivateKeyJwk: String  // double-encoded JWK string (content irrelevant here)
+    let passkeyUserHandle: String
+  }
+
+  private func passkeyEntry(
+    id: String, rpId: String, username: String,
+    credentialID: Data, userHandle: Data,
+    userId: String, vaultKey: SymmetricKey
+  ) throws -> CacheEntry {
+    let credIdB64 = base64URLEncode(credentialID)
+    let userHandleB64 = base64URLEncode(userHandle)
+    let overviewData = try JSONEncoder().encode(
+      TestPasskeyOverviewBlob(
+        title: "T", username: username, relyingPartyId: rpId, credentialId: credIdB64
+      )
+    )
+    let fullData = try JSONEncoder().encode(
+      TestPasskeyFullBlob(
+        title: "T", username: username, relyingPartyId: rpId, credentialId: credIdB64,
+        passkeyPrivateKeyJwk: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"d\":\"x\"}",
+        passkeyUserHandle: userHandleB64
+      )
+    )
+    let overviewAAD = try buildPersonalEntryAAD(userId: userId, entryId: id, vaultType: VaultType.overview)
+    let blobAAD = try buildPersonalEntryAAD(userId: userId, entryId: id, vaultType: VaultType.blob)
+    let overview = try encryptAESGCMEncoded(plaintext: overviewData, key: vaultKey, aad: overviewAAD)
+    let blob = try encryptAESGCMEncoded(plaintext: fullData, key: vaultKey, aad: blobAAD)
+    return CacheEntry(
+      id: id, teamId: nil, aadVersion: 1,
+      encryptedBlob: blob, encryptedOverview: overview, entryType: "PASSKEY"
+    )
   }
 
   private func personalEntry(
@@ -207,15 +334,17 @@ final class CredentialIdentityRegistrarTests: XCTestCase {
 /// ASCredentialIdentityStore which is entitlement/device-dependent).
 private actor FakeIdentityStore: CredentialIdentityStoring {
   private let enabled: Bool
-  private(set) var replacedSpecs: [CredentialIdentitySpec]?
+  private(set) var replacedPasswordSpecs: [CredentialIdentitySpec]?
+  private(set) var replacedPasskeySpecs: [PasskeyIdentitySpec]?
   private(set) var replaceCount = 0
   private(set) var removeAllCount = 0
 
   init(enabled: Bool) { self.enabled = enabled }
 
   func isEnabled() async -> Bool { enabled }
-  func replace(with specs: [CredentialIdentitySpec]) async {
-    replacedSpecs = specs
+  func replace(passwords: [CredentialIdentitySpec], passkeys: [PasskeyIdentitySpec]) async {
+    replacedPasswordSpecs = passwords
+    replacedPasskeySpecs = passkeys
     replaceCount += 1
   }
   func removeAll() async { removeAllCount += 1 }

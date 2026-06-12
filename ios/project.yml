@@ -152,6 +152,9 @@ targets:
             ASCredentialProviderExtensionCapabilities:
               ProvidesPasswords: true
               ProvidesOneTimeCodes: true
+              # Passkey assertion (sign-in). Registration is explicitly cancelled
+              # in CredentialProviderViewController (read-only/offline extension).
+              ProvidesPasskeys: true
     entitlements:
       path: PasswdSSOAutofillExtension/PasswdSSOAutofillExtension.entitlements
       properties:

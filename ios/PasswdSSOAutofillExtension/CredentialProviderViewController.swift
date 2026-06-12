@@ -62,14 +62,59 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
   }
 
   /// iOS 17+ passkey-aware list entry point — the variant iOS 18/26 actually
-  /// invokes. Passkeys are unsupported, so the request parameters are ignored
-  /// and we present the password list.
+  /// invokes. For a passkey ceremony (non-empty relyingPartyIdentifier) we
+  /// present a passkey picker filtered to the requested rpId; password-only
+  /// ceremonies keep presenting the password list.
   @available(iOS 17.0, *)
   override func prepareCredentialList(
     for serviceIdentifiers: [ASCredentialServiceIdentifier],
     requestParameters: ASPasskeyCredentialRequestParameters
   ) {
-    presentCredentialList(for: serviceIdentifiers)
+    let rpId = requestParameters.relyingPartyIdentifier
+    if rpId.isEmpty {
+      presentCredentialList(for: serviceIdentifiers)
+    } else {
+      presentPasskeyList(for: serviceIdentifiers, requestParameters: requestParameters)
+    }
+  }
+
+  /// Present a passkey picker for the requested rpId. On selection, build the
+  /// assertion from the OS-provided request parameters (clientDataHash etc.).
+  @available(iOS 17.0, *)
+  @MainActor
+  private func presentPasskeyList(
+    for serviceIdentifiers: [ASCredentialServiceIdentifier],
+    requestParameters: ASPasskeyCredentialRequestParameters
+  ) {
+    let sendable = serviceIdentifiers.map { ServiceIdentifier(from: $0) }
+    let originalIdents = serviceIdentifiers.map {
+      ASCredentialServiceIdentifier(identifier: $0.identifier, type: $0.type)
+    }
+    let request = PasskeyAssertionRequest(
+      relyingPartyId: requestParameters.relyingPartyIdentifier,
+      clientDataHash: requestParameters.clientDataHash,
+      userVerificationRequired: requestParameters.userVerificationPreference == .required
+    )
+    Task { @MainActor in
+      do {
+        let result = try await resolver.resolveCandidates(for: sendable)
+        let matches = filterPasskeyCandidates(result.all, rpId: request.relyingPartyId)
+        let view = CredentialPickerView(
+          matched: matches,
+          all: matches,
+          serviceIdentifiers: originalIdents,
+          onSelect: { [weak self] summary in
+            self?.completePasskeyAssertion(entryId: summary.id, request: request)
+          },
+          onCancel: { [weak self] in self?.cancel(with: nil) }
+        )
+        presentSwiftUI(view)
+      } catch CredentialResolver.Error.vaultLocked {
+        presentLockedSheet()
+      } catch {
+        cancel(with: error)
+      }
+    }
   }
 
   override func prepareInterfaceForExtensionConfiguration() {
@@ -98,22 +143,75 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
   override func prepareInterfaceToProvideCredential(
     for credentialRequest: any ASCredentialRequest
   ) {
-    // Only password requests are supported; cancel passkey assertions rather
-    // than completing them with the wrong credential type.
-    guard credentialRequest.type == .password else {
+    switch credentialRequest.type {
+    case .password:
+      let recordId = credentialRequest.credentialIdentity.recordIdentifier ?? ""
+      Task { @MainActor in
+        do {
+          let detail = try await resolver.decryptEntryDetail(entryId: recordId)
+          let credential = ASPasswordCredential(user: detail.username, password: detail.password)
+          extensionContext.completeRequest(withSelectedCredential: credential)
+        } catch {
+          cancel(with: error)
+        }
+      }
+    case .passkeyAssertion:
+      guard
+        let passkeyRequest = credentialRequest as? ASPasskeyCredentialRequest,
+        let identity = passkeyRequest.credentialIdentity as? ASPasskeyCredentialIdentity,
+        let recordId = identity.recordIdentifier, !recordId.isEmpty
+      else {
+        cancel(with: nil)
+        return
+      }
+      let request = PasskeyAssertionRequest(
+        relyingPartyId: identity.relyingPartyIdentifier,
+        clientDataHash: passkeyRequest.clientDataHash,
+        userVerificationRequired: passkeyRequest.userVerificationPreference == .required
+      )
+      completePasskeyAssertion(entryId: recordId, request: request)
+    default:
       cancel(with: nil)
-      return
     }
-    let recordId = credentialRequest.credentialIdentity.recordIdentifier ?? ""
+  }
+
+  /// Resolve the chosen passkey entry, build the assertion, and complete the
+  /// request. signCount is 0; UV/UP are true (every fill is biometric-gated).
+  @available(iOS 17.0, *)
+  private func completePasskeyAssertion(entryId: String, request: PasskeyAssertionRequest) {
     Task { @MainActor in
       do {
-        let detail = try await resolver.decryptEntryDetail(entryId: recordId)
-        let credential = ASPasswordCredential(user: detail.username, password: detail.password)
-        extensionContext.completeRequest(withSelectedCredential: credential)
+        var material = try await resolver.decryptPasskeyMaterial(entryId: entryId)
+        defer { material.zeroPrivateKey() }
+        let outputs = try buildPasskeyAssertion(material: material, request: request)
+        let credential = ASPasskeyAssertionCredential(
+          userHandle: outputs.userHandle,
+          relyingParty: outputs.relyingParty,
+          signature: outputs.signature,
+          clientDataHash: request.clientDataHash,
+          authenticatorData: outputs.authenticatorData,
+          credentialID: outputs.credentialID
+        )
+        await extensionContext.completeAssertionRequest(using: credential)
       } catch {
         cancel(with: error)
       }
     }
+  }
+
+  /// Passkey REGISTRATION is out of scope for this build: the AutoFill extension
+  /// is read-only/offline and cannot durably persist a freshly-generated private
+  /// key, so returning an ASPasskeyRegistrationCredential we cannot save would
+  /// lock the user out of that account. Cancel cleanly so iOS falls through to
+  /// another provider.
+  @available(iOS 17.0, *)
+  override func prepareInterface(forPasskeyRegistration registrationRequest: any ASCredentialRequest) {
+    extensionContext.cancelRequest(
+      withError: NSError(
+        domain: ASExtensionErrorDomain,
+        code: ASExtensionError.failed.rawValue
+      )
+    )
   }
 
   // MARK: - TOTP fill (Step 9, iOS 17+)

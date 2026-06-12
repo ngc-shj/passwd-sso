@@ -144,4 +144,78 @@ final class EntryBlobDecoderTests: XCTestCase {
       EntryBlobDecoder.detail(plaintext: data("not-json"), entryId: "e9", teamId: nil)
     )
   }
+
+  // MARK: - passkey overview / material (C3)
+
+  func testSummarySurfacesPasskeyOverviewFields() throws {
+    let json = #"{"title":"GitHub","username":"alice","relyingPartyId":"github.com","credentialId":"AQIDBA"}"#
+    let summary = try XCTUnwrap(
+      EntryBlobDecoder.summary(plaintext: data(json), entryId: "pk1", teamId: nil)
+    )
+    XCTAssertEqual(summary.relyingPartyId, "github.com")
+    XCTAssertEqual(summary.credentialId, "AQIDBA")
+  }
+
+  func testSummaryLoginEntryHasNilPasskeyFields() throws {
+    let json = #"{"title":"Acme","username":"u","urlHost":"acme.com","tags":[]}"#
+    let summary = try XCTUnwrap(
+      EntryBlobDecoder.summary(plaintext: data(json), entryId: "e1", teamId: nil)
+    )
+    XCTAssertNil(summary.relyingPartyId, "LOGIN entries are not passkeys")
+    XCTAssertNil(summary.credentialId)
+  }
+
+  func testPasskeyMaterialDecodesDoubleEncodedJWK() throws {
+    // passkeyPrivateKeyJwk is a JSON STRING containing the JWK object (double-encoded),
+    // matching the browser extension's JSON.stringify(privateKeyJwk).
+    let json = #"""
+    {"title":"GitHub","relyingPartyId":"github.com","credentialId":"AQIDBA",\#
+    "passkeyPrivateKeyJwk":"{\"kty\":\"EC\",\"crv\":\"P-256\",\"d\":\"abc\",\"x\":\"xx\",\"y\":\"yy\"}",\#
+    "passkeyUserHandle":"BQYHCA"}
+    """#
+    let material = try XCTUnwrap(
+      EntryBlobDecoder.passkeyMaterial(plaintext: data(json), entryId: "pk1")
+    )
+    XCTAssertEqual(material.entryId, "pk1")
+    XCTAssertEqual(material.relyingPartyId, "github.com")
+    XCTAssertEqual(material.credentialId, "AQIDBA")
+    XCTAssertEqual(material.userHandle, "BQYHCA")
+    // The stored JWK is the inner object string; decodeP256PrivateKeyJWK parses it.
+    XCTAssertEqual(String(decoding: material.privateKeyJWK, as: UTF8.self),
+                   #"{"kty":"EC","crv":"P-256","d":"abc","x":"xx","y":"yy"}"#)
+  }
+
+  func testPasskeyMaterialReturnsNilWhenNotPasskey() {
+    // LOGIN blob: no relyingPartyId / no passkeyPrivateKeyJwk.
+    let json = #"{"title":"Acme","username":"u","password":"p","url":"acme.com"}"#
+    XCTAssertNil(EntryBlobDecoder.passkeyMaterial(plaintext: data(json), entryId: "e1"))
+  }
+
+  func testPasskeyMaterialReturnsNilWhenCredentialIdMissing() {
+    // rpId + jwk present but credentialId absent → fail fast (F17).
+    let json = #"{"relyingPartyId":"github.com","passkeyPrivateKeyJwk":"{}","passkeyUserHandle":"BQYHCA"}"#
+    XCTAssertNil(EntryBlobDecoder.passkeyMaterial(plaintext: data(json), entryId: "pk1"))
+  }
+
+  // MARK: - CacheEntry.entryType backward compat (C4)
+
+  func testCacheEntryDecodesNilEntryTypeFromLegacyJSON() throws {
+    let json = #"""
+    {"id":"e1","aadVersion":0,"keyVersion":0,\#
+    "encryptedBlob":{"ciphertext":"00","iv":"00","authTag":"00"},\#
+    "encryptedOverview":{"ciphertext":"00","iv":"00","authTag":"00"}}
+    """#
+    let entry = try JSONDecoder().decode(CacheEntry.self, from: data(json))
+    XCTAssertNil(entry.entryType, "legacy cache rows lack entryType → decode to nil")
+  }
+
+  func testCacheEntryDecodesPasskeyEntryType() throws {
+    let json = #"""
+    {"id":"pk1","aadVersion":1,"keyVersion":1,"entryType":"PASSKEY",\#
+    "encryptedBlob":{"ciphertext":"00","iv":"00","authTag":"00"},\#
+    "encryptedOverview":{"ciphertext":"00","iv":"00","authTag":"00"}}
+    """#
+    let entry = try JSONDecoder().decode(CacheEntry.self, from: data(json))
+    XCTAssertEqual(entry.entryType, "PASSKEY")
+  }
 }
