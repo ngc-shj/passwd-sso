@@ -89,8 +89,8 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **SSH Agent** — `passwd-sso agent` proxies vault SSH keys via SSH agent protocol
 - **CI/CD Secrets** — `env` and `run` commands inject vault secrets into environment/subprocess. Set `PSSO_PASSPHRASE` for non-interactive auto-unlock in CI pipelines. **Security note**: `PSSO_PASSPHRASE` is intended for CI/automation only — the passphrase is readable from the process environment (e.g., via /proc on Linux). Do not use in shared or interactive environments; use `passwd-sso unlock` (TTY prompt) instead.
 - `env` / `run` read `.passwd-sso-env.json` and use the saved CLI `serverUrl` from `passwd-sso login`. In that file, `secrets` is a mapping from output env var name to vault entry/field. Example: `"DATABASE_PASSWORD": { "entry": "<entry-id>", "field": "password" }` means "fetch the `password` field from that vault entry and expose it as `DATABASE_PASSWORD`". The key name is just the output env var name and the CLI exposes the fetched field value as-is — it does not synthesize connection strings or transform the value. **Do not commit `.passwd-sso-env.json` if it contains an `apiKey`** — it's a long-lived credential. Add the file to `.gitignore` and inject the key from your CI secrets store at runtime.
-- **Browser Extension** — Chrome/Edge MV3; autofill, inline suggestions, custom field autofill, multi-URL matching, CC/address fill, new-login detect & save, **passkey provider** (intercepts WebAuthn get/create, offers vault passkeys before platform authenticator)
-- **iOS App + AutoFill Extension** — native iPhone app (iOS 17+) with credential provider extension; password + TOTP fill in Safari and apps with Associated Domains. Source: [`ios/`](./ios/). Self-hosters must publish an `apple-app-site-association` (AASA) file at `https://<server>/.well-known/apple-app-site-association` claiming the `/api/mobile/authorize/redirect` callback path — see [`ios/README.md`](./ios/README.md) for the JSON template
+- **Browser Extension** — Chrome/Edge MV3; autofill, inline suggestions, custom field autofill, multi-URL matching, CC/address fill, new-login detect & save, vault-wide search from the popup, **passkey provider** (intercepts WebAuthn get/create, offers vault passkeys before platform authenticator)
+- **iOS App + AutoFill Extension** — native iPhone app (iOS 17+) with credential provider extension; password + TOTP fill, QuickType inline suggestions, and **passkey (WebAuthn) assertion** in Safari and apps with Associated Domains; Face ID vault unlock, in-app entry create/edit, extension-parity settings (auto-lock, clipboard clear, theme), English/Japanese localization. Source: [`ios/`](./ios/). The server generates the required `apple-app-site-association` (AASA) file — set `IOS_APP_TEAM_ID` / `IOS_APP_BUNDLE_ID` and wire `https://<server>/.well-known/apple-app-site-association` to `/api/mobile/.well-known/apple-app-site-association` at your reverse proxy; see [`ios/README.md`](./ios/README.md)
 - **REST API v1** — `/api/v1/*` with OpenAPI 3.1 spec
 - **API Keys** — Scoped keys with SHA-256 hashed tokens and configurable expiration
 
@@ -343,6 +343,7 @@ src/
 ├── lib/                  # Core logic (crypto, auth, validation, rate limiting)
 └── i18n/                 # next-intl routing
 extension/                # Chrome/Edge MV3 browser extension
+ios/                      # Native iOS app + AutoFill credential provider extension
 cli/                      # Node.js CLI tool
 docs/                     # Documentation (architecture, security, operations, setup)
 ```

@@ -116,6 +116,7 @@ sequenceDiagram
 | **Refresh trigger** | `ALARM_TOKEN_REFRESH` fires before idle expiry | — |
 | **Revocation** | `DELETE /api/extension/token` (Bearer + DPoP) or token expiry | — |
 | **SW restart** | Ephemeral key lost → token unreadable → re-connect required | — |
+| **Expired-session reauth** | When the connect page's passkey step-up returns `UNAUTHORIZED` (Auth.js session fully expired), the page routes to full sign-in instead of looping the passkey prompt. During reauth the UI shows a "verifying" label and a Cancel button that aborts the in-flight WebAuthn ceremony (`abortInFlightCeremony()`) | — |
 
 ### Server-side identity resolution
 
@@ -168,6 +169,19 @@ passphrase. The persisted `tokenCnfJkt` is also re-checked against the
 SW's IDB DPoP key thumbprint; mismatch (e.g., the key was reset via the
 Options page) clears the session so the next request triggers a fresh
 connect.
+
+### Hydration / unreachable-SW robustness
+
+Message handlers wait for hydration through a bounded race
+(`awaitHydrationBounded()`, 5 s) so a hung hydration cannot wedge
+`GET_STATUS`; only the alarm path keeps the unbounded await. A mutator
+(e.g. `LOCK_VAULT`) that runs before hydration completes sets a
+`hydrationSuperseded` flag, and hydration re-checks it at every
+resume-after-await point rather than overwrite the newer state. The popup
+defends from its side: `GET_STATUS` is raced against a 3 s timeout with
+two short retries, falling back to an error pane with a Retry button when
+the service worker stays unreachable — background refreshes never clobber
+a working screen on a transient failure.
 
 ## Content Script Registration
 

@@ -8,6 +8,7 @@ Because competitor capabilities vary by plan and deployment model, always verify
 | Symbol | Meaning |
 |---|---|
 | Done | Implemented in passwd-sso |
+| Partial | Partially implemented in passwd-sso |
 | --- | Not implemented |
 | Yes | Supported |
 | No | Not supported |
@@ -75,9 +76,9 @@ Because competitor capabilities vary by plan and deployment model, always verify
 | Feature | passwd-sso | 1Password | Bitwarden | Notes |
 |---|---|---|---|---|
 | Web UI | Done | Yes | Yes | |
-| Browser extension | Done | Yes | Yes | Chrome MV3; autofill, passkey provider (WebAuthn get/create interception) |
+| Browser extension | Done | Yes | Yes | Chrome MV3; autofill, vault-wide popup search, passkey provider (WebAuthn get/create interception) |
 | Desktop app | --- | Yes | Yes | |
-| Mobile app | --- | Yes | Yes | |
+| Mobile app | Partial | Yes | Yes | Native iOS app + AutoFill/passkey provider (iOS 17+); Android not implemented |
 
 ## 8. Operations / Self-hosting
 

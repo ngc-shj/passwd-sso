@@ -1,10 +1,8 @@
-# iOS Workspace Draft
+# iOS Workspace
 
-This directory is the planned home for the native iOS implementation of `passwd-sso`.
+This directory contains the native iOS implementation of `passwd-sso`: an iPhone app (iOS 17+) plus an AutoFill credential provider extension that matches the browser extension's core value using native iOS AutoFill primitives.
 
-The initial goal is to ship an iPhone MVP that matches the browser extension's core value using native iOS AutoFill primitives.
-
-## Planned Layout
+## Layout
 
 ```text
 ios/
@@ -19,10 +17,11 @@ ios/
 ### `PasswdSSOApp/`
 
 - server URL setup
-- sign-in
-- vault unlock
+- sign-in (custom-scheme OAuth) and manual sign-out
+- vault unlock (passphrase + Face ID re-unlock)
 - vault list, search, and detail
-- settings
+- credential create + edit (personal entries)
+- settings (auto-lock, timeout action, clipboard clear, theme)
 - lock/logout flows
 - debug/status surfaces useful during MVP development
 
@@ -32,6 +31,8 @@ ios/
 - credential lookup and matching
 - password fill
 - TOTP fill
+- QuickType inline suggestions (`ASCredentialIdentityStore`)
+- passkey (WebAuthn) assertion provider
 - locked-vault fallback
 - no-match fallback
 
@@ -61,12 +62,15 @@ The MVP baseline is the browser extension, not the full web admin surface.
 In scope:
 
 - sign-in
-- unlock
+- unlock (passphrase + Face ID re-unlock)
 - password AutoFill
 - TOTP AutoFill
+- QuickType inline suggestions
+- passkey (WebAuthn) assertion AutoFill
 - personal vault read path
 - team vault read path
-- manual credential edit (personal entries)
+- manual credential create + edit (personal entries)
+- English/Japanese localization (String Catalog)
 
 Out of scope for the first slice:
 
@@ -78,7 +82,7 @@ Out of scope for the first slice:
 
 ### Manual edit
 
-The browser extension's "save credential after sign-in" flow has no iOS equivalent (no callback into a third-party AutoFill extension after a successful sign-in). Manual edit inside `PasswdSSOApp` replaces it. Team-vault edit is deferred to a future MVP iteration; for now, edit team entries via the web app.
+The browser extension's "save credential after sign-in" flow has no iOS equivalent (no callback into a third-party AutoFill extension after a successful sign-in). Manual create + edit inside `PasswdSSOApp` replaces it. Team-vault edit is deferred to a future MVP iteration; for now, edit team entries via the web app.
 
 ## Building Locally
 
@@ -140,12 +144,26 @@ For the iOS 17.0 minimum-deployment-target validation (AutoFill TOTP `prepareOne
 
 `PasswdSSOApp`, `PasswdSSOAutofillExtension`, and `PasswdSSOTests` all share:
 
-- **App Group**: `group.com.passwd-sso.shared` — shared file container for opaque ciphertext blobs
-- **Keychain Access Group**: `$(AppIdentifierPrefix)com.passwd-sso.shared` — shared `bridge_key_blob` storage
+- **App Group**: `group.jp.jpng.passwd-sso.shared` — shared file container for opaque ciphertext blobs
+- **Keychain Access Group**: `$(AppIdentifierPrefix)jp.jpng.passwd-sso.shared` — shared bridge-key storage
 
 The shared entitlement on `PasswdSSOTests` is intentional and required for the cross-process bridge-key XCTest (per plan §"Cross-Process Bridge-Key Test — split into XCTest + XCUITest", T17).
 
 `PasswdSSOAutofillExtension`'s `Info.plist` declares `NSExtension.NSExtensionAttributes.ASCredentialProviderExtensionCapabilities.ProvidesOneTimeCodes = YES` for the iOS 17+ TOTP AutoFill path.
+
+## AASA (apple-app-site-association)
+
+The server generates the AASA file at `GET /api/mobile/.well-known/apple-app-site-association` (`src/app/api/mobile/.well-known/apple-app-site-association/route.ts`). It claims the `/api/mobile/authorize/redirect` callback path for the OAuth sign-in Universal Link.
+
+Operator setup:
+
+1. Set `IOS_APP_TEAM_ID` (Apple Developer Team ID, e.g. `ABCDE12345`) and optionally `IOS_APP_BUNDLE_ID` (default: `com.passwd-sso`) on the server. The route returns 503 until `IOS_APP_TEAM_ID` is configured.
+2. Wire the root path at the reverse proxy — Apple requires the file at the **site root**, even when the app is mounted under a basePath:
+
+```text
+https://<server>/.well-known/apple-app-site-association
+  → /<basePath>/api/mobile/.well-known/apple-app-site-association
+```
 
 ## Side-channel controls
 
@@ -217,6 +235,7 @@ Apple Developer Program enrollment are in
 
 ## References
 
+- Architecture: [docs/architecture/ios-app.md](../docs/architecture/ios-app.md)
 - Plan: [docs/archive/review/ios-autofill-mvp-plan.md](../docs/archive/review/ios-autofill-mvp-plan.md)
 - Verification Status: [docs/archive/review/ios-autofill-mvp-verification-status.md](../docs/archive/review/ios-autofill-mvp-verification-status.md)
 - Manual Test Plan: [docs/archive/review/ios-autofill-mvp-manual-test.md](../docs/archive/review/ios-autofill-mvp-manual-test.md)

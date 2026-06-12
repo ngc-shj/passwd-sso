@@ -23,6 +23,8 @@ Tired of copying and pasting passwords from your passwd-sso vault? This extensio
 
 📋 **Instant copy** — Right-click any page or press a shortcut to copy your password or username to the clipboard. Done in under a second.
 
+🔍 **Search your entire vault** — The popup search box looks across every entry in your vault, not just the current site's matches, so you can find and copy any credential from anywhere.
+
 🔒 **Zero-knowledge security** — Your master passphrase never leaves your device. All data is encrypted with AES-256-GCM before it ever touches the network. Even if someone intercepts the traffic, they see only ciphertext.
 
 ⏱️ **Auto-lock** — Walk away from your computer? The vault locks itself after a configurable timeout, so your credentials are never left exposed.
