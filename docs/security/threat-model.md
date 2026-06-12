@@ -2,7 +2,7 @@
 
 This document presents a systematic STRIDE-based threat analysis for passwd-sso.
 
-Last updated: 2026-05-21
+Last updated: 2026-06-13
 
 ---
 
@@ -24,6 +24,9 @@ Last updated: 2026-05-21
 | CLI OAuth refresh token | High | DB + `$XDG_DATA_HOME/passwd-sso/credentials` (JSON, mode 0o600) |
 | WebAuthn credentials | High | DB (public key + credential ID) |
 | Extension passkey private keys | Critical | Encrypted in DB entry blob (AES-256-GCM, wrapped by vault secret key) |
+| iOS mobile tokens (access + refresh) | High | DB (hashed) + iOS Keychain (`WhenUnlockedThisDeviceOnly`); DPoP-bound to a Secure Enclave key |
+| iOS bridge key | Critical | iOS Keychain access group (`biometryCurrentSet`); wraps the cached vault key |
+| iOS encrypted entry cache | Critical | App Group container (AES-256-GCM under vault key; counter + install-UUID bound via AAD) |
 | PRF-derived vault key | Critical | Ephemeral in client memory |
 | Audit logs | Medium | PostgreSQL |
 | Account salt | Low | DB (public parameter) |
@@ -63,6 +66,17 @@ TB7: Extension Passkey Provider (MAIN world <-> content script <-> Service Worke
      Messages cross two isolated world boundaries via postMessage (MAIN→ISOLATED)
      and chrome.runtime.sendMessage (ISOLATED→SW).
      rpId is validated against sender.tab.url at the SW boundary (not payload).
+
+TB8: iOS Host App <-> AutoFill Extension (App Group + shared Keychain)
+     Separate processes share an App Group container (encrypted entry cache,
+     wrapped vault key, rollback flags — ciphertext only) and a Keychain access
+     group holding the biometry-gated bridge key. The plaintext vault key is
+     never persisted; each fill reconstructs it behind a fresh Face ID prompt
+     and zeroes it after use. Cache reads verify a Keychain-held counter and
+     install UUID via AEAD-bound AAD; rejected caches produce HMAC rollback
+     flags drained by the host app to /api/mobile/cache-rollback-report.
+     Server communication is DPoP-bound to a Secure Enclave P-256 key
+     (see docs/architecture/ios-app.md).
 ```
 
 ## 3. STRIDE Analysis

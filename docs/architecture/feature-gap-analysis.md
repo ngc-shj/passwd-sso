@@ -1,6 +1,6 @@
 # Feature Gap Analysis Report
 
-Last updated: 2026-03-06
+Last updated: 2026-06-13
 
 ## Purpose
 
@@ -267,17 +267,17 @@ MAIN world WebAuthn interceptor (`webauthn-interceptor.js`) overrides `navigator
 
 | # | Feature | 1P | BW | LP | DL | KP | PP | NP | Impact | Implementation Effort |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| P-1 | Mobile apps (iOS/Android) | Yes | Yes | Yes | Yes | 3rd party | Yes | Yes | High | Very High |
+| P-1 | Mobile apps (iOS/Android) — iOS implemented (2026-06) | Yes | Yes | Yes | Yes | 3rd party | Yes | Yes | High | Very High (Android remaining) |
 | ~~P-2~~ | ~~CLI tool (vault operations)~~ | Yes | Yes | - | - | Yes | Planned | - | — | — |
 | P-3 | Offline access | Yes | Yes | Partial | Partial | Yes | Yes | Yes | Medium | High |
 | P-4 | Desktop app | Yes | Yes | - | - | Yes | Yes | Yes | Low | High |
-| P-5 | Biometric unlock (Touch ID/Face ID) | Yes | Yes | Yes | Yes | - | Yes | Yes | Medium | Depends on P-1 |
+| P-5 | Biometric unlock (Touch ID/Face ID) — iOS Face ID implemented (2026-06) | Yes | Yes | Yes | Yes | - | Yes | Yes | Medium | Depends on P-1 |
 
-#### P-1 Mobile apps
+#### P-1 Mobile apps — iOS implemented (2026-06)
 
-- Current: web UI only; accessible via mobile browser but no native autofill integration
-- Competitors: all provide iOS/Android native apps
-- Proposal: React Native or Capacitor/Ionic reusing existing React components; integrate iOS/Android credential-provider APIs; replace Web Crypto via `react-native-quick-crypto`
+- Current: native iOS app + AutoFill credential provider extension (`ios/`, SwiftUI, iOS 17+) — custom-scheme OAuth sign-in, personal + team vault read, in-app entry create/edit (personal), password + TOTP AutoFill, QuickType inline suggestions (ASCredentialIdentityStore), passkey (WebAuthn) assertion provider, Face ID vault unlock, en/ja localization
+- Original proposal (React Native / Capacitor reusing React components) superseded by the native Swift implementation
+- Remaining: Android app; team-entry write parity on iOS
 
 #### ~~P-2 CLI tool~~ — Implemented (2026-03-04)
 
@@ -455,7 +455,7 @@ Auto-monitor logic with 24-hour interval and vault-unlock gating. Background bre
 | ID | Feature | Rationale |
 | --- | --- | --- |
 | ~~S-4~~ | ~~Passkey vault unlock~~ | ✅ 2026-03-06 |
-| P-1 | Mobile app | Very high effort, likely dedicated team |
+| P-1 | Mobile app | iOS shipped (2026-06); Android remaining |
 | P-3 | Offline access | Service Worker + IndexedDB + complex sync design |
 | P-4 | Desktop app | Electron/Tauri, can be partially substituted by web |
 | ~~E-1~~ | ~~SSH keys + SSH Agent~~ | ✅ 2026-03-06 |
@@ -537,7 +537,7 @@ Completed: 2026-03-06
 9. ~~**B-2** Directory sync~~ ✅
 10. ~~**U-3** Travel Mode~~ ✅
 11. ~~**X-6** TOTP QR capture~~ ✅
-12. **P-1** Mobile apps (iOS / Android)
+12. **P-1** Mobile apps — iOS ✅ (2026-06); Android remaining
 13. **P-3** Offline access
 
 ---
@@ -567,13 +567,14 @@ Feature-category coverage:
 - Strong audit-log surface (150+ action types)
 - Send (temporary text/file sharing) parity with Bitwarden
 - Strong vault management: folder hierarchy + entry history + duplicate detection
-- Full extension feature set: autofill, TOTP, context menu, keyboard shortcuts, login detection & save, passkey provider (WebAuthn interceptor)
+- Full extension feature set: autofill, TOTP, context menu, keyboard shortcuts, login detection & save, vault-wide popup search, passkey provider (WebAuthn interceptor)
+- Native iOS app + AutoFill extension (iOS 17+): password/TOTP fill, QuickType inline suggestions, passkey assertion provider, Face ID unlock
 - Email notification infrastructure (Resend + SMTP) with full emergency-access notification coverage
 - Concurrent session management (list/revoke with device detection)
 
 **Largest gaps:**
 
-- No mobile / desktop apps
+- No Android / desktop apps (iOS app shipped 2026-06)
 
 **Improvements since previous report (2026-02-20):**
 
