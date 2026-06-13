@@ -235,3 +235,22 @@ Replace raw error-code strings with `API_ERROR.*` (values identical; pattern of 
 - Tenant admin opens TenantAdmin settings — JIT/delegation TTL help text renders the same numbers as before (now interpolated).
 - Extension user autofills credentials and saves a new login — message-type constants must keep exact values or the content-script ↔ background protocol breaks (twin files verified pairwise).
 - Rate-limited API client hits a 429 on the same thresholds as before.
+
+## Implementation Checklist
+
+Impact analysis was performed during Phase 1 (3 parallel codebase sweeps + fingerprint + 3-round expert verification); per-contract file:line inventories live in the Contracts section above and are the authoritative work list.
+
+### Batching (conflict-free waves)
+- Wave 1 (parallel, disjoint trees): Batch E = C10 (messages/ + policy cards + privacy page + new i18n test); Batch F = C11 (extension/); Batch G = C12 (cli/).
+- Wave 2 (parallel, disjoint trees): Batch A = C1 (src/lib/crypto + vault/setup route + e2e/helpers/crypto.test.ts value pins); Batch D = C6+C7+C8+C9+C13 (string constants across src routes/components/lib + test alignment).
+- Wave 3 (single agent; overlaps Wave-2 files sequentially, no parallel conflict): Batch B/C = C2+C3+C4+C5 (time arithmetic + RATE_WINDOW_MS sweep + TTL dedup + env-schema). rate-limiters.ts gets BOTH its edits here (15*MS_PER_MINUTE and v1ApiKeyLimiter→RATE_WINDOW_MS).
+
+### CI gate parity (Step 2-1 diff, 2026-06-13)
+- pre-pr.sh covers: lint, vitest, build, check:env-docs, check:crypto-domains, check:bypass-rls, check:team-auth-rls, check:migration-drift, api-error-codes check, e2e-selectors check, gitleaks, refactor-phase-verify.
+- CI-only gaps and dispositions:
+  - Extension CI job (extension vitest) → run `cd extension && npm test` locally before completion (plan VE2).
+  - CLI tests → run `cd cli && npm test` locally (same).
+  - `licenses:check:*:strict` → no-op for this PR (zero dependency changes); CI re-verifies.
+  - DB+Redis integration job → not required by any contract (VE1: pure refactor, unit+build verifiable); CI re-verifies.
+- check:crypto-domains specifics: new `src/lib/crypto/crypto-params.ts` matches the `crypto-*.ts` glob and joins scanSet automatically. It contains no HKDF/AAD tokens; if the ledger check flags it, add to `LEDGER_EXEMPT` in `scripts/checks/check-crypto-domains.mjs` with justification "pure numeric cipher parameters (IV/tag/key lengths, PBKDF2 count); no HKDF info strings, no AAD scopes" and mirror the note in `docs/security/crypto-domain-ledger.md` per that file's convention.
+- check:api-error-codes / api-error-body-drift: C9 touches API_ERROR usage — these gates re-verify automatically in pre-pr.
