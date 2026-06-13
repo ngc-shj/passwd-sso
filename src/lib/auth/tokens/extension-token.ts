@@ -50,10 +50,12 @@ export function hasScope(
  *    `dpop/validate-token-dpop.ts`, which requires a valid DPoP proof bound
  *    to the row's `cnfJkt`. IOS_APP rows without cnfJkt are rejected early.
  *    IP / user-agent are updated on success.
- *  - `clientKind === 'BROWSER_EXTENSION'`: ALWAYS requires a valid DPoP proof
- *    (no bearer-only fallback — cnfJkt is NOT NULL for all BROWSER_EXTENSION
- *    rows post-migration). IP / user-agent are NOT updated (browser rows
- *    historically left those fields NULL).
+ *  - `clientKind === 'BROWSER_EXTENSION'` (and `'IOS_AUTOFILL'`, which takes
+ *    the same else-branch): ALWAYS requires a valid DPoP proof (no bearer-only
+ *    fallback — cnfJkt is NOT NULL for all BROWSER_EXTENSION rows
+ *    post-migration, and is set at mint for every IOS_AUTOFILL row). IP /
+ *    user-agent are NOT updated (browser rows historically left those fields
+ *    NULL).
  *
  * On success, updates `lastUsedAt` (best-effort, non-blocking).
  */

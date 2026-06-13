@@ -20,6 +20,14 @@ tests or the simulator's AutoFill UI.
 
 ## Steps (happy path — register, then immediately authenticate)
 
+> The happy path doubles as the **cross-process Keychain round-trip check
+> (R25)**: the upload token is WRITTEN by the host process
+> (AutofillTokenRefresher → UploadTokenStore) and READ by the AutoFill
+> extension process — a boundary unit tests cannot cross (both targets mock
+> the Keychain in-process). A registration that reaches the network proves
+> host-written `com.passwd-sso.upload-token` items are visible to the
+> extension via the shared default access group.
+
 1. Foreground the passwd-sso host app (unlock if prompted), then open Safari →
    `https://webauthn.io`, enter a test username, tap "Register".
 2. Expected: the system sheet offers saving the passkey with passwd-sso;

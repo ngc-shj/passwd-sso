@@ -1,6 +1,6 @@
 # Coding Deviation Log: ios-passkey-registration
 
-## C1–C3 / S-C1–S-C2 (commits 8a568876, c21ef211)
+## C1–C3 / S-C1–S-C2 (commits `8a568876`, `c21ef211`)
 
 - **S-C2 token TTL**: plan said "short-lived (config, default ~1h)"; the server
   pins `IOS_AUTOFILL_TOKEN_TTL_MS = 5 min` (code-layer constant, not
@@ -45,6 +45,22 @@
   `replace()` would have wiped the registered password/passkey set. Both are
   best-effort AFTER the confirmed upload; failures log and never cancel the
   already-durable registration.
+- **Self-R-check (Step 2-5) dispositions**:
+  - RS2 [Major] — `POST /api/mobile/autofill-token` lacked the rate limit the
+    plan's S-C2 acceptance demanded. FIXED in Phase 2: 30 req/h per user
+    (`mintLimiter`), 429 path + vitest.
+  - R25 [Major] — the upload token crosses a true process boundary
+    (host writes, extension reads via the shared Keychain group), which unit
+    tests cannot cross (both targets mock the Keychain in-process). Accepted
+    with quantification: worst case = registration cancels cleanly (no-lockout
+    fall-through to iCloud Keychain, never data loss); likelihood = low (same
+    shared-default-group mechanism as the shipped BridgeKeyStore /
+    bridge-key items the AutoFill fill path already exercises on device);
+    cost to fix = a device-level E2E harness this repo does not have. The R35
+    manual test's happy path is the explicit verification artifact (note added
+    to ios-passkey-registration-manual-test.md).
+  - R3 [Minor] — dispatch comments in `extension-token.ts` /
+    `validate-token-dpop.ts` didn't mention IOS_AUTOFILL. FIXED.
 - **Process**: implemented directly by the orchestrator (no Sonnet sub-agent
   batches) — the per-contract test-gated loop on a single Xcode project
   serializes anyway, and the security-critical wiring benefits from the

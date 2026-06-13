@@ -83,4 +83,29 @@ describe("POST /api/mobile/autofill-token", () => {
     expect(res.status).toBe(400);
     expect(mockIssueAutofill).not.toHaveBeenCalled();
   });
+
+  it("429 once the per-user mint budget is exhausted", async () => {
+    mockCheckAuth.mockResolvedValue({
+      ok: true,
+      auth: { type: "token", userId: "u-rl", tenantId: "t1" },
+    });
+    mockIssueAutofill.mockResolvedValue({
+      token: "secret-token",
+      expiresAt: new Date("2026-06-13T00:05:00.000Z"),
+      cnfJkt: "jkt",
+      scope: "passwords:write",
+    });
+
+    let rateLimitedStatus: number | undefined;
+    for (let i = 0; i < 31; i++) {
+      const res = await POST(post({ jwk: VALID_JWK }));
+      if (res.status === 429) {
+        rateLimitedStatus = res.status;
+        break;
+      }
+      expect(res.status).toBe(201);
+    }
+
+    expect(rateLimitedStatus).toBe(429);
+  });
 });

@@ -106,11 +106,11 @@ The host's mobile DPoP key is a host-only Secure-Enclave key and is **immutable*
 ## Go/No-Go Gate
 | ID | Subject | Status |
 |----|---------|--------|
-| S-C1 | `IOS_AUTOFILL` clientKind + DPoP-enforced validation | done (c21ef211) |
-| S-C2 | `POST /api/mobile/autofill-token` (jkt-bound, scope-min) | done (c21ef211) |
-| C1 | Registration crypto (BE\|BS flags, golden vectors + CBOR decoder) | done (8a568876) |
-| C2 | Passkey blob builder (full JWK, real-keypair round-trip) | done (8a568876) |
-| C3 | `registrationOutcome` pure fn (no-lockout matrix) | done (8a568876) |
+| S-C1 | `IOS_AUTOFILL` clientKind + DPoP-enforced validation | done (`c21ef211`) |
+| S-C2 | `POST /api/mobile/autofill-token` (jkt-bound, scope-min) | done (`c21ef211`) |
+| C1 | Registration crypto (BE\|BS flags, golden vectors + CBOR decoder) | done (`8a568876`) |
+| C2 | Passkey blob builder (full JWK, real-keypair round-trip) | done (`8a568876`) |
+| C3 | `registrationOutcome` pure fn (no-lockout matrix) | done (`8a568876`) |
 | C4 | Shared-group DPoP key + `EntryUploader` (new Shared type) + nonce staging | done |
 | C5 | `UploadTokenStore` (AfterFirstUnlock, mock-Keychain) | done |
 | C6 | Host mint/cache/clear token | done |

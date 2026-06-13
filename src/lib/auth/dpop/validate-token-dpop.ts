@@ -40,7 +40,8 @@ export type ValidateTokenDpopResult =
     };
 
 /**
- * Shared DPoP-validation helper for both BROWSER_EXTENSION and IOS_APP tokens.
+ * Shared DPoP-validation helper for BROWSER_EXTENSION, IOS_APP, and
+ * IOS_AUTOFILL tokens.
  *
  * Extracted from the IOS_APP branch of validateExtensionToken. Caller has
  * already confirmed the row is non-revoked, non-expired, and (for IOS_APP)

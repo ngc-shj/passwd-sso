@@ -4,7 +4,9 @@ import { z } from "zod";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { parseBody } from "@/lib/http/parse-body";
 import { checkAuth } from "@/lib/auth/session/check-auth";
-import { unauthorized } from "@/lib/http/api-response";
+import { rateLimited, unauthorized } from "@/lib/http/api-response";
+import { createRateLimiter } from "@/lib/security/rate-limit";
+import { MS_PER_HOUR } from "@/lib/constants/time";
 import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants/auth/extension-token";
 import { jwkThumbprint } from "@/lib/auth/dpop/verify";
 import { issueAutofillToken } from "@/lib/auth/tokens/mobile-token";
@@ -12,6 +14,15 @@ import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 export const runtime = "nodejs";
+
+// 30 req / h per user. The host mints once per unlock and once per app
+// foreground — generous for real use, but a stolen host token cannot flood
+// extensionToken rows or keep revoking the live AutoFill token (each mint
+// revokes the prior one) at full speed.
+const mintLimiter = createRateLimiter({
+  windowMs: MS_PER_HOUR,
+  max: 30,
+});
 
 // The AutoFill extension's own DPoP public key (P-256). The minted token binds
 // to its RFC 7638 thumbprint so only that extension can present it.
@@ -46,6 +57,13 @@ export const POST = withRequestLog(async (req: NextRequest) => {
   // tenantId). A bare session / API key is not the intended minter.
   if (authed.auth.type !== "token") return unauthorized();
   const { userId, tenantId } = authed.auth;
+
+  // Rate-limit per user, after auth (the bucket key is the authenticated
+  // identity) and before the mint/audit work.
+  const rl = await mintLimiter.check(`rl:mobile_autofill_token:${userId}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
+  }
 
   const parsed = await parseBody(req, BodySchema);
   if (!parsed.ok) return parsed.response;
