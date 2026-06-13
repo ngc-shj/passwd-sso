@@ -232,6 +232,11 @@ model ExtensionToken {
 enum ExtensionTokenClientKind {
   BROWSER_EXTENSION
   IOS_APP
+  // Short-lived, passwords:write-only token the host app mints for its AutoFill
+  // extension (DPoP-bound to the extension's own key) — used to upload a newly
+  // created passkey during registration. Validated identically to the other
+  // kinds (DPoP required); cannot be refreshed.
+  IOS_AUTOFILL
 }
 
 model ExtensionBridgeCode {
