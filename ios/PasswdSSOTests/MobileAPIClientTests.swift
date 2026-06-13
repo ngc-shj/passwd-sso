@@ -411,7 +411,7 @@ final class MobileAPIClientTests: XCTestCase {
       "https://host.example/passwd-sso/api/teams/t1/passwords?include=blob"
     )
     // canonicalHTU (DPoP htu) strips the query but keeps the basePath.
-    let htu = await client.canonicalHTU(url: try XCTUnwrap(withQuery))
+    let htu = canonicalHTU(url: try XCTUnwrap(withQuery))
     XCTAssertEqual(htu, "https://host.example/passwd-sso/api/teams/t1/passwords")
   }
 
@@ -485,7 +485,7 @@ final class MobileAPIClientTests: XCTestCase {
       .replacingOccurrences(of: "_", with: "/")))
     let payload = try JSONDecoder().decode([String: AnyDecodable].self, from: payloadData)
 
-    let expectedAth = await client.sha256Base64URL(accessToken)
+    let expectedAth = sha256Base64URL(accessToken)
     XCTAssertEqual(payload["ath"]?.value as? String, expectedAth)
   }
 
@@ -532,7 +532,7 @@ final class MobileAPIClientTests: XCTestCase {
     let payloadData = try XCTUnwrap(Data(base64Encoded: b64.replacingOccurrences(of: "-", with: "+")
       .replacingOccurrences(of: "_", with: "/")))
     let payload = try JSONDecoder().decode([String: AnyDecodable].self, from: payloadData)
-    let expectedAth = await client.sha256Base64URL(accessToken)
+    let expectedAth = sha256Base64URL(accessToken)
     XCTAssertEqual(payload["ath"]?.value as? String, expectedAth)
     XCTAssertEqual(payload["htm"]?.value as? String, "POST")
   }
@@ -684,7 +684,7 @@ final class MobileAPIClientTests: XCTestCase {
       .replacingOccurrences(of: "_", with: "/")))
     let payload = try JSONDecoder().decode([String: AnyDecodable].self, from: payloadData)
 
-    let expectedAth = await client.sha256Base64URL("acc_update_test")
+    let expectedAth = sha256Base64URL("acc_update_test")
     XCTAssertEqual(payload["ath"]?.value as? String, expectedAth,
                    "DPoP proof must contain ath = SHA-256(access_token)")
     XCTAssertEqual(payload["htm"]?.value as? String, "POST")
@@ -1006,8 +1006,8 @@ final class TokenRefreshTests: XCTestCase {
     let initialAth = try decodeDPoPAth(initialDPoP)
     let retryAth = try decodeDPoPAth(retryDPoP)
 
-    let expectedOldAth = await client.sha256Base64URL(oldToken)
-    let expectedNewAth = await client.sha256Base64URL(newToken)
+    let expectedOldAth = sha256Base64URL(oldToken)
+    let expectedNewAth = sha256Base64URL(newToken)
     XCTAssertEqual(initialAth, expectedOldAth, "Initial ath should be SHA-256(oldToken)")
     XCTAssertEqual(retryAth, expectedNewAth, "Retry ath should be SHA-256(newToken)")
     XCTAssertNotEqual(initialAth, retryAth, "ath must change after token refresh")

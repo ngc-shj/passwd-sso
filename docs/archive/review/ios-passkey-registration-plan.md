@@ -106,15 +106,49 @@ The host's mobile DPoP key is a host-only Secure-Enclave key and is **immutable*
 ## Go/No-Go Gate
 | ID | Subject | Status |
 |----|---------|--------|
-| S-C1 | `IOS_AUTOFILL` clientKind + DPoP-enforced validation | pending |
-| S-C2 | `POST /api/mobile/autofill-token` (jkt-bound, scope-min) | pending |
-| C1 | Registration crypto (BE\|BS flags, golden vectors + CBOR decoder) | pending |
-| C2 | Passkey blob builder (full JWK, real-keypair round-trip) | pending |
-| C3 | `registrationOutcome` pure fn (no-lockout matrix) | pending |
-| C4 | Shared-group DPoP key + `EntryUploader` (new Shared type) + nonce staging | pending |
-| C5 | `UploadTokenStore` (AfterFirstUnlock, mock-Keychain) | pending |
-| C6 | Host mint/cache/clear token | pending |
-| C7 | Extension flow + `ProvidesPasskeyRegistration` capability + single completion point | pending |
-| C8 | signCount + orphan documentation | pending |
+| S-C1 | `IOS_AUTOFILL` clientKind + DPoP-enforced validation | done (c21ef211) |
+| S-C2 | `POST /api/mobile/autofill-token` (jkt-bound, scope-min) | done (c21ef211) |
+| C1 | Registration crypto (BE\|BS flags, golden vectors + CBOR decoder) | done (8a568876) |
+| C2 | Passkey blob builder (full JWK, real-keypair round-trip) | done (8a568876) |
+| C3 | `registrationOutcome` pure fn (no-lockout matrix) | done (8a568876) |
+| C4 | Shared-group DPoP key + `EntryUploader` (new Shared type) + nonce staging | done |
+| C5 | `UploadTokenStore` (AfterFirstUnlock, mock-Keychain) | done |
+| C6 | Host mint/cache/clear token | done |
+| C7 | Extension flow + `ProvidesPasskeyRegistration` capability + single completion point | done |
+| C8 | signCount + orphan documentation | done |
 
 > Verify before locking C7: the iOS 17 `ASPasskeyRegistrationCredential` initializer (clientDataHash vs clientDataJSON).
+> → VERIFIED (iOS 26.4 SDK header): `init(relyingParty:clientDataHash:credentialID:attestationObject:)` — takes `clientDataHash`; the OS owns clientDataJSON. `completeRegistrationRequest(using:completionHandler:)` exists since iOS 17.
+
+## Implementation Checklist (C4–C8, Step 2-1)
+
+Reuse obligations (existing shared assets — do NOT reimplement):
+- [ ] `KeychainAccessor`/`SystemKeychainAccessor` (`Shared/Storage/BridgeKeyStore.swift:26`) — C5 store DI; tests use `FakeKeychain` (HostTokenStoreTests.swift:9) / `MockKeychainAccessor`
+- [ ] `generateDPoPKey`/`loadDPoPKey`/`exportPublicKeyJWK`/`computeJWKThumbprint` (`Shared/Crypto/SecureEnclaveKey.swift`) — C4 key creation; access group is the DEFAULT keychain group (single `…shared` entitlement on both targets — explicit literal group fails with errSecMissingEntitlement on device, per BridgeKeyStore comment)
+- [ ] `buildDPoPProof` (`Shared/Auth/DPoPProofBuilder.swift`) + `SecureEnclaveDPoPSigner` — C4 uploader signing
+- [ ] `encryptAESGCMEncoded` + `buildPersonalEntryAAD` + `VaultType` (`Shared/Crypto/`) — C7 blob encryption (mirror `VaultViewModel.createEntry:189`)
+- [ ] keyVersion recovery idiom: `max(1, first personal entry keyVersion ?? 1)` (`VaultUnlocker.unlockWithBiometrics:232`)
+- [ ] entryId idiom: `UUID().uuidString.lowercased()` (`VaultViewModel.createEntry:197`)
+- [ ] cache write protocol: write file at counter N+1 FIRST, `incrementCounter` after (`HostSyncService.runSync`)
+- [ ] `passkeyRegistrationOutcome` (C3, shipped) — the ONLY completion gate in C7
+- [ ] `PasskeyEntryBlobBuilder.buildCreate` / `buildRegistrationAuthData` / `buildNoneAttestationObject` / `generatePasskey` (C1/C2, shipped)
+- [ ] `CredentialIdentityRegistrar` seam — extend protocol with append-style `add(passkeys:)` (replace() would drop other identities)
+- [ ] `MockURLProtocol`/`FakeSigner`/`httpResponse` (MobileAPIClientTests.swift, top-level) — reusable by new test files
+- [ ] ISO8601 expiresAt from server has fractional seconds (`.toISOString()`) → parse with `.withFractionalSeconds`
+
+Files to add/modify:
+- [ ] ADD `ios/Shared/Storage/UploadTokenStore.swift` (C5) + `ios/PasswdSSOTests/UploadTokenStoreTests.swift`
+- [ ] ADD `ios/Shared/Auth/AutofillDPoPKey.swift` (C4 — label `com.passwd-sso.dpop.autofill`)
+- [ ] ADD `ios/Shared/Network/EntryUploader.swift` (C4 — owns `CreateEntryRequest` MOVED from MobileAPIClient.swift; shared `canonicalHTU`/`sha256Base64URL` free functions) + `ios/PasswdSSOTests/EntryUploaderTests.swift` (port T5 ath test)
+- [ ] MODIFY `ios/PasswdSSOApp/Network/MobileAPIClient.swift` (remove moved struct; delegate htu/ath helpers; add `mintAutofillToken`)
+- [ ] ADD `ios/PasswdSSOApp/Auth/AutofillTokenRefresher.swift` (C6) + tests
+- [ ] MODIFY `ios/PasswdSSOApp/Vault/AutoLockService.swift` (clear upload token on lock/signOut) + tests
+- [ ] MODIFY `ios/PasswdSSOApp/Views/RootView.swift` + `PasswdSSOAppApp.swift` (mint after unlock/foreground sync)
+- [ ] MODIFY `ios/Shared/AutoFill/CredentialResolver.swift` (C7: `encryptPasskeyEntry` + `appendEntryToCache`) + tests
+- [ ] MODIFY `ios/Shared/AutoFill/CredentialIdentityRegistrar.swift` (append API) + tests
+- [ ] MODIFY `ios/PasswdSSOAutofillExtension/CredentialProviderViewController.swift` (C7 flow + F5 guard reset)
+- [ ] MODIFY `ios/project.yml` (`ProvidesPasskeyRegistration: true`) → `xcodegen generate`
+- [ ] ADD `docs/archive/review/ios-passkey-registration-manual-test.md` (R35 Tier-2, adversarial scenarios per plan §Testing)
+- [ ] C8 doc: signCount-from-0 + orphan note (extension README + manual-test)
+
+CI gate parity: iOS CI (`.github/workflows`) runs xcodebuild test + xcodegen-regenerated project; server gates = vitest + next build (no server changes in C4–C8; run anyway as mandatory checks). No new-file-pattern CI gates detected for `ios/**.swift` beyond the xcodegen regeneration rule (project.yml is SSoT).

@@ -28,8 +28,9 @@ enum AppState {
 // MARK: - Root view
 
 struct RootView: View {
-  /// Called when vault is unlocked so the app shell can wire foreground sync + drain.
-  let onVaultReady: (HostSyncService, RollbackFlagDrain, SymmetricKey, String) -> Void
+  /// Called when vault is unlocked so the app shell can wire foreground sync +
+  /// drain + AutoFill upload-token re-mint.
+  let onVaultReady: (HostSyncService, RollbackFlagDrain, SymmetricKey, String, AutofillTokenRefresher?) -> Void
 
   @State private var appState: AppState = .setup
 
@@ -306,7 +307,12 @@ struct RootView: View {
       )
     }
 
-    onVaultReady(syncService, drain, vaultKey, unlockResult.userId)
+    // Mint + stage the AutoFill upload token (plan C6 — passkey registration).
+    // Best-effort: a mint failure must not affect the unlock flow.
+    let tokenRefresher = AutofillTokenRefresher(apiClient: apiClient)
+    await tokenRefresher.refresh()
+
+    onVaultReady(syncService, drain, vaultKey, unlockResult.userId, tokenRefresher)
 
     // Register QuickType inline-suggestion identities for the just-synced set.
     await refreshCredentialIdentities(from: cacheData, vaultKey: vaultKey, userId: unlockResult.userId)

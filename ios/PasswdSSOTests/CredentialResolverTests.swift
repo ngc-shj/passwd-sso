@@ -1167,4 +1167,169 @@ final class CredentialResolverTests: XCTestCase {
       // Also acceptable
     }
   }
+
+  // MARK: - Passkey registration (C7): encryptPasskeyEntry / appendEntryToCache
+
+  /// Common fixture: bridge blob + wrapped vault key + cache with one personal
+  /// LOGIN entry at keyVersion 3 (so keyVersion recovery is observable).
+  private func makeRegistrationFixture() throws -> (
+    resolver: CredentialResolver, vaultKey: SymmetricKey, blob: BridgeKeyStore.Blob,
+    bridgeKeyStore: BridgeKeyStore
+  ) {
+    let keychain = MockKeychainAccessor()
+    let (bridgeKeyStore, blob) = try makeBridgeKeyBlob(keychain: keychain)
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+    let mockWKS = MockWrappedKeyStore()
+    try wrapAndSaveVaultKey(vaultKey: vaultKey, cacheKey: cacheKey, store: mockWKS)
+
+    let userId = "user-reg"
+    let summary = VaultEntrySummary(
+      id: "login-1", title: "L", username: "u", urlHost: "l.com"
+    )
+    let detail = VaultEntryDetail(
+      id: "login-1", title: "L", username: "u", urlHost: "l.com",
+      password: "p", url: "https://l.com"
+    )
+    let existing = try makePersonalCacheEntry(
+      summary: summary, detail: detail, key: vaultKey,
+      userId: userId, aadVersion: 1, keyVersion: 3
+    )
+    try buildCacheFile(
+      at: cacheURL, entries: [existing], vaultKey: vaultKey,
+      hostInstallUUID: blob.hostInstallUUID, counter: blob.cacheVersionCounter,
+      userId: userId
+    )
+    let resolver = CredentialResolver(
+      bridgeKeyStore: bridgeKeyStore, wrappedKeyStore: mockWKS, cacheURL: cacheURL
+    )
+    return (resolver, vaultKey, blob, bridgeKeyStore)
+  }
+
+  func testEncryptPasskeyEntry_recoversKeyVersionAndUserIdAndBindsAAD() async throws {
+    let fixture = try makeRegistrationFixture()
+    let entryId = "pk-new-1"
+    let blobPlain = Data(#"{"entryType":"PASSKEY"}"#.utf8)
+    let overviewPlain = Data(#"{"title":"T"}"#.utf8)
+
+    let enc = try await fixture.resolver.encryptPasskeyEntry(
+      entryId: entryId, blobPlaintext: blobPlain, overviewPlaintext: overviewPlain
+    )
+
+    XCTAssertEqual(enc.userId, "user-reg")
+    XCTAssertEqual(enc.keyVersion, 3, "keyVersion must be recovered from the cached personal entry")
+    // Decryptable ONLY with the correct personal AAD (blob/overview separated).
+    let blobAAD = try buildPersonalEntryAAD(
+      userId: "user-reg", entryId: entryId, vaultType: VaultType.blob
+    )
+    let overviewAAD = try buildPersonalEntryAAD(
+      userId: "user-reg", entryId: entryId, vaultType: VaultType.overview
+    )
+    XCTAssertEqual(
+      try decryptAESGCMEncoded(encrypted: enc.encryptedBlob, key: fixture.vaultKey, aad: blobAAD),
+      blobPlain
+    )
+    XCTAssertEqual(
+      try decryptAESGCMEncoded(encrypted: enc.encryptedOverview, key: fixture.vaultKey, aad: overviewAAD),
+      overviewPlain
+    )
+    XCTAssertThrowsError(
+      try decryptAESGCMEncoded(encrypted: enc.encryptedBlob, key: fixture.vaultKey, aad: overviewAAD),
+      "blob ciphertext must not validate under the overview AAD"
+    )
+  }
+
+  func testEncryptPasskeyEntry_missingWrappedVaultKey_throwsVaultLocked() async throws {
+    let keychain = MockKeychainAccessor()
+    let (bridgeKeyStore, blob) = try makeBridgeKeyBlob(keychain: keychain)
+    let vaultKey = SymmetricKey(size: .bits256)
+    try buildCacheFile(
+      at: cacheURL, entries: [], vaultKey: vaultKey,
+      hostInstallUUID: blob.hostInstallUUID, counter: blob.cacheVersionCounter
+    )
+    let resolver = CredentialResolver(
+      bridgeKeyStore: bridgeKeyStore, wrappedKeyStore: MockWrappedKeyStore(), cacheURL: cacheURL
+    )
+
+    do {
+      _ = try await resolver.encryptPasskeyEntry(
+        entryId: "x", blobPlaintext: Data([1]), overviewPlaintext: Data([2])
+      )
+      XCTFail("Expected vaultLocked")
+    } catch CredentialResolver.Error.vaultLocked {
+      // expected
+    }
+  }
+
+  func testAppendEntryToCache_appendsAtCounterPlusOneAndBumpsMeta() async throws {
+    let fixture = try makeRegistrationFixture()
+    let entryId = "pk-new-2"
+    let enc = try await fixture.resolver.encryptPasskeyEntry(
+      entryId: entryId,
+      blobPlaintext: Data(#"{"entryType":"PASSKEY"}"#.utf8),
+      overviewPlaintext: Data(#"{"title":"T"}"#.utf8)
+    )
+    let newEntry = CacheEntry(
+      id: entryId, teamId: nil, aadVersion: 1, keyVersion: enc.keyVersion,
+      encryptedBlob: enc.encryptedBlob, encryptedOverview: enc.encryptedOverview,
+      entryType: "PASSKEY"
+    )
+
+    try await fixture.resolver.appendEntryToCache(newEntry)
+
+    // Bridge meta counter advanced by exactly one…
+    let meta = try fixture.bridgeKeyStore.readDirect()
+    XCTAssertEqual(meta.cacheVersionCounter, fixture.blob.cacheVersionCounter + 1)
+    // …and the on-disk cache at the new counter contains BOTH entries.
+    let cache = try readCacheFile(
+      path: cacheURL,
+      vaultKey: fixture.vaultKey,
+      expectedHostInstallUUID: fixture.blob.hostInstallUUID,
+      expectedCounter: meta.cacheVersionCounter
+    )
+    let entries = try JSONDecoder().decode([CacheEntry].self, from: cache.entries)
+    XCTAssertEqual(entries.map(\.id).sorted(), ["login-1", entryId].sorted())
+    XCTAssertEqual(entries.first(where: { $0.id == entryId })?.entryType, "PASSKEY")
+  }
+
+  /// Full round-trip (T4 spirit): real generated passkey → blob builder →
+  /// encryptPasskeyEntry → appendEntryToCache → decryptPasskeyMaterial →
+  /// decodeP256PrivateKeyJWK recovers the SAME public key.
+  func testRegisteredPasskey_isImmediatelyAssertableFromCache() async throws {
+    let fixture = try makeRegistrationFixture()
+    let entryId = "pk-roundtrip"
+    let passkey = generatePasskey()
+    let userHandle = Data([9, 8, 7])
+    let (blobPlain, overviewPlain) = try PasskeyEntryBlobBuilder.buildCreate(
+      rpId: "webauthn.io",
+      rpName: "webauthn.io",
+      userName: "alice",
+      userHandle: userHandle,
+      userDisplayName: "alice",
+      passkey: passkey,
+      creationDate: "2026-06-13T00:00:00.000Z"
+    )
+    let enc = try await fixture.resolver.encryptPasskeyEntry(
+      entryId: entryId, blobPlaintext: blobPlain, overviewPlaintext: overviewPlain
+    )
+    try await fixture.resolver.appendEntryToCache(
+      CacheEntry(
+        id: entryId, teamId: nil, aadVersion: 1, keyVersion: enc.keyVersion,
+        encryptedBlob: enc.encryptedBlob, encryptedOverview: enc.encryptedOverview,
+        entryType: "PASSKEY"
+      )
+    )
+
+    let material = try await fixture.resolver.decryptPasskeyMaterial(entryId: entryId)
+
+    XCTAssertEqual(material.relyingPartyId, "webauthn.io")
+    XCTAssertEqual(material.userHandle, base64URLEncode(userHandle))
+    XCTAssertEqual(material.signCount, 0)
+    let recovered = try decodeP256PrivateKeyJWK(material.privateKeyJWK)
+    XCTAssertEqual(
+      recovered.publicKey.rawRepresentation,
+      passkey.privateKey.publicKey.rawRepresentation,
+      "stored JWK must round-trip to the original key (bare-object encoding is a known failure mode)"
+    )
+  }
 }

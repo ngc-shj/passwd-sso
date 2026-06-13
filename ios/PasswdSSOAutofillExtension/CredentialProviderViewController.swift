@@ -267,19 +267,206 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     }
   }
 
-  /// Passkey REGISTRATION is out of scope for this build: the AutoFill extension
-  /// is read-only/offline and cannot durably persist a freshly-generated private
-  /// key, so returning an ASPasskeyRegistrationCredential we cannot save would
-  /// lock the user out of that account. Cancel cleanly so iOS falls through to
-  /// another provider.
+  // MARK: - Passkey registration (plan C7)
+
+  /// Sendable inputs captured from the OS registration request before the
+  /// foreground deferral (the AS* request types are not Sendable).
+  private struct PasskeyRegistrationInput: Sendable {
+    let relyingPartyId: String
+    let userName: String
+    let userHandle: Data
+    let clientDataHash: Data
+    let algorithmSupported: Bool
+  }
+
+  /// Synchronous-upload registration: generate a P-256 credential, E2E-encrypt
+  /// it, POST it to the server over the DPoP-bound upload channel, and return
+  /// the attestation ONLY after the server confirmed the save. Every failure
+  /// cancels (iOS falls through to iCloud Keychain) — a credential the server
+  /// has not durably stored must never reach the relying party (no-lockout).
   @available(iOS 17.0, *)
   override func prepareInterface(forPasskeyRegistration registrationRequest: any ASCredentialRequest) {
-    extensionContext.cancelRequest(
-      withError: NSError(
-        domain: ASExtensionErrorDomain,
-        code: ASExtensionError.failed.rawValue
-      )
+    guard
+      let request = registrationRequest as? ASPasskeyCredentialRequest,
+      let identity = request.credentialIdentity as? ASPasskeyCredentialIdentity,
+      !identity.relyingPartyIdentifier.isEmpty,
+      !identity.userHandle.isEmpty
+    else {
+      cancel(with: nil)
+      return
+    }
+    let input = PasskeyRegistrationInput(
+      relyingPartyId: identity.relyingPartyIdentifier,
+      userName: identity.userName,
+      userHandle: identity.userHandle,
+      clientDataHash: request.clientDataHash,
+      algorithmSupported: request.supportedAlgorithms.contains(.ES256)
     )
+    deferToForeground { [weak self] in
+      self?.runPasskeyRegistration(input: input)
+    }
+  }
+
+  /// Gather every outcome input (algorithm, vault/biometric, crypto, token,
+  /// upload), then let `passkeyRegistrationOutcome` make the SINGLE decision.
+  /// `completeRegistrationRequest` is reachable from exactly one branch.
+  @available(iOS 17.0, *)
+  @MainActor
+  private func runPasskeyRegistration(input: PasskeyRegistrationInput) {
+    Task { @MainActor in
+      let entryId = UUID().uuidString.lowercased()
+
+      var vaultUnlocked = false
+      var cryptoSucceeded = false
+      var hasUploadToken = false
+      var uploadedEntryId: String?
+      var generated: GeneratedPasskey?
+      var attestationObject = Data()
+      var encryption: CredentialResolver.RegistrationEncryption?
+
+      if input.algorithmSupported {
+        do {
+          let passkey = generatePasskey()
+          let authData = buildRegistrationAuthData(
+            rpId: input.relyingPartyId,
+            signCount: 0,
+            credentialId: passkey.credentialId,
+            coseKey: passkey.publicKeyCOSE
+          )
+          attestationObject = buildNoneAttestationObject(authData: authData)
+          let (blob, overview) = try PasskeyEntryBlobBuilder.buildCreate(
+            rpId: input.relyingPartyId,
+            rpName: input.relyingPartyId,
+            userName: input.userName,
+            userHandle: input.userHandle,
+            userDisplayName: input.userName,
+            passkey: passkey,
+            creationDate: ISO8601DateFormatter().string(from: Date())
+          )
+          // Biometric gate + vault unwrap + AAD-bound encryption. The plaintext
+          // blob (private-key JWK inside) stays in this scope only; zeroing is
+          // best-effort (S4 — CryptoKit owns the P256 key buffer).
+          encryption = try await resolver.encryptPasskeyEntry(
+            entryId: entryId,
+            blobPlaintext: blob,
+            overviewPlaintext: overview
+          )
+          vaultUnlocked = true
+          cryptoSucceeded = true
+          generated = passkey
+        } catch CredentialResolver.Error.vaultLocked {
+          Self.log.error("passkey registration: vault locked")
+        } catch {
+          Self.log.error("passkey registration: crypto/encrypt failed: \(String(describing: error), privacy: .public)")
+          // encryptPasskeyEntry only ran after biometrics if crypto reached it;
+          // treat any non-lock failure as a crypto failure (still a cancel).
+          vaultUnlocked = true
+        }
+      }
+
+      if let encryption {
+        let uploadTokenStore = UploadTokenStore()
+        if let stored = try? uploadTokenStore.loadValid(),
+           let serverConfig = loadServerConfig(),
+           let dpopKey = try? getOrCreateAutofillDPoPKey(),
+           let extensionJWK = try? exportPublicKeyJWK(key: dpopKey) {
+          hasUploadToken = true
+          let uploader = EntryUploader(
+            serverURL: serverConfig.baseURL,
+            signer: SecureEnclaveDPoPSigner(key: dpopKey),
+            jwk: extensionJWK,
+            accessToken: stored.token,
+            initialNonce: stored.dpopNonce,
+            onNonceUpdate: { nonce in try? UploadTokenStore().saveNonce(nonce) }
+          )
+          let body = CreateEntryRequest(
+            id: entryId,
+            encryptedBlob: encryption.encryptedBlob,
+            encryptedOverview: encryption.encryptedOverview,
+            keyVersion: encryption.keyVersion,
+            aadVersion: 1,
+            entryType: "PASSKEY"
+          )
+          do {
+            uploadedEntryId = try await uploader.createEntry(body: body)
+          } catch {
+            Self.log.error("passkey registration: upload failed: \(String(describing: error), privacy: .public)")
+          }
+        } else {
+          Self.log.error("passkey registration: no valid upload token / server config")
+        }
+      }
+
+      // THE single decision point (C3). Only `.complete` returns a credential.
+      let decision = passkeyRegistrationOutcome(
+        algorithmSupported: input.algorithmSupported,
+        vaultUnlocked: vaultUnlocked,
+        cryptoSucceeded: cryptoSucceeded,
+        hasUploadToken: hasUploadToken,
+        uploadedEntryId: uploadedEntryId,
+        expectedEntryId: entryId
+      )
+      guard decision == .complete, let encryption, let passkey = generated else {
+        Self.log.error("passkey registration cancelled: \(String(describing: decision), privacy: .public)")
+        cancel(with: nil)
+        return
+      }
+
+      // Server save is confirmed — everything below is best-effort local
+      // bookkeeping and must NOT cancel the ceremony anymore.
+      await persistRegistrationLocally(
+        input: input, entryId: entryId, encryption: encryption, passkey: passkey
+      )
+
+      let credential = ASPasskeyRegistrationCredential(
+        relyingParty: input.relyingPartyId,
+        clientDataHash: input.clientDataHash,
+        credentialID: passkey.credentialId,
+        attestationObject: attestationObject
+      )
+      let delivered = await extensionContext.completeRegistrationRequest(using: credential)
+      if !delivered {
+        // Orphan case (S3): the server entry exists but the RP did not get
+        // the credential. Harmless — the user simply re-registers.
+        Self.log.error("passkey registration: completeRegistrationRequest returned false (server entry \(entryId, privacy: .public) is now unused)")
+      }
+    }
+  }
+
+  /// Append the confirmed entry to the local cache and register its QuickType
+  /// identity so an immediate assertion on this device works before the next
+  /// host sync. Failures are logged only — the server copy is durable.
+  @available(iOS 17.0, *)
+  @MainActor
+  private func persistRegistrationLocally(
+    input: PasskeyRegistrationInput,
+    entryId: String,
+    encryption: CredentialResolver.RegistrationEncryption,
+    passkey: GeneratedPasskey
+  ) async {
+    let cacheEntry = CacheEntry(
+      id: entryId,
+      teamId: nil,
+      aadVersion: 1,
+      keyVersion: encryption.keyVersion,
+      encryptedBlob: encryption.encryptedBlob,
+      encryptedOverview: encryption.encryptedOverview,
+      entryType: "PASSKEY"
+    )
+    do {
+      try await resolver.appendEntryToCache(cacheEntry)
+    } catch {
+      Self.log.error("passkey registration: cache append failed (next host sync recovers): \(String(describing: error), privacy: .public)")
+    }
+    await CredentialIdentityRegistrar().add(passkeys: [
+      PasskeyIdentitySpec(
+        relyingPartyIdentifier: input.relyingPartyId,
+        userName: input.userName,
+        credentialID: passkey.credentialId,
+        userHandle: input.userHandle,
+        recordIdentifier: entryId
+      )
+    ])
   }
 
   // MARK: - TOTP fill (Step 9, iOS 17+)
@@ -373,6 +560,11 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
   /// the resolver directly — see `pendingForegroundWork`.
   @MainActor
   private func deferToForeground(_ work: @escaping () -> Void) {
+    // Re-arm the single-fire guard per entry point (F5): if iOS reuses this VC
+    // for a second prepare* call (e.g. a registration after a list), a stale
+    // `foregroundWorkStarted == true` would silently drop the new deferred work
+    // and hang the ceremony with no cancel.
+    foregroundWorkStarted = false
     pendingForegroundWork = work
     presentSwiftUI(FillProgressView())
   }

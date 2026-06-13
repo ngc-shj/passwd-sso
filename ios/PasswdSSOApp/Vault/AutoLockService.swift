@@ -31,6 +31,7 @@ import Shared
   private let bridgeKeyStore: BridgeKeyStore
   private let wrappedKeyStore: WrappedKeyStore
   private let tokenStore: HostTokenStore
+  private let uploadTokenStore: UploadTokenStore
   private let cacheURL: URL
 
   public init(
@@ -39,6 +40,7 @@ import Shared
     bridgeKeyStore: BridgeKeyStore,
     wrappedKeyStore: any WrappedKeyStore,
     tokenStore: HostTokenStore,
+    uploadTokenStore: UploadTokenStore = UploadTokenStore(),
     cacheURL: URL
   ) {
     self.reducer = reducer
@@ -46,6 +48,7 @@ import Shared
     self.bridgeKeyStore = bridgeKeyStore
     self.wrappedKeyStore = wrappedKeyStore
     self.tokenStore = tokenStore
+    self.uploadTokenStore = uploadTokenStore
     self.cacheURL = cacheURL
   }
 
@@ -74,9 +77,11 @@ import Shared
   }
 
   /// Drop vault_key from memory (keeps bridge_key so biometric re-unlock is available);
-  /// keeps cache + wrapped blobs.
+  /// keeps cache + wrapped blobs. The AutoFill upload token is cleared (plan C6):
+  /// a locked vault must not leave a spendable write token in the shared Keychain.
   public func lock() {
     stopTimer()
+    try? uploadTokenStore.clear()
     state = .locked
   }
 
