@@ -1,3 +1,4 @@
+import type { ExtensionTokenClientKind } from "@prisma/client";
 import { EXTENSION_TOKEN_SCOPE, type ExtensionTokenScope } from "@/lib/constants";
 
 /**
@@ -38,6 +39,13 @@ export interface ValidatedExtensionToken {
    *    guard in mobile-token.ts before this type is ever constructed.
    */
   cnfJkt: string;
+  /**
+   * The token row's client kind. Exposed so routes can enforce
+   * client-kind-specific policy (e.g. only an IOS_APP host token may broker an
+   * IOS_AUTOFILL upload token) — the scope check alone does not distinguish
+   * kinds that happen to share a scope.
+   */
+  clientKind: ExtensionTokenClientKind;
 }
 
 export type TokenValidationError =

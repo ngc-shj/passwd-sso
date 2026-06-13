@@ -383,6 +383,9 @@ export async function validateIosTokenDpop(
       familyCreatedAt: row.familyCreatedAt,
       // cnfJkt is guaranteed non-null here: null guard above returned early.
       cnfJkt,
+      // This validator is the IOS_APP-only DPoP path (the IOS_AUTOFILL kind is
+      // validated via validateExtensionTokenDpop, not here).
+      clientKind: "IOS_APP",
     },
   };
 }

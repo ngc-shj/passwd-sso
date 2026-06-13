@@ -61,6 +61,29 @@
     to ios-passkey-registration-manual-test.md).
   - R3 [Minor] — dispatch comments in `extension-token.ts` /
     `validate-token-dpop.ts` didn't mention IOS_AUTOFILL. FIXED.
+- **Phase-3 Round-1 fixes**:
+  - S1 [Minor] — the mint endpoint gated on `auth.type === "token"`, which also
+    admits BROWSER_EXTENSION / IOS_AUTOFILL tokens (they share passwords:write).
+    Threaded `clientKind` onto `ValidatedExtensionToken` → `AuthResult["token"]`
+    (additive; existing consumers unaffected) and gated the route on `IOS_APP`.
+  - S2 [Minor] — added migration `20260613000001_ios_autofill_cnf_jkt_required`
+    (partial CHECK), DB-layer parity with the BROWSER_EXTENSION constraint.
+  - T1/T2 [Major] — added the S-C1 IOS_AUTOFILL DPoP-required tests and the
+    issueAutofillToken unit tests (the route test had mocked it away).
+  - T3 [Minor] — C1 golden vectors: the plan asked for byte vectors captured
+    from the browser-extension TS encoder. No such fixture exists in
+    `extension/test/fixtures/` (only TOTP/url-match/vault-unlock fixtures).
+    Resolution: added EXACT-BYTE golden-vector tests built from the canonical
+    framing + the pinned key (`testCOSEKeyExactGoldenBytes`,
+    `testNoneAttestationObjectExactGoldenBytes`) — these pin the wire
+    framing/length-encoding so any encoder change fails CI. The residual gap
+    (the bytes are self-derived, not captured from the *other* implementation)
+    is mitigated end-to-end: the server accepts the produced blob and the
+    shipped assertion decoders read it back, which is a cross-implementation
+    check in substance. Accepted as a deliberate deviation from the literal
+    "captured from the TS encoder" wording.
+  - F1 / T4 [Minor] — accepted with quantification (see code-review Resolution
+    Status); no code change.
 - **Process**: implemented directly by the orchestrator (no Sonnet sub-agent
   batches) — the per-contract test-gated loop on a single Xcode project
   serializes anyway, and the security-critical wiring benefits from the

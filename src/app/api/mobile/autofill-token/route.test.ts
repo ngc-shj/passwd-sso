@@ -36,7 +36,7 @@ describe("POST /api/mobile/autofill-token", () => {
   });
 
   it("mints a token bound to the supplied jwk for an authenticated host token", async () => {
-    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "token", userId: "u1", tenantId: "t1" } });
+    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "token", userId: "u1", tenantId: "t1", clientKind: "IOS_APP" } });
     mockIssueAutofill.mockResolvedValue({
       token: "secret-token",
       expiresAt: new Date("2026-06-13T00:05:00.000Z"),
@@ -70,15 +70,35 @@ describe("POST /api/mobile/autofill-token", () => {
     expect(mockIssueAutofill).not.toHaveBeenCalled();
   });
 
+  it("rejects a non-IOS_APP token (BROWSER_EXTENSION shares the scope but may not mint)", async () => {
+    mockCheckAuth.mockResolvedValue({
+      ok: true,
+      auth: { type: "token", userId: "u1", tenantId: "t1", clientKind: "BROWSER_EXTENSION" },
+    });
+    const res = await POST(post({ jwk: VALID_JWK }));
+    expect(res.status).toBe(401);
+    expect(mockIssueAutofill).not.toHaveBeenCalled();
+  });
+
+  it("rejects an IOS_AUTOFILL token (cannot rotate its own kind)", async () => {
+    mockCheckAuth.mockResolvedValue({
+      ok: true,
+      auth: { type: "token", userId: "u1", tenantId: "t1", clientKind: "IOS_AUTOFILL" },
+    });
+    const res = await POST(post({ jwk: VALID_JWK }));
+    expect(res.status).toBe(401);
+    expect(mockIssueAutofill).not.toHaveBeenCalled();
+  });
+
   it("400 on a malformed jwk (missing coordinates)", async () => {
-    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "token", userId: "u1", tenantId: "t1" } });
+    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "token", userId: "u1", tenantId: "t1", clientKind: "IOS_APP" } });
     const res = await POST(post({ jwk: { kty: "EC", crv: "P-256" } }));
     expect(res.status).toBe(400);
     expect(mockIssueAutofill).not.toHaveBeenCalled();
   });
 
   it("400 on a non-P-256 jwk", async () => {
-    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "token", userId: "u1", tenantId: "t1" } });
+    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "token", userId: "u1", tenantId: "t1", clientKind: "IOS_APP" } });
     const res = await POST(post({ jwk: { kty: "EC", crv: "P-384", x: "a", y: "b" } }));
     expect(res.status).toBe(400);
     expect(mockIssueAutofill).not.toHaveBeenCalled();
@@ -87,7 +107,7 @@ describe("POST /api/mobile/autofill-token", () => {
   it("429 once the per-user mint budget is exhausted", async () => {
     mockCheckAuth.mockResolvedValue({
       ok: true,
-      auth: { type: "token", userId: "u-rl", tenantId: "t1" },
+      auth: { type: "token", userId: "u-rl", tenantId: "t1", clientKind: "IOS_APP" },
     });
     mockIssueAutofill.mockResolvedValue({
       token: "secret-token",

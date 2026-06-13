@@ -377,7 +377,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
             jwk: extensionJWK,
             accessToken: stored.token,
             initialNonce: stored.dpopNonce,
-            onNonceUpdate: { nonce in try? UploadTokenStore().saveNonce(nonce) }
+            onNonceUpdate: { [uploadTokenStore] nonce in try? uploadTokenStore.saveNonce(nonce) }
           )
           let body = CreateEntryRequest(
             id: entryId,

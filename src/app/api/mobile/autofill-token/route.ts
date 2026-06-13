@@ -53,9 +53,13 @@ export const POST = withRequestLog(async (req: NextRequest) => {
   // the host's token already carries. This also runs the host's DPoP check.
   const authed = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_WRITE });
   if (!authed.ok) return authed.response;
-  // Only the host app's bearer token may broker an AutoFill token (it carries
-  // tenantId). A bare session / API key is not the intended minter.
-  if (authed.auth.type !== "token") return unauthorized();
+  // Only the host app's own bearer token (clientKind IOS_APP) may broker an
+  // AutoFill upload token. A bare session / API key is not a "token", and a
+  // BROWSER_EXTENSION / IOS_AUTOFILL token — which shares the passwords:write
+  // scope — must not be able to mint or rotate the AutoFill token either.
+  if (authed.auth.type !== "token" || authed.auth.clientKind !== "IOS_APP") {
+    return unauthorized();
+  }
   const { userId, tenantId } = authed.auth;
 
   // Rate-limit per user, after auth (the bucket key is the authenticated

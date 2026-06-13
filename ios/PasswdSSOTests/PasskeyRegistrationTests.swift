@@ -87,6 +87,36 @@ final class PasskeyRegistrationTests: XCTestCase {
     XCTAssertEqual(value(-3), .bytes(Data(raw.suffix(32))))  // y
   }
 
+  // Golden byte-vector: pins the EXACT wire bytes (framing + length prefixes),
+  // not just decoder-recoverable field values. The expected sequence is built
+  // from the canonical COSE_Key framing for ES256/P-256 + the pinned key's
+  // raw x‖y, so a change to integer-length encoding, map-key order, or bstr
+  // framing in coseEC2PublicKey fails here even though the CBOR would still
+  // decode. (No cross-impl TS-captured fixture exists — see deviation log;
+  // the wire bytes are additionally cross-checked end-to-end by the server
+  // accepting the blob and the shipped assertion decoders reading it back.)
+  func testCOSEKeyExactGoldenBytes() {
+    let raw = pinnedKey.publicKey.rawRepresentation  // 64: x(32)‖y(32)
+    var expected = Data([0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20])
+    expected.append(raw.prefix(32))                  // x
+    expected.append(contentsOf: [0x22, 0x58, 0x20])  // key -3, bstr(32)
+    expected.append(raw.suffix(32))                  // y
+    XCTAssertEqual(coseEC2PublicKey(pinnedKey.publicKey), expected)
+  }
+
+  func testNoneAttestationObjectExactGoldenBytes() {
+    let authData = Data([0xAA, 0xBB, 0xCC])
+    // map(3) | "attStmt":map(0) | "authData":bstr(3) | "fmt":"none"
+    var expected = Data([0xa3])
+    expected.append(contentsOf: [0x67]); expected.append(Data("attStmt".utf8))
+    expected.append(0xa0)  // empty map
+    expected.append(contentsOf: [0x68]); expected.append(Data("authData".utf8))
+    expected.append(contentsOf: [0x43]); expected.append(authData)  // bstr(3)
+    expected.append(contentsOf: [0x63]); expected.append(Data("fmt".utf8))
+    expected.append(contentsOf: [0x64]); expected.append(Data("none".utf8))  // tstr(4)
+    XCTAssertEqual(buildNoneAttestationObject(authData: authData), expected)
+  }
+
   // MARK: authData
 
   func testRegistrationAuthDataLayout() {

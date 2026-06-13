@@ -87,10 +87,12 @@ vi.mock("./extension-token", async (importOriginal) => ({
 
 import {
   issueIosToken,
+  issueAutofillToken,
   validateIosTokenDpop,
   refreshIosToken,
   IOS_TOKEN_IDLE_TIMEOUT_MS,
   IOS_TOKEN_ABSOLUTE_TIMEOUT_MS,
+  IOS_AUTOFILL_TOKEN_TTL_MS,
   REFRESH_REPLAY_GRACE_MS,
   _resetRotationCacheForTests,
 } from "./mobile-token";
@@ -236,6 +238,60 @@ describe("issueIosToken", () => {
   });
 });
 
+// ─── issueAutofillToken ──────────────────────────────────────
+
+describe("issueAutofillToken", () => {
+  it("creates a single passwords:write IOS_AUTOFILL row bound to cnfJkt with the short TTL", async () => {
+    const before = Date.now();
+    const result = await issueAutofillToken({
+      userId: USER_ID,
+      tenantId: TENANT_ID,
+      cnfJkt: CNF_JKT,
+    });
+
+    expect(result.token).toMatch(/^tok_/);
+    expect(result.scope).toBe("passwords:write");
+    expect(result.cnfJkt).toBe(CNF_JKT);
+    // TTL is the 5-min AutoFill constant, not the 24h idle timeout.
+    const ttl = result.expiresAt.getTime() - before;
+    expect(ttl).toBeGreaterThan(IOS_AUTOFILL_TOKEN_TTL_MS - 5_000);
+    expect(ttl).toBeLessThanOrEqual(IOS_AUTOFILL_TOKEN_TTL_MS + 5_000);
+
+    // Exactly ONE row created (unlike issueIosToken's access+refresh pair).
+    expect(mockExtCreate).toHaveBeenCalledTimes(1);
+    const createCall = mockExtCreate.mock.calls[0][0];
+    expect(createCall.data).toMatchObject({
+      userId: USER_ID,
+      tenantId: TENANT_ID,
+      clientKind: "IOS_AUTOFILL",
+      cnfJkt: CNF_JKT,
+      scope: "passwords:write",
+    });
+  });
+
+  it("revokes prior active IOS_AUTOFILL rows for the user before minting (single active token)", async () => {
+    await issueAutofillToken({ userId: USER_ID, tenantId: TENANT_ID, cnfJkt: CNF_JKT });
+
+    expect(mockExtUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: USER_ID, clientKind: "IOS_AUTOFILL", revokedAt: null },
+        data: expect.objectContaining({ revokedAt: expect.any(Date) }),
+      }),
+    );
+    // The revoke targets ONLY IOS_AUTOFILL — it must not evict the host's
+    // IOS_APP access/refresh rows.
+    const revokeWhere = mockExtUpdateMany.mock.calls[0][0].where;
+    expect(revokeWhere.clientKind).toBe("IOS_AUTOFILL");
+  });
+
+  it("uses a fresh familyId per mint (non-refreshable, single-purpose)", async () => {
+    await issueAutofillToken({ userId: USER_ID, tenantId: TENANT_ID, cnfJkt: CNF_JKT });
+    const createData = mockExtCreate.mock.calls[0][0].data;
+    expect(createData.familyId).toBeTruthy();
+    expect(typeof createData.familyId).toBe("string");
+  });
+});
+
 // ─── validateIosTokenDpop ────────────────────────────────────
 
 describe("validateIosTokenDpop", () => {
@@ -287,6 +343,7 @@ describe("validateIosTokenDpop", () => {
         familyId: FAMILY_ID,
         familyCreatedAt: baseRow.familyCreatedAt,
         cnfJkt: CNF_JKT,
+        clientKind: "IOS_APP",
       });
     }
   });

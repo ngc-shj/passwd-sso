@@ -109,6 +109,7 @@ export async function validateExtensionTokenDpop(args: {
       familyId: row.familyId,
       familyCreatedAt: row.familyCreatedAt,
       cnfJkt: row.cnfJkt,
+      clientKind: row.clientKind,
     },
   };
 }
