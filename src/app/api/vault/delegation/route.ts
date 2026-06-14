@@ -21,7 +21,7 @@ import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
 import {
   DELEGATION_DEFAULT_TTL_SEC,
   DELEGATION_MAX_TTL_SEC,
@@ -185,7 +185,7 @@ async function handlePOST(request: NextRequest) {
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   // Step 1: Create new delegation session in DB.
-  const expiresAt = new Date(Date.now() + effectiveTtl * 1000);
+  const expiresAt = new Date(Date.now() + effectiveTtl * MS_PER_SECOND);
   const delegationSession = await withBypassRls(prisma, (tx) =>
     tx.delegationSession.create({
       data: {
@@ -207,7 +207,7 @@ async function handlePOST(request: NextRequest) {
       userId,
       delegationSession.id,
       metadataEntries,
-      effectiveTtl * 1000,
+      effectiveTtl * MS_PER_SECOND,
     );
   } catch (err) {
     getLogger().warn(

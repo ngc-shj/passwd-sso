@@ -1,3 +1,5 @@
+import { MS_PER_MINUTE } from "./time";
+
 // ── Token bridge (legacy DOM-event constants kept for backwards-compatibility) ──
 /** @deprecated Kept for reference only; no current code path emits this event. */
 export const TOKEN_ELEMENT_ID = "passwd-sso-ext-token";
@@ -12,7 +14,7 @@ export const EXT_CONNECT_REQUEST_MSG_TYPE = "PASSWD_SSO_EXT_CONNECT_REQUEST";
 export const EXT_CONNECT_READY_MSG_TYPE = "PASSWD_SSO_EXT_CONNECT_READY";
 
 // Bridge code wire constants (mirror of web app constant — sync test enforces equality)
-export const BRIDGE_CODE_TTL_MS = 60 * 1000;
+export const BRIDGE_CODE_TTL_MS = MS_PER_MINUTE;
 export const BRIDGE_CODE_MAX_ACTIVE = 3;
 export const BRIDGE_CODE_LENGTH = 64;
 

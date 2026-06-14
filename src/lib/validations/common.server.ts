@@ -2,6 +2,8 @@
 // These values are kept separate to avoid leaking server configuration
 // into the client bundle.
 
+import { MS_PER_SECOND, MS_PER_MINUTE } from "@/lib/constants/time";
+
 // ─── KDF Parameters ──────────────────────────────────────────
 export const KDF_PBKDF2_ITERATIONS_MIN = 600_000;
 export const KDF_PBKDF2_ITERATIONS_MAX = 10_000_000;
@@ -49,8 +51,8 @@ export const SCIM_PAGE_COUNT_MAX = 200;
 export const SCIM_PAGE_COUNT_DEFAULT = 100;
 
 // ─── Session Cache ──────────────────────────────────────────
-export const SESSION_CACHE_TTL_MS = 30_000;          // 30 s — positive cache ceiling
-export const NEGATIVE_CACHE_TTL_MS = 5_000;          // 5 s — short-TTL negative cache (S-Req-6)
+export const SESSION_CACHE_TTL_MS = 30 * MS_PER_SECOND;          // 30 s — positive cache ceiling
+export const NEGATIVE_CACHE_TTL_MS = 5 * MS_PER_SECOND;          // 5 s — short-TTL negative cache (S-Req-6)
 // M1 invariant: tombstones MUST outlive any positive cache they need to
 // suppress. When TOMBSTONE_TTL_MS < SESSION_CACHE_TTL_MS, a Redis tombstone
 // write that lands later than the positive cache expiry (e.g. the tombstone
@@ -62,14 +64,14 @@ export const NEGATIVE_CACHE_TTL_MS = 5_000;          // 5 s — short-TTL negati
 // "TOMBSTONE_TTL_MS >= SESSION_CACHE_TTL_MS" test in
 // `src/lib/validations/common.server.test.ts` — CI fails if a future edit
 // breaks the relationship.
-export const TOMBSTONE_TTL_MS = 30_000;              // 30 s — populate-after-invalidate guard
+export const TOMBSTONE_TTL_MS = 30 * MS_PER_SECOND;              // 30 s — populate-after-invalidate guard
 export const SESSION_CACHE_KEY_PREFIX = "sess:cache:";
 
 // ─── Webhook Dispatcher ─────────────────────────────────────
 export const WEBHOOK_CONCURRENCY = 5;
 
 // ─── Rate Limit Window ──────────────────────────────────────
-export const RATE_WINDOW_MS = 60_000;           // 1 minute
+export const RATE_WINDOW_MS = MS_PER_MINUTE;           // 1 minute
 
 // ─── Tenant ─────────────────────────────────────────────────
 export const MAX_TENANT_CLAIM_LENGTH = 255;

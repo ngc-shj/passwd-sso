@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { textEncode, toArrayBuffer } from "@/lib/crypto/crypto-utils";
 import { htuMatches } from "./htu-canonical";
 import type { JtiCache } from "./jti-cache";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 
 /**
  * RFC 9449 (DPoP) proof verifier.
@@ -158,7 +159,7 @@ export async function verifyDpopProof(
     return fail(DPOP_VERIFY_ERROR.IAT_OUT_OF_WINDOW, "iat missing");
   }
   const skew = options.iatSkewSeconds ?? DEFAULT_SKEW_SECONDS;
-  const nowSec = Math.floor((options.now ?? Date.now)() / 1000);
+  const nowSec = Math.floor((options.now ?? Date.now)() / MS_PER_SECOND);
   if (Math.abs(nowSec - payload.iat) > skew) {
     return fail(DPOP_VERIFY_ERROR.IAT_OUT_OF_WINDOW);
   }

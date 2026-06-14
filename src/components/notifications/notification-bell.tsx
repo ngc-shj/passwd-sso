@@ -17,6 +17,7 @@ import { API_PATH, apiPath } from "@/lib/constants";
 import type { NotificationType } from "@prisma/client";
 import { fetchApi } from "@/lib/url-helpers";
 import { NOTIFICATION_BELL_LIMIT } from "@/lib/validations/common";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 interface NotificationItem {
   id: string;
@@ -28,7 +29,7 @@ interface NotificationItem {
   createdAt: string;
 }
 
-const POLL_INTERVAL_MS = 60_000;
+const POLL_INTERVAL_MS = MS_PER_MINUTE;
 
 /** Resolve notification body using i18n when a translation key exists for the type */
 function resolveNotificationBody(

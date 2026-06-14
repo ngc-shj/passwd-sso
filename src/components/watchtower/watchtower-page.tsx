@@ -44,6 +44,7 @@ import {
   formatExpiringDetails,
 } from "@/lib/watchtower/format-details";
 import { toast } from "sonner";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 
 interface WatchtowerPageProps {
   scope: WatchtowerScope;
@@ -115,7 +116,7 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
                 {canAnalyze
                   ? t("refresh")
                   : t("cooldown", {
-                      seconds: Math.ceil(cooldownRemainingMs / 1000),
+                      seconds: Math.ceil(cooldownRemainingMs / MS_PER_SECOND),
                     })}
               </Button>
             </div>
@@ -141,7 +142,7 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
                 {canAnalyze
                   ? t("runHint")
                   : t("runHintCooldown", {
-                      seconds: Math.ceil(cooldownRemainingMs / 1000),
+                      seconds: Math.ceil(cooldownRemainingMs / MS_PER_SECOND),
                     })}
               </p>
             </CardContent>

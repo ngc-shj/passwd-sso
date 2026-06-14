@@ -7,8 +7,9 @@
 
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
+import { MS_PER_SECOND } from "./time";
 
-const CLEAR_TIMEOUT_MS = 30_000;
+const CLEAR_TIMEOUT_MS = 30 * MS_PER_SECOND;
 
 let clearTimer: ReturnType<typeof setTimeout> | null = null;
 let copiedHash: string | null = null;

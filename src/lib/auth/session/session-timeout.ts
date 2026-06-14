@@ -1,8 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 // Cache scaffold. 60s TTL matches the pattern used by the retired sessionDurationCache.
-const SESSION_TIMEOUT_CACHE_TTL_MS = 60_000;
+const SESSION_TIMEOUT_CACHE_TTL_MS = MS_PER_MINUTE;
 const SESSION_TIMEOUT_CACHE_MAX_SIZE = 10_000;
 
 interface CacheEntry {

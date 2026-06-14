@@ -12,8 +12,9 @@ import {
   type ServerResponse,
 } from "node:http";
 import { spawn } from "node:child_process";
+import { MS_PER_MINUTE, MS_PER_SECOND } from "./time";
 
-const CALLBACK_TIMEOUT_MS = 120_000; // 2 minutes
+const CALLBACK_TIMEOUT_MS = 2 * MS_PER_MINUTE;
 
 const CLI_CLIENT_NAME = "passwd-sso-cli";
 const CLI_SCOPES =
@@ -177,7 +178,7 @@ export async function startCallbackServer(expectedState: string): Promise<{
     return new Promise<CallbackResult>((res, rej) => {
       const timer = setTimeout(() => {
         server.close();
-        rej(new Error(`Timed out waiting for OAuth callback after ${CALLBACK_TIMEOUT_MS / 1000}s`));
+        rej(new Error(`Timed out waiting for OAuth callback after ${CALLBACK_TIMEOUT_MS / MS_PER_SECOND}s`));
       }, CALLBACK_TIMEOUT_MS);
 
       callbackPromise

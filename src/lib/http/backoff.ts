@@ -4,7 +4,7 @@ export function computeBackoffMs(
   attempt: number,
   opts?: { baseMs?: number; capMs?: number },
 ): number {
-  const baseMs = opts?.baseMs ?? 1000;
+  const baseMs = opts?.baseMs ?? MS_PER_SECOND;
   const capMs = opts?.capMs ?? MS_PER_HOUR;
   return Math.min(baseMs * Math.pow(2, attempt), capMs);
 }

@@ -36,7 +36,7 @@ const DEFAULT_LOCKOUT_THRESHOLDS = [
 type LockoutThreshold = { attempts: number; lockMinutes: number };
 
 const lockoutThresholdCache = new Map<string, { thresholds: LockoutThreshold[]; expiresAt: number }>();
-const LOCKOUT_THRESHOLD_CACHE_TTL_MS = 60_000;
+const LOCKOUT_THRESHOLD_CACHE_TTL_MS = MS_PER_MINUTE;
 const LOCKOUT_THRESHOLD_CACHE_MAX_SIZE = 1_000;
 
 /**

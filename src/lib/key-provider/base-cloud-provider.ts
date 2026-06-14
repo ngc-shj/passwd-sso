@@ -9,6 +9,7 @@
 import type { KeyName, KeyProvider } from "./types";
 import { HEX64_RE } from "@/lib/validations/common";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
+import { MS_PER_SECOND, MS_PER_MINUTE } from "@/lib/constants/time";
 
 export { HEX64_RE };
 
@@ -18,7 +19,7 @@ export interface CacheEntry {
 }
 
 export interface CloudProviderConfig {
-  ttlMs?: number;        // default 300_000 (5 min)
+  ttlMs?: number;        // default 5 * MS_PER_MINUTE (5 min)
   maxStaleTtlMs?: number; // default 2× ttlMs
 }
 
@@ -36,7 +37,7 @@ export abstract class BaseCloudKeyProvider implements KeyProvider {
   protected maxStaleTtlMs: number;
 
   constructor(config: CloudProviderConfig) {
-    this.ttlMs = config.ttlMs ?? 300_000;
+    this.ttlMs = config.ttlMs ?? 5 * MS_PER_MINUTE;
     this.maxStaleTtlMs = config.maxStaleTtlMs ?? this.ttlMs * 2;
   }
 
@@ -54,7 +55,7 @@ export abstract class BaseCloudKeyProvider implements KeyProvider {
       return plaintext;
     } catch (err) {
       if (cached && Date.now() - cached.fetchedAt < this.maxStaleTtlMs) {
-        const elapsed = Math.round((Date.now() - cached.fetchedAt) / 1000);
+        const elapsed = Math.round((Date.now() - cached.fetchedAt) / MS_PER_SECOND);
         this.logStaleWarning(name, elapsed, err);
         return cached.key;
       }
@@ -153,7 +154,7 @@ export abstract class BaseCloudKeyProvider implements KeyProvider {
     // Dynamic import to avoid bundling pino/node:async_hooks into SSR bundles
     void import("@/lib/logger").then(({ default: log }) => {
       log.warn(
-        { provider: this.name, keyName: name, elapsedSec, maxStaleTtlSec: this.maxStaleTtlMs / 1000 },
+        { provider: this.name, keyName: name, elapsedSec, maxStaleTtlSec: this.maxStaleTtlMs / MS_PER_SECOND },
         `[key-provider] fetch failed, using stale cached key: ${err instanceof Error ? err.message : err}`
       );
     }).catch(() => {

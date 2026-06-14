@@ -30,6 +30,7 @@ interface CopyButtonProps {
 }
 
 import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 
 export function CopyButton({
   getValue,
@@ -74,7 +75,7 @@ export function CopyButton({
         }
       }, CLIPBOARD_CLEAR_TIMEOUT_MS);
 
-      setTimeout(() => setCopied(false), 2000);
+      setTimeout(() => setCopied(false), 2 * MS_PER_SECOND);
     } catch {
       // Clipboard access denied
     }

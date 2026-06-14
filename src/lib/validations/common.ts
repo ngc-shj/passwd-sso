@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SEC_PER_MINUTE, SEC_PER_DAY } from "@/lib/constants/time";
 
 // ─── Validation Constants (single source of truth) ──────────
 // Used by both Zod schemas (server) and UI components (client).
@@ -229,10 +230,10 @@ export const PASSKEY_GRACE_PERIOD_MAX = 90;
 // ─── Machine Identity Policy ─────────────────────────────────
 export const SA_TOKEN_MAX_EXPIRY_MIN = 1;
 export const SA_TOKEN_MAX_EXPIRY_MAX = 3650;
-export const JIT_TOKEN_TTL_MIN = 60;      // 1 minute
-export const JIT_TOKEN_TTL_MAX = 86400;   // 24 hours
-export const DELEGATION_TTL_MIN = 60;     // 1 minute
-export const DELEGATION_TTL_MAX = 86400;  // 24 hours
+export const JIT_TOKEN_TTL_MIN = SEC_PER_MINUTE;
+export const JIT_TOKEN_TTL_MAX = SEC_PER_DAY;
+export const DELEGATION_TTL_MIN = SEC_PER_MINUTE;
+export const DELEGATION_TTL_MAX = SEC_PER_DAY;
 
 // ─── Password History ────────────────────────────────────────
 export const PASSWORD_HISTORY_COUNT_MAX = 24;

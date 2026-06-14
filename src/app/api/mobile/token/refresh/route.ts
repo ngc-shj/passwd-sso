@@ -46,7 +46,7 @@ import { exceedsDeclaredContentLength } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
-import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
 import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
 import {
   verifyDpopProof,
@@ -247,7 +247,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     {
       access_token: result.token.accessToken,
       refresh_token: result.token.refreshToken,
-      expires_in: Math.floor(IOS_TOKEN_IDLE_TIMEOUT_MS / 1000),
+      expires_in: Math.floor(IOS_TOKEN_IDLE_TIMEOUT_MS / MS_PER_SECOND),
       token_type: "DPoP",
     },
     {

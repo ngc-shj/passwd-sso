@@ -19,6 +19,7 @@ import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { WEBHOOK_CONCURRENCY, WEBHOOK_MAX_RETRIES } from "@/lib/validations/common.server";
 import { Agent as UndiciAgent } from "undici";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 import {
   sanitizeForExternalDelivery,
   resolveAndValidateIps,
@@ -77,7 +78,7 @@ interface WebhookRecord {
 
 // ─── Constants ──────────────────────────────────────────────────
 
-const RETRY_DELAYS = [1_000, 5_000, 25_000];
+const RETRY_DELAYS = [1 * MS_PER_SECOND, 5 * MS_PER_SECOND, 25 * MS_PER_SECOND];
 const USER_AGENT = "passwd-sso-webhook/1.0";
 
 // ─── Helpers ────────────────────────────────────────────────────
@@ -140,7 +141,7 @@ async function deliverWithRetry(
           "X-Webhook-Signature": `t=${signatures.timestamp},v1=${signatures.v1Signature}`,
         },
         body: payload,
-        signal: AbortSignal.timeout(10_000),
+        signal: AbortSignal.timeout(10 * MS_PER_SECOND),
         redirect: "error",
         // @ts-expect-error -- Node.js fetch supports undici dispatcher
         dispatcher,

@@ -24,6 +24,7 @@ import type { TeamPolicyClient } from "@/hooks/team/use-team-policy";
 import { getPolicyViolations } from "@/lib/security/password-policy-validation";
 import { AlertTriangle } from "lucide-react";
 import { fetchApi } from "@/lib/url-helpers";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 import {
   PASSWORD_LENGTH_MIN,
   PASSWORD_LENGTH_MAX,
@@ -163,14 +164,14 @@ export function PasswordGenerator({
   const copyHistory = async (pw: string, idx: number) => {
     await navigator.clipboard.writeText(pw);
     setCopiedIdx(idx);
-    setTimeout(() => setCopiedIdx(null), 2000);
+    setTimeout(() => setCopiedIdx(null), 2 * MS_PER_SECOND);
   };
 
   const copyGenerated = async () => {
     if (!generated) return;
     await navigator.clipboard.writeText(generated);
     setCopiedGenerated(true);
-    setTimeout(() => setCopiedGenerated(false), 2000);
+    setTimeout(() => setCopiedGenerated(false), 2 * MS_PER_SECOND);
   };
 
   const update = (partial: Partial<GeneratorSettings>) => {

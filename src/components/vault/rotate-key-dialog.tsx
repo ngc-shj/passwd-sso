@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { useVault } from "@/lib/vault/vault-context";
 import { apiErrorToI18nKey, API_ERROR } from "@/lib/http/api-error-codes";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,7 +79,7 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
         (effects?.invalidatedMcpRefreshTokens ?? 0);
       if (mcpRevoked > 0) {
         toast.info(t("rotateKeyMcpRevokedBanner", { count: mcpRevoked }), {
-          duration: 10_000,
+          duration: 10 * MS_PER_SECOND,
         });
       }
       handleOpenChange(false);

@@ -42,6 +42,7 @@ import { SEND_MAX_FILE_SIZE, SEND_MAX_TEXT_LENGTH, MAX_VIEWS_MIN, MAX_VIEWS_MAX,
 import { formatFileSize } from "@/lib/format/format-file-size";
 import { bindRangeInput } from "@/lib/ui/input-range";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 
 interface SendDialogProps {
   open: boolean;
@@ -176,7 +177,7 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
     if (!createdUrl) return;
     await navigator.clipboard.writeText(createdUrl);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setTimeout(() => setCopied(false), 2 * MS_PER_SECOND);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -234,7 +235,7 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
                     onClick={async () => {
                       await navigator.clipboard.writeText(createdAccessPassword);
                       setPasswordCopied(true);
-                      setTimeout(() => setPasswordCopied(false), 2000);
+                      setTimeout(() => setPasswordCopied(false), 2 * MS_PER_SECOND);
                     }}
                   >
                     {passwordCopied ? (

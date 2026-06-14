@@ -18,7 +18,7 @@ import {
   FAMILY_REVOKED_REASON,
 } from "@/lib/constants/auth/mcp";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
 
 const tokenRateLimiter = createRateLimiter({
   windowMs: MS_PER_MINUTE,
@@ -72,7 +72,7 @@ async function handlePOST(req: NextRequest) {
             status: 429,
             headers:
               retryAfterMs != null && retryAfterMs > 0
-                ? { "Retry-After": String(Math.ceil(retryAfterMs / 1000)) }
+                ? { "Retry-After": String(Math.ceil(retryAfterMs / MS_PER_SECOND)) }
                 : {},
           },
         ),
@@ -102,7 +102,7 @@ async function handlePOST(req: NextRequest) {
             status: 429,
             headers:
               retryAfterMs != null && retryAfterMs > 0
-                ? { "Retry-After": String(Math.ceil(retryAfterMs / 1000)) }
+                ? { "Retry-After": String(Math.ceil(retryAfterMs / MS_PER_SECOND)) }
                 : {},
           },
         ),
@@ -163,7 +163,7 @@ async function handlePOST(req: NextRequest) {
             status: 429,
             headers:
               retryAfterMs != null && retryAfterMs > 0
-                ? { "Retry-After": String(Math.ceil(retryAfterMs / 1000)) }
+                ? { "Retry-After": String(Math.ceil(retryAfterMs / MS_PER_SECOND)) }
                 : {},
           },
         ),

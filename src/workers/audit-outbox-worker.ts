@@ -15,7 +15,7 @@ import {
 } from "@/lib/constants/audit/audit";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { NIL_UUID, SYSTEM_ACTOR_ID, UUID_RE } from "@/lib/constants/app";
-import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
+import { MS_PER_DAY, MS_PER_HOUR, MS_PER_SECOND } from "@/lib/constants/time";
 import { WORKER_POOL_IDLE_TIMEOUT_MS, WORKER_POOL_STATEMENT_TIMEOUT_MS } from "@/workers/worker-pool-config";
 import { DELIVERERS, type TargetConfig, type DeliveryPayload } from "@/workers/audit-delivery";
 import { decryptServerData, getMasterKeyByVersion } from "@/lib/crypto/crypto-server";
@@ -446,7 +446,7 @@ async function recordError(
   const newAttemptCount = row.attempt_count + 1;
   const isDead = newAttemptCount >= row.max_attempts;
   const backoffMs = withFullJitter(computeBackoffMs(newAttemptCount));
-  const backoffSeconds = backoffMs / 1000;
+  const backoffSeconds = backoffMs / MS_PER_SECOND;
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -770,7 +770,7 @@ async function dispatchWebhookForRow(
  * Rows stuck longer than PROCESSING_TIMEOUT_MS are assumed abandoned.
  */
 async function reapStuckRows(prisma: PrismaClient): Promise<number> {
-  const timeoutSeconds = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS / 1000;
+  const timeoutSeconds = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS / MS_PER_SECOND;
 
   // Reset stuck PROCESSING rows: those under max_attempts go back to PENDING,
   // those at or over max_attempts transition to FAILED (dead-letter).
@@ -1114,10 +1114,8 @@ export function createWorker(config: WorkerConfig) {
   let depthAlarmed = false;
   let lastDepthAlertAt = 0;
   const DEPTH_REALERT_MS = MS_PER_DAY;
-  const pendingThreshold =
-    Number(process.env.OUTBOX_READY_PENDING_THRESHOLD ?? "1000") || 1000;
-  const oldestThresholdSecs =
-    Number(process.env.OUTBOX_READY_OLDEST_THRESHOLD_SECS ?? "3600") || 3600;
+  const pendingThreshold = AUDIT_OUTBOX.READY_PENDING_THRESHOLD;
+  const oldestThresholdSecs = AUDIT_OUTBOX.READY_OLDEST_THRESHOLD;
 
   async function checkDepthAlert(): Promise<void> {
     try {

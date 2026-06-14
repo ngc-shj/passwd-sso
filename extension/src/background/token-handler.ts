@@ -10,6 +10,7 @@ import { BRIDGE_CODE_LENGTH } from "../lib/constants";
 import { getSettings } from "../lib/storage";
 import { signDpopProof } from "../lib/dpop-key";
 import { DpopSignError, swFetchAuthenticated } from "./dpop-fetch";
+import { MS_PER_MINUTE } from "../lib/time";
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -83,14 +84,14 @@ export async function attemptTokenRefreshWith(
       callbacks.clearToken();
     } else {
       // Transient error (429, 5xx) — retry if enough TTL remains
-      if (tokenExpiresAt - Date.now() > 60_000) {
+      if (tokenExpiresAt - Date.now() > MS_PER_MINUTE) {
         callbacks.scheduleRefreshAlarm(tokenExpiresAt);
       }
     }
   } catch {
     // Network error — keep current token, retry next cycle.
     const tokenExpiresAt = callbacks.getTokenExpiresAt();
-    if (tokenExpiresAt && tokenExpiresAt - Date.now() > 60_000) {
+    if (tokenExpiresAt && tokenExpiresAt - Date.now() > MS_PER_MINUTE) {
       callbacks.scheduleRefreshAlarm(tokenExpiresAt);
     }
   }

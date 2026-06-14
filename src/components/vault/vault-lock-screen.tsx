@@ -6,6 +6,7 @@ import { useRouter } from "@/i18n/navigation";
 import { useVault, VaultUnlockError } from "@/lib/vault/vault-context";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { API_PATH, SESSION_STORAGE_KEY } from "@/lib/constants";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { isWebAuthnSupported } from "@/lib/auth/webauthn/webauthn-client";
 import { hasPrf } from "@/lib/auth/prf-handoff";
@@ -29,7 +30,7 @@ export function formatLockedUntil(lockedUntil: string | null | undefined, t: (ke
   if (!lockedUntil) return t("accountLocked");
   const diff = new Date(lockedUntil).getTime() - Date.now();
   if (diff <= 0) return t("accountLocked");
-  const minutes = Math.ceil(diff / 60_000);
+  const minutes = Math.ceil(diff / MS_PER_MINUTE);
   if (minutes >= 60) {
     const hours = Math.ceil(minutes / 60);
     return t("accountLockedWithTime", { time: t("hours", { count: String(hours) }) });

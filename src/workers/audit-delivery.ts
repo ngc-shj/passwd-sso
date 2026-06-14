@@ -16,6 +16,7 @@ import {
   sanitizeErrorForStorage,
 } from "@/lib/http/external-http";
 import { getLogger } from "@/lib/logger";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 
 // ─── Interface ────────────────────────────────────────────────
 
@@ -211,7 +212,7 @@ export const siemHecDeliverer: AuditDeliverer = {
 
     const hecEvent = {
       event: sanitizeForExternalDelivery(payload),
-      time: Math.floor(new Date(payload.createdAt).getTime() / 1000),
+      time: Math.floor(new Date(payload.createdAt).getTime() / MS_PER_SECOND),
       sourcetype: "passwd-sso:audit",
     };
     const body = JSON.stringify(hecEvent);

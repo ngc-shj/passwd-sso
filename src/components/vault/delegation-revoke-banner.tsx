@@ -6,6 +6,7 @@ import { useVault } from "@/lib/vault/vault-context";
 import { API_PATH } from "@/lib/constants/auth/api-path";
 import { fetchApi } from "@/lib/url-helpers";
 import { VAULT_STATUS } from "@/lib/constants";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { useRouter } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
 import { Shield } from "lucide-react";
@@ -37,7 +38,7 @@ export function DelegationRevokeBanner() {
       if (!cancelled && n !== undefined) setCount(n);
     };
     load();
-    const interval = setInterval(load, 60_000);
+    const interval = setInterval(load, MS_PER_MINUTE);
     return () => {
       cancelled = true;
       clearInterval(interval);

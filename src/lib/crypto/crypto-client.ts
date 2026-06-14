@@ -164,7 +164,7 @@ async function deriveWrappingKeyArgon2id(
   accountSalt: Uint8Array,
   params: KdfParams
 ): Promise<CryptoKey> {
-  const memory = params.kdfMemory ?? ARGON2ID_KDF_PARAMS.kdfMemory!;
+  const memory = params.kdfMemory ?? ARGON2ID_KDF_PARAMS.kdfMemory ?? 65536;
   const parallelism = params.kdfParallelism ?? 4;
   const iterations = params.kdfIterations ?? 3;
 

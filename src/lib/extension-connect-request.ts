@@ -4,6 +4,7 @@ import {
   EXT_CONNECT_REQUEST_MSG_TYPE,
   EXT_CONNECT_READY_MSG_TYPE,
 } from "@/lib/constants";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 
 /**
  * Error codes the web app handles. Anything the extension SW reports outside
@@ -28,7 +29,7 @@ export type ExtensionConnectResult =
 // fetch DB writes (~500ms each) + safety margin. The legacy
 // requestExtensionJkt was 500ms which is fine for a single round-trip
 // postMessage but too tight for this new SW-initiated dual-fetch flow.
-const DEFAULT_TIMEOUT_MS = 8_000;
+const DEFAULT_TIMEOUT_MS = 8 * MS_PER_SECOND;
 
 function coerceErrorCode(input: unknown): ExtensionConnectErrorCode {
   if (typeof input !== "string") return EXTENSION_CONNECT_ERROR_CODE.GENERIC_FAILURE;

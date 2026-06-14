@@ -201,7 +201,7 @@ async function handlePOST(req: NextRequest) {
     grant_types: body.grant_types ?? ["authorization_code"],
     response_types: ["code"],
     token_endpoint_auth_method: "none", // A07-4: literal — DCR is public-only
-    client_id_issued_at: Math.floor(client.createdAt.getTime() / 1000),
+    client_id_issued_at: Math.floor(client.createdAt.getTime() / MS_PER_SECOND),
   };
 
   return NextResponse.json(responseBody, { status: 201 });

@@ -3,11 +3,11 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
-import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
 
 const DEFAULT_INACTIVITY_TIMEOUT_MS = 15 * MS_PER_MINUTE;
 const DEFAULT_HIDDEN_TIMEOUT_MS = 5 * MS_PER_MINUTE;
-const ACTIVITY_CHECK_INTERVAL_MS = 30_000; // check every 30 seconds
+const ACTIVITY_CHECK_INTERVAL_MS = 30 * MS_PER_SECOND;
 
 interface AutoLockProviderProps {
   vaultStatus: VaultStatus;

@@ -29,9 +29,10 @@ vi.mock("./recovery-key-dialog", () => ({
 }));
 
 import { isDismissedInStorage } from "./recovery-key-banner";
-import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
+import { MS_PER_DAY, MS_PER_HOUR, MS_PER_MINUTE } from "@/lib/constants/time";
+import { LOCAL_STORAGE_KEY } from "@/lib/constants";
 
-const DISMISS_KEY = "psso:recovery-key-banner-dismissed";
+const DISMISS_KEY = LOCAL_STORAGE_KEY.RECOVERY_KEY_BANNER_DISMISSED;
 const TWENTY_FOUR_HOURS = MS_PER_DAY;
 
 describe("isDismissedInStorage", () => {
@@ -56,7 +57,7 @@ describe("isDismissedInStorage", () => {
   });
 
   it("returns true when dismissed exactly at boundary (23h59m)", () => {
-    const justUnder = Date.now() - (TWENTY_FOUR_HOURS - 60_000);
+    const justUnder = Date.now() - (TWENTY_FOUR_HOURS - MS_PER_MINUTE);
     storageMap.set(DISMISS_KEY, String(justUnder));
     expect(isDismissedInStorage()).toBe(true);
   });
@@ -68,7 +69,7 @@ describe("isDismissedInStorage", () => {
   });
 
   it("returns false when dismissed over 24h ago", () => {
-    const longAgo = Date.now() - TWENTY_FOUR_HOURS - 60_000;
+    const longAgo = Date.now() - TWENTY_FOUR_HOURS - MS_PER_MINUTE;
     storageMap.set(DISMISS_KEY, String(longAgo));
     expect(isDismissedInStorage()).toBe(false);
   });

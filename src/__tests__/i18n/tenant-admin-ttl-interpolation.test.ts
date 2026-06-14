@@ -89,9 +89,8 @@ describe("TenantAdmin TTL help text interpolation", () => {
 });
 
 describe("PrivacyPolicy security section PBKDF2 iterations interpolation", () => {
-  // PBKDF2_ITERATIONS is sourced from CRYPTO_CONSTANTS (crypto-client.ts).
-  // When C1 creates crypto-params.ts, the import source can be updated to
-  // @/lib/crypto/crypto-params without changing the assertion logic.
+  // PBKDF2_ITERATIONS via CRYPTO_CONSTANTS (which references crypto-params.ts).
+  // Direct import from @/lib/crypto/crypto-params also valid — see deviation D4.
   const PBKDF2_ITERATIONS = CRYPTO_CONSTANTS.PBKDF2_ITERATIONS;
 
   for (const locale of LOCALES) {
@@ -101,8 +100,8 @@ describe("PrivacyPolicy security section PBKDF2 iterations interpolation", () =>
 
     it(`[${locale}] sections.security.body renders PBKDF2 iterations without placeholder residue`, () => {
       const result = t("sections.security.body", { iterations: PBKDF2_ITERATIONS });
-      // Rendered number must appear (locale-formatted: "600,000" for both en and ja)
-      expect(result).toContain("600,000");
+      // Rendered number must appear, formatted for the current locale
+      expect(result).toContain(new Intl.NumberFormat(locale).format(PBKDF2_ITERATIONS));
       expect(result).not.toContain("{");
       expect(result).not.toContain("}");
     });

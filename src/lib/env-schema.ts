@@ -24,7 +24,9 @@ import {
   MS_PER_HOUR,
   MS_PER_DAY,
   MS_PER_MINUTE,
+  MS_PER_SECOND,
   SEC_PER_DAY,
+  SEC_PER_MINUTE,
 } from "@/lib/constants/time";
 
 // ─── Reusable validators ────────────────────────────────────
@@ -90,7 +92,7 @@ export const envObject = z.object({
   DCR_CLEANUP_INTERVAL_MS: z.coerce
     .number()
     .int()
-    .min(60_000)
+    .min(MS_PER_MINUTE)
     .max(MS_PER_DAY)
     .default(MS_PER_HOUR),
   DCR_CLEANUP_BATCH_SIZE: z.coerce.number().int().min(1).max(10_000).default(1000),
@@ -293,12 +295,12 @@ export const envObject = z.object({
     .number()
     .int()
     .min(100)
-    .max(60000)
-    .default(1000),
+    .max(MS_PER_MINUTE)
+    .default(MS_PER_SECOND),
   OUTBOX_PROCESSING_TIMEOUT_MS: z.coerce
     .number()
     .int()
-    .min(10000)
+    .min(10 * MS_PER_SECOND)
     .max(MS_PER_HOUR)
     .default(5 * MS_PER_MINUTE),
   OUTBOX_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(100).default(8),
@@ -315,13 +317,13 @@ export const envObject = z.object({
     .int()
     .min(30)
     .max(SEC_PER_DAY)
-    .default(600),
+    .default(10 * SEC_PER_MINUTE),
   OUTBOX_REAPER_INTERVAL_MS: z.coerce
     .number()
     .int()
-    .min(5000)
+    .min(5 * MS_PER_SECOND)
     .max(MS_PER_HOUR)
-    .default(30000),
+    .default(30 * MS_PER_SECOND),
 
   // --- Logger (A1) ---
   // pino log levels. Production debug/trace ban DEFERRED to follow-up PR (S15).
@@ -369,26 +371,26 @@ export const envObject = z.object({
     .number()
     .int()
     .min(0)
-    .max(60000)
-    .default(5000),
+    .max(MS_PER_MINUTE)
+    .default(5 * MS_PER_SECOND),
   DB_POOL_IDLE_TIMEOUT_MS: z.coerce
     .number()
     .int()
     .min(0)
     .max(10 * MS_PER_MINUTE)
-    .default(30000),
+    .default(30 * MS_PER_SECOND),
   DB_POOL_MAX_LIFETIME_SECONDS: z.coerce
     .number()
     .int()
     .min(0)
     .max(SEC_PER_DAY)
-    .default(1800),
+    .default(30 * SEC_PER_MINUTE),
   DB_POOL_STATEMENT_TIMEOUT_MS: z.coerce
     .number()
     .int()
     .min(0)
     .max(5 * MS_PER_MINUTE)
-    .default(30000),
+    .default(30 * MS_PER_SECOND),
 
   // --- Audit anchor publisher ---
   DEPLOYMENT_ID: z.string().uuid().optional(),

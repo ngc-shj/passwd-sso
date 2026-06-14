@@ -16,6 +16,7 @@ import { prisma } from "@/lib/prisma";
 import { getRedis } from "@/lib/redis";
 import { getLogger } from "@/lib/logger";
 import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 
 export type CheckStatus = "pass" | "fail" | "warn";
 
@@ -34,7 +35,7 @@ export interface HealthResponse {
   };
 }
 
-const CHECK_TIMEOUT_MS = 3_000;
+const CHECK_TIMEOUT_MS = 3 * MS_PER_SECOND;
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([

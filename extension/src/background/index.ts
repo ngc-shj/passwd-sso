@@ -187,7 +187,7 @@ interface PendingSavePrompt {
   timestamp: number;
 }
 
-const PENDING_SAVE_TTL_MS = 30_000; // 30 seconds
+const PENDING_SAVE_TTL_MS = 30 * MS_PER_SECOND;
 const MAX_PENDING_SAVES = 5;
 const pendingSavePrompts = new Map<number, PendingSavePrompt>();
 
@@ -543,7 +543,7 @@ function scheduleRefreshAlarm(expiresAt: number): void {
   // Floor the refresh time to at least a few seconds in the future so
   // we never schedule an alarm in the past (Chrome coerces that to "now"
   // and we'd loop anyway).
-  const MIN_DELAY_MS = 5_000;
+  const MIN_DELAY_MS = 5 * MS_PER_SECOND;
   const effectiveRefreshAt = Math.max(refreshAt, now + MIN_DELAY_MS);
   chrome.alarms.create(ALARM_TOKEN_REFRESH, { when: effectiveRefreshAt });
 }
@@ -620,7 +620,7 @@ const hydrationPromise = hydrateFromSession().catch(() => {});
 // popup retries and a later message re-checks once hydration settles. The
 // alarm path keeps the unbounded await (a delayed token refresh is harmless,
 // and proceeding early there could wrongly clear a token mid-hydration).
-const HYDRATION_TIMEOUT_MS = 5_000; // 5 seconds
+const HYDRATION_TIMEOUT_MS = 5 * MS_PER_SECOND;
 
 function awaitHydrationBounded(): Promise<void> {
   let timer: ReturnType<typeof setTimeout>;

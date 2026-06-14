@@ -20,6 +20,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { errorResponse } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 // ─── Tenant policy cache ─────────────────────────────────────
 
@@ -29,7 +30,7 @@ interface TenantAccessPolicy {
   tailscaleTailnet: string | null;
 }
 
-const POLICY_CACHE_TTL_MS = 60_000;
+const POLICY_CACHE_TTL_MS = MS_PER_MINUTE;
 const POLICY_CACHE_MAX_SIZE = 1_000;
 
 interface PolicyCacheEntry {

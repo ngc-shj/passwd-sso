@@ -1,3 +1,5 @@
+import { MS_PER_SECOND } from "@/lib/constants/time";
+
 export function formatDateTime(value: string | Date, locale: string): string {
   const date = value instanceof Date ? value : new Date(value);
   return date.toLocaleString(locale);
@@ -24,7 +26,7 @@ export function formatRelativeTime(value: string | Date, locale: string): string
   const date = value instanceof Date ? value : new Date(value);
   const now = Date.now();
   const diffMs = now - date.getTime();
-  const diffSec = Math.floor(diffMs / 1000);
+  const diffSec = Math.floor(diffMs / MS_PER_SECOND);
   const diffMin = Math.floor(diffSec / 60);
   const diffHour = Math.floor(diffMin / 60);
   const diffDay = Math.floor(diffHour / 24);

@@ -39,6 +39,13 @@ const {
 vi.mock("@/lib/auth/tokens/extension-token", () => ({
   validateExtensionToken: mockValidateExtensionToken,
   revokeExtensionTokenFamily: mockRevokeExtensionTokenFamily,
+  EXTENSION_TOKEN_REVOKE_REASON: {
+    FAMILY_EXPIRED: "family_expired",
+    REPLAY_DETECTED: "replay_detected",
+    SIGN_OUT_EVERYWHERE: "sign_out_everywhere",
+    PASSKEY_REAUTH: "passkey_reauth",
+    USER_DELETE: "user_delete",
+  },
 }));
 
 vi.mock("@/lib/auth/policy/access-restriction", () => ({

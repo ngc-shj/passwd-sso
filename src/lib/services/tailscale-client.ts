@@ -14,10 +14,11 @@
 
 import { isTailscaleIp, isValidIpAddress } from "@/lib/auth/policy/ip-access";
 import http from "node:http";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 
 const DEFAULT_TAILSCALE_SOCKET = "/run/tailscale/tailscaled.sock";
-const WHOIS_TIMEOUT_MS = 3_000;
-const CACHE_TTL_MS = 30_000;
+const WHOIS_TIMEOUT_MS = 3 * MS_PER_SECOND;
+const CACHE_TTL_MS = 30 * MS_PER_SECOND;
 const CACHE_MAX_SIZE = 500;
 
 // ─── Cache ───────────────────────────────────────────────────

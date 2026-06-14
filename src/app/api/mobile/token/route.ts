@@ -46,7 +46,7 @@ import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
 import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
 import { verifyDpopProof } from "@/lib/auth/dpop/verify";
 import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
@@ -275,7 +275,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     {
       access_token: issued.accessToken,
       refresh_token: issued.refreshToken,
-      expires_in: Math.floor(IOS_TOKEN_IDLE_TIMEOUT_MS / 1000),
+      expires_in: Math.floor(IOS_TOKEN_IDLE_TIMEOUT_MS / MS_PER_SECOND),
       token_type: "DPoP",
     },
     {
