@@ -1,227 +1,6 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "All" : {
-      "extractionState" : "translated",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "All"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "すべて"
-          }
-        }
-      }
-    },
-    "Logins" : {
-      "extractionState" : "translated",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Logins"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ログイン"
-          }
-        }
-      }
-    },
-    "Secure Notes" : {
-      "extractionState" : "translated",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Secure Notes"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "セキュアメモ"
-          }
-        }
-      }
-    },
-    "Credit Cards" : {
-      "extractionState" : "translated",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Credit Cards"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "クレジットカード"
-          }
-        }
-      }
-    },
-    "Identities" : {
-      "extractionState" : "translated",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Identities"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "個人情報"
-          }
-        }
-      }
-    },
-    "Bank Accounts" : {
-      "extractionState" : "translated",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Bank Accounts"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "銀行口座"
-          }
-        }
-      }
-    },
-    "SSH Keys" : {
-      "extractionState" : "translated",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "SSH Keys"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "SSHキー"
-          }
-        }
-      }
-    },
-    "Software Licenses" : {
-      "extractionState" : "translated",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Software Licenses"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ソフトウェアライセンス"
-          }
-        }
-      }
-    },
-    "Passkeys" : {
-      "extractionState" : "translated",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Passkeys"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "パスキー"
-          }
-        }
-      }
-    },
-    "Codes" : {
-      "extractionState" : "translated",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Codes"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "コード"
-          }
-        }
-      }
-    },
-    "Favorites" : {
-      "extractionState" : "translated",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Favorites"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "お気に入り"
-          }
-        }
-      }
-    },
-    "Auto-copy TOTP after fill" : {
-      "extractionState" : "translated",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Auto-copy TOTP after fill"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "入力後にTOTPを自動コピー"
-          }
-        }
-      }
-    },
-    "When on, filling a login that has a one-time-code copies the current code to the clipboard so you can paste it. The clipboard clears after the time above and never syncs to your other devices." : {
-      "extractionState" : "translated",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "When on, filling a login that has a one-time-code copies the current code to the clipboard so you can paste it. The clipboard clears after the time above and never syncs to your other devices."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "オンにすると、ワンタイムコードを持つログインを入力した際に、現在のコードをクリップボードにコピーします。クリップボードは上記の時間が経過すると消去され、ほかのデバイスには同期されません。"
-          }
-        }
-      }
-    },
     "%@" : {
       "comment" : "Xcode-editor extraction placeholder for the TOTP countdown Int; the compiler emits the %lld key. Pure number — not translated.",
       "shouldTranslate" : false
@@ -304,6 +83,23 @@
         }
       }
     },
+    "All" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべて"
+          }
+        }
+      }
+    },
     "Appearance" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -338,6 +134,23 @@
         }
       }
     },
+    "Auto-copy TOTP after fill" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auto-copy TOTP after fill"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "入力後にTOTPを自動コピー"
+          }
+        }
+      }
+    },
     "Auto-Lock" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -351,6 +164,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "自動ロック"
+          }
+        }
+      }
+    },
+    "Bank Accounts" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bank Accounts"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "銀行口座"
           }
         }
       }
@@ -408,7 +238,6 @@
       }
     },
     "Clipboard" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -420,6 +249,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "クリップボード"
+          }
+        }
+      }
+    },
+    "Codes" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codes"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コード"
           }
         }
       }
@@ -491,6 +337,23 @@
         }
       }
     },
+    "Could not save. Please try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not save. Please try again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存できませんでした。もう一度お試しください。"
+          }
+        }
+      }
+    },
     "Couldn't decrypt this entry." : {
       "localizations" : {
         "en" : {
@@ -503,6 +366,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "このエントリを復号できませんでした。"
+          }
+        }
+      }
+    },
+    "Couldn't sync. Check your connection and try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't sync. Check your connection and try again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同期できませんでした。接続を確認して再試行してください。"
           }
         }
       }
@@ -520,6 +400,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "エントリを作成"
+          }
+        }
+      }
+    },
+    "Credit Cards" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Credit Cards"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "クレジットカード"
           }
         }
       }
@@ -658,6 +555,40 @@
         }
       }
     },
+    "Favorites" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Favorites"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "お気に入り"
+          }
+        }
+      }
+    },
+    "Identities" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Identities"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "個人情報"
+          }
+        }
+      }
+    },
     "Incorrect passphrase. Please try again." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -724,6 +655,23 @@
         }
       }
     },
+    "Logins" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Logins"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ログイン"
+          }
+        }
+      }
+    },
     "Master passphrase" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -776,7 +724,6 @@
       }
     },
     "No entries" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -793,7 +740,6 @@
       }
     },
     "No matches" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -842,6 +788,23 @@
         }
       }
     },
+    "OK" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OK"
+          }
+        }
+      }
+    },
     "On Timeout" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -872,6 +835,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ワンタイムコード"
+          }
+        }
+      }
+    },
+    "Passkeys" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passkeys"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パスキー"
           }
         }
       }
@@ -947,23 +927,6 @@
         }
       }
     },
-    "Save failed: %@" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Save failed: %@"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "保存に失敗しました: %@"
-          }
-        }
-      }
-    },
     "Search" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -977,6 +940,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "検索"
+          }
+        }
+      }
+    },
+    "Secure Notes" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Secure Notes"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "セキュアメモ"
           }
         }
       }
@@ -1131,6 +1111,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "サインインしています…"
+          }
+        }
+      }
+    },
+    "Software Licenses" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Software Licenses"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ソフトウェアライセンス"
+          }
+        }
+      }
+    },
+    "SSH Keys" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH Keys"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSHキー"
+          }
+        }
+      }
+    },
+    "Sync failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sync failed"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同期に失敗しました"
+          }
+        }
+      }
+    },
+    "Sync now" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sync now"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今すぐ同期"
           }
         }
       }
@@ -1405,70 +1453,36 @@
         }
       }
     },
-    "Sync now" : {
-      "extractionState" : "manual",
+    "When on, filling a login that has a one-time-code copies the current code to the clipboard so you can paste it. The clipboard clears after the time above and never syncs to your other devices." : {
+      "extractionState" : "translated",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Sync now"
+            "value" : "When on, filling a login that has a one-time-code copies the current code to the clipboard so you can paste it. The clipboard clears after the time above and never syncs to your other devices."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "今すぐ同期"
+            "value" : "オンにすると、ワンタイムコードを持つログインを入力した際に、現在のコードをクリップボードにコピーします。クリップボードは上記の時間が経過すると消去され、ほかのデバイスには同期されません。"
           }
         }
       }
     },
-    "Sync failed" : {
+    "You've reached your vault's item limit. Remove unused items and try again." : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Sync failed"
+            "value" : "You've reached your vault's item limit. Remove unused items and try again."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "同期に失敗しました"
-          }
-        }
-      }
-    },
-    "OK" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "OK"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "OK"
-          }
-        }
-      }
-    },
-    "Couldn't sync. Check your connection and try again." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't sync. Check your connection and try again."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同期できませんでした。接続を確認して再試行してください。"
+            "value" : "保管庫の項目数が上限に達しました。不要な項目を削除してから、もう一度お試しください。"
           }
         }
       }

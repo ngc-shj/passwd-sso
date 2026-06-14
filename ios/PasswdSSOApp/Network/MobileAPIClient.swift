@@ -93,6 +93,9 @@ public enum MobileAPIError: Error, Equatable {
   case dpopInvalid(newNonce: String?)
   case rateLimited(retryAfter: TimeInterval)
   case notFound
+  /// Server rejected a create because a per-resource quota is exhausted
+  /// (HTTP 403 carrying the server's quota-exhaustion error code).
+  case quotaExceeded
   case serverError(status: Int)
   case networkError(URLError)
   /// The refresh token is dead (no refresh token, or refresh endpoint returned 401/dpopInvalid).
@@ -753,6 +756,13 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     case 404:
       throw MobileAPIError.notFound
     default:
+      // Map the server's quota-exhaustion envelope to a dedicated case so the UI
+      // can show an actionable message. Keyed off the body `error` code (not the
+      // HTTP status) so unrelated 403s still surface as .serverError.
+      if let envelope = try? JSONDecoder().decode(APIErrorEnvelope.self, from: data),
+         envelope.error == "QUOTA_EXCEEDED" {
+        throw MobileAPIError.quotaExceeded
+      }
       throw MobileAPIError.serverError(status: status)
     }
   }
@@ -773,4 +783,10 @@ public actor MobileAPIClient: VaultUnlockDataSource {
 
 private struct CreateEntryResponse: Decodable {
   let id: String
+}
+
+/// Minimal error envelope used to detect server error codes on non-2xx
+/// responses. Extra fields (resource/current/max) are ignored by JSONDecoder.
+private struct APIErrorEnvelope: Decodable {
+  let error: String
 }

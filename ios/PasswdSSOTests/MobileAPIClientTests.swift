@@ -537,6 +537,83 @@ final class MobileAPIClientTests: XCTestCase {
     XCTAssertEqual(payload["htm"]?.value as? String, "POST")
   }
 
+  // MARK: - createEntry quota mapping
+
+  private func makeCreateBody() -> CreateEntryRequest {
+    let enc = EncryptedData(
+      ciphertext: "aabbcc",
+      iv: "112233445566778899aabbcc",
+      authTag: "deadbeefdeadbeefdeadbeefdeadbeef"
+    )
+    return CreateEntryRequest(
+      id: "e1", encryptedBlob: enc, encryptedOverview: enc,
+      keyVersion: 1, aadVersion: 1, entryType: "LOGIN"
+    )
+  }
+
+  private func stubCreate(status: Int, body: Data) {
+    let createURL = serverURL.appending(path: "/api/passwords", directoryHint: .notDirectory)
+    // createEntry retries only on 401, so a 403/quota stub fires exactly once.
+    MockURLProtocol.requestHandler = { _ in (body, httpResponse(status: status, url: createURL)) }
+  }
+
+  private func makeCreateClient() -> MobileAPIClient {
+    MobileAPIClient(
+      serverURL: serverURL,
+      signer: FakeSigner(),
+      jwk: knownJWK,
+      tokenStore: tokenStore,
+      urlSession: session
+    )
+  }
+
+  func testCreateEntry_quotaExceededBodyMapsToQuotaExceeded() async throws {
+    seedAccessToken()
+    stubCreate(
+      status: 403,
+      body: Data(#"{"error":"QUOTA_EXCEEDED","resource":"passwords","current":10000,"max":10000}"#.utf8)
+    )
+    do {
+      _ = try await makeCreateClient().createEntry(body: makeCreateBody())
+      XCTFail("expected quotaExceeded")
+    } catch {
+      XCTAssertEqual(error as? MobileAPIError, .quotaExceeded)
+    }
+  }
+
+  func testCreateEntry_403WithoutQuotaCodeMapsToServerError() async throws {
+    seedAccessToken()
+    stubCreate(status: 403, body: Data(#"{"error":"FORBIDDEN"}"#.utf8))
+    do {
+      _ = try await makeCreateClient().createEntry(body: makeCreateBody())
+      XCTFail("expected serverError")
+    } catch {
+      XCTAssertEqual(error as? MobileAPIError, .serverError(status: 403))
+    }
+  }
+
+  func testCreateEntry_403WithEmptyBodyMapsToServerError() async throws {
+    seedAccessToken()
+    stubCreate(status: 403, body: Data())
+    do {
+      _ = try await makeCreateClient().createEntry(body: makeCreateBody())
+      XCTFail("expected serverError")
+    } catch {
+      XCTAssertEqual(error as? MobileAPIError, .serverError(status: 403))
+    }
+  }
+
+  func testCreateEntry_403WithMalformedBodyMapsToServerError() async throws {
+    seedAccessToken()
+    stubCreate(status: 403, body: Data("{invalid".utf8))
+    do {
+      _ = try await makeCreateClient().createEntry(body: makeCreateBody())
+      XCTFail("expected serverError")
+    } catch {
+      XCTAssertEqual(error as? MobileAPIError, .serverError(status: 403))
+    }
+  }
+
   func testUpdateEntry_persistsNonceFromResponse() async throws {
     seedAccessToken()
 

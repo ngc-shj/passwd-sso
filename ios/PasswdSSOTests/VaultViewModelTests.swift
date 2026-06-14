@@ -438,6 +438,32 @@ final class VaultViewModelTests: XCTestCase {
     XCTAssertEqual(count, 0, "allSummaries must not change on entryIdMismatch")
   }
 
+  // MARK: - createEntry propagates quotaExceeded
+
+  func testCreateEntry_quotaExceededPropagates() async throws {
+    let createURL = serverURL.appending(path: "/api/passwords", directoryHint: .notDirectory)
+    MockURLProtocol.requestHandler = { _ in
+      // 403 returned immediately — createEntry throws before any sync runs.
+      (Data(#"{"error":"QUOTA_EXCEEDED","resource":"passwords","current":10000,"max":10000}"#.utf8),
+       httpResponse(status: 403, url: createURL))
+    }
+
+    let (apiClient, syncService) = makeClientAndSyncService()
+    let vm = await VaultViewModel()
+
+    do {
+      try await vm.createEntry(
+        userId: userId,
+        fields: EditableEntryFields(title: "T", username: "", password: "p"),
+        vaultKey: vaultKey, keyVersion: liveKeyVersion,
+        apiClient: apiClient, hostSyncService: syncService
+      )
+      XCTFail("Expected quotaExceeded")
+    } catch {
+      XCTAssertEqual(error as? MobileAPIError, .quotaExceeded)
+    }
+  }
+
   // MARK: - createEntry no-optimistic-prepend proof (T10)
 
   func testCreateEntry_noOptimisticPrepend_whenSyncReturnsEmptyCache() async throws {
