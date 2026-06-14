@@ -67,17 +67,19 @@ public func coseEC2PublicKey(_ pub: P256.Signing.PublicKey) -> Data {
 
 private let kRegFlagUserPresent: UInt8 = 0x01
 private let kRegFlagUserVerified: UInt8 = 0x04
+private let kRegFlagBackupEligible: UInt8 = 0x08
+private let kRegFlagBackupState: UInt8 = 0x10
 private let kRegFlagAttested: UInt8 = 0x40
 
 /// Build attestation authenticatorData: SHA256(rpId)(32) ‖ flags(1) ‖ signCount(4 BE)
 /// ‖ AAGUID(16 zero) ‖ credIdLen(2 BE) ‖ credId ‖ COSE public key.
-/// Flags = UP|UV|AT (0x45) — byte-identical to the browser extension's
-/// buildAttestationAuthData (webauthn-crypto.ts). Do NOT set BE/BS: an iOS
-/// credential-provider credential is device-bound and NOT OS-backed-up, so
-/// claiming BS=1 makes Safari's getAuthenticatorData() return null for the
-/// provider's attestationObject, which crashes the RP's WebAuthn client before
-/// the registration is ever recorded ("Unrecognized credential ID" on later
-/// assertion). The earlier 0x5D ("match the assertion path") was the bug.
+/// Flags = UP|UV|AT|BE|BS (0x5D). An iOS *credential-provider* passkey sets
+/// BE|BS=1: Apple treats provider passkeys as synced and re-emits the
+/// attestationObject on that assumption (it also zeroes the AAGUID), and the
+/// shipped assertion path sets BE|BS too (device-verified). This DIFFERS from
+/// the desktop browser extension (0x45), which is a different platform that
+/// does NOT go through iOS credential-provider re-emission — so it is the wrong
+/// reference for this target. Zero AAGUID (iOS overwrites it to zero anyway).
 public func buildRegistrationAuthData(
   rpId: String,
   signCount: UInt32,
@@ -86,7 +88,8 @@ public func buildRegistrationAuthData(
 ) -> Data {
   var out = Data()
   out.append(contentsOf: SHA256.hash(data: Data(rpId.utf8)))
-  let flags = kRegFlagUserPresent | kRegFlagUserVerified | kRegFlagAttested  // 0x45
+  let flags = kRegFlagUserPresent | kRegFlagUserVerified | kRegFlagAttested
+    | kRegFlagBackupEligible | kRegFlagBackupState  // 0x5D
   out.append(flags)
   out.append(UInt8((signCount >> 24) & 0xff))
   out.append(UInt8((signCount >> 16) & 0xff))

@@ -256,10 +256,12 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
           authenticatorData: outputs.authenticatorData,
           credentialID: outputs.credentialID
         )
-        let delivered = await extensionContext.completeAssertionRequest(using: credential)
-        if !delivered {
-          Self.log.error("completePasskeyAssertion: system rejected the assertion (completeAssertionRequest returned false)")
-        }
+        // The async result is the completion handler's `expired` flag (OS
+        // background-task lifecycle), NOT a delivery success/failure. Calling
+        // this completes+dismisses the request; there is no "delivered" bool.
+        // (The previous `if !delivered` logged a false "system rejected" on the
+        // normal success path, where expired == false.)
+        _ = await extensionContext.completeAssertionRequest(using: credential)
       } catch {
         Self.log.error("completePasskeyAssertion FAILED: \(String(describing: error), privacy: .public)")
         cancel(with: error)
@@ -424,12 +426,12 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         credentialID: passkey.credentialId,
         attestationObject: attestationObject
       )
-      let delivered = await extensionContext.completeRegistrationRequest(using: credential)
-      if !delivered {
-        // Orphan case (S3): the server entry exists but the RP did not get
-        // the credential. Harmless — the user simply re-registers.
-        Self.log.error("passkey registration: completeRegistrationRequest returned false (server entry \(entryId, privacy: .public) is now unused)")
-      }
+      // The async result is the completion handler's `expired` flag (whether the
+      // OS prematurely ended a background completion task) — NOT a delivery
+      // success/failure signal. Calling this method already completes+dismisses
+      // the request; there is no per-call "delivered" boolean. Do not treat it
+      // as failure (the previous code logged a false "is now unused" on success).
+      _ = await extensionContext.completeRegistrationRequest(using: credential)
     }
   }
 

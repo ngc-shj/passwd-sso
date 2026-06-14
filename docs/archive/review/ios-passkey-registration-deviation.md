@@ -84,7 +84,30 @@
     "captured from the TS encoder" wording.
   - F1 / T4 [Minor] — accepted with quantification (see code-review Resolution
     Status); no code change.
-- **Post-merge device-test fix — registration flags `0x5D` → `0x45` (REVERSES plan F3/S8)**:
+- **Device-test RESOLUTION — registration flags stay `0x5D`; the failure was the BROWSER, not our bytes**:
+  Real-device testing concluded: passkey registration **works in Safari** with
+  the shipped `0x5D` (UP|UV|AT|BE|BS) flags. The earlier "registration fails /
+  getAuthenticatorData() null / Unrecognized credential ID" was reproduced only
+  in **non-Safari iOS browsers (Edge AND Chrome)**. Apple has acknowledged a
+  WebAuthn regression in non-Safari iOS browsers (Chrome, Firefox, Edge) on
+  iOS 26.2/26.2.1 (Apple Developer Forums thread 813927:
+  isUserVerifyingPlatformAuthenticatorAvailable() returns false in non-Safari
+  browsers; Apple engineer: "We are aware of this issue ... currently
+  investigating a solution"). The exact page symptom (getAuthenticatorData()
+  null) is observed, not a mechanism we have a primary source for — but Safari
+  and iCloud Keychain both accept the SAME response from our provider, and only
+  non-Safari browsers fail, so the defect is browser-side and not fixable in the
+  extension. The mid-investigation flag change to
+  `0x45` was a MISTAKE based on (a) the desktop browser-extension reference,
+  which is the wrong platform, and (b) tests that were unknowingly run in Edge
+  (so no flag value appeared to help). Apple's guidance for iOS credential
+  providers is BE|BS=1, which `0x5D` satisfies and which matches the shipped
+  assertion path. Net: `0x5D` retained (= original 45f12086), `0x45` reverted.
+  Also fixed in the VC: the `completeRegistrationRequest`/`completeAssertionRequest`
+  result was misread as a delivery flag — it is the completion handler's
+  `expired` flag (background-task lifecycle), so the old `if !delivered` logged a
+  false "is now unused"/"system rejected" on every success. Removed.
+- **(superseded) earlier note — registration flags `0x5D` → `0x45`**:
   Real-device testing on webauthn.io failed: registration showed
   `null is not an object ('t.getAuthenticatorData().slice')` and later
   authentication failed `Unrecognized credential ID`. Root cause (confirmed by
