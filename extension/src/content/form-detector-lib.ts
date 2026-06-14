@@ -7,6 +7,7 @@ declare const navigation: EventTarget | undefined;
 import type { DecryptedEntry } from "../types/messages";
 import type { AutofillTargetHint } from "../types/messages";
 import { t } from "../lib/i18n";
+import { PSSO_VAULT_STATE_CHANGED, PSSO_TRIGGER_INLINE_SUGGESTIONS } from "../lib/constants";
 import {
   showDropdown,
   hideDropdown,
@@ -528,13 +529,13 @@ export function initFormDetector(): FormDetectorCleanup {
   // Listen for vault state changes (sent from popup after unlock/lock)
   const runtimeMessageHandler = (message: { type?: string }) => {
     if (destroyed) return;
-    if (message?.type !== "PSSO_VAULT_STATE_CHANGED" && message?.type !== "PSSO_TRIGGER_INLINE_SUGGESTIONS") return;
+    if (message?.type !== PSSO_VAULT_STATE_CHANGED && message?.type !== PSSO_TRIGGER_INLINE_SUGGESTIONS) return;
     const active = document.activeElement;
     if (active instanceof HTMLInputElement && shouldTriggerForInput(active)) {
       requestMatches(active);
       return;
     }
-    if (message?.type === "PSSO_TRIGGER_INLINE_SUGGESTIONS") {
+    if (message?.type === PSSO_TRIGGER_INLINE_SUGGESTIONS) {
       const firstCandidate = Array.from(document.querySelectorAll<HTMLInputElement>("input")).find(
         (i) => shouldTriggerForInput(i),
       );

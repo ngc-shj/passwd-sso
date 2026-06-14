@@ -98,6 +98,22 @@ export const EXT_MSG = {
   PASSKEY_CREATE_CREDENTIAL: "PASSKEY_CREATE_CREDENTIAL",
 } as const;
 
+// ── Content script message types ──
+// SW → content script: show the post-navigation save/update banner.
+export const PSSO_SHOW_SAVE_BANNER = "PSSO_SHOW_SAVE_BANNER";
+// SW → content script: trigger inline autofill suggestions (keyboard shortcut).
+export const PSSO_TRIGGER_INLINE_SUGGESTIONS = "PSSO_TRIGGER_INLINE_SUGGESTIONS";
+// Popup → content script: vault lock/unlock state changed; re-evaluate suggestions.
+export const PSSO_VAULT_STATE_CHANGED = "PSSO_VAULT_STATE_CHANGED";
+// SW → autofill content script: perform field fill.
+// Note: autofill.js (plain JS, no import support) declares a matching local literal —
+// keep both in sync (mirrors the AUTOFILL_CC_FILL / autofill-cc.js pattern).
+export const AUTOFILL_FILL = "AUTOFILL_FILL";
+// ISOLATED world → MAIN world: bypass WebAuthn interception on own app pages.
+// Note: webauthn-interceptor.js (MAIN world, plain JS) cannot import from this module.
+// It declares a matching local literal — keep both in sync (mirrors the WebAuthn note).
+export const WEBAUTHN_OWN_APP_BYPASS_MSG = "PASSWD_SSO_OWN_APP_BYPASS";
+
 // ── WebAuthn clientDataJSON type strings ──
 // Note: webauthn-interceptor.js (MAIN world, plain JS) cannot import from this module.
 // It declares matching local vars at the top of the IIFE — keep both in sync.

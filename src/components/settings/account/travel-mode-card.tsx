@@ -28,6 +28,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Plane, AlertTriangle } from "lucide-react";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 export function TravelModeCard() {
   const t = useTranslations("TravelMode");
@@ -70,7 +71,7 @@ export function TravelModeCard() {
       if (result.success) {
         setShowDisableDialog(false);
         setPassphrase("");
-      } else if (result.error === "INVALID_PASSPHRASE") {
+      } else if (result.error === API_ERROR.INVALID_PASSPHRASE) {
         setDisableError(t("passphraseIncorrect"));
       } else {
         setDisableError(t("disableFailed"));

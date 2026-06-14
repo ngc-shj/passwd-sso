@@ -22,6 +22,7 @@ vi.mock("@/lib/vault/vault-context", () => ({
 }));
 vi.mock("@/lib/constants", () => ({
   VAULT_STATUS: { UNLOCKED: "UNLOCKED", LOCKED: "LOCKED" },
+  LOCAL_STORAGE_KEY: { RECOVERY_KEY_BANNER_DISMISSED: "psso:recovery-key-banner-dismissed" },
 }));
 vi.mock("./recovery-key-dialog", () => ({
   RecoveryKeyDialog: () => null,

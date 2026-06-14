@@ -91,14 +91,14 @@ export function TenantDelegationPolicyCard() {
     if (delegationDefaultEnabled) {
       if (delegationDefaultTtlSec === "") return t("delegationDefaultRequired");
       const n = Number(delegationDefaultTtlSec);
-      if (!Number.isInteger(n) || n < DELEGATION_TTL_MIN) return t("delegationTtlValidationMin");
-      if (n > DELEGATION_TTL_MAX) return t("delegationTtlValidationMax");
+      if (!Number.isInteger(n) || n < DELEGATION_TTL_MIN) return t("delegationTtlValidationMin", { min: DELEGATION_TTL_MIN });
+      if (n > DELEGATION_TTL_MAX) return t("delegationTtlValidationMax", { max: DELEGATION_TTL_MAX });
     }
     if (delegationMaxEnabled) {
       if (delegationMaxTtlSec === "") return t("delegationMaxRequired");
       const n = Number(delegationMaxTtlSec);
-      if (!Number.isInteger(n) || n < DELEGATION_TTL_MIN) return t("delegationTtlValidationMin");
-      if (n > DELEGATION_TTL_MAX) return t("delegationTtlValidationMax");
+      if (!Number.isInteger(n) || n < DELEGATION_TTL_MIN) return t("delegationTtlValidationMin", { min: DELEGATION_TTL_MIN });
+      if (n > DELEGATION_TTL_MAX) return t("delegationTtlValidationMax", { max: DELEGATION_TTL_MAX });
     }
     if (delegationDefaultEnabled && delegationMaxEnabled && delegationDefaultTtlSec !== "" && delegationMaxTtlSec !== "") {
       const def = Number(delegationDefaultTtlSec);
@@ -184,7 +184,7 @@ export function TenantDelegationPolicyCard() {
               })}
               placeholder="3600"
             />
-            <p className="text-xs text-muted-foreground">{t("delegationDefaultTtlSecHelp")}</p>
+            <p className="text-xs text-muted-foreground">{t("delegationDefaultTtlSecHelp", { min: DELEGATION_TTL_MIN, max: DELEGATION_TTL_MAX })}</p>
           </div>
         )}
 
@@ -219,7 +219,7 @@ export function TenantDelegationPolicyCard() {
               })}
               placeholder="3600"
             />
-            <p className="text-xs text-muted-foreground">{t("delegationMaxTtlSecHelp")}</p>
+            <p className="text-xs text-muted-foreground">{t("delegationMaxTtlSecHelp", { min: DELEGATION_TTL_MIN, max: DELEGATION_TTL_MAX })}</p>
           </div>
         )}
 

@@ -30,6 +30,7 @@
   // it posts this message so the interceptor skips all WebAuthn interception.
   var ownAppBypass = false;
   window.addEventListener("message", function (event) {
+    // Literal must equal WEBAUTHN_OWN_APP_BYPASS_MSG in src/lib/constants.ts — keep both in sync.
     if (event.source === window && event.data && event.data.type === "PASSWD_SSO_OWN_APP_BYPASS") {
       ownAppBypass = true;
     }

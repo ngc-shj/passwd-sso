@@ -10,15 +10,16 @@
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { VAULT_ROTATE_ATTACHMENT_CEK_MAX } from "@/lib/validations/common";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 /** Shared limiter for `/api/v1/*` API-key-authenticated routes (100 req/min). */
 export const v1ApiKeyLimiter = createRateLimiter({
-  windowMs: MS_PER_MINUTE,
+  windowMs: RATE_WINDOW_MS,
   max: 100,
 });
 
 /** Per-user limiter for `PUT /api/passwords/[id]/attachments/[id]/migrate`. */
 export const migrateLimiter = createRateLimiter({
-  windowMs: 15 * 60_000,
+  windowMs: 15 * MS_PER_MINUTE,
   max: VAULT_ROTATE_ATTACHMENT_CEK_MAX + 1000, // 5000 work + 1000 retry headroom
 });

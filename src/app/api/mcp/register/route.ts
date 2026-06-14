@@ -22,6 +22,7 @@ import {
 } from "@/lib/constants/auth/mcp";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 
 const dcrRateLimiter = createRateLimiter({
   windowMs: DCR_RATE_LIMIT_WINDOW_MS,
@@ -131,7 +132,7 @@ async function handlePOST(req: NextRequest) {
   // sentinel (matches downstream `clientSecretHash === ""` check in oauth-server.ts).
   const clientId = MCP_CLIENT_ID_PREFIX + randomBytes(16).toString("hex");
   const clientSecretHash = "";
-  const dcrExpiresAt = new Date(Date.now() + MCP_DCR_UNCLAIMED_EXPIRY_SEC * 1000);
+  const dcrExpiresAt = new Date(Date.now() + MCP_DCR_UNCLAIMED_EXPIRY_SEC * MS_PER_SECOND);
 
   // Count + create atomically with bypass RLS (no tenant context for DCR)
   let client: { id: string; clientId: string; createdAt: Date };

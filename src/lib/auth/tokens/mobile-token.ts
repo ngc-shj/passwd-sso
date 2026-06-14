@@ -14,6 +14,7 @@ import {
   IOS_TOKEN_DEFAULT_SCOPES,
   EXTENSION_TOKEN_SCOPE,
 } from "@/lib/constants/auth/extension-token";
+import { MS_PER_DAY } from "@/lib/constants/time";
 import {
   verifyDpopProof,
   computeAth,
@@ -24,6 +25,7 @@ import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import {
   revokeExtensionTokenFamily,
+  EXTENSION_TOKEN_REVOKE_REASON,
   parseScopes,
   type ValidatedExtensionToken,
 } from "./extension-token";
@@ -35,8 +37,8 @@ import {
 // (idle 24h covers a typical user's day; absolute 7d forces re-auth at
 // the host app weekly).
 
-export const IOS_TOKEN_IDLE_TIMEOUT_MS = 24 * 60 * 60 * 1000;
-export const IOS_TOKEN_ABSOLUTE_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000;
+export const IOS_TOKEN_IDLE_TIMEOUT_MS = MS_PER_DAY;
+export const IOS_TOKEN_ABSOLUTE_TIMEOUT_MS = 7 * MS_PER_DAY;
 
 /**
  * TTL for the single-purpose AutoFill upload token (passkey registration).
@@ -493,7 +495,7 @@ export async function refreshIosToken(
       familyId: oldRow.familyId,
       userId: oldRow.userId,
       tenantId: oldRow.tenantId,
-      reason: "replay_detected",
+      reason: EXTENSION_TOKEN_REVOKE_REASON.REPLAY_DETECTED,
     });
     await emitReplayDetected({
       req,
@@ -511,7 +513,7 @@ export async function refreshIosToken(
       familyId: oldRow.familyId,
       userId: oldRow.userId,
       tenantId: oldRow.tenantId,
-      reason: "family_expired",
+      reason: EXTENSION_TOKEN_REVOKE_REASON.FAMILY_EXPIRED,
     });
     return { ok: false, error: "REFRESH_TOKEN_FAMILY_EXPIRED" };
   }

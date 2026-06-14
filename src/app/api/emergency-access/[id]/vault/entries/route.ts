@@ -6,10 +6,11 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, rateLimited, notFound, unauthorized } from "@/lib/http/api-response";
 
-const entriesLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
+const entriesLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 10 });
 
 // GET /api/emergency-access/[id]/vault/entries — Fetch owner's encrypted entries
 async function handleGET(

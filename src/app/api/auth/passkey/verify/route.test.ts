@@ -71,6 +71,13 @@ vi.mock("@/lib/audit/audit", () => ({
 
 vi.mock("@/lib/auth/tokens/extension-token", () => ({
   revokeAllExtensionTokensForUser: vi.fn().mockResolvedValue({ rowsRevoked: 0, familiesRevoked: 0 }),
+  EXTENSION_TOKEN_REVOKE_REASON: {
+    FAMILY_EXPIRED: "family_expired",
+    REPLAY_DETECTED: "replay_detected",
+    SIGN_OUT_EVERYWHERE: "sign_out_everywhere",
+    PASSKEY_REAUTH: "passkey_reauth",
+    USER_DELETE: "user_delete",
+  },
 }));
 
 vi.mock("@/lib/prisma", () => ({

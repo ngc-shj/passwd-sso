@@ -10,8 +10,9 @@ import { getSessionToken } from "../helpers";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
-const revokeLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
+const revokeLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 10 });
 
 async function handleDELETE(
   request: NextRequest,

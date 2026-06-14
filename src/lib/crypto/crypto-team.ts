@@ -35,10 +35,10 @@ import {
 // Re-export so callers importing TeamKeyWrapContext from crypto-team still work.
 export type { TeamKeyWrapContext };
 
+import { AES_KEY_LENGTH, IV_LENGTH, AUTH_TAG_LENGTH } from "./crypto-params";
+
 // ─── Constants ──────────────────────────────────────────────────
 
-const AES_KEY_LENGTH = 256;
-const IV_LENGTH = 12;
 const HKDF_SALT_LENGTH = 32;
 
 /** HKDF info for team key wrapping (ECDH → AES key) */
@@ -203,8 +203,8 @@ export async function wrapTeamKeyForMember(
   );
 
   const encryptedBytes = new Uint8Array(encrypted);
-  const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - 16);
-  const authTag = encryptedBytes.slice(encryptedBytes.length - 16);
+  const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - AUTH_TAG_LENGTH);
+  const authTag = encryptedBytes.slice(encryptedBytes.length - AUTH_TAG_LENGTH);
 
   return {
     ciphertext: hexEncode(ciphertext),
@@ -430,8 +430,8 @@ export async function wrapItemKey(
   );
 
   const encryptedBytes = new Uint8Array(encrypted);
-  const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - 16);
-  const authTag = encryptedBytes.slice(encryptedBytes.length - 16);
+  const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - AUTH_TAG_LENGTH);
+  const authTag = encryptedBytes.slice(encryptedBytes.length - AUTH_TAG_LENGTH);
 
   return {
     ciphertext: hexEncode(ciphertext),

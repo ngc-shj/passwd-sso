@@ -12,6 +12,7 @@
  */
 
 import { createConnection } from "node:net";
+import { AGENT_CHILD_TIMEOUT_MS } from "../lib/time.js";
 
 interface DecryptResponse {
   ok: boolean;
@@ -119,7 +120,7 @@ export async function decryptCommand(
       finish(err);
     });
 
-    socket.setTimeout(10_000);
+    socket.setTimeout(AGENT_CHILD_TIMEOUT_MS);
     socket.on("timeout", () => {
       process.stderr.write("Error: Agent request timed out\n");
       process.exitCode = 1;

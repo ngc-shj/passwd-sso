@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault, VaultUnlockError } from "@/lib/vault/vault-context";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { API_PATH } from "@/lib/constants";
+import { API_PATH, SESSION_STORAGE_KEY } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { isWebAuthnSupported } from "@/lib/auth/webauthn/webauthn-client";
 import { hasPrf } from "@/lib/auth/prf-handoff";
@@ -148,7 +148,7 @@ export function VaultLockScreen() {
   // waiting for the hasPrfPasskeys query to resolve.
   const webauthnSignInRef = useRef(
     typeof window !== "undefined" &&
-      sessionStorage.getItem("psso:webauthn-signin") === "1",
+      sessionStorage.getItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN) === "1",
   );
 
   // Auto-unlock vault after WebAuthn sign-in.
@@ -158,7 +158,7 @@ export function VaultLockScreen() {
     if (!webauthnSignInRef.current || !prfChecked) return;
     // Consume flag (one-shot)
     webauthnSignInRef.current = false;
-    sessionStorage.removeItem("psso:webauthn-signin");
+    sessionStorage.removeItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN);
 
     // PRF material is handed off in-memory (not sessionStorage) and consumed by
     // unlockWithStoredPrf; peek without consuming to decide whether to attempt.

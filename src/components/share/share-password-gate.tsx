@@ -11,6 +11,7 @@ import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { SHARE_PASSWORD_MAX_ATTEMPTS } from "@/lib/validations/common";
 import { fetchApi } from "@/lib/url-helpers";
+import { SESSION_STORAGE_KEY } from "@/lib/constants";
 
 interface SharePasswordGateProps {
   token: string;
@@ -68,7 +69,7 @@ export function SharePasswordGate({
       const data = await res.json();
       // Persist for potential page refresh recovery
       try {
-        sessionStorage.setItem(`share-access:${token}`, data.accessToken);
+        sessionStorage.setItem(`${SESSION_STORAGE_KEY.SHARE_ACCESS_PREFIX}${token}`, data.accessToken);
       } catch {
         // sessionStorage unavailable (e.g. private browsing) — proceed anyway
       }

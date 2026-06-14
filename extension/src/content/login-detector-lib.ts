@@ -5,6 +5,7 @@
 import { findPasswordInputs, findUsernameInput } from "./form-detector-lib";
 import { showSaveBanner, hideSaveBanner } from "./ui/save-banner";
 import type { ExtensionResponse } from "../types/messages";
+import { PSSO_SHOW_SAVE_BANNER } from "../lib/constants";
 
 export interface LoginDetectorCleanup {
   destroy: () => void;
@@ -250,7 +251,7 @@ export function initLoginDetector(): LoginDetectorCleanup {
     existingEntryId?: string;
     existingTitle?: string;
   }): void {
-    if (message?.type !== "PSSO_SHOW_SAVE_BANNER") return;
+    if (message?.type !== PSSO_SHOW_SAVE_BANNER) return;
     if (!message.action || message.action === "none") return;
 
     showSaveBannerForResponse(

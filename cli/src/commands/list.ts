@@ -7,6 +7,7 @@ import { getEncryptionKey, getUserId } from "../lib/vault-state.js";
 import { decryptData } from "../lib/crypto.js";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
 import * as output from "../lib/output.js";
+import { CLI_API_PATH } from "../lib/api-paths.js";
 
 interface PasswordEntry {
   id: string;
@@ -36,7 +37,7 @@ export async function listCommand(options: { json?: boolean }): Promise<void> {
 
   const userId = getUserId();
 
-  const res = await apiRequest<PasswordEntry[]>("/api/passwords");
+  const res = await apiRequest<PasswordEntry[]>(CLI_API_PATH.PASSWORDS);
   if (!res.ok) {
     output.error(`Failed to fetch entries: ${res.status}`);
     return;

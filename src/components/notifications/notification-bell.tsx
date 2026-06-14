@@ -16,7 +16,7 @@ import { formatRelativeTime } from "@/lib/format/format-datetime";
 import { API_PATH, apiPath } from "@/lib/constants";
 import type { NotificationType } from "@prisma/client";
 import { fetchApi } from "@/lib/url-helpers";
-import { NOTIFICATION_BELL_LIMIT } from "@/lib/validations/common.server";
+import { NOTIFICATION_BELL_LIMIT } from "@/lib/validations/common";
 
 interface NotificationItem {
   id: string;

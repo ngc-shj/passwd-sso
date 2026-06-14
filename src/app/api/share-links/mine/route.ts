@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
 import { requireTeamMember } from "@/lib/auth/access/team-auth";
-import { TEAM_ROLE } from "@/lib/constants";
+import { TEAM_ROLE, SHARE_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { isValidCursorId } from "@/lib/audit/audit-query";
@@ -55,7 +55,7 @@ async function handleGET(req: NextRequest) {
     if (shareType === "entry") {
       where.passwordEntryId = { not: null };
     } else if (shareType === "send") {
-      where.shareType = { in: ["TEXT", "FILE"] };
+      where.shareType = { in: [SHARE_TYPE.TEXT, SHARE_TYPE.FILE] };
     }
     // "all" or null: personal entries + sends, exclude team shares (shown in team context)
     if (!shareType || (shareType !== "entry" && shareType !== "send")) {

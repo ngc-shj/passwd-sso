@@ -8,6 +8,7 @@
 const PBKDF2_ITERATIONS = 600_000;
 const AES_KEY_LENGTH = 256;
 const IV_LENGTH = 12;
+const GCM_TAG_LENGTH = 16;
 const HKDF_ENC_INFO = "passwd-sso-enc-v1";
 const HKDF_AUTH_INFO = "passwd-sso-auth-v1";
 const VERIFICATION_PLAINTEXT = "passwd-sso-vault-verification-v1";
@@ -198,8 +199,8 @@ export async function encryptData(
   const encrypted = await crypto.subtle.encrypt(params, key, textEncode(plaintext));
 
   const encryptedBytes = new Uint8Array(encrypted);
-  const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - 16);
-  const authTag = encryptedBytes.slice(encryptedBytes.length - 16);
+  const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - GCM_TAG_LENGTH);
+  const authTag = encryptedBytes.slice(encryptedBytes.length - GCM_TAG_LENGTH);
 
   return {
     ciphertext: hexEncode(ciphertext),

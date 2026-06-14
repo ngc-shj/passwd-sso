@@ -373,6 +373,7 @@ if (
   window[AUTOFILL_GUARD] = true;
   chrome.runtime.onMessage.addListener(function (message, sender) {
     // Only accept messages from our own extension — reject external senders
+    // Literal must equal AUTOFILL_FILL in src/lib/constants.ts — keep both in sync.
     if (message && message.type === "AUTOFILL_FILL" && sender.id === chrome.runtime.id) {
       performAutofill(message);
     }

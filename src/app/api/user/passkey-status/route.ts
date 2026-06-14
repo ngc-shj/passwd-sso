@@ -7,10 +7,11 @@ import { errorResponse, rateLimited } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_DAY } from "@/lib/constants/time";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
 
-const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 60 });
+const rateLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 60 });
 
 /**
  * GET /api/user/passkey-status

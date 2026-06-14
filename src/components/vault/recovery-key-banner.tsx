@@ -3,19 +3,18 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault/vault-context";
-import { VAULT_STATUS } from "@/lib/constants";
+import { VAULT_STATUS, LOCAL_STORAGE_KEY } from "@/lib/constants";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, X } from "lucide-react";
 import { RecoveryKeyDialog } from "./recovery-key-dialog";
 
-const DISMISS_KEY = "psso:recovery-key-banner-dismissed";
 const DISMISS_DURATION_MS = MS_PER_DAY;
 
 /** @internal Exported for testing */
 export function isDismissedInStorage(): boolean {
   try {
-    const ts = localStorage.getItem(DISMISS_KEY);
+    const ts = localStorage.getItem(LOCAL_STORAGE_KEY.RECOVERY_KEY_BANNER_DISMISSED);
     if (ts) {
       const elapsed = Date.now() - Number(ts);
       return elapsed >= 0 && elapsed < DISMISS_DURATION_MS;
@@ -42,7 +41,7 @@ export function RecoveryKeyBanner() {
 
   function handleDismiss() {
     try {
-      localStorage.setItem(DISMISS_KEY, String(Date.now()));
+      localStorage.setItem(LOCAL_STORAGE_KEY.RECOVERY_KEY_BANNER_DISMISSED, String(Date.now()));
     } catch {
       // Ignore
     }

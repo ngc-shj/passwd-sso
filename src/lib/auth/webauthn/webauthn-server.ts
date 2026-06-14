@@ -35,6 +35,7 @@ import type { TxOrPrisma } from "@/lib/prisma";
 import { getKeyProviderSync } from "@/lib/key-provider";
 import { getRedis } from "@/lib/redis";
 import { parseDeviceFromUserAgent } from "@/lib/parse-user-agent";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 // ── Shared constants ────────────────────────────────────────
 
@@ -459,7 +460,7 @@ export async function verifyAuthenticationAssertion(
   });
 
   if (!storedCredential) {
-    return { ok: false, status: 404, code: "NOT_FOUND", details: "Credential not found" };
+    return { ok: false, status: 404, code: API_ERROR.NOT_FOUND, details: "Credential not found" };
   }
 
   // v11: WebAuthnCredential shape — string `id` (no Uint8Array conversion),

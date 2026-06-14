@@ -18,11 +18,13 @@ import {
   AUDIT_TARGET_TYPE,
   AUDIT_ACTION,
   SEND_EXPIRY_MAP,
+  SHARE_TYPE,
 } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
-const sendTextLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
+const sendTextLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 20 });
 
 // POST /api/sends — Create a text Send
 async function handlePOST(req: NextRequest) {
@@ -65,7 +67,7 @@ async function handlePOST(req: NextRequest) {
     return prisma.passwordShare.create({
       data: {
         tokenHash,
-        shareType: "TEXT",
+        shareType: SHARE_TYPE.TEXT,
         entryType: null,
         sendName: name,
         encryptedData: encrypted.ciphertext,
@@ -88,7 +90,7 @@ async function handlePOST(req: NextRequest) {
     action: AUDIT_ACTION.SEND_CREATE,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
     targetId: share.id,
-    metadata: { sendType: "TEXT", expiresIn, maxViews: maxViews ?? null },
+    metadata: { sendType: SHARE_TYPE.TEXT, expiresIn, maxViews: maxViews ?? null },
   });
 
   return NextResponse.json({

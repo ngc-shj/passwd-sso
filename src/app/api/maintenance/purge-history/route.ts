@@ -21,13 +21,14 @@ import { AUDIT_METADATA_KEY } from "@/lib/constants";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { MS_PER_DAY } from "@/lib/constants/time";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/http/api-response";
 
 // Rate limiter shares the same key for dryRun and real calls intentionally:
 // preventing probe→exploit racing (an admin cannot dry-run-probe matching
 // counts then immediately delete within the same 60-second window).
-const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });
+const rateLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 1 });
 
 const bodySchema = z.object({
   retentionDays: z.number().int().min(1).max(3650).default(90),

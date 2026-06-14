@@ -36,6 +36,7 @@ import {
   KDF_ARGON2_PARALLELISM_MAX,
 } from "@/lib/validations/common.server";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { PBKDF2_ITERATIONS } from "@/lib/crypto/crypto-params";
 
 export const runtime = "nodejs";
 
@@ -115,7 +116,7 @@ async function handlePOST(request: NextRequest) {
 
   // Apply KDF defaults if client omits kdfParams
   const kdfType = data.kdfParams?.kdfType ?? 0;
-  const kdfIterations = data.kdfParams?.kdfIterations ?? 600_000;
+  const kdfIterations = data.kdfParams?.kdfIterations ?? PBKDF2_ITERATIONS;
   const kdfMemory = data.kdfParams && "kdfMemory" in data.kdfParams ? data.kdfParams.kdfMemory : null;
   const kdfParallelism = data.kdfParams && "kdfParallelism" in data.kdfParams ? data.kdfParams.kdfParallelism : null;
 

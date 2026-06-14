@@ -11,6 +11,7 @@ import { checkNewDeviceAndNotify } from "@/lib/auth/policy/new-device-detection"
 import { USER_AGENT_MAX_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { createNotification } from "@/lib/notification";
 import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
@@ -36,7 +37,7 @@ export function createCustomAdapter(): Adapter {
       select: { tenantId: true },
     });
     if (!user) {
-      throw new Error("USER_NOT_FOUND");
+      throw new Error(API_ERROR.USER_NOT_FOUND);
     }
     return user.tenantId;
   }

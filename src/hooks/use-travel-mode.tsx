@@ -4,6 +4,7 @@ import { createContext, useContext, useState, useEffect, useCallback } from "rea
 import type { ReactNode } from "react";
 import { fetchApi } from "@/lib/url-helpers";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 interface TravelModeState {
   active: boolean;
@@ -82,7 +83,7 @@ export function TravelModeProvider({ children }: { children: ReactNode }) {
 
         if (!res.ok) {
           if (res.status === 401) {
-            return { success: false, error: "INVALID_PASSPHRASE" };
+            return { success: false, error: API_ERROR.INVALID_PASSPHRASE };
           }
           if (res.status === 403) {
             return { success: false, error: "ACCOUNT_LOCKED" };

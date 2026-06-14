@@ -142,7 +142,7 @@ async function handlePUT(
           select: { tenantId: true, keyVersion: true },
         });
         if (!u?.tenantId) {
-          throw new Error("USER_NOT_FOUND");
+          throw new Error(API_ERROR.USER_NOT_FOUND);
         }
         // I5.6: cekKeyVersion must match the user's current keyVersion at
         // lock-acquisition time.
@@ -181,7 +181,7 @@ async function handlePUT(
       // No payload per S11
       return errorResponse(API_ERROR.LEGACY_INTEGRITY_MISMATCH);
     }
-    if (err instanceof Error && (err.message === "NOT_FOUND" || err.message === "USER_NOT_FOUND")) {
+    if (err instanceof Error && (err.message === API_ERROR.NOT_FOUND || err.message === API_ERROR.USER_NOT_FOUND)) {
       return notFound();
     }
     throw err;

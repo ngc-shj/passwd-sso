@@ -270,12 +270,15 @@ export async function issueExtensionToken(params: {
 
 // ─── Family revocation ───────────────────────────────────────
 
-export type ExtensionTokenFamilyRevokeReason =
-  | "family_expired"
-  | "replay_detected"
-  | "sign_out_everywhere"
-  | "passkey_reauth"
-  | "user_delete";
+export const EXTENSION_TOKEN_REVOKE_REASON = {
+  FAMILY_EXPIRED: "family_expired",
+  REPLAY_DETECTED: "replay_detected",
+  SIGN_OUT_EVERYWHERE: "sign_out_everywhere",
+  PASSKEY_REAUTH: "passkey_reauth",
+  USER_DELETE: "user_delete",
+} as const;
+
+export type ExtensionTokenFamilyRevokeReason = (typeof EXTENSION_TOKEN_REVOKE_REASON)[keyof typeof EXTENSION_TOKEN_REVOKE_REASON];
 
 /**
  * Revoke every token row in the family and emit an audit event.

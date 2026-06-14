@@ -12,6 +12,7 @@ import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { TEAM_ROTATE_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import {
   encryptedFieldSchema,
   TEAM_KEY_VERSION_MIN,
@@ -221,7 +222,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           where: { id: teamId },
           data: { teamKeyVersion: newTeamKeyVersion },
         });
-      }, { timeout: 60_000 }),
+      }, { timeout: TEAM_ROTATE_TX_TIMEOUT_MS }),
     );
   } catch (e) {
     if (e instanceof Error && e.message === "TEAM_KEY_VERSION_CONFLICT") {

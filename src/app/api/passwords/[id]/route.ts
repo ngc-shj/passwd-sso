@@ -16,9 +16,10 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
-const getLimiter = createRateLimiter({ windowMs: 60_000, max: 60 });
-const updateLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
+const getLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 60 });
+const updateLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 30 });
 
 // GET /api/passwords/[id] - Get password detail (returns encrypted blob)
 async function handleGET(

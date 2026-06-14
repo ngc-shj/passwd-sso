@@ -19,7 +19,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isValidCidr, extractClientIp } from "@/lib/auth/policy/ip-access";
 import { readJsonWithCap } from "@/lib/http/parse-body";
-import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
+import { MAX_JSON_BODY_BYTES, RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { invalidateTenantPolicyCache, wouldIpBeAllowed } from "@/lib/auth/policy/access-restriction";
 import { invalidateLockoutThresholdCache } from "@/lib/auth/policy/account-lockout";
 import { invalidateSessionTimeoutCacheForTenant } from "@/lib/auth/session/session-timeout";
@@ -64,7 +64,7 @@ import {
   IP_ADDRESS_MAX_LENGTH,
 } from "@/lib/validations/common.server";
 
-const policyLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
+const policyLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 10 });
 
 // GET /api/tenant/policy — read tenant session policy
 async function handleGET(_req: NextRequest) {

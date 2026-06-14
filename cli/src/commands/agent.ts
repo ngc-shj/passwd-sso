@@ -34,6 +34,8 @@ import { authorizeSign } from "../lib/ssh-sign-authorizer.js";
 import { confirmSign } from "../lib/ssh-confirm.js";
 import { decryptAgentCommand } from "./agent-decrypt.js";
 import * as output from "../lib/output.js";
+import { AGENT_CHILD_TIMEOUT_MS, VAULT_LOCK_POLL_INTERVAL_MS } from "../lib/time.js";
+import { CLI_API_PATH } from "../lib/api-paths.js";
 
 /** Env flag marking the forked daemon child process. */
 const SSH_DAEMON_ENV = "_PSSO_SSH_DAEMON";
@@ -95,7 +97,7 @@ async function loadSshKeys(): Promise<number> {
 
   const userId = getUserId();
 
-  const res = await apiRequest<VaultEntry[]>("/api/passwords?type=SSH_KEY&include=blob");
+  const res = await apiRequest<VaultEntry[]>(`${CLI_API_PATH.PASSWORDS}?type=SSH_KEY&include=blob`);
   if (!res.ok) {
     output.error(`Failed to fetch SSH keys: HTTP ${res.status}`);
     process.exit(1);
@@ -194,7 +196,7 @@ export async function agentCommand(opts: AgentOptions): Promise<void> {
       clearInterval(checkLock);
       process.exit(0);
     }
-  }, 5000);
+  }, VAULT_LOCK_POLL_INTERVAL_MS);
 
   // Wait forever (signal handlers in ssh-agent-socket.ts handle cleanup)
   await new Promise<void>(() => {
@@ -255,7 +257,7 @@ async function forkDaemon(): Promise<void> {
     process.stderr.write("Error: Agent child did not respond within 10s.\n");
     child.kill();
     process.exit(1);
-  }, 10_000);
+  }, AGENT_CHILD_TIMEOUT_MS);
 }
 
 /**

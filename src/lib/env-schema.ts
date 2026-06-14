@@ -20,6 +20,12 @@
 
 import { z } from "zod";
 import { HEX64_RE } from "@/lib/validations/common";
+import {
+  MS_PER_HOUR,
+  MS_PER_DAY,
+  MS_PER_MINUTE,
+  SEC_PER_DAY,
+} from "@/lib/constants/time";
 
 // ─── Reusable validators ────────────────────────────────────
 
@@ -85,8 +91,8 @@ export const envObject = z.object({
     .number()
     .int()
     .min(60_000)
-    .max(86_400_000)
-    .default(3_600_000),
+    .max(MS_PER_DAY)
+    .default(MS_PER_HOUR),
   DCR_CLEANUP_BATCH_SIZE: z.coerce.number().int().min(1).max(10_000).default(1000),
   DCR_CLEANUP_EMIT_HEARTBEAT_AUDIT: z
     .enum(["true", "false"])
@@ -262,7 +268,7 @@ export const envObject = z.object({
 
   // --- Key provider ---
   KEY_PROVIDER: z.string().default("env"),
-  SM_CACHE_TTL_MS: z.coerce.number().int().min(10000).max(3600000).optional(),
+  SM_CACHE_TTL_MS: z.coerce.number().int().min(10000).max(MS_PER_HOUR).optional(),
   // Cloud provider endpoints — conditionally required via superRefine.
   AZURE_KV_URL: nonEmpty.optional(),
   GCP_PROJECT_ID: nonEmpty.optional(),
@@ -293,8 +299,8 @@ export const envObject = z.object({
     .number()
     .int()
     .min(10000)
-    .max(3600000)
-    .default(300000),
+    .max(MS_PER_HOUR)
+    .default(5 * MS_PER_MINUTE),
   OUTBOX_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(100).default(8),
   OUTBOX_RETENTION_HOURS: z.coerce.number().int().min(1).max(168).default(24),
   OUTBOX_FAILED_RETENTION_DAYS: z.coerce
@@ -308,13 +314,13 @@ export const envObject = z.object({
     .number()
     .int()
     .min(30)
-    .max(86400)
+    .max(SEC_PER_DAY)
     .default(600),
   OUTBOX_REAPER_INTERVAL_MS: z.coerce
     .number()
     .int()
     .min(5000)
-    .max(3600000)
+    .max(MS_PER_HOUR)
     .default(30000),
 
   // --- Logger (A1) ---
@@ -369,19 +375,19 @@ export const envObject = z.object({
     .number()
     .int()
     .min(0)
-    .max(600000)
+    .max(10 * MS_PER_MINUTE)
     .default(30000),
   DB_POOL_MAX_LIFETIME_SECONDS: z.coerce
     .number()
     .int()
     .min(0)
-    .max(86400)
+    .max(SEC_PER_DAY)
     .default(1800),
   DB_POOL_STATEMENT_TIMEOUT_MS: z.coerce
     .number()
     .int()
     .min(0)
-    .max(300000)
+    .max(5 * MS_PER_MINUTE)
     .default(30000),
 
   // --- Audit anchor publisher ---

@@ -7,6 +7,7 @@ import { ShareSendView } from "@/components/share/share-send-view";
 import { ShareEntryView } from "@/components/share/share-entry-view";
 import { ShareE2EEntryView } from "@/components/share/share-e2e-entry-view";
 import { fetchApi } from "@/lib/url-helpers";
+import { SESSION_STORAGE_KEY, SHARE_TYPE } from "@/lib/constants";
 
 interface ShareProtectedContentProps {
   shareId: string;
@@ -66,7 +67,7 @@ export function ShareProtectedContent({
     let cancelled = false;
 
     try {
-      const stored = sessionStorage.getItem(`share-access:${token}`);
+      const stored = sessionStorage.getItem(`${SESSION_STORAGE_KEY.SHARE_ACCESS_PREFIX}${token}`);
       if (stored) {
         tryFetchContent(shareId, stored).then((data) => {
           if (cancelled) return;
@@ -74,7 +75,7 @@ export function ShareProtectedContent({
             setAccessToken(stored);
             setContent(data);
           } else {
-            sessionStorage.removeItem(`share-access:${token}`);
+            sessionStorage.removeItem(`${SESSION_STORAGE_KEY.SHARE_ACCESS_PREFIX}${token}`);
           }
         });
       }
@@ -122,10 +123,10 @@ export function ShareProtectedContent({
   // Server-decrypted content
   const data = content.data ?? {};
 
-  if (content.shareType === "TEXT") {
+  if (content.shareType === SHARE_TYPE.TEXT) {
     return (
       <ShareSendView
-        sendType="TEXT"
+        sendType={SHARE_TYPE.TEXT}
         name={String(data.name ?? content.sendName ?? "")}
         text={String(data.text ?? "")}
         token={token}
@@ -137,10 +138,10 @@ export function ShareProtectedContent({
     );
   }
 
-  if (content.shareType === "FILE") {
+  if (content.shareType === SHARE_TYPE.FILE) {
     return (
       <ShareSendView
-        sendType="FILE"
+        sendType={SHARE_TYPE.FILE}
         name={String(data.name ?? content.sendName ?? "")}
         filename={content.sendFilename}
         sizeBytes={content.sendSizeBytes}

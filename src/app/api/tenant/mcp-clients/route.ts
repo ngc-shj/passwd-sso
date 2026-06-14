@@ -9,7 +9,7 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
-import { MAX_MCP_CLIENTS_PER_TENANT, MCP_SCOPES, LOOPBACK_REDIRECT_RE } from "@/lib/constants/auth/mcp";
+import { MAX_MCP_CLIENTS_PER_TENANT, MCP_SCOPES, LOOPBACK_REDIRECT_RE, MCP_CLIENT_ID_PREFIX } from "@/lib/constants/auth/mcp";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, errorResponseWithMessage, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
@@ -149,7 +149,7 @@ async function handlePOST(req: NextRequest) {
   }
 
   // Generate client credentials
-  const clientId = "mcpc_" + randomBytes(16).toString("hex");
+  const clientId = MCP_CLIENT_ID_PREFIX + randomBytes(16).toString("hex");
   const clientSecret = randomBytes(32).toString("base64url");
   const clientSecretHash = hashToken(clientSecret);
 

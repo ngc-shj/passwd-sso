@@ -19,7 +19,12 @@ const CLI_CLIENT_NAME = "passwd-sso-cli";
 const CLI_SCOPES =
   "credentials:list credentials:use vault:status vault:unlock-data passwords:read passwords:write ssh:sign";
 
+const OAUTH_DEFAULT_EXPIRES_IN_SEC = 3600;
+
 const MCP_TOKEN_ENDPOINT = "/api/mcp/token";
+const MCP_REGISTER_ENDPOINT = "/api/mcp/register";
+const MCP_REVOKE_ENDPOINT = "/api/mcp/revoke";
+const MCP_AUTHORIZE_ENDPOINT = "/api/mcp/authorize";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -191,7 +196,7 @@ export async function registerClient(
   serverUrl: string,
   redirectUri: string,
 ): Promise<{ clientId: string }> {
-  const response = await fetch(`${serverUrl}/api/mcp/register`, { // codeql[js/file-system-data-in-network-request] serverUrl is user-provided config, not untrusted file data
+  const response = await fetch(`${serverUrl}${MCP_REGISTER_ENDPOINT}`, { // codeql[js/file-system-data-in-network-request] serverUrl is user-provided config, not untrusted file data
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -242,7 +247,7 @@ function parseTokenResponse(data: Record<string, unknown>): TokenResponse {
   return {
     accessToken,
     refreshToken,
-    expiresIn: typeof expiresIn === "number" ? expiresIn : 3600,
+    expiresIn: typeof expiresIn === "number" ? expiresIn : OAUTH_DEFAULT_EXPIRES_IN_SEC,
     scope: typeof scope === "string" ? scope : CLI_SCOPES,
   };
 }
@@ -314,7 +319,7 @@ export async function revokeTokenRequest(
   if (tokenTypeHint) params.token_type_hint = tokenTypeHint;
 
   try {
-    await fetch(`${serverUrl}/api/mcp/revoke`, { // codeql[js/file-system-data-in-network-request] OAuth token revocation sends stored token to the revocation endpoint
+    await fetch(`${serverUrl}${MCP_REVOKE_ENDPOINT}`, { // codeql[js/file-system-data-in-network-request] OAuth token revocation sends stored token to the revocation endpoint
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams(params).toString(),
@@ -406,7 +411,7 @@ export async function runOAuthFlow(serverUrl: string): Promise<OAuthResult> {
 
   const { clientId } = await registerClient(serverUrl, redirectUri);
 
-  const authUrl = new URL(`${serverUrl}/api/mcp/authorize`);
+  const authUrl = new URL(`${serverUrl}${MCP_AUTHORIZE_ENDPOINT}`);
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("client_id", clientId);
   authUrl.searchParams.set("redirect_uri", redirectUri);

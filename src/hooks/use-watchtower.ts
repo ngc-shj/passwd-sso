@@ -7,7 +7,8 @@ import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD, buildTeamEntryAAD, buildItemKeyWrapAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { unwrapItemKey, deriveItemEncryptionKey } from "@/lib/crypto/crypto-team";
 import { API_PATH, ENTRY_TYPE, LOCAL_STORAGE_KEY, apiPath } from "@/lib/constants";
-import { MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
+import { MS_PER_DAY } from "@/lib/constants/time";
+import { WATCHTOWER_COOLDOWN_MS } from "@/lib/constants/timing";
 import { getCooldownState } from "@/lib/watchtower/state";
 import {
   shouldAutoCheck,
@@ -28,7 +29,7 @@ import { fetchApi } from "@/lib/url-helpers";
 
 export const OLD_THRESHOLD_DAYS = 90;
 export const EXPIRING_THRESHOLD_DAYS = 30;
-export const WATCHTOWER_COOLDOWN_MS = 5 * MS_PER_MINUTE;
+export { WATCHTOWER_COOLDOWN_MS } from "@/lib/constants/timing";
 
 // ─── Types ───────────────────────────────────────────────────
 

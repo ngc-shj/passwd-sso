@@ -20,6 +20,7 @@ import {
 } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_DAY } from "@/lib/constants/time";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import {
   OPERATOR_TOKEN_PREFIX,
@@ -34,8 +35,8 @@ export const runtime = "nodejs";
 
 const TOKEN_LIMIT_PER_TENANT = 50;
 
-const createTokenLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
-const listTokenLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
+const createTokenLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 5 });
+const listTokenLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 30 });
 
 const createTokenSchema = z
   .object({

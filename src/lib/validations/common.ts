@@ -129,6 +129,7 @@ export const SCIM_FIELD_MAX_LENGTH = 255;
 // ─── Notification ───────────────────────────────────────────
 export const NOTIFICATION_TITLE_MAX = 200;
 export const NOTIFICATION_BODY_MAX = 2000;
+export const NOTIFICATION_BELL_LIMIT = 10;
 
 // ─── Entry Snippet ──────────────────────────────────────────
 export const ENTRY_SNIPPET_MAX = 100;

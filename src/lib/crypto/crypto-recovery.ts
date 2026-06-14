@@ -17,10 +17,13 @@ import { hexEncode, hexDecode } from "./crypto-client";
 import { toArrayBuffer, textEncode } from "./crypto-utils";
 import { RECOVERY_KEY_DATA_LENGTH } from "../validations/common";
 
+import { AES_KEY_LENGTH, IV_LENGTH, AUTH_TAG_LENGTH } from "./crypto-params";
+
 const HKDF_RECOVERY_WRAP_INFO = "passwd-sso-recovery-wrap-v1";
 const HKDF_RECOVERY_VERIFIER_INFO = "passwd-sso-recovery-verifier-v1";
 const RECOVERY_KEY_BYTES = 32;
-const IV_LENGTH = 12;
+// 256-bit HKDF verifier output; value coincides with AES_KEY_LENGTH but semantically distinct
+const VERIFIER_BITS = 256;
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 // ─── Base32 Encode / Decode ─────────────────────────────────────
@@ -167,7 +170,7 @@ export async function deriveRecoveryWrappingKey(
       info: textEncode(HKDF_RECOVERY_WRAP_INFO),
     },
     hkdfKey,
-    { name: "AES-GCM", length: 256 },
+    { name: "AES-GCM", length: AES_KEY_LENGTH },
     false,
     ["encrypt", "decrypt"],
   );
@@ -206,8 +209,8 @@ export async function wrapSecretKeyWithRecovery(
   );
 
   const encryptedBytes = new Uint8Array(encrypted);
-  const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - 16);
-  const authTag = encryptedBytes.slice(encryptedBytes.length - 16);
+  const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - AUTH_TAG_LENGTH);
+  const authTag = encryptedBytes.slice(encryptedBytes.length - AUTH_TAG_LENGTH);
 
   // 4. Compute verifier hash
   const verifierHash = await computeRecoveryVerifierHash(recoveryKey);
@@ -275,7 +278,7 @@ export async function computeRecoveryVerifierHash(
       info: textEncode(HKDF_RECOVERY_VERIFIER_INFO),
     },
     hkdfKey,
-    256,
+    VERIFIER_BITS,
   );
 
   const hash = await crypto.subtle.digest("SHA-256", verifierKeyBits);

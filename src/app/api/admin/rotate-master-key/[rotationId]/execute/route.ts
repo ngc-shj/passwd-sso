@@ -35,9 +35,10 @@ import {
   computeExecuteEligibility,
 } from "@/lib/admin-rotation/rotation-eligibility";
 import { getLogger } from "@/lib/logger";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 const rateLimiter = createRateLimiter({
-  windowMs: 60_000,
+  windowMs: RATE_WINDOW_MS,
   max: 1,
   failClosedOnRedisError: true,
 });
@@ -91,7 +92,7 @@ async function handlePOST(
       metadata: {
         rotationId,
         targetVersion: row.targetVersion,
-        cause: "FORBIDDEN_CROSS_TENANT",
+        cause: API_ERROR.FORBIDDEN_CROSS_TENANT,
       },
     });
     return errorResponse(API_ERROR.FORBIDDEN_CROSS_TENANT);

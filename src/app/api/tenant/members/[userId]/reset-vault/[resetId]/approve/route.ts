@@ -120,7 +120,7 @@ async function handlePOST(
       action: AUDIT_ACTION.ADMIN_VAULT_RESET_APPROVE,
       targetType: "User",
       targetId: targetUserId,
-      metadata: { resetId, cause: "FORBIDDEN_SELF_APPROVAL" },
+      metadata: { resetId, cause: API_ERROR.FORBIDDEN_SELF_APPROVAL },
     });
     return forbidden();
   }

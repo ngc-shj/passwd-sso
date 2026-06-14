@@ -2,6 +2,7 @@
 // Imported by form-detector.ts alongside autofill-lib.
 
 import { handleWebAuthnMessage } from "./webauthn-bridge-lib";
+import { WEBAUTHN_OWN_APP_BYPASS_MSG } from "../lib/constants";
 
 const GUARD_KEY = "__pssoWebAuthnBridge";
 if (!(window as unknown as Record<string, boolean>)[GUARD_KEY]) {
@@ -18,7 +19,7 @@ if (!(window as unknown as Record<string, boolean>)[GUARD_KEY]) {
       if (page.origin !== base.origin) return;
       const bp = base.pathname || "/";
       if (page.pathname === bp || page.pathname.startsWith(bp.endsWith("/") ? bp : `${bp}/`)) {
-        window.postMessage({ type: "PASSWD_SSO_OWN_APP_BYPASS" }, window.location.origin);
+        window.postMessage({ type: WEBAUTHN_OWN_APP_BYPASS_MSG }, window.location.origin);
       }
     } catch { /* invalid URL — ignore */ }
   });

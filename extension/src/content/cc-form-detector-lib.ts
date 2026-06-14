@@ -4,7 +4,7 @@
 
 import type { DecryptedEntry } from "../types/messages";
 import { t } from "../lib/i18n";
-import { EXT_MSG } from "../lib/constants";
+import { EXT_MSG, PSSO_VAULT_STATE_CHANGED, PSSO_TRIGGER_INLINE_SUGGESTIONS } from "../lib/constants";
 import {
   isUsableInput,
   isElementVisuallySafe,
@@ -432,8 +432,8 @@ export function initCreditCardDetector(): CreditCardDetectorCleanup {
   const runtimeMessageHandler = (message: { type?: string }) => {
     if (destroyed) return;
     if (
-      message?.type !== "PSSO_VAULT_STATE_CHANGED" &&
-      message?.type !== "PSSO_TRIGGER_INLINE_SUGGESTIONS"
+      message?.type !== PSSO_VAULT_STATE_CHANGED &&
+      message?.type !== PSSO_TRIGGER_INLINE_SUGGESTIONS
     ) {
       return;
     }

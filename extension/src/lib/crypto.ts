@@ -3,6 +3,7 @@
 const PBKDF2_ITERATIONS = 600_000;
 const AES_KEY_LENGTH = 256;
 const IV_LENGTH = 12; // 96 bits, recommended for GCM
+export const GCM_TAG_LENGTH = 16; // AES-GCM auth tag length in bytes
 const HKDF_ENC_INFO = "passwd-sso-enc-v1";
 const VERIFICATION_PLAINTEXT = "passwd-sso-vault-verification-v1";
 
@@ -183,10 +184,10 @@ export async function encryptData(
     textEncode(plaintext)
   );
 
-  // GCM appends 16-byte auth tag
+  // GCM appends GCM_TAG_LENGTH-byte auth tag
   const encBytes = new Uint8Array(encrypted);
-  const ciphertext = encBytes.slice(0, encBytes.length - 16);
-  const authTag = encBytes.slice(encBytes.length - 16);
+  const ciphertext = encBytes.slice(0, encBytes.length - GCM_TAG_LENGTH);
+  const authTag = encBytes.slice(encBytes.length - GCM_TAG_LENGTH);
 
   return {
     ciphertext: hexEncode(ciphertext),

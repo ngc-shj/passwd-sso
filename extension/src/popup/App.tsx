@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { sendMessage } from "../lib/messaging";
-import { SESSION_KEY } from "../lib/constants";
+import { SESSION_KEY, PSSO_VAULT_STATE_CHANGED } from "../lib/constants";
 import { t } from "../lib/i18n";
 import { LoginPrompt } from "./components/LoginPrompt";
 import { VaultUnlock } from "./components/VaultUnlock";
@@ -33,7 +33,7 @@ async function notifyVaultStateChanged(): Promise<void> {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id) {
-      await chrome.tabs.sendMessage(tab.id, { type: "PSSO_VAULT_STATE_CHANGED" });
+      await chrome.tabs.sendMessage(tab.id, { type: PSSO_VAULT_STATE_CHANGED });
     }
   } catch {
     // content script may not be present on this tab

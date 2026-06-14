@@ -34,6 +34,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import {
   MASTER_KEY_VERSION_MIN,
   MASTER_KEY_VERSION_MAX,
+  RATE_WINDOW_MS,
 } from "@/lib/validations/common.server";
 import { ROTATION_TOTAL_TTL_MS } from "@/lib/constants/time";
 import { createNotification } from "@/lib/notification";
@@ -45,7 +46,7 @@ import { resolveUserLocale } from "@/lib/locale";
 import { getLogger } from "@/lib/logger";
 
 const rateLimiter = createRateLimiter({
-  windowMs: 60_000,
+  windowMs: RATE_WINDOW_MS,
   max: 1,
   failClosedOnRedisError: true,
 });

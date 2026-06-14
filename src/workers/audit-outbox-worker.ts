@@ -15,7 +15,8 @@ import {
 } from "@/lib/constants/audit/audit";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { NIL_UUID, SYSTEM_ACTOR_ID, UUID_RE } from "@/lib/constants/app";
-import { MS_PER_DAY } from "@/lib/constants/time";
+import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
+import { WORKER_POOL_IDLE_TIMEOUT_MS, WORKER_POOL_STATEMENT_TIMEOUT_MS } from "@/workers/worker-pool-config";
 import { DELIVERERS, type TargetConfig, type DeliveryPayload } from "@/workers/audit-delivery";
 import { decryptServerData, getMasterKeyByVersion } from "@/lib/crypto/crypto-server";
 import { sanitizeErrorForStorage } from "@/lib/http/external-http";
@@ -866,8 +867,8 @@ async function purgeRetention(prisma: PrismaClient): Promise<void> {
   const retentionHours = AUDIT_OUTBOX.RETENTION_HOURS;
   const failedRetentionDays = AUDIT_OUTBOX.FAILED_RETENTION_DAYS;
 
-  const sentCutoff = new Date(Date.now() - retentionHours * 3_600_000);
-  const failedCutoff = new Date(Date.now() - failedRetentionDays * 86_400_000);
+  const sentCutoff = new Date(Date.now() - retentionHours * MS_PER_HOUR);
+  const failedCutoff = new Date(Date.now() - failedRetentionDays * MS_PER_DAY);
 
   const result = await prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
@@ -958,8 +959,8 @@ export function createWorker(config: WorkerConfig) {
   const pool = new pg.Pool({
     connectionString: databaseUrl,
     max: 5,
-    idleTimeoutMillis: 30_000,
-    statement_timeout: 60_000,
+    idleTimeoutMillis: WORKER_POOL_IDLE_TIMEOUT_MS,
+    statement_timeout: WORKER_POOL_STATEMENT_TIMEOUT_MS,
     application_name: "passwd-sso-outbox-worker",
   });
 

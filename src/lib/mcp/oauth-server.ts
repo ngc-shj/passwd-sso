@@ -25,6 +25,7 @@ import {
   type McpScope,
   type RefreshExchangeReason,
 } from "@/lib/constants/auth/mcp";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 
 export interface McpTokenData {
   tokenId: string;
@@ -91,7 +92,7 @@ export async function createAuthorizationCode(
 ): Promise<AuthCodeResult> {
   const plainCode = randomBytes(32).toString("base64url");
   const codeHash = hashToken(plainCode);
-  const expiresAt = new Date(Date.now() + MCP_CODE_EXPIRY_SEC * 1000);
+  const expiresAt = new Date(Date.now() + MCP_CODE_EXPIRY_SEC * MS_PER_SECOND);
 
   await withBypassRls(prisma, async (tx) =>
     tx.mcpAuthorizationCode.create({
@@ -201,7 +202,7 @@ export async function exchangeCodeForToken(
         params.tokenExpirySeconds ?? MCP_TOKEN_EXPIRY_SEC,
         MCP_TOKEN_EXPIRY_SEC,
       );
-      const expiresAt = new Date(Date.now() + expirySeconds * 1000);
+      const expiresAt = new Date(Date.now() + expirySeconds * MS_PER_SECOND);
 
       const newAccessToken = await tx.mcpAccessToken.create({
         data: {
@@ -266,7 +267,7 @@ export async function createRefreshToken(params: {
   const token = MCP_REFRESH_TOKEN_PREFIX + randomBytes(32).toString("base64url");
   const tokenHash = hashToken(token);
   const familyId = params.familyId ?? randomUUID();
-  const expiresAt = new Date(Date.now() + MCP_REFRESH_TOKEN_EXPIRY_SEC * 1000);
+  const expiresAt = new Date(Date.now() + MCP_REFRESH_TOKEN_EXPIRY_SEC * MS_PER_SECOND);
 
   await withBypassRls(prisma, async (tx) => {
     await tx.mcpRefreshToken.create({
@@ -388,11 +389,11 @@ export async function exchangeRefreshToken(
       // Generate new tokens up-front so we can include the new hash in the CAS
       const newAccessToken = MCP_TOKEN_PREFIX + randomBytes(32).toString("base64url");
       const newAccessTokenHash = hashToken(newAccessToken);
-      const accessExpiresAt = new Date(Date.now() + MCP_TOKEN_EXPIRY_SEC * 1000);
+      const accessExpiresAt = new Date(Date.now() + MCP_TOKEN_EXPIRY_SEC * MS_PER_SECOND);
 
       const newRefreshToken = MCP_REFRESH_TOKEN_PREFIX + randomBytes(32).toString("base64url");
       const newRefreshTokenHash = hashToken(newRefreshToken);
-      const refreshExpiresAt = new Date(Date.now() + MCP_REFRESH_TOKEN_EXPIRY_SEC * 1000);
+      const refreshExpiresAt = new Date(Date.now() + MCP_REFRESH_TOKEN_EXPIRY_SEC * MS_PER_SECOND);
 
       // Atomic compare-and-swap: claim the rotation slot.
       // UPDATE ... WHERE rotatedAt IS NULL acquires a row-level lock; concurrent

@@ -10,10 +10,10 @@ import {
   formatRecoveryKey,
   wrapSecretKeyWithRecovery,
 } from "@/lib/crypto/crypto-recovery";
-import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { apiErrorToI18nKey, API_ERROR } from "@/lib/http/api-error-codes";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
-import { API_PATH } from "@/lib/constants";
+import { API_PATH, LOCAL_STORAGE_KEY } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -142,7 +142,7 @@ export function RecoveryKeyDialog({
     if (result.ok) {
       setFormattedKey(result.formattedKey);
       setStep("display");
-    } else if (result.errorCode === "INVALID_PASSPHRASE") {
+    } else if (result.errorCode === API_ERROR.INVALID_PASSPHRASE) {
       setError(tApi("invalidPassphrase"));
     } else if (result.errorCode) {
       setError(tApi(apiErrorToI18nKey(result.errorCode)));
@@ -166,7 +166,7 @@ export function RecoveryKeyDialog({
     setHasRecoveryKey(true);
     // Remove banner dismiss timestamp so banner won't re-show
     try {
-      localStorage.removeItem("psso:recovery-key-banner-dismissed");
+      localStorage.removeItem(LOCAL_STORAGE_KEY.RECOVERY_KEY_BANNER_DISMISSED);
     } catch {
       // Ignore
     }

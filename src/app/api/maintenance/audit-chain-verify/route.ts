@@ -29,8 +29,9 @@ import {
   computeEventHash,
 } from "@/lib/audit/audit-chain";
 import { MS_PER_DAY } from "@/lib/constants/time";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
-const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 3 });
+const rateLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 3 });
 
 const FIVE_YEARS_MS = 5 * 365 * MS_PER_DAY;
 const MAX_ROWS_PER_REQUEST = 10_000;

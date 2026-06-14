@@ -9,9 +9,7 @@
  * All CryptoKey objects are created with extractable: false.
  */
 
-const PBKDF2_ITERATIONS = 600_000;
-const AES_KEY_LENGTH = 256;
-const IV_LENGTH = 12; // 96 bits, recommended for GCM
+import { PBKDF2_ITERATIONS, AES_KEY_LENGTH, IV_LENGTH, AUTH_TAG_LENGTH } from "./crypto-params";
 const HKDF_ENC_INFO = "passwd-sso-enc-v1";
 const HKDF_AUTH_INFO = "passwd-sso-auth-v1";
 const VERIFICATION_PLAINTEXT = "passwd-sso-vault-verification-v1";
@@ -166,7 +164,7 @@ async function deriveWrappingKeyArgon2id(
   accountSalt: Uint8Array,
   params: KdfParams
 ): Promise<CryptoKey> {
-  const memory = params.kdfMemory ?? 65536;
+  const memory = params.kdfMemory ?? ARGON2ID_KDF_PARAMS.kdfMemory!;
   const parallelism = params.kdfParallelism ?? 4;
   const iterations = params.kdfIterations ?? 3;
 
@@ -288,8 +286,8 @@ export async function wrapSecretKey(
 
   // Web Crypto API appends the auth tag to the ciphertext
   const encryptedBytes = new Uint8Array(encrypted);
-  const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - 16);
-  const authTag = encryptedBytes.slice(encryptedBytes.length - 16);
+  const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - AUTH_TAG_LENGTH);
+  const authTag = encryptedBytes.slice(encryptedBytes.length - AUTH_TAG_LENGTH);
 
   return {
     ciphertext: hexEncode(ciphertext),
@@ -383,8 +381,8 @@ export async function encryptData(
   );
 
   const encryptedBytes = new Uint8Array(encrypted);
-  const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - 16);
-  const authTag = encryptedBytes.slice(encryptedBytes.length - 16);
+  const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - AUTH_TAG_LENGTH);
+  const authTag = encryptedBytes.slice(encryptedBytes.length - AUTH_TAG_LENGTH);
 
   return {
     ciphertext: hexEncode(ciphertext),
@@ -446,8 +444,8 @@ export async function encryptBinary(
   );
 
   const encryptedBytes = new Uint8Array(encrypted);
-  const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - 16);
-  const authTag = encryptedBytes.slice(encryptedBytes.length - 16);
+  const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - AUTH_TAG_LENGTH);
+  const authTag = encryptedBytes.slice(encryptedBytes.length - AUTH_TAG_LENGTH);
 
   return {
     ciphertext,

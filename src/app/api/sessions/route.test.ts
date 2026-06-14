@@ -39,6 +39,13 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 vi.mock("@/lib/auth/tokens/extension-token", () => ({
   revokeAllExtensionTokensForUser: vi.fn().mockResolvedValue({ rowsRevoked: 0, familiesRevoked: 0 }),
+  EXTENSION_TOKEN_REVOKE_REASON: {
+    SIGN_OUT_EVERYWHERE: "sign_out_everywhere",
+    PASSKEY_REAUTH: "passkey_reauth",
+    FAMILY_EXPIRED: "family_expired",
+    REPLAY_DETECTED: "replay_detected",
+    USER_DELETE: "user_delete",
+  },
 }));
 vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
   invalidateCachedSessions: mockInvalidateCachedSessions,

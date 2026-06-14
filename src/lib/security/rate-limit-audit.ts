@@ -33,13 +33,14 @@ import {
   oauthTemporarilyUnavailable,
 } from "@/lib/http/api-response";
 import type { RateLimiter, RateLimitResult } from "@/lib/security/rate-limit";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export type FailClosedEnvelope =
   | "canonical"
   | "oauth"
   | (() => NextResponse);
 
-const THROTTLE_WINDOW_MS = 5 * 60 * 1000; // 5 min
+const THROTTLE_WINDOW_MS = 5 * MS_PER_MINUTE;
 const SCOPE_RE = /^[a-z][a-z0-9_]{0,31}(\.[a-z][a-z0-9_]{0,31}){0,2}$/;
 
 /**

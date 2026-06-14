@@ -6,11 +6,9 @@
  */
 
 import { hexEncode, hexDecode } from "@/lib/crypto/crypto-client";
+import { PBKDF2_ITERATIONS, AES_KEY_LENGTH, IV_LENGTH, AUTH_TAG_LENGTH } from "@/lib/crypto/crypto-params";
 
-const PBKDF2_ITERATIONS = 600_000;
-const AES_KEY_LENGTH = 256;
 const SALT_LENGTH = 16; // 128 bits
-const IV_LENGTH = 12; // 96 bits, recommended for GCM
 
 export interface EncryptedExportFile {
   version: 1;
@@ -86,10 +84,10 @@ export async function encryptExport(
     encoder.encode(plaintext)
   );
 
-  // Web Crypto API appends the 16-byte auth tag to the ciphertext
+  // Web Crypto API appends the auth tag to the ciphertext
   const encryptedBytes = new Uint8Array(encrypted);
-  const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - 16);
-  const authTag = encryptedBytes.slice(encryptedBytes.length - 16);
+  const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - AUTH_TAG_LENGTH);
+  const authTag = encryptedBytes.slice(encryptedBytes.length - AUTH_TAG_LENGTH);
 
   return {
     version: 1,

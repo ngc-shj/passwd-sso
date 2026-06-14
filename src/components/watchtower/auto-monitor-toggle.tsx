@@ -3,6 +3,7 @@
 import { useLocale, useTranslations } from "next-intl";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { MS_PER_MINUTE, MS_PER_HOUR } from "@/lib/constants/time";
 
 interface AutoMonitorToggleProps {
   enabled: boolean;
@@ -12,8 +13,8 @@ interface AutoMonitorToggleProps {
 
 function formatRelativeTime(timestamp: number, locale: string): string {
   const diff = Date.now() - timestamp;
-  const minutes = Math.floor(diff / 60_000);
-  const hours = Math.floor(diff / 3_600_000);
+  const minutes = Math.floor(diff / MS_PER_MINUTE);
+  const hours = Math.floor(diff / MS_PER_HOUR);
 
   if (locale === "ja") {
     if (minutes < 1) return "たった今";

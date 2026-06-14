@@ -11,7 +11,7 @@ import {
   startPasskeyAuthentication,
   abortInFlightCeremony,
 } from "@/lib/auth/webauthn/webauthn-client";
-import { API_PATH } from "@/lib/constants";
+import { API_PATH, SESSION_STORAGE_KEY } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { useCallbackUrl } from "@/hooks/use-callback-url";
 import { callbackUrlToHref, isApiCallbackUrl } from "@/lib/auth/session/callback-url";
@@ -102,7 +102,7 @@ export function SecurityKeySignInForm() {
         prfOutput = null;
       }
 
-      sessionStorage.setItem("psso:webauthn-signin", "1");
+      sessionStorage.setItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN, "1");
       // API callbacks (e.g. iOS /api/mobile/authorize) live outside the [locale]
       // segment; the next-intl router would inject the active locale and 404, so
       // navigate to those plainly.

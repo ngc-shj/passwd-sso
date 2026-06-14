@@ -15,13 +15,14 @@ import {
   unauthorized,
 } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
 
 type Params = { params: Promise<{ id: string }> };
 
 // 30/min lets an admin sweep many tokens during incident response without self-DOS.
-const revokeLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
+const revokeLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 30 });
 
 // DELETE /api/tenant/operator-tokens/[id] — revoke a token (returns 409 if already revoked)
 async function handleDELETE(req: NextRequest, { params }: Params) {
