@@ -22,8 +22,7 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
     self.defaults = defaults
     // Pre-fill the last successfully-probed server URL so it isn't re-typed
     // on every launch.
-    if let data = defaults.data(forKey: "serverConfig"),
-       let config = try? JSONDecoder().decode(ServerConfig.self, from: data) {
+    if let config = loadServerConfig(defaults: defaults) {
       self.urlText = config.baseURL.absoluteString
     }
   }
@@ -102,8 +101,7 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
   }
 
   private func persist(_ config: ServerConfig) {
-    guard let data = try? JSONEncoder().encode(config) else { return }
-    defaults.set(data, forKey: "serverConfig")
+    saveServerConfig(config, defaults: defaults)
   }
 }
 

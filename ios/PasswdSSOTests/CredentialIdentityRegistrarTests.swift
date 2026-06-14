@@ -320,6 +320,36 @@ final class CredentialIdentityRegistrarTests: XCTestCase {
     XCTAssertEqual(passkeys?.first?.recordIdentifier, "pk1")
   }
 
+  func testAddPasskeysAppendsWhenEnabled() async {
+    let store = FakeIdentityStore(enabled: true)
+    let registrar = CredentialIdentityRegistrar(store: store)
+    let spec = PasskeyIdentitySpec(
+      relyingPartyIdentifier: "webauthn.io", userName: "alice",
+      credentialID: Data([1]), userHandle: Data([2]), recordIdentifier: "e1"
+    )
+
+    await registrar.add(passkeys: [spec])
+
+    let added = await store.addedPasskeySpecs
+    XCTAssertEqual(added, [spec])
+    let replaceCount = await store.replaceCount
+    XCTAssertEqual(replaceCount, 0, "add must append, never wipe the existing set")
+  }
+
+  func testAddPasskeysIsNoOpWhenProviderDisabled() async {
+    let store = FakeIdentityStore(enabled: false)
+    let registrar = CredentialIdentityRegistrar(store: store)
+    let spec = PasskeyIdentitySpec(
+      relyingPartyIdentifier: "webauthn.io", userName: "alice",
+      credentialID: Data([1]), userHandle: Data([2]), recordIdentifier: "e1"
+    )
+
+    await registrar.add(passkeys: [spec])
+
+    let added = await store.addedPasskeySpecs
+    XCTAssertTrue(added.isEmpty)
+  }
+
   private func passkeyEntry(
     id: String, rpId: String, username: String,
     credentialID: Data, userHandle: Data,
@@ -383,6 +413,7 @@ private actor FakeIdentityStore: CredentialIdentityStoring {
   private let enabled: Bool
   private(set) var replacedPasswordSpecs: [CredentialIdentitySpec]?
   private(set) var replacedPasskeySpecs: [PasskeyIdentitySpec]?
+  private(set) var addedPasskeySpecs: [PasskeyIdentitySpec] = []
   private(set) var replaceCount = 0
   private(set) var removeAllCount = 0
 
@@ -393,6 +424,9 @@ private actor FakeIdentityStore: CredentialIdentityStoring {
     replacedPasswordSpecs = passwords
     replacedPasskeySpecs = passkeys
     replaceCount += 1
+  }
+  func add(passkeys: [PasskeyIdentitySpec]) async {
+    addedPasskeySpecs.append(contentsOf: passkeys)
   }
   func removeAll() async { removeAllCount += 1 }
 }

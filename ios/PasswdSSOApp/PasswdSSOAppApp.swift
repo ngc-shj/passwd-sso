@@ -11,6 +11,7 @@ struct PasswdSSOAppApp: App {
   @State private var activeDrain: RollbackFlagDrain?
   @State private var currentVaultKey: SymmetricKey?
   @State private var currentUserId: String?
+  @State private var activeTokenRefresher: AutofillTokenRefresher?
 
   private let backgroundSyncContext = BackgroundSyncContext()
 
@@ -32,11 +33,12 @@ struct PasswdSSOAppApp: App {
     WindowGroup {
       ZStack {
         RootView(
-          onVaultReady: { syncService, drain, vaultKey, userId in
+          onVaultReady: { syncService, drain, vaultKey, userId, tokenRefresher in
             activeSyncService = syncService
             activeDrain = drain
             currentVaultKey = vaultKey
             currentUserId = userId
+            activeTokenRefresher = tokenRefresher
             backgroundSyncContext.update(
               syncService: syncService, vaultKey: vaultKey, userId: userId
             )
@@ -63,6 +65,12 @@ struct PasswdSSOAppApp: App {
           // Per plan §"Foreground sync (primary path)": drain flags then re-sync.
           Task {
             guard let vaultKey = currentVaultKey else { return }
+            // 0. Re-mint the short-lived AutoFill upload token (plan C6) so a
+            // passkey registration started soon after foregrounding finds a
+            // live token. Best-effort; independent of the sync result below.
+            if let refresher = activeTokenRefresher {
+              await refresher.refresh()
+            }
             // 1. Drain any rollback flags written by the AutoFill extension.
             if let drain = activeDrain {
               await drain.drainPendingFlags(vaultKey: vaultKey)

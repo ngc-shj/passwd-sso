@@ -74,6 +74,16 @@ public struct TokenExchangeResponse: Sendable, Codable, Equatable {
   }
 }
 
+// MARK: - AutoFill upload token (matches POST /api/mobile/autofill-token response)
+
+public struct AutofillTokenResponse: Sendable, Codable, Equatable {
+  public let token: String
+  /// ISO 8601 with fractional seconds (server `Date.toISOString()`).
+  public let expiresAt: String
+  public let scope: [String]
+  public let cnfJkt: String
+}
+
 // MARK: - Errors
 
 public enum MobileAPIError: Error, Equatable {
@@ -90,32 +100,8 @@ public enum MobileAPIError: Error, Equatable {
   case authenticationRequired
 }
 
-// MARK: - Entry create request
-
-public struct CreateEntryRequest: Sendable, Codable {
-  public let id: String                 // client-generated UUIDv4 (REQUIRED for aadVersion >= 1)
-  public let encryptedBlob: EncryptedData
-  public let encryptedOverview: EncryptedData
-  public let keyVersion: Int
-  public let aadVersion: Int             // 1
-  public let entryType: String           // "LOGIN"
-
-  public init(
-    id: String,
-    encryptedBlob: EncryptedData,
-    encryptedOverview: EncryptedData,
-    keyVersion: Int,
-    aadVersion: Int,
-    entryType: String
-  ) {
-    self.id = id
-    self.encryptedBlob = encryptedBlob
-    self.encryptedOverview = encryptedOverview
-    self.keyVersion = keyVersion
-    self.aadVersion = aadVersion
-    self.entryType = entryType
-  }
-}
+// CreateEntryRequest moved to Shared (ios/Shared/Network/EntryUploader.swift)
+// so the AutoFill extension's EntryUploader shares the wire shape.
 
 // MARK: - Entry update request
 
@@ -402,6 +388,57 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     }
   }
 
+  /// Mint a short-lived, DPoP-bound AutoFill upload token via
+  /// POST /api/mobile/autofill-token (plan C6). `extensionJWK` is the AutoFill
+  /// extension's OWN shared-group SE public key — the server binds the minted
+  /// token to its thumbprint, so only the extension can spend it.
+  /// On 401 + new DPoP-Nonce, retries once with the fresh nonce.
+  public func mintAutofillToken(extensionJWK: [String: String]) async throws -> AutofillTokenResponse {
+    let accessToken = try await validAccessToken()
+
+    let endpoint = serverURL.appending(
+      path: "/api/mobile/autofill-token",
+      directoryHint: .notDirectory
+    )
+    let htu = canonicalHTU(url: endpoint)
+    let ath = sha256Base64URL(accessToken)
+
+    let localJWK = jwk
+    let localSigner = signer
+    let nonce = try? tokenStore.loadNonce()
+    let proof = try await buildDPoPProof(
+      htm: "POST",
+      htu: htu,
+      jwk: localJWK,
+      ath: ath,
+      nonce: nonce,
+      signer: localSigner
+    )
+
+    let bodyData = try JSONEncoder().encode(["jwk": extensionJWK])
+    var request = URLRequest(url: endpoint)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+    request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
+    request.httpBody = bodyData
+
+    let data = try await performBodyHTTP(request) { newNonce in
+      let retryProof = try await buildDPoPProof(
+        htm: "POST",
+        htu: htu,
+        jwk: localJWK,
+        ath: ath,
+        nonce: newNonce,
+        signer: localSigner
+      )
+      var retryRequest = request
+      retryRequest.setValue(retryProof.jws, forHTTPHeaderField: "DPoP")
+      return retryRequest
+    }
+    return try JSONDecoder().decode(AutofillTokenResponse.self, from: data)
+  }
+
   /// Update an existing personal entry via PUT /api/passwords/{entryId}.
   /// Requires a valid access token (DPoP-signed with ath).
   /// On 401 + new DPoP-Nonce, retries once with the fresh nonce.
@@ -636,19 +673,9 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     return components.url
   }
 
-  /// Strip query/fragment for the canonical htu value per RFC 9449 §4.2.
-  func canonicalHTU(url: URL) -> String {
-    var components = URLComponents(url: url, resolvingAgainstBaseURL: false) ?? URLComponents()
-    components.query = nil
-    components.fragment = nil
-    return components.url?.absoluteString ?? url.absoluteString
-  }
-
-  /// SHA-256(token) → base64url, for the DPoP `ath` claim.
-  func sha256Base64URL(_ token: String) -> String {
-    let digest = SHA256.hash(data: Data(token.utf8))
-    return base64URLEncode(Data(digest))
-  }
+  // canonicalHTU / sha256Base64URL moved to Shared (EntryUploader.swift) so
+  // the extension-side uploader and this client share one implementation.
+  // Unqualified calls in this file resolve to those free functions.
 
   /// Perform an HTTP request that returns no body; on 401 + new nonce, retry once.
   /// Throws `MobileAPIError.notFound` for 404, `.serverError(status:)` for other non-2xx.
@@ -690,12 +717,13 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     }
   }
 
-  /// Perform a create (POST) request that returns a body with an `id` field.
-  /// Accepts 200 or 201 as success. On 401 + new nonce, retries once.
-  private func performCreateHTTP(
+  /// Perform a request whose success (200/201) response body is returned raw.
+  /// On 401 + new nonce, retries once. 404 → .notFound; other non-2xx →
+  /// .serverError(status:).
+  private func performBodyHTTP(
     _ request: URLRequest,
     makeRetry: ((String) async throws -> URLRequest)? = nil
-  ) async throws -> String {
+  ) async throws -> Data {
     let (data, response) = try await performHTTP(request)
     let http = response as! HTTPURLResponse
 
@@ -712,22 +740,32 @@ public actor MobileAPIClient: VaultUnlockDataSource {
       if let retryNonce = retryHTTP.value(forHTTPHeaderField: "DPoP-Nonce") {
         try? tokenStore.saveNonce(retryNonce)
       }
-      return try decodeCreateResponse(retryData, status: retryHTTP.statusCode)
+      return try decodeBodyResponse(retryData, status: retryHTTP.statusCode)
     }
 
-    return try decodeCreateResponse(data, status: http.statusCode)
+    return try decodeBodyResponse(data, status: http.statusCode)
   }
 
-  private func decodeCreateResponse(_ data: Data, status: Int) throws -> String {
+  private func decodeBodyResponse(_ data: Data, status: Int) throws -> Data {
     switch status {
     case 200, 201:
-      let resp = try JSONDecoder().decode(CreateEntryResponse.self, from: data)
-      return resp.id
+      return data
     case 404:
       throw MobileAPIError.notFound
     default:
       throw MobileAPIError.serverError(status: status)
     }
+  }
+
+  /// Perform a create (POST) request that returns a body with an `id` field.
+  /// Accepts 200 or 201 as success. On 401 + new nonce, retries once.
+  private func performCreateHTTP(
+    _ request: URLRequest,
+    makeRetry: ((String) async throws -> URLRequest)? = nil
+  ) async throws -> String {
+    let data = try await performBodyHTTP(request, makeRetry: makeRetry)
+    let resp = try JSONDecoder().decode(CreateEntryResponse.self, from: data)
+    return resp.id
   }
 }
 

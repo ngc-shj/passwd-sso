@@ -118,6 +118,7 @@ describe("validateExtensionTokenDpop", () => {
           familyId: FAMILY_ID,
           familyCreatedAt: baseRow.familyCreatedAt,
           cnfJkt: CNF_JKT,
+          clientKind: "BROWSER_EXTENSION",
         });
       }
     });

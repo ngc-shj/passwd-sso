@@ -27,12 +27,29 @@ public actor HostSyncService {
     self.cacheURL = cacheURL
   }
 
+  /// In-flight sync task, so concurrent callers coalesce onto ONE network
+  /// round-trip + cache write + counter increment. Both the app shell and the
+  /// vault list refresh on `.active`; without this they would each fire a full
+  /// sync (and bump the bridge counter twice).
+  private var inFlight: Task<SyncReport, Error>?
+
+  /// Full host sync. Concurrent calls join the in-flight sync and share its
+  /// result. Reentrant-safe: while a caller awaits the task value the actor is
+  /// free, so a second caller sees `inFlight` and joins the same task.
+  public func runSync(vaultKey: SymmetricKey, userId: String) async throws -> SyncReport {
+    if let inFlight { return try await inFlight.value }
+    let task = Task { try await self.performSync(vaultKey: vaultKey, userId: userId) }
+    inFlight = task
+    defer { inFlight = nil }
+    return try await task.value
+  }
+
   /// Performs the full host sync.
   /// Per plan §"Write ordering": cache file is written first; blob counter updated after.
   /// - Parameters:
   ///   - vaultKey: Vault encryption key (never persisted).
   ///   - userId: User ID from the unlock response; stored in the cache header for AAD construction.
-  public func runSync(vaultKey: SymmetricKey, userId: String) async throws -> SyncReport {
+  private func performSync(vaultKey: SymmetricKey, userId: String) async throws -> SyncReport {
     let now = Date()
 
     // Read current blob to get counter and UUID

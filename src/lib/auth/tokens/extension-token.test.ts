@@ -290,6 +290,77 @@ describe("validateExtensionToken", () => {
     });
   });
 
+  it("dispatches IOS_AUTOFILL through the DPoP-required path (S-C1: no bearer-only bypass)", async () => {
+    const expiresAt = new Date("2030-01-01");
+    const familyCreatedAt = new Date();
+    mockFindUnique.mockResolvedValue({
+      id: "t1",
+      userId: "u1",
+      tenantId: "ten1",
+      scope: "passwords:write",
+      expiresAt,
+      revokedAt: null,
+      familyId: FAMILY_ID,
+      familyCreatedAt,
+      clientKind: "IOS_AUTOFILL",
+      cnfJkt: VALID_CNF_JKT,
+    });
+    mockValidateTokenDpop.mockResolvedValue({
+      ok: true,
+      data: {
+        tokenId: "t1",
+        userId: "u1",
+        tenantId: "ten1",
+        scopes: ["passwords:write"],
+        expiresAt,
+        familyId: FAMILY_ID,
+        familyCreatedAt,
+        cnfJkt: VALID_CNF_JKT,
+        clientKind: "IOS_AUTOFILL",
+      },
+    });
+
+    const req = createRequest("POST", "http://localhost/api/passwords", {
+      headers: { Authorization: `Bearer ${"a".repeat(64)}`, DPoP: "valid.dpop.proof" },
+    });
+    const result = await validateExtensionToken(req);
+
+    expect(mockValidateTokenDpop).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.scopes).toEqual(["passwords:write"]);
+      expect(result.data.clientKind).toBe("IOS_AUTOFILL");
+    }
+  });
+
+  it("returns INVALID for IOS_AUTOFILL when the DPoP proof is absent/invalid (no bypass)", async () => {
+    mockFindUnique.mockResolvedValue({
+      id: "t1",
+      userId: "u1",
+      tenantId: "ten1",
+      scope: "passwords:write",
+      expiresAt: new Date("2030-01-01"),
+      revokedAt: null,
+      familyId: FAMILY_ID,
+      familyCreatedAt: new Date(),
+      clientKind: "IOS_AUTOFILL",
+      cnfJkt: VALID_CNF_JKT,
+    });
+    mockValidateTokenDpop.mockResolvedValue({
+      ok: false,
+      error: "EXTENSION_TOKEN_DPOP_INVALID",
+      dpopError: "DPOP_HEADER_MISSING",
+    });
+
+    const req = createRequest("POST", "http://localhost/api/passwords", {
+      headers: { Authorization: `Bearer ${"a".repeat(64)}` },
+    });
+    const result = await validateExtensionToken(req);
+
+    expect(mockValidateTokenDpop).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(false);
+  });
+
   it("returns INVALID for IOS_APP with null cnfJkt without calling DPoP helper", async () => {
     mockFindUnique.mockResolvedValue({
       id: "t1",

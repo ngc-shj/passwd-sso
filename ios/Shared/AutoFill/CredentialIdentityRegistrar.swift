@@ -171,6 +171,10 @@ public protocol CredentialIdentityStoring: Sendable {
   /// call, so a password-only refresh with `passkeys: []` also clears stale
   /// passkey identities (lifecycle parity).
   func replace(passwords: [CredentialIdentitySpec], passkeys: [PasskeyIdentitySpec]) async
+  /// APPEND passkey identities without touching the existing set — used by the
+  /// extension right after a passkey registration (it has no full entry set to
+  /// replace with).
+  func add(passkeys: [PasskeyIdentitySpec]) async
   func removeAll() async
 }
 
@@ -221,6 +225,21 @@ public struct SystemCredentialIdentityStore: CredentialIdentityStoring {
     // iOS 17+ heterogeneous-array API (ObjC `replaceCredentialIdentityEntries:`,
     // Swift name `replaceCredentialIdentities(_:)`) — one atomic replace of both kinds.
     try? await ASCredentialIdentityStore.shared.replaceCredentialIdentities(identities)
+  }
+
+  public func add(passkeys: [PasskeyIdentitySpec]) async {
+    let identities: [any ASCredentialIdentity] = passkeys.map { spec in
+      ASPasskeyCredentialIdentity(
+        relyingPartyIdentifier: spec.relyingPartyIdentifier,
+        userName: spec.userName,
+        credentialID: spec.credentialID,
+        userHandle: spec.userHandle,
+        recordIdentifier: spec.recordIdentifier
+      )
+    }
+    // saveCredentialIdentities APPENDS to the store (replace* is the
+    // wipe-and-set variant).
+    try? await ASCredentialIdentityStore.shared.saveCredentialIdentities(identities)
   }
 
   public func removeAll() async {
@@ -280,6 +299,16 @@ public struct CredentialIdentityRegistrar: Sendable {
       return
     }
     await store.replace(passwords: Self.specs(from: summaries), passkeys: passkeys)
+  }
+
+  /// Append passkey identities to the registered set (post-registration).
+  /// No-op when the AutoFill provider is disabled in Settings.
+  public func add(passkeys: [PasskeyIdentitySpec]) async {
+    guard await store.isEnabled() else {
+      identityLog.error("add: AutoFill provider DISABLED in Settings — nothing registered")
+      return
+    }
+    await store.add(passkeys: passkeys)
   }
 
   /// Remove all registered identities (always runs; removeAll is a no-op when

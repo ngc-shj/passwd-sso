@@ -33,3 +33,10 @@ regexTarget = "match"
 regexes = [
   '''VERIFIER_PBKDF2_BITS''',
 ]
+
+[[allowlists]]
+description = "CryptoKit type name in crypto source, not a credential (generic-api-key false positive on `let privateKey: P256.Signing.PrivateKey` in PasskeyRegistration.swift)."
+regexTarget = "match"
+regexes = [
+  '''P256\.Signing\.PrivateKey''',
+]

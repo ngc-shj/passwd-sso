@@ -24,7 +24,10 @@ struct VaultListView: View {
   @State private var isShowingSettings: Bool = false
   @State private var isShowingCreateForm: Bool = false
   @State private var isShowingSignOutConfirm: Bool = false
+  @State private var isSyncing: Bool = false
+  @State private var syncError: String?
   @FocusState private var searchFocused: Bool
+  @Environment(\.scenePhase) private var scenePhase
 
   var body: some View {
     NavigationStack {
@@ -45,6 +48,16 @@ struct VaultListView: View {
         // no two toolbar items can merge into one glass capsule.
         ToolbarItem(placement: .topBarTrailing) {
           Menu {
+            // Re-fetch from the server, rebuild the local cache, and rebind the
+            // list so an entry/passkey registered externally (AutoFill
+            // extension, web) appears without a lock/unlock cycle. Pull-to-
+            // refresh on the list runs the same `sync()`.
+            Button {
+              Task { await sync() }
+            } label: {
+              Label("Sync now", systemImage: "arrow.clockwise")
+            }
+            .disabled(isSyncing)
             Button {
               autoLockService.recordActivity()
               isShowingSettings = true
@@ -92,6 +105,22 @@ struct VaultListView: View {
       // Passwords-app pattern). Activity tracking stays on query change.
       .onChange(of: viewModel.searchQuery) { _, _ in
         autoLockService.recordActivity()
+      }
+      // Returning to the app re-binds the list from a fresh sync, so a passkey/
+      // entry registered while away (AutoFill extension in Safari, web) appears
+      // automatically — no lock/unlock or manual sync. Silent on failure.
+      .onChange(of: scenePhase) { _, newPhase in
+        if newPhase == .active {
+          Task { await sync(surfaceErrors: false) }
+        }
+      }
+      .alert(
+        "Sync failed",
+        isPresented: Binding(get: { syncError != nil }, set: { if !$0 { syncError = nil } })
+      ) {
+        Button("OK", role: .cancel) { syncError = nil }
+      } message: {
+        Text(syncError ?? "")
       }
       // Anchored at body level (NOT inside the Menu, where dismissal races the
       // menu collapse). signOut() ends in .loggedOut → RootView routes to setup.
@@ -240,6 +269,7 @@ struct VaultListView: View {
       }
       .padding()
     }
+    .refreshable { await sync() }
     .overlay {
       if viewModel.filteredSummaries.isEmpty {
         Text("No entries")
@@ -270,11 +300,49 @@ struct VaultListView: View {
       }
     }
     .listStyle(.plain)
+    .refreshable { await sync() }
     .overlay {
       if viewModel.filteredSummaries.isEmpty {
         Text("No matches")
           .foregroundStyle(.secondary)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
+      }
+    }
+  }
+
+  /// Re-fetch entries from the server, rebuild the encrypted cache, and rebind
+  /// the visible list from the fresh cache. Best-effort, single-flight via
+  /// `isSyncing`. Backs the "Sync now" menu item, pull-to-refresh, and the
+  /// silent foreground auto-refresh.
+  ///
+  /// `surfaceErrors`: manual triggers (button / pull) show a non-blocking alert
+  /// on failure; the automatic foreground refresh stays silent (a transient
+  /// offline state must not pop an alert just for returning to the app).
+  @MainActor
+  private func sync(surfaceErrors: Bool = true) async {
+    // Never sync (decrypt into the view's state) once the vault has locked —
+    // defence-in-depth against a background idle-lock racing an in-flight or
+    // queued foreground refresh.
+    guard autoLockService.state == .unlocked else { return }
+    guard !isSyncing else { return }
+    isSyncing = true
+    defer { isSyncing = false }
+    // Manual sync is a user action → reset the idle-lock timer. The silent
+    // foreground auto-refresh is NOT user interaction, so it must not extend the
+    // auto-lock window just because the app returned to the foreground.
+    if surfaceErrors { autoLockService.recordActivity() }
+    do {
+      let report = try await hostSyncService.runSync(vaultKey: vaultKey, userId: userId)
+      if let fresh = report.cacheData {
+        viewModel.loadFromCache(cacheData: fresh, vaultKey: vaultKey, userId: userId)
+      }
+    } catch MobileAPIError.authenticationRequired {
+      if surfaceErrors {
+        syncError = String(localized: "Your session expired. Lock and unlock to sign in again.")
+      }
+    } catch {
+      if surfaceErrors {
+        syncError = String(localized: "Couldn't sync. Check your connection and try again.")
       }
     }
   }

@@ -438,6 +438,214 @@ public actor CredentialResolver {
   // Blob → model decode is shared with the host app via EntryBlobDecoder
   // (ios/Shared/Models/EntryBlobDecoder.swift) — do NOT reintroduce a local copy.
 
+  // MARK: - Passkey registration support (plan C7)
+
+  /// Result of encrypting a freshly-generated PASSKEY entry for upload.
+  public struct RegistrationEncryption: Sendable, Equatable {
+    public let encryptedBlob: EncryptedData
+    public let encryptedOverview: EncryptedData
+    public let keyVersion: Int
+    public let userId: String
+
+    public init(
+      encryptedBlob: EncryptedData,
+      encryptedOverview: EncryptedData,
+      keyVersion: Int,
+      userId: String
+    ) {
+      self.encryptedBlob = encryptedBlob
+      self.encryptedOverview = encryptedOverview
+      self.keyVersion = keyVersion
+      self.userId = userId
+    }
+  }
+
+  /// Registration step 1: single biometric bridge_key read, then encrypt the
+  /// new PASSKEY full blob + overview under the vault key with personal AAD
+  /// (aadVersion 1). keyVersion is recovered from the cache the same way the
+  /// host's biometric unlock does (first personal entry, floor 1). Retains the
+  /// bridge blob so the post-upload `appendEntryToCache` does not re-prompt.
+  /// Vault_key is zeroed before returning.
+  public func encryptPasskeyEntry(
+    entryId: String,
+    blobPlaintext: Data,
+    overviewPlaintext: Data
+  ) async throws -> RegistrationEncryption {
+    currentBlob = nil
+
+    let blob: BridgeKeyStore.Blob
+    do {
+      blob = try await bridgeKeyStore.readForFillAuthenticated(
+        reason: "Save passkey to passwd-sso vault"
+      )
+    } catch {
+      Self.log.error("encryptPasskeyEntry: vaultLocked at bridge_key read: \(String(describing: error), privacy: .public)")
+      throw Error.vaultLocked
+    }
+
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    guard let wrapped = try? wrappedKeyStore.loadVaultKey() else {
+      throw Error.vaultLocked
+    }
+    guard
+      let vaultKeyData = try? decryptAESGCM(
+        ciphertext: wrapped.ciphertext,
+        iv: wrapped.iv,
+        tag: wrapped.authTag,
+        key: cacheKey
+      )
+    else {
+      throw Error.vaultLocked
+    }
+    var mutableVaultKeyData = vaultKeyData
+    defer { zeroData(&mutableVaultKeyData) }
+    let vaultKey = SymmetricKey(data: vaultKeyData)
+
+    // Read the cache for userId + live keyVersion (and to fail early on a
+    // rejected/unavailable cache — a vault we cannot append to later).
+    let cacheData: CacheData
+    do {
+      cacheData = try readCacheFile(
+        path: cacheURL,
+        vaultKey: vaultKey,
+        expectedHostInstallUUID: blob.hostInstallUUID,
+        expectedCounter: blob.cacheVersionCounter,
+        now: now()
+      )
+    } catch EntryCacheError.rejection(let kind, let context) {
+      await writeRollbackFlag(kind: kind, context: context, blob: blob, vaultKey: vaultKey)
+      throw Error.cacheRejected(kind)
+    } catch {
+      throw Error.cacheUnavailable
+    }
+    let userId = cacheData.header.userId
+    guard !userId.isEmpty else { throw Error.cacheUnavailable }
+
+    // Same keyVersion recovery as VaultUnlocker.unlockWithBiometrics.
+    let entries = (try? JSONDecoder().decode([CacheEntry].self, from: cacheData.entries)) ?? []
+    let keyVersion = max(1, entries.first(where: { $0.teamId == nil })?.keyVersion ?? 1)
+
+    let blobAAD = try buildPersonalEntryAAD(
+      userId: userId, entryId: entryId, vaultType: VaultType.blob
+    )
+    let overviewAAD = try buildPersonalEntryAAD(
+      userId: userId, entryId: entryId, vaultType: VaultType.overview
+    )
+    let encryptedBlob = try encryptAESGCMEncoded(
+      plaintext: blobPlaintext, key: vaultKey, aad: blobAAD
+    )
+    let encryptedOverview = try encryptAESGCMEncoded(
+      plaintext: overviewPlaintext, key: vaultKey, aad: overviewAAD
+    )
+
+    // Retain for appendEntryToCache (same single-biometric pattern as
+    // resolveCandidates → decryptEntryDetail).
+    currentBlob = blob
+
+    return RegistrationEncryption(
+      encryptedBlob: encryptedBlob,
+      encryptedOverview: encryptedOverview,
+      keyVersion: keyVersion,
+      userId: userId
+    )
+  }
+
+  /// Registration step 2, AFTER the server confirmed the upload: append the
+  /// entry to the local cache at counter N+1 and bump the bridge meta counter
+  /// (same write protocol as HostSyncService — file first, counter after).
+  /// Best-effort from the ceremony's point of view: the caller must NOT gate
+  /// `completeRegistrationRequest` on this (the server copy is durable; a
+  /// stale local cache self-heals on the next host sync).
+  public func appendEntryToCache(_ entry: CacheEntry) async throws {
+    let blob: BridgeKeyStore.Blob
+    if let retained = currentBlob {
+      blob = retained
+    } else {
+      do {
+        blob = try await bridgeKeyStore.readForFillAuthenticated(
+          reason: "Save passkey to passwd-sso vault"
+        )
+      } catch {
+        throw Error.vaultLocked
+      }
+    }
+    currentBlob = nil  // consume after one use
+
+    // Re-read counter/uuid fresh — a concurrent host sync may have advanced
+    // them since the retained read.
+    let meta = try bridgeKeyStore.readDirect()
+
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    guard let wrapped = try? wrappedKeyStore.loadVaultKey() else {
+      throw Error.vaultLocked
+    }
+    guard
+      let vaultKeyData = try? decryptAESGCM(
+        ciphertext: wrapped.ciphertext,
+        iv: wrapped.iv,
+        tag: wrapped.authTag,
+        key: cacheKey
+      )
+    else {
+      throw Error.vaultLocked
+    }
+    var mutableVaultKeyData = vaultKeyData
+    defer { zeroData(&mutableVaultKeyData) }
+    let vaultKey = SymmetricKey(data: vaultKeyData)
+
+    let cacheData: CacheData
+    do {
+      cacheData = try readCacheFile(
+        path: cacheURL,
+        vaultKey: vaultKey,
+        expectedHostInstallUUID: meta.hostInstallUUID,
+        expectedCounter: meta.cacheVersionCounter,
+        now: now()
+      )
+    } catch EntryCacheError.rejection(let kind, let context) {
+      await writeRollbackFlag(kind: kind, context: context, blob: blob, vaultKey: vaultKey)
+      throw Error.cacheRejected(kind)
+    } catch {
+      throw Error.cacheUnavailable
+    }
+
+    var entries: [CacheEntry]
+    do {
+      entries = try JSONDecoder().decode([CacheEntry].self, from: cacheData.entries)
+    } catch {
+      throw Error.cacheUnavailable
+    }
+    entries.append(entry)
+    let entriesJSON: Data
+    do {
+      entriesJSON = try JSONEncoder().encode(entries)
+    } catch {
+      throw Error.cacheUnavailable
+    }
+
+    let newCounter = meta.cacheVersionCounter &+ 1
+    let header = CacheHeader(
+      cacheVersionCounter: newCounter,
+      cacheIssuedAt: now(),
+      // Not a server refresh — preserve the last successful sync timestamp.
+      lastSuccessfulRefreshAt: cacheData.header.lastSuccessfulRefreshAt,
+      entryCount: UInt32(entries.count),
+      hostInstallUUID: meta.hostInstallUUID,
+      userId: cacheData.header.userId
+    )
+    do {
+      try writeCacheFile(
+        data: CacheData(header: header, entries: entriesJSON),
+        vaultKey: vaultKey,
+        hostInstallUUID: meta.hostInstallUUID,
+        path: cacheURL
+      )
+    } catch {
+      throw Error.cacheUnavailable
+    }
+    try bridgeKeyStore.incrementCounter(newCounter: newCounter)
+  }
+
   // MARK: - Private helpers
 
   private func decryptSummary(

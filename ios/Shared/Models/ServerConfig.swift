@@ -14,3 +14,22 @@ public struct ServerConfig: Codable, Sendable, Equatable {
     self.pinnedTLSSPKIHash = pinnedTLSSPKIHash
   }
 }
+
+// MARK: - App Group persistence
+
+/// UserDefaults key for the JSON-encoded ServerConfig in the App Group suite.
+/// Shared so the host (writes at setup) and the AutoFill extension (reads for
+/// the passkey-registration upload) agree on one location.
+public let serverConfigDefaultsKey = "serverConfig"
+
+public func saveServerConfig(_ config: ServerConfig, defaults: UserDefaults) {
+  guard let data = try? JSONEncoder().encode(config) else { return }
+  defaults.set(data, forKey: serverConfigDefaultsKey)
+}
+
+public func loadServerConfig(
+  defaults: UserDefaults? = UserDefaults(suiteName: AppGroupContainer.identifier)
+) -> ServerConfig? {
+  guard let data = defaults?.data(forKey: serverConfigDefaultsKey) else { return nil }
+  return try? JSONDecoder().decode(ServerConfig.self, from: data)
+}

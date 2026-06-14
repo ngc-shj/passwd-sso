@@ -14,13 +14,14 @@ import { API_KEY_PREFIX, type ApiKeyScope } from "@/lib/constants/auth/api-key";
 import { SA_TOKEN_PREFIX, type SaTokenScope } from "@/lib/constants/auth/service-account";
 import { MCP_TOKEN_PREFIX, type McpScope } from "@/lib/constants/auth/mcp";
 import type { ExtensionTokenScope } from "@/lib/constants";
+import type { ExtensionTokenClientKind } from "@prisma/client";
 
 /** Known Bearer token prefixes — tokens with these prefixes never fall through to extension token validation. */
 const KNOWN_PREFIXES = [API_KEY_PREFIX, SA_TOKEN_PREFIX, MCP_TOKEN_PREFIX, "scim_"] as const;
 
 export type AuthResult =
   | { type: "session"; userId: string }
-  | { type: "token"; userId: string; tenantId: string; scopes: ExtensionTokenScope[] }
+  | { type: "token"; userId: string; tenantId: string; scopes: ExtensionTokenScope[]; clientKind: ExtensionTokenClientKind }
   | { type: "api_key"; userId: string; tenantId: string; apiKeyId: string; scopes: ApiKeyScope[] }
   | { type: "service_account"; serviceAccountId: string; tenantId: string; tokenId: string; scopes: SaTokenScope[] }
   | { type: "mcp_token"; userId: string | null; tenantId: string; tokenId: string; mcpClientId: string; scopes: McpScope[] };
@@ -146,5 +147,6 @@ export async function authOrToken(
     userId: result.data.userId,
     tenantId: result.data.tenantId,
     scopes: result.data.scopes,
+    clientKind: result.data.clientKind,
   };
 }

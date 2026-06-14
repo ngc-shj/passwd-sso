@@ -32,10 +32,16 @@ final class AutoLockServiceTests: XCTestCase {
       bridgeKeyStore: bks,
       wrappedKeyStore: wks,
       tokenStore: tokenStore,
+      uploadTokenStore: makeUploadTokenStore(keychain: keychain),
       cacheURL: cacheURL
     )
     service.autoLockMinutes = autoLockMinutes
     return service
+  }
+
+  /// Upload-token store over the SAME mock keychain makeService wires in.
+  private func makeUploadTokenStore(keychain: MockKeychain) -> UploadTokenStore {
+    UploadTokenStore(service: "com.passwd-sso.test.upload-token", keychain: keychain)
   }
 
   private func makeTmpDir() -> URL {
@@ -129,6 +135,24 @@ final class AutoLockServiceTests: XCTestCase {
     XCTAssertNotNil(loaded, "wrapped vault key should survive lock()")
   }
 
+  func testLockClearsUploadToken() throws {
+    let tmpDir = makeTmpDir()
+    defer { try? FileManager.default.removeItem(at: tmpDir) }
+    let keychain = MockKeychain()
+    seedKeychain(keychain)
+    let uploadStore = makeUploadTokenStore(keychain: keychain)
+    try uploadStore.save(token: "up_t", expiresAt: Date().addingTimeInterval(300), dpopNonce: "n")
+
+    let service = makeService(tmpDir: tmpDir, keychain: keychain)
+    service.startTimer()
+    service.lock()
+
+    XCTAssertNil(
+      try uploadStore.load(),
+      "a locked vault must not leave a spendable AutoFill upload token behind"
+    )
+  }
+
   // MARK: - Sign-out
 
   func testSignOutDeletesEverything() throws {
@@ -159,10 +183,13 @@ final class AutoLockServiceTests: XCTestCase {
       service: "com.passwd-sso.test.tokens",
       keychain: keychain
     )
+    let uploadStore = makeUploadTokenStore(keychain: keychain)
+    try uploadStore.save(token: "up_t", expiresAt: Date().addingTimeInterval(300), dpopNonce: nil)
     let service = AutoLockService(
       bridgeKeyStore: bks,
       wrappedKeyStore: wks,
       tokenStore: tokenStore,
+      uploadTokenStore: uploadStore,
       cacheURL: cacheURL
     )
     service.startTimer()
@@ -177,6 +204,8 @@ final class AutoLockServiceTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
     // Wrapped keys should be gone
     XCTAssertNil(try wks.loadVaultKey())
+    // AutoFill upload token should be gone
+    XCTAssertNil(try uploadStore.load())
   }
 
   // MARK: - Default timeout

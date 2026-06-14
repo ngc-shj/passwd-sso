@@ -159,9 +159,11 @@ targets:
             ASCredentialProviderExtensionCapabilities:
               ProvidesPasswords: true
               ProvidesOneTimeCodes: true
-              # Passkey assertion (sign-in). Registration is explicitly cancelled
-              # in CredentialProviderViewController (read-only/offline extension).
+              # Passkey assertion (sign-in).
               ProvidesPasskeys: true
+              # Passkey registration (creation). Without this key iOS never
+              # routes prepareInterface(forPasskeyRegistration:) to us (F4).
+              ProvidesPasskeyRegistration: true
     entitlements:
       path: PasswdSSOAutofillExtension/PasswdSSOAutofillExtension.entitlements
       properties:

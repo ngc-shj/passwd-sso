@@ -10,7 +10,10 @@ import {
   AUDIT_TARGET_TYPE,
   EXTENSION_TOKEN_MAX_ACTIVE,
 } from "@/lib/constants";
-import { IOS_TOKEN_DEFAULT_SCOPES } from "@/lib/constants/auth/extension-token";
+import {
+  IOS_TOKEN_DEFAULT_SCOPES,
+  EXTENSION_TOKEN_SCOPE,
+} from "@/lib/constants/auth/extension-token";
 import {
   verifyDpopProof,
   computeAth,
@@ -34,6 +37,13 @@ import {
 
 export const IOS_TOKEN_IDLE_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 export const IOS_TOKEN_ABSOLUTE_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * TTL for the single-purpose AutoFill upload token (passkey registration).
+ * Deliberately short: it exists only to cover the seconds-long registration
+ * ceremony. Not refreshable; a fresh one is minted by the host on each unlock.
+ */
+export const IOS_AUTOFILL_TOKEN_TTL_MS = 5 * 60 * 1000;
 
 /** Replay-disambiguation window for legitimate retry-after-network-failure. */
 export const REFRESH_REPLAY_GRACE_MS = 5_000;
@@ -195,6 +205,77 @@ export async function issueIosToken(
   };
 }
 
+// ─── AutoFill upload token (passkey registration) ──────────────
+
+export interface IssueAutofillTokenParams {
+  userId: string;
+  tenantId: string;
+  /**
+   * RFC 7638 JWK thumbprint of the AutoFill EXTENSION's own DPoP key (NOT the
+   * host's). The minted token's DPoP `cnf.jkt` binds to this so only the
+   * extension (which holds the matching SE key in the shared Keychain group)
+   * can present the token.
+   */
+  cnfJkt: string;
+}
+
+export interface IssuedAutofillToken {
+  /** Plaintext bearer token; returned once, never persisted. */
+  token: string;
+  expiresAt: Date;
+  cnfJkt: string;
+  /** CSV scope ("passwords:write"). */
+  scope: string;
+}
+
+/**
+ * Mint a short-lived, `passwords:write`-only, DPoP-bound token for the iOS
+ * AutoFill extension's passkey-registration upload. Validated by the SAME
+ * `validateExtensionToken` DPoP path as the other client kinds (no special
+ * branch); `POST /api/passwords` accepts it via the shared scope check.
+ *
+ * Only one active AutoFill token per user — any prior one is revoked first, so
+ * minting never evicts the host's own IOS_APP tokens via the active-token cap.
+ */
+export async function issueAutofillToken(
+  params: IssueAutofillTokenParams,
+): Promise<IssuedAutofillToken> {
+  const { userId, tenantId, cnfJkt } = params;
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + IOS_AUTOFILL_TOKEN_TTL_MS);
+  const scopeCsv = EXTENSION_TOKEN_SCOPE.PASSWORDS_WRITE;
+
+  const plaintext = generateShareToken();
+  const tokenHash = hashToken(plaintext);
+
+  await withUserTenantRls(userId, async () =>
+    prisma.$transaction(async (tx) => {
+      // Single active AutoFill token per user (short-lived, single-purpose).
+      // Revoke priors so this mint stays within the active cap WITHOUT evicting
+      // the host's IOS_APP access/refresh rows.
+      await tx.extensionToken.updateMany({
+        where: { userId, clientKind: "IOS_AUTOFILL", revokedAt: null },
+        data: { revokedAt: now },
+      });
+      await tx.extensionToken.create({
+        data: {
+          userId,
+          tenantId,
+          tokenHash,
+          scope: scopeCsv,
+          expiresAt,
+          familyId: randomUUID(),
+          familyCreatedAt: now,
+          clientKind: "IOS_AUTOFILL",
+          cnfJkt,
+        },
+      });
+    }),
+  );
+
+  return { token: plaintext, expiresAt, cnfJkt, scope: scopeCsv };
+}
+
 // ─── Validation (DPoP) ──────────────────────────────────────────
 
 export interface IosTokenRow {
@@ -302,6 +383,9 @@ export async function validateIosTokenDpop(
       familyCreatedAt: row.familyCreatedAt,
       // cnfJkt is guaranteed non-null here: null guard above returned early.
       cnfJkt,
+      // This validator is the IOS_APP-only DPoP path (the IOS_AUTOFILL kind is
+      // validated via validateExtensionTokenDpop, not here).
+      clientKind: "IOS_APP",
     },
   };
 }

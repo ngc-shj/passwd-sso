@@ -28,6 +28,8 @@
 			<dict>
 				<key>ProvidesOneTimeCodes</key>
 				<true/>
+				<key>ProvidesPasskeyRegistration</key>
+				<true/>
 				<key>ProvidesPasskeys</key>
 				<true/>
 				<key>ProvidesPasswords</key>
