@@ -27,6 +27,7 @@ struct VaultListView: View {
   @State private var isSyncing: Bool = false
   @State private var syncError: String?
   @FocusState private var searchFocused: Bool
+  @Environment(\.scenePhase) private var scenePhase
 
   var body: some View {
     NavigationStack {
@@ -104,6 +105,14 @@ struct VaultListView: View {
       // Passwords-app pattern). Activity tracking stays on query change.
       .onChange(of: viewModel.searchQuery) { _, _ in
         autoLockService.recordActivity()
+      }
+      // Returning to the app re-binds the list from a fresh sync, so a passkey/
+      // entry registered while away (AutoFill extension in Safari, web) appears
+      // automatically — no lock/unlock or manual sync. Silent on failure.
+      .onChange(of: scenePhase) { _, newPhase in
+        if newPhase == .active {
+          Task { await sync(surfaceErrors: false) }
+        }
       }
       .alert(
         "Sync failed",
@@ -302,24 +311,35 @@ struct VaultListView: View {
   }
 
   /// Re-fetch entries from the server, rebuild the encrypted cache, and rebind
-  /// the visible list from the fresh cache. Best-effort: on failure the current
-  /// list is kept and a non-blocking alert is shown. Single-flight via
-  /// `isSyncing`. Backs both the "Sync now" menu item and pull-to-refresh.
+  /// the visible list from the fresh cache. Best-effort, single-flight via
+  /// `isSyncing`. Backs the "Sync now" menu item, pull-to-refresh, and the
+  /// silent foreground auto-refresh.
+  ///
+  /// `surfaceErrors`: manual triggers (button / pull) show a non-blocking alert
+  /// on failure; the automatic foreground refresh stays silent (a transient
+  /// offline state must not pop an alert just for returning to the app).
   @MainActor
-  private func sync() async {
+  private func sync(surfaceErrors: Bool = true) async {
     guard !isSyncing else { return }
     isSyncing = true
     defer { isSyncing = false }
-    autoLockService.recordActivity()
+    // Manual sync is a user action → reset the idle-lock timer. The silent
+    // foreground auto-refresh is NOT user interaction, so it must not extend the
+    // auto-lock window just because the app returned to the foreground.
+    if surfaceErrors { autoLockService.recordActivity() }
     do {
       let report = try await hostSyncService.runSync(vaultKey: vaultKey, userId: userId)
       if let fresh = report.cacheData {
         viewModel.loadFromCache(cacheData: fresh, vaultKey: vaultKey, userId: userId)
       }
     } catch MobileAPIError.authenticationRequired {
-      syncError = String(localized: "Your session expired. Lock and unlock to sign in again.")
+      if surfaceErrors {
+        syncError = String(localized: "Your session expired. Lock and unlock to sign in again.")
+      }
     } catch {
-      syncError = String(localized: "Couldn't sync. Check your connection and try again.")
+      if surfaceErrors {
+        syncError = String(localized: "Couldn't sync. Check your connection and try again.")
+      }
     }
   }
 
