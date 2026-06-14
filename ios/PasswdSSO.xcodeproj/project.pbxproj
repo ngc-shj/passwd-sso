@@ -134,6 +134,7 @@
 		F50C3FCB3A6C9F4A5419B71E /* PasskeyRegistrationOutcome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 881416D87A323B49E40CCCC3 /* PasskeyRegistrationOutcome.swift */; };
 		F67226652335D3241D5B1ADD /* PasskeySignCountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 469C94A411CE66C4D3EAB9AA /* PasskeySignCountStore.swift */; };
 		F6D4F11AC118415488FB8DCF /* URLMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F6C27CE52EFE55D86666E7C /* URLMatcher.swift */; };
+		F7972AB668F0D8073EBA5172 /* EntryFormTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBBBBBBE5688A781ED154534 /* EntryFormTests.swift */; };
 		FC74F7D953B2978FE27D3B85 /* EntryDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD65567EDF5CDCFB425499EA /* EntryDetailView.swift */; };
 		FD86EB17606A4DC5301497AA /* TOTPCodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D235AC82775464BDF11F292F /* TOTPCodeView.swift */; };
 		FEC853759999A05E6F0867F4 /* EntryUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = D696B8B99CFDB4FFFDC090E1 /* EntryUploader.swift */; };
@@ -307,6 +308,7 @@
 		B61C70648C7D9DE6F493F1AD /* SecureClipboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureClipboardTests.swift; sourceTree = "<group>"; };
 		B67A2748B3B1C69F7543EB64 /* PasswdSSOTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PasswdSSOTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		BB8D42DAB6AE67B22BFFB262 /* BackgroundSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSyncCoordinator.swift; sourceTree = "<group>"; };
+		BBBBBBBE5688A781ED154534 /* EntryFormTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryFormTests.swift; sourceTree = "<group>"; };
 		C02778E2A8EE7B7A09B671C4 /* KDF.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KDF.swift; sourceTree = "<group>"; };
 		C19D6A107E63BFA725F2C0F3 /* WrappedKeyStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WrappedKeyStoreTests.swift; sourceTree = "<group>"; };
 		C1F6D6429583F4DF936E38A0 /* SharedFrameworkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedFrameworkTests.swift; sourceTree = "<group>"; };
@@ -403,6 +405,7 @@
 				24CD914CFF8AD6DD6DAB0129 /* EntryCacheFileTests.swift */,
 				628885DD1B6E8E32503A7DD9 /* EntryEncrypterTests.swift */,
 				28A274ABCE6A2833F3A66EF5 /* EntryFetcherTests.swift */,
+				BBBBBBBE5688A781ED154534 /* EntryFormTests.swift */,
 				38C0939161B9D1614DD3053E /* EntryTypeCategoryTests.swift */,
 				D2EE0867F2772AB2952888FA /* EntryUploaderTests.swift */,
 				CFD016B2D5D9999A41CCA92F /* HostSyncServiceTests.swift */,
@@ -988,6 +991,7 @@
 				EF9407000E17ADEB5E667D88 /* EntryCacheFileTests.swift in Sources */,
 				96A710A8F83E4FEB146E39D4 /* EntryEncrypterTests.swift in Sources */,
 				53BABB8B7A6B12FE9A269D87 /* EntryFetcherTests.swift in Sources */,
+				F7972AB668F0D8073EBA5172 /* EntryFormTests.swift in Sources */,
 				0CDECAF833B17127DDB5B59B /* EntryTypeCategoryTests.swift in Sources */,
 				7309070E13EA38FE4F57C277 /* EntryUploaderTests.swift in Sources */,
 				1600D1BA3846CDCAEA02EF7E /* HostSyncServiceTests.swift in Sources */,

@@ -207,7 +207,20 @@ struct EntryForm: View {
       }
       dismiss()
     } catch {
-      saveError = String(localized: "Save failed: \(error.localizedDescription)")
+      saveError = EntryForm.saveErrorMessage(for: error)
     }
+  }
+
+  /// Map a save error to a user-facing, localized message. Pure and
+  /// `nonisolated` so it is unit-testable without MainActor dispatch.
+  /// Does not interpolate `error.localizedDescription` — that would leak
+  /// internal `MobileAPIError` case labels/associated values into the UI.
+  // TODO(ios-quota-exceeded-message): consider MobileAPIError: LocalizedError
+  // for richer per-case save messages instead of one generic fallback.
+  nonisolated static func saveErrorMessage(for error: Error) -> String {
+    if (error as? MobileAPIError) == .quotaExceeded {
+      return String(localized: "You've reached your vault's item limit. Remove unused items and try again.")
+    }
+    return String(localized: "Could not save. Please try again.")
   }
 }
