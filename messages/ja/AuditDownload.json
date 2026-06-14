@@ -9,7 +9,7 @@
   "to": "終了",
   "download": "ダウンロード",
   "downloading": "ダウンロード中...",
-  "maxRange": "最大期間は90日です",
+  "maxRange": "最大期間は{max}日です",
   "rateLimited": "リクエストが多すぎます。しばらくしてからお試しください。",
   "exportDisabled": "チームポリシーによりエクスポートが無効です",
   "downloadError": "ダウンロードに失敗しました",

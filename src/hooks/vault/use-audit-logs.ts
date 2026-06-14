@@ -9,6 +9,7 @@ import { readApiErrorBody, getApiErrorDetail } from "@/lib/http/read-api-error-b
 import { downloadBlob } from "@/lib/ui/download-blob";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import type { AuditActionValue } from "@/lib/constants";
+import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common";
 
 // ---- Types ----
 
@@ -196,7 +197,7 @@ export function useAuditLogs(config: UseAuditLogsConfig): UseAuditLogsReturn {
           // Map known validation keys to i18n messages
           const msg =
             hasDate ? td("dateRequired")
-            : hasRange ? td("maxRange")
+            : hasRange ? td("maxRange", { max: AUDIT_LOG_MAX_RANGE_DAYS })
             : td("downloadError");
           toast.error(msg);
         } else {

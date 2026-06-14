@@ -36,6 +36,7 @@ import { getKeyProviderSync } from "@/lib/key-provider";
 import { getRedis } from "@/lib/redis";
 import { parseDeviceFromUserAgent } from "@/lib/parse-user-agent";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { SEC_PER_MINUTE } from "@/lib/constants/time";
 
 // ── Shared constants ────────────────────────────────────────
 
@@ -46,7 +47,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
  * dedicated key namespace. Tuning this value applies to both flows in
  * lockstep — sub-flows MUST NOT define a local override.
  */
-export const WEBAUTHN_CHALLENGE_TTL_SECONDS = 300;
+export const WEBAUTHN_CHALLENGE_TTL_SECONDS = 5 * SEC_PER_MINUTE;
 
 // ── Env helpers ──────────────────────────────────────────────
 

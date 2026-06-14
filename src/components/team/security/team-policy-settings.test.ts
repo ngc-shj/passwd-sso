@@ -1,9 +1,16 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { createTranslator } from "next-intl";
 import { validatePolicy } from "./team-policy-settings";
 import {
   POLICY_MIN_PW_LENGTH_MIN,
   POLICY_MIN_PW_LENGTH_MAX,
   PASSWORD_HISTORY_COUNT_MAX,
+  SESSION_IDLE_TIMEOUT_MIN,
+  SESSION_IDLE_TIMEOUT_MAX,
+  SESSION_ABSOLUTE_TIMEOUT_MIN,
+  SESSION_ABSOLUTE_TIMEOUT_MAX,
 } from "@/lib/validations";
 
 const VALID_BASE = {
@@ -81,5 +88,54 @@ describe("validatePolicy", () => {
   it("rejects negative passwordHistoryCount", () => {
     const errs = validatePolicy({ ...VALID_BASE, passwordHistoryCount: -1 });
     expect(errs.passwordHistoryCount).toBe("passwordHistoryCountRange");
+  });
+});
+
+// Guards the validate() i18n wiring: every msgKey validatePolicy can emit must
+// resolve to a real number-bearing string. A dropped interpolation arg (the
+// F-R4-1 bug) would leave a literal "{min}"/"{max}" in the output.
+describe("range error i18n wiring", () => {
+  const messages = JSON.parse(
+    readFileSync(join(process.cwd(), "messages", "en", "TeamPolicy.json"), "utf8"),
+  ) as Record<string, unknown>;
+  const t = createTranslator({ locale: "en", messages });
+
+  // Mirror of ERROR_MESSAGE_ARGS in team-policy-settings.tsx — must cover every
+  // Range key validatePolicy emits.
+  const ERROR_MESSAGE_ARGS: Record<string, Record<string, number>> = {
+    minPasswordLengthRange: { min: POLICY_MIN_PW_LENGTH_MIN, max: POLICY_MIN_PW_LENGTH_MAX },
+    passwordHistoryCountRange: { min: 0, max: PASSWORD_HISTORY_COUNT_MAX },
+    sessionIdleTimeoutRange: { min: SESSION_IDLE_TIMEOUT_MIN, max: SESSION_IDLE_TIMEOUT_MAX },
+    sessionAbsoluteTimeoutRange: { min: SESSION_ABSOLUTE_TIMEOUT_MIN, max: SESSION_ABSOLUTE_TIMEOUT_MAX },
+  };
+
+  it("session idle timeout out-of-range error renders real numbers, no placeholder residue", () => {
+    const errs = validatePolicy({ ...VALID_BASE, sessionIdleTimeoutMinutes: 1441 });
+    const msgKey = errs.sessionIdleTimeoutMinutes;
+    const rendered = t(msgKey, ERROR_MESSAGE_ARGS[msgKey]);
+    expect(rendered).toContain(String(SESSION_IDLE_TIMEOUT_MAX));
+    expect(rendered).not.toContain("{");
+    expect(rendered).not.toContain("}");
+  });
+
+  it("session absolute timeout out-of-range error renders real numbers, no placeholder residue", () => {
+    const errs = validatePolicy({ ...VALID_BASE, sessionAbsoluteTimeoutMinutes: 43201 });
+    const msgKey = errs.sessionAbsoluteTimeoutMinutes;
+    const rendered = t(msgKey, ERROR_MESSAGE_ARGS[msgKey]);
+    expect(rendered).toContain(String(SESSION_ABSOLUTE_TIMEOUT_MAX));
+    expect(rendered).not.toContain("{");
+    expect(rendered).not.toContain("}");
+  });
+
+  it("ERROR_MESSAGE_ARGS covers every Range key validatePolicy can emit", () => {
+    const emittableRangeKeys = [
+      "minPasswordLengthRange",
+      "passwordHistoryCountRange",
+      "sessionIdleTimeoutRange",
+      "sessionAbsoluteTimeoutRange",
+    ];
+    for (const key of emittableRangeKeys) {
+      expect(ERROR_MESSAGE_ARGS[key]).toBeDefined();
+    }
   });
 });

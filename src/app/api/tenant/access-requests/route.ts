@@ -18,7 +18,7 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { z } from "zod";
 import { SA_TOKEN_PREFIX, SA_TOKEN_SCOPE, SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
-import { MS_PER_HOUR, MS_PER_MINUTE } from "@/lib/constants/time";
+import { MS_PER_HOUR, MS_PER_MINUTE, MIN_PER_HOUR, MIN_PER_DAY } from "@/lib/constants/time";
 
 const accessRequestCreateLimiter = createRateLimiter({
   windowMs: MS_PER_HOUR,
@@ -40,14 +40,14 @@ const adminCreateSchema = z.object({
   serviceAccountId: z.string().uuid(),
   requestedScope: z.array(z.enum(SA_TOKEN_SCOPES as [string, ...string[]])).min(1),
   justification: z.string().max(1000).optional(),
-  expiresInMinutes: z.number().int().min(5).max(1440).default(60),
+  expiresInMinutes: z.number().int().min(5).max(MIN_PER_DAY).default(MIN_PER_HOUR),
 });
 
 // SA self-service request (serviceAccountId inferred from token)
 const saCreateSchema = z.object({
   requestedScope: z.array(z.enum(SA_TOKEN_SCOPES as [string, ...string[]])).min(1),
   justification: z.string().max(1000).optional(),
-  expiresInMinutes: z.number().int().min(5).max(1440).default(60),
+  expiresInMinutes: z.number().int().min(5).max(MIN_PER_DAY).default(MIN_PER_HOUR),
 });
 
 // GET /api/tenant/access-requests — List access requests for the tenant

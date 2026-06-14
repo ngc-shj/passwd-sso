@@ -10,7 +10,8 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { parseActionsCsvParam, parseActorType } from "@/lib/audit/audit-query";
-import { AUDIT_LOG_MAX_RANGE_DAYS, RATE_WINDOW_MS } from "@/lib/validations/common.server";
+import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { buildAuditLogStream, buildAuditLogDownloadResponse } from "@/lib/audit/audit-log-stream";
 

@@ -112,19 +112,19 @@ export function TenantPasswordPolicyCard() {
   const validate = (): string | null => {
     if (minPasswordLength !== "") {
       const num = Number(minPasswordLength);
-      if (!Number.isInteger(num) || num < POLICY_MIN_PW_LENGTH_MIN) return t("passwordMinLengthValidationMin");
-      if (num > POLICY_MIN_PW_LENGTH_MAX) return t("passwordMinLengthValidationMax");
+      if (!Number.isInteger(num) || num < POLICY_MIN_PW_LENGTH_MIN) return t("passwordMinLengthValidationMin", { min: POLICY_MIN_PW_LENGTH_MIN });
+      if (num > POLICY_MIN_PW_LENGTH_MAX) return t("passwordMinLengthValidationMax", { max: POLICY_MIN_PW_LENGTH_MAX });
     }
     if (passwordMaxAgeEnabled) {
       if (passwordMaxAgeDays === "") return t("passwordMaxAgeRequired");
       const num = Number(passwordMaxAgeDays);
-      if (!Number.isInteger(num) || num < PASSWORD_MAX_AGE_MIN) return t("passwordMaxAgeValidationMin");
-      if (num > PASSWORD_MAX_AGE_MAX) return t("passwordMaxAgeValidationMax");
+      if (!Number.isInteger(num) || num < PASSWORD_MAX_AGE_MIN) return t("passwordMaxAgeValidationMin", { min: PASSWORD_MAX_AGE_MIN });
+      if (num > PASSWORD_MAX_AGE_MAX) return t("passwordMaxAgeValidationMax", { max: PASSWORD_MAX_AGE_MAX });
     }
     if (passwordExpiryWarningDays !== "") {
       const num = Number(passwordExpiryWarningDays);
-      if (!Number.isInteger(num) || num < PASSWORD_EXPIRY_WARNING_MIN) return t("passwordExpiryWarningValidationMin");
-      if (num > PASSWORD_EXPIRY_WARNING_MAX) return t("passwordExpiryWarningValidationMax");
+      if (!Number.isInteger(num) || num < PASSWORD_EXPIRY_WARNING_MIN) return t("passwordExpiryWarningValidationMin", { min: PASSWORD_EXPIRY_WARNING_MIN });
+      if (num > PASSWORD_EXPIRY_WARNING_MAX) return t("passwordExpiryWarningValidationMax", { max: PASSWORD_EXPIRY_WARNING_MAX });
     }
     return null;
   };
@@ -195,7 +195,7 @@ export function TenantPasswordPolicyCard() {
             })}
             placeholder="0"
           />
-          <p className="text-xs text-muted-foreground">{t("tenantMinPasswordLengthHelp")}</p>
+          <p className="text-xs text-muted-foreground">{t("tenantMinPasswordLengthHelp", { min: POLICY_MIN_PW_LENGTH_MIN, max: POLICY_MIN_PW_LENGTH_MAX })}</p>
         </div>
 
         {/* Character requirements */}
@@ -272,7 +272,7 @@ export function TenantPasswordPolicyCard() {
                 })}
                 placeholder="90"
               />
-              <p className="text-xs text-muted-foreground">{t("passwordMaxAgeDaysHelp")}</p>
+              <p className="text-xs text-muted-foreground">{t("passwordMaxAgeDaysHelp", { min: PASSWORD_MAX_AGE_MIN, max: PASSWORD_MAX_AGE_MAX })}</p>
             </div>
 
             <div className="space-y-2">
@@ -290,7 +290,7 @@ export function TenantPasswordPolicyCard() {
                 })}
                 placeholder="14"
               />
-              <p className="text-xs text-muted-foreground">{t("passwordExpiryWarningDaysHelp")}</p>
+              <p className="text-xs text-muted-foreground">{t("passwordExpiryWarningDaysHelp", { min: PASSWORD_EXPIRY_WARNING_MIN, max: PASSWORD_EXPIRY_WARNING_MAX })}</p>
             </div>
           </>
         )}

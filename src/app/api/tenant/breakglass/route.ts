@@ -9,6 +9,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { BREAKGLASS_USER_LIST_LIMIT } from "@/lib/validations/common.server";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
+import { SEC_PER_HOUR } from "@/lib/constants/time";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { createNotification } from "@/lib/notification";
 import { createBreakglassGrantSchema } from "@/lib/validations";
@@ -120,7 +121,7 @@ async function handlePOST(req: NextRequest) {
       // in the same window are immediate (incident already underway).
       // Configurable env: BREAKGLASS_COOLING_OFF_SECONDS=0 disables.
       const coolingOffSecs = Number(
-        process.env.BREAKGLASS_COOLING_OFF_SECONDS ?? "3600",
+        process.env.BREAKGLASS_COOLING_OFF_SECONDS ?? String(SEC_PER_HOUR),
       );
       const recentGrant =
         coolingOffSecs > 0

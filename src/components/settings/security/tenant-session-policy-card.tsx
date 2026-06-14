@@ -22,12 +22,16 @@ import {
   MAX_CONCURRENT_SESSIONS_MAX,
   SESSION_IDLE_TIMEOUT_MIN,
   SESSION_IDLE_TIMEOUT_MAX,
+  SESSION_IDLE_TIMEOUT_DEFAULT,
   SESSION_ABSOLUTE_TIMEOUT_MIN,
   SESSION_ABSOLUTE_TIMEOUT_MAX,
+  SESSION_ABSOLUTE_TIMEOUT_DEFAULT,
   EXTENSION_TOKEN_IDLE_TIMEOUT_MIN,
   EXTENSION_TOKEN_IDLE_TIMEOUT_MAX,
+  EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
   EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MIN,
   EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MAX,
+  EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT,
   VAULT_AUTO_LOCK_MIN,
   VAULT_AUTO_LOCK_MAX,
 } from "@/lib/validations";
@@ -88,10 +92,10 @@ export function TenantSessionPolicyCard() {
         setUnlimited(unlimitedVal);
         setMaxSessions(maxSessionsVal);
 
-        const idleVal = String(data.sessionIdleTimeoutMinutes ?? 480);
-        const absVal = String(data.sessionAbsoluteTimeoutMinutes ?? 43200);
-        const extIdleVal = String(data.extensionTokenIdleTimeoutMinutes ?? 10080);
-        const extAbsVal = String(data.extensionTokenAbsoluteTimeoutMinutes ?? 43200);
+        const idleVal = String(data.sessionIdleTimeoutMinutes ?? SESSION_IDLE_TIMEOUT_DEFAULT);
+        const absVal = String(data.sessionAbsoluteTimeoutMinutes ?? SESSION_ABSOLUTE_TIMEOUT_DEFAULT);
+        const extIdleVal = String(data.extensionTokenIdleTimeoutMinutes ?? EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT);
+        const extAbsVal = String(data.extensionTokenAbsoluteTimeoutMinutes ?? EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT);
         setIdleTimeoutMinutes(idleVal);
         setAbsoluteTimeoutMinutes(absVal);
         setExtensionIdleMinutes(extIdleVal);
@@ -323,7 +327,7 @@ export function TenantSessionPolicyCard() {
               max: SESSION_IDLE_TIMEOUT_MAX,
               onEdit: () => setError(null),
             })}
-            placeholder="480"
+            placeholder={String(SESSION_IDLE_TIMEOUT_DEFAULT)}
           />
           <p className="text-xs text-muted-foreground">
             {t("idleTimeoutHelp", { min: SESSION_IDLE_TIMEOUT_MIN, max: SESSION_IDLE_TIMEOUT_MAX })}
@@ -344,7 +348,7 @@ export function TenantSessionPolicyCard() {
               max: SESSION_ABSOLUTE_TIMEOUT_MAX,
               onEdit: () => setError(null),
             })}
-            placeholder="43200"
+            placeholder={String(SESSION_ABSOLUTE_TIMEOUT_DEFAULT)}
           />
           <p className="text-xs text-muted-foreground">
             {t("absoluteTimeoutHelp", { min: SESSION_ABSOLUTE_TIMEOUT_MIN, max: SESSION_ABSOLUTE_TIMEOUT_MAX })}
@@ -367,7 +371,7 @@ export function TenantSessionPolicyCard() {
               max: EXTENSION_TOKEN_IDLE_TIMEOUT_MAX,
               onEdit: () => setError(null),
             })}
-            placeholder="10080"
+            placeholder={String(EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT)}
           />
           <p className="text-xs text-muted-foreground">
             {t("extensionIdleHelp", { min: EXTENSION_TOKEN_IDLE_TIMEOUT_MIN, max: EXTENSION_TOKEN_IDLE_TIMEOUT_MAX })}
@@ -388,7 +392,7 @@ export function TenantSessionPolicyCard() {
               max: EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MAX,
               onEdit: () => setError(null),
             })}
-            placeholder="43200"
+            placeholder={String(EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT)}
           />
           <p className="text-xs text-muted-foreground">
             {t("extensionAbsoluteHelp", { min: EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MIN, max: EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MAX })}

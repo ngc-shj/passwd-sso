@@ -8,6 +8,7 @@
 import jsQR from "jsqr";
 import type { EntryTotp } from "@/lib/vault/entry-form-types";
 import { MAX_IMAGE_DIMENSION } from "@/lib/validations/common";
+import { SEC_PER_HOUR } from "@/lib/constants/time";
 
 /**
  * Scan an ImageData for a QR code and return the decoded text.
@@ -50,7 +51,7 @@ export function parseOtpauthUri(input: string): EntryTotp | null {
       secret,
       algorithm,
       digits: !Number.isNaN(rawDigits) && rawDigits >= 4 && rawDigits <= 10 ? rawDigits : undefined,
-      period: !Number.isNaN(rawPeriod) && rawPeriod > 0 && rawPeriod <= 3600 ? rawPeriod : undefined,
+      period: !Number.isNaN(rawPeriod) && rawPeriod > 0 && rawPeriod <= SEC_PER_HOUR ? rawPeriod : undefined,
     };
   } catch {
     return null;

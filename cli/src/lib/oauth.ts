@@ -12,7 +12,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { spawn } from "node:child_process";
-import { MS_PER_MINUTE, MS_PER_SECOND } from "./time";
+import { MS_PER_MINUTE, MS_PER_SECOND, SEC_PER_HOUR } from "./time";
 
 const CALLBACK_TIMEOUT_MS = 2 * MS_PER_MINUTE;
 
@@ -20,7 +20,7 @@ const CLI_CLIENT_NAME = "passwd-sso-cli";
 const CLI_SCOPES =
   "credentials:list credentials:use vault:status vault:unlock-data passwords:read passwords:write ssh:sign";
 
-const OAUTH_DEFAULT_EXPIRES_IN_SEC = 3600;
+const OAUTH_DEFAULT_EXPIRES_IN_SEC = SEC_PER_HOUR;
 
 const MCP_TOKEN_ENDPOINT = "/api/mcp/token";
 const MCP_REGISTER_ENDPOINT = "/api/mcp/register";

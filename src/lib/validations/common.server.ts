@@ -18,7 +18,7 @@ export const KDF_ARGON2_PARALLELISM_MAX = 16;
 // Session policy min/max constants are in common.ts (shared with client).
 
 // ─── Audit Log ────────────────────────────────────────────────
-export const AUDIT_LOG_MAX_RANGE_DAYS = 90;
+// AUDIT_LOG_MAX_RANGE_DAYS lives in common.ts (client-shared — rendered in UI).
 export const AUDIT_LOG_BATCH_SIZE = 500;
 export const AUDIT_LOG_MAX_ROWS = 100_000;
 export const METADATA_MAX_BYTES = 10_240;      // 10 KB

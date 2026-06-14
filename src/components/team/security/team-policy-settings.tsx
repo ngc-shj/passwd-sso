@@ -113,6 +113,15 @@ const SECTION_HEADER: Record<TeamPolicySection, { icon: LucideIcon; titleKey: st
 };
 const FALLBACK_HEADER = { icon: ListChecks, titleKey: "title", descKey: "description" } as const;
 
+// Interpolation args for range error messages, keyed by message key.
+// Keys absent here have no placeholders and resolve without args.
+const ERROR_MESSAGE_ARGS: Record<string, Record<string, number>> = {
+  minPasswordLengthRange: { min: POLICY_MIN_PW_LENGTH_MIN, max: POLICY_MIN_PW_LENGTH_MAX },
+  passwordHistoryCountRange: { min: 0, max: PASSWORD_HISTORY_COUNT_MAX },
+  sessionIdleTimeoutRange: { min: SESSION_IDLE_TIMEOUT_MIN, max: SESSION_IDLE_TIMEOUT_MAX },
+  sessionAbsoluteTimeoutRange: { min: SESSION_ABSOLUTE_TIMEOUT_MIN, max: SESSION_ABSOLUTE_TIMEOUT_MAX },
+};
+
 interface TeamPolicySettingsProps {
   teamId: string;
   // section filter: controls which fields render. Save always writes the
@@ -162,7 +171,8 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
     const rawErrs = validatePolicy(policy);
     const translated: Record<string, string> = {};
     for (const [key, msgKey] of Object.entries(rawErrs)) {
-      translated[key] = t(msgKey);
+      const args = ERROR_MESSAGE_ARGS[msgKey];
+      translated[key] = args ? t(msgKey, args) : t(msgKey);
     }
     setFieldErrors(translated);
     return Object.keys(rawErrs).length === 0;
@@ -359,7 +369,7 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
             <p className="text-xs text-muted-foreground">{t("sessionIdleTimeoutHelp", { min: SESSION_IDLE_TIMEOUT_MIN, max: SESSION_IDLE_TIMEOUT_MAX })}</p>
             {fieldErrors.sessionIdleTimeoutMinutes && (
               <p className="text-sm text-destructive">
-                {t(fieldErrors.sessionIdleTimeoutMinutes, { min: SESSION_IDLE_TIMEOUT_MIN, max: SESSION_IDLE_TIMEOUT_MAX })}
+                {fieldErrors.sessionIdleTimeoutMinutes}
               </p>
             )}
           </div>
@@ -388,7 +398,7 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
             <p className="text-xs text-muted-foreground">{t("sessionAbsoluteTimeoutHelp", { min: SESSION_ABSOLUTE_TIMEOUT_MIN, max: SESSION_ABSOLUTE_TIMEOUT_MAX })}</p>
             {fieldErrors.sessionAbsoluteTimeoutMinutes && (
               <p className="text-sm text-destructive">
-                {t(fieldErrors.sessionAbsoluteTimeoutMinutes, { min: SESSION_ABSOLUTE_TIMEOUT_MIN, max: SESSION_ABSOLUTE_TIMEOUT_MAX })}
+                {fieldErrors.sessionAbsoluteTimeoutMinutes}
               </p>
             )}
           </div>
@@ -422,7 +432,7 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
                 setPolicy((p) => ({ ...p, passwordHistoryCount: value }));
               }}
             />
-            <p className="text-xs text-muted-foreground">{t("passwordHistoryCountHelp")}</p>
+            <p className="text-xs text-muted-foreground">{t("passwordHistoryCountHelp", { max: PASSWORD_HISTORY_COUNT_MAX })}</p>
           </div>
         </div>
         )}

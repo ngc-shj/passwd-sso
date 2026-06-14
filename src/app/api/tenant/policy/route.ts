@@ -24,6 +24,7 @@ import { invalidateTenantPolicyCache, wouldIpBeAllowed } from "@/lib/auth/policy
 import { invalidateLockoutThresholdCache } from "@/lib/auth/policy/account-lockout";
 import { invalidateSessionTimeoutCacheForTenant } from "@/lib/auth/session/session-timeout";
 import { invalidateTenantSessionsCache } from "@/lib/auth/session/user-session-invalidation";
+import { MIN_PER_HOUR, MIN_PER_DAY } from "@/lib/constants/time";
 import {
   pinLengthSchema,
   MAX_CIDRS,
@@ -626,7 +627,7 @@ async function handlePATCH(req: NextRequest) {
   // Cross-field validation: lockout thresholds/durations must be strictly ascending.
   // Merge request values with current DB values, falling back to schema defaults when DB has no value.
   const DEFAULT_T1 = 5, DEFAULT_T2 = 10, DEFAULT_T3 = 15;
-  const DEFAULT_D1 = 15, DEFAULT_D2 = 60, DEFAULT_D3 = 1440;
+  const DEFAULT_D1 = 15, DEFAULT_D2 = MIN_PER_HOUR, DEFAULT_D3 = MIN_PER_DAY;
 
   const t1 = (lockoutThreshold1 !== undefined ? lockoutThreshold1 : currentTenant?.lockoutThreshold1) ?? DEFAULT_T1;
   const t2 = (lockoutThreshold2 !== undefined ? lockoutThreshold2 : currentTenant?.lockoutThreshold2) ?? DEFAULT_T2;

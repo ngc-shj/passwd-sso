@@ -77,8 +77,8 @@ export function TenantRetentionPolicyCard() {
     if (auditLogRetentionEnabled) {
       if (auditLogRetentionDays === "") return t("auditLogRetentionRequired");
       const num = Number(auditLogRetentionDays);
-      if (!Number.isInteger(num) || num < AUDIT_LOG_RETENTION_MIN) return t("auditLogRetentionValidationMin");
-      if (num > AUDIT_LOG_RETENTION_MAX) return t("auditLogRetentionValidationMax");
+      if (!Number.isInteger(num) || num < AUDIT_LOG_RETENTION_MIN) return t("auditLogRetentionValidationMin", { min: AUDIT_LOG_RETENTION_MIN });
+      if (num > AUDIT_LOG_RETENTION_MAX) return t("auditLogRetentionValidationMax", { max: AUDIT_LOG_RETENTION_MAX });
     }
     return null;
   };
@@ -158,7 +158,7 @@ export function TenantRetentionPolicyCard() {
               })}
               placeholder="365"
             />
-            <p className="text-xs text-muted-foreground">{t("auditLogRetentionDaysHelp")}</p>
+            <p className="text-xs text-muted-foreground">{t("auditLogRetentionDaysHelp", { min: AUDIT_LOG_RETENTION_MIN, max: AUDIT_LOG_RETENTION_MAX })}</p>
           </div>
         )}
 
