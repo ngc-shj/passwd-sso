@@ -320,6 +320,10 @@ struct VaultListView: View {
   /// offline state must not pop an alert just for returning to the app).
   @MainActor
   private func sync(surfaceErrors: Bool = true) async {
+    // Never sync (decrypt into the view's state) once the vault has locked —
+    // defence-in-depth against a background idle-lock racing an in-flight or
+    // queued foreground refresh.
+    guard autoLockService.state == .unlocked else { return }
     guard !isSyncing else { return }
     isSyncing = true
     defer { isSyncing = false }

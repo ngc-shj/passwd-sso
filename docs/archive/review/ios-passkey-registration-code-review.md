@@ -133,3 +133,49 @@ pure `passkeyRegistrationOutcome` carrying the invariant — confirmed no VC-onl
 ## Round 1 verification
 Server: vitest (auth/mobile/extension trees) 938 pass; next build clean.
 iOS: PasskeyRegistrationTests + CredentialResolverTests pass after fixes (full suite re-run before final commit).
+
+---
+
+# Round 2 (incremental) — post-implementation work (sync UI + flag cleanup)
+
+Date: 2026-06-14
+Scope: `git diff 6db8852e...HEAD` — flag revert (0x45→0x5D), completeRegistration/
+completeAssertion `expired`-misread log removal, host-app vault sync feature
+(pull-to-refresh + "Sync now" + foreground auto-refresh), Localizable.xcstrings.
+Three experts (functionality / security / testing). No Critical, no Major-with-impact.
+
+## Findings & resolution
+
+- **F1 / T8 [Minor] — plan doc stale**: line 51 still said "CORRECTED → 0x45" after
+  the 0x5D revert. **Fixed**: rewritten to state 0x5D is correct (Apple provider
+  requirement; Safari-confirmed) with the 0x45 misstep noted as history.
+- **S1 [Minor] — `sync()` lacked a locked-state guard**: a background idle-lock
+  could race a queued foreground refresh, decrypting summaries into a
+  deallocating view state (not persisted/transmitted; not exploitable).
+  **Fixed**: `guard autoLockService.state == .unlocked else { return }` at the top
+  of `sync()`.
+- **F2 / S2 [Minor] — double foreground `runSync`**: the app shell and the vault
+  list both call `runSync` on `.active`; the actor serialized them but each did a
+  full network sync + bridge-counter increment. **Fixed**: single-flight in
+  `HostSyncService` — concurrent callers coalesce onto one in-flight sync (one
+  round-trip, one counter bump), benefiting every caller (app shell, vault list,
+  background task).
+- **T5 [Major→accepted] — `sync()` has no unit test**: the logic lives in a
+  SwiftUI View method; the repo has no view-logic unit-test harness and the real
+  `HostSyncService.runSync`/single-flight network path is not directly unit-tested
+  (the suite uses `StubHostSyncService`). Anti-Deferral: acceptable risk —
+  worst case a silently-broken single-flight guard re-introduces the (harmless)
+  double sync; likelihood low; cost-to-fix = extracting a `@Observable` sync
+  model + building MobileAPIClient/EntryFetcher mocks, disproportionate.
+  Tracked as a follow-up (extract `SyncState` if view sync logic grows).
+- **T9 [Minor]** — `StubHostSyncService.runSync()` signature differs from
+  production: intentional private test stub, not a defect. No action.
+
+## Recurring Issue Check
+Functionality R1-R37, Security R1-R37 + RS1-RS4, Testing R1-R37 + RT1-RT5 — all
+clean on the changed lines except the Minors above (resolved). 0x5D flag and log
+removals verified correct (Apple-mandated; no secrets logged). New xcstrings keys
+all have `state: translated` ja, satisfying LocalizationCatalogTests.
+
+## Round 2 verification
+iOS 462 XCTest green; build green. (Server unchanged this round.)
