@@ -24,6 +24,8 @@ struct VaultListView: View {
   @State private var isShowingSettings: Bool = false
   @State private var isShowingCreateForm: Bool = false
   @State private var isShowingSignOutConfirm: Bool = false
+  @State private var isSyncing: Bool = false
+  @State private var syncError: String?
   @FocusState private var searchFocused: Bool
 
   var body: some View {
@@ -45,6 +47,16 @@ struct VaultListView: View {
         // no two toolbar items can merge into one glass capsule.
         ToolbarItem(placement: .topBarTrailing) {
           Menu {
+            // Re-fetch from the server, rebuild the local cache, and rebind the
+            // list so an entry/passkey registered externally (AutoFill
+            // extension, web) appears without a lock/unlock cycle. Pull-to-
+            // refresh on the list runs the same `sync()`.
+            Button {
+              Task { await sync() }
+            } label: {
+              Label("Sync now", systemImage: "arrow.clockwise")
+            }
+            .disabled(isSyncing)
             Button {
               autoLockService.recordActivity()
               isShowingSettings = true
@@ -92,6 +104,14 @@ struct VaultListView: View {
       // Passwords-app pattern). Activity tracking stays on query change.
       .onChange(of: viewModel.searchQuery) { _, _ in
         autoLockService.recordActivity()
+      }
+      .alert(
+        "Sync failed",
+        isPresented: Binding(get: { syncError != nil }, set: { if !$0 { syncError = nil } })
+      ) {
+        Button("OK", role: .cancel) { syncError = nil }
+      } message: {
+        Text(syncError ?? "")
       }
       // Anchored at body level (NOT inside the Menu, where dismissal races the
       // menu collapse). signOut() ends in .loggedOut → RootView routes to setup.
@@ -240,6 +260,7 @@ struct VaultListView: View {
       }
       .padding()
     }
+    .refreshable { await sync() }
     .overlay {
       if viewModel.filteredSummaries.isEmpty {
         Text("No entries")
@@ -270,12 +291,35 @@ struct VaultListView: View {
       }
     }
     .listStyle(.plain)
+    .refreshable { await sync() }
     .overlay {
       if viewModel.filteredSummaries.isEmpty {
         Text("No matches")
           .foregroundStyle(.secondary)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
+    }
+  }
+
+  /// Re-fetch entries from the server, rebuild the encrypted cache, and rebind
+  /// the visible list from the fresh cache. Best-effort: on failure the current
+  /// list is kept and a non-blocking alert is shown. Single-flight via
+  /// `isSyncing`. Backs both the "Sync now" menu item and pull-to-refresh.
+  @MainActor
+  private func sync() async {
+    guard !isSyncing else { return }
+    isSyncing = true
+    defer { isSyncing = false }
+    autoLockService.recordActivity()
+    do {
+      let report = try await hostSyncService.runSync(vaultKey: vaultKey, userId: userId)
+      if let fresh = report.cacheData {
+        viewModel.loadFromCache(cacheData: fresh, vaultKey: vaultKey, userId: userId)
+      }
+    } catch MobileAPIError.authenticationRequired {
+      syncError = String(localized: "Your session expired. Lock and unlock to sign in again.")
+    } catch {
+      syncError = String(localized: "Couldn't sync. Check your connection and try again.")
     }
   }
 
