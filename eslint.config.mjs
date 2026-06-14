@@ -22,6 +22,12 @@ const eslintConfig = defineConfig([
     "coverage/**",
     "extension/**",
     "load-test/**",
+    // Throwaway git-ignored worktree copies (Claude Code agent worktrees) that
+    // duplicate the whole repo, incl. node_modules/require-based files. They are
+    // not project source for the root config to lint — without this, local
+    // `eslint .` reports thousands of errors from .claude/worktrees that CI
+    // (fresh checkout, no .claude) never sees.
+    ".claude/**",
   ]),
   {
     // Prevent plain fetch() in client-side code — use fetchApi() instead.
