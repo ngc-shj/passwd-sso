@@ -413,8 +413,21 @@ else
   fi
 fi
 
-if git rev-parse --abbrev-ref HEAD | grep -q "^refactor/"; then
-  run_step "Refactor phase verify" node scripts/refactor-phase-verify.mjs
+# Refactor-phase verify — only for MOVE refactors (≥1 src rename). A content-only
+# refactor/* branch (0 renames) doesn't need the move-only orchestrator: its
+# rename-specific scripts no-op, and its rls/crypto/migration checks already run
+# as standalone "Static:" steps above. Pass --skip-merge-queue-guards so the
+# local run isn't false-failed by a stale, git-ignored
+# .refactor-phase-verify-baseline; CI's refactor-phase-verify.yml keeps using
+# --force WITHOUT the flag, so its behavior is unchanged.
+if [ "$STATIC_ONLY" != "1" ] && git rev-parse --abbrev-ref HEAD | grep -q "^refactor/"; then
+  # two-dot -M main (working tree) mirrors verify-move-only-diff.mjs:194; do NOT
+  # change to main...HEAD — the gate's rename detector must match the verifier.
+  if git diff --name-status -M main -- src | grep -qE '^[RC]'; then
+    run_step "Refactor phase verify" node scripts/refactor-phase-verify.mjs --skip-merge-queue-guards
+  else
+    printf "${BOLD}▸ Refactor phase verify${RESET}\n  (skipped — content-only refactor: 0 src renames; CI's Refactor Phase Verify workflow is authoritative)\n\n"
+  fi
 fi
 
 # Manual-test artifact gate (R35 Tier-1) — fails if admin-IA changes ship
@@ -457,6 +470,36 @@ fi
 
 if [ "$STATIC_ONLY" != "1" ]; then
   run_step "Build"                  npx next build
+fi
+
+# Multi-package build + test — mirror CI's "CLI: Build → Test" and
+# "Extension: Test → Build" jobs so a package-level break (e.g. an ESM .js
+# extension omission that tsc catches but vitest/esbuild tolerates) is caught
+# locally, not first in CI. iOS is intentionally excluded: its CI job is
+# `xcodebuild` on macos-latest and is not reproducible in this local gate.
+# pre-pr does NOT `npm ci` (slow/destructive); it reuses installed deps and
+# fails with an actionable hint if a package's node_modules is absent.
+if [ "$STATIC_ONLY" != "1" ]; then
+  # CLI: Build → Test (CI order — tsc must run first; cli/ is ESM NodeNext, so a
+  # missing .js extension is a tsc TS2835 error that vitest/esbuild tolerates).
+  if [ ! -d cli/node_modules ]; then
+    printf "${RED}ERROR: cli/node_modules missing — run 'cd cli && npm ci' (pre-pr does not auto-install)${RESET}\n\n" >&2
+    failed=$((failed + 1))
+    failures+=("CLI: deps missing|")
+  else
+    run_step "CLI: Build"  bash -c 'cd cli && npm run build'
+    run_step "CLI: Test"   bash -c 'cd cli && npm test'
+  fi
+
+  # Extension: Test → Build (CI order).
+  if [ ! -d extension/node_modules ]; then
+    printf "${RED}ERROR: extension/node_modules missing — run 'cd extension && npm ci' (pre-pr does not auto-install)${RESET}\n\n" >&2
+    failed=$((failed + 1))
+    failures+=("Extension: deps missing|")
+  else
+    run_step "Extension: Test"   bash -c 'cd extension && npm test'
+    run_step "Extension: Build"  bash -c 'cd extension && npm run build'
+  fi
 fi
 
 echo ""

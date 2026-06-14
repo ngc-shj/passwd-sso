@@ -4,10 +4,18 @@
  * the current tree. Intended for merge-queue CI on refactor/* branches.
  *
  * Usage:
- *   node scripts/refactor-phase-verify.mjs [--force] [--verbose]
+ *   node scripts/refactor-phase-verify.mjs [--force] [--verbose] [--skip-merge-queue-guards]
  *
  * --force    Run even when not on a refactor/* branch.
  * --verbose  Print each command before running it.
+ * --skip-merge-queue-guards
+ *            Skip the merge-queue-only guards (stale-branch baseline check and
+ *            the parallel-refactor-branch check), but still run every
+ *            verification script. Intended for the local pre-pr.sh invocation:
+ *            those guards are vacuous in CI's fresh checkout (always first-run)
+ *            and only produce false-positives locally from a stale, git-ignored
+ *            .refactor-phase-verify-baseline. CI keeps using --force WITHOUT
+ *            this flag, so its behavior is unchanged.
  *
  * Stale-branch guard:
  *   Reads expected base SHA from env var EXPECTED_MAIN_SHA or the file
@@ -55,6 +63,7 @@ function runScript(label, cmd, verbose) {
 const args = process.argv.slice(2);
 const forceFlag = args.includes("--force");
 const verboseFlag = args.includes("--verbose");
+const skipMergeQueueGuards = args.includes("--skip-merge-queue-guards");
 
 // Branch guard
 const currentBranchName = currentBranch();
@@ -63,34 +72,39 @@ if (!forceFlag && !/^refactor\//.test(currentBranchName)) {
   process.exit(0);
 }
 
-// Stale-branch guard
-const originSha = fetchOriginMainSha();
-const envSha = process.env["EXPECTED_MAIN_SHA"] ?? "";
-let expectedSha = envSha;
+// Stale-branch guard (merge-queue-only). Skipped under --skip-merge-queue-guards:
+// it is vacuous in CI's fresh checkout (first-run always records & passes) and
+// only false-fails locally from a stale .refactor-phase-verify-baseline. The
+// verification scripts below still run regardless.
+if (!skipMergeQueueGuards) {
+  const originSha = fetchOriginMainSha();
+  const envSha = process.env["EXPECTED_MAIN_SHA"] ?? "";
+  let expectedSha = envSha;
 
-// Read the baseline directly and fall through to first-run on ENOENT.
-// Avoids the TOCTOU race between existsSync() and readFileSync()
-// (CodeQL: js/file-system-race).
-if (!expectedSha) {
-  try {
-    expectedSha = readFileSync(BASELINE_FILE, "utf8").trim();
-  } catch (err) {
-    if (err.code !== "ENOENT") throw err;
-    // First run: record current SHA as baseline
-    writeFileSync(BASELINE_FILE, originSha + "\n", "utf8");
-    console.log(`refactor-phase-verify: baseline recorded (${originSha}).`);
-    expectedSha = originSha;
+  // Read the baseline directly and fall through to first-run on ENOENT.
+  // Avoids the TOCTOU race between existsSync() and readFileSync()
+  // (CodeQL: js/file-system-race).
+  if (!expectedSha) {
+    try {
+      expectedSha = readFileSync(BASELINE_FILE, "utf8").trim();
+    } catch (err) {
+      if (err.code !== "ENOENT") throw err;
+      // First run: record current SHA as baseline
+      writeFileSync(BASELINE_FILE, originSha + "\n", "utf8");
+      console.log(`refactor-phase-verify: baseline recorded (${originSha}).`);
+      expectedSha = originSha;
+    }
   }
-}
 
-if (originSha !== expectedSha) {
-  console.error(
-    `Branch is stale vs origin/main.\n` +
-      `  expected: ${expectedSha}\n` +
-      `  current:  ${originSha}\n` +
-      `Rebase and re-run.`
-  );
-  process.exit(1);
+  if (originSha !== expectedSha) {
+    console.error(
+      `Branch is stale vs origin/main.\n` +
+        `  expected: ${expectedSha}\n` +
+        `  current:  ${originSha}\n` +
+        `Rebase and re-run.`
+    );
+    process.exit(1);
+  }
 }
 
 // Parallel-branch guard: fail if another refactor/* PR is open.
@@ -120,7 +134,8 @@ function checkParallelRefactorBranches() {
   }
 }
 
-if (!checkParallelRefactorBranches()) {
+// Parallel-branch guard is also merge-queue-only — skip under the same flag.
+if (!skipMergeQueueGuards && !checkParallelRefactorBranches()) {
   process.exit(1);
 }
 
