@@ -14,7 +14,7 @@ import {
   IOS_TOKEN_DEFAULT_SCOPES,
   EXTENSION_TOKEN_SCOPE,
 } from "@/lib/constants/auth/extension-token";
-import { MS_PER_DAY, MS_PER_SECOND } from "@/lib/constants/time";
+import { MS_PER_DAY, MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
 import {
   verifyDpopProof,
   computeAth,
@@ -45,7 +45,7 @@ export const IOS_TOKEN_ABSOLUTE_TIMEOUT_MS = 7 * MS_PER_DAY;
  * Deliberately short: it exists only to cover the seconds-long registration
  * ceremony. Not refreshable; a fresh one is minted by the host on each unlock.
  */
-export const IOS_AUTOFILL_TOKEN_TTL_MS = 5 * 60 * 1000;
+export const IOS_AUTOFILL_TOKEN_TTL_MS = 5 * MS_PER_MINUTE;
 
 /** Replay-disambiguation window for legitimate retry-after-network-failure. */
 export const REFRESH_REPLAY_GRACE_MS = 5 * MS_PER_SECOND;
