@@ -125,7 +125,7 @@ final class PasskeyRegistrationTests: XCTestCase {
     let authData = buildRegistrationAuthData(rpId: "webauthn.io", signCount: 0, credentialId: credId, coseKey: cose)
 
     XCTAssertEqual(Data(authData.prefix(32)), Data(SHA256.hash(data: Data("webauthn.io".utf8))))
-    XCTAssertEqual(authData[32], 0x5D, "flags must be UP|UV|AT|BE|BS")
+    XCTAssertEqual(authData[32], 0x45, "flags must be UP|UV|AT (no BE/BS — matches the extension; BS=1 breaks Safari getAuthenticatorData)")
     XCTAssertEqual(Array(authData[33..<37]), [0, 0, 0, 0], "signCount 0 BE")
     XCTAssertEqual(Array(authData[37..<53]), Array(repeating: 0, count: 16), "AAGUID all zero")
     XCTAssertEqual(Array(authData[53..<55]), [0x00, 0x20], "credIdLen = 32 BE")

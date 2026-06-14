@@ -84,6 +84,27 @@
     "captured from the TS encoder" wording.
   - F1 / T4 [Minor] — accepted with quantification (see code-review Resolution
     Status); no code change.
+- **Post-merge device-test fix — registration flags `0x5D` → `0x45` (REVERSES plan F3/S8)**:
+  Real-device testing on webauthn.io failed: registration showed
+  `null is not an object ('t.getAuthenticatorData().slice')` and later
+  authentication failed `Unrecognized credential ID`. Root cause (confirmed by
+  diffing against the proven-working browser-extension reference
+  `extension/src/lib/webauthn-crypto.ts`, which registers at `0x45`): the plan's
+  F3/S8 "fix" to set BE|BS (`0x5D`) on the registration authData was WRONG. An
+  iOS credential-provider credential is device-bound and not OS-backed-up;
+  claiming BS=1 makes Safari's `getAuthenticatorData()` return null for the
+  provider's attestationObject, crashing the RP's WebAuthn client BEFORE the
+  registration is recorded — so the credential exists locally/on our server but
+  never at the RP. Fix: `buildRegistrationAuthData` now emits `0x45` (UP|UV|AT),
+  byte-identical to the extension. All other fields were already byte-identical.
+  Test updated (`testRegistrationAuthDataLayout` 0x5D→0x45). The shipped
+  ASSERTION still sets BE|BS (`0x1D`) — left UNCHANGED pending device evidence,
+  because the shipped code carries a test-verified note that iOS returns
+  `completeAssertionRequest == false` without BS (an OS-layer requirement the
+  browser extension never hits). If device re-test shows the RP rejects the
+  assertion on backup-state mismatch, the assertion flags change to `0x05` in a
+  follow-up. (Zero risk to extension-registered passkeys; pre-fix iOS `0x5D`
+  registrations never reached the RP.)
 - **Process**: implemented directly by the orchestrator (no Sonnet sub-agent
   batches) — the per-contract test-gated loop on a single Xcode project
   serializes anyway, and the security-critical wiring benefits from the

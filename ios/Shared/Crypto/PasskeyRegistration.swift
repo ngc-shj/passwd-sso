@@ -67,15 +67,17 @@ public func coseEC2PublicKey(_ pub: P256.Signing.PublicKey) -> Data {
 
 private let kRegFlagUserPresent: UInt8 = 0x01
 private let kRegFlagUserVerified: UInt8 = 0x04
-private let kRegFlagBackupEligible: UInt8 = 0x08
-private let kRegFlagBackupState: UInt8 = 0x10
 private let kRegFlagAttested: UInt8 = 0x40
 
 /// Build attestation authenticatorData: SHA256(rpId)(32) ‖ flags(1) ‖ signCount(4 BE)
 /// ‖ AAGUID(16 zero) ‖ credIdLen(2 BE) ‖ credId ‖ COSE public key.
-/// Flags = UP|UV|AT|BE|BS (0x5D): AT for attested-credential-data, and BE|BS to
-/// MATCH the assertion path (buildAssertionAuthenticatorData sets BE|BS) so RPs
-/// that enforce backup-flag consistency across ceremonies accept later assertions.
+/// Flags = UP|UV|AT (0x45) — byte-identical to the browser extension's
+/// buildAttestationAuthData (webauthn-crypto.ts). Do NOT set BE/BS: an iOS
+/// credential-provider credential is device-bound and NOT OS-backed-up, so
+/// claiming BS=1 makes Safari's getAuthenticatorData() return null for the
+/// provider's attestationObject, which crashes the RP's WebAuthn client before
+/// the registration is ever recorded ("Unrecognized credential ID" on later
+/// assertion). The earlier 0x5D ("match the assertion path") was the bug.
 public func buildRegistrationAuthData(
   rpId: String,
   signCount: UInt32,
@@ -84,8 +86,7 @@ public func buildRegistrationAuthData(
 ) -> Data {
   var out = Data()
   out.append(contentsOf: SHA256.hash(data: Data(rpId.utf8)))
-  let flags = kRegFlagUserPresent | kRegFlagUserVerified | kRegFlagAttested
-    | kRegFlagBackupEligible | kRegFlagBackupState  // 0x5D
+  let flags = kRegFlagUserPresent | kRegFlagUserVerified | kRegFlagAttested  // 0x45
   out.append(flags)
   out.append(UInt8((signCount >> 24) & 0xff))
   out.append(UInt8((signCount >> 16) & 0xff))

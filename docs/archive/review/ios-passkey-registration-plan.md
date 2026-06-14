@@ -48,7 +48,7 @@ The host's mobile DPoP key is a host-only Secure-Enclave key and is **immutable*
 ### iOS — crypto & blob (server-independent; build first)
 #### C1 — WebAuthn registration crypto (`ios/Shared/Crypto/PasskeyRegistration.swift`)
 - P-256 keygen (`P256.Signing.PrivateKey`), random 32-byte credentialId, COSE EC2 encoder, minimal CBOR encoder, attestation authData, `none` attestationObject.
-- **Flags (F3/S8 fix)**: registration authData sets `UP|UV|AT|BE|BS` (`0x5D`) to MATCH the shipped assertion flags (`buildAssertionAuthenticatorData` sets BE|BS) — else strict RPs reject later assertions. Zero AAGUID.
+- **Flags**: ~~(F3/S8 fix) registration authData sets `UP|UV|AT|BE|BS` (`0x5D`)~~ **CORRECTED after device testing → `0x45` (UP|UV|AT, no BE/BS), byte-identical to the extension.** F3/S8 was wrong: BS=1 on a provider (non-OS-backed-up) credential makes Safari's `getAuthenticatorData()` return null → RP never records the registration. See deviation log. Zero AAGUID.
 - **Testability (T1)**: ship **golden byte vectors** captured from the browser extension's TS encoder for a pinned keypair (COSE key, authData, attestationObject) AND a minimal CBOR *decoder in the test target* to assert `fmt=="none"`, authData length, COSE map keys. Both.
 - **Forbidden**: non-zero AAGUID literal; flags byte != 0x5D in registration authData.
 - **Acceptance**: byte-equality vs golden vectors; the produced public key verifies a signature from the matching private key via the shipped assertion verifier.
