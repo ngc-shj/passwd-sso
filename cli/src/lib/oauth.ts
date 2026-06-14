@@ -12,7 +12,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { spawn } from "node:child_process";
-import { MS_PER_MINUTE, MS_PER_SECOND, SEC_PER_HOUR } from "./time";
+import { MS_PER_MINUTE, MS_PER_SECOND, SEC_PER_HOUR } from "./time.js";
 
 const CALLBACK_TIMEOUT_MS = 2 * MS_PER_MINUTE;
 

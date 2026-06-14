@@ -7,7 +7,7 @@
 
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { MS_PER_SECOND } from "./time";
+import { MS_PER_SECOND } from "./time.js";
 
 const CLEAR_TIMEOUT_MS = 30 * MS_PER_SECOND;
 
