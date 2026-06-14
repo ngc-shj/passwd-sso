@@ -197,7 +197,7 @@ export async function registerClient(
   serverUrl: string,
   redirectUri: string,
 ): Promise<{ clientId: string }> {
-  const response = await fetch(`${serverUrl}${MCP_REGISTER_ENDPOINT}`, { // codeql[js/file-system-data-in-network-request] serverUrl is user-provided config, not untrusted file data
+  const response = await fetch(`${serverUrl}${MCP_REGISTER_ENDPOINT}`, { // codeql[js/file-system-data-in-network-request, js/file-access-to-http] serverUrl is user-provided config, not untrusted file data
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -320,7 +320,7 @@ export async function revokeTokenRequest(
   if (tokenTypeHint) params.token_type_hint = tokenTypeHint;
 
   try {
-    await fetch(`${serverUrl}${MCP_REVOKE_ENDPOINT}`, { // codeql[js/file-system-data-in-network-request] OAuth token revocation sends stored token to the revocation endpoint
+    await fetch(`${serverUrl}${MCP_REVOKE_ENDPOINT}`, { // codeql[js/file-system-data-in-network-request, js/file-access-to-http] OAuth token revocation sends stored token to the revocation endpoint
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams(params).toString(),
