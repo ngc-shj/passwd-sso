@@ -12,7 +12,7 @@ import { withTeamTenantRls } from "@/lib/tenant-context";
 import { BYPASS_PURPOSE, withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
-import { MS_PER_DAY } from "@/lib/constants/time";
+import { TEAM_INVITATION_TTL_MS } from "@/lib/constants/team/invitation";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -128,7 +128,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   const token = randomBytes(32).toString("hex");
-  const expiresAt = new Date(Date.now() + 7 * MS_PER_DAY);
+  const expiresAt = new Date(Date.now() + TEAM_INVITATION_TTL_MS);
 
   const invitation = await withTeamTenantRls(teamId, async () =>
     prisma.teamInvitation.create({

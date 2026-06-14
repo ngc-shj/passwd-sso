@@ -9,7 +9,7 @@
   "to": "To",
   "download": "Download",
   "downloading": "Downloading...",
-  "maxRange": "Maximum range is 90 days",
+  "maxRange": "Maximum range is {max} days",
   "rateLimited": "Too many requests. Please try again later.",
   "exportDisabled": "Export is disabled by team policy",
   "downloadError": "Failed to download",

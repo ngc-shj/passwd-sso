@@ -1,4 +1,4 @@
-import { MS_PER_MINUTE } from "../time";
+import { MS_PER_MINUTE, DAYS_PER_YEAR } from "../time";
 
 export const SA_TOKEN_PREFIX = "sa_";
 
@@ -37,7 +37,7 @@ export const MAX_SERVICE_ACCOUNTS_PER_TENANT = 50;
 export const MAX_SA_TOKENS_PER_ACCOUNT = 5;
 
 /** Maximum SA token expiry: 365 days */
-export const MAX_SA_TOKEN_EXPIRY_DAYS = 365;
+export const MAX_SA_TOKEN_EXPIRY_DAYS = DAYS_PER_YEAR;
 
 /** Default SA token expiry: 90 days */
 export const DEFAULT_SA_TOKEN_EXPIRY_DAYS = 90;

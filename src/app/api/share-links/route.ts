@@ -29,8 +29,9 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
-const shareLinkLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
+const shareLinkLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 20 });
 
 const EXPIRY_MAP: Record<string, number> = {
   "1h": MS_PER_HOUR,

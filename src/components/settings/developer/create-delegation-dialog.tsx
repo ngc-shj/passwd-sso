@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { Loader2, AlertTriangle, Search } from "lucide-react";
 
 interface AvailableToken {
@@ -265,7 +266,7 @@ export function CreateDelegationDialog({
                         0,
                         Math.floor(
                           (new Date(token.expiresAt).getTime() - Date.now()) /
-                            60_000,
+                            MS_PER_MINUTE,
                         ),
                       );
                       const expired = remaining <= 0;

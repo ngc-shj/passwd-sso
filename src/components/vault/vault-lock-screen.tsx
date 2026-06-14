@@ -5,7 +5,8 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault, VaultUnlockError } from "@/lib/vault/vault-context";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { API_PATH } from "@/lib/constants";
+import { API_PATH, SESSION_STORAGE_KEY } from "@/lib/constants";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { isWebAuthnSupported } from "@/lib/auth/webauthn/webauthn-client";
 import { hasPrf } from "@/lib/auth/prf-handoff";
@@ -29,7 +30,7 @@ export function formatLockedUntil(lockedUntil: string | null | undefined, t: (ke
   if (!lockedUntil) return t("accountLocked");
   const diff = new Date(lockedUntil).getTime() - Date.now();
   if (diff <= 0) return t("accountLocked");
-  const minutes = Math.ceil(diff / 60_000);
+  const minutes = Math.ceil(diff / MS_PER_MINUTE);
   if (minutes >= 60) {
     const hours = Math.ceil(minutes / 60);
     return t("accountLockedWithTime", { time: t("hours", { count: String(hours) }) });
@@ -148,7 +149,7 @@ export function VaultLockScreen() {
   // waiting for the hasPrfPasskeys query to resolve.
   const webauthnSignInRef = useRef(
     typeof window !== "undefined" &&
-      sessionStorage.getItem("psso:webauthn-signin") === "1",
+      sessionStorage.getItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN) === "1",
   );
 
   // Auto-unlock vault after WebAuthn sign-in.
@@ -158,7 +159,7 @@ export function VaultLockScreen() {
     if (!webauthnSignInRef.current || !prfChecked) return;
     // Consume flag (one-shot)
     webauthnSignInRef.current = false;
-    sessionStorage.removeItem("psso:webauthn-signin");
+    sessionStorage.removeItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN);
 
     // PRF material is handed off in-memory (not sessionStorage) and consumed by
     // unlockWithStoredPrf; peek without consuming to decide whether to attempt.

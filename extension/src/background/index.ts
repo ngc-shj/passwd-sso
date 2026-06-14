@@ -59,7 +59,11 @@ import {
   CMD_LOCK_VAULT,
   EXT_ENTRY_TYPE,
   EXT_MSG,
+  PSSO_SHOW_SAVE_BANNER,
+  PSSO_TRIGGER_INLINE_SUGGESTIONS,
+  AUTOFILL_FILL,
 } from "../lib/constants";
+import { MS_PER_SECOND, MS_PER_MINUTE } from "../lib/time";
 import { generateTOTPCode } from "../lib/totp";
 import {
   initContextMenu,
@@ -120,7 +124,7 @@ interface TeamKeyCacheEntry {
   cachedAt: number;
 }
 const teamKeyCache = new Map<string, TeamKeyCacheEntry>();
-const TEAM_KEY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const TEAM_KEY_CACHE_TTL_MS = 5 * MS_PER_MINUTE; // 5 minutes
 const MAX_TEAM_KEY_CACHE = 50;
 const MAX_TEAMS = 10;
 
@@ -128,14 +132,14 @@ const ACTIONABLE_TYPES: Set<string> = new Set([
   EXT_ENTRY_TYPE.LOGIN, EXT_ENTRY_TYPE.CREDIT_CARD,
   EXT_ENTRY_TYPE.IDENTITY, EXT_ENTRY_TYPE.PASSKEY,
 ]);
-const CACHE_TTL_MS = 60_000; // 1 minute
-const REFRESH_BUFFER_MS = 2 * 60 * 1000; // refresh 2 min before expiry
+const CACHE_TTL_MS = MS_PER_MINUTE; // 1 minute
+const REFRESH_BUFFER_MS = 2 * MS_PER_MINUTE; // refresh 2 min before expiry
 
 let lastClipboardCopyTime = 0;
 
 /** Schedule clipboard clear after a copy operation. */
 async function scheduleClipboardClear(clipboardClearSeconds: number): Promise<void> {
-  const clipMs = clipboardClearSeconds * 1000;
+  const clipMs = clipboardClearSeconds * MS_PER_SECOND;
   lastClipboardCopyTime = Date.now();
   await chrome.alarms.clear(ALARM_CLEAR_CLIPBOARD).catch(() => {});
   setTimeout(async () => {
@@ -183,7 +187,7 @@ interface PendingSavePrompt {
   timestamp: number;
 }
 
-const PENDING_SAVE_TTL_MS = 30_000; // 30 seconds
+const PENDING_SAVE_TTL_MS = 30 * MS_PER_SECOND;
 const MAX_PENDING_SAVES = 5;
 const pendingSavePrompts = new Map<number, PendingSavePrompt>();
 
@@ -539,7 +543,7 @@ function scheduleRefreshAlarm(expiresAt: number): void {
   // Floor the refresh time to at least a few seconds in the future so
   // we never schedule an alarm in the past (Chrome coerces that to "now"
   // and we'd loop anyway).
-  const MIN_DELAY_MS = 5_000;
+  const MIN_DELAY_MS = 5 * MS_PER_SECOND;
   const effectiveRefreshAt = Math.max(refreshAt, now + MIN_DELAY_MS);
   chrome.alarms.create(ALARM_TOKEN_REFRESH, { when: effectiveRefreshAt });
 }
@@ -616,7 +620,7 @@ const hydrationPromise = hydrateFromSession().catch(() => {});
 // popup retries and a later message re-checks once hydration settles. The
 // alarm path keeps the unbounded await (a delayed token refresh is harmless,
 // and proceeding early there could wrongly clear a token mid-hydration).
-const HYDRATION_TIMEOUT_MS = 5_000; // 5 seconds
+const HYDRATION_TIMEOUT_MS = 5 * MS_PER_SECOND;
 
 function awaitHydrationBounded(): Promise<void> {
   let timer: ReturnType<typeof setTimeout>;
@@ -745,7 +749,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             return;
           }
           chrome.tabs.sendMessage(tabId, {
-            type: "PSSO_SHOW_SAVE_BANNER",
+            type: PSSO_SHOW_SAVE_BANNER,
             host: pending.host,
             username: pending.username,
             password: pending.password,
@@ -795,7 +799,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       await attemptTokenRefresh();
     }
     if (alarm.name === ALARM_CLEAR_CLIPBOARD) {
-      if (Date.now() - lastClipboardCopyTime >= cachedClipboardClearSeconds * 1000) {
+      if (Date.now() - lastClipboardCopyTime >= cachedClipboardClearSeconds * MS_PER_SECOND) {
         await copyToClipboard("");
       }
     }
@@ -901,7 +905,7 @@ chrome.commands.onCommand.addListener(async (command) => {
     if (!extractHost(tab.url)) return;
 
     try {
-      await chrome.tabs.sendMessage(tab.id, { type: "PSSO_TRIGGER_INLINE_SUGGESTIONS" });
+      await chrome.tabs.sendMessage(tab.id, { type: PSSO_TRIGGER_INLINE_SUGGESTIONS });
     } catch {
       // Ensure content script is present on already-open tabs, then retry.
       try {
@@ -909,7 +913,7 @@ chrome.commands.onCommand.addListener(async (command) => {
           target: { tabId: tab.id, allFrames: true },
           files: ["src/content/form-detector.js"],
         });
-        await chrome.tabs.sendMessage(tab.id, { type: "PSSO_TRIGGER_INLINE_SUGGESTIONS" });
+        await chrome.tabs.sendMessage(tab.id, { type: PSSO_TRIGGER_INLINE_SUGGESTIONS });
       } catch {
         // ignore on restricted pages
       }
@@ -1578,7 +1582,7 @@ async function performAutofillForEntry(
   // so the AUTOFILL_FILL listener is already present — no executeScript needed.
   try {
     await chrome.tabs.sendMessage(tabId, {
-      type: "AUTOFILL_FILL",
+      type: AUTOFILL_FILL,
       username,
       ...(password ? { password } : {}),
       ...(totpCode ? { totpCode } : {}),

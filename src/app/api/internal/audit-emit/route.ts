@@ -6,10 +6,11 @@ import { logAuditAsync, extractRequestMeta } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { parseBody } from "@/lib/http/parse-body";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
 
-const auditEmitLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
+const auditEmitLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 20 });
 
 // Actions callable from the proxy via internal fetch.
 // Restricting to a fixed set prevents this endpoint from becoming

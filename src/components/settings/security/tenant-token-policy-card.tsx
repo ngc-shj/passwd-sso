@@ -106,20 +106,20 @@ export function TenantTokenPolicyCard() {
     if (saTokenMaxExpiryEnabled) {
       if (saTokenMaxExpiryDays === "") return t("saTokenMaxExpiryRequired");
       const n = Number(saTokenMaxExpiryDays);
-      if (!Number.isInteger(n) || n < SA_TOKEN_MAX_EXPIRY_MIN) return t("saTokenMaxExpiryValidationMin");
-      if (n > SA_TOKEN_MAX_EXPIRY_MAX) return t("saTokenMaxExpiryValidationMax");
+      if (!Number.isInteger(n) || n < SA_TOKEN_MAX_EXPIRY_MIN) return t("saTokenMaxExpiryValidationMin", { min: SA_TOKEN_MAX_EXPIRY_MIN });
+      if (n > SA_TOKEN_MAX_EXPIRY_MAX) return t("saTokenMaxExpiryValidationMax", { max: SA_TOKEN_MAX_EXPIRY_MAX });
     }
     if (jitTokenDefaultEnabled) {
       if (jitTokenDefaultTtlSec === "") return t("jitTokenDefaultRequired");
       const n = Number(jitTokenDefaultTtlSec);
-      if (!Number.isInteger(n) || n < JIT_TOKEN_TTL_MIN) return t("jitTokenTtlValidationMin");
-      if (n > JIT_TOKEN_TTL_MAX) return t("jitTokenTtlValidationMax");
+      if (!Number.isInteger(n) || n < JIT_TOKEN_TTL_MIN) return t("jitTokenTtlValidationMin", { min: JIT_TOKEN_TTL_MIN });
+      if (n > JIT_TOKEN_TTL_MAX) return t("jitTokenTtlValidationMax", { max: JIT_TOKEN_TTL_MAX });
     }
     if (jitTokenMaxEnabled) {
       if (jitTokenMaxTtlSec === "") return t("jitTokenMaxRequired");
       const n = Number(jitTokenMaxTtlSec);
-      if (!Number.isInteger(n) || n < JIT_TOKEN_TTL_MIN) return t("jitTokenTtlValidationMin");
-      if (n > JIT_TOKEN_TTL_MAX) return t("jitTokenTtlValidationMax");
+      if (!Number.isInteger(n) || n < JIT_TOKEN_TTL_MIN) return t("jitTokenTtlValidationMin", { min: JIT_TOKEN_TTL_MIN });
+      if (n > JIT_TOKEN_TTL_MAX) return t("jitTokenTtlValidationMax", { max: JIT_TOKEN_TTL_MAX });
     }
     if (jitTokenDefaultEnabled && jitTokenMaxEnabled && jitTokenDefaultTtlSec !== "" && jitTokenMaxTtlSec !== "") {
       const def = Number(jitTokenDefaultTtlSec);
@@ -206,7 +206,7 @@ export function TenantTokenPolicyCard() {
               })}
               placeholder="365"
             />
-            <p className="text-xs text-muted-foreground">{t("saTokenMaxExpiryDaysHelp")}</p>
+            <p className="text-xs text-muted-foreground">{t("saTokenMaxExpiryDaysHelp", { min: SA_TOKEN_MAX_EXPIRY_MIN, max: SA_TOKEN_MAX_EXPIRY_MAX })}</p>
           </div>
         )}
 
@@ -243,7 +243,7 @@ export function TenantTokenPolicyCard() {
               })}
               placeholder="3600"
             />
-            <p className="text-xs text-muted-foreground">{t("jitTokenDefaultTtlSecHelp")}</p>
+            <p className="text-xs text-muted-foreground">{t("jitTokenDefaultTtlSecHelp", { min: JIT_TOKEN_TTL_MIN, max: JIT_TOKEN_TTL_MAX })}</p>
           </div>
         )}
 
@@ -278,7 +278,7 @@ export function TenantTokenPolicyCard() {
               })}
               placeholder="3600"
             />
-            <p className="text-xs text-muted-foreground">{t("jitTokenMaxTtlSecHelp")}</p>
+            <p className="text-xs text-muted-foreground">{t("jitTokenMaxTtlSecHelp", { min: JIT_TOKEN_TTL_MIN, max: JIT_TOKEN_TTL_MAX })}</p>
           </div>
         )}
 

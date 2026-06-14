@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { Copy, ShieldOff, ShieldAlert, ShieldCheck, ShieldX, KeyRound, Lock, Loader2, Info } from "lucide-react";
+import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault/vault-context";
 import { VAULT_STATUS, EA_STATUS, apiPath } from "@/lib/constants";
@@ -137,8 +138,8 @@ function StepIndicator({ status, t }: { status: EaStatusValue; t: ReturnType<typ
 function getTimeRemaining(waitExpiresAt: string): string {
   const diff = new Date(waitExpiresAt).getTime() - Date.now();
   if (diff <= 0) return "0";
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const days = Math.floor(diff / MS_PER_DAY);
+  const hours = Math.floor((diff % MS_PER_DAY) / MS_PER_HOUR);
   if (days > 0) return `${days}d ${hours}h`;
   return `${hours}h`;
 }

@@ -6,6 +6,7 @@ import {
   type ApiErrorCode,
 } from "@/lib/http/api-error-codes";
 import { mapPrismaError } from "@/lib/prisma/prisma-error";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 
 /**
  * Canonical wire shape of the Main API error envelope.
@@ -138,7 +139,7 @@ export function errorResponseWithMessage(
 export const rateLimited = (retryAfterMs?: number) => {
   const headers: Record<string, string> = {};
   if (retryAfterMs != null && retryAfterMs > 0) {
-    headers["Retry-After"] = String(Math.ceil(retryAfterMs / 1000));
+    headers["Retry-After"] = String(Math.ceil(retryAfterMs / MS_PER_SECOND));
   }
   return errorResponse(
     API_ERROR.RATE_LIMIT_EXCEEDED,
@@ -156,7 +157,7 @@ const DEFAULT_SERVICE_UNAVAILABLE_RETRY_AFTER_SEC = 30;
 function retryAfterSecondsOrDefault(retryAfterMs?: number): string {
   const sec =
     retryAfterMs != null && retryAfterMs > 0
-      ? Math.ceil(retryAfterMs / 1000)
+      ? Math.ceil(retryAfterMs / MS_PER_SECOND)
       : DEFAULT_SERVICE_UNAVAILABLE_RETRY_AFTER_SEC;
   return String(sec);
 }

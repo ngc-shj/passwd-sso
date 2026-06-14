@@ -23,8 +23,9 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { rateLimited, unauthorized, forbidden } from "@/lib/http/api-response";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
-const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });
+const rateLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 1 });
 
 const bodySchema = z.object({
   tenantId: z.string().uuid().optional(),

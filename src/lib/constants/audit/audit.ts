@@ -1,4 +1,5 @@
 import type { AuditAction, AuditScope, ActorType } from "@prisma/client";
+import { MS_PER_DAY, MS_PER_MINUTE, MS_PER_SECOND, SEC_PER_MINUTE } from "@/lib/constants/time";
 
 export const ACTOR_TYPE = {
   HUMAN: "HUMAN",
@@ -817,14 +818,14 @@ import { envInt } from "@/lib/env/env-utils";
 
 export const AUDIT_OUTBOX = {
   BATCH_SIZE: envInt("OUTBOX_BATCH_SIZE", 500),
-  POLL_INTERVAL_MS: envInt("OUTBOX_POLL_INTERVAL_MS", 1000),
-  PROCESSING_TIMEOUT_MS: envInt("OUTBOX_PROCESSING_TIMEOUT_MS", 300_000),
+  POLL_INTERVAL_MS: envInt("OUTBOX_POLL_INTERVAL_MS", MS_PER_SECOND),
+  PROCESSING_TIMEOUT_MS: envInt("OUTBOX_PROCESSING_TIMEOUT_MS", 5 * MS_PER_MINUTE),
   MAX_ATTEMPTS: envInt("OUTBOX_MAX_ATTEMPTS", 8),
   RETENTION_HOURS: envInt("OUTBOX_RETENTION_HOURS", 24),
   FAILED_RETENTION_DAYS: envInt("OUTBOX_FAILED_RETENTION_DAYS", 90),
   READY_PENDING_THRESHOLD: envInt("OUTBOX_READY_PENDING_THRESHOLD", 10_000),
-  READY_OLDEST_THRESHOLD: envInt("OUTBOX_READY_OLDEST_THRESHOLD_SECS", 600),
-  REAPER_INTERVAL_MS: envInt("OUTBOX_REAPER_INTERVAL_MS", 30_000),
+  READY_OLDEST_THRESHOLD: envInt("OUTBOX_READY_OLDEST_THRESHOLD_SECS", 10 * SEC_PER_MINUTE),
+  REAPER_INTERVAL_MS: envInt("OUTBOX_REAPER_INTERVAL_MS", 30 * MS_PER_SECOND),
 } as const;
 
 export const OUTBOX_BYPASS_AUDIT_ACTIONS: ReadonlySet<string> = new Set([
@@ -884,8 +885,8 @@ export const WEBHOOK_DISPATCH_SUPPRESS: ReadonlySet<string> = new Set([
 
 // --- Audit anchor publisher ---
 
-export const AUDIT_ANCHOR_CADENCE_MS = 24 * 60 * 60 * 1000;         // 24h
-export const AUDIT_ANCHOR_PUBLISH_OFFSET_MS = 5 * 60 * 1000;        // 5 min after midnight UTC
+export const AUDIT_ANCHOR_CADENCE_MS = MS_PER_DAY;
+export const AUDIT_ANCHOR_PUBLISH_OFFSET_MS = 5 * MS_PER_MINUTE;
 export const AUDIT_ANCHOR_RETENTION_YEARS = 7;
 export const AUDIT_ANCHOR_MANIFEST_VERSION = 1;
 export const AUDIT_ANCHOR_TYP = "passwd-sso.audit-anchor.v1";

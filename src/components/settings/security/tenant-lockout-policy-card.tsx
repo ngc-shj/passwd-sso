@@ -95,12 +95,12 @@ export function TenantLockoutPolicyCard() {
     const t3 = threshold3 !== "" ? Number(threshold3) : null;
     const d3 = duration3 !== "" ? Number(duration3) : null;
 
-    if (t1 !== null && (t1 < LOCKOUT_THRESHOLD_MIN || t1 > LOCKOUT_THRESHOLD_MAX)) return t("lockoutThresholdRange");
-    if (d1 !== null && (d1 < LOCKOUT_DURATION_MIN || d1 > LOCKOUT_DURATION_MAX)) return t("lockoutDurationRange");
-    if (t2 !== null && (t2 < LOCKOUT_THRESHOLD_MIN || t2 > LOCKOUT_THRESHOLD_MAX)) return t("lockoutThresholdRange");
-    if (d2 !== null && (d2 < LOCKOUT_DURATION_MIN || d2 > LOCKOUT_DURATION_MAX)) return t("lockoutDurationRange");
-    if (t3 !== null && (t3 < LOCKOUT_THRESHOLD_MIN || t3 > LOCKOUT_THRESHOLD_MAX)) return t("lockoutThresholdRange");
-    if (d3 !== null && (d3 < LOCKOUT_DURATION_MIN || d3 > LOCKOUT_DURATION_MAX)) return t("lockoutDurationRange");
+    if (t1 !== null && (t1 < LOCKOUT_THRESHOLD_MIN || t1 > LOCKOUT_THRESHOLD_MAX)) return t("lockoutThresholdRange", { min: LOCKOUT_THRESHOLD_MIN, max: LOCKOUT_THRESHOLD_MAX });
+    if (d1 !== null && (d1 < LOCKOUT_DURATION_MIN || d1 > LOCKOUT_DURATION_MAX)) return t("lockoutDurationRange", { min: LOCKOUT_DURATION_MIN, max: LOCKOUT_DURATION_MAX });
+    if (t2 !== null && (t2 < LOCKOUT_THRESHOLD_MIN || t2 > LOCKOUT_THRESHOLD_MAX)) return t("lockoutThresholdRange", { min: LOCKOUT_THRESHOLD_MIN, max: LOCKOUT_THRESHOLD_MAX });
+    if (d2 !== null && (d2 < LOCKOUT_DURATION_MIN || d2 > LOCKOUT_DURATION_MAX)) return t("lockoutDurationRange", { min: LOCKOUT_DURATION_MIN, max: LOCKOUT_DURATION_MAX });
+    if (t3 !== null && (t3 < LOCKOUT_THRESHOLD_MIN || t3 > LOCKOUT_THRESHOLD_MAX)) return t("lockoutThresholdRange", { min: LOCKOUT_THRESHOLD_MIN, max: LOCKOUT_THRESHOLD_MAX });
+    if (d3 !== null && (d3 < LOCKOUT_DURATION_MIN || d3 > LOCKOUT_DURATION_MAX)) return t("lockoutDurationRange", { min: LOCKOUT_DURATION_MIN, max: LOCKOUT_DURATION_MAX });
 
     // Thresholds must be ascending
     if (t1 !== null && t2 !== null && t2 <= t1) return t("lockoutThresholdAscending");
@@ -188,7 +188,7 @@ export function TenantLockoutPolicyCard() {
                   })}
                   placeholder="5"
                 />
-                <p className="text-xs text-muted-foreground">{t("lockoutThresholdHelp")}</p>
+                <p className="text-xs text-muted-foreground">{t("lockoutThresholdHelp", { min: LOCKOUT_THRESHOLD_MIN, max: LOCKOUT_THRESHOLD_MAX })}</p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor={`lockout-duration-${tier}`}>{t("lockoutDurationLabel")}</Label>
@@ -205,7 +205,7 @@ export function TenantLockoutPolicyCard() {
                   })}
                   placeholder="15"
                 />
-                <p className="text-xs text-muted-foreground">{t("lockoutDurationHelp")}</p>
+                <p className="text-xs text-muted-foreground">{t("lockoutDurationHelp", { min: LOCKOUT_DURATION_MIN, max: LOCKOUT_DURATION_MAX })}</p>
               </div>
             </div>
           </div>

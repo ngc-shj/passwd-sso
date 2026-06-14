@@ -1,5 +1,6 @@
 import { requireOptionalModule } from "@/lib/blob-store/runtime-module";
 import { AUDIT_ANCHOR_RETENTION_YEARS } from "@/lib/constants/audit/audit";
+import { MS_PER_DAY } from "@/lib/constants/time";
 import type { AnchorDestination } from "./destination";
 
 type S3Module = {
@@ -37,7 +38,7 @@ export class S3Destination implements AnchorDestination {
     const client = new mod.S3Client({});
 
     const retainUntil = new Date(
-      Date.now() + this.retentionYears * 365 * 24 * 60 * 60 * 1000,
+      Date.now() + this.retentionYears * 365 * MS_PER_DAY,
     );
 
     const key = this.prefix ? `${this.prefix}/${artifactKey}` : artifactKey;

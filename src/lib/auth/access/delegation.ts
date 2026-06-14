@@ -19,13 +19,14 @@ import {
 import type { ServerEncryptedData } from "@/lib/crypto/crypto-server";
 import { logAuditAsyncBothScopes } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
+import { SEC_PER_MINUTE, SEC_PER_HOUR } from "@/lib/constants/time";
 
 // ─── Constants ─────────────────────────────────────────────────
 
-export const DELEGATION_DEFAULT_TTL_SEC = 900; // 15 minutes
-export const DELEGATION_MAX_TTL_SEC = 3600; // 1 hour
+export const DELEGATION_DEFAULT_TTL_SEC = 15 * SEC_PER_MINUTE;
+export const DELEGATION_MAX_TTL_SEC = SEC_PER_HOUR;
 export const DELEGATION_MAX_ENTRIES = 20;
-export const DELEGATION_MIN_TTL_SEC = 300; // 5 minutes
+export const DELEGATION_MIN_TTL_SEC = 5 * SEC_PER_MINUTE;
 
 // ─── Redis Key Builders ────────────────────────────────────────
 

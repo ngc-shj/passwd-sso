@@ -20,8 +20,9 @@ import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/http/api-response";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
-const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });
+const rateLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 1 });
 
 async function handlePOST(req: NextRequest) {
   const authResult = await verifyAdminToken(req);

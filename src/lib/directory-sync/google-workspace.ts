@@ -39,10 +39,11 @@ export interface GoogleGroup {
 }
 
 import { DIRECTORY_SYNC_MAX_PAGES, DIRECTORY_SYNC_ERROR_PREVIEW } from "@/lib/validations/common.server";
+import { MS_PER_SECOND, SEC_PER_HOUR } from "@/lib/constants/time";
 
 // ─── Constants ──────────────────────────────────────────────
 
-const FETCH_TIMEOUT_MS = 30_000;
+const FETCH_TIMEOUT_MS = 30 * MS_PER_SECOND;
 
 // ─── Validation ──────────────────────────────────────────────
 
@@ -69,7 +70,7 @@ function createJwt(
   scopes: string[],
   adminEmail: string,
 ): string {
-  const now = Math.floor(Date.now() / 1000);
+  const now = Math.floor(Date.now() / MS_PER_SECOND);
   const header = { alg: "RS256", typ: "JWT" };
   const payload = {
     iss: serviceAccount.client_email,
@@ -77,7 +78,7 @@ function createJwt(
     scope: scopes.join(" "),
     aud: "https://oauth2.googleapis.com/token",
     iat: now,
-    exp: now + 3600, // 1 hour
+    exp: now + SEC_PER_HOUR,
   };
 
   const segments = [

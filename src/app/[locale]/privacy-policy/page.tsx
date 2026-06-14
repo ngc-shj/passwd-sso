@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { ArrowLeft } from "lucide-react";
+import { CRYPTO_CONSTANTS } from "@/lib/crypto/crypto-client";
 
 const LAST_UPDATED = "2026-03-11";
 const ISSUES_URL = "https://github.com/ngc-shj/passwd-sso/issues";
@@ -71,7 +72,9 @@ export default function PrivacyPolicyPage() {
                       </a>
                     ),
                   })
-                : t(`sections.${key}.body`)}
+                : key === "security"
+                  ? t(`sections.${key}.body`, { iterations: CRYPTO_CONSTANTS.PBKDF2_ITERATIONS })
+                  : t(`sections.${key}.body`)}
             </p>
             {ITEM_SECTIONS[key] && (
               <ul className="mt-3 list-inside list-disc space-y-1 text-muted-foreground">

@@ -14,6 +14,7 @@ import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audi
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { AUDIT_ACTION } from "@/lib/constants";
+import { EXTENSION_TOKEN_REVOKE_REASON } from "@/lib/auth/tokens/extension-token";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import {
@@ -180,7 +181,7 @@ async function handlePOST(req: NextRequest) {
   try {
     const result = await invalidateUserSessions(user.id, {
       allTenants: true,
-      reason: "passkey_reauth",
+      reason: EXTENSION_TOKEN_REVOKE_REASON.PASSKEY_REAUTH,
       excludeSessionToken: sessionToken,
     });
     if (result.cacheTombstoneFailures > 0) {

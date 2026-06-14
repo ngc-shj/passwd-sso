@@ -18,10 +18,11 @@ import {
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 type RouteContext = { params: Promise<{ teamId: string; id: string }> };
 
-const teamAttachmentUploadLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
+const teamAttachmentUploadLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 30 });
 
 function getExtension(filename: string): string {
   return filename.split(".").pop()?.toLowerCase() ?? "";

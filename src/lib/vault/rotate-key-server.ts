@@ -6,6 +6,7 @@ import {
   ATTACHMENT_MANIFEST_CAP,
 } from "@/lib/validations/common";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 // ── Error classes ────────────────────────────────────────────────────────────
 
@@ -484,7 +485,7 @@ export async function applyAttachmentMigration(
     select: { id: true, encryptionMode: true, encryptedData: true, keyVersion: true },
   });
   if (!row) {
-    throw new Error("NOT_FOUND");
+    throw new Error(API_ERROR.NOT_FOUND);
   }
 
   // Mode check (I5.3): only mode-0 rows are eligible
@@ -520,7 +521,7 @@ export async function applyAttachmentMigration(
     },
   });
   if (updateResult.count !== 1) {
-    throw new Error("NOT_FOUND");
+    throw new Error(API_ERROR.NOT_FOUND);
   }
 
   void entryId; // referenced in audit by caller

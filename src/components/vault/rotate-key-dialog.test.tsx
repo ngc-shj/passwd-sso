@@ -25,6 +25,10 @@ vi.mock("@/lib/vault/vault-context", () => ({
 
 vi.mock("@/lib/http/api-error-codes", () => ({
   apiErrorToI18nKey: (code: string) => `apiErr:${code}`,
+  API_ERROR: {
+    INVALID_PASSPHRASE: "INVALID_PASSPHRASE",
+    ENTRY_COUNT_MISMATCH: "ENTRY_COUNT_MISMATCH",
+  },
 }));
 
 vi.mock("@/lib/ui/ime-guard", () => ({

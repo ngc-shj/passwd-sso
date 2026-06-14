@@ -3,6 +3,12 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
 import { getLogger } from "@/lib/logger";
 import { getTenantRlsContext } from "@/lib/tenant-rls";
+import {
+  MS_PER_SECOND,
+  MS_PER_MINUTE,
+  SEC_PER_MINUTE,
+  SEC_PER_DAY,
+} from "@/lib/constants/time";
 
 /**
  * Either the global `prisma` client or an interactive transaction client.
@@ -70,21 +76,21 @@ function createPool(): pg.Pool {
   const pool = new pg.Pool({
     connectionString,
     max: envInt("DB_POOL_MAX", 20, { min: 1, max: 200 }),
-    connectionTimeoutMillis: envInt("DB_POOL_CONNECTION_TIMEOUT_MS", 5000, {
+    connectionTimeoutMillis: envInt("DB_POOL_CONNECTION_TIMEOUT_MS", 5 * MS_PER_SECOND, {
       min: 0,
-      max: 60_000,
+      max: MS_PER_MINUTE,
     }),
-    idleTimeoutMillis: envInt("DB_POOL_IDLE_TIMEOUT_MS", 30_000, {
+    idleTimeoutMillis: envInt("DB_POOL_IDLE_TIMEOUT_MS", 30 * MS_PER_SECOND, {
       min: 0,
-      max: 600_000,
+      max: 10 * MS_PER_MINUTE,
     }),
-    maxLifetimeSeconds: envInt("DB_POOL_MAX_LIFETIME_SECONDS", 1800, {
+    maxLifetimeSeconds: envInt("DB_POOL_MAX_LIFETIME_SECONDS", 30 * SEC_PER_MINUTE, {
       min: 0,
-      max: 86_400,
+      max: SEC_PER_DAY,
     }),
-    statement_timeout: envInt("DB_POOL_STATEMENT_TIMEOUT_MS", 30_000, {
+    statement_timeout: envInt("DB_POOL_STATEMENT_TIMEOUT_MS", 30 * MS_PER_SECOND, {
       min: 0,
-      max: 300_000,
+      max: 5 * MS_PER_MINUTE,
     }),
     application_name: "passwd-sso",
   });

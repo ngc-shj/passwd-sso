@@ -52,6 +52,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 interface ServiceAccount {
   id: string;
@@ -998,7 +999,7 @@ export function ServiceAccountCard() {
                     type="date"
                     value={tokenExpiresAt}
                     onChange={(e) => setTokenExpiresAt(e.target.value)}
-                    min={new Date(Date.now() + 86400000).toISOString().split("T")[0]}
+                    min={new Date(Date.now() + MS_PER_DAY).toISOString().split("T")[0]}
                   />
                 </div>
               </div>

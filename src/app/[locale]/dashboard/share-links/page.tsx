@@ -37,7 +37,7 @@ import {
   Terminal,
 } from "lucide-react";
 import { toast } from "sonner";
-import { API_PATH, apiPath, ENTRY_TYPE } from "@/lib/constants";
+import { API_PATH, apiPath, ENTRY_TYPE, SHARE_TYPE } from "@/lib/constants";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { formatFileSize } from "@/lib/format/format-file-size";
 import { SendDialog } from "@/components/share/send-dialog";
@@ -327,12 +327,12 @@ export default function ShareLinksPage() {
                   <div className="flex-1 min-w-0 space-y-1.5">
                     <div className="flex items-center gap-2 flex-wrap">
                       {getStatusBadge(link)}
-                      {link.shareType === "TEXT" ? (
+                      {link.shareType === SHARE_TYPE.TEXT ? (
                         <span className="text-xs text-muted-foreground flex items-center gap-1">
                           <MessageSquare className="h-3.5 w-3.5" />
                           {link.sendName ?? t("textSend")}
                         </span>
-                      ) : link.shareType === "FILE" ? (
+                      ) : link.shareType === SHARE_TYPE.FILE ? (
                         <span className="text-xs text-muted-foreground flex items-center gap-1">
                           <Paperclip className="h-3.5 w-3.5" />
                           {link.sendFilename ?? link.sendName ?? t("fileSend")}
@@ -356,11 +356,11 @@ export default function ShareLinksPage() {
                       )}
                     </div>
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                      {link.shareType === "ENTRY_SHARE" && link.hasPersonalEntry ? (
+                      {link.shareType === SHARE_TYPE.ENTRY_SHARE && link.hasPersonalEntry ? (
                         <span className="text-muted-foreground italic">
                           {t("personalEntry")}
                         </span>
-                      ) : link.shareType === "ENTRY_SHARE" && !link.teamPasswordEntryId ? (
+                      ) : link.shareType === SHARE_TYPE.ENTRY_SHARE && !link.teamPasswordEntryId ? (
                         <span className="text-muted-foreground italic">
                           {t("deletedEntry")}
                         </span>

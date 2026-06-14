@@ -7,7 +7,7 @@ import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { readJsonWithCap, exceedsDeclaredContentLength } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
-import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
 
 const revokeLimiter = createRateLimiter({
   windowMs: MS_PER_MINUTE,
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
           // Default 60 s when retryAfterMs is null/undefined — preserves the
           // pre-migration contract (see route.test.ts: "defaulting to 60").
           headers: {
-            "Retry-After": String(Math.ceil((retryAfterMs ?? 60_000) / 1000)),
+            "Retry-After": String(Math.ceil((retryAfterMs ?? MS_PER_MINUTE) / MS_PER_SECOND)),
           },
         },
       ),

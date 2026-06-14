@@ -2,10 +2,11 @@ import { getShadowHost } from "./shadow-host";
 import { bannerStyles } from "./styles";
 import { t } from "../../lib/i18n";
 import type { PasskeyMatchEntry } from "../../types/messages";
+import { MS_PER_SECOND } from "../../lib/time";
 
 const BANNER_ID = "psso-passkey-save-banner";
 const STYLE_ID = "psso-passkey-save-style";
-const AUTO_DISMISS_MS = 15_000;
+const AUTO_DISMISS_MS = 15 * MS_PER_SECOND;
 
 export interface PasskeySaveBannerOptions {
   rpName: string;

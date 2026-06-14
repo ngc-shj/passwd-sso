@@ -1,4 +1,4 @@
-import { MS_PER_MINUTE } from "../time";
+import { MS_PER_MINUTE, DAYS_PER_YEAR } from "../time";
 
 export const API_KEY_PREFIX = "api_";
 
@@ -31,7 +31,7 @@ export const API_KEY_FORBIDDEN_SCOPES = [
 export const MAX_API_KEYS_PER_USER = 10;
 
 /** Maximum API key expiry: 365 days */
-export const MAX_API_KEY_EXPIRY_DAYS = 365;
+export const MAX_API_KEY_EXPIRY_DAYS = DAYS_PER_YEAR;
 
 /** Default API key expiry: 90 days */
 export const DEFAULT_API_KEY_EXPIRY_DAYS = 90;

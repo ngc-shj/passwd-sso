@@ -35,6 +35,8 @@ import type { TxOrPrisma } from "@/lib/prisma";
 import { getKeyProviderSync } from "@/lib/key-provider";
 import { getRedis } from "@/lib/redis";
 import { parseDeviceFromUserAgent } from "@/lib/parse-user-agent";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { SEC_PER_MINUTE } from "@/lib/constants/time";
 
 // ── Shared constants ────────────────────────────────────────
 
@@ -45,7 +47,7 @@ import { parseDeviceFromUserAgent } from "@/lib/parse-user-agent";
  * dedicated key namespace. Tuning this value applies to both flows in
  * lockstep — sub-flows MUST NOT define a local override.
  */
-export const WEBAUTHN_CHALLENGE_TTL_SECONDS = 300;
+export const WEBAUTHN_CHALLENGE_TTL_SECONDS = 5 * SEC_PER_MINUTE;
 
 // ── Env helpers ──────────────────────────────────────────────
 
@@ -459,7 +461,7 @@ export async function verifyAuthenticationAssertion(
   });
 
   if (!storedCredential) {
-    return { ok: false, status: 404, code: "NOT_FOUND", details: "Credential not found" };
+    return { ok: false, status: 404, code: API_ERROR.NOT_FOUND, details: "Credential not found" };
   }
 
   // v11: WebAuthnCredential shape — string `id` (no Uint8Array conversion),

@@ -9,8 +9,9 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, rateLimited, notFound, unauthorized } from "@/lib/http/api-response";
 import { autoPromoteIfElapsed } from "@/lib/emergency-access/vault-auto-promote";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
-const vaultLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
+const vaultLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 10 });
 
 // GET /api/emergency-access/[id]/vault — Get ECDH data for vault access
 async function handleGET(

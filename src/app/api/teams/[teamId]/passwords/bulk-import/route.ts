@@ -9,12 +9,13 @@ import { parseBody } from "@/lib/http/parse-body";
 import { bulkTeamImportSchema } from "@/lib/validations";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import * as teamPasswordService from "@/lib/services/team-password-service";
 
 type Params = { params: Promise<{ teamId: string }> };
 
-const teamBulkImportLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
+const teamBulkImportLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 30 });
 
 // POST /api/teams/[teamId]/passwords/bulk-import - Bulk create team password entries (E2E encrypted)
 async function handlePOST(req: NextRequest, { params }: Params) {

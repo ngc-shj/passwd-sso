@@ -35,6 +35,7 @@ function base64urlDecode(s: string): Uint8Array {
 }
 
 import { hexDecode, hexEncode, toArrayBuffer } from "../../crypto/crypto-utils";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 export { hexEncode };
 
 // ─── Option conversion ─────────────────────────────────────
@@ -230,7 +231,7 @@ export async function unwrapSecretKeyWithPrf(
 // `abortInFlightCeremony` for component unmount cleanup.
 let inFlightCeremonyAbort: AbortController | null = null;
 
-const CEREMONY_TIMEOUT_MS = 120_000;
+const CEREMONY_TIMEOUT_MS = 2 * MS_PER_MINUTE;
 
 /**
  * Start a WebAuthn ceremony: abort any prior in-flight request, then register

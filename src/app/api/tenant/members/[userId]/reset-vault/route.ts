@@ -20,7 +20,7 @@ import { NOTIFICATION_TYPE } from "@/lib/constants/audit/notification";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { forbidden, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { MAX_PENDING_RESETS, VAULT_RESET_HISTORY_LIMIT } from "@/lib/validations/common.server";
-import { MS_PER_DAY } from "@/lib/constants/time";
+import { MS_PER_DAY, RESET_TOTAL_TTL_MS } from "@/lib/constants/time";
 import { encryptResetToken } from "@/lib/vault/admin-reset-token-crypto";
 import { deriveResetStatus } from "@/lib/vault/admin-reset-status";
 import {
@@ -30,8 +30,6 @@ import {
 } from "@/lib/vault/admin-reset-eligibility";
 
 export const runtime = "nodejs";
-
-const RESET_TOKEN_TTL_MS = MS_PER_DAY;
 
 const adminResetLimiter = createRateLimiter({
   windowMs: MS_PER_DAY,
@@ -139,7 +137,7 @@ async function handlePOST(
   const id = randomUUID();
   const token = randomBytes(32).toString("hex");
   const tokenHash = createHash("sha256").update(token).digest("hex");
-  const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS);
+  const expiresAt = new Date(Date.now() + RESET_TOTAL_TTL_MS);
 
   const encryptedToken = encryptResetToken(token, {
     tenantId: actor.tenantId,

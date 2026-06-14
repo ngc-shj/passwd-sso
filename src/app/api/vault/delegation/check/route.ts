@@ -19,7 +19,7 @@ import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
-import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
 
 const checkRateLimiter = createRateLimiter({
   windowMs: MS_PER_MINUTE,
@@ -85,7 +85,7 @@ export async function GET(request: NextRequest) {
           headers: {
             "Retry-After": String(
               retryAfterMs != null && retryAfterMs > 0
-                ? Math.ceil(retryAfterMs / 1000)
+                ? Math.ceil(retryAfterMs / MS_PER_SECOND)
                 : 30,
             ),
           },

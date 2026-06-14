@@ -1,3 +1,5 @@
+import { MS_PER_MINUTE } from "./time";
+
 // ── Token bridge (legacy DOM-event constants kept for backwards-compatibility) ──
 /** @deprecated Kept for reference only; no current code path emits this event. */
 export const TOKEN_ELEMENT_ID = "passwd-sso-ext-token";
@@ -12,7 +14,7 @@ export const EXT_CONNECT_REQUEST_MSG_TYPE = "PASSWD_SSO_EXT_CONNECT_REQUEST";
 export const EXT_CONNECT_READY_MSG_TYPE = "PASSWD_SSO_EXT_CONNECT_READY";
 
 // Bridge code wire constants (mirror of web app constant — sync test enforces equality)
-export const BRIDGE_CODE_TTL_MS = 60 * 1000;
+export const BRIDGE_CODE_TTL_MS = MS_PER_MINUTE;
 export const BRIDGE_CODE_MAX_ACTIVE = 3;
 export const BRIDGE_CODE_LENGTH = 64;
 
@@ -97,6 +99,22 @@ export const EXT_MSG = {
   PASSKEY_CHECK_DUPLICATE: "PASSKEY_CHECK_DUPLICATE",
   PASSKEY_CREATE_CREDENTIAL: "PASSKEY_CREATE_CREDENTIAL",
 } as const;
+
+// ── Content script message types ──
+// SW → content script: show the post-navigation save/update banner.
+export const PSSO_SHOW_SAVE_BANNER = "PSSO_SHOW_SAVE_BANNER";
+// SW → content script: trigger inline autofill suggestions (keyboard shortcut).
+export const PSSO_TRIGGER_INLINE_SUGGESTIONS = "PSSO_TRIGGER_INLINE_SUGGESTIONS";
+// Popup → content script: vault lock/unlock state changed; re-evaluate suggestions.
+export const PSSO_VAULT_STATE_CHANGED = "PSSO_VAULT_STATE_CHANGED";
+// SW → autofill content script: perform field fill.
+// Note: autofill.js (plain JS, no import support) declares a matching local literal —
+// keep both in sync (mirrors the AUTOFILL_CC_FILL / autofill-cc.js pattern).
+export const AUTOFILL_FILL = "AUTOFILL_FILL";
+// ISOLATED world → MAIN world: bypass WebAuthn interception on own app pages.
+// Note: webauthn-interceptor.js (MAIN world, plain JS) cannot import from this module.
+// It declares a matching local literal — keep both in sync (mirrors the WebAuthn note).
+export const WEBAUTHN_OWN_APP_BYPASS_MSG = "PASSWD_SSO_OWN_APP_BYPASS";
 
 // ── WebAuthn clientDataJSON type strings ──
 // Note: webauthn-interceptor.js (MAIN world, plain JS) cannot import from this module.

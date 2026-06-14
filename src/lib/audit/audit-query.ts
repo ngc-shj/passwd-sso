@@ -1,6 +1,7 @@
 // Shared query helpers for audit log API routes
 
 import { AUDIT_ACTION_VALUES } from "@/lib/constants";
+import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { CURSOR_ID_RE } from "@/lib/validations/common";
 import type { AuditAction } from "@prisma/client";
 
@@ -8,10 +9,10 @@ import type { AuditAction } from "@prisma/client";
 export const VALID_ACTIONS: Set<string> = new Set(AUDIT_ACTION_VALUES);
 
 /** Valid actor type values for audit log filtering. */
-export const VALID_ACTOR_TYPES = ["HUMAN", "SERVICE_ACCOUNT", "MCP_AGENT", "SYSTEM", "ANONYMOUS"] as const;
+export const VALID_ACTOR_TYPES: (typeof ACTOR_TYPE)[keyof typeof ACTOR_TYPE][] = Object.values(ACTOR_TYPE);
 
 /** Parses actorType from search params. Returns the value if valid, undefined otherwise. */
-export function parseActorType(searchParams: URLSearchParams): (typeof VALID_ACTOR_TYPES)[number] | undefined {
+export function parseActorType(searchParams: URLSearchParams): (typeof ACTOR_TYPE)[keyof typeof ACTOR_TYPE] | undefined {
   const raw = searchParams.get("actorType");
   return VALID_ACTOR_TYPES.find((t) => t === raw);
 }

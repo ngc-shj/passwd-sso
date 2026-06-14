@@ -30,8 +30,10 @@
  * Client-only: imported solely by "use client" components.
  */
 
+import { MS_PER_SECOND } from "@/lib/constants/time";
+
 /** Grace window before an unconsumed handoff self-wipes. */
-export const PRF_HANDOFF_TTL_MS = 30_000;
+export const PRF_HANDOFF_TTL_MS = 30 * MS_PER_SECOND;
 
 export interface PrfHandoff {
   /** PRF output bytes. Owned by the handoff; the consumer zeroizes after use. */

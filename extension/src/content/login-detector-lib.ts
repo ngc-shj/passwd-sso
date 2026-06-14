@@ -5,6 +5,8 @@
 import { findPasswordInputs, findUsernameInput } from "./form-detector-lib";
 import { showSaveBanner, hideSaveBanner } from "./ui/save-banner";
 import type { ExtensionResponse } from "../types/messages";
+import { PSSO_SHOW_SAVE_BANNER } from "../lib/constants";
+import { MS_PER_SECOND } from "../lib/time";
 
 export interface LoginDetectorCleanup {
   destroy: () => void;
@@ -18,7 +20,7 @@ const REGISTRATION_FIELD_RE =
   /^(name|first.?name|last.?name|full.?name|phone|tel|address|city|state|zip|postal|country|birth|dob|age|gender|company|organization)$/i;
 
 /** Debounce interval to prevent duplicate LOGIN_DETECTED for the same action. */
-const DETECT_DEBOUNCE_MS = 2_000;
+const DETECT_DEBOUNCE_MS = 2 * MS_PER_SECOND;
 
 /**
  * Determine if a form looks like a password-change or registration form
@@ -250,7 +252,7 @@ export function initLoginDetector(): LoginDetectorCleanup {
     existingEntryId?: string;
     existingTitle?: string;
   }): void {
-    if (message?.type !== "PSSO_SHOW_SAVE_BANNER") return;
+    if (message?.type !== PSSO_SHOW_SAVE_BANNER) return;
     if (!message.action || message.action === "none") return;
 
     showSaveBannerForResponse(

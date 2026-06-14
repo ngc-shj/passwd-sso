@@ -24,11 +24,13 @@ import {
   AUDIT_TARGET_TYPE,
   AUDIT_ACTION,
   SEND_EXPIRY_MAP,
+  SHARE_TYPE,
 } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
-const sendFileLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
+const sendFileLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 5 });
 
 // POST /api/sends/file — Create a file Send
 async function handlePOST(req: NextRequest) {
@@ -149,7 +151,7 @@ async function handlePOST(req: NextRequest) {
       prisma.passwordShare.aggregate({
         where: {
           createdById: session.user.id,
-          shareType: "FILE",
+          shareType: SHARE_TYPE.FILE,
           revokedAt: null,
           expiresAt: { gt: now },
           sendSizeBytes: { not: null },
@@ -206,7 +208,7 @@ async function handlePOST(req: NextRequest) {
     prisma.passwordShare.create({
       data: {
         tokenHash,
-        shareType: "FILE",
+        shareType: SHARE_TYPE.FILE,
         entryType: null,
         sendName: meta.name,
         sendFilename: filename,
@@ -235,7 +237,7 @@ async function handlePOST(req: NextRequest) {
     action: AUDIT_ACTION.SEND_CREATE,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
     targetId: share.id,
-    metadata: { sendType: "FILE", filename, sizeBytes: file.size },
+    metadata: { sendType: SHARE_TYPE.FILE, filename, sizeBytes: file.size },
   });
 
   return NextResponse.json({

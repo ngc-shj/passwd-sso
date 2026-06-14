@@ -1,4 +1,5 @@
 import { getLogger } from "@/lib/logger";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 
 /**
  * Single throttle window used by every Redis-backed cache that uses
@@ -7,7 +8,7 @@ import { getLogger } from "@/lib/logger";
  * caches, and the rate-limit Redis path — changing the value here updates
  * all four call sites at once.
  */
-export const REDIS_FALLBACK_LOG_THROTTLE_MS = 5_000;
+export const REDIS_FALLBACK_LOG_THROTTLE_MS = 5 * MS_PER_SECOND;
 
 /**
  * Throttled error logger factory. The returned function emits at most one

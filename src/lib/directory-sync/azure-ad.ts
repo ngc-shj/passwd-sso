@@ -5,6 +5,7 @@
  */
 
 import { DIRECTORY_SYNC_MAX_PAGES, DIRECTORY_SYNC_ERROR_PREVIEW } from "@/lib/validations/common.server";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -33,7 +34,7 @@ export interface AzureAdGroup {
 // ─── Constants ──────────────────────────────────────────────
 
 const GRAPH_ORIGIN = "https://graph.microsoft.com";
-const FETCH_TIMEOUT_MS = 30_000;
+const FETCH_TIMEOUT_MS = 30 * MS_PER_SECOND;
 
 // ─── Validation ──────────────────────────────────────────────
 

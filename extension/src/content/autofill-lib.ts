@@ -1,4 +1,5 @@
 import type { AutofillPayload } from "../types/messages";
+import { AUTOFILL_FILL } from "../lib/constants";
 
 function setInputValue(input: HTMLInputElement, value: string) {
   input.focus();
@@ -331,7 +332,7 @@ if (
   (window as unknown as Record<string, boolean>)[AUTOFILL_GUARD] = true;
   chrome.runtime.onMessage.addListener((message: AutofillPayload, sender: chrome.runtime.MessageSender) => {
     // Only accept messages from our own extension — reject external senders
-    if (message?.type === "AUTOFILL_FILL" && sender.id === chrome.runtime.id) {
+    if (message?.type === AUTOFILL_FILL && sender.id === chrome.runtime.id) {
       performAutofill(message);
     }
   });

@@ -10,7 +10,7 @@ import {
   startPasskeyAuthentication,
   abortInFlightCeremony,
 } from "@/lib/auth/webauthn/webauthn-client";
-import { API_PATH } from "@/lib/constants";
+import { API_PATH, SESSION_STORAGE_KEY } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { useCallbackUrl } from "@/hooks/use-callback-url";
 import { callbackUrlToHref, isApiCallbackUrl } from "@/lib/auth/session/callback-url";
@@ -96,7 +96,7 @@ export function PasskeySignInButton() {
       }
 
       // 5. Set flag for vault auto-unlock after dashboard navigation
-      sessionStorage.setItem("psso:webauthn-signin", "1");
+      sessionStorage.setItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN, "1");
 
       // 6. Navigate to callback destination (preserves ext_connect for extension).
       // API callbacks (e.g. iOS /api/mobile/authorize) live outside the [locale]

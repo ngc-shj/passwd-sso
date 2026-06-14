@@ -13,11 +13,12 @@ import { validateMcpToken } from "@/lib/mcp/oauth-server";
 import { API_KEY_PREFIX, type ApiKeyScope } from "@/lib/constants/auth/api-key";
 import { SA_TOKEN_PREFIX, type SaTokenScope } from "@/lib/constants/auth/service-account";
 import { MCP_TOKEN_PREFIX, type McpScope } from "@/lib/constants/auth/mcp";
+import { SCIM_TOKEN_PREFIX } from "@/lib/scim/token-utils";
 import type { ExtensionTokenScope } from "@/lib/constants";
 import type { ExtensionTokenClientKind } from "@prisma/client";
 
 /** Known Bearer token prefixes — tokens with these prefixes never fall through to extension token validation. */
-const KNOWN_PREFIXES = [API_KEY_PREFIX, SA_TOKEN_PREFIX, MCP_TOKEN_PREFIX, "scim_"] as const;
+const KNOWN_PREFIXES = [API_KEY_PREFIX, SA_TOKEN_PREFIX, MCP_TOKEN_PREFIX, SCIM_TOKEN_PREFIX] as const;
 
 export type AuthResult =
   | { type: "session"; userId: string }

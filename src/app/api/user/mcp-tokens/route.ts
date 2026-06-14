@@ -9,8 +9,9 @@ import { resolveUserTenantId } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 import { evictDelegationRedisKeys } from "@/lib/auth/access/delegation";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
-const revokeAllLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
+const revokeAllLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 5 });
 
 async function handleGET(_req: NextRequest) {
   const session = await auth();

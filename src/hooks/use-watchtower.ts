@@ -7,7 +7,8 @@ import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD, buildTeamEntryAAD, buildItemKeyWrapAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { unwrapItemKey, deriveItemEncryptionKey } from "@/lib/crypto/crypto-team";
 import { API_PATH, ENTRY_TYPE, LOCAL_STORAGE_KEY, apiPath } from "@/lib/constants";
-import { MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
+import { MS_PER_DAY, MS_PER_SECOND } from "@/lib/constants/time";
+import { WATCHTOWER_COOLDOWN_MS } from "@/lib/constants/timing";
 import { getCooldownState } from "@/lib/watchtower/state";
 import {
   shouldAutoCheck,
@@ -28,7 +29,7 @@ import { fetchApi } from "@/lib/url-helpers";
 
 export const OLD_THRESHOLD_DAYS = 90;
 export const EXPIRING_THRESHOLD_DAYS = 30;
-export const WATCHTOWER_COOLDOWN_MS = 5 * MS_PER_MINUTE;
+export { WATCHTOWER_COOLDOWN_MS } from "@/lib/constants/timing";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -181,7 +182,7 @@ export function useWatchtower(
   }, []);
 
   useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    const id = window.setInterval(() => setNow(Date.now()), MS_PER_SECOND);
     return () => window.clearInterval(id);
   }, []);
 
@@ -268,7 +269,7 @@ export function useWatchtower(
           const retryAfterSec = Number(startRes.headers.get("Retry-After"));
           const startedAt =
             Number.isFinite(retryAfterSec) && retryAfterSec > 0
-              ? Date.now() + retryAfterSec * 1000 - WATCHTOWER_COOLDOWN_MS
+              ? Date.now() + retryAfterSec * MS_PER_SECOND - WATCHTOWER_COOLDOWN_MS
               : Date.now();
           setLastAnalyzedAt(startedAt);
           window.localStorage.setItem(

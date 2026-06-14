@@ -17,7 +17,7 @@ import { generateAuthenticationOpts, buildPrfExtensions } from "@/lib/auth/webau
 import { randomBytes } from "node:crypto";
 import { EMAIL_MAX_LENGTH } from "@/lib/validations/common";
 import { PASSKEY_DUMMY_CREDENTIALS_MAX } from "@/lib/validations/common.server";
-import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { MS_PER_MINUTE, SEC_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
@@ -27,7 +27,7 @@ const rateLimiter = createRateLimiter({
   failClosedOnRedisError: true,
 });
 
-const CHALLENGE_TTL_SECONDS = 300;
+const CHALLENGE_TTL_SECONDS = 5 * SEC_PER_MINUTE;
 
 const emailSchema = z.object({
   email: z.string().email().max(EMAIL_MAX_LENGTH),

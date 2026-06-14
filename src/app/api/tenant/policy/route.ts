@@ -19,11 +19,12 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isValidCidr, extractClientIp } from "@/lib/auth/policy/ip-access";
 import { readJsonWithCap } from "@/lib/http/parse-body";
-import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
+import { MAX_JSON_BODY_BYTES, RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { invalidateTenantPolicyCache, wouldIpBeAllowed } from "@/lib/auth/policy/access-restriction";
 import { invalidateLockoutThresholdCache } from "@/lib/auth/policy/account-lockout";
 import { invalidateSessionTimeoutCacheForTenant } from "@/lib/auth/session/session-timeout";
 import { invalidateTenantSessionsCache } from "@/lib/auth/session/user-session-invalidation";
+import { MIN_PER_HOUR, MIN_PER_DAY } from "@/lib/constants/time";
 import {
   pinLengthSchema,
   MAX_CIDRS,
@@ -64,7 +65,7 @@ import {
   IP_ADDRESS_MAX_LENGTH,
 } from "@/lib/validations/common.server";
 
-const policyLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
+const policyLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 10 });
 
 // GET /api/tenant/policy — read tenant session policy
 async function handleGET(_req: NextRequest) {
@@ -626,7 +627,7 @@ async function handlePATCH(req: NextRequest) {
   // Cross-field validation: lockout thresholds/durations must be strictly ascending.
   // Merge request values with current DB values, falling back to schema defaults when DB has no value.
   const DEFAULT_T1 = 5, DEFAULT_T2 = 10, DEFAULT_T3 = 15;
-  const DEFAULT_D1 = 15, DEFAULT_D2 = 60, DEFAULT_D3 = 1440;
+  const DEFAULT_D1 = 15, DEFAULT_D2 = MIN_PER_HOUR, DEFAULT_D3 = MIN_PER_DAY;
 
   const t1 = (lockoutThreshold1 !== undefined ? lockoutThreshold1 : currentTenant?.lockoutThreshold1) ?? DEFAULT_T1;
   const t2 = (lockoutThreshold2 !== undefined ? lockoutThreshold2 : currentTenant?.lockoutThreshold2) ?? DEFAULT_T2;

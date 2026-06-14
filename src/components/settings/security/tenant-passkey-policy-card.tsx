@@ -84,13 +84,13 @@ export function TenantPasskeyPolicyCard() {
   const validate = (): string | null => {
     if (requirePasskey && gracePeriodDays !== "") {
       const num = Number(gracePeriodDays);
-      if (!Number.isInteger(num) || num < PASSKEY_GRACE_PERIOD_MIN) return t("passkeyGracePeriodValidationMin");
-      if (num > PASSKEY_GRACE_PERIOD_MAX) return t("passkeyGracePeriodValidationMax");
+      if (!Number.isInteger(num) || num < PASSKEY_GRACE_PERIOD_MIN) return t("passkeyGracePeriodValidationMin", { min: PASSKEY_GRACE_PERIOD_MIN });
+      if (num > PASSKEY_GRACE_PERIOD_MAX) return t("passkeyGracePeriodValidationMax", { max: PASSKEY_GRACE_PERIOD_MAX });
     }
     if (requireMinPinLength !== "") {
       const num = Number(requireMinPinLength);
-      if (!Number.isInteger(num) || num < PIN_LENGTH_MIN) return t("passkeyMinPinLengthValidationMin");
-      if (num > PIN_LENGTH_MAX) return t("passkeyMinPinLengthValidationMax");
+      if (!Number.isInteger(num) || num < PIN_LENGTH_MIN) return t("passkeyMinPinLengthValidationMin", { min: PIN_LENGTH_MIN });
+      if (num > PIN_LENGTH_MAX) return t("passkeyMinPinLengthValidationMax", { max: PIN_LENGTH_MAX });
     }
     return null;
   };
@@ -192,7 +192,7 @@ export function TenantPasskeyPolicyCard() {
             })}
             placeholder="6"
           />
-          <p className="text-xs text-muted-foreground">{t("requireMinPinLengthHelp")}</p>
+          <p className="text-xs text-muted-foreground">{t("requireMinPinLengthHelp", { min: PIN_LENGTH_MIN, max: PIN_LENGTH_MAX })}</p>
         </div>
 
         {error && <p className="text-sm text-destructive">{error}</p>}

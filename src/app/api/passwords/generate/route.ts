@@ -7,8 +7,9 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponseWithMessage, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
-const generateLimiter = createRateLimiter({ windowMs: 60_000, max: 120 });
+const generateLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 120 });
 
 // POST /api/passwords/generate - Generate a random password or passphrase
 async function handlePOST(req: NextRequest) {

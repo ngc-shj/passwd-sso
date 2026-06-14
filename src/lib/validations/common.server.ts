@@ -2,6 +2,8 @@
 // These values are kept separate to avoid leaking server configuration
 // into the client bundle.
 
+import { MS_PER_SECOND, MS_PER_MINUTE } from "@/lib/constants/time";
+
 // ─── KDF Parameters ──────────────────────────────────────────
 export const KDF_PBKDF2_ITERATIONS_MIN = 600_000;
 export const KDF_PBKDF2_ITERATIONS_MAX = 10_000_000;
@@ -16,7 +18,7 @@ export const KDF_ARGON2_PARALLELISM_MAX = 16;
 // Session policy min/max constants are in common.ts (shared with client).
 
 // ─── Audit Log ────────────────────────────────────────────────
-export const AUDIT_LOG_MAX_RANGE_DAYS = 90;
+// AUDIT_LOG_MAX_RANGE_DAYS lives in common.ts (client-shared — rendered in UI).
 export const AUDIT_LOG_BATCH_SIZE = 500;
 export const AUDIT_LOG_MAX_ROWS = 100_000;
 export const METADATA_MAX_BYTES = 10_240;      // 10 KB
@@ -49,8 +51,8 @@ export const SCIM_PAGE_COUNT_MAX = 200;
 export const SCIM_PAGE_COUNT_DEFAULT = 100;
 
 // ─── Session Cache ──────────────────────────────────────────
-export const SESSION_CACHE_TTL_MS = 30_000;          // 30 s — positive cache ceiling
-export const NEGATIVE_CACHE_TTL_MS = 5_000;          // 5 s — short-TTL negative cache (S-Req-6)
+export const SESSION_CACHE_TTL_MS = 30 * MS_PER_SECOND;          // 30 s — positive cache ceiling
+export const NEGATIVE_CACHE_TTL_MS = 5 * MS_PER_SECOND;          // 5 s — short-TTL negative cache (S-Req-6)
 // M1 invariant: tombstones MUST outlive any positive cache they need to
 // suppress. When TOMBSTONE_TTL_MS < SESSION_CACHE_TTL_MS, a Redis tombstone
 // write that lands later than the positive cache expiry (e.g. the tombstone
@@ -62,14 +64,14 @@ export const NEGATIVE_CACHE_TTL_MS = 5_000;          // 5 s — short-TTL negati
 // "TOMBSTONE_TTL_MS >= SESSION_CACHE_TTL_MS" test in
 // `src/lib/validations/common.server.test.ts` — CI fails if a future edit
 // breaks the relationship.
-export const TOMBSTONE_TTL_MS = 30_000;              // 30 s — populate-after-invalidate guard
+export const TOMBSTONE_TTL_MS = 30 * MS_PER_SECOND;              // 30 s — populate-after-invalidate guard
 export const SESSION_CACHE_KEY_PREFIX = "sess:cache:";
 
 // ─── Webhook Dispatcher ─────────────────────────────────────
 export const WEBHOOK_CONCURRENCY = 5;
 
 // ─── Rate Limit Window ──────────────────────────────────────
-export const RATE_WINDOW_MS = 60_000;           // 1 minute
+export const RATE_WINDOW_MS = MS_PER_MINUTE;           // 1 minute
 
 // ─── Tenant ─────────────────────────────────────────────────
 export const MAX_TENANT_CLAIM_LENGTH = 255;
@@ -106,6 +108,5 @@ export const SHARE_ACCESS_LOG_LIMIT = 50;
 export const BREAKGLASS_USER_LIST_LIMIT = 200;
 export const VAULT_RESET_HISTORY_LIMIT = 50;
 export const TEAM_MEMBER_SEARCH_LIMIT = 10;
-export const NOTIFICATION_BELL_LIMIT = 10;
 export const PASSKEY_DUMMY_CREDENTIALS_MAX = 3;
 export const PASSWORD_HISTORY_SNIPPET_LENGTH = 10;

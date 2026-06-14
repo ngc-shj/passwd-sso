@@ -1,6 +1,7 @@
 import { vi } from "vitest";
 import { TEAM_ROLE } from "@/lib/constants";
 import type { TeamRoleValue } from "@/lib/constants";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 export interface MockMembership {
   id: string;
@@ -44,11 +45,11 @@ export function createTeamAuthMocks(
 
   return {
     requireTeamMember: vi.fn(async () => {
-      if (!membership) throw new TeamAuthError("NOT_FOUND", 404);
+      if (!membership) throw new TeamAuthError(API_ERROR.NOT_FOUND, 404);
       return membership;
     }),
     requireTeamPermission: vi.fn(async () => {
-      if (!membership) throw new TeamAuthError("NOT_FOUND", 404);
+      if (!membership) throw new TeamAuthError(API_ERROR.NOT_FOUND, 404);
       return membership;
     }),
     hasTeamPermission: vi.fn(() => !!membership),

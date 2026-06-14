@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, createParams, parseResponse } from "../../helpers/request-builder";
 
@@ -81,7 +82,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(404);
-    expect(json.error).toBe("NOT_FOUND");
+    expect(json.error).toBe(API_ERROR.NOT_FOUND);
   });
 
   it("returns 404 when entry belongs to different team", async () => {

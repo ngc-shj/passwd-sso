@@ -8,10 +8,11 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { getSessionToken } from "./helpers";
 import { withUserTenantRls, resolveUserTenantId } from "@/lib/tenant-context";
 import { rateLimited, unauthorized } from "@/lib/http/api-response";
-import { revokeAllExtensionTokensForUser } from "@/lib/auth/tokens/extension-token";
+import { revokeAllExtensionTokensForUser, EXTENSION_TOKEN_REVOKE_REASON } from "@/lib/auth/tokens/extension-token";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
-const revokeAllLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
+const revokeAllLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 5 });
 
 async function handleGET(request: NextRequest) {
   const session = await auth();
@@ -152,7 +153,7 @@ async function handleDELETE(request: NextRequest) {
     await revokeAllExtensionTokensForUser({
       userId: session.user.id,
       tenantId,
-      reason: "sign_out_everywhere",
+      reason: EXTENSION_TOKEN_REVOKE_REASON.SIGN_OUT_EVERYWHERE,
     });
   }
 

@@ -15,6 +15,7 @@ import { Agent as UndiciAgent } from "undici";
 import { isIpInCidr } from "@/lib/auth/policy/ip-access";
 import { METADATA_BLOCKLIST } from "@/lib/audit/audit-logger";
 import { safeRecord } from "@/lib/safe-keys";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 
 // ─── SSRF Defense ──────────────────────────────────────────────
 
@@ -189,7 +190,7 @@ export async function validateAndFetch(
         ...options.headers,
       },
       redirect: "error",
-      signal: AbortSignal.timeout(options.timeout ?? 10_000),
+      signal: AbortSignal.timeout(options.timeout ?? 10 * MS_PER_SECOND),
       // @ts-expect-error -- Node.js fetch supports undici dispatcher
       dispatcher,
     });

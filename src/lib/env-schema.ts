@@ -20,6 +20,14 @@
 
 import { z } from "zod";
 import { HEX64_RE } from "@/lib/validations/common";
+import {
+  MS_PER_HOUR,
+  MS_PER_DAY,
+  MS_PER_MINUTE,
+  MS_PER_SECOND,
+  SEC_PER_DAY,
+  SEC_PER_MINUTE,
+} from "@/lib/constants/time";
 
 // ─── Reusable validators ────────────────────────────────────
 
@@ -84,9 +92,9 @@ export const envObject = z.object({
   DCR_CLEANUP_INTERVAL_MS: z.coerce
     .number()
     .int()
-    .min(60_000)
-    .max(86_400_000)
-    .default(3_600_000),
+    .min(MS_PER_MINUTE)
+    .max(MS_PER_DAY)
+    .default(MS_PER_HOUR),
   DCR_CLEANUP_BATCH_SIZE: z.coerce.number().int().min(1).max(10_000).default(1000),
   DCR_CLEANUP_EMIT_HEARTBEAT_AUDIT: z
     .enum(["true", "false"])
@@ -262,7 +270,7 @@ export const envObject = z.object({
 
   // --- Key provider ---
   KEY_PROVIDER: z.string().default("env"),
-  SM_CACHE_TTL_MS: z.coerce.number().int().min(10000).max(3600000).optional(),
+  SM_CACHE_TTL_MS: z.coerce.number().int().min(10000).max(MS_PER_HOUR).optional(),
   // Cloud provider endpoints — conditionally required via superRefine.
   AZURE_KV_URL: nonEmpty.optional(),
   GCP_PROJECT_ID: nonEmpty.optional(),
@@ -287,14 +295,14 @@ export const envObject = z.object({
     .number()
     .int()
     .min(100)
-    .max(60000)
-    .default(1000),
+    .max(MS_PER_MINUTE)
+    .default(MS_PER_SECOND),
   OUTBOX_PROCESSING_TIMEOUT_MS: z.coerce
     .number()
     .int()
-    .min(10000)
-    .max(3600000)
-    .default(300000),
+    .min(10 * MS_PER_SECOND)
+    .max(MS_PER_HOUR)
+    .default(5 * MS_PER_MINUTE),
   OUTBOX_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(100).default(8),
   OUTBOX_RETENTION_HOURS: z.coerce.number().int().min(1).max(168).default(24),
   OUTBOX_FAILED_RETENTION_DAYS: z.coerce
@@ -308,14 +316,14 @@ export const envObject = z.object({
     .number()
     .int()
     .min(30)
-    .max(86400)
-    .default(600),
+    .max(SEC_PER_DAY)
+    .default(10 * SEC_PER_MINUTE),
   OUTBOX_REAPER_INTERVAL_MS: z.coerce
     .number()
     .int()
-    .min(5000)
-    .max(3600000)
-    .default(30000),
+    .min(5 * MS_PER_SECOND)
+    .max(MS_PER_HOUR)
+    .default(30 * MS_PER_SECOND),
 
   // --- Logger (A1) ---
   // pino log levels. Production debug/trace ban DEFERRED to follow-up PR (S15).
@@ -363,26 +371,26 @@ export const envObject = z.object({
     .number()
     .int()
     .min(0)
-    .max(60000)
-    .default(5000),
+    .max(MS_PER_MINUTE)
+    .default(5 * MS_PER_SECOND),
   DB_POOL_IDLE_TIMEOUT_MS: z.coerce
     .number()
     .int()
     .min(0)
-    .max(600000)
-    .default(30000),
+    .max(10 * MS_PER_MINUTE)
+    .default(30 * MS_PER_SECOND),
   DB_POOL_MAX_LIFETIME_SECONDS: z.coerce
     .number()
     .int()
     .min(0)
-    .max(86400)
-    .default(1800),
+    .max(SEC_PER_DAY)
+    .default(30 * SEC_PER_MINUTE),
   DB_POOL_STATEMENT_TIMEOUT_MS: z.coerce
     .number()
     .int()
     .min(0)
-    .max(300000)
-    .default(30000),
+    .max(5 * MS_PER_MINUTE)
+    .default(30 * MS_PER_SECOND),
 
   // --- Audit anchor publisher ---
   DEPLOYMENT_ID: z.string().uuid().optional(),

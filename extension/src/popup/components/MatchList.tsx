@@ -10,6 +10,7 @@ import { humanizeError } from "../../lib/error-messages";
 import { getSettings } from "../../lib/storage";
 import { t } from "../../lib/i18n";
 import { EXT_ENTRY_TYPE } from "../../lib/constants";
+import { MS_PER_SECOND } from "../../lib/time";
 import { Toast } from "./Toast";
 
 interface Props {
@@ -56,7 +57,7 @@ export function MatchList({ tabUrl }: Props) {
     setToast({ message: successMsg, type: "success" });
     setTimeout(() => setToast(null), 2000);
     const { clipboardClearSeconds } = await getSettings();
-    setTimeout(() => { navigator.clipboard.writeText("").catch(() => {}); }, clipboardClearSeconds * 1000);
+    setTimeout(() => { navigator.clipboard.writeText("").catch(() => {}); }, clipboardClearSeconds * MS_PER_SECOND);
   };
 
   const handleCopy = async (entryId: string, teamId?: string) => {

@@ -2,8 +2,9 @@
 
 import { useState, useCallback, useRef, type ReactNode, createElement } from "react";
 import { RepromptDialog } from "@/components/passwords/dialogs/reprompt-dialog";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 
-const CACHE_TTL_MS = 30_000; // 30 seconds
+const CACHE_TTL_MS = 30 * MS_PER_SECOND;
 
 interface PendingVerification {
   entryId: string;

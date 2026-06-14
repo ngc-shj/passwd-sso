@@ -9,7 +9,7 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { readJsonWithCap } from "@/lib/http/parse-body";
-import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
+import { MAX_JSON_BODY_BYTES, RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -23,7 +23,7 @@ import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-const dirSyncRunLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });
+const dirSyncRunLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 1 });
 
 const runSchema = z.object({
   dryRun: z.boolean().optional().default(false),

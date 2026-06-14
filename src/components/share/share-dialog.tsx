@@ -44,6 +44,7 @@ import { formatDateTime } from "@/lib/format/format-datetime";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { MAX_VIEWS_MIN, MAX_VIEWS_MAX } from "@/lib/validations";
 import { bindRangeInput } from "@/lib/ui/input-range";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 import { safeRecord } from "@/lib/safe-keys";
 
 interface ShareLink {
@@ -348,7 +349,7 @@ export function ShareDialog({
     if (!createdUrl) return;
     await navigator.clipboard.writeText(createdUrl);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setTimeout(() => setCopied(false), 2 * MS_PER_SECOND);
   };
 
   const fetchAccessLogs = useCallback(
@@ -455,7 +456,7 @@ export function ShareDialog({
                     onClick={async () => {
                       await navigator.clipboard.writeText(createdAccessPassword);
                       setPasswordCopied(true);
-                      setTimeout(() => setPasswordCopied(false), 2000);
+                      setTimeout(() => setPasswordCopied(false), 2 * MS_PER_SECOND);
                     }}
                   >
                     {passwordCopied ? (

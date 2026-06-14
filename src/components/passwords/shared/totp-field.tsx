@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { CopyButton } from "./copy-button";
 import { X, ShieldCheck, QrCode } from "lucide-react";
 import { TOTP_ALGORITHM } from "@/lib/constants";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 import { parseOtpauthUri } from "@/lib/ui/qr-scanner-client";
 import { QRCaptureDialog } from "../dialogs/qr-capture-dialog";
 import type { EntryTotp } from "@/lib/vault/entry-form-types";
@@ -62,15 +63,15 @@ function TOTPCodeDisplay({ totp: totpEntry, wrapCopyGetter }: { totp: TOTPEntry;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     generateCode();
     const interval = setInterval(() => {
-      const now = Math.floor(Date.now() / 1000);
+      const now = Math.floor(Date.now() / MS_PER_SECOND);
       const rem = period - (now % period);
       setRemaining(rem);
       if (rem === period) {
         generateCode();
       }
-    }, 1000);
+    }, MS_PER_SECOND);
     // Set initial remaining
-    const now = Math.floor(Date.now() / 1000);
+    const now = Math.floor(Date.now() / MS_PER_SECOND);
     setRemaining(period - (now % period));
     return () => clearInterval(interval);
   }, [generateCode, period]);

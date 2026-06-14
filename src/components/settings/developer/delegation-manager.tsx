@@ -6,6 +6,7 @@ import { useVault } from "@/lib/vault/vault-context";
 import { API_PATH, apiPath } from "@/lib/constants/auth/api-path";
 import { fetchApi } from "@/lib/url-helpers";
 import { VAULT_STATUS } from "@/lib/constants";
+import { MS_PER_SECOND, MS_PER_MINUTE } from "@/lib/constants/time";
 import {
   Card,
   CardContent,
@@ -46,7 +47,7 @@ export function DelegationManager() {
 
   // Update "now" every 30s for TTL display
   useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 30_000);
+    const interval = setInterval(() => setNow(Date.now()), 30 * MS_PER_SECOND);
     return () => clearInterval(interval);
   }, []);
 
@@ -81,7 +82,7 @@ export function DelegationManager() {
       }
     };
     load();
-    const interval = setInterval(load, 30_000);
+    const interval = setInterval(load, 30 * MS_PER_SECOND);
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -117,7 +118,7 @@ export function DelegationManager() {
   const getRemainingMinutes = (expiresAt: string) => {
     return Math.max(
       0,
-      Math.floor((new Date(expiresAt).getTime() - now) / 60_000),
+      Math.floor((new Date(expiresAt).getTime() - now) / MS_PER_MINUTE),
     );
   };
 

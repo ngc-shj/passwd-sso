@@ -11,10 +11,10 @@
 //   `psoenc1:<keyVersion>:<base64url(iv || authTag || ciphertext)>`
 
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { IV_LENGTH, AUTH_TAG_LENGTH } from "./crypto-params";
+export { IV_LENGTH, AUTH_TAG_LENGTH } from "./crypto-params";
 
 export const ALGORITHM = "aes-256-gcm";
-export const IV_LENGTH = 12;
-export const AUTH_TAG_LENGTH = 16;
 export const SENTINEL = "psoenc1:";
 
 export type ParsedEnvelope = {

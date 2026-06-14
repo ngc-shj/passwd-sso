@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { hashToken, decryptShareBinary } from "@/lib/crypto/crypto-server";
 import { verifyShareAccessToken } from "@/lib/auth/tokens/share-access-token";
-import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
+import { USER_AGENT_MAX_LENGTH, RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
@@ -13,8 +13,9 @@ import {
   createThrottledErrorLogger,
   REDIS_FALLBACK_LOG_THROTTLE_MS,
 } from "@/lib/logger/throttled";
+import { SHARE_TYPE } from "@/lib/constants";
 
-const downloadLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
+const downloadLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 20 });
 
 const logShareAccessLogFailure = createThrottledErrorLogger(
   REDIS_FALLBACK_LOG_THROTTLE_MS,
@@ -76,7 +77,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       return new NextResponse(null, { status: 410 });
     }
 
-    if (share.shareType !== "FILE") {
+    if (share.shareType !== SHARE_TYPE.FILE) {
       return new NextResponse(null, { status: 400 });
     }
 

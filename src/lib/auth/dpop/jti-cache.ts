@@ -3,6 +3,7 @@ import {
   REDIS_FALLBACK_LOG_THROTTLE_MS,
   createThrottledErrorLogger,
 } from "@/lib/logger/throttled";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 /**
  * RFC 9449 §11.1 — server-side `jti` uniqueness cache.
@@ -44,7 +45,7 @@ export interface JtiCache {
 // "DEFAULT_TTL_MS >= 2 × DPOP_DEFAULT_SKEW_SECONDS" test in
 // `jti-cache.test.ts` — CI fails if a future edit breaks the relationship.
 // Exported so the test can reference the same source of truth as production.
-export const DPOP_DEFAULT_JTI_TTL_MS = 60_000;
+export const DPOP_DEFAULT_JTI_TTL_MS = MS_PER_MINUTE;
 const DEFAULT_TTL_MS = DPOP_DEFAULT_JTI_TTL_MS;
 
 const logRedisError = createThrottledErrorLogger(

@@ -30,6 +30,7 @@ import {
 } from "@/lib/validations/common";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { VAULT_ROTATE_TX_TIMEOUT_MS } from "@/lib/constants/vault/rotate-key";
 import {
   applyVaultRotation,
   LegacyAttachmentsResidualError,
@@ -188,7 +189,7 @@ async function handlePOST(request: NextRequest) {
           newServerSalt,
           payload,
         );
-      }, { timeout: 120_000 }),
+      }, { timeout: VAULT_ROTATE_TX_TIMEOUT_MS }),
     );
   } catch (e) {
     if (e instanceof LegacyAttachmentsResidualError) {

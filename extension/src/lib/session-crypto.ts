@@ -7,7 +7,7 @@
  * and the user must re-authenticate.
  */
 
-import { hexEncode } from "./crypto";
+import { hexEncode, GCM_TAG_LENGTH } from "./crypto";
 
 const IV_LENGTH = 12;
 
@@ -58,8 +58,8 @@ export async function encryptField(plaintext: string): Promise<EncryptedField | 
       encoded,
     );
     const encBytes = new Uint8Array(encrypted);
-    const ciphertext = encBytes.slice(0, encBytes.length - 16);
-    const authTag = encBytes.slice(encBytes.length - 16);
+    const ciphertext = encBytes.slice(0, encBytes.length - GCM_TAG_LENGTH);
+    const authTag = encBytes.slice(encBytes.length - GCM_TAG_LENGTH);
     return {
       ciphertext: hexEncode(ciphertext),
       iv: hexEncode(iv),

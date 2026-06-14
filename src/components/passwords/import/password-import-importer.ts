@@ -23,6 +23,7 @@ import {
 } from "@/components/passwords/import/password-import-folders";
 import { apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { MS_PER_SECOND, MS_PER_MINUTE } from "@/lib/constants/time";
 
 const BULK_IMPORT_CHUNK_SIZE = 50;
 const MAX_RETRIES_PER_CHUNK = 3;
@@ -198,7 +199,7 @@ export async function runImportEntries({
           }
           const retryAfter = res.headers.get("Retry-After");
           const rawSec = retryAfter ? parseInt(retryAfter, 10) : 1;
-          const delayMs = Math.min(Math.max(Number.isNaN(rawSec) ? 1 : rawSec, 1) * 1000, 60_000);
+          const delayMs = Math.min(Math.max(Number.isNaN(rawSec) ? 1 : rawSec, 1) * MS_PER_SECOND, MS_PER_MINUTE);
           await new Promise((resolve) => setTimeout(resolve, delayMs));
           continue;
         }

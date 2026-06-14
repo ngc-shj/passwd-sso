@@ -20,11 +20,12 @@ import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, notFound, unauthorized, rateLimited, validationError } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { LegacyAttachmentInconsistentVersionError } from "@/lib/vault/rotate-key-server";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-const attachmentUploadLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
+const attachmentUploadLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 30 });
 
 function getExtension(filename: string): string {
   return filename.split(".").pop()?.toLowerCase() ?? "";
@@ -277,7 +278,7 @@ async function handlePOST(
           select: { keyVersion: true },
         });
         if (!currentUser) {
-          throw new Error("USER_NOT_FOUND");
+          throw new Error(API_ERROR.USER_NOT_FOUND);
         }
         if (cekKeyVersion !== currentUser.keyVersion) {
           throw new LegacyAttachmentInconsistentVersionError();
@@ -319,7 +320,7 @@ async function handlePOST(
     if (error instanceof LegacyAttachmentInconsistentVersionError) {
       return errorResponse(API_ERROR.ATTACHMENT_INCONSISTENT_VERSION);
     }
-    if (error instanceof Error && error.message === "USER_NOT_FOUND") {
+    if (error instanceof Error && error.message === API_ERROR.USER_NOT_FOUND) {
       return notFound();
     }
     throw error;

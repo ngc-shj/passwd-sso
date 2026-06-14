@@ -10,6 +10,7 @@ import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { createPersonalPasswordEntry } from "@/lib/services/personal-password-service";
 import { FILENAME_MAX_LENGTH, TRASH_PURGE_BATCH_SIZE } from "@/lib/validations/common";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -26,8 +27,8 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
-const listLimiter = createRateLimiter({ windowMs: 60_000, max: 60 });
-const createLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
+const listLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 60 });
+const createLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 30 });
 
 // GET /api/passwords - List passwords (returns encrypted overviews)
 async function handleGET(req: NextRequest) {

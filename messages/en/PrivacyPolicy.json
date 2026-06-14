@@ -42,7 +42,7 @@
     },
     "security": {
       "title": "Security",
-      "body": "All password data is encrypted client-side using AES-256-GCM before transmission. The master passphrase never leaves your device. Key derivation uses PBKDF2 with 600,000 iterations."
+      "body": "All password data is encrypted client-side using AES-256-GCM before transmission. The master passphrase never leaves your device. Key derivation uses PBKDF2 with {iterations, number} iterations."
     },
     "changes": {
       "title": "Changes to This Policy",

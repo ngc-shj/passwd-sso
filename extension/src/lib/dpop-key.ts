@@ -13,6 +13,8 @@
  * idbPut(), the next boot finds no IDB row and regenerates cleanly.
  */
 
+import { MS_PER_SECOND } from "./time";
+
 // htu construction is inlined here (same algorithm as canonicalHtuClient).
 // The extension build is a separate Vite/CRXJS bundle that cannot import
 // from src/lib/auth/dpop/htu-canonical.ts — no shared tsconfig path mapping.
@@ -213,7 +215,7 @@ export async function signDpopProof(input: {
     jti: crypto.randomUUID(),
     htm: input.method.toUpperCase(),
     htu,
-    iat: Math.floor(Date.now() / 1000),
+    iat: Math.floor(Date.now() / MS_PER_SECOND),
   };
 
   if (input.accessToken) {

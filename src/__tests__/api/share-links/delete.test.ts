@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, createParams, parseResponse } from "../../helpers/request-builder";
 
@@ -62,7 +63,7 @@ describe("DELETE /api/share-links/[id]", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(404);
-    expect(json.error).toBe("NOT_FOUND");
+    expect(json.error).toBe(API_ERROR.NOT_FOUND);
   });
 
   it("returns 404 when share belongs to another user", async () => {
@@ -80,7 +81,7 @@ describe("DELETE /api/share-links/[id]", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(404);
-    expect(json.error).toBe("NOT_FOUND");
+    expect(json.error).toBe(API_ERROR.NOT_FOUND);
   });
 
   it("returns 409 when already revoked", async () => {

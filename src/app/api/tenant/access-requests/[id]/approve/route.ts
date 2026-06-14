@@ -17,7 +17,8 @@ import { SA_TOKEN_PREFIX, MAX_SA_TOKENS_PER_ACCOUNT } from "@/lib/constants/auth
 import { parseSaTokenScopes } from "@/lib/auth/tokens/service-account-token";
 import { randomBytes } from "node:crypto";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
-import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { MS_PER_MINUTE, MS_PER_SECOND, SEC_PER_HOUR } from "@/lib/constants/time";
+import { JIT_TOKEN_TTL_MAX } from "@/lib/validations/common";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -29,8 +30,6 @@ const approveLimiter = createRateLimiter({
 
 export const runtime = "nodejs";
 
-const DEFAULT_JIT_TTL_SEC = 3600;   // 1 hour
-const MAX_JIT_TTL_SEC = 86400;      // 24 hours
 
 // POST /api/tenant/access-requests/[id]/approve — Approve an access request and issue JIT token
 async function handlePOST(req: NextRequest, { params }: Params) {
@@ -128,8 +127,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
-  const defaultTtlSec = tenant?.jitTokenDefaultTtlSec ?? DEFAULT_JIT_TTL_SEC;
-  const maxTtlSec = Math.min(tenant?.jitTokenMaxTtlSec ?? MAX_JIT_TTL_SEC, MAX_JIT_TTL_SEC);
+  const defaultTtlSec = tenant?.jitTokenDefaultTtlSec ?? SEC_PER_HOUR;
+  const maxTtlSec = Math.min(tenant?.jitTokenMaxTtlSec ?? JIT_TOKEN_TTL_MAX, JIT_TOKEN_TTL_MAX);
   const ttlSec = Math.min(defaultTtlSec, maxTtlSec);
 
   let result: { plaintext: string; expiresAt: Date; tokenId: string };
@@ -169,7 +168,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       // Issue a short-lived SA token scoped to validated scopes only
       const plaintext = SA_TOKEN_PREFIX + randomBytes(32).toString("hex");
       const tokenHash = hashToken(plaintext);
-      const expiresAt = new Date(Date.now() + ttlSec * 1000);
+      const expiresAt = new Date(Date.now() + ttlSec * MS_PER_SECOND);
 
       const token = await tx.serviceAccountToken.create({
         data: {

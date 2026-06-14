@@ -12,6 +12,7 @@ import {
 } from "@/lib/constants/audit/audit";
 import { SYSTEM_ACTOR_ID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import type { AuditOutboxPayload } from "@/lib/audit/audit-outbox";
+import { WORKER_POOL_IDLE_TIMEOUT_MS, WORKER_POOL_STATEMENT_TIMEOUT_MS } from "@/workers/worker-pool-config";
 
 export interface WorkerConfig {
   databaseUrl: string;
@@ -137,8 +138,8 @@ export function createWorker(config: WorkerConfig) {
   const pool = new pg.Pool({
     connectionString: databaseUrl,
     max: 3,
-    idleTimeoutMillis: 30_000,
-    statement_timeout: 60_000,
+    idleTimeoutMillis: WORKER_POOL_IDLE_TIMEOUT_MS,
+    statement_timeout: WORKER_POOL_STATEMENT_TIMEOUT_MS,
     application_name: "passwd-sso-dcr-cleanup-worker",
   });
 

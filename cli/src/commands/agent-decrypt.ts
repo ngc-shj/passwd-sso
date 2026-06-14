@@ -18,6 +18,7 @@ import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
 import { getEncryptionKey, getUserId, getSecretKeyBytes, setEncryptionKey } from "../lib/vault-state.js";
 import { readPassphrase, unlockWithPassphrase } from "./unlock.js";
 import * as output from "../lib/output.js";
+import { AGENT_CHILD_TIMEOUT_MS } from "../lib/time.js";
 
 // ─── Input Validation Schema ───────────────────────────────────
 
@@ -353,7 +354,7 @@ async function forkDaemon(socketPath: string): Promise<void> {
     process.stderr.write("Error: Agent child did not respond within 10s.\n");
     child.kill();
     process.exit(1);
-  }, 10_000);
+  }, AGENT_CHILD_TIMEOUT_MS);
 }
 
 /**

@@ -9,7 +9,7 @@ import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { generateRegistrationOpts, derivePrfSaltV2 } from "@/lib/auth/webauthn/webauthn-server";
-import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { MS_PER_MINUTE, SEC_PER_MINUTE } from "@/lib/constants/time";
 import { randomBytes } from "node:crypto";
 
 export const runtime = "nodejs";
@@ -20,7 +20,7 @@ const rateLimiter = createRateLimiter({
   failClosedOnRedisError: true,
 });
 
-const CHALLENGE_TTL_SECONDS = 300;
+const CHALLENGE_TTL_SECONDS = 5 * SEC_PER_MINUTE;
 
 // POST /api/webauthn/register/options
 async function handlePOST(req: NextRequest) {

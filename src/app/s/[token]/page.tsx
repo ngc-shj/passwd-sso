@@ -9,18 +9,19 @@ import { ShareError } from "@/components/share/share-error";
 import { ShareProtectedContent } from "@/components/share/share-protected-content";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIpFromHeaders, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
-import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
+import { USER_AGENT_MAX_LENGTH, RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import {
   createThrottledErrorLogger,
   REDIS_FALLBACK_LOG_THROTTLE_MS,
 } from "@/lib/logger/throttled";
+import { SHARE_TYPE } from "@/lib/constants";
 
 const logShareAccessLogFailure = createThrottledErrorLogger(
   REDIS_FALLBACK_LOG_THROTTLE_MS,
   "share-access-log.write.fallback",
 );
 
-const sharePageLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
+const sharePageLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 20 });
 
 type Props = {
   params: Promise<{ token: string }>;
@@ -101,7 +102,7 @@ export default async function SharePage({ params }: Props) {
     // The revoked_at/expires_at predicates are re-asserted here to close a
     // TOCTOU window between findUnique and the UPDATE — without them, a
     // share revoked/expired in that window would still render.
-    if (share.shareType !== "FILE") {
+    if (share.shareType !== SHARE_TYPE.FILE) {
       const updated: number = await prisma.$executeRaw`
         UPDATE "password_shares"
         SET "view_count" = "view_count" + 1
@@ -177,10 +178,10 @@ export default async function SharePage({ params }: Props) {
     }
 
     // Branch on shareType
-    if (share.shareType === "TEXT") {
+    if (share.shareType === SHARE_TYPE.TEXT) {
       return (
         <ShareSendView
-          sendType="TEXT"
+          sendType={SHARE_TYPE.TEXT}
           name={String(data.name ?? share.sendName ?? "")}
           text={String(data.text ?? "")}
           token={token}
@@ -191,10 +192,10 @@ export default async function SharePage({ params }: Props) {
       );
     }
 
-    if (share.shareType === "FILE") {
+    if (share.shareType === SHARE_TYPE.FILE) {
       return (
         <ShareSendView
-          sendType="FILE"
+          sendType={SHARE_TYPE.FILE}
           name={String(data.name ?? share.sendName ?? "")}
           filename={share.sendFilename}
           sizeBytes={share.sendSizeBytes}

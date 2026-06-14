@@ -17,6 +17,7 @@ import {
   hexEncode,
 } from "./crypto";
 import { CRYPTO_CONSTANTS } from "../../src/lib/crypto/crypto-client";
+import { AUTH_TAG_LENGTH, AES_KEY_LENGTH } from "../../src/lib/crypto/crypto-params";
 
 // ─── Fixed test vectors ─────────────────────────────────────────
 const PASSPHRASE = "TestPassphrase!2026";
@@ -40,6 +41,16 @@ describe("E2E crypto helpers", () => {
       );
       expect(CRYPTO_CONSTANTS.VERIFIER_DOMAIN_PREFIX).toBe("verifier");
       expect(CRYPTO_CONSTANTS.IV_LENGTH).toBe(12);
+    });
+  });
+
+  describe("crypto-params value pins", () => {
+    it("AUTH_TAG_LENGTH must be 16 bytes", () => {
+      expect(AUTH_TAG_LENGTH).toBe(16);
+    });
+
+    it("AES_KEY_LENGTH must be 256 bits", () => {
+      expect(AES_KEY_LENGTH).toBe(256);
     });
   });
 

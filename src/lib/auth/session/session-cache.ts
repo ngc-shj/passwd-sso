@@ -13,6 +13,7 @@ import {
   SESSION_CACHE_TTL_MS,
   TOMBSTONE_TTL_MS,
 } from "@/lib/validations/common.server";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 
 // ─── Types ──────────────────────────────────────────────────
 export interface SessionInfo {
@@ -154,7 +155,7 @@ export async function setCachedSession(
 
   // Sub-1 s TTL on a positive entry → skip entirely (S-Req-5).
   // Checked before cacheKey() so a no-cache path costs zero HMAC.
-  if (info.valid && info.userId && ttlMs < 1000) return;
+  if (info.valid && info.userId && ttlMs < MS_PER_SECOND) return;
 
   // cacheKey() throws if the KeyProvider has not yet warmed share-master
   // (S-5 / S-11 cold-start). Catch here so the call never propagates.

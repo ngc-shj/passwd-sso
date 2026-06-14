@@ -12,6 +12,7 @@ import { errorResponse, unauthorized, notFound } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { SHARE_TYPE } from "@/lib/constants";
 import {
   createThrottledErrorLogger,
   REDIS_FALLBACK_LOG_THROTTLE_MS,
@@ -113,7 +114,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     // For FILE shares, viewCount is incremented by the download route instead,
     // to prevent bypass via direct download (skipping content API).
     let viewCountDelta = 0;
-    if (share.shareType !== "FILE") {
+    if (share.shareType !== SHARE_TYPE.FILE) {
       const updated: number = await prisma.$executeRaw`
         UPDATE "password_shares"
         SET "view_count" = "view_count" + 1

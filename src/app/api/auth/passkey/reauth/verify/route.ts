@@ -95,7 +95,7 @@ async function handlePOST(req: NextRequest) {
     const code =
       verification.code === "SERVICE_UNAVAILABLE"
         ? API_ERROR.SERVICE_UNAVAILABLE
-        : verification.code === "NOT_FOUND"
+        : verification.code === API_ERROR.NOT_FOUND
           ? API_ERROR.NOT_FOUND
           : API_ERROR.VALIDATION_ERROR;
     return errorResponse(

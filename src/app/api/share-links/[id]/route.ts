@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAuditInTx, personalAuditBase, teamAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized, notFound } from "@/lib/http/api-response";
-import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, AUDIT_ACTION, SHARE_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -59,7 +59,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
       ...(teamPasswordEntryId && teamId
         ? teamAuditBase(req, session.user.id, teamId)
         : personalAuditBase(req, session.user.id)),
-      action: share.shareType === "TEXT" || share.shareType === "FILE"
+      action: share.shareType === SHARE_TYPE.TEXT || share.shareType === SHARE_TYPE.FILE
         ? AUDIT_ACTION.SEND_REVOKE
         : AUDIT_ACTION.SHARE_REVOKE,
       targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,

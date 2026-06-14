@@ -12,8 +12,9 @@ import { parseBody } from "@/lib/http/parse-body";
 import { bulkImportSchema } from "@/lib/validations";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
-const bulkImportLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
+const bulkImportLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 30 });
 
 // POST /api/passwords/bulk-import - Bulk create password entries (E2E encrypted)
 async function handlePOST(req: NextRequest) {

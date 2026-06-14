@@ -18,6 +18,7 @@ import {
   sign,
   type AnchorRow,
 } from "@/lib/audit/anchor-manifest";
+import { WORKER_POOL_IDLE_TIMEOUT_MS, WORKER_POOL_STATEMENT_TIMEOUT_MS } from "@/workers/worker-pool-config";
 import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
 
 // --- Typed errors ---
@@ -434,8 +435,8 @@ export function createPublisher(config: PublisherConfig): {
   const pool = new pg.Pool({
     connectionString: config.databaseUrl,
     max: 3,
-    idleTimeoutMillis: 30_000,
-    statement_timeout: 60_000,
+    idleTimeoutMillis: WORKER_POOL_IDLE_TIMEOUT_MS,
+    statement_timeout: WORKER_POOL_STATEMENT_TIMEOUT_MS,
     application_name: "passwd-sso-audit-anchor-publisher",
   });
 

@@ -21,10 +21,9 @@ import {
 } from "node:crypto";
 import { getKeyProviderSync } from "@/lib/key-provider";
 import { getCurrentVerifierVersion } from "@/lib/crypto/verifier-version";
+import { IV_LENGTH, AUTH_TAG_LENGTH } from "./crypto-params";
 
 const ALGORITHM = "aes-256-gcm";
-const IV_LENGTH = 12; // 96 bits, recommended for GCM
-const AUTH_TAG_LENGTH = 16; // 128 bits
 
 export interface ServerEncryptedData {
   ciphertext: string; // hex

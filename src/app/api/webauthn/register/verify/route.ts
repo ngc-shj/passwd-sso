@@ -204,7 +204,7 @@ async function handlePOST(req: NextRequest) {
         tenant: { select: { requireMinPinLength: true } },
       },
     });
-    if (!user) throw new Error("USER_NOT_FOUND");
+    if (!user) throw new Error(API_ERROR.USER_NOT_FOUND);
     return user;
   });
 

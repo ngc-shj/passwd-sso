@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SEC_PER_MINUTE, SEC_PER_DAY, MIN_PER_HOUR, MIN_PER_DAY, DAYS_PER_YEAR } from "@/lib/constants/time";
 
 // ─── Validation Constants (single source of truth) ──────────
 // Used by both Zod schemas (server) and UI components (client).
@@ -51,8 +52,8 @@ export const AUDIT_DELIVERY_AWS_CREDENTIAL_MAX = 256; // S3 accessKeyId / secret
 export const DIRECTORY_SYNC_CREDENTIAL_KEY_MAX = 128;
 export const DIRECTORY_SYNC_CREDENTIAL_ENTRIES_MAX = 32;
 export const SYNC_INTERVAL_MIN = 15;
-export const SYNC_INTERVAL_MAX = 1440;
-export const SYNC_INTERVAL_DEFAULT = 60;
+export const SYNC_INTERVAL_MAX = MIN_PER_DAY;
+export const SYNC_INTERVAL_DEFAULT = MIN_PER_HOUR;
 
 // ─── WebAuthn ────────────────────────────────────────────────
 export const WEBAUTHN_NICKNAME_MAX_LENGTH = 100;
@@ -62,8 +63,8 @@ export const WEBAUTHN_RESPONSE_MAX = 10_000;
 
 // ─── SCIM ────────────────────────────────────────────────────
 export const SCIM_TOKEN_EXPIRY_MIN_DAYS = 1;
-export const SCIM_TOKEN_EXPIRY_MAX_DAYS = 3650;
-export const SCIM_TOKEN_EXPIRY_DEFAULT_DAYS = 365;
+export const SCIM_TOKEN_EXPIRY_MAX_DAYS = 10 * DAYS_PER_YEAR;
+export const SCIM_TOKEN_EXPIRY_DEFAULT_DAYS = DAYS_PER_YEAR;
 
 // ─── AAD Protocol Version ────────────────────────────────────
 // Current AAD format version (binds ciphertext to user/team/entry/keyVersion).
@@ -129,6 +130,7 @@ export const SCIM_FIELD_MAX_LENGTH = 255;
 // ─── Notification ───────────────────────────────────────────
 export const NOTIFICATION_TITLE_MAX = 200;
 export const NOTIFICATION_BODY_MAX = 2000;
+export const NOTIFICATION_BELL_LIMIT = 10;
 
 // ─── Entry Snippet ──────────────────────────────────────────
 export const ENTRY_SNIPPET_MAX = 100;
@@ -185,41 +187,43 @@ export const MAX_CONCURRENT_SESSIONS_MAX = 100;
 // refreshes / premature sign-outs. Validated empirically (see the
 // unify-session-timeout-policy deviation log).
 export const SESSION_IDLE_TIMEOUT_MIN = 5;
-export const SESSION_IDLE_TIMEOUT_MAX = 1440;          // 24 hours in minutes
+export const SESSION_IDLE_TIMEOUT_MAX = MIN_PER_DAY;
 // Absolute session lifetime (createdAt-based, non-rolling)
 export const SESSION_ABSOLUTE_TIMEOUT_MIN = 5;
-export const SESSION_ABSOLUTE_TIMEOUT_MAX = 43200;     // 30 days in minutes
+export const SESSION_ABSOLUTE_TIMEOUT_MAX = 30 * MIN_PER_DAY;
 // Browser extension token lifetime (idle = rolling, absolute = family lifetime)
 export const EXTENSION_TOKEN_IDLE_TIMEOUT_MIN = 5;
-export const EXTENSION_TOKEN_IDLE_TIMEOUT_MAX = 43200; // 30 days in minutes
+export const EXTENSION_TOKEN_IDLE_TIMEOUT_MAX = 30 * MIN_PER_DAY;
 export const EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MIN = 5;
-export const EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MAX = 43200;
+export const EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MAX = 30 * MIN_PER_DAY;
 // Defaults used by schema + migration backfill
-export const SESSION_IDLE_TIMEOUT_DEFAULT = 480;        // 8 hours
-export const SESSION_ABSOLUTE_TIMEOUT_DEFAULT = 43200;  // 30 days
-export const EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT = 10080;     // 7 days
-export const EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT = 43200; // 30 days
+export const SESSION_IDLE_TIMEOUT_DEFAULT = 8 * MIN_PER_HOUR;
+export const SESSION_ABSOLUTE_TIMEOUT_DEFAULT = 30 * MIN_PER_DAY;
+export const EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT = 7 * MIN_PER_DAY;
+export const EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT = 30 * MIN_PER_DAY;
 // Vault auto-lock: same 5-min floor for consistency with the session floors.
 // Cross-field invariant enforced server-side:
 //   vaultAutoLockMinutes <= min(sessionIdleTimeoutMinutes, extensionTokenIdleTimeoutMinutes)
 export const VAULT_AUTO_LOCK_MIN = 5;
-export const VAULT_AUTO_LOCK_MAX = 1440;
+export const VAULT_AUTO_LOCK_MAX = MIN_PER_DAY;
 
 // ─── Lockout Policy ──────────────────────────────────────────
 export const LOCKOUT_THRESHOLD_MIN = 1;
 export const LOCKOUT_THRESHOLD_MAX = 50;
 export const LOCKOUT_DURATION_MIN = 1;           // minutes
-export const LOCKOUT_DURATION_MAX = 10080;        // 7 days in minutes
+export const LOCKOUT_DURATION_MAX = 7 * MIN_PER_DAY;
 
 // ─── Password Expiry ─────────────────────────────────────────
 export const PASSWORD_MAX_AGE_MIN = 1;
-export const PASSWORD_MAX_AGE_MAX = 730;          // 2 years in days
+export const PASSWORD_MAX_AGE_MAX = 2 * DAYS_PER_YEAR;
 export const PASSWORD_EXPIRY_WARNING_MIN = 1;
 export const PASSWORD_EXPIRY_WARNING_MAX = 90;
 
 // ─── Audit Log Retention ─────────────────────────────────────
 export const AUDIT_LOG_RETENTION_MIN = 30;
-export const AUDIT_LOG_RETENTION_MAX = 3650;      // 10 years in days
+export const AUDIT_LOG_RETENTION_MAX = 10 * DAYS_PER_YEAR;
+// Max date span for an audit-log download request (rendered in the UI).
+export const AUDIT_LOG_MAX_RANGE_DAYS = 90;
 
 // ─── Passkey Enforcement ─────────────────────────────────────
 export const PASSKEY_GRACE_PERIOD_MIN = 1;
@@ -227,11 +231,11 @@ export const PASSKEY_GRACE_PERIOD_MAX = 90;
 
 // ─── Machine Identity Policy ─────────────────────────────────
 export const SA_TOKEN_MAX_EXPIRY_MIN = 1;
-export const SA_TOKEN_MAX_EXPIRY_MAX = 3650;
-export const JIT_TOKEN_TTL_MIN = 60;      // 1 minute
-export const JIT_TOKEN_TTL_MAX = 86400;   // 24 hours
-export const DELEGATION_TTL_MIN = 60;     // 1 minute
-export const DELEGATION_TTL_MAX = 86400;  // 24 hours
+export const SA_TOKEN_MAX_EXPIRY_MAX = 10 * DAYS_PER_YEAR;
+export const JIT_TOKEN_TTL_MIN = SEC_PER_MINUTE;
+export const JIT_TOKEN_TTL_MAX = SEC_PER_DAY;
+export const DELEGATION_TTL_MIN = SEC_PER_MINUTE;
+export const DELEGATION_TTL_MAX = SEC_PER_DAY;
 
 // ─── Password History ────────────────────────────────────────
 export const PASSWORD_HISTORY_COUNT_MAX = 24;

@@ -9,6 +9,7 @@ import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
 import { generateTOTPCode } from "../lib/totp.js";
 import { copyToClipboard } from "../lib/clipboard.js";
 import * as output from "../lib/output.js";
+import { MS_PER_SECOND } from "../lib/time.js";
 
 interface PasswordEntryDetail {
   id: string;
@@ -71,7 +72,7 @@ export async function totpCommand(
     });
 
     const period = blob.totp.period ?? 30;
-    const remaining = period - (Math.floor(Date.now() / 1000) % period);
+    const remaining = period - (Math.floor(Date.now() / MS_PER_SECOND) % period);
 
     if (options.json) {
       output.json({ code, remaining, period });

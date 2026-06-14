@@ -40,15 +40,49 @@ function extractStringConst(name: string): string | undefined {
 }
 
 function extractNumericConst(name: string): number | undefined {
-  // Allow underscore-separated numeric literals (e.g. 60 * 1000, 60_000, 3)
+  // Allow numeric literals and MS_PER_* time-unit expressions
+  // (e.g. 60 * 1000, 60_000, 3, MS_PER_MINUTE) — the extension expresses
+  // durations via the shared MS_PER_* constants, same as the web app.
+  //
+  // Substitution whitelist — COMPLETE list of identifiers replaced before eval:
+  //   MS_PER_SECOND → 1000
+  //   MS_PER_MINUTE → 60000
+  // Any other uppercase identifier (e.g. MS_PER_HOUR, MY_CONSTANT) causes the
+  // post-substitution safety check to reject the expression and return undefined,
+  // preventing silent wrong-number extraction. Add to this whitelist explicitly
+  // when the extension introduces new time-unit constants.
   const match = extSource.match(
-    new RegExp(`export const ${name}\\s*=\\s*([0-9_*\\s]+);`),
+    new RegExp(`export const ${name}\\s*=\\s*([0-9_*\\sA-Z]+);`),
   );
   if (!match) return undefined;
-  // Evaluate the numeric expression literally — only digits, underscores,
-  // asterisks, and whitespace are allowed by the regex above, so this is safe.
-  return Function(`"use strict"; return (${match[1]});`)();
+  const expr = match[1]
+    .replace(/\bMS_PER_SECOND\b/g, "1000")
+    .replace(/\bMS_PER_MINUTE\b/g, "60000");
+  // After substitution only digits, underscores, asterisks, and whitespace
+  // remain — verify before evaluating so the Function() call stays safe.
+  if (!/^[0-9_*\s]+$/.test(expr)) return undefined;
+  return Function(`"use strict"; return (${expr});`)();
 }
+
+describe("extractNumericConst guard", () => {
+  it("returns undefined for a source line containing an un-whitelisted identifier", () => {
+    // If the guard were absent, an expression like "MS_PER_HOUR" would pass
+    // through as a non-numeric string and evaluate to NaN or throw, producing a
+    // silent wrong result. The post-substitution safety check must reject it.
+    // We simulate a synthetic source line by temporarily checking against a
+    // known-bad expression that contains a non-whitelisted uppercase identifier.
+    const syntheticSource = "export const FAKE_CONST = MS_PER_HOUR;";
+    const match = syntheticSource.match(
+      /export const FAKE_CONST\s*=\s*([0-9_*\sA-Z]+);/,
+    );
+    expect(match).not.toBeNull();
+    const expr = (match?.[1] ?? "")
+      .replace(/\bMS_PER_SECOND\b/g, "1000")
+      .replace(/\bMS_PER_MINUTE\b/g, "60000");
+    // MS_PER_HOUR is NOT in the whitelist — safety check must reject
+    expect(/^[0-9_*\s]+$/.test(expr)).toBe(false);
+  });
+});
 
 describe("extension constants sync (web app ↔ extension repo)", () => {
   it("BRIDGE_CODE_TTL_MS matches between web app and extension", () => {

@@ -10,6 +10,7 @@ import { decryptData } from "../lib/crypto.js";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
 import { writeSecretFile } from "../lib/secure-file.js";
 import * as output from "../lib/output.js";
+import { CLI_API_PATH } from "../lib/api-paths.js";
 
 interface PasswordEntry {
   id: string;
@@ -62,7 +63,7 @@ export async function exportCommand(options: {
     return;
   }
 
-  const res = await apiRequest<PasswordEntry[]>("/api/passwords?include=blob");
+  const res = await apiRequest<PasswordEntry[]>(`${CLI_API_PATH.PASSWORDS}?include=blob`);
   if (!res.ok) {
     output.error(`Failed to fetch entries: ${res.status}`);
     return;

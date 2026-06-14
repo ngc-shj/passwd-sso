@@ -18,6 +18,7 @@ import {
   PASSWORD_LENGTH_MAX,
   CIPHERTEXT_MAX,
   NOTIFICATION_TITLE_MAX,
+  NOTIFICATION_BELL_LIMIT,
   ENTRY_NAME_MAX,
 } from "@/lib/validations/common";
 
@@ -311,5 +312,10 @@ describe("Constant relationships", () => {
     expect(NOTIFICATION_TITLE_MAX).toBe(200);
     expect(ENTRY_NAME_MAX).toBe(200);
     expect(NOTIFICATION_TITLE_MAX).toBe(ENTRY_NAME_MAX);
+  });
+
+  it("NOTIFICATION_BELL_LIMIT is a positive integer", () => {
+    expect(Number.isInteger(NOTIFICATION_BELL_LIMIT)).toBe(true);
+    expect(NOTIFICATION_BELL_LIMIT).toBeGreaterThan(0);
   });
 });

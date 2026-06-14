@@ -48,7 +48,8 @@ export {
   EXT_CONNECT_READY_MSG_TYPE,
 } from "./integrations/extension";
 export { API_PATH, apiPath } from "./auth/api-path";
-export { LOCAL_STORAGE_KEY } from "./vault/storage-key";
+export { LOCAL_STORAGE_KEY, SESSION_STORAGE_KEY } from "./vault/storage-key";
+export type { LocalStorageKey, SessionStorageKey } from "./vault/storage-key";
 export { AUDIT_TARGET_TYPE } from "./audit/audit-target";
 export type { AuditTargetType } from "./audit/audit-target";
 export { SHARE_TYPE, SHARE_TYPE_VALUES, SEND_EXPIRY_MAP } from "./auth/share-type";

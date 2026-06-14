@@ -9,6 +9,7 @@
  */
 
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import {
   MCP_PROTOCOL_VERSION,
   MCP_SERVER_NAME,
@@ -31,7 +32,7 @@ function hasRequiredScope(tokenScopes: string[], required: string): boolean {
 
 // ─── Rate limiting ────────────────────────────────────────────
 
-const mcpRateLimiter = createRateLimiter({ windowMs: 60_000, max: 60 });
+const mcpRateLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 60 });
 
 // ─── JSON-RPC types ───────────────────────────────────────────
 

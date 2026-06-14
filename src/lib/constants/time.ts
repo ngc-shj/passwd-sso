@@ -19,6 +19,15 @@ export const SEC_PER_HOUR = 60 * SEC_PER_MINUTE;
 /** Seconds per day. */
 export const SEC_PER_DAY = 24 * SEC_PER_HOUR;
 
+/** Minutes per hour — for user-facing duration settings expressed in minutes. */
+export const MIN_PER_HOUR = 60;
+
+/** Minutes per day — for user-facing duration settings expressed in minutes. */
+export const MIN_PER_DAY = 24 * MIN_PER_HOUR;
+
+/** Calendar-year approximation for retention/expiry settings expressed in days. */
+export const DAYS_PER_YEAR = 365;
+
 /**
  * Post-approval execution TTL. Short window mitigates email-channel disclosure
  * (S3 — once approved, the URL+token sits in the target's mailbox). Capped

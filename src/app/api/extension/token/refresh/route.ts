@@ -5,7 +5,7 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
-import { validateExtensionToken, revokeExtensionTokenFamily } from "@/lib/auth/tokens/extension-token";
+import { validateExtensionToken, revokeExtensionTokenFamily, EXTENSION_TOKEN_REVOKE_REASON } from "@/lib/auth/tokens/extension-token";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
@@ -100,7 +100,7 @@ async function handlePOST(req: NextRequest) {
       familyId,
       userId,
       tenantId: activeSession.tenantId,
-      reason: "family_expired",
+      reason: EXTENSION_TOKEN_REVOKE_REASON.FAMILY_EXPIRED,
     });
     return errorResponse(API_ERROR.EXTENSION_TOKEN_SESSION_EXPIRED);
   }

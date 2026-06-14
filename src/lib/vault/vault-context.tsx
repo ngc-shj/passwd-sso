@@ -54,6 +54,7 @@ import {
 } from "../auth/webauthn/webauthn-client";
 import { AutoLockProvider } from "./auto-lock-context";
 import { EmergencyAccessProvider, confirmPendingEmergencyGrants } from "../emergency-access/emergency-access-context";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 
 /** Error thrown by `unlock()` when the server rejects the request with a specific error code. */
 export class VaultUnlockError extends Error {
@@ -243,14 +244,14 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     // First timeout: force a session refresh after 10s
     const retryTimer = setTimeout(() => {
       updateRef.current();
-    }, 10_000);
+    }, 10 * MS_PER_SECOND);
 
     // Second timeout: if still LOADING after 15s, show lock screen
     const fallbackTimer = setTimeout(() => {
       setVaultStatus((prev) =>
         prev === VAULT_STATUS.LOADING ? VAULT_STATUS.LOCKED : prev,
       );
-    }, 15_000);
+    }, 15 * MS_PER_SECOND);
 
     return () => {
       clearTimeout(retryTimer);
