@@ -27,7 +27,7 @@ Recurring check: R5 OK / R9 OK / R19 OK / R24 — migrations intentionally stric
 - **T1 (Major):** New MCP tenant-mismatch reject branches (`validateMcpToken`, `exchangeRefreshToken`) had no test — pass-branch mocks aligned but revert was invisible. → FIXED.
 - **T2 (Major):** New `deleteTeamPassword` count!==1→404 race path untested. → FIXED.
 - **T3 (Major):** New access-requests `sa.tenantId !== tenantId → SA_NOT_FOUND` branch untested. → FIXED.
-- **T4 (Minor):** Composite-FK migrations have no integration test asserting the DB rejects a mismatched insert. → DEFERRED (see below).
+- **T4 (Minor):** Composite-FK migrations have no integration test asserting the DB rejects a mismatched insert. → FIXED (real-DB integration test added via /test-gen).
 - Confirmed sound: invitation-accept CAS test (executes callback, asserts upsert-not-called on race), MCP auth-code CAS test, JIT expiresAt-atomic test (captures transition where) — all load-bearing; R7 where-assertions use concrete matching literals; R19 mocks aligned.
 
 ## Resolution Status
@@ -43,14 +43,9 @@ Recurring check: R5 OK / R9 OK / R19 OK / R24 — migrations intentionally stric
 - Action: added SA self-service test with `sa.tenantId: "tenant-OTHER"` → SA_NOT_FOUND (404), create not called.
 - File: src/app/api/tenant/access-requests/route.test.ts
 
-### T4 [Minor] Composite-FK integration test — Deferred
-- **Anti-Deferral check**: acceptable risk, quantified.
-  - Worst case: a future schema edit silently drops the composite FK and CI stays green; the DB-level last-line-of-defense regresses (app-layer checks still hold).
-  - Likelihood: low — the FK is in schema.prisma + a committed migration; a drop requires a deliberate schema edit + new migration.
-  - Cost to fix: an integration test requires the real-DB harness (`test:integration`) with bespoke mismatched-row insert setup — >30 min, and the primary guard (app-layer tenant checks) is now covered by T1/T3.
-- TODO marker: `TODO(tenant-boundary-defensive-hardening): add integration test asserting the (service_account_id, tenant_id) and (access_requests) composite FKs reject a cross-tenant insert.`
-- The FK was manually verified present via psql during implementation (both migrations applied to dev DB).
-- **Orchestrator sign-off**: acceptable-risk exception satisfied (worst case / likelihood / cost stated; app-layer guard tested).
+### T4 [Minor] Composite-FK integration test — FIXED
+- Action: added a real-DB integration test (`src/__tests__/db-integration/service-account-tenant-fk.integration.test.ts`) using the existing `createTestContext` harness. It seeds an SA in tenant A and asserts the composite FK REJECTS inserting a `service_account_tokens` / `access_requests` row with tenant B (matcher `/service_account_id_tenant_id_fkey/`), and ACCEPTS the matching-tenant insert. 4 tests, all passing against the dev DB via `vitest --config vitest.integration.config.ts`.
+- This supersedes the earlier deferral: the DB-level backstop is now covered, so a future schema edit dropping either composite FK fails CI.
 
 ## Recommendation (non-blocking, R35)
 Before merge, run the two composite-FK migrations against a dev DB with existing SA/token/access-request rows and confirm a legitimate SA-token issuance + JIT approval + invitation accept still succeed end-to-end. (Migrations were applied to the local dev DB during implementation; a clean-DB rehearsal on a representative dataset is the residual step.)
