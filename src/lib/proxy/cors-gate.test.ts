@@ -30,6 +30,9 @@ describe("isBearerBypassRoute — Bearer-bypass detection truth table", () => {
     { path: "/api/vault/status", expected: true, reason: "vault status exact" },
     { path: "/api/vault/unlock/data", expected: true, reason: "vault unlock data exact" },
     { path: "/api/vault/unlock/data/extra", expected: true, reason: "child of vault unlock data" },
+    { path: "/api/teams", expected: true, reason: "teams list — Bearer (iOS app / extension)" },
+    { path: "/api/teams/t1/passwords", expected: true, reason: "team passwords — child of teams" },
+    { path: "/api/teams/t1/member-key", expected: true, reason: "team member-key — child of teams" },
     { path: "/api/api-keys", expected: false, reason: "api-keys removed from Bearer-bypass list (session-only post-C2)" },
     { path: "/api/api-keys/k1", expected: false, reason: "api-keys child also session-only post-C2" },
     { path: "/api/extension/token", expected: true, reason: "extension token EXACT only" },
@@ -40,7 +43,6 @@ describe("isBearerBypassRoute — Bearer-bypass detection truth table", () => {
     { path: "/api/vault/ssh/sign-authorize", expected: true, reason: "SSH agent sign-authorize — CLI Bearer" },
 
     // Deny (NOT Bearer-bypass)
-    { path: "/api/teams", expected: false, reason: "teams not in list" },
     { path: "/api/tags", expected: false, reason: "tags not in list" },
     { path: "/api/notifications", expected: false, reason: "notifications not in list" },
     { path: "/api/extension/token/extra", expected: false, reason: "child of token (not in EXACT-list)" },

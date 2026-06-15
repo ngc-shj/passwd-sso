@@ -11,6 +11,7 @@ struct PasswdSSOAppApp: App {
   @State private var activeDrain: RollbackFlagDrain?
   @State private var currentVaultKey: SymmetricKey?
   @State private var currentUserId: String?
+  @State private var currentCacheKey: SymmetricKey?
   @State private var activeTokenRefresher: AutofillTokenRefresher?
 
   private let backgroundSyncContext = BackgroundSyncContext()
@@ -25,7 +26,8 @@ struct PasswdSSOAppApp: App {
     BackgroundSyncTask.register(
       syncService: { context.currentSyncService() },
       vaultKey: { context.currentVaultKey() },
-      userId: { context.currentUserId() }
+      userId: { context.currentUserId() },
+      cacheKey: { context.currentCacheKey() }
     )
   }
 
@@ -33,14 +35,15 @@ struct PasswdSSOAppApp: App {
     WindowGroup {
       ZStack {
         RootView(
-          onVaultReady: { syncService, drain, vaultKey, userId, tokenRefresher in
+          onVaultReady: { syncService, drain, vaultKey, userId, tokenRefresher, cacheKey in
             activeSyncService = syncService
             activeDrain = drain
             currentVaultKey = vaultKey
             currentUserId = userId
+            currentCacheKey = cacheKey
             activeTokenRefresher = tokenRefresher
             backgroundSyncContext.update(
-              syncService: syncService, vaultKey: vaultKey, userId: userId
+              syncService: syncService, vaultKey: vaultKey, userId: userId, cacheKey: cacheKey
             )
             BackgroundSyncTask.scheduleNext()
           }
@@ -80,7 +83,8 @@ struct PasswdSSOAppApp: App {
                   let userId = currentUserId else { return }
             let report: SyncReport?
             do {
-              report = try await syncService.runSync(vaultKey: vaultKey, userId: userId)
+              report = try await syncService.runSync(
+                vaultKey: vaultKey, userId: userId, cacheKey: currentCacheKey)
             } catch MobileAPIError.authenticationRequired {
               // Refresh token dead — no recovery in background; just stop.
               return
@@ -88,10 +92,12 @@ struct PasswdSSOAppApp: App {
               // Transient error — keep using cached data; do nothing.
               return
             }
-            // 3. Re-register QuickType identities for the freshly-synced set.
+            // 3. Re-register QuickType identities for the freshly-synced set
+            //    (personal + team via cacheKey-unwrapped team keys).
             if let cacheData = report?.cacheData {
               await refreshCredentialIdentities(
-                from: cacheData, vaultKey: vaultKey, userId: userId
+                from: cacheData, vaultKey: vaultKey, userId: userId,
+                cacheKey: currentCacheKey, wrappedKeyStore: AppGroupWrappedKeyStore()
               )
             }
           }

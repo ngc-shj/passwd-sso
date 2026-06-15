@@ -614,6 +614,141 @@ final class MobileAPIClientTests: XCTestCase {
     }
   }
 
+  // MARK: - fetchTeamMemberKey
+
+  private func stubTeamMemberKey(status: Int, body: Data, teamId: String = "team-1") {
+    let url = serverURL.appending(path: "/api/teams/\(teamId)/member-key", directoryHint: .notDirectory)
+    MockURLProtocol.requestHandler = { _ in (body, httpResponse(status: status, url: url)) }
+  }
+
+  private func teamMemberKeyJSON() -> Data {
+    Data("""
+    {
+      "encryptedTeamKey": "aabbcc",
+      "teamKeyIv": "112233445566778899aabbcc",
+      "teamKeyAuthTag": "deadbeefdeadbeefdeadbeefdeadbeef",
+      "ephemeralPublicKey": "{\\"kty\\":\\"EC\\",\\"crv\\":\\"P-256\\",\\"x\\":\\"AAAA\\",\\"y\\":\\"BBBB\\"}",
+      "hkdfSalt": "ccddee",
+      "keyVersion": 2,
+      "wrapVersion": 1
+    }
+    """.utf8)
+  }
+
+  func testFetchTeamMemberKey_200_decodesResponse() async throws {
+    seedAccessToken()
+    stubTeamMemberKey(status: 200, body: teamMemberKeyJSON())
+
+    let client = MobileAPIClient(
+      serverURL: serverURL,
+      signer: FakeSigner(),
+      jwk: knownJWK,
+      tokenStore: tokenStore,
+      urlSession: session
+    )
+
+    let resp = try await client.fetchTeamMemberKey(teamId: "team-1")
+
+    XCTAssertEqual(resp.encryptedTeamKey, "aabbcc")
+    XCTAssertEqual(resp.teamKeyIv, "112233445566778899aabbcc")
+    XCTAssertEqual(resp.teamKeyAuthTag, "deadbeefdeadbeefdeadbeefdeadbeef")
+    XCTAssertEqual(resp.keyVersion, 2)
+    XCTAssertEqual(resp.wrapVersion, 1)
+    XCTAssertEqual(resp.hkdfSalt, "ccddee")
+    // T7: ephemeralPublicKey must decode to the expected non-empty string value.
+    XCTAssertFalse(resp.ephemeralPublicKey.isEmpty,
+      "ephemeralPublicKey must be non-empty after decoding (T7)")
+    XCTAssertEqual(
+      resp.ephemeralPublicKey,
+      #"{"kty":"EC","crv":"P-256","x":"AAAA","y":"BBBB"}"#,
+      "ephemeralPublicKey must match the stub's JSON value exactly (T7)"
+    )
+  }
+
+  func testFetchTeamMemberKey_403_keyNotDistributed_throwsTeamKeyNotDistributed() async throws {
+    seedAccessToken()
+    let errorBody = Data(#"{"error":"KEY_NOT_DISTRIBUTED"}"#.utf8)
+    stubTeamMemberKey(status: 403, body: errorBody)
+
+    let client = MobileAPIClient(
+      serverURL: serverURL,
+      signer: FakeSigner(),
+      jwk: knownJWK,
+      tokenStore: tokenStore,
+      urlSession: session
+    )
+
+    do {
+      _ = try await client.fetchTeamMemberKey(teamId: "team-1")
+      XCTFail("Expected teamKeyNotDistributed")
+    } catch MobileAPIError.teamKeyNotDistributed {
+      // expected
+    }
+  }
+
+  func testFetchTeamMemberKey_404_memberKeyNotFound_throwsTeamKeyNotDistributed() async throws {
+    seedAccessToken()
+    let errorBody = Data(#"{"error":"MEMBER_KEY_NOT_FOUND"}"#.utf8)
+    stubTeamMemberKey(status: 404, body: errorBody)
+
+    let client = MobileAPIClient(
+      serverURL: serverURL,
+      signer: FakeSigner(),
+      jwk: knownJWK,
+      tokenStore: tokenStore,
+      urlSession: session
+    )
+
+    do {
+      _ = try await client.fetchTeamMemberKey(teamId: "team-1")
+      XCTFail("Expected teamKeyNotDistributed")
+    } catch MobileAPIError.teamKeyNotDistributed {
+      // expected
+    }
+  }
+
+  func testFetchTeamMemberKey_403_emptyBody_throwsTeamKeyNotDistributed() async throws {
+    // A bare 403 with no body (e.g. generic auth rejection) should still map to
+    // teamKeyNotDistributed because the server contract says 403 = key not available.
+    seedAccessToken()
+    stubTeamMemberKey(status: 403, body: Data())
+
+    let client = MobileAPIClient(
+      serverURL: serverURL,
+      signer: FakeSigner(),
+      jwk: knownJWK,
+      tokenStore: tokenStore,
+      urlSession: session
+    )
+
+    do {
+      _ = try await client.fetchTeamMemberKey(teamId: "team-1")
+      XCTFail("Expected teamKeyNotDistributed for bare 403")
+    } catch MobileAPIError.teamKeyNotDistributed {
+      // expected
+    }
+  }
+
+  func testFetchTeamMemberKey_404_emptyBody_throwsTeamKeyNotDistributed() async throws {
+    seedAccessToken()
+    stubTeamMemberKey(status: 404, body: Data())
+
+    let client = MobileAPIClient(
+      serverURL: serverURL,
+      signer: FakeSigner(),
+      jwk: knownJWK,
+      tokenStore: tokenStore,
+      urlSession: session
+    )
+
+    do {
+      _ = try await client.fetchTeamMemberKey(teamId: "team-1")
+      XCTFail("Expected teamKeyNotDistributed for bare 404")
+    } catch MobileAPIError.teamKeyNotDistributed {
+      // expected
+    }
+  }
+
   func testUpdateEntry_persistsNonceFromResponse() async throws {
     seedAccessToken()
 

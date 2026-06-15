@@ -26,6 +26,11 @@ public struct UnlockResult: Sendable, Equatable {
   /// fetch; nil from the biometric/offline path (which reuses the persisted value).
   /// NOT defaulted — both construction sites must state it explicitly.
   public let tenantAutoLockMinutes: Int?
+  /// The REAL cacheKey (HKDF of the actual bridge_key), captured at unlock when the
+  /// bridge_key is in hand. Required for team-key wrap/unwrap + in-app team decrypt —
+  /// `readDirect()` returns an EMPTY bridge_key, so cacheKey CANNOT be re-derived
+  /// later without a biometric `readForFill`. Thread this from unlock instead.
+  public let cacheKey: SymmetricKey
 }
 
 /// Source of the encrypted vault-unlock material. `MobileAPIClient` is the
@@ -168,12 +173,36 @@ public actor VaultUnlocker {
     )
     try wrappedKeyStore.saveVaultKey(wrapped)
 
+    // Step 6b: if the account has an ECDH keypair (team E2E), unwrap it with the
+    // secretKey and re-persist it wrapped under cacheKey (bound to userId), so
+    // sync (incl. background / post-biometric) can derive team keys without the
+    // secretKey. Best-effort: a failure here must never block unlocking the vault.
+    if let encPriv = unlockData.encryptedEcdhPrivateKey,
+       let ivHex = unlockData.ecdhPrivateKeyIv,
+       let tagHex = unlockData.ecdhPrivateKeyAuthTag {
+      do {
+        let wrappingKey = TeamKeyCrypto.deriveEcdhWrappingKey(
+          secretKey: SymmetricKey(data: secretKey))
+        let ecdhKey = try TeamKeyCrypto.unwrapEcdhPrivateKey(
+          encrypted: EncryptedData(ciphertext: encPriv, iv: ivHex, authTag: tagHex),
+          wrappingKey: wrappingKey)
+        var pkcs8 = ecdhKey.derRepresentation
+        defer { pkcs8.resetBytes(in: 0..<pkcs8.count) }
+        let wrappedEcdh = try TeamEntryDecryptor.wrapEcdhPrivateKey(
+          pkcs8: pkcs8, cacheKey: cacheKey, userId: unlockData.userId, issuedAt: Date())
+        try wrappedKeyStore.saveECDHPrivateKey(wrappedEcdh)
+      } catch {
+        // Non-fatal: team entries simply won't be available until a later unlock.
+      }
+    }
+
     // Step 7: return in-memory vault_key + userId + live keyVersion
     return UnlockResult(
       vaultKey: vaultKey,
       userId: unlockData.userId,
       keyVersion: unlockData.keyVersion,
-      tenantAutoLockMinutes: unlockData.vaultAutoLockMinutes
+      tenantAutoLockMinutes: unlockData.vaultAutoLockMinutes,
+      cacheKey: cacheKey
     )
   }
 
@@ -237,7 +266,8 @@ public actor VaultUnlocker {
       vaultKey: vaultKey,
       userId: cache.header.userId,
       keyVersion: keyVersion,
-      tenantAutoLockMinutes: nil
+      tenantAutoLockMinutes: nil,
+      cacheKey: cacheKey
     )
   }
 

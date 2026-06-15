@@ -496,6 +496,245 @@ final class VaultViewModelTests: XCTestCase {
     XCTAssertEqual(summaryCount, 0, "allSummaries must come from sync, not an optimistic prepend")
   }
 
+  // MARK: - loadFromCache with team entries (C9 wiring)
+
+  /// loadFromCache with cacheKey + seeded team key → team entries appear in allSummaries.
+  func testLoadFromCache_withTeamKeyAndCacheKey_decryptsTeamEntries() async throws {
+    let localVaultKey = vaultKey
+    let localUserId = userId
+
+    let cacheKey = SymmetricKey(size: .bits256)
+    let teamId = "team-vm-1"
+    let teamEncKey = SymmetricKey(size: .bits256)
+
+    // Wrap the team key and seed into a MockWrappedKeyStore.
+    let wrappedTeamKey = try TeamEntryDecryptor.wrapTeamKey(
+      teamEncKey: teamEncKey, cacheKey: cacheKey, userId: localUserId,
+      teamId: teamId, teamKeyVersion: 1, issuedAt: Date()
+    )
+    let wks = MockWrappedKeyStore()
+    try wks.saveTeamKeys([wrappedTeamKey])
+
+    // Build a team cache entry.
+    let teamOverviewAAD = try buildTeamEntryAAD(
+      teamId: teamId, entryId: "te-vm-1", vaultType: VaultType.overview, itemKeyVersion: 0
+    )
+    struct OverviewBlob: Encodable { let title: String; let username: String; let urlHost: String }
+    let overviewData = try JSONEncoder().encode(
+      OverviewBlob(title: "Team Login", username: "teamuser", urlHost: "team.example.com")
+    )
+    let teamOverviewEnc = try encryptAESGCMEncoded(
+      plaintext: overviewData, key: teamEncKey, aad: teamOverviewAAD
+    )
+    let dummyBlob = try encryptAESGCMEncoded(plaintext: Data("{}".utf8), key: localVaultKey, aad: nil)
+    let teamEntry = CacheEntry(
+      id: "te-vm-1", teamId: teamId, aadVersion: 1, keyVersion: 0,
+      teamKeyVersion: 1, itemKeyVersion: 0,
+      encryptedItemKey: nil,
+      encryptedBlob: dummyBlob,
+      encryptedOverview: teamOverviewEnc
+    )
+
+    // Also add a personal entry.
+    let personalEntry = CacheEntry(
+      id: "pe-vm-1", teamId: nil, aadVersion: 0,
+      encryptedBlob: try encryptAESGCMEncoded(plaintext: Data(#"{"title":"P","username":"alice","password":"pw","url":"","notes":"","tags":[]}"#.utf8), key: localVaultKey, aad: nil),
+      encryptedOverview: try encryptAESGCMEncoded(plaintext: Data(#"{"title":"P","username":"alice","urlHost":"personal.com"}"#.utf8), key: localVaultKey, aad: nil)
+    )
+
+    let header = CacheHeader(
+      cacheVersionCounter: 1, cacheIssuedAt: Date(), lastSuccessfulRefreshAt: Date(),
+      entryCount: 2, hostInstallUUID: Data(repeating: 0, count: 16), userId: localUserId
+    )
+    let cacheData = CacheData(
+      header: header, entries: try JSONEncoder().encode([personalEntry, teamEntry])
+    )
+
+    let vm = await VaultViewModel()
+    await MainActor.run {
+      vm.loadFromCache(
+        cacheData: cacheData, vaultKey: localVaultKey, userId: localUserId,
+        cacheKey: cacheKey, wrappedKeyStore: wks
+      )
+    }
+
+    let all = await MainActor.run { vm.allSummaries }
+    XCTAssertEqual(all.count, 2, "Both personal and team entries must appear in allSummaries")
+    XCTAssertNotNil(all.first(where: { $0.id == "te-vm-1" }),
+      "Team entry must appear in allSummaries when cacheKey + team key are provided")
+    XCTAssertNotNil(all.first(where: { $0.id == "pe-vm-1" }),
+      "Personal entry must still appear in allSummaries")
+  }
+
+  // MARK: - VaultScope filtering
+
+  func testLoadFromCache_personalScopeFiltersToTeamIdNil() async throws {
+    let localVaultKey = vaultKey
+    let localUserId = userId
+
+    let cacheKey = SymmetricKey(size: .bits256)
+    let teamId = "team-scope"
+    let teamEncKey = SymmetricKey(size: .bits256)
+    let wrappedTeamKey = try TeamEntryDecryptor.wrapTeamKey(
+      teamEncKey: teamEncKey, cacheKey: cacheKey, userId: localUserId,
+      teamId: teamId, teamKeyVersion: 1, issuedAt: Date()
+    )
+    let wks = MockWrappedKeyStore()
+    try wks.saveTeamKeys([wrappedTeamKey])
+
+    struct OverviewBlob: Encodable { let title: String; let username: String; let urlHost: String }
+    let teamAAD = try buildTeamEntryAAD(
+      teamId: teamId, entryId: "te-scope-1", vaultType: VaultType.overview, itemKeyVersion: 0
+    )
+    let teamOverviewEnc = try encryptAESGCMEncoded(
+      plaintext: try JSONEncoder().encode(OverviewBlob(title: "T", username: "u", urlHost: "scope.example.com")),
+      key: teamEncKey, aad: teamAAD
+    )
+    let dummyBlob = try encryptAESGCMEncoded(plaintext: Data("{}".utf8), key: localVaultKey, aad: nil)
+    let teamEntry = CacheEntry(
+      id: "te-scope-1", teamId: teamId, aadVersion: 1, keyVersion: 0,
+      teamKeyVersion: 1, itemKeyVersion: 0,
+      encryptedItemKey: nil, encryptedBlob: dummyBlob, encryptedOverview: teamOverviewEnc
+    )
+    let personalEntry = CacheEntry(
+      id: "pe-scope-1", teamId: nil, aadVersion: 0,
+      encryptedBlob: try encryptAESGCMEncoded(plaintext: Data(#"{"title":"P","username":"p","password":"pw","url":"","notes":"","tags":[]}"#.utf8), key: localVaultKey, aad: nil),
+      encryptedOverview: try encryptAESGCMEncoded(plaintext: Data(#"{"title":"P","username":"p","urlHost":"personal.example.com"}"#.utf8), key: localVaultKey, aad: nil)
+    )
+    let header = CacheHeader(
+      cacheVersionCounter: 1, cacheIssuedAt: Date(), lastSuccessfulRefreshAt: Date(),
+      entryCount: 2, hostInstallUUID: Data(repeating: 0, count: 16), userId: localUserId
+    )
+    let cacheData = CacheData(header: header, entries: try JSONEncoder().encode([personalEntry, teamEntry]))
+
+    let vm = await VaultViewModel()
+    await MainActor.run {
+      vm.loadFromCache(cacheData: cacheData, vaultKey: localVaultKey, userId: localUserId,
+                       cacheKey: cacheKey, wrappedKeyStore: wks)
+      vm.scope = .personal
+    }
+
+    let filtered = await MainActor.run { vm.filteredSummaries }
+    XCTAssertEqual(filtered.count, 1, ".personal scope must show only personal entries")
+    XCTAssertEqual(filtered.first?.id, "pe-scope-1")
+    XCTAssertEqual(filtered.first?.teamId, nil)
+  }
+
+  func testLoadFromCache_teamScopeFiltersToOneTeam() async throws {
+    let localVaultKey = vaultKey
+    let localUserId = userId
+
+    let cacheKey = SymmetricKey(size: .bits256)
+    let teamId = "team-scope-filter"
+    let teamEncKey = SymmetricKey(size: .bits256)
+    let wrappedTeamKey = try TeamEntryDecryptor.wrapTeamKey(
+      teamEncKey: teamEncKey, cacheKey: cacheKey, userId: localUserId,
+      teamId: teamId, teamKeyVersion: 1, issuedAt: Date()
+    )
+    let wks = MockWrappedKeyStore()
+    try wks.saveTeamKeys([wrappedTeamKey])
+
+    struct OverviewBlob: Encodable { let title: String; let username: String; let urlHost: String }
+    let teamAAD = try buildTeamEntryAAD(
+      teamId: teamId, entryId: "te-filter-1", vaultType: VaultType.overview, itemKeyVersion: 0
+    )
+    let teamOverviewEnc = try encryptAESGCMEncoded(
+      plaintext: try JSONEncoder().encode(OverviewBlob(title: "T", username: "u", urlHost: "filter.example.com")),
+      key: teamEncKey, aad: teamAAD
+    )
+    let dummyBlob = try encryptAESGCMEncoded(plaintext: Data("{}".utf8), key: localVaultKey, aad: nil)
+    let teamEntry = CacheEntry(
+      id: "te-filter-1", teamId: teamId, aadVersion: 1, keyVersion: 0,
+      teamKeyVersion: 1, itemKeyVersion: 0,
+      encryptedItemKey: nil, encryptedBlob: dummyBlob, encryptedOverview: teamOverviewEnc
+    )
+    let personalEntry = CacheEntry(
+      id: "pe-filter-1", teamId: nil, aadVersion: 0,
+      encryptedBlob: try encryptAESGCMEncoded(plaintext: Data(#"{"title":"P","username":"p","password":"pw","url":"","notes":"","tags":[]}"#.utf8), key: localVaultKey, aad: nil),
+      encryptedOverview: try encryptAESGCMEncoded(plaintext: Data(#"{"title":"P","username":"p","urlHost":"personal.filter.com"}"#.utf8), key: localVaultKey, aad: nil)
+    )
+    let header = CacheHeader(
+      cacheVersionCounter: 1, cacheIssuedAt: Date(), lastSuccessfulRefreshAt: Date(),
+      entryCount: 2, hostInstallUUID: Data(repeating: 0, count: 16), userId: localUserId
+    )
+    let cacheData = CacheData(header: header, entries: try JSONEncoder().encode([personalEntry, teamEntry]))
+
+    let vm = await VaultViewModel()
+    await MainActor.run {
+      vm.loadFromCache(cacheData: cacheData, vaultKey: localVaultKey, userId: localUserId,
+                       cacheKey: cacheKey, wrappedKeyStore: wks)
+      vm.scope = .team(teamId)
+    }
+
+    let filtered = await MainActor.run { vm.filteredSummaries }
+    XCTAssertEqual(filtered.count, 1, ".team scope must show only that team's entries")
+    XCTAssertEqual(filtered.first?.id, "te-filter-1")
+    XCTAssertEqual(filtered.first?.teamId, teamId)
+  }
+
+  /// teamDirectory labels are loaded from cacheKey-decrypted directory.
+  func testLoadFromCache_teamDirectoryLabels() async throws {
+    let localVaultKey = vaultKey
+    let localUserId = userId
+    let localEntryId = entryId
+
+    let directory = [
+      TeamDirectoryEntry(id: "team-dir-1", name: "Alpha Team"),
+      TeamDirectoryEntry(id: "team-dir-2", name: "Beta Team"),
+    ]
+    let cacheData = try makeCacheData(
+      entryId: localEntryId, userId: localUserId, vaultKey: localVaultKey,
+      blobJSON: #"{"title":"T","username":"u","password":"pw","url":null,"notes":null}"#,
+      overviewJSON: #"{"title":"T","username":"u","urlHost":null}"#,
+      aadVersion: 0
+    )
+
+    let vm = await VaultViewModel()
+    await MainActor.run {
+      vm.loadFromCache(
+        cacheData: cacheData, vaultKey: localVaultKey, userId: localUserId,
+        teamDirectory: directory
+      )
+    }
+
+    let labels = await MainActor.run { vm.teamDirectory }
+    XCTAssertEqual(labels.count, 2)
+    XCTAssertEqual(labels.first(where: { $0.id == "team-dir-1" })?.name, "Alpha Team")
+    XCTAssertEqual(labels.first(where: { $0.id == "team-dir-2" })?.name, "Beta Team")
+  }
+
+  /// No cacheKey → personal-only, team entries skipped, no crash.
+  func testLoadFromCache_noCacheKey_personalOnly() async throws {
+    let localVaultKey = vaultKey
+    let localUserId = userId
+
+    let dummyEnc = try encryptAESGCMEncoded(plaintext: Data("{}".utf8), key: localVaultKey, aad: nil)
+    let teamEntry = CacheEntry(
+      id: "te-nocache", teamId: "some-team", aadVersion: 0,
+      encryptedBlob: dummyEnc, encryptedOverview: dummyEnc
+    )
+    let personalEntry = CacheEntry(
+      id: "pe-nocache", teamId: nil, aadVersion: 0,
+      encryptedBlob: try encryptAESGCMEncoded(plaintext: Data(#"{"title":"P","username":"p","password":"pw","url":"","notes":"","tags":[]}"#.utf8), key: localVaultKey, aad: nil),
+      encryptedOverview: try encryptAESGCMEncoded(plaintext: Data(#"{"title":"P","username":"p","urlHost":"only.personal.com"}"#.utf8), key: localVaultKey, aad: nil)
+    )
+    let header = CacheHeader(
+      cacheVersionCounter: 1, cacheIssuedAt: Date(), lastSuccessfulRefreshAt: Date(),
+      entryCount: 2, hostInstallUUID: Data(repeating: 0, count: 16), userId: localUserId
+    )
+    let cacheData = CacheData(header: header, entries: try JSONEncoder().encode([personalEntry, teamEntry]))
+
+    let vm = await VaultViewModel()
+    await MainActor.run {
+      // No cacheKey → personal-only (no team key store access).
+      vm.loadFromCache(cacheData: cacheData, vaultKey: localVaultKey, userId: localUserId)
+    }
+
+    let all = await MainActor.run { vm.allSummaries }
+    XCTAssertEqual(all.count, 1, "Without cacheKey only personal entries must be in allSummaries")
+    XCTAssertEqual(all.first?.id, "pe-nocache")
+  }
+
   // MARK: - createEntry 401 + nonce retry
 
   func testCreateEntry_retriesOnceWith401AndNewNonce() async throws {

@@ -130,7 +130,7 @@ describe("handleApiAuth — Bearer-bypass dispatch", () => {
 
   it("Bearer + non-bypass route + cookie → session check fires (no bypass)", async () => {
     const res = await handleApiAuth(
-      makeRequest("/api/teams", "GET", {
+      makeRequest("/api/tags", "GET", {
         Authorization: "Bearer tok",
         Cookie: "authjs.session-token=sess-2",
       }),
@@ -141,7 +141,7 @@ describe("handleApiAuth — Bearer-bypass dispatch", () => {
 
   it("Cookie only + non-Bearer route → session check fires", async () => {
     const res = await handleApiAuth(
-      makeRequest("/api/teams", "GET", { Cookie: "authjs.session-token=sess-3" }),
+      makeRequest("/api/tags", "GET", { Cookie: "authjs.session-token=sess-3" }),
     );
     expect(res.status).toBe(401);
     expect(fetchSpy).toHaveBeenCalled();

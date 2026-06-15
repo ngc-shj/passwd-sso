@@ -22,6 +22,7 @@ struct EntryForm: View {
   @Bindable var viewModel: VaultViewModel
   let apiClient: MobileAPIClient
   let hostSyncService: HostSyncService
+  var cacheKey: SymmetricKey? = nil
 
   @State private var title: String
   @State private var username: String
@@ -42,7 +43,8 @@ struct EntryForm: View {
     keyVersion: Int,
     viewModel: VaultViewModel,
     apiClient: MobileAPIClient,
-    hostSyncService: HostSyncService
+    hostSyncService: HostSyncService,
+    cacheKey: SymmetricKey? = nil
   ) {
     self.mode = mode
     self.vaultKey = vaultKey
@@ -51,6 +53,7 @@ struct EntryForm: View {
     self.viewModel = viewModel
     self.apiClient = apiClient
     self.hostSyncService = hostSyncService
+    self.cacheKey = cacheKey
 
     switch mode {
     case .create:
@@ -192,7 +195,8 @@ struct EntryForm: View {
           vaultKey: vaultKey,
           keyVersion: keyVersion,
           apiClient: apiClient,
-          hostSyncService: hostSyncService
+          hostSyncService: hostSyncService,
+          cacheKey: cacheKey
         )
       case .edit(let summary, _):
         try await viewModel.saveEntry(
@@ -202,7 +206,8 @@ struct EntryForm: View {
           vaultKey: vaultKey,
           keyVersion: keyVersion,
           apiClient: apiClient,
-          hostSyncService: hostSyncService
+          hostSyncService: hostSyncService,
+          cacheKey: cacheKey
         )
       }
       dismiss()

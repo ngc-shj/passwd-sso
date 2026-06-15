@@ -30,6 +30,7 @@ import Shared
   private let clock: Clock
   private let bridgeKeyStore: BridgeKeyStore
   private let wrappedKeyStore: WrappedKeyStore
+  private let teamDirectoryStore: TeamDirectoryStoring
   private let tokenStore: HostTokenStore
   private let uploadTokenStore: UploadTokenStore
   private let cacheURL: URL
@@ -39,6 +40,7 @@ import Shared
     clock: Clock = SystemClock(),
     bridgeKeyStore: BridgeKeyStore,
     wrappedKeyStore: any WrappedKeyStore,
+    teamDirectoryStore: any TeamDirectoryStoring = TeamDirectoryStore(),
     tokenStore: HostTokenStore,
     uploadTokenStore: UploadTokenStore = UploadTokenStore(),
     cacheURL: URL
@@ -47,6 +49,7 @@ import Shared
     self.clock = clock
     self.bridgeKeyStore = bridgeKeyStore
     self.wrappedKeyStore = wrappedKeyStore
+    self.teamDirectoryStore = teamDirectoryStore
     self.tokenStore = tokenStore
     self.uploadTokenStore = uploadTokenStore
     self.cacheURL = cacheURL
@@ -93,6 +96,8 @@ import Shared
     lock()
     try? tokenStore.deleteAll()
     try? wrappedKeyStore.clearAll()
+    // Wipe the team-directory blob too (it lives outside WrappedKeyStore.clearAll).
+    try? teamDirectoryStore.clear()
     let fm = FileManager.default
     if fm.fileExists(atPath: cacheURL.path) {
       try? fm.removeItem(at: cacheURL)

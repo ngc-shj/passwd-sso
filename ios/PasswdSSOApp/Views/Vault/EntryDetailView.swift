@@ -16,6 +16,7 @@ struct EntryDetailView: View {
   @Bindable var viewModel: VaultViewModel
   let apiClient: MobileAPIClient
   let hostSyncService: HostSyncService
+  var cacheKey: SymmetricKey? = nil
 
   @State private var detail: VaultEntryDetail?
   @State private var loadFailed: Bool = false
@@ -72,7 +73,8 @@ struct EntryDetailView: View {
           keyVersion: keyVersion,
           viewModel: viewModel,
           apiClient: apiClient,
-          hostSyncService: hostSyncService
+          hostSyncService: hostSyncService,
+          cacheKey: cacheKey
         )
       }
     }
@@ -221,7 +223,8 @@ struct EntryDetailView: View {
       for: summary.id,
       cacheData: effectiveCacheData,
       vaultKey: vaultKey,
-      userId: userId
+      userId: userId,
+      cacheKey: cacheKey
     )
     detail = loaded
     loadFailed = (loaded == nil)

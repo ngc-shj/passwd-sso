@@ -18,12 +18,29 @@ public enum VaultViewModelError: Error, Equatable {
 /// Observable view-model for the vault list and detail screens.
 /// Holds decrypted summaries in memory. The vault_key must be held by the caller;
 /// this view-model receives it at unlock time only.
+/// Which vault the in-app list is currently showing. `.personal` shows entries
+/// with no teamId; `.team(id)` shows only that team's entries. Drives the top
+/// vault switcher so the team vault is clearly separated from the personal one.
+public enum VaultScope: Hashable, Sendable {
+  case personal
+  case team(String)
+}
+
 @Observable @MainActor public final class VaultViewModel {
   public private(set) var summaries: [VaultEntrySummary] = []
   public var searchQuery: String = ""
-  public var filterTeamId: String? = nil  // nil = all, non-nil = specific team
+  /// Selected vault (personal by default — team entries are NOT mixed into the
+  /// personal list; the user switches vaults explicitly).
+  public var scope: VaultScope = .personal
+  /// Teams the user belongs to, for the switcher labels (populated from the
+  /// cacheKey-decrypted team directory at load time).
+  public var teamDirectory: [TeamDirectoryEntry] = []
 
   var allSummaries: [VaultEntrySummary] = []
+
+  /// cacheKey from the last `loadFromCache`, retained so `loadDetail` can decrypt
+  /// team entries without re-threading it from every call site.
+  private var loadedCacheKey: SymmetricKey?
 
   /// The most recently loaded cache. Set by `loadFromCache` and refreshed after
   /// every successful write+sync so `saveEntry`/`loadDetail` always read fresh data.
@@ -32,7 +49,13 @@ public enum VaultViewModelError: Error, Equatable {
   // MARK: - Filtered results
 
   public var filteredSummaries: [VaultEntrySummary] {
-    var result = allSummaries
+    var result: [VaultEntrySummary]
+    switch scope {
+    case .personal:
+      result = allSummaries.filter { $0.teamId == nil }
+    case .team(let teamId):
+      result = allSummaries.filter { $0.teamId == teamId }
+    }
     if !searchQuery.isEmpty {
       let q = searchQuery.lowercased()
       result = result.filter {
@@ -41,10 +64,13 @@ public enum VaultViewModelError: Error, Equatable {
         $0.urlHost.lowercased().contains(q)
       }
     }
-    if let teamId = filterTeamId {
-      result = result.filter { $0.teamId == teamId }
-    }
     return result
+  }
+
+  /// True when the currently selected scope is a team vault (create is disabled).
+  public var isTeamScope: Bool {
+    if case .team = scope { return true }
+    return false
   }
 
   // MARK: - Load from cache
@@ -56,15 +82,35 @@ public enum VaultViewModelError: Error, Equatable {
   /// construction). HostSyncService and DebugVaultLoader both write this
   /// shape; the previous `[EncryptedEntry]` decode path was a dead Step-7
   /// type that never matched the on-disk format.
-  public func loadFromCache(cacheData: CacheData, vaultKey: SymmetricKey, userId: String) {
+  /// - Parameters:
+  ///   - cacheKey: when provided (with team keys present), team entries are decrypted
+  ///     too and shown under their team vault. nil → personal-only (no regression).
+  ///   - teamDirectory: team id→name list for the switcher labels.
+  public func loadFromCache(
+    cacheData: CacheData,
+    vaultKey: SymmetricKey,
+    userId: String,
+    cacheKey: SymmetricKey? = nil,
+    wrappedKeyStore: WrappedKeyStore = AppGroupWrappedKeyStore(),
+    teamDirectory: [TeamDirectoryEntry] = []
+  ) {
     self.cacheData = cacheData
+    self.teamDirectory = teamDirectory
+    self.loadedCacheKey = cacheKey
     guard let entries = try? JSONDecoder().decode([CacheEntry].self, from: cacheData.entries) else {
       return
     }
+    let teamKeys: [WrappedTeamKey] = cacheKey != nil ? ((try? wrappedKeyStore.loadTeamKeys()) ?? []) : []
 
     var decoded: [VaultEntrySummary] = []
     for entry in entries {
-      if let summary = decryptOverview(entry: entry, vaultKey: vaultKey, userId: userId) {
+      if entry.teamId != nil {
+        if let cacheKey,
+           let summary = TeamEntryDecryptor.decryptTeamSummary(
+             entry: entry, teamKeys: teamKeys, cacheKey: cacheKey, userId: userId, now: { Date() }) {
+          decoded.append(summary)
+        }
+      } else if let summary = decryptOverview(entry: entry, vaultKey: vaultKey, userId: userId) {
         decoded.append(summary)
       }
     }
@@ -78,11 +124,19 @@ public enum VaultViewModelError: Error, Equatable {
     for entryId: String,
     cacheData: CacheData,
     vaultKey: SymmetricKey,
-    userId: String
+    userId: String,
+    cacheKey: SymmetricKey? = nil,
+    wrappedKeyStore: WrappedKeyStore = AppGroupWrappedKeyStore()
   ) -> VaultEntryDetail? {
     guard let entries = try? JSONDecoder().decode([CacheEntry].self, from: cacheData.entries),
           let entry = entries.first(where: { $0.id == entryId }) else {
       return nil
+    }
+    if entry.teamId != nil {
+      guard let key = cacheKey ?? loadedCacheKey else { return nil }
+      let teamKeys = (try? wrappedKeyStore.loadTeamKeys()) ?? []
+      return TeamEntryDecryptor.decryptTeamDetail(
+        entry: entry, teamKeys: teamKeys, cacheKey: key, userId: userId, now: { Date() })
     }
     return decryptBlob(entry: entry, vaultKey: vaultKey, userId: userId)
   }
@@ -192,7 +246,8 @@ extension VaultViewModel {
     vaultKey: SymmetricKey,
     keyVersion: Int,
     apiClient: MobileAPIClient,
-    hostSyncService: HostSyncService
+    hostSyncService: HostSyncService,
+    cacheKey: SymmetricKey? = nil
   ) async throws {
     let entryId = UUID().uuidString.lowercased()
     let (blobData, overviewData) = try PersonalEntryBlobBuilder.buildCreate(fields: fields)
@@ -219,12 +274,19 @@ extension VaultViewModel {
     }
 
     // Refresh from sync — no optimistic prepend; allSummaries rebuilt from the cache.
-    let report = try await hostSyncService.runSync(vaultKey: vaultKey, userId: userId)
+    let report = try await hostSyncService.runSync(
+      vaultKey: vaultKey, userId: userId, cacheKey: cacheKey)
     if let freshCache = report.cacheData {
-      loadFromCache(cacheData: freshCache, vaultKey: vaultKey, userId: userId)
+      // Preserve team visibility (pass cacheKey + current directory) so team
+      // entries don't vanish from the in-app list after a personal create.
+      loadFromCache(
+        cacheData: freshCache, vaultKey: vaultKey, userId: userId,
+        cacheKey: cacheKey, teamDirectory: teamDirectory)
       // Keep QuickType identities in step with the mutation — without this the
       // new/edited entry is missing from AutoFill until the next foreground sync.
-      await refreshCredentialIdentities(from: freshCache, vaultKey: vaultKey, userId: userId)
+      await refreshCredentialIdentities(
+        from: freshCache, vaultKey: vaultKey, userId: userId,
+        cacheKey: cacheKey, wrappedKeyStore: AppGroupWrappedKeyStore())
     }
   }
 
@@ -238,7 +300,8 @@ extension VaultViewModel {
     vaultKey: SymmetricKey,
     keyVersion: Int,
     apiClient: MobileAPIClient,
-    hostSyncService: HostSyncService
+    hostSyncService: HostSyncService,
+    cacheKey: SymmetricKey? = nil
   ) async throws {
     // Reject team entries — out of scope for MVP.
     if let summary = allSummaries.first(where: { $0.id == entryId }),
@@ -277,12 +340,17 @@ extension VaultViewModel {
     try await apiClient.updateEntry(entryId: entryId, body: updateReq)
 
     // Refresh cache after server confirms success.
-    let report = try await hostSyncService.runSync(vaultKey: vaultKey, userId: userId)
+    let report = try await hostSyncService.runSync(
+      vaultKey: vaultKey, userId: userId, cacheKey: cacheKey)
     if let freshCache = report.cacheData {
-      loadFromCache(cacheData: freshCache, vaultKey: vaultKey, userId: userId)
+      loadFromCache(
+        cacheData: freshCache, vaultKey: vaultKey, userId: userId,
+        cacheKey: cacheKey, teamDirectory: teamDirectory)
       // Keep QuickType identities in step with the mutation — without this the
       // new/edited entry is missing from AutoFill until the next foreground sync.
-      await refreshCredentialIdentities(from: freshCache, vaultKey: vaultKey, userId: userId)
+      await refreshCredentialIdentities(
+        from: freshCache, vaultKey: vaultKey, userId: userId,
+        cacheKey: cacheKey, wrappedKeyStore: AppGroupWrappedKeyStore())
     }
   }
 }

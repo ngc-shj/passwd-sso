@@ -17,7 +17,8 @@ enum AppState {
     keyVersion: Int,
     cacheData: CacheData,
     autoLockService: AutoLockService,
-    apiClient: MobileAPIClient
+    apiClient: MobileAPIClient,
+    cacheKey: SymmetricKey?
   )
   // Locked but still signed in: re-unlock needs only the passphrase, keeping the
   // server config + token (no OAuth re-sign-in). Carries serverConfig/apiClient
@@ -30,7 +31,7 @@ enum AppState {
 struct RootView: View {
   /// Called when vault is unlocked so the app shell can wire foreground sync +
   /// drain + AutoFill upload-token re-mint.
-  let onVaultReady: (HostSyncService, RollbackFlagDrain, SymmetricKey, String, AutofillTokenRefresher?) -> Void
+  let onVaultReady: (HostSyncService, RollbackFlagDrain, SymmetricKey, String, AutofillTokenRefresher?, SymmetricKey) -> Void
 
   @State private var appState: AppState = .setup
 
@@ -54,7 +55,7 @@ struct RootView: View {
         // Arriving via sign-in / app entry → auto-prompt Face ID on appear.
         vaultLockedScreen(serverConfig: serverConfig, apiClient: apiClient, autoPromptOnAppear: true)
 
-      case .vaultUnlocked(let serverConfig, let vaultKey, let userId, let keyVersion, let cacheData, let autoLockService, let apiClient):
+      case .vaultUnlocked(let serverConfig, let vaultKey, let userId, let keyVersion, let cacheData, let autoLockService, let apiClient, let cacheKey):
         VaultListView(
           cacheData: cacheData,
           vaultKey: vaultKey,
@@ -62,7 +63,8 @@ struct RootView: View {
           keyVersion: keyVersion,
           autoLockService: autoLockService,
           apiClient: apiClient,
-          hostSyncService: hostSyncService ?? makeFallbackSyncService(apiClient: apiClient)
+          hostSyncService: hostSyncService ?? makeFallbackSyncService(apiClient: apiClient),
+          cacheKey: cacheKey
         )
         .onChange(of: autoLockService.state) { _, newState in
           switch newState {
@@ -256,7 +258,8 @@ struct RootView: View {
 
     let syncReport: SyncReport?
     do {
-      syncReport = try await syncService.runSync(vaultKey: vaultKey, userId: unlockResult.userId)
+      syncReport = try await syncService.runSync(
+        vaultKey: vaultKey, userId: unlockResult.userId, cacheKey: unlockResult.cacheKey)
     } catch {
       // The user has just unlocked with a valid vault key + session. A sync
       // failure here (network, server, or auth) must NOT bounce them back to
@@ -312,10 +315,14 @@ struct RootView: View {
     let tokenRefresher = AutofillTokenRefresher(apiClient: apiClient)
     await tokenRefresher.refresh()
 
-    onVaultReady(syncService, drain, vaultKey, unlockResult.userId, tokenRefresher)
+    onVaultReady(syncService, drain, vaultKey, unlockResult.userId, tokenRefresher, unlockResult.cacheKey)
 
-    // Register QuickType inline-suggestion identities for the just-synced set.
-    await refreshCredentialIdentities(from: cacheData, vaultKey: vaultKey, userId: unlockResult.userId)
+    // Register QuickType inline-suggestion identities for the just-synced set
+    // (personal + team — team requires the REAL cacheKey from unlock to unwrap
+    // the persisted team keys; readDirect's bridge_key is empty).
+    await refreshCredentialIdentities(
+      from: cacheData, vaultKey: vaultKey, userId: unlockResult.userId,
+      cacheKey: unlockResult.cacheKey, wrappedKeyStore: AppGroupWrappedKeyStore())
 
     applyPersistedTimeout(to: autoLockService)
     autoLockService.startTimer()
@@ -326,7 +333,8 @@ struct RootView: View {
       keyVersion: unlockResult.keyVersion,
       cacheData: cacheData,
       autoLockService: autoLockService,
-      apiClient: apiClient
+      apiClient: apiClient,
+      cacheKey: unlockResult.cacheKey
     )
   }
 
@@ -410,7 +418,10 @@ struct RootView: View {
     let cacheData = state.cacheData
     let vaultKey = state.vaultKey
     let userId = state.userId
-    Task { await refreshCredentialIdentities(from: cacheData, vaultKey: vaultKey, userId: userId) }
+    Task {
+      await refreshCredentialIdentities(
+        from: cacheData, vaultKey: vaultKey, userId: userId)
+    }
     appState = .vaultUnlocked(
       serverConfig: serverConfig,
       vaultKey: state.vaultKey,
@@ -418,7 +429,8 @@ struct RootView: View {
       keyVersion: state.keyVersion,
       cacheData: state.cacheData,
       autoLockService: autoLockService,
-      apiClient: debugApiClient
+      apiClient: debugApiClient,
+      cacheKey: nil
     )
   }
   #endif

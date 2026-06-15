@@ -26,6 +26,7 @@
 		1C61EBA902B63AA436EDFED4 /* VaultListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF803DEFD9DF8AF7683EE422 /* VaultListView.swift */; };
 		1FECDEBE12AA76923178DF37 /* VaultViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDC5DA8C56C2D47372666388 /* VaultViewModelTests.swift */; };
 		20391C4492AC914382EF7F0A /* VaultCategory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 564FD260758BB7131E59A188 /* VaultCategory.swift */; };
+		20AF809AB4BCADC6CEE46FF8 /* TeamKeyCryptoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9496DBB2550578117CE8944 /* TeamKeyCryptoTests.swift */; };
 		270E924C1DDE26ACB7454E34 /* RollbackFlagDrainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB996D498008FC6F399B7078 /* RollbackFlagDrainTests.swift */; };
 		27597DEF7D7C04078DDB8212 /* VaultUnlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D415409924052B276B874809 /* VaultUnlockView.swift */; };
 		275CA45AE18A3AD75D9EDA8C /* CredentialIdentityRegistrarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C62D90660DD31E8DCA4CD77 /* CredentialIdentityRegistrarTests.swift */; };
@@ -92,6 +93,7 @@
 		A3CEA13B7C87135CC54039D6 /* TeamContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8901EA2724A715ACFBEEDBEF /* TeamContext.swift */; };
 		A457C9391F7E1E8164C97A46 /* AutoLockService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00C68DCFC79DBA6600F27E36 /* AutoLockService.swift */; };
 		A49DCEFF5ABDE722BF33C324 /* SPKIEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3FBC66A0BFC38B393757852 /* SPKIEncoder.swift */; };
+		A593FD25556BA7A6EB040FAE /* team-key-fixture.json in Resources */ = {isa = PBXBuildFile; fileRef = B8AE8A147DAB81877B408F77 /* team-key-fixture.json */; };
 		A5FA7118BBC2D9CE7C30901E /* MobileAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D7D6EC824EE87139CFBABE4 /* MobileAPIClient.swift */; };
 		A7DAE27E6B8224EAD297A40C /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 655496E4AA02111C447C8897 /* Localizable.xcstrings */; };
 		AA4D5B1010D5702791244F19 /* PasskeyRegistrationOutcomeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9EAECA9F4E2D5A9B57AA94D /* PasskeyRegistrationOutcomeTests.swift */; };
@@ -114,6 +116,7 @@
 		CCC9A05E9E45777A96B84BDF /* Shared.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 296B0035C443158058EA4866 /* Shared.framework */; };
 		CCF7AB22A048CA0D633DC740 /* CredentialResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = D22C90FE49C237E8EB2ABC26 /* CredentialResolver.swift */; };
 		D034CB85FCE2181F6E9490EE /* AppSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29C2D35912411C20F34DA986 /* AppSettingsStore.swift */; };
+		D3E9450606ECCA248DEF4B75 /* TeamEntryDecryptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36E02F2DF62F07EDFD1D4AC /* TeamEntryDecryptor.swift */; };
 		D5D219073C574D1919EE94D6 /* AutofillTokenRefresherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 093A4C680F943C38DC91C965 /* AutofillTokenRefresherTests.swift */; };
 		D818CC3D8994859EC9B470F2 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72F670E8B421F3D4CB3734A6 /* RootView.swift */; };
 		D8EA7B209BAE0D68AB7DB5D5 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2BB90663584E9586FF0945C /* ContentView.swift */; };
@@ -128,6 +131,8 @@
 		E425C49CE0F5257C1821EB50 /* VaultEntryDetail.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00236EB9F799A708CF1C4FC /* VaultEntryDetail.swift */; };
 		E61FA83E34E321C09B0D7176 /* TOTPVectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CB624E102C09D08D7B9BB8D /* TOTPVectorTests.swift */; };
 		E6242A08FB6CD768CBCED638 /* StaleBlobRecoveryServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65EFD0AD3F8896F5D18F2967 /* StaleBlobRecoveryServiceTests.swift */; };
+		E7DD10FDBE035875BB7A93E5 /* TeamKeyCrypto.swift in Sources */ = {isa = PBXBuildFile; fileRef = 123297FA521C8B4A2D71A5A3 /* TeamKeyCrypto.swift */; };
+		EE5586305A8A75C6F0DE9A47 /* TeamDirectoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 820C1F588B1209A77A6C0A36 /* TeamDirectoryStore.swift */; };
 		EEDC524C6F56E4E378F8DB16 /* DebugVaultLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6190750A2E1A027047EDBB4 /* DebugVaultLoader.swift */; };
 		EF9407000E17ADEB5E667D88 /* EntryCacheFileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24CD914CFF8AD6DD6DAB0129 /* EntryCacheFileTests.swift */; };
 		F376E57211FDE0E03F285949 /* LockedFallbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C6E4E71B2DDEE6BBA03CBF4 /* LockedFallbackView.swift */; };
@@ -222,6 +227,7 @@
 		0BDD66BD3FF47585E7183FC8 /* fixtures */ = {isa = PBXFileReference; lastKnownFileType = folder; name = fixtures; path = ../extension/test/fixtures; sourceTree = SOURCE_ROOT; };
 		0CB624E102C09D08D7B9BB8D /* TOTPVectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TOTPVectorTests.swift; sourceTree = "<group>"; };
 		120E0D108C572BDFE0A5E79E /* SecureEnclaveKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureEnclaveKey.swift; sourceTree = "<group>"; };
+		123297FA521C8B4A2D71A5A3 /* TeamKeyCrypto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamKeyCrypto.swift; sourceTree = "<group>"; };
 		13E66C8E3793F0F33D64AAB4 /* VaultViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultViewModel.swift; sourceTree = "<group>"; };
 		160063572DE97E6E16AE7A3D /* SPKIEncoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SPKIEncoderTests.swift; sourceTree = "<group>"; };
 		1682BC8C00C9060F5E4DC11D /* Common.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Common.xcconfig; sourceTree = "<group>"; };
@@ -282,6 +288,7 @@
 		7AFCE015CCAE07263B30B8B4 /* LockStateReducerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LockStateReducerTests.swift; sourceTree = "<group>"; };
 		80BC3E2908650479CBBE6D07 /* EntryBlobDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryBlobDecoderTests.swift; sourceTree = "<group>"; };
 		81279161CAE5152A36AAAC35 /* WrappedKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WrappedKeyStore.swift; sourceTree = "<group>"; };
+		820C1F588B1209A77A6C0A36 /* TeamDirectoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamDirectoryStore.swift; sourceTree = "<group>"; };
 		881416D87A323B49E40CCCC3 /* PasskeyRegistrationOutcome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasskeyRegistrationOutcome.swift; sourceTree = "<group>"; };
 		8901EA2724A715ACFBEEDBEF /* TeamContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamContext.swift; sourceTree = "<group>"; };
 		8AC8C547AA2FF81B4A670924 /* CredentialResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialResolverTests.swift; sourceTree = "<group>"; };
@@ -304,9 +311,11 @@
 		AFB5F0EE6A3D22DF1F2C53B2 /* AutofillTokenRefresher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutofillTokenRefresher.swift; sourceTree = "<group>"; };
 		B088B96E6D37D767B517A837 /* StaleBlobRecoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StaleBlobRecoveryService.swift; sourceTree = "<group>"; };
 		B19DB7B9B5F953AC7FC8CE8E /* BridgeKeyStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeKeyStoreTests.swift; sourceTree = "<group>"; };
+		B36E02F2DF62F07EDFD1D4AC /* TeamEntryDecryptor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamEntryDecryptor.swift; sourceTree = "<group>"; };
 		B4DEECF70DC7351FAF2E7CB7 /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
 		B61C70648C7D9DE6F493F1AD /* SecureClipboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureClipboardTests.swift; sourceTree = "<group>"; };
 		B67A2748B3B1C69F7543EB64 /* PasswdSSOTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PasswdSSOTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B8AE8A147DAB81877B408F77 /* team-key-fixture.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "team-key-fixture.json"; sourceTree = "<group>"; };
 		BB8D42DAB6AE67B22BFFB262 /* BackgroundSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSyncCoordinator.swift; sourceTree = "<group>"; };
 		BBBBBBBE5688A781ED154534 /* EntryFormTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryFormTests.swift; sourceTree = "<group>"; };
 		C02778E2A8EE7B7A09B671C4 /* KDF.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KDF.swift; sourceTree = "<group>"; };
@@ -333,6 +342,7 @@
 		D696B8B99CFDB4FFFDC090E1 /* EntryUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryUploader.swift; sourceTree = "<group>"; };
 		D844C1C788162BAC9B723269 /* AuthCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthCoordinatorTests.swift; sourceTree = "<group>"; };
 		D86EB7DC9441141057919E49 /* AESGCM.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AESGCM.swift; sourceTree = "<group>"; };
+		D9496DBB2550578117CE8944 /* TeamKeyCryptoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamKeyCryptoTests.swift; sourceTree = "<group>"; };
 		DA9CDF313B63803B2922146A /* UploadTokenStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploadTokenStoreTests.swift; sourceTree = "<group>"; };
 		DB996D498008FC6F399B7078 /* RollbackFlagDrainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RollbackFlagDrainTests.swift; sourceTree = "<group>"; };
 		DF803DEFD9DF8AF7683EE422 /* VaultListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultListView.swift; sourceTree = "<group>"; };
@@ -385,6 +395,7 @@
 		05BA435F126C68DBC307F646 /* PasswdSSOTests */ = {
 			isa = PBXGroup;
 			children = (
+				D65F7572FD660C475D7266B0 /* fixtures */,
 				62893F31F539812D3B5BE334 /* AADParityTests.swift */,
 				2DAD672FE74D0EB78FA99F1C /* AESGCMTests.swift */,
 				430B7C32D3A606C25EDA8568 /* AppSettingsStoreTests.swift */,
@@ -429,6 +440,7 @@
 				C1F6D6429583F4DF936E38A0 /* SharedFrameworkTests.swift */,
 				160063572DE97E6E16AE7A3D /* SPKIEncoderTests.swift */,
 				65EFD0AD3F8896F5D18F2967 /* StaleBlobRecoveryServiceTests.swift */,
+				D9496DBB2550578117CE8944 /* TeamKeyCryptoTests.swift */,
 				0CB624E102C09D08D7B9BB8D /* TOTPVectorTests.swift */,
 				DA9CDF313B63803B2922146A /* UploadTokenStoreTests.swift */,
 				92BFAE8E878C252FF7DF4D68 /* URLMatchingTests.swift */,
@@ -482,6 +494,7 @@
 				D22C90FE49C237E8EB2ABC26 /* CredentialResolver.swift */,
 				881416D87A323B49E40CCCC3 /* PasskeyRegistrationOutcome.swift */,
 				7546B006E2E44B4AB2F80A42 /* RollbackFlagWriter.swift */,
+				B36E02F2DF62F07EDFD1D4AC /* TeamEntryDecryptor.swift */,
 			);
 			path = AutoFill;
 			sourceTree = "<group>";
@@ -632,6 +645,7 @@
 				CA0A9545A79418E5DCAF4109 /* PasskeyRegistration.swift */,
 				120E0D108C572BDFE0A5E79E /* SecureEnclaveKey.swift */,
 				A3FBC66A0BFC38B393757852 /* SPKIEncoder.swift */,
+				123297FA521C8B4A2D71A5A3 /* TeamKeyCrypto.swift */,
 			);
 			path = Crypto;
 			sourceTree = "<group>";
@@ -690,6 +704,14 @@
 			path = PasswdSSOApp;
 			sourceTree = "<group>";
 		};
+		D65F7572FD660C475D7266B0 /* fixtures */ = {
+			isa = PBXGroup;
+			children = (
+				B8AE8A147DAB81877B408F77 /* team-key-fixture.json */,
+			);
+			path = fixtures;
+			sourceTree = "<group>";
+		};
 		D8971D5431C5B996B592DD95 /* TOTP */ = {
 			isa = PBXGroup;
 			children = (
@@ -739,6 +761,7 @@
 				8AFD6C1D7BB52C3C67DF3BD2 /* EntryCacheFile.swift */,
 				00C68B395A2ACE49D3F116CB /* HostTokenStore.swift */,
 				469C94A411CE66C4D3EAB9AA /* PasskeySignCountStore.swift */,
+				820C1F588B1209A77A6C0A36 /* TeamDirectoryStore.swift */,
 				C29F7DCD8033069009E3E5EF /* UploadTokenStore.swift */,
 				81279161CAE5152A36AAAC35 /* WrappedKeyStore.swift */,
 			);
@@ -909,6 +932,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4C643AAE37D9DA7E0DCC0DAA /* fixtures in Resources */,
+				A593FD25556BA7A6EB040FAE /* team-key-fixture.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1014,6 +1038,7 @@
 				61C3FD90259F677EA6150C8F /* SharedFrameworkTests.swift in Sources */,
 				E6242A08FB6CD768CBCED638 /* StaleBlobRecoveryServiceTests.swift in Sources */,
 				E61FA83E34E321C09B0D7176 /* TOTPVectorTests.swift in Sources */,
+				20AF809AB4BCADC6CEE46FF8 /* TeamKeyCryptoTests.swift in Sources */,
 				CB194266359903474FE04F9D /* URLMatchingTests.swift in Sources */,
 				B8C977958109D9B3AFC3D13E /* UploadTokenStoreTests.swift in Sources */,
 				364D3AC186509520589AB21A /* VaultCategoryTests.swift in Sources */,
@@ -1064,6 +1089,9 @@
 				88B94C8725C6BEA507605D39 /* Shared.swift in Sources */,
 				BE01EC8587AC154A545C44F6 /* TOTPGenerator.swift in Sources */,
 				A3CEA13B7C87135CC54039D6 /* TeamContext.swift in Sources */,
+				EE5586305A8A75C6F0DE9A47 /* TeamDirectoryStore.swift in Sources */,
+				D3E9450606ECCA248DEF4B75 /* TeamEntryDecryptor.swift in Sources */,
+				E7DD10FDBE035875BB7A93E5 /* TeamKeyCrypto.swift in Sources */,
 				F6D4F11AC118415488FB8DCF /* URLMatcher.swift in Sources */,
 				51DAB59DC908DF2838680335 /* UploadTokenStore.swift in Sources */,
 				E425C49CE0F5257C1821EB50 /* VaultEntryDetail.swift in Sources */,

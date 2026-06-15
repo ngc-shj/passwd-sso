@@ -20,6 +20,7 @@ import { handlePreflight, applyCorsHeaders } from "@/lib/http/cors";
  */
 export const EXTENSION_TOKEN_ROUTES: readonly string[] = [
   API_PATH.PASSWORDS,
+  API_PATH.TEAMS,                   // team list + per-team passwords/member-key — Bearer (iOS app / extension); handlers enforce scope + requireTeamPermission
   API_PATH.VAULT_STATUS,
   API_PATH.VAULT_UNLOCK_DATA,
   API_PATH.EXTENSION_TOKEN,         // DELETE (revoke) — validated by route handler

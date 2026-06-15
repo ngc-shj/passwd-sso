@@ -214,11 +214,11 @@ public actor CredentialResolver {
           continue
         }
         // Unwrap team key using cacheKey (team keys are wrapped under cacheKey, not vault_key).
-        guard let teamKey = decryptTeamKey(wrappedTeamKey, cacheKey: cacheKey) else {
+        guard let teamKey = TeamEntryDecryptor.unwrapTeamKey(wrappedTeamKey, cacheKey: cacheKey, userId: userId) else {
           continue
         }
         // Unwrap ItemKey if itemKeyVersion >= 1.
-        guard let entryKey = resolveTeamEntryKey(entry: entry, teamKey: teamKey) else {
+        guard let entryKey = TeamEntryDecryptor.resolveTeamEntryKey(entry: entry, teamKey: teamKey) else {
           continue
         }
         if let summary = decryptSummary(entry: entry, key: entryKey, userId: userId) {
@@ -331,11 +331,17 @@ public actor CredentialResolver {
       guard let wrappedTeamKey = teamKeys.first(where: { $0.teamId == teamId }) else {
         throw Error.entryNotFound
       }
-      // Team keys are wrapped under cacheKey (same as vault_key wrapping).
-      guard let teamKey = decryptTeamKey(wrappedTeamKey, cacheKey: cacheKey) else {
+      // Enforce the same 15-min staleness bound as resolveCandidates: a revoked
+      // membership must stop FILLING (not just stop appearing in the list) within
+      // the revocation window, even if the stale key still decrypts.
+      guard now().timeIntervalSince(wrappedTeamKey.issuedAt) <= teamKeyMaxAge else {
         throw Error.entryNotFound
       }
-      guard let entryKey = resolveTeamEntryKey(entry: entry, teamKey: teamKey) else {
+      // Team keys are wrapped under cacheKey (same as vault_key wrapping).
+      guard let teamKey = TeamEntryDecryptor.unwrapTeamKey(wrappedTeamKey, cacheKey: cacheKey, userId: userId) else {
+        throw Error.entryNotFound
+      }
+      guard let entryKey = TeamEntryDecryptor.resolveTeamEntryKey(entry: entry, teamKey: teamKey) else {
         throw Error.entryNotFound
       }
       decryptKey = entryKey
@@ -715,60 +721,8 @@ public actor CredentialResolver {
     }
   }
 
-  /// Resolve the entry-level key:
-  /// - itemKeyVersion == 0 → use teamKey directly.
-  /// - itemKeyVersion >= 1 → decrypt encryptedItemKey with teamKey + wrap AAD.
-  private func resolveTeamEntryKey(
-    entry: CacheEntry,
-    teamKey: SymmetricKey
-  ) -> SymmetricKey? {
-    let itemKeyVersion = entry.itemKeyVersion ?? 0
-    if itemKeyVersion == 0 {
-      return teamKey
-    }
-    guard
-      let teamId = entry.teamId,
-      let teamKeyVersion = entry.teamKeyVersion,
-      let wrapped = entry.encryptedItemKey,
-      let aad = try? buildItemKeyWrapAAD(
-        teamId: teamId,
-        entryId: entry.id,
-        teamKeyVersion: teamKeyVersion
-      ),
-      let cipher = try? hexDecode(wrapped.ciphertext),
-      let iv = try? hexDecode(wrapped.iv),
-      let tag = try? hexDecode(wrapped.authTag),
-      let itemKeyData = try? decryptAESGCM(
-        ciphertext: cipher,
-        iv: iv,
-        tag: tag,
-        key: teamKey,
-        aad: aad
-      )
-    else {
-      return nil
-    }
-    return SymmetricKey(data: itemKeyData)
-  }
-
-  /// Unwrap a stored team key using cacheKey (the HKDF-derived bridge_key derivative).
-  /// Team keys are wrapped under cacheKey, matching the vault_key wrapping scheme.
-  private func decryptTeamKey(
-    _ wrapped: WrappedTeamKey,
-    cacheKey: SymmetricKey
-  ) -> SymmetricKey? {
-    guard
-      let plaintext = try? decryptAESGCM(
-        ciphertext: wrapped.ciphertext,
-        iv: wrapped.iv,
-        tag: wrapped.authTag,
-        key: cacheKey
-      )
-    else {
-      return nil
-    }
-    return SymmetricKey(data: plaintext)
-  }
+  // Team-key unwrap + entry-key resolution moved to the shared `TeamEntryDecryptor`
+  // (single source of truth; also used by CredentialIdentityRegistrar + HostSyncService).
 
   private func writeRollbackFlag(
     kind: CacheRejectionKind,

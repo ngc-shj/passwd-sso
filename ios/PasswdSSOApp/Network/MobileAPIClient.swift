@@ -19,6 +19,12 @@ public struct VaultUnlockData: Sendable, Codable, Equatable {
   /// Tenant-enforced auto-lock interval (minutes), or nil when the tenant sets no
   /// policy. Optional → the synthesized decoder treats null/absent as nil.
   public let vaultAutoLockMinutes: Int?
+  /// Account ECDH keypair material (team E2E). All nil for accounts without an
+  /// ECDH keypair / no team membership. Used to unwrap team keys.
+  public let ecdhPublicKey: String?
+  public let encryptedEcdhPrivateKey: String?
+  public let ecdhPrivateKeyIv: String?
+  public let ecdhPrivateKeyAuthTag: String?
 
   enum CodingKeys: String, CodingKey {
     case accountSalt
@@ -30,6 +36,10 @@ public struct VaultUnlockData: Sendable, Codable, Equatable {
     case kdfIterations
     case userId
     case vaultAutoLockMinutes
+    case ecdhPublicKey
+    case encryptedEcdhPrivateKey
+    case ecdhPrivateKeyIv
+    case ecdhPrivateKeyAuthTag
   }
 
   // Explicit memberwise init with vaultAutoLockMinutes defaulted LAST so existing
@@ -44,7 +54,11 @@ public struct VaultUnlockData: Sendable, Codable, Equatable {
     kdfType: Int,
     kdfIterations: Int,
     userId: String,
-    vaultAutoLockMinutes: Int? = nil
+    vaultAutoLockMinutes: Int? = nil,
+    ecdhPublicKey: String? = nil,
+    encryptedEcdhPrivateKey: String? = nil,
+    ecdhPrivateKeyIv: String? = nil,
+    ecdhPrivateKeyAuthTag: String? = nil
   ) {
     self.accountSalt = accountSalt
     self.encryptedSecretKey = encryptedSecretKey
@@ -55,10 +69,25 @@ public struct VaultUnlockData: Sendable, Codable, Equatable {
     self.kdfIterations = kdfIterations
     self.userId = userId
     self.vaultAutoLockMinutes = vaultAutoLockMinutes
+    self.ecdhPublicKey = ecdhPublicKey
+    self.encryptedEcdhPrivateKey = encryptedEcdhPrivateKey
+    self.ecdhPrivateKeyIv = ecdhPrivateKeyIv
+    self.ecdhPrivateKeyAuthTag = ecdhPrivateKeyAuthTag
   }
 }
 
 // MARK: - Response types
+
+/// GET /api/teams/{teamId}/member-key response (team E2E key material).
+public struct TeamMemberKeyResponse: Sendable, Codable, Equatable {
+  public let encryptedTeamKey: String
+  public let teamKeyIv: String
+  public let teamKeyAuthTag: String
+  public let ephemeralPublicKey: String
+  public let hkdfSalt: String
+  public let keyVersion: Int
+  public let wrapVersion: Int
+}
 
 public struct TokenExchangeResponse: Sendable, Codable, Equatable {
   public let accessToken: String
@@ -96,6 +125,9 @@ public enum MobileAPIError: Error, Equatable {
   /// Server rejected a create because a per-resource quota is exhausted
   /// (HTTP 403 carrying the server's quota-exhaustion error code).
   case quotaExceeded
+  /// The team member key has not been distributed to this user (or no longer
+  /// exists). Treated as "skip this team" during sync, not a hard failure.
+  case teamKeyNotDistributed
   case serverError(status: Int)
   case networkError(URLError)
   /// The refresh token is dead (no refresh token, or refresh endpoint returned 401/dpopInvalid).
@@ -282,6 +314,19 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     }
     let data = try await performAuthedGET(url: endpointURL)
     return try JSONDecoder().decode([TeamEncryptedEntry].self, from: data)
+  }
+
+  /// Fetch this user's wrapped team key for a team (GET /api/teams/{id}/member-key).
+  /// 403 (KEY_NOT_DISTRIBUTED) / 404 (MEMBER_KEY_NOT_FOUND) → `teamKeyNotDistributed`
+  /// so the sync caller skips the team rather than failing the whole sync.
+  public func fetchTeamMemberKey(teamId: String) async throws -> TeamMemberKeyResponse {
+    let url = serverURL.appending(path: "/api/teams/\(teamId)/member-key", directoryHint: .notDirectory)
+    do {
+      let data = try await performAuthedGET(url: url)
+      return try JSONDecoder().decode(TeamMemberKeyResponse.self, from: data)
+    } catch MobileAPIError.serverError(let status) where status == 403 || status == 404 {
+      throw MobileAPIError.teamKeyNotDistributed
+    }
   }
 
   /// Fetch encrypted entries from a GET endpoint (personal or team).

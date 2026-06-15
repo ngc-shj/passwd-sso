@@ -92,6 +92,44 @@ final class WrappedKeyStoreTests: XCTestCase {
     XCTAssertTrue(loaded.isEmpty)
   }
 
+  // MARK: - ECDH private key round-trip
+
+  func testECDHPrivateKeyRoundTrip() throws {
+    XCTAssertNil(try store.loadECDHPrivateKey(), "Should be nil before save")
+
+    let wrapped = WrappedECDHPrivateKey(
+      ciphertext: Data([0xAB, 0xCD]),
+      iv: Data(repeating: 0x11, count: 12),
+      authTag: Data(repeating: 0x22, count: 16),
+      issuedAt: Date(timeIntervalSince1970: 2_000_000)
+    )
+    try store.saveECDHPrivateKey(wrapped)
+
+    let loaded = try store.loadECDHPrivateKey()
+    XCTAssertNotNil(loaded)
+    XCTAssertEqual(loaded, wrapped)
+  }
+
+  func testECDHPrivateKeyOverwrite() throws {
+    let first = WrappedECDHPrivateKey(
+      ciphertext: Data([0x01]),
+      iv: Data(repeating: 0x10, count: 12),
+      authTag: Data(repeating: 0x10, count: 16),
+      issuedAt: Date(timeIntervalSince1970: 1000)
+    )
+    let second = WrappedECDHPrivateKey(
+      ciphertext: Data([0x02]),
+      iv: Data(repeating: 0x20, count: 12),
+      authTag: Data(repeating: 0x20, count: 16),
+      issuedAt: Date(timeIntervalSince1970: 2000)
+    )
+    try store.saveECDHPrivateKey(first)
+    try store.saveECDHPrivateKey(second)
+
+    let loaded = try store.loadECDHPrivateKey()
+    XCTAssertEqual(loaded, second, "Second write should replace first")
+  }
+
   // MARK: - clearAll
 
   func testClearAllDeletesBothFiles() throws {
@@ -118,6 +156,65 @@ final class WrappedKeyStoreTests: XCTestCase {
 
     XCTAssertNil(try store.loadVaultKey())
     XCTAssertTrue((try store.loadTeamKeys()).isEmpty)
+  }
+
+  // MARK: - clearAll removes ECDH file too
+
+  func testClearAllDeletesECDHFile() throws {
+    let vk = WrappedVaultKey(
+      ciphertext: Data([0x01]),
+      iv: Data(repeating: 0x01, count: 12),
+      authTag: Data(repeating: 0x01, count: 16),
+      issuedAt: Date()
+    )
+    let ecdh = WrappedECDHPrivateKey(
+      ciphertext: Data([0xAB]),
+      iv: Data(repeating: 0xAB, count: 12),
+      authTag: Data(repeating: 0xAB, count: 16),
+      issuedAt: Date()
+    )
+    try store.saveVaultKey(vk)
+    try store.saveECDHPrivateKey(ecdh)
+
+    // Confirm files exist before clearing.
+    XCTAssertNotNil(try store.loadVaultKey())
+    XCTAssertNotNil(try store.loadECDHPrivateKey())
+
+    try store.clearAll()
+
+    XCTAssertNil(try store.loadVaultKey(), "vault key must be deleted by clearAll")
+    XCTAssertNil(try store.loadECDHPrivateKey(), "ECDH key must be deleted by clearAll")
+  }
+
+  // MARK: - clearTeamKeys leaves vault key intact
+
+  func testClearTeamKeysRemovesTeamKeysButLeavesVaultKey() throws {
+    let vk = WrappedVaultKey(
+      ciphertext: Data([0x01]),
+      iv: Data(repeating: 0x01, count: 12),
+      authTag: Data(repeating: 0x01, count: 16),
+      issuedAt: Date()
+    )
+    let keys = [
+      WrappedTeamKey(
+        teamId: "team-clear",
+        ciphertext: Data([0xAA]),
+        iv: Data(repeating: 0x05, count: 12),
+        authTag: Data(repeating: 0x06, count: 16),
+        issuedAt: Date(),
+        teamKeyVersion: 1
+      )
+    ]
+    try store.saveVaultKey(vk)
+    try store.saveTeamKeys(keys)
+
+    try store.clearTeamKeys()
+
+    // Team keys must be gone.
+    XCTAssertTrue((try store.loadTeamKeys()).isEmpty, "clearTeamKeys must remove team keys")
+    // Vault key must survive.
+    XCTAssertNotNil(try store.loadVaultKey(), "clearTeamKeys must NOT touch the vault key")
+    XCTAssertEqual(try store.loadVaultKey(), vk)
   }
 
   // MARK: - Atomic write (no torn .tmp left behind)
@@ -159,6 +256,10 @@ final class TempDirWrappedKeyStore: WrappedKeyStore, @unchecked Sendable {
     baseDir.appending(path: "vault/wrapped-team-keys.json", directoryHint: .notDirectory)
   }
 
+  private var ecdhKeyURL: URL {
+    baseDir.appending(path: "vault/wrapped-ecdh-private-key.json", directoryHint: .notDirectory)
+  }
+
   func saveVaultKey(_ wrapped: WrappedVaultKey) throws {
     try ensureVaultDir()
     let data = try JSONEncoder().encode(wrapped)
@@ -183,10 +284,28 @@ final class TempDirWrappedKeyStore: WrappedKeyStore, @unchecked Sendable {
     return try JSONDecoder().decode([WrappedTeamKey].self, from: data)
   }
 
+  func clearTeamKeys() throws {
+    let fm = FileManager.default
+    if fm.fileExists(atPath: teamKeysURL.path) { try fm.removeItem(at: teamKeysURL) }
+  }
+
+  func saveECDHPrivateKey(_ wrapped: WrappedECDHPrivateKey) throws {
+    try ensureVaultDir()
+    let data = try JSONEncoder().encode(wrapped)
+    try atomicWrite(data: data, to: ecdhKeyURL)
+  }
+
+  func loadECDHPrivateKey() throws -> WrappedECDHPrivateKey? {
+    guard FileManager.default.fileExists(atPath: ecdhKeyURL.path) else { return nil }
+    let data = try Data(contentsOf: ecdhKeyURL)
+    return try JSONDecoder().decode(WrappedECDHPrivateKey.self, from: data)
+  }
+
   func clearAll() throws {
     let fm = FileManager.default
     if fm.fileExists(atPath: vaultKeyURL.path) { try fm.removeItem(at: vaultKeyURL) }
     if fm.fileExists(atPath: teamKeysURL.path) { try fm.removeItem(at: teamKeysURL) }
+    if fm.fileExists(atPath: ecdhKeyURL.path) { try fm.removeItem(at: ecdhKeyURL) }
   }
 
   private func ensureVaultDir() throws {

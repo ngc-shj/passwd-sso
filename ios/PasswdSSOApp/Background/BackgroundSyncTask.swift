@@ -15,9 +15,11 @@ public enum BackgroundSyncTask {
   public static func register(
     syncService: @Sendable @escaping () -> HostSyncService?,
     vaultKey: @Sendable @escaping () -> SymmetricKey?,
-    userId: @Sendable @escaping () -> String?
+    userId: @Sendable @escaping () -> String?,
+    cacheKey: @Sendable @escaping () -> SymmetricKey? = { nil }
   ) {
-    let runner = BackgroundSyncRunner(syncService: syncService, vaultKey: vaultKey, userId: userId)
+    let runner = BackgroundSyncRunner(
+      syncService: syncService, vaultKey: vaultKey, userId: userId, cacheKey: cacheKey)
     BGTaskScheduler.shared.register(
       forTaskWithIdentifier: identifier,
       using: nil,
@@ -46,15 +48,25 @@ public final class BackgroundSyncContext: @unchecked Sendable {
   private var syncService: HostSyncService?
   private var vaultKey: SymmetricKey?
   private var userId: String?
+  private var cacheKey: SymmetricKey?
 
   public init() {}
 
-  public func update(syncService: HostSyncService, vaultKey: SymmetricKey, userId: String) {
+  public func update(
+    syncService: HostSyncService, vaultKey: SymmetricKey, userId: String, cacheKey: SymmetricKey? = nil
+  ) {
     lock.lock()
     defer { lock.unlock() }
     self.syncService = syncService
     self.vaultKey = vaultKey
     self.userId = userId
+    self.cacheKey = cacheKey
+  }
+
+  public func currentCacheKey() -> SymmetricKey? {
+    lock.lock()
+    defer { lock.unlock() }
+    return cacheKey
   }
 
   public func currentSyncService() -> HostSyncService? {
@@ -83,15 +95,18 @@ final class BackgroundSyncRunner: @unchecked Sendable {
   private let syncService: @Sendable () -> HostSyncService?
   private let vaultKey: @Sendable () -> SymmetricKey?
   private let userId: @Sendable () -> String?
+  private let cacheKey: @Sendable () -> SymmetricKey?
 
   init(
     syncService: @Sendable @escaping () -> HostSyncService?,
     vaultKey: @Sendable @escaping () -> SymmetricKey?,
-    userId: @Sendable @escaping () -> String?
+    userId: @Sendable @escaping () -> String?,
+    cacheKey: @Sendable @escaping () -> SymmetricKey? = { nil }
   ) {
     self.syncService = syncService
     self.vaultKey = vaultKey
     self.userId = userId
+    self.cacheKey = cacheKey
   }
 
   func run(task bgTask: BGTask) {
@@ -100,8 +115,9 @@ final class BackgroundSyncRunner: @unchecked Sendable {
     let serviceProvider = syncService
     let keyProvider = vaultKey
     let userIdProvider = userId
+    let cacheKeyProvider = cacheKey
     Task {
-      await runAsync(box: box, serviceProvider: serviceProvider, keyProvider: keyProvider, userIdProvider: userIdProvider)
+      await runAsync(box: box, serviceProvider: serviceProvider, keyProvider: keyProvider, userIdProvider: userIdProvider, cacheKeyProvider: cacheKeyProvider)
     }
   }
 
@@ -109,15 +125,24 @@ final class BackgroundSyncRunner: @unchecked Sendable {
     box: TaskBox,
     serviceProvider: @Sendable () -> HostSyncService?,
     keyProvider: @Sendable () -> SymmetricKey?,
-    userIdProvider: @Sendable () -> String?
+    userIdProvider: @Sendable () -> String?,
+    cacheKeyProvider: @Sendable () -> SymmetricKey? = { nil }
   ) async {
     guard let service = serviceProvider(), let key = keyProvider(), let uid = userIdProvider() else {
       box.task.setTaskCompleted(success: false)
       BackgroundSyncTask.scheduleNext()
       return
     }
+    let cacheKey = cacheKeyProvider()
     do {
-      _ = try await service.runSync(vaultKey: key, userId: uid)
+      let report = try await service.runSync(vaultKey: key, userId: uid, cacheKey: cacheKey)
+      // Re-register QuickType identities so team entries appear after a background
+      // refresh (not only after returning to the foreground). Personal + team.
+      if let cacheData = report.cacheData {
+        await refreshCredentialIdentities(
+          from: cacheData, vaultKey: key, userId: uid,
+          cacheKey: cacheKey, wrappedKeyStore: AppGroupWrappedKeyStore())
+      }
       box.task.setTaskCompleted(success: true)
       BackgroundSyncTask.scheduleNext()
     } catch MobileAPIError.authenticationRequired {

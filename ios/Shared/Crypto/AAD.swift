@@ -13,6 +13,10 @@ public enum AADScope: String {
   case team = "OV"
   case attachment = "AT"
   case itemKey = "IK"
+  /// TeamMemberKey wrapping (server-compat, mirrors extension crypto-team.ts).
+  case teamKey = "OK"
+  /// iOS-local cacheKey wraps (ECDH key + team enc keys) — NOT shared with server.
+  case localWrap = "LW"
 }
 
 /// Vault-field discriminators used in the AAD `vaultType` field, mirroring
@@ -94,6 +98,31 @@ public func buildItemKeyWrapAAD(
 /// Build AAD for an attachment (entryId, attachmentId).
 public func buildAttachmentAAD(entryId: String, attachmentId: String) throws -> Data {
   try buildAADBytes(scope: .attachment, fields: [entryId, attachmentId])
+}
+
+/// Build AAD for the server-side TeamMemberKey wrap (teamId, toUserId, keyVersion,
+/// wrapVersion). Byte-identical to the extension's buildTeamKeyWrapAAD (scope "OK").
+public func buildTeamKeyWrapAAD(
+  teamId: String,
+  toUserId: String,
+  keyVersion: Int,
+  wrapVersion: Int
+) throws -> Data {
+  try buildAADBytes(
+    scope: .teamKey,
+    fields: [teamId, toUserId, String(keyVersion), String(wrapVersion)]
+  )
+}
+
+/// Build AAD for an on-device cacheKey wrap (scope "LW"). Binds the wrapped blob
+/// to the user (and team) it was derived for so a transplanted blob fails AEAD.
+/// `kind` is "ecdh" or "team"; `teamId` is "" for the ECDH key.
+public func buildLocalWrapAAD(
+  kind: String,
+  userId: String,
+  teamId: String = ""
+) throws -> Data {
+  try buildAADBytes(scope: .localWrap, fields: [kind, userId, teamId])
 }
 
 public enum AADError: Error, Equatable {
