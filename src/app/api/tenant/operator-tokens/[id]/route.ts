@@ -69,7 +69,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
 
   await withTenantRls(prisma, actor.tenantId, async (tx) =>
     tx.operatorToken.update({
-      where: { id },
+      where: { id, tenantId: actor.tenantId },
       data: { revokedAt: new Date() },
     }),
   );

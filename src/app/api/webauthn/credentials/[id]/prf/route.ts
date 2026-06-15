@@ -161,7 +161,7 @@ async function handlePOST(
         }
 
         await tx.webAuthnCredential.update({
-          where: { id: credentialRowId },
+          where: { id: credentialRowId, userId },
           data: {
             prfEncryptedSecretKey: body.prfEncryptedSecretKey,
             prfSecretKeyIv: body.prfSecretKeyIv,

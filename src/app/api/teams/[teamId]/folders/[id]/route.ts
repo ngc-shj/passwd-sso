@@ -135,7 +135,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   try {
     folder = await withTeamTenantRls(teamId, async () =>
       prisma.teamFolder.update({
-        where: { id },
+        where: { id, teamId },
         data: updateData,
       }),
     );
@@ -229,7 +229,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
       for (const child of children) {
         const newName = renames.get(child.id);
         await tx.teamFolder.update({
-          where: { id: child.id },
+          where: { id: child.id, teamId },
           data: {
             parentId: existing.parentId,
             ...(newName ? { name: newName } : {}),
@@ -240,7 +240,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
         where: { teamFolderId: id },
         data: { teamFolderId: null },
       });
-      await tx.teamFolder.delete({ where: { id } });
+      await tx.teamFolder.delete({ where: { id, teamId } });
     }),
   );
 

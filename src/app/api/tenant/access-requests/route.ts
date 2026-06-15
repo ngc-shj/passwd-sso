@@ -176,10 +176,17 @@ async function handlePOST(req: NextRequest) {
     const sa = await withBypassRls(prisma, async (tx) =>
       tx.serviceAccount.findUnique({
         where: { id: serviceAccountId },
-        select: { isActive: true, createdById: true },
+        select: { isActive: true, createdById: true, tenantId: true },
       }),
     BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
     if (!sa) {
+      return errorResponse(API_ERROR.SA_NOT_FOUND);
+    }
+    // Defensive tenant-boundary check, symmetric with the admin path below.
+    // validateServiceAccountToken already enforces token.tenantId === sa.tenantId,
+    // so this only fires on a corrupted row; fail closed rather than create the
+    // request under the token's tenant for an SA owned by another tenant.
+    if (sa.tenantId !== tenantId) {
       return errorResponse(API_ERROR.SA_NOT_FOUND);
     }
     if (!sa.isActive) {

@@ -43,7 +43,7 @@ async function handlePOST(
 
   await withUserTenantRls(session.user.id, async () =>
     prisma.passwordEntry.update({
-      where: { id },
+      where: { id, userId: session.user.id },
       data: { deletedAt: null },
     }),
   );

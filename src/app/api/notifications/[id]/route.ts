@@ -26,7 +26,7 @@ async function handlePATCH(
 
   const notification = await withUserTenantRls(session.user.id, async () =>
     prisma.notification.update({
-      where: { id },
+      where: { id, userId: session.user.id },
       data: { isRead: true },
     }),
   );
@@ -57,7 +57,7 @@ async function handleDELETE(
   }
 
   await withUserTenantRls(session.user.id, async () =>
-    prisma.notification.delete({ where: { id } }),
+    prisma.notification.delete({ where: { id, userId: session.user.id } }),
   );
 
   return NextResponse.json({ success: true });

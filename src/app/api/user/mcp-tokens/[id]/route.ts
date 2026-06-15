@@ -35,7 +35,7 @@ async function handleDELETE(
 
     const revokedDelegationSessionIds = await prisma.$transaction(async (tx) => {
       await tx.mcpAccessToken.update({
-        where: { id },
+        where: { id, userId, tenantId },
         data: { revokedAt: now },
       });
 

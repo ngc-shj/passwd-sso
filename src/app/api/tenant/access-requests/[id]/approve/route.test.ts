@@ -140,6 +140,41 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
     mockRequireRecentSession.mockResolvedValue(null);
   });
 
+  it("gates the approval transition on expiresAt atomically (closes TOCTOU window)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAccessRequestFindUnique.mockResolvedValue(makeAccessRequest());
+    mockTenantFindUnique.mockResolvedValue(null);
+
+    let capturedWhere: Record<string, unknown> | undefined;
+    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
+      const tx = {
+        serviceAccountToken: {
+          count: vi.fn().mockResolvedValue(0),
+          create: vi.fn().mockResolvedValue({ id: "tok-1" }),
+        },
+        accessRequest: {
+          updateMany: vi.fn().mockImplementation((args: { where: Record<string, unknown> }) => {
+            capturedWhere = args.where;
+            return { count: 1 };
+          }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+      };
+      return fn(tx);
+    });
+
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/access-requests/${REQUEST_ID}/approve`,
+    );
+    const res = await POST(req, createParams({ id: REQUEST_ID }));
+    expect((await parseResponse(res)).status).toBe(200);
+    // The status transition must carry an expiresAt > now predicate so a request
+    // that expires between the pre-transaction check and the write is excluded.
+    expect(capturedWhere).toMatchObject({ expiresAt: { gt: expect.any(Date) } });
+  });
+
   it("approves pending request and returns JIT token", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);

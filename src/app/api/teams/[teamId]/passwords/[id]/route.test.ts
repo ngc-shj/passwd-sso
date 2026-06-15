@@ -23,6 +23,8 @@ const {
       findUnique: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
+      deleteMany: vi.fn(),
+      updateMany: vi.fn(),
     },
     mockPrismaTeamFolder: { findUnique: vi.fn() },
     mockPrismaTeam: { findUnique: vi.fn() },
@@ -682,9 +684,9 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]", () => {
     expect(json.error).toBe("NOT_FOUND");
   });
 
-  it("soft deletes by default", async () => {
+  it("soft deletes by default, scoping the mutation by id + teamId", async () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ id: PW_ID, teamId: TEAM_ID });
-    mockPrismaTeamPasswordEntry.update.mockResolvedValue({});
+    mockPrismaTeamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
 
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`),
@@ -693,12 +695,14 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
-    expect(mockPrismaTeamPasswordEntry.update).toHaveBeenCalled();
+    expect(mockPrismaTeamPasswordEntry.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: PW_ID, teamId: TEAM_ID } }),
+    );
   });
 
-  it("permanently deletes when permanent=true", async () => {
+  it("permanently deletes when permanent=true, scoping the delete by id + teamId", async () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ id: PW_ID, teamId: TEAM_ID });
-    mockPrismaTeamPasswordEntry.delete.mockResolvedValue({});
+    mockPrismaTeamPasswordEntry.deleteMany.mockResolvedValue({ count: 1 });
 
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
@@ -707,6 +711,32 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]", () => {
       createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
     expect(res.status).toBe(200);
-    expect(mockPrismaTeamPasswordEntry.delete).toHaveBeenCalled();
+    expect(mockPrismaTeamPasswordEntry.deleteMany).toHaveBeenCalledWith({
+      where: { id: PW_ID, teamId: TEAM_ID },
+    });
+  });
+
+  it("returns 404 when the scoped permanent delete matches no row (concurrent delete / wrong team)", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ id: PW_ID, teamId: TEAM_ID });
+    mockPrismaTeamPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
+        searchParams: { permanent: "true" },
+      }),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 when the scoped soft delete matches no row", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ id: PW_ID, teamId: TEAM_ID });
+    mockPrismaTeamPasswordEntry.updateMany.mockResolvedValue({ count: 0 });
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(404);
   });
 });

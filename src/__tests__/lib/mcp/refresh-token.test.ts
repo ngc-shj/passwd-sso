@@ -114,6 +114,7 @@ describe("exchangeRefreshToken", () => {
     clientId: "mcpc_testclient",
     clientSecretHash: "hashed:correct-secret",
     isActive: true,
+    tenantId: "tenant-uuid-123",
   };
 
   const VALID_RT = {
@@ -254,6 +255,28 @@ describe("exchangeRefreshToken", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe("invalid_grant");
+  });
+
+  it("returns invalid_client when the token's tenantId differs from its client's tenantId", async () => {
+    // Defensive tenant-boundary check: a corrupted source row must not propagate
+    // a divergent tenantId into a freshly minted token pair.
+    const { mockRefreshUpdateMany } = await setupPrisma({
+      rt: {
+        ...VALID_RT,
+        mcpClient: { ...VALID_CLIENT, tenantId: "tenant-OTHER" },
+      },
+    });
+
+    const result = await exchangeRefreshToken({
+      refreshToken: "valid-refresh-token",
+      clientId: "mcpc_testclient",
+      clientSecretHash: "hashed:correct-secret",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("invalid_client");
+    // The rotation CAS must not run — no new pair is minted for a divergent row.
+    expect(mockRefreshUpdateMany).not.toHaveBeenCalled();
   });
 
   it("REPLAY DETECTION: rotated token reuse triggers family-wide revocation", async () => {

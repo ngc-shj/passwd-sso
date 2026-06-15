@@ -258,7 +258,7 @@ describe("DELETE /api/passwords/[id]/attachments/[attachmentId]", () => {
     const json = await res.json();
     expect(json.success).toBe(true);
     expect(mockPrismaAttachment.delete).toHaveBeenCalledWith({
-      where: { id: "att-1" },
+      where: { id: "att-1", passwordEntryId: "pw-1" },
     });
   });
 });

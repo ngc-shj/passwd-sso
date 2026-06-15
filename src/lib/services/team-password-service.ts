@@ -559,7 +559,7 @@ export async function updateTeamPassword(
       });
       if (all.length > 20) {
         await tx.teamPasswordEntryHistory.deleteMany({
-          where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
+          where: { entryId: passwordId, id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
         });
       }
     }
@@ -596,12 +596,23 @@ export async function deleteTeamPassword(
       teamId,
       entryIds: [passwordId],
     });
-    await prisma.teamPasswordEntry.delete({ where: { id: passwordId } });
+    // Scope the mutation by teamId (not the global PK alone) so a stale/mis-routed
+    // caller or a broken RLS context cannot delete an entry belonging to another
+    // team. Mirrors the id+teamId predicate used by updateTeamPassword.
+    const deleted = await prisma.teamPasswordEntry.deleteMany({
+      where: { id: passwordId, teamId },
+    });
+    if (deleted.count !== 1) {
+      throw new TeamPasswordServiceError(API_ERROR.NOT_FOUND, 404);
+    }
     return refs;
   }
-  await prisma.teamPasswordEntry.update({
-    where: { id: passwordId },
+  const trashed = await prisma.teamPasswordEntry.updateMany({
+    where: { id: passwordId, teamId },
     data: { deletedAt: new Date() },
   });
+  if (trashed.count !== 1) {
+    throw new TeamPasswordServiceError(API_ERROR.NOT_FOUND, 404);
+  }
   return [];
 }

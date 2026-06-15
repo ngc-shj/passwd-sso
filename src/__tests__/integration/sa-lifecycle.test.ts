@@ -325,7 +325,7 @@ describe("Scenario 2: SA token issuance and authentication", () => {
     // mockHashToken is already wired to return "hashed-token".
     mockServiceAccountTokenFindUnique.mockResolvedValue({
       ...BASE_TOKEN,
-      serviceAccount: { isActive: true },
+      serviceAccount: { isActive: true, tenantId: BASE_TOKEN.tenantId },
     });
     mockServiceAccountTokenUpdate.mockResolvedValue({});
 
@@ -360,7 +360,7 @@ describe("Scenario 3: SA deactivation → token rejection", () => {
   it("token validates when SA is active", async () => {
     mockServiceAccountTokenFindUnique.mockResolvedValue({
       ...BASE_TOKEN,
-      serviceAccount: { isActive: true },
+      serviceAccount: { isActive: true, tenantId: BASE_TOKEN.tenantId },
     });
     mockServiceAccountTokenUpdate.mockResolvedValue({});
 
@@ -496,7 +496,7 @@ describe("Scenario 5: SA token on v1 endpoint — authOrToken dispatch and scope
     mockServiceAccountTokenFindUnique.mockResolvedValue({
       ...BASE_TOKEN,
       scope: storedScope,
-      serviceAccount: { isActive: true },
+      serviceAccount: { isActive: true, tenantId: BASE_TOKEN.tenantId },
     });
     mockServiceAccountTokenUpdate.mockResolvedValue({});
 

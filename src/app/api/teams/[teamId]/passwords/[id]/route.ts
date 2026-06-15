@@ -179,9 +179,17 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   const { searchParams } = new URL(req.url);
   const permanent = searchParams.get("permanent") === "true";
 
-  const blobRefs = await withTeamTenantRls(teamId, () =>
-    teamPasswordService.deleteTeamPassword(teamId, id, permanent),
-  );
+  let blobRefs;
+  try {
+    blobRefs = await withTeamTenantRls(teamId, () =>
+      teamPasswordService.deleteTeamPassword(teamId, id, permanent),
+    );
+  } catch (e) {
+    if (e instanceof TeamPasswordServiceError) {
+      return errorResponse(e.code, e.statusHint);
+    }
+    throw e;
+  }
   // Purge external blobs after the RLS tx closes (don't hold a DB connection
   // open during blob-store network I/O).
   await deleteAttachmentBlobs(blobRefs);

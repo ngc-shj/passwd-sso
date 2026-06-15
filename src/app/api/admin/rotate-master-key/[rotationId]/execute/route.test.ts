@@ -280,7 +280,7 @@ describe("POST /api/admin/rotate-master-key/[rotationId]/execute", () => {
   it("records revokedShares on the rotation row after successful execute", async () => {
     await callPOST();
     expect(mockUpdate).toHaveBeenCalledWith({
-      where: { id: ROTATION_ID },
+      where: { id: ROTATION_ID, tenantId: TENANT },
       data: { revokedShares: 7 },
     });
   });

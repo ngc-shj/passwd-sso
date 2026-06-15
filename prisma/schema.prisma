@@ -1223,7 +1223,9 @@ model AccessRequest {
   createdAt                   DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
 
   tenant                  Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  serviceAccount          ServiceAccount  @relation(fields: [serviceAccountId], references: [id], onDelete: Cascade)
+  // Composite FK (serviceAccountId, tenantId) → ServiceAccount(id, tenantId):
+  // a request's tenantId is guaranteed at the DB level to match its SA's tenant.
+  serviceAccount          ServiceAccount  @relation(fields: [serviceAccountId, tenantId], references: [id, tenantId], onDelete: Cascade)
   approvedBy              User?           @relation("AccessRequestApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
   requesterUser           User?           @relation("AccessRequestRequester", fields: [requesterUserId], references: [id], onDelete: SetNull)
   requesterServiceAccount ServiceAccount? @relation("AccessRequestSelfService", fields: [requesterServiceAccountId], references: [id], onDelete: SetNull)
@@ -1663,6 +1665,9 @@ model ServiceAccount {
   auditLogs               AuditLog[]
 
   @@unique([tenantId, name])
+  // Referenced by ServiceAccountToken's composite FK so a token's tenantId is
+  // guaranteed at the DB level to match its parent SA's tenantId.
+  @@unique([id, tenantId])
   @@index([tenantId, isActive])
   @@map("service_accounts")
 }
@@ -1680,7 +1685,10 @@ model ServiceAccountToken {
   revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(3)
   lastUsedAt       DateTime? @map("last_used_at") @db.Timestamptz(3)
 
-  serviceAccount ServiceAccount @relation(fields: [serviceAccountId], references: [id], onDelete: Cascade)
+  // Composite FK (serviceAccountId, tenantId) → ServiceAccount(id, tenantId)
+  // enforces tenant-boundary consistency at the DB level: a token cannot point
+  // to an SA owned by a different tenant.
+  serviceAccount ServiceAccount @relation(fields: [serviceAccountId, tenantId], references: [id, tenantId], onDelete: Cascade)
   tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([serviceAccountId, revokedAt])

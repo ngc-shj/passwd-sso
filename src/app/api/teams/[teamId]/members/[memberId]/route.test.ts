@@ -255,7 +255,7 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     expect(json.role).toBe(TEAM_ROLE.OWNER);
     // Actor should be demoted to ADMIN
     expect(mockPrismaTeamMember.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: ownerMembership.id }, data: { role: TEAM_ROLE.ADMIN } }),
+      expect.objectContaining({ where: { id: ownerMembership.id, teamId: TEAM_ID }, data: { role: TEAM_ROLE.ADMIN } }),
     );
   });
 
@@ -468,7 +468,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
       where: { teamId: TEAM_ID, userId: "target-user" },
     });
     expect(mockPrismaTeamMember.delete).toHaveBeenCalledWith({
-      where: { id: MEMBER_ID },
+      where: { id: MEMBER_ID, teamId: TEAM_ID },
     });
   });
 

@@ -162,7 +162,7 @@ describe("DELETE /api/tenant/operator-tokens/[id]", () => {
     expect(body.success).toBe(true);
 
     expect(mockPrismaOperatorToken.update).toHaveBeenCalledWith({
-      where: { id: "tok-1" },
+      where: { id: "tok-1", tenantId: TENANT_ID },
       data: { revokedAt: expect.any(Date) },
     });
 

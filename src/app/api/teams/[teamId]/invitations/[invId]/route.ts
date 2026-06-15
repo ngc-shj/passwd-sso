@@ -36,7 +36,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   }
 
   await withTeamTenantRls(teamId, async () =>
-    prisma.teamInvitation.delete({ where: { id: invId } }),
+    prisma.teamInvitation.delete({ where: { id: invId, teamId } }),
   );
 
   return NextResponse.json({ success: true });

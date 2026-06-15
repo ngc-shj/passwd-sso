@@ -177,7 +177,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     );
     expect(txEntryUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: ENTRY_ID },
+        where: { id: ENTRY_ID, teamId: TEAM_ID },
         data: expect.objectContaining({
           encryptedBlob: baseHistory.encryptedBlob,
           teamKeyVersion: baseHistory.teamKeyVersion,

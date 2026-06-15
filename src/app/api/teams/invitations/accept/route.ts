@@ -58,8 +58,8 @@ async function handlePOST(req: NextRequest) {
 
   if (invitation.expiresAt < new Date()) {
     await withTeamTenantRls(invitation.teamId, async () =>
-      prisma.teamInvitation.update({
-        where: { id: invitation.id },
+      prisma.teamInvitation.updateMany({
+        where: { id: invitation.id, teamId: invitation.teamId, status: INVITATION_STATUS.PENDING },
         data: { status: INVITATION_STATUS.EXPIRED },
       }),
     );
@@ -90,8 +90,8 @@ async function handlePOST(req: NextRequest) {
     // Active member → already a member
     if (existingMember.deactivatedAt === null) {
       await withTeamTenantRls(invitation.teamId, async () =>
-        prisma.teamInvitation.update({
-          where: { id: invitation.id },
+        prisma.teamInvitation.updateMany({
+          where: { id: invitation.id, teamId: invitation.teamId, status: INVITATION_STATUS.PENDING },
           data: { status: INVITATION_STATUS.ACCEPTED },
         }),
       );
@@ -122,9 +122,23 @@ async function handlePOST(req: NextRequest) {
   // Create membership (or re-activate if previously deactivated) and mark invitation as accepted.
   // keyDistributed starts as false (admin must distribute team key).
   // Use team tenant context: team_members and team_invitations belong to the team's tenant.
-  await withTeamTenantRls(invitation.teamId, async () =>
-    prisma.$transaction([
-      prisma.teamMember.upsert({
+  const accepted = await withTeamTenantRls(invitation.teamId, async () =>
+    prisma.$transaction(async (tx) => {
+      // Claim the invitation atomically: re-assert PENDING + not-expired in the
+      // write so two concurrent accepts (or an accept straddling expiry) cannot
+      // both succeed. The pre-checks above are the fast path; this is the guard.
+      const claim = await tx.teamInvitation.updateMany({
+        where: {
+          id: invitation.id,
+          teamId: invitation.teamId,
+          status: INVITATION_STATUS.PENDING,
+          expiresAt: { gt: new Date() },
+        },
+        data: { status: INVITATION_STATUS.ACCEPTED },
+      });
+      if (claim.count === 0) return false;
+
+      await tx.teamMember.upsert({
         where: {
           teamId_userId: {
             teamId: invitation.teamId,
@@ -144,13 +158,14 @@ async function handlePOST(req: NextRequest) {
           deactivatedAt: null,
           scimManaged: false,
         },
-      }),
-      prisma.teamInvitation.update({
-        where: { id: invitation.id },
-        data: { status: INVITATION_STATUS.ACCEPTED },
-      }),
-    ]),
+      });
+      return true;
+    }),
   );
+
+  if (!accepted) {
+    return errorResponse(API_ERROR.INVITATION_ALREADY_USED);
+  }
 
   return NextResponse.json({
     team: invitation.team,

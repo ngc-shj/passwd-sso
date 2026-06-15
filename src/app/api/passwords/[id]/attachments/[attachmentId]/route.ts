@@ -126,7 +126,7 @@ async function handleDELETE(
 
   await withUserTenantRls(session.user.id, async () =>
     prisma.attachment.delete({
-      where: { id: attachmentId },
+      where: { id: attachmentId, passwordEntryId: id },
     }),
   );
 

@@ -462,7 +462,7 @@ describe("refreshIosToken", () => {
     // Old family rows revoked.
     expect(mockExtUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { familyId: FAMILY_ID, revokedAt: null },
+        where: { familyId: FAMILY_ID, userId: USER_ID, revokedAt: null },
         data: expect.objectContaining({ revokedAt: expect.any(Date) }),
       }),
     );

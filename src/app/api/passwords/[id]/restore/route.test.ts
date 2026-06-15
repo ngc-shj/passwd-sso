@@ -89,7 +89,7 @@ describe("POST /api/passwords/[id]/restore", () => {
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
     expect(mockPrismaPasswordEntry.update).toHaveBeenCalledWith({
-      where: { id: PW_ID },
+      where: { id: PW_ID, userId: "test-user-id" },
       data: { deletedAt: null },
     });
   });

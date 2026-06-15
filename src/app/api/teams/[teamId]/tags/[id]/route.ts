@@ -94,7 +94,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   try {
     updated = await withTeamTenantRls(teamId, async () =>
       prisma.teamTag.update({
-        where: { id },
+        where: { id, teamId },
         data: updateData,
       }),
     );
@@ -139,7 +139,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   }
 
   await withTeamTenantRls(teamId, async () =>
-    prisma.teamTag.delete({ where: { id } }),
+    prisma.teamTag.delete({ where: { id, teamId } }),
   );
 
   return NextResponse.json({ success: true });

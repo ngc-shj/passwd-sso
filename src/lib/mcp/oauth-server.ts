@@ -189,11 +189,16 @@ export async function exchangeCodeForToken(
       if (!verifyPkceS256(authCode.codeChallenge, params.codeVerifier))
         return { error: "invalid_grant" as const };
 
-      // Mark code as used (atomic within transaction)
-      await tx.mcpAuthorizationCode.update({
-        where: { id: authCode.id },
+      // Mark code as used via compare-and-swap. The findUnique above takes no
+      // row lock (Read Committed), so two concurrent exchanges can both observe
+      // usedAt === null; gating the consume on `usedAt: null` makes the loser's
+      // count === 0 and aborts it, preventing double-redemption of one code into
+      // multiple independent token families. Mirrors the refresh-token CAS below.
+      const consumed = await tx.mcpAuthorizationCode.updateMany({
+        where: { id: authCode.id, usedAt: null },
         data: { usedAt: new Date() },
       });
+      if (consumed.count === 0) return { error: "invalid_grant" as const };
 
       // Issue access token
       const plainToken = MCP_TOKEN_PREFIX + randomBytes(32).toString("base64url");
@@ -376,6 +381,12 @@ export async function exchangeRefreshToken(
         (!isPublicClient && !safeEqual(rt.mcpClient.clientSecretHash, params.clientSecretHash)) ||
         !rt.mcpClient.isActive
       ) {
+        return { type: "invalid_client" as const };
+      }
+
+      // Defensive tenant-boundary check: do not propagate a divergent tenantId
+      // from a corrupted source row into the freshly minted token pair.
+      if (rt.mcpClient.tenantId !== rt.tenantId) {
         return { type: "invalid_client" as const };
       }
 
@@ -590,7 +601,7 @@ export async function validateMcpToken(
         id: true,
         tenantId: true,
         clientId: true,
-        mcpClient: { select: { clientId: true, isActive: true } },
+        mcpClient: { select: { clientId: true, isActive: true, tenantId: true } },
         userId: true,
         serviceAccountId: true,
         scope: true,
@@ -607,6 +618,12 @@ export async function validateMcpToken(
   // A07-4: third McpClient lookup site — reject inactive clients so an admin's
   // "Deactivate client" action takes immediate effect, not just after token TTL.
   if (!record.mcpClient.isActive) return { ok: false, error: "invalid_token" };
+  // Defensive tenant-boundary check: the token's denormalized tenantId must match
+  // its parent client's own tenantId. Issuance keeps them consistent; a mismatch
+  // means a corrupted row — fail closed rather than trust the token's tenantId.
+  if (record.mcpClient.tenantId !== record.tenantId) {
+    return { ok: false, error: "invalid_token" };
+  }
 
   // C13: reject deactivated users — tenant-scoped to the token's own tenant.
   // SA-bound tokens (userId === null) skip the membership check: they are
@@ -679,18 +696,18 @@ export async function revokeToken(params: {
           if (!verifyRevokeClientAuth(rt.mcpClient.clientSecretHash, params.clientSecretHash)) return;
           // Revoke entire rotation family
           await tx.mcpRefreshToken.updateMany({
-            where: { familyId: rt.familyId, revokedAt: null },
+            where: { familyId: rt.familyId, tenantId: rt.tenantId, revokedAt: null },
             data: { revokedAt: new Date() },
           });
           // Revoke all associated access tokens in the family
           const familyTokens = await tx.mcpRefreshToken.findMany({
-            where: { familyId: rt.familyId },
+            where: { familyId: rt.familyId, tenantId: rt.tenantId },
             select: { accessTokenId: true },
           });
           const accessTokenIds = [...new Set(familyTokens.map((t) => t.accessTokenId))];
           if (accessTokenIds.length > 0) {
             await tx.mcpAccessToken.updateMany({
-              where: { id: { in: accessTokenIds }, revokedAt: null },
+              where: { id: { in: accessTokenIds }, tenantId: rt.tenantId, revokedAt: null },
               data: { revokedAt: new Date() },
             });
           }
@@ -707,7 +724,7 @@ export async function revokeToken(params: {
       if (at && at.mcpClient.clientId === params.clientId) {
         if (!verifyRevokeClientAuth(at.mcpClient.clientSecretHash, params.clientSecretHash)) return;
         await tx.mcpAccessToken.update({
-          where: { id: at.id },
+          where: { id: at.id, tenantId: at.tenantId },
           data: { revokedAt: new Date() },
         });
       }

@@ -84,13 +84,13 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 
       // Demote actor first (avoid transient dual-OWNER)
       await tx.tenantMember.update({
-        where: { id: currentActor.id },
+        where: { id: currentActor.id, tenantId: actor.tenantId },
         data: { role: TENANT_ROLE.ADMIN },
       });
 
       // Promote target to OWNER
       return tx.tenantMember.update({
-        where: { id: target.id },
+        where: { id: target.id, tenantId: actor.tenantId },
         data: { role: TENANT_ROLE.OWNER },
         include: {
           user: { select: { id: true, name: true, email: true, image: true } },
@@ -128,7 +128,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   // Update role
   const updated = await withTenantRls(prisma, actor.tenantId, async (tx) =>
     tx.tenantMember.update({
-      where: { id: target.id },
+      where: { id: target.id, tenantId: actor.tenantId },
       data: { role: result.data.role },
       include: {
         user: { select: { id: true, name: true, email: true, image: true } },

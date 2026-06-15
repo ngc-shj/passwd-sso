@@ -42,8 +42,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntry.update({
-      where: { id },
+    prisma.teamPasswordEntry.updateMany({
+      where: { id, teamId },
       data: { deletedAt: null },
     }),
   );

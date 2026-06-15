@@ -143,12 +143,17 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         throw new Error("Token limit exceeded");
       }
 
-      // Optimistic lock: only update if still PENDING and belongs to this tenant.
+      // Optimistic lock: only update if still PENDING, belongs to this tenant,
+      // AND has not expired. The pre-transaction expiry check above is the
+      // common-case fast path; gating expiresAt atomically here closes the
+      // TOCTOU window where the request crosses its deadline between that read
+      // and this write — JIT expiry is a security boundary, so a token must not
+      // be issued for a request that expired mid-flight (race lands as CONFLICT).
       // C6: throw on { ok: false } to abort the transaction — SA-token creation
       // below must not commit if the status transition did not fire.
       const transitionResult = await transition({
         db: tx,
-        where: { id: requestId, tenantId: actor.tenantId },
+        where: { id: requestId, tenantId: actor.tenantId, expiresAt: { gt: new Date() } },
         to: AR_STATUS.APPROVED,
         actor: AR_ACTOR.ADMIN,
         extraData: { approvedById: session.user.id, approvedAt: new Date() },
@@ -183,7 +188,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       });
 
       await tx.accessRequest.update({
-        where: { id: requestId },
+        where: { id: requestId, tenantId: actor.tenantId },
         data: { grantedTokenId: token.id, grantedTokenTtlSec: ttlSec },
       });
 

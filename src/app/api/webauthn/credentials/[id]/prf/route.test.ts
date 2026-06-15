@@ -172,7 +172,7 @@ describe("POST /api/webauthn/credentials/[id]/prf", () => {
     const res = await POST(createRequest("POST", URL, { body: validBody }), params);
     expect(res.status).toBe(200);
     expect(mockTxCredentialUpdate).toHaveBeenCalledWith({
-      where: { id: "cred-row-1" },
+      where: { id: "cred-row-1", userId: "user-1" },
       data: {
         prfEncryptedSecretKey: validBody.prfEncryptedSecretKey,
         prfSecretKeyIv: validBody.prfSecretKeyIv,

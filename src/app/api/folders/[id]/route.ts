@@ -143,7 +143,7 @@ async function handlePUT(
   try {
     folder = await withUserTenantRls(session.user.id, async () =>
       prisma.folder.update({
-        where: { id },
+        where: { id, userId: session.user.id },
         data: updateData,
       }),
     );
@@ -243,7 +243,7 @@ async function handleDELETE(
       for (const child of children) {
         const newName = renames.get(child.id);
         await tx.folder.update({
-          where: { id: child.id },
+          where: { id: child.id, userId: session.user.id },
           data: {
             parentId: existing.parentId,
             ...(newName ? { name: newName } : {}),
@@ -256,7 +256,7 @@ async function handleDELETE(
         data: { folderId: null },
       });
       // Delete the folder
-      await tx.folder.delete({ where: { id } });
+      await tx.folder.delete({ where: { id, userId: session.user.id } });
     }),
   );
 

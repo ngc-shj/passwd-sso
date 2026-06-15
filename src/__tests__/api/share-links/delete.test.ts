@@ -121,7 +121,7 @@ describe("DELETE /api/share-links/[id]", () => {
     expect(status).toBe(200);
     expect(json.ok).toBe(true);
     expect(mockUpdate).toHaveBeenCalledWith({
-      where: { id: "s1" },
+      where: { id: "s1", createdById: DEFAULT_SESSION.user.id },
       data: { revokedAt: expect.any(Date) },
     });
   });

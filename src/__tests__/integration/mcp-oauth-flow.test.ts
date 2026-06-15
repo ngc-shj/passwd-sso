@@ -314,7 +314,7 @@ describe("Scenario 3: PKCE Token Exchange Success via /api/mcp/token", () => {
             codeChallengeMethod: "S256",
             scope: "credentials:list,credentials:use",
           }),
-          update: vi.fn().mockResolvedValue({}),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         },
         mcpAccessToken: {
           create: vi.fn().mockResolvedValue({ id: "new-token-id" }),

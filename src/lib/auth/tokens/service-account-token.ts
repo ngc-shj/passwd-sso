@@ -92,7 +92,7 @@ export async function validateServiceAccountToken(
         revokedAt: true,
         lastUsedAt: true,
         serviceAccount: {
-          select: { isActive: true },
+          select: { isActive: true, tenantId: true },
         },
       },
     }),
@@ -109,6 +109,14 @@ export async function validateServiceAccountToken(
   }
   if (!token.serviceAccount.isActive) {
     return { ok: false, error: "SA_INACTIVE" };
+  }
+  // Defensive tenant-boundary check: the token's tenantId and its parent SA's
+  // own tenantId must agree. Normal issuance keeps them consistent; a mismatch
+  // means a corrupted / migration-broken row. Fail closed (don't process the
+  // request under the token's tenant for an SA owned by another tenant) and
+  // collapse into SA_TOKEN_INVALID so callers cannot probe cross-tenant SA ids.
+  if (token.serviceAccount.tenantId !== token.tenantId) {
+    return { ok: false, error: "SA_TOKEN_INVALID" };
   }
 
   // Throttled lastUsedAt update (non-blocking)

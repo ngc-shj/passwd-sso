@@ -88,7 +88,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     });
     if (all.length > 20) {
       await tx.teamPasswordEntryHistory.deleteMany({
-        where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
+        where: { entryId: id, id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
       });
     }
 
@@ -97,7 +97,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     // the client must detect the mismatch, decrypt with the old key via
     // GET /member-key?keyVersion=N, re-encrypt with the current key, and PUT.
     await tx.teamPasswordEntry.update({
-      where: { id },
+      where: { id, teamId },
       data: {
         encryptedBlob: history.encryptedBlob,
         blobIv: history.blobIv,

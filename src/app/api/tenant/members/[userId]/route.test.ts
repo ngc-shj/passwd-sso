@@ -179,7 +179,7 @@ describe("PUT /api/tenant/members/[userId]", () => {
     expect(json.userId).toBe(TARGET_USER_ID);
     expect(mockPrismaTenantMember.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: TARGET_ADMIN.id },
+        where: { id: TARGET_ADMIN.id, tenantId: TENANT_ID },
         data: { role: "MEMBER" },
       }),
     );

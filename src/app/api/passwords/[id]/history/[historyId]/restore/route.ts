@@ -87,13 +87,13 @@ async function handlePOST(
     });
     if (all.length > 20) {
       await tx.passwordEntryHistory.deleteMany({
-        where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
+        where: { entryId: id, id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
       });
     }
 
     // Restore history version
     await tx.passwordEntry.update({
-      where: { id },
+      where: { id, userId: session.user.id },
       data: {
         encryptedBlob: history.encryptedBlob,
         blobIv: history.blobIv,
