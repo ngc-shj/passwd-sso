@@ -185,6 +185,12 @@ None.
     NIST CAVP / RFC test vectors). Removing them yields no cross-platform anchor (the whole point of C9).
 - **Orchestrator sign-off**: accepted — committing synthetic crypto test vectors is correct and intended; the
   risk is bounded false-positive scanner noise, not a real secret exposure.
+- **CI follow-up (gitleaks)**: the fixture is already exempt via the `^ios/.*Tests/.*` allowlist path in
+  `.gitleaks.toml`, so it did NOT trip the scanner. The actual CI secret-scan failure was a *separate*
+  false-positive: `generic-api-key` matched the CryptoKit type name `P256.KeyAgreement.PrivateKey` in
+  `HostSyncService.swift` (production source, not a credential) — the same class as the pre-existing
+  `P256.Signing.PrivateKey` allowlist entry. Resolved by adding `P256\.KeyAgreement\.PrivateKey` to that
+  allowlist. Verified: 0 gitleaks findings across all git-tracked files (clean-checkout = CI condition).
 
 ### T1 — golden-vector self-check → strengthened-or-documented (regression subagent)
 - Action: attempt `derRepresentation == f.pkcs8PrivKeyHex`; keep if it passes, else revert with an explicit

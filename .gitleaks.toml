@@ -35,8 +35,9 @@ regexes = [
 ]
 
 [[allowlists]]
-description = "CryptoKit type name in crypto source, not a credential (generic-api-key false positive on `let privateKey: P256.Signing.PrivateKey` in PasskeyRegistration.swift)."
+description = "CryptoKit type names in crypto source, not credentials (generic-api-key false positives on `P256.Signing.PrivateKey` in PasskeyRegistration.swift and `P256.KeyAgreement.PrivateKey` in the team-key ECDH code)."
 regexTarget = "match"
 regexes = [
   '''P256\.Signing\.PrivateKey''',
+  '''P256\.KeyAgreement\.PrivateKey''',
 ]
