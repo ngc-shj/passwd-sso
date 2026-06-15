@@ -7,9 +7,16 @@ import SwiftUI
 // MARK: - Root app state
 
 enum AppState {
+  /// Pre-restore splash. Initial state on cold launch; replaced by the result of
+  /// SessionRestorer.restore() in RootView's .task before anything else renders
+  /// (so the URL screen never flashes on a returning launch).
+  case launching
   case setup
   case signIn(serverConfig: ServerConfig, coordinator: AuthCoordinator)
-  case signedIn(serverConfig: ServerConfig, tokens: TokenPair, apiClient: MobileAPIClient)
+  case signedIn(serverConfig: ServerConfig, apiClient: MobileAPIClient)
+  /// Transitional splash shown while handleVaultUnlocked runs its async sync,
+  /// so the passphrase/Face ID screen does not linger during the unlock→list gap.
+  case unlocking
   case vaultUnlocked(
     serverConfig: ServerConfig,
     vaultKey: SymmetricKey,
@@ -33,7 +40,7 @@ struct RootView: View {
   /// drain + AutoFill upload-token re-mint.
   let onVaultReady: (HostSyncService, RollbackFlagDrain, SymmetricKey, String, AutofillTokenRefresher?, SymmetricKey) -> Void
 
-  @State private var appState: AppState = .setup
+  @State private var appState: AppState = .launching
 
   // Shared dependency instances kept alive across state transitions
   @State private var hostSyncService: HostSyncService?
@@ -41,6 +48,11 @@ struct RootView: View {
   var body: some View {
     Group {
       switch appState {
+      case .launching, .unlocking:
+        // Neutral splash: launch restoration runs in .task (so the URL screen
+        // never flashes); .unlocking covers the post-unlock sync gap.
+        launchSplash
+
       case .setup:
         ServerURLSetupView { config in
           let tokenStore = HostTokenStore()
@@ -51,7 +63,7 @@ struct RootView: View {
       case .signIn(let config, let coordinator):
         makeSignInView(config: config, coordinator: coordinator)
 
-      case .signedIn(let serverConfig, _, let apiClient):
+      case .signedIn(let serverConfig, let apiClient):
         // Arriving via sign-in / app entry → auto-prompt Face ID on appear.
         vaultLockedScreen(serverConfig: serverConfig, apiClient: apiClient, autoPromptOnAppear: true)
 
@@ -95,7 +107,12 @@ struct RootView: View {
           // is present). A real foreground re-entry still auto-prompts (scenePhase).
           vaultLockedScreen(serverConfig: serverConfig, apiClient: apiClient, autoPromptOnAppear: false)
           Button("Sign in again") {
-            appState = .setup
+            // Skip the URL screen on explicit re-auth — the server config is
+            // already known. A fresh coordinator reuses the persisted SE key.
+            appState = .signIn(
+              serverConfig: serverConfig,
+              coordinator: AuthCoordinator(serverConfig: serverConfig)
+            )
           }
           .buttonStyle(.bordered)
           .controlSize(.large)
@@ -103,42 +120,55 @@ struct RootView: View {
         }
       }
     }
+    .task {
+      // One-shot launch restoration. Guard on .launching so a later view
+      // re-appear does not re-run it.
+      guard case .launching = appState else { return }
+      let result = await SessionRestorer.live().restore()
+      switch result {
+      case .needsSetup:
+        appState = .setup
+      case .needsSignIn(let config):
+        appState = .signIn(
+          serverConfig: config,
+          coordinator: AuthCoordinator(serverConfig: config)
+        )
+      case .needsUnlock(let config, let apiClient):
+        appState = .signedIn(serverConfig: config, apiClient: apiClient)
+      case .needsReauth(let config, let apiClient):
+        // Refresh failed (dead session OR transient server error — ambiguous at
+        // launch). Route to the unlock-or-resign-in screen: local unlock of the
+        // cached vault works offline, and "Sign in again" re-auths. No
+        // destructive cleanup (the signal is not reliably "revoked").
+        appState = .vaultLocked(serverConfig: config, apiClient: apiClient)
+      }
+    }
+  }
+
+  /// Neutral branded splash for `.launching` / `.unlocking`.
+  private var launchSplash: some View {
+    VStack(spacing: 24) {
+      Text("passwd-sso").font(.largeTitle.bold())
+      ProgressView()
+    }
   }
 
   // MARK: - Sign-in view factory
 
   @ViewBuilder
   private func makeSignInView(config: ServerConfig, coordinator: AuthCoordinator) -> some View {
-    #if DEBUG
     SignInView(
       coordinator: coordinator,
-      onSignedIn: { pair in
+      onSignedIn: { _ in
         Task { @MainActor in
           let apiClient = await buildRealAPIClient(
             serverConfig: config,
             coordinator: coordinator
           )
-          appState = .signedIn(serverConfig: config, tokens: pair, apiClient: apiClient)
-        }
-      },
-      onDebugVaultReady: { state in
-        handleDebugVaultLoaded(state, serverConfig: config, coordinator: coordinator)
-      }
-    )
-    #else
-    SignInView(
-      coordinator: coordinator,
-      onSignedIn: { pair in
-        Task { @MainActor in
-          let apiClient = await buildRealAPIClient(
-            serverConfig: config,
-            coordinator: coordinator
-          )
-          appState = .signedIn(serverConfig: config, tokens: pair, apiClient: apiClient)
+          appState = .signedIn(serverConfig: config, apiClient: apiClient)
         }
       }
     )
-    #endif
   }
 
   // MARK: - Vault locked / unlock entry
@@ -225,6 +255,12 @@ struct RootView: View {
     wrappedKeyStore: any WrappedKeyStore,
     policyAuthoritative: Bool
   ) async {
+    // MUST be the first statement — regression guard for the post-unlock flicker
+    // fix (#3): replaces the passphrase/Face ID screen with the splash before the
+    // async sync below, so it does not linger during the unlock→list gap. Do not
+    // move below the first await.
+    appState = .unlocking
+
     // Persist the tenant auto-lock policy BEFORE applyPersistedTimeout reads the
     // effective interval. Biometric (non-authoritative) is a no-op so it can't
     // wipe the value persisted by the last passphrase unlock.
@@ -388,52 +424,6 @@ struct RootView: View {
       tokenStore: tokenStore
     )
   }
-
-  #if DEBUG
-  /// Transition directly to .vaultUnlocked using the fixture state loaded by DebugVaultLoader.
-  /// The apiClient uses a NoOpDPoPSigner since the DEBUG vault doesn't sync.
-  @MainActor
-  private func handleDebugVaultLoaded(
-    _ state: DebugVaultLoader.LoadedState,
-    serverConfig: ServerConfig,
-    coordinator: AuthCoordinator
-  ) {
-    let debugApiClient = MobileAPIClient(
-      serverURL: URL(string: "https://debug.local")!,
-      signer: NoOpDPoPSigner(),
-      jwk: [:],
-      tokenStore: HostTokenStore()
-    )
-    let bks = BridgeKeyStore()
-    let wks = AppGroupWrappedKeyStore()
-    let cacheURL = (try? AppGroupContainer.cacheFileURL()) ?? URL(fileURLWithPath: "/dev/null")
-    let autoLockService = AutoLockService(
-      bridgeKeyStore: bks,
-      wrappedKeyStore: wks,
-      tokenStore: HostTokenStore(),
-      cacheURL: cacheURL
-    )
-    applyPersistedTimeout(to: autoLockService)
-    autoLockService.startTimer()
-    let cacheData = state.cacheData
-    let vaultKey = state.vaultKey
-    let userId = state.userId
-    Task {
-      await refreshCredentialIdentities(
-        from: cacheData, vaultKey: vaultKey, userId: userId)
-    }
-    appState = .vaultUnlocked(
-      serverConfig: serverConfig,
-      vaultKey: state.vaultKey,
-      userId: state.userId,
-      keyVersion: state.keyVersion,
-      cacheData: state.cacheData,
-      autoLockService: autoLockService,
-      apiClient: debugApiClient,
-      cacheKey: nil
-    )
-  }
-  #endif
 }
 
 

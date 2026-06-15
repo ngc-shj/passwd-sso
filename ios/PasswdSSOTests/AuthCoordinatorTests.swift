@@ -81,6 +81,47 @@ final class AuthCoordinatorTests: XCTestCase {
     XCTAssertNotNil(jwk["y"], "JWK must contain y coordinate")
   }
 
+  // MARK: - loadPersistedSigner (C1)
+
+  func testLoadPersistedSigner_keyPresent_returnsTrueAndEnablesSigner() async throws {
+    // Inject a software-key loader: the real loadDPoPKey filters on
+    // kSecAttrTokenIDSecureEnclave and can never see simulator software keys.
+    let raw = try makeSoftwareP256Key(label: "com.test.persist.\(UUID().uuidString)")
+    let wrapped = SendableSecKey(raw)
+    let config = ServerConfig(baseURL: URL(string: "https://test.passwd-sso.example")!)
+    let coordinator = AuthCoordinator(serverConfig: config, keyLoader: { _ in wrapped.key })
+
+    let loaded = await coordinator.loadPersistedSigner()
+    XCTAssertTrue(loaded, "loadPersistedSigner must return true when the loader yields a key")
+
+    // currentSigner / currentJWK now succeed against the real coordinator.
+    let signer = try await coordinator.currentSigner()
+    let signature = try await signer.sign(input: Data("header.payload".utf8))
+    XCTAssertEqual(signature.count, 64)
+    let jwk = try await coordinator.currentJWK()
+    XCTAssertEqual(jwk["kty"], "EC")
+  }
+
+  func testLoadPersistedSigner_keyAbsent_returnsFalseAndSignerStillThrows() async {
+    let config = ServerConfig(baseURL: URL(string: "https://test.passwd-sso.example")!)
+    let coordinator = AuthCoordinator(
+      serverConfig: config,
+      keyLoader: { _ in throw SecureEnclaveKeyError.keyNotFound }
+    )
+
+    let loaded = await coordinator.loadPersistedSigner()
+    XCTAssertFalse(loaded, "loadPersistedSigner must return false when no key is found")
+
+    do {
+      _ = try await coordinator.currentSigner()
+      XCTFail("Expected keyGenerationFailed when no key is loaded")
+    } catch AuthError.keyGenerationFailed {
+      // Expected.
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
   // MARK: - Helpers
 
   /// Generate a software (non-SE) P-256 key for simulator testing.

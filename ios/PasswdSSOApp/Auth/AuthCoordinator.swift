@@ -35,7 +35,11 @@ public enum AuthError: Error, Equatable {
 public actor AuthCoordinator {
   private let serverConfig: ServerConfig
   let tokenStore: HostTokenStore
-  private let dpopKeyLabel = "com.passwd-sso.dpop.host"
+  private let dpopKeyLabel: String
+  /// Seam for loading the persisted SE key. Defaults to `loadDPoPKey`, which
+  /// filters on `kSecAttrTokenIDSecureEnclave` — invisible to the simulator
+  /// software keys used in tests, so tests inject a software-key loader here.
+  private let keyLoader: @Sendable (String) throws -> SecKey
   /// Custom URL scheme the server redirects the ASWebAuthenticationSession to
   /// on successful sign-in (`passwd-sso://auth/callback?code&state`). Captured
   /// by scheme, so it works against any self-hosted server host — no Universal
@@ -45,9 +49,29 @@ public actor AuthCoordinator {
   /// Set after the first successful call to getOrCreateDPoPKey.
   private var loadedKey: SecKey?
 
-  public init(serverConfig: ServerConfig, tokenStore: HostTokenStore = HostTokenStore()) {
+  public init(
+    serverConfig: ServerConfig,
+    tokenStore: HostTokenStore = HostTokenStore(),
+    dpopKeyLabel: String = "com.passwd-sso.dpop.host",
+    keyLoader: (@Sendable (String) throws -> SecKey)? = nil
+  ) {
+    precondition(!dpopKeyLabel.isEmpty, "dpopKeyLabel must not be empty")
     self.serverConfig = serverConfig
     self.tokenStore = tokenStore
+    self.dpopKeyLabel = dpopKeyLabel
+    self.keyLoader = keyLoader ?? { label in try loadDPoPKey(label: label) }
+  }
+
+  /// Load the persisted Secure Enclave DPoP key into `loadedKey` WITHOUT
+  /// generating a new one. Returns true if an existing key was found. Used at
+  /// launch to rebuild a signing-capable API client without a full OAuth
+  /// sign-in; absence ⇒ no prior session ⇒ caller routes to sign-in.
+  public func loadPersistedSigner() -> Bool {
+    if let existing = try? keyLoader(dpopKeyLabel) {
+      loadedKey = existing
+      return true
+    }
+    return false
   }
 
   // MARK: - Public

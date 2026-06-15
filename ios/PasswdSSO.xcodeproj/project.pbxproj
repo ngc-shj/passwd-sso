@@ -54,6 +54,7 @@
 		5421D67E38D403D16E75A584 /* AESGCMTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DAD672FE74D0EB78FA99F1C /* AESGCMTests.swift */; };
 		542B8D1BD03A73706A98778B /* KDF.swift in Sources */ = {isa = PBXBuildFile; fileRef = C02778E2A8EE7B7A09B671C4 /* KDF.swift */; };
 		56F8D2D70DF4C0539E6A7988 /* PasskeyAssertionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 493B2BB02D23F64F52EF0DAA /* PasskeyAssertionTests.swift */; };
+		59428A468BFADE6726350ABB /* SessionRestorerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9460BB2F468F19DF7EC3A00 /* SessionRestorerTests.swift */; };
 		5B65C54AB593A685DC452BA4 /* OneTimeCodePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D57AF6A21C048387AB2FC0C5 /* OneTimeCodePickerView.swift */; };
 		60AD9C0835A9502C54C79E90 /* AESGCM.swift in Sources */ = {isa = PBXBuildFile; fileRef = D86EB7DC9441141057919E49 /* AESGCM.swift */; };
 		60C6D1BB9FB84DB9FA966478 /* PasswdSSOAutofillExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4F631B3CA954B4A2A4EC5714 /* PasswdSSOAutofillExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -135,6 +136,7 @@
 		EE5586305A8A75C6F0DE9A47 /* TeamDirectoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 820C1F588B1209A77A6C0A36 /* TeamDirectoryStore.swift */; };
 		EEDC524C6F56E4E378F8DB16 /* DebugVaultLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6190750A2E1A027047EDBB4 /* DebugVaultLoader.swift */; };
 		EF9407000E17ADEB5E667D88 /* EntryCacheFileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24CD914CFF8AD6DD6DAB0129 /* EntryCacheFileTests.swift */; };
+		F2FD2B81E009401CBD83DF77 /* SessionRestorer.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC7711E89FA2346B9FE338E3 /* SessionRestorer.swift */; };
 		F376E57211FDE0E03F285949 /* LockedFallbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C6E4E71B2DDEE6BBA03CBF4 /* LockedFallbackView.swift */; };
 		F50C3FCB3A6C9F4A5419B71E /* PasskeyRegistrationOutcome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 881416D87A323B49E40CCCC3 /* PasskeyRegistrationOutcome.swift */; };
 		F67226652335D3241D5B1ADD /* PasskeySignCountStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 469C94A411CE66C4D3EAB9AA /* PasskeySignCountStore.swift */; };
@@ -316,8 +318,10 @@
 		B61C70648C7D9DE6F493F1AD /* SecureClipboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureClipboardTests.swift; sourceTree = "<group>"; };
 		B67A2748B3B1C69F7543EB64 /* PasswdSSOTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PasswdSSOTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B8AE8A147DAB81877B408F77 /* team-key-fixture.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "team-key-fixture.json"; sourceTree = "<group>"; };
+		B9460BB2F468F19DF7EC3A00 /* SessionRestorerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestorerTests.swift; sourceTree = "<group>"; };
 		BB8D42DAB6AE67B22BFFB262 /* BackgroundSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundSyncCoordinator.swift; sourceTree = "<group>"; };
 		BBBBBBBE5688A781ED154534 /* EntryFormTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryFormTests.swift; sourceTree = "<group>"; };
+		BC7711E89FA2346B9FE338E3 /* SessionRestorer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRestorer.swift; sourceTree = "<group>"; };
 		C02778E2A8EE7B7A09B671C4 /* KDF.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KDF.swift; sourceTree = "<group>"; };
 		C19D6A107E63BFA725F2C0F3 /* WrappedKeyStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WrappedKeyStoreTests.swift; sourceTree = "<group>"; };
 		C1F6D6429583F4DF936E38A0 /* SharedFrameworkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedFrameworkTests.swift; sourceTree = "<group>"; };
@@ -437,6 +441,7 @@
 				775C6B815B59EF7FAADB00EB /* RollbackFlagWriterTests.swift */,
 				B61C70648C7D9DE6F493F1AD /* SecureClipboardTests.swift */,
 				662E445816ED2184809324A5 /* ServerTrustServiceTests.swift */,
+				B9460BB2F468F19DF7EC3A00 /* SessionRestorerTests.swift */,
 				C1F6D6429583F4DF936E38A0 /* SharedFrameworkTests.swift */,
 				160063572DE97E6E16AE7A3D /* SPKIEncoderTests.swift */,
 				65EFD0AD3F8896F5D18F2967 /* StaleBlobRecoveryServiceTests.swift */,
@@ -563,6 +568,7 @@
 				A2CB0DAE185BE8F6CC8E6351 /* AuthCoordinator.swift */,
 				AFB5F0EE6A3D22DF1F2C53B2 /* AutofillTokenRefresher.swift */,
 				C9E896E2CA0264206A65A0B8 /* ServerTrustService.swift */,
+				BC7711E89FA2346B9FE338E3 /* SessionRestorer.swift */,
 			);
 			path = Auth;
 			sourceTree = "<group>";
@@ -978,6 +984,7 @@
 				D818CC3D8994859EC9B470F2 /* RootView.swift in Sources */,
 				93D09C74C9EDAA9E4767D4C3 /* ServerTrustService.swift in Sources */,
 				347F2D6168FB578E0E7687EC /* ServerURLSetupView.swift in Sources */,
+				F2FD2B81E009401CBD83DF77 /* SessionRestorer.swift in Sources */,
 				0DF2C117B49A7A20E36940F0 /* SettingsView.swift in Sources */,
 				FFDB363D6F74C9F3DD0E54C3 /* SignInView.swift in Sources */,
 				4372EB553FD8B0AE2BF33972 /* StaleBlobRecoveryService.swift in Sources */,
@@ -1035,6 +1042,7 @@
 				FFA7B60616C41F7692F7271C /* SPKIEncoderTests.swift in Sources */,
 				29D3F2AD7DEF39F185E5ABEA /* SecureClipboardTests.swift in Sources */,
 				E0832EF8431014E47A2A4636 /* ServerTrustServiceTests.swift in Sources */,
+				59428A468BFADE6726350ABB /* SessionRestorerTests.swift in Sources */,
 				61C3FD90259F677EA6150C8F /* SharedFrameworkTests.swift in Sources */,
 				E6242A08FB6CD768CBCED638 /* StaleBlobRecoveryServiceTests.swift in Sources */,
 				E61FA83E34E321C09B0D7176 /* TOTPVectorTests.swift in Sources */,
