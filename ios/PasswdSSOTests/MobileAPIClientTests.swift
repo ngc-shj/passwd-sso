@@ -1066,6 +1066,79 @@ final class TokenRefreshTests: XCTestCase {
     XCTAssertEqual(refreshCallCount, 1, "Refresh should be attempted exactly once")
   }
 
+  // MARK: - ensureValidSession (C2): launch-time session probe
+
+  func testEnsureValidSession_validToken_makesNoNetworkRequest() async throws {
+    let expiresAt = fixedNow.addingTimeInterval(3600)
+    try tokenStore.saveTokens(access: "acc_fresh", refresh: "ref_fresh", expiresAt: expiresAt)
+
+    MockURLProtocol.requestHandler = { [weak self] request in
+      self?.resourceCallCount += 1
+      return (Data(), httpResponse(status: 200, url: request.url!))
+    }
+
+    let client = makeClient()
+    try await client.ensureValidSession()
+
+    XCTAssertEqual(resourceCallCount, 0,
+                   "ensureValidSession must make no network call when the token is still valid")
+  }
+
+  func testEnsureValidSession_expiredToken_refreshesAndPersists() async throws {
+    let expiresAt = fixedNow.addingTimeInterval(-10)
+    try tokenStore.saveTokens(access: "acc_old", refresh: "ref_old", expiresAt: expiresAt)
+
+    let refreshURL = serverURL.appending(path: "/api/mobile/token/refresh", directoryHint: .notDirectory)
+    MockURLProtocol.requestHandler = { [weak self] request in
+      if request.url?.path == "/api/mobile/token/refresh" {
+        self?.refreshCallCount += 1
+        return (tokenResponseJSON(), httpResponse(status: 200, url: refreshURL))
+      }
+      return (Data(), httpResponse(status: 200, url: request.url!))
+    }
+
+    let client = makeClient()
+    try await client.ensureValidSession()
+
+    XCTAssertEqual(refreshCallCount, 1, "expired token must trigger exactly one refresh")
+    let stored = try XCTUnwrap(tokenStore.loadAccess())
+    XCTAssertEqual(stored.token, "acc_test", "rotated access token must be persisted")
+  }
+
+  func testEnsureValidSession_refresh401_throwsAuthenticationRequired() async throws {
+    let expiresAt = fixedNow.addingTimeInterval(-10)
+    try tokenStore.saveTokens(access: "acc_dead", refresh: "ref_dead", expiresAt: expiresAt)
+
+    let refreshURL = serverURL.appending(path: "/api/mobile/token/refresh", directoryHint: .notDirectory)
+    MockURLProtocol.requestHandler = { _ in (Data(), httpResponse(status: 401, url: refreshURL)) }
+
+    let client = makeClient()
+    do {
+      try await client.ensureValidSession()
+      XCTFail("Expected authenticationRequired (dead session)")
+    } catch MobileAPIError.authenticationRequired {
+      // Expected.
+    }
+  }
+
+  func testEnsureValidSession_transportError_throwsNetworkError() async throws {
+    let expiresAt = fixedNow.addingTimeInterval(-10)
+    try tokenStore.saveTokens(access: "acc_off", refresh: "ref_off", expiresAt: expiresAt)
+
+    // MUST be a concrete URLError — an NSError in NSURLErrorDomain would not
+    // match `as URLError` and would be remapped to authenticationRequired (T2f),
+    // silently validating the dead-session path instead of the offline path.
+    MockURLProtocol.requestHandler = { _ in throw URLError(.notConnectedToInternet) }
+
+    let client = makeClient()
+    do {
+      try await client.ensureValidSession()
+      XCTFail("Expected networkError (offline)")
+    } catch MobileAPIError.networkError {
+      // Expected — distinct from a dead session.
+    }
+  }
+
   // MARK: - fetchEntries: 200 happy path
 
   func testFetchEntries_happyPath() async throws {

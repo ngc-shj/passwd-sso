@@ -79,9 +79,10 @@ public enum VaultScope: Hashable, Sendable {
   ///
   /// The cache stores `[CacheEntry]` (the on-disk wire model carrying
   /// aadVersion/keyVersion/teamKeyVersion/itemKeyVersion needed for AAD
-  /// construction). HostSyncService and DebugVaultLoader both write this
-  /// shape; the previous `[EncryptedEntry]` decode path was a dead Step-7
-  /// type that never matched the on-disk format.
+  /// construction). HostSyncService writes this shape in production;
+  /// DebugVaultLoader writes it as a test fixture. The previous
+  /// `[EncryptedEntry]` decode path was a dead Step-7 type that never matched
+  /// the on-disk format.
   /// - Parameters:
   ///   - cacheKey: when provided (with team keys present), team entries are decrypted
   ///     too and shown under their team vault. nil → personal-only (no regression).

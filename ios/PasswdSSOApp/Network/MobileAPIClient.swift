@@ -591,6 +591,15 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     return try await ensureRefreshed(staleToken: token)
   }
 
+  /// Launch-time session probe: returns when a usable access token is available
+  /// (already valid, or refreshed), throws `.networkError` when offline, and
+  /// `.authenticationRequired` when the session is dead (refresh rejected).
+  /// Makes NO network request when the stored access token is still within its
+  /// validity window — safe to call on an offline launch.
+  public func ensureValidSession() async throws {
+    _ = try await validAccessToken()
+  }
+
   // MARK: - Shared authenticated GET (C1 + C3)
 
   /// Performs an authenticated GET request with the full C3 retry ladder:

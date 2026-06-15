@@ -14,8 +14,9 @@ final class PasswdSSOUITests: XCTestCase {
   /// accidentally removing or breaking hit-testing on the button. Buttons are
   /// matched by accessibility identifier, not localized title, so the test is
   /// locale-independent (the simulator may run in any language).
-  /// Launch routes to either ServerURLSetupView or, when a server config is
-  /// already persisted, SignInView.
+  /// Launch first shows a splash while SessionRestorer.restore() runs, then
+  /// routes to ServerURLSetupView (no persisted config — the clean UI-test
+  /// case) or, when a server config is already persisted, SignInView.
   func testPrimaryButtonIsHittable() {
     let app = XCUIApplication()
     app.launch()

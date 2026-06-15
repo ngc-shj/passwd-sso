@@ -30,10 +30,10 @@ final class WindowProvider: NSObject, ASWebAuthenticationPresentationContextProv
 
 struct SignInView: View {
   let coordinator: AuthCoordinator
+  /// The server the OAuth flow will target — shown so the user can confirm it
+  /// before authenticating (the URL setup screen is skipped on a known server).
+  let serverURL: URL
   let onSignedIn: (TokenPair) -> Void
-  #if DEBUG
-  let onDebugVaultReady: (DebugVaultLoader.LoadedState) -> Void
-  #endif
 
   @State private var state: SignInViewState = .idle
   @State private var windowProvider = WindowProvider()
@@ -42,8 +42,15 @@ struct SignInView: View {
     VStack(spacing: 32) {
       Spacer()
 
-      Text("passwd-sso")
-        .font(.largeTitle.bold())
+      VStack(spacing: 4) {
+        Text("passwd-sso")
+          .font(.largeTitle.bold())
+        Text(serverURL.absoluteString)
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+          .textSelection(.enabled)
+      }
 
       switch state {
       case .idle:
@@ -69,16 +76,6 @@ struct SignInView: View {
       .accessibilityIdentifier("sign-in-primary-button")
       .disabled(state == .signingIn)
 
-      #if DEBUG
-      Button("Load Test Vault (DEBUG)") {
-        Task { await loadDebugVault() }
-      }
-      .buttonStyle(.bordered)
-      .controlSize(.large)
-      .tint(.orange)
-      .disabled(state == .signingIn)
-      #endif
-
       Spacer()
       Spacer()
     }
@@ -100,20 +97,6 @@ struct SignInView: View {
       state = .error(message: error.localizedDescription)
     }
   }
-
-  #if DEBUG
-  @MainActor
-  private func loadDebugVault() async {
-    state = .signingIn
-    do {
-      try DebugVaultLoader.reset()
-      let loadedState = try await DebugVaultLoader.loadFixtureVault()
-      onDebugVaultReady(loadedState)
-    } catch {
-      state = .error(message: "DEBUG: \(error.localizedDescription)")
-    }
-  }
-  #endif
 }
 
 // MARK: - Window capture helper

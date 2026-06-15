@@ -130,7 +130,8 @@ struct VaultListView: View {
         Text(syncError ?? "")
       }
       // Anchored at body level (NOT inside the Menu, where dismissal races the
-      // menu collapse). signOut() ends in .loggedOut → RootView routes to setup.
+      // menu collapse). Manual signOut() ends in .loggedOut(.manual) → RootView
+      // routes to the URL setup screen (the deliberate change-server path).
       .confirmationDialog(
         "Sign out of passwd-sso?",
         isPresented: $isShowingSignOutConfirm,
