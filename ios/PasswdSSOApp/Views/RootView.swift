@@ -86,11 +86,22 @@ struct RootView: View {
             appState = .vaultLocked(serverConfig: serverConfig, apiClient: apiClient)
             // Clear QuickType identities — no inline hints for a locked vault.
             Task { await CredentialIdentityRegistrar().clear() }
-          case .loggedOut:
-            // Manual Sign Out or logout-on-timeout cleared tokens/cache — route
-            // to setup/sign-in. Single chokepoint for clearing the tenant policy
-            // (mirrors the extension clearing it on disconnect).
-            appState = .setup
+          case .loggedOut(let reason):
+            // Tokens/cache already cleared by signOut(). Manual Sign Out routes to
+            // the URL screen (the deliberate change-server path); an idle-timeout
+            // logout skips it and goes straight to sign-in (the server is known).
+            switch reason {
+            case .manual:
+              appState = .setup
+            case .idleTimeout:
+              appState = .signIn(
+                serverConfig: serverConfig,
+                coordinator: AuthCoordinator(serverConfig: serverConfig)
+              )
+            }
+            // Single chokepoint for clearing the tenant policy + QuickType
+            // (mirrors the extension clearing it on disconnect). Runs for both
+            // reasons — both are full sign-outs.
             AppSettingsStore().clearTenantPolicy()
             Task { await CredentialIdentityRegistrar().clear() }
           case .unlocked:

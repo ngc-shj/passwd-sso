@@ -196,7 +196,7 @@ final class AutoLockServiceTests: XCTestCase {
     service.signOut()
 
     // Ends in .loggedOut (not .locked) so the app routes to sign-in.
-    XCTAssertEqual(service.state, .loggedOut)
+    XCTAssertEqual(service.state, .loggedOut(reason: .manual))
     // V2 bridge-key + bridge-meta items should be gone
     XCTAssertNil(keychain.store["com.passwd-sso.test.bridge-key-v2:blob"])
     XCTAssertNil(keychain.store["com.passwd-sso.test.bridge-meta-v2:blob"])
@@ -307,7 +307,7 @@ final class AutoLockServiceTests: XCTestCase {
     clock.advance(by: 15 * 60)
     service.tick()
 
-    XCTAssertEqual(service.state, .loggedOut)
+    XCTAssertEqual(service.state, .loggedOut(reason: .idleTimeout))
     XCTAssertNil(
       keychain.store["com.passwd-sso.test.bridge-key-v2:blob"],
       "bridge_key should be deleted on logout timeout"
@@ -362,7 +362,7 @@ final class AutoLockServiceTests: XCTestCase {
 
     XCTAssertTrue(spy.didClear,
       "signOut() must call teamDirectoryStore.clear() to wipe the team-directory blob (F2/S13 regression)")
-    XCTAssertEqual(service.state, .loggedOut)
+    XCTAssertEqual(service.state, .loggedOut(reason: .manual))
   }
 
   // MARK: - autoLockMinutes clamping

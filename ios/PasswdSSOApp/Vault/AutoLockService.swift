@@ -4,10 +4,16 @@ import Shared
 /// Manages auto-lock and manual lock for the host app.
 /// `LockStateReducer` contains the pure logic; this class owns the live timer.
 @Observable @MainActor public final class AutoLockService {
+  /// Why a full sign-out happened — drives where the app routes afterward.
+  public enum LogoutReason: Sendable, Equatable {
+    case manual       // explicit "Sign Out" — offer the URL screen (change-server path)
+    case idleTimeout  // logout-on-timeout — skip the URL screen, go straight to sign-in
+  }
+
   public enum State: Sendable, Equatable {
     case unlocked
-    case locked      // idle lock / manual Lock — tokens kept, re-unlock with passphrase
-    case loggedOut   // logout-on-timeout — tokens cleared, must sign in again
+    case locked                          // idle lock / manual Lock — tokens kept, re-unlock with passphrase
+    case loggedOut(reason: LogoutReason) // tokens cleared, must sign in again
   }
 
   public private(set) var state: State = .locked
@@ -91,7 +97,7 @@ import Shared
   /// Full sign-out: lock + delete tokens + clear cache + clear wrapped blobs.
   /// Ends in `.loggedOut` (not `.locked`) so the app routes to sign-in rather
   /// than the passphrase re-unlock screen (which has no token to re-unlock with).
-  public func signOut() {
+  public func signOut(reason: LogoutReason = .manual) {
     try? bridgeKeyStore.delete()
     lock()
     try? tokenStore.deleteAll()
@@ -102,7 +108,7 @@ import Shared
     if fm.fileExists(atPath: cacheURL.path) {
       try? fm.removeItem(at: cacheURL)
     }
-    state = .loggedOut
+    state = .loggedOut(reason: reason)
   }
 
   // MARK: - Private
@@ -114,7 +120,7 @@ import Shared
     if elapsed >= Double(_autoLockMinutes * 60) {
       switch timeoutAction {
       case .lock: lock()
-      case .logout: signOut()
+      case .logout: signOut(reason: .idleTimeout)
       }
     }
   }
