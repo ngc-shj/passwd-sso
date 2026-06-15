@@ -106,7 +106,7 @@ describe("validateServiceAccountToken", () => {
       expiresAt: new Date(Date.now() + 86400000),
       revokedAt: new Date(),
       lastUsedAt: null,
-      serviceAccount: { isActive: true },
+      serviceAccount: { isActive: true, tenantId: TENANT_ID },
     });
 
     const result = await validateServiceAccountToken(makeRequest("sa_test123"));
@@ -122,7 +122,7 @@ describe("validateServiceAccountToken", () => {
       expiresAt: new Date(Date.now() - 1000),
       revokedAt: null,
       lastUsedAt: null,
-      serviceAccount: { isActive: true },
+      serviceAccount: { isActive: true, tenantId: TENANT_ID },
     });
 
     const result = await validateServiceAccountToken(makeRequest("sa_test123"));
@@ -145,6 +145,24 @@ describe("validateServiceAccountToken", () => {
     expect(result).toEqual({ ok: false, error: "SA_INACTIVE" });
   });
 
+  it("returns SA_TOKEN_INVALID when the SA's own tenantId differs from the token's tenantId", async () => {
+    // Defensive tenant-boundary check: a corrupted/migration-broken row where the
+    // token claims one tenant but its parent SA belongs to another must fail closed.
+    mockPrisma.serviceAccountToken.findUnique.mockResolvedValue({
+      id: TOKEN_ID,
+      serviceAccountId: SA_ID,
+      tenantId: TENANT_ID,
+      scope: "passwords:read",
+      expiresAt: new Date(Date.now() + 86400000),
+      revokedAt: null,
+      lastUsedAt: null,
+      serviceAccount: { isActive: true, tenantId: "tenant-OTHER" },
+    });
+
+    const result = await validateServiceAccountToken(makeRequest("sa_test123"));
+    expect(result).toEqual({ ok: false, error: "SA_TOKEN_INVALID" });
+  });
+
   it("returns valid result for a valid token", async () => {
     mockPrisma.serviceAccountToken.findUnique.mockResolvedValue({
       id: TOKEN_ID,
@@ -154,7 +172,7 @@ describe("validateServiceAccountToken", () => {
       expiresAt: new Date(Date.now() + 86400000),
       revokedAt: null,
       lastUsedAt: null,
-      serviceAccount: { isActive: true },
+      serviceAccount: { isActive: true, tenantId: TENANT_ID },
     });
     mockPrisma.serviceAccountToken.update.mockResolvedValue({});
 
@@ -179,7 +197,7 @@ describe("validateServiceAccountToken", () => {
       expiresAt: new Date(Date.now() + 86400000),
       revokedAt: null,
       lastUsedAt: new Date(), // just now
-      serviceAccount: { isActive: true },
+      serviceAccount: { isActive: true, tenantId: TENANT_ID },
     });
 
     const result = await validateServiceAccountToken(makeRequest("sa_test123"));

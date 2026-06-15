@@ -97,7 +97,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     // the client must detect the mismatch, decrypt with the old key via
     // GET /member-key?keyVersion=N, re-encrypt with the current key, and PUT.
     await tx.teamPasswordEntry.update({
-      where: { id },
+      where: { id, teamId },
       data: {
         encryptedBlob: history.encryptedBlob,
         blobIv: history.blobIv,

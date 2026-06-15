@@ -1663,6 +1663,9 @@ model ServiceAccount {
   auditLogs               AuditLog[]
 
   @@unique([tenantId, name])
+  // Referenced by ServiceAccountToken's composite FK so a token's tenantId is
+  // guaranteed at the DB level to match its parent SA's tenantId.
+  @@unique([id, tenantId])
   @@index([tenantId, isActive])
   @@map("service_accounts")
 }
@@ -1680,7 +1683,10 @@ model ServiceAccountToken {
   revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(3)
   lastUsedAt       DateTime? @map("last_used_at") @db.Timestamptz(3)
 
-  serviceAccount ServiceAccount @relation(fields: [serviceAccountId], references: [id], onDelete: Cascade)
+  // Composite FK (serviceAccountId, tenantId) → ServiceAccount(id, tenantId)
+  // enforces tenant-boundary consistency at the DB level: a token cannot point
+  // to an SA owned by a different tenant.
+  serviceAccount ServiceAccount @relation(fields: [serviceAccountId, tenantId], references: [id, tenantId], onDelete: Cascade)
   tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([serviceAccountId, revokedAt])

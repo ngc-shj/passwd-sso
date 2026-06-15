@@ -351,6 +351,7 @@ describe("POST /api/tenant/access-requests", () => {
     mockServiceAccountFindUnique.mockResolvedValue({
       isActive: true,
       createdById: DEFAULT_SESSION.user.id,
+      tenantId: "tenant-1",
     });
     const created = {
       id: "req-sa-1",
@@ -389,6 +390,7 @@ describe("POST /api/tenant/access-requests", () => {
     mockServiceAccountFindUnique.mockResolvedValue({
       isActive: true,
       createdById: DEFAULT_SESSION.user.id,
+      tenantId: "tenant-1",
     });
     const denied = new Response(
       JSON.stringify({ error: "ACCESS_DENIED" }),
@@ -433,6 +435,7 @@ describe("POST /api/tenant/access-requests", () => {
     mockServiceAccountFindUnique.mockResolvedValue({
       isActive: true,
       createdById: DEFAULT_SESSION.user.id,
+      tenantId: "tenant-1",
     });
     const created = {
       id: "req-sa-infer",

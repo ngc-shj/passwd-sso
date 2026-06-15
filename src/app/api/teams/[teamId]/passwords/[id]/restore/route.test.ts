@@ -15,6 +15,7 @@ const { mockAuth, mockPrismaTeamPasswordEntry, mockRequireTeamPermission, TeamAu
     mockPrismaTeamPasswordEntry: {
       findUnique: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
@@ -105,7 +106,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/restore", () => {
       teamId: TEAM_ID,
       deletedAt: new Date(),
     });
-    mockPrismaTeamPasswordEntry.update.mockResolvedValue({});
+    mockPrismaTeamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}/restore`),
@@ -114,5 +115,10 @@ describe("POST /api/teams/[teamId]/passwords/[id]/restore", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
+    // Final mutation must be scoped by id + teamId (defense in depth).
+    expect(mockPrismaTeamPasswordEntry.updateMany).toHaveBeenCalledWith({
+      where: { id: PW_ID, teamId: TEAM_ID },
+      data: { deletedAt: null },
+    });
   });
 });
