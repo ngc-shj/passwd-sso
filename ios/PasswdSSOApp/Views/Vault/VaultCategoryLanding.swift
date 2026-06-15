@@ -64,6 +64,7 @@ struct VaultCategoryListView: View {
   @Bindable var viewModel: VaultViewModel
   let apiClient: MobileAPIClient
   let hostSyncService: HostSyncService
+  var cacheKey: SymmetricKey? = nil
 
   // Seed synchronously so an already-active recording never shows a frame of
   // entries before onAppear flips the flag.
@@ -90,7 +91,8 @@ struct VaultCategoryListView: View {
               autoLockService: autoLockService,
               viewModel: viewModel,
               apiClient: apiClient,
-              hostSyncService: hostSyncService
+              hostSyncService: hostSyncService,
+              cacheKey: cacheKey
             )
           } label: {
             EntrySummaryRow(summary: summary)

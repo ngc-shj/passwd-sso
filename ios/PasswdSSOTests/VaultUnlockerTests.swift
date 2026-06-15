@@ -4,6 +4,52 @@ import XCTest
 @testable import PasswdSSOApp
 @testable import Shared
 
+// MARK: - ECDH VaultUnlockData builder
+
+/// Build VaultUnlockData with ECDH fields populated. Generates a real P-256
+/// keypair, exports PKCS#8, encrypts it under deriveEcdhWrappingKey(secretKey),
+/// and injects the 4 ECDH fields. Returns the data, the plain secretKey bytes,
+/// and the generated member key so callers can verify the stored blob.
+private func makeVaultUnlockDataWithECDH(
+  passphrase: String,
+  userId: String = "ecdh-user-1"
+) throws -> (data: VaultUnlockData, secretKey: Data, memberKey: P256.KeyAgreement.PrivateKey) {
+  let saltData = Data(repeating: 0xBB, count: 32)
+  let wrappingKey = try deriveWrappingKeyPBKDF2(
+    passphrase: passphrase,
+    salt: saltData,
+    iterations: pbkdf2Iterations
+  )
+  let secretKey = Data(repeating: 0x55, count: 32)
+  let (cipher, iv, tag) = try encryptAESGCM(plaintext: secretKey, key: wrappingKey)
+
+  // Generate a fresh P-256 keypair.
+  let memberKey = P256.KeyAgreement.PrivateKey()
+  var pkcs8 = memberKey.derRepresentation
+  defer { pkcs8.resetBytes(in: 0..<pkcs8.count) }
+
+  // Encrypt PKCS#8 under the ECDH wrapping key (HKDF of secretKey).
+  let ecdhWrappingKey = TeamKeyCrypto.deriveEcdhWrappingKey(
+    secretKey: SymmetricKey(data: secretKey)
+  )
+  let (ecdhCipher, ecdhIV, ecdhTag) = try encryptAESGCM(plaintext: pkcs8, key: ecdhWrappingKey)
+
+  let data = VaultUnlockData(
+    accountSalt: hexEncode(saltData),
+    encryptedSecretKey: hexEncode(cipher),
+    secretKeyIv: hexEncode(iv),
+    secretKeyAuthTag: hexEncode(tag),
+    keyVersion: 1,
+    kdfType: 0,
+    kdfIterations: pbkdf2Iterations,
+    userId: userId,
+    encryptedEcdhPrivateKey: hexEncode(ecdhCipher),
+    ecdhPrivateKeyIv: hexEncode(ecdhIV),
+    ecdhPrivateKeyAuthTag: hexEncode(ecdhTag)
+  )
+  return (data, secretKey, memberKey)
+}
+
 // MARK: - Mock VaultUnlockData provider
 
 /// Simulates a vault unlock by providing pre-computed encrypted key material.
@@ -716,6 +762,131 @@ final class VaultUnlockerTests: XCTestCase {
     )
 
     XCTAssertFalse(unlocker.biometricUnlockAvailable(), "must be false when wrapped key is absent")
+  }
+
+  // MARK: - ECDH key persistence on passphrase unlock
+
+  /// Passphrase unlock WITH ECDH fields → wrappedKeyStore.loadECDHPrivateKey() is
+  /// non-nil and the blob unwraps back to the original PKCS#8 bytes.
+  func testUnlock_withECDHFields_persistsECDHBlob() async throws {
+    let passphrase = "ecdh-test-pass"
+    let userId = "ecdh-user-persist"
+    let (unlockData, _, memberKey) = try makeVaultUnlockDataWithECDH(
+      passphrase: passphrase, userId: userId
+    )
+
+    let keychain = MockKeychain()
+    let bks = BridgeKeyStore(
+      accessGroup: "test",
+      service: "com.passwd-sso.test.ecdh.bridge-key",
+      keychain: keychain
+    )
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .success(unlockData)),
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      cacheURL: tmpDir.appending(path: "ecdh.cache", directoryHint: .notDirectory)
+    )
+
+    let result = try await unlocker.unlock(passphrase: passphrase)
+
+    // ECDH blob must be saved.
+    let wrappedEcdh = try XCTUnwrap(try wks.loadECDHPrivateKey(),
+      "ECDH key must be persisted after passphrase unlock when ECDH fields are present")
+
+    // Unwrap it under the cacheKey with the correct userId AAD and verify bytes.
+    let cacheKey = result.cacheKey
+    let unwrapped = try XCTUnwrap(
+      TeamEntryDecryptor.unwrapEcdhPrivateKey(wrappedEcdh, cacheKey: cacheKey, userId: userId),
+      "Stored ECDH blob must unwrap under the cacheKey + userId AAD"
+    )
+
+    // The unwrapped PKCS#8 must re-import to the same key.
+    let reimported = try P256.KeyAgreement.PrivateKey(derRepresentation: unwrapped)
+    XCTAssertEqual(
+      reimported.rawRepresentation,
+      memberKey.rawRepresentation,
+      "Unwrapped PKCS#8 must round-trip to the original member key"
+    )
+  }
+
+  /// Passphrase unlock WITHOUT ECDH fields → no ECDH blob saved, but unlock succeeds.
+  func testUnlock_withoutECDHFields_noECDHBlob() async throws {
+    let passphrase = "no-ecdh-pass"
+    let (unlockData, _) = try makeVaultUnlockData(passphrase: passphrase)
+    // unlockData has no ECDH fields (ecdhPrivateKey* == nil by default).
+
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    let bks = BridgeKeyStore(
+      accessGroup: "test",
+      service: "com.passwd-sso.test.noecdh.bridge-key",
+      keychain: MockKeychain()
+    )
+
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .success(unlockData)),
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      cacheURL: tmpDir.appending(path: "noecdh.cache", directoryHint: .notDirectory)
+    )
+
+    let result = try await unlocker.unlock(passphrase: passphrase)
+
+    XCTAssertNotNil(result.vaultKey, "unlock must succeed even without ECDH fields")
+    XCTAssertNil(try wks.loadECDHPrivateKey(),
+      "No ECDH blob must be saved when the server returns no ECDH fields")
+  }
+
+  /// Biometric path: ECDH blob is a no-op — existing blob untouched, unlock succeeds.
+  func testUnlockWithBiometrics_ECDHIsNoOp() async throws {
+    let keychain = MockKeychainAccessor()
+    let bks = BridgeKeyStore(
+      accessGroup: "test.jp.jpng.passwd-sso.shared",
+      keychain: keychain
+    )
+    let blob = try bks.create()
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    try wrapAndSaveVaultKeyToStore(vaultKey: vaultKey, cacheKey: cacheKey, store: wks)
+
+    // Pre-seed an ECDH blob to verify it is left untouched by biometric unlock.
+    let ecdhSentinel = WrappedECDHPrivateKey(
+      ciphertext: Data([0xDE, 0xAD]),
+      iv: Data(repeating: 0x11, count: 12),
+      authTag: Data(repeating: 0x22, count: 16),
+      issuedAt: Date()
+    )
+    try wks.saveECDHPrivateKey(ecdhSentinel)
+
+    let cacheURL = tmpDir.appending(path: "biometric-ecdh.cache", directoryHint: .notDirectory)
+    let entry = try makePersonalCacheEntryForBiometricTest(
+      vaultKey: vaultKey, userId: "ecdh-bio-user", keyVersion: 1
+    )
+    try buildCacheFileForBiometricTest(
+      at: cacheURL, entries: [entry], vaultKey: vaultKey,
+      hostInstallUUID: blob.hostInstallUUID, counter: blob.cacheVersionCounter,
+      userId: "ecdh-bio-user", now: Date()
+    )
+
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .wrongPassphrase),
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      cacheURL: cacheURL,
+      now: { Date() }
+    )
+
+    _ = try await unlocker.unlockWithBiometrics(reason: "test")
+
+    // The ECDH blob must be unchanged — biometric path is a no-op for ECDH.
+    let stored = try XCTUnwrap(try wks.loadECDHPrivateKey(),
+      "Pre-seeded ECDH blob must still be present after biometric unlock")
+    XCTAssertEqual(stored, ecdhSentinel,
+      "Biometric unlock must not modify the existing ECDH blob")
   }
 
   // MARK: - biometricUnlockAvailable only touches bridge-meta-v2 (T3)

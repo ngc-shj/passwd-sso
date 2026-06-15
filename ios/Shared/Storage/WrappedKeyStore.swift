@@ -41,6 +41,23 @@ public struct WrappedTeamKey: Sendable, Codable, Equatable {
   }
 }
 
+/// The account ECDH private key (PKCS#8), wrapped under cacheKey with a
+/// `buildLocalWrapAAD(kind:"ecdh", userId:)` binding. Persisted so sync (incl.
+/// background, post-biometric) can unwrap team keys without the vault secretKey.
+public struct WrappedECDHPrivateKey: Sendable, Codable, Equatable {
+  public let ciphertext: Data
+  public let iv: Data
+  public let authTag: Data
+  public let issuedAt: Date
+
+  public init(ciphertext: Data, iv: Data, authTag: Data, issuedAt: Date) {
+    self.ciphertext = ciphertext
+    self.iv = iv
+    self.authTag = authTag
+    self.issuedAt = issuedAt
+  }
+}
+
 // MARK: - Protocol
 
 public protocol WrappedKeyStore: Sendable {
@@ -48,6 +65,9 @@ public protocol WrappedKeyStore: Sendable {
   func loadVaultKey() throws -> WrappedVaultKey?
   func saveTeamKeys(_ keys: [WrappedTeamKey]) throws
   func loadTeamKeys() throws -> [WrappedTeamKey]
+  func clearTeamKeys() throws
+  func saveECDHPrivateKey(_ wrapped: WrappedECDHPrivateKey) throws
+  func loadECDHPrivateKey() throws -> WrappedECDHPrivateKey?
   func clearAll() throws
 }
 
@@ -87,17 +107,35 @@ public struct AppGroupWrappedKeyStore: WrappedKeyStore, Sendable {
     return try JSONDecoder().decode([WrappedTeamKey].self, from: data)
   }
 
+  public func clearTeamKeys() throws {
+    let path = try teamKeysURL().path
+    if FileManager.default.fileExists(atPath: path) {
+      try FileManager.default.removeItem(atPath: path)
+    }
+  }
+
+  // MARK: - ECDH private key
+
+  public func saveECDHPrivateKey(_ wrapped: WrappedECDHPrivateKey) throws {
+    let data = try JSONEncoder().encode(wrapped)
+    try atomicWrite(data: data, to: ecdhPrivateKeyURL())
+  }
+
+  public func loadECDHPrivateKey() throws -> WrappedECDHPrivateKey? {
+    let url = try ecdhPrivateKeyURL()
+    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+    let data = try Data(contentsOf: url)
+    return try JSONDecoder().decode(WrappedECDHPrivateKey.self, from: data)
+  }
+
   // MARK: - Clear
 
   public func clearAll() throws {
     let fm = FileManager.default
-    let vaultKeyPath = try vaultKeyURL().path
-    let teamKeysPath = try teamKeysURL().path
-    if fm.fileExists(atPath: vaultKeyPath) {
-      try fm.removeItem(atPath: vaultKeyPath)
-    }
-    if fm.fileExists(atPath: teamKeysPath) {
-      try fm.removeItem(atPath: teamKeysPath)
+    for path in [try vaultKeyURL().path, try teamKeysURL().path, try ecdhPrivateKeyURL().path] {
+      if fm.fileExists(atPath: path) {
+        try fm.removeItem(atPath: path)
+      }
     }
   }
 
@@ -113,6 +151,12 @@ public struct AppGroupWrappedKeyStore: WrappedKeyStore, Sendable {
     try AppGroupContainer.url()
       .appending(path: "vault", directoryHint: .isDirectory)
       .appending(path: "wrapped-team-keys.json", directoryHint: .notDirectory)
+  }
+
+  private func ecdhPrivateKeyURL() throws -> URL {
+    try AppGroupContainer.url()
+      .appending(path: "vault", directoryHint: .isDirectory)
+      .appending(path: "wrapped-ecdh-private-key.json", directoryHint: .notDirectory)
   }
 
   private func atomicWrite(data: Data, to url: URL) throws {

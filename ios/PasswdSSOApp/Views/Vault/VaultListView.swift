@@ -19,6 +19,9 @@ struct VaultListView: View {
   let autoLockService: AutoLockService
   let apiClient: MobileAPIClient
   let hostSyncService: HostSyncService
+  /// The REAL cacheKey from unlock (nil in debug). Needed to decrypt team entries
+  /// in-app + persist/read team keys; cannot be re-derived (readDirect is empty).
+  let cacheKey: SymmetricKey?
 
   @State private var isScreenRecording: Bool = UIScreen.main.isCaptured
   @State private var isShowingSettings: Bool = false
@@ -31,13 +34,16 @@ struct VaultListView: View {
 
   var body: some View {
     NavigationStack {
-      Group {
-        if isScreenRecording {
-          ScreenRecordingOverlay()
-        } else if viewModel.searchQuery.isEmpty {
-          categoryGrid
-        } else {
-          entryList
+      VStack(spacing: 0) {
+        vaultSwitcher
+        Group {
+          if isScreenRecording {
+            ScreenRecordingOverlay()
+          } else if viewModel.searchQuery.isEmpty {
+            categoryGrid
+          } else {
+            entryList
+          }
         }
       }
       .navigationTitle("passwd-sso")
@@ -98,7 +104,8 @@ struct VaultListView: View {
           keyVersion: keyVersion,
           viewModel: viewModel,
           apiClient: apiClient,
-          hostSyncService: hostSyncService
+          hostSyncService: hostSyncService,
+          cacheKey: cacheKey
         )
       }
       // Search moved from the top navigation drawer to the bottom bar (native
@@ -138,7 +145,7 @@ struct VaultListView: View {
       }
     }
     .onAppear {
-      viewModel.loadFromCache(cacheData: cacheData, vaultKey: vaultKey, userId: userId)
+      reload(cacheData)
       updateScreenRecordingState()
     }
     .onReceive(
@@ -146,6 +153,38 @@ struct VaultListView: View {
     ) { _ in
       updateScreenRecordingState()
     }
+  }
+
+  // MARK: - Vault switcher (personal vs team)
+
+  /// Segmented switcher making the team vault clearly separate from the personal
+  /// one. Hidden entirely when the user belongs to no team (personal-only users
+  /// see no change). Switching scope re-filters the grid/list to that vault.
+  @ViewBuilder private var vaultSwitcher: some View {
+    if !viewModel.teamDirectory.isEmpty {
+      Picker("Vault", selection: $viewModel.scope) {
+        Text("Personal").tag(VaultScope.personal)
+        ForEach(viewModel.teamDirectory) { team in
+          Text(team.name).tag(VaultScope.team(team.id))
+        }
+      }
+      .pickerStyle(.segmented)
+      .padding(.horizontal)
+      .padding(.vertical, 8)
+      .onChange(of: viewModel.scope) { _, _ in
+        autoLockService.recordActivity()
+        viewModel.searchQuery = ""
+      }
+    }
+  }
+
+  /// Decrypt + bind a fresh cache: use the unlock-time cacheKey (for team entries)
+  /// and load the team directory (for switcher labels), then hand both to the VM.
+  private func reload(_ data: CacheData) {
+    let teamDir = cacheKey.map { TeamDirectoryStore().load(cacheKey: $0, userId: userId) } ?? []
+    viewModel.loadFromCache(
+      cacheData: data, vaultKey: vaultKey, userId: userId,
+      cacheKey: cacheKey, teamDirectory: teamDir)
   }
 
   // MARK: - Bottom bar (search + create)
@@ -179,7 +218,7 @@ struct VaultListView: View {
       .frame(minHeight: 44)
       .background(Color(.secondarySystemBackground), in: Capsule())
 
-      if viewModel.filterTeamId == nil {
+      if !viewModel.isTeamScope {
         Button {
           autoLockService.recordActivity()
           isShowingCreateForm = true
@@ -259,7 +298,8 @@ struct VaultListView: View {
               autoLockService: autoLockService,
               viewModel: viewModel,
               apiClient: apiClient,
-              hostSyncService: hostSyncService
+              hostSyncService: hostSyncService,
+              cacheKey: cacheKey
             )
           } label: {
             CategoryCard(symbol: item.symbol, label: item.label, count: item.count)
@@ -293,7 +333,8 @@ struct VaultListView: View {
           autoLockService: autoLockService,
           viewModel: viewModel,
           apiClient: apiClient,
-          hostSyncService: hostSyncService
+          hostSyncService: hostSyncService,
+          cacheKey: cacheKey
         )
       } label: {
         EntrySummaryRow(summary: summary)
@@ -332,9 +373,10 @@ struct VaultListView: View {
     // auto-lock window just because the app returned to the foreground.
     if surfaceErrors { autoLockService.recordActivity() }
     do {
-      let report = try await hostSyncService.runSync(vaultKey: vaultKey, userId: userId)
+      let report = try await hostSyncService.runSync(
+        vaultKey: vaultKey, userId: userId, cacheKey: cacheKey)
       if let fresh = report.cacheData {
-        viewModel.loadFromCache(cacheData: fresh, vaultKey: vaultKey, userId: userId)
+        reload(fresh)
       }
     } catch MobileAPIError.authenticationRequired {
       if surfaceErrors {

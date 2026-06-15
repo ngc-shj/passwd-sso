@@ -318,6 +318,53 @@ final class AutoLockServiceTests: XCTestCase {
     )
   }
 
+  // MARK: - F2/S13 regression: signOut clears the team-directory blob
+
+  /// Regression for F2/S13: before the fix, AutoLockService.signOut() did NOT call
+  /// teamDirectoryStore.clear(), leaving the team-directory blob on disk after sign-out.
+  /// This test fails against the old code (clear() never called → spy.didClear == false)
+  /// and passes with the fix (signOut calls teamDirectoryStore.clear()).
+  func testSignOut_clearsTeamDirectory() throws {
+    let tmpDir = makeTmpDir()
+    defer { try? FileManager.default.removeItem(at: tmpDir) }
+    let keychain = MockKeychain()
+    seedKeychain(keychain)
+
+    // Spy TeamDirectoryStoring that records whether clear() was called.
+    final class SpyTeamDirectoryStore: TeamDirectoryStoring, @unchecked Sendable {
+      private(set) var didClear = false
+      func save(_ entries: [TeamDirectoryEntry], cacheKey: SymmetricKey, userId: String) throws {}
+      func load(cacheKey: SymmetricKey, userId: String) -> [TeamDirectoryEntry] { [] }
+      func clear() throws { didClear = true }
+    }
+
+    let spy = SpyTeamDirectoryStore()
+    let bks = BridgeKeyStore(
+      accessGroup: "test",
+      service: "com.passwd-sso.test.bridge-key",
+      keychain: keychain
+    )
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    let tokenStore = HostTokenStore(
+      service: "com.passwd-sso.test.tokens",
+      keychain: keychain
+    )
+    let cacheURL = tmpDir.appending(path: "test.cache", directoryHint: .notDirectory)
+    let service = AutoLockService(
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      teamDirectoryStore: spy,
+      tokenStore: tokenStore,
+      cacheURL: cacheURL
+    )
+    service.startTimer()
+    service.signOut()
+
+    XCTAssertTrue(spy.didClear,
+      "signOut() must call teamDirectoryStore.clear() to wipe the team-directory blob (F2/S13 regression)")
+    XCTAssertEqual(service.state, .loggedOut)
+  }
+
   // MARK: - autoLockMinutes clamping
 
   func testAutoLockMinutesClamped() {

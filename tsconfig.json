@@ -38,6 +38,7 @@
   "exclude": [
     "node_modules",
     "extension",
-    "cli"
+    "cli",
+    "scripts/generate-team-key-fixture.ts"
   ]
 }

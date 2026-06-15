@@ -21,6 +21,7 @@
     "generate:key": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
     "generate:audit-anchor-signing-key": "bash scripts/generate-audit-anchor-signing-key.sh",
     "generate:audit-anchor-tag-secret": "bash scripts/generate-audit-anchor-tag-secret.sh",
+    "generate:team-key-fixture": "tsx scripts/generate-team-key-fixture.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

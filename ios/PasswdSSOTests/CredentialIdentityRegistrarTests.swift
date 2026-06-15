@@ -405,6 +405,170 @@ final class CredentialIdentityRegistrarTests: XCTestCase {
     )
     return CacheData(header: header, entries: try JSONEncoder().encode(entries))
   }
+
+  // MARK: - Team entry QuickType registration (C9 wiring)
+
+  /// A team cache entry + seeded WrappedTeamKey + cacheKey → the team entry's
+  /// host appears in the replaced/registered specs.
+  func testDecryptTeamOverviews_withTeamKeyAndCacheKey_producesSpecs() throws {
+    let cacheKey = SymmetricKey(size: .bits256)
+    let userId = "user-team-reg"
+    let teamId = "team-reg-1"
+    let teamEncKey = SymmetricKey(size: .bits256)
+
+    // Wrap the team key under cacheKey (matching the host-sync wiring).
+    let wrappedTeamKey = try TeamEntryDecryptor.wrapTeamKey(
+      teamEncKey: teamEncKey, cacheKey: cacheKey, userId: userId,
+      teamId: teamId, teamKeyVersion: 1, issuedAt: Date()
+    )
+
+    // Build a team cache entry with urlHost "team.example.com".
+    let summary = VaultEntrySummary(
+      id: "te-reg-1", title: "Team Login", username: "teamuser",
+      urlHost: "team.example.com", teamId: teamId
+    )
+    let overviewBlob = TestOverviewBlob(
+      title: summary.title, username: summary.username, urlHost: summary.urlHost
+    )
+    let overviewData = try JSONEncoder().encode(overviewBlob)
+    let overviewAAD = try buildTeamEntryAAD(
+      teamId: teamId, entryId: summary.id, vaultType: VaultType.overview, itemKeyVersion: 0
+    )
+    let overviewEnc = try encryptAESGCMEncoded(plaintext: overviewData, key: teamEncKey, aad: overviewAAD)
+    let dummyBlob = try encryptAESGCMEncoded(plaintext: Data("{}".utf8), key: teamEncKey, aad: nil)
+    let teamEntry = CacheEntry(
+      id: summary.id, teamId: teamId, aadVersion: 1, keyVersion: 0,
+      teamKeyVersion: 1, itemKeyVersion: 0,
+      encryptedItemKey: nil,
+      encryptedBlob: dummyBlob,
+      encryptedOverview: overviewEnc
+    )
+
+    let wks = MockWrappedKeyStore()
+    try wks.saveTeamKeys([wrappedTeamKey])
+
+    let cache = try makeCache([teamEntry], userId: userId)
+
+    let summaries = decryptTeamOverviews(
+      from: cache, cacheKey: cacheKey, userId: userId, wrappedKeyStore: wks
+    )
+
+    XCTAssertEqual(summaries.count, 1, "One team entry must decrypt to one summary")
+    XCTAssertEqual(summaries.first?.urlHost, "team.example.com")
+    XCTAssertEqual(summaries.first?.teamId, teamId)
+  }
+
+  /// cacheKey nil → only personal summaries, no team entries, no crash.
+  func testDecryptTeamOverviews_noCacheKey_returnsEmpty() throws {
+    let userId = "user-no-cachekey"
+    let teamId = "team-no-key"
+    let dummyEnc = try encryptAESGCMEncoded(plaintext: Data("{}".utf8), key: SymmetricKey(size: .bits256), aad: nil)
+    let teamEntry = CacheEntry(
+      id: "te-no-key", teamId: teamId, aadVersion: 0,
+      encryptedBlob: dummyEnc, encryptedOverview: dummyEnc
+    )
+    let cache = try makeCache([teamEntry], userId: userId)
+
+    // Passing a random cacheKey with no team keys saved → empty (no team keys in store).
+    let wks = MockWrappedKeyStore()
+    // wks has no team keys.
+    let summaries = decryptTeamOverviews(
+      from: cache, cacheKey: SymmetricKey(size: .bits256), userId: userId, wrappedKeyStore: wks
+    )
+
+    XCTAssertTrue(summaries.isEmpty,
+      "decryptTeamOverviews with empty team key store must return empty (not crash)")
+  }
+
+  // MARK: - refreshCredentialIdentities with team keys
+
+  func testRefreshCredentialIdentities_withTeamKey_registersTeamHostInPasswordSpecs() async throws {
+    let vaultKey = SymmetricKey(size: .bits256)
+    let cacheKey = SymmetricKey(size: .bits256)
+    let userId = "user-team-refresh"
+    let teamId = "team-refresh-1"
+    let teamEncKey = SymmetricKey(size: .bits256)
+
+    let wrappedTeamKey = try TeamEntryDecryptor.wrapTeamKey(
+      teamEncKey: teamEncKey, cacheKey: cacheKey, userId: userId,
+      teamId: teamId, teamKeyVersion: 1, issuedAt: Date()
+    )
+
+    // Personal entry.
+    let personalEntry = try self.personalEntry(
+      id: "pe-1", urlHost: "personal.com", username: "alice",
+      userId: userId, aadVersion: 1, vaultKey: vaultKey
+    )
+
+    // Team entry.
+    let teamOverviewBlob = TestOverviewBlob(
+      title: "Team App", username: "teamuser", urlHost: "teamapp.com"
+    )
+    let teamOverviewData = try JSONEncoder().encode(teamOverviewBlob)
+    let overviewAAD = try buildTeamEntryAAD(
+      teamId: teamId, entryId: "te-1", vaultType: VaultType.overview, itemKeyVersion: 0
+    )
+    let teamOverviewEnc = try encryptAESGCMEncoded(
+      plaintext: teamOverviewData, key: teamEncKey, aad: overviewAAD
+    )
+    let dummyBlob = try encryptAESGCMEncoded(plaintext: Data("{}".utf8), key: vaultKey, aad: nil)
+    let teamEntry = CacheEntry(
+      id: "te-1", teamId: teamId, aadVersion: 1, keyVersion: 0,
+      teamKeyVersion: 1, itemKeyVersion: 0,
+      encryptedItemKey: nil,
+      encryptedBlob: dummyBlob,
+      encryptedOverview: teamOverviewEnc
+    )
+
+    let wks = MockWrappedKeyStore()
+    try wks.saveTeamKeys([wrappedTeamKey])
+
+    let cache = try makeCache([personalEntry, teamEntry], userId: userId)
+    let store = FakeIdentityStore(enabled: true)
+    let registrar = CredentialIdentityRegistrar(store: store)
+
+    await refreshCredentialIdentities(
+      from: cache, vaultKey: vaultKey, userId: userId,
+      cacheKey: cacheKey, wrappedKeyStore: wks, registrar: registrar
+    )
+
+    let passwords = await store.replacedPasswordSpecs
+    XCTAssertNotNil(passwords, "replace must be called")
+    let hosts = passwords?.map(\.host) ?? []
+    XCTAssertTrue(hosts.contains("personal.com"), "Personal entry host must appear in specs")
+    XCTAssertTrue(hosts.contains("teamapp.com"), "Team entry host must appear in specs when team key is available")
+  }
+
+  func testRefreshCredentialIdentities_noTeamKeys_personalOnly() async throws {
+    let vaultKey = SymmetricKey(size: .bits256)
+    let userId = "user-personal-only"
+
+    let personalEntry = try self.personalEntry(
+      id: "pe-2", urlHost: "onlypersonal.com", username: "bob",
+      userId: userId, aadVersion: 1, vaultKey: vaultKey
+    )
+    let dummyEnc = try encryptAESGCMEncoded(plaintext: Data("{}".utf8), key: vaultKey, aad: nil)
+    let teamEntry = CacheEntry(
+      id: "te-2", teamId: "some-team", aadVersion: 0,
+      encryptedBlob: dummyEnc, encryptedOverview: dummyEnc
+    )
+    let cache = try makeCache([personalEntry, teamEntry], userId: userId)
+
+    let store = FakeIdentityStore(enabled: true)
+    let registrar = CredentialIdentityRegistrar(store: store)
+
+    // No cacheKey/wrappedKeyStore → personal-only.
+    await refreshCredentialIdentities(
+      from: cache, vaultKey: vaultKey, userId: userId, registrar: registrar
+    )
+
+    let passwords = await store.replacedPasswordSpecs
+    let hosts = passwords?.map(\.host) ?? []
+    XCTAssertEqual(hosts, ["onlypersonal.com"],
+      "Without cacheKey, only personal entries must be registered")
+    XCTAssertFalse(hosts.contains("some-team"),
+      "Team entries must not appear without cacheKey")
+  }
 }
 
 /// In-memory fake for CredentialIdentityStoring (actor → Sendable, no real

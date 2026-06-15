@@ -98,19 +98,54 @@ public func buildPasskeyIdentitySpecs(
   return result
 }
 
+/// Decrypt TEAM entry overviews for QuickType registration. Requires the cacheKey
+/// (to unwrap the persisted team keys) — when cacheKey/team keys are absent the
+/// caller simply gets no team suggestions (personal-only, no regression). Shares
+/// the exact decrypt path with `CredentialResolver` via `TeamEntryDecryptor`.
+public func decryptTeamOverviews(
+  from cacheData: CacheData,
+  cacheKey: SymmetricKey,
+  userId: String,
+  wrappedKeyStore: WrappedKeyStore,
+  now: @escaping () -> Date = { Date() }
+) -> [VaultEntrySummary] {
+  guard let entries = try? JSONDecoder().decode([CacheEntry].self, from: cacheData.entries) else {
+    return []
+  }
+  let teamKeys = (try? wrappedKeyStore.loadTeamKeys()) ?? []
+  guard !teamKeys.isEmpty else { return [] }
+  var result: [VaultEntrySummary] = []
+  for entry in entries where entry.teamId != nil {
+    if let summary = TeamEntryDecryptor.decryptTeamSummary(
+      entry: entry, teamKeys: teamKeys, cacheKey: cacheKey, userId: userId, now: now) {
+      result.append(summary)
+    }
+  }
+  return result
+}
+
 // MARK: - One-step refresh
 
 /// Decrypt personal summaries + passkey specs from a fresh cache and replace
 /// the OS credential-identity store in one step. Single entry point for every
 /// refresh site (foreground sync, vault unlock, entry create/save) so the
 /// summaries/passkeys/replace sequence cannot drift between call sites.
+///
+/// When `cacheKey` + `wrappedKeyStore` are supplied, TEAM entries are registered
+/// too (QuickType for team credentials). Omitting them registers personal-only.
 public func refreshCredentialIdentities(
   from cacheData: CacheData,
   vaultKey: SymmetricKey,
   userId: String,
+  cacheKey: SymmetricKey? = nil,
+  wrappedKeyStore: WrappedKeyStore? = nil,
   registrar: CredentialIdentityRegistrar = CredentialIdentityRegistrar()
 ) async {
-  let summaries = decryptPersonalOverviews(from: cacheData, vaultKey: vaultKey, userId: userId)
+  var summaries = decryptPersonalOverviews(from: cacheData, vaultKey: vaultKey, userId: userId)
+  if let cacheKey, let wrappedKeyStore {
+    summaries += decryptTeamOverviews(
+      from: cacheData, cacheKey: cacheKey, userId: userId, wrappedKeyStore: wrappedKeyStore)
+  }
   let passkeys = buildPasskeyIdentitySpecs(from: cacheData, vaultKey: vaultKey, userId: userId)
   await registrar.replace(with: summaries, passkeys: passkeys)
 }

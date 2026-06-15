@@ -18,6 +18,7 @@ final class MockRollbackFlagWriter: RollbackFlagWriter, @unchecked Sendable {
 final class MockWrappedKeyStore: WrappedKeyStore, @unchecked Sendable {
   var storedVaultKey: WrappedVaultKey?
   var teamKeys: [WrappedTeamKey] = []
+  var storedECDHPrivateKey: WrappedECDHPrivateKey?
 
   func saveVaultKey(_ wrapped: WrappedVaultKey) throws {
     storedVaultKey = wrapped
@@ -30,9 +31,18 @@ final class MockWrappedKeyStore: WrappedKeyStore, @unchecked Sendable {
   }
 
   func loadTeamKeys() throws -> [WrappedTeamKey] { teamKeys }
+  func clearTeamKeys() throws { teamKeys = [] }
+
+  func saveECDHPrivateKey(_ wrapped: WrappedECDHPrivateKey) throws {
+    storedECDHPrivateKey = wrapped
+  }
+
+  func loadECDHPrivateKey() throws -> WrappedECDHPrivateKey? { storedECDHPrivateKey }
+
   func clearAll() throws {
     storedVaultKey = nil
     teamKeys = []
+    storedECDHPrivateKey = nil
   }
 }
 
@@ -305,7 +315,9 @@ private func makeTeamCacheEntry(
       teamId: teamId, entryId: entryId, teamKeyVersion: teamKeyVersion
     )
     let itemKeyBytes = rawItemKey.withUnsafeBytes { Data($0) }
-    entryKey = rawItemKey
+    // Production decrypts the entry under deriveItemEncryptionKey(itemKey), NOT the
+    // raw ItemKey — mirror that so the fixture matches the resolver.
+    entryKey = TeamKeyCrypto.deriveItemEncryptionKey(itemKey: rawItemKey)
     encryptedItemKey = try encryptAESGCMEncoded(
       plaintext: itemKeyBytes, key: teamKey, aad: wrapAAD
     )
@@ -327,24 +339,20 @@ private func makeTeamCacheEntry(
   )
 }
 
-/// Wrap a team key under cacheKey and build a WrappedTeamKey (no AAD on team key wrapping).
+/// Wrap a team key under cacheKey with the localWrap AAD (kind:"team", userId, teamId),
+/// matching the host-side TeamEntryDecryptor.wrapTeamKey. userId defaults to the
+/// buildCacheFile default ("test-user-id") so the resolver's AAD reconstruction matches.
 private func wrapTeamKey(
   _ teamKey: SymmetricKey,
   teamId: String,
   teamKeyVersion: Int,
   cacheKey: SymmetricKey,
+  userId: String = "test-user-id",
   issuedAt: Date = Date()
 ) throws -> WrappedTeamKey {
-  let teamKeyData = teamKey.withUnsafeBytes { Data($0) }
-  let (cipher, iv, tag) = try encryptAESGCM(plaintext: teamKeyData, key: cacheKey)
-  return WrappedTeamKey(
-    teamId: teamId,
-    ciphertext: cipher,
-    iv: iv,
-    authTag: tag,
-    issuedAt: issuedAt,
-    teamKeyVersion: teamKeyVersion
-  )
+  try TeamEntryDecryptor.wrapTeamKey(
+    teamEncKey: teamKey, cacheKey: cacheKey, userId: userId,
+    teamId: teamId, teamKeyVersion: teamKeyVersion, issuedAt: issuedAt)
 }
 
 // MARK: - Tests
@@ -993,7 +1001,7 @@ final class CredentialResolverTests: XCTestCase {
     let teamId = "team-x"
     let teamKey = SymmetricKey(size: .bits256)
     // Team keys are wrapped under cacheKey (not vaultKey) in the corrected architecture.
-    let wrappedTeamKey = try wrapTeamKey(teamKey, teamId: teamId, teamKeyVersion: 1, cacheKey: cacheKey)
+    let wrappedTeamKey = try wrapTeamKey(teamKey, teamId: teamId, teamKeyVersion: 1, cacheKey: cacheKey, userId: "u-1")
 
     let summary = VaultEntrySummary(
       id: "te-0", title: "T", username: "u", urlHost: "y.com", teamId: teamId
@@ -1031,7 +1039,7 @@ final class CredentialResolverTests: XCTestCase {
 
     let teamId = "team-y"
     let teamKey = SymmetricKey(size: .bits256)
-    let wrappedTeamKey = try wrapTeamKey(teamKey, teamId: teamId, teamKeyVersion: 2, cacheKey: cacheKey)
+    let wrappedTeamKey = try wrapTeamKey(teamKey, teamId: teamId, teamKeyVersion: 2, cacheKey: cacheKey, userId: "u-1")
 
     let summary = VaultEntrySummary(
       id: "te-1", title: "T", username: "u", urlHost: "z.com", teamId: teamId
@@ -1069,7 +1077,7 @@ final class CredentialResolverTests: XCTestCase {
 
     let teamId = "team-z"
     let teamKey = SymmetricKey(size: .bits256)
-    let wrappedTeamKey = try wrapTeamKey(teamKey, teamId: teamId, teamKeyVersion: 1, cacheKey: cacheKey)
+    let wrappedTeamKey = try wrapTeamKey(teamKey, teamId: teamId, teamKeyVersion: 1, cacheKey: cacheKey, userId: "u-1")
 
     let summary = VaultEntrySummary(
       id: "te-missing", title: "T", username: "u", urlHost: "w.com", teamId: teamId
@@ -1125,7 +1133,7 @@ final class CredentialResolverTests: XCTestCase {
 
     let teamId = "team-w"
     let teamKey = SymmetricKey(size: .bits256)
-    let wrappedTeamKey = try wrapTeamKey(teamKey, teamId: teamId, teamKeyVersion: 1, cacheKey: cacheKey)
+    let wrappedTeamKey = try wrapTeamKey(teamKey, teamId: teamId, teamKeyVersion: 1, cacheKey: cacheKey, userId: "u-1")
 
     let summary = VaultEntrySummary(
       id: "te-wrong-aad", title: "T", username: "u", urlHost: "v.com", teamId: teamId
@@ -1290,6 +1298,77 @@ final class CredentialResolverTests: XCTestCase {
     let entries = try JSONDecoder().decode([CacheEntry].self, from: cache.entries)
     XCTAssertEqual(entries.map(\.id).sorted(), ["login-1", entryId].sorted())
     XCTAssertEqual(entries.first(where: { $0.id == entryId })?.entryType, "PASSKEY")
+  }
+
+  // MARK: - F3 regression: decryptEntryDetail enforces 15-min staleness on team keys
+
+  /// Regression for F3: previously decryptEntryDetail had NO staleness check on the
+  /// team key, so a revoked-and-stale team key could still fill credentials. The fix
+  /// adds the same staleness guard as resolveCandidates. This test will FAIL against
+  /// the old code (no guard → detail decrypts → no throw), and PASS with the fix.
+  func testDecryptEntryDetail_staleTeamKey_throwsEntryNotFound() async throws {
+    let keychain = MockKeychainAccessor()
+    let (bridgeKeyStore, blob) = try makeBridgeKeyBlob(keychain: keychain)
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+
+    let mockWKS = MockWrappedKeyStore()
+    try wrapAndSaveVaultKey(vaultKey: vaultKey, cacheKey: cacheKey, store: mockWKS)
+
+    // A stale team key: issuedAt is 16 minutes ago (past the 15-min window).
+    let teamId = "team-stale-fill"
+    let teamKey = SymmetricKey(size: .bits256)
+    let staleIssuedAt = Date().addingTimeInterval(-16 * 60)
+    let wrappedStale = try wrapTeamKey(
+      teamKey, teamId: teamId, teamKeyVersion: 1,
+      cacheKey: cacheKey, userId: "test-user-id", issuedAt: staleIssuedAt
+    )
+
+    let entryId = "team-entry-stale-fill"
+    let summary = VaultEntrySummary(
+      id: entryId, title: "Team Fill", username: "alice",
+      urlHost: "fill.example.com", teamId: teamId
+    )
+    let detail = VaultEntryDetail(
+      id: entryId, title: "Team Fill", username: "alice",
+      urlHost: "fill.example.com", teamId: teamId,
+      password: "secret123", url: "https://fill.example.com"
+    )
+    let entry = try makeTeamCacheEntry(
+      summary: summary, detail: detail, teamKey: teamKey,
+      teamId: teamId, teamKeyVersion: 1, itemKeyVersion: 0
+    )
+    try buildCacheFile(
+      at: cacheURL, entries: [entry], vaultKey: vaultKey,
+      hostInstallUUID: blob.hostInstallUUID, counter: blob.cacheVersionCounter,
+      userId: "test-user-id"
+    )
+    try mockWKS.saveTeamKeys([wrappedStale])
+
+    // Use injectable `now` set to a fixed time so the staleness check is deterministic.
+    // The fixed now is after the stale window (issuedAt was 16 min ago from real Date()).
+    let fixedNow = Date()
+    let resolver = CredentialResolver(
+      bridgeKeyStore: bridgeKeyStore,
+      wrappedKeyStore: mockWKS,
+      cacheURL: cacheURL,
+      now: { fixedNow }
+    )
+
+    // First prime the retained blob via resolveCandidates (expected to throw teamKeyStale).
+    do {
+      _ = try await resolver.resolveCandidates(for: [])
+    } catch CredentialResolver.Error.teamKeyStale {
+      // expected — primes the retained blob in the process
+    }
+
+    // decryptEntryDetail must also refuse the stale team key and throw entryNotFound.
+    do {
+      _ = try await resolver.decryptEntryDetail(entryId: entryId)
+      XCTFail("Expected entryNotFound for a stale team key in decryptEntryDetail (F3 regression)")
+    } catch CredentialResolver.Error.entryNotFound {
+      // expected: the staleness guard fires
+    }
   }
 
   /// Full round-trip (T4 spirit): real generated passkey → blob builder →

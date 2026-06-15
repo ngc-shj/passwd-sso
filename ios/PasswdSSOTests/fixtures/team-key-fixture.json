@@ -1,0 +1,48 @@
+{
+  "_comment": "Captured from extension/src/lib/crypto-team.ts via scripts/generate-team-key-fixture.ts. Do not hand-edit.",
+  "secretKeyHex": "6d7db94189161de9bf187fc3319bfbca64e2a8dedce95d04af1c816675437c61",
+  "encryptedEcdhPrivateKey": {
+    "ciphertext": "8cd3c55bdef4da4ccb7244f8b6a6e35de4a469da40dc0889c5b9aa96d36a3895a109d162d9491a299ba8be1de2a4c2809259c075ccc9bc8a7faad73db2971531a25cef67b6b2c78442423db4bb8c06ea2d2ad9bf25b0187349446afbfd8642ffb9a14216eb9ef8748c16e71a484830f2f73579585052bfcd1bf08de60e85293deb45708804e554a1ac67",
+    "iv": "3d8e1e29eb802a1b48743042",
+    "authTag": "208ad74b32c63da9acaca6ea1f913570"
+  },
+  "pkcs8PrivKeyHex": "308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b0201010420cbab82ca640a0f73d69913f548127bba3952bf821cf1bc9f5070b5cbd7de1ee8a144034200040dffada9b085558760062417026336e7ca6e9a2777a2e33822482fb14313238ad8ad72c3c748ec6d62ef9e6cf5c0b6f1f7896432df5ac8886c3f225d59da446a",
+  "ephemeralPublicKeyJwk": "{\"key_ops\":[],\"ext\":true,\"kty\":\"EC\",\"x\":\"hVWa0N08Pf_hKr61uyhI-gqCr7TsCooA8NhmVVXu464\",\"y\":\"zUL1SkuUSzKS40FNHtcifhb6URte1lvyPLq4JXN2IpI\",\"crv\":\"P-256\"}",
+  "hkdfSaltHex": "a00d9d3036012a3c8d4fb6351e445753709028f61634a3c42e1348f8f0ccaced",
+  "encryptedTeamKey": {
+    "ciphertext": "0e99ed127bce28d7a432c31b042bf67d0d49f337c0c2b266568ae909618c159f",
+    "iv": "9b627fd74b9f0b57d5516a1c",
+    "authTag": "0af1d0a8614e15d78074e913f2ca9749"
+  },
+  "teamId": "team-fixture-1",
+  "toUserId": "user-fixture-1",
+  "keyVersion": 1,
+  "wrapVersion": 1,
+  "rawTeamKeyHex": "84cd6fcbde7321a46010ec1ae9bbc5c48da70a44aec4a7e01eea59adfcee9c70",
+  "teamEncKeyHex": "a0edf4345c8f72ca5b8e57ef98ba203ff12dd7c9ebc896a4b5a2fe3be48dd39c",
+  "entryId": "00000000-0000-4000-8000-000000000001",
+  "encryptedOverview": {
+    "ciphertext": "a9a31b56f6999c035b4fe69aaf94d13ca8f86c927e484f74a32f1dda559c6a94044b7c8581418533874ceadb51832e1b52401f9ec643f86b0695dd3f2629515e3fa9c516023a8f63a916375acc9a128ee24c",
+    "iv": "3e830c5b051cd61716aff6dd",
+    "authTag": "c23eac81fe4ec471cb9deebfa6ccfee1"
+  },
+  "overviewPlaintext": "{\"title\":\"Team Login\",\"username\":\"alice@example.com\",\"urlHost\":\"team.example.com\"}",
+  "teamKeyWrapAADHex": "4f4b0104000e7465616d2d666978747572652d31000e757365722d666978747572652d31000131000131",
+  "overviewAADHex": "4f560104000e7465616d2d666978747572652d31002430303030303030302d303030302d343030302d383030302d30303030303030303030303100086f76657276696577000130",
+  "memberPublicKeyRawHex": "040dffada9b085558760062417026336e7ca6e9a2777a2e33822482fb14313238ad8ad72c3c748ec6d62ef9e6cf5c0b6f1f7896432df5ac8886c3f225d59da446a",
+  "teamKeyVersion": 1,
+  "entryIdV1": "00000000-0000-4000-8000-000000000002",
+  "encryptedItemKey": {
+    "ciphertext": "f350060cbe18651de2dfea5736ba1e84325056c0cf3d03cad26d8f941fa59c99",
+    "iv": "bdb424760c7222f6bbfe2a7d",
+    "authTag": "bfa064d3a98217c24ec361a049df025a"
+  },
+  "itemKeyHex": "ed83464ac61093ed668a46a8076573858f2e1cf6b0fb52877360176a0aff53ba",
+  "itemEncKeyHex": "d9009e40cc335b67bb0a59b1c7b22512cd230bcf9e5d971eb5170b2fcdafb605",
+  "encryptedOverviewV1": {
+    "ciphertext": "b7f4d456e5f3c96eb51519957c1b8d14d818f1d3e5508a2c314e534140c69d5ea39521a3ca63e361d432c87eac33b143493eb7d2fd12734401e7a4e17474c77a1c646e7099b49cb279ea14139198e7acd9",
+    "iv": "1c0facb464ec43af7ab24028",
+    "authTag": "6c5e041a28d1b9ad64af76c42d3a1dde"
+  },
+  "overviewPlaintextV1": "{\"title\":\"Team Login v1\",\"username\":\"bob@example.com\",\"urlHost\":\"v1.example.com\"}"
+}
