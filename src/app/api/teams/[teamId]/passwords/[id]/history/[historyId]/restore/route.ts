@@ -88,7 +88,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     });
     if (all.length > 20) {
       await tx.teamPasswordEntryHistory.deleteMany({
-        where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
+        where: { entryId: id, id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
       });
     }
 

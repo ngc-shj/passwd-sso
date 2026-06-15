@@ -559,7 +559,7 @@ export async function updateTeamPassword(
       });
       if (all.length > 20) {
         await tx.teamPasswordEntryHistory.deleteMany({
-          where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
+          where: { entryId: passwordId, id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
         });
       }
     }

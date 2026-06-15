@@ -643,7 +643,7 @@ describe("PUT /api/passwords/[id]", () => {
     );
 
     expect(txMock.passwordEntryHistory.deleteMany).toHaveBeenCalledWith({
-      where: { id: { in: ["hist-0"] } },
+      where: { entryId: PW_ID, id: { in: ["hist-0"] } },
     });
   });
 

@@ -289,7 +289,7 @@ describe("PUT /api/v1/passwords/[id]", () => {
     );
 
     expect(mockHistoryDeleteMany).toHaveBeenCalledWith({
-      where: { id: { in: ["hist-0"] } },
+      where: { entryId: PW_ID, id: { in: ["hist-0"] } },
     });
   });
 
