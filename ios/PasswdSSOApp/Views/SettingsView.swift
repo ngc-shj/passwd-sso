@@ -85,6 +85,12 @@ struct SettingsView: View {
     )
   }
 
+  /// Current server URL — surfaced here because launch restoration skips the
+  /// setup screen, so this is the only place a signed-in user can confirm it.
+  private var serverURLDisplay: String {
+    loadServerConfig()?.baseURL.absoluteString ?? String(localized: "Not configured")
+  }
+
   var body: some View {
     NavigationStack {
       Form {
@@ -133,6 +139,18 @@ struct SettingsView: View {
               Text(option.label).tag(option)
             }
           }
+        }
+
+        Section {
+          LabeledContent("URL") {
+            Text(serverURLDisplay)
+              .foregroundStyle(.secondary)
+              .textSelection(.enabled)
+          }
+        } header: {
+          Text("Server")
+        } footer: {
+          Text("To use a different server, sign out and set up again.")
         }
       }
       .navigationTitle("Settings")
