@@ -217,6 +217,6 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]",
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.success).toBe(true);
-    expect(mockAttachmentDelete).toHaveBeenCalledWith({ where: { id: "a1" } });
+    expect(mockAttachmentDelete).toHaveBeenCalledWith({ where: { id: "a1", teamPasswordEntryId: "e1" } });
   });
 });
