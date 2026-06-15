@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.4.58](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.57...passwd-sso-v0.4.58) (2026-06-15)
+
+
+### Features
+
+* iOS passkey registration — AutoFill provider, DPoP-bound upload, vault sync UI ([#560](https://github.com/ngc-shj/passwd-sso/issues/560)) ([64d1065](https://github.com/ngc-shj/passwd-sso/commit/64d10656ed4f0dac1f02090b2692074fe2d4a0cf))
+* **ios:** auto-copy TOTP to clipboard after AutoFill login (opt-in) ([#555](https://github.com/ngc-shj/passwd-sso/issues/555)) ([82b29dc](https://github.com/ngc-shj/passwd-sso/commit/82b29dcf04c1bc4a4b16495edab7eb7d926a09af))
+* **ios:** category landing grid for the vault ([#559](https://github.com/ngc-shj/passwd-sso/issues/559)) ([6a4d87a](https://github.com/ngc-shj/passwd-sso/commit/6a4d87a4cc5c4fe6e69c6c634df8052bc8d17a00))
+* **ios:** dedicated quota-exceeded message on entry create (S10-A) ([#564](https://github.com/ngc-shj/passwd-sso/issues/564)) ([d312675](https://github.com/ngc-shj/passwd-sso/commit/d3126750b82710b0d8707842d8874dd42384d943))
+* **ios:** team vault support — AutoFill QuickType, fill, and in-app team vault ([#565](https://github.com/ngc-shj/passwd-sso/issues/565)) ([3b7be11](https://github.com/ngc-shj/passwd-sso/commit/3b7be1126981517558cdba777960df5856993e11))
+
+
+### Bug Fixes
+
+* **deps:** pin esbuild &gt;=0.28.1 in root and cli to close RCE/file-read CVEs ([#566](https://github.com/ngc-shj/passwd-sso/issues/566)) ([e4f1270](https://github.com/ngc-shj/passwd-sso/commit/e4f12705fa245dab0f6890f98561ca645c8a95eb))
+* **ios:** sync MARKETING_VERSION to released 0.4.57 ([#556](https://github.com/ngc-shj/passwd-sso/issues/556)) ([ba64d20](https://github.com/ngc-shj/passwd-sso/commit/ba64d20362a4e704e0544ed78974797508a9310c))
+
+
+### Code Refactoring
+
+* replace hardcoded values with shared constants ([#561](https://github.com/ngc-shj/passwd-sso/issues/561)) ([ea97e0f](https://github.com/ngc-shj/passwd-sso/commit/ea97e0f0c8f1d2db8a90a6c0c8f7d5b8f2d66c02))
+
 ## [0.4.57](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.56...passwd-sso-v0.4.57) (2026-06-12)
 
 
