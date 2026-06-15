@@ -652,6 +652,35 @@ describe("validateMcpToken", () => {
     }
   });
 
+  // Defensive tenant-boundary check: token.tenantId must match its parent
+  // client's own tenantId. A corrupted row must fail closed.
+  it("rejects a token whose tenantId differs from its client's tenantId", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    (prisma as Record<string, unknown>).mcpAccessToken = {
+      findUnique: vi.fn().mockResolvedValue({
+        id: "token-id",
+        tenantId: "tenant-A",
+        clientId: "c1",
+        mcpClient: { clientId: "mcpc_abc", isActive: true, tenantId: "tenant-OTHER" },
+        userId: "u1",
+        serviceAccountId: null,
+        scope: "credentials:list",
+        expiresAt: new Date(Date.now() + 3600_000),
+        revokedAt: null,
+        lastUsedAt: null,
+      }),
+      update: vi.fn(),
+    };
+
+    const { validateMcpToken } = await import("./oauth-server");
+    const result = await validateMcpToken("mcp_valid_token");
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("invalid_token");
+    }
+  });
+
   // ── C13: deactivated-user rejection ───────────────────────
 
   it("C13(a): deactivated-in-token-tenant ⇒ invalid_token", async () => {

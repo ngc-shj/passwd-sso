@@ -379,6 +379,34 @@ describe("POST /api/tenant/access-requests", () => {
     expect(json.id).toBe("req-sa-1");
   });
 
+  it("returns SA_NOT_FOUND when the SA's tenantId differs from the token's tenantId", async () => {
+    // Defensive tenant-boundary check, symmetric with the admin path: a corrupted
+    // row where the SA belongs to another tenant must fail closed.
+    mockAuthOrToken.mockResolvedValue({
+      type: "service_account",
+      serviceAccountId: SA_ID,
+      tenantId: "tenant-1",
+      tokenId: "tok-1",
+      scopes: ["access-request:create"],
+    });
+    mockServiceAccountFindUnique.mockResolvedValue({
+      isActive: true,
+      createdById: DEFAULT_SESSION.user.id,
+      tenantId: "tenant-OTHER",
+    });
+
+    const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      headers: { Authorization: "Bearer sa_sometoken" },
+      body: { requestedScope: ["passwords:read"] },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(404);
+    expect(json.error).toBe("SA_NOT_FOUND");
+    expect(mockAccessRequestCreate).not.toHaveBeenCalled();
+  });
+
   it("returns 403 when SA token request is from outside tenant IP range", async () => {
     mockAuthOrToken.mockResolvedValue({
       type: "service_account",

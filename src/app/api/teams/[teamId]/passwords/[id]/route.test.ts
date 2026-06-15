@@ -715,4 +715,28 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]", () => {
       where: { id: PW_ID, teamId: TEAM_ID },
     });
   });
+
+  it("returns 404 when the scoped permanent delete matches no row (concurrent delete / wrong team)", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ id: PW_ID, teamId: TEAM_ID });
+    mockPrismaTeamPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
+        searchParams: { permanent: "true" },
+      }),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 when the scoped soft delete matches no row", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ id: PW_ID, teamId: TEAM_ID });
+    mockPrismaTeamPasswordEntry.updateMany.mockResolvedValue({ count: 0 });
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+    expect(res.status).toBe(404);
+  });
 });
