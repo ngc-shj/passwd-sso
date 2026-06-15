@@ -95,7 +95,7 @@ async function handlePUT(
   try {
     tag = await withUserTenantRls(session.user.id, async () =>
       prisma.tag.update({
-        where: { id },
+        where: { id, userId: session.user.id },
         data: updateData,
       }),
     );
@@ -142,7 +142,7 @@ async function handleDELETE(
   }
 
   await withUserTenantRls(session.user.id, async () =>
-    prisma.tag.delete({ where: { id } }),
+    prisma.tag.delete({ where: { id, userId: session.user.id } }),
   );
 
   return NextResponse.json({ success: true });

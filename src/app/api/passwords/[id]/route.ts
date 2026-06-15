@@ -225,7 +225,7 @@ async function handlePUT(
             });
           }
           return tx.passwordEntry.update({
-            where: { id },
+            where: { id, userId },
             data: updateData,
             include: { tags: { select: { id: true } } },
           });
@@ -233,7 +233,7 @@ async function handlePUT(
       )
     : withUserTenantRls(userId, async () =>
         prisma.passwordEntry.update({
-          where: { id },
+          where: { id, userId },
           data: updateData,
           include: { tags: { select: { id: true } } },
         }),
@@ -314,14 +314,14 @@ async function handleDELETE(
         kind: "personal",
         entryIds: [id],
       });
-      await prisma.passwordEntry.delete({ where: { id } });
+      await prisma.passwordEntry.delete({ where: { id, userId } });
       return attachmentRefs;
     });
     await deleteAttachmentBlobs(refs);
   } else {
     await withUserTenantRls(userId, async () =>
       prisma.passwordEntry.update({
-        where: { id },
+        where: { id, userId },
         data: { deletedAt: new Date() },
       }),
     );

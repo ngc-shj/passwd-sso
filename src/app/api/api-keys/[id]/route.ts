@@ -41,7 +41,7 @@ async function handleDELETE(
 
   await withUserTenantRls(userId, async () =>
     prisma.apiKey.update({
-      where: { id },
+      where: { id, userId },
       data: { revokedAt: new Date() },
     }),
   );

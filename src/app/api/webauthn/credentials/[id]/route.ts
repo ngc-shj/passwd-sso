@@ -51,7 +51,7 @@ async function handleDELETE(
 
   await withUserTenantRls(userId, async () =>
     prisma.webAuthnCredential.delete({
-      where: { id },
+      where: { id, userId },
     }),
   );
 
@@ -95,7 +95,7 @@ async function handlePATCH(
 
   const updated = await withUserTenantRls(userId, async () =>
     prisma.webAuthnCredential.update({
-      where: { id },
+      where: { id, userId },
       data: { nickname: data.nickname },
       select: {
         id: true,

@@ -188,7 +188,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       });
 
       await tx.accessRequest.update({
-        where: { id: requestId },
+        where: { id: requestId, tenantId: actor.tenantId },
         data: { grantedTokenId: token.id, grantedTokenTtlSec: ttlSec },
       });
 

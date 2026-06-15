@@ -47,7 +47,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
 
   await withUserTenantRls(session.user.id, async () =>
     prisma.passwordShare.update({
-      where: { id },
+      where: { id, createdById: session.user.id },
       data: { revokedAt: new Date() },
     }),
   );

@@ -197,7 +197,7 @@ async function handlePOST(
   try {
     await withTenantRls(prisma, auth.tenantId, async (tx) =>
       tx.masterKeyRotation.update({
-        where: { id: rotationId },
+        where: { id: rotationId, tenantId: auth.tenantId },
         data: { revokedShares },
       }),
     );

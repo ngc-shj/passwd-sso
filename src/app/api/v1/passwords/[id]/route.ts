@@ -245,7 +245,7 @@ async function handlePUT(
       }
     }
     return tx.passwordEntry.update({
-      where: { id },
+      where: { id, userId },
       data: updateData,
       include: { tags: { select: { id: true } } },
     });
@@ -320,7 +320,7 @@ async function handleDELETE(
 
   await withTenantRls(prisma, tenantId, async (tx) =>
     tx.passwordEntry.update({
-      where: { id },
+      where: { id, userId },
       data: { deletedAt: new Date() },
     }),
   );

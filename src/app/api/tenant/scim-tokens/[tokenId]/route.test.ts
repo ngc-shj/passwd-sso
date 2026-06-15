@@ -148,7 +148,7 @@ describe("DELETE /api/tenant/scim-tokens/[tokenId]", () => {
     );
     expect(res.status).toBe(200);
     expect(mockPrismaScimToken.update).toHaveBeenCalledWith({
-      where: { id: "tok-1" },
+      where: { id: "tok-1", tenantId: TENANT_ID },
       data: { revokedAt: expect.any(Date) },
     });
     expect(mockLogAudit).toHaveBeenCalledWith(

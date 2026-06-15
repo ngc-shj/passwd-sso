@@ -83,7 +83,7 @@ async function writeSyncError(
   try {
     await withTenantRls(prisma, tenantId, (tx) =>
       tx.directorySyncConfig.update({
-        where: { id: configId },
+        where: { id: configId, tenantId },
         data: {
           status: "ERROR",
           lastSyncError: sanitizeSyncError(error),
@@ -386,7 +386,7 @@ export async function runDirectorySync(
       // Reset config status
       await withTenantRls(prisma, tenantId, (tx) =>
         tx.directorySyncConfig.update({
-          where: { id: configId },
+          where: { id: configId, tenantId },
           data: {
             status: "ERROR",
             lastSyncError: sanitizeSyncError(msg),

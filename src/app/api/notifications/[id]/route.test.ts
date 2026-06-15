@@ -102,7 +102,7 @@ describe("PATCH /api/notifications/[id]", () => {
     expect(json.isRead).toBe(true);
 
     expect(mockPrismaNotification.update).toHaveBeenCalledWith({
-      where: { id: "n1" },
+      where: { id: "n1", userId: "user-1" },
       data: { isRead: true },
     });
   });
@@ -155,7 +155,7 @@ describe("DELETE /api/notifications/[id]", () => {
     expect(json.success).toBe(true);
 
     expect(mockPrismaNotification.delete).toHaveBeenCalledWith({
-      where: { id: "n1" },
+      where: { id: "n1", userId: "user-1" },
     });
   });
 });

@@ -101,7 +101,7 @@ async function handlePUT(
   try {
     updated = await withTenantRls(prisma, actor.tenantId, async (tx) =>
       tx.mcpClient.update({
-        where: { id },
+        where: { id, tenantId: actor.tenantId },
         data: updateData,
         select: { id: true, clientId: true, name: true, redirectUris: true, allowedScopes: true, isActive: true, isDcr: true, updatedAt: true },
       }),

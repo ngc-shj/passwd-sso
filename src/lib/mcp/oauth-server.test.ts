@@ -136,7 +136,7 @@ describe("exchangeCodeForToken", () => {
         id: "code-id",
         usedAt: new Date(),
         expiresAt: new Date(Date.now() + 60000),
-        mcpClient: { clientId: "mcpc_test", clientSecretHash: "hashed:secret", isActive: true },
+        mcpClient: { clientId: "mcpc_test", clientSecretHash: "hashed:secret", isActive: true, tenantId: "tenant-uuid" },
         clientId: "client-uuid",
         tenantId: "tenant-uuid",
         userId: "user-uuid",
@@ -167,7 +167,7 @@ describe("exchangeCodeForToken", () => {
         id: "code-id",
         usedAt: null,
         expiresAt: new Date(Date.now() - 1000), // expired
-        mcpClient: { clientId: "mcpc_test", clientSecretHash: "hashed:secret", isActive: true },
+        mcpClient: { clientId: "mcpc_test", clientSecretHash: "hashed:secret", isActive: true, tenantId: "tenant-uuid" },
         clientId: "client-uuid",
         tenantId: "tenant-uuid",
         userId: "user-uuid",
@@ -198,7 +198,7 @@ describe("exchangeCodeForToken", () => {
         id: "code-id",
         usedAt: null,
         expiresAt: new Date(Date.now() + 60000),
-        mcpClient: { clientId: "mcpc_other", clientSecretHash: "hashed:secret", isActive: true },
+        mcpClient: { clientId: "mcpc_other", clientSecretHash: "hashed:secret", isActive: true, tenantId: "tenant-uuid" },
         clientId: "client-uuid",
         tenantId: "tenant-uuid",
         userId: "user-uuid",
@@ -358,7 +358,7 @@ describe("exchangeCodeForToken", () => {
     const challenge = computeS256Challenge(verifier);
 
     const { prisma } = await import("@/lib/prisma");
-    const mockUpdate = vi.fn().mockResolvedValue({});
+    const mockConsume = vi.fn().mockResolvedValue({ count: 1 });
     const mockTokenCreate = vi.fn().mockResolvedValue({ id: "token-id" });
     (prisma as Record<string, unknown>).mcpAuthorizationCode = {
       findUnique: vi.fn().mockResolvedValue({
@@ -375,7 +375,7 @@ describe("exchangeCodeForToken", () => {
         codeChallengeMethod: "S256",
         scope: "credentials:read",
       }),
-      update: mockUpdate,
+      updateMany: mockConsume,
     };
     (prisma as Record<string, unknown>).mcpAccessToken = { create: mockTokenCreate };
 
@@ -394,8 +394,53 @@ describe("exchangeCodeForToken", () => {
       expect(result.data.expiresIn).toBeGreaterThan(0);
       expect(result.data.scope).toBe("credentials:read");
     }
-    expect(mockUpdate).toHaveBeenCalledOnce();
+    expect(mockConsume).toHaveBeenCalledOnce();
+    expect(mockConsume).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "code-id", usedAt: null } }),
+    );
     expect(mockTokenCreate).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a second concurrent exchange of the same code (single-use CAS)", async () => {
+    const verifier = "correct-verifier-string-for-test";
+    const challenge = computeS256Challenge(verifier);
+
+    const { prisma } = await import("@/lib/prisma");
+    // Simulate the CAS loser: findUnique still sees usedAt === null (no row lock),
+    // but the conditional consume matches 0 rows because the winner already set usedAt.
+    const mockConsume = vi.fn().mockResolvedValue({ count: 0 });
+    const mockTokenCreate = vi.fn().mockResolvedValue({ id: "token-id" });
+    (prisma as Record<string, unknown>).mcpAuthorizationCode = {
+      findUnique: vi.fn().mockResolvedValue({
+        id: "code-id",
+        usedAt: null,
+        expiresAt: new Date(Date.now() + 60000),
+        mcpClient: { clientId: "mcpc_test", clientSecretHash: "hashed:secret", isActive: true, tenantId: "tenant-uuid" },
+        clientId: "client-uuid",
+        tenantId: "tenant-uuid",
+        userId: "user-uuid",
+        serviceAccountId: null,
+        redirectUri: "https://example.com/callback",
+        codeChallenge: challenge,
+        codeChallengeMethod: "S256",
+        scope: "credentials:read",
+      }),
+      updateMany: mockConsume,
+    };
+    (prisma as Record<string, unknown>).mcpAccessToken = { create: mockTokenCreate };
+
+    const result = await exchangeCodeForToken({
+      code: "valid-code",
+      clientId: "mcpc_test",
+      clientSecretHash: "hashed:secret",
+      redirectUri: "https://example.com/callback",
+      codeVerifier: verifier,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("invalid_grant");
+    // No token may be minted for the loser.
+    expect(mockTokenCreate).not.toHaveBeenCalled();
   });
 });
 
@@ -475,7 +520,7 @@ describe("validateMcpToken", () => {
         id: "token-id",
         tenantId: "tenant-uuid",
         clientId: "client-uuid",
-        mcpClient: { clientId: "mcpc_testclient123", isActive: true },
+        mcpClient: { clientId: "mcpc_testclient123", isActive: true, tenantId: "tenant-uuid" },
         userId: "user-uuid",
         serviceAccountId: null,
         scope: "credentials:read,credentials:list",
@@ -505,7 +550,7 @@ describe("validateMcpToken", () => {
         id: "token-id",
         tenantId: "t1",
         clientId: "c1",
-        mcpClient: { clientId: "mcpc_abc", isActive: true },
+        mcpClient: { clientId: "mcpc_abc", isActive: true, tenantId: "t1" },
         userId: "u1",
         serviceAccountId: null,
         scope: "credentials:list",
@@ -533,7 +578,7 @@ describe("validateMcpToken", () => {
         id: "token-id",
         tenantId: "t1",
         clientId: "c1",
-        mcpClient: { clientId: "mcpc_abc", isActive: true },
+        mcpClient: { clientId: "mcpc_abc", isActive: true, tenantId: "t1" },
         userId: "u1",
         serviceAccountId: null,
         scope: "credentials:list",
@@ -561,7 +606,7 @@ describe("validateMcpToken", () => {
         id: "token-id",
         tenantId: "t1",
         clientId: "c1",
-        mcpClient: { clientId: "mcpc_abc", isActive: true },
+        mcpClient: { clientId: "mcpc_abc", isActive: true, tenantId: "t1" },
         userId: "u1",
         serviceAccountId: null,
         scope: "credentials:list",
@@ -587,7 +632,7 @@ describe("validateMcpToken", () => {
         id: "token-id",
         tenantId: "t1",
         clientId: "c1",
-        mcpClient: { clientId: "mcpc_abc", isActive: false }, // deactivated
+        mcpClient: { clientId: "mcpc_abc", isActive: false, tenantId: "t1" }, // deactivated
         userId: "u1",
         serviceAccountId: null,
         scope: "credentials:list",
@@ -616,7 +661,7 @@ describe("validateMcpToken", () => {
         id: "token-id",
         tenantId: "tenant-uuid",
         clientId: "client-uuid",
-        mcpClient: { clientId: "mcpc_abc", isActive: true },
+        mcpClient: { clientId: "mcpc_abc", isActive: true, tenantId: "tenant-uuid" },
         userId: "user-uuid",
         serviceAccountId: null,
         scope: "credentials:list",
@@ -644,7 +689,7 @@ describe("validateMcpToken", () => {
         id: "token-id",
         tenantId: "tenant-A",
         clientId: "client-uuid",
-        mcpClient: { clientId: "mcpc_abc", isActive: true },
+        mcpClient: { clientId: "mcpc_abc", isActive: true, tenantId: "tenant-A" },
         userId: "user-uuid",
         serviceAccountId: null,
         scope: "credentials:list",
@@ -677,7 +722,7 @@ describe("validateMcpToken", () => {
         id: "token-id",
         tenantId: "tenant-uuid",
         clientId: "client-uuid",
-        mcpClient: { clientId: "mcpc_abc", isActive: true },
+        mcpClient: { clientId: "mcpc_abc", isActive: true, tenantId: "tenant-uuid" },
         userId: "user-uuid",
         serviceAccountId: null,
         scope: "credentials:list",
@@ -716,7 +761,7 @@ describe("validateMcpToken", () => {
       familyId: "fam-uuid",
       accessTokenId: "at-id",
       scope: "credentials:list",
-      mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true },
+      mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: "tenant-uuid" },
     };
     (prisma as Record<string, unknown>).mcpRefreshToken = {
       findUnique: vi.fn().mockResolvedValue(baseRt),
@@ -755,7 +800,7 @@ describe("validateMcpToken", () => {
       familyId: "fam-uuid",
       accessTokenId: "at-id",
       scope: "credentials:list",
-      mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true },
+      mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: "tenant-uuid" },
     };
     (prisma as Record<string, unknown>).mcpRefreshToken = {
       findUnique: vi.fn().mockResolvedValue(baseRt),
@@ -794,7 +839,7 @@ describe("validateMcpToken", () => {
       familyId: "fam-uuid",
       accessTokenId: "at-id",
       scope: "credentials:list",
-      mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true },
+      mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: "tenant-uuid" },
     };
     (prisma as Record<string, unknown>).mcpRefreshToken = {
       findUnique: vi.fn().mockResolvedValue(baseRt),
@@ -827,7 +872,7 @@ describe("validateMcpToken", () => {
         id: "token-id",
         tenantId: "tenant-uuid",
         clientId: "client-uuid",
-        mcpClient: { clientId: "mcpc_abc", isActive: true },
+        mcpClient: { clientId: "mcpc_abc", isActive: true, tenantId: "tenant-uuid" },
         userId: null,
         serviceAccountId: "sa-uuid",
         scope: "credentials:list",

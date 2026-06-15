@@ -109,7 +109,7 @@ async function handleDELETE(req: NextRequest) {
 
   await withUserTenantRls(result.data.userId, async () =>
     prisma.extensionToken.update({
-      where: { id: result.data.tokenId },
+      where: { id: result.data.tokenId, userId: result.data.userId },
       data: { revokedAt: new Date() },
     }),
   );

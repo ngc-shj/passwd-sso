@@ -50,7 +50,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
 
   await withTenantRls(prisma, actor.tenantId, async (tx) =>
     tx.scimToken.update({
-      where: { id: tokenId },
+      where: { id: tokenId, tenantId: actor.tenantId },
       data: { revokedAt: new Date() },
     }),
   );

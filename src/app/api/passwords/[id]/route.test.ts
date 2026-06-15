@@ -936,7 +936,7 @@ describe("DELETE /api/passwords/[id]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
-    expect(mockPrismaPasswordEntry.delete).toHaveBeenCalledWith({ where: { id: PW_ID } });
+    expect(mockPrismaPasswordEntry.delete).toHaveBeenCalledWith({ where: { id: PW_ID, userId: "test-user-id" } });
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "ENTRY_PERMANENT_DELETE",

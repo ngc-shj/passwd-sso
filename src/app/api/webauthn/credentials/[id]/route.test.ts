@@ -119,7 +119,7 @@ describe("DELETE /api/webauthn/credentials/[id]", () => {
     expect(status).toBe(200);
     expect(json.success).toBe(true);
     expect(mockPrismaDelete).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "cred-1" } }),
+      expect.objectContaining({ where: { id: "cred-1", userId: "user-1" } }),
     );
   });
 
@@ -205,7 +205,7 @@ describe("PATCH /api/webauthn/credentials/[id]", () => {
     expect(json.nickname).toBe("My YubiKey");
     expect(mockPrismaUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "cred-1" },
+        where: { id: "cred-1", userId: "user-1" },
         data: { nickname: "My YubiKey" },
       }),
     );

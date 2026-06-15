@@ -124,7 +124,7 @@ describe("DELETE /api/share-links/[id]", () => {
     expect(json.ok).toBe(true);
     expect(mockPrismaPasswordShare.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: SHARE_ID },
+        where: { id: SHARE_ID, createdById: "user-1" },
         data: expect.objectContaining({ revokedAt: expect.any(Date) }),
       }),
     );

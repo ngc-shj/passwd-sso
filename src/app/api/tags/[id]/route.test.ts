@@ -202,6 +202,6 @@ describe("DELETE /api/tags/[id]", () => {
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
-    expect(mockPrismaTag.delete).toHaveBeenCalledWith({ where: { id: TAG_ID } });
+    expect(mockPrismaTag.delete).toHaveBeenCalledWith({ where: { id: TAG_ID, userId: "test-user-id" } });
   });
 });

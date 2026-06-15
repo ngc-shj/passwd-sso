@@ -524,7 +524,7 @@ export async function refreshIosToken(
   const nowDate = new Date(now);
   await withUserTenantRls(oldRow.userId, async () =>
     prisma.extensionToken.updateMany({
-      where: { familyId: oldRow.familyId, revokedAt: null },
+      where: { familyId: oldRow.familyId, userId: oldRow.userId, revokedAt: null },
       data: { revokedAt: nowDate },
     }),
   );

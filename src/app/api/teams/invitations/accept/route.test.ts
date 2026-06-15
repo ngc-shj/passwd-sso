@@ -6,6 +6,7 @@ const { mockAuth, mockPrismaTeamInvitation, mockPrismaTeamMember, mockPrismaUser
   mockPrismaTeamInvitation: {
     findUnique: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
   },
   mockPrismaTeamMember: {
     findUnique: vi.fn(),
@@ -60,7 +61,18 @@ describe("POST /api/teams/invitations/accept", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id", email: "user@test.com" } });
-    mockTransaction.mockResolvedValue([{}, {}]);
+    mockPrismaTeamInvitation.updateMany.mockResolvedValue({ count: 1 });
+    // The accept path runs prisma.$transaction(async (tx) => …); execute the
+    // callback with a tx whose invitation CAS wins by default so the real
+    // claim → upsert logic is exercised (not bypassed).
+    mockTransaction.mockImplementation(async (arg: unknown) =>
+      typeof arg === "function"
+        ? (arg as (tx: unknown) => unknown)({
+            teamInvitation: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+            teamMember: { upsert: vi.fn().mockResolvedValue({}) },
+          })
+        : [{}, {}],
+    );
     mockRateLimiter.check.mockResolvedValue({ allowed: true });
   });
 
@@ -181,6 +193,28 @@ describe("POST /api/teams/invitations/accept", () => {
     expect(json.role).toBe(TEAM_ROLE.MEMBER);
     expect(json.team.name).toBe("My Team");
     expect(mockTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 410 when the accept CAS loses a concurrent race", async () => {
+    mockPrismaTeamInvitation.findUnique.mockResolvedValue(validInvitation);
+    mockPrismaTeamMember.findUnique.mockResolvedValue(null);
+    mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
+    // Status+expiry CAS matches 0 rows: another accept won concurrently (or the
+    // invitation expired between the pre-check and the write).
+    const upsert = vi.fn();
+    mockTransaction.mockImplementation(async (arg: unknown) =>
+      (arg as (tx: unknown) => unknown)({
+        teamInvitation: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+        teamMember: { upsert },
+      }),
+    );
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
+      body: { token: "valid-token" },
+    }));
+    expect(res.status).toBe(410);
+    // Membership must NOT be created when the claim is lost.
+    expect(upsert).not.toHaveBeenCalled();
   });
 
   it("returns needsKeyDistribution for team accept", async () => {

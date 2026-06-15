@@ -93,7 +93,7 @@ async function handlePOST(
 
     // Restore history version
     await tx.passwordEntry.update({
-      where: { id },
+      where: { id, userId: session.user.id },
       data: {
         encryptedBlob: history.encryptedBlob,
         blobIv: history.blobIv,

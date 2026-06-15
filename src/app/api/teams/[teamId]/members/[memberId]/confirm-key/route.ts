@@ -123,7 +123,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       });
 
       await tx.teamMember.update({
-        where: { id: memberId },
+        where: { id: memberId, teamId },
         data: { keyDistributed: true },
       });
 

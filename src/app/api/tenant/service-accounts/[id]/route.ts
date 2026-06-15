@@ -105,7 +105,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   try {
     sa = await withTenantRls(prisma, actor.tenantId, async (tx) =>
       tx.serviceAccount.update({
-        where: { id },
+        where: { id, tenantId: actor.tenantId },
         data: {
           ...(result.data.name !== undefined && { name: result.data.name }),
           ...(result.data.description !== undefined && { description: result.data.description }),
@@ -178,7 +178,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   // Hard-delete: cascade removes tokens and access requests automatically
   await withTenantRls(prisma, actor.tenantId, async (tx) =>
     tx.serviceAccount.delete({
-      where: { id },
+      where: { id, tenantId: actor.tenantId },
     }),
   );
 

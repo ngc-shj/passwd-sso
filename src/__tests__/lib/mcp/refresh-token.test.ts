@@ -114,6 +114,7 @@ describe("exchangeRefreshToken", () => {
     clientId: "mcpc_testclient",
     clientSecretHash: "hashed:correct-secret",
     isActive: true,
+    tenantId: "tenant-uuid-123",
   };
 
   const VALID_RT = {

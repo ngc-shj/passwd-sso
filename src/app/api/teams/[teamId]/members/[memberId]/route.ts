@@ -85,11 +85,11 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     const [, updated] = await withTeamTenantRls(teamId, async () =>
       prisma.$transaction([
         prisma.teamMember.update({
-          where: { id: actorMembership.id },
+          where: { id: actorMembership.id, teamId },
           data: { role: TEAM_ROLE.ADMIN },
         }),
         prisma.teamMember.update({
-          where: { id: memberId },
+          where: { id: memberId, teamId },
           data: { role: TEAM_ROLE.OWNER },
           select: {
             id: true,
@@ -127,7 +127,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 
   const updated = await withTeamTenantRls(teamId, async () =>
     prisma.teamMember.update({
-      where: { id: memberId },
+      where: { id: memberId, teamId },
       data: { role: result.data.role },
       select: {
         id: true,
@@ -195,7 +195,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   await withTeamTenantRls(teamId, async () =>
     prisma.$transaction([
       prisma.teamMemberKey.deleteMany({ where: { teamId: teamId, userId: target.userId } }),
-      prisma.teamMember.delete({ where: { id: memberId } }),
+      prisma.teamMember.delete({ where: { id: memberId, teamId } }),
     ]),
   );
 
