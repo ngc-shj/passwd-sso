@@ -159,6 +159,7 @@ struct RootView: View {
   private func makeSignInView(config: ServerConfig, coordinator: AuthCoordinator) -> some View {
     SignInView(
       coordinator: coordinator,
+      serverURL: config.baseURL,
       onSignedIn: { _ in
         Task { @MainActor in
           let apiClient = await buildRealAPIClient(

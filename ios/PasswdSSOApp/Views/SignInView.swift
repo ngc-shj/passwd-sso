@@ -30,6 +30,9 @@ final class WindowProvider: NSObject, ASWebAuthenticationPresentationContextProv
 
 struct SignInView: View {
   let coordinator: AuthCoordinator
+  /// The server the OAuth flow will target — shown so the user can confirm it
+  /// before authenticating (the URL setup screen is skipped on a known server).
+  let serverURL: URL
   let onSignedIn: (TokenPair) -> Void
 
   @State private var state: SignInViewState = .idle
@@ -39,8 +42,15 @@ struct SignInView: View {
     VStack(spacing: 32) {
       Spacer()
 
-      Text("passwd-sso")
-        .font(.largeTitle.bold())
+      VStack(spacing: 4) {
+        Text("passwd-sso")
+          .font(.largeTitle.bold())
+        Text(serverURL.absoluteString)
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+          .textSelection(.enabled)
+      }
 
       switch state {
       case .idle:
