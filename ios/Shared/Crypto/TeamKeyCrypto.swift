@@ -9,7 +9,7 @@ import Foundation
 ///   ECDH(member, ephemeral) → HKDF("passwd-sso-team-v1", salt=memberKey.hkdfSalt) → AES-GCM(AAD "OK") → rawTeamKey
 ///   rawTeamKey → HKDF("passwd-sso-team-enc-v1", salt=zero32) → teamEncKey (entry decryption key)
 public enum TeamKeyCrypto {
-  private static let zeroSalt = Data(repeating: 0, count: 32)
+  private static let zeroSalt = Data(repeating: 0, count: CryptoParams.symmetricKeyByteCount)
   private static let ecdhWrapInfo = "passwd-sso-ecdh-v1"
   private static let teamWrapInfo = "passwd-sso-team-v1"
   private static let teamEncInfo = "passwd-sso-team-enc-v1"
@@ -27,7 +27,7 @@ public enum TeamKeyCrypto {
       inputKeyMaterial: secretKey,
       salt: zeroSalt,
       info: Data(ecdhWrapInfo.utf8),
-      outputByteCount: 32
+      outputByteCount: CryptoParams.symmetricKeyByteCount
     )
   }
 
@@ -62,10 +62,10 @@ public enum TeamKeyCrypto {
     guard key.kty == "EC", key.crv == "P-256" else {
       throw TeamKeyCryptoError.unsupportedKeyType
     }
-    guard let x = base64URLDecode(key.x), x.count == 32,
-          let y = base64URLDecode(key.y), y.count == 32
+    guard let x = base64URLDecode(key.x), x.count == P256Params.coordinateByteCount,
+          let y = base64URLDecode(key.y), y.count == P256Params.coordinateByteCount
     else { throw TeamKeyCryptoError.malformedPublicKey }
-    var x963 = Data([0x04])
+    var x963 = Data([P256Params.uncompressedPointPrefix])
     x963.append(x)
     x963.append(y)
     return try P256.KeyAgreement.PublicKey(x963Representation: x963)
@@ -93,7 +93,7 @@ public enum TeamKeyCrypto {
       inputKeyMaterial: SymmetricKey(data: sharedBytes),
       salt: try hexDecode(hkdfSalt),
       info: Data(teamWrapInfo.utf8),
-      outputByteCount: 32
+      outputByteCount: CryptoParams.symmetricKeyByteCount
     )
     let aad = try buildTeamKeyWrapAAD(
       teamId: teamId, toUserId: toUserId, keyVersion: keyVersion, wrapVersion: wrapVersion
@@ -115,7 +115,7 @@ public enum TeamKeyCrypto {
       inputKeyMaterial: rawTeamKey,
       salt: zeroSalt,
       info: Data(teamEncInfo.utf8),
-      outputByteCount: 32
+      outputByteCount: CryptoParams.symmetricKeyByteCount
     )
   }
 
@@ -128,7 +128,7 @@ public enum TeamKeyCrypto {
       inputKeyMaterial: itemKey,
       salt: zeroSalt,
       info: Data(itemEncInfo.utf8),
-      outputByteCount: 32
+      outputByteCount: CryptoParams.symmetricKeyByteCount
     )
   }
 

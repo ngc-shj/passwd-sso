@@ -34,12 +34,12 @@ public struct RollbackFlagPayload: Sendable, Codable, Equatable {
 /// either side would silently reject every flag as forged.
 private func deriveRollbackFlagMacKey(from vaultKey: SymmetricKey) -> SymmetricKey {
   let info = "rollback-flag-mac".data(using: .utf8)!
-  let salt = Data(repeating: 0, count: 32)
+  let salt = Data(repeating: 0, count: CryptoParams.symmetricKeyByteCount)
   return HKDF<SHA256>.deriveKey(
     inputKeyMaterial: vaultKey,
     salt: salt,
     info: info,
-    outputByteCount: 32
+    outputByteCount: CryptoParams.symmetricKeyByteCount
   )
 }
 

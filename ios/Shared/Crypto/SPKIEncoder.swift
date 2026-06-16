@@ -28,8 +28,8 @@ private let p256SPKIPrefix: [UInt8] = [
 public func encodeP256SPKI(uncompressedPoint: Data) throws -> Data {
   // Expect 0x04 || X(32) || Y(32) = 65 bytes.
   let startIdx = uncompressedPoint.startIndex
-  guard uncompressedPoint.count == 65,
-        uncompressedPoint[startIdx] == 0x04
+  guard uncompressedPoint.count == P256Params.uncompressedPointByteCount,
+        uncompressedPoint[startIdx] == P256Params.uncompressedPointPrefix
   else {
     throw SPKIEncoderError.invalidPoint
   }

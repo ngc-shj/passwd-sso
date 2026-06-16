@@ -237,7 +237,7 @@ extension MobileAPIClient {
   /// Fetch team memberships from GET /api/teams.
   /// Uses performAuthedGET for the full C3 retry ladder (nonce→refresh, fixes F3).
   func fetchTeamMemberships() async throws -> [TeamMembership] {
-    let endpoint = serverURL.appending(path: "/api/teams", directoryHint: .notDirectory)
+    let endpoint = serverURL.appending(path: APIPath.teams, directoryHint: .notDirectory)
     let data = try await performAuthedGET(url: endpoint)
     return try JSONDecoder().decode([TeamMembership].self, from: data)
   }

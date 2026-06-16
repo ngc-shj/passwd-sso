@@ -23,7 +23,7 @@ public func encryptAESGCM(
 ) throws -> (ciphertext: Data, iv: Data, tag: Data) {
   let nonce = AES.GCM.Nonce()
   let nonceData = Data(nonce)
-  guard nonceData.count == 12 else {
+  guard nonceData.count == CryptoParams.aesGCMNonceByteCount else {
     throw AESGCMError.unexpectedNonceLength
   }
 
@@ -51,8 +51,8 @@ public func decryptAESGCM(
   key: SymmetricKey,
   aad: Data? = nil
 ) throws -> Data {
-  guard iv.count == 12 else { throw AESGCMError.invalidIVLength }
-  guard tag.count == 16 else { throw AESGCMError.invalidTagLength }
+  guard iv.count == CryptoParams.aesGCMNonceByteCount else { throw AESGCMError.invalidIVLength }
+  guard tag.count == CryptoParams.aesGCMTagByteCount else { throw AESGCMError.invalidTagLength }
 
   let nonce = try AES.GCM.Nonce(data: iv)
   let sealedBox = try AES.GCM.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)

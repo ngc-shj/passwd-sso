@@ -11,7 +11,7 @@ import Shared
 /// missing/expired token as a clean cancel (fall-through to iCloud Keychain),
 /// not a lockout.
 public struct AutofillTokenRefresher: Sendable {
-  private static let log = Logger(subsystem: "jp.jpng.passwd-sso", category: "autofill-token")
+  private static let log = Logger(subsystem: AppGroupContainer.loggerSubsystem, category: "autofill-token")
 
   private let apiClient: MobileAPIClient
   private let uploadTokenStore: UploadTokenStore

@@ -59,7 +59,7 @@ public final class BridgeKeyStore: Sendable {
   // AutoFill "vault locked" symptom can be traced to its true cause (item
   // missing vs. biometry failure vs. interaction-not-allowed/entitlement) via
   // Console.app. No key material is ever logged.
-  private static let log = Logger(subsystem: "jp.jpng.passwd-sso", category: "autofill")
+  private static let log = Logger(subsystem: AppGroupContainer.loggerSubsystem, category: "autofill")
 
   /// Logical bundle of bridge-key + counter/uuid. After the V2 split, the
   /// two Keychain items back this struct: `bridgeKey` comes from
@@ -126,12 +126,12 @@ public final class BridgeKeyStore: Sendable {
   /// Writes BOTH v2 items in this order: meta first, then key. On failure
   /// of the second write, deletes the first to avoid orphaned state.
   public func create() throws -> Blob {
-    var bridgeKeyBytes = Data(repeating: 0, count: 32)
+    var bridgeKeyBytes = Data(repeating: 0, count: bridgeKeyV2Size)
     var counterBytes = Data(repeating: 0, count: 8)
     var uuidBytes = Data(repeating: 0, count: 16)
 
     let r1 = bridgeKeyBytes.withUnsafeMutableBytes {
-      SecRandomCopyBytes(kSecRandomDefault, 32, $0.baseAddress!)
+      SecRandomCopyBytes(kSecRandomDefault, bridgeKeyV2Size, $0.baseAddress!)
     }
     let r2 = counterBytes.withUnsafeMutableBytes {
       SecRandomCopyBytes(kSecRandomDefault, 8, $0.baseAddress!)

@@ -197,7 +197,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     codeVerifier: String,
     deviceJkt: String
   ) async throws -> TokenExchangeResponse {
-    let tokenURL = serverURL.appending(path: "/api/mobile/token", directoryHint: .notDirectory)
+    let tokenURL = serverURL.appending(path: APIPath.mobileToken, directoryHint: .notDirectory)
     let htu = canonicalHTU(url: tokenURL)
 
     // Capture values before crossing into async context so retry closure doesn't need await.
@@ -206,7 +206,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
 
     let nonce = try? tokenStore.loadNonce()
     let proof = try await buildDPoPProof(
-      htm: "POST",
+      htm: HTTPMethod.post,
       htu: htu,
       jwk: localJWK,
       nonce: nonce,
@@ -221,21 +221,21 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     let bodyData = try JSONEncoder().encode(body)
 
     var request = URLRequest(url: tokenURL)
-    request.httpMethod = "POST"
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
+    request.httpMethod = HTTPMethod.post
+    request.setValue(HTTPContentType.json, forHTTPHeaderField: HTTPHeader.contentType)
+    request.setValue(proof.jws, forHTTPHeaderField: HTTPHeader.dpop)
     request.httpBody = bodyData
 
     return try await performTokenRequest(request) { newNonce in
       let retryProof = try await buildDPoPProof(
-        htm: "POST",
+        htm: HTTPMethod.post,
         htu: htu,
         jwk: localJWK,
         nonce: newNonce,
         signer: localSigner
       )
       var retryRequest = request
-      retryRequest.setValue(retryProof.jws, forHTTPHeaderField: "DPoP")
+      retryRequest.setValue(retryProof.jws, forHTTPHeaderField: HTTPHeader.dpop)
       return retryRequest
     }
   }
@@ -251,7 +251,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     }
 
     let refreshURL = serverURL.appending(
-      path: "/api/mobile/token/refresh",
+      path: APIPath.mobileTokenRefresh,
       directoryHint: .notDirectory
     )
     let htu = canonicalHTU(url: refreshURL)
@@ -262,7 +262,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
 
     let nonce = try? tokenStore.loadNonce()
     let proof = try await buildDPoPProof(
-      htm: "POST",
+      htm: HTTPMethod.post,
       htu: htu,
       jwk: localJWK,
       ath: ath,
@@ -274,16 +274,16 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     let bodyData = try JSONEncoder().encode(body)
 
     var request = URLRequest(url: refreshURL)
-    request.httpMethod = "POST"
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpMethod = HTTPMethod.post
+    request.setValue(HTTPContentType.json, forHTTPHeaderField: HTTPHeader.contentType)
     // SECURITY: never log this request or its headers — Authorization carries the refresh token.
-    request.setValue("DPoP \(refreshToken)", forHTTPHeaderField: "Authorization")
-    request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
+    request.setValue("\(HTTPAuthScheme.dpopPrefix)\(refreshToken)", forHTTPHeaderField: HTTPHeader.authorization)
+    request.setValue(proof.jws, forHTTPHeaderField: HTTPHeader.dpop)
     request.httpBody = bodyData
 
     return try await performTokenRequest(request) { newNonce in
       let retryProof = try await buildDPoPProof(
-        htm: "POST",
+        htm: HTTPMethod.post,
         htu: htu,
         jwk: localJWK,
         ath: ath,
@@ -291,7 +291,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
         signer: localSigner
       )
       var retryRequest = request
-      retryRequest.setValue(retryProof.jws, forHTTPHeaderField: "DPoP")
+      retryRequest.setValue(retryProof.jws, forHTTPHeaderField: HTTPHeader.dpop)
       return retryRequest
     }
   }
@@ -301,7 +301,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   /// Fetch vault unlock data from GET /api/vault/unlock/data.
   /// Requires a valid access token (DPoP-signed). Applies the full C3 retry ladder.
   public func fetchVaultUnlockData() async throws -> VaultUnlockData {
-    let url = serverURL.appending(path: "/api/vault/unlock/data", directoryHint: .notDirectory)
+    let url = serverURL.appending(path: APIPath.vaultUnlockData, directoryHint: .notDirectory)
     let data = try await performAuthedGET(url: url)
     return try JSONDecoder().decode(VaultUnlockData.self, from: data)
   }
@@ -309,7 +309,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   /// Fetch encrypted team entries (flat response format) for a given team.
   /// Requires a valid access token (DPoP-signed). Applies the full C3 retry ladder.
   public func fetchTeamEntries(teamId: String) async throws -> [TeamEncryptedEntry] {
-    guard let endpointURL = resourceURL(path: "/api/teams/\(teamId)/passwords", query: "include=blob") else {
+    guard let endpointURL = resourceURL(path: APIPath.teamPasswords(teamId: teamId), query: "include=blob") else {
       throw MobileAPIError.serverError(status: 400)
     }
     let data = try await performAuthedGET(url: endpointURL)
@@ -320,7 +320,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   /// 403 (KEY_NOT_DISTRIBUTED) / 404 (MEMBER_KEY_NOT_FOUND) → `teamKeyNotDistributed`
   /// so the sync caller skips the team rather than failing the whole sync.
   public func fetchTeamMemberKey(teamId: String) async throws -> TeamMemberKeyResponse {
-    let url = serverURL.appending(path: "/api/teams/\(teamId)/member-key", directoryHint: .notDirectory)
+    let url = serverURL.appending(path: APIPath.teamMemberKey(teamId: teamId), directoryHint: .notDirectory)
     do {
       let data = try await performAuthedGET(url: url)
       return try JSONDecoder().decode(TeamMemberKeyResponse.self, from: data)
@@ -346,7 +346,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     let accessToken = try await validAccessToken()
 
     let endpoint = serverURL.appending(
-      path: "/api/mobile/cache-rollback-report",
+      path: APIPath.mobileCacheRollbackReport,
       directoryHint: .notDirectory
     )
     let htu = canonicalHTU(url: endpoint)
@@ -356,7 +356,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     let localSigner = signer
     let nonce = try? tokenStore.loadNonce()
     let proof = try await buildDPoPProof(
-      htm: "POST",
+      htm: HTTPMethod.post,
       htu: htu,
       jwk: localJWK,
       ath: ath,
@@ -366,15 +366,15 @@ public actor MobileAPIClient: VaultUnlockDataSource {
 
     let bodyData = try JSONEncoder().encode(body)
     var request = URLRequest(url: endpoint)
-    request.httpMethod = "POST"
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-    request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
+    request.httpMethod = HTTPMethod.post
+    request.setValue(HTTPContentType.json, forHTTPHeaderField: HTTPHeader.contentType)
+    request.setValue("\(HTTPAuthScheme.bearerPrefix)\(accessToken)", forHTTPHeaderField: HTTPHeader.authorization)
+    request.setValue(proof.jws, forHTTPHeaderField: HTTPHeader.dpop)
     request.httpBody = bodyData
 
     try await performVoidHTTP(request) { newNonce in
       let retryProof = try await buildDPoPProof(
-        htm: "POST",
+        htm: HTTPMethod.post,
         htu: htu,
         jwk: localJWK,
         ath: ath,
@@ -382,7 +382,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
         signer: localSigner
       )
       var retryRequest = request
-      retryRequest.setValue(retryProof.jws, forHTTPHeaderField: "DPoP")
+      retryRequest.setValue(retryProof.jws, forHTTPHeaderField: HTTPHeader.dpop)
       return retryRequest
     }
   }
@@ -395,7 +395,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     let accessToken = try await validAccessToken()
 
     let endpoint = serverURL.appending(
-      path: "/api/passwords",
+      path: APIPath.passwords,
       directoryHint: .notDirectory
     )
     let htu = canonicalHTU(url: endpoint)
@@ -405,7 +405,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     let localSigner = signer
     let nonce = try? tokenStore.loadNonce()
     let proof = try await buildDPoPProof(
-      htm: "POST",
+      htm: HTTPMethod.post,
       htu: htu,
       jwk: localJWK,
       ath: ath,
@@ -415,15 +415,15 @@ public actor MobileAPIClient: VaultUnlockDataSource {
 
     let bodyData = try JSONEncoder().encode(body)
     var request = URLRequest(url: endpoint)
-    request.httpMethod = "POST"
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-    request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
+    request.httpMethod = HTTPMethod.post
+    request.setValue(HTTPContentType.json, forHTTPHeaderField: HTTPHeader.contentType)
+    request.setValue("\(HTTPAuthScheme.bearerPrefix)\(accessToken)", forHTTPHeaderField: HTTPHeader.authorization)
+    request.setValue(proof.jws, forHTTPHeaderField: HTTPHeader.dpop)
     request.httpBody = bodyData
 
     return try await performCreateHTTP(request) { newNonce in
       let retryProof = try await buildDPoPProof(
-        htm: "POST",
+        htm: HTTPMethod.post,
         htu: htu,
         jwk: localJWK,
         ath: ath,
@@ -431,7 +431,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
         signer: localSigner
       )
       var retryRequest = request
-      retryRequest.setValue(retryProof.jws, forHTTPHeaderField: "DPoP")
+      retryRequest.setValue(retryProof.jws, forHTTPHeaderField: HTTPHeader.dpop)
       return retryRequest
     }
   }
@@ -445,7 +445,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     let accessToken = try await validAccessToken()
 
     let endpoint = serverURL.appending(
-      path: "/api/mobile/autofill-token",
+      path: APIPath.mobileAutofillToken,
       directoryHint: .notDirectory
     )
     let htu = canonicalHTU(url: endpoint)
@@ -455,7 +455,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     let localSigner = signer
     let nonce = try? tokenStore.loadNonce()
     let proof = try await buildDPoPProof(
-      htm: "POST",
+      htm: HTTPMethod.post,
       htu: htu,
       jwk: localJWK,
       ath: ath,
@@ -465,15 +465,15 @@ public actor MobileAPIClient: VaultUnlockDataSource {
 
     let bodyData = try JSONEncoder().encode(["jwk": extensionJWK])
     var request = URLRequest(url: endpoint)
-    request.httpMethod = "POST"
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-    request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
+    request.httpMethod = HTTPMethod.post
+    request.setValue(HTTPContentType.json, forHTTPHeaderField: HTTPHeader.contentType)
+    request.setValue("\(HTTPAuthScheme.bearerPrefix)\(accessToken)", forHTTPHeaderField: HTTPHeader.authorization)
+    request.setValue(proof.jws, forHTTPHeaderField: HTTPHeader.dpop)
     request.httpBody = bodyData
 
     let data = try await performBodyHTTP(request) { newNonce in
       let retryProof = try await buildDPoPProof(
-        htm: "POST",
+        htm: HTTPMethod.post,
         htu: htu,
         jwk: localJWK,
         ath: ath,
@@ -481,7 +481,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
         signer: localSigner
       )
       var retryRequest = request
-      retryRequest.setValue(retryProof.jws, forHTTPHeaderField: "DPoP")
+      retryRequest.setValue(retryProof.jws, forHTTPHeaderField: HTTPHeader.dpop)
       return retryRequest
     }
     return try JSONDecoder().decode(AutofillTokenResponse.self, from: data)
@@ -494,7 +494,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     let accessToken = try await validAccessToken()
 
     let endpoint = serverURL.appending(
-      path: "/api/passwords/\(entryId)",
+      path: APIPath.password(id: entryId),
       directoryHint: .notDirectory
     )
     let htu = canonicalHTU(url: endpoint)
@@ -504,7 +504,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     let localSigner = signer
     let nonce = try? tokenStore.loadNonce()
     let proof = try await buildDPoPProof(
-      htm: "PUT",
+      htm: HTTPMethod.put,
       htu: htu,
       jwk: localJWK,
       ath: ath,
@@ -514,15 +514,15 @@ public actor MobileAPIClient: VaultUnlockDataSource {
 
     let bodyData = try JSONEncoder().encode(body)
     var request = URLRequest(url: endpoint)
-    request.httpMethod = "PUT"
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-    request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
+    request.httpMethod = HTTPMethod.put
+    request.setValue(HTTPContentType.json, forHTTPHeaderField: HTTPHeader.contentType)
+    request.setValue("\(HTTPAuthScheme.bearerPrefix)\(accessToken)", forHTTPHeaderField: HTTPHeader.authorization)
+    request.setValue(proof.jws, forHTTPHeaderField: HTTPHeader.dpop)
     request.httpBody = bodyData
 
     try await performVoidHTTP(request) { newNonce in
       let retryProof = try await buildDPoPProof(
-        htm: "PUT",
+        htm: HTTPMethod.put,
         htu: htu,
         jwk: localJWK,
         ath: ath,
@@ -530,7 +530,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
         signer: localSigner
       )
       var retryRequest = request
-      retryRequest.setValue(retryProof.jws, forHTTPHeaderField: "DPoP")
+      retryRequest.setValue(retryProof.jws, forHTTPHeaderField: HTTPHeader.dpop)
       return retryRequest
     }
   }
@@ -618,18 +618,18 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     var didNonceRetry = false, didRefreshRetry = false
     while true {
       let proof = try await buildDPoPProof(
-        htm: "GET", htu: htu, jwk: localJWK, ath: sha256Base64URL(token),
+        htm: HTTPMethod.get, htu: htu, jwk: localJWK, ath: sha256Base64URL(token),
         nonce: nonce, signer: localSigner
       )
       var request = URLRequest(url: url)
-      request.httpMethod = "GET"
-      request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-      request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
+      request.httpMethod = HTTPMethod.get
+      request.setValue("\(HTTPAuthScheme.bearerPrefix)\(token)", forHTTPHeaderField: HTTPHeader.authorization)
+      request.setValue(proof.jws, forHTTPHeaderField: HTTPHeader.dpop)
       let (data, response) = try await performHTTP(request)
       let http = response as! HTTPURLResponse
       // A nonce in THIS response is the actual challenge signal; a stale stored
       // nonce must NOT trigger a nonce-retry (keeps the ladder bounded at ≤3).
-      let freshNonce = http.value(forHTTPHeaderField: "DPoP-Nonce")
+      let freshNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce)
       if let n = freshNonce {
         try? tokenStore.saveNonce(n)
         nonce = n
@@ -673,18 +673,18 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     let http = response as! HTTPURLResponse
 
     // Persist nonce from any response (RFC 9449 §8).
-    if let newNonce = http.value(forHTTPHeaderField: "DPoP-Nonce") {
+    if let newNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce) {
       try? tokenStore.saveNonce(newNonce)
     }
 
     // On 401 with a new nonce and a retry closure, retry once.
     if http.statusCode == 401,
        let makeRetry,
-       let newNonce = http.value(forHTTPHeaderField: "DPoP-Nonce") {
+       let newNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce) {
       let retryRequest = try await makeRetry(newNonce)
       let (retryData, retryResponse) = try await performHTTP(retryRequest)
       let retryHTTP = retryResponse as! HTTPURLResponse
-      if let retryNonce = retryHTTP.value(forHTTPHeaderField: "DPoP-Nonce") {
+      if let retryNonce = retryHTTP.value(forHTTPHeaderField: HTTPHeader.dpopNonce) {
         try? tokenStore.saveNonce(retryNonce)
       }
       return try decodeResponse(retryData, status: retryHTTP.statusCode)
@@ -743,17 +743,17 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     let (_, response) = try await performHTTP(request)
     let http = response as! HTTPURLResponse
 
-    if let newNonce = http.value(forHTTPHeaderField: "DPoP-Nonce") {
+    if let newNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce) {
       try? tokenStore.saveNonce(newNonce)
     }
 
     if http.statusCode == 401,
        let makeRetry,
-       let newNonce = http.value(forHTTPHeaderField: "DPoP-Nonce") {
+       let newNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce) {
       let retryRequest = try await makeRetry(newNonce)
       let (_, retryResponse) = try await performHTTP(retryRequest)
       let retryHTTP = retryResponse as! HTTPURLResponse
-      if let retryNonce = retryHTTP.value(forHTTPHeaderField: "DPoP-Nonce") {
+      if let retryNonce = retryHTTP.value(forHTTPHeaderField: HTTPHeader.dpopNonce) {
         try? tokenStore.saveNonce(retryNonce)
       }
       try decodeVoidResponse(status: retryHTTP.statusCode)
@@ -784,17 +784,17 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     let (data, response) = try await performHTTP(request)
     let http = response as! HTTPURLResponse
 
-    if let newNonce = http.value(forHTTPHeaderField: "DPoP-Nonce") {
+    if let newNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce) {
       try? tokenStore.saveNonce(newNonce)
     }
 
     if http.statusCode == 401,
        let makeRetry,
-       let newNonce = http.value(forHTTPHeaderField: "DPoP-Nonce") {
+       let newNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce) {
       let retryRequest = try await makeRetry(newNonce)
       let (retryData, retryResponse) = try await performHTTP(retryRequest)
       let retryHTTP = retryResponse as! HTTPURLResponse
-      if let retryNonce = retryHTTP.value(forHTTPHeaderField: "DPoP-Nonce") {
+      if let retryNonce = retryHTTP.value(forHTTPHeaderField: HTTPHeader.dpopNonce) {
         try? tokenStore.saveNonce(retryNonce)
       }
       return try decodeBodyResponse(retryData, status: retryHTTP.statusCode)

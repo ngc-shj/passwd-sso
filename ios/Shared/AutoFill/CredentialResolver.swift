@@ -79,7 +79,7 @@ public actor CredentialResolver {
   // Diagnostic only — records WHICH of the three vault-locked sub-causes fired
   // (bridge_key read, wrapped-key absent, or unwrap failure) so the AutoFill
   // "vault locked" symptom is traceable in Console.app. No key material logged.
-  private static let log = Logger(subsystem: "jp.jpng.passwd-sso", category: "autofill")
+  private static let log = Logger(subsystem: AppGroupContainer.loggerSubsystem, category: "autofill")
 
   // MARK: - Error
 
