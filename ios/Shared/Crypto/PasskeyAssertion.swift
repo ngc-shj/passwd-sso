@@ -70,7 +70,7 @@ public func decodeP256PrivateKeyJWK(_ jwkJSON: Data) throws -> P256.Signing.Priv
   guard jwk.kty == "EC", jwk.crv == "P-256" else {
     throw PasskeyCryptoError.unsupportedKeyType
   }
-  guard var scalar = try? base64URLDecode(jwk.d), scalar.count == 32 else {
+  guard var scalar = try? base64URLDecode(jwk.d), scalar.count == P256Params.coordinateByteCount else {
     throw PasskeyCryptoError.malformedPrivateScalar
   }
   // Zero the raw private scalar once the key is constructed (the inner JSON

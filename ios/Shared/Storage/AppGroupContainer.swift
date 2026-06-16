@@ -10,6 +10,9 @@ public enum AppGroupContainerError: Error, Equatable {
 public struct AppGroupContainer: Sendable {
   public static let identifier = "group.jp.jpng.passwd-sso.shared"
 
+  /// Logger subsystem shared by all three targets (host app, AutoFill extension, Shared framework).
+  public static let loggerSubsystem = "jp.jpng.passwd-sso"
+
   /// Returns the root URL of the shared App Group container.
   public static func url() throws -> URL {
     guard let containerURL = FileManager.default.containerURL(

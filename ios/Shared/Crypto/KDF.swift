@@ -7,7 +7,7 @@ private let hkdfEncInfo = "passwd-sso-enc-v1"
 private let hkdfAuthInfo = "passwd-sso-auth-v1"
 // Cache vault key — used only on iOS device (no server-side equivalent).
 private let hkdfCacheInfo = "passwd-sso-cache-v1"
-private let hkdfZeroSalt = Data(repeating: 0, count: 32)
+private let hkdfZeroSalt = Data(repeating: 0, count: CryptoParams.symmetricKeyByteCount)
 
 /// PBKDF2 iteration count pinned by the parent server (crypto-client.ts).
 /// Doubles as the minimum a client accepts from a server-supplied unlock
@@ -25,7 +25,7 @@ public func deriveWrappingKeyPBKDF2(
     throw KDFError.invalidPassphrase
   }
 
-  var derivedKey = Data(repeating: 0, count: 32)
+  var derivedKey = Data(repeating: 0, count: CryptoParams.symmetricKeyByteCount)
   let status = derivedKey.withUnsafeMutableBytes { derivedKeyPtr in
     passphraseData.withUnsafeBytes { passphrasePtr in
       salt.withUnsafeBytes { saltPtr in
@@ -35,7 +35,7 @@ public func deriveWrappingKeyPBKDF2(
           saltPtr.baseAddress, salt.count,
           CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256),
           UInt32(iterations),
-          derivedKeyPtr.baseAddress, 32
+          derivedKeyPtr.baseAddress, CryptoParams.symmetricKeyByteCount
         )
       }
     }
@@ -55,7 +55,7 @@ public func deriveEncryptionKey(secretKey: Data) throws -> SymmetricKey {
     inputKeyMaterial: inputKey,
     salt: hkdfZeroSalt,
     info: info,
-    outputByteCount: 32
+    outputByteCount: CryptoParams.symmetricKeyByteCount
   )
 }
 
@@ -69,7 +69,7 @@ public func deriveAuthKey(secretKey: Data) throws -> Data {
     inputKeyMaterial: inputKey,
     salt: hkdfZeroSalt,
     info: info,
-    outputByteCount: 32
+    outputByteCount: CryptoParams.symmetricKeyByteCount
   )
   return derived.withUnsafeBytes { Data($0) }
 }
@@ -83,7 +83,7 @@ public func deriveCacheVaultKey(bridgeKey: Data) throws -> SymmetricKey {
     inputKeyMaterial: inputKey,
     salt: hkdfZeroSalt,
     info: info,
-    outputByteCount: 32
+    outputByteCount: CryptoParams.symmetricKeyByteCount
   )
 }
 

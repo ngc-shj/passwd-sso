@@ -154,7 +154,7 @@ public actor EntryFetcher {
   /// Fetch personal vault entries with `?include=blob`.
   /// Returns entries as `CacheEntry` (with AAD input fields populated).
   public func fetchPersonal() async throws -> [EncryptedEntry] {
-    try await apiClient.fetchEntries(endpoint: "/api/passwords?include=blob")
+    try await apiClient.fetchEntries(endpoint: "\(APIPath.passwords)?include=blob")
   }
 
   /// Fetch team-vault entries for a single team.

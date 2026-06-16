@@ -51,8 +51,8 @@ enum CBOR {
 /// -1:1(P-256), -2:x(32), -3:y(32)} in canonical key order.
 public func coseEC2PublicKey(_ pub: P256.Signing.PublicKey) -> Data {
   let raw = pub.rawRepresentation  // 64 bytes: x ‖ y (no 0x04 prefix)
-  let x = raw.prefix(32)
-  let y = raw.suffix(32)
+  let x = raw.prefix(P256Params.coordinateByteCount)
+  let y = raw.suffix(P256Params.coordinateByteCount)
   var out = Data()
   CBOR.writeHead(5, 5, into: &out)  // map, 5 entries
   CBOR.int(1, into: &out); CBOR.int(2, into: &out)    // kty: EC2
@@ -122,11 +122,14 @@ public func buildNoneAttestationObject(authData: Data) -> Data {
 public func ecPrivateKeyJWKString(_ key: P256.Signing.PrivateKey) -> String {
   let d = key.rawRepresentation                 // 32 bytes (private scalar)
   let pub = key.publicKey.rawRepresentation     // 64 bytes: x ‖ y
-  let x = base64URLEncode(Data(pub.prefix(32)))
-  let y = base64URLEncode(Data(pub.suffix(32)))
+  let x = base64URLEncode(Data(pub.prefix(P256Params.coordinateByteCount)))
+  let y = base64URLEncode(Data(pub.suffix(P256Params.coordinateByteCount)))
   let dStr = base64URLEncode(d)
   return "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"\(x)\",\"y\":\"\(y)\",\"d\":\"\(dStr)\"}"
 }
+
+// random ID length; coincides with the P-256 coordinate size but semantically distinct
+private let credentialIdByteCount = 32
 
 // MARK: - Generated passkey
 
@@ -156,6 +159,6 @@ public func makePasskey(privateKey: P256.Signing.PrivateKey, credentialId: Data)
 /// `SystemRandomNumberGenerator` is cryptographically secure on Apple platforms.
 public func generatePasskey() -> GeneratedPasskey {
   var rng = SystemRandomNumberGenerator()
-  let credentialId = Data((0..<32).map { _ in UInt8.random(in: 0...255, using: &rng) })
+  let credentialId = Data((0..<credentialIdByteCount).map { _ in UInt8.random(in: 0...255, using: &rng) })
   return GeneratedPasskey(credentialId: credentialId, privateKey: P256.Signing.PrivateKey())
 }

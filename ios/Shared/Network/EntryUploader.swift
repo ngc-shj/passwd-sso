@@ -102,7 +102,7 @@ public struct EntryUploader: Sendable {
   /// the caller (registration outcome gate) verifies it equals the
   /// client-generated id before completing the ceremony.
   public func createEntry(body: CreateEntryRequest) async throws -> String {
-    let endpoint = serverURL.appending(path: "/api/passwords", directoryHint: .notDirectory)
+    let endpoint = serverURL.appending(path: APIPath.passwords, directoryHint: .notDirectory)
     let htu = canonicalHTU(url: endpoint)
     let ath = sha256Base64URL(accessToken)
     let bodyData = try JSONEncoder().encode(body)
@@ -111,13 +111,13 @@ public struct EntryUploader: Sendable {
     var didNonceRetry = false
     while true {
       let proof = try await buildDPoPProof(
-        htm: "POST", htu: htu, jwk: jwk, ath: ath, nonce: nonce, signer: signer
+        htm: HTTPMethod.post, htu: htu, jwk: jwk, ath: ath, nonce: nonce, signer: signer
       )
       var request = URLRequest(url: endpoint)
-      request.httpMethod = "POST"
-      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-      request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-      request.setValue(proof.jws, forHTTPHeaderField: "DPoP")
+      request.httpMethod = HTTPMethod.post
+      request.setValue(HTTPContentType.json, forHTTPHeaderField: HTTPHeader.contentType)
+      request.setValue("\(HTTPAuthScheme.bearerPrefix)\(accessToken)", forHTTPHeaderField: HTTPHeader.authorization)
+      request.setValue(proof.jws, forHTTPHeaderField: HTTPHeader.dpop)
       request.httpBody = bodyData
 
       let data: Data
@@ -133,7 +133,7 @@ public struct EntryUploader: Sendable {
 
       // A nonce in THIS response is the actual challenge signal; persist it
       // for future proofs either way (RFC 9449 §8).
-      let freshNonce = http.value(forHTTPHeaderField: "DPoP-Nonce")
+      let freshNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce)
       if let n = freshNonce {
         onNonceUpdate?(n)
         nonce = n

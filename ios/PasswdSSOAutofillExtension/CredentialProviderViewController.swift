@@ -8,7 +8,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
 
   // Diagnostic only — confirms the extension is invoked and which branch runs,
   // so the AutoFill "vault locked" symptom is traceable in Console.app.
-  private static let log = Logger(subsystem: "jp.jpng.passwd-sso", category: "autofill")
+  private static let log = Logger(subsystem: AppGroupContainer.loggerSubsystem, category: "autofill")
 
   // Work deferred until the extension view is foreground (viewDidAppear) — the
   // reliable point for the biometric keychain read (`evaluateAccessControl`),

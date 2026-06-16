@@ -6,7 +6,7 @@ import OSLog
 // Diagnostic only — traces the QuickType passkey registration lifecycle
 // (detection counts + register/clear timing) so a "passkey not offered in the
 // system sheet" symptom is debuggable in Console.app. No secrets logged.
-private let identityLog = Logger(subsystem: "jp.jpng.passwd-sso", category: "autofill")
+private let identityLog = Logger(subsystem: AppGroupContainer.loggerSubsystem, category: "autofill")
 
 // MARK: - Personal overview decryption (for registration)
 

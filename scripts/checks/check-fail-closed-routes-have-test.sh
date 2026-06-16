@@ -28,8 +28,10 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 DEBT_FILE="$REPO_ROOT/scripts/checks/fail-closed-test-debt.txt"
 
-# Build allowlist set (paths only, no comments, no blanks)
-declare -A DEBT
+# Build allowlist (paths only, no comments, no blanks). bash 3.2 has no
+# associative arrays (`declare -A`), so keep a newline-delimited list and
+# test membership with `grep -qxF`.
+DEBT_LIST=""
 if [ -f "$DEBT_FILE" ]; then
   while IFS= read -r line; do
     # Strip CR (Windows line endings) and surrounding whitespace
@@ -37,19 +39,31 @@ if [ -f "$DEBT_FILE" ]; then
     line="${line## }"; line="${line%% }"
     [ -z "$line" ] && continue
     case "$line" in \#*) continue ;; esac
-    DEBT["$line"]=1
+    DEBT_LIST="${DEBT_LIST}${line}
+"
   done < "$DEBT_FILE"
 fi
 
-# Enumerate opt-in routes
+is_debt() {
+  # exact whole-line match against the normalized debt list
+  printf '%s' "$DEBT_LIST" | grep -qxF "$1"
+}
+
+# Enumerate opt-in routes. bash 3.2 has no `mapfile`; read into an indexed
+# array with a while-loop.
 fail=0
-mapfile -t routes < <(
+routes=()
+while IFS= read -r route_line; do
+  [ -n "$route_line" ] && routes+=("$route_line")
+done < <(
   grep -rln 'failClosedOnRedisError: true' "$REPO_ROOT/src/app/api" 2>/dev/null \
     | sed "s|^$REPO_ROOT/||" \
     | sort
 )
 
-for route in "${routes[@]}"; do
+# Guard against an empty array under `set -u` (bash 3.2 errors on "${a[@]}"
+# when the array is empty).
+for route in ${routes[@]+"${routes[@]}"}; do
   # Adjacent test path
   dir="$(dirname "$route")"
   adjacent_test="$dir/route.test.ts"
@@ -65,7 +79,7 @@ for route in "${routes[@]}"; do
   if grep -q "redisErrored" "$REPO_ROOT/$alt_test" 2>/dev/null; then
     continue
   fi
-  if [ -n "${DEBT[$route]:-}" ]; then
+  if is_debt "$route"; then
     continue # documented debt
   fi
 

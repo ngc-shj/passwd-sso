@@ -29,7 +29,7 @@ public func generateDPoPKey(label: String) throws -> SecKey {
 
   let attributes: [String: Any] = [
     kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
-    kSecAttrKeySizeInBits as String: 256,
+    kSecAttrKeySizeInBits as String: P256Params.keySizeBits,
     kSecAttrTokenID as String: kSecAttrTokenIDSecureEnclave,
     kSecPrivateKeyAttrs as String: [
       kSecAttrIsPermanent as String: true,
@@ -103,11 +103,12 @@ public func exportPublicKeyJWK(key: SecKey) throws -> [String: String] {
     throw SecureEnclaveKeyError.publicKeyExportFailed
   }
   // Uncompressed EC point: 0x04 || x(32) || y(32)
-  guard data.count == 65, data[0] == 0x04 else {
+  guard data.count == P256Params.uncompressedPointByteCount,
+        data[0] == P256Params.uncompressedPointPrefix else {
     throw SecureEnclaveKeyError.publicKeyExportFailed
   }
-  let x = data[1..<33]
-  let y = data[33..<65]
+  let x = data[1 ..< (1 + P256Params.coordinateByteCount)]
+  let y = data[(1 + P256Params.coordinateByteCount) ..< P256Params.uncompressedPointByteCount]
   return [
     "kty": "EC",
     "crv": "P-256",
@@ -140,6 +141,9 @@ public func computeJWKThumbprint(jwk: [String: String]) throws -> String {
 
 // MARK: - DER → raw r||s conversion
 
+// raw ECDSA r/s component length; distinct from key/coordinate
+private let ecdsaComponentByteCount = 32
+
 /// Convert X9.62 DER-encoded ECDSA signature to raw 64-byte r||s for JWS.
 private func derToRawECDSA(_ der: Data) throws -> Data {
   var idx = 0
@@ -167,10 +171,10 @@ private func derToRawECDSA(_ der: Data) throws -> Data {
     defer { idx += len }
     var intBytes = Data(bytes[idx..<(idx + len)])
     // Strip leading zero padding for sign-extension
-    while intBytes.count > 32, intBytes.first == 0x00 { intBytes = intBytes.dropFirst() }
+    while intBytes.count > ecdsaComponentByteCount, intBytes.first == 0x00 { intBytes = intBytes.dropFirst() }
     // Left-pad to 32 bytes
-    while intBytes.count < 32 { intBytes.insert(0x00, at: intBytes.startIndex) }
-    guard intBytes.count == 32 else { throw SecureEnclaveKeyError.derConversionFailed }
+    while intBytes.count < ecdsaComponentByteCount { intBytes.insert(0x00, at: intBytes.startIndex) }
+    guard intBytes.count == ecdsaComponentByteCount else { throw SecureEnclaveKeyError.derConversionFailed }
     return intBytes
   }
 

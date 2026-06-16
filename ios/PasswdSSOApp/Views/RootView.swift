@@ -317,7 +317,7 @@ struct RootView: View {
       // token surfaces as stale data, recoverable by an explicit manual Sign Out.
       // Diagnostic only (no secrets — MobileAPIError cases carry no token data):
       // captures WHY an unlock-time sync failed so a stale-data report is debuggable.
-      Logger(subsystem: "jp.jpng.passwd-sso", category: "sync")
+      Logger(subsystem: AppGroupContainer.loggerSubsystem, category: "sync")
         .error("unlock-time runSync failed: \(String(describing: error), privacy: .public)")
       syncReport = nil
     }

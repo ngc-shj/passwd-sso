@@ -35,6 +35,8 @@ public enum AuthError: Error, Equatable {
 public actor AuthCoordinator {
   private let serverConfig: ServerConfig
   let tokenStore: HostTokenStore
+  /// PKCE verifier/state entropy length
+  private let pkceRandomByteCount = 32
   private let dpopKeyLabel: String
   /// Seam for loading the persisted SE key. Defaults to `loadDPoPKey`, which
   /// filters on `kSecAttrTokenIDSecureEnclave` — invisible to the simulator
@@ -221,8 +223,8 @@ public actor AuthCoordinator {
 
   /// Generate PKCE code_verifier (43-char base64url), code_challenge (S256), and state.
   private func generatePKCEAndState() throws -> (verifier: String, challenge: String, state: String) {
-    let verifierBytes = try secureRandom(count: 32)
-    let stateBytes = try secureRandom(count: 32)
+    let verifierBytes = try secureRandom(count: pkceRandomByteCount)
+    let stateBytes = try secureRandom(count: pkceRandomByteCount)
 
     let verifier = base64URLEncode(verifierBytes)
     let state = base64URLEncode(stateBytes)
@@ -240,7 +242,7 @@ public actor AuthCoordinator {
   ) throws -> URL {
     var components = URLComponents(
       url: serverConfig.baseURL.appending(
-        path: "/api/mobile/authorize",
+        path: APIPath.mobileAuthorize,
         directoryHint: .notDirectory
       ),
       resolvingAgainstBaseURL: false

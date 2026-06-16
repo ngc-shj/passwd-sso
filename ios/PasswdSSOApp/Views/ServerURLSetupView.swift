@@ -77,7 +77,7 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
     let aasaURL = aasaRootURL(for: base)
     async let aasaCheck: Void = fetchURL(aasaURL)
     async let healthCheck: Void = fetchURL(
-      base.appending(path: "/api/health/live", directoryHint: .notDirectory)
+      base.appending(path: APIPath.healthLive, directoryHint: .notDirectory)
     )
     _ = try await (aasaCheck, healthCheck)
   }
