@@ -45,10 +45,10 @@ None — all observations carried file:line evidence.
 - RT1 (mock desync): PASS. RT2 (no non-unit-testable demands): PASS. RT3 (fixture inline correct): PASS. RT5 (no CI demands): PASS. RT6 (new exports covered): PASS. RT7 (tests can go red on drift): PASS. RT4 + R-series (impl/sec): N/A.
 
 ## Environment Verification Report
-Phase 1 declared VE1 (Xcode/macOS build not runnable in the authoring environment) and VE2 (xcodegen folder-glob auto-discovery).
+Phase 1 declared VE1 (Xcode/macOS build assumed not runnable in the authoring environment) and VE2 (xcodegen folder-glob auto-discovery).
 - All contract acceptance **grep gates**: `verified-local` — run by the orchestrator, all return 0 in production code (see Functionality findings).
-- `xcodebuild test` (full XCTest suite incl. crypto vectors + new `CryptoParamsTests`): `blocked-deferred` — predicted by Phase 1 VE1 (no macOS toolchain). Cost-to-fix: user/CI runs one `xcodebuild test` command; worst case a missed adoption is a compile error caught immediately by that build; likelihood low (edits are mechanical literal→constant swaps, grep-verified, byte-identity confirmed by review). No code path requires runtime verification beyond what the existing suite + value-pins cover.
-- VE2: confirmed — `Shared/` and `PasswdSSOTests/` use folder globs in `project.yml`; the 4 new files are auto-included, no manifest edit.
+- `xcodebuild test` (full suite incl. crypto vectors + new `CryptoParamsTests`): **`verified-local`** — VE1 was incorrect; Xcode 26.4.1 IS available. After `xcodegen generate` (to register the 4 new files in the tracked `project.pbxproj`), ran `xcodebuild test -project PasswdSSO.xcodeproj -scheme PasswdSSOApp -destination 'platform=iOS Simulator,id=iPhone 15 Pro'`: **`** TEST SUCCEEDED **`, EXIT=0, Executed 526 unit tests + UITests, 0 failures** (2026-06-16). The new `CryptoParamsTests` and all crypto vector/parity suites pass. VE1 is hereby retracted.
+- VE2: confirmed — `Shared/` and `PasswdSSOTests/` use folder globs in `project.yml`; `xcodegen generate` auto-discovered all 4 new files (pbxproj diff: +26/-10, only the new file registrations, no churn). The regenerated `project.pbxproj` is committed.
 
 ## Resolution Status
 No findings to resolve. Plan review (2 functionality rounds + 1 security + 1 testing) and Phase 2 verification (contract greps + crypto byte-identity spot-check) front-loaded the issues; the code-review round confirmed clean. Awaiting `xcodebuild test` by the user/CI (VE1) as the final gate before PR.
