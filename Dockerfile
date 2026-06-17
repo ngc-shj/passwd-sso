@@ -1,6 +1,6 @@
 # Stage 1: Install dependencies
 # Pin base image to digest for reproducible builds (update with: docker pull node:20-alpine)
-FROM node:20-alpine@sha256:b88333c42c23fbd91596ebd7fd10de239cedab9617de04142dde7315e3bc0afa AS deps
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS deps
 # deps/builder are intermediate — only the runner stage ships. Patching here
 # would be discarded. apk upgrade only happens in the runner stage.
 RUN apk add --no-cache libc6-compat
@@ -23,7 +23,7 @@ COPY prisma.config.ts ./prisma.config.ts
 RUN DATABASE_URL="$DATABASE_URL" npx prisma generate
 
 # Stage 2: Build the application
-FROM node:20-alpine@sha256:b88333c42c23fbd91596ebd7fd10de239cedab9617de04142dde7315e3bc0afa AS builder
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS builder
 WORKDIR /app
 # DATABASE_URL is needed only for `prisma generate` to satisfy env("DATABASE_URL")
 # in prisma.config.ts — no actual DB connection is opened at build time. A dummy
@@ -50,7 +50,7 @@ RUN npx esbuild scripts/dcr-cleanup-worker.ts \
       --alias:@=./src
 
 # Stage 3: Production image
-FROM node:20-alpine@sha256:b88333c42c23fbd91596ebd7fd10de239cedab9617de04142dde7315e3bc0afa AS runner
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS runner
 WORKDIR /app
 RUN apk upgrade --no-cache zlib libcrypto3 libssl3 musl musl-utils
 
