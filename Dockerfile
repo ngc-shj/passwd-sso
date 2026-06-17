@@ -42,9 +42,9 @@ RUN npx esbuild scripts/audit-outbox-worker.ts \
       --external:pg --external:@prisma/client --external:@prisma/adapter-pg \
       --tsconfig=tsconfig.json \
       --alias:@=./src
-RUN npx esbuild scripts/dcr-cleanup-worker.ts \
+RUN npx esbuild scripts/retention-gc-worker.ts \
       --bundle --platform=node --target=node20 \
-      --outfile=dist/dcr-cleanup-worker.js \
+      --outfile=dist/retention-gc-worker.js \
       --external:pg --external:@prisma/client --external:@prisma/adapter-pg \
       --tsconfig=tsconfig.json \
       --alias:@=./src
@@ -136,8 +136,8 @@ COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/clie
 
 # Audit outbox worker (bundled by esbuild; pg + deps are external)
 COPY --from=builder --chown=nextjs:nodejs /app/dist/audit-outbox-worker.js ./dist/audit-outbox-worker.js
-# DCR cleanup worker (bundled by esbuild; pg + deps are external)
-COPY --from=builder --chown=nextjs:nodejs /app/dist/dcr-cleanup-worker.js ./dist/dcr-cleanup-worker.js
+# Retention-GC worker (bundled by esbuild; pg + deps are external)
+COPY --from=builder --chown=nextjs:nodejs /app/dist/retention-gc-worker.js ./dist/retention-gc-worker.js
 COPY --from=builder /app/node_modules/pg ./node_modules/pg
 COPY --from=builder /app/node_modules/pg-connection-string ./node_modules/pg-connection-string
 COPY --from=builder /app/node_modules/pg-int8 ./node_modules/pg-int8
