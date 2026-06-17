@@ -1,9 +1,10 @@
 # Code Review: retention-gc-worker
 Date: 2026-06-17
-Review round: 1 (fixes applied)
+Review rounds: 2 (converged — Round 2 clean)
 
 ## Changes from Previous Round
-Initial code review (Phase 3 Round 1), incremental on top of the Phase 2 self-R-check baseline. Three expert sub-agents reviewed the committed diff vs origin/main.
+- **Round 1**: initial code review, incremental on top of the Phase 2 self-R-check baseline. Three expert sub-agents reviewed the committed diff vs origin/main. 1 Major + 4 Minor + 1 Adjacent; all resolved.
+- **Round 2**: incremental verification of the Round-1 fixes (F1 touched audit-logging, a security-boundary concern → mandatory Round 2 per the tightening-skip rule). Verdict: **ROUND 2 CLEAN** — all four fixes confirmed correct and complete, no regressions. F1 removal verified single-group; the `tenant-webhook-card` test correctly still references AUDIT_LOG_PURGE via the ADMIN group (drives webhooks, unaffected). F2 dcrWorker removal left zero code hits + exhaustive TestRole switch. T-A SQL assertions match sweep.ts output and are RT7 red-capable. T-C heartbeat guard correct.
 
 ## Functionality Findings
 - **F1 [Minor]**: `AUDIT_ACTION.AUDIT_LOG_PURGE` was added to the `MAINTENANCE` audit group alongside `RETENTION_GC_SWEEP`, but it already lived in the `ADMIN` group — an unintended, unrequested duplication that broadened the tenant audit-log "Maintenance" filter. **Fixed**: removed the extra line; `MAINTENANCE` gains only `RETENTION_GC_SWEEP`.
