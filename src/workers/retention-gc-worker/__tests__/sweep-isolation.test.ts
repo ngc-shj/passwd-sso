@@ -27,10 +27,20 @@ describe("sweepOnce per-entry error isolation (C4/INV-C4b/RT7)", () => {
 
     let callIndex = 0;
     // Each registry entry triggers one $transaction call, in registry order.
-    // Make the call for `failingTable` reject; all others resolve with a count.
+    // sweepOnce ALSO fires one EXTRA $transaction for the heartbeat after the
+    // entries (because a sibling deleted >0 → anyDeleted). That extra call has
+    // callIndex === entryOrder.length; we return 0 for it (entryOrder[i] is
+    // undefined there) and the mock ignores the callback, so the heartbeat
+    // emit never runs and its result is discarded by sweepOnce — invisible to
+    // the assertions below. Guard it explicitly so a future mock that DOES
+    // invoke the callback can't silently misalign the per-entry mapping.
     const entryOrder = RETENTION_REGISTRY.map((e) => e.table);
     const mockPrisma = {
       $transaction: vi.fn(async () => {
+        if (callIndex >= entryOrder.length) {
+          callIndex += 1;
+          return 0; // heartbeat tx — result discarded by sweepOnce
+        }
         const table = entryOrder[callIndex];
         callIndex += 1;
         if (table === failingTable) {

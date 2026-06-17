@@ -5,11 +5,17 @@
  *   A — auditLogRetentionDays=30: rows older than 30d must be deleted; recent kept.
  *   B — auditLogRetentionDays=NULL: must be entirely untouched (FR4).
  *
- * Mechanism check (T6):
- *   - The worker role has no direct DELETE on audit_logs; deletion routes through
- *     audit_log_purge() SECURITY DEFINER function (INV-C3b).
+ * Mechanism check (T6) — co-guarded across TWO test files, by design:
+ *   - This file runs sweepAuditLogs as the SUPERUSER client and asserts row-state
+ *     (A's old rows gone, A's recent kept, B untouched). It does NOT itself observe
+ *     the audit_log_purge() route — it trusts that sweepAuditLogs (sweep.ts) contains
+ *     ONLY the definer-fn call and no direct DELETE.
+ *   - The INV-C3b "no direct DELETE" mechanism is enforced by the SEPARATE negative
+ *     control in retention-gc-worker-role.integration.test.ts, which proves the worker
+ *     role lacks a direct audit_logs DELETE grant (permission denied). A regression
+ *     replacing audit_log_purge() with a direct DELETE in sweepAuditLogs would pass
+ *     HERE (superuser can direct-delete) but the role grant set makes it fail in prod.
  *   - heartbeat per-table count attributes audit_logs deletion only to tenant A.
- *   - Tenant B's rows are untouched (null retention = skip).
  */
 
 import {
