@@ -179,9 +179,9 @@ describe("envObject (raw schema, no superRefine)", () => {
     expect(result.success).toBe(true);
   });
 
-  it("rejects DCR_CLEANUP_INTERVAL_MS below min", () => {
+  it("rejects RETENTION_GC_INTERVAL_MS below min", () => {
     const result = envObject.safeParse(
-      baseEnv({ DCR_CLEANUP_INTERVAL_MS: "1000" }),
+      baseEnv({ RETENTION_GC_INTERVAL_MS: "1000" }),
     );
     expect(result.success).toBe(false);
   });

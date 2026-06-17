@@ -144,7 +144,7 @@ describe("POST /api/maintenance/dcr-cleanup (410 deprecation stub)", () => {
     const body = await res.json();
     expect(body).toEqual({
       error: "endpoint_removed",
-      replacement: "worker:dcr-cleanup",
+      replacement: "worker:retention-gc",
     });
   });
 
@@ -168,7 +168,7 @@ describe("POST /api/maintenance/dcr-cleanup (410 deprecation stub)", () => {
           tokenSubjectUserId: SUBJECT_USER_ID,
           tokenId: TOKEN_ID,
           deprecated: true,
-          replacement: "worker:dcr-cleanup",
+          replacement: "worker:retention-gc",
         }),
       }),
     );

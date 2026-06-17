@@ -44,12 +44,12 @@ services:
     networks:
       - internal
 
-  dcr-cleanup-worker:
+  retention-gc-worker:
     build:
       context: .
       dockerfile: Dockerfile
       target: deps
-    container_name: passwd-sso-dcr-cleanup-worker
+    container_name: passwd-sso-retention-gc-worker
     volumes:
       - .:/app
       - /app/node_modules
@@ -57,7 +57,7 @@ services:
       # See docker-compose.yml app service for the .env vs .env.local note.
       - .env
     environment:
-      - DCR_CLEANUP_DATABASE_URL=postgresql://passwd_dcr_cleanup_worker:${PASSWD_DCR_CLEANUP_WORKER_PASSWORD:?PASSWD_DCR_CLEANUP_WORKER_PASSWORD is required}@db:5432/passwd_sso
+      - RETENTION_GC_DATABASE_URL=postgresql://passwd_retention_gc_worker:${PASSWD_RETENTION_GC_WORKER_PASSWORD:?PASSWD_RETENTION_GC_WORKER_PASSWORD is required}@db:5432/passwd_sso
       - DATABASE_URL=postgresql://passwd_app:${PASSWD_APP_PASSWORD:?PASSWD_APP_PASSWORD is required}@db:5432/passwd_sso
     depends_on:
       db:
@@ -70,7 +70,7 @@ services:
         # the project as "service depends on undefined service: migrate".
         condition: service_completed_successfully
         required: false
-    command: ["npx", "tsx", "scripts/dcr-cleanup-worker.ts"]
+    command: ["npx", "tsx", "scripts/retention-gc-worker.ts"]
     restart: unless-stopped
     networks:
       - internal

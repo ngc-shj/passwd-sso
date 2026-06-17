@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Set the passwd_dcr_cleanup_worker role password in an existing cluster.
+# Set the passwd_retention_gc_worker role password in an existing cluster.
 #
 # Usage:
 #   MIGRATION_DATABASE_URL=<superuser-url> \
-#   scripts/set-dcr-cleanup-worker-password.sh <<< "$PASSWORD"
+#   scripts/set-retention-gc-worker-password.sh <<< "$PASSWORD"
 #
 #   # k8s example (stdin from secret):
 #   MIGRATION_DATABASE_URL=<superuser-url> \
-#   kubectl exec --stdin ... -- bash scripts/set-dcr-cleanup-worker-password.sh \
+#   kubectl exec --stdin ... -- bash scripts/set-retention-gc-worker-password.sh \
 #     < <(kubectl get secret ... -o jsonpath='{.data.password}' | base64 -d)
 #
 # Environment variables:
@@ -78,21 +78,21 @@ escaped="${new_password//${q}/${q}${q}}"
 
 if [[ "$DRY_RUN" == "1" ]]; then
   # Print sanitised representation (password redacted).
-  echo "[DRY_RUN] would invoke: psql \"${MIGRATION_DATABASE_URL}\" -f - (stdin: ALTER ROLE passwd_dcr_cleanup_worker WITH PASSWORD '<REDACTED>';)" >&2
+  echo "[DRY_RUN] would invoke: psql \"${MIGRATION_DATABASE_URL}\" -f - (stdin: ALTER ROLE passwd_retention_gc_worker WITH PASSWORD '<REDACTED>';)" >&2
 
   if [[ -n "$PRINT_ARGS_FILE" ]]; then
     # Write the generated stdin SQL (with quote-doubled password) to file for
     # test assertion only. umask 077 ensures mode 0600.
     (
       umask 077
-      printf "ALTER ROLE passwd_dcr_cleanup_worker WITH PASSWORD '%s';\n" "$escaped" > "$PRINT_ARGS_FILE"
+      printf "ALTER ROLE passwd_retention_gc_worker WITH PASSWORD '%s';\n" "$escaped" > "$PRINT_ARGS_FILE"
     )
   fi
   exit 0
 fi
 
 psql "$MIGRATION_DATABASE_URL" -f - <<EOF
-ALTER ROLE passwd_dcr_cleanup_worker WITH PASSWORD '$escaped';
+ALTER ROLE passwd_retention_gc_worker WITH PASSWORD '$escaped';
 EOF
 
-echo "[set-dcr-cleanup-worker-password] OK — password updated for passwd_dcr_cleanup_worker"
+echo "[set-retention-gc-worker-password] OK — password updated for passwd_retention_gc_worker"

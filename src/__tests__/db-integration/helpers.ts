@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 
 // ─── Role connection strings ────────────────────────────────────
 
-type TestRole = "superuser" | "app" | "worker" | "dcr-cleanup-worker";
+type TestRole = "superuser" | "app" | "worker" | "dcr-cleanup-worker" | "retention-gc-worker";
 
 function getConnectionString(role: TestRole): string {
   const base = process.env.DATABASE_URL;
@@ -45,6 +45,14 @@ function getConnectionString(role: TestRole): string {
         base.replace(
           /\/\/[^:]+:[^@]+@/,
           "//passwd_dcr_cleanup_worker:passwd_dcr_pass@",
+        )
+      );
+    case "retention-gc-worker":
+      return (
+        process.env.RETENTION_GC_DATABASE_URL ??
+        base.replace(
+          /\/\/[^:]+:[^@]+@/,
+          "//passwd_retention_gc_worker:passwd_retention_gc_pass@",
         )
       );
   }
@@ -89,8 +97,10 @@ export interface TestContext {
   app: PrismaWithPool;
   /** Worker role (passwd_outbox_worker) — for privilege enumeration */
   worker: PrismaWithPool;
-  /** DCR-cleanup-worker role (passwd_dcr_cleanup_worker) — for sweeper privilege tests */
+  /** DCR-cleanup-worker role (passwd_dcr_cleanup_worker) — kept-but-unused (role not dropped) */
   dcrWorker: PrismaWithPool;
+  /** Retention-GC-worker role (passwd_retention_gc_worker) — for sweeper privilege tests (C7/C10) */
+  retentionWorker: PrismaWithPool;
   /** Create a tenant row and return its UUID */
   createTenant: () => Promise<string>;
   /** Create a user row belonging to a tenant and return its UUID */
@@ -106,6 +116,7 @@ export async function createTestContext(): Promise<TestContext> {
   const app = createPrismaForRole("app");
   const worker = createPrismaForRole("worker");
   const dcrWorker = createPrismaForRole("dcr-cleanup-worker");
+  const retentionWorker = createPrismaForRole("retention-gc-worker");
 
   // Verify connectivity
   await su.prisma.$executeRaw`SELECT 1`;
@@ -260,10 +271,11 @@ export async function createTestContext(): Promise<TestContext> {
       app.prisma.$disconnect().then(() => app.pool.end()),
       worker.prisma.$disconnect().then(() => worker.pool.end()),
       dcrWorker.prisma.$disconnect().then(() => dcrWorker.pool.end()),
+      retentionWorker.prisma.$disconnect().then(() => retentionWorker.pool.end()),
     ]);
   }
 
-  return { su, app, worker, dcrWorker, createTenant, createUser, deleteTestData, cleanup };
+  return { su, app, worker, dcrWorker, retentionWorker, createTenant, createUser, deleteTestData, cleanup };
 }
 
 // ─── Deferred barrier for concurrency tests ─────────────────────

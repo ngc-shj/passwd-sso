@@ -185,7 +185,7 @@ Used-but-unexpired single-use codes (`mcp_authorization_codes.usedAt`, `*_bridge
   - `REVOKE ALL ON SCHEMA public` + `ALTER DEFAULT PRIVILEGES ... REVOKE ALL ON TABLES/SEQUENCES` + `REVOKE REFERENCES` (S5 — full least-privilege pattern); `GRANT USAGE ON SCHEMA public`.
   - `GRANT SELECT, DELETE` on each EXPIRY table (`mcp_clients`, `sessions`, `verification_tokens`, `extension_bridge_codes`, `mobile_bridge_codes`, `mcp_authorization_codes`).
   - `GRANT SELECT` on `tenants` (PER_TENANT_FN enumeration + emit FK check); `GRANT EXECUTE` on `audit_log_purge(uuid, timestamptz)`.
-  - `GRANT SELECT, INSERT` on `audit_outbox` (heartbeat emit writes here — NOT audit_logs); `GRANT SELECT` on FK-referenced `users`/`teams`/`service_accounts` for the outbox emit existence check.
+  - `GRANT SELECT, INSERT` on `audit_outbox` (heartbeat emit writes here — NOT audit_logs). **No grant on `users`/`teams`/`service_accounts`** — corrected during Phase-2 self-R-check (R14): unlike the outbox-worker (which delivers to audit_logs and FK-checks those tables), this worker only enqueues to `audit_outbox` (whose sole FK is `tenants`) and reads `tenants` for the emit EXISTS check. `tenants` SELECT alone is sufficient.
   - **NO grant on `audit_logs`** (S5/F5 — emit goes to audit_outbox; audit_logs deletion via definer fn only).
   - **R14 completeness**: `(keys) IN (SELECT ...)` delete needs SELECT+DELETE on each table; bypass_rls GUC needs no grant.
 - **DCR role decision**: leave `passwd_dcr_cleanup_worker` role intact-but-unused (dropping a role is destructive R31-adjacent + pre-1.0 churn). New role gets `mcp_clients` SELECT/DELETE.
@@ -259,6 +259,49 @@ SC1–SC7 above. The narrowing from 13→6 EXPIRY tables happened in plan-review
 ### Out of scope
 - UI for GC status/config (worker is operator infra; per-tenant audit retention already has UI).
 - Cron/scheduler change (project uses poll-loop workers; we follow that).
+
+## Implementation Checklist
+
+**Files to CREATE:**
+- `src/workers/retention-gc-worker/registry.ts` (C1) — types + RETENTION_REGISTRY
+- `src/workers/retention-gc-worker/predicate.ts` (C1) — PredicateClause + renderPredicate
+- `src/workers/retention-gc-worker/sweep.ts` (C2/C3/C4) — sweepExpiryEntry, sweepAuditLogs, sweepOnce
+- `src/workers/retention-gc-worker/index.ts` (C5) — createWorker
+- `scripts/retention-gc-worker.ts` (C5) — entrypoint (clone scripts/dcr-cleanup-worker.ts)
+- `prisma/migrations/<ts>_add_retention_gc_worker_role/migration.sql` (C7)
+- `infra/postgres/initdb/04-create-retention-gc-worker-role.sql` (C9)
+- `infra/k8s/retention-gc-worker.yaml` (C9 — clone dcr-cleanup-worker.yaml)
+- `scripts/set-retention-gc-worker-password.sh` + `scripts/__tests__/set-retention-gc-worker-password.test.mjs` (C8)
+- `scripts/__tests__/retention-gc-worker-env.test.mjs` (C5 — clone dcr-cleanup-worker-env.test.mjs)
+- unit tests: registry DMMF/key checks, predicate render, sweep SQL-build (C1/C2)
+- integration tests: `src/__tests__/db-integration/retention-gc-worker-{sweep,role,audit-logs,error-isolation}.integration.test.ts` (C2/C3/C4/C10)
+- `docs/archive/review/retention-gc-worker-manual-test.md` (C11)
+
+**Files to MODIFY:**
+- `src/lib/env-schema.ts:75-99` — replace DCR_CLEANUP_* block with RETENTION_GC_* (C6)
+- `src/lib/constants/audit/audit.ts` — add `RETENTION_GC_SWEEP` to AUDIT_ACTION (after AUDIT_LOG_PURGE ~:79), AUDIT_ACTION_VALUES (~:219), AUDIT_ACTION_GROUP.MAINTENANCE (:715) (C6/R12)
+- `messages/en/AuditLog.json` + `messages/ja/AuditLog.json` — add RETENTION_GC_SWEEP label (C6; ja non-katakana)
+- `package.json:45` — `worker:dcr-cleanup` → `worker:retention-gc` (C8)
+- `docker-compose.override.yml` — dcr-cleanup-worker service → retention-gc-worker (C8)
+- `docker-compose.yml:47` — PASSWD_DCR_CLEANUP_WORKER_PASSWORD → PASSWD_RETENTION_GC_WORKER_PASSWORD (C9)
+- `scripts/env-descriptions.ts:109,843-859` — DCR_CLEANUP_* → RETENTION_GC_* (C9)
+- `scripts/env-allowlist.ts:187,203` — password var swap (C9)
+- `.github/workflows/ci-integration.yml` — add PASSWD_RETENTION_GC_WORKER_PASSWORD env + ALTER ROLE (C9)
+- `src/__tests__/db-integration/helpers.ts` — add "retention-gc-worker" TestRole + retentionWorker (C10)
+
+**Files to RETIRE (in same PR):**
+- `src/workers/dcr-cleanup-worker.ts`, `scripts/dcr-cleanup-worker.ts`, `infra/k8s/dcr-cleanup-worker.yaml`, `scripts/set-dcr-cleanup-worker-password.sh` + test, `scripts/__tests__/dcr-cleanup-worker-env.test.mjs`, 3 `dcr-cleanup-worker-*.integration.test.ts` (port per C10). KEEP `infra/postgres/initdb/03-...` + the dcr role (kept-but-unused, C7 decision).
+
+**Shared utilities to REUSE (do NOT reimplement):**
+- `src/lib/constants/time.ts` — MS_PER_HOUR/MS_PER_MINUTE/MS_PER_DAY (env defaults)
+- `src/lib/validations/common.ts:223` — AUDIT_LOG_RETENTION_MIN (C3 floor)
+- `src/lib/constants/app.ts` — SYSTEM_TENANT_ID, SYSTEM_ACTOR_ID
+- `src/lib/constants/audit/audit.ts` — AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE, AUDIT_METADATA_KEY
+- `src/workers/worker-pool-config.ts` — WORKER_POOL_IDLE_TIMEOUT_MS, WORKER_POOL_STATEMENT_TIMEOUT_MS
+- `src/lib/env-schema.ts` — envObject (.pick pattern), audit_log_purge definer fn (existing)
+- Pattern templates (clone, don't invent): `src/workers/dcr-cleanup-worker.ts`, `scripts/dcr-cleanup-worker.ts`
+
+**CI gate parity**: ci-integration.yml triggers on `src/workers/**` + `prisma/migrations/**` (both touched). New role password must be ALTER ROLE'd in CI to match helpers.ts fallback `passwd_retention_gc_pass`.
 
 ## User operation scenarios
 - **Operator deploys the worker**: `docker compose up` brings up `retention-gc-worker`; expired sessions/codes/DCR rows physically removed within the interval; counts logged. Per-tenant audit retention now automatic (manual `purge-audit-logs.sh` remains for ad-hoc/forced purge).

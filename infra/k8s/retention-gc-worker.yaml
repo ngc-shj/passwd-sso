@@ -1,33 +1,33 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: dcr-cleanup-worker
+  name: retention-gc-worker
   labels:
     app: passwd-sso
-    component: dcr-cleanup-worker
+    component: retention-gc-worker
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: passwd-sso
-      component: dcr-cleanup-worker
+      component: retention-gc-worker
   template:
     metadata:
       labels:
         app: passwd-sso
-        component: dcr-cleanup-worker
+        component: retention-gc-worker
     spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: worker
           image: passwd-sso:latest
-          command: ["node", "dist/dcr-cleanup-worker.js"]
+          command: ["node", "dist/retention-gc-worker.js"]
           env:
-            - name: DCR_CLEANUP_DATABASE_URL
+            - name: RETENTION_GC_DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: dcr-cleanup-worker-db
-                  key: dcr-cleanup-database-url
+                  name: retention-gc-worker-db
+                  key: retention-gc-database-url
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -45,17 +45,17 @@ spec:
             # AND the binary still runs. Cheaper than a network probe and avoids
             # masking DB outages with a tautological process.exit(0).
             exec:
-              command: ["node", "dist/dcr-cleanup-worker.js", "--validate-env-only"]
+              command: ["node", "dist/retention-gc-worker.js", "--validate-env-only"]
             initialDelaySeconds: 60
             periodSeconds: 60
             failureThreshold: 3
           startupProbe:
             exec:
-              command: ["node", "dist/dcr-cleanup-worker.js", "--validate-env-only"]
+              command: ["node", "dist/retention-gc-worker.js", "--validate-env-only"]
             failureThreshold: 3
             periodSeconds: 5
           readinessProbe:
             exec:
-              command: ["node", "dist/dcr-cleanup-worker.js", "--validate-env-only"]
+              command: ["node", "dist/retention-gc-worker.js", "--validate-env-only"]
             initialDelaySeconds: 5
             periodSeconds: 10

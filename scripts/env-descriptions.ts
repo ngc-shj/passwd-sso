@@ -15,7 +15,7 @@ export const GROUPS = [
   "Health",
   "Redis",
   "Outbox worker",
-  "DCR cleanup worker",
+  "Retention GC worker",
   "Audit anchor publisher",
   "Key provider",
   "DB pool",
@@ -106,14 +106,14 @@ export const descriptions: Record<
       "Optional — falls back to DATABASE_URL if unset.",
     example: "postgresql://passwd_outbox_worker:pass@localhost:5432/passwd_sso",
   },
-  DCR_CLEANUP_DATABASE_URL: {
+  RETENTION_GC_DATABASE_URL: {
     group: "Database",
     order: 4,
     description:
-      "PostgreSQL connection URL for the DCR cleanup worker role (passwd_dcr_cleanup_worker).\n" +
-      "Least privilege: SELECT/DELETE on mcp_clients, SELECT/INSERT on audit_outbox.\n" +
+      "PostgreSQL connection URL for the retention GC worker role (passwd_retention_gc_worker).\n" +
+      "Least privilege: SELECT/DELETE on GC-eligible tables, SELECT/INSERT on audit_outbox.\n" +
       "Optional — falls back to DATABASE_URL if unset.",
-    example: "postgresql://passwd_dcr_cleanup_worker:pass@localhost:5432/passwd_sso",
+    example: "postgresql://passwd_retention_gc_worker:pass@localhost:5432/passwd_sso",
   },
 
   // ── Auth ─────────────────────────────────────────────────────────────────
@@ -838,29 +838,29 @@ export const descriptions: Record<
     example: "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
   },
 
-  // ── DCR cleanup worker ────────────────────────────────────────────────────────
+  // ── Retention GC worker ───────────────────────────────────────────────────────
 
-  DCR_CLEANUP_INTERVAL_MS: {
-    group: "DCR cleanup worker",
+  RETENTION_GC_INTERVAL_MS: {
+    group: "Retention GC worker",
     order: 1,
     description:
-      "Interval between DCR cleanup sweeps in milliseconds. Default: 3600000 (1 hour).\n" +
+      "Interval between retention GC sweeps in milliseconds. Default: 3600000 (1 hour).\n" +
       "Minimum: 60000 (1 minute). Maximum: 86400000 (24 hours).",
     example: "3600000",
   },
-  DCR_CLEANUP_BATCH_SIZE: {
-    group: "DCR cleanup worker",
+  RETENTION_GC_BATCH_SIZE: {
+    group: "Retention GC worker",
     order: 2,
     description:
-      "Maximum number of expired DCR client rows deleted per sweep. Default: 1000.\n" +
+      "Maximum number of expired rows deleted per table per sweep. Default: 1000.\n" +
       "Valid range: 1–10000.",
     example: "1000",
   },
-  DCR_CLEANUP_EMIT_HEARTBEAT_AUDIT: {
-    group: "DCR cleanup worker",
+  RETENTION_GC_EMIT_HEARTBEAT_AUDIT: {
+    group: "Retention GC worker",
     order: 3,
     description:
-      "When true, emit an audit row on every sweep even when purgedCount=0. Default: false.\n" +
+      "When true, emit an audit row on every sweep even when all counts are zero. Default: false.\n" +
       "Useful for liveness verification in audit pipelines; increases audit_outbox volume.",
     example: "false",
   },
