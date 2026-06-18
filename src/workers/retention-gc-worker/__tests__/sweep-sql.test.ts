@@ -14,8 +14,8 @@
 
 import { describe, it, expect, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
-import { sweepExpiryEntry, sweepGuardedExpiryEntry } from "../sweep";
-import type { ExpiryEntry, GuardedExpiryEntry } from "../registry";
+import { sweepExpiryEntry, sweepGuardedExpiryEntry, sweepAuditProvenanceEntry } from "../sweep";
+import type { ExpiryEntry, GuardedExpiryEntry, AuditProvenanceEntry } from "../registry";
 
 /** A fake TransactionClient capturing the bypass_rls set_config and the DELETE. */
 function makeFakeTx() {
@@ -155,5 +155,88 @@ describe("sweepGuardedExpiryEntry generated SQL (SC5 C2/RT7)", () => {
     expect(sql).toMatch(
       /NOT EXISTS \(\s*SELECT 1 FROM delegation_sessions d\s+WHERE d\.mcp_token_id = mcp_access_tokens\.id\s+AND d\.revoked_at IS NULL AND d\.expires_at > now\(\)/,
     );
+  });
+});
+
+describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7)", () => {
+  function makeProvenanceTx(rows: Record<string, unknown>[]) {
+    const executeRaw = vi.fn().mockResolvedValue(undefined); // set_config
+    const queryRawUnsafe = vi.fn().mockResolvedValue(rows); // SELECT (capture)
+    const executeRawUnsafe = vi.fn().mockResolvedValue(rows.length); // DELETE
+    const auditOutbox = { create: vi.fn().mockResolvedValue(undefined) };
+    const queryRaw = vi.fn().mockResolvedValue([{ bypass_rls: "on", tenant_id: "" }]);
+    // enqueueAuditInWorkerTx does two $queryRaw reads (ctx + tenant exists)
+    queryRaw
+      .mockResolvedValueOnce([{ bypass_rls: "on", tenant_id: "" }])
+      .mockResolvedValue([{ ok: true }]);
+    const tx = {
+      $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
+      $queryRawUnsafe: queryRawUnsafe,
+      $executeRawUnsafe: executeRawUnsafe,
+      auditOutbox,
+    } as unknown as Prisma.TransactionClient;
+    return { tx, queryRawUnsafe, executeRawUnsafe, auditOutbox };
+  }
+
+  it("SELECTs the provenance projection (no row lock), then DELETEs id = ANY($1::uuid[])", async () => {
+    const entry: AuditProvenanceEntry = {
+      kind: "EXPIRY_AUDIT_PROVENANCE",
+      table: "extension_tokens",
+      cutoffColumn: "expires_at",
+      provenanceColumns: ["tenant_id", "user_id", "last_used_at", "last_used_ip", "last_used_user_agent"],
+      globalDelete: true,
+    };
+    const rows = [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        tenant_id: "22222222-2222-4222-8222-222222222222",
+        user_id: "33333333-3333-4333-8333-333333333333",
+        last_used_at: null,
+        last_used_ip: "10.0.0.1",
+        last_used_user_agent: "ua",
+      },
+    ];
+    const { tx, queryRawUnsafe, executeRawUnsafe, auditOutbox } =
+      makeProvenanceTx(rows);
+
+    const deleted = await sweepAuditProvenanceEntry(tx, entry, 100);
+    expect(deleted).toBe(1);
+
+    // SELECT: projection includes id + all provenance cols, LIMIT $1, no FOR UPDATE.
+    const [selectSql, ...selectParams] = queryRawUnsafe.mock.calls[0];
+    expect(selectParams).toEqual([100]);
+    expect(selectSql).toMatch(
+      /SELECT id, tenant_id, user_id, last_used_at, last_used_ip, last_used_user_agent FROM extension_tokens/,
+    );
+    expect(selectSql).toMatch(/WHERE expires_at < now\(\)/);
+    expect(selectSql).toMatch(/LIMIT \$1/);
+    // No FOR UPDATE — that needs UPDATE privilege; the GC role has only SELECT+DELETE.
+    expect(selectSql).not.toContain("FOR UPDATE");
+
+    // Audit emitted BEFORE delete, under the row's own tenant_id.
+    expect(auditOutbox.create).toHaveBeenCalledTimes(1);
+    const emitted = auditOutbox.create.mock.calls[0][0];
+    expect(emitted.data.tenantId).toBe("22222222-2222-4222-8222-222222222222");
+
+    // DELETE binds the captured ids as $1::uuid[], not interpolated.
+    const [deleteSql, ...deleteParams] = executeRawUnsafe.mock.calls[0];
+    expect(deleteSql).toMatch(/DELETE FROM extension_tokens WHERE id = ANY\(\$1::uuid\[\]\)/);
+    expect(deleteParams).toEqual([["11111111-1111-4111-8111-111111111111"]]);
+  });
+
+  it("returns 0 and emits nothing when no rows are expired", async () => {
+    const entry: AuditProvenanceEntry = {
+      kind: "EXPIRY_AUDIT_PROVENANCE",
+      table: "api_keys",
+      cutoffColumn: "expires_at",
+      provenanceColumns: ["tenant_id", "user_id", "name", "last_used_at"],
+      globalDelete: true,
+    };
+    const { tx, executeRawUnsafe, auditOutbox } = makeProvenanceTx([]);
+    const deleted = await sweepAuditProvenanceEntry(tx, entry, 100);
+    expect(deleted).toBe(0);
+    expect(auditOutbox.create).not.toHaveBeenCalled();
+    expect(executeRawUnsafe).not.toHaveBeenCalled(); // no DELETE issued
   });
 });

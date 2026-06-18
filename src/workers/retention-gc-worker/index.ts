@@ -94,6 +94,26 @@ export function validateRegistry(
             `All RLS-enabled tables require globalDelete to acknowledge the all-tenant blast radius.`,
         );
       }
+    } else if (entry.kind === "EXPIRY_AUDIT_PROVENANCE") {
+      assertIdentifier(entry.table);
+      assertIdentifier(entry.cutoffColumn);
+      // provenanceColumns are interpolated into the SELECT projection — validate
+      // every one (defense-in-depth before any SQL is built; S1/S3).
+      for (const col of entry.provenanceColumns) {
+        assertIdentifier(col);
+      }
+      // tenant_id is required for the per-row audit emit.
+      if (!entry.provenanceColumns.includes("tenant_id")) {
+        throw new Error(
+          `retention-gc: EXPIRY_AUDIT_PROVENANCE entry for table "${entry.table}" must include "tenant_id" in provenanceColumns (the audit is emitted under the row's own tenant).`,
+        );
+      }
+      if (!entry.globalDelete && !RLS_FREE_EXPIRY_TABLES.has(entry.table)) {
+        throw new Error(
+          `retention-gc: EXPIRY_AUDIT_PROVENANCE entry for table "${entry.table}" is missing globalDelete:true. ` +
+            `All RLS-enabled tables require globalDelete to acknowledge the all-tenant blast radius.`,
+        );
+      }
     }
     // PER_TENANT_FN entries have no free identifiers to validate — the table,
     // fn, and tenantRetentionColumn fields are literal union types.
