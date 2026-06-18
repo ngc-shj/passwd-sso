@@ -5,6 +5,8 @@ import "@testing-library/jest-dom/vitest";
 import {
   AUDIT_LOG_RETENTION_MIN,
   AUDIT_LOG_RETENTION_MAX,
+  RETENTION_DAYS_MIN,
+  RETENTION_DAYS_MAX,
 } from "@/lib/validations/common";
 
 const { mockFetch, mockToast } = vi.hoisted(() => ({
@@ -146,5 +148,104 @@ describe("TenantRetentionPolicyCard", () => {
     await waitFor(() => {
       expect(mockToast.error).toHaveBeenCalledWith("retentionPolicySaveFailed");
     });
+  });
+
+  describe("generic retention fields", () => {
+    const FIELDS = [
+      { key: "trashRetentionDays", labelKey: "trashRetention" },
+      { key: "historyRetentionDays", labelKey: "historyRetention" },
+      { key: "shareAccessLogRetentionDays", labelKey: "shareAccessLogRetention" },
+      { key: "directorySyncLogRetentionDays", labelKey: "directorySyncLogRetention" },
+      { key: "notificationRetentionDays", labelKey: "notificationRetention" },
+    ] as const;
+
+    for (const { key, labelKey } of FIELDS) {
+      it(`hydrates ${key} from GET and shows the days input when set`, async () => {
+        setupGet({ auditLogRetentionDays: 365, [key]: 30 });
+        render(<TenantRetentionPolicyCard />);
+        const input = (await screen.findByLabelText(
+          `${labelKey}Days`,
+        )) as HTMLInputElement;
+        expect(input.value).toBe("30");
+      });
+
+      it(`enables ${key} via toggle and PATCHes the typed value`, async () => {
+        setupGet({ auditLogRetentionDays: 365 });
+        render(<TenantRetentionPolicyCard />);
+        const save = await screen.findByRole("button", {
+          name: "retentionPolicySave",
+        });
+
+        // Field starts disabled (null from GET); toggle on, then type a value.
+        fireEvent.click(screen.getByLabelText(`${labelKey}Enabled`));
+        const input = screen.getByLabelText(`${labelKey}Days`) as HTMLInputElement;
+        fireEvent.change(input, { target: { value: "45" } });
+
+        expect(save).not.toBeDisabled();
+        fireEvent.click(save);
+
+        await waitFor(() => {
+          const patchCalls = mockFetch.mock.calls.filter(
+            (c) => (c[1] as RequestInit | undefined)?.method === "PATCH",
+          );
+          expect(patchCalls.length).toBe(1);
+          const body = JSON.parse(String((patchCalls[0][1] as RequestInit).body));
+          expect(body[key]).toBe(45);
+        });
+      });
+
+      it(`PATCHes null for ${key} when its toggle is off`, async () => {
+        setupGet({ auditLogRetentionDays: 365, [key]: 30 });
+        render(<TenantRetentionPolicyCard />);
+        const save = await screen.findByRole("button", {
+          name: "retentionPolicySave",
+        });
+
+        // Toggle the (initially-on) field off, then save.
+        fireEvent.click(screen.getByLabelText(`${labelKey}Enabled`));
+        fireEvent.click(save);
+
+        await waitFor(() => {
+          const patchCalls = mockFetch.mock.calls.filter(
+            (c) => (c[1] as RequestInit | undefined)?.method === "PATCH",
+          );
+          expect(patchCalls.length).toBe(1);
+          const body = JSON.parse(String((patchCalls[0][1] as RequestInit).body));
+          expect(body[key]).toBeNull();
+        });
+      });
+
+      it(`range-validates ${key}: blur clamps over-max down to max`, async () => {
+        setupGet({ auditLogRetentionDays: 365, [key]: 30 });
+        render(<TenantRetentionPolicyCard />);
+        const input = (await screen.findByLabelText(
+          `${labelKey}Days`,
+        )) as HTMLInputElement;
+
+        fireEvent.change(input, { target: { value: String(RETENTION_DAYS_MAX + 100) } });
+        expect(input.value).toBe(String(RETENTION_DAYS_MAX + 100));
+
+        fireEvent.blur(input);
+        await waitFor(() => {
+          expect(input.value).toBe(String(RETENTION_DAYS_MAX));
+        });
+      });
+
+      it(`range-validates ${key}: blur clamps below-min up to min`, async () => {
+        setupGet({ auditLogRetentionDays: 365, [key]: 30 });
+        render(<TenantRetentionPolicyCard />);
+        const input = (await screen.findByLabelText(
+          `${labelKey}Days`,
+        )) as HTMLInputElement;
+
+        fireEvent.change(input, { target: { value: "0" } });
+        expect(input.value).toBe("0");
+
+        fireEvent.blur(input);
+        await waitFor(() => {
+          expect(input.value).toBe(String(RETENTION_DAYS_MIN));
+        });
+      });
+    }
   });
 });

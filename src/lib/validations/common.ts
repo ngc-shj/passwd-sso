@@ -222,6 +222,11 @@ export const PASSWORD_EXPIRY_WARNING_MAX = 90;
 // ─── Audit Log Retention ─────────────────────────────────────
 export const AUDIT_LOG_RETENTION_MIN = 30;
 export const AUDIT_LOG_RETENTION_MAX = 10 * DAYS_PER_YEAR;
+
+// ─── Generic Retention (trash, history, operational logs) ────
+// Operational cleanup, not forensic — no 30-day floor like audit logs.
+export const RETENTION_DAYS_MIN = 1;
+export const RETENTION_DAYS_MAX = 10 * DAYS_PER_YEAR;
 // Max date span for an audit-log download request (rendered in the UI).
 export const AUDIT_LOG_MAX_RANGE_DAYS = 90;
 

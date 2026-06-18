@@ -15,6 +15,8 @@ import {
   PASSWORD_EXPIRY_WARNING_MAX,
   AUDIT_LOG_RETENTION_MIN,
   AUDIT_LOG_RETENTION_MAX,
+  RETENTION_DAYS_MIN,
+  RETENTION_DAYS_MAX,
   SA_TOKEN_MAX_EXPIRY_MIN,
   SA_TOKEN_MAX_EXPIRY_MAX,
   PASSKEY_GRACE_PERIOD_MIN,
@@ -187,6 +189,36 @@ describe("TenantAdmin TTL help text interpolation", () => {
       expect(result).not.toContain("{");
       expect(result).not.toContain("}");
     });
+
+    for (const labelKey of [
+      "trashRetention",
+      "historyRetention",
+      "shareAccessLogRetention",
+      "directorySyncLogRetention",
+      "notificationRetention",
+    ] as const) {
+      it(`[${locale}] ${labelKey}DaysHelp renders min and max values`, () => {
+        const result = t(`${labelKey}DaysHelp`, { min: RETENTION_DAYS_MIN, max: RETENTION_DAYS_MAX });
+        expect(result).toContain(String(RETENTION_DAYS_MIN));
+        expect(result).toContain(String(RETENTION_DAYS_MAX));
+        expect(result).not.toContain("{");
+        expect(result).not.toContain("}");
+      });
+
+      it(`[${locale}] ${labelKey}ValidationMin renders min value`, () => {
+        const result = t(`${labelKey}ValidationMin`, { min: RETENTION_DAYS_MIN });
+        expect(result).toContain(String(RETENTION_DAYS_MIN));
+        expect(result).not.toContain("{");
+        expect(result).not.toContain("}");
+      });
+
+      it(`[${locale}] ${labelKey}ValidationMax renders max value`, () => {
+        const result = t(`${labelKey}ValidationMax`, { max: RETENTION_DAYS_MAX });
+        expect(result).toContain(String(RETENTION_DAYS_MAX));
+        expect(result).not.toContain("{");
+        expect(result).not.toContain("}");
+      });
+    }
 
     it(`[${locale}] saTokenMaxExpiryDaysHelp renders min and max values`, () => {
       const result = t("saTokenMaxExpiryDaysHelp", { min: SA_TOKEN_MAX_EXPIRY_MIN, max: SA_TOKEN_MAX_EXPIRY_MAX });

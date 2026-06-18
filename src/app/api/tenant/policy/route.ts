@@ -38,6 +38,8 @@ import {
   PASSWORD_EXPIRY_WARNING_MAX,
   AUDIT_LOG_RETENTION_MIN,
   AUDIT_LOG_RETENTION_MAX,
+  RETENTION_DAYS_MIN,
+  RETENTION_DAYS_MAX,
   PASSKEY_GRACE_PERIOD_MIN,
   PASSKEY_GRACE_PERIOD_MAX,
   POLICY_MIN_PW_LENGTH_MIN,
@@ -107,6 +109,11 @@ async function handleGET(_req: NextRequest) {
         passwordMaxAgeDays: true,
         passwordExpiryWarningDays: true,
         auditLogRetentionDays: true,
+        trashRetentionDays: true,
+        historyRetentionDays: true,
+        shareAccessLogRetentionDays: true,
+        directorySyncLogRetentionDays: true,
+        notificationRetentionDays: true,
         tenantMinPasswordLength: true,
         tenantRequireUppercase: true,
         tenantRequireLowercase: true,
@@ -145,6 +152,11 @@ async function handleGET(_req: NextRequest) {
     passwordMaxAgeDays: user?.tenant?.passwordMaxAgeDays ?? null,
     passwordExpiryWarningDays: user?.tenant?.passwordExpiryWarningDays ?? null,
     auditLogRetentionDays: user?.tenant?.auditLogRetentionDays ?? null,
+    trashRetentionDays: user?.tenant?.trashRetentionDays ?? null,
+    historyRetentionDays: user?.tenant?.historyRetentionDays ?? null,
+    shareAccessLogRetentionDays: user?.tenant?.shareAccessLogRetentionDays ?? null,
+    directorySyncLogRetentionDays: user?.tenant?.directorySyncLogRetentionDays ?? null,
+    notificationRetentionDays: user?.tenant?.notificationRetentionDays ?? null,
     tenantMinPasswordLength: user?.tenant?.tenantMinPasswordLength ?? null,
     tenantRequireUppercase: user?.tenant?.tenantRequireUppercase ?? false,
     tenantRequireLowercase: user?.tenant?.tenantRequireLowercase ?? false,
@@ -204,6 +216,11 @@ async function handlePATCH(req: NextRequest) {
     passwordMaxAgeDays,
     passwordExpiryWarningDays,
     auditLogRetentionDays,
+    trashRetentionDays,
+    historyRetentionDays,
+    shareAccessLogRetentionDays,
+    directorySyncLogRetentionDays,
+    notificationRetentionDays,
     tenantMinPasswordLength,
     tenantRequireUppercase,
     tenantRequireLowercase,
@@ -459,6 +476,63 @@ async function handlePATCH(req: NextRequest) {
       !Number.isInteger(auditLogRetentionDays) ||
       auditLogRetentionDays < AUDIT_LOG_RETENTION_MIN ||
       auditLogRetentionDays > AUDIT_LOG_RETENTION_MAX
+    ) {
+      return validationError();
+    }
+  }
+
+  // Validate the generic retention windows: null (never auto-delete) or
+  // integer within the shared operational-cleanup bounds.
+  if (trashRetentionDays !== null && trashRetentionDays !== undefined) {
+    if (
+      typeof trashRetentionDays !== "number" ||
+      !Number.isInteger(trashRetentionDays) ||
+      trashRetentionDays < RETENTION_DAYS_MIN ||
+      trashRetentionDays > RETENTION_DAYS_MAX
+    ) {
+      return validationError();
+    }
+  }
+
+  if (historyRetentionDays !== null && historyRetentionDays !== undefined) {
+    if (
+      typeof historyRetentionDays !== "number" ||
+      !Number.isInteger(historyRetentionDays) ||
+      historyRetentionDays < RETENTION_DAYS_MIN ||
+      historyRetentionDays > RETENTION_DAYS_MAX
+    ) {
+      return validationError();
+    }
+  }
+
+  if (shareAccessLogRetentionDays !== null && shareAccessLogRetentionDays !== undefined) {
+    if (
+      typeof shareAccessLogRetentionDays !== "number" ||
+      !Number.isInteger(shareAccessLogRetentionDays) ||
+      shareAccessLogRetentionDays < RETENTION_DAYS_MIN ||
+      shareAccessLogRetentionDays > RETENTION_DAYS_MAX
+    ) {
+      return validationError();
+    }
+  }
+
+  if (directorySyncLogRetentionDays !== null && directorySyncLogRetentionDays !== undefined) {
+    if (
+      typeof directorySyncLogRetentionDays !== "number" ||
+      !Number.isInteger(directorySyncLogRetentionDays) ||
+      directorySyncLogRetentionDays < RETENTION_DAYS_MIN ||
+      directorySyncLogRetentionDays > RETENTION_DAYS_MAX
+    ) {
+      return validationError();
+    }
+  }
+
+  if (notificationRetentionDays !== null && notificationRetentionDays !== undefined) {
+    if (
+      typeof notificationRetentionDays !== "number" ||
+      !Number.isInteger(notificationRetentionDays) ||
+      notificationRetentionDays < RETENTION_DAYS_MIN ||
+      notificationRetentionDays > RETENTION_DAYS_MAX
     ) {
       return validationError();
     }
@@ -808,6 +882,21 @@ async function handlePATCH(req: NextRequest) {
   if (auditLogRetentionDays !== undefined) {
     updateData.auditLogRetentionDays = auditLogRetentionDays ?? null;
   }
+  if (trashRetentionDays !== undefined) {
+    updateData.trashRetentionDays = trashRetentionDays ?? null;
+  }
+  if (historyRetentionDays !== undefined) {
+    updateData.historyRetentionDays = historyRetentionDays ?? null;
+  }
+  if (shareAccessLogRetentionDays !== undefined) {
+    updateData.shareAccessLogRetentionDays = shareAccessLogRetentionDays ?? null;
+  }
+  if (directorySyncLogRetentionDays !== undefined) {
+    updateData.directorySyncLogRetentionDays = directorySyncLogRetentionDays ?? null;
+  }
+  if (notificationRetentionDays !== undefined) {
+    updateData.notificationRetentionDays = notificationRetentionDays ?? null;
+  }
   if (tenantMinPasswordLength !== undefined && tenantMinPasswordLength !== null) {
     updateData.tenantMinPasswordLength = tenantMinPasswordLength;
   }
@@ -921,6 +1010,11 @@ async function handlePATCH(req: NextRequest) {
           passwordMaxAgeDays: true,
           passwordExpiryWarningDays: true,
           auditLogRetentionDays: true,
+          trashRetentionDays: true,
+          historyRetentionDays: true,
+          shareAccessLogRetentionDays: true,
+          directorySyncLogRetentionDays: true,
+          notificationRetentionDays: true,
           tenantMinPasswordLength: true,
           tenantRequireUppercase: true,
           tenantRequireLowercase: true,
@@ -1005,6 +1099,11 @@ async function handlePATCH(req: NextRequest) {
       passwordMaxAgeDays: updated.passwordMaxAgeDays,
       passwordExpiryWarningDays: updated.passwordExpiryWarningDays,
       auditLogRetentionDays: updated.auditLogRetentionDays,
+      trashRetentionDays: updated.trashRetentionDays,
+      historyRetentionDays: updated.historyRetentionDays,
+      shareAccessLogRetentionDays: updated.shareAccessLogRetentionDays,
+      directorySyncLogRetentionDays: updated.directorySyncLogRetentionDays,
+      notificationRetentionDays: updated.notificationRetentionDays,
       tenantMinPasswordLength: updated.tenantMinPasswordLength,
       tenantRequireUppercase: updated.tenantRequireUppercase,
       tenantRequireLowercase: updated.tenantRequireLowercase,
@@ -1051,6 +1150,11 @@ async function handlePATCH(req: NextRequest) {
     passwordMaxAgeDays: updated.passwordMaxAgeDays,
     passwordExpiryWarningDays: updated.passwordExpiryWarningDays,
     auditLogRetentionDays: updated.auditLogRetentionDays,
+    trashRetentionDays: updated.trashRetentionDays,
+    historyRetentionDays: updated.historyRetentionDays,
+    shareAccessLogRetentionDays: updated.shareAccessLogRetentionDays,
+    directorySyncLogRetentionDays: updated.directorySyncLogRetentionDays,
+    notificationRetentionDays: updated.notificationRetentionDays,
     tenantMinPasswordLength: updated.tenantMinPasswordLength,
     tenantRequireUppercase: updated.tenantRequireUppercase,
     tenantRequireLowercase: updated.tenantRequireLowercase,
