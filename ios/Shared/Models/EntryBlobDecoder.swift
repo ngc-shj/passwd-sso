@@ -48,6 +48,75 @@ public enum EntryBlobDecoder {
     let notes: String?
     let tags: [TagPayload]?
     let totp: TotpPayload?
+
+    // Type-specific fields. The blob is a single flat JSON object; field names
+    // are disjoint across types (except shared title/notes/username/email), so
+    // every key is decoded as an optional and is nil for types that omit it.
+    // Sub-structs are built only for the matching entryType (see `detail`).
+    // SECURE_NOTE
+    let content: String?
+    let isMarkdown: Bool?
+    // CREDIT_CARD
+    let cardholderName: String?
+    let cardNumber: String?
+    let brand: String?
+    let expiryMonth: String?
+    let expiryYear: String?
+    let cvv: String?
+    // IDENTITY
+    let fullName: String?
+    let address: String?
+    let givenName: String?
+    let familyName: String?
+    let middleName: String?
+    let familyNameKana: String?
+    let givenNameKana: String?
+    let addressLine1: String?
+    let addressLine2: String?
+    let city: String?
+    let state: String?
+    let postalCode: String?
+    let country: String?
+    let phone: String?
+    let email: String?
+    let dateOfBirth: String?
+    let nationality: String?
+    let idNumber: String?
+    let issueDate: String?
+    let expiryDate: String?
+    // BANK_ACCOUNT
+    let bankName: String?
+    let accountType: String?
+    let accountHolderName: String?
+    let accountNumber: String?
+    let routingNumber: String?
+    let swiftBic: String?
+    let iban: String?
+    let branchName: String?
+    // SSH_KEY (blob keys are `passphrase`/`comment`, NOT sshPassphrase/sshComment;
+    // `keySize` is free-text so decode as String). `publicKey`/`keyType`/
+    // `fingerprint` reuse identifiers above where not already declared.
+    let privateKey: String?
+    let publicKey: String?
+    let keyType: String?
+    let fingerprint: String?
+    let passphrase: String?
+    let comment: String?
+    let keySize: String?
+    // SOFTWARE_LICENSE
+    let softwareName: String?
+    let licenseKey: String?
+    let version: String?
+    let licensee: String?
+    let purchaseDate: String?
+    let expirationDate: String?
+    // PASSKEY (display fields only — provider-private passkey* keys are never
+    // decoded here; see PasskeyFullBlobPayload for the assertion path).
+    let relyingPartyId: String?
+    let relyingPartyName: String?
+    let credentialId: String?
+    let creationDate: String?
+    let deviceInfo: String?
   }
 
   /// Full-blob fields needed to build a passkey assertion. Decoded separately
@@ -143,12 +212,16 @@ public enum EntryBlobDecoder {
     )
   }
 
-  /// Reconstruct a detail view from a full-blob plaintext. `id`/`teamId` come
-  /// from the cache row; `totpSecret` is derived from the `totp` object.
+  /// Reconstruct a detail view from a full-blob plaintext. `id`/`teamId`/
+  /// `entryType` come from the cache row, never the blob. LOGIN fields are
+  /// decoded unconditionally (so AutoFill, which passes `entryType: nil`, is
+  /// unchanged); the type-specific sub-struct is built only for a matching
+  /// non-login `entryType`.
   public static func detail(
     plaintext: Data,
     entryId: String,
-    teamId: String?
+    teamId: String?,
+    entryType: String? = nil
   ) -> VaultEntryDetail? {
     guard let p = try? JSONDecoder().decode(FullBlobPayload.self, from: plaintext) else {
       return nil
@@ -169,7 +242,42 @@ public enum EntryBlobDecoder {
       totpAlgorithm: p.totp?.algorithm,
       totpDigits: p.totp?.digits,
       totpPeriod: p.totp?.period,
-      generatorSettings: nil
+      generatorSettings: nil,
+      entryType: entryType,
+      secureNote: entryType == "SECURE_NOTE"
+        ? .init(content: p.content, isMarkdown: p.isMarkdown) : nil,
+      creditCard: entryType == "CREDIT_CARD"
+        ? .init(
+          cardholderName: p.cardholderName, cardNumber: p.cardNumber, brand: p.brand,
+          expiryMonth: p.expiryMonth, expiryYear: p.expiryYear, cvv: p.cvv) : nil,
+      identity: entryType == "IDENTITY"
+        ? .init(
+          fullName: p.fullName, address: p.address, givenName: p.givenName,
+          familyName: p.familyName, middleName: p.middleName, familyNameKana: p.familyNameKana,
+          givenNameKana: p.givenNameKana, addressLine1: p.addressLine1, addressLine2: p.addressLine2,
+          city: p.city, state: p.state, postalCode: p.postalCode, country: p.country,
+          phone: p.phone, email: p.email, dateOfBirth: p.dateOfBirth, nationality: p.nationality,
+          idNumber: p.idNumber, issueDate: p.issueDate, expiryDate: p.expiryDate) : nil,
+      bankAccount: entryType == "BANK_ACCOUNT"
+        ? .init(
+          bankName: p.bankName, accountType: p.accountType, accountHolderName: p.accountHolderName,
+          accountNumber: p.accountNumber, routingNumber: p.routingNumber, swiftBic: p.swiftBic,
+          iban: p.iban, branchName: p.branchName) : nil,
+      sshKey: entryType == "SSH_KEY"
+        ? .init(
+          privateKey: p.privateKey, publicKey: p.publicKey, keyType: p.keyType,
+          fingerprint: p.fingerprint, passphrase: p.passphrase, comment: p.comment,
+          keySize: p.keySize) : nil,
+      softwareLicense: entryType == "SOFTWARE_LICENSE"
+        ? .init(
+          softwareName: p.softwareName, licenseKey: p.licenseKey, version: p.version,
+          licensee: p.licensee, email: p.email, purchaseDate: p.purchaseDate,
+          expirationDate: p.expirationDate) : nil,
+      passkey: entryType == "PASSKEY"
+        ? .init(
+          relyingPartyId: p.relyingPartyId, relyingPartyName: p.relyingPartyName,
+          username: p.username, credentialId: p.credentialId, creationDate: p.creationDate,
+          deviceInfo: p.deviceInfo) : nil
     )
   }
 }

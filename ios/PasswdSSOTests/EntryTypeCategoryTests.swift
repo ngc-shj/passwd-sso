@@ -30,4 +30,24 @@ final class EntryTypeCategoryTests: XCTestCase {
   func testAllCasesCountIsEight() {
     XCTAssertEqual(EntryTypeCategory.allCases.count, 8)
   }
+
+  // MARK: - isEditableOnIOS (C7 data-corruption guard)
+
+  func testIsEditableOnIOSTrueForLoginNilAndUnknown() {
+    // LOGIN, plus nil/unknown which fall back to LOGIN, are the only editable cases.
+    XCTAssertTrue(EntryTypeCategory.isEditableOnIOS(rawType: "LOGIN"))
+    XCTAssertTrue(EntryTypeCategory.isEditableOnIOS(rawType: nil))
+    XCTAssertTrue(EntryTypeCategory.isEditableOnIOS(rawType: "FUTURE_TYPE"))
+  }
+
+  func testIsEditableOnIOSFalseForAllNonLoginTypes() {
+    for raw in [
+      "SECURE_NOTE", "CREDIT_CARD", "IDENTITY", "BANK_ACCOUNT",
+      "SSH_KEY", "SOFTWARE_LICENSE", "PASSKEY",
+    ] {
+      XCTAssertFalse(
+        EntryTypeCategory.isEditableOnIOS(rawType: raw),
+        "\(raw) must not be editable on iOS")
+    }
+  }
 }

@@ -204,7 +204,9 @@ public enum VaultScope: Hashable, Sendable {
         key: vaultKey,
         aad: aad
       )
-      return EntryBlobDecoder.detail(plaintext: plaintext, entryId: entry.id, teamId: entry.teamId)
+      return EntryBlobDecoder.detail(
+        plaintext: plaintext, entryId: entry.id, teamId: entry.teamId,
+        entryType: entry.entryType)
     } catch {
       return nil
     }

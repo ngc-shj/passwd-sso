@@ -19,6 +19,14 @@ enum EntryTypeCategory: String, CaseIterable {
     return category
   }
 
+  /// The iOS edit form is LOGIN-shaped only. Editing a non-login entry through it
+  /// re-encrypts a login blob and pollutes the entry with empty login scalars +
+  /// a login-shaped overview. Only LOGIN (and unknown/nil, which falls back to
+  /// LOGIN) is editable on iOS; everything else is edited in the web app.
+  static func isEditableOnIOS(rawType: String?) -> Bool {
+    from(rawType: rawType) == .login
+  }
+
   var sfSymbol: String {
     switch self {
     case .login: "person.text.rectangle"

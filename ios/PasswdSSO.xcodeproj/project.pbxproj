@@ -148,6 +148,7 @@
 		F7972AB668F0D8073EBA5172 /* EntryFormTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBBBBBBE5688A781ED154534 /* EntryFormTests.swift */; };
 		FC74F7D953B2978FE27D3B85 /* EntryDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD65567EDF5CDCFB425499EA /* EntryDetailView.swift */; };
 		FD86EB17606A4DC5301497AA /* TOTPCodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D235AC82775464BDF11F292F /* TOTPCodeView.swift */; };
+		FDCF81FEBE1BAA45EF9FF36A /* EntryDetailTypeSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 329772DC684FA8AA0E0D8B06 /* EntryDetailTypeSections.swift */; };
 		FEC853759999A05E6F0867F4 /* EntryUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = D696B8B99CFDB4FFFDC090E1 /* EntryUploader.swift */; };
 		FF47A8B760D1DCE2230121A3 /* PasskeyRegistration.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA0A9545A79418E5DCAF4109 /* PasskeyRegistration.swift */; };
 		FFA7B60616C41F7692F7271C /* SPKIEncoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 160063572DE97E6E16AE7A3D /* SPKIEncoderTests.swift */; };
@@ -255,6 +256,7 @@
 		3000F818C09142AEC4837294 /* PasskeyAssertion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasskeyAssertion.swift; sourceTree = "<group>"; };
 		3073F23D803A683034FF5D44 /* VaultCategoryLanding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultCategoryLanding.swift; sourceTree = "<group>"; };
 		327A83D67306CD99E0CB3270 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		329772DC684FA8AA0E0D8B06 /* EntryDetailTypeSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryDetailTypeSections.swift; sourceTree = "<group>"; };
 		32E806A6C00D78F85B1ABC89 /* PersonalEntryBlobBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalEntryBlobBuilder.swift; sourceTree = "<group>"; };
 		345F9CF0FA1F40F81B8D6074 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		36DABD88C20A969FBE8AA7BA /* HostTokenStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostTokenStoreTests.swift; sourceTree = "<group>"; };
@@ -620,6 +622,7 @@
 		831DA2A399A896ABE739ED44 /* Vault */ = {
 			isa = PBXGroup;
 			children = (
+				329772DC684FA8AA0E0D8B06 /* EntryDetailTypeSections.swift */,
 				FD65567EDF5CDCFB425499EA /* EntryDetailView.swift */,
 				2A3E40BD15B72CC7D2465FA1 /* EntryEditForm.swift */,
 				7158BC25C5EA94F9F042EEEE /* EntryTypeCategory.swift */,
@@ -985,6 +988,7 @@
 				D8EA7B209BAE0D68AB7DB5D5 /* ContentView.swift in Sources */,
 				EEDC524C6F56E4E378F8DB16 /* DebugVaultLoader.swift in Sources */,
 				028ADBEDD93783F5080BA973 /* DeviceIdentifier.swift in Sources */,
+				FDCF81FEBE1BAA45EF9FF36A /* EntryDetailTypeSections.swift in Sources */,
 				FC74F7D953B2978FE27D3B85 /* EntryDetailView.swift in Sources */,
 				B0974C58F65B8B4CBE7FB084 /* EntryEditForm.swift in Sources */,
 				B083185D5D570CC65E2C2624 /* EntryFetcher.swift in Sources */,

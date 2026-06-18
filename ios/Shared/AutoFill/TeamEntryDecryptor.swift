@@ -141,6 +141,7 @@ public enum TeamEntryDecryptor {
       let tag = try? hexDecode(entry.encryptedBlob.authTag),
       let plaintext = try? decryptAESGCM(ciphertext: cipher, iv: iv, tag: tag, key: entryKey, aad: aad)
     else { return nil }
-    return EntryBlobDecoder.detail(plaintext: plaintext, entryId: entry.id, teamId: teamId)
+    return EntryBlobDecoder.detail(
+      plaintext: plaintext, entryId: entry.id, teamId: teamId, entryType: entry.entryType)
   }
 }

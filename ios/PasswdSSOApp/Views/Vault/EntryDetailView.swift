@@ -55,9 +55,15 @@ struct EntryDetailView: View {
     .navigationTitle(summary.title)
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
-      ToolbarItem(placement: .topBarTrailing) {
-        Button("Edit") {
-          isShowingEditForm = true
+      // Edit is LOGIN-only on iOS: the edit form is login-shaped and would
+      // corrupt a non-login entry on save (empty login scalars + login-shaped
+      // overview). Non-login entries are edited in the web app. nil/unknown
+      // entryType falls back to LOGIN, so the button shows during load.
+      if EntryTypeCategory.isEditableOnIOS(rawType: detail?.entryType) {
+        ToolbarItem(placement: .topBarTrailing) {
+          Button("Edit") {
+            isShowingEditForm = true
+          }
         }
       }
     }
@@ -90,40 +96,34 @@ struct EntryDetailView: View {
     .onDisappear {
       detail = nil
     }
+    // Clear decrypted secrets the moment the vault locks/logs out while this
+    // view stays foregrounded (lock() does not unmount it). The detail now
+    // holds SSH private keys, card numbers, IBANs — a larger surface than the
+    // password+TOTP it once carried, so don't leave it resident past lock.
+    .onChange(of: autoLockService.state) { _, newState in
+      if newState != .unlocked {
+        detail = nil
+      }
+    }
   }
 
   // MARK: - Detail content
 
+  @ViewBuilder
   private func detailContent(_ d: VaultEntryDetail) -> some View {
     List {
-      // Show the same fields as the edit form (even when empty) so opening Edit
-      // doesn't surprise the user with rows that weren't there. Empty fields
-      // render a muted "Not set" rather than being hidden.
-      fieldRow(label: "Username", value: d.username)
-      passwordRow(d.password)
-      fieldRow(label: "URL", value: d.url)
-
-      Section("Notes") {
-        if d.notes.isEmpty {
-          notSetText
-        } else {
-          Text(d.notes)
-            .font(.caption)
-            .privacySensitive()
-        }
-      }
-
-      Section("One-Time Code") {
-        if let totpSecret = d.totpSecret, !totpSecret.isEmpty {
-          TOTPCodeView(params: TOTPParams(
-            secret: totpSecret,
-            algorithm: d.totpAlgorithm,
-            digits: d.totpDigits,
-            period: d.totpPeriod
-          ))
-        } else {
-          notSetText
-        }
+      // Render the field set for the entry's type. Each per-type section lives
+      // in EntryDetailTypeSections.swift; LOGIN keeps its original rows so its
+      // rendering is structurally unchanged.
+      switch EntryTypeCategory.from(rawType: d.entryType) {
+      case .login: loginSections(d)
+      case .secureNote: secureNoteSection(d.secureNote)
+      case .creditCard: creditCardSection(d.creditCard, notes: d.notes)
+      case .identity: identitySection(d.identity, notes: d.notes)
+      case .bankAccount: bankAccountSection(d.bankAccount, notes: d.notes)
+      case .sshKey: sshKeySection(d.sshKey, notes: d.notes)
+      case .softwareLicense: softwareLicenseSection(d.softwareLicense, notes: d.notes)
+      case .passkey: passkeySection(d.passkey, notes: d.notes)
       }
 
       // Read-only display of preserved-but-not-iOS-editable data, so the user
@@ -135,16 +135,60 @@ struct EntryDetailView: View {
         }
       }
 
-      Section {
-        Text("Tags, custom fields, generator settings, and password history are kept when you save an edit here — edit those in the web app.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+      // The edit-preservation note only applies to LOGIN (the one type editable
+      // on iOS). For non-login types editing happens in the web app entirely.
+      if EntryTypeCategory.isEditableOnIOS(rawType: d.entryType) {
+        Section {
+          Text("Tags, custom fields, generator settings, and password history are kept when you save an edit here — edit those in the web app.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      } else {
+        Section {
+          Text("Edit this entry in the web app.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
       }
     }
     .listStyle(.insetGrouped)
   }
 
-  private var notSetText: some View {
+  // LOGIN field set — unchanged from the original detail layout.
+  @ViewBuilder
+  private func loginSections(_ d: VaultEntryDetail) -> some View {
+    // Show the same fields as the edit form (even when empty) so opening Edit
+    // doesn't surprise the user with rows that weren't there. Empty fields
+    // render a muted "Not set" rather than being hidden.
+    fieldRow(label: "Username", value: d.username)
+    passwordRow(d.password)
+    fieldRow(label: "URL", value: d.url)
+
+    Section("Notes") {
+      if d.notes.isEmpty {
+        notSetText
+      } else {
+        Text(d.notes)
+          .font(.caption)
+          .privacySensitive()
+      }
+    }
+
+    Section("One-Time Code") {
+      if let totpSecret = d.totpSecret, !totpSecret.isEmpty {
+        TOTPCodeView(params: TOTPParams(
+          secret: totpSecret,
+          algorithm: d.totpAlgorithm,
+          digits: d.totpDigits,
+          period: d.totpPeriod
+        ))
+      } else {
+        notSetText
+      }
+    }
+  }
+
+  var notSetText: some View {
     Text("Not set")
       .font(.body)
       .foregroundStyle(.secondary)
@@ -152,7 +196,7 @@ struct EntryDetailView: View {
 
   // LocalizedStringKey (not String) so `Section(_:)` binds the localizing
   // overload — callers pass literals ("Username"/"URL") that must translate.
-  private func fieldRow(label: LocalizedStringKey, value: String) -> some View {
+  func fieldRow(label: LocalizedStringKey, value: String) -> some View {
     Section(label) {
       if value.isEmpty {
         notSetText
@@ -232,7 +276,7 @@ struct EntryDetailView: View {
 
   /// Copy to pasteboard with localOnly + a configurable auto-clear expiration
   /// (AppSettingsStore.clipboardClearSeconds) per plan §"Side-Channel Controls".
-  private func copySecurely(value: String) {
+  func copySecurely(value: String) {
     SecureClipboard.copy(value, clearAfter: AppSettingsStore().clipboardClearSeconds)
   }
 }
