@@ -34,8 +34,14 @@ import {
   type GuardName,
   type AuditProvenanceEntry,
   type PerTenantFnEntry,
+  type PerTenantTrashEntry,
 } from "./registry";
 import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
+import {
+  collectEntryAttachmentRefs,
+  deleteAttachmentBlobs,
+  type AttachmentBlobRef,
+} from "@/lib/blob-store/cleanup";
 
 /**
  * Fixed "no live dependents" guard SQL fragments, keyed by GuardName.
@@ -339,6 +345,134 @@ export async function sweepAuditLogs(
 }
 
 /**
+ * Auto-purge soft-deleted (trashed) vault entries past each tenant's configured
+ * grace period (SC2). One PER_TENANT_TRASH entry per entry table.
+ *
+ * Per tenant, in its own transaction:
+ *   1. set bypass_rls FIRST (entry tables AND attachments are RLS-enabled).
+ *   2. SELECT trashed entry ids past `now() - trashRetentionDays days` (LIMIT
+ *      batchSize). For team_password_entries also select team_id.
+ *   3. Collect external blob refs BEFORE the cascade destroys the Attachment
+ *      rows. For team scope the ids are grouped by team_id and
+ *      collectEntryAttachmentRefs is called once per team group (F4) — its team
+ *      scope takes a single teamId. Refs are [] on the DB backend.
+ *   4. deleteMany the entries by id (cascade removes attachments/history/
+ *      favorites/tag-links; SetNull on password_shares).
+ *   5. Emit a per-tenant TRASH_RETENTION_PURGED audit (only if rows deleted).
+ *
+ * AFTER the tx commits, the collected external blobs are deleted best-effort
+ * (deleteAttachmentBlobs uses Promise.allSettled) — mirrors empty-trash: a
+ * failed external delete orphans an object but never leaves a dangling DB row.
+ *
+ * Unlike the other sweepers this takes workerPrisma (not a tx): the external
+ * blob delete must run after the DB tx commits, so this owns its own
+ * transactions.
+ *
+ * @returns Total entries deleted across all enumerated tenants.
+ */
+export async function sweepTrashEntry(
+  workerPrisma: PrismaClient,
+  entry: PerTenantTrashEntry,
+  batchSize: number,
+): Promise<number> {
+  assertIdentifier(entry.table);
+
+  // Enumerate only tenants with explicit trash retention configured (NULL → skip).
+  const tenants = await workerPrisma.tenant.findMany({
+    where: { trashRetentionDays: { not: null } },
+    select: { id: true, trashRetentionDays: true },
+  });
+
+  let total = 0;
+  for (const tenant of tenants) {
+    const retention = tenant.trashRetentionDays!;
+    const cutoff = new Date(Date.now() - retention * MS_PER_DAY);
+
+    const { deletedCount, refs } = await workerPrisma.$transaction(
+      async (tx) => {
+        // bypass_rls FIRST — both entry tables and attachments are RLS-enabled.
+        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+
+        // Select trashed entries past the cutoff. team scope also needs team_id
+        // so the refs can be partitioned by team (F4).
+        const rows =
+          entry.scopeKind === "team"
+            ? await tx.$queryRaw<Array<{ id: string; team_id: string }>>`
+                SELECT id, team_id FROM team_password_entries
+                WHERE tenant_id = ${tenant.id}::uuid
+                  AND deleted_at IS NOT NULL
+                  AND deleted_at < ${cutoff}
+                LIMIT ${batchSize}`
+            : await tx.$queryRaw<Array<{ id: string }>>`
+                SELECT id FROM password_entries
+                WHERE tenant_id = ${tenant.id}::uuid
+                  AND deleted_at IS NOT NULL
+                  AND deleted_at < ${cutoff}
+                LIMIT ${batchSize}`;
+
+        if (rows.length === 0) {
+          return { deletedCount: 0, refs: [] as AttachmentBlobRef[] };
+        }
+
+        const ids = rows.map((r) => r.id);
+
+        // Collect external blob refs BEFORE the cascade delete.
+        const collected: AttachmentBlobRef[] = [];
+        if (entry.scopeKind === "team") {
+          // Group ids by team_id; one collectEntryAttachmentRefs call per team.
+          const idsByTeam = new Map<string, string[]>();
+          for (const row of rows as Array<{ id: string; team_id: string }>) {
+            const list = idsByTeam.get(row.team_id) ?? [];
+            list.push(row.id);
+            idsByTeam.set(row.team_id, list);
+          }
+          for (const [teamId, teamEntryIds] of idsByTeam) {
+            collected.push(
+              ...(await collectEntryAttachmentRefs(tx, {
+                kind: "team",
+                teamId,
+                entryIds: teamEntryIds,
+              })),
+            );
+          }
+          await tx.teamPasswordEntry.deleteMany({ where: { id: { in: ids } } });
+        } else {
+          collected.push(
+            ...(await collectEntryAttachmentRefs(tx, {
+              kind: "personal",
+              entryIds: ids,
+            })),
+          );
+          await tx.passwordEntry.deleteMany({ where: { id: { in: ids } } });
+        }
+
+        await enqueueAuditInWorkerTx(tx, tenant.id, {
+          scope: AUDIT_SCOPE.TENANT,
+          action: AUDIT_ACTION.TRASH_RETENTION_PURGED,
+          userId: SYSTEM_ACTOR_ID,
+          actorType: ACTOR_TYPE.SYSTEM,
+          serviceAccountId: null,
+          teamId: null,
+          targetType: entry.table,
+          targetId: null,
+          metadata: { table: entry.table, purgedCount: ids.length },
+          ip: null,
+          userAgent: "retention-gc-worker",
+        });
+
+        return { deletedCount: ids.length, refs: collected };
+      },
+    );
+
+    // Best-effort external blob delete AFTER the tx commits (mirrors empty-trash).
+    await deleteAttachmentBlobs(refs);
+    total += deletedCount;
+  }
+
+  return total;
+}
+
+/**
  * Run one full sweep across the RETENTION_REGISTRY.
  *
  * Each EXPIRY entry runs in its own $transaction (INV-C4a). A per-entry error
@@ -382,6 +516,11 @@ export async function sweepOnce(
         counts[tableName] = await workerPrisma.$transaction(async (tx) =>
           sweepAuditLogs(tx, entry),
         );
+      } else if (entry.kind === "PER_TENANT_TRASH") {
+        // Unlike other kinds, call sweepTrashEntry with workerPrisma DIRECTLY
+        // (no outer $transaction): it owns its own per-tenant transactions
+        // because the external blob delete must run after each DB tx commits.
+        counts[tableName] = await sweepTrashEntry(workerPrisma, entry, batchSize);
       }
     } catch (err) {
       // Per-entry error isolation (INV-C4b): log {table, code} — authoritative error record (F7).

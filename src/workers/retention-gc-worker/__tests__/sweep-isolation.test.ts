@@ -25,23 +25,35 @@ describe("sweepOnce per-entry error isolation (C4/INV-C4b/RT7)", () => {
       (e) => e.kind === "EXPIRY",
     )!.table;
 
+    // PER_TENANT_TRASH entries dispatch through sweepTrashEntry (not an outer
+    // $transaction), which first calls workerPrisma.tenant.findMany. Returning
+    // [] makes those entries report 0 with no inner tx — keeping the $transaction
+    // call sequence aligned 1:1 with the non-trash entries.
+    const txEntryOrder = RETENTION_REGISTRY.filter(
+      (e) => e.kind !== "PER_TENANT_TRASH",
+    ).map((e) => e.table);
+    const trashTables = RETENTION_REGISTRY.filter(
+      (e) => e.kind === "PER_TENANT_TRASH",
+    ).map((e) => e.table);
+    const entryOrder = RETENTION_REGISTRY.map((e) => e.table);
+
     let callIndex = 0;
-    // Each registry entry triggers one $transaction call, in registry order.
-    // sweepOnce ALSO fires one EXTRA $transaction for the heartbeat after the
-    // entries (because a sibling deleted >0 → anyDeleted). That extra call has
-    // callIndex === entryOrder.length; we return 0 for it (entryOrder[i] is
-    // undefined there) and the mock ignores the callback, so the heartbeat
+    // Each non-trash registry entry triggers one $transaction call, in registry
+    // order. sweepOnce ALSO fires one EXTRA $transaction for the heartbeat after
+    // the entries (because a sibling deleted >0 → anyDeleted). That extra call
+    // has callIndex === txEntryOrder.length; we return 0 for it (txEntryOrder[i]
+    // is undefined there) and the mock ignores the callback, so the heartbeat
     // emit never runs and its result is discarded by sweepOnce — invisible to
     // the assertions below. Guard it explicitly so a future mock that DOES
     // invoke the callback can't silently misalign the per-entry mapping.
-    const entryOrder = RETENTION_REGISTRY.map((e) => e.table);
     const mockPrisma = {
+      tenant: { findMany: vi.fn(async () => []) },
       $transaction: vi.fn(async () => {
-        if (callIndex >= entryOrder.length) {
+        if (callIndex >= txEntryOrder.length) {
           callIndex += 1;
           return 0; // heartbeat tx — result discarded by sweepOnce
         }
-        const table = entryOrder[callIndex];
+        const table = txEntryOrder[callIndex];
         callIndex += 1;
         if (table === failingTable) {
           throw Object.assign(new Error("boom"), { code: "XX000" });
@@ -58,10 +70,14 @@ describe("sweepOnce per-entry error isolation (C4/INV-C4b/RT7)", () => {
     // The failing entry is flagged -1; the sweep did NOT abort.
     expect(counts[failingTable]).toBe(-1);
 
-    // Every sibling entry still ran and reported its count (3), proving isolation.
-    for (const table of entryOrder) {
+    // Every non-trash sibling still ran and reported its count (3) — isolation.
+    for (const table of txEntryOrder) {
       if (table === failingTable) continue;
       expect(counts[table]).toBe(3);
+    }
+    // Trash entries (no tenants enumerated) report 0 and don't abort the sweep.
+    for (const table of trashTables) {
+      expect(counts[table]).toBe(0);
     }
 
     // sweepOnce visited every registry entry despite the mid-loop failure.

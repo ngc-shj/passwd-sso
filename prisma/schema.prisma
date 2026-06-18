@@ -589,6 +589,9 @@ model Tenant {
   auditLogRetentionDays Int?    @map("audit_log_retention_days")
   auditChainEnabled     Boolean @default(false) @map("audit_chain_enabled")
 
+  // Trash (soft-deleted entry) auto-purge retention. NULL = never auto-purge.
+  trashRetentionDays Int? @map("trash_retention_days")
+
   // Tenant-wide password policy
   tenantMinPasswordLength Int     @default(0) @map("tenant_min_password_length")
   tenantRequireUppercase  Boolean @default(false) @map("tenant_require_uppercase")
@@ -927,6 +930,7 @@ enum AuditAction {
   AUDIT_LOG_PURGE
   RETENTION_GC_SWEEP
   CREDENTIAL_RETENTION_PURGED
+  TRASH_RETENTION_PURGED
   MASTER_KEY_ROTATION
   VERIFIER_PEPPER_ROTATE_BEGIN
   VERIFIER_PEPPER_ROTATE_COMPLETE

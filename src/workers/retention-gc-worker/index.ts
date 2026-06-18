@@ -114,6 +114,11 @@ export function validateRegistry(
             `All RLS-enabled tables require globalDelete to acknowledge the all-tenant blast radius.`,
         );
       }
+    } else if (entry.kind === "PER_TENANT_TRASH") {
+      // `table` is the only free identifier; scopeKind and tenantRetentionColumn
+      // are literal-union types. The sweeper sets bypass_rls explicitly (like
+      // sweepAuditLogs), so there is no globalDelete flag to enforce.
+      assertIdentifier(entry.table);
     }
     // PER_TENANT_FN entries have no free identifiers to validate — the table,
     // fn, and tenantRetentionColumn fields are literal union types.
