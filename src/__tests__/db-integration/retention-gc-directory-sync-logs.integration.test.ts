@@ -1,10 +1,10 @@
 /**
- * Real-DB test for SC7 append-only log retention (PER_TENANT_AGE).
+ * Real-DB test for SC7 directory-sync-log retention (PER_TENANT_AGE).
  *
- * share_access_logs (created_at age basis). directory_sync_logs (started_at) and
- * notifications (created_at) share the identical PER_TENANT_AGE codepath and have
- * their own live-DB companions (retention-gc-directory-sync-logs,
- * retention-gc-notifications).
+ * Companion to retention-gc-append-only-logs (share_access_logs). This exercises
+ * the directory_sync_logs table specifically: started_at age basis (no created_at
+ * column), child of directory_sync_configs. Verifies the live worker DELETE path,
+ * NULL = never, and worker least-privilege.
  */
 
 import {
@@ -25,15 +25,14 @@ import {
 import { sweepPerTenantAge } from "@/workers/retention-gc-worker/sweep";
 import { RETENTION_REGISTRY } from "@/workers/retention-gc-worker/registry";
 
-const shareLogEntry = RETENTION_REGISTRY.find(
-  (e) => e.kind === "PER_TENANT_AGE" && e.table === "share_access_logs",
+const syncLogEntry = RETENTION_REGISTRY.find(
+  (e) => e.kind === "PER_TENANT_AGE" && e.table === "directory_sync_logs",
 )! as Extract<(typeof RETENTION_REGISTRY)[number], { kind: "PER_TENANT_AGE" }>;
 
-describe("retention-gc append-only log retention (SC7)", () => {
+describe("retention-gc directory-sync-log retention (SC7)", () => {
   let ctx: TestContext;
   let tenantId: string;
-  let userId: string;
-  let shareId: string;
+  let configId: string;
 
   beforeAll(async () => {
     ctx = await createTestContext();
@@ -43,16 +42,16 @@ describe("retention-gc append-only log retention (SC7)", () => {
   });
   beforeEach(async () => {
     tenantId = await ctx.createTenant();
-    userId = await ctx.createUser(tenantId);
-    shareId = randomUUID();
+    configId = randomUUID();
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
-        `INSERT INTO password_shares (id, token_hash, encrypted_data, data_iv, data_auth_tag, expires_at, created_by_id, tenant_id, created_at)
-         VALUES ($1::uuid, $2, '\\x00', 'iv', 'tag', now() + interval '7 days', $3::uuid, $4::uuid, now())`,
-        shareId,
-        `sh-${shareId.slice(0, 16)}`,
-        userId,
+        `INSERT INTO directory_sync_configs
+           (id, tenant_id, provider, display_name, enabled, sync_interval_minutes,
+            encrypted_credentials, credentials_iv, credentials_auth_tag, status, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, 'OKTA'::"DirectorySyncProvider", 'test-config', true, 60,
+            '\\x00', 'iv', 'tag', 'IDLE'::"DirectorySyncStatus", now(), now())`,
+        configId,
         tenantId,
       );
     });
@@ -65,21 +64,23 @@ describe("retention-gc append-only log retention (SC7)", () => {
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
-        `UPDATE tenants SET share_access_log_retention_days = ${days === null ? "NULL" : "$2"} WHERE id = $1::uuid`,
+        `UPDATE tenants SET directory_sync_log_retention_days = ${days === null ? "NULL" : "$2"} WHERE id = $1::uuid`,
         ...(days === null ? [tenantId] : [tenantId, days]),
       );
     });
   }
 
-  async function insertAccessLog(ageExpr: string): Promise<string> {
+  async function insertSyncLog(ageExpr: string): Promise<string> {
     const id = randomUUID();
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
-        `INSERT INTO share_access_logs (id, share_id, tenant_id, created_at)
-         VALUES ($1::uuid, $2::uuid, $3::uuid, ${ageExpr})`,
+        `INSERT INTO directory_sync_logs
+           (id, config_id, tenant_id, status, started_at, dry_run,
+            users_created, users_updated, users_deactivated, groups_updated)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'SUCCESS'::"DirectorySyncStatus", ${ageExpr}, false, 0, 0, 0, 0)`,
         id,
-        shareId,
+        configId,
         tenantId,
       );
     });
@@ -90,21 +91,21 @@ describe("retention-gc append-only log retention (SC7)", () => {
     const rows = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       return tx.$queryRawUnsafe<{ id: string }[]>(
-        `SELECT id FROM share_access_logs WHERE id = $1::uuid`,
+        `SELECT id FROM directory_sync_logs WHERE id = $1::uuid`,
         id,
       );
     });
     return rows.length > 0;
   }
 
-  it("deletes access logs older than the tenant retention, keeps recent", async () => {
+  it("deletes sync logs older than the tenant retention, keeps recent", async () => {
     await setRetention(30);
-    const old = await insertAccessLog("now() - interval '31 days'");
-    const recent = await insertAccessLog("now() - interval '5 days'");
+    const old = await insertSyncLog("now() - interval '31 days'");
+    const recent = await insertSyncLog("now() - interval '5 days'");
 
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      await sweepPerTenantAge(tx, shareLogEntry, 100);
+      await sweepPerTenantAge(tx, syncLogEntry, 100);
     });
 
     expect(await logExists(old)).toBe(false);
@@ -113,11 +114,11 @@ describe("retention-gc append-only log retention (SC7)", () => {
 
   it("does NOT delete when the tenant retention is NULL", async () => {
     await setRetention(null);
-    const old = await insertAccessLog("now() - interval '400 days'");
+    const old = await insertSyncLog("now() - interval '400 days'");
 
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      await sweepPerTenantAge(tx, shareLogEntry, 100);
+      await sweepPerTenantAge(tx, syncLogEntry, 100);
     });
 
     expect(await logExists(old)).toBe(true);
@@ -125,10 +126,10 @@ describe("retention-gc append-only log retention (SC7)", () => {
 
   it("worker role CAN delete logs but CANNOT delete audit_logs (least privilege)", async () => {
     await setRetention(30);
-    const old = await insertAccessLog("now() - interval '31 days'");
+    const old = await insertSyncLog("now() - interval '31 days'");
 
     await ctx.retentionWorker.prisma.$transaction(async (tx) => {
-      await sweepPerTenantAge(tx, shareLogEntry, 100);
+      await sweepPerTenantAge(tx, syncLogEntry, 100);
     });
     expect(await logExists(old)).toBe(false);
 
