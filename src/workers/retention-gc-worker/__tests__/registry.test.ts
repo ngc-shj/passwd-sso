@@ -33,7 +33,7 @@ for (const model of Prisma.dmmf.datamodel.models) {
 }
 
 describe("RETENTION_REGISTRY — schema cross-check (INV-C1a)", () => {
-  it("contains exactly 6 EXPIRY + 1 EXPIRY_GUARDED + 4 EXPIRY_AUDIT_PROVENANCE + 1 PER_TENANT_FN + 2 PER_TENANT_TRASH entries", () => {
+  it("contains exactly 6 EXPIRY + 1 EXPIRY_GUARDED + 4 EXPIRY_AUDIT_PROVENANCE + 1 PER_TENANT_FN + 2 PER_TENANT_TRASH + 2 PER_TENANT_AGE entries", () => {
     const expiry = RETENTION_REGISTRY.filter((e) => e.kind === "EXPIRY");
     const guarded = RETENTION_REGISTRY.filter(
       (e) => e.kind === "EXPIRY_GUARDED",
@@ -47,11 +47,15 @@ describe("RETENTION_REGISTRY — schema cross-check (INV-C1a)", () => {
     const perTenantTrash = RETENTION_REGISTRY.filter(
       (e) => e.kind === "PER_TENANT_TRASH",
     );
+    const perTenantAge = RETENTION_REGISTRY.filter(
+      (e) => e.kind === "PER_TENANT_AGE",
+    );
     expect(expiry).toHaveLength(6);
     expect(guarded).toHaveLength(1);
     expect(provenance).toHaveLength(4);
     expect(perTenant).toHaveLength(1);
     expect(perTenantTrash).toHaveLength(2);
+    expect(perTenantAge).toHaveLength(2);
   });
 
   it("has no duplicate table entries (INV-C1d)", () => {
@@ -120,6 +124,21 @@ describe("RETENTION_REGISTRY — schema cross-check (INV-C1a)", () => {
       const model = modelsByPhysicalName.get(entry.table);
       expect(model, `model "${entry.table}" not found`).toBeDefined();
       expect(model!.fields.has("deleted_at")).toBe(true);
+      expect(model!.fields.has("tenant_id")).toBe(true);
+    });
+  }
+
+  // PER_TENANT_AGE: table must resolve and carry the cutoffColumn + tenant_id.
+  for (const entry of RETENTION_REGISTRY) {
+    if (entry.kind !== "PER_TENANT_AGE") continue;
+
+    it(`age entry "${entry.table}" resolves and carries cutoffColumn "${entry.cutoffColumn}" + tenant_id`, () => {
+      const model = modelsByPhysicalName.get(entry.table);
+      expect(model, `model "${entry.table}" not found`).toBeDefined();
+      expect(
+        model!.fields.has(entry.cutoffColumn),
+        `cutoffColumn "${entry.cutoffColumn}" missing on "${entry.table}"`,
+      ).toBe(true);
       expect(model!.fields.has("tenant_id")).toBe(true);
     });
   }

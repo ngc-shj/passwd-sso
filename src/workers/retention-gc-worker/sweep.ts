@@ -35,6 +35,7 @@ import {
   type AuditProvenanceEntry,
   type PerTenantFnEntry,
   type PerTenantTrashEntry,
+  type PerTenantAgeEntry,
 } from "./registry";
 import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import {
@@ -345,6 +346,80 @@ export async function sweepAuditLogs(
 }
 
 /**
+ * Plain per-tenant age-based DELETE (SC3): trims rows older than each tenant's
+ * configured retention. Unlike sweepAuditLogs (definer fn for immutability),
+ * these tables (entry history) are trimmed with a direct batch-bounded DELETE.
+ *
+ * Takes a `tx` (dispatched via workerPrisma.$transaction, like sweepAuditLogs).
+ * Sets bypass_rls first; enumerates tenants with the retention column NOT NULL;
+ * per tenant deletes `<table>` rows where `<cutoffColumn> < now() - retention`.
+ * Emits a per-tenant HISTORY_RETENTION_PURGED audit when a tenant has rows trimmed.
+ *
+ * @returns Total rows deleted across all enumerated tenants.
+ */
+export async function sweepPerTenantAge(
+  tx: Prisma.TransactionClient,
+  entry: PerTenantAgeEntry,
+  batchSize: number,
+): Promise<number> {
+  assertIdentifier(entry.table);
+  assertIdentifier(entry.cutoffColumn);
+
+  await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+
+  // Enumerate only tenants with the retention column configured (NULL → skip).
+  const tenants = await tx.tenant.findMany({
+    where: { [entry.tenantRetentionColumn]: { not: null } },
+    select: { id: true, [entry.tenantRetentionColumn]: true },
+  });
+
+  let total = 0;
+  for (const tenant of tenants) {
+    const retention = tenant[entry.tenantRetentionColumn] as number;
+    const cutoff = new Date(Date.now() - retention * MS_PER_DAY);
+
+    // Batch-bounded (id) IN (SELECT id ... LIMIT) — table/cutoffColumn are
+    // allowlist-validated; tenant id, cutoff, batchSize are bound params.
+    const deleted = await tx.$executeRawUnsafe<number>(
+      `DELETE FROM ${entry.table}
+         WHERE (id) IN (
+           SELECT id FROM ${entry.table}
+           WHERE tenant_id = $1::uuid
+             AND ${entry.cutoffColumn} < $2::timestamptz
+           LIMIT $3
+         )`,
+      tenant.id,
+      cutoff,
+      batchSize,
+    );
+
+    if (deleted > 0) {
+      await enqueueAuditInWorkerTx(tx, tenant.id, {
+        scope: AUDIT_SCOPE.TENANT,
+        action: AUDIT_ACTION.HISTORY_RETENTION_PURGED,
+        userId: SYSTEM_ACTOR_ID,
+        actorType: ACTOR_TYPE.SYSTEM,
+        serviceAccountId: null,
+        teamId: null,
+        targetType: entry.table,
+        targetId: null,
+        metadata: {
+          table: entry.table,
+          purgedCount: deleted,
+          triggeredBy: "retention-gc-worker",
+        },
+        ip: null,
+        userAgent: "retention-gc-worker",
+      });
+    }
+
+    total += deleted;
+  }
+
+  return total;
+}
+
+/**
  * Auto-purge soft-deleted (trashed) vault entries past each tenant's configured
  * grace period (SC2). One PER_TENANT_TRASH entry per entry table.
  *
@@ -521,6 +596,10 @@ export async function sweepOnce(
         // (no outer $transaction): it owns its own per-tenant transactions
         // because the external blob delete must run after each DB tx commits.
         counts[tableName] = await sweepTrashEntry(workerPrisma, entry, batchSize);
+      } else if (entry.kind === "PER_TENANT_AGE") {
+        counts[tableName] = await workerPrisma.$transaction(async (tx) =>
+          sweepPerTenantAge(tx, entry, batchSize),
+        );
       }
     } catch (err) {
       // Per-entry error isolation (INV-C4b): log {table, code} — authoritative error record (F7).

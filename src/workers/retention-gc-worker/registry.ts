@@ -16,7 +16,8 @@ export type RetentionEntryKind =
   | "EXPIRY_GUARDED"
   | "EXPIRY_AUDIT_PROVENANCE"
   | "PER_TENANT_FN"
-  | "PER_TENANT_TRASH";
+  | "PER_TENANT_TRASH"
+  | "PER_TENANT_AGE";
 
 /**
  * Closed set of "no live dependents" guards. Each maps to a fixed SQL fragment
@@ -126,12 +127,29 @@ export interface PerTenantTrashEntry {
   tenantRetentionColumn: "trashRetentionDays";
 }
 
+/**
+ * A plain per-tenant age-based DELETE: removes rows older than a per-tenant
+ * retention. Unlike PER_TENANT_FN (audit_logs, which routes through a SECURITY
+ * DEFINER fn because audit_logs DELETE is revoked for immutability), these tables
+ * are trimmable with a direct batch-bounded DELETE. Used for password-entry
+ * history (SC3).
+ */
+export interface PerTenantAgeEntry {
+  kind: "PER_TENANT_AGE";
+  table: string;
+  /** Age column compared to now() - retention (^[a-z_]+$), e.g. "changed_at". */
+  cutoffColumn: string;
+  /** Prisma model field holding per-tenant retention days (null = skip). */
+  tenantRetentionColumn: "historyRetentionDays";
+}
+
 export type RetentionEntry =
   | ExpiryEntry
   | GuardedExpiryEntry
   | AuditProvenanceEntry
   | PerTenantFnEntry
-  | PerTenantTrashEntry;
+  | PerTenantTrashEntry
+  | PerTenantAgeEntry;
 
 /**
  * EXPIRY tables that are intentionally RLS-free (no RLS policy, no tenant_id),
@@ -310,5 +328,19 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
     table: "team_password_entries",
     scopeKind: "team",
     tenantRetentionColumn: "trashRetentionDays",
+  },
+  {
+    // Personal password-entry history auto-trim past the per-tenant retention (SC3).
+    kind: "PER_TENANT_AGE",
+    table: "password_entry_histories",
+    cutoffColumn: "changed_at",
+    tenantRetentionColumn: "historyRetentionDays",
+  },
+  {
+    // Team password-entry history auto-trim past the per-tenant retention (SC3).
+    kind: "PER_TENANT_AGE",
+    table: "team_password_entry_histories",
+    cutoffColumn: "changed_at",
+    tenantRetentionColumn: "historyRetentionDays",
   },
 ] as const;
