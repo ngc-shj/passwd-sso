@@ -11,7 +11,15 @@
 
 import type { PredicateClause } from "./predicate";
 
-export type RetentionEntryKind = "EXPIRY" | "PER_TENANT_FN";
+export type RetentionEntryKind = "EXPIRY" | "EXPIRY_GUARDED" | "PER_TENANT_FN";
+
+/**
+ * Closed set of "no live dependents" guards. Each maps to a fixed SQL fragment
+ * defined in sweep.ts (GUARD_SQL) — NOT registry data — so the guard's
+ * NOT EXISTS subqueries stay compile-time literals and never widen the S1
+ * SQL-injection containment boundary.
+ */
+export type GuardName = "MCP_TOKEN_FAMILY_DEAD";
 
 export interface ExpiryEntry {
   kind: "EXPIRY";
@@ -54,7 +62,30 @@ export interface PerTenantFnEntry {
   tenantRetentionColumn: "auditLogRetentionDays";
 }
 
-export type RetentionEntry = ExpiryEntry | PerTenantFnEntry;
+/**
+ * An EXPIRY delete gated by a code-defined "no live dependents" guard.
+ *
+ * Used for parent tables with ON DELETE CASCADE to live dependents, where a
+ * naive expiry delete would destroy still-valid children (e.g. deleting a
+ * 1h-expired mcp_access_tokens row would cascade-destroy a live 7d refresh
+ * token). The guard's NOT EXISTS subqueries (resolved from GuardName in
+ * sweep.ts) hold the delete until the whole family is expendable; the FK
+ * CASCADE then removes the dead children.
+ */
+export interface GuardedExpiryEntry {
+  kind: "EXPIRY_GUARDED";
+  table: string;
+  cutoffColumn: string;
+  keyColumns: string[];
+  /** Closed enum selecting a fixed guard SQL fragment in sweep.ts — never raw SQL (S1). */
+  guard: GuardName;
+  globalDelete?: true;
+}
+
+export type RetentionEntry =
+  | ExpiryEntry
+  | GuardedExpiryEntry
+  | PerTenantFnEntry;
 
 /**
  * EXPIRY tables that are intentionally RLS-free (no RLS policy, no tenant_id),
@@ -142,6 +173,20 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
     table: "mcp_authorization_codes",
     cutoffColumn: "expires_at",
     keyColumns: ["id"],
+    globalDelete: true,
+  },
+  {
+    // MCP OAuth access tokens (1h TTL) — parent of the rotation family.
+    // ON DELETE CASCADE to mcp_refresh_tokens (7d) + delegation_sessions; a naive
+    // expiry delete would destroy still-valid children (SC5). The MCP_TOKEN_FAMILY_DEAD
+    // guard holds the delete until no live refresh token or delegation session
+    // references this access token; the cascade then removes the dead children.
+    // globalDelete: true — mcp_access_tokens is RLS-enabled.
+    kind: "EXPIRY_GUARDED",
+    table: "mcp_access_tokens",
+    cutoffColumn: "expires_at",
+    keyColumns: ["id"],
+    guard: "MCP_TOKEN_FAMILY_DEAD",
     globalDelete: true,
   },
   {
