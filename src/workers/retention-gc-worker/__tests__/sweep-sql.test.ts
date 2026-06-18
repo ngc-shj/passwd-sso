@@ -185,6 +185,7 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7)", () => {
       table: "extension_tokens",
       cutoffColumn: "expires_at",
       provenanceColumns: ["tenant_id", "user_id", "last_used_at", "last_used_ip", "last_used_user_agent"],
+      auditAction: "CREDENTIAL_RETENTION_PURGED",
       globalDelete: true,
     };
     const rows = [
@@ -218,6 +219,8 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7)", () => {
     expect(auditOutbox.create).toHaveBeenCalledTimes(1);
     const emitted = auditOutbox.create.mock.calls[0][0];
     expect(emitted.data.tenantId).toBe("22222222-2222-4222-8222-222222222222");
+    // Credential tables emit CREDENTIAL_RETENTION_PURGED (entry.auditAction).
+    expect(emitted.data.payload.action).toBe("CREDENTIAL_RETENTION_PURGED");
 
     // DELETE binds the captured ids as $1::uuid[], not interpolated.
     const [deleteSql, ...deleteParams] = executeRawUnsafe.mock.calls[0];
@@ -231,6 +234,7 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7)", () => {
       table: "api_keys",
       cutoffColumn: "expires_at",
       provenanceColumns: ["tenant_id", "user_id", "name", "last_used_at"],
+      auditAction: "CREDENTIAL_RETENTION_PURGED",
       globalDelete: true,
     };
     const { tx, executeRawUnsafe, auditOutbox } = makeProvenanceTx([]);
@@ -238,5 +242,39 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7)", () => {
     expect(deleted).toBe(0);
     expect(auditOutbox.create).not.toHaveBeenCalled();
     expect(executeRawUnsafe).not.toHaveBeenCalled(); // no DELETE issued
+  });
+
+  it("SC6 security-record entry emits SECURITY_RECORD_RETENTION_PURGED (auditAction parameterization)", async () => {
+    const entry: AuditProvenanceEntry = {
+      kind: "EXPIRY_AUDIT_PROVENANCE",
+      table: "team_invitations",
+      cutoffColumn: "expires_at",
+      provenanceColumns: [
+        "tenant_id",
+        "invited_by_id",
+        "email",
+        "status",
+        "created_at",
+      ],
+      auditAction: "SECURITY_RECORD_RETENTION_PURGED",
+      globalDelete: true,
+    };
+    const rows = [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        tenant_id: "22222222-2222-4222-8222-222222222222",
+        invited_by_id: "33333333-3333-4333-8333-333333333333",
+        email: "invitee@example.com",
+        status: "PENDING",
+        created_at: null,
+      },
+    ];
+    const { tx, auditOutbox } = makeProvenanceTx(rows);
+
+    const deleted = await sweepAuditProvenanceEntry(tx, entry, 100);
+    expect(deleted).toBe(1);
+
+    const emitted = auditOutbox.create.mock.calls[0][0];
+    expect(emitted.data.payload.action).toBe("SECURITY_RECORD_RETENTION_PURGED");
   });
 });

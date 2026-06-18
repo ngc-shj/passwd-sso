@@ -255,6 +255,7 @@
   "TRASH_RETENTION_PURGED": "Expired trashed entries purged (system worker)",
   "HISTORY_RETENTION_PURGED": "Expired entry history trimmed (system worker)",
   "LOG_RETENTION_PURGED": "Expired log entries purged (system worker)",
+  "SECURITY_RECORD_RETENTION_PURGED": "Expired security record purged after recording its provenance (system worker)",
   "AUDIT_DELIVERY_FAILED": "Audit delivery failed",
   "AUDIT_DELIVERY_DEAD_LETTER": "Audit delivery dead-lettered",
   "AUDIT_ANCHOR_PUBLISHED": "Audit anchor manifest published",

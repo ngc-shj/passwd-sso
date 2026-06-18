@@ -105,6 +105,14 @@ export interface AuditProvenanceEntry {
    * Allowlist-validated (^[a-z_]+$) — SELECT-projection identifiers, never values.
    */
   provenanceColumns: string[];
+  /**
+   * Audit action emitted per purged row. CREDENTIAL_RETENTION_PURGED for the
+   * credential tables (SC4); SECURITY_RECORD_RETENTION_PURGED for the
+   * security-record tables (SC6).
+   */
+  auditAction:
+    | "CREDENTIAL_RETENTION_PURGED"
+    | "SECURITY_RECORD_RETENTION_PURGED";
   globalDelete?: true;
 }
 
@@ -268,6 +276,7 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
     table: "api_keys",
     cutoffColumn: "expires_at",
     provenanceColumns: ["tenant_id", "user_id", "name", "last_used_at"],
+    auditAction: "CREDENTIAL_RETENTION_PURGED",
     globalDelete: true,
   },
   {
@@ -281,6 +290,7 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
       "name",
       "last_used_at",
     ],
+    auditAction: "CREDENTIAL_RETENTION_PURGED",
     globalDelete: true,
   },
   {
@@ -295,6 +305,7 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
       "name",
       "last_used_at",
     ],
+    auditAction: "CREDENTIAL_RETENTION_PURGED",
     globalDelete: true,
   },
   {
@@ -309,6 +320,114 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
       "last_used_ip",
       "last_used_user_agent",
     ],
+    auditAction: "CREDENTIAL_RETENTION_PURGED",
+    globalDelete: true,
+  },
+  {
+    // SC6 security-record tables: each carries forensic value (who acted, when,
+    // outcome markers). Provenance is emitted under the row's own tenant before
+    // the expired record is deleted, atomically. Cutoff is the record's own
+    // expiry — an expired record is non-actionable for all 6 (the execute/action
+    // paths gate on expiresAt > now), so GC after expiry never removes an
+    // in-flight action.
+    //
+    // JIT access requests — provenance: requesting actor (user or SA), status,
+    // approval timing.
+    kind: "EXPIRY_AUDIT_PROVENANCE",
+    table: "access_requests",
+    cutoffColumn: "expires_at",
+    provenanceColumns: [
+      "tenant_id",
+      "service_account_id",
+      "requester_user_id",
+      "requester_service_account_id",
+      "status",
+      "approved_at",
+      "created_at",
+    ],
+    auditAction: "SECURITY_RECORD_RETENTION_PURGED",
+    globalDelete: true,
+  },
+  {
+    // Admin vault resets — provenance: target user + approval/execution/revoke markers.
+    kind: "EXPIRY_AUDIT_PROVENANCE",
+    table: "admin_vault_resets",
+    cutoffColumn: "expires_at",
+    provenanceColumns: [
+      "tenant_id",
+      "target_user_id",
+      "approved_at",
+      "executed_at",
+      "revoked_at",
+      "created_at",
+    ],
+    auditAction: "SECURITY_RECORD_RETENTION_PURGED",
+    globalDelete: true,
+  },
+  {
+    // Master key rotations — provenance: target version + approval/execution/revoke markers.
+    kind: "EXPIRY_AUDIT_PROVENANCE",
+    table: "master_key_rotations",
+    cutoffColumn: "expires_at",
+    provenanceColumns: [
+      "tenant_id",
+      "target_version",
+      "approved_at",
+      "executed_at",
+      "revoked_at",
+      "created_at",
+    ],
+    auditAction: "SECURITY_RECORD_RETENTION_PURGED",
+    globalDelete: true,
+  },
+  {
+    // Personal-log access grants (break-glass) — provenance: requester + target.
+    kind: "EXPIRY_AUDIT_PROVENANCE",
+    table: "personal_log_access_grants",
+    cutoffColumn: "expires_at",
+    provenanceColumns: [
+      "tenant_id",
+      "requester_id",
+      "target_user_id",
+      "revoked_at",
+      "created_at",
+    ],
+    auditAction: "SECURITY_RECORD_RETENTION_PURGED",
+    globalDelete: true,
+  },
+  {
+    // Password shares / sends — provenance: creator + share/entry type + revoke marker.
+    // Has an ON DELETE CASCADE child (share_access_logs); deleting an expired
+    // share cascades its access logs (a dead share's access history has no
+    // standalone value). The worker needs no child grant — RI runs internally.
+    kind: "EXPIRY_AUDIT_PROVENANCE",
+    table: "password_shares",
+    cutoffColumn: "expires_at",
+    provenanceColumns: [
+      "tenant_id",
+      "created_by_id",
+      "share_type",
+      "entry_type",
+      "revoked_at",
+      "created_at",
+    ],
+    auditAction: "SECURITY_RECORD_RETENTION_PURGED",
+    globalDelete: true,
+  },
+  {
+    // Team invitations — provenance: inviter + invitee email (PII, conscious
+    // forensic decision) + status.
+    kind: "EXPIRY_AUDIT_PROVENANCE",
+    table: "team_invitations",
+    cutoffColumn: "expires_at",
+    provenanceColumns: [
+      "tenant_id",
+      "invited_by_id",
+      "email",
+      "status",
+      "created_at",
+    ],
+    auditAction: "SECURITY_RECORD_RETENTION_PURGED",
     globalDelete: true,
   },
   {

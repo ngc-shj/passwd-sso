@@ -279,7 +279,7 @@ export async function sweepAuditProvenanceEntry(
     // Emit BEFORE delete, in the same tx — atomic provenance durability.
     await enqueueAuditInWorkerTx(tx, tenantId, {
       scope: AUDIT_SCOPE.TENANT,
-      action: AUDIT_ACTION.CREDENTIAL_RETENTION_PURGED,
+      action: AUDIT_ACTION[entry.auditAction],
       userId: SYSTEM_ACTOR_ID,
       actorType: ACTOR_TYPE.SYSTEM,
       serviceAccountId: null,
