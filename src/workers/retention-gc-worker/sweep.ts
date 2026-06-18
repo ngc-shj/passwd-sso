@@ -69,6 +69,16 @@ const GUARD_SQL: Record<GuardName, (parent: string) => string> = {
        WHERE d.mcp_token_id = ${parent}.id
          AND d.revoked_at IS NULL AND d.expires_at > now()
      )`,
+  // emergency_access_grants: token_expires_at is the 7-day INVITATION window, NOT
+  // a death signal — an ACCEPTED/IDLE/ACTIVATED grant stays live past it. A grant
+  // is dead only when terminal (REVOKED/REJECTED) or a never-accepted expired
+  // invite (PENDING + token_expires_at past). STALE/IDLE are recoverable, NOT
+  // included. Status literals are compile-time constants here (S1-safe).
+  EMERGENCY_GRANT_DEAD: (parent) =>
+    `AND (
+       ${parent}.status IN ('REVOKED', 'REJECTED')
+       OR (${parent}.status = 'PENDING' AND ${parent}.token_expires_at < now())
+     )`,
 };
 
 // Re-export EmitFn and enqueueAuditInWorkerTx so integration tests can target them.
@@ -254,10 +264,15 @@ export async function sweepAuditProvenanceEntry(
   // over-privilege it (it never updates these rows). The capture targets only
   // already-expired rows, which the app never deletes (only this worker does),
   // so there is no SELECT→DELETE race to lock against — the id list is stable.
+  // Optional "this row is dead" guard (SC6b) — a compile-time-literal SQL fragment
+  // from GUARD_SQL, appended to the WHERE. Used when cutoffColumn alone cannot
+  // express GC-eligibility (e.g. emergency_access_grants). The DELETE below targets
+  // the captured id list, so the guard only needs to filter the SELECT.
+  const guardSql = entry.guard ? ` ${GUARD_SQL[entry.guard](entry.table)}` : "";
   const projection = ["id", ...entry.provenanceColumns].join(", ");
   const rows = await tx.$queryRawUnsafe<Record<string, unknown>[]>(
     `SELECT ${projection} FROM ${entry.table}
-       WHERE ${entry.cutoffColumn} < now()
+       WHERE ${entry.cutoffColumn} < now()${guardSql}
        LIMIT $1`,
     batchSize,
   );

@@ -36,7 +36,7 @@ for (const model of Prisma.dmmf.datamodel.models) {
 }
 
 describe("RETENTION_REGISTRY — schema cross-check (INV-C1a)", () => {
-  it("contains exactly 6 EXPIRY + 1 EXPIRY_GUARDED + 10 EXPIRY_AUDIT_PROVENANCE + 1 PER_TENANT_FN + 2 PER_TENANT_TRASH + 5 PER_TENANT_AGE entries", () => {
+  it("contains exactly 6 EXPIRY + 1 EXPIRY_GUARDED + 11 EXPIRY_AUDIT_PROVENANCE + 1 PER_TENANT_FN + 2 PER_TENANT_TRASH + 5 PER_TENANT_AGE entries", () => {
     const expiry = RETENTION_REGISTRY.filter((e) => e.kind === "EXPIRY");
     const guarded = RETENTION_REGISTRY.filter(
       (e) => e.kind === "EXPIRY_GUARDED",
@@ -55,7 +55,7 @@ describe("RETENTION_REGISTRY — schema cross-check (INV-C1a)", () => {
     );
     expect(expiry).toHaveLength(6);
     expect(guarded).toHaveLength(1);
-    expect(provenance).toHaveLength(10);
+    expect(provenance).toHaveLength(11);
     expect(perTenant).toHaveLength(1);
     expect(perTenantTrash).toHaveLength(2);
     expect(perTenantAge).toHaveLength(5);
