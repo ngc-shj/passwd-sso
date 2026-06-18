@@ -132,12 +132,14 @@ vi.mock("./master-detail-shell", () => ({
 vi.mock("./password-detail-pane", () => ({
   PasswordDetailPane: ({
     entryId,
+    entry,
     readOnly,
     onRestore,
     onDeletePermanently,
     onDelete,
   }: {
     entryId: string | null;
+    entry?: { username?: string } | null;
     readOnly?: boolean;
     onRestore?: () => void;
     onDeletePermanently?: () => void;
@@ -146,10 +148,13 @@ vi.mock("./password-detail-pane", () => ({
     capturedPaneRestore = onRestore;
     capturedPaneDeletePermanently = onDeletePermanently;
     capturedPaneDelete = onDelete;
+    // Expose the overview username so a test can assert the header re-syncs to the
+    // refreshed list object after an edit (the real header reads entry.username).
     return (
       <div
         data-testid="detail-pane"
         data-entry-id={entryId ?? ""}
+        data-username={entry?.username ?? ""}
         data-readonly={String(readOnly ?? false)}
       />
     );
@@ -726,5 +731,58 @@ describe("EntryListView — accordion team PasswordCard wiring", () => {
     expect(typeof capturedCardProps?.getUrl).toBe("function");
     expect(capturedCardProps?.createdBy).toBe("createdBy:Alice");
     expect(await (capturedCardProps?.getPassword as () => Promise<string>)()).toBe("pw");
+  });
+});
+
+// ── Detail-pane header re-syncs to the refreshed list object after an edit ──────
+// Regression: in master-detail, editing an entry's username synced the list but the
+// detail-pane header kept the stale username — activeEntry held the old object and
+// was never re-pointed to the refreshed entries object. Fails before the resync
+// effect in entry-list-view.tsx; passes after.
+describe("EntryListView — detail-pane header re-sync after edit", () => {
+  beforeEach(() => {
+    mockFetchApi.mockReset();
+    mockDecryptData.mockReset();
+    mockBuildAAD.mockReset().mockReturnValue("aad-bytes");
+  });
+
+  it("updates the detail-pane header username when the active entry is refreshed", async () => {
+    // Initial fetch: entry-1 with username "alice".
+    mockFetchApi.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [makeServerEntry("entry-1", { deletedAt: null })],
+    });
+    mockDecryptData.mockResolvedValueOnce(
+      makeDecryptedOverview("GitHub", { username: "alice" }),
+    );
+
+    const { rerender } = render(
+      <PasswordList searchQuery="" tagId={null} refreshKey={0} />,
+    );
+
+    await waitFor(() => { expect(screen.getByText("GitHub")).toBeInTheDocument(); });
+
+    // Select entry-1 → header shows the original username.
+    act(() => { fireEvent.click(screen.getByTestId("row-entry-1")); });
+    expect(screen.getByTestId("detail-pane")).toHaveAttribute("data-username", "alice");
+
+    // Simulate edit + refresh: same id, new username "bob". Bumping refreshKey
+    // re-triggers the fetch effect, producing a NEW entry object (fresh decrypt).
+    mockFetchApi.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [makeServerEntry("entry-1", { deletedAt: null })],
+    });
+    mockDecryptData.mockResolvedValueOnce(
+      makeDecryptedOverview("GitHub", { username: "bob" }),
+    );
+
+    await act(async () => {
+      rerender(<PasswordList searchQuery="" tagId={null} refreshKey={1} />);
+    });
+
+    // Assert: the header reflects the new username (stale "alice" before the fix).
+    await waitFor(() => {
+      expect(screen.getByTestId("detail-pane")).toHaveAttribute("data-username", "bob");
+    });
   });
 });

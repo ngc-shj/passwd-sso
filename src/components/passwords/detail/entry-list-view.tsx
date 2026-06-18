@@ -133,8 +133,10 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
     assertDescriptorAdapterCompat(descriptor, adapter);
   }, [descriptor, adapter]);
 
-  // INV-F1 / INV-S5: activeEntry AND selectionMode — owned here, reset atomically on query/view change.
-  const [activeEntry, setActiveEntry] = useState<E | null>(null);
+  // INV-F1 / INV-S5: active selection AND selectionMode — owned here, reset atomically on query/view change.
+  // Store the id only; the entry is DERIVED from the live entries array below, so the
+  // detail pane always reflects the latest overview (no stale-snapshot drift on edit).
+  const [activeEntryId, setActiveEntryId] = useState<string | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
 
   // Soft-delete (move-to-trash) confirm dialog state. Mirrors the accordion
@@ -160,7 +162,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
   const [prevViewKey, setPrevViewKey] = useState(viewKey);
   if (prevViewKey !== viewKey) {
     setPrevViewKey(viewKey);
-    setActiveEntry(null);
+    setActiveEntryId(null);
     setSelectionMode(false);
   }
 
@@ -174,6 +176,15 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
     refreshKey,
     sort: descriptor.sort,
   });
+
+  // Derive the active entry from the live list by id. Storing the id (not the object)
+  // keeps the detail pane in sync with edits automatically — a refetch replaces the
+  // entry object and this re-derives, so the header never shows a stale snapshot.
+  // Resolves to null when the selected entry leaves the list (deleted/filtered out).
+  const activeEntry = useMemo(
+    () => (activeEntryId ? (entries.find((en) => en.id === activeEntryId) ?? null) : null),
+    [entries, activeEntryId],
+  );
 
   // INV-S3: derive vaultStatus from adapter.availability (S3 — same signal for list + pane).
   const vaultStatus = adapter.availability.ready ? VAULT_STATUS.UNLOCKED : VAULT_STATUS.LOADING;
@@ -252,7 +263,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
           ? Math.min(currentIdx + 1, entries.length - 1)
           : Math.max(currentIdx - 1, 0);
         const next = entries[nextIdx];
-        if (next) setActiveEntry(next);
+        if (next) setActiveEntryId(next.id);
       }, 150);
       return;
     }
@@ -291,7 +302,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
     () => ({
       enterSelectionMode: () => {
         setSelectionMode(true);
-        setActiveEntry(null);
+        setActiveEntryId(null);
       },
       exitSelectionMode: () => {
         setSelectionMode(false);
@@ -329,7 +340,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
     // INV-C1.4 + F8: for favorites view, unfavoriting removes the row.
     const removesRow = descriptor.removeOnUnfavorite && !next;
     if (removesRow) {
-      setActiveEntry((prev) => (prev?.id === entry.id ? null : prev));
+      setActiveEntryId((prev) => (prev === entry.id ? null : prev));
       onEntryRemoved?.(entry.id);
     }
     try {
@@ -343,7 +354,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
 
   const handleSetArchived = useCallback(async (entry: E, next: boolean) => {
     // Archive/unarchive always removes from the current view.
-    setActiveEntry((prev) => (prev?.id === entry.id ? null : prev));
+    setActiveEntryId((prev) => (prev === entry.id ? null : prev));
     onEntryRemoved?.(entry.id);
     try {
       await adapter.setArchived(entry, next);
@@ -355,7 +366,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
   }, [adapter, onDataChange, onEntryRemoved, reload]);
 
   const handleSoftDelete = useCallback(async (entry: E) => {
-    setActiveEntry((prev) => (prev?.id === entry.id ? null : prev));
+    setActiveEntryId((prev) => (prev === entry.id ? null : prev));
     onEntryRemoved?.(entry.id);
     try {
       await adapter.softDelete(entry);
@@ -369,7 +380,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
   // Share — decrypt the entry's detail (lazy, on demand), strip secret/internal
   // fields, then open the share dialog. Works for personal + team via the adapter.
   const handleShare = useCallback(async (entry: E) => {
-    setActiveEntry(entry);
+    setActiveEntryId(entry.id);
     try {
       const detail = await adapter.buildGetDetail(entry)();
       const { totp: _totp, passwordHistory: _ph, id: _id, requireReprompt: _rp, ...safe } = detail;
@@ -385,7 +396,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
 
   // C9 — restore (no confirm per INV-C9.2).
   const handleRestore = useCallback(async (entry: E) => {
-    setActiveEntry((prev) => (prev?.id === entry.id ? null : prev));
+    setActiveEntryId((prev) => (prev === entry.id ? null : prev));
     onEntryRemoved?.(entry.id);
     try {
       await adapter.restore(entry);
@@ -401,7 +412,7 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
     const entry = deletePermanentlyPending;
     if (!entry) return;
     setDeletePermanentlyPending(null);
-    setActiveEntry((prev) => (prev?.id === entry.id ? null : prev));
+    setActiveEntryId((prev) => (prev === entry.id ? null : prev));
     onEntryRemoved?.(entry.id);
     try {
       await adapter.deletePermanently(entry);
@@ -463,13 +474,8 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
   }, [entries]);
 
   const handleToggleExpand = useCallback((id: string) => {
-    const entry = entries.find((e) => e.id === id);
-    if (activeEntry?.id === id) {
-      setActiveEntry(null);
-    } else if (entry) {
-      setActiveEntry(entry);
-    }
-  }, [entries, activeEntry]);
+    setActiveEntryId((prev) => (prev === id ? null : id));
+  }, []);
 
   // ── Render helpers ──────────────────────────────────────────────────────────
 
@@ -713,13 +719,9 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
             return (
               <PasswordRow
                 entry={entry}
-                isActive={activeEntry?.id === entry.id}
+                isActive={activeEntryId === entry.id}
                 onActivate={() => {
-                  if (activeEntry?.id === entry.id) {
-                    setActiveEntry(null);
-                  } else {
-                    setActiveEntry(entry);
-                  }
+                  setActiveEntryId((prev) => (prev === entry.id ? null : entry.id));
                 }}
                 selectionMode={selectionMode}
                 showFavorite={descriptor.rowActions.favorite && adapter.supportsFavorite}
