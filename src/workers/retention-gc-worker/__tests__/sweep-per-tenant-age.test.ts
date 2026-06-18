@@ -14,10 +14,19 @@ const ENTRY: PerTenantAgeEntry = {
   table: "password_entry_histories",
   cutoffColumn: "changed_at",
   tenantRetentionColumn: "historyRetentionDays",
+  auditAction: "HISTORY_RETENTION_PURGED",
+};
+
+const LOG_ENTRY: PerTenantAgeEntry = {
+  kind: "PER_TENANT_AGE",
+  table: "share_access_logs",
+  cutoffColumn: "created_at",
+  tenantRetentionColumn: "shareAccessLogRetentionDays",
+  auditAction: "LOG_RETENTION_PURGED",
 };
 
 function makeTx(
-  tenants: Array<{ id: string; historyRetentionDays: number | null }>,
+  tenants: Array<Record<string, string | number | null>>,
   deletedPerTenant: number,
 ) {
   const executeRaw = vi.fn().mockResolvedValue(undefined); // set_config
@@ -100,5 +109,18 @@ describe("sweepPerTenantAge (SC3)", () => {
     const total = await sweepPerTenantAge(tx, ENTRY, 100);
     expect(total).toBe(0);
     expect(auditOutbox.create).not.toHaveBeenCalled();
+  });
+
+  it("emits the entry's auditAction (LOG_RETENTION_PURGED for append-only logs, SC7)", async () => {
+    const tenantId = "44444444-4444-4444-8444-444444444444";
+    const { tx, auditOutbox } = makeTx(
+      [{ id: tenantId, shareAccessLogRetentionDays: 60 }],
+      2,
+    );
+    await sweepPerTenantAge(tx, LOG_ENTRY, 100);
+    expect(auditOutbox.create).toHaveBeenCalledTimes(1);
+    const payload = auditOutbox.create.mock.calls[0][0].data.payload;
+    expect(payload.action).toBe("LOG_RETENTION_PURGED");
+    expect(payload.metadata.table).toBe("share_access_logs");
   });
 });
