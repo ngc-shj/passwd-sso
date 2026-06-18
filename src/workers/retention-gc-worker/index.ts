@@ -119,6 +119,12 @@ export function validateRegistry(
       // are literal-union types. The sweeper sets bypass_rls explicitly (like
       // sweepAuditLogs), so there is no globalDelete flag to enforce.
       assertIdentifier(entry.table);
+    } else if (entry.kind === "PER_TENANT_AGE") {
+      // table + cutoffColumn are interpolated into the DELETE SQL → allowlist
+      // both at boot (S1). tenantRetentionColumn is a literal-union type. The
+      // sweeper sets bypass_rls explicitly, so no globalDelete flag to enforce.
+      assertIdentifier(entry.table);
+      assertIdentifier(entry.cutoffColumn);
     }
     // PER_TENANT_FN entries have no free identifiers to validate — the table,
     // fn, and tenantRetentionColumn fields are literal union types.
