@@ -85,7 +85,15 @@ describe("TeamEditDialog — entry-type → form mapping", () => {
         open={true}
         onOpenChange={vi.fn()}
         onSaved={vi.fn()}
-        editData={{ id: "e1", entryType, title: "x" }}
+        editData={{
+          id: "e1",
+          entryType,
+          title: "x",
+          username: null,
+          password: "",
+          url: null,
+          notes: null,
+        }}
       />,
     );
     expect(screen.getByTestId(testId)).toBeInTheDocument();
@@ -99,7 +107,14 @@ describe("TeamEditDialog — entry-type → form mapping", () => {
         open={true}
         onOpenChange={vi.fn()}
         onSaved={vi.fn()}
-        editData={{ id: "e1", title: "x" }}
+        editData={{
+          id: "e1",
+          title: "x",
+          username: null,
+          password: "",
+          url: null,
+          notes: null,
+        }}
       />,
     );
     expect(screen.getByTestId("form-LOGIN")).toBeInTheDocument();

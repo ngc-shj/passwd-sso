@@ -50,7 +50,7 @@ import {
 import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
 import { issueExtensionToken, validateExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { NextRequest } from "next/server";
-import type { JtiCache } from "@/lib/auth/dpop/jti-cache";
+import { DPOP_DEFAULT_JTI_TTL_MS, type JtiCache } from "@/lib/auth/dpop/jti-cache";
 import {
   generateKeypair,
   makeProof,
@@ -61,14 +61,15 @@ import {
 function makeMemoryJtiCache(): JtiCache {
   const seen = new Map<string, number>();
   return {
-    async hasOrRecord(jti: string, _jkt: string, ttlSeconds: number): Promise<boolean> {
+    async hasOrRecord(jkt: string, jti: string): Promise<boolean> {
       const now = Math.floor(Date.now() / 1000);
       // Evict expired entries.
       for (const [k, exp] of seen) {
         if (exp <= now) seen.delete(k);
       }
-      if (seen.has(jti)) return true;
-      seen.set(jti, now + ttlSeconds);
+      const key = `${jkt}:${jti}`;
+      if (seen.has(key)) return true;
+      seen.set(key, now + DPOP_DEFAULT_JTI_TTL_MS / 1000);
       return false;
     },
   };

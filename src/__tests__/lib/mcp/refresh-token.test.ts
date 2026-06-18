@@ -31,7 +31,7 @@ describe("createRefreshToken", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     const { prisma } = await import("@/lib/prisma");
-    (prisma as Record<string, unknown>).mcpRefreshToken = {
+    (prisma as unknown as Record<string, unknown>).mcpRefreshToken = {
       create: vi.fn().mockResolvedValue({ id: "rt-uuid" }),
     };
   });
@@ -53,7 +53,7 @@ describe("createRefreshToken", () => {
   it("stores hash in DB (not plaintext token)", async () => {
     const { prisma } = await import("@/lib/prisma");
     const mockCreate = vi.fn().mockResolvedValue({ id: "rt-uuid" });
-    (prisma as Record<string, unknown>).mcpRefreshToken = { create: mockCreate };
+    (prisma as unknown as Record<string, unknown>).mcpRefreshToken = { create: mockCreate };
 
     const result = await createRefreshToken({
       accessTokenId: "access-token-id",
@@ -73,7 +73,7 @@ describe("createRefreshToken", () => {
   it("generates a new familyId when not provided", async () => {
     const { prisma } = await import("@/lib/prisma");
     const mockCreate = vi.fn().mockResolvedValue({ id: "rt-uuid" });
-    (prisma as Record<string, unknown>).mcpRefreshToken = { create: mockCreate };
+    (prisma as unknown as Record<string, unknown>).mcpRefreshToken = { create: mockCreate };
 
     await createRefreshToken({
       accessTokenId: "access-token-id",
@@ -90,7 +90,7 @@ describe("createRefreshToken", () => {
   it("uses the provided familyId when given (for rotation)", async () => {
     const { prisma } = await import("@/lib/prisma");
     const mockCreate = vi.fn().mockResolvedValue({ id: "rt-uuid" });
-    (prisma as Record<string, unknown>).mcpRefreshToken = { create: mockCreate };
+    (prisma as unknown as Record<string, unknown>).mcpRefreshToken = { create: mockCreate };
 
     const existingFamilyId = "existing-family-uuid";
     await createRefreshToken({
@@ -128,15 +128,17 @@ describe("exchangeRefreshToken", () => {
     serviceAccountId: null,
     scope: "credentials:list,credentials:use",
     expiresAt: new Date(Date.now() + 3600000),
-    revokedAt: null,
-    rotatedAt: null,
+    // Nullable timestamp columns (DateTime? in schema). Widen so per-test
+    // overrides can supply a Date (expired/revoked/rotated fixtures).
+    revokedAt: null as Date | null,
+    rotatedAt: null as Date | null,
     mcpClient: VALID_CLIENT,
   };
 
   function setupPrisma(overrides: {
     rt?: typeof VALID_RT | null;
-    newAccessCreate?: jest.Mock | ReturnType<typeof vi.fn>;
-    newRefreshCreate?: jest.Mock | ReturnType<typeof vi.fn>;
+    newAccessCreate?: ReturnType<typeof vi.fn>;
+    newRefreshCreate?: ReturnType<typeof vi.fn>;
     refreshUpdateMany?: ReturnType<typeof vi.fn>;
     refreshFindMany?: ReturnType<typeof vi.fn>;
     accessUpdateMany?: ReturnType<typeof vi.fn>;
@@ -156,12 +158,12 @@ describe("exchangeRefreshToken", () => {
       const mockAccessUpdateMany = overrides.accessUpdateMany ?? vi.fn().mockResolvedValue({});
       const mockRefreshUpdate = overrides.refreshUpdate ?? vi.fn().mockResolvedValue({});
 
-      (prisma as Record<string, unknown>).$transaction = async (fn: (tx: unknown) => unknown) => fn(prisma);
+      (prisma as unknown as Record<string, unknown>).$transaction = async (fn: (tx: unknown) => unknown) => fn(prisma);
       // C13: active membership default so happy-path and CAS tests pass.
-      (prisma as Record<string, unknown>).tenantMember = {
+      (prisma as unknown as Record<string, unknown>).tenantMember = {
         findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
       };
-      (prisma as Record<string, unknown>).mcpRefreshToken = {
+      (prisma as unknown as Record<string, unknown>).mcpRefreshToken = {
         findUnique: vi.fn().mockResolvedValue(overrides.rt !== undefined ? overrides.rt : VALID_RT),
         updateMany: mockRefreshUpdateMany,
         findMany: mockRefreshFindMany,
@@ -169,7 +171,7 @@ describe("exchangeRefreshToken", () => {
         update: mockRefreshUpdate,
       };
       const mockAccessUpdate = vi.fn().mockResolvedValue({});
-      (prisma as Record<string, unknown>).mcpAccessToken = {
+      (prisma as unknown as Record<string, unknown>).mcpAccessToken = {
         create: mockAccessCreate,
         update: mockAccessUpdate,
         updateMany: mockAccessUpdateMany,

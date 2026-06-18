@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { Mock } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 
@@ -50,8 +51,19 @@ const wrapper = ({ children }: { children: ReactNode }) => (
   <VaultProvider>{children}</VaultProvider>
 );
 
+// Mock fetch handler signature: the call sites (failing-fetch composers) invoke
+// fetchMock(url, init) directly, so the mock must carry a callable signature
+// rather than the bare Mock<Procedure | Constructable> that ReturnType<typeof
+// vi.fn> infers.
+type MockFetchResponse = {
+  ok: boolean;
+  status?: number;
+  json: () => Promise<unknown>;
+};
+type FetchHandler = (url: string, init?: RequestInit) => Promise<MockFetchResponse>;
+
 interface FetchEnv {
-  fetchMock: ReturnType<typeof vi.fn>;
+  fetchMock: Mock<FetchHandler>;
   store: { vault: ServerVault | null };
 }
 
@@ -62,7 +74,7 @@ interface FetchEnv {
  */
 function makeFetchEnv(initialVault: ServerVault | null = null): FetchEnv {
   const store: { vault: ServerVault | null } = { vault: initialVault };
-  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+  const fetchMock = vi.fn<FetchHandler>(async (url: string, init?: RequestInit) => {
     const path = typeof url === "string" ? url : "";
 
     if (path === "/api/vault/status") {
@@ -129,7 +141,7 @@ function makeFetchEnv(initialVault: ServerVault | null = null): FetchEnv {
 
     // Catch-all: 404 — surfaces unmocked routes loudly
     return { ok: false, status: 404, json: async () => ({}) };
-  }) as unknown as ReturnType<typeof vi.fn>;
+  });
 
   return { fetchMock, store };
 }

@@ -14,6 +14,14 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {},
 }));
 
+// The mocked `prisma` is an empty object the tests populate with per-delegate
+// mocks at runtime; its real type is `PrismaClient` (a class), which does not
+// structurally overlap an index signature, so attaching arbitrary delegate
+// mocks requires bridging through `unknown`. Centralize that single bridge.
+function mockDelegates(client: unknown): Record<string, unknown> {
+  return client as Record<string, unknown>;
+}
+
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: vi.fn(async (prisma, fn) => fn(prisma)),
 }));
@@ -81,7 +89,7 @@ describe("createAuthorizationCode", () => {
   it("creates an authorization code and returns plaintext + expiry", async () => {
     const { prisma } = await import("@/lib/prisma");
     const mockCreate = vi.fn().mockResolvedValue({ id: "code-uuid" });
-    (prisma as Record<string, unknown>).mcpAuthorizationCode = { create: mockCreate };
+    mockDelegates(prisma).mcpAuthorizationCode = { create: mockCreate };
 
     const result = await createAuthorizationCode({
       clientId: "client-uuid",
@@ -107,13 +115,13 @@ describe("exchangeCodeForToken", () => {
     vi.clearAllMocks();
     const { prisma } = await import("@/lib/prisma");
     // Provide $transaction that passes prisma itself as the tx argument
-    (prisma as Record<string, unknown>).$transaction = async (fn: (tx: unknown) => unknown) =>
+    mockDelegates(prisma).$transaction = async (fn: (tx: unknown) => unknown) =>
       fn(prisma);
   });
 
   it("returns invalid_grant when code not found", async () => {
     const { prisma } = await import("@/lib/prisma");
-    (prisma as Record<string, unknown>).mcpAuthorizationCode = {
+    mockDelegates(prisma).mcpAuthorizationCode = {
       findUnique: vi.fn().mockResolvedValue(null),
     };
 
@@ -131,7 +139,7 @@ describe("exchangeCodeForToken", () => {
 
   it("returns invalid_grant when code is already used", async () => {
     const { prisma } = await import("@/lib/prisma");
-    (prisma as Record<string, unknown>).mcpAuthorizationCode = {
+    mockDelegates(prisma).mcpAuthorizationCode = {
       findUnique: vi.fn().mockResolvedValue({
         id: "code-id",
         usedAt: new Date(),
@@ -162,7 +170,7 @@ describe("exchangeCodeForToken", () => {
 
   it("returns invalid_grant when code is expired", async () => {
     const { prisma } = await import("@/lib/prisma");
-    (prisma as Record<string, unknown>).mcpAuthorizationCode = {
+    mockDelegates(prisma).mcpAuthorizationCode = {
       findUnique: vi.fn().mockResolvedValue({
         id: "code-id",
         usedAt: null,
@@ -193,7 +201,7 @@ describe("exchangeCodeForToken", () => {
 
   it("returns invalid_client when client_id does not match", async () => {
     const { prisma } = await import("@/lib/prisma");
-    (prisma as Record<string, unknown>).mcpAuthorizationCode = {
+    mockDelegates(prisma).mcpAuthorizationCode = {
       findUnique: vi.fn().mockResolvedValue({
         id: "code-id",
         usedAt: null,
@@ -228,7 +236,7 @@ describe("exchangeCodeForToken", () => {
     const challenge = computeS256Challenge(verifier);
 
     const { prisma } = await import("@/lib/prisma");
-    (prisma as Record<string, unknown>).mcpAuthorizationCode = {
+    mockDelegates(prisma).mcpAuthorizationCode = {
       findUnique: vi.fn().mockResolvedValue({
         id: "code-id",
         usedAt: null,
@@ -259,7 +267,7 @@ describe("exchangeCodeForToken", () => {
 
   it("returns invalid_client when clientSecretHash does not match", async () => {
     const { prisma } = await import("@/lib/prisma");
-    (prisma as Record<string, unknown>).mcpAuthorizationCode = {
+    mockDelegates(prisma).mcpAuthorizationCode = {
       findUnique: vi.fn().mockResolvedValue({
         id: "code-id",
         usedAt: null,
@@ -290,7 +298,7 @@ describe("exchangeCodeForToken", () => {
 
   it("returns invalid_client when client isActive is false", async () => {
     const { prisma } = await import("@/lib/prisma");
-    (prisma as Record<string, unknown>).mcpAuthorizationCode = {
+    mockDelegates(prisma).mcpAuthorizationCode = {
       findUnique: vi.fn().mockResolvedValue({
         id: "code-id",
         usedAt: null,
@@ -324,7 +332,7 @@ describe("exchangeCodeForToken", () => {
     const challenge = computeS256Challenge(verifier);
 
     const { prisma } = await import("@/lib/prisma");
-    (prisma as Record<string, unknown>).mcpAuthorizationCode = {
+    mockDelegates(prisma).mcpAuthorizationCode = {
       findUnique: vi.fn().mockResolvedValue({
         id: "code-id",
         usedAt: null,
@@ -360,7 +368,7 @@ describe("exchangeCodeForToken", () => {
     const { prisma } = await import("@/lib/prisma");
     const mockConsume = vi.fn().mockResolvedValue({ count: 1 });
     const mockTokenCreate = vi.fn().mockResolvedValue({ id: "token-id" });
-    (prisma as Record<string, unknown>).mcpAuthorizationCode = {
+    mockDelegates(prisma).mcpAuthorizationCode = {
       findUnique: vi.fn().mockResolvedValue({
         id: "code-id",
         usedAt: null,
@@ -377,7 +385,7 @@ describe("exchangeCodeForToken", () => {
       }),
       updateMany: mockConsume,
     };
-    (prisma as Record<string, unknown>).mcpAccessToken = { create: mockTokenCreate };
+    mockDelegates(prisma).mcpAccessToken = { create: mockTokenCreate };
 
     const result = await exchangeCodeForToken({
       code: "valid-code",
@@ -410,7 +418,7 @@ describe("exchangeCodeForToken", () => {
     // but the conditional consume matches 0 rows because the winner already set usedAt.
     const mockConsume = vi.fn().mockResolvedValue({ count: 0 });
     const mockTokenCreate = vi.fn().mockResolvedValue({ id: "token-id" });
-    (prisma as Record<string, unknown>).mcpAuthorizationCode = {
+    mockDelegates(prisma).mcpAuthorizationCode = {
       findUnique: vi.fn().mockResolvedValue({
         id: "code-id",
         usedAt: null,
@@ -427,7 +435,7 @@ describe("exchangeCodeForToken", () => {
       }),
       updateMany: mockConsume,
     };
-    (prisma as Record<string, unknown>).mcpAccessToken = { create: mockTokenCreate };
+    mockDelegates(prisma).mcpAccessToken = { create: mockTokenCreate };
 
     const result = await exchangeCodeForToken({
       code: "valid-code",
@@ -451,7 +459,7 @@ describe("validateMcpToken", () => {
     vi.clearAllMocks();
     // C13: provide active-membership default so existing valid-token tests pass.
     const { prisma } = await import("@/lib/prisma");
-    (prisma as Record<string, unknown>).tenantMember = {
+    mockDelegates(prisma).tenantMember = {
       findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
     };
   });
@@ -464,7 +472,7 @@ describe("validateMcpToken", () => {
 
   it("returns invalid_token when token not found in DB", async () => {
     const { prisma } = await import("@/lib/prisma");
-    (prisma as Record<string, unknown>).mcpAccessToken = {
+    mockDelegates(prisma).mcpAccessToken = {
       findUnique: vi.fn().mockResolvedValue(null),
     };
 
@@ -475,7 +483,7 @@ describe("validateMcpToken", () => {
 
   it("returns token_revoked when token has revokedAt set", async () => {
     const { prisma } = await import("@/lib/prisma");
-    (prisma as Record<string, unknown>).mcpAccessToken = {
+    mockDelegates(prisma).mcpAccessToken = {
       findUnique: vi.fn().mockResolvedValue({
         id: "token-id",
         tenantId: "tenant-uuid",
@@ -495,7 +503,7 @@ describe("validateMcpToken", () => {
 
   it("returns token_expired when token is past expiry", async () => {
     const { prisma } = await import("@/lib/prisma");
-    (prisma as Record<string, unknown>).mcpAccessToken = {
+    mockDelegates(prisma).mcpAccessToken = {
       findUnique: vi.fn().mockResolvedValue({
         id: "token-id",
         tenantId: "tenant-uuid",
@@ -515,7 +523,7 @@ describe("validateMcpToken", () => {
 
   it("returns token data on valid token", async () => {
     const { prisma } = await import("@/lib/prisma");
-    (prisma as Record<string, unknown>).mcpAccessToken = {
+    mockDelegates(prisma).mcpAccessToken = {
       findUnique: vi.fn().mockResolvedValue({
         id: "token-id",
         tenantId: "tenant-uuid",
@@ -545,7 +553,7 @@ describe("validateMcpToken", () => {
   it("updates lastUsedAt when null", async () => {
     const { prisma } = await import("@/lib/prisma");
     const mockUpdate = vi.fn().mockResolvedValue({});
-    (prisma as Record<string, unknown>).mcpAccessToken = {
+    mockDelegates(prisma).mcpAccessToken = {
       findUnique: vi.fn().mockResolvedValue({
         id: "token-id",
         tenantId: "t1",
@@ -573,7 +581,7 @@ describe("validateMcpToken", () => {
   it("updates lastUsedAt when older than threshold", async () => {
     const { prisma } = await import("@/lib/prisma");
     const mockUpdate = vi.fn().mockResolvedValue({});
-    (prisma as Record<string, unknown>).mcpAccessToken = {
+    mockDelegates(prisma).mcpAccessToken = {
       findUnique: vi.fn().mockResolvedValue({
         id: "token-id",
         tenantId: "t1",
@@ -601,7 +609,7 @@ describe("validateMcpToken", () => {
   it("does not update lastUsedAt when within threshold", async () => {
     const { prisma } = await import("@/lib/prisma");
     const mockUpdate = vi.fn().mockResolvedValue({});
-    (prisma as Record<string, unknown>).mcpAccessToken = {
+    mockDelegates(prisma).mcpAccessToken = {
       findUnique: vi.fn().mockResolvedValue({
         id: "token-id",
         tenantId: "t1",
@@ -627,7 +635,7 @@ describe("validateMcpToken", () => {
   // deactivated must be rejected immediately, not wait for TTL expiry.
   it("A07-4: rejects token bound to an inactive client (isActive=false)", async () => {
     const { prisma } = await import("@/lib/prisma");
-    (prisma as Record<string, unknown>).mcpAccessToken = {
+    mockDelegates(prisma).mcpAccessToken = {
       findUnique: vi.fn().mockResolvedValue({
         id: "token-id",
         tenantId: "t1",
@@ -656,7 +664,7 @@ describe("validateMcpToken", () => {
   // client's own tenantId. A corrupted row must fail closed.
   it("rejects a token whose tenantId differs from its client's tenantId", async () => {
     const { prisma } = await import("@/lib/prisma");
-    (prisma as Record<string, unknown>).mcpAccessToken = {
+    mockDelegates(prisma).mcpAccessToken = {
       findUnique: vi.fn().mockResolvedValue({
         id: "token-id",
         tenantId: "tenant-A",
@@ -685,7 +693,7 @@ describe("validateMcpToken", () => {
 
   it("C13(a): deactivated-in-token-tenant ⇒ invalid_token", async () => {
     const { prisma } = await import("@/lib/prisma");
-    (prisma as Record<string, unknown>).mcpAccessToken = {
+    mockDelegates(prisma).mcpAccessToken = {
       findUnique: vi.fn().mockResolvedValue({
         id: "token-id",
         tenantId: "tenant-uuid",
@@ -700,7 +708,7 @@ describe("validateMcpToken", () => {
       }),
       update: vi.fn(),
     };
-    (prisma as Record<string, unknown>).tenantMember = {
+    mockDelegates(prisma).tenantMember = {
       findUnique: vi.fn().mockResolvedValue({ deactivatedAt: new Date("2025-01-01") }),
     };
 
@@ -713,7 +721,7 @@ describe("validateMcpToken", () => {
   it("C13(b): deactivated in token tenant (cross-tenant bypass guard) ⇒ invalid_token", async () => {
     const { prisma } = await import("@/lib/prisma");
     const mockTenantMemberFindUnique = vi.fn().mockResolvedValue({ deactivatedAt: new Date("2025-01-01") });
-    (prisma as Record<string, unknown>).mcpAccessToken = {
+    mockDelegates(prisma).mcpAccessToken = {
       findUnique: vi.fn().mockResolvedValue({
         id: "token-id",
         tenantId: "tenant-A",
@@ -728,7 +736,7 @@ describe("validateMcpToken", () => {
       }),
       update: vi.fn(),
     };
-    (prisma as Record<string, unknown>).tenantMember = {
+    mockDelegates(prisma).tenantMember = {
       findUnique: mockTenantMemberFindUnique,
     };
 
@@ -746,7 +754,7 @@ describe("validateMcpToken", () => {
 
   it("C13(c): active membership ⇒ valid", async () => {
     const { prisma } = await import("@/lib/prisma");
-    (prisma as Record<string, unknown>).mcpAccessToken = {
+    mockDelegates(prisma).mcpAccessToken = {
       findUnique: vi.fn().mockResolvedValue({
         id: "token-id",
         tenantId: "tenant-uuid",
@@ -761,7 +769,7 @@ describe("validateMcpToken", () => {
       }),
       update: vi.fn().mockResolvedValue({}),
     };
-    (prisma as Record<string, unknown>).tenantMember = {
+    mockDelegates(prisma).tenantMember = {
       findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
     };
 
@@ -792,16 +800,16 @@ describe("validateMcpToken", () => {
       scope: "credentials:list",
       mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: "tenant-uuid" },
     };
-    (prisma as Record<string, unknown>).mcpRefreshToken = {
+    mockDelegates(prisma).mcpRefreshToken = {
       findUnique: vi.fn().mockResolvedValue(baseRt),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       create: vi.fn().mockResolvedValue({ id: "new-rt-id" }),
     };
-    (prisma as Record<string, unknown>).mcpAccessToken = {
+    mockDelegates(prisma).mcpAccessToken = {
       create: vi.fn().mockResolvedValue({ id: "new-at-id" }),
       update: vi.fn().mockResolvedValue({}),
     };
-    (prisma as Record<string, unknown>).tenantMember = {
+    mockDelegates(prisma).tenantMember = {
       findUnique: vi.fn().mockResolvedValue({ deactivatedAt: new Date("2025-01-01") }),
     };
 
@@ -831,16 +839,16 @@ describe("validateMcpToken", () => {
       scope: "credentials:list",
       mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: "tenant-uuid" },
     };
-    (prisma as Record<string, unknown>).mcpRefreshToken = {
+    mockDelegates(prisma).mcpRefreshToken = {
       findUnique: vi.fn().mockResolvedValue(baseRt),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       create: vi.fn().mockResolvedValue({ id: "new-rt-id" }),
     };
-    (prisma as Record<string, unknown>).mcpAccessToken = {
+    mockDelegates(prisma).mcpAccessToken = {
       create: vi.fn().mockResolvedValue({ id: "new-at-id" }),
       update: vi.fn().mockResolvedValue({}),
     };
-    (prisma as Record<string, unknown>).tenantMember = {
+    mockDelegates(prisma).tenantMember = {
       findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
     };
 
@@ -870,16 +878,16 @@ describe("validateMcpToken", () => {
       scope: "credentials:list",
       mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: "tenant-uuid" },
     };
-    (prisma as Record<string, unknown>).mcpRefreshToken = {
+    mockDelegates(prisma).mcpRefreshToken = {
       findUnique: vi.fn().mockResolvedValue(baseRt),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       create: vi.fn().mockResolvedValue({ id: "new-rt-id" }),
     };
-    (prisma as Record<string, unknown>).mcpAccessToken = {
+    mockDelegates(prisma).mcpAccessToken = {
       create: vi.fn().mockResolvedValue({ id: "new-at-id" }),
       update: vi.fn().mockResolvedValue({}),
     };
-    (prisma as Record<string, unknown>).tenantMember = {
+    mockDelegates(prisma).tenantMember = {
       findUnique: mockTenantMemberFindUnique,
     };
 
@@ -896,7 +904,7 @@ describe("validateMcpToken", () => {
   it("C13(d): userId:null SA-bound token ⇒ valid (membership query NOT called)", async () => {
     const { prisma } = await import("@/lib/prisma");
     const mockTenantMemberFindUnique = vi.fn().mockResolvedValue({ deactivatedAt: null });
-    (prisma as Record<string, unknown>).mcpAccessToken = {
+    mockDelegates(prisma).mcpAccessToken = {
       findUnique: vi.fn().mockResolvedValue({
         id: "token-id",
         tenantId: "tenant-uuid",
@@ -911,7 +919,7 @@ describe("validateMcpToken", () => {
       }),
       update: vi.fn().mockResolvedValue({}),
     };
-    (prisma as Record<string, unknown>).tenantMember = {
+    mockDelegates(prisma).tenantMember = {
       findUnique: mockTenantMemberFindUnique,
     };
 

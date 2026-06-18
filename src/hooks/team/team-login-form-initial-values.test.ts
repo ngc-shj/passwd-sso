@@ -117,6 +117,10 @@ describe("buildTeamLoginFormInitialValues", () => {
         requireRepromptForAll: false,
         allowExport: true,
         allowSharing: true,
+        requireSharePassword: false,
+        passwordHistoryCount: 0,
+        inheritTenantCidrs: true,
+        teamAllowedCidrs: [],
       },
     );
 

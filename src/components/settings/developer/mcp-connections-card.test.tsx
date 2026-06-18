@@ -104,7 +104,23 @@ vi.mock("@/components/settings/developer/scope-badges", () => ({
 
 import { McpConnectionsCard } from "./mcp-connections-card";
 
-const sampleClients = [
+type TestMcpClient = {
+  id: string;
+  clientId: string;
+  name: string;
+  isDcr: boolean;
+  allowedScopes: string;
+  clientCreatedAt: string;
+  connection: {
+    tokenId: string;
+    scope: string;
+    createdAt: string;
+    expiresAt: string;
+    lastUsedAt: string | null;
+  } | null;
+};
+
+const sampleClients: TestMcpClient[] = [
   {
     id: "client-db-1",
     clientId: "mcpc_abc123",
@@ -137,7 +153,7 @@ const sampleClients = [
   },
 ];
 
-function setupFetchClients(clients = sampleClients) {
+function setupFetchClients(clients: TestMcpClient[] = sampleClients) {
   mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
     if (!init?.method || init.method === "GET") {
       return Promise.resolve({

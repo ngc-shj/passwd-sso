@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
+import type { generateDefaultNickname } from "@/lib/auth/webauthn/webauthn-client";
 
 const SENTINEL_BYTE = 0xab;
 
@@ -24,7 +25,7 @@ const {
   mockStartAuth: vi.fn(),
   mockWrap: vi.fn(),
   mockIsSupported: vi.fn(() => true),
-  mockGenerateNickname: vi.fn(() => "auto-name"),
+  mockGenerateNickname: vi.fn<typeof generateDefaultNickname>(() => "auto-name"),
   capturedSecretKey: { value: null as Uint8Array | null },
   capturedPrfOutput: { value: null as Uint8Array | null },
 }));
@@ -63,7 +64,7 @@ vi.mock("@/lib/auth/webauthn/webauthn-client", () => ({
     capturedPrfOutput.value = prfOutput;
     return mockWrap(secretKey, prfOutput);
   },
-  generateDefaultNickname: (...args: unknown[]) =>
+  generateDefaultNickname: (...args: Parameters<typeof generateDefaultNickname>) =>
     mockGenerateNickname(...args),
 }));
 

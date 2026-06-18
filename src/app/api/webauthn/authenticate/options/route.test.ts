@@ -56,7 +56,7 @@ vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
     (creds: Array<{ credentialId: string; prfSalt: string | null }>) => {
       // Drive PRF-disabled via the legacy mock so existing tests that stub
       // mockDerivePrfSalt.mockImplementation(() => throw) still pass.
-      let v1: string | null = null;
+      let v1: string;
       try {
         v1 = mockDerivePrfSalt();
       } catch {

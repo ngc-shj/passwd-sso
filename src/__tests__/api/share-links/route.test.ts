@@ -306,7 +306,7 @@ describe("POST /api/share-links", () => {
     const { requireTeamPermission } = await import("@/lib/auth/access/team-auth");
     const { TeamAuthError: RealTeamAuthError } = await import("@/lib/auth/access/team-auth");
     vi.mocked(requireTeamPermission).mockRejectedValueOnce(
-      new RealTeamAuthError("INSUFFICIENT_PERMISSION", 403)
+      new RealTeamAuthError("FORBIDDEN", 403)
     );
 
     const req = createRequest("POST", "http://localhost/api/share-links", {
@@ -324,7 +324,7 @@ describe("POST /api/share-links", () => {
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
     expect(status).toBe(403);
-    expect(json.error).toBe("INSUFFICIENT_PERMISSION");
+    expect(json.error).toBe("FORBIDDEN");
   });
 
   it("returns 404 when entry not owned by user", async () => {

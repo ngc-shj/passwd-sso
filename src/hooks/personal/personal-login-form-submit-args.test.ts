@@ -14,6 +14,7 @@ describe("buildPersonalLoginSubmitArgs", () => {
       onSaved,
       encryptionKey: {} as CryptoKey,
       userId: null,
+      keyVersion: 1,
       values: {
         title: "title",
         username: "user",

@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { useEntryListData } from "./use-entry-list-data";
-import type { VaultListAdapter } from "@/lib/vault/vault-list-adapter";
+import type { VaultListAdapter, EntryListViewKind } from "@/lib/vault/vault-list-adapter";
 import type { PasswordRowEntry } from "@/components/passwords/detail/password-row";
 import type { PasswordDetailPaneEntry } from "@/components/passwords/detail/password-detail-pane";
 
@@ -390,7 +390,7 @@ describe("useEntryListData", () => {
     const { rerender } = renderHook(
       ({ view }) =>
         useEntryListData({ ...DEFAULT_ARGS, adapter, view }),
-      { initialProps: { view: "normal" as const } },
+      { initialProps: { view: "normal" as EntryListViewKind } },
     );
 
     // Wait for the first effect to fire and capture the signal.
@@ -428,7 +428,7 @@ describe("useEntryListData", () => {
     const { result, rerender } = renderHook(
       ({ view }) =>
         useEntryListData({ ...DEFAULT_ARGS, adapter, view }),
-      { initialProps: { view: "normal" as const } },
+      { initialProps: { view: "normal" as EntryListViewKind } },
     );
 
     // Trigger the second fetch (cancels the first).

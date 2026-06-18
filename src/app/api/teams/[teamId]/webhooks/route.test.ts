@@ -99,7 +99,7 @@ describe("GET /api/teams/[teamId]/webhooks", () => {
   it("returns 403 when lacking permission", async () => {
     const TeamAuthError = (await import("@/lib/auth/access/team-auth")).TeamAuthError;
     mockRequireTeamPermission.mockRejectedValue(
-      new TeamAuthError("Forbidden", 403),
+      new TeamAuthError("FORBIDDEN", 403),
     );
     const req = createRequest("GET", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks");
     const { status } = await parseResponse(await GET(req, teamParams()));
@@ -232,7 +232,7 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
   it("returns 403 when MEMBER tries to create webhook", async () => {
     const TeamAuthError = (await import("@/lib/auth/access/team-auth")).TeamAuthError;
     mockRequireTeamPermission.mockRejectedValue(
-      new TeamAuthError("Forbidden", 403),
+      new TeamAuthError("FORBIDDEN", 403),
     );
     const req = createRequest("POST", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks", {
       body: {

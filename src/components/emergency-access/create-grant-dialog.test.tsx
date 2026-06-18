@@ -124,7 +124,7 @@ function openDialog() {
 }
 
 describe("CreateGrantDialog", () => {
-  let onCreated: ReturnType<typeof vi.fn>;
+  let onCreated: ReturnType<typeof vi.fn<() => void>>;
 
   beforeEach(() => {
     mockFetchApi.mockReset();
@@ -135,7 +135,7 @@ describe("CreateGrantDialog", () => {
       value: { writeText: mockClipboardWrite },
       configurable: true,
     });
-    onCreated = vi.fn();
+    onCreated = vi.fn<() => void>();
   });
 
   it("renders trigger button when closed", () => {

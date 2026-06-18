@@ -13,6 +13,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import React from "react";
 import { VAULT_STATUS } from "@/lib/constants";
+import type { createTeamKeyEscrow } from "@/lib/crypto/crypto-team";
 
 const SENTINEL_TEAMKEY_BYTE = 0xcd;
 
@@ -28,7 +29,7 @@ const { mockFetch, mockToast, mockUseVault, generateTeamKeyMock, createEscrowMoc
         lastTeamKey.ref = buf;
         return buf;
       }),
-      createEscrowMock: vi.fn(async () => ({
+      createEscrowMock: vi.fn<typeof createTeamKeyEscrow>(async () => ({
         encryptedTeamKey: "ek",
         teamKeyIv: "iv",
         teamKeyAuthTag: "at",
@@ -65,7 +66,8 @@ vi.mock("@/lib/vault/vault-context", () => ({
 
 vi.mock("@/lib/crypto/crypto-team", () => ({
   generateTeamSymmetricKey: () => generateTeamKeyMock(),
-  createTeamKeyEscrow: (...args: unknown[]) => createEscrowMock(...args),
+  createTeamKeyEscrow: (...args: Parameters<typeof createTeamKeyEscrow>) =>
+    createEscrowMock(...args),
 }));
 
 vi.mock("@/lib/ui/ime-guard", () => ({ preventIMESubmit: vi.fn() }));

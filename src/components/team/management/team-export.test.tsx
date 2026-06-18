@@ -12,13 +12,19 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { mockTeamMismatch } from "@/__tests__/helpers/mock-app-navigation";
+import type { encryptExport } from "@/lib/crypto/export-crypto";
 
 const SENTINEL_NOT_A_SECRET_ZJYK = "SENTINEL_NOT_A_SECRET_ZJYK";
 
 const { mockFetch, mockToast, encryptExportMock } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
   mockToast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
-  encryptExportMock: vi.fn(async () => ({ ciphertext: "ct", iv: "iv", authTag: "tag" })),
+  encryptExportMock: vi.fn<typeof encryptExport>(
+    async () =>
+      ({ ciphertext: "ct", iv: "iv", authTag: "tag" }) as unknown as Awaited<
+        ReturnType<typeof encryptExport>
+      >,
+  ),
 }));
 
 vi.mock("next-intl", () => ({
@@ -33,7 +39,7 @@ vi.mock("@/lib/url-helpers", () => ({
 }));
 
 vi.mock("@/lib/crypto/export-crypto", () => ({
-  encryptExport: (...args: unknown[]) => encryptExportMock(...args),
+  encryptExport: encryptExportMock,
 }));
 
 vi.mock("@/lib/team/team-vault-context", () => ({

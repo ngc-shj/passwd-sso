@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 
 const { mockWarn, mockRateLimitCheck } = vi.hoisted(() => ({
   mockWarn: vi.fn(),
@@ -26,13 +27,13 @@ import { POST } from "./route";
 function createCspRequest(
   body: unknown,
   options: { contentType?: string; ip?: string } = {}
-): Request {
+): NextRequest {
   const {
     contentType = "application/csp-report",
     ip = "127.0.0.1",
   } = options;
 
-  return new Request("http://localhost/api/csp-report", {
+  return new NextRequest("http://localhost/api/csp-report", {
     method: "POST",
     headers: {
       "Content-Type": contentType,
@@ -145,7 +146,7 @@ describe("POST /api/csp-report", () => {
   });
 
   it("returns 204 on malformed JSON body", async () => {
-    const req = new Request("http://localhost/api/csp-report", {
+    const req = new NextRequest("http://localhost/api/csp-report", {
       method: "POST",
       headers: {
         "Content-Type": "application/csp-report",

@@ -349,7 +349,13 @@ describe("resolveActorType", () => {
   });
 
   it("returns HUMAN for token auth", () => {
-    const auth = { type: "token" as const, userId: "u1", scopes: [] as never[] };
+    const auth = {
+      type: "token" as const,
+      userId: "u1",
+      tenantId: "t1",
+      scopes: [] as never[],
+      clientKind: "BROWSER_EXTENSION" as const,
+    };
     expect(resolveActorType(auth)).toBe("HUMAN");
   });
 

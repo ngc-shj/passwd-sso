@@ -125,12 +125,6 @@ const makeGetRequest = () =>
     headers: { Origin: "http://localhost" },
   });
 
-const makeDeleteRequest = () =>
-  new NextRequest("http://localhost/api/vault/delegation", {
-    method: "DELETE",
-    headers: { Origin: "http://localhost" },
-  });
-
 // ─── POST Tests ──────────────────────────────────────────────────
 
 describe("POST /api/vault/delegation", () => {
@@ -613,25 +607,25 @@ describe("DELETE /api/vault/delegation", () => {
 
   it("returns 401 when no session", async () => {
     mockAuth.mockResolvedValue(null);
-    const res = await DELETE(makeDeleteRequest());
+    const res = await DELETE();
     expect(res.status).toBe(401);
   });
 
   it("returns 403 when no tenant", async () => {
     mockResolveUserTenantId.mockResolvedValue(null);
-    const res = await DELETE(makeDeleteRequest());
+    const res = await DELETE();
     expect(res.status).toBe(403);
   });
 
   it("returns revokedCount on success", async () => {
-    const res = await DELETE(makeDeleteRequest());
+    const res = await DELETE();
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.revokedCount).toBe(3);
   });
 
   it("calls revokeAllDelegationSessions with correct args", async () => {
-    await DELETE(makeDeleteRequest());
+    await DELETE();
     expect(mockRevokeAllDelegationSessions).toHaveBeenCalledWith(
       USER_ID,
       TENANT_ID,
@@ -641,7 +635,7 @@ describe("DELETE /api/vault/delegation", () => {
 
   it("returns revokedCount of 0 when no active sessions", async () => {
     mockRevokeAllDelegationSessions.mockResolvedValue(0);
-    const res = await DELETE(makeDeleteRequest());
+    const res = await DELETE();
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.revokedCount).toBe(0);

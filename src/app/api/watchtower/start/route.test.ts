@@ -42,7 +42,9 @@ describe("POST /api/watchtower/start", () => {
     const req = new NextRequest("http://localhost:3000/api/watchtower/start", {
       method: "POST",
     });
-    const res = await POST(req);
+    // route POST is typed () => Promise<Response> (handler ignores the request),
+    // but withRequestLog forwards any args at runtime — verify it tolerates one.
+    const res = await (POST as (req: NextRequest) => Promise<Response>)(req);
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.ok).toBe(true);

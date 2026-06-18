@@ -229,6 +229,9 @@ jobs:
         run: npx prisma generate
 
       - run: npm run lint
+      # tsc --noEmit typechecks test files too (vitest does not; next build
+      # excludes them), catching mock/type drift that would otherwise rot.
+      - run: npm run typecheck
       - run: npm run check:team-auth-rls
       - run: npm run check:bypass-rls
       - run: npm run check:crypto-domains

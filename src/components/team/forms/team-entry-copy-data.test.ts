@@ -1,9 +1,15 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from "vitest";
+import { mockTranslator } from "@/__tests__/helpers/mock-translator";
+import type {
+  BankAccountFormTranslator,
+  PasswordFormTranslator,
+  SecureNoteFormTranslator,
+} from "@/lib/translation-types";
 import { buildTeamEntryCopyData } from "./team-entry-copy-data";
 
-function makeTranslator(prefix: string) {
-  return vi.fn((key: string) => `${prefix}:${key}`);
+function makeTranslator<T>(prefix: string): T {
+  return mockTranslator<T>((key: string) => `${prefix}:${key}`);
 }
 
 describe("buildTeamEntryCopyData", () => {
@@ -34,7 +40,7 @@ describe("buildTeamEntryCopyData", () => {
   });
 
   it("applies the password translator to password copy", () => {
-    const t = makeTranslator("p");
+    const t = makeTranslator<PasswordFormTranslator>("p");
     const result = buildTeamEntryCopyData({
       t,
       tn: makeTranslator("n"),
@@ -53,8 +59,8 @@ describe("buildTeamEntryCopyData", () => {
   });
 
   it("applies the secureNote translator only to secureNote copy", () => {
-    const tn = makeTranslator("n");
-    const t = makeTranslator("p");
+    const tn = makeTranslator<SecureNoteFormTranslator>("n");
+    const t = makeTranslator<PasswordFormTranslator>("p");
     const result = buildTeamEntryCopyData({
       t,
       tn,
@@ -93,7 +99,8 @@ describe("buildTeamEntryCopyData", () => {
   });
 
   it("does not call translators for unrelated kinds", () => {
-    const tba = makeTranslator("ba");
+    const tbaFn = vi.fn((key: string) => `ba:${key}`);
+    const tba = mockTranslator<BankAccountFormTranslator>(tbaFn);
     buildTeamEntryCopyData({
       t: makeTranslator("p"),
       tn: makeTranslator("n"),
@@ -106,7 +113,7 @@ describe("buildTeamEntryCopyData", () => {
     });
 
     // tba should only be called with bankAccount translation keys
-    const calledKeys = tba.mock.calls.map((c) => c[0] as string);
+    const calledKeys = tbaFn.mock.calls.map((c) => c[0]);
     expect(calledKeys.every((k) => k.includes("BankAccount") || ["title", "titlePlaceholder", "notes", "notesPlaceholder", "tags"].includes(k))).toBe(true);
   });
 });

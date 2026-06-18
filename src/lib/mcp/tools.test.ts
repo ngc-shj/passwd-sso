@@ -42,6 +42,16 @@ import { toolListCredentials, toolSearchCredentials, MCP_TOOLS } from "./tools";
 import { USER_SUPPLIED_METADATA_WARNING } from "@/lib/auth/access/delegation";
 import type { McpTokenData } from "@/lib/mcp/oauth-server";
 
+type ListResult = Awaited<ReturnType<typeof toolListCredentials>>;
+type SearchResult = Awaited<ReturnType<typeof toolSearchCredentials>>;
+type OkResult = Extract<ListResult | SearchResult, { result: unknown }>;
+
+function assertHasResult(value: ListResult | SearchResult): asserts value is OkResult {
+  if (!("result" in value)) {
+    throw new Error(`expected success result, got: ${JSON.stringify(value)}`);
+  }
+}
+
 const makeToken = (overrides?: Partial<McpTokenData>): McpTokenData => ({
   tokenId: "tok-1",
   tenantId: "t-1",
@@ -102,6 +112,7 @@ describe("toolListCredentials", () => {
     mockFetchDelegationEntry.mockResolvedValueOnce(ENTRY_1);
 
     const result = await toolListCredentials(makeToken(), {});
+    assertHasResult(result);
     expect(result.result).toBeDefined();
     expect(result.result?.entries).toHaveLength(1);
     expect(result.result?.total).toBe(1);
@@ -127,6 +138,7 @@ describe("toolListCredentials", () => {
     mockFetchDelegationEntry.mockResolvedValueOnce(ENTRY_2);
 
     const result = await toolListCredentials(makeToken(), { limit: 1, offset: 1 });
+    assertHasResult(result);
     expect(result.result?.entries).toHaveLength(1);
     expect(result.result?.total).toBe(2);
   });
@@ -136,6 +148,7 @@ describe("toolListCredentials", () => {
     mockGetDelegatedEntryIdsForSession.mockResolvedValueOnce(new Set());
 
     const result = await toolListCredentials(makeToken(), {});
+    assertHasResult(result);
     expect(result.result?.entries).toHaveLength(0);
     expect(result.result?.total).toBe(0);
   });
@@ -186,6 +199,7 @@ describe("toolSearchCredentials", () => {
     mockFetchDelegationEntry.mockResolvedValueOnce(ENTRY_2);
 
     const result = await toolSearchCredentials(makeToken(), { query: "GitHub" });
+    assertHasResult(result);
     expect(result.result?.entries).toHaveLength(1);
     expect(result.result?.entries[0].title).toBe("GitHub");
     expect(result.result?.total).toBe(1);
@@ -198,6 +212,7 @@ describe("toolSearchCredentials", () => {
     mockFetchDelegationEntry.mockResolvedValueOnce(ENTRY_2);
 
     const result = await toolSearchCredentials(makeToken(), { query: "BOB" });
+    assertHasResult(result);
     expect(result.result?.entries).toHaveLength(1);
     expect(result.result?.entries[0].username).toBe("bob");
     // Verify metadata-only in the returned entry
@@ -216,6 +231,7 @@ describe("toolSearchCredentials", () => {
     mockFetchDelegationEntry.mockResolvedValueOnce(ENTRY_2);
 
     const result = await toolSearchCredentials(makeToken(), {});
+    assertHasResult(result);
     expect(result.result?.entries).toHaveLength(2);
     expect(result.result?.total).toBe(2);
   });
@@ -226,6 +242,7 @@ describe("toolSearchCredentials", () => {
     mockFetchDelegationEntry.mockResolvedValueOnce(ENTRY_1);
 
     const result = await toolSearchCredentials(makeToken(), { query: "   " });
+    assertHasResult(result);
     expect(result.result?.entries).toHaveLength(1);
     expect(result.result?.total).toBe(1);
   });
@@ -237,6 +254,7 @@ describe("toolSearchCredentials", () => {
     mockFetchDelegationEntry.mockResolvedValueOnce(ENTRY_2);
 
     const result = await toolSearchCredentials(makeToken(), { limit: 1, offset: 0 });
+    assertHasResult(result);
     expect(result.result?.entries).toHaveLength(1);
     expect(result.result?.total).toBe(2);
   });

@@ -54,15 +54,43 @@ vi.mock("@/components/ui/button", () => ({
 }));
 
 import { AdminSidebar, countLeafLinks, getTenantNavItems, getTeamNavItems } from "./admin-sidebar";
+import type { AdminTeamMembership } from "@/lib/auth/access/team-auth";
+import { TEAM_ROLE } from "@/lib/constants";
 
 // Mock t function used by getTenantNavItems / getTeamNavItems for derived counts.
 const tMock = ((key: string) => key) as unknown as Parameters<typeof getTenantNavItems>[0];
 const expectedTenantLinks = countLeafLinks(getTenantNavItems(tMock));
 const expectedTeamLinks = countLeafLinks(getTeamNavItems(tMock, "team-1"));
 
-const adminTeams = [
-  { team: { id: "team-1", name: "Team Alpha", slug: "team-alpha" } },
-  { team: { id: "team-2", name: "Team Beta", slug: "team-beta" } },
+function makeAdminTeam(
+  id: string,
+  name: string,
+  slug: string,
+): AdminTeamMembership {
+  return {
+    id: `member-${id}`,
+    tenantId: "tenant-1",
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+    userId: "user-1",
+    role: TEAM_ROLE.ADMIN,
+    deactivatedAt: null,
+    scimManaged: false,
+    teamId: id,
+    keyDistributed: true,
+    team: {
+      id,
+      name,
+      slug,
+      tenantName: "Tenant One",
+      isCrossTenant: false,
+    },
+  };
+}
+
+const adminTeams: AdminTeamMembership[] = [
+  makeAdminTeam("team-1", "Team Alpha", "team-alpha"),
+  makeAdminTeam("team-2", "Team Beta", "team-beta"),
 ];
 
 describe("countLeafLinks helper", () => {

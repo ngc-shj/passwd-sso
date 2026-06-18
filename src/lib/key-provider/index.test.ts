@@ -4,6 +4,7 @@ import {
   getKeyProviderSync,
   _resetKeyProvider,
 } from "./index";
+import type { KeyProvider } from "./types";
 
 // Mock provider modules so we don't need real keys
 vi.mock("./env-provider", () => {
@@ -96,9 +97,9 @@ describe("key-provider index", () => {
       vi.stubEnv("AWS_REGION", "eu-west-1");
       vi.stubEnv("SM_CACHE_TTL_MS", "60000");
 
-      const provider = await getKeyProvider() as { config?: unknown };
+      const provider = await getKeyProvider();
       expect(provider.name).toBe("aws-sm");
-      expect((provider as { config?: { ttlMs?: number } }).config).toMatchObject({
+      expect((provider as KeyProvider & { config?: { ttlMs?: number } }).config).toMatchObject({
         ttlMs: 60000,
       });
     });
@@ -114,7 +115,7 @@ describe("key-provider index", () => {
       vi.stubEnv("KEY_PROVIDER", "azure-kv");
       vi.stubEnv("AZURE_KV_URL", "https://my-vault.vault.azure.net");
 
-      const provider = await getKeyProvider() as { config?: { vaultUrl?: string } };
+      const provider = await getKeyProvider() as KeyProvider & { config?: { vaultUrl?: string } };
       expect(provider.name).toBe("azure-kv");
       expect(provider.config).toMatchObject({ vaultUrl: "https://my-vault.vault.azure.net" });
     });
@@ -124,7 +125,7 @@ describe("key-provider index", () => {
       vi.stubEnv("AZURE_KV_URL", "https://test-vault.vault.azure.net");
       vi.stubEnv("SM_CACHE_TTL_MS", "90000");
 
-      const provider = await getKeyProvider() as { config?: { ttlMs?: number } };
+      const provider = await getKeyProvider() as KeyProvider & { config?: { ttlMs?: number } };
       expect(provider.name).toBe("azure-kv");
       expect(provider.config).toMatchObject({ ttlMs: 90000 });
     });
@@ -140,7 +141,7 @@ describe("key-provider index", () => {
       vi.stubEnv("KEY_PROVIDER", "gcp-sm");
       vi.stubEnv("GCP_PROJECT_ID", "prod-project-123");
 
-      const provider = await getKeyProvider() as { config?: { projectId?: string } };
+      const provider = await getKeyProvider() as KeyProvider & { config?: { projectId?: string } };
       expect(provider.name).toBe("gcp-sm");
       expect(provider.config).toMatchObject({ projectId: "prod-project-123" });
     });
@@ -150,7 +151,7 @@ describe("key-provider index", () => {
       vi.stubEnv("GCP_PROJECT_ID", "my-project");
       vi.stubEnv("SM_CACHE_TTL_MS", "45000");
 
-      const provider = await getKeyProvider() as { config?: { ttlMs?: number } };
+      const provider = await getKeyProvider() as KeyProvider & { config?: { ttlMs?: number } };
       expect(provider.name).toBe("gcp-sm");
       expect(provider.config).toMatchObject({ ttlMs: 45000 });
     });

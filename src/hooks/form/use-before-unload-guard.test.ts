@@ -1,11 +1,19 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+  type MockInstance,
+} from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useBeforeUnloadGuard } from "./use-before-unload-guard";
 
 describe("useBeforeUnloadGuard", () => {
-  let addSpy: ReturnType<typeof vi.spyOn>;
-  let removeSpy: ReturnType<typeof vi.spyOn>;
+  let addSpy: MockInstance<typeof window.addEventListener>;
+  let removeSpy: MockInstance<typeof window.removeEventListener>;
 
   beforeEach(() => {
     addSpy = vi.spyOn(window, "addEventListener");

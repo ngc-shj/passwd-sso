@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { buildOpenApiSpec } from "@/lib/openapi-spec";
 import { HEX_IV_LENGTH, HEX_AUTH_TAG_LENGTH } from "@/lib/validations/common";
 import { API_ERROR } from "@/lib/http/api-error-codes";

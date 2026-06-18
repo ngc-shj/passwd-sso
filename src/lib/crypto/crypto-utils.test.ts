@@ -47,9 +47,11 @@ describe("textEncode", () => {
 
   it("encodes ASCII string", () => {
     const buf = textEncode("hello");
-    expect(new Uint8Array(buf)).toEqual(
-      new Uint8Array([0x68, 0x65, 0x6c, 0x6c, 0x6f]),
-    );
+    const bytes =
+      buf instanceof ArrayBuffer
+        ? new Uint8Array(buf)
+        : new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+    expect(bytes).toEqual(new Uint8Array([0x68, 0x65, 0x6c, 0x6c, 0x6f]));
   });
 
   it("encodes multi-byte UTF-8", () => {
