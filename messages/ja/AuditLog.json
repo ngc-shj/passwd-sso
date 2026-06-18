@@ -254,6 +254,7 @@
   "CREDENTIAL_RETENTION_PURGED": "期限切れ認証情報を証跡記録のうえ削除（システムワーカー）",
   "TRASH_RETENTION_PURGED": "ゴミ箱の期限切れエントリを削除（システムワーカー）",
   "HISTORY_RETENTION_PURGED": "期限切れの変更履歴を削除（システムワーカー）",
+  "LOG_RETENTION_PURGED": "期限切れのログを削除（システムワーカー）",
   "AUDIT_DELIVERY_FAILED": "監査配信失敗",
   "AUDIT_DELIVERY_DEAD_LETTER": "監査配信デッドレター化",
   "AUDIT_ANCHOR_PUBLISHED": "監査アンカーマニフェストを公開",

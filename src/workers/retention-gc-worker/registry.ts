@@ -132,7 +132,7 @@ export interface PerTenantTrashEntry {
  * retention. Unlike PER_TENANT_FN (audit_logs, which routes through a SECURITY
  * DEFINER fn because audit_logs DELETE is revoked for immutability), these tables
  * are trimmable with a direct batch-bounded DELETE. Used for password-entry
- * history (SC3).
+ * history (SC3) and append-only logs (SC7).
  */
 export interface PerTenantAgeEntry {
   kind: "PER_TENANT_AGE";
@@ -140,7 +140,16 @@ export interface PerTenantAgeEntry {
   /** Age column compared to now() - retention (^[a-z_]+$), e.g. "changed_at". */
   cutoffColumn: string;
   /** Prisma model field holding per-tenant retention days (null = skip). */
-  tenantRetentionColumn: "historyRetentionDays";
+  tenantRetentionColumn:
+    | "historyRetentionDays"
+    | "shareAccessLogRetentionDays"
+    | "directorySyncLogRetentionDays"
+    | "notificationRetentionDays";
+  /**
+   * Audit action emitted per tenant when rows are trimmed. HISTORY_RETENTION_PURGED
+   * for entry history (SC3); LOG_RETENTION_PURGED for append-only logs (SC7).
+   */
+  auditAction: "HISTORY_RETENTION_PURGED" | "LOG_RETENTION_PURGED";
 }
 
 export type RetentionEntry =
@@ -335,6 +344,7 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
     table: "password_entry_histories",
     cutoffColumn: "changed_at",
     tenantRetentionColumn: "historyRetentionDays",
+    auditAction: "HISTORY_RETENTION_PURGED",
   },
   {
     // Team password-entry history auto-trim past the per-tenant retention (SC3).
@@ -342,5 +352,30 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
     table: "team_password_entry_histories",
     cutoffColumn: "changed_at",
     tenantRetentionColumn: "historyRetentionDays",
+    auditAction: "HISTORY_RETENTION_PURGED",
+  },
+  {
+    // Share-link access logs (SC7) — created_at age basis.
+    kind: "PER_TENANT_AGE",
+    table: "share_access_logs",
+    cutoffColumn: "created_at",
+    tenantRetentionColumn: "shareAccessLogRetentionDays",
+    auditAction: "LOG_RETENTION_PURGED",
+  },
+  {
+    // Directory-sync run logs (SC7) — started_at age basis (no created_at column).
+    kind: "PER_TENANT_AGE",
+    table: "directory_sync_logs",
+    cutoffColumn: "started_at",
+    tenantRetentionColumn: "directorySyncLogRetentionDays",
+    auditAction: "LOG_RETENTION_PURGED",
+  },
+  {
+    // User notifications (SC7) — created_at age basis; tenant opts in via retention.
+    kind: "PER_TENANT_AGE",
+    table: "notifications",
+    cutoffColumn: "created_at",
+    tenantRetentionColumn: "notificationRetentionDays",
+    auditAction: "LOG_RETENTION_PURGED",
   },
 ] as const;

@@ -353,7 +353,7 @@ export async function sweepAuditLogs(
  * Takes a `tx` (dispatched via workerPrisma.$transaction, like sweepAuditLogs).
  * Sets bypass_rls first; enumerates tenants with the retention column NOT NULL;
  * per tenant deletes `<table>` rows where `<cutoffColumn> < now() - retention`.
- * Emits a per-tenant HISTORY_RETENTION_PURGED audit when a tenant has rows trimmed.
+ * Emits a per-tenant audit (entry.auditAction) when a tenant has rows trimmed.
  *
  * @returns Total rows deleted across all enumerated tenants.
  */
@@ -368,14 +368,19 @@ export async function sweepPerTenantAge(
   await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
 
   // Enumerate only tenants with the retention column configured (NULL → skip).
-  const tenants = await tx.tenant.findMany({
-    where: { [entry.tenantRetentionColumn]: { not: null } },
-    select: { id: true, [entry.tenantRetentionColumn]: true },
-  });
+  // The retention column is a dynamic (but closed-union) Prisma field name, so
+  // type the rows explicitly — a computed `select` key defeats Prisma inference.
+  const col = entry.tenantRetentionColumn;
+  // A computed `select` key defeats Prisma's row-type inference (the return type
+  // widens to a 50-model union), so narrow explicitly through `unknown`.
+  const tenants = (await tx.tenant.findMany({
+    where: { [col]: { not: null } },
+    select: { id: true, [col]: true },
+  })) as unknown as Array<{ id: string } & Record<typeof col, number | null>>;
 
   let total = 0;
   for (const tenant of tenants) {
-    const retention = tenant[entry.tenantRetentionColumn] as number;
+    const retention = tenant[col] as number;
     const cutoff = new Date(Date.now() - retention * MS_PER_DAY);
 
     // Batch-bounded (id) IN (SELECT id ... LIMIT) — table/cutoffColumn are
@@ -396,7 +401,7 @@ export async function sweepPerTenantAge(
     if (deleted > 0) {
       await enqueueAuditInWorkerTx(tx, tenant.id, {
         scope: AUDIT_SCOPE.TENANT,
-        action: AUDIT_ACTION.HISTORY_RETENTION_PURGED,
+        action: AUDIT_ACTION[entry.auditAction],
         userId: SYSTEM_ACTOR_ID,
         actorType: ACTOR_TYPE.SYSTEM,
         serviceAccountId: null,
