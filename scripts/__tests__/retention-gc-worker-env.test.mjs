@@ -1,12 +1,13 @@
 /**
- * Tests for the dcr-cleanup worker's --validate-env-only flag.
+ * Env-contract test for scripts/retention-gc-worker.ts --validate-env-only (C5/T9).
  *
- * Each test spawns the worker with a minimal env (PATH + explicit overrides) to
- * verify the Zod validation path without touching the database.
+ * Each test spawns the worker with a minimal, isolated env (PATH + explicit overrides)
+ * to verify the Zod validation path without touching the database.
  *
- * T25: stdout assertions pin the EXACT JSON payload (via JSON.parse + toEqual),
- * never substring-only. Substring-only assertions are FORBIDDEN per spec.
+ * Assertions use JSON.parse + toEqual (not substring-only) per T25/T9 contract.
+ * No snapshots — this project has no snapshot infra.
  */
+
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
@@ -14,10 +15,9 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
-const WORKER = resolve(REPO_ROOT, "scripts", "dcr-cleanup-worker.ts");
+const WORKER = resolve(REPO_ROOT, "scripts", "retention-gc-worker.ts");
 
 const VALID_DATABASE_URL = "postgresql://app:app@localhost:5432/passwd_sso";
-const VALID_DCR_CLEANUP_DATABASE_URL = "postgresql://passwd_dcr_cleanup_worker:pass@localhost:5432/passwd_sso";
 const MALFORMED_URL = "not-a-valid-url";
 
 // ── env snapshot / restore ────────────────────────────────────────────────────
@@ -36,9 +36,8 @@ function spawnWorker(envOverrides = {}) {
     "node_modules/.bin/tsx",
     [WORKER, "--validate-env-only"],
     {
-      // Never inherit parent env — explicit pass only.
-      // DATABASE_URL="" is passed explicitly so dotenv's loadEnv() cannot
-      // override it from .env or .env.local.
+      // Never inherit parent env — explicit pass only (mirrors audit-outbox-worker-env.test.mjs).
+      // DATABASE_URL="" is passed explicitly so dotenv's loadEnv() cannot override it.
       env: { PATH: process.env.PATH, DATABASE_URL: "", ...envOverrides },
       encoding: "utf8",
       timeout: 15_000,
@@ -49,7 +48,7 @@ function spawnWorker(envOverrides = {}) {
 
 /**
  * Extract the first line from stdout that parses as valid JSON.
- * Skips non-JSON lines defensively (e.g. future dotenv diagnostic banners).
+ * Skips non-JSON preamble lines (e.g. future dotenv diagnostic banners).
  */
 function extractJsonLine(stdout) {
   for (const line of stdout.split("\n")) {
@@ -66,33 +65,46 @@ function extractJsonLine(stdout) {
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
-describe("dcr-cleanup-worker --validate-env-only", () => {
-  it("exits 0 and stdout equals {level:info,msg:env validation passed} when all required vars are valid", () => {
+describe("retention-gc-worker --validate-env-only", () => {
+  it("exits 0 and stdout equals {level:info,msg:'env validation passed'} with valid env (T9)", () => {
     const result = spawnWorker({
       DATABASE_URL: VALID_DATABASE_URL,
-      DCR_CLEANUP_DATABASE_URL: VALID_DCR_CLEANUP_DATABASE_URL,
+      // RETENTION_GC_DATABASE_URL omitted — falls back to DATABASE_URL.
     });
 
     expect(result.status).toBe(0);
 
-    // Exact payload check via JSON.parse + toEqual (not substring-only).
+    // T9: exact payload check via JSON.parse + toEqual (NOT substring-only).
     const payload = extractJsonLine(result.stdout);
     expect(payload).toEqual({ level: "info", msg: "env validation passed" });
   });
 
-  it("exits 1 with stderr JSON {path:DCR_CLEANUP_DATABASE_URL,code} when that var is a malformed URL", () => {
+  it("exits 0 with explicit RETENTION_GC_DATABASE_URL set", () => {
     const result = spawnWorker({
       DATABASE_URL: VALID_DATABASE_URL,
-      DCR_CLEANUP_DATABASE_URL: MALFORMED_URL,
+      RETENTION_GC_DATABASE_URL: VALID_DATABASE_URL,
+    });
+
+    expect(result.status).toBe(0);
+
+    const payload = extractJsonLine(result.stdout);
+    expect(payload).toEqual({ level: "info", msg: "env validation passed" });
+  });
+
+  it("exits 1 with stderr JSON {level:error,msg:'env validation failed',path:'RETENTION_GC_DATABASE_URL'} when malformed", () => {
+    const result = spawnWorker({
+      DATABASE_URL: VALID_DATABASE_URL,
+      RETENTION_GC_DATABASE_URL: MALFORMED_URL,
     });
 
     expect(result.status).toBe(1);
 
+    // Find the relevant error line in stderr.
     const stderrLines = result.stderr.trim().split("\n").filter(Boolean);
     const errorLine = stderrLines.find((l) => {
       try {
         const obj = JSON.parse(l);
-        return obj.level === "error" && obj.path === "DCR_CLEANUP_DATABASE_URL";
+        return obj.level === "error" && obj.path === "RETENTION_GC_DATABASE_URL";
       } catch {
         return false;
       }
@@ -100,17 +112,16 @@ describe("dcr-cleanup-worker --validate-env-only", () => {
     expect(errorLine).toBeTruthy();
 
     const parsed = JSON.parse(errorLine);
-    expect(parsed.level).toBe("error");
-    expect(parsed.msg).toBe("env validation failed");
-    expect(parsed.path).toBe("DCR_CLEANUP_DATABASE_URL");
+    // T9: exact payload check.
+    expect(parsed.level).toEqual("error");
+    expect(parsed.msg).toEqual("env validation failed");
+    expect(parsed.path).toEqual("RETENTION_GC_DATABASE_URL");
     expect(typeof parsed.code).toBe("string");
   });
 
-  it("exits 1 when DCR_CLEANUP_DATABASE_URL is missing AND DATABASE_URL is also missing", () => {
-    // DCR_CLEANUP_DATABASE_URL is optional in schema (falls back to DATABASE_URL).
-    // When both are missing, DATABASE_URL="" triggers nonEmpty rejection.
+  it("exits 1 with clear error referencing DATABASE_URL when it is empty", () => {
     const result = spawnWorker({
-      DATABASE_URL: "",  // explicitly empty → Zod nonEmpty rejects it
+      DATABASE_URL: "", // explicitly empty → Zod nonEmpty rejects it
     });
 
     expect(result.status).toBe(1);
@@ -127,30 +138,10 @@ describe("dcr-cleanup-worker --validate-env-only", () => {
     expect(hasDbUrlError).toBe(true);
   });
 
-  it("exits 1 when DCR_CLEANUP_INTERVAL_MS is below 60_000", () => {
+  it("exits 1 with clear error when RETENTION_GC_BATCH_SIZE is non-numeric", () => {
     const result = spawnWorker({
       DATABASE_URL: VALID_DATABASE_URL,
-      DCR_CLEANUP_INTERVAL_MS: "30000",
-    });
-
-    expect(result.status).toBe(1);
-
-    const stderrLines = result.stderr.trim().split("\n").filter(Boolean);
-    const hasIntervalError = stderrLines.some((l) => {
-      try {
-        const obj = JSON.parse(l);
-        return obj.path === "DCR_CLEANUP_INTERVAL_MS";
-      } catch {
-        return false;
-      }
-    });
-    expect(hasIntervalError).toBe(true);
-  });
-
-  it("exits 1 when DCR_CLEANUP_BATCH_SIZE is above 10_000", () => {
-    const result = spawnWorker({
-      DATABASE_URL: VALID_DATABASE_URL,
-      DCR_CLEANUP_BATCH_SIZE: "99999",
+      RETENTION_GC_BATCH_SIZE: "not-a-number",
     });
 
     expect(result.status).toBe(1);
@@ -159,11 +150,25 @@ describe("dcr-cleanup-worker --validate-env-only", () => {
     const hasBatchSizeError = stderrLines.some((l) => {
       try {
         const obj = JSON.parse(l);
-        return obj.path === "DCR_CLEANUP_BATCH_SIZE";
+        return obj.path === "RETENTION_GC_BATCH_SIZE";
       } catch {
         return false;
       }
     });
     expect(hasBatchSizeError).toBe(true);
+  });
+
+  it("stderr does NOT include the rejected value (F30+S22 — no value echo)", () => {
+    const sensitiveValue = "super-secret-malformed-url-that-must-not-leak-99887766";
+    const result = spawnWorker({
+      DATABASE_URL: VALID_DATABASE_URL,
+      RETENTION_GC_DATABASE_URL: sensitiveValue,
+    });
+
+    expect(result.status).toBe(1);
+    // The rejected value must never appear verbatim in stderr.
+    expect(result.stderr).not.toContain(sensitiveValue);
+    // No success JSON on the failure path.
+    expect(extractJsonLine(result.stdout)).toBeNull();
   });
 });

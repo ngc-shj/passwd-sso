@@ -6,16 +6,16 @@ loadEnv();
 // parseEnv() on the full schema at module load and fail the worker boot when
 // non-worker vars (auth providers, WebAuthn, etc.) are absent.
 import { envObject } from "@/lib/env-schema";
-import { createWorker } from "@/workers/dcr-cleanup-worker";
+import { createWorker } from "@/workers/retention-gc-worker";
 
 // Pick only the fields the worker reads. envObject (not envSchema) because
 // Zod 4 throws on .pick() of a refined schema (F16).
 const workerEnvSchema = envObject.pick({
   DATABASE_URL: true,
-  DCR_CLEANUP_DATABASE_URL: true,
-  DCR_CLEANUP_INTERVAL_MS: true,
-  DCR_CLEANUP_BATCH_SIZE: true,
-  DCR_CLEANUP_EMIT_HEARTBEAT_AUDIT: true,
+  RETENTION_GC_DATABASE_URL: true,
+  RETENTION_GC_INTERVAL_MS: true,
+  RETENTION_GC_BATCH_SIZE: true,
+  RETENTION_GC_EMIT_HEARTBEAT_AUDIT: true,
   NODE_ENV: true,
   DB_POOL_MAX: true,
   DB_POOL_CONNECTION_TIMEOUT_MS: true,
@@ -45,7 +45,7 @@ if (!parseResult.success) {
 const workerEnv = parseResult.data;
 
 // --validate-env-only flag exits 0 after parsing, without touching DB.
-// Byte-exact contract tested in scripts/__tests__/dcr-cleanup-worker-env.test.mjs.
+// Byte-exact contract tested in scripts/__tests__/retention-gc-worker-env.test.mjs.
 if (process.argv.includes("--validate-env-only")) {
   console.log(
     JSON.stringify({ level: "info", msg: "env validation passed" }),
@@ -54,19 +54,19 @@ if (process.argv.includes("--validate-env-only")) {
 }
 
 const databaseUrl =
-  workerEnv.DCR_CLEANUP_DATABASE_URL ?? workerEnv.DATABASE_URL;
+  workerEnv.RETENTION_GC_DATABASE_URL ?? workerEnv.DATABASE_URL;
 
 const worker = createWorker({
   databaseUrl,
-  intervalMs: workerEnv.DCR_CLEANUP_INTERVAL_MS,
-  batchSize: workerEnv.DCR_CLEANUP_BATCH_SIZE,
-  emitHeartbeatAudit: workerEnv.DCR_CLEANUP_EMIT_HEARTBEAT_AUDIT,
+  intervalMs: workerEnv.RETENTION_GC_INTERVAL_MS,
+  batchSize: workerEnv.RETENTION_GC_BATCH_SIZE,
+  emitHeartbeatAudit: workerEnv.RETENTION_GC_EMIT_HEARTBEAT_AUDIT,
 });
 
 // Graceful shutdown: finish in-flight sweep then exit 0.
 function handleSignal(signal: string): void {
   console.log(
-    JSON.stringify({ level: "info", msg: "dcr-cleanup.shutdown", signal }),
+    JSON.stringify({ level: "info", msg: "retention-gc.shutdown", signal }),
   );
   worker.stop().then(() => {
     process.exit(0);
@@ -74,7 +74,7 @@ function handleSignal(signal: string): void {
     console.error(
       JSON.stringify({
         level: "fatal",
-        msg: "dcr-cleanup.shutdown_error",
+        msg: "retention-gc.shutdown_error",
         code: (err as NodeJS.ErrnoException | undefined)?.code ?? "unknown",
       }),
     );
@@ -89,7 +89,7 @@ worker.start().catch((err: unknown) => {
   console.error(
     JSON.stringify({
       level: "fatal",
-      msg: "dcr-cleanup.fatal",
+      msg: "retention-gc.fatal",
       code: (err as NodeJS.ErrnoException | undefined)?.code ?? "unknown",
     }),
   );

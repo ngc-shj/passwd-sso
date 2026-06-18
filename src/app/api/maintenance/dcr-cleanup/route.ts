@@ -3,13 +3,14 @@
  *
  * DEPRECATED — returns 410 Gone for one minor version.
  *
- * DCR cleanup is now automatic: the `dcr-cleanup-worker` process runs periodic
- * sweeps and emits SYSTEM-attributed audit events. This endpoint stub authenticates
- * the caller so that stale cron jobs are surfaced via a MCP_CLIENT_DCR_CLEANUP_DEPRECATED_CALL
- * audit event in the caller's tenant audit log, giving operators time to remove their jobs
- * before the stub is deleted in the next minor release.
+ * DCR cleanup is now automatic: the generic `retention-gc-worker` process runs
+ * periodic sweeps (DCR clients are one entry in its retention registry) and emits
+ * SYSTEM-attributed audit events. This endpoint stub authenticates the caller so that
+ * stale cron jobs are surfaced via a MCP_CLIENT_DCR_CLEANUP_DEPRECATED_CALL audit event
+ * in the caller's tenant audit log, giving operators time to remove their jobs before
+ * the stub is deleted in the next minor release.
  *
- * Replacement: `npm run worker:dcr-cleanup` (dev) or the `dcr-cleanup-worker` Docker service.
+ * Replacement: `npm run worker:retention-gc` (dev) or the `retention-gc-worker` Docker service.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -49,12 +50,12 @@ async function handlePOST(req: NextRequest) {
       tokenSubjectUserId: auth.subjectUserId,
       tokenId: auth.tokenId,
       deprecated: true,
-      replacement: "worker:dcr-cleanup",
+      replacement: "worker:retention-gc",
     },
   });
 
   return NextResponse.json(
-    { error: "endpoint_removed", replacement: "worker:dcr-cleanup" },
+    { error: "endpoint_removed", replacement: "worker:retention-gc" },
     { status: 410 },
   );
 }

@@ -70,9 +70,9 @@ export const envObject = z.object({
     )
     .optional(),
 
-  // --- DCR cleanup worker ---
-  // Dedicated DB URL for the dcr-cleanup worker role; falls back to DATABASE_URL.
-  DCR_CLEANUP_DATABASE_URL: z
+  // --- Retention GC worker ---
+  // Dedicated DB URL for the retention-gc worker role; falls back to DATABASE_URL.
+  RETENTION_GC_DATABASE_URL: z
     .string()
     .transform((s) => s.trim())
     .pipe(
@@ -85,18 +85,18 @@ export const envObject = z.object({
             return false;
           }
         },
-        { message: "DCR_CLEANUP_DATABASE_URL must be a valid URL" },
+        { message: "RETENTION_GC_DATABASE_URL must be a valid URL" },
       ),
     )
     .optional(),
-  DCR_CLEANUP_INTERVAL_MS: z.coerce
+  RETENTION_GC_INTERVAL_MS: z.coerce
     .number()
     .int()
     .min(MS_PER_MINUTE)
     .max(MS_PER_DAY)
     .default(MS_PER_HOUR),
-  DCR_CLEANUP_BATCH_SIZE: z.coerce.number().int().min(1).max(10_000).default(1000),
-  DCR_CLEANUP_EMIT_HEARTBEAT_AUDIT: z
+  RETENTION_GC_BATCH_SIZE: z.coerce.number().int().min(1).max(10_000).default(1000),
+  RETENTION_GC_EMIT_HEARTBEAT_AUDIT: z
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),

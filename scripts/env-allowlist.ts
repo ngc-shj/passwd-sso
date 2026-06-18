@@ -131,7 +131,7 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
     description:
       "Password for the passwd_app NOSUPERUSER DB role (runtime).\n" +
       "Used by docker-compose to compose DATABASE_URL for the app +\n" +
-      "audit-outbox-worker + dcr-cleanup-worker containers, AND by\n" +
+      "audit-outbox-worker + retention-gc-worker containers, AND by\n" +
       "infra/postgres/initdb on first boot to create the role.\n" +
       "Generate with: openssl rand -hex 24",
     secret: true,
@@ -184,25 +184,25 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
   },
   {
     type: "literal",
-    key: "PASSWD_DCR_CLEANUP_WORKER_PASSWORD",
+    key: "PASSWD_RETENTION_GC_WORKER_PASSWORD",
     justification:
-      "Password for the passwd_dcr_cleanup_worker NOSUPERUSER DB role used by the DCR cleanup worker. " +
-      "Consumed by docker-compose (PASSWD_DCR_CLEANUP_WORKER_PASSWORD env on db service for initdb AND " +
-      "DCR_CLEANUP_DATABASE_URL on the worker service) AND by " +
-      "scripts/set-dcr-cleanup-worker-password.sh for existing clusters.",
+      "Password for the passwd_retention_gc_worker NOSUPERUSER DB role used by the retention GC worker. " +
+      "Consumed by docker-compose (PASSWD_RETENTION_GC_WORKER_PASSWORD env on db service for initdb AND " +
+      "RETENTION_GC_DATABASE_URL on the worker service) AND by " +
+      "scripts/set-retention-gc-worker-password.sh for existing clusters.",
     consumers: [
-      "scripts/set-dcr-cleanup-worker-password.sh",
+      "scripts/set-retention-gc-worker-password.sh",
       "docker-compose.yml",
       "docker-compose.override.yml",
       "infra/postgres/initdb",
     ],
-    reviewedAt: "2026-05-16",
+    reviewedAt: "2026-06-17",
     includeInExample: true,
     requiredForConsumer: true,
     description:
-      "Password for the passwd_dcr_cleanup_worker least-privilege DB role.\n" +
-      "Used by docker-compose to wire DCR_CLEANUP_DATABASE_URL for\n" +
-      "the dcr-cleanup-worker container, AND by\n" +
+      "Password for the passwd_retention_gc_worker least-privilege DB role.\n" +
+      "Used by docker-compose to wire RETENTION_GC_DATABASE_URL for\n" +
+      "the retention-gc-worker container, AND by\n" +
       "infra/postgres/initdb to create the role on first boot.\n" +
       "Generate with: openssl rand -hex 24",
     secret: true,
