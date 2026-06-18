@@ -292,7 +292,8 @@ describe("GET /api/share-links/mine", () => {
 
     it("returns error when team membership check fails", async () => {
       const { TeamAuthError } = await import("@/lib/auth/access/team-auth");
-      mockRequireTeamMember.mockRejectedValue(new TeamAuthError("NOT_MEMBER", 403));
+      const { API_ERROR } = await import("@/lib/http/api-error-codes");
+      mockRequireTeamMember.mockRejectedValue(new TeamAuthError(API_ERROR.FORBIDDEN, 403));
       const res = await GET(
         createRequest("GET", "http://localhost/api/share-links/mine", {
           searchParams: { team: TEAM_ID },

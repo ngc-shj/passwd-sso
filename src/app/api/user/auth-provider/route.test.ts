@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockPrismaAccount, mockWithBypassRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -28,17 +27,13 @@ describe("GET /api/user/auth-provider", () => {
 
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
-    const res = await GET(
-      createRequest("GET", "http://localhost/api/user/auth-provider"),
-    );
+    const res = await GET();
     expect(res.status).toBe(401);
   });
 
   it("returns canPasskeySignIn: true for passkey-only user (no accounts)", async () => {
     mockPrismaAccount.findMany.mockResolvedValue([]);
-    const res = await GET(
-      createRequest("GET", "http://localhost/api/user/auth-provider"),
-    );
+    const res = await GET();
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.canPasskeySignIn).toBe(true);
@@ -48,9 +43,7 @@ describe("GET /api/user/auth-provider", () => {
     mockPrismaAccount.findMany.mockResolvedValue([
       { provider: "google" },
     ]);
-    const res = await GET(
-      createRequest("GET", "http://localhost/api/user/auth-provider"),
-    );
+    const res = await GET();
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.canPasskeySignIn).toBe(false);
@@ -60,9 +53,7 @@ describe("GET /api/user/auth-provider", () => {
     mockPrismaAccount.findMany.mockResolvedValue([
       { provider: "saml-jackson" },
     ]);
-    const res = await GET(
-      createRequest("GET", "http://localhost/api/user/auth-provider"),
-    );
+    const res = await GET();
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.canPasskeySignIn).toBe(false);
@@ -73,9 +64,7 @@ describe("GET /api/user/auth-provider", () => {
       { provider: "google" },
       { provider: "nodemailer" },
     ]);
-    const res = await GET(
-      createRequest("GET", "http://localhost/api/user/auth-provider"),
-    );
+    const res = await GET();
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.canPasskeySignIn).toBe(true);
@@ -85,9 +74,7 @@ describe("GET /api/user/auth-provider", () => {
     mockPrismaAccount.findMany.mockResolvedValue([
       { provider: "nodemailer" },
     ]);
-    const res = await GET(
-      createRequest("GET", "http://localhost/api/user/auth-provider"),
-    );
+    const res = await GET();
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.canPasskeySignIn).toBe(true);
@@ -95,17 +82,13 @@ describe("GET /api/user/auth-provider", () => {
 
   it("returns 500 on DB error", async () => {
     mockPrismaAccount.findMany.mockRejectedValue(new Error("DB error"));
-    const res = await GET(
-      createRequest("GET", "http://localhost/api/user/auth-provider"),
-    );
+    const res = await GET();
     expect(res.status).toBe(500);
   });
 
   it("uses withBypassRls with AUTH_FLOW purpose", async () => {
     mockPrismaAccount.findMany.mockResolvedValue([]);
-    await GET(
-      createRequest("GET", "http://localhost/api/user/auth-provider"),
-    );
+    await GET();
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Function),

@@ -12,16 +12,19 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 
 import { render, screen } from "@testing-library/react";
 import { mockTeamMismatch } from "@/__tests__/helpers/mock-app-navigation";
+import type { encryptBinary, decryptBinary } from "@/lib/crypto/crypto-client";
 
 const { mockFetch, mockToast, encryptBinaryMock, decryptBinaryMock } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
   mockToast: { error: vi.fn(), success: vi.fn() },
-  encryptBinaryMock: vi.fn(async () => ({
+  encryptBinaryMock: vi.fn<typeof encryptBinary>(async () => ({
     ciphertext: new Uint8Array([1, 2, 3]),
     iv: "iv-hex",
     authTag: "tag-hex",
   })),
-  decryptBinaryMock: vi.fn(async () => new Uint8Array([4, 5, 6])),
+  decryptBinaryMock: vi.fn<typeof decryptBinary>(
+    async () => new Uint8Array([4, 5, 6]).buffer,
+  ),
 }));
 
 vi.mock("next-intl", () => ({
@@ -42,8 +45,8 @@ vi.mock("@/lib/team/team-vault-context", () => ({
 }));
 
 vi.mock("@/lib/crypto/crypto-client", () => ({
-  encryptBinary: (...args: unknown[]) => encryptBinaryMock(...args),
-  decryptBinary: (...args: unknown[]) => decryptBinaryMock(...args),
+  encryptBinary: encryptBinaryMock,
+  decryptBinary: decryptBinaryMock,
 }));
 
 vi.mock("@/lib/crypto/crypto-aad", () => ({

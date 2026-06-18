@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { withBypassRls } from "@/lib/tenant-rls";
 
 const { mockFindFirst, mockWithBypassRls } = vi.hoisted(() => ({
   mockFindFirst: vi.fn(),
-  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+  mockWithBypassRls: vi.fn<typeof withBypassRls>(async (prisma, fn) => fn(prisma as Parameters<typeof fn>[0])),
 }));
 
 vi.mock("@/lib/prisma", () => ({

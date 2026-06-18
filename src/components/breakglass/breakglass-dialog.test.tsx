@@ -138,11 +138,11 @@ function openDialog() {
 }
 
 describe("BreakGlassDialog", () => {
-  let onGrantCreated: ReturnType<typeof vi.fn>;
+  let onGrantCreated: ReturnType<typeof vi.fn<() => void>>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    onGrantCreated = vi.fn();
+    onGrantCreated = vi.fn<() => void>();
   });
 
   it("renders trigger button when closed", () => {

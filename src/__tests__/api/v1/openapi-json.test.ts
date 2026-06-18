@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 
 const mockAuthOrToken = vi.hoisted(() => vi.fn());

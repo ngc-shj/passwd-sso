@@ -58,7 +58,7 @@ describe("TeamTagsAndFolderSection", () => {
         selectedTags={[]}
         onTagsChange={vi.fn()}
         folders={[
-          { id: "f1", name: "Work", parentId: null, sortOrder: 0, entryCount: 0 },
+          { id: "f1", name: "Work", parentId: null },
         ]}
         folderId={null}
         onFolderChange={vi.fn()}

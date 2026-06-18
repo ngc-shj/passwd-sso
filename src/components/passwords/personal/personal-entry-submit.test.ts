@@ -33,6 +33,8 @@ describe("executePersonalEntrySubmit", () => {
     await executePersonalEntrySubmit({
       mode: "create",
       encryptionKey: {} as CryptoKey,
+      userId: "u1",
+      keyVersion: 1,
       fullBlob: "full",
       overviewBlob: "overview",
       tagIds: ["t1"],
@@ -54,6 +56,8 @@ describe("executePersonalEntrySubmit", () => {
     await executePersonalEntrySubmit({
       mode: "create",
       encryptionKey: {} as CryptoKey,
+      userId: "u1",
+      keyVersion: 1,
       fullBlob: "full",
       overviewBlob: "overview",
       tagIds: [],

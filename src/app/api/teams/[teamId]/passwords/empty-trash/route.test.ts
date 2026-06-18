@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
+import type { logAuditAsync, logAuditBulkAsync } from "@/lib/audit/audit";
 
 const {
   mockAuth,
@@ -23,7 +24,7 @@ const {
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
-    mockLogAudit: vi.fn(),
+    mockLogAudit: vi.fn<typeof logAuditAsync>(),
   };
 });
 
@@ -42,7 +43,7 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
-  logAuditBulkAsync: vi.fn(async (entries: unknown[]) => {
+  logAuditBulkAsync: vi.fn<typeof logAuditBulkAsync>(async (entries) => {
     for (const e of entries) await mockLogAudit(e);
   }),
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
@@ -158,7 +159,7 @@ describe("POST /api/teams/[teamId]/passwords/empty-trash", () => {
       createParams({ teamId: TEAM_ID }),
     );
     const permanentDeleteCalls = mockLogAudit.mock.calls.filter(
-      ([call]: [{ action: string }]) => call.action === "ENTRY_PERMANENT_DELETE",
+      ([call]) => call.action === "ENTRY_PERMANENT_DELETE",
     );
     expect(permanentDeleteCalls).toHaveLength(2);
   });

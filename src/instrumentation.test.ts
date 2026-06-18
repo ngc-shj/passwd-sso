@@ -33,9 +33,9 @@ async function loadOnRequestError() {
 // Minimal mock request/context matching Next.js InstrumentationOnRequestError signature
 function makeMockArgs(err: unknown) {
   const request = {
+    path: "/api/test",
     method: "GET",
-    url: "http://localhost/api/test",
-    headers: new Headers(),
+    headers: {},
   };
   const context = { routerKind: "App Router" as const, routePath: "/api/test", routeType: "route" as const, renderSource: "react-server-components" as const, revalidateReason: undefined };
   return [err, request, context] as const;

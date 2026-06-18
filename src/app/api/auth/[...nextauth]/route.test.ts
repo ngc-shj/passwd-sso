@@ -1,6 +1,15 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
+// Mirrors the `RouteHandler` signature in route.ts (not exported). The
+// wrappers are generic `<H extends RouteHandler>(h: H): H`, so the inner
+// mock must carry the request-accepting signature for `wrapped(req)` to
+// typecheck — otherwise vi.fn infers a zero-arg call signature.
+type RouteHandler = (
+  request: NextRequest,
+  ...rest: unknown[]
+) => Promise<Response>;
+
 // Mock dependencies so route.ts can be imported without side-effects
 vi.mock("@/auth", () => ({
   handlers: {
@@ -214,7 +223,7 @@ describe("withCallbackRateLimit", () => {
     const { _withCallbackRateLimit } = await import(
       "@/app/api/auth/[...nextauth]/route"
     );
-    const inner = vi.fn(async () => new Response("ok"));
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
     const wrapped = _withCallbackRateLimit(inner);
 
     const res = await wrapped(makeReq("/api/auth/signin"));
@@ -229,7 +238,7 @@ describe("withCallbackRateLimit", () => {
     const { _withCallbackRateLimit } = await import(
       "@/app/api/auth/[...nextauth]/route"
     );
-    const inner = vi.fn(async () => new Response("ok"));
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
     const wrapped = _withCallbackRateLimit(inner);
 
     const res = await wrapped(makeReq("/api/auth/callback/google", "GET"));
@@ -245,7 +254,7 @@ describe("withCallbackRateLimit", () => {
     const { _withCallbackRateLimit } = await import(
       "@/app/api/auth/[...nextauth]/route"
     );
-    const inner = vi.fn(async () => new Response("ok"));
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
     const wrapped = _withCallbackRateLimit(inner);
 
     const res = await wrapped(makeReq("/api/auth/callback/google", "POST"));
@@ -259,7 +268,7 @@ describe("withCallbackRateLimit", () => {
     const { _withCallbackRateLimit } = await import(
       "@/app/api/auth/[...nextauth]/route"
     );
-    const inner = vi.fn(async () => new Response("ok"));
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
     const wrapped = _withCallbackRateLimit(inner);
 
     await wrapped(makeReq("/api/auth/callback/google", "GET"));
@@ -274,7 +283,7 @@ describe("withCallbackRateLimit", () => {
     const { _withCallbackRateLimit } = await import(
       "@/app/api/auth/[...nextauth]/route"
     );
-    const inner = vi.fn(async () => new Response("ok"));
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
     const wrapped = _withCallbackRateLimit(inner);
 
     const res = await wrapped(makeReq("/api/auth/callback/google", "GET"));
@@ -297,7 +306,7 @@ describe("withCallbackRateLimit", () => {
     const { _withCallbackRateLimit } = await import(
       "@/app/api/auth/[...nextauth]/route"
     );
-    const inner = vi.fn(async () => new Response("ok"));
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
     const wrapped = _withCallbackRateLimit(inner);
 
     mockExtractClientIp.mockReturnValueOnce("203.0.113.5");

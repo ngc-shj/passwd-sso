@@ -135,6 +135,9 @@ run_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-pr
 run_step "Static: ios-no-diagnostic-logging" bash scripts/checks/check-ios-no-diagnostic-logging.sh
 if [ "$STATIC_ONLY" != "1" ]; then
   run_step "Lint"                   npx eslint .
+  # tsc --noEmit typechecks test files too (vitest does not; next build excludes
+  # them), catching mock/type drift that would otherwise rot silently.
+  run_step "Typecheck"              npx tsc --noEmit
 fi
 run_step "Static: env drift check"  npm run check:env-docs
 run_step "Static: team-auth-rls"  node scripts/checks/check-team-auth-rls.mjs

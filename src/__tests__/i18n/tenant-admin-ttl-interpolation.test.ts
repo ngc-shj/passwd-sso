@@ -32,20 +32,82 @@ import {
 } from "@/lib/validations/common";
 import { CRYPTO_CONSTANTS } from "@/lib/crypto/crypto-client";
 
-function readMessages(locale: string, namespace: string): Record<string, unknown> {
+function readMessages<T>(locale: string, namespace: string): T {
   return JSON.parse(
     readFileSync(
       join(process.cwd(), "messages", locale, `${namespace}.json`),
       "utf8",
     ),
-  ) as Record<string, unknown>;
+  ) as T;
 }
 
 const LOCALES = ["en", "ja"] as const;
 
+const RETENTION_LABEL_KEYS = [
+  "trashRetention",
+  "historyRetention",
+  "shareAccessLogRetention",
+  "directorySyncLogRetention",
+  "notificationRetention",
+] as const;
+
+type RetentionLabelKey = (typeof RETENTION_LABEL_KEYS)[number];
+
+type TenantAdminMessageKey =
+  | "jitTokenDefaultTtlSecHelp"
+  | "jitTokenMaxTtlSecHelp"
+  | "jitTokenTtlValidationMin"
+  | "jitTokenTtlValidationMax"
+  | "delegationDefaultTtlSecHelp"
+  | "delegationMaxTtlSecHelp"
+  | "delegationTtlValidationMin"
+  | "delegationTtlValidationMax"
+  | "lockoutDurationHelp"
+  | "lockoutDurationRange"
+  | "passwordMaxAgeDaysHelp"
+  | "passwordMaxAgeValidationMin"
+  | "passwordMaxAgeValidationMax"
+  | "passwordExpiryWarningDaysHelp"
+  | "passwordExpiryWarningValidationMin"
+  | "passwordExpiryWarningValidationMax"
+  | "auditLogRetentionDaysHelp"
+  | "auditLogRetentionValidationMin"
+  | "auditLogRetentionValidationMax"
+  | `${RetentionLabelKey}DaysHelp`
+  | `${RetentionLabelKey}ValidationMin`
+  | `${RetentionLabelKey}ValidationMax`
+  | "saTokenMaxExpiryDaysHelp"
+  | "saTokenMaxExpiryValidationMin"
+  | "saTokenMaxExpiryValidationMax"
+  | "passkeyGracePeriodValidationMin"
+  | "passkeyGracePeriodValidationMax"
+  | "requireMinPinLengthHelp"
+  | "passkeyMinPinLengthValidationMin"
+  | "passkeyMinPinLengthValidationMax"
+  | "lockoutThresholdHelp"
+  | "lockoutThresholdRange"
+  | "tenantMinPasswordLengthHelp"
+  | "passwordMinLengthValidationMin"
+  | "passwordMinLengthValidationMax";
+
+type TenantAdminMessages = Record<TenantAdminMessageKey, string>;
+
+type TeamPolicyMessages = Record<
+  | "minPasswordLengthRange"
+  | "passwordHistoryCountHelp"
+  | "passwordHistoryCountRange",
+  string
+>;
+
+type AuditDownloadMessages = Record<"maxRange", string>;
+
+type PrivacyPolicyMessages = {
+  sections: { security: { body: string } };
+};
+
 describe("TenantAdmin TTL help text interpolation", () => {
   for (const locale of LOCALES) {
-    const messages = readMessages(locale, "TenantAdmin");
+    const messages = readMessages<TenantAdminMessages>(locale, "TenantAdmin");
     const t = createTranslator({ locale, messages });
 
     it(`[${locale}] jitTokenDefaultTtlSecHelp renders min and max values`, () => {
@@ -190,13 +252,7 @@ describe("TenantAdmin TTL help text interpolation", () => {
       expect(result).not.toContain("}");
     });
 
-    for (const labelKey of [
-      "trashRetention",
-      "historyRetention",
-      "shareAccessLogRetention",
-      "directorySyncLogRetention",
-      "notificationRetention",
-    ] as const) {
+    for (const labelKey of RETENTION_LABEL_KEYS) {
       it(`[${locale}] ${labelKey}DaysHelp renders min and max values`, () => {
         const result = t(`${labelKey}DaysHelp`, { min: RETENTION_DAYS_MIN, max: RETENTION_DAYS_MAX });
         expect(result).toContain(String(RETENTION_DAYS_MIN));
@@ -322,7 +378,7 @@ describe("TenantAdmin TTL help text interpolation", () => {
 
 describe("TeamPolicy range/help text interpolation", () => {
   for (const locale of LOCALES) {
-    const messages = readMessages(locale, "TeamPolicy");
+    const messages = readMessages<TeamPolicyMessages>(locale, "TeamPolicy");
     const t = createTranslator({ locale, messages });
 
     it(`[${locale}] minPasswordLengthRange renders min and max values`, () => {
@@ -351,7 +407,7 @@ describe("TeamPolicy range/help text interpolation", () => {
 
 describe("AuditDownload interpolation", () => {
   for (const locale of LOCALES) {
-    const messages = readMessages(locale, "AuditDownload");
+    const messages = readMessages<AuditDownloadMessages>(locale, "AuditDownload");
     const t = createTranslator({ locale, messages });
 
     it(`[${locale}] maxRange renders max value`, () => {
@@ -369,7 +425,7 @@ describe("PrivacyPolicy security section PBKDF2 iterations interpolation", () =>
   const PBKDF2_ITERATIONS = CRYPTO_CONSTANTS.PBKDF2_ITERATIONS;
 
   for (const locale of LOCALES) {
-    const rawMessages = readMessages(locale, "PrivacyPolicy");
+    const rawMessages = readMessages<PrivacyPolicyMessages>(locale, "PrivacyPolicy");
     // sections is a nested object; createTranslator needs flat messages or supports nesting
     const t = createTranslator({ locale, messages: { PrivacyPolicy: rawMessages }, namespace: "PrivacyPolicy" });
 

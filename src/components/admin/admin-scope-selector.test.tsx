@@ -72,10 +72,30 @@ vi.mock("@/components/ui/select", () => ({
 }));
 
 import { AdminScopeSelector } from "./admin-scope-selector";
+import type { AdminTeamMembership } from "@/lib/auth/access/team-auth";
+import { TEAM_ROLE } from "@/lib/constants";
 
-const adminTeams = [
-  { team: { id: "team-1", name: "Team Alpha", slug: "team-alpha", tenantName: "Home Tenant", isCrossTenant: false } },
-  { team: { id: "team-2", name: "Team Beta", slug: "team-beta", tenantName: "Guest Tenant", isCrossTenant: true } },
+function membership(
+  team: AdminTeamMembership["team"],
+): AdminTeamMembership {
+  return {
+    id: `member-${team.id}`,
+    teamId: team.id,
+    userId: "user-1",
+    tenantId: "tenant-1",
+    role: TEAM_ROLE.ADMIN,
+    keyDistributed: true,
+    deactivatedAt: null,
+    scimManaged: false,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+    team,
+  };
+}
+
+const adminTeams: AdminTeamMembership[] = [
+  membership({ id: "team-1", name: "Team Alpha", slug: "team-alpha", tenantName: "Home Tenant", isCrossTenant: false }),
+  membership({ id: "team-2", name: "Team Beta", slug: "team-beta", tenantName: "Guest Tenant", isCrossTenant: true }),
 ];
 
 describe("AdminScopeSelector", () => {

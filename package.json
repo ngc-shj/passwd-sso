@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
     "check:team-auth-rls": "node scripts/checks/check-team-auth-rls.mjs",
     "check:bypass-rls": "node scripts/checks/check-bypass-rls.mjs",
     "check:crypto-domains": "node scripts/checks/check-crypto-domains.mjs",

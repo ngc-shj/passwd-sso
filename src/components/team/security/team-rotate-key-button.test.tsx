@@ -11,6 +11,13 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 }
 
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import type {
+  generateTeamSymmetricKey,
+  createTeamKeyEscrow,
+  wrapItemKey,
+  unwrapItemKey,
+  deriveTeamEncryptionKey,
+} from "@/lib/crypto/crypto-team";
 
 const {
   mockFetch,
@@ -28,22 +35,22 @@ const {
   return {
     mockFetch: vi.fn(),
     mockToast: { error: vi.fn(), success: vi.fn() },
-    generateTeamKeyMock: vi.fn(() => {
+    generateTeamKeyMock: vi.fn<typeof generateTeamSymmetricKey>(() => {
       const buf = new Uint8Array(32).fill(0xab);
       teamKeySnap.refs.push(buf);
       return buf;
     }),
-    unwrapItemKeyMock: vi.fn(async () => {
+    unwrapItemKeyMock: vi.fn<typeof unwrapItemKey>(async () => {
       const buf = new Uint8Array(32).fill(0xcd);
       rawSnap.refs.push(buf);
       return buf;
     }),
-    wrapItemKeyMock: vi.fn(async () => ({
+    wrapItemKeyMock: vi.fn<typeof wrapItemKey>(async () => ({
       ciphertext: "ct",
       iv: "iv",
       authTag: "at",
     })),
-    createEscrowMock: vi.fn(async () => ({
+    createEscrowMock: vi.fn<typeof createTeamKeyEscrow>(async () => ({
       encryptedTeamKey: "ek",
       teamKeyIv: "tkiv",
       teamKeyAuthTag: "tkat",
@@ -52,7 +59,9 @@ const {
       keyVersion: 2,
       wrapVersion: 1,
     })),
-    deriveTeamKeyMock: vi.fn(async () => ({} as CryptoKey)),
+    deriveTeamKeyMock: vi.fn<typeof deriveTeamEncryptionKey>(
+      async () => ({}) as CryptoKey,
+    ),
     rawItemKeysSnapshot: rawSnap,
     newTeamKeysSnapshot: teamKeySnap,
   };
@@ -77,13 +86,13 @@ vi.mock("@/lib/team/team-vault-core", () => ({
 }));
 
 vi.mock("@/lib/crypto/crypto-team", () => ({
-  generateTeamSymmetricKey: () => generateTeamKeyMock(),
-  createTeamKeyEscrow: (...args: unknown[]) => createEscrowMock(...args),
+  generateTeamSymmetricKey: generateTeamKeyMock,
+  createTeamKeyEscrow: createEscrowMock,
   encryptTeamEntry: vi.fn(async () => ({ ciphertext: "c", iv: "i", authTag: "a" })),
   decryptTeamEntry: vi.fn(async () => "{}"),
-  wrapItemKey: (...args: unknown[]) => wrapItemKeyMock(...args),
-  unwrapItemKey: (...args: unknown[]) => unwrapItemKeyMock(...args),
-  deriveTeamEncryptionKey: (...args: unknown[]) => deriveTeamKeyMock(...args),
+  wrapItemKey: wrapItemKeyMock,
+  unwrapItemKey: unwrapItemKeyMock,
+  deriveTeamEncryptionKey: deriveTeamKeyMock,
 }));
 
 vi.mock("@/lib/crypto/crypto-aad", () => ({

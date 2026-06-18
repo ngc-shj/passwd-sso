@@ -77,11 +77,11 @@ vi.mock("@/components/ui/label", () => ({
 import { ChangePassphraseDialog } from "./change-passphrase-dialog";
 
 describe("ChangePassphraseDialog", () => {
-  let onOpenChange: ReturnType<typeof vi.fn>;
+  let onOpenChange: ReturnType<typeof vi.fn<(open: boolean) => void>>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    onOpenChange = vi.fn();
+    onOpenChange = vi.fn<(open: boolean) => void>();
   });
 
   function fillForm(current: string, next: string, confirm: string) {

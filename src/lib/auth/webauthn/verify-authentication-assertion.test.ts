@@ -89,9 +89,9 @@ const storedCredential = {
   publicKey: "AQID",
   counter: BigInt(4),
   transports: ["internal"],
-  prfEncryptedSecretKey: null,
-  prfSecretKeyIv: null,
-  prfSecretKeyAuthTag: null,
+  prfEncryptedSecretKey: null as string | null,
+  prfSecretKeyIv: null as string | null,
+  prfSecretKeyAuthTag: null as string | null,
 };
 
 function makeTxStub(overrides: Partial<{

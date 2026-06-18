@@ -97,7 +97,7 @@ describe("validatePolicy", () => {
 describe("range error i18n wiring", () => {
   const messages = JSON.parse(
     readFileSync(join(process.cwd(), "messages", "en", "TeamPolicy.json"), "utf8"),
-  ) as Record<string, unknown>;
+  ) as Record<string, string>;
   const t = createTranslator({ locale: "en", messages });
 
   // Mirror of ERROR_MESSAGE_ARGS in team-policy-settings.tsx — must cover every

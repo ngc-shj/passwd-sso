@@ -43,10 +43,30 @@ vi.mock("./admin-sidebar", () => ({
   },
 }));
 
+import type { AdminTeamMembership } from "@/lib/auth/access/team-auth";
+import { TEAM_ROLE } from "@/lib/constants";
 import { AdminShell } from "./admin-shell";
 
-const teamA = { team: { id: "team-a", name: "A", slug: "a", tenantName: "Tenant A", isCrossTenant: false } };
-const teamB = { team: { id: "team-b", name: "B", slug: "b", tenantName: "Tenant B", isCrossTenant: true } };
+function makeAdminTeam(
+  team: AdminTeamMembership["team"],
+): AdminTeamMembership {
+  return {
+    id: `member-${team.id}`,
+    tenantId: "tenant-1",
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+    userId: "user-1",
+    role: TEAM_ROLE.ADMIN,
+    deactivatedAt: null,
+    scimManaged: false,
+    teamId: team.id,
+    keyDistributed: true,
+    team,
+  };
+}
+
+const teamA = makeAdminTeam({ id: "team-a", name: "A", slug: "a", tenantName: "Tenant A", isCrossTenant: false });
+const teamB = makeAdminTeam({ id: "team-b", name: "B", slug: "b", tenantName: "Tenant B", isCrossTenant: true });
 
 describe("AdminShell", () => {
   it("renders header, sidebar, and children", () => {

@@ -72,11 +72,11 @@ vi.mock("@/components/ui/label", () => ({
 import { RotateKeyDialog } from "./rotate-key-dialog";
 
 describe("RotateKeyDialog", () => {
-  let onOpenChange: ReturnType<typeof vi.fn>;
+  let onOpenChange: ReturnType<typeof vi.fn<(open: boolean) => void>>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    onOpenChange = vi.fn();
+    onOpenChange = vi.fn<(open: boolean) => void>();
   });
 
   it("renders title and warning when open", () => {

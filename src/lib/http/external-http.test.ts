@@ -1,9 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+// resolve4/resolve6 are overloaded in @types/node; production code only ever
+// calls the bare `(hostname: string) => Promise<string[]>` overload, so type
+// the mocks against that single signature (the full `typeof` would force the
+// impl to satisfy every overload).
 const { mockFetch, mockResolve4, mockResolve6 } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
-  mockResolve4: vi.fn(async () => ["93.184.216.34"]),
-  mockResolve6: vi.fn(async () => []),
+  mockResolve4: vi.fn<(hostname: string) => Promise<string[]>>(
+    async () => ["93.184.216.34"],
+  ),
+  mockResolve6: vi.fn<(hostname: string) => Promise<string[]>>(
+    async () => [],
+  ),
 }));
 
 vi.mock("node:dns/promises", () => ({

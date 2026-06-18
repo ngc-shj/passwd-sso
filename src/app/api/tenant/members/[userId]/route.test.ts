@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockPrismaTenantMember, mockRequireTenantPermission, mockWithTenantRls, TenantAuthError, mockLogAudit } = vi.hoisted(() => {
@@ -128,7 +129,7 @@ describe("PUT /api/tenant/members/[userId]", () => {
 
   it("returns 400 for invalid JSON body", async () => {
     const res = await PUT(
-      new Request("http://localhost:3000/api/tenant/members/" + TARGET_USER_ID, {
+      new NextRequest("http://localhost:3000/api/tenant/members/" + TARGET_USER_ID, {
         method: "PUT",
         body: "not json",
         headers: { "Content-Type": "application/json" },

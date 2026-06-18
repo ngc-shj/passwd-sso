@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { loadAllMessages } from "./messages";
 
 // ─── Hoisted mocks ───────────────────────────────────────────────────────────
 //
@@ -8,7 +9,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // `messages.test.ts`).
 
 const { mockLoadAllMessages } = vi.hoisted(() => ({
-  mockLoadAllMessages: vi.fn(async () => ({ Common: { ok: "ok" } })),
+  mockLoadAllMessages: vi.fn<typeof loadAllMessages>(async () => ({
+    Common: { ok: "ok" },
+  })),
 }));
 
 vi.mock("./messages", () => ({

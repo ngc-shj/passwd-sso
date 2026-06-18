@@ -120,14 +120,19 @@ import { POST } from "./route";
 const ROUTE_URL = "http://localhost:3000/api/webauthn/register/verify";
 
 function makeResponse(credPropsOverride?: Record<string, unknown>) {
+  const innerResponse: {
+    clientDataJSON: string;
+    attestationObject: string;
+    transports?: string[];
+  } = {
+    clientDataJSON: "Y2xpZW50RGF0YQ",
+    attestationObject: "YXR0ZXN0YXRpb24",
+    transports: ["internal", "hybrid"],
+  };
   return {
     id: "cred-id-1",
     type: "public-key",
-    response: {
-      clientDataJSON: "Y2xpZW50RGF0YQ",
-      attestationObject: "YXR0ZXN0YXRpb24",
-      transports: ["internal", "hybrid"],
-    },
+    response: innerResponse,
     clientExtensionResults: credPropsOverride ?? {},
   };
 }

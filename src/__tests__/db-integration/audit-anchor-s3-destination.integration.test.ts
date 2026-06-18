@@ -41,6 +41,32 @@ async function isMinioAvailable(host: string, port: number, timeoutMs = 1500): P
   });
 }
 
+// @aws-sdk/client-s3 is an optional, uninstalled peer dependency loaded at
+// runtime via require(). It is not a dev dependency, so `typeof import(...)`
+// cannot resolve its types. Mirror the production S3Module pattern
+// (src/lib/audit/anchor-destinations/s3-destination.ts) and describe the
+// subset of the SDK these helpers actually use.
+type S3CommandInput = Record<string, unknown>;
+type S3Client = {
+  send: (command: unknown) => Promise<{
+    ContentType?: string;
+    Body?: AsyncIterable<Buffer | Uint8Array>;
+  }>;
+};
+type S3ClientOptions = {
+  region?: string;
+  endpoint?: string;
+  forcePathStyle?: boolean;
+  credentials?: { accessKeyId: string; secretAccessKey: string };
+};
+type S3ClientS3Module = {
+  S3Client: new (options: S3ClientOptions) => S3Client;
+  CreateBucketCommand: new (input: S3CommandInput) => unknown;
+  HeadBucketCommand: new (input: S3CommandInput) => unknown;
+  GetObjectCommand: new (input: S3CommandInput) => unknown;
+  PutObjectCommand: new (input: S3CommandInput) => unknown;
+};
+
 const MINIO_HOST = "localhost";
 const MINIO_PORT = 9000;
 const MINIO_ENDPOINT = `http://${MINIO_HOST}:${MINIO_PORT}`;
@@ -59,7 +85,7 @@ async function ensureBucket(): Promise<void> {
   // If unavailable, the test skips at the it.skipIf gate.
   const { S3Client, CreateBucketCommand, HeadBucketCommand } =
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require("@aws-sdk/client-s3") as typeof import("@aws-sdk/client-s3");
+    require("@aws-sdk/client-s3") as S3ClientS3Module;
 
   const client = new S3Client({
     region: "us-east-1",
@@ -84,7 +110,7 @@ async function ensureBucket(): Promise<void> {
 async function getObject(key: string): Promise<{ contentType: string; body: Buffer }> {
   const { S3Client, GetObjectCommand } =
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require("@aws-sdk/client-s3") as typeof import("@aws-sdk/client-s3");
+    require("@aws-sdk/client-s3") as S3ClientS3Module;
 
   const client = new S3Client({
     region: "us-east-1",
@@ -137,7 +163,7 @@ describe("S3Destination — MinIO integration", () => {
 
       const { S3Client, PutObjectCommand } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require("@aws-sdk/client-s3") as typeof import("@aws-sdk/client-s3");
+        require("@aws-sdk/client-s3") as S3ClientS3Module;
 
       const client = new S3Client({
         region: "us-east-1",
