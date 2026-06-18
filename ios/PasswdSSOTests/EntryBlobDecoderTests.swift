@@ -161,6 +161,197 @@ final class EntryBlobDecoderTests: XCTestCase {
     )
   }
 
+  // MARK: - detail() type-specific sub-structs
+
+  func testDetailDecodesCreditCardBlob() throws {
+    let json = #"""
+    {"title":"Visa","cardholderName":"Alice A","cardNumber":"4111111111111111",
+     "brand":"visa","expiryMonth":"12","expiryYear":"2030","cvv":"123","notes":"n"}
+    """#
+    let d = try XCTUnwrap(
+      EntryBlobDecoder.detail(plaintext: data(json), entryId: "cc1", teamId: nil, entryType: "CREDIT_CARD")
+    )
+    let cc = try XCTUnwrap(d.creditCard)
+    XCTAssertEqual(cc.cardholderName, "Alice A")
+    XCTAssertEqual(cc.cardNumber, "4111111111111111")
+    XCTAssertEqual(cc.brand, "visa")
+    XCTAssertEqual(cc.expiryMonth, "12")
+    XCTAssertEqual(cc.expiryYear, "2030")
+    XCTAssertEqual(cc.cvv, "123")
+    XCTAssertEqual(d.notes, "n")
+    // Sibling sub-structs are nil; unconsumed LOGIN scalars are empty.
+    XCTAssertNil(d.identity)
+    XCTAssertNil(d.bankAccount)
+    XCTAssertNil(d.secureNote)
+    XCTAssertEqual(d.password, "")
+    XCTAssertEqual(d.url, "")
+  }
+
+  func testDetailDecodesIdentityBlob() throws {
+    let json = #"""
+    {"title":"Me","fullName":"Alice Anderson","givenName":"Alice","familyName":"Anderson",
+     "address":"1 Main St","addressLine1":"Apt 2","postalCode":"94016","city":"SF",
+     "country":"US","email":"a@example.com","dateOfBirth":"1990-01-01","idNumber":"X12345",
+     "issueDate":"2020-01-01","expiryDate":"2030-01-01"}
+    """#
+    let d = try XCTUnwrap(
+      EntryBlobDecoder.detail(plaintext: data(json), entryId: "id1", teamId: nil, entryType: "IDENTITY")
+    )
+    let id = try XCTUnwrap(d.identity)
+    XCTAssertEqual(id.fullName, "Alice Anderson")
+    XCTAssertEqual(id.address, "1 Main St")
+    XCTAssertEqual(id.addressLine1, "Apt 2")
+    XCTAssertEqual(id.postalCode, "94016")
+    XCTAssertEqual(id.city, "SF")
+    XCTAssertEqual(id.country, "US")
+    XCTAssertEqual(id.email, "a@example.com")
+    XCTAssertEqual(id.dateOfBirth, "1990-01-01")
+    XCTAssertEqual(id.idNumber, "X12345")
+    XCTAssertEqual(id.expiryDate, "2030-01-01")
+    XCTAssertNil(id.middleName)  // absent → nil
+    XCTAssertNil(d.creditCard)
+    XCTAssertEqual(d.password, "")
+  }
+
+  func testDetailDecodesBankAccountBlob() throws {
+    let json = #"""
+    {"title":"Checking","bankName":"Acme Bank","accountType":"checking",
+     "accountHolderName":"Alice","accountNumber":"000123456","routingNumber":"110000000",
+     "swiftBic":"ACMEUS33","iban":"US00ACME0001","branchName":"Downtown"}
+    """#
+    let d = try XCTUnwrap(
+      EntryBlobDecoder.detail(plaintext: data(json), entryId: "ba1", teamId: nil, entryType: "BANK_ACCOUNT")
+    )
+    let ba = try XCTUnwrap(d.bankAccount)
+    XCTAssertEqual(ba.bankName, "Acme Bank")
+    XCTAssertEqual(ba.accountType, "checking")
+    XCTAssertEqual(ba.accountHolderName, "Alice")
+    XCTAssertEqual(ba.accountNumber, "000123456")
+    XCTAssertEqual(ba.routingNumber, "110000000")
+    XCTAssertEqual(ba.swiftBic, "ACMEUS33")
+    XCTAssertEqual(ba.iban, "US00ACME0001")
+    XCTAssertEqual(ba.branchName, "Downtown")
+    XCTAssertNil(d.sshKey)
+  }
+
+  func testDetailDecodesSshKeyBlobUsesPassphraseAndCommentKeys() throws {
+    // Blob keys are `passphrase`/`comment` (NOT sshPassphrase/sshComment), and
+    // `keySize` is a free-text string ("2048"), not an Int.
+    let json = #"""
+    {"title":"deploy key","privateKey":"-----BEGIN-----","publicKey":"ssh-ed25519 AAA",
+     "keyType":"ed25519","keySize":"256","fingerprint":"SHA256:abc",
+     "passphrase":"hunter2","comment":"deploy@host"}
+    """#
+    let d = try XCTUnwrap(
+      EntryBlobDecoder.detail(plaintext: data(json), entryId: "ssh1", teamId: nil, entryType: "SSH_KEY")
+    )
+    let key = try XCTUnwrap(d.sshKey)
+    XCTAssertEqual(key.privateKey, "-----BEGIN-----")
+    XCTAssertEqual(key.publicKey, "ssh-ed25519 AAA")
+    XCTAssertEqual(key.keyType, "ed25519")
+    XCTAssertEqual(key.keySize, "256")
+    XCTAssertEqual(key.fingerprint, "SHA256:abc")
+    XCTAssertEqual(key.passphrase, "hunter2")
+    XCTAssertEqual(key.comment, "deploy@host")
+  }
+
+  func testDetailDecodesSoftwareLicenseBlob() throws {
+    let json = #"""
+    {"title":"IDE","softwareName":"CoolIDE","licenseKey":"ABCD-EFGH","version":"3.2",
+     "licensee":"Alice","email":"a@example.com","purchaseDate":"2024-01-01",
+     "expirationDate":"2025-01-01"}
+    """#
+    let d = try XCTUnwrap(
+      EntryBlobDecoder.detail(plaintext: data(json), entryId: "sl1", teamId: nil, entryType: "SOFTWARE_LICENSE")
+    )
+    let lic = try XCTUnwrap(d.softwareLicense)
+    XCTAssertEqual(lic.softwareName, "CoolIDE")
+    XCTAssertEqual(lic.licenseKey, "ABCD-EFGH")
+    XCTAssertEqual(lic.version, "3.2")
+    XCTAssertEqual(lic.licensee, "Alice")
+    XCTAssertEqual(lic.email, "a@example.com")
+    XCTAssertEqual(lic.purchaseDate, "2024-01-01")
+    XCTAssertEqual(lic.expirationDate, "2025-01-01")
+  }
+
+  func testDetailDecodesPasskeyDisplayBlobExcludesPrivateMaterial() throws {
+    // Provider-private passkey* keys must never surface in the display struct.
+    let json = #"""
+    {"title":"GitHub","relyingPartyId":"github.com","relyingPartyName":"GitHub",
+     "username":"alice","credentialId":"AQIDBA","creationDate":"2024-05-01",
+     "deviceInfo":"iPhone","passkeyPrivateKeyJwk":"{\"d\":\"secret\"}","passkeyUserHandle":"dXNlcg"}
+    """#
+    let d = try XCTUnwrap(
+      EntryBlobDecoder.detail(plaintext: data(json), entryId: "pk1", teamId: nil, entryType: "PASSKEY")
+    )
+    let pk = try XCTUnwrap(d.passkey)
+    XCTAssertEqual(pk.relyingPartyId, "github.com")
+    XCTAssertEqual(pk.relyingPartyName, "GitHub")
+    XCTAssertEqual(pk.username, "alice")
+    XCTAssertEqual(pk.credentialId, "AQIDBA")
+    XCTAssertEqual(pk.creationDate, "2024-05-01")
+    XCTAssertEqual(pk.deviceInfo, "iPhone")
+  }
+
+  func testDetailSecureNoteBodyComesFromContentNotNotes() throws {
+    // The note body lives under `content`, never `notes` — pin both directions.
+    let json = #"{"title":"Note","content":"the secret body","tags":[]}"#
+    let d = try XCTUnwrap(
+      EntryBlobDecoder.detail(plaintext: data(json), entryId: "sn1", teamId: nil, entryType: "SECURE_NOTE")
+    )
+    let note = try XCTUnwrap(d.secureNote)
+    XCTAssertEqual(note.content, "the secret body")
+    XCTAssertEqual(d.notes, "")  // body did NOT leak into top-level notes
+  }
+
+  func testDetailMinimalSubStructLeavesAbsentFieldsNil() throws {
+    // Only one key present; every other credit-card field decodes to nil.
+    let json = #"{"title":"Card","cardNumber":"4111"}"#
+    let d = try XCTUnwrap(
+      EntryBlobDecoder.detail(plaintext: data(json), entryId: "cc2", teamId: nil, entryType: "CREDIT_CARD")
+    )
+    let cc = try XCTUnwrap(d.creditCard)
+    XCTAssertEqual(cc.cardNumber, "4111")
+    XCTAssertNil(cc.cardholderName)
+    XCTAssertNil(cc.brand)
+    XCTAssertNil(cc.expiryMonth)
+    XCTAssertNil(cc.cvv)
+  }
+
+  func testDetailLoginEntryTypeNilAndLoginAreEquivalent() throws {
+    let json = #"{"title":"L","username":"a","password":"p","url":"https://x"}"#
+    let nilType = try XCTUnwrap(
+      EntryBlobDecoder.detail(plaintext: data(json), entryId: "l1", teamId: nil)
+    )
+    let loginType = try XCTUnwrap(
+      EntryBlobDecoder.detail(plaintext: data(json), entryId: "l1", teamId: nil, entryType: "LOGIN")
+    )
+    XCTAssertEqual(nilType.username, loginType.username)
+    XCTAssertEqual(nilType.password, loginType.password)
+    XCTAssertEqual(nilType.url, loginType.url)
+    // No sub-struct is populated for LOGIN under either form.
+    for d in [nilType, loginType] {
+      XCTAssertNil(d.secureNote)
+      XCTAssertNil(d.creditCard)
+      XCTAssertNil(d.identity)
+      XCTAssertNil(d.bankAccount)
+      XCTAssertNil(d.sshKey)
+      XCTAssertNil(d.softwareLicense)
+      XCTAssertNil(d.passkey)
+    }
+  }
+
+  func testDetailTeamPathHonorsEntryTypeAndCarriesTeamId() throws {
+    // Pins that the TeamEntryDecryptor call site's entryType + teamId reach the
+    // sub-struct selection.
+    let json = #"{"title":"Team Card","cardNumber":"4111111111111111","brand":"visa"}"#
+    let d = try XCTUnwrap(
+      EntryBlobDecoder.detail(plaintext: data(json), entryId: "tc1", teamId: "t1", entryType: "CREDIT_CARD")
+    )
+    XCTAssertEqual(d.teamId, "t1")
+    XCTAssertEqual(d.creditCard?.cardNumber, "4111111111111111")
+  }
+
   // MARK: - passkey overview / material (C3)
 
   func testSummarySurfacesPasskeyOverviewFields() throws {
