@@ -33,16 +33,20 @@ for (const model of Prisma.dmmf.datamodel.models) {
 }
 
 describe("RETENTION_REGISTRY — schema cross-check (INV-C1a)", () => {
-  it("contains exactly 6 EXPIRY + 1 EXPIRY_GUARDED + 1 PER_TENANT_FN entries", () => {
+  it("contains exactly 6 EXPIRY + 1 EXPIRY_GUARDED + 4 EXPIRY_AUDIT_PROVENANCE + 1 PER_TENANT_FN entries", () => {
     const expiry = RETENTION_REGISTRY.filter((e) => e.kind === "EXPIRY");
     const guarded = RETENTION_REGISTRY.filter(
       (e) => e.kind === "EXPIRY_GUARDED",
+    );
+    const provenance = RETENTION_REGISTRY.filter(
+      (e) => e.kind === "EXPIRY_AUDIT_PROVENANCE",
     );
     const perTenant = RETENTION_REGISTRY.filter(
       (e) => e.kind === "PER_TENANT_FN",
     );
     expect(expiry).toHaveLength(6);
     expect(guarded).toHaveLength(1);
+    expect(provenance).toHaveLength(4);
     expect(perTenant).toHaveLength(1);
   });
 
@@ -85,6 +89,22 @@ describe("RETENTION_REGISTRY — schema cross-check (INV-C1a)", () => {
         }
       });
     }
+  }
+
+  // EXPIRY_AUDIT_PROVENANCE: table + cutoffColumn + every provenanceColumn must
+  // resolve to a real physical column (S3/T2). tenant_id must be present.
+  for (const entry of RETENTION_REGISTRY) {
+    if (entry.kind !== "EXPIRY_AUDIT_PROVENANCE") continue;
+
+    it(`provenance entry "${entry.table}" table + cutoffColumn + provenanceColumns resolve to real physical columns`, () => {
+      const model = modelsByPhysicalName.get(entry.table);
+      expect(model, `model "${entry.table}" not found`).toBeDefined();
+      expect(model!.fields.has(entry.cutoffColumn)).toBe(true);
+      for (const col of entry.provenanceColumns) {
+        expect(model!.fields.has(col), `column "${col}" missing on "${entry.table}"`).toBe(true);
+      }
+      expect(entry.provenanceColumns).toContain("tenant_id");
+    });
   }
 });
 

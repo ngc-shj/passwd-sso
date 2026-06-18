@@ -11,7 +11,11 @@
 
 import type { PredicateClause } from "./predicate";
 
-export type RetentionEntryKind = "EXPIRY" | "EXPIRY_GUARDED" | "PER_TENANT_FN";
+export type RetentionEntryKind =
+  | "EXPIRY"
+  | "EXPIRY_GUARDED"
+  | "EXPIRY_AUDIT_PROVENANCE"
+  | "PER_TENANT_FN";
 
 /**
  * Closed set of "no live dependents" guards. Each maps to a fixed SQL fragment
@@ -82,9 +86,30 @@ export interface GuardedExpiryEntry {
   globalDelete?: true;
 }
 
+/**
+ * An EXPIRY delete that captures each row's forensic provenance into an audit
+ * event BEFORE deleting it, atomically (same tx). Used for credential tables
+ * (api_keys, *_tokens) whose rows carry lastUsedIp / lastUsedAt / actor binding
+ * — deleting on expiry would erase incident-investigation evidence, so the
+ * provenance is durably enqueued to the audit outbox first (SC4).
+ */
+export interface AuditProvenanceEntry {
+  kind: "EXPIRY_AUDIT_PROVENANCE";
+  table: string;
+  cutoffColumn: string;
+  /**
+   * Physical columns captured into the audit metadata before deletion.
+   * MUST include "tenant_id" (the audit is emitted under the row's own tenant).
+   * Allowlist-validated (^[a-z_]+$) — SELECT-projection identifiers, never values.
+   */
+  provenanceColumns: string[];
+  globalDelete?: true;
+}
+
 export type RetentionEntry =
   | ExpiryEntry
   | GuardedExpiryEntry
+  | AuditProvenanceEntry
   | PerTenantFnEntry;
 
 /**
@@ -187,6 +212,55 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
     cutoffColumn: "expires_at",
     keyColumns: ["id"],
     guard: "MCP_TOKEN_FAMILY_DEAD",
+    globalDelete: true,
+  },
+  {
+    // API keys — forensic provenance (last_used_at, owning user) emitted before delete.
+    kind: "EXPIRY_AUDIT_PROVENANCE",
+    table: "api_keys",
+    cutoffColumn: "expires_at",
+    provenanceColumns: ["tenant_id", "user_id", "name", "last_used_at"],
+    globalDelete: true,
+  },
+  {
+    // Service-account tokens — provenance: owning SA + last use.
+    kind: "EXPIRY_AUDIT_PROVENANCE",
+    table: "service_account_tokens",
+    cutoffColumn: "expires_at",
+    provenanceColumns: [
+      "tenant_id",
+      "service_account_id",
+      "name",
+      "last_used_at",
+    ],
+    globalDelete: true,
+  },
+  {
+    // Operator tokens — provenance: who minted + who it authenticates as + last use.
+    kind: "EXPIRY_AUDIT_PROVENANCE",
+    table: "operator_tokens",
+    cutoffColumn: "expires_at",
+    provenanceColumns: [
+      "tenant_id",
+      "subject_user_id",
+      "created_by_user_id",
+      "name",
+      "last_used_at",
+    ],
+    globalDelete: true,
+  },
+  {
+    // Extension tokens — richest provenance: last_used_ip + user_agent + owning user.
+    kind: "EXPIRY_AUDIT_PROVENANCE",
+    table: "extension_tokens",
+    cutoffColumn: "expires_at",
+    provenanceColumns: [
+      "tenant_id",
+      "user_id",
+      "last_used_at",
+      "last_used_ip",
+      "last_used_user_agent",
+    ],
     globalDelete: true,
   },
   {

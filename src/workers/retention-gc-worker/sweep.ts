@@ -32,8 +32,10 @@ import {
   type ExpiryEntry,
   type GuardedExpiryEntry,
   type GuardName,
+  type AuditProvenanceEntry,
   type PerTenantFnEntry,
 } from "./registry";
+import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 
 /**
  * Fixed "no live dependents" guard SQL fragments, keyed by GuardName.
@@ -207,6 +209,95 @@ export async function sweepGuardedExpiryEntry(
 }
 
 /**
+ * Capture-then-delete for an EXPIRY_AUDIT_PROVENANCE entry (SC4).
+ *
+ * For credential tables whose rows carry forensic provenance (lastUsedIp/At,
+ * actor binding), this records each expired row's provenance into an audit event
+ * BEFORE deleting it — atomically, so a failed audit emit rolls back the delete
+ * (the provenance MUST be durable before the credential is destroyed; this is the
+ * whole point, unlike the best-effort heartbeat). Per row the audit is emitted
+ * under the row's OWN tenant_id, so it lands in the owning tenant's audit log.
+ *
+ * No row lock is taken: a FOR UPDATE lock needs UPDATE privilege the GC role
+ * deliberately lacks, and only already-expired rows (which the app never
+ * row-deletes — it revokes via UPDATE) are captured, so the id list is stable
+ * between the SELECT and the DELETE.
+ *
+ * @returns Rows deleted (and audited) this batch.
+ */
+export async function sweepAuditProvenanceEntry(
+  tx: Prisma.TransactionClient,
+  entry: AuditProvenanceEntry,
+  batchSize: number,
+): Promise<number> {
+  assertIdentifier(entry.table);
+  assertIdentifier(entry.cutoffColumn);
+  for (const col of entry.provenanceColumns) {
+    assertIdentifier(col);
+  }
+
+  if (entry.globalDelete) {
+    await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+  }
+
+  // Capture expired rows + provenance, then audit-emit + delete by id in the same
+  // tx. tenant_id is always in provenanceColumns. We deliberately do NOT use
+  // SELECT ... FOR UPDATE: Postgres requires UPDATE privilege for a FOR UPDATE
+  // lock, and granting UPDATE on credential tables to the GC role would
+  // over-privilege it (it never updates these rows). The capture targets only
+  // already-expired rows, which the app never deletes (only this worker does),
+  // so there is no SELECT→DELETE race to lock against — the id list is stable.
+  const projection = ["id", ...entry.provenanceColumns].join(", ");
+  const rows = await tx.$queryRawUnsafe<Record<string, unknown>[]>(
+    `SELECT ${projection} FROM ${entry.table}
+       WHERE ${entry.cutoffColumn} < now()
+       LIMIT $1`,
+    batchSize,
+  );
+
+  if (rows.length === 0) return 0;
+
+  for (const row of rows) {
+    const tenantId = String(row["tenant_id"]);
+    const provenance: Record<string, unknown> = { table: entry.table };
+    for (const col of entry.provenanceColumns) {
+      const value = row[col] ?? null;
+      // Defense-in-depth: cap the free-text user-agent in metadata too (the
+      // source column is @db.Text; ingest caps it, but don't rely on that here).
+      provenance[col] =
+        col === "last_used_user_agent" && typeof value === "string"
+          ? value.slice(0, USER_AGENT_MAX_LENGTH)
+          : value;
+    }
+    // Emit BEFORE delete, in the same tx — atomic provenance durability.
+    await enqueueAuditInWorkerTx(tx, tenantId, {
+      scope: AUDIT_SCOPE.TENANT,
+      action: AUDIT_ACTION.CREDENTIAL_RETENTION_PURGED,
+      userId: SYSTEM_ACTOR_ID,
+      actorType: ACTOR_TYPE.SYSTEM,
+      serviceAccountId: null,
+      teamId: null,
+      targetType: entry.table,
+      targetId: String(row["id"]),
+      metadata: provenance,
+      // Surface the credential's last-used network provenance in the dedicated
+      // audit columns when the table carries them (extension_tokens).
+      ip: row["last_used_ip"] != null ? String(row["last_used_ip"]) : null,
+      userAgent:
+        row["last_used_user_agent"] != null
+          ? String(row["last_used_user_agent"]).slice(0, USER_AGENT_MAX_LENGTH)
+          : null,
+    });
+  }
+
+  const ids = rows.map((r) => String(r["id"]));
+  return tx.$executeRawUnsafe<number>(
+    `DELETE FROM ${entry.table} WHERE id = ANY($1::uuid[])`,
+    ids,
+  );
+}
+
+/**
  * Delete expired audit_logs rows for every tenant with a non-null retention setting.
  *
  * - Enumerates only tenants with auditLogRetentionDays IS NOT NULL.
@@ -282,6 +373,10 @@ export async function sweepOnce(
       } else if (entry.kind === "EXPIRY_GUARDED") {
         counts[tableName] = await workerPrisma.$transaction(async (tx) =>
           sweepGuardedExpiryEntry(tx, entry, batchSize),
+        );
+      } else if (entry.kind === "EXPIRY_AUDIT_PROVENANCE") {
+        counts[tableName] = await workerPrisma.$transaction(async (tx) =>
+          sweepAuditProvenanceEntry(tx, entry, batchSize),
         );
       } else if (entry.kind === "PER_TENANT_FN") {
         counts[tableName] = await workerPrisma.$transaction(async (tx) =>
