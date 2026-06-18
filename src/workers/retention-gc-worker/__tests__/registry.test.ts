@@ -33,10 +33,16 @@ for (const model of Prisma.dmmf.datamodel.models) {
 }
 
 describe("RETENTION_REGISTRY — schema cross-check (INV-C1a)", () => {
-  it("contains exactly 6 EXPIRY + 1 PER_TENANT_FN entries", () => {
+  it("contains exactly 6 EXPIRY + 1 EXPIRY_GUARDED + 1 PER_TENANT_FN entries", () => {
     const expiry = RETENTION_REGISTRY.filter((e) => e.kind === "EXPIRY");
-    const perTenant = RETENTION_REGISTRY.filter((e) => e.kind === "PER_TENANT_FN");
+    const guarded = RETENTION_REGISTRY.filter(
+      (e) => e.kind === "EXPIRY_GUARDED",
+    );
+    const perTenant = RETENTION_REGISTRY.filter(
+      (e) => e.kind === "PER_TENANT_FN",
+    );
     expect(expiry).toHaveLength(6);
+    expect(guarded).toHaveLength(1);
     expect(perTenant).toHaveLength(1);
   });
 
@@ -47,7 +53,8 @@ describe("RETENTION_REGISTRY — schema cross-check (INV-C1a)", () => {
   });
 
   for (const entry of RETENTION_REGISTRY) {
-    if (entry.kind !== "EXPIRY") continue;
+    // EXPIRY and EXPIRY_GUARDED both carry table/cutoffColumn/keyColumns.
+    if (entry.kind !== "EXPIRY" && entry.kind !== "EXPIRY_GUARDED") continue;
 
     it(`entry.table "${entry.table}" resolves to a real Prisma model physical name`, () => {
       expect(modelsByPhysicalName.has(entry.table)).toBe(true);
@@ -67,11 +74,13 @@ describe("RETENTION_REGISTRY — schema cross-check (INV-C1a)", () => {
       }
     });
 
-    if (entry.predicate && entry.predicate.length > 0) {
+    // Only EXPIRY entries carry `predicate`; EXPIRY_GUARDED has no predicate field.
+    if (entry.kind === "EXPIRY" && entry.predicate && entry.predicate.length > 0) {
+      const predicate = entry.predicate;
       it(`entry "${entry.table}" predicate columns resolve to real physical columns`, () => {
         const model = modelsByPhysicalName.get(entry.table);
         expect(model).toBeDefined();
-        for (const clause of entry.predicate!) {
+        for (const clause of predicate) {
           expect(model!.fields.has(clause.column)).toBe(true);
         }
       });

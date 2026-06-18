@@ -80,6 +80,20 @@ export function validateRegistry(
             `radius. Only "${[...RLS_FREE_EXPIRY_TABLES].join('", "')}" may omit it (RLS-free tables).`,
         );
       }
+    } else if (entry.kind === "EXPIRY_GUARDED") {
+      assertIdentifier(entry.table);
+      assertIdentifier(entry.cutoffColumn);
+      for (const col of entry.keyColumns) {
+        assertIdentifier(col);
+      }
+      // `guard` is a closed GuardName enum (compile-time checked) → no runtime
+      // SQL validation needed. Same globalDelete enforcement as EXPIRY.
+      if (!entry.globalDelete && !RLS_FREE_EXPIRY_TABLES.has(entry.table)) {
+        throw new Error(
+          `retention-gc: EXPIRY_GUARDED entry for table "${entry.table}" is missing globalDelete:true. ` +
+            `All RLS-enabled tables require globalDelete to acknowledge the all-tenant blast radius.`,
+        );
+      }
     }
     // PER_TENANT_FN entries have no free identifiers to validate — the table,
     // fn, and tenantRetentionColumn fields are literal union types.

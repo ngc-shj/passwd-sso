@@ -30,8 +30,37 @@ import { assertIdentifier, renderPredicate } from "./predicate";
 import {
   RETENTION_REGISTRY,
   type ExpiryEntry,
+  type GuardedExpiryEntry,
+  type GuardName,
   type PerTenantFnEntry,
 } from "./registry";
+
+/**
+ * Fixed "no live dependents" guard SQL fragments, keyed by GuardName.
+ *
+ * These are compile-time literals — NOT registry data — so the NOT EXISTS
+ * subqueries (which reference fixed child table/column names) never widen the
+ * S1 SQL-injection containment boundary. Each fragment is AND-appended to the
+ * guarded delete's WHERE clause; `<parent>` is the placeholder for the parent
+ * table name (allowlist-validated) so the correlation predicate binds correctly.
+ */
+const GUARD_SQL: Record<GuardName, (parent: string) => string> = {
+  // mcp_access_tokens: hold the delete until no live refresh token or delegation
+  // session references this access token. The FK CASCADE then removes the dead
+  // children. revoked tokens/sessions do NOT count as live (a fully-rotated-away
+  // or revoked family GCs correctly).
+  MCP_TOKEN_FAMILY_DEAD: (parent) =>
+    `AND NOT EXISTS (
+       SELECT 1 FROM mcp_refresh_tokens r
+       WHERE r.access_token_id = ${parent}.id
+         AND r.revoked_at IS NULL AND r.expires_at > now()
+     )
+     AND NOT EXISTS (
+       SELECT 1 FROM delegation_sessions d
+       WHERE d.mcp_token_id = ${parent}.id
+         AND d.revoked_at IS NULL AND d.expires_at > now()
+     )`,
+};
 
 // Re-export EmitFn and enqueueAuditInWorkerTx so integration tests can target them.
 export type EmitFn = (
@@ -140,6 +169,44 @@ export async function sweepExpiryEntry(
 }
 
 /**
+ * Batch-bounded DELETE for an EXPIRY_GUARDED entry — an expiry delete on a parent
+ * table gated by a code-defined "no live dependents" guard (GUARD_SQL[entry.guard]).
+ *
+ * Same (keys) IN (SELECT keys WHERE cutoff < now() AND <guard> LIMIT $1) shape as
+ * sweepExpiryEntry. The guard's NOT EXISTS subqueries are compile-time literals
+ * keyed by the closed GuardName enum — never registry data (S1). bypass_rls is set
+ * (globalDelete) so the parent delete AND the FK-cascade to child rows span all
+ * tenants under the existing RLS policies. batchSize is the only bound param.
+ */
+export async function sweepGuardedExpiryEntry(
+  tx: Prisma.TransactionClient,
+  entry: GuardedExpiryEntry,
+  batchSize: number,
+): Promise<number> {
+  assertIdentifier(entry.table);
+  assertIdentifier(entry.cutoffColumn);
+  for (const col of entry.keyColumns) {
+    assertIdentifier(col);
+  }
+
+  if (entry.globalDelete) {
+    await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+  }
+
+  const guardSql = GUARD_SQL[entry.guard](entry.table);
+  const keyList = entry.keyColumns.join(", ");
+  const sql = `DELETE FROM ${entry.table}
+    WHERE (${keyList}) IN (
+      SELECT ${keyList} FROM ${entry.table}
+      WHERE ${entry.cutoffColumn} < now()
+      ${guardSql}
+      LIMIT $1
+    )`;
+
+  return tx.$executeRawUnsafe<number>(sql, batchSize);
+}
+
+/**
  * Delete expired audit_logs rows for every tenant with a non-null retention setting.
  *
  * - Enumerates only tenants with auditLogRetentionDays IS NOT NULL.
@@ -206,17 +273,20 @@ export async function sweepOnce(
   for (const entry of RETENTION_REGISTRY) {
     const tableName = entry.table;
     try {
+      // Explicit per-kind dispatch (F1) — no elimination-else, so a future kind
+      // cannot silently misroute into the wrong branch.
       if (entry.kind === "EXPIRY") {
-        const deleted = await workerPrisma.$transaction(async (tx) =>
+        counts[tableName] = await workerPrisma.$transaction(async (tx) =>
           sweepExpiryEntry(tx, entry, batchSize),
         );
-        counts[tableName] = deleted;
-      } else {
-        // kind === "PER_TENANT_FN"
-        const deleted = await workerPrisma.$transaction(async (tx) =>
+      } else if (entry.kind === "EXPIRY_GUARDED") {
+        counts[tableName] = await workerPrisma.$transaction(async (tx) =>
+          sweepGuardedExpiryEntry(tx, entry, batchSize),
+        );
+      } else if (entry.kind === "PER_TENANT_FN") {
+        counts[tableName] = await workerPrisma.$transaction(async (tx) =>
           sweepAuditLogs(tx, entry),
         );
-        counts[tableName] = deleted;
       }
     } catch (err) {
       // Per-entry error isolation (INV-C4b): log {table, code} — authoritative error record (F7).

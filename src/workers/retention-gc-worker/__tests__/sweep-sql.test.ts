@@ -14,8 +14,8 @@
 
 import { describe, it, expect, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
-import { sweepExpiryEntry } from "../sweep";
-import type { ExpiryEntry } from "../registry";
+import { sweepExpiryEntry, sweepGuardedExpiryEntry } from "../sweep";
+import type { ExpiryEntry, GuardedExpiryEntry } from "../registry";
 
 /** A fake TransactionClient capturing the bypass_rls set_config and the DELETE. */
 function makeFakeTx() {
@@ -115,5 +115,45 @@ describe("sweepExpiryEntry generated SQL (C2/RT7)", () => {
 
     // set_config('app.bypass_rls', 'on', true) issued via the tagged-template $executeRaw.
     expect(executeRaw).toHaveBeenCalled();
+  });
+});
+
+describe("sweepGuardedExpiryEntry generated SQL (SC5 C2/RT7)", () => {
+  it("emits both NOT EXISTS guard clauses + (id) IN (SELECT ... LIMIT $1), only batchSize bound", async () => {
+    const entry: GuardedExpiryEntry = {
+      kind: "EXPIRY_GUARDED",
+      table: "mcp_access_tokens",
+      cutoffColumn: "expires_at",
+      keyColumns: ["id"],
+      guard: "MCP_TOKEN_FAMILY_DEAD",
+      globalDelete: true,
+    };
+    const { tx, executeRaw, executeRawUnsafe } = makeFakeTx();
+
+    const deleted = await sweepGuardedExpiryEntry(tx, entry, 250);
+
+    expect(deleted).toBe(7);
+    // bypass_rls GUC set in-tx (globalDelete).
+    expect(executeRaw).toHaveBeenCalled();
+
+    const [sql, ...params] = executeRawUnsafe.mock.calls[0];
+    // Only batchSize is bound — no extra param, never inlined.
+    expect(params).toEqual([250]);
+    expect(sql).not.toContain("250");
+    expect(sql).not.toContain("${");
+
+    // Batch-bounded (id) IN (SELECT id ... LIMIT $1) shape with the cutoff.
+    expect(sql).toMatch(
+      /DELETE FROM mcp_access_tokens\s+WHERE \(id\) IN \(\s*SELECT id FROM mcp_access_tokens\s+WHERE expires_at < now\(\)/,
+    );
+    expect(sql).toMatch(/LIMIT \$1/);
+
+    // Both family-guard NOT EXISTS clauses present (the SC5 protection).
+    expect(sql).toMatch(
+      /NOT EXISTS \(\s*SELECT 1 FROM mcp_refresh_tokens r\s+WHERE r\.access_token_id = mcp_access_tokens\.id\s+AND r\.revoked_at IS NULL AND r\.expires_at > now\(\)/,
+    );
+    expect(sql).toMatch(
+      /NOT EXISTS \(\s*SELECT 1 FROM delegation_sessions d\s+WHERE d\.mcp_token_id = mcp_access_tokens\.id\s+AND d\.revoked_at IS NULL AND d\.expires_at > now\(\)/,
+    );
   });
 });
