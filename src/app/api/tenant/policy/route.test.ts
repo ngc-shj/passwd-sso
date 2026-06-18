@@ -573,4 +573,85 @@ describe("PATCH /api/tenant/policy", () => {
       expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessionsBulk);
     });
   });
+
+  describe("generic retention fields", () => {
+    const FIELDS = [
+      "trashRetentionDays",
+      "historyRetentionDays",
+      "shareAccessLogRetentionDays",
+      "directorySyncLogRetentionDays",
+      "notificationRetentionDays",
+    ] as const;
+
+    for (const field of FIELDS) {
+      it(`GET returns ${field} from tenant policy`, async () => {
+        mockPrismaUserFindUnique.mockResolvedValue({
+          tenant: { ...BASE_POLICY, [field]: 42 },
+        });
+        const req = createRequest("GET", ROUTE_URL);
+        const { status, json } = await parseResponse(await GET(req));
+        expect(status).toBe(200);
+        expect(json[field]).toBe(42);
+      });
+
+      it(`GET returns ${field}=null when not set`, async () => {
+        mockPrismaUserFindUnique.mockResolvedValue({ tenant: { ...BASE_POLICY } });
+        const req = createRequest("GET", ROUTE_URL);
+        const { status, json } = await parseResponse(await GET(req));
+        expect(status).toBe(200);
+        expect(json[field]).toBeNull();
+      });
+
+      it(`PATCH accepts a valid ${field} and writes it`, async () => {
+        mockPrismaTenantUpdate.mockResolvedValue({ ...BASE_POLICY, [field]: 30 });
+        const req = createRequest("PATCH", ROUTE_URL, { body: { [field]: 30 } });
+        const { status, json } = await parseResponse(await PATCH(req));
+        expect(status).toBe(200);
+        expect(json[field]).toBe(30);
+        expect(mockPrismaTenantUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ [field]: 30 }) }),
+        );
+      });
+
+      it(`PATCH accepts ${field} at the lower bound (1)`, async () => {
+        mockPrismaTenantUpdate.mockResolvedValue({ ...BASE_POLICY, [field]: 1 });
+        const req = createRequest("PATCH", ROUTE_URL, { body: { [field]: 1 } });
+        const { status, json } = await parseResponse(await PATCH(req));
+        expect(status).toBe(200);
+        expect(json[field]).toBe(1);
+      });
+
+      it(`PATCH rejects ${field} below minimum (0)`, async () => {
+        const req = createRequest("PATCH", ROUTE_URL, { body: { [field]: 0 } });
+        const { status, json } = await parseResponse(await PATCH(req));
+        expect(status).toBe(400);
+        expect(json.error).toBe("VALIDATION_ERROR");
+      });
+
+      it(`PATCH rejects ${field} above maximum (3651)`, async () => {
+        const req = createRequest("PATCH", ROUTE_URL, { body: { [field]: 3651 } });
+        const { status, json } = await parseResponse(await PATCH(req));
+        expect(status).toBe(400);
+        expect(json.error).toBe("VALIDATION_ERROR");
+      });
+
+      it(`PATCH rejects non-integer ${field}`, async () => {
+        const req = createRequest("PATCH", ROUTE_URL, { body: { [field]: 1.5 } });
+        const { status, json } = await parseResponse(await PATCH(req));
+        expect(status).toBe(400);
+        expect(json.error).toBe("VALIDATION_ERROR");
+      });
+
+      it(`PATCH null clears ${field}`, async () => {
+        mockPrismaTenantUpdate.mockResolvedValue({ ...BASE_POLICY, [field]: null });
+        const req = createRequest("PATCH", ROUTE_URL, { body: { [field]: null } });
+        const { status, json } = await parseResponse(await PATCH(req));
+        expect(status).toBe(200);
+        expect(json[field]).toBeNull();
+        expect(mockPrismaTenantUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ [field]: null }) }),
+        );
+      });
+    }
+  });
 });
