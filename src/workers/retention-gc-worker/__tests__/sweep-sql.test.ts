@@ -277,4 +277,46 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7)", () => {
     const emitted = auditOutbox.create.mock.calls[0][0];
     expect(emitted.data.payload.action).toBe("SECURITY_RECORD_RETENTION_PURGED");
   });
+
+  it("SC6b emergency-grant entry appends the EMERGENCY_GRANT_DEAD guard (both OR-branches) to the SELECT", async () => {
+    const entry: AuditProvenanceEntry = {
+      kind: "EXPIRY_AUDIT_PROVENANCE",
+      table: "emergency_access_grants",
+      cutoffColumn: "created_at",
+      provenanceColumns: ["tenant_id", "owner_id", "status", "token_expires_at"],
+      auditAction: "SECURITY_RECORD_RETENTION_PURGED",
+      guard: "EMERGENCY_GRANT_DEAD",
+      globalDelete: true,
+    };
+    const { tx, queryRawUnsafe } = makeProvenanceTx([]);
+
+    await sweepAuditProvenanceEntry(tx, entry, 100);
+
+    const [selectSql] = queryRawUnsafe.mock.calls[0];
+    // The guard restricts to DEAD grants only — both OR-branches present so a
+    // live ACCEPTED/ACTIVATED grant (past its invite window) is never selected.
+    expect(selectSql).toContain("status IN ('REVOKED', 'REJECTED')");
+    expect(selectSql).toMatch(
+      /status = 'PENDING' AND emergency_access_grants\.token_expires_at < now\(\)/,
+    );
+    // Guard is appended after the cutoff, still batch-bounded.
+    expect(selectSql).toMatch(/WHERE created_at < now\(\)\s+AND \(/);
+    expect(selectSql).toMatch(/LIMIT \$1/);
+  });
+
+  it("entries WITHOUT a guard append no guard SQL (SC4/SC6 unguarded path unchanged)", async () => {
+    const entry: AuditProvenanceEntry = {
+      kind: "EXPIRY_AUDIT_PROVENANCE",
+      table: "api_keys",
+      cutoffColumn: "expires_at",
+      provenanceColumns: ["tenant_id", "user_id"],
+      auditAction: "CREDENTIAL_RETENTION_PURGED",
+      globalDelete: true,
+    };
+    const { tx, queryRawUnsafe } = makeProvenanceTx([]);
+    await sweepAuditProvenanceEntry(tx, entry, 100);
+    const [selectSql] = queryRawUnsafe.mock.calls[0];
+    expect(selectSql).not.toContain("status IN");
+    expect(selectSql).toMatch(/WHERE expires_at < now\(\)\s+LIMIT \$1/);
+  });
 });

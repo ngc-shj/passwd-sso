@@ -25,7 +25,7 @@ export type RetentionEntryKind =
  * NOT EXISTS subqueries stay compile-time literals and never widen the S1
  * SQL-injection containment boundary.
  */
-export type GuardName = "MCP_TOKEN_FAMILY_DEAD";
+export type GuardName = "MCP_TOKEN_FAMILY_DEAD" | "EMERGENCY_GRANT_DEAD";
 
 export interface ExpiryEntry {
   kind: "EXPIRY";
@@ -113,6 +113,14 @@ export interface AuditProvenanceEntry {
   auditAction:
     | "CREDENTIAL_RETENTION_PURGED"
     | "SECURITY_RECORD_RETENTION_PURGED";
+  /**
+   * Optional "this row is dead" guard (closed GuardName enum → compile-time-literal
+   * SQL in GUARD_SQL, never registry data). Used when a single cutoffColumn cannot
+   * express GC-eligibility — e.g. emergency_access_grants, whose token_expires_at is
+   * an invitation window, not a death signal, so the guard restricts to terminal /
+   * expired-unaccepted rows (SC6b).
+   */
+  guard?: GuardName;
   globalDelete?: true;
 }
 
@@ -428,6 +436,30 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
       "created_at",
     ],
     auditAction: "SECURITY_RECORD_RETENTION_PURGED",
+    globalDelete: true,
+  },
+  {
+    // Emergency-access grants (SC6b) — GC only DEAD grants: terminal
+    // (REVOKED/REJECTED) or never-accepted expired invites. The
+    // EMERGENCY_GRANT_DEAD guard is the real filter (token_expires_at is the
+    // invite window, not a death signal — an ACCEPTED/ACTIVATED grant past it is
+    // still live). cutoffColumn created_at < now() is a tautology so the guard
+    // governs. Cascade removes the grant's emergency_access_key_pairs.
+    kind: "EXPIRY_AUDIT_PROVENANCE",
+    table: "emergency_access_grants",
+    cutoffColumn: "created_at",
+    provenanceColumns: [
+      "tenant_id",
+      "owner_id",
+      "grantee_id",
+      "status",
+      "token_expires_at",
+      "wait_expires_at",
+      "revoked_at",
+      "created_at",
+    ],
+    auditAction: "SECURITY_RECORD_RETENTION_PURGED",
+    guard: "EMERGENCY_GRANT_DEAD",
     globalDelete: true,
   },
   {
