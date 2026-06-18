@@ -37,9 +37,10 @@ not silently scoped. `audit-outbox-metrics` returns aggregates only for the
 token's own tenant — queue depth and failure counts of other tenants are not
 exposed.
 
-DCR cleanup (`dcr-cleanup`) is now system-internal: it runs as the
-`dcr-cleanup-worker` background process with its own least-privilege DB role and
-emits `SYSTEM`-attributed audit events. It is no longer triggered by an op_*
+DCR cleanup is now system-internal: it runs inside the generic
+`retention-gc-worker` background process (which absorbed the former dedicated
+DCR-cleanup worker) with its own least-privilege DB role and emits
+`SYSTEM`-attributed audit events. It is no longer triggered by an op_*
 token. The deprecated `POST /api/maintenance/dcr-cleanup` endpoint returns
 410 Gone and emits a `MCP_CLIENT_DCR_CLEANUP_DEPRECATED_CALL` audit event to
 surface stale cron jobs; the stub will be removed in the next minor release.
@@ -81,7 +82,7 @@ The token's subject is bound at mint time, so no separate `OPERATOR_ID` env var 
 For routes without a dedicated script (`audit-outbox-metrics`, `audit-outbox-purge-failed`, `audit-chain-verify`), curl directly:
 
 ```bash
-# DCR cleanup is now automatic — runs in the dcr-cleanup-worker process.
+# DCR cleanup is now automatic — runs in the retention-gc-worker process.
 # The deprecated POST endpoint returns 410 Gone for one minor version
 # to surface stale cron jobs via audit logs.
 

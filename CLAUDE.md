@@ -37,7 +37,7 @@ MIGRATION_DATABASE_URL=<privileged-url> npm run migrate:account-tokens          
 Audit outbox worker (separate process):
 ```bash
 npm run worker:audit-outbox    # Run the outbox worker (requires OUTBOX_WORKER_DATABASE_URL)
-npm run worker:dcr-cleanup     # Run the DCR cleanup worker (requires DCR_CLEANUP_DATABASE_URL)
+npm run worker:retention-gc    # Run the retention GC worker (requires RETENTION_GC_DATABASE_URL)
 npm run test:integration       # Run real-DB integration tests (requires running Postgres)
 ```
 
@@ -418,7 +418,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/admin/rotate-master-key` | POST | Rotate server master key (admin-only, bearer token) |
 | `/api/maintenance/purge-history` | POST | System-wide history purge (admin-only, bearer token) |
 | `/api/maintenance/purge-audit-logs` | POST | System-wide audit log purge (admin-only, bearer token) |
-| `/api/maintenance/dcr-cleanup` | POST | **DEPRECATED — returns 410 Gone.** DCR cleanup now runs in the `dcr-cleanup-worker` process. Stub emits audit event for stale-cron detection; removed next minor. |
+| `/api/maintenance/dcr-cleanup` | POST | **DEPRECATED — returns 410 Gone.** DCR cleanup now runs in the `retention-gc-worker` process (the generic retention GC absorbed the former DCR-cleanup worker). Stub emits audit event for stale-cron detection; removed next minor. |
 
 ### i18n
 
