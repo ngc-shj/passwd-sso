@@ -252,6 +252,7 @@
   "AUDIT_OUTBOX_PURGE_EXECUTED": "送信キュー失敗行をパージ",
   "RETENTION_GC_SWEEP": "保持期限切れデータの定期削除を実行（システムワーカー）",
   "CREDENTIAL_RETENTION_PURGED": "期限切れ認証情報を証跡記録のうえ削除（システムワーカー）",
+  "TRASH_RETENTION_PURGED": "ゴミ箱の期限切れエントリを削除（システムワーカー）",
   "AUDIT_DELIVERY_FAILED": "監査配信失敗",
   "AUDIT_DELIVERY_DEAD_LETTER": "監査配信デッドレター化",
   "AUDIT_ANCHOR_PUBLISHED": "監査アンカーマニフェストを公開",

@@ -15,7 +15,8 @@ export type RetentionEntryKind =
   | "EXPIRY"
   | "EXPIRY_GUARDED"
   | "EXPIRY_AUDIT_PROVENANCE"
-  | "PER_TENANT_FN";
+  | "PER_TENANT_FN"
+  | "PER_TENANT_TRASH";
 
 /**
  * Closed set of "no live dependents" guards. Each maps to a fixed SQL fragment
@@ -106,11 +107,31 @@ export interface AuditProvenanceEntry {
   globalDelete?: true;
 }
 
+/**
+ * Per-tenant auto-purge of soft-deleted (trashed) vault entries with an
+ * attachment-blob side effect (SC2). Deleting a trashed entry cascades to its
+ * attachments/history/favorites/tag-links and SetNulls password_shares; when an
+ * external blob backend is configured the worker first collects the external
+ * object refs (collectEntryAttachmentRefs) and deletes them post-commit
+ * (deleteAttachmentBlobs), mirroring empty-trash. NULL trashRetentionDays →
+ * tenant skipped (no implicit deletion).
+ */
+export interface PerTenantTrashEntry {
+  kind: "PER_TENANT_TRASH";
+  /** Physical entry table whose deleted_at tombstones are auto-purged. */
+  table: "password_entries" | "team_password_entries";
+  /** Selects the collectEntryAttachmentRefs scope shape (personal vs team). */
+  scopeKind: "personal" | "team";
+  /** Prisma model field holding per-tenant trash retention days (null = skip). */
+  tenantRetentionColumn: "trashRetentionDays";
+}
+
 export type RetentionEntry =
   | ExpiryEntry
   | GuardedExpiryEntry
   | AuditProvenanceEntry
-  | PerTenantFnEntry;
+  | PerTenantFnEntry
+  | PerTenantTrashEntry;
 
 /**
  * EXPIRY tables that are intentionally RLS-free (no RLS policy, no tenant_id),
@@ -271,5 +292,23 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
     table: "audit_logs",
     fn: "audit_log_purge",
     tenantRetentionColumn: "auditLogRetentionDays",
+  },
+  {
+    // Personal-vault trash auto-purge (SC2). NULL trashRetentionDays → tenant
+    // skipped. The cascade removes attachments/history/favorites/tag-links;
+    // external blobs are deleted post-commit by sweepTrashEntry.
+    kind: "PER_TENANT_TRASH",
+    table: "password_entries",
+    scopeKind: "personal",
+    tenantRetentionColumn: "trashRetentionDays",
+  },
+  {
+    // Team-vault trash auto-purge (SC2). Selected ids are grouped by team_id so
+    // collectEntryAttachmentRefs is called once per team (its team scope takes a
+    // single teamId).
+    kind: "PER_TENANT_TRASH",
+    table: "team_password_entries",
+    scopeKind: "team",
+    tenantRetentionColumn: "trashRetentionDays",
   },
 ] as const;
