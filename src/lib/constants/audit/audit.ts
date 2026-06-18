@@ -89,6 +89,10 @@ export const AUDIT_ACTION = {
   HISTORY_RETENTION_PURGED: "HISTORY_RETENTION_PURGED",
   // Append-only log auto-delete past per-tenant retention (system worker).
   LOG_RETENTION_PURGED: "LOG_RETENTION_PURGED",
+  // Forensic provenance of an expired security record (access request, vault
+  // reset, key rotation, log-access grant, share, team invite), recorded just
+  // before the retention-gc-worker deletes it (SC6).
+  SECURITY_RECORD_RETENTION_PURGED: "SECURITY_RECORD_RETENTION_PURGED",
   // MASTER_KEY_ROTATION: legacy single-action key — retained for old audit rows
   // and for the share-only rotation path (A04-4 keeps emit-site removed and
   // routes the four phase actions below). Do NOT add new emit sites for this
@@ -283,6 +287,7 @@ export const AUDIT_ACTION_VALUES = [
   AUDIT_ACTION.TRASH_RETENTION_PURGED,
   AUDIT_ACTION.HISTORY_RETENTION_PURGED,
   AUDIT_ACTION.LOG_RETENTION_PURGED,
+  AUDIT_ACTION.SECURITY_RECORD_RETENTION_PURGED,
   AUDIT_ACTION.SEND_CREATE,
   AUDIT_ACTION.SEND_REVOKE,
   AUDIT_ACTION.SHARE_ACCESS_VERIFY_SUCCESS,
@@ -740,6 +745,7 @@ export const AUDIT_ACTION_GROUPS_TENANT: Record<string, AuditAction[]> = {
     AUDIT_ACTION.TRASH_RETENTION_PURGED,
     AUDIT_ACTION.HISTORY_RETENTION_PURGED,
     AUDIT_ACTION.LOG_RETENTION_PURGED,
+    AUDIT_ACTION.SECURITY_RECORD_RETENTION_PURGED,
     AUDIT_ACTION.AUDIT_DELIVERY_FAILED,
     AUDIT_ACTION.AUDIT_DELIVERY_DEAD_LETTER,
     AUDIT_ACTION.AUDIT_ANCHOR_PUBLISHED,
