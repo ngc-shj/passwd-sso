@@ -102,7 +102,7 @@ describe("encryptCredentials", () => {
     vi.stubEnv("NODE_ENV", "production");
     delete process.env.DIRECTORY_SYNC_MASTER_KEY;
     // fallback keys should not be consulted in production
-    process.env.SHARE_MASTER_KEY = "f".repeat(64);
+    vi.stubEnv("SHARE_MASTER_KEY", "f".repeat(64));
     expect(() => encryptCredentials("data", "cfg", "ten")).toThrow(
       "DIRECTORY_SYNC_MASTER_KEY required in production",
     );
