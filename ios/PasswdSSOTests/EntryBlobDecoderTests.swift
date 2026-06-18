@@ -232,6 +232,10 @@ final class EntryBlobDecoderTests: XCTestCase {
     XCTAssertEqual(ba.iban, "US00ACME0001")
     XCTAssertEqual(ba.branchName, "Downtown")
     XCTAssertNil(d.sshKey)
+    XCTAssertNil(d.creditCard)
+    // Unconsumed LOGIN scalars stay empty — no stray URL/Password row.
+    XCTAssertEqual(d.url, "")
+    XCTAssertEqual(d.password, "")
   }
 
   func testDetailDecodesSshKeyBlobUsesPassphraseAndCommentKeys() throws {
@@ -253,6 +257,9 @@ final class EntryBlobDecoderTests: XCTestCase {
     XCTAssertEqual(key.fingerprint, "SHA256:abc")
     XCTAssertEqual(key.passphrase, "hunter2")
     XCTAssertEqual(key.comment, "deploy@host")
+    XCTAssertNil(d.bankAccount)
+    XCTAssertEqual(d.url, "")
+    XCTAssertEqual(d.password, "")
   }
 
   func testDetailDecodesSoftwareLicenseBlob() throws {
@@ -272,6 +279,9 @@ final class EntryBlobDecoderTests: XCTestCase {
     XCTAssertEqual(lic.email, "a@example.com")
     XCTAssertEqual(lic.purchaseDate, "2024-01-01")
     XCTAssertEqual(lic.expirationDate, "2025-01-01")
+    XCTAssertNil(d.passkey)
+    XCTAssertEqual(d.url, "")
+    XCTAssertEqual(d.password, "")
   }
 
   func testDetailDecodesPasskeyDisplayBlobExcludesPrivateMaterial() throws {
@@ -291,6 +301,11 @@ final class EntryBlobDecoderTests: XCTestCase {
     XCTAssertEqual(pk.credentialId, "AQIDBA")
     XCTAssertEqual(pk.creationDate, "2024-05-01")
     XCTAssertEqual(pk.deviceInfo, "iPhone")
+    XCTAssertNil(d.softwareLicense)
+    // url/password absent → empty. `username` legitimately carries "alice"
+    // (shared key decoded unconditionally), so it is NOT asserted empty (T10).
+    XCTAssertEqual(d.url, "")
+    XCTAssertEqual(d.password, "")
   }
 
   func testDetailSecureNoteBodyComesFromContentNotNotes() throws {
