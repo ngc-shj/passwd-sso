@@ -126,7 +126,7 @@ Set the following values:
 | `PASSWD_SUPERUSER_PASSWORD` | Password for the `passwd_user` SUPERUSER DB role. Used by `docker-compose` (POSTGRES_PASSWORD bootstrap, jackson DB_URL, migrate URL). Container fails to start if unset. | `openssl rand -hex 24` |
 | `PASSWD_APP_PASSWORD` | Password for the `passwd_app` NOSUPERUSER DB role (Next.js runtime). Used by `docker-compose` for `DATABASE_URL` AND forwarded to `initdb` for role creation. Container fails to start if unset. | `openssl rand -hex 24` |
 | `PASSWD_OUTBOX_WORKER_PASSWORD` | Password for the `passwd_outbox_worker` DB role (set during `initdb`). Used by `docker-compose` to wire `OUTBOX_WORKER_DATABASE_URL`. Required when running the audit-outbox-worker. Use `scripts/set-outbox-worker-password.sh` to rotate on existing clusters. | `openssl rand -hex 24` |
-| `PASSWD_DCR_CLEANUP_WORKER_PASSWORD` | Password for the `passwd_dcr_cleanup_worker` DB role (set during `initdb`). Used by `docker-compose` to wire `DCR_CLEANUP_DATABASE_URL`. Required when running the dcr-cleanup-worker. Use `scripts/set-dcr-cleanup-worker-password.sh` to rotate on existing clusters. | `openssl rand -hex 24` |
+| `PASSWD_RETENTION_GC_WORKER_PASSWORD` | Password for the `passwd_retention_gc_worker` DB role (set during `initdb`). Used by `docker-compose` to wire `RETENTION_GC_DATABASE_URL`. Required when running the retention-gc-worker. Use `scripts/set-retention-gc-worker-password.sh` to rotate on existing clusters. | `openssl rand -hex 24` |
 
 > **Upgrading from a pre-2026-05-16 deployment**: `docker-compose.yml` and
 > `docker-compose.override.yml` previously fell back to the public default
@@ -143,13 +143,13 @@ Set the following values:
 >    PASSWD_SUPERUSER_PASSWORD=passwd_pass
 >    PASSWD_APP_PASSWORD=passwd_app_pass
 >    PASSWD_OUTBOX_WORKER_PASSWORD=passwd_outbox_pass
->    PASSWD_DCR_CLEANUP_WORKER_PASSWORD=passwd_dcr_pass
+>    PASSWD_RETENTION_GC_WORKER_PASSWORD=passwd_dcr_pass
 >    ```
 > 2. **Rotate to new passwords** (recommended): generate fresh values with
 >    `openssl rand -hex 24`, write them to `.env`, then `ALTER ROLE` each
 >    role to match. For the worker roles use the dedicated rotation scripts
 >    `scripts/set-outbox-worker-password.sh` and
->    `scripts/set-dcr-cleanup-worker-password.sh`.
+>    `scripts/set-retention-gc-worker-password.sh`.
 >
 | `BLOB_BACKEND` | Attachment storage backend | `db`, `s3`, `azure`, or `gcs` |
 | `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` | Required if `BLOB_BACKEND=s3` | e.g., `ap-northeast-1`, bucket name |

@@ -195,7 +195,7 @@ npm run docker:down   # stops and tears down
 
 > **Migration from older clones**: if your repo predates this change you may have a `.env.local` and no `.env`. Run `mv .env.local .env` so Docker Compose can find it without `--env-file`. Re-running `npm run init:env` warns when both files exist.
 
-The bottom of `.env.example` has a dedicated **External / Build-time** section listing variables that are NOT read by the Next.js app but ARE required by docker-compose, provisioning scripts, or the production build (`JACKSON_API_KEY` for the Jackson container, `PASSWD_SUPERUSER_PASSWORD` / `PASSWD_APP_PASSWORD` / `PASSWD_OUTBOX_WORKER_PASSWORD` / `PASSWD_DCR_CLEANUP_WORKER_PASSWORD` for the DB roles, `SENTRY_AUTH_TOKEN` for source-map upload, `NEXT_DEV_ALLOWED_ORIGINS` for the dev server). `npm run init:env` prompts for these alongside the Zod-declared vars and writes them into the same `.env`.
+The bottom of `.env.example` has a dedicated **External / Build-time** section listing variables that are NOT read by the Next.js app but ARE required by docker-compose, provisioning scripts, or the production build (`JACKSON_API_KEY` for the Jackson container, `PASSWD_SUPERUSER_PASSWORD` / `PASSWD_APP_PASSWORD` / `PASSWD_OUTBOX_WORKER_PASSWORD` / `PASSWD_RETENTION_GC_WORKER_PASSWORD` for the DB roles, `SENTRY_AUTH_TOKEN` for source-map upload, `NEXT_DEV_ALLOWED_ORIGINS` for the dev server). `npm run init:env` prompts for these alongside the Zod-declared vars and writes them into the same `.env`.
 
 Key variables:
 
@@ -256,7 +256,7 @@ Key variables:
 | `PASSWD_SUPERUSER_PASSWORD` | (Required for `docker compose`) Password for the `passwd_user` SUPERUSER DB role. docker-compose fails to start if unset. See [Docker Setup](docs/setup/docker/en.md) for upgrade notes. |
 | `PASSWD_APP_PASSWORD` | (Required for `docker compose`) Password for the `passwd_app` runtime DB role. docker-compose fails to start if unset. |
 | `PASSWD_OUTBOX_WORKER_PASSWORD` | (Required for `docker compose`) Password for the `passwd_outbox_worker` DB role. Used by initdb on first boot; for existing clusters use `scripts/set-outbox-worker-password.sh` |
-| `PASSWD_DCR_CLEANUP_WORKER_PASSWORD` | (Required for `docker compose`) Password for the `passwd_dcr_cleanup_worker` DB role. Used by initdb on first boot; for existing clusters use `scripts/set-dcr-cleanup-worker-password.sh` |
+| `PASSWD_RETENTION_GC_WORKER_PASSWORD` | (Required for `docker compose`) Password for the `passwd_retention_gc_worker` DB role. Used by initdb on first boot; for existing clusters use `scripts/set-retention-gc-worker-password.sh` |
 | `OUTBOX_BATCH_SIZE`, `OUTBOX_*` | (Optional) Audit outbox worker tuning. See `.env.example` for all options |
 | `NEXT_DEV_ALLOWED_ORIGINS` | (Optional) Allowed origins for dev server (e.g., Tailscale hostname) |
 | `NEXT_PUBLIC_CHROME_STORE_URL` | (Optional) Chrome Web Store URL for extension distribution |

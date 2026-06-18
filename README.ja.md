@@ -194,7 +194,7 @@ npm run docker:down
 
 > **古いクローンからの移行**: 過去の運用で `.env.local` のみ作成しているリポジトリは、`mv .env.local .env` を実行して Docker Compose が自動読込できる canonical なファイルに移してください。`npm run init:env` は legacy `.env.local` を検出すると 1 度だけ NOTE で同じことを案内します。
 
-`.env.example` の末尾には **External / Build-time** セクションがあり、Next.js アプリは読まないが docker-compose / 本番ビルド / プロビジョニングスクリプトが必要とする変数 (`JACKSON_API_KEY` (Jackson コンテナ用), `PASSWD_SUPERUSER_PASSWORD` / `PASSWD_APP_PASSWORD` / `PASSWD_OUTBOX_WORKER_PASSWORD` / `PASSWD_DCR_CLEANUP_WORKER_PASSWORD` (DB ロール用), `SENTRY_AUTH_TOKEN` (ソースマップアップロード用), `NEXT_DEV_ALLOWED_ORIGINS` (dev サーバ用)) が並びます。`npm run init:env` は Zod 宣言済み変数と並んで、これらも同一の `.env` に書き出します。
+`.env.example` の末尾には **External / Build-time** セクションがあり、Next.js アプリは読まないが docker-compose / 本番ビルド / プロビジョニングスクリプトが必要とする変数 (`JACKSON_API_KEY` (Jackson コンテナ用), `PASSWD_SUPERUSER_PASSWORD` / `PASSWD_APP_PASSWORD` / `PASSWD_OUTBOX_WORKER_PASSWORD` / `PASSWD_RETENTION_GC_WORKER_PASSWORD` (DB ロール用), `SENTRY_AUTH_TOKEN` (ソースマップアップロード用), `NEXT_DEV_ALLOWED_ORIGINS` (dev サーバ用)) が並びます。`npm run init:env` は Zod 宣言済み変数と並んで、これらも同一の `.env` に書き出します。
 
 主要な変数:
 
@@ -255,7 +255,7 @@ npm run docker:down
 | `PASSWD_SUPERUSER_PASSWORD` | （`docker compose` 必須）`passwd_user` SUPERUSER ロールのパスワード。未設定だと docker-compose が起動失敗。アップグレード手順は [Docker Setup](docs/setup/docker/en.md) 参照 |
 | `PASSWD_APP_PASSWORD` | （`docker compose` 必須）`passwd_app` ランタイムロールのパスワード。未設定だと docker-compose が起動失敗 |
 | `PASSWD_OUTBOX_WORKER_PASSWORD` | （`docker compose` 必須）`passwd_outbox_worker` DB ロールのパスワード。initdb 初回起動時に使用。既存クラスタでは `scripts/set-outbox-worker-password.sh` を使用 |
-| `PASSWD_DCR_CLEANUP_WORKER_PASSWORD` | （`docker compose` 必須）`passwd_dcr_cleanup_worker` DB ロールのパスワード。initdb 初回起動時に使用。既存クラスタでは `scripts/set-dcr-cleanup-worker-password.sh` を使用 |
+| `PASSWD_RETENTION_GC_WORKER_PASSWORD` | （`docker compose` 必須）`passwd_retention_gc_worker` DB ロールのパスワード。initdb 初回起動時に使用。既存クラスタでは `scripts/set-retention-gc-worker-password.sh` を使用 |
 | `OUTBOX_BATCH_SIZE`, `OUTBOX_*` | （任意）監査アウトボックスワーカーの調整。詳細は `.env.example` 参照 |
 | `NEXT_DEV_ALLOWED_ORIGINS` | （任意）dev サーバー向け許可オリジン（例: Tailscale ホスト名） |
 | `NEXT_PUBLIC_CHROME_STORE_URL` | （任意）ブラウザ拡張配布用 Chrome Web Store URL |
