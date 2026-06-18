@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { SEC_PER_MINUTE, MS_PER_MINUTE } from "@/lib/constants/time";
+import type { createRateLimiter } from "@/lib/security/rate-limit";
 
 describe("auth.config basePath handling", () => {
   beforeEach(() => {
@@ -238,7 +239,9 @@ describe("auth.config Google domain validation", () => {
 });
 
 const { mockCreateRateLimiter } = vi.hoisted(() => ({
-  mockCreateRateLimiter: vi.fn(() => ({ check: vi.fn(), clear: vi.fn() })),
+  mockCreateRateLimiter: vi.fn<typeof createRateLimiter>(
+    () => ({ check: vi.fn(), clear: vi.fn() }) as unknown as ReturnType<typeof createRateLimiter>,
+  ),
 }));
 
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -286,13 +289,14 @@ describe("auth.config magic-link provider settings", () => {
     // vi.resetModules() is called in beforeEach — fresh import picks up the stub
     const config = (await import("@/auth.config")).default;
     const nodemailerProvider = config.providers.find(
-      (p): p is { id: string; maxAge?: number } =>
-        typeof p === "object" && p !== null && "id" in p && (p as { id: string }).id === "nodemailer",
+      (p) => typeof p === "object" && p !== null && "id" in p && p.id === "nodemailer",
     );
 
     expect(nodemailerProvider).toBeDefined();
     // maxAge is seconds; 15 * SEC_PER_MINUTE = 15 * 60 = 900
-    expect(nodemailerProvider?.maxAge).toBe(15 * SEC_PER_MINUTE);
+    expect((nodemailerProvider as { maxAge?: number }).maxAge).toBe(
+      15 * SEC_PER_MINUTE,
+    );
   });
 
   it("MAGIC_LINK_TTL_MINUTES is 15 (equals 15 * SEC_PER_MINUTE / SEC_PER_MINUTE)", async () => {
