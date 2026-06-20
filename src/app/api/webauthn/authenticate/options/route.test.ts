@@ -50,7 +50,8 @@ vi.mock("@/lib/tenant-context", () => ({
 // `mockDerivePrfSalt` symbol is wired into the mock's v1 path so existing
 // `mockDerivePrfSalt.mockImplementation(() => { throw … })` cases still
 // route through the buildPrfExtensions PRF-disabled branch.
-vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
+vi.mock("@/lib/auth/webauthn/webauthn-server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/webauthn/webauthn-server")>()),
   generateAuthenticationOpts: mockGenerateAuthenticationOpts,
   buildPrfExtensions: vi.fn(
     (creds: Array<{ credentialId: string; prfSalt: string | null }>) => {
@@ -234,6 +235,22 @@ describe("POST /api/webauthn/authenticate/options", () => {
     expect(status).toBe(200);
     expect(json.options).toBeDefined();
     expect(json.prfSalt).toBe("prf-salt-hex");
+  });
+
+  it("returns a per-flow challengeId and stores the challenge under that scoped key", async () => {
+    const req = createRequest("POST", ROUTE_URL);
+    const { status, json } = await parseResponse(await POST(req));
+
+    expect(status).toBe(200);
+    expect(json.challengeId).toMatch(/^[0-9a-f]{32}$/);
+    // Concurrent authenticate flows from the same user must not overwrite each
+    // other: the Redis key carries both userId (scoping) and the challengeId.
+    expect(mockRedisSet).toHaveBeenCalledWith(
+      `webauthn:challenge:authenticate:user-1:${json.challengeId}`,
+      expect.any(String),
+      "EX",
+      expect.any(Number),
+    );
   });
 
   it("returns 429 with RATE_LIMIT_EXCEEDED when rate limit is exceeded", async () => {

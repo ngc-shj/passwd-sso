@@ -325,6 +325,46 @@ describe("POST /api/tenant/service-accounts/[id]/tokens", () => {
     expect(json.error).toBe("SA_TOKEN_LIMIT_EXCEEDED");
   });
 
+  it("counts only non-revoked AND non-expired tokens toward the limit", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockServiceAccountFindUnique.mockResolvedValue({
+      id: SA_ID,
+      tenantId: "tenant-1",
+      isActive: true,
+    });
+
+    const countMock = vi.fn().mockResolvedValue(0);
+    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
+      const tx = {
+        serviceAccountToken: {
+          count: countMock,
+          create: vi.fn().mockResolvedValue({
+            id: "tok-new",
+            name: "deploy-token",
+            scope: ["passwords:read"],
+            expiresAt: new Date(Date.now() + 30 * 24 * 3600 * 1000),
+            createdAt: new Date(),
+          }),
+        },
+      };
+      return fn(tx);
+    });
+
+    const expiresAt = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/service-accounts/${SA_ID}/tokens`,
+      { body: { name: "deploy-token", scope: ["passwords:read"], expiresAt } },
+    );
+    await POST(req, createParams({ id: SA_ID }));
+
+    // Expired-but-not-revoked tokens are unusable and must not consume a slot.
+    const where = countMock.mock.calls[0][0].where;
+    expect(where.revokedAt).toBeNull();
+    expect(where.expiresAt).toEqual({ gt: expect.any(Date) });
+  });
+
   it("clamps expiresAt to saTokenMaxExpiryDays when requested expiry exceeds the limit", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);

@@ -15,6 +15,7 @@ import {
   generateAuthenticationOpts,
   buildPrfExtensions,
   WEBAUTHN_CHALLENGE_TTL_SECONDS,
+  generateChallengeId,
 } from "@/lib/auth/webauthn/webauthn-server";
 
 export const runtime = "nodejs";
@@ -84,9 +85,12 @@ async function handlePOST(req: NextRequest) {
     })),
   );
 
-  // Store challenge in Redis
+  // Store challenge in Redis. Per-flow challengeId in the key so concurrent
+  // authenticate flows from the same user (multiple tabs) don't overwrite each
+  // other; userId stays in the key so verify only consumes its own user's challenge.
+  const challengeId = generateChallengeId();
   await redis.set(
-    `webauthn:challenge:authenticate:${userId}`,
+    `webauthn:challenge:authenticate:${userId}:${challengeId}`,
     options.challenge,
     "EX",
     WEBAUTHN_CHALLENGE_TTL_SECONDS,
@@ -107,6 +111,7 @@ async function handlePOST(req: NextRequest) {
 
   return NextResponse.json({
     options,
+    challengeId,
     prfSalt,
   });
 }

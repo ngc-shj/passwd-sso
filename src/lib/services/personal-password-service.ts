@@ -56,9 +56,10 @@ export async function createPersonalPasswordEntry(
   // Normalize duplicates: a caller-supplied duplicate (e.g. ["t1","t1"])
   // should not count as a missing tag — tag.count returns distinct row count,
   // so compare against the deduped input length, not the raw array length.
-  // Mirrors team-password-service.ts.
-  if (tagIds?.length) {
-    const uniqueTagIds = [...new Set(tagIds)];
+  // The same deduped array is used for the relation write below so Prisma never
+  // receives a duplicate connect. Mirrors team-password-service.ts.
+  const uniqueTagIds = tagIds?.length ? [...new Set(tagIds)] : [];
+  if (uniqueTagIds.length) {
     const ownedCount = await db.tag.count({ where: { id: { in: uniqueTagIds }, userId } });
     if (ownedCount !== uniqueTagIds.length) return { ok: false, reason: "TAGS_NOT_OWNED" };
   }
@@ -77,8 +78,8 @@ export async function createPersonalPasswordEntry(
       ...(folderId ? { folderId } : {}),
       userId,
       tenantId,
-      ...(tagIds?.length
-        ? { tags: { connect: tagIds.map((id) => ({ id })) } }
+      ...(uniqueTagIds.length
+        ? { tags: { connect: uniqueTagIds.map((id) => ({ id })) } }
         : {}),
     },
     include: { tags: { select: { id: true } } },

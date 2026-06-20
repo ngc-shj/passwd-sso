@@ -165,7 +165,7 @@ async function handlePOST(req: NextRequest) {
         userId,
         tenantId,
         ...(tagIds?.length
-          ? { tags: { connect: tagIds.map((id) => ({ id })) } }
+          ? { tags: { connect: [...new Set(tagIds)].map((id) => ({ id })) } }
           : {}),
       },
       include: { tags: { select: { id: true } } },

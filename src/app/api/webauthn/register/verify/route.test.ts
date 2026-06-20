@@ -49,7 +49,8 @@ vi.mock("@/lib/redis", () => ({
   getRedis: mockGetRedis,
 }));
 
-vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
+vi.mock("@/lib/auth/webauthn/webauthn-server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/webauthn/webauthn-server")>()),
   verifyRegistration: mockVerifyRegistration,
   uint8ArrayToBase64url: mockUint8ArrayToBase64url,
   getRpOrigin: mockGetRpOrigin,
@@ -137,9 +138,12 @@ function makeResponse(credPropsOverride?: Record<string, unknown>) {
   };
 }
 
+const CHALLENGE_ID = "0123456789abcdef0123456789abcdef";
+
 function makeBody(credPropsOverride?: Record<string, unknown>) {
   return {
     response: makeResponse(credPropsOverride),
+    challengeId: CHALLENGE_ID,
     nickname: "Test Key",
   };
 }
@@ -465,6 +469,17 @@ describe("POST /api/webauthn/register/verify", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("INVALID_CHALLENGE");
+  });
+
+  it("consumes the challenge under the per-flow challengeId key (no cross-flow collision)", async () => {
+    const req = createRequest("POST", ROUTE_URL, { body: makeBody() });
+    await POST(req);
+
+    // The key MUST embed both userId (scoping) and the per-flow challengeId so a
+    // concurrent register flow from the same user cannot consume this challenge.
+    expect(mockRedisGetdel).toHaveBeenCalledWith(
+      `webauthn:challenge:register:user-1:${CHALLENGE_ID}`,
+    );
   });
 
   it("returns 503 with SERVICE_UNAVAILABLE when WEBAUTHN_RP_ID is not set", async () => {

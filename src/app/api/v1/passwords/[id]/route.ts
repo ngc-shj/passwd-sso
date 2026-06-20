@@ -193,7 +193,7 @@ async function handlePUT(
   if (requireReprompt !== undefined) updateData.requireReprompt = requireReprompt;
   if (expiresAt !== undefined) updateData.expiresAt = expiresAt ? new Date(expiresAt) : null;
   if (tagIds !== undefined) {
-    updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
+    updateData.tags = { set: [...new Set(tagIds)].map((tid) => ({ id: tid })) };
   }
 
   // Row type for the FOR UPDATE snapshot read (personal password_entries).

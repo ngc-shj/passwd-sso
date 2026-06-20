@@ -202,6 +202,39 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
     );
   });
 
+  it("counts only non-revoked AND non-expired tokens toward the limit", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAccessRequestFindUnique.mockResolvedValue(makeAccessRequest());
+    mockTenantFindUnique.mockResolvedValue(null);
+
+    const countMock = vi.fn().mockResolvedValue(0);
+    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
+      const tx = {
+        serviceAccountToken: {
+          count: countMock,
+          create: vi.fn().mockResolvedValue({ id: "tok-1", expiresAt: new Date(Date.now() + 3600 * 1000) }),
+        },
+        accessRequest: {
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          update: vi.fn().mockResolvedValue({}),
+        },
+      };
+      return fn(tx);
+    });
+
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/access-requests/${REQUEST_ID}/approve`,
+    );
+    await POST(req, createParams({ id: REQUEST_ID }));
+
+    // Expired-but-not-revoked tokens are unusable and must not consume a slot.
+    const where = countMock.mock.calls[0][0].where;
+    expect(where.revokedAt).toBeNull();
+    expect(where.expiresAt).toEqual({ gt: expect.any(Date) });
+  });
+
   it("returns 409 when request is already processed (double-approval)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);

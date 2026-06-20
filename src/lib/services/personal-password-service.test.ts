@@ -133,6 +133,10 @@ describe("createPersonalPasswordEntry", () => {
     );
 
     expect(result).toEqual({ ok: true, entry: expect.anything() });
+    // The relation write must also dedupe — passing a duplicate connect to
+    // Prisma is malformed input. Only the unique tag is connected.
+    const data = mockPasswordEntryCreate.mock.calls[0][0].data;
+    expect(data.tags).toEqual({ connect: [{ id: "t1" }] });
   });
 
   it("C3: still rejects when tagIds reference an unowned tag", async () => {

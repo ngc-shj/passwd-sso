@@ -33,7 +33,8 @@ vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
 
-vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
+vi.mock("@/lib/auth/webauthn/webauthn-server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/webauthn/webauthn-server")>()),
   verifyAuthenticationAssertion: mockVerifyAuthenticationAssertion,
 }));
 

@@ -342,6 +342,10 @@ describe("createTeamPassword", () => {
     expect(mockTeamTagCount).toHaveBeenCalledWith({
       where: { id: { in: ["tag-1"] }, teamId: TEAM_ID },
     });
+    // The relation write must also dedupe — a duplicate connect is malformed
+    // input to Prisma. Only the unique tag is connected.
+    const createData = mockTeamPasswordEntryCreate.mock.calls[0][0].data;
+    expect(createData.tags).toEqual({ connect: [{ id: "tag-1" }] });
   });
 });
 
@@ -430,6 +434,23 @@ describe("updateTeamPassword", () => {
     // No history snapshot for metadata-only updates
     expect(mockTeamPasswordEntryHistoryCreate).not.toHaveBeenCalled();
     expect(mockTeamPasswordEntryUpdate).toHaveBeenCalledOnce();
+  });
+
+  it("deduplicates tagIds in the relation set on update", async () => {
+    mockTeamTagCount.mockResolvedValue(1); // tag-1 owned (distinct count)
+    mockTeamPasswordEntryUpdate.mockResolvedValue({ id: PASSWORD_ID, tags: [] });
+
+    const input: UpdateTeamPasswordInput = {
+      tagIds: ["tag-1", "tag-1"],
+      userId: USER_ID,
+      existingEntry: BASE_EXISTING_ENTRY,
+    };
+
+    await updateTeamPassword(TEAM_ID, PASSWORD_ID, input);
+
+    // A duplicate `set` is malformed input to Prisma — only the unique tag is set.
+    const updateData = mockTeamPasswordEntryUpdate.mock.calls[0][0].data;
+    expect(updateData.tags).toEqual({ set: [{ id: "tag-1" }] });
   });
 
   it("throws TeamPasswordServiceError (TEAM_KEY_VERSION_MISMATCH) when team version differs", async () => {

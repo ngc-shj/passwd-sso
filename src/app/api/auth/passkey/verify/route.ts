@@ -10,6 +10,7 @@ import { parseBody } from "@/lib/http/parse-body";
 import { WEBAUTHN_RESPONSE_MAX } from "@/lib/validations/common";
 import { assertOrigin } from "@/lib/auth/session/csrf";
 import { authorizeWebAuthn } from "@/lib/auth/webauthn/webauthn-authorize";
+import { CHALLENGE_ID_RE } from "@/lib/auth/webauthn/webauthn-server";
 import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit/audit";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
@@ -70,7 +71,7 @@ async function handlePOST(req: NextRequest) {
   // Parse request body
   const passkeyVerifySchema = z.object({
     credentialResponse: z.string().min(1).max(WEBAUTHN_RESPONSE_MAX),
-    challengeId: z.string().regex(/^[0-9a-f]{32}$/),
+    challengeId: z.string().regex(CHALLENGE_ID_RE),
   });
   const bodyResult = await parseBody(req, passkeyVerifySchema);
   if (!bodyResult.ok) return bodyResult.response;

@@ -50,7 +50,8 @@ vi.mock("@/lib/tenant-context", () => ({
 // in Redis (RT5 — production primitive call-path), (b) output is the value
 // the route returns to the client. Tests stubbing PRF-disabled drive
 // mockDerivePrfSaltV2.mockImplementation(() => { throw ... }) directly.
-vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
+vi.mock("@/lib/auth/webauthn/webauthn-server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/webauthn/webauthn-server")>()),
   generateRegistrationOpts: mockGenerateRegistrationOpts,
   derivePrfSaltV2: mockDerivePrfSaltV2,
 }));
@@ -166,10 +167,12 @@ describe("POST /api/webauthn/register/options", () => {
     const req = createRequest("POST", ROUTE_URL);
     await POST(req);
 
-    // A02-8: register-options now caches a JSON envelope containing both
-    // challenge AND the per-credential salt under the SAME Redis key.
+    // A02-8: register-options caches a JSON envelope containing both challenge
+    // AND the per-credential salt. The Redis key is scoped by a per-flow
+    // challengeId (returned to the client) so concurrent register flows from the
+    // same user don't overwrite each other; userId stays in the key for scoping.
     expect(mockRedisSet).toHaveBeenCalledWith(
-      "webauthn:challenge:register:user-1",
+      expect.stringMatching(/^webauthn:challenge:register:user-1:[0-9a-f]{32}$/),
       expect.any(String),
       "EX",
       300,
@@ -179,6 +182,14 @@ describe("POST /api/webauthn/register/options", () => {
     // RT5: the cached perCredentialSalt MUST be the same value passed to
     // derivePrfSaltV2, so the wrap-side salt and DB-side salt cannot diverge.
     expect(envelope.prfSalt).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("returns the per-flow challengeId and stores it in the Redis key so concurrent flows don't collide", async () => {
+    const { json } = await parseResponse(await POST(createRequest("POST", ROUTE_URL)));
+    expect(json.challengeId).toMatch(/^[0-9a-f]{32}$/);
+    // The key the challenge is stored under must carry that exact challengeId.
+    const key = mockRedisSet.mock.calls[0][0] as string;
+    expect(key).toBe(`webauthn:challenge:register:user-1:${json.challengeId}`);
   });
 
   it("returns prfSupported=false and prfSalt=null when PRF is disabled (derivePrfSaltV2 throws)", async () => {

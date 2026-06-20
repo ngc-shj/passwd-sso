@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
@@ -9,7 +8,7 @@ import { errorResponse, unauthorized, notFound } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { assertOrigin } from "@/lib/auth/session/csrf";
-import { generateAuthenticationOpts, buildPrfExtensions, WEBAUTHN_CHALLENGE_TTL_SECONDS } from "@/lib/auth/webauthn/webauthn-server";
+import { generateAuthenticationOpts, buildPrfExtensions, WEBAUTHN_CHALLENGE_TTL_SECONDS, generateChallengeId } from "@/lib/auth/webauthn/webauthn-server";
 import { getRedis } from "@/lib/redis";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
@@ -70,7 +69,7 @@ async function handlePOST(req: NextRequest) {
     })),
   );
 
-  const challengeId = randomBytes(16).toString("hex");
+  const challengeId = generateChallengeId();
   await redis.set(
     `webauthn:challenge:reauth:${session.user.id}:${challengeId}`,
     options.challenge,

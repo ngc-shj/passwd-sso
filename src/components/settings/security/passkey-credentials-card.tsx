@@ -164,7 +164,7 @@ export function PasskeyCredentialsCard() {
         return;
       }
 
-      const { options, prfSalt } = await optionsRes.json();
+      const { options, challengeId, prfSalt } = await optionsRes.json();
 
       // 2. Start WebAuthn registration with PRF
       const reg = await startPasskeyRegistration(options, prfSalt ?? undefined);
@@ -203,6 +203,7 @@ export function PasskeyCredentialsCard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           response: responseJSON,
+          challengeId,
           nickname: resolvedNickname,
           ...prfData,
         }),
@@ -305,7 +306,7 @@ export function PasskeyCredentialsCard() {
         return;
       }
 
-      const { options, prfSalt } = await optionsRes.json();
+      const { options, challengeId, prfSalt } = await optionsRes.json();
 
       // 2. Authenticate (with PRF if available)
       const { responseJSON, prfOutput: authPrfOutput } = await startPasskeyAuthentication(
@@ -317,7 +318,7 @@ export function PasskeyCredentialsCard() {
       const verifyRes = await fetchApi(API_PATH.WEBAUTHN_AUTHENTICATE_VERIFY, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ response: responseJSON }),
+        body: JSON.stringify({ response: responseJSON, challengeId }),
       });
 
       if (verifyRes.ok) {

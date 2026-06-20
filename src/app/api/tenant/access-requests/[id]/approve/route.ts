@@ -135,9 +135,15 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   try {
     result = await withTenantRls(prisma, actor.tenantId, async (tx) =>
     prisma.$transaction(async (tx) => {
-      // Enforce token limit per SA
+      // Enforce token limit per SA. "Active" = not revoked AND not expired,
+      // matching extension/operator/SCIM token limit checks — expired-but-not-
+      // revoked tokens are unusable and must not consume a slot.
       const activeTokenCount = await tx.serviceAccountToken.count({
-        where: { serviceAccountId: request.serviceAccountId, revokedAt: null },
+        where: {
+          serviceAccountId: request.serviceAccountId,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
       });
       if (activeTokenCount >= MAX_SA_TOKENS_PER_ACCOUNT) {
         throw new Error("Token limit exceeded");

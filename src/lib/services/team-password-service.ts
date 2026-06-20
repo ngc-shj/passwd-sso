@@ -330,7 +330,7 @@ export async function createTeamPassword(
       ...(expiresAt !== undefined ? { expiresAt: expiresAt ? new Date(expiresAt) : null } : {}),
       ...(teamFolderId ? { teamFolderId } : {}),
       ...(tagIds?.length
-        ? { tags: { connect: tagIds.map((id) => ({ id })) } }
+        ? { tags: { connect: [...new Set(tagIds)].map((id) => ({ id })) } }
         : {}),
     },
     include: {
@@ -502,7 +502,7 @@ export async function updateTeamPassword(
   if (requireReprompt !== undefined) updateData.requireReprompt = requireReprompt;
   if (expiresAt !== undefined) updateData.expiresAt = expiresAt ? new Date(expiresAt) : null;
   if (tagIds !== undefined) {
-    updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
+    updateData.tags = { set: [...new Set(tagIds)].map((tid) => ({ id: tid })) };
   }
 
   // Row type for the FOR UPDATE snapshot read (team_password_entries).

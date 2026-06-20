@@ -186,6 +186,29 @@ describe("POST /api/vault/ssh/sign-authorize", () => {
     expect(json.reason).toBe("invalid_params");
   });
 
+  it("returns 413 payload_too_large when body exceeds the 16 KB cap", async () => {
+    // Oversized payload: a declared Content-Length above the cap is rejected
+    // before the body is buffered (memory-pressure guard). The fingerprint is
+    // padded past 16 KB; the schema would also reject it, but the cap fires first.
+    const huge = "x".repeat(20 * 1024);
+    const body = JSON.stringify({ keyId: VALID_KEY_ID, fingerprint: huge });
+    const req = new NextRequest("http://localhost/api/vault/ssh/sign-authorize", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": String(Buffer.byteLength(body)),
+      },
+      body,
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(413);
+    const json = await res.json();
+    expect(json.authorized).toBe(false);
+    expect(json.reason).toBe("payload_too_large");
+    // The cap must fire before the DB lookup.
+    expect(mockPrismaPasswordEntry.findFirst).not.toHaveBeenCalled();
+  });
+
   it("accepts CUID-format keyId (e.g. abc_DEF-123)", async () => {
     // keyId regex /^[a-zA-Z0-9_-]{1,100}$/ must accept CUID-format IDs.
     // This test guards against accidentally switching to z.string().uuid().

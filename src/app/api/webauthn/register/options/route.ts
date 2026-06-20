@@ -8,7 +8,11 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { generateRegistrationOpts, derivePrfSaltV2 } from "@/lib/auth/webauthn/webauthn-server";
+import {
+  generateRegistrationOpts,
+  derivePrfSaltV2,
+  generateChallengeId,
+} from "@/lib/auth/webauthn/webauthn-server";
 import { MS_PER_MINUTE, SEC_PER_MINUTE } from "@/lib/constants/time";
 import { randomBytes } from "node:crypto";
 
@@ -83,8 +87,12 @@ async function handlePOST(req: NextRequest) {
     prfSalt: prfSalt !== null ? perCredentialSalt : null,
   });
 
+  // Per-flow challengeId in the Redis key so concurrent register flows from the
+  // same user (multiple tabs/devices) don't overwrite each other's challenge.
+  // userId stays in the key so verify can only consume its own user's challenge.
+  const challengeId = generateChallengeId();
   await redis.set(
-    `webauthn:challenge:register:${userId}`,
+    `webauthn:challenge:register:${userId}:${challengeId}`,
     envelope,
     "EX",
     CHALLENGE_TTL_SECONDS,
@@ -92,6 +100,7 @@ async function handlePOST(req: NextRequest) {
 
   return NextResponse.json({
     options,
+    challengeId,
     prfSupported: prfSalt !== null,
     prfSalt,
   });

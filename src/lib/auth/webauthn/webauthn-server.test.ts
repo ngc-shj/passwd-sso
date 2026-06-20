@@ -298,3 +298,41 @@ describe("base64urlToUint8Array / uint8ArrayToBase64url", () => {
     expect(base64urlToUint8Array("AQID")).toEqual(new Uint8Array([1, 2, 3]));
   });
 });
+
+describe("generateChallengeId / CHALLENGE_ID_RE (per-flow challenge scoping SSoT)", () => {
+  let generateChallengeId: () => string;
+  let CHALLENGE_ID_RE: RegExp;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const mod = await import("./webauthn-server");
+    generateChallengeId = mod.generateChallengeId;
+    CHALLENGE_ID_RE = mod.CHALLENGE_ID_RE;
+  });
+
+  it("generates a 32-char lowercase-hex id (16 random bytes)", () => {
+    const id = generateChallengeId();
+    expect(id).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it("generates distinct ids on each call (entropy guard)", () => {
+    const ids = new Set(Array.from({ length: 50 }, () => generateChallengeId()));
+    expect(ids.size).toBe(50);
+  });
+
+  it("validator accepts a freshly generated id", () => {
+    expect(CHALLENGE_ID_RE.test(generateChallengeId())).toBe(true);
+  });
+
+  it("validator rejects malformed ids — the contract every verify route depends on", () => {
+    // Uppercase hex, wrong length, non-hex chars, and key-traversal attempts
+    // (colon, wildcard) must all be rejected so they cannot reach Redis key
+    // construction. generateChallengeId only ever emits lowercase hex.
+    expect(CHALLENGE_ID_RE.test("0123456789ABCDEF0123456789abcdef")).toBe(false); // uppercase
+    expect(CHALLENGE_ID_RE.test("0123456789abcdef")).toBe(false); // too short
+    expect(CHALLENGE_ID_RE.test("0123456789abcdef0123456789abcdef0")).toBe(false); // too long
+    expect(CHALLENGE_ID_RE.test("0123456789abcdef0123456789abcdeg")).toBe(false); // non-hex
+    expect(CHALLENGE_ID_RE.test("user-1:0123456789abcdef0123456789ab")).toBe(false); // colon
+    expect(CHALLENGE_ID_RE.test("")).toBe(false);
+  });
+});
