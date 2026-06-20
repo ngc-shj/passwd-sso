@@ -66,14 +66,27 @@ function createRequest(method: string, url: string) {
   return new NextRequest(url, { method });
 }
 
-function createFormDataRequest(
+async function createFormDataRequest(
   url: string,
   fields: Record<string, string | Blob>,
   headers?: Record<string, string>
-): NextRequest {
+): Promise<NextRequest> {
   const formData = new FormData();
   for (const [k, v] of Object.entries(fields)) formData.append(k, v);
-  return new NextRequest(url, { method: "POST", body: formData, headers });
+  // Serialize once to set Content-Length, mirroring a real browser upload —
+  // the route gates on it via rejectOversizedMultipart (fail-closed if absent).
+  // An explicit `headers` override (e.g. a too-large content-length test) wins.
+  const encoded = new Request("http://localhost", { method: "POST", body: formData });
+  const bytes = new Uint8Array(await encoded.arrayBuffer());
+  return new NextRequest(url, {
+    method: "POST",
+    body: bytes,
+    headers: {
+      "content-type": encoded.headers.get("content-type") ?? "multipart/form-data",
+      "content-length": String(bytes.length),
+      ...headers,
+    },
+  });
 }
 
 // Valid hex strings for client-encrypted fields
@@ -161,7 +174,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -179,7 +192,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
       new MockTeamAuthError("FORBIDDEN", 403),
     );
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -197,7 +210,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 404 when entry does not belong to team", async () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: "other-team" });
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -212,7 +225,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 when required fields are missing", async () => {
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         filename: "doc.pdf",
       }),
       createParams("team-1", "pw-1"),
@@ -224,7 +237,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 when content type is not allowed", async () => {
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/zip",
@@ -242,7 +255,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 400 when attachment limit is exceeded", async () => {
     mockPrismaAttachment.count.mockResolvedValue(20);
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -259,7 +272,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 413 when declared content-length is too large", async () => {
     const res = await POST(
-      createFormDataRequest(
+      await createFormDataRequest(
         "http://localhost/api/teams/team-1/passwords/pw-1/attachments",
         {
           file: new Blob(["abc"]),
@@ -281,7 +294,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 400 when actual file size exceeds max", async () => {
     const huge = new Blob([new Uint8Array(11 * 1024 * 1024)]);
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: huge,
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -298,7 +311,9 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 when formData parsing fails", async () => {
     const req = {
-      headers: new Headers(),
+      // Valid content-length so the multipart size gate passes and we reach
+      // formData() — this test exercises the parse-failure path specifically.
+      headers: new Headers({ "content-length": "100" }),
       formData: vi.fn().mockRejectedValue(new Error("bad form")),
     } as unknown as NextRequest;
     const res = await POST(req, createParams("team-1", "pw-1"));
@@ -309,7 +324,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 for invalid extension", async () => {
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "bad.exe",
         contentType: "application/pdf",
@@ -324,7 +339,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 for invalid iv format", async () => {
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -341,7 +356,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 for invalid authTag format", async () => {
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -365,7 +380,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
       createdAt: new Date(),
     });
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -394,7 +409,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 when encryptionMode is missing", async () => {
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -411,7 +426,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 400 when encryptionMode=0", async () => {
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -430,7 +445,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 429 when rate limited", async () => {
     mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 30_000 });
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",
@@ -453,7 +468,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
       teamKeyVersion: 1,
     });
     const res = await POST(
-      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
         filename: "doc.pdf",
         contentType: "application/pdf",

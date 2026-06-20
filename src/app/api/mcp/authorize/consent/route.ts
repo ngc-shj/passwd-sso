@@ -9,7 +9,7 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
-import { exceedsDeclaredContentLength } from "@/lib/http/parse-body";
+import { readFormWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 import { requireRecentSession } from "@/lib/auth/session/step-up";
 
@@ -35,18 +35,18 @@ export async function POST(req: NextRequest) {
   const stepUpError = await requireRecentSession(req);
   if (stepUpError) return stepUpError;
 
-  // Cap the untrusted form body before parsing (content-length pre-check;
-  // session-authed so lower severity, but still untrusted input).
-  if (exceedsDeclaredContentLength(req, MAX_JSON_BODY_BYTES)) {
+  // Stream-read the consent form under the byte cap. The form is submitted as
+  // application/x-www-form-urlencoded (hidden-input form POST, no file upload),
+  // so the streaming text cap is authoritative against oversized/chunked bodies.
+  const read = await readFormWithCap(req, MAX_JSON_BODY_BYTES);
+  if (!read.ok) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
-
-  // Parse form data submitted from the consent UI
-  const formData = await req.formData();
-  const clientId = formData.get("client_id") as string;
-  const redirectUri = formData.get("redirect_uri") as string;
-  const state = formData.get("state") as string;
-  const action = formData.get("action") as string;
+  const formData = new URLSearchParams(read.text);
+  const clientId = formData.get("client_id") ?? "";
+  const redirectUri = formData.get("redirect_uri") ?? "";
+  const state = formData.get("state") ?? "";
+  const action = formData.get("action") ?? "";
 
   if (!clientId || !redirectUri) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
@@ -93,9 +93,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.redirect(denyUrl.toString(), 302);
   }
 
-  const scope = formData.get("scope") as string;
-  const codeChallenge = formData.get("code_challenge") as string;
-  const codeChallengeMethod = (formData.get("code_challenge_method") as string) || "S256";
+  const scope = formData.get("scope") ?? "";
+  const codeChallenge = formData.get("code_challenge") ?? "";
+  const codeChallengeMethod = formData.get("code_challenge_method") || "S256";
 
   if (!scope || !codeChallenge) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
@@ -115,8 +115,14 @@ export async function POST(req: NextRequest) {
 
     let claimResult: { error: "tenant_cap" | "name_conflict" | "already_claimed" | null };
     try {
-      claimResult = await withBypassRls(prisma, async (tx) =>
-        prisma.$transaction(async (tx) => {
+      // withBypassRls already runs the callback inside a transaction with the
+      // RLS-bypass GUC set. The claim sequence (count → exclusion lookup → CAS
+      // update) runs directly on that tx — a nested prisma.$transaction would
+      // open a second connection WITHOUT the bypass config, so it must not be
+      // reintroduced here.
+      claimResult = await withBypassRls(
+        prisma,
+        async (tx) => {
           const tenantClientCount = await tx.mcpClient.count({
             where: { tenantId: userTenantId },
           });
@@ -165,8 +171,9 @@ export async function POST(req: NextRequest) {
             return { error: "already_claimed" as const };
           }
           return { error: null as null };
-        }),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+        },
+        BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+      );
     } catch (err) {
       // C7: a concurrent foreign claim can win the race and cause a P2002 unique
       // violation on (tenantId, name). Map to the same consent error — not a 500.

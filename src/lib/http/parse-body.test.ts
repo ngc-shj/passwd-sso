@@ -1,7 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { parseBody, readJsonWithCap, exceedsDeclaredContentLength } from "./parse-body";
+import {
+  parseBody,
+  readJsonWithCap,
+  readBytesWithCap,
+  readFormWithCap,
+  rejectOversizedMultipart,
+  exceedsDeclaredContentLength,
+} from "./parse-body";
 
 function jsonRequest(body: unknown): NextRequest {
   return new NextRequest("http://localhost:3000/api/test", {
@@ -237,6 +244,133 @@ describe("readJsonWithCap", () => {
     if (result.ok) {
       expect(result.body).toEqual({ foo: "bar" });
     }
+  });
+});
+
+describe("readBytesWithCap", () => {
+  it("returns the raw bytes when within the cap", async () => {
+    const req = new NextRequest("http://localhost:3000/api/test", {
+      method: "POST",
+      body: "hello",
+    });
+    const result = await readBytesWithCap(req, 1024);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(new TextDecoder().decode(result.bytes)).toBe("hello");
+    }
+  });
+
+  it("rejects via streaming cap when no content-length is present (chunked-TE bypass guard)", async () => {
+    const big = "x".repeat(2_000_000);
+    const req = new NextRequest("http://localhost:3000/api/test", {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: big,
+    });
+    const result = await readBytesWithCap(req, 1_048_576);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.tooLarge).toBe(true);
+    }
+  });
+
+  it("rejects early when content-length declares over the cap", async () => {
+    const req = new NextRequest("http://localhost:3000/api/test", {
+      method: "POST",
+      headers: { "Content-Length": "2000" },
+      body: "small",
+    });
+    const result = await readBytesWithCap(req, 1000);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.tooLarge).toBe(true);
+    }
+  });
+
+  it("reports noStream (not tooLarge) when the body stream is absent", async () => {
+    const req = new NextRequest("http://localhost:3000/api/test", {
+      method: "POST",
+    });
+    const result = await readBytesWithCap(req, 1024);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.tooLarge).toBeUndefined();
+      expect(result.noStream).toBe(true);
+    }
+  });
+});
+
+describe("readFormWithCap", () => {
+  it("decodes a urlencoded body within the cap", async () => {
+    const req = new NextRequest("http://localhost:3000/api/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "a=1&b=two",
+    });
+    const result = await readFormWithCap(req, 1024);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const params = new URLSearchParams(result.text);
+      expect(params.get("a")).toBe("1");
+      expect(params.get("b")).toBe("two");
+    }
+  });
+
+  it("rejects an oversized form body via the streaming cap", async () => {
+    const big = "k=" + "v".repeat(2_000_000);
+    const req = new NextRequest("http://localhost:3000/api/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: big,
+    });
+    const result = await readFormWithCap(req, 1_048_576);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.tooLarge).toBe(true);
+    }
+  });
+});
+
+describe("rejectOversizedMultipart", () => {
+  function multipartReq(contentLength: string | null): NextRequest {
+    const headers: Record<string, string> = {
+      "Content-Type": "multipart/form-data; boundary=x",
+    };
+    if (contentLength !== null) headers["Content-Length"] = contentLength;
+    return new NextRequest("http://localhost:3000/api/test", {
+      method: "POST",
+      headers,
+      body: "--x--",
+    });
+  }
+
+  it("returns a 413 when content-length is absent (fail-closed)", () => {
+    const res = rejectOversizedMultipart(multipartReq(null), 1000);
+    expect(res?.status).toBe(413);
+  });
+
+  it("returns a 413 when content-length exceeds the cap", () => {
+    const res = rejectOversizedMultipart(multipartReq("2000"), 1000);
+    expect(res?.status).toBe(413);
+  });
+
+  it("returns a 413 for a non-numeric content-length", () => {
+    const res = rejectOversizedMultipart(multipartReq("not-a-number"), 1000);
+    expect(res?.status).toBe(413);
+  });
+
+  it("returns null (proceed) when content-length is within the cap", () => {
+    expect(rejectOversizedMultipart(multipartReq("500"), 1000)).toBeNull();
+  });
+
+  it("returns null when content-length equals the cap", () => {
+    expect(rejectOversizedMultipart(multipartReq("1000"), 1000)).toBeNull();
   });
 });
 
