@@ -93,7 +93,7 @@ describe("POST /api/sends/file", () => {
 
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
-    const req = createMultipartRequest("http://localhost/api/sends/file", createFormData());
+    const req = await createMultipartRequest("http://localhost/api/sends/file", createFormData());
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
     expect(status).toBe(401);
@@ -103,10 +103,16 @@ describe("POST /api/sends/file", () => {
   it("returns 400 when FormData parsing fails", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     const { NextRequest } = await import("next/server");
+    const body = JSON.stringify({ name: "test" });
     const req = new NextRequest("http://localhost/api/sends/file", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "test" }),
+      // Valid content-length so the multipart size gate passes and we reach
+      // formData() — this test exercises the parse-failure path specifically.
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": String(Buffer.byteLength(body)),
+      },
+      body,
     } as ConstructorParameters<typeof NextRequest>[1]);
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
@@ -119,7 +125,7 @@ describe("POST /api/sends/file", () => {
     const fd = new FormData();
     fd.append("name", "Test");
     fd.append("expiresIn", "1d");
-    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const req = await createMultipartRequest("http://localhost/api/sends/file", fd);
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -131,11 +137,24 @@ describe("POST /api/sends/file", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     const bigContent = new Uint8Array(10 * 1024 * 1024 + 1);
     const bigFile = new File([bigContent], "big.bin", { type: "application/octet-stream" });
-    const req = createMultipartRequest("http://localhost/api/sends/file", createFormData({ file: bigFile }));
+    const req = await createMultipartRequest("http://localhost/api/sends/file", createFormData({ file: bigFile }));
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
     expect(json.error).toBe("SEND_FILE_TOO_LARGE");
+  });
+
+  it("returns 413 (fail-closed) when Content-Length is absent (chunked-body DoS guard)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    const req = await createMultipartRequest(
+      "http://localhost/api/sends/file",
+      createFormData(),
+      { omitContentLength: true },
+    );
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(413);
+    expect(json.error).toBe("PAYLOAD_TOO_LARGE");
   });
 
   it("returns 400 when storage limit exceeded (413 semantics)", async () => {
@@ -144,7 +163,7 @@ describe("POST /api/sends/file", () => {
     const largeFile = new File([new Uint8Array(2 * 1024 * 1024)], "medium.bin", {
       type: "application/octet-stream",
     });
-    const req = createMultipartRequest("http://localhost/api/sends/file", createFormData({ file: largeFile }));
+    const req = await createMultipartRequest("http://localhost/api/sends/file", createFormData({ file: largeFile }));
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -156,7 +175,7 @@ describe("POST /api/sends/file", () => {
     const expiresAt = new Date(Date.now() + 86400_000);
     mockCreate.mockResolvedValue({ id: "share-1", expiresAt });
 
-    const req = createMultipartRequest("http://localhost/api/sends/file", createFormData());
+    const req = await createMultipartRequest("http://localhost/api/sends/file", createFormData());
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
@@ -193,7 +212,7 @@ describe("POST /api/sends/file", () => {
 
     const fd = createFormData();
     fd.append("requirePassword", "true");
-    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const req = await createMultipartRequest("http://localhost/api/sends/file", fd);
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
@@ -206,7 +225,7 @@ describe("POST /api/sends/file", () => {
     const expiresAt = new Date(Date.now() + 86400_000);
     mockCreate.mockResolvedValue({ id: "share-3", expiresAt });
 
-    const req = createMultipartRequest("http://localhost/api/sends/file", createFormData());
+    const req = await createMultipartRequest("http://localhost/api/sends/file", createFormData());
     await POST(req as never);
 
     // Both aggregate and user.findUnique must be called
@@ -230,7 +249,7 @@ describe("POST /api/sends/file", () => {
       type: "application/octet-stream",
     });
     const fd = createFormData({ file });
-    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const req = await createMultipartRequest("http://localhost/api/sends/file", fd);
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
@@ -247,7 +266,7 @@ describe("POST /api/sends/file", () => {
     const html = new TextEncoder().encode("<html><script>alert(1)</script></html>");
     const file = new File([html], "page.html", { type: "text/plain" });
     const fd = createFormData({ file });
-    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const req = await createMultipartRequest("http://localhost/api/sends/file", fd);
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
@@ -265,7 +284,7 @@ describe("POST /api/sends/file", () => {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
     const file = new File([png], "image.png", { type: "image/png" });
     const fd = createFormData({ file });
-    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const req = await createMultipartRequest("http://localhost/api/sends/file", fd);
     await POST(req as never);
 
     expect(mockCreate).toHaveBeenCalledWith(
@@ -284,7 +303,7 @@ describe("POST /api/sends/file", () => {
     // both to flag tampering and to avoid storing a misleading content-type.
     const file = new File([png], "image.png", { type: "image/jpeg" });
     const fd = createFormData({ file });
-    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const req = await createMultipartRequest("http://localhost/api/sends/file", fd);
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
@@ -303,7 +322,7 @@ describe("POST /api/sends/file", () => {
 
     const file = new File(["hello"], "notes.txt", { type: "text/plain" });
     const fd = createFormData({ file });
-    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const req = await createMultipartRequest("http://localhost/api/sends/file", fd);
     await POST(req as never);
 
     expect(mockCreate).toHaveBeenCalledWith(

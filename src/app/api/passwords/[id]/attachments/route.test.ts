@@ -103,17 +103,25 @@ vi.mock("@/lib/quota/resource-quotas", () => ({
   QuotaExceededError: class extends Error {},
 }));
 
-function createFormDataRequest(
+async function createFormDataRequest(
   url: string,
   fields: Record<string, string | Blob>
-): NextRequest {
+): Promise<NextRequest> {
   const formData = new FormData();
   for (const [key, value] of Object.entries(fields)) {
     formData.append(key, value);
   }
+  // Serialize once to set Content-Length, mirroring a real browser upload —
+  // the route gates on it via rejectOversizedMultipart (fail-closed if absent).
+  const encoded = new Request("http://localhost", { method: "POST", body: formData });
+  const bytes = new Uint8Array(await encoded.arrayBuffer());
   return new NextRequest(url, {
     method: "POST",
-    body: formData,
+    body: bytes,
+    headers: {
+      "content-type": encoded.headers.get("content-type") ?? "multipart/form-data",
+      "content-length": String(bytes.length),
+    },
   });
 }
 
@@ -230,7 +238,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
   it("returns 401 when unauthenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["data"]),
         iv: "a".repeat(24),
         authTag: "b".repeat(32),
@@ -247,7 +255,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
   it("returns 400 when attachment limit reached", async () => {
     mockPrismaAttachment.count.mockResolvedValue(20);
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["data"]),
         iv: "a".repeat(24),
         authTag: "b".repeat(32),
@@ -265,7 +273,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
 
   it("returns 400 for invalid extension (EXTENSION_NOT_ALLOWED)", async () => {
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["data"]),
         iv: "a".repeat(24),
         authTag: "b".repeat(32),
@@ -283,7 +291,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
 
   it("returns 400 for file too large (FILE_TOO_LARGE)", async () => {
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["data"]),
         iv: "a".repeat(24),
         authTag: "b".repeat(32),
@@ -301,7 +309,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
 
   it("returns 400 for invalid content type (CONTENT_TYPE_NOT_ALLOWED)", async () => {
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["data"]),
         iv: "a".repeat(24),
         authTag: "b".repeat(32),
@@ -319,7 +327,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
 
   it("returns 400 for invalid iv format (INVALID_ENCRYPTION_FORMAT)", async () => {
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["data"]),
         iv: "short",
         authTag: "b".repeat(32),
@@ -340,7 +348,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
   it("rejects upload missing cekEncrypted → 400 INVALID_REQUEST", async () => {
     // No CEK fields at all
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["data"]),
         iv: "a".repeat(24),
         authTag: "b".repeat(32),
@@ -364,7 +372,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     });
 
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         id: clientId,
         file: new Blob(["encrypted-data"]),
         iv: "a".repeat(24),
@@ -404,7 +412,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         id: clientId,
         file: new Blob(["encrypted-data"]),
         iv: "a".repeat(24),
@@ -443,7 +451,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     });
 
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         id: clientId,
         file: new Blob(["encrypted-data"]),
         iv: "a".repeat(24),
@@ -470,7 +478,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
   it("returns 400 when actual file blob exceeds MAX_FILE_SIZE", async () => {
     const hugeBlob = new Blob([new Uint8Array(11 * 1024 * 1024)]); // 11MB
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: hugeBlob,
         iv: "a".repeat(24),
         authTag: "b".repeat(32),
@@ -510,7 +518,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     });
 
     await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["encrypted-data"]),
         iv: "a".repeat(24),
         authTag: "b".repeat(32),
@@ -533,7 +541,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
   it("returns 429 when rate limited", async () => {
     mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 30_000 });
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["data"]),
         iv: "a".repeat(24),
         authTag: "b".repeat(32),
@@ -561,7 +569,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     );
 
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         id: "../../../etc/passwd",
         file: new Blob(["encrypted-data"]),
         iv: "a".repeat(24),
@@ -591,7 +599,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     });
 
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         id: clientId,
         file: new Blob(["encrypted-data"]),
         iv: "a".repeat(24),
@@ -622,7 +630,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     mockPrismaUser.findUnique.mockResolvedValueOnce({ keyVersion: 2 });
 
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["encrypted-data"]),
         iv: "a".repeat(24),
         authTag: "b".repeat(32),
@@ -647,7 +655,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     mockPrismaUser.findUnique.mockResolvedValueOnce(null);
 
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["encrypted-data"]),
         iv: "a".repeat(24),
         authTag: "b".repeat(32),
@@ -685,7 +693,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     });
 
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["encrypted-data"]),
         iv: "a".repeat(24),
         authTag: "b".repeat(32),
@@ -703,7 +711,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
   it("rejects upload with oversized cekEncrypted → 400 VALIDATION_ERROR", async () => {
     const longCek = "A".repeat(257);
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["encrypted-data"]),
         iv: "a".repeat(24),
         authTag: "b".repeat(32),
@@ -722,7 +730,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
   it("rejects upload with malformed base64 in cekEncrypted (base64url chars) → 400 VALIDATION_ERROR", async () => {
     // base64url uses `-` / `_`; standard base64 regex must reject them.
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["encrypted-data"]),
         iv: "a".repeat(24),
         authTag: "b".repeat(32),
@@ -743,7 +751,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
 
   it("rejects upload with cekEncrypted length not multiple of 4 → 400 VALIDATION_ERROR", async () => {
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["encrypted-data"]),
         iv: "a".repeat(24),
         authTag: "b".repeat(32),
@@ -763,7 +771,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
 
   it("rejects upload with cekEncrypted containing the OTHER base64url char `_` → 400", async () => {
     const res = await POST(
-      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
         file: new Blob(["encrypted-data"]),
         iv: "a".repeat(24),
         authTag: "b".repeat(32),

@@ -88,7 +88,7 @@ describe("POST /api/sends/file", () => {
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
 
-    const req = createMultipartRequest(
+    const req = await createMultipartRequest(
       "http://localhost/api/sends/file",
       createFormData()
     );
@@ -103,7 +103,7 @@ describe("POST /api/sends/file", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockCheck.mockResolvedValue({ allowed: false });
 
-    const req = createMultipartRequest(
+    const req = await createMultipartRequest(
       "http://localhost/api/sends/file",
       createFormData()
     );
@@ -118,12 +118,18 @@ describe("POST /api/sends/file", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
 
     // Send non-FormData body that will cause req.formData() to throw
+    const body = JSON.stringify({ name: "test" });
     const req = new (await import("next/server")).NextRequest(
       "http://localhost/api/sends/file",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "test" }),
+        // Valid content-length so the multipart size gate passes and we reach
+        // formData() — this test exercises the parse-failure path specifically.
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": String(Buffer.byteLength(body)),
+        },
+        body,
       } as ConstructorParameters<typeof import("next/server").NextRequest>[1]
     );
     const res = await POST(req as never);
@@ -141,7 +147,7 @@ describe("POST /api/sends/file", () => {
     fd.append("expiresIn", "1d");
     // No file field appended
 
-    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const req = await createMultipartRequest("http://localhost/api/sends/file", fd);
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
@@ -159,7 +165,7 @@ describe("POST /api/sends/file", () => {
       type: "application/octet-stream",
     });
 
-    const req = createMultipartRequest(
+    const req = await createMultipartRequest(
       "http://localhost/api/sends/file",
       createFormData({ file: exactFile })
     );
@@ -177,7 +183,7 @@ describe("POST /api/sends/file", () => {
       type: "application/octet-stream",
     });
 
-    const req = createMultipartRequest(
+    const req = await createMultipartRequest(
       "http://localhost/api/sends/file",
       createFormData({ file: bigFile })
     );
@@ -194,7 +200,7 @@ describe("POST /api/sends/file", () => {
     mockCreate.mockResolvedValue({ id: "share-1", expiresAt: new Date() });
 
     const fd = createFormData({ contentType: "image/png", filename: "test.png" });
-    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const req = await createMultipartRequest("http://localhost/api/sends/file", fd);
     const res = await POST(req as never);
 
     expect(res.status).toBe(201);
@@ -206,7 +212,7 @@ describe("POST /api/sends/file", () => {
     mockCreate.mockResolvedValue({ id: "share-1", expiresAt: new Date() });
 
     const fd = createFormData({ contentType: "application/octet-stream", filename: "test.bin" });
-    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const req = await createMultipartRequest("http://localhost/api/sends/file", fd);
     const res = await POST(req as never);
 
     expect(res.status).toBe(201);
@@ -218,7 +224,7 @@ describe("POST /api/sends/file", () => {
 
     const fd = createFormData({ contentType: "image/jpeg", filename: "test.jpg" });
 
-    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const req = await createMultipartRequest("http://localhost/api/sends/file", fd);
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
@@ -231,7 +237,7 @@ describe("POST /api/sends/file", () => {
     mockFileTypeFromBuffer.mockResolvedValue(undefined);
     mockCreate.mockResolvedValue({ id: "share-1", expiresAt: new Date() });
 
-    const req = createMultipartRequest(
+    const req = await createMultipartRequest(
       "http://localhost/api/sends/file",
       createFormData()
     );
@@ -245,7 +251,7 @@ describe("POST /api/sends/file", () => {
 
     const fd = createFormData({ filename: "../etc/passwd" });
 
-    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const req = await createMultipartRequest("http://localhost/api/sends/file", fd);
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
@@ -259,7 +265,7 @@ describe("POST /api/sends/file", () => {
 
     const fd = createFormData({ filename: "テスト文書.txt" });
 
-    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const req = await createMultipartRequest("http://localhost/api/sends/file", fd);
     const res = await POST(req as never);
 
     expect(res.status).toBe(201);
@@ -270,7 +276,7 @@ describe("POST /api/sends/file", () => {
 
     const fd = createFormData({ filename: "test😀.txt" });
 
-    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const req = await createMultipartRequest("http://localhost/api/sends/file", fd);
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
@@ -284,7 +290,7 @@ describe("POST /api/sends/file", () => {
     const file = new File(["data"], "", { type: "text/plain" });
     const fd = createFormData({ file });
 
-    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const req = await createMultipartRequest("http://localhost/api/sends/file", fd);
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
@@ -307,7 +313,7 @@ describe("POST /api/sends/file", () => {
     );
     const fdLarge = createFormData({ file: largeFile });
 
-    const req = createMultipartRequest(
+    const req = await createMultipartRequest(
       "http://localhost/api/sends/file",
       fdLarge
     );
@@ -323,7 +329,7 @@ describe("POST /api/sends/file", () => {
     const expiresAt = new Date(Date.now() + 86400_000);
     mockCreate.mockResolvedValue({ id: "share-1", expiresAt });
 
-    const req = createMultipartRequest(
+    const req = await createMultipartRequest(
       "http://localhost/api/sends/file",
       createFormData()
     );
@@ -364,7 +370,7 @@ describe("POST /api/sends/file", () => {
     const fd = createFormData();
     fd.append("requirePassword", "true");
 
-    const req = createMultipartRequest("http://localhost/api/sends/file", fd);
+    const req = await createMultipartRequest("http://localhost/api/sends/file", fd);
     const res = await POST(req as never);
     const { status } = await parseResponse(res);
 

@@ -16,6 +16,7 @@ import {
   isValidSendFilename,
 } from "@/lib/validations";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { rejectOversizedMultipart } from "@/lib/http/parse-body";
 import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
@@ -122,14 +123,12 @@ async function handlePOST(
     return errorResponse(API_ERROR.ATTACHMENT_LIMIT_EXCEEDED);
   }
 
-  // Early rejection: check Content-Length before consuming body into memory
-  const contentLength = req.headers.get("content-length");
-  if (contentLength) {
-    const declaredSize = parseInt(contentLength, 10);
-    if (!Number.isNaN(declaredSize) && declaredSize > MAX_FILE_SIZE * 2) {
-      return errorResponse(API_ERROR.PAYLOAD_TOO_LARGE);
-    }
-  }
+  // Early rejection before buffering the multipart body into memory. Requires a
+  // declared Content-Length and caps it — fail-closed on a missing header so a
+  // chunked / no-Content-Length body cannot bypass the cap (req.formData() has
+  // no streaming cap of its own).
+  const oversized = rejectOversizedMultipart(req, MAX_FILE_SIZE * 2);
+  if (oversized) return oversized;
 
   // Parse FormData
   let formData: FormData;

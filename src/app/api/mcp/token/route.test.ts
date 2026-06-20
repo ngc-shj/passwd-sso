@@ -129,6 +129,59 @@ describe("POST /api/mcp/token", () => {
     expect(json.error).toBe("invalid_request");
   });
 
+  it("rejects an oversized urlencoded form body with no Content-Length (chunked-TE bypass guard)", async () => {
+    // If the streaming cap did NOT fire, this body parses into a complete,
+    // valid authorization_code grant and would reach exchangeCodeForToken —
+    // so `not.toHaveBeenCalled()` can only hold when the cap aborts the read.
+    // (Guards against a vacuous pass via the missing-required-fields branch.)
+    mockExchangeCodeForToken.mockResolvedValue({
+      ok: true,
+      data: {
+        accessToken: "mcp_access_token_should_not_be_issued",
+        tokenType: "Bearer",
+        expiresIn: 3600,
+        scope: "credentials:list",
+        tokenId: "token-id",
+        clientDbId: "client-uuid",
+        tenantId: "tenant-uuid",
+        userId: "user-uuid",
+        serviceAccountId: null,
+      },
+    });
+    const { NextRequest } = await import("next/server");
+    // 2 MB urlencoded body, streamed with NO Content-Length header — the
+    // streaming cap must abort the read and reject before parsing. The grant
+    // params come FIRST so the body is structurally complete up front; only the
+    // trailing padding pushes it over the cap.
+    const oversized =
+      "grant_type=authorization_code" +
+      "&code=test-code-abc" +
+      "&redirect_uri=https%3A%2F%2Fexample.com%2Fcallback" +
+      "&client_id=mcpc_testclient" +
+      "&client_secret=secret-value" +
+      "&code_verifier=my-code-verifier" +
+      "&padding=" + "x".repeat(2_000_000);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(oversized));
+        controller.close();
+      },
+    });
+    const req = new NextRequest("http://localhost/api/mcp/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: stream,
+      duplex: "half",
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+    // The cap must have aborted the read before the grant was exchanged.
+    expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
+  });
+
   it("returns 400 when exchange fails with invalid_grant", async () => {
     mockExchangeCodeForToken.mockResolvedValue({
       ok: false,

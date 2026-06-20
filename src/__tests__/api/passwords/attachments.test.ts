@@ -116,7 +116,7 @@ vi.mock("@/lib/quota/resource-quotas", () => ({
   QuotaExceededError: class extends Error {},
 }));
 
-function createFormDataRequest(
+async function createFormDataRequest(
   fields: Record<string, string | Blob>,
   headers: Record<string, string> = {},
 ) {
@@ -124,10 +124,19 @@ function createFormDataRequest(
   for (const [key, value] of Object.entries(fields)) {
     formData.append(key, value);
   }
+  // Serialize once to set Content-Length, mirroring a real browser upload —
+  // the route gates on it via rejectOversizedMultipart (fail-closed if absent).
+  // An explicit `headers` override (e.g. a too-large content-length test) wins.
+  const encoded = new Request("http://localhost", { method: "POST", body: formData });
+  const bytes = new Uint8Array(await encoded.arrayBuffer());
   return new NextRequest("http://localhost/api/passwords/e1/attachments", {
     method: "POST",
-    body: formData,
-    headers,
+    body: bytes,
+    headers: {
+      "content-type": encoded.headers.get("content-type") ?? "multipart/form-data",
+      "content-length": String(bytes.length),
+      ...headers,
+    },
   });
 }
 
@@ -225,7 +234,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
 
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
-    const req = createFormDataRequest(validFormFields());
+    const req = await createFormDataRequest(validFormFields());
     const res = await POST(req, createParams("e1"));
     const { status } = await parseResponse(res);
     expect(status).toBe(401);
@@ -234,7 +243,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
   it("returns 404 when entry not found", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockEntryFindUnique.mockResolvedValue(null);
-    const req = createFormDataRequest(validFormFields());
+    const req = await createFormDataRequest(validFormFields());
     const res = await POST(req, createParams("e1"));
     const { status } = await parseResponse(res);
     expect(status).toBe(404);
@@ -243,7 +252,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
   it("returns 404 when entry belongs to another user (A01-4: no existence oracle)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockEntryFindUnique.mockResolvedValue({ userId: "other-user" });
-    const req = createFormDataRequest(validFormFields());
+    const req = await createFormDataRequest(validFormFields());
     const res = await POST(req, createParams("e1"));
     const { status } = await parseResponse(res);
     expect(status).toBe(404);
@@ -253,7 +262,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockEntryFindUnique.mockResolvedValue({ userId: DEFAULT_SESSION.user.id });
     mockAttachmentCount.mockResolvedValue(20);
-    const req = createFormDataRequest(validFormFields());
+    const req = await createFormDataRequest(validFormFields());
     const res = await POST(req, createParams("e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -264,7 +273,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockEntryFindUnique.mockResolvedValue({ userId: DEFAULT_SESSION.user.id });
     mockAttachmentCount.mockResolvedValue(0);
-    const req = createFormDataRequest(validFormFields(), {
+    const req = await createFormDataRequest(validFormFields(), {
       "content-length": String(100 * 1024 * 1024),
     });
     const res = await POST(req, createParams("e1"));
@@ -277,10 +286,16 @@ describe("POST /api/passwords/[id]/attachments", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockEntryFindUnique.mockResolvedValue({ userId: DEFAULT_SESSION.user.id });
     mockAttachmentCount.mockResolvedValue(0);
+    const body = "not form data";
     const req = new NextRequest("http://localhost/api/passwords/e1/attachments", {
       method: "POST",
-      body: "not form data",
-      headers: { "content-type": "text/plain" },
+      body,
+      // Valid content-length so the multipart size gate passes and we reach
+      // formData() — this test exercises the parse-failure path specifically.
+      headers: {
+        "content-type": "text/plain",
+        "content-length": String(Buffer.byteLength(body)),
+      },
     });
     const res = await POST(req, createParams("e1"));
     const { status, json } = await parseResponse(res);
@@ -292,7 +307,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockEntryFindUnique.mockResolvedValue({ userId: DEFAULT_SESSION.user.id });
     mockAttachmentCount.mockResolvedValue(0);
-    const req = createFormDataRequest({ file: new Blob(["x"]) });
+    const req = await createFormDataRequest({ file: new Blob(["x"]) });
     const res = await POST(req, createParams("e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -305,7 +320,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
     fields.iv = "bad-iv";
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, createParams("e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -318,7 +333,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
     fields.authTag = "bad-tag";
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, createParams("e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -331,7 +346,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
     fields.filename = "malware.exe";
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, createParams("e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -344,7 +359,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
     fields.contentType = "application/x-executable";
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, createParams("e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -357,7 +372,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
     fields.filename = "../etc/passwd.pdf";
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, createParams("e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -370,7 +385,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
     fields.filename = "test\r\n.pdf";
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, createParams("e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -383,7 +398,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
     fields.filename = "CON.pdf";
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, createParams("e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -403,7 +418,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
       createdAt: new Date(),
     };
     mockAttachmentCreate.mockResolvedValue(created);
-    const req = createFormDataRequest(validFormFields());
+    const req = await createFormDataRequest(validFormFields());
     const res = await POST(req, createParams("e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(201);
@@ -415,7 +430,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     mockEntryFindUnique.mockResolvedValue({ userId: DEFAULT_SESSION.user.id });
     mockAttachmentCount.mockResolvedValue(0);
     const fields = { ...validFormFields(), cekEncrypted: "Y2V-" };
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, createParams("e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -438,7 +453,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     };
     mockAttachmentCreate.mockResolvedValue(created);
     const fields = { ...validFormFields(), id: uppercaseId };
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, createParams("e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(201);
