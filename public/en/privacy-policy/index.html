@@ -32,22 +32,22 @@
     </a>
 
     <h1>Privacy Policy</h1>
-    <p class="subtitle">passwd-sso Browser Extension</p>
-    <p class="updated">Last updated: 2026-03-11</p>
+    <p class="subtitle">passwd-sso Browser Extension &amp; iOS App</p>
+    <p class="updated">Last updated: 2026-06-21</p>
 
     <div class="sections">
       <section>
         <h2>Overview</h2>
-        <p>The passwd-sso browser extension ("the Extension") is a companion to the passwd-sso password manager. This policy explains what data the Extension accesses, how it is used, and your rights.</p>
+        <p>The passwd-sso browser extension ("the Extension") and the passwd-sso iOS app ("the App") are companions to the passwd-sso password manager. This policy explains what data they access, how it is used, and your rights. Unless a section is marked as Extension-specific or iOS-specific, it applies to both.</p>
       </section>
 
       <section>
         <h2>Data Collection</h2>
-        <p>The Extension does NOT collect, transmit, or sell any personal data to third parties. All vault data is end-to-end encrypted and only decrypted locally in your browser.</p>
+        <p>The Extension and the App do NOT collect, transmit, or sell any personal data to third parties. There is no analytics, advertising, or third-party SDK. All vault data is end-to-end encrypted and only decrypted locally on your device.</p>
       </section>
 
       <section>
-        <h2>Data Accessed Locally</h2>
+        <h2>Data Accessed Locally (Extension)</h2>
         <p>The Extension accesses the following data solely on your device:</p>
         <ul>
           <li><strong>storage</strong> — Extension settings and encrypted session state (via chrome.storage)</li>
@@ -59,11 +59,11 @@
 
       <section>
         <h2>Server Communication</h2>
-        <p>The Extension communicates exclusively with your self-hosted passwd-sso server instance. No data is sent to any other server. All communication uses HTTPS and encrypted payloads.</p>
+        <p>The Extension and the App communicate exclusively with the self-hosted passwd-sso server instance that you configure. No data is sent to any other server, and there is no passwd-sso-operated cloud backend. All communication uses HTTPS and encrypted payloads.</p>
       </section>
 
       <section>
-        <h2>Browser Permissions</h2>
+        <h2>Browser Permissions (Extension)</h2>
         <p>The Extension requests the following permissions:</p>
         <ul>
           <li><strong>storage</strong> — Save extension settings and encrypted session state</li>
@@ -75,6 +75,19 @@
           <li><strong>offscreen</strong> — Perform clipboard operations in the background</li>
           <li><strong>hostPermissions</strong> — Access web pages for form detection and autofill (granted on demand)</li>
         </ul>
+      </section>
+
+      <section>
+        <h2>passwd-sso for iOS (App)</h2>
+        <p>The iOS app provides the same vault access natively on iPhone, using iOS system frameworks. It accesses the following solely on your device:</p>
+        <ul>
+          <li><strong>Keychain &amp; App Group</strong> — Stores encrypted session state and the vault bridge key, shared securely between the app and its AutoFill extension. Never transmitted.</li>
+          <li><strong>Face ID / Touch ID</strong> — Used only to confirm it's you before unlocking the vault or revealing a credential. Biometric data is processed by iOS and never seen by, or sent to, the app.</li>
+          <li><strong>AutoFill Credential Provider</strong> — When you enable passwd-sso under Settings → AutoFill &amp; Passwords, iOS lets the app fill passwords, one-time codes (TOTP), and passkeys into apps and websites at your request.</li>
+          <li><strong>Passkeys (WebAuthn)</strong> — Passkey credentials are stored end-to-end encrypted in your vault and used to sign in; their private keys never leave your device unencrypted.</li>
+          <li><strong>Local cache</strong> — Encrypted vault entries are cached on device for AutoFill and offline list display, protected by the same end-to-end encryption.</li>
+        </ul>
+        <p>The App contains no analytics or tracking SDKs and does not use the iOS advertising identifier.</p>
       </section>
 
       <section>
