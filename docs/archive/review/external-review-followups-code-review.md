@@ -1,5 +1,31 @@
 # Code Review: external-review-followups
 Date: 2026-06-20
+Review round: 2
+
+## Round 2 — second external review pass
+
+A second external review of the open PR confirmed all four code fixes plus the
+challengeId consolidation, and raised two further items:
+
+- **WebAuthn `userVerification` mismatch (Low)** — options requested `preferred`
+  while every verify path requires UV (`requireUserVerification: true`), causing
+  a late-reject UX trap for UV-incapable authenticators. RESOLVED: `generateRegistrationOpts`
+  and `generateAuthenticationOpts` now request `userVerification: "required"`, matching
+  `generateDiscoverableAuthOpts` and the app's actual UV-required model. (This reverses
+  the Round-1 "#4 false positive" judgment — re-analysis showed all verify paths require
+  UV, so `preferred` was a genuine latent inconsistency, not a deliberate non-UV-key
+  trade-off.) Added regression tests pinning options↔verify UV consistency.
+- **`tx` shadowing in approve/tokens (maintainability)** — `withTenantRls(..., async (tx) =>
+  prisma.$transaction(async (tx) => ...))` had an unused outer `tx` shadowed by a redundant
+  nested `prisma.$transaction`. RESOLVED essentially (not cosmetically): `withTenantRls`
+  already opens the transaction and provides `tx`, so the redundant inner `prisma.$transaction`
+  was removed and the provided `tx` used directly. Rewired the route + integration test mocks
+  (`mockWithTenantRls` passes the prisma tx; SA-token/access-request write methods moved onto
+  the prisma mock) so the tests exercise the real single-transaction structure.
+
+---
+
+# (Round 1 below)
 Review round: 1
 
 ## Changes from Previous Round

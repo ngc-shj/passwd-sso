@@ -102,7 +102,7 @@ describe("POST /api/auth/passkey/options/email", () => {
       challenge: "test-challenge-base64url",
       rpId: "localhost",
       allowCredentials: [{ id: "cred-1", type: "public-key" }],
-      userVerification: "preferred",
+      userVerification: "required",
     });
     // withBypassRls: call the callback directly
     mockWithBypassRls.mockImplementation(

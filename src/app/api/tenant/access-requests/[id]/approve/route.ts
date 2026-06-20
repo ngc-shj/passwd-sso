@@ -133,8 +133,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   let result: { plaintext: string; expiresAt: Date; tokenId: string };
   try {
-    result = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    prisma.$transaction(async (tx) => {
+    result = await withTenantRls(prisma, actor.tenantId, async (tx) => {
       // Enforce token limit per SA. "Active" = not revoked AND not expired,
       // matching extension/operator/SCIM token limit checks — expired-but-not-
       // revoked tokens are unusable and must not consume a slot.
@@ -199,8 +198,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       });
 
       return { plaintext, expiresAt, tokenId: token.id };
-    }),
-    );
+    });
   } catch (err) {
     if (err instanceof Error && err.message === "Already processed or wrong tenant") {
       return errorResponse(API_ERROR.CONFLICT);

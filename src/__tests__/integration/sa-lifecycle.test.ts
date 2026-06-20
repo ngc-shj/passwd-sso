@@ -32,7 +32,8 @@ const {
   mockServiceAccountTokenFindUnique,
   mockServiceAccountTokenUpdate,
   mockServiceAccountTokenUpdateMany,
-  mockPrismaTransaction,
+  mockServiceAccountTokenCount,
+  mockServiceAccountTokenCreate,
   mockPasswordsAuthOrToken,
   mockRequireRecentSession,
 } = vi.hoisted(() => ({
@@ -52,7 +53,8 @@ const {
   mockServiceAccountTokenFindUnique: vi.fn(),
   mockServiceAccountTokenUpdate: vi.fn(),
   mockServiceAccountTokenUpdateMany: vi.fn(),
-  mockPrismaTransaction: vi.fn(),
+  mockServiceAccountTokenCount: vi.fn(),
+  mockServiceAccountTokenCreate: vi.fn(),
   mockPasswordsAuthOrToken: vi.fn(),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
@@ -92,8 +94,9 @@ vi.mock("@/lib/prisma", () => ({
       findUnique: mockServiceAccountTokenFindUnique,
       update: mockServiceAccountTokenUpdate,
       updateMany: mockServiceAccountTokenUpdateMany,
+      count: mockServiceAccountTokenCount,
+      create: mockServiceAccountTokenCreate,
     },
-    $transaction: mockPrismaTransaction,
   },
 }));
 
@@ -293,15 +296,8 @@ describe("Scenario 2: SA token issuance and authentication", () => {
       isActive: true,
     });
 
-    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
-      const tx = {
-        serviceAccountToken: {
-          count: vi.fn().mockResolvedValue(0),
-          create: vi.fn().mockResolvedValue({ ...BASE_TOKEN }),
-        },
-      };
-      return fn(tx);
-    });
+    mockServiceAccountTokenCount.mockResolvedValue(0);
+    mockServiceAccountTokenCreate.mockResolvedValue({ ...BASE_TOKEN });
 
     const expiresAt = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
     const req = createRequest(

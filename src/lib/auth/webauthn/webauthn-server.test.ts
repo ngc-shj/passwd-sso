@@ -258,6 +258,33 @@ describe("generateRegistrationOpts (C8 userID Uint8Array shape)", () => {
     const expectedWireId = Buffer.from(userId, "utf-8").toString("base64url");
     expect(opts.user.id).toBe(expectedWireId);
   });
+
+  it("requests userVerification 'required' to match verifyRegistration's UV requirement", async () => {
+    // verifyRegistration uses requireUserVerification: true. Requesting only
+    // "preferred" here would let a UV-incapable authenticator complete the
+    // ceremony then be rejected at verify (late-reject UX trap).
+    const { generateRegistrationOpts } = await import("./webauthn-server");
+    const opts = await generateRegistrationOpts("user-1", "user@example.com", []);
+    expect(opts.authenticatorSelection?.userVerification).toBe("required");
+  });
+});
+
+describe("generateAuthenticationOpts", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubEnv("WEBAUTHN_RP_ID", "example.com");
+  });
+
+  it("requests userVerification 'required' to match the UV requirement of all verify paths", async () => {
+    // verifyAuthentication / verifyAuthenticationAssertion use
+    // requireUserVerification: true. Options must request UV up front rather
+    // than letting a UV-incapable authenticator pass the ceremony then fail verify.
+    const { generateAuthenticationOpts } = await import("./webauthn-server");
+    const opts = await generateAuthenticationOpts([
+      { credentialId: "cred-1", transports: ["internal"] },
+    ]);
+    expect(opts.userVerification).toBe("required");
+  });
 });
 
 describe("base64urlToUint8Array / uint8ArrayToBase64url", () => {

@@ -129,7 +129,11 @@ export async function generateRegistrationOpts(
     excludeCredentials,
     authenticatorSelection: {
       residentKey: "preferred",
-      userVerification: "preferred",
+      // verifyRegistration requires UV (requireUserVerification: true), so request
+      // it up front. With "preferred", a UV-incapable authenticator would complete
+      // the ceremony client-side and only be rejected at verify — a confusing
+      // late-reject. "required" surfaces the requirement before the ceremony.
+      userVerification: "required",
     },
     extensions: {
       credProps: true,
@@ -181,7 +185,11 @@ export async function generateAuthenticationOpts(
   const opts: GenerateAuthenticationOptionsOpts = {
     rpID: rpId,
     allowCredentials: allow,
-    userVerification: "preferred",
+    // All verify paths that consume these options (verifyAuthentication /
+    // verifyAuthenticationAssertion) require UV, so request it up front rather
+    // than letting a UV-incapable authenticator pass the ceremony and be
+    // rejected at verify. Matches generateDiscoverableAuthOpts ("required").
+    userVerification: "required",
   };
 
   return generateAuthenticationOptions(opts);
