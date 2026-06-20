@@ -239,11 +239,14 @@ final class EntryBlobDecoderTests: XCTestCase {
   }
 
   func testDetailDecodesSshKeyBlobUsesPassphraseAndCommentKeys() throws {
-    // Blob keys are `passphrase`/`comment` (NOT sshPassphrase/sshComment), and
-    // `keySize` is a free-text string ("2048"), not an Int.
+    // Blob keys are `passphrase`/`comment` (NOT sshPassphrase/sshComment).
+    // The web client writes `keySize` as a JSON NUMBER (the SSH parser yields an
+    // Int bit-length); decoding it as a bare String previously threw a
+    // typeMismatch that failed the whole blob decode and left SSH entries stuck
+    // on "decrypting". This mirrors the real server payload (numeric keySize).
     let json = #"""
     {"title":"deploy key","privateKey":"-----BEGIN-----","publicKey":"ssh-ed25519 AAA",
-     "keyType":"ed25519","keySize":"256","fingerprint":"SHA256:abc",
+     "keyType":"ed25519","keySize":256,"fingerprint":"SHA256:abc",
      "passphrase":"hunter2","comment":"deploy@host"}
     """#
     let d = try XCTUnwrap(
@@ -260,6 +263,79 @@ final class EntryBlobDecoderTests: XCTestCase {
     XCTAssertNil(d.bankAccount)
     XCTAssertEqual(d.url, "")
     XCTAssertEqual(d.password, "")
+  }
+
+  func testDetailDecodesSshKeyBlobToleratesStringKeySize() throws {
+    // Defensive: a blob that carries `keySize` as a string (legacy/hand-edited
+    // data) must still decode rather than throwing the whole blob away.
+    let json = #"""
+    {"title":"legacy key","privateKey":"-----BEGIN-----","keyType":"rsa",
+     "keySize":"2048","fingerprint":"SHA256:xyz"}
+    """#
+    let d = try XCTUnwrap(
+      EntryBlobDecoder.detail(plaintext: data(json), entryId: "ssh2", teamId: nil, entryType: "SSH_KEY")
+    )
+    let key = try XCTUnwrap(d.sshKey)
+    XCTAssertEqual(key.keySize, "2048")
+    XCTAssertEqual(key.keyType, "rsa")
+  }
+
+  func testDetailDecodesSshKeyBlobWithNullKeySize() throws {
+    // `keySize || null` → JSON null when the parser could not estimate a size.
+    let json = #"""
+    {"title":"sizeless key","privateKey":"-----BEGIN-----","keyType":"ed25519",
+     "keySize":null,"fingerprint":"SHA256:zzz"}
+    """#
+    let d = try XCTUnwrap(
+      EntryBlobDecoder.detail(plaintext: data(json), entryId: "ssh3", teamId: nil, entryType: "SSH_KEY")
+    )
+    let key = try XCTUnwrap(d.sshKey)
+    XCTAssertNil(key.keySize)
+    XCTAssertEqual(key.keyType, "ed25519")
+  }
+
+  func testDetailDecodesSshKeyBlobWithMissingKeySize() throws {
+    // keySize key omitted entirely (different decode path from explicit null).
+    let json = #"""
+    {"title":"k","privateKey":"-----BEGIN-----","keyType":"rsa","fingerprint":"SHA256:m"}
+    """#
+    let d = try XCTUnwrap(
+      EntryBlobDecoder.detail(plaintext: data(json), entryId: "ssh4", teamId: nil, entryType: "SSH_KEY")
+    )
+    let key = try XCTUnwrap(d.sshKey)
+    XCTAssertNil(key.keySize)
+    XCTAssertEqual(key.keyType, "rsa")
+  }
+
+  func testDetailDecodesSshKeyBlobNormalizesWholeNumberDoubleKeySize() throws {
+    // A whole-number double (256.0) normalizes to "256", not "256.0".
+    let json = #"""
+    {"title":"k","privateKey":"-----BEGIN-----","keyType":"rsa","keySize":256.0}
+    """#
+    let d = try XCTUnwrap(
+      EntryBlobDecoder.detail(plaintext: data(json), entryId: "ssh5", teamId: nil, entryType: "SSH_KEY")
+    )
+    let key = try XCTUnwrap(d.sshKey)
+    XCTAssertEqual(key.keySize, "256")
+  }
+
+  func testDetailToleratesNonScalarKeySizeWithoutFailingWholeBlob() throws {
+    // Regression guard for the exact failure class this fix targets: an
+    // unexpected JSON shape for ONE field must not throw the whole blob decode.
+    // bool/array keySize → keySize nil, but the SSH entry still decodes.
+    for badKeySize in ["true", "[2048]", #"{"bits":2048}"#] {
+      let json = """
+      {"title":"weird","privateKey":"-----BEGIN-----","keyType":"rsa",
+       "keySize":\(badKeySize),"fingerprint":"SHA256:q"}
+      """
+      let d = try XCTUnwrap(
+        EntryBlobDecoder.detail(plaintext: data(json), entryId: "ssh6", teamId: nil, entryType: "SSH_KEY"),
+        "blob with keySize=\(badKeySize) should still decode"
+      )
+      let key = try XCTUnwrap(d.sshKey)
+      XCTAssertNil(key.keySize, "non-scalar keySize=\(badKeySize) should decode to nil")
+      XCTAssertEqual(key.keyType, "rsa")
+    }
   }
 
   func testDetailDecodesSoftwareLicenseBlob() throws {

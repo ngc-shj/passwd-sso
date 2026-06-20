@@ -147,8 +147,9 @@ public struct VaultEntryDetail: Codable, Sendable, Equatable, Identifiable {
     public let fingerprint: String?
     public let passphrase: String?
     public let comment: String?
-    // Free-text input on the web form (written as `keySize || null`), so the
-    // blob value may be a string like "2048" — decode as String, not Int.
+    // Auto-detected bit length. The web client writes it as a JSON number;
+    // EntryBlobDecoder tolerantly decodes number-or-string and normalizes to a
+    // display string here (see FlexibleString in EntryBlobDecoder).
     public let keySize: String?
     public init(
       privateKey: String? = nil, publicKey: String? = nil, keyType: String? = nil,
