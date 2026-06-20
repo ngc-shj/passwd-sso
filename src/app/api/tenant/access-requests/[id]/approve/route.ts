@@ -134,6 +134,12 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   let result: { plaintext: string; expiresAt: Date; tokenId: string };
   try {
     result = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      // Serialize concurrent token issuance for the same SA (this approve path
+      // AND the direct token-create route share this lock key) so the
+      // count→create limit check cannot be raced past MAX_SA_TOKENS_PER_ACCOUNT
+      // under READ COMMITTED.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${request.serviceAccountId}::text))`;
+
       // Enforce token limit per SA. "Active" = not revoked AND not expired,
       // matching extension/operator/SCIM token limit checks — expired-but-not-
       // revoked tokens are unusable and must not consume a slot.

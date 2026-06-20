@@ -1,6 +1,23 @@
 # Code Review: external-review-followups
 Date: 2026-06-20
-Review round: 2
+Review round: 3
+
+## Round 3 — SA token limit concurrency hardening
+
+A third external observation noted the SA token limit was not strictly
+concurrency-safe: under READ COMMITTED, two concurrent issuance transactions
+(approve and/or direct token-create) could both read a sub-limit `count` and
+each `create`, momentarily exceeding `MAX_SA_TOKENS_PER_ACCOUNT`. Low severity
+(quota/abuse control, not a hard security boundary; pre-existing, not worsened
+by this PR). RESOLVED: both issuance transactions now take a per-SA advisory
+lock — `pg_advisory_xact_lock(hashtext(serviceAccountId))` — as the first
+statement, reusing the codebase's established serialization pattern (PRF/key
+rotation, attachments). Both paths share the same lock key, so approve and
+direct-create serialize against each other too. Added an ordering regression
+test (lock acquired before count) and `$executeRaw` to the route + integration
+test mocks. Manual-verification note: the advisory-lock shape is identical to
+three existing production routes; mocked tests assert call ordering, not the
+real PG lock.
 
 ## Round 2 — second external review pass
 

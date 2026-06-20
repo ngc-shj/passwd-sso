@@ -71,6 +71,8 @@ vi.mock("@/lib/prisma", () => ({
       count: mockSaTokenCount,
       create: mockSaTokenCreate,
     },
+    // Advisory lock used to serialize concurrent SA token issuance.
+    $executeRaw: vi.fn().mockResolvedValue(0),
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,

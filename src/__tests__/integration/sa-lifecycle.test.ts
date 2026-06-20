@@ -97,6 +97,8 @@ vi.mock("@/lib/prisma", () => ({
       count: mockServiceAccountTokenCount,
       create: mockServiceAccountTokenCreate,
     },
+    // Advisory lock used to serialize concurrent SA token issuance.
+    $executeRaw: vi.fn().mockResolvedValue(0),
   },
 }));
 

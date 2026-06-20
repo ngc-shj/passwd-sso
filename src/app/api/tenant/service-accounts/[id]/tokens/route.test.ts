@@ -15,6 +15,7 @@ const {
   mockServiceAccountTokenFindMany,
   mockServiceAccountTokenCount,
   mockServiceAccountTokenCreate,
+  mockSaExecuteRaw,
   mockHashToken,
   mockRequireRecentSession,
 } = vi.hoisted(() => ({
@@ -30,6 +31,7 @@ const {
   mockServiceAccountTokenFindMany: vi.fn(),
   mockServiceAccountTokenCount: vi.fn(),
   mockServiceAccountTokenCreate: vi.fn(),
+  mockSaExecuteRaw: vi.fn().mockResolvedValue(0),
   mockHashToken: vi.fn().mockReturnValue("hashed-token"),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
@@ -59,6 +61,8 @@ vi.mock("@/lib/prisma", () => ({
       count: mockServiceAccountTokenCount,
       create: mockServiceAccountTokenCreate,
     },
+    // Advisory lock used to serialize concurrent SA token issuance.
+    $executeRaw: mockSaExecuteRaw,
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -194,6 +198,7 @@ describe("POST /api/tenant/service-accounts/[id]/tokens", () => {
     vi.clearAllMocks();
     mockRequireRecentSession.mockReset();
     mockRequireRecentSession.mockResolvedValue(null);
+    mockSaExecuteRaw.mockResolvedValue(0);
   });
 
   it("creates a token and returns plaintext once", async () => {
@@ -231,6 +236,40 @@ describe("POST /api/tenant/service-accounts/[id]/tokens", () => {
         tenantId: "tenant-1",
       }),
     );
+  });
+
+  it("acquires the per-SA advisory lock before the limit count (serializes issuance)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockServiceAccountFindUnique.mockResolvedValue({
+      id: SA_ID,
+      tenantId: "tenant-1",
+      isActive: true,
+    });
+    makeTransactionSuccess();
+
+    const order: string[] = [];
+    mockSaExecuteRaw.mockImplementation(() => {
+      order.push("lock");
+      return Promise.resolve(0);
+    });
+    mockServiceAccountTokenCount.mockImplementation(() => {
+      order.push("count");
+      return Promise.resolve(0);
+    });
+
+    const expiresAt = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/service-accounts/${SA_ID}/tokens`,
+      { body: { name: "deploy-token", scope: ["passwords:read"], expiresAt } },
+    );
+    await POST(req, createParams({ id: SA_ID }));
+
+    // The advisory lock MUST be taken before the count→create window, otherwise
+    // two concurrent issuers can both read a sub-limit count and over-issue.
+    expect(mockSaExecuteRaw).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["lock", "count"]);
   });
 
   it("returns 409 when service account is inactive", async () => {
