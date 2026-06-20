@@ -29,7 +29,8 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
 
-vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
+vi.mock("@/lib/auth/webauthn/webauthn-server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/webauthn/webauthn-server")>()),
   verifyAuthenticationAssertion: mockVerifyAuthenticationAssertion,
 }));
 
@@ -63,8 +64,11 @@ import { POST } from "./route";
 
 const ROUTE_URL = "http://localhost:3000/api/webauthn/authenticate/verify";
 
+const CHALLENGE_ID = "0123456789abcdef0123456789abcdef";
+
 const validBody = {
   response: { id: "cred-1", rawId: "cred-1", type: "public-key", response: {} },
+  challengeId: CHALLENGE_ID,
 };
 
 function successResult(prfPresent = true) {
@@ -121,7 +125,7 @@ describe("POST /api/webauthn/authenticate/verify", () => {
       expect.anything(), // prisma instance
       "user-1",
       validBody.response,
-      "webauthn:challenge:authenticate:user-1",
+      `webauthn:challenge:authenticate:user-1:${CHALLENGE_ID}`,
       "Test/1.0",
     );
     // The route MUST run the helper inside withUserTenantRls so RLS context covers

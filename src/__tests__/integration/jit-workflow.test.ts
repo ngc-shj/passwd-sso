@@ -23,8 +23,11 @@ const {
   mockAccessRequestCreate,
   mockServiceAccountFindUnique,
   mockAccessRequestFindUnique,
+  mockAccessRequestUpdateMany,
+  mockAccessRequestUpdate,
   mockTenantFindUnique,
-  mockPrismaTransaction,
+  mockSaTokenCount,
+  mockSaTokenCreate,
   mockHashToken,
   mockDispatchTenantWebhook,
   mockRequireRecentSession,
@@ -40,8 +43,11 @@ const {
   mockAccessRequestCreate: vi.fn(),
   mockServiceAccountFindUnique: vi.fn(),
   mockAccessRequestFindUnique: vi.fn(),
+  mockAccessRequestUpdateMany: vi.fn(),
+  mockAccessRequestUpdate: vi.fn(),
   mockTenantFindUnique: vi.fn(),
-  mockPrismaTransaction: vi.fn(),
+  mockSaTokenCount: vi.fn(),
+  mockSaTokenCreate: vi.fn(),
   mockHashToken: vi.fn().mockReturnValue("hashed-token"),
   mockDispatchTenantWebhook: vi.fn(),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
@@ -71,6 +77,8 @@ vi.mock("@/lib/prisma", () => ({
       findMany: mockAccessRequestFindMany,
       create: mockAccessRequestCreate,
       findUnique: mockAccessRequestFindUnique,
+      updateMany: mockAccessRequestUpdateMany,
+      update: mockAccessRequestUpdate,
     },
     serviceAccount: {
       findUnique: mockServiceAccountFindUnique,
@@ -78,7 +86,12 @@ vi.mock("@/lib/prisma", () => ({
     tenant: {
       findUnique: mockTenantFindUnique,
     },
-    $transaction: mockPrismaTransaction,
+    serviceAccountToken: {
+      count: mockSaTokenCount,
+      create: mockSaTokenCreate,
+    },
+    // Advisory lock used to serialize concurrent SA token issuance.
+    $executeRaw: vi.fn().mockResolvedValue(0),
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -178,28 +191,19 @@ describe("Scenario 1: Full JIT workflow", () => {
     mockTenantFindUnique.mockResolvedValue(null); // use defaults
 
     const expiresAt = new Date(Date.now() + 3600 * 1000);
-    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
-      const tx = {
-        serviceAccountToken: {
-          count: vi.fn().mockResolvedValue(0),
-          create: vi.fn().mockResolvedValue({
-            id: "d0000000-0000-4000-8000-000000000001",
-            serviceAccountId: SA_ID,
-            tenantId: "a0000000-0000-4000-8000-000000000001",
-            tokenHash: "hashed-token",
-            prefix: "sa_abcd",
-            name: `JIT-${REQUEST_ID.slice(0, 8)}`,
-            scope: "passwords:read,passwords:list",
-            expiresAt,
-          }),
-        },
-        accessRequest: {
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-          update: vi.fn().mockResolvedValue({}),
-        },
-      };
-      return fn(tx);
+    mockSaTokenCount.mockResolvedValue(0);
+    mockSaTokenCreate.mockResolvedValue({
+      id: "d0000000-0000-4000-8000-000000000001",
+      serviceAccountId: SA_ID,
+      tenantId: "a0000000-0000-4000-8000-000000000001",
+      tokenHash: "hashed-token",
+      prefix: "sa_abcd",
+      name: `JIT-${REQUEST_ID.slice(0, 8)}`,
+      scope: "passwords:read,passwords:list",
+      expiresAt,
     });
+    mockAccessRequestUpdateMany.mockResolvedValue({ count: 1 });
+    mockAccessRequestUpdate.mockResolvedValue({});
 
     const approveReq = createRequest(
       "POST",
@@ -299,29 +303,23 @@ describe("Scenario 3: Double approval prevention", () => {
 
     const expiresAt = new Date(Date.now() + 3600 * 1000);
 
-    // First approval: updateMany returns count 1 (success)
-    mockPrismaTransaction.mockImplementationOnce(async (fn: (tx: unknown) => unknown) => {
-      const tx = {
-        serviceAccountToken: {
-          count: vi.fn().mockResolvedValue(0),
-          create: vi.fn().mockResolvedValue({
-            id: "d0000000-0000-4000-8000-000000000001",
-            serviceAccountId: SA_ID,
-            tenantId: "a0000000-0000-4000-8000-000000000001",
-            tokenHash: "hashed-token",
-            prefix: "sa_abcd",
-            name: `JIT-${REQUEST_ID.slice(0, 8)}`,
-            scope: "passwords:read",
-            expiresAt,
-          }),
-        },
-        accessRequest: {
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-          update: vi.fn().mockResolvedValue({}),
-        },
-      };
-      return fn(tx);
+    mockSaTokenCount.mockResolvedValue(0);
+    mockSaTokenCreate.mockResolvedValue({
+      id: "d0000000-0000-4000-8000-000000000001",
+      serviceAccountId: SA_ID,
+      tenantId: "a0000000-0000-4000-8000-000000000001",
+      tokenHash: "hashed-token",
+      prefix: "sa_abcd",
+      name: `JIT-${REQUEST_ID.slice(0, 8)}`,
+      scope: "passwords:read",
+      expiresAt,
     });
+    mockAccessRequestUpdate.mockResolvedValue({});
+    // First approval: the status transition fires (count 1, success).
+    // Second approval: the row is no longer PENDING (count 0, already processed).
+    mockAccessRequestUpdateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
 
     const req1 = createRequest(
       "POST",
@@ -330,21 +328,6 @@ describe("Scenario 3: Double approval prevention", () => {
     const res1 = await approveAccessRequest(req1, createParams({ id: REQUEST_ID }));
     const { status: status1 } = await parseResponse(res1);
     expect(status1).toBe(200);
-
-    // Second approval: updateMany returns count 0 (already processed)
-    mockPrismaTransaction.mockImplementationOnce(async (fn: (tx: unknown) => unknown) => {
-      const tx = {
-        serviceAccountToken: {
-          count: vi.fn().mockResolvedValue(0),
-          create: vi.fn(),
-        },
-        accessRequest: {
-          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-          update: vi.fn(),
-        },
-      };
-      return fn(tx);
-    });
 
     const req2 = createRequest(
       "POST",
@@ -442,8 +425,9 @@ describe("Scenario 5: Expired access request rejection (regression)", () => {
 
     expect(status).toBe(410);
     expect(json.error).toBe("SA_ACCESS_REQUEST_EXPIRED");
-    // Must NOT have started the issue-token transaction.
-    expect(mockPrismaTransaction).not.toHaveBeenCalled();
+    // Must NOT have started the issue-token write path.
+    expect(mockSaTokenCount).not.toHaveBeenCalled();
+    expect(mockSaTokenCreate).not.toHaveBeenCalled();
   });
 
   it("approving at exactly expiresAt is rejected (boundary)", async () => {

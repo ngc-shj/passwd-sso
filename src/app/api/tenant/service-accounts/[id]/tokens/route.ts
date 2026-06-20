@@ -133,27 +133,33 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   let token;
   try {
-    token = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-      prisma.$transaction(async (tx) => {
-        const activeTokenCount = await tx.serviceAccountToken.count({
-          where: { serviceAccountId: id, revokedAt: null },
-        });
-        if (activeTokenCount >= MAX_SA_TOKENS_PER_ACCOUNT) {
-          throw new Error("Token limit exceeded");
-        }
-        return tx.serviceAccountToken.create({
-          data: {
-            serviceAccountId: id,
-            tenantId: actor.tenantId,
-            tokenHash,
-            prefix,
-            name: result.data.name,
-            scope,
-            expiresAt,
-          },
-        });
-      }),
-    );
+    token = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      // Serialize concurrent token issuance for the same SA so the count→create
+      // limit check cannot be raced past MAX_SA_TOKENS_PER_ACCOUNT under
+      // READ COMMITTED (two issuers seeing the same pre-insert count).
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${id}::text))`;
+
+      // "Active" = not revoked AND not expired, matching extension/operator/
+      // SCIM token limit checks — expired-but-not-revoked tokens are unusable
+      // and must not consume a slot.
+      const activeTokenCount = await tx.serviceAccountToken.count({
+        where: { serviceAccountId: id, revokedAt: null, expiresAt: { gt: new Date() } },
+      });
+      if (activeTokenCount >= MAX_SA_TOKENS_PER_ACCOUNT) {
+        throw new Error("Token limit exceeded");
+      }
+      return tx.serviceAccountToken.create({
+        data: {
+          serviceAccountId: id,
+          tenantId: actor.tenantId,
+          tokenHash,
+          prefix,
+          name: result.data.name,
+          scope,
+          expiresAt,
+        },
+      });
+    });
   } catch (err) {
     if (err instanceof Error && err.message === "Token limit exceeded") {
       return errorResponse(API_ERROR.SA_TOKEN_LIMIT_EXCEEDED);

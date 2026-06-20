@@ -15,6 +15,7 @@ import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 
 import { errorResponse, errorResponseWithMessage, notFound, rateLimited, validationError } from "@/lib/http/api-response";
 import type { V1AuthResult } from "@/lib/auth/session/v1-auth";
+import { dedupeTagIds, tagSet } from "@/lib/services/tag-relation";
 
 type V1AuthData = Extract<V1AuthResult, { ok: true }>["data"];
 
@@ -153,7 +154,7 @@ async function handlePUT(
   // distinct row count, so compare against the deduped input length, not the
   // raw array length. Mirrors team-password-service.ts.
   if (tagIds?.length) {
-    const uniqueTagIds = [...new Set(tagIds)];
+    const uniqueTagIds = dedupeTagIds(tagIds);
     const ownedCount = await withTenantRls(prisma, tenantId, async (tx) =>
       tx.tag.count({ where: { id: { in: uniqueTagIds }, userId } }),
     );
@@ -193,7 +194,7 @@ async function handlePUT(
   if (requireReprompt !== undefined) updateData.requireReprompt = requireReprompt;
   if (expiresAt !== undefined) updateData.expiresAt = expiresAt ? new Date(expiresAt) : null;
   if (tagIds !== undefined) {
-    updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
+    updateData.tags = tagSet(tagIds);
   }
 
   // Row type for the FOR UPDATE snapshot read (personal password_entries).

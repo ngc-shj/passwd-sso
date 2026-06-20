@@ -9,7 +9,10 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { verifyAuthenticationAssertion } from "@/lib/auth/webauthn/webauthn-server";
+import {
+  verifyAuthenticationAssertion,
+  CHALLENGE_ID_RE,
+} from "@/lib/auth/webauthn/webauthn-server";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/types";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
@@ -23,6 +26,8 @@ const rateLimiter = createRateLimiter({
 
 const verifyAuthenticationSchema = z.object({
   response: z.record(z.string(), z.unknown()),
+  // 32-hex-char id minted by authenticate/options; scopes the challenge to this flow.
+  challengeId: z.string().regex(CHALLENGE_ID_RE),
 });
 
 // POST /api/webauthn/authenticate/verify
@@ -44,14 +49,14 @@ async function handlePOST(req: NextRequest) {
 
   const result = await parseBody(req, verifyAuthenticationSchema);
   if (!result.ok) return result.response;
-  const { response } = result.data;
+  const { response, challengeId } = result.data;
 
   const verifyResult = await withUserTenantRls(userId, async () =>
     verifyAuthenticationAssertion(
       prisma,
       userId,
       response as unknown as AuthenticationResponseJSON,
-      `webauthn:challenge:authenticate:${userId}`,
+      `webauthn:challenge:authenticate:${userId}:${challengeId}`,
       req.headers.get("user-agent"),
     ),
   );

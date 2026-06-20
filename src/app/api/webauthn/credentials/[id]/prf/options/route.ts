@@ -29,7 +29,7 @@ const rateLimiter = createRateLimiter({
  * Issue a one-shot WebAuthn challenge for the PRF re-bootstrap flow. The
  * challenge is stored in Redis under a DEDICATED namespace
  * (`webauthn:challenge:prf-rebootstrap:${userId}`) — separate from the sign-in
- * `webauthn:challenge:authenticate:${userId}` key — so that:
+ * `webauthn:challenge:authenticate:${userId}:${challengeId}` key — so that:
  *
  *   1. A concurrent sign-in `getdel` cannot consume the rebootstrap challenge.
  *   2. An attacker who can hit one endpoint cannot DoS the other's pending

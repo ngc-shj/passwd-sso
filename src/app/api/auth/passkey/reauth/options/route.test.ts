@@ -50,7 +50,8 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
 
 // A02-8: route now calls buildPrfExtensions; mock follows the same v1/v2
 // convention used in other PRF-options test files.
-vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
+vi.mock("@/lib/auth/webauthn/webauthn-server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/webauthn/webauthn-server")>()),
   generateAuthenticationOpts: mockGenerateAuthenticationOpts,
   buildPrfExtensions: vi.fn(
     (creds: Array<{ credentialId: string; prfSalt: string | null }>) => {

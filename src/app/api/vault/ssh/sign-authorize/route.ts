@@ -19,6 +19,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { authOrToken, hasUserId } from "@/lib/auth/session/auth-or-token";
+import { readJsonWithCap } from "@/lib/http/parse-body";
 import { MCP_SCOPE } from "@/lib/constants/auth/mcp";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { logAuditAsync, personalAuditBase, resolveActorType } from "@/lib/audit/audit";
@@ -105,14 +106,17 @@ export async function POST(request: NextRequest) {
   });
   if (blocked) return blocked;
 
-  // Parse request body
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ authorized: false, reason: "invalid_params" }, { status: 400 });
+  // Parse request body. The body is tiny (3 small fields); cap at 16 KB so an
+  // authenticated caller cannot apply memory pressure with an oversized payload.
+  // Keep the route's own {authorized:false,reason} envelope rather than parseBody's
+  // API_ERROR envelope — the CLI agent dispatches on `reason`.
+  const read = await readJsonWithCap(request, 16 * 1024);
+  if (!read.ok) {
+    const reason = read.tooLarge ? "payload_too_large" : "invalid_params";
+    const status = read.tooLarge ? 413 : 400;
+    return NextResponse.json({ authorized: false, reason }, { status });
   }
-  const parsed = signBodySchema.safeParse(body);
+  const parsed = signBodySchema.safeParse(read.body);
   if (!parsed.success) {
     return NextResponse.json({ authorized: false, reason: "invalid_params" }, { status: 400 });
   }

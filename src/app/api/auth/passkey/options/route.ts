@@ -12,8 +12,8 @@ import {
   generateDiscoverableAuthOpts,
   derivePrfSalt,
   WEBAUTHN_CHALLENGE_TTL_SECONDS,
+  generateChallengeId,
 } from "@/lib/auth/webauthn/webauthn-server";
-import { randomBytes } from "node:crypto";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
@@ -59,7 +59,7 @@ async function handlePOST(req: NextRequest) {
   const options = await generateDiscoverableAuthOpts();
 
   // Generate a random challengeId (not tied to userId since unauthenticated)
-  const challengeId = randomBytes(16).toString("hex");
+  const challengeId = generateChallengeId();
 
   // Store challenge in Redis with TTL
   await redis.set(

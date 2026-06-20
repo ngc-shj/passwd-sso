@@ -10,6 +10,7 @@ import type { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import type { TxOrPrisma } from "@/lib/prisma";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
+import { dedupeTagIds, tagConnect } from "@/lib/services/tag-relation";
 import type { createE2EPasswordSchema } from "@/lib/validations";
 
 type CreatePersonalPasswordInput = z.infer<typeof createE2EPasswordSchema>;
@@ -57,8 +58,8 @@ export async function createPersonalPasswordEntry(
   // should not count as a missing tag — tag.count returns distinct row count,
   // so compare against the deduped input length, not the raw array length.
   // Mirrors team-password-service.ts.
-  if (tagIds?.length) {
-    const uniqueTagIds = [...new Set(tagIds)];
+  const uniqueTagIds = tagIds?.length ? dedupeTagIds(tagIds) : [];
+  if (uniqueTagIds.length) {
     const ownedCount = await db.tag.count({ where: { id: { in: uniqueTagIds }, userId } });
     if (ownedCount !== uniqueTagIds.length) return { ok: false, reason: "TAGS_NOT_OWNED" };
   }
@@ -77,9 +78,7 @@ export async function createPersonalPasswordEntry(
       ...(folderId ? { folderId } : {}),
       userId,
       tenantId,
-      ...(tagIds?.length
-        ? { tags: { connect: tagIds.map((id) => ({ id })) } }
-        : {}),
+      ...(uniqueTagIds.length ? { tags: tagConnect(uniqueTagIds) } : {}),
     },
     include: { tags: { select: { id: true } } },
   });

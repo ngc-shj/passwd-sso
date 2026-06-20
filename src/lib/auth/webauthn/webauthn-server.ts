@@ -30,7 +30,7 @@ import type {
   AuthenticationResponseJSON,
   WebAuthnCredential,
 } from "@simplewebauthn/types";
-import { hkdfSync } from "node:crypto";
+import { hkdfSync, randomBytes } from "node:crypto";
 import type { TxOrPrisma } from "@/lib/prisma";
 import { getKeyProviderSync } from "@/lib/key-provider";
 import { getRedis } from "@/lib/redis";
@@ -48,6 +48,19 @@ import { SEC_PER_MINUTE } from "@/lib/constants/time";
  * lockstep — sub-flows MUST NOT define a local override.
  */
 export const WEBAUTHN_CHALLENGE_TTL_SECONDS = 5 * SEC_PER_MINUTE;
+
+/**
+ * Per-flow challenge identifier: 16 random bytes as lowercase hex.
+ * Embedded in the Redis challenge key (alongside the server-derived userId or
+ * pre-auth scope) so concurrent WebAuthn/passkey flows don't overwrite each
+ * other's challenge. Single source of truth for both mint and validate so the
+ * generator and the validating regex can never drift.
+ */
+export const CHALLENGE_ID_RE = /^[0-9a-f]{32}$/;
+
+export function generateChallengeId(): string {
+  return randomBytes(16).toString("hex");
+}
 
 // ── Env helpers ──────────────────────────────────────────────
 
@@ -116,7 +129,11 @@ export async function generateRegistrationOpts(
     excludeCredentials,
     authenticatorSelection: {
       residentKey: "preferred",
-      userVerification: "preferred",
+      // verifyRegistration requires UV (requireUserVerification: true), so request
+      // it up front. With "preferred", a UV-incapable authenticator would complete
+      // the ceremony client-side and only be rejected at verify — a confusing
+      // late-reject. "required" surfaces the requirement before the ceremony.
+      userVerification: "required",
     },
     extensions: {
       credProps: true,
@@ -168,7 +185,11 @@ export async function generateAuthenticationOpts(
   const opts: GenerateAuthenticationOptionsOpts = {
     rpID: rpId,
     allowCredentials: allow,
-    userVerification: "preferred",
+    // All verify paths that consume these options (verifyAuthentication /
+    // verifyAuthenticationAssertion) require UV, so request it up front rather
+    // than letting a UV-incapable authenticator pass the ceremony and be
+    // rejected at verify. Matches generateDiscoverableAuthOpts ("required").
+    userVerification: "required",
   };
 
   return generateAuthenticationOptions(opts);
@@ -412,8 +433,8 @@ export type VerifyAssertionResult =
  * - Set RLS context (e.g., `withUserTenantRls(userId, ...)`) BEFORE invoking,
  *   so the credential lookup and counter UPDATE see only the user's row.
  * - Pass a per-flow Redis challenge key namespace. Sign-in uses
- *   `webauthn:challenge:authenticate:${userId}`; PRF rebootstrap uses
- *   `webauthn:challenge:prf-rebootstrap:${userId}`. Sharing a namespace
+ *   `webauthn:challenge:authenticate:${userId}:${challengeId}`; PRF rebootstrap
+ *   uses `webauthn:challenge:prf-rebootstrap:${userId}`. Sharing a namespace
  *   between flows opens race / DoS / replay windows (#433 / S-N1).
  * - When called inside a `prisma.$transaction`, pass the tx client so the
  *   counter advance rolls back if the surrounding tx aborts. Otherwise pass

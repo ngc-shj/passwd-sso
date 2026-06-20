@@ -13,7 +13,7 @@ import { assertOrigin } from "@/lib/auth/session/csrf";
 import { NIL_UUID } from "@/lib/constants/app";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
-import { generateAuthenticationOpts, buildPrfExtensions } from "@/lib/auth/webauthn/webauthn-server";
+import { generateAuthenticationOpts, buildPrfExtensions, generateChallengeId } from "@/lib/auth/webauthn/webauthn-server";
 import { randomBytes } from "node:crypto";
 import { EMAIL_MAX_LENGTH } from "@/lib/validations/common";
 import { PASSKEY_DUMMY_CREDENTIALS_MAX } from "@/lib/validations/common.server";
@@ -149,7 +149,7 @@ async function handlePOST(req: NextRequest) {
 
   const options = await generateAuthenticationOpts(allowCredentials);
 
-  const challengeId = randomBytes(16).toString("hex");
+  const challengeId = generateChallengeId();
 
   // Same Redis key pattern as discoverable flow — verify route is shared
   await redis.set(

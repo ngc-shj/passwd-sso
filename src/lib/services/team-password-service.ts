@@ -12,6 +12,7 @@ import {
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
+import { dedupeTagIds, tagConnect, tagSet } from "@/lib/services/tag-relation";
 import type { EntryType } from "@prisma/client";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { TRASH_PURGE_BATCH_SIZE } from "@/lib/validations/common";
@@ -120,7 +121,7 @@ async function assertTeamTagsOwnership(
   // Normalize: a caller-supplied duplicate (e.g. ["t1","t1"]) should not
   // count as a missing tag. teamTag.count returns distinct row count, so
   // compare against the deduped input length, not the raw array length.
-  const uniqueTagIds = [...new Set(tagIds)];
+  const uniqueTagIds = dedupeTagIds(tagIds);
   const count = await prisma.teamTag.count({
     where: { id: { in: uniqueTagIds }, teamId },
   });
@@ -329,9 +330,7 @@ export async function createTeamPassword(
       ...(requireReprompt !== undefined ? { requireReprompt } : {}),
       ...(expiresAt !== undefined ? { expiresAt: expiresAt ? new Date(expiresAt) : null } : {}),
       ...(teamFolderId ? { teamFolderId } : {}),
-      ...(tagIds?.length
-        ? { tags: { connect: tagIds.map((id) => ({ id })) } }
-        : {}),
+      ...(tagIds?.length ? { tags: tagConnect(tagIds) } : {}),
     },
     include: {
       tags: { select: { id: true, name: true, color: true } },
@@ -502,7 +501,7 @@ export async function updateTeamPassword(
   if (requireReprompt !== undefined) updateData.requireReprompt = requireReprompt;
   if (expiresAt !== undefined) updateData.expiresAt = expiresAt ? new Date(expiresAt) : null;
   if (tagIds !== undefined) {
-    updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
+    updateData.tags = tagSet(tagIds);
   }
 
   // Row type for the FOR UPDATE snapshot read (team_password_entries).

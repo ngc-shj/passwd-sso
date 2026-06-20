@@ -25,6 +25,7 @@ import {
   uint8ArrayToBase64url,
   getRpOrigin,
   PER_CRED_SALT_HEX_RE,
+  CHALLENGE_ID_RE,
 } from "@/lib/auth/webauthn/webauthn-server";
 import { parseDeviceFromUserAgent } from "@/lib/parse-user-agent";
 import { sendEmail } from "@/lib/email";
@@ -41,6 +42,8 @@ const rateLimiter = createRateLimiter({
 
 const verifyRegistrationSchema = z.object({
   response: z.record(z.string(), z.unknown()),
+  // 32-hex-char id minted by register/options; scopes the challenge to this flow.
+  challengeId: z.string().regex(CHALLENGE_ID_RE),
   nickname: z.string().max(WEBAUTHN_NICKNAME_MAX_LENGTH).optional(),
   prfEncryptedSecretKey: z.string().max(PRF_ENCRYPTED_KEY_MAX_LENGTH).optional(),
   prfSecretKeyIv: hexIv.optional(),
@@ -80,18 +83,21 @@ async function handlePOST(req: NextRequest) {
   if (!result.ok) return result.response;
   const {
     response,
+    challengeId,
     nickname,
     prfEncryptedSecretKey,
     prfSecretKeyIv,
     prfSecretKeyAuthTag,
   } = result.data;
 
-  // A02-8: the register-options route now stores a JSON envelope containing
-  // both the challenge AND the per-credential PRF salt under the SAME Redis
-  // key. This atomic binding prevents a race where two concurrent
-  // register-options requests would silently brick the first request's
-  // credential — see plan v2 §C4.
-  const envelopeRaw = await redis.getdel(`webauthn:challenge:register:${userId}`);
+  // A02-8: the register-options route stores a JSON envelope containing both the
+  // challenge AND the per-credential PRF salt under the same Redis key. The key
+  // is scoped by per-flow challengeId so concurrent register flows from the same
+  // user never overwrite each other; userId is also in the key so a flow can only
+  // consume its own user's challenge — see plan v2 §C4.
+  const envelopeRaw = await redis.getdel(
+    `webauthn:challenge:register:${userId}:${challengeId}`,
+  );
   if (!envelopeRaw) {
     return errorResponse(API_ERROR.INVALID_CHALLENGE);
   }

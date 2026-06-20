@@ -14,19 +14,32 @@ const {
   mockWithBypassRls,
   mockLogAudit,
   mockAccessRequestFindUnique,
+  mockAccessRequestUpdateMany,
+  mockAccessRequestUpdate,
   mockTenantFindUnique,
-  mockPrismaTransaction,
+  mockSaTokenCount,
+  mockSaTokenCreate,
+  mockSaExecuteRaw,
   mockHashToken,
   mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
+  // withTenantRls IS the transaction boundary in production: it opens the tx
+  // and passes it to fn. The mock passes the prisma mock as the tx so both the
+  // read path (accessRequest.findUnique) and the write path
+  // (serviceAccountToken.{count,create} + accessRequest.{updateMany,update})
+  // resolve to the configured mocks — no separate $transaction indirection.
   mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockLogAudit: vi.fn(),
   mockAccessRequestFindUnique: vi.fn(),
+  mockAccessRequestUpdateMany: vi.fn(),
+  mockAccessRequestUpdate: vi.fn(),
   mockTenantFindUnique: vi.fn(),
-  mockPrismaTransaction: vi.fn(),
+  mockSaTokenCount: vi.fn(),
+  mockSaTokenCreate: vi.fn(),
+  mockSaExecuteRaw: vi.fn().mockResolvedValue(0),
   mockHashToken: vi.fn().mockReturnValue("hashed-token"),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
@@ -50,11 +63,18 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     accessRequest: {
       findUnique: mockAccessRequestFindUnique,
+      updateMany: mockAccessRequestUpdateMany,
+      update: mockAccessRequestUpdate,
     },
     tenant: {
       findUnique: mockTenantFindUnique,
     },
-    $transaction: mockPrismaTransaction,
+    serviceAccountToken: {
+      count: mockSaTokenCount,
+      create: mockSaTokenCreate,
+    },
+    // Advisory lock used to serialize concurrent SA token issuance.
+    $executeRaw: mockSaExecuteRaw,
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -109,28 +129,19 @@ const makeAccessRequest = (overrides: Record<string, unknown> = {}) => ({
 
 const makeTransactionSuccess = () => {
   const expiresAt = new Date(Date.now() + 3600 * 1000);
-  mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
-    const tx = {
-      serviceAccountToken: {
-        count: vi.fn().mockResolvedValue(0),
-        create: vi.fn().mockResolvedValue({
-          id: "tok-1",
-          serviceAccountId: SA_ID,
-          tenantId: "tenant-1",
-          tokenHash: "hashed-token",
-          prefix: "sa_abcd",
-          name: `JIT-${REQUEST_ID.slice(0, 8)}`,
-          scope: "passwords:read",
-          expiresAt,
-        }),
-      },
-      accessRequest: {
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-        update: vi.fn().mockResolvedValue({}),
-      },
-    };
-    return fn(tx);
+  mockSaTokenCount.mockResolvedValue(0);
+  mockSaTokenCreate.mockResolvedValue({
+    id: "tok-1",
+    serviceAccountId: SA_ID,
+    tenantId: "tenant-1",
+    tokenHash: "hashed-token",
+    prefix: "sa_abcd",
+    name: `JIT-${REQUEST_ID.slice(0, 8)}`,
+    scope: "passwords:read",
+    expiresAt,
   });
+  mockAccessRequestUpdateMany.mockResolvedValue({ count: 1 });
+  mockAccessRequestUpdate.mockResolvedValue({});
   return expiresAt;
 };
 
@@ -138,6 +149,36 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRequireRecentSession.mockResolvedValue(null);
+    mockSaExecuteRaw.mockResolvedValue(0);
+  });
+
+  it("acquires the per-SA advisory lock before the limit count (serializes issuance)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAccessRequestFindUnique.mockResolvedValue(makeAccessRequest());
+    mockTenantFindUnique.mockResolvedValue(null);
+    makeTransactionSuccess();
+
+    const order: string[] = [];
+    mockSaExecuteRaw.mockImplementation(() => {
+      order.push("lock");
+      return Promise.resolve(0);
+    });
+    mockSaTokenCount.mockImplementation(() => {
+      order.push("count");
+      return Promise.resolve(0);
+    });
+
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/access-requests/${REQUEST_ID}/approve`,
+    );
+    await POST(req, createParams({ id: REQUEST_ID }));
+
+    // The advisory lock MUST be taken before the count→create window so a
+    // concurrent approve / direct-create for the same SA cannot over-issue.
+    expect(mockSaExecuteRaw).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["lock", "count"]);
   });
 
   it("gates the approval transition on expiresAt atomically (closes TOCTOU window)", async () => {
@@ -147,22 +188,13 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
     mockTenantFindUnique.mockResolvedValue(null);
 
     let capturedWhere: Record<string, unknown> | undefined;
-    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
-      const tx = {
-        serviceAccountToken: {
-          count: vi.fn().mockResolvedValue(0),
-          create: vi.fn().mockResolvedValue({ id: "tok-1" }),
-        },
-        accessRequest: {
-          updateMany: vi.fn().mockImplementation((args: { where: Record<string, unknown> }) => {
-            capturedWhere = args.where;
-            return { count: 1 };
-          }),
-          update: vi.fn().mockResolvedValue({}),
-        },
-      };
-      return fn(tx);
+    mockSaTokenCount.mockResolvedValue(0);
+    mockSaTokenCreate.mockResolvedValue({ id: "tok-1" });
+    mockAccessRequestUpdateMany.mockImplementation((args: { where: Record<string, unknown> }) => {
+      capturedWhere = args.where;
+      return { count: 1 };
     });
+    mockAccessRequestUpdate.mockResolvedValue({});
 
     const req = createRequest(
       "POST",
@@ -202,26 +234,38 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
     );
   });
 
+  it("counts only non-revoked AND non-expired tokens toward the limit", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAccessRequestFindUnique.mockResolvedValue(makeAccessRequest());
+    mockTenantFindUnique.mockResolvedValue(null);
+
+    mockSaTokenCount.mockResolvedValue(0);
+    mockSaTokenCreate.mockResolvedValue({ id: "tok-1", expiresAt: new Date(Date.now() + 3600 * 1000) });
+    mockAccessRequestUpdateMany.mockResolvedValue({ count: 1 });
+    mockAccessRequestUpdate.mockResolvedValue({});
+
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/access-requests/${REQUEST_ID}/approve`,
+    );
+    await POST(req, createParams({ id: REQUEST_ID }));
+
+    // Expired-but-not-revoked tokens are unusable and must not consume a slot.
+    const where = mockSaTokenCount.mock.calls[0][0].where;
+    expect(where.revokedAt).toBeNull();
+    expect(where.expiresAt).toEqual({ gt: expect.any(Date) });
+  });
+
   it("returns 409 when request is already processed (double-approval)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockAccessRequestFindUnique.mockResolvedValue(makeAccessRequest());
     mockTenantFindUnique.mockResolvedValue(null);
 
-    // Simulate the transaction throwing "Already processed or wrong tenant"
-    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
-      const tx = {
-        serviceAccountToken: {
-          count: vi.fn().mockResolvedValue(0),
-          create: vi.fn(),
-        },
-        accessRequest: {
-          updateMany: vi.fn().mockResolvedValue({ count: 0 }), // 0 = already processed
-          update: vi.fn(),
-        },
-      };
-      return fn(tx);
-    });
+    // Simulate the status transition not firing (0 rows) → already processed.
+    mockSaTokenCount.mockResolvedValue(0);
+    mockAccessRequestUpdateMany.mockResolvedValue({ count: 0 }); // 0 = already processed
 
     const req = createRequest(
       "POST",
@@ -240,20 +284,8 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
     mockAccessRequestFindUnique.mockResolvedValue(makeAccessRequest());
     mockTenantFindUnique.mockResolvedValue(null);
 
-    // Simulate the transaction throwing "Token limit exceeded"
-    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
-      const tx = {
-        serviceAccountToken: {
-          count: vi.fn().mockResolvedValue(MAX_SA_TOKENS_PER_ACCOUNT),
-          create: vi.fn(),
-        },
-        accessRequest: {
-          updateMany: vi.fn(),
-          update: vi.fn(),
-        },
-      };
-      return fn(tx);
-    });
+    // Token count at the limit → the route throws before the status transition.
+    mockSaTokenCount.mockResolvedValue(MAX_SA_TOKENS_PER_ACCOUNT);
 
     const req = createRequest(
       "POST",
@@ -341,7 +373,9 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
 
     expect(status).toBe(403);
     expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
-    expect(mockPrismaTransaction).not.toHaveBeenCalled();
+    // The token-issuing write path MUST NOT have started.
+    expect(mockSaTokenCount).not.toHaveBeenCalled();
+    expect(mockSaTokenCreate).not.toHaveBeenCalled();
   });
 
   it("returns 409 when service account is inactive", async () => {
@@ -370,19 +404,8 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
     mockTenantFindUnique.mockResolvedValue(null);
 
     // updateMany succeeds (count 1) but parseSaTokenScopes("nonexistent:scope") returns []
-    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
-      const tx = {
-        serviceAccountToken: {
-          count: vi.fn().mockResolvedValue(0),
-          create: vi.fn(),
-        },
-        accessRequest: {
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-          update: vi.fn(),
-        },
-      };
-      return fn(tx);
-    });
+    mockSaTokenCount.mockResolvedValue(0);
+    mockAccessRequestUpdateMany.mockResolvedValue({ count: 1 });
 
     const req = createRequest(
       "POST",
@@ -414,7 +437,8 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
 
     expect(status).toBe(410);
     expect(json.error).toBe("SA_ACCESS_REQUEST_EXPIRED");
-    // The transaction that would issue the JIT token MUST NOT have started.
-    expect(mockPrismaTransaction).not.toHaveBeenCalled();
+    // The write path that would issue the JIT token MUST NOT have started.
+    expect(mockSaTokenCount).not.toHaveBeenCalled();
+    expect(mockSaTokenCreate).not.toHaveBeenCalled();
   });
 });

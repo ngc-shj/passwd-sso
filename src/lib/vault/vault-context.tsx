@@ -543,7 +543,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
 
       const vaultData = await dataRes.json();
-      const { options, prfSalt } = await optionsRes.json();
+      const { options, challengeId, prfSalt } = await optionsRes.json();
 
       // A02-8 F1: post-A02-8 the server may return `prfSalt: null` when every
       // PRF-capable credential is v2 (per-credential salts are carried inside
@@ -572,7 +572,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       const verifyRes = await fetchApi(API_PATH.WEBAUTHN_AUTHENTICATE_VERIFY, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ response: responseJSON }),
+        body: JSON.stringify({ response: responseJSON, challengeId }),
       });
 
       if (!verifyRes.ok) return false;

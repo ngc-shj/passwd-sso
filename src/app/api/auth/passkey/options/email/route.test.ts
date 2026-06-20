@@ -36,7 +36,8 @@ vi.mock("@/lib/security/rate-limit", () => ({
 // A02-8: route now calls buildPrfExtensions. Default mock returns the v1
 // shape for legacy NULL-prfSalt credentials so existing tests pass; A02-8
 // cases override per-test.
-vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
+vi.mock("@/lib/auth/webauthn/webauthn-server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/webauthn/webauthn-server")>()),
   generateAuthenticationOpts: mockGenerateAuthenticationOpts,
   buildPrfExtensions: vi.fn(
     (creds: Array<{ credentialId: string; prfSalt: string | null }>) => {
@@ -101,7 +102,7 @@ describe("POST /api/auth/passkey/options/email", () => {
       challenge: "test-challenge-base64url",
       rpId: "localhost",
       allowCredentials: [{ id: "cred-1", type: "public-key" }],
-      userVerification: "preferred",
+      userVerification: "required",
     });
     // withBypassRls: call the callback directly
     mockWithBypassRls.mockImplementation(

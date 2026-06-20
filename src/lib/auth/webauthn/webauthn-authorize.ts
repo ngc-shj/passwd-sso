@@ -15,6 +15,7 @@ import {
   verifyAuthentication,
   getRpOrigin,
   base64urlToUint8Array,
+  CHALLENGE_ID_RE,
 } from "@/lib/auth/webauthn/webauthn-server";
 import type { WebAuthnCredential, AuthenticationResponseJSON } from "@simplewebauthn/types";
 import { logAuditAsync } from "@/lib/audit/audit";
@@ -26,9 +27,6 @@ import { MS_PER_SECOND } from "@/lib/constants/time";
 // rejects). 5s captures human-impossible re-tap intervals without
 // flagging legitimate rapid Touch ID on modern hardware.
 const COUNTER_ZERO_REUSE_WINDOW_MS = 5 * MS_PER_SECOND;
-
-// challengeId must be a 32-char hex string (16 random bytes)
-const CHALLENGE_ID_RE = /^[0-9a-f]{32}$/;
 
 // C5: Dummy credential for timing equalization when credential not found.
 //
