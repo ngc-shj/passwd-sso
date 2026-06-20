@@ -17,6 +17,7 @@ import { EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/co
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
+import { dedupeTagIds, tagSet } from "@/lib/services/tag-relation";
 
 const getLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 60 });
 const updateLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 30 });
@@ -136,7 +137,7 @@ async function handlePUT(
   // tag.count returns distinct row count, so compare against the deduped
   // input length, not the raw array length. Mirrors team-password-service.ts.
   if (tagIds?.length) {
-    const uniqueTagIds = [...new Set(tagIds)];
+    const uniqueTagIds = dedupeTagIds(tagIds);
     const ownedCount = await withUserTenantRls(userId, async () =>
       prisma.tag.count({ where: { id: { in: uniqueTagIds }, userId } }),
     );
@@ -174,7 +175,7 @@ async function handlePUT(
   if (requireReprompt !== undefined) updateData.requireReprompt = requireReprompt;
   if (expiresAt !== undefined) updateData.expiresAt = expiresAt ? new Date(expiresAt) : null;
   if (tagIds !== undefined) {
-    updateData.tags = { set: [...new Set(tagIds)].map((tid) => ({ id: tid })) };
+    updateData.tags = tagSet(tagIds);
   }
 
   // Row type for the FOR UPDATE snapshot read (personal password_entries).

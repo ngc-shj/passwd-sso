@@ -13,6 +13,7 @@ import { ENTRY_TYPE_VALUES, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/consta
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
+import { dedupeTagIds, tagConnect } from "@/lib/services/tag-relation";
 import type { EntryType } from "@prisma/client";
 import { errorResponse, errorResponseWithMessage, rateLimited, unauthorized } from "@/lib/http/api-response";
 
@@ -145,7 +146,7 @@ async function handlePOST(req: NextRequest) {
     // so compare against the deduped input length, not the raw array length.
     // Mirrors team-password-service.ts.
     if (tagIds?.length) {
-      const uniqueTagIds = [...new Set(tagIds)];
+      const uniqueTagIds = dedupeTagIds(tagIds);
       const ownedCount = await tx.tag.count({ where: { id: { in: uniqueTagIds }, userId } });
       if (ownedCount !== uniqueTagIds.length) return { error: "INVALID_TAGS" as const };
     }
@@ -164,9 +165,7 @@ async function handlePOST(req: NextRequest) {
         ...(folderId ? { folderId } : {}),
         userId,
         tenantId,
-        ...(tagIds?.length
-          ? { tags: { connect: [...new Set(tagIds)].map((id) => ({ id })) } }
-          : {}),
+        ...(tagIds?.length ? { tags: tagConnect(tagIds) } : {}),
       },
       include: { tags: { select: { id: true } } },
     });
