@@ -39,17 +39,34 @@ export function createRequest(
 /**
  * Creates a NextRequest from FormData for multipart upload tests.
  * Note: Do NOT set Content-Type header manually — the boundary is auto-generated.
+ *
+ * A real browser sets Content-Length on form uploads, and route handlers gate
+ * on it (rejectOversizedMultipart fails closed when it is absent). undici does
+ * NOT set Content-Length for a streamed FormData body, so we serialize the body
+ * once to compute and set it — mirroring the browser wire shape. Pass
+ * `{ omitContentLength: true }` to exercise the fail-closed (no-header) path.
  */
-export function createMultipartRequest(
+export async function createMultipartRequest(
   url: string,
   formData: FormData,
-  options: { headers?: Record<string, string> } = {}
-): NextRequest {
-  const { headers = {} } = options;
+  options: { headers?: Record<string, string>; omitContentLength?: boolean } = {}
+): Promise<NextRequest> {
+  const { headers = {}, omitContentLength = false } = options;
+  // Serialize the multipart body once to capture its bytes + boundary header.
+  const encoded = new Request("http://localhost", { method: "POST", body: formData });
+  const bytes = new Uint8Array(await encoded.arrayBuffer());
+  const contentType = encoded.headers.get("content-type") ?? "multipart/form-data";
+
+  const finalHeaders: Record<string, string> = {
+    "content-type": contentType,
+    ...(omitContentLength ? {} : { "content-length": String(bytes.length) }),
+    ...headers,
+  };
+
   return new NextRequest(url, {
     method: "POST",
-    body: formData,
-    headers,
+    body: bytes,
+    headers: finalHeaders,
   } as ConstructorParameters<typeof NextRequest>[1]);
 }
 

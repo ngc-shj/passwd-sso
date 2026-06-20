@@ -78,7 +78,7 @@ function createGetRequest() {
   });
 }
 
-function createFormDataRequest(
+async function createFormDataRequest(
   fields: Record<string, string | Blob>,
   headers: Record<string, string> = {},
 ) {
@@ -86,10 +86,19 @@ function createFormDataRequest(
   for (const [key, value] of Object.entries(fields)) {
     formData.append(key, value);
   }
+  // Serialize once to set Content-Length, mirroring a real browser upload —
+  // the route gates on it via rejectOversizedMultipart (fail-closed if absent).
+  // An explicit `headers` override (e.g. a too-large content-length test) wins.
+  const encoded = new Request("http://localhost", { method: "POST", body: formData });
+  const bytes = new Uint8Array(await encoded.arrayBuffer());
   return new NextRequest("http://localhost/api/teams/o1/passwords/e1/attachments", {
     method: "POST",
-    body: formData,
-    headers,
+    body: bytes,
+    headers: {
+      "content-type": encoded.headers.get("content-type") ?? "multipart/form-data",
+      "content-length": String(bytes.length),
+      ...headers,
+    },
   });
 }
 
@@ -169,7 +178,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
 
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
-    const req = createFormDataRequest(validFormFields());
+    const req = await createFormDataRequest(validFormFields());
     const res = await POST(req, makeParams("o1", "e1"));
     const { status } = await parseResponse(res);
     expect(status).toBe(401);
@@ -178,7 +187,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   it("returns 403 when lacking permission", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
-    const req = createFormDataRequest(validFormFields());
+    const req = await createFormDataRequest(validFormFields());
     const res = await POST(req, makeParams("o1", "e1"));
     const { status } = await parseResponse(res);
     expect(status).toBe(403);
@@ -188,7 +197,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(null);
-    const req = createFormDataRequest(validFormFields());
+    const req = await createFormDataRequest(validFormFields());
     const res = await POST(req, makeParams("o1", "e1"));
     const { status } = await parseResponse(res);
     expect(status).toBe(404);
@@ -199,7 +208,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(20);
-    const req = createFormDataRequest(validFormFields());
+    const req = await createFormDataRequest(validFormFields());
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -211,7 +220,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
-    const req = createFormDataRequest(validFormFields(), {
+    const req = await createFormDataRequest(validFormFields(), {
       "content-length": String(100 * 1024 * 1024),
     });
     const res = await POST(req, makeParams("o1", "e1"));
@@ -225,7 +234,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
-    const req = createFormDataRequest({ file: new Blob(["x"]) });
+    const req = await createFormDataRequest({ file: new Blob(["x"]) });
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -239,7 +248,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
     fields.filename = "malware.exe";
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -253,7 +262,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
     fields.contentType = "application/x-executable";
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -266,7 +275,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = { ...validFormFields(), iv: "bad-iv" };
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -279,7 +288,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = { ...validFormFields(), authTag: "bad-tag" };
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -293,7 +302,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
     fields.filename = "../etc/passwd.pdf";
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -307,7 +316,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
     fields.filename = "test\r\n.pdf";
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -321,7 +330,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
     fields.filename = "CON.pdf";
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -342,7 +351,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
       createdAt: new Date(),
     };
     mockAttachmentCreate.mockResolvedValue(created);
-    const req = createFormDataRequest(validFormFields());
+    const req = await createFormDataRequest(validFormFields());
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(201);
@@ -365,7 +374,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = { ...validFormFields(), encryptionMode: "0" };
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -378,7 +387,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = { ...validFormFields(), encryptionMode: "2" };
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -392,7 +401,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockAttachmentCount.mockResolvedValue(0);
     const fields = validFormFields();
     delete fields.encryptionMode;
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -403,7 +412,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue({ ...TEAM_ENTRY, itemKeyVersion: 0 });
-    const req = createFormDataRequest(validFormFields());
+    const req = await createFormDataRequest(validFormFields());
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -416,7 +425,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = { ...validFormFields(), id: "not-a-uuid" };
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -437,7 +446,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
       createdAt: new Date(),
     });
     const fields = { ...validFormFields(), id: "550e8400-e29b-41d4-a716-446655440000" };
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, makeParams("o1", "e1"));
     const { status } = await parseResponse(res);
     expect(status).toBe(201);
@@ -458,7 +467,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
       createdAt: new Date(),
     });
     const fields = { ...validFormFields(), id: uppercaseId };
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(201);
@@ -479,7 +488,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = { ...validFormFields(), aadVersion: "2" };
-    const req = createFormDataRequest(fields);
+    const req = await createFormDataRequest(fields);
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -491,7 +500,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     mockRequireTeamPermission.mockResolvedValue(undefined);
     const entryWithoutItemKey = { teamId: "o1", teamKeyVersion: 1, tenantId: "t1" };
     mockEntryFindUnique.mockResolvedValue(entryWithoutItemKey);
-    const req = createFormDataRequest(validFormFields());
+    const req = await createFormDataRequest(validFormFields());
     const res = await POST(req, makeParams("o1", "e1"));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);

@@ -15,7 +15,7 @@ const {
   mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+  mockWithBypassRls: vi.fn(),
   mockFindFirst: vi.fn(),
   mockFindUnique: vi.fn(),
   mockCreateAuthorizationCode: vi.fn(),
@@ -56,6 +56,34 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
+// withBypassRls runs its callback on a bypass-RLS transaction client. The route
+// uses that tx directly for both simple cross-tenant lookups (mcpClient.findFirst
+// / user.findUnique / mcpClient.findUnique) AND the DCR claim sequence (count →
+// exclusion findFirst → delete → CAS updateMany). This impl passes a tx mock
+// serving all of them. Defined as a named helper (re-applied in beforeEach
+// because vi.clearAllMocks() wipes mock implementations between tests).
+function bypassRlsImpl(_p: unknown, fn: (tx: unknown) => unknown) {
+  return fn({
+    mcpClient: {
+      // The route issues two distinct findFirst shapes on the bypass tx: the
+      // initial client lookup keys on `clientId`; the DCR claim-exclusion
+      // lookups key on `name`/`isDcr` (no clientId). Dispatch by shape so the
+      // claim path keeps using mockTxFindFirst while the client lookup uses
+      // mockFindFirst — preserving the per-call assertions in the tests.
+      findFirst: (args: { where?: Record<string, unknown> }) =>
+        args?.where && "clientId" in args.where
+          ? mockFindFirst(args)
+          : mockTxFindFirst(args),
+      findUnique: mockMcpClientFindUnique,
+      count: mockMcpClientCount,
+      updateMany: mockMcpClientUpdateMany,
+      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      delete: mockTxDelete,
+    },
+    user: { findUnique: mockFindUnique },
+  });
+}
+
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
@@ -93,21 +121,23 @@ const VALID_USER = {
   tenantId: "tenant-uuid-123",
 };
 
-function buildFormData(fields: Record<string, string>): FormData {
-  const fd = new FormData();
+function buildFormBody(fields: Record<string, string>): string {
+  // The consent UI submits a hidden-input <form> POST, which the browser sends
+  // as application/x-www-form-urlencoded — match that wire shape here.
+  const params = new URLSearchParams();
   for (const [key, value] of Object.entries(fields)) {
-    fd.set(key, value);
+    params.set(key, value);
   }
-  return fd;
+  return params.toString();
 }
 
 function createFormRequest(url: string, fields: Record<string, string>, headers: Record<string, string> = {}) {
-  const fd = buildFormData(fields);
   const urlObj = new URL(url);
   return new Request(url, {
     method: "POST",
-    body: fd,
+    body: buildFormBody(fields),
     headers: {
+      "content-type": "application/x-www-form-urlencoded",
       origin: urlObj.origin,
       host: urlObj.host,
       ...headers,
@@ -128,8 +158,9 @@ describe("POST /api/mcp/authorize/consent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue(VALID_SESSION);
-    // withBypassRls: always execute callback (may be called 2+ times for claiming)
-    mockWithBypassRls.mockImplementation(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p));
+    // withBypassRls: execute callback on the bypass tx mock (may be called 2+
+    // times for claiming). Re-applied each test because clearAllMocks wipes it.
+    mockWithBypassRls.mockImplementation(bypassRlsImpl);
     mockFindFirst.mockResolvedValue(VALID_CLIENT);
     mockFindUnique.mockResolvedValue(VALID_USER);
     mockTxFindFirst.mockResolvedValue(null); // default: no existing same-name client
@@ -572,14 +603,13 @@ describe("POST /api/mcp/authorize/consent", () => {
   // (c) P2002 unique-violation race maps to consent error (not a 500).
   it("C7(c): P2002 unique violation during claim maps to name_conflict consent error", async () => {
     mockFindFirst.mockResolvedValueOnce({ ...VALID_CLIENT, isDcr: true, tenantId: null });
-    // $transaction throws P2002 (concurrent foreign claim won the race)
+    // The claim CAS updateMany throws P2002 — a concurrent foreign claim won the
+    // race and tripped the (tenantId, name) unique constraint on the write.
     const p2002 = new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
       code: "P2002",
       clientVersion: "5.0.0",
     });
-    // Override $transaction to throw P2002
-    const { prisma: mockPrismaModule } = await import("@/lib/prisma");
-    vi.mocked(mockPrismaModule.$transaction).mockRejectedValueOnce(p2002);
+    mockMcpClientUpdateMany.mockRejectedValueOnce(p2002);
 
     const req = createFormRequest(
       "http://localhost/api/mcp/authorize/consent",

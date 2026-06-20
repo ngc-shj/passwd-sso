@@ -42,7 +42,7 @@ import {
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
-import { exceedsDeclaredContentLength } from "@/lib/http/parse-body";
+import { readBytesWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
@@ -90,18 +90,15 @@ function extractDpopBearer(req: NextRequest): string | null {
 }
 
 async function handlePOST(req: NextRequest): Promise<Response> {
-  // Cheap early reject before buffering the whole body (cap untrusted bytes).
-  if (exceedsDeclaredContentLength(req, MAX_JSON_BODY_BYTES)) {
-    return errorResponse(API_ERROR.PAYLOAD_TOO_LARGE);
-  }
-
   // We need raw body bytes for the replay-vs-retry hash AND a parsed copy
-  // for validation. Read once, then reparse from the buffer.
-  const rawBody = new Uint8Array(await req.arrayBuffer());
-  // Authoritative cap (defends against chunked TE that omits content-length).
-  if (rawBody.length > MAX_JSON_BODY_BYTES) {
+  // for validation. Stream-read once under the byte cap, then reparse from the
+  // buffer. The streaming cap is authoritative — it aborts mid-read on a
+  // chunked body that omits Content-Length, unlike an after-read length check.
+  const read = await readBytesWithCap(req, MAX_JSON_BODY_BYTES);
+  if (!read.ok) {
     return errorResponse(API_ERROR.PAYLOAD_TOO_LARGE);
   }
+  const rawBody = read.bytes;
   let parsedBody: unknown;
   try {
     parsedBody = rawBody.length === 0

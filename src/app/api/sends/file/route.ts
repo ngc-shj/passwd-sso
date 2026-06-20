@@ -27,6 +27,7 @@ import {
   SHARE_TYPE,
 } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { rejectOversizedMultipart } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
@@ -43,6 +44,13 @@ async function handlePOST(req: NextRequest) {
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }
+
+  // Early rejection before buffering the multipart body into memory. Requires a
+  // declared Content-Length and caps it — fail-closed on a missing header so a
+  // chunked / no-Content-Length body cannot bypass the cap (req.formData() has
+  // no streaming cap of its own). file.size is re-checked post-parse below.
+  const oversized = rejectOversizedMultipart(req, SEND_MAX_FILE_SIZE * 2);
+  if (oversized) return oversized;
 
   let formData: FormData;
   try {

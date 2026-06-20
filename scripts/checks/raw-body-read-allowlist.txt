@@ -1,0 +1,8 @@
+# Allowlist for check-raw-body-read.sh — route files permitted to call
+# req.text() / req.arrayBuffer() / req.formData() without the standard
+# parse-body cap helpers. One repo-relative path per line; `#` lines are
+# comments.
+#
+# Add an entry ONLY with a justification comment explaining why the route
+# cannot use the streaming-cap helpers. Empty by default — all current routes
+# use the helpers (src/lib/http/parse-body.ts).
