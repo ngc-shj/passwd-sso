@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.4.59](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.58...passwd-sso-v0.4.59) (2026-06-18)
+
+
+### Features
+
+* **ios:** render type-specific fields in entry detail view ([#587](https://github.com/ngc-shj/passwd-sso/issues/587)) ([b17112f](https://github.com/ngc-shj/passwd-sso/commit/b17112fd43583877f662a9588949c1b21882702d))
+* **ios:** restore session at launch — skip URL/sign-in screens for returning users ([#569](https://github.com/ngc-shj/passwd-sso/issues/569)) ([1a96fc6](https://github.com/ngc-shj/passwd-sso/commit/1a96fc6ff0098907f35ec403751ba45d40e26c47))
+* **security:** emergency-access-grant GC with status-aware guard (SC6b) ([#582](https://github.com/ngc-shj/passwd-sso/issues/582)) ([0e6d5c5](https://github.com/ngc-shj/passwd-sso/commit/0e6d5c54b0ad0e7867b8d8ea324b569bfeb609c1))
+* **security:** family-aware GC for MCP OAuth token rotation family (SC5) ([#576](https://github.com/ngc-shj/passwd-sso/issues/576)) ([449bcfe](https://github.com/ngc-shj/passwd-sso/commit/449bcfe4b8c97e2b61903af6ae486cf756fad45f))
+* **security:** forensic-credential GC with emit-provenance-before-delete (SC4) ([#577](https://github.com/ngc-shj/passwd-sso/issues/577)) ([7911587](https://github.com/ngc-shj/passwd-sso/commit/7911587c44265a70abf16610aa8386bd9f8a2d8e))
+* **security:** generic retention-GC worker for expired-data physical deletion ([#571](https://github.com/ngc-shj/passwd-sso/issues/571)) ([fd7984f](https://github.com/ngc-shj/passwd-sso/commit/fd7984fea30e740091dc358b4e29dd6f9cedb5ec))
+* **security:** per-tenant retention for append-only logs (SC7) ([#580](https://github.com/ngc-shj/passwd-sso/issues/580)) ([4bca973](https://github.com/ngc-shj/passwd-sso/commit/4bca9736ba5f012cc4dcf92ae1b9e206de568159))
+* **security:** security-record retention GC with provenance (SC6) ([#581](https://github.com/ngc-shj/passwd-sso/issues/581)) ([76b9308](https://github.com/ngc-shj/passwd-sso/commit/76b9308dae8c0ac21f8e7a5b7b84f8e01b8af7a7))
+* **security:** tenant-configurable password-history auto-trim (SC3) ([#579](https://github.com/ngc-shj/passwd-sso/issues/579)) ([7b77587](https://github.com/ngc-shj/passwd-sso/commit/7b77587e5df2d2b5ad49c3700ca403a85eb7850f))
+* **security:** tenant-configurable trash auto-purge with blob cleanup (SC2) ([#578](https://github.com/ngc-shj/passwd-sso/issues/578)) ([483d8d9](https://github.com/ngc-shj/passwd-sso/commit/483d8d96cb600e9927ae73d827278d502645b37e))
+* **tenant:** expose per-tenant retention windows in policy API + settings card ([#583](https://github.com/ngc-shj/passwd-sso/issues/583)) ([1df9c58](https://github.com/ngc-shj/passwd-sso/commit/1df9c58ca28371026e13c2207869575ba91f459a))
+
+
+### Bug Fixes
+
+* **deps:** bump nodemailer to 9.0.1 to clear high-severity CVEs ([#585](https://github.com/ngc-shj/passwd-sso/issues/585)) ([a2840b1](https://github.com/ngc-shj/passwd-sso/commit/a2840b114597bf5d0cf400a692ad869e6075cd03))
+* **deps:** declare undici as a direct dependency; bump undici/babel off CVEs ([#589](https://github.com/ngc-shj/passwd-sso/issues/589)) ([2dd8bf5](https://github.com/ngc-shj/passwd-sso/commit/2dd8bf5dcddd34130b0e00cb4809699fefe99b62))
+* **extension:** override undici &gt;=7.28.0 to clear transitive CVEs ([#591](https://github.com/ngc-shj/passwd-sso/issues/591)) ([fdcfef3](https://github.com/ngc-shj/passwd-sso/commit/fdcfef345b69f67ad219d89fe15f008b325592b9))
+* **security:** harden multi-tenant boundaries (TOCTOU, token tenant cross-checks, mutation scoping) ([#567](https://github.com/ngc-shj/passwd-sso/issues/567)) ([c72313e](https://github.com/ngc-shj/passwd-sso/commit/c72313e19fcb5f93f8651306023fd20dac79a473))
+* **security:** patch HIGH CVEs — hono 4.12.25, base-image OpenSSL 3.5.7-r0 ([#572](https://github.com/ngc-shj/passwd-sso/issues/572)) ([b26aaea](https://github.com/ngc-shj/passwd-sso/commit/b26aaea32725e994ec411e85970eafd47a21b182))
+* **vault:** sync 3-pane detail header to edited entry overview ([#592](https://github.com/ngc-shj/passwd-sso/issues/592)) ([0d1b86b](https://github.com/ngc-shj/passwd-sso/commit/0d1b86b0bbdccfa8d0d428c1737ff6107ab3cd31))
+
+
+### Code Refactoring
+
+* **ios:** replace hardcoded values with shared constants ([#570](https://github.com/ngc-shj/passwd-sso/issues/570)) ([e36dde6](https://github.com/ngc-shj/passwd-sso/commit/e36dde6455c35cb870f5c3a8ad92cc0477169f05))
+
 ## [0.4.58](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.57...passwd-sso-v0.4.58) (2026-06-15)
 
 
