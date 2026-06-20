@@ -13,6 +13,11 @@ dist/
 # Test coverage snapshots (used by test-gen workflow; never tracked)
 .coverage-snapshots/
 
+# App Store review credentials — NEVER commit (test account password, vault passphrase)
+*.review-credentials.local.md
+.review-credentials.local.md
+docs/.review-credentials.local.md
+
 # Environment variables - NEVER commit secrets
 .env
 .env.local
