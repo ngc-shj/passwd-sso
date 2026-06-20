@@ -174,6 +174,36 @@ describe("POST /api/mobile/token/refresh", () => {
     expect(res.headers.get("dpop-nonce")).toBeNull();
   });
 
+  it("rejects an oversized JSON body with no Content-Length before any token lookup (chunked-TE bypass guard)", async () => {
+    // 2 MB body streamed with NO Content-Length header. readBytesWithCap is the
+    // first thing handlePOST does, so the streaming cap must abort the read and
+    // return 413 before the token is looked up or rotated. (Guards the raw-body
+    // hash path against the chunked-body DoS that an after-read check missed.)
+    const oversized = JSON.stringify({ refresh_token: REFRESH_TOKEN, padding: "x".repeat(2_000_000) });
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(oversized));
+        controller.close();
+      },
+    });
+    const req = new NextRequest("https://example.test/api/mobile/token/refresh", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `DPoP ${REFRESH_TOKEN}`,
+        dpop: "fake.proof",
+      },
+      body: stream,
+      duplex: "half",
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await POST(req);
+    const { status, json } = await parseJson(res);
+    expect(status).toBe(413);
+    expect(json.error).toBe("PAYLOAD_TOO_LARGE");
+    expect(mockExtensionTokenFindUnique).not.toHaveBeenCalled();
+    expect(mockRefreshIosToken).not.toHaveBeenCalled();
+  });
+
   it("returns 401 with REPLAY_DETECTED code when refreshIosToken signals replay", async () => {
     mockRefreshIosToken.mockResolvedValueOnce({
       ok: false,
