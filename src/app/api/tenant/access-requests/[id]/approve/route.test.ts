@@ -19,6 +19,7 @@ const {
   mockTenantFindUnique,
   mockSaTokenCount,
   mockSaTokenCreate,
+  mockSaExecuteRaw,
   mockHashToken,
   mockRequireRecentSession,
 } = vi.hoisted(() => ({
@@ -38,6 +39,7 @@ const {
   mockTenantFindUnique: vi.fn(),
   mockSaTokenCount: vi.fn(),
   mockSaTokenCreate: vi.fn(),
+  mockSaExecuteRaw: vi.fn().mockResolvedValue(0),
   mockHashToken: vi.fn().mockReturnValue("hashed-token"),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
@@ -72,7 +74,7 @@ vi.mock("@/lib/prisma", () => ({
       create: mockSaTokenCreate,
     },
     // Advisory lock used to serialize concurrent SA token issuance.
-    $executeRaw: vi.fn().mockResolvedValue(0),
+    $executeRaw: mockSaExecuteRaw,
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -147,6 +149,36 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRequireRecentSession.mockResolvedValue(null);
+    mockSaExecuteRaw.mockResolvedValue(0);
+  });
+
+  it("acquires the per-SA advisory lock before the limit count (serializes issuance)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAccessRequestFindUnique.mockResolvedValue(makeAccessRequest());
+    mockTenantFindUnique.mockResolvedValue(null);
+    makeTransactionSuccess();
+
+    const order: string[] = [];
+    mockSaExecuteRaw.mockImplementation(() => {
+      order.push("lock");
+      return Promise.resolve(0);
+    });
+    mockSaTokenCount.mockImplementation(() => {
+      order.push("count");
+      return Promise.resolve(0);
+    });
+
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/access-requests/${REQUEST_ID}/approve`,
+    );
+    await POST(req, createParams({ id: REQUEST_ID }));
+
+    // The advisory lock MUST be taken before the count→create window so a
+    // concurrent approve / direct-create for the same SA cannot over-issue.
+    expect(mockSaExecuteRaw).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["lock", "count"]);
   });
 
   it("gates the approval transition on expiresAt atomically (closes TOCTOU window)", async () => {
