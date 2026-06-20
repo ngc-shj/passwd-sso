@@ -67,6 +67,12 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSRequiresIPhoneOS: true
+        # The app uses only standard cryptography (AES-256-GCM, PBKDF2, HKDF via
+        # CryptoKit/CommonCrypto) for authentication and data protection — no
+        # proprietary algorithms. This qualifies for the export-compliance
+        # exemption, so we declare false and skip the per-build encryption
+        # questionnaire / annual self-classification report.
+        ITSAppUsesNonExemptEncryption: false
         # Required for the LAContext biometric gate (vault unlock / entry
         # reveal). iOS hard-crashes any Face ID access without this key.
         NSFaceIDUsageDescription: passwd-sso uses Face ID to confirm it's you before unlocking your vault and revealing credentials.
@@ -145,6 +151,8 @@ targets:
         CFBundleDisplayName: passwd-sso AutoFill
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        # See host app note — standard crypto only, export-compliance exempt.
+        ITSAppUsesNonExemptEncryption: false
         # The extension reads bridge_key behind a per-fill LAContext biometric
         # prompt; iOS hard-crashes any Face ID access without this key.
         NSFaceIDUsageDescription: passwd-sso uses Face ID to confirm it's you before filling a credential.
