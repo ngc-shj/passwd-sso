@@ -167,6 +167,25 @@ public enum EntryBlobDecoder {
     }
   }
 
+  /// Decodes a JSON value that may be an integer or a numeric string into an Int.
+  /// Same defense as `FlexibleString` but for integer-typed blob fields (TOTP
+  /// `digits`/`period`): a write-side drift to a string (e.g. `"6"`) must not
+  /// throw the whole blob decode. Non-numeric shapes decode to `value == nil`.
+  private struct FlexibleInt: Decodable {
+    let value: Int?
+
+    init(from decoder: Decoder) throws {
+      let container = try decoder.singleValueContainer()
+      if let i = try? container.decode(Int.self) {
+        value = i
+      } else if let s = try? container.decode(String.self), let i = Int(s) {
+        value = i
+      } else {
+        value = nil
+      }
+    }
+  }
+
   private struct TagPayload: Decodable {
     let name: String
     let color: String?
@@ -175,8 +194,10 @@ public enum EntryBlobDecoder {
   private struct TotpPayload: Decodable {
     let secret: String
     let algorithm: String?
-    let digits: Int?
-    let period: Int?
+    // Tolerant: web writes these as numbers, but a string drift must not throw
+    // the whole blob decode (which would make the LOGIN detail undecryptable).
+    let digits: FlexibleInt?
+    let period: FlexibleInt?
   }
 
   /// Reconstruct a list-view summary from an overview-blob plaintext. `id` and
@@ -275,8 +296,8 @@ public enum EntryBlobDecoder {
       notes: p.notes ?? "",
       totpSecret: p.totp?.secret,
       totpAlgorithm: p.totp?.algorithm,
-      totpDigits: p.totp?.digits,
-      totpPeriod: p.totp?.period,
+      totpDigits: p.totp?.digits.flatMap { $0.value },
+      totpPeriod: p.totp?.period.flatMap { $0.value },
       generatorSettings: nil,
       entryType: entryType,
       secureNote: entryType == "SECURE_NOTE"
