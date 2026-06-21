@@ -346,4 +346,14 @@ final class AppSettingsStoreTests: XCTestCase {
     LanguageRefresh.shared.bump()
     XCTAssertEqual(LanguageRefresh.shared.token, before + 1)
   }
+
+  /// The explicit-theme branch of `SettingsView.sheetColorScheme` delegates to
+  /// `AppTheme.colorScheme`; pin its mapping (the `.system → nil` case is what
+  /// the sheet-revert fix must resolve concretely; the device-resolution branch
+  /// itself is manual/UITest-only).
+  func testAppThemeColorScheme() {
+    XCTAssertEqual(AppTheme.light.colorScheme, .light)
+    XCTAssertEqual(AppTheme.dark.colorScheme, .dark)
+    XCTAssertNil(AppTheme.system.colorScheme)
+  }
 }

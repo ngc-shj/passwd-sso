@@ -1,5 +1,23 @@
 # Code Review: ios-language-switcher
 
+## FULL-BRANCH Code Review (immediate-switch + theme-sheet fixes)
+Date: 2026-06-21T14:11:24Z — fresh /triangulate Phase-3 over `origin/main...HEAD` (9 commits).
+
+### Round 1 findings & resolution
+- **F1 [Major] — RESOLVED**: residual risk the open Settings sheet would not re-localize in place — cross-`.sheet`-boundary `.environment(\.locale,)` propagation from RootView is unreliable (it had failed on-device once, commit `d56de6df`). Fix: `SettingsView` now directly `@ObservedObject`s `LanguageRefresh.shared`, so a `bump()` re-runs the sheet's OWN body (no dependence on cross-boundary propagation). Round-2 verification confirmed: `@Published token`→`objectWillChange` reliably re-runs `SettingsView.body`; `applyAppLanguage()` re-points the bundle BEFORE `bump()`; all ~20 sheet strings (Section headers, footers, picker titles/options, navigationTitle, Done, LabeledContent, endonym labels) re-resolve; no retain cycle; harmless RootView+SettingsView dual-observation. **F1 resolved, Round-2 clean.**
+- **F2 / T1 [Minor] — RESOLVED**: endonyms `"日本語"`/`"English"` were NOT in the catalog (labels worked by absent-key fallback, contradicting the code comment). Added both as `shouldTranslate:false` catalog entries so the documented contract is real and `LocalizationCatalogTests` covers them (it skips `shouldTranslate:false`).
+- **F3 [Minor] — RESOLVED**: `LanguageRefresh` doc comment still described the rejected `.id(token)` mechanism; updated to the `@ObservedObject`-driven body re-eval.
+- **F4 [Minor] — RESOLVED**: `sheetColorScheme` used `.first` window scene (unordered Set, fragile under multi-window / transitions); now prefers the `.foregroundActive` scene and falls back to `UITraitCollection.current` instead of hard `.light`.
+- **T2 [Minor] — RESOLVED**: added `testAppThemeColorScheme` pinning `.light`/`.dark`/`.system→nil` (the explicit-theme slice of the sheet-revert fix; the device-resolution branch is manual).
+- **T3 [Minor — acknowledged]**: RootView `.environment(\.locale,)` integration is manual/UITest-only; constituent pieces (`localeOverride`, `token`) are unit-covered.
+- **Security: No findings** (S1-S5): swizzle overrides only `localizedString`; the `AppLanguage` enum is the path-construction validation gate (no traversal); `.environment`-not-`.id` preserves vault/lock state; extension path purely presentational; no PII.
+
+### Verification
+- Build: pass. Full `xcodebuild test`: pass (incl. LocalizationCatalogTests, both string-path switch tests, theme test). iOS guard: pass.
+- **Manual VC (REQUIRED)**: signed-in — (1) Settings open, ja↔en switches the sheet's labels in place without dismissal; (2) switching language while unlocked does NOT re-lock; (3) System→Light→System: sheet AND app both return to device appearance; (4) AutoFill follows language next invocation.
+
+---
+
 ## ARCHITECTURE PIVOT — Code Review (immediate-switch rewrite)
 Date: 2026-06-21T12:15:25Z
 

@@ -1,16 +1,19 @@
 import Foundation
 import SwiftUI
 
-/// App-wide signal that the display language changed. The root view observes it
-/// and re-renders its content (via `.id(token)`) so already-rendered
-/// `Text("…")` / `String(localized:)` re-resolve against the new `LanguageBundle`
-/// override — SwiftUI does not otherwise know the bundle's string table moved.
+/// App-wide signal that the display language changed. Views that show localized
+/// text observe it (`@ObservedObject LanguageRefresh.shared`) so they re-evaluate
+/// their body on a `bump()` and re-resolve `Text("…")` / `L10n.string(…)` against
+/// the new `LanguageBundle` override — SwiftUI does not otherwise know the
+/// bundle's string table moved. We drive re-evaluation this way rather than via
+/// `.id()`, which would re-create the view tree (dropping `@State`, dismissing a
+/// presented sheet); `RootView` and the Settings sheet each observe this directly.
 @MainActor
 public final class LanguageRefresh: ObservableObject {
   public static let shared = LanguageRefresh()
   private init() {}
 
-  /// Bumped on each language change; used as a `.id()` on the root content.
+  /// Bumped on each language change to invalidate observing views' bodies.
   @Published public private(set) var token = 0
 
   public func bump() { token += 1 }

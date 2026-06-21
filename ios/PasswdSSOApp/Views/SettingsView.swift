@@ -46,6 +46,14 @@ struct SettingsView: View {
   @AppStorage("appTheme", store: .appGroup) private var theme: AppTheme = .system
   private let store = AppSettingsStore()
 
+  /// Observed so THIS sheet re-evaluates its own body on a language change.
+  /// The sheet is presented in a detached context; relying on the presenter's
+  /// `\.locale` environment to propagate across the sheet boundary proved
+  /// unreliable, so the sheet subscribes to the refresh directly and re-resolves
+  /// its `Text("…")` / `L10n.string(…)` in place (the resolution layer is not
+  /// memoized) while staying open.
+  @ObservedObject private var languageRefresh = LanguageRefresh.shared
+
   /// Mirror of the stored language preference, driving the picker selection.
   @State private var language: AppLanguage = AppSettingsStore().appLanguage
 
@@ -225,9 +233,13 @@ struct SettingsView: View {
   /// device setting. The window-scene trait is independent of per-view overrides.
   private var sheetColorScheme: ColorScheme {
     if let override = theme.colorScheme { return override }
-    let deviceStyle = UIApplication.shared.connectedScenes
-      .compactMap { $0 as? UIWindowScene }
-      .first?.traitCollection.userInterfaceStyle
+    // Prefer the foreground-active window scene; `connectedScenes` is unordered
+    // and may briefly lack an active scene mid-transition or hold several under
+    // multi-window. Fall back to the current trait rather than hard-coding a
+    // scheme so a dark device is never momentarily mis-tinted light.
+    let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+    let deviceStyle = (scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)?
+      .traitCollection.userInterfaceStyle ?? UITraitCollection.current.userInterfaceStyle
     return deviceStyle == .dark ? .dark : .light
   }
 }
