@@ -19,6 +19,20 @@ extension AppTheme {
   }
 }
 
+extension AppLanguage {
+  /// Picker label. `.system` reuses the existing "System" catalog key (also used
+  /// by the theme picker). The endonyms are rendered via `String(localized:)`
+  /// whose keys exist as `shouldTranslate:false` catalog entries, so they render
+  /// identically in both locales and do not trip the catalog-completeness test.
+  var label: String {
+    switch self {
+    case .system: String(localized: "System")
+    case .ja: String(localized: "日本語")
+    case .en: String(localized: "English")
+    }
+  }
+}
+
 /// App settings, mirroring the browser extension's options: auto-lock timeout,
 /// vault timeout action, clipboard auto-clear, and theme.
 @MainActor
@@ -28,6 +42,17 @@ struct SettingsView: View {
   @Environment(\.dismiss) private var dismiss
   @AppStorage("appTheme", store: .appGroup) private var theme: AppTheme = .system
   private let store = AppSettingsStore()
+
+  /// Mirror of the stored language preference so the picker updates immediately
+  /// even though the rendered language only flips on relaunch (restart-to-apply).
+  @State private var language: AppLanguage = AppSettingsStore().appLanguage
+  /// True once the user picks a language whose resolved code differs from the
+  /// one the app launched with — i.e. a relaunch is needed to apply it.
+  @State private var pendingRestart = false
+  /// The localization the app resolved at launch; the restart-notice comparison
+  /// is done in resolved-code space so picking the already-active language shows
+  /// no notice.
+  private let launchEffectiveCode = Bundle.main.preferredLocalizations.first
 
   private static let lockOptions = [5, 15, 30, 60]
 
@@ -80,6 +105,20 @@ struct SettingsView: View {
       get: { store.autoCopyTotp },
       set: { newValue in
         store.autoCopyTotp = newValue
+        autoLockService.recordActivity()
+      }
+    )
+  }
+
+  private var languageSelection: Binding<AppLanguage> {
+    Binding(
+      get: { language },
+      set: { newValue in
+        language = newValue
+        store.appLanguage = newValue
+        // Show the restart notice only when the choice actually changes the
+        // resolved language from what the app launched with.
+        pendingRestart = newValue.effectiveCode != launchEffectiveCode
         autoLockService.recordActivity()
       }
     )
@@ -138,6 +177,20 @@ struct SettingsView: View {
             ForEach(AppTheme.allCases, id: \.self) { option in
               Text(option.label).tag(option)
             }
+          }
+        }
+
+        Section {
+          Picker("Language", selection: languageSelection) {
+            ForEach(AppLanguage.allCases, id: \.self) { option in
+              Text(option.label).tag(option)
+            }
+          }
+        } header: {
+          Text("Language")
+        } footer: {
+          if pendingRestart {
+            Text("Language changed. Restart the app to apply.")
           }
         }
 

@@ -14,6 +14,40 @@ public enum AppTheme: String, CaseIterable {
   case dark
 }
 
+/// User-selected display language. `system` follows the device language;
+/// `ja`/`en` force a specific localization. rawValues `"ja"`/`"en"` match the
+/// catalog localization codes (and `AppleLanguages` array elements).
+public enum AppLanguage: String, CaseIterable {
+  case system
+  case ja
+  case en
+
+  /// The BCP-47 code this choice resolves to. `.system` resolves to the bundle's
+  /// current localization (the device language) — read from
+  /// `Bundle.main.preferredLocalizations`, NOT `Locale.current`, so it reflects
+  /// the localizations the app actually ships. Used to decide whether a host
+  /// language change needs a restart (it differs from the launch-time code).
+  public var effectiveCode: String {
+    switch self {
+    case .ja: "ja"
+    case .en: "en"
+    case .system: Bundle.main.preferredLocalizations.first ?? "en"
+    }
+  }
+
+  /// A forced locale for `.environment(\.locale,)` injection (AutoFill extension,
+  /// which renders all strings via `Text(LocalizedStringKey)`). `nil` for
+  /// `.system` means "do not override" — the view inherits the device locale.
+  /// Constructed from the closed enum, never `Locale.current`.
+  public var localeOverride: Locale? {
+    switch self {
+    case .ja: Locale(identifier: "ja")
+    case .en: Locale(identifier: "en")
+    case .system: nil
+    }
+  }
+}
+
 extension UserDefaults {
   /// Shared App Group suite used for all persisted app settings.
   /// UserDefaults is thread-safe but not `Sendable`; the unsafe annotation
@@ -44,12 +78,24 @@ public struct AppSettingsStore {
     static let clipboardClearSeconds = "clipboardClearSeconds"
     static let tenantAutoLockMinutes = "tenantAutoLockMinutes"
     static let autoCopyTotp = "autoCopyTotp"
+    static let appLanguage = "appLanguage"
+    /// The OS-owned key honored ONLY in the standard domain. Never written to
+    /// the App Group suite (the bundle-localization machinery ignores it there).
+    static let appleLanguages = "AppleLanguages"
   }
 
   private let defaults: UserDefaults
+  private let systemDefaults: UserDefaults
 
-  public init(defaults: UserDefaults = .appGroup) {
+  /// - Parameters:
+  ///   - defaults: App Group suite holding all persisted settings.
+  ///   - systemDefaults: the standard domain, where `AppleLanguages` must be
+  ///     written for the OS to honor a language override on next launch. Injected
+  ///     so tests can use a throwaway suite instead of polluting the real
+  ///     `.standard` domain.
+  public init(defaults: UserDefaults = .appGroup, systemDefaults: UserDefaults = .standard) {
     self.defaults = defaults
+    self.systemDefaults = systemDefaults
   }
 
   /// Auto-lock idle timeout in minutes. Range [5, 60]; absent → 15. There is
@@ -145,5 +191,35 @@ public struct AppSettingsStore {
   public var autoCopyTotp: Bool {
     get { defaults.bool(forKey: Key.autoCopyTotp) }
     nonmutating set { defaults.set(newValue, forKey: Key.autoCopyTotp) }
+  }
+
+  /// User-selected display language. The picker reads/writes this App-Group key;
+  /// the setter ALSO mutates the standard-domain `AppleLanguages` so the host app
+  /// resolves the chosen localization on next launch (the host uses
+  /// `String(localized:)`, which is not affected by the SwiftUI `\.locale`
+  /// environment — hence restart-to-apply). The AutoFill extension reads only the
+  /// App-Group value and applies it live via `.environment(\.locale,)`.
+  ///
+  /// Fail-closed: absent or unrecognized stored value → `.system`. We read the
+  /// preference from THIS key (not by parsing `AppleLanguages`, which the OS may
+  /// normalize to region-qualified forms like `ja-JP`).
+  public var appLanguage: AppLanguage {
+    get {
+      guard let raw = defaults.string(forKey: Key.appLanguage),
+        let language = AppLanguage(rawValue: raw)
+      else { return .system }
+      return language
+    }
+    nonmutating set {
+      defaults.set(newValue.rawValue, forKey: Key.appLanguage)
+      switch newValue {
+      case .system:
+        // Remove the override so the device language governs again. Writing
+        // ["system"] would be an invalid localization and break the bundle.
+        systemDefaults.removeObject(forKey: Key.appleLanguages)
+      case .ja, .en:
+        systemDefaults.set([newValue.rawValue], forKey: Key.appleLanguages)
+      }
+    }
   }
 }

@@ -842,6 +842,10 @@
         }
       }
     },
+    "English" : {
+      "comment" : "Endonym (English language name) for the language picker — same in all locales.",
+      "shouldTranslate" : false
+    },
     "Enter a valid https:// URL (http:// allowed for localhost)." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1178,6 +1182,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "鍵タイプ"
+          }
+        }
+      }
+    },
+    "Language" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Language"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "言語"
+          }
+        }
+      }
+    },
+    "Language changed. Restart the app to apply." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Language changed. Restart the app to apply."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "言語を変更しました。反映するにはアプリを再起動してください。"
           }
         }
       }
@@ -2450,6 +2486,10 @@
           }
         }
       }
+    },
+    "日本語" : {
+      "comment" : "Endonym (Japanese language name) for the language picker — same in all locales.",
+      "shouldTranslate" : false
     }
   },
   "version" : "1.0"

@@ -658,7 +658,15 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
       child.view.removeFromSuperview()
       child.removeFromParent()
     }
-    let host = UIHostingController(rootView: view)
+    // Apply the user's language preference here (the single SwiftUI hosting
+    // choke point) so every view inherits it. The extension's strings are all
+    // `Text(LocalizedStringKey)`, which honor `\.locale`, so this flips the UI
+    // language with no relaunch. Read fresh per presentation (never cached) so a
+    // host-side change takes effect on the next presentation. `.system` →
+    // nil → no override → inherit the device locale.
+    let override = AppSettingsStore().appLanguage.localeOverride
+    let rootView = override.map { AnyView(view.environment(\.locale, $0)) } ?? AnyView(view)
+    let host = UIHostingController(rootView: rootView)
     addChild(host)
     host.view.translatesAutoresizingMaskIntoConstraints = false
     self.view.addSubview(host.view)
