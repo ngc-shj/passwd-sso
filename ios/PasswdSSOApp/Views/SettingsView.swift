@@ -203,5 +203,11 @@ struct SettingsView: View {
         }
       }
     }
+    // A `.sheet` is presented in its own context and does NOT inherit the
+    // WindowGroup's `.preferredColorScheme`, so without this the Settings sheet
+    // keeps the system appearance while the app behind it follows the user's
+    // theme — and a theme change made here applies to the app but not to this
+    // sheet. Apply the same override on the sheet's own root to keep them in sync.
+    .preferredColorScheme(theme.colorScheme)
   }
 }
