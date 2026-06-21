@@ -45,6 +45,11 @@ struct RootView: View {
   // Shared dependency instances kept alive across state transitions
   @State private var hostSyncService: HostSyncService?
 
+  /// Drives in-place re-localization on a language change. Observed here (not at
+  /// the App root) so the `.id()` below re-creates only the CONTENT views — never
+  /// `RootView` itself — preserving `appState` (and the in-memory vault key).
+  @ObservedObject private var languageRefresh = LanguageRefresh.shared
+
   var body: some View {
     Group {
       switch appState {
@@ -131,6 +136,13 @@ struct RootView: View {
         }
       }
     }
+    // Re-create the CONTENT views on a language change so their already-rendered
+    // Text("…") / L10n.string(…) re-resolve against the freshly-applied
+    // LanguageBundle. `.id()` here re-creates only this Group's children, NOT
+    // `RootView` (whose `appState`/vault key live above), so switching language
+    // does not re-lock the vault. The launch `.task` below re-runs on the id
+    // change but its `guard case .launching` makes it a no-op post-unlock.
+    .id(languageRefresh.token)
     .task {
       // One-shot launch restoration. Guard on .launching so a later view
       // re-appear does not re-run it.
