@@ -257,7 +257,7 @@ struct VaultListView: View {
     let counts = categoryCounts(viewModel.filteredSummaries)
     var items: [LandingItem] = [
       LandingItem(id: "all", category: .all, symbol: "tray.full",
-                  label: String(localized: "All"), count: counts[.all] ?? 0),
+                  label: L10n.string("All"), count: counts[.all] ?? 0),
     ]
     for type in EntryTypeCategory.allCases {
       let count = counts[.type(type)] ?? 0
@@ -268,11 +268,11 @@ struct VaultListView: View {
     }
     if let count = counts[.codes], count > 0 {
       items.append(LandingItem(id: "codes", category: .codes, symbol: "clock",
-                               label: String(localized: "Codes"), count: count))
+                               label: L10n.string("Codes"), count: count))
     }
     if let count = counts[.favorites], count > 0 {
       items.append(LandingItem(id: "favorites", category: .favorites, symbol: "star",
-                               label: String(localized: "Favorites"), count: count))
+                               label: L10n.string("Favorites"), count: count))
     }
     for tag in distinctTags(viewModel.filteredSummaries) {
       items.append(LandingItem(id: "tag-\(tag)", category: .tag(tag), symbol: "tag",
@@ -381,11 +381,11 @@ struct VaultListView: View {
       }
     } catch MobileAPIError.authenticationRequired {
       if surfaceErrors {
-        syncError = String(localized: "Your session expired. Lock and unlock to sign in again.")
+        syncError = L10n.string("Your session expired. Lock and unlock to sign in again.")
       }
     } catch {
       if surfaceErrors {
-        syncError = String(localized: "Couldn't sync. Check your connection and try again.")
+        syncError = L10n.string("Couldn't sync. Check your connection and try again.")
       }
     }
   }

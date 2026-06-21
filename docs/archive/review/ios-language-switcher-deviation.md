@@ -1,6 +1,13 @@
 # Coding Deviation Log: ios-language-switcher
 
-## D1 — `.system`-removes-key test asserts baseline-revert, not `XCTAssertNil` (C2 / T3)
+## D2 — MAJOR: pivoted from restart-to-apply (`AppleLanguages`) to immediate-switch (`Bundle.main` swizzle)
+- **Plan said**: C2/C7 — host writes `AppleLanguages` to the standard domain and applies on next launch (restart-to-apply); extension uses `.environment(\.locale,)`.
+- **Actual**: the `AppleLanguages` mechanism was REMOVED entirely. Host + extension now switch language IMMEDIATELY via a `Bundle.main` `object_setClass` swizzle (`LanguageBundle`), all `String(localized:)` sites swept to `L10n.string`, and the root re-localizes via a `\.locale` environment change (no restart, no `.id()` teardown).
+- **Why**: the planned `AppleLanguages` approach had a confirmed on-device bug — システム→英語 worked but 英語→日本語 did not. Empirically verified root cause: `Bundle.main.preferredLocalizations` resolves once at launch, so the in-app write is next-launch-only and directionally unreliable. The user then requested immediate switching (no restart). The swizzle + `String(localized:bundle:)` approach was empirically validated to switch both directions immediately.
+- **Contract impact**: supersedes C2's `AppleLanguages` invariant, C4's restart-notice, C5's restart-notice string (removed), and C1's `effectiveCode` (removed, unused). C1's `localeOverride` and the enum survive. C7 still applies (extension), now backed by `applyAppLanguage()` + `.environment`. New surface: `LanguageBundle` / `L10n` / `LanguageRefresh`. Re-reviewed in the ARCHITECTURE PIVOT code-review section; F1 (Critical, `.id()` state loss) found and fixed; T1-T3 (test isolation/coverage) found and fixed; security clean.
+- **D1 below is now obsolete** (the `.system`-removes-AppleLanguages test it describes was removed in this pivot).
+
+## D1 — `.system`-removes-key test asserts baseline-revert, not `XCTAssertNil` (C2 / T3) [OBSOLETE — test removed in D2]
 - **Plan said**: C2 acceptance — "Set `.system` after `.ja` → `standard.object(forKey: "AppleLanguages") == nil`."
 - **Actual**: the test asserts the value reverts to the suite's pre-write baseline and is NO LONGER `["ja"]`, rather than asserting `nil`.
 - **Why**: discovered during `xcodebuild test` — a suite-backed `UserDefaults` falls through to `NSGlobalDomain` for keys it does not itself hold. After `removeObject(forKey: "AppleLanguages")`, the injected suite reports the device's global `AppleLanguages` (e.g. `["ja-JP", "en-JP"]`), NOT `nil`. The production code is correct (the override IS removed from the suite); only the assertion needed to account for the fall-through. The test still provable-reds: a no-op `.system` setter leaves `["ja"]`, which the `XCTAssertNotEqual(..., ["ja"])` + baseline-equality pair catches.

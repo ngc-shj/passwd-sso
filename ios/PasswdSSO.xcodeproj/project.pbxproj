@@ -65,6 +65,7 @@
 		65B588E2DB548D9142568179 /* CryptoUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC38F9BDA78209BF77E16CC7 /* CryptoUtils.swift */; };
 		66734B405C893DA325204500 /* HostTokenStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36DABD88C20A969FBE8AA7BA /* HostTokenStoreTests.swift */; };
 		6790FB758EF3FD2CB70EA152 /* LockStateReducer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5008EABA0367B0BB5E55052F /* LockStateReducer.swift */; };
+		69132B93EEBD44B27B153925 /* LanguageBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D62DC1D07ABCD23DB055F66 /* LanguageBundle.swift */; };
 		69C540BACD28B65D0DDB74A3 /* PasswdSSOAppApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C025655D57D0A2807DB8625 /* PasswdSSOAppApp.swift */; };
 		69FEF074D2733163B126CC4E /* AutofillTokenRefresher.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFB5F0EE6A3D22DF1F2C53B2 /* AutofillTokenRefresher.swift */; };
 		6AC9B4C903888C5379BD42CD /* AutofillDPoPKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F67FCBE789AD13342E5DE77 /* AutofillDPoPKey.swift */; };
@@ -258,6 +259,7 @@
 		29C2D35912411C20F34DA986 /* AppSettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsStore.swift; sourceTree = "<group>"; };
 		2A3E40BD15B72CC7D2465FA1 /* EntryEditForm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryEditForm.swift; sourceTree = "<group>"; };
 		2C025655D57D0A2807DB8625 /* PasswdSSOAppApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasswdSSOAppApp.swift; sourceTree = "<group>"; };
+		2D62DC1D07ABCD23DB055F66 /* LanguageBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageBundle.swift; sourceTree = "<group>"; };
 		2DAD672FE74D0EB78FA99F1C /* AESGCMTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AESGCMTests.swift; sourceTree = "<group>"; };
 		3000F818C09142AEC4837294 /* PasskeyAssertion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasskeyAssertion.swift; sourceTree = "<group>"; };
 		3073F23D803A683034FF5D44 /* VaultCategoryLanding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultCategoryLanding.swift; sourceTree = "<group>"; };
@@ -793,6 +795,7 @@
 				E0EAAD69A5C2E24912DEB8D1 /* BridgeKeyStore.swift */,
 				8AFD6C1D7BB52C3C67DF3BD2 /* EntryCacheFile.swift */,
 				00C68B395A2ACE49D3F116CB /* HostTokenStore.swift */,
+				2D62DC1D07ABCD23DB055F66 /* LanguageBundle.swift */,
 				469C94A411CE66C4D3EAB9AA /* PasskeySignCountStore.swift */,
 				820C1F588B1209A77A6C0A36 /* TeamDirectoryStore.swift */,
 				C29F7DCD8033069009E3E5EF /* UploadTokenStore.swift */,
@@ -1123,6 +1126,7 @@
 				4BB5CCEA7BC170BA864CE2A4 /* HTTPConstants.swift in Sources */,
 				3582DA3CD5414790F589E168 /* HostTokenStore.swift in Sources */,
 				542B8D1BD03A73706A98778B /* KDF.swift in Sources */,
+				69132B93EEBD44B27B153925 /* LanguageBundle.swift in Sources */,
 				2F1B42C2B8566A94C6155FEE /* LockState.swift in Sources */,
 				6790FB758EF3FD2CB70EA152 /* LockStateReducer.swift in Sources */,
 				3602BE17465AD01B73DA82AC /* PasskeyAssertion.swift in Sources */,

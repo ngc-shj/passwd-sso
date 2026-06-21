@@ -1,4 +1,32 @@
 # Code Review: ios-language-switcher
+
+## ARCHITECTURE PIVOT — Code Review (immediate-switch rewrite)
+Date: 2026-06-21T12:15:25Z
+
+### Why the rewrite
+The original restart-to-apply / `AppleLanguages`-write approach had a confirmed runtime bug: システム→英語 worked, but 英語→日本語 left the UI in English. Root cause (empirically verified on the simulator): `Bundle.main.preferredLocalizations` is resolved ONCE at process launch, so an in-app `AppleLanguages` write only affects the *next* launch and was directionally unreliable. Reworked to switch **immediately** (no restart) via a `Bundle.main` swizzle.
+
+### New mechanism
+- `ios/Shared/Storage/LanguageBundle.swift` (new): a `Bundle` subclass installed on `Bundle.main` via `object_setClass`, overriding `localizedString(forKey:value:table:)` to resolve from the chosen `.lproj`. Covers `Text("…")` / `NSLocalizedString`. Plus `L10n.string(_:)` (resolves `String(localized:bundle:)` against the active `.lproj`, since Swift's bare `String(localized:)` does NOT route through the swizzle) and `LanguageRefresh` (ObservableObject token for re-render).
+- All ~27 host `String(localized:)` sites swept to `L10n.string(...)`.
+- `AppSettingsStore.appLanguage` no longer writes `AppleLanguages`; adds `applyAppLanguage()`. Removed `systemDefaults` param + `effectiveCode`.
+- App `init()` calls `applyAppLanguage()` at launch; root re-localizes via `.environment(\.locale,)` keyed off `languageRefresh.token`. The extension calls `applyAppLanguage()` at presentation.
+
+### Findings & resolution
+- **F1 [Critical] — RESOLVED**: the first cut used `.id(languageRefresh.token)` on the root ZStack, which would tear down `RootView` and reset its `@State appState` — dropping the in-memory `vaultKey` and **re-locking the vault on every language change**. (Functionality expert flagged it; the Security expert's S3 reached the opposite conclusion, claiming vault state lived on the App struct — resolved by reading the code: the vault key is in `RootView.appState`'s `.vaultUnlocked` case, `RootView.swift:43,70`, inside the `.id()`'d subtree, so F1 is correct.) Fixed by removing `.id()` and re-localizing via a `\.locale` environment change keyed to the refresh token (`PasswdSSOAppApp.swift:136-159`), which re-evaluates subtree bodies WITHOUT changing RootView identity — vault/session state preserved.
+- **Security: No findings** (S1-S4). The flagged path-traversal probe (appLanguage code → `Bundle(path:)`) is NOT exploitable: the `AppLanguage` enum is the validation gate (`appLanguage` getter fail-closes unknown values to `.system`), production callers pass only `nil`/`"ja"`/`"en"`, and `path(forResource:ofType:)` does not do raw path concatenation. The swizzle overrides ONLY `localizedString` (no Info.plist / code-signing / resource shadowing). The `.id`-removal fix keeps vault/session/lock state untouched.
+- **T1 [Major] — RESOLVED**: the process-global swizzle reset was in a body-`defer`; moved to `tearDown()` (`LanguageBundle.setLanguage(nil)`) so a leaked override cannot make sibling tests locale-dependent.
+- **T2 [Major] — RESOLVED**: `testAppLanguageLabels` compared two different resolution paths; now compares `AppLanguage.system.label` against the same-path `L10n.string("System")`.
+- **T3 [Major] — RESOLVED**: added `testApplyAppLanguageRePointsL10nStringBothDirections` — the swizzle test only proved the `Text`/NSLocalizedString path; this covers the `L10n.string` path the swept call sites actually use. Also added `testLanguageRefreshBumpIncrementsToken` (RT6).
+- **T6 [Minor — acknowledged, manual]**: the F1 fix's "re-localize without teardown, preserve RootView `@State`" guarantee is a SwiftUI view-graph behavior — not unit-testable; covered by manual VC (on-device ja↔en switch while unlocked, confirm vault stays unlocked).
+
+### Verification
+- Build: pass. Full `xcodebuild test`: pass (incl. new L10n/swizzle/refresh tests). iOS diagnostic-logging guard: pass.
+- **Manual VC (REQUIRED before merge)**: on sim/device — (1) ja↔en immediate switch with no restart; (2) switching language while the vault is UNLOCKED does NOT re-lock it (the F1 fix); (3) AutoFill extension follows the language on next invocation.
+
+---
+
+# (Prior round — original restart-to-apply approach, superseded by the pivot above)
 Date: 2026-06-21T06:47:57Z
 Review round: 1
 

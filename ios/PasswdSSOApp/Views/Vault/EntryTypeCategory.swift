@@ -1,4 +1,5 @@
 import Foundation
+import Shared
 
 /// Presentation mapping for the server entry-type strings. Lives in the app
 /// target (not Shared) so `localizedLabel` resolves against the app's String
@@ -44,14 +45,14 @@ enum EntryTypeCategory: String, CaseIterable {
   /// raw type identifiers never leak into the UI.
   var localizedLabel: String {
     switch self {
-    case .login: String(localized: "Logins")
-    case .secureNote: String(localized: "Secure Notes")
-    case .creditCard: String(localized: "Credit Cards")
-    case .identity: String(localized: "Identities")
-    case .bankAccount: String(localized: "Bank Accounts")
-    case .sshKey: String(localized: "SSH Keys")
-    case .softwareLicense: String(localized: "Software Licenses")
-    case .passkey: String(localized: "Passkeys")
+    case .login: L10n.string("Logins")
+    case .secureNote: L10n.string("Secure Notes")
+    case .creditCard: L10n.string("Credit Cards")
+    case .identity: L10n.string("Identities")
+    case .bankAccount: L10n.string("Bank Accounts")
+    case .sshKey: L10n.string("SSH Keys")
+    case .softwareLicense: L10n.string("Software Licenses")
+    case .passkey: L10n.string("Passkeys")
     }
   }
 }

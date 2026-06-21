@@ -11,32 +11,21 @@ import Shared
 final class AppSettingsStoreTests: XCTestCase {
   private var suiteName: String!
   private var defaults: UserDefaults!
-  /// A throwaway stand-in for `UserDefaults.standard`, used to test the
-  /// `AppleLanguages` side effect of `appLanguage` WITHOUT writing into the test
-  /// host process's real standard domain (which would pollute locale-sensitive
-  /// tests like LocalizationCatalogTests).
-  private var systemSuiteName: String!
-  private var systemDefaults: UserDefaults!
-  /// Baseline of the REAL standard domain's AppleLanguages, captured before each
-  /// test, so a leak guard can confirm no test mutated it.
-  private var realAppleLanguagesBaseline: [String]?
 
   override func setUp() {
     super.setUp()
     suiteName = "test.appsettings.\(UUID().uuidString)"
     defaults = UserDefaults(suiteName: suiteName)
-    systemSuiteName = "test.appsettings.system.\(UUID().uuidString)"
-    systemDefaults = UserDefaults(suiteName: systemSuiteName)
-    realAppleLanguagesBaseline = UserDefaults.standard.stringArray(forKey: "AppleLanguages")
   }
 
   override func tearDown() {
     defaults.removePersistentDomain(forName: suiteName)
-    systemDefaults.removePersistentDomain(forName: systemSuiteName)
     defaults = nil
     suiteName = nil
-    systemDefaults = nil
-    systemSuiteName = nil
+    // Reset the process-global LanguageBundle override unconditionally — any
+    // language test mutates it, and a leaked override would make sibling tests'
+    // L10n.string(…) / Bundle.localizedString(…) lookups locale-dependent.
+    LanguageBundle.setLanguage(nil)
     super.tearDown()
   }
 
@@ -237,73 +226,38 @@ final class AppSettingsStoreTests: XCTestCase {
 
   // MARK: - App language
 
-  /// All language tests inject BOTH suites; the `systemDefaults` injection is what
-  /// keeps the `AppleLanguages` write off the real `.standard` domain.
-  private func languageStore() -> AppSettingsStore {
-    AppSettingsStore(defaults: defaults, systemDefaults: systemDefaults)
-  }
-
   func testAppLanguageAbsentReturnsSystem() {
-    XCTAssertEqual(languageStore().appLanguage, .system)
+    XCTAssertEqual(AppSettingsStore(defaults: defaults).appLanguage, .system)
   }
 
   func testAppLanguageInvalidRawValueReturnsSystem() {
     defaults.set("de", forKey: "appLanguage")
-    XCTAssertEqual(languageStore().appLanguage, .system)
+    XCTAssertEqual(AppSettingsStore(defaults: defaults).appLanguage, .system)
     defaults.set("", forKey: "appLanguage")
-    XCTAssertEqual(languageStore().appLanguage, .system)
+    XCTAssertEqual(AppSettingsStore(defaults: defaults).appLanguage, .system)
   }
 
-  func testAppLanguageJaSetsAppleLanguages() {
-    let store = languageStore()
+  func testAppLanguageRoundTrip() {
+    let store = AppSettingsStore(defaults: defaults)
     store.appLanguage = .ja
     XCTAssertEqual(store.appLanguage, .ja)
-    XCTAssertEqual(systemDefaults.stringArray(forKey: "AppleLanguages"), ["ja"])
-  }
-
-  func testAppLanguageEnSetsAppleLanguages() {
-    let store = languageStore()
     store.appLanguage = .en
     XCTAssertEqual(store.appLanguage, .en)
-    XCTAssertEqual(systemDefaults.stringArray(forKey: "AppleLanguages"), ["en"])
-  }
-
-  /// Provable-red: write `.ja` FIRST so the override key exists, then assert
-  /// `.system` removes it. On a fresh suite the key is already absent, so a no-op
-  /// `.system` setter would pass spuriously without this precondition.
-  ///
-  /// Note: a suite-backed `UserDefaults` falls through to `NSGlobalDomain` for
-  /// keys it does not itself hold, so after removal `object(forKey:)` returns the
-  /// device's global `AppleLanguages` (e.g. ["ja-JP", "en-JP"]), NOT nil. We
-  /// therefore assert the override was removed by confirming the value reverts to
-  /// the suite's pre-write baseline (the global fall-through), not to our `["ja"]`.
-  func testAppLanguageSystemRemovesAppleLanguages() {
-    let store = languageStore()
-    let baseline = systemDefaults.stringArray(forKey: "AppleLanguages")
-    store.appLanguage = .ja
-    XCTAssertEqual(systemDefaults.stringArray(forKey: "AppleLanguages"), ["ja"])  // precondition: override present
     store.appLanguage = .system
     XCTAssertEqual(store.appLanguage, .system)
-    // Override gone: the suite no longer reports our forced ["ja"]; it reverts to
-    // whatever the global domain provides (the baseline).
-    XCTAssertNotEqual(systemDefaults.stringArray(forKey: "AppleLanguages"), ["ja"])
-    XCTAssertEqual(systemDefaults.stringArray(forKey: "AppleLanguages"), baseline)
   }
 
-  /// The setter must NOT touch the real `.standard` domain — only the injected
-  /// `systemDefaults`. Compares the real domain against the setUp baseline.
-  func testAppLanguageDoesNotMutateRealStandardDomain() {
-    languageStore().appLanguage = .ja
-    XCTAssertEqual(UserDefaults.standard.stringArray(forKey: "AppleLanguages"), realAppleLanguagesBaseline)
+  func testAppLanguagePersistsAcrossInstances() {
+    AppSettingsStore(defaults: defaults).appLanguage = .ja
+    XCTAssertEqual(AppSettingsStore(defaults: defaults).appLanguage, .ja)
   }
 
   /// Host writes the preference; the AutoFill extension reads it from a separate
-  /// store over the same App-Group suite (the cross-process hand-off C7 depends on).
+  /// store over the same App-Group suite (the shared hand-off the extension relies
+  /// on to apply the language).
   func testAppLanguageReadsAcrossSeparateStoresOnSameSuite() {
-    let appSide = languageStore()
-    let extensionSide = AppSettingsStore(
-      defaults: UserDefaults(suiteName: suiteName)!,
-      systemDefaults: UserDefaults(suiteName: systemSuiteName)!)
+    let appSide = AppSettingsStore(defaults: defaults)
+    let extensionSide = AppSettingsStore(defaults: UserDefaults(suiteName: suiteName)!)
     appSide.appLanguage = .ja
     XCTAssertEqual(extensionSide.appLanguage, .ja)
   }
@@ -313,14 +267,6 @@ final class AppSettingsStoreTests: XCTestCase {
     for language in AppLanguage.allCases {
       XCTAssertEqual(AppLanguage(rawValue: language.rawValue), language)
     }
-  }
-
-  func testAppLanguageEffectiveCode() {
-    XCTAssertEqual(AppLanguage.ja.effectiveCode, "ja")
-    XCTAssertEqual(AppLanguage.en.effectiveCode, "en")
-    // `.system` resolves to the bundle's current localization (device language);
-    // assert it is one of the shipped codes rather than pinning a specific one.
-    XCTAssertTrue(["ja", "en"].contains(AppLanguage.system.effectiveCode))
   }
 
   func testAppLanguageLocaleOverride() {
@@ -339,11 +285,65 @@ final class AppSettingsStoreTests: XCTestCase {
     XCTAssertEqual(AppLanguage.ja.label, "日本語")
     XCTAssertEqual(AppLanguage.en.label, "English")
     // `.system` reuses the existing "System" key (the C5/F1 contract: no duplicate
-    // key). Comparing against the same `String(localized:)` call proves the
-    // key-routing; the distinctness checks below additionally catch a regression
-    // that accidentally routes `.system` to an endonym key.
-    XCTAssertEqual(AppLanguage.system.label, String(localized: "System"))
+    // key). Compare against the SAME resolution path the label uses (`L10n.string`,
+    // bundle-aware) rather than bare `String(localized:)`, so the assertion stays
+    // self-consistent under any active override; the distinctness checks below
+    // catch a regression that accidentally routes `.system` to an endonym key.
+    XCTAssertEqual(AppLanguage.system.label, L10n.string("System"))
     XCTAssertNotEqual(AppLanguage.system.label, AppLanguage.ja.label)
     XCTAssertNotEqual(AppLanguage.system.label, AppLanguage.en.label)
+  }
+
+  /// Core of the fix: applying a language re-points the `Text("…")` /
+  /// NSLocalizedString path (`Bundle.main.localizedString`) immediately and in
+  /// BOTH directions — the on-device `AppleLanguages` approach only worked
+  /// en→system, not en→ja. `tearDown()` resets the global override.
+  @MainActor
+  func testApplyAppLanguageRePointsTextLookupBothDirections() {
+    let store = AppSettingsStore(defaults: defaults)
+    func lookup() -> String {
+      Bundle.main.localizedString(forKey: "Language", value: nil, table: nil)
+    }
+
+    store.appLanguage = .ja
+    store.applyAppLanguage()
+    XCTAssertEqual(lookup(), "言語")
+
+    // The previously-failing direction: switch straight to English and back to ja.
+    store.appLanguage = .en
+    store.applyAppLanguage()
+    XCTAssertEqual(lookup(), "Language")
+
+    store.appLanguage = .ja
+    store.applyAppLanguage()
+    XCTAssertEqual(lookup(), "言語")  // en → ja now works
+  }
+
+  /// The imperative `String(localized:)` call sites were swept to `L10n.string`,
+  /// which resolves via a DIFFERENT path than the swizzle (`String(localized:
+  /// bundle: LanguageBundle.current)`). This proves THAT path also follows a
+  /// language switch in both directions — the swizzle test above does not cover it.
+  @MainActor
+  func testApplyAppLanguageRePointsL10nStringBothDirections() {
+    let store = AppSettingsStore(defaults: defaults)
+
+    store.appLanguage = .ja
+    store.applyAppLanguage()
+    XCTAssertEqual(L10n.string("Language"), "言語")
+
+    store.appLanguage = .en
+    store.applyAppLanguage()
+    XCTAssertEqual(L10n.string("Language"), "Language")
+
+    store.appLanguage = .ja
+    store.applyAppLanguage()
+    XCTAssertEqual(L10n.string("Language"), "言語")  // en → ja
+  }
+
+  @MainActor
+  func testLanguageRefreshBumpIncrementsToken() {
+    let before = LanguageRefresh.shared.token
+    LanguageRefresh.shared.bump()
+    XCTAssertEqual(LanguageRefresh.shared.token, before + 1)
   }
 }

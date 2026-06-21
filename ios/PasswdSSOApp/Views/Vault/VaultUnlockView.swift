@@ -35,7 +35,7 @@ struct VaultUnlockView: View {
   init(
     unlocker: VaultUnlocker,
     biometricUnlock: (@MainActor @Sendable () async -> Void)? = nil,
-    biometryLabel: String = String(localized: "biometrics"),
+    biometryLabel: String = L10n.string("biometrics"),
     autoPromptOnAppear: Bool = false,
     onUnlocked: @MainActor @escaping (UnlockResult) -> Void
   ) {
@@ -136,11 +136,11 @@ struct VaultUnlockView: View {
         onUnlocked(result)
       }
     } catch VaultUnlockError.invalidPassphrase {
-      errorMessage = String(localized: "Incorrect passphrase. Please try again.")
+      errorMessage = L10n.string("Incorrect passphrase. Please try again.")
       passphrase = ""
       isLoading = false
     } catch {
-      errorMessage = String(localized: "Unable to unlock vault. Check your connection and try again.")
+      errorMessage = L10n.string("Unable to unlock vault. Check your connection and try again.")
       isLoading = false
     }
   }

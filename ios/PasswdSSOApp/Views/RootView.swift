@@ -211,7 +211,7 @@ struct RootView: View {
     // Apple product names — localized system-side, kept literal here.
     case .faceID:  biometryLabel = "Face ID"
     case .touchID: biometryLabel = "Touch ID"
-    default:       biometryLabel = String(localized: "biometrics")
+    default:       biometryLabel = L10n.string("biometrics")
     }
 
     let biometricUnlock: (@MainActor @Sendable () async -> Void)?
@@ -219,7 +219,7 @@ struct RootView: View {
       biometricUnlock = { @MainActor @Sendable in
         do {
           let result = try await unlocker.unlockWithBiometrics(
-            reason: String(localized: "Unlock your passwd-sso vault.")
+            reason: L10n.string("Unlock your passwd-sso vault.")
           )
           await handleVaultUnlocked(
             unlockResult: result,

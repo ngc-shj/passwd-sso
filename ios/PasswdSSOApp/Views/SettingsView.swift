@@ -12,9 +12,9 @@ extension AppTheme {
 
   var label: String {
     switch self {
-    case .system: String(localized: "System")
-    case .light: String(localized: "Light")
-    case .dark: String(localized: "Dark")
+    case .system: L10n.string("System")
+    case .light: L10n.string("Light")
+    case .dark: L10n.string("Dark")
     }
   }
 }
@@ -28,9 +28,9 @@ extension AppLanguage {
   /// they do not trip the catalog-completeness test.
   var label: String {
     switch self {
-    case .system: String(localized: "System")
-    case .ja: String(localized: "日本語")
-    case .en: String(localized: "English")
+    case .system: L10n.string("System")
+    case .ja: L10n.string("日本語")
+    case .en: L10n.string("English")
     }
   }
 }
@@ -45,16 +45,8 @@ struct SettingsView: View {
   @AppStorage("appTheme", store: .appGroup) private var theme: AppTheme = .system
   private let store = AppSettingsStore()
 
-  /// Mirror of the stored language preference so the picker updates immediately
-  /// even though the rendered language only flips on relaunch (restart-to-apply).
+  /// Mirror of the stored language preference, driving the picker selection.
   @State private var language: AppLanguage = AppSettingsStore().appLanguage
-  /// True once the user picks a language whose resolved code differs from the
-  /// one the app launched with — i.e. a relaunch is needed to apply it.
-  @State private var pendingRestart = false
-  /// The localization the app resolved at launch; the restart-notice comparison
-  /// is done in resolved-code space so picking the already-active language shows
-  /// no notice.
-  private let launchEffectiveCode = Bundle.main.preferredLocalizations.first
 
   private static let lockOptions = [5, 15, 30, 60]
 
@@ -118,9 +110,10 @@ struct SettingsView: View {
       set: { newValue in
         language = newValue
         store.appLanguage = newValue
-        // Show the restart notice only when the choice actually changes the
-        // resolved language from what the app launched with.
-        pendingRestart = newValue.effectiveCode != launchEffectiveCode
+        // Apply immediately (no restart): re-points Bundle.main string lookup
+        // and bumps the app-wide refresh token so rendered views re-localize.
+        store.applyAppLanguage()
+        LanguageRefresh.shared.bump()
         autoLockService.recordActivity()
       }
     )
@@ -129,7 +122,7 @@ struct SettingsView: View {
   /// Current server URL — surfaced here because launch restoration skips the
   /// setup screen, so this is the only place a signed-in user can confirm it.
   private var serverURLDisplay: String {
-    loadServerConfig()?.baseURL.absoluteString ?? String(localized: "Not configured")
+    loadServerConfig()?.baseURL.absoluteString ?? L10n.string("Not configured")
   }
 
   var body: some View {
@@ -182,17 +175,11 @@ struct SettingsView: View {
           }
         }
 
-        Section {
+        Section("Language") {
           Picker("Language", selection: languageSelection) {
             ForEach(AppLanguage.allCases, id: \.self) { option in
               Text(option.label).tag(option)
             }
-          }
-        } header: {
-          Text("Language")
-        } footer: {
-          if pendingRestart {
-            Text("Language changed. Restart the app to apply.")
           }
         }
 

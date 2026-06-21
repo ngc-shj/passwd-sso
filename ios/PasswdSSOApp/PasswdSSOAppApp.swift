@@ -18,8 +18,13 @@ struct PasswdSSOAppApp: App {
 
   @Environment(\.scenePhase) private var scenePhase
   @AppStorage("appTheme", store: .appGroup) private var theme: AppTheme = .system
+  @StateObject private var languageRefresh = LanguageRefresh.shared
 
   init() {
+    // Apply the persisted display-language override before any view renders so
+    // String(localized:) / Text("…") resolve to the chosen language from launch.
+    AppSettingsStore().applyAppLanguage()
+
     // BGTaskScheduler mandates registering the launch handler before the app
     // finishes launching; the sync state arrives later via onVaultReady.
     let context = backgroundSyncContext
@@ -124,6 +129,18 @@ struct PasswdSSOAppApp: App {
         }
       }
       .preferredColorScheme(theme.colorScheme)
+      // Re-localize on a language change WITHOUT an `.id()` identity change — an
+      // `.id()` bump would tear down RootView and reset its `appState`, dropping
+      // the in-memory vault key (forcing a re-unlock). Instead we change the
+      // `\.locale` environment, which re-evaluates the subtree's bodies in place:
+      // `Text("…")` / `L10n.string(…)` then re-resolve against the freshly-applied
+      // LanguageBundle override (the resolution layer is not memoized). Reading
+      // `languageRefresh.token` ties this view's invalidation to the bump so the
+      // recompute fires even when the resolved `Locale` value is unchanged.
+      // `localeOverride` is nil for `.system` → inherit the device locale.
+      .environment(
+        \.locale,
+        languageOverrideLocale(token: languageRefresh.token))
       .task {
         // Launch invariant: a crash/reboot can strand identities in the OS store
         // (it survives termination). Clear at launch so "vault locked ⇒ no inline
@@ -131,5 +148,13 @@ struct PasswdSSOAppApp: App {
         await CredentialIdentityRegistrar().clear()
       }
     }
+  }
+
+  /// The `\.locale` to apply for the current language preference. `token` is
+  /// unused in the result; it only makes this call a dependency of
+  /// `languageRefresh.token` so the `.environment` recomputes on a language bump.
+  private func languageOverrideLocale(token: Int) -> Locale {
+    _ = token
+    return AppSettingsStore().appLanguage.localeOverride ?? .autoupdatingCurrent
   }
 }
