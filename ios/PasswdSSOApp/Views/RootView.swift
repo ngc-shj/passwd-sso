@@ -45,6 +45,19 @@ struct RootView: View {
   // Shared dependency instances kept alive across state transitions
   @State private var hostSyncService: HostSyncService?
 
+  /// Drives in-place re-localization on a language change without re-creating the
+  /// view tree (so an open Settings sheet stays open and the vault stays
+  /// unlocked). A `bump()` re-runs `body`, which re-reads `languageLocale`.
+  @ObservedObject private var languageRefresh = LanguageRefresh.shared
+
+  /// The override locale for the current preference. Reads `languageRefresh.token`
+  /// so this value (and thus the `.environment(\.locale,)` it feeds) changes on a
+  /// bump, forcing the subtree — including the presented sheet — to re-evaluate.
+  private var languageLocale: Locale {
+    _ = languageRefresh.token
+    return AppSettingsStore().appLanguage.localeOverride ?? .autoupdatingCurrent
+  }
+
   var body: some View {
     Group {
       switch appState {
@@ -131,6 +144,15 @@ struct RootView: View {
         }
       }
     }
+    // Re-evaluate content bodies in place on a language change so already-rendered
+    // Text("…") / L10n.string(…) re-resolve against the freshly-applied
+    // LanguageBundle. We read `languageRefresh.token` via `.environment` below
+    // (NOT `.id`, which would re-create the subtree and dismiss the open Settings
+    // sheet — theme switching keeps the sheet open, language must match). RootView
+    // observes `languageRefresh`, so a bump re-runs this body; the changed
+    // `\.locale` environment propagates the invalidation into descendants
+    // (including the presented sheet, which inherits the environment).
+    .environment(\.locale, languageLocale)
     .task {
       // One-shot launch restoration. Guard on .launching so a later view
       // re-appear does not re-run it.
@@ -211,7 +233,7 @@ struct RootView: View {
     // Apple product names — localized system-side, kept literal here.
     case .faceID:  biometryLabel = "Face ID"
     case .touchID: biometryLabel = "Touch ID"
-    default:       biometryLabel = String(localized: "biometrics")
+    default:       biometryLabel = L10n.string("biometrics")
     }
 
     let biometricUnlock: (@MainActor @Sendable () async -> Void)?
@@ -219,7 +241,7 @@ struct RootView: View {
       biometricUnlock = { @MainActor @Sendable in
         do {
           let result = try await unlocker.unlockWithBiometrics(
-            reason: String(localized: "Unlock your passwd-sso vault.")
+            reason: L10n.string("Unlock your passwd-sso vault.")
           )
           await handleVaultUnlocked(
             unlockResult: result,

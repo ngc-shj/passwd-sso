@@ -20,6 +20,10 @@ struct PasswdSSOAppApp: App {
   @AppStorage("appTheme", store: .appGroup) private var theme: AppTheme = .system
 
   init() {
+    // Apply the persisted display-language override before any view renders so
+    // String(localized:) / Text("…") resolve to the chosen language from launch.
+    AppSettingsStore().applyAppLanguage()
+
     // BGTaskScheduler mandates registering the launch handler before the app
     // finishes launching; the sync state arrives later via onVaultReady.
     let context = backgroundSyncContext

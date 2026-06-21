@@ -14,6 +14,27 @@ public enum AppTheme: String, CaseIterable {
   case dark
 }
 
+/// User-selected display language. `system` follows the device language;
+/// `ja`/`en` force a specific localization. rawValues `"ja"`/`"en"` match the
+/// catalog localization codes (and `AppleLanguages` array elements).
+public enum AppLanguage: String, CaseIterable {
+  case system
+  case ja
+  case en
+
+  /// A forced locale for `.environment(\.locale,)` injection (drives date/number
+  /// formatting alongside the `LanguageBundle` string-lookup override). `nil` for
+  /// `.system` means "do not override" — views inherit the device locale.
+  /// Constructed from the closed enum, never `Locale.current`.
+  public var localeOverride: Locale? {
+    switch self {
+    case .ja: Locale(identifier: "ja")
+    case .en: Locale(identifier: "en")
+    case .system: nil
+    }
+  }
+}
+
 extension UserDefaults {
   /// Shared App Group suite used for all persisted app settings.
   /// UserDefaults is thread-safe but not `Sendable`; the unsafe annotation
@@ -44,6 +65,7 @@ public struct AppSettingsStore {
     static let clipboardClearSeconds = "clipboardClearSeconds"
     static let tenantAutoLockMinutes = "tenantAutoLockMinutes"
     static let autoCopyTotp = "autoCopyTotp"
+    static let appLanguage = "appLanguage"
   }
 
   private let defaults: UserDefaults
@@ -145,5 +167,38 @@ public struct AppSettingsStore {
   public var autoCopyTotp: Bool {
     get { defaults.bool(forKey: Key.autoCopyTotp) }
     nonmutating set { defaults.set(newValue, forKey: Key.autoCopyTotp) }
+  }
+
+  /// User-selected display language, persisted in the App-Group suite (shared by
+  /// the host app and the AutoFill extension). The actual string-lookup override
+  /// is applied by `LanguageBundle.setLanguage(_:)` (swizzles `Bundle.main` to
+  /// resolve `String(localized:)` / `Text("…")` against the chosen `.lproj`),
+  /// which the caller invokes after writing this preference — see
+  /// `applyAppLanguage()`. We intentionally do NOT write `AppleLanguages`: that
+  /// only takes effect on the next launch and proved unreliable in both
+  /// directions on device (the OS resolves `preferredLocalizations` once at
+  /// launch and does not durably honor an in-app override).
+  ///
+  /// Fail-closed: absent or unrecognized stored value → `.system`.
+  public var appLanguage: AppLanguage {
+    get {
+      guard let raw = defaults.string(forKey: Key.appLanguage),
+        let language = AppLanguage(rawValue: raw)
+      else { return .system }
+      return language
+    }
+    nonmutating set {
+      defaults.set(newValue.rawValue, forKey: Key.appLanguage)
+    }
+  }
+
+  /// Apply the persisted language to the process's string lookup via
+  /// `LanguageBundle`. Call at launch and after changing `appLanguage`.
+  /// `.system` → `nil` → no override (device language governs).
+  public func applyAppLanguage() {
+    switch appLanguage {
+    case .system: LanguageBundle.setLanguage(nil)
+    case .ja, .en: LanguageBundle.setLanguage(appLanguage.rawValue)
+    }
   }
 }

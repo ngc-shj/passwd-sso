@@ -224,8 +224,8 @@ struct EntryForm: View {
   // for richer per-case save messages instead of one generic fallback.
   nonisolated static func saveErrorMessage(for error: Error) -> String {
     if (error as? MobileAPIError) == .quotaExceeded {
-      return String(localized: "You've reached your vault's item limit. Remove unused items and try again.")
+      return L10n.string("You've reached your vault's item limit. Remove unused items and try again.")
     }
-    return String(localized: "Could not save. Please try again.")
+    return L10n.string("Could not save. Please try again.")
   }
 }

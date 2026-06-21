@@ -1,5 +1,6 @@
 import SwiftUI
 import Shared
+import UIKit
 
 extension AppTheme {
   var colorScheme: ColorScheme? {
@@ -12,9 +13,25 @@ extension AppTheme {
 
   var label: String {
     switch self {
-    case .system: String(localized: "System")
-    case .light: String(localized: "Light")
-    case .dark: String(localized: "Dark")
+    case .system: L10n.string("System")
+    case .light: L10n.string("Light")
+    case .dark: L10n.string("Dark")
+    }
+  }
+}
+
+extension AppLanguage {
+  /// Picker label. `.system` reuses the existing translated "System" catalog key
+  /// (also used by the theme picker; en "System" / ja "システム") — safe because it
+  /// is an existing key, not because it is untranslated. The endonyms `.ja`/`.en`
+  /// are separate `shouldTranslate:false` catalog entries, so `String(localized:)`
+  /// returns the key literal ("日本語"/"English") identically in both locales and
+  /// they do not trip the catalog-completeness test.
+  var label: String {
+    switch self {
+    case .system: L10n.string("System")
+    case .ja: L10n.string("日本語")
+    case .en: L10n.string("English")
     }
   }
 }
@@ -28,6 +45,17 @@ struct SettingsView: View {
   @Environment(\.dismiss) private var dismiss
   @AppStorage("appTheme", store: .appGroup) private var theme: AppTheme = .system
   private let store = AppSettingsStore()
+
+  /// Observed so THIS sheet re-evaluates its own body on a language change.
+  /// The sheet is presented in a detached context; relying on the presenter's
+  /// `\.locale` environment to propagate across the sheet boundary proved
+  /// unreliable, so the sheet subscribes to the refresh directly and re-resolves
+  /// its `Text("…")` / `L10n.string(…)` in place (the resolution layer is not
+  /// memoized) while staying open.
+  @ObservedObject private var languageRefresh = LanguageRefresh.shared
+
+  /// Mirror of the stored language preference, driving the picker selection.
+  @State private var language: AppLanguage = AppSettingsStore().appLanguage
 
   private static let lockOptions = [5, 15, 30, 60]
 
@@ -85,10 +113,25 @@ struct SettingsView: View {
     )
   }
 
+  private var languageSelection: Binding<AppLanguage> {
+    Binding(
+      get: { language },
+      set: { newValue in
+        language = newValue
+        store.appLanguage = newValue
+        // Apply immediately (no restart): re-points Bundle.main string lookup
+        // and bumps the app-wide refresh token so rendered views re-localize.
+        store.applyAppLanguage()
+        LanguageRefresh.shared.bump()
+        autoLockService.recordActivity()
+      }
+    )
+  }
+
   /// Current server URL — surfaced here because launch restoration skips the
   /// setup screen, so this is the only place a signed-in user can confirm it.
   private var serverURLDisplay: String {
-    loadServerConfig()?.baseURL.absoluteString ?? String(localized: "Not configured")
+    loadServerConfig()?.baseURL.absoluteString ?? L10n.string("Not configured")
   }
 
   var body: some View {
@@ -141,6 +184,14 @@ struct SettingsView: View {
           }
         }
 
+        Section("Language") {
+          Picker("Language", selection: languageSelection) {
+            ForEach(AppLanguage.allCases, id: \.self) { option in
+              Text(option.label).tag(option)
+            }
+          }
+        }
+
         Section {
           LabeledContent("URL") {
             Text(serverURLDisplay)
@@ -161,5 +212,34 @@ struct SettingsView: View {
         }
       }
     }
+    // A `.sheet` is presented in its own context and does NOT inherit the
+    // WindowGroup's `.preferredColorScheme`, so the sheet must set its own to stay
+    // in sync with the app behind it. We pass a CONCRETE scheme (never `nil`):
+    // `.preferredColorScheme(nil)` does not revert a previously-applied override
+    // on a sheet, so `.system` would get stuck on whatever was last forced
+    // (e.g. System→Light→System left the sheet on Light). For `.system` we resolve
+    // the device's actual appearance and pass that explicitly.
+    .preferredColorScheme(sheetColorScheme)
+  }
+
+  /// The sheet's color scheme. For an explicit `.light`/`.dark` theme, that scheme;
+  /// for `.system`, the device's CURRENT appearance resolved concretely (so we
+  /// never pass `nil`, which a sheet will not honor as a revert).
+  ///
+  /// Reads the device style from the active window scene's trait, NOT
+  /// `UITraitCollection.current` — the latter reflects the *effective* (possibly
+  /// overridden) trait of the view being drawn, so under this sheet's own
+  /// `.preferredColorScheme` it would feed back the forced value instead of the
+  /// device setting. The window-scene trait is independent of per-view overrides.
+  private var sheetColorScheme: ColorScheme {
+    if let override = theme.colorScheme { return override }
+    // Prefer the foreground-active window scene; `connectedScenes` is unordered
+    // and may briefly lack an active scene mid-transition or hold several under
+    // multi-window. Fall back to the current trait rather than hard-coding a
+    // scheme so a dark device is never momentarily mis-tinted light.
+    let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+    let deviceStyle = (scenes.first { $0.activationState == .foregroundActive } ?? scenes.first)?
+      .traitCollection.userInterfaceStyle ?? UITraitCollection.current.userInterfaceStyle
+    return deviceStyle == .dark ? .dark : .light
   }
 }

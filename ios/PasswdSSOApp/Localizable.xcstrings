@@ -84,6 +84,7 @@
       }
     },
     "Account Holder Name" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -100,6 +101,7 @@
       }
     },
     "Account Number" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -116,6 +118,7 @@
       }
     },
     "Account Type" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -132,6 +135,7 @@
       }
     },
     "Address" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -148,6 +152,7 @@
       }
     },
     "Address Line 1" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -164,6 +169,7 @@
       }
     },
     "Address Line 2" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -282,6 +288,7 @@
       }
     },
     "Bank Name" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -316,6 +323,7 @@
       }
     },
     "Branch Name" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -332,6 +340,7 @@
       }
     },
     "Brand" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -365,6 +374,7 @@
       }
     },
     "Card Number" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -381,6 +391,7 @@
       }
     },
     "Cardholder Name" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -397,6 +408,7 @@
       }
     },
     "City" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -463,6 +475,7 @@
       }
     },
     "Comment" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -596,6 +609,7 @@
       }
     },
     "Country" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -629,6 +643,7 @@
       }
     },
     "Creation Date" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -645,6 +660,7 @@
       }
     },
     "Credential ID" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -678,6 +694,7 @@
       }
     },
     "CVV" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -711,6 +728,7 @@
       }
     },
     "Date of Birth" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -744,6 +762,7 @@
       }
     },
     "Device Info" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -827,6 +846,7 @@
       }
     },
     "Email" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -892,6 +912,7 @@
       }
     },
     "Expiration Date" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -908,6 +929,7 @@
       }
     },
     "Expiry Date" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -924,6 +946,7 @@
       }
     },
     "Expiry Month" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -940,6 +963,7 @@
       }
     },
     "Expiry Year" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -956,6 +980,7 @@
       }
     },
     "Family Name" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -972,6 +997,7 @@
       }
     },
     "Family Name (Kana)" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1005,6 +1031,7 @@
       }
     },
     "Fingerprint" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1021,6 +1048,7 @@
       }
     },
     "Full Name" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1037,6 +1065,7 @@
       }
     },
     "Given Name" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1053,6 +1082,7 @@
       }
     },
     "Given Name (Kana)" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1069,6 +1099,7 @@
       }
     },
     "IBAN" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1085,6 +1116,7 @@
       }
     },
     "ID Number" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1135,6 +1167,7 @@
       }
     },
     "Issue Date" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1151,6 +1184,7 @@
       }
     },
     "Key Size" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1167,6 +1201,7 @@
       }
     },
     "Key Type" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1182,7 +1217,25 @@
         }
       }
     },
+    "Language" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Language"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "言語"
+          }
+        }
+      }
+    },
     "License Key" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1199,6 +1252,7 @@
       }
     },
     "Licensee" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1298,6 +1352,7 @@
       }
     },
     "Middle Name" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1331,6 +1386,7 @@
       }
     },
     "Nationality" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1429,6 +1485,7 @@
       }
     },
     "Note" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1530,6 +1587,7 @@
       }
     },
     "Passphrase" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1584,6 +1642,7 @@
       }
     },
     "Phone" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1600,6 +1659,7 @@
       }
     },
     "Postal Code" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1616,6 +1676,7 @@
       }
     },
     "Private Key" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1632,6 +1693,7 @@
       }
     },
     "Public Key" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1648,6 +1710,7 @@
       }
     },
     "Purchase Date" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1680,6 +1743,7 @@
       }
     },
     "Relying Party ID" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1696,6 +1760,7 @@
       }
     },
     "Relying Party Name" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1729,6 +1794,7 @@
       }
     },
     "Routing Number" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1983,6 +2049,7 @@
       }
     },
     "Software Name" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2016,6 +2083,7 @@
       }
     },
     "State" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2032,6 +2100,7 @@
       }
     },
     "SWIFT / BIC" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2385,6 +2454,7 @@
       }
     },
     "Version" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
