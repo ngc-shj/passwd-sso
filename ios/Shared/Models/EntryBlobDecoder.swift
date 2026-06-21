@@ -93,16 +93,21 @@ public enum EntryBlobDecoder {
     let swiftBic: String?
     let iban: String?
     let branchName: String?
-    // SSH_KEY (blob keys are `passphrase`/`comment`, NOT sshPassphrase/sshComment;
-    // `keySize` is free-text so decode as String). `publicKey`/`keyType`/
-    // `fingerprint` reuse identifiers above where not already declared.
+    // SSH_KEY (blob keys are `passphrase`/`comment`, NOT sshPassphrase/sshComment).
+    // `publicKey`/`keyType`/`fingerprint` reuse identifiers above where not
+    // already declared. `keySize` is written by the web client as a JSON number
+    // (`keySize || null`, where the parser yields an Int bit-length), so it must
+    // tolerate a numeric value — decoding it as a bare `String?` throws a
+    // typeMismatch that fails the WHOLE blob decode and leaves SSH entries stuck
+    // on "decrypting". `FlexibleString` accepts a number or a string and
+    // normalizes to a display string.
     let privateKey: String?
     let publicKey: String?
     let keyType: String?
     let fingerprint: String?
     let passphrase: String?
     let comment: String?
-    let keySize: String?
+    let keySize: FlexibleString?
     // SOFTWARE_LICENSE
     let softwareName: String?
     let licenseKey: String?
@@ -132,6 +137,55 @@ public enum EntryBlobDecoder {
     let passkeySignCount: Int?
   }
 
+  /// Decodes a JSON value that may be a number or a string into a display string.
+  /// Used for blob fields whose write-side type has drifted across clients (e.g.
+  /// SSH `keySize`, written as a number by the web client). This NEVER throws:
+  /// any unexpected shape (bool, array, object) decodes to `value == nil` rather
+  /// than failing — so a single drifted field can never throw the whole blob
+  /// decode (the exact failure that left SSH entries stuck on "decrypting").
+  /// A whole-number `Double` (e.g. `256.0`) is normalized to an integer string.
+  private struct FlexibleString: Decodable {
+    let value: String?
+
+    init(from decoder: Decoder) throws {
+      let container = try decoder.singleValueContainer()
+      if let s = try? container.decode(String.self) {
+        value = s
+      } else if let i = try? container.decode(Int.self) {
+        value = String(i)
+      } else if let d = try? container.decode(Double.self) {
+        // Normalize whole-number doubles (256.0 → "256"); guard the Int cast
+        // against out-of-range/non-finite values that would trap.
+        if d.isFinite, d == d.rounded(), d >= -9.007e15, d <= 9.007e15 {
+          value = String(Int(d))
+        } else {
+          value = String(d)
+        }
+      } else {
+        value = nil
+      }
+    }
+  }
+
+  /// Decodes a JSON value that may be an integer or a numeric string into an Int.
+  /// Same defense as `FlexibleString` but for integer-typed blob fields (TOTP
+  /// `digits`/`period`): a write-side drift to a string (e.g. `"6"`) must not
+  /// throw the whole blob decode. Non-numeric shapes decode to `value == nil`.
+  private struct FlexibleInt: Decodable {
+    let value: Int?
+
+    init(from decoder: Decoder) throws {
+      let container = try decoder.singleValueContainer()
+      if let i = try? container.decode(Int.self) {
+        value = i
+      } else if let s = try? container.decode(String.self), let i = Int(s) {
+        value = i
+      } else {
+        value = nil
+      }
+    }
+  }
+
   private struct TagPayload: Decodable {
     let name: String
     let color: String?
@@ -140,8 +194,10 @@ public enum EntryBlobDecoder {
   private struct TotpPayload: Decodable {
     let secret: String
     let algorithm: String?
-    let digits: Int?
-    let period: Int?
+    // Tolerant: web writes these as numbers, but a string drift must not throw
+    // the whole blob decode (which would make the LOGIN detail undecryptable).
+    let digits: FlexibleInt?
+    let period: FlexibleInt?
   }
 
   /// Reconstruct a list-view summary from an overview-blob plaintext. `id` and
@@ -240,8 +296,8 @@ public enum EntryBlobDecoder {
       notes: p.notes ?? "",
       totpSecret: p.totp?.secret,
       totpAlgorithm: p.totp?.algorithm,
-      totpDigits: p.totp?.digits,
-      totpPeriod: p.totp?.period,
+      totpDigits: p.totp?.digits.flatMap { $0.value },
+      totpPeriod: p.totp?.period.flatMap { $0.value },
       generatorSettings: nil,
       entryType: entryType,
       secureNote: entryType == "SECURE_NOTE"
@@ -267,7 +323,7 @@ public enum EntryBlobDecoder {
         ? .init(
           privateKey: p.privateKey, publicKey: p.publicKey, keyType: p.keyType,
           fingerprint: p.fingerprint, passphrase: p.passphrase, comment: p.comment,
-          keySize: p.keySize) : nil,
+          keySize: p.keySize.flatMap { $0.value }) : nil,
       softwareLicense: entryType == "SOFTWARE_LICENSE"
         ? .init(
           softwareName: p.softwareName, licenseKey: p.licenseKey, version: p.version,
