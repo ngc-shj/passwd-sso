@@ -1,5 +1,6 @@
 import SwiftUI
 import Shared
+import UIKit
 
 extension AppTheme {
   var colorScheme: ColorScheme? {
@@ -204,10 +205,29 @@ struct SettingsView: View {
       }
     }
     // A `.sheet` is presented in its own context and does NOT inherit the
-    // WindowGroup's `.preferredColorScheme`, so without this the Settings sheet
-    // keeps the system appearance while the app behind it follows the user's
-    // theme — and a theme change made here applies to the app but not to this
-    // sheet. Apply the same override on the sheet's own root to keep them in sync.
-    .preferredColorScheme(theme.colorScheme)
+    // WindowGroup's `.preferredColorScheme`, so the sheet must set its own to stay
+    // in sync with the app behind it. We pass a CONCRETE scheme (never `nil`):
+    // `.preferredColorScheme(nil)` does not revert a previously-applied override
+    // on a sheet, so `.system` would get stuck on whatever was last forced
+    // (e.g. System→Light→System left the sheet on Light). For `.system` we resolve
+    // the device's actual appearance and pass that explicitly.
+    .preferredColorScheme(sheetColorScheme)
+  }
+
+  /// The sheet's color scheme. For an explicit `.light`/`.dark` theme, that scheme;
+  /// for `.system`, the device's CURRENT appearance resolved concretely (so we
+  /// never pass `nil`, which a sheet will not honor as a revert).
+  ///
+  /// Reads the device style from the active window scene's trait, NOT
+  /// `UITraitCollection.current` — the latter reflects the *effective* (possibly
+  /// overridden) trait of the view being drawn, so under this sheet's own
+  /// `.preferredColorScheme` it would feed back the forced value instead of the
+  /// device setting. The window-scene trait is independent of per-view overrides.
+  private var sheetColorScheme: ColorScheme {
+    if let override = theme.colorScheme { return override }
+    let deviceStyle = UIApplication.shared.connectedScenes
+      .compactMap { $0 as? UIWindowScene }
+      .first?.traitCollection.userInterfaceStyle
+    return deviceStyle == .dark ? .dark : .light
   }
 }
