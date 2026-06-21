@@ -20,10 +20,12 @@ extension AppTheme {
 }
 
 extension AppLanguage {
-  /// Picker label. `.system` reuses the existing "System" catalog key (also used
-  /// by the theme picker). The endonyms are rendered via `String(localized:)`
-  /// whose keys exist as `shouldTranslate:false` catalog entries, so they render
-  /// identically in both locales and do not trip the catalog-completeness test.
+  /// Picker label. `.system` reuses the existing translated "System" catalog key
+  /// (also used by the theme picker; en "System" / ja "システム") — safe because it
+  /// is an existing key, not because it is untranslated. The endonyms `.ja`/`.en`
+  /// are separate `shouldTranslate:false` catalog entries, so `String(localized:)`
+  /// returns the key literal ("日本語"/"English") identically in both locales and
+  /// they do not trip the catalog-completeness test.
   var label: String {
     switch self {
     case .system: String(localized: "System")

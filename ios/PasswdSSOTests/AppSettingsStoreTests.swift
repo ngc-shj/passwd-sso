@@ -5,8 +5,9 @@ import Shared
 @testable import PasswdSSOApp
 
 /// Tests for AppSettingsStore persistence: defaults-when-absent, clamping/
-/// validation, and round-trip for auto-lock minutes, vault timeout action, and
-/// clipboard auto-clear. Each test uses a unique UserDefaults suite.
+/// validation, and round-trip for auto-lock minutes, vault timeout action,
+/// clipboard auto-clear, auto-copy TOTP, tenant policy, and app language. Each
+/// test uses a unique UserDefaults suite.
 final class AppSettingsStoreTests: XCTestCase {
   private var suiteName: String!
   private var defaults: UserDefaults!
@@ -328,5 +329,21 @@ final class AppSettingsStoreTests: XCTestCase {
     XCTAssertEqual(AppLanguage.ja.localeOverride?.identifier, "ja")
     XCTAssertEqual(AppLanguage.en.localeOverride?.identifier, "en")
     XCTAssertNil(AppLanguage.system.localeOverride)
+  }
+
+  /// Pins the picker labels (C5/F1): endonyms render literally, and `.system`
+  /// REUSES the existing "System" key (same value the theme picker shows) rather
+  /// than introducing a duplicate. Guards against a regression that swaps an
+  /// endonym or routes `.system` through a different/untranslated key.
+  func testAppLanguageLabels() {
+    XCTAssertEqual(AppLanguage.ja.label, "日本語")
+    XCTAssertEqual(AppLanguage.en.label, "English")
+    // `.system` reuses the existing "System" key (the C5/F1 contract: no duplicate
+    // key). Comparing against the same `String(localized:)` call proves the
+    // key-routing; the distinctness checks below additionally catch a regression
+    // that accidentally routes `.system` to an endonym key.
+    XCTAssertEqual(AppLanguage.system.label, String(localized: "System"))
+    XCTAssertNotEqual(AppLanguage.system.label, AppLanguage.ja.label)
+    XCTAssertNotEqual(AppLanguage.system.label, AppLanguage.en.label)
   }
 }
