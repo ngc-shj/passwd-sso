@@ -45,10 +45,18 @@ struct RootView: View {
   // Shared dependency instances kept alive across state transitions
   @State private var hostSyncService: HostSyncService?
 
-  /// Drives in-place re-localization on a language change. Observed here (not at
-  /// the App root) so the `.id()` below re-creates only the CONTENT views — never
-  /// `RootView` itself — preserving `appState` (and the in-memory vault key).
+  /// Drives in-place re-localization on a language change without re-creating the
+  /// view tree (so an open Settings sheet stays open and the vault stays
+  /// unlocked). A `bump()` re-runs `body`, which re-reads `languageLocale`.
   @ObservedObject private var languageRefresh = LanguageRefresh.shared
+
+  /// The override locale for the current preference. Reads `languageRefresh.token`
+  /// so this value (and thus the `.environment(\.locale,)` it feeds) changes on a
+  /// bump, forcing the subtree — including the presented sheet — to re-evaluate.
+  private var languageLocale: Locale {
+    _ = languageRefresh.token
+    return AppSettingsStore().appLanguage.localeOverride ?? .autoupdatingCurrent
+  }
 
   var body: some View {
     Group {
@@ -136,13 +144,15 @@ struct RootView: View {
         }
       }
     }
-    // Re-create the CONTENT views on a language change so their already-rendered
+    // Re-evaluate content bodies in place on a language change so already-rendered
     // Text("…") / L10n.string(…) re-resolve against the freshly-applied
-    // LanguageBundle. `.id()` here re-creates only this Group's children, NOT
-    // `RootView` (whose `appState`/vault key live above), so switching language
-    // does not re-lock the vault. The launch `.task` below re-runs on the id
-    // change but its `guard case .launching` makes it a no-op post-unlock.
-    .id(languageRefresh.token)
+    // LanguageBundle. We read `languageRefresh.token` via `.environment` below
+    // (NOT `.id`, which would re-create the subtree and dismiss the open Settings
+    // sheet — theme switching keeps the sheet open, language must match). RootView
+    // observes `languageRefresh`, so a bump re-runs this body; the changed
+    // `\.locale` environment propagates the invalidation into descendants
+    // (including the presented sheet, which inherits the environment).
+    .environment(\.locale, languageLocale)
     .task {
       // One-shot launch restoration. Guard on .launching so a later view
       // re-appear does not re-run it.
