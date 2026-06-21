@@ -862,10 +862,6 @@
         }
       }
     },
-    "English" : {
-      "comment" : "Endonym (English language name) for the language picker — same in all locales.",
-      "shouldTranslate" : false
-    },
     "Enter a valid https:// URL (http:// allowed for localhost)." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2524,10 +2520,6 @@
           }
         }
       }
-    },
-    "日本語" : {
-      "comment" : "Endonym (Japanese language name) for the language picker — same in all locales.",
-      "shouldTranslate" : false
     }
   },
   "version" : "1.0"
