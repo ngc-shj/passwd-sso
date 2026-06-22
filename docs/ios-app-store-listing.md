@@ -67,7 +67,7 @@ and turn on passwd-sso under Settings → General → AutoFill & Passwords.
 
 password,vault,autofill,passkey,totp,2fa,self-hosted,e2e,encryption,sso,security,passwords
 
-### What's New (release notes for v0.4.58)
+### What's New (release notes for v0.4.59)
 
 First public release. Self-hosted password vault with native iOS AutoFill,
 TOTP, passkey assertion and registration, and Face ID unlock.
@@ -195,12 +195,20 @@ Profiles → Identifiers):
 > first archive — but the App Group must be created and the capabilities enabled
 > on the App IDs, or the upload is rejected at signing.
 
-### Step 2 — Bump the build number
+### Step 2 — Build number (automatic)
 
-App Store Connect rejects a re-uploaded build number. Before each archive bump
-`CURRENT_PROJECT_VERSION` (currently `1`) in `ios/project.yml` for all targets,
-then `xcodegen generate`. `MARKETING_VERSION` (`0.4.58`) is managed by
-release-please and is the user-visible version string.
+App Store Connect rejects a re-uploaded build number. You normally do **not**
+need to bump anything: `CURRENT_PROJECT_VERSION` is set to `$(MARKETING_VERSION)`
+in `ios/project.yml`, so the build number tracks the marketing version
+release-please manages — each release advances both. Just `xcodegen generate`
+after pulling a release.
+
+The only manual case: re-uploading the **same** marketing version (e.g. a
+rejected build re-submitted without a release bump). Then give that one upload a
+unique build number by hand (e.g. set `CURRENT_PROJECT_VERSION` to
+`0.4.59.1`) and `xcodegen generate`. **Revert it to `$(MARKETING_VERSION)`
+afterwards** — leaving the literal in place freezes the build number and the
+next release will be rejected for a duplicate build number.
 
 ### Step 3 — Archive (Xcode, real device or "Any iOS Device")
 
@@ -263,7 +271,7 @@ AutoFill registration issues that the simulator cannot.
 
 - [ ] Apple Developer membership active; Free app agreement signed.
 - [ ] App IDs + App Group + capabilities registered (Step 1).
-- [ ] `CURRENT_PROJECT_VERSION` bumped; `xcodegen generate` run (Step 2).
+- [ ] `xcodegen generate` run; build number = marketing version (auto, Step 2).
 - [ ] Device archive uploaded and processed (Steps 3–4).
 - [ ] Privacy Policy URL published and reachable.
 - [ ] Support URL set.

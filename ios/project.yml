@@ -48,7 +48,12 @@ targets:
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: YES
         GENERATE_INFOPLIST_FILE: YES
-        CURRENT_PROJECT_VERSION: 1
+        # CFBundleVersion (build number) tracks MARKETING_VERSION so a
+        # release-please version bump advances the build number too — no manual
+        # bump before each App Store upload. (Re-uploading the *same* marketing
+        # version would need a manual unique suffix, which normal releases never
+        # hit.) Applied to every target below as well.
+        CURRENT_PROJECT_VERSION: $(MARKETING_VERSION)
         MARKETING_VERSION: "0.4.59" # x-release-please-version
 
   PasswdSSOApp:
@@ -118,7 +123,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: jp.jpng.passwd-sso
-        CURRENT_PROJECT_VERSION: 1
+        CURRENT_PROJECT_VERSION: $(MARKETING_VERSION)
         MARKETING_VERSION: "0.4.59" # x-release-please-version
         TARGETED_DEVICE_FAMILY: "1"
         # Single-size (1024) AppIcon in PasswdSSOApp/Assets.xcassets. xcodegen
@@ -189,7 +194,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: jp.jpng.passwd-sso.PasswdSSOAutofillExtension
         APPLICATION_EXTENSION_API_ONLY: YES
-        CURRENT_PROJECT_VERSION: 1
+        CURRENT_PROJECT_VERSION: $(MARKETING_VERSION)
         MARKETING_VERSION: "0.4.59" # x-release-please-version
         TARGETED_DEVICE_FAMILY: "1"
     dependencies:
@@ -222,7 +227,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: jp.jpng.passwd-sso.PasswdSSOTests
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/PasswdSSOApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PasswdSSOApp
         BUNDLE_LOADER: $(TEST_HOST)
-        CURRENT_PROJECT_VERSION: 1
+        CURRENT_PROJECT_VERSION: $(MARKETING_VERSION)
         MARKETING_VERSION: "0.4.59" # x-release-please-version
     dependencies:
       - target: Shared
@@ -244,7 +249,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: jp.jpng.passwd-sso.PasswdSSOUITests
         TEST_TARGET_NAME: PasswdSSOApp
-        CURRENT_PROJECT_VERSION: 1
+        CURRENT_PROJECT_VERSION: $(MARKETING_VERSION)
         MARKETING_VERSION: "0.4.59" # x-release-please-version
     dependencies:
       - target: PasswdSSOApp
