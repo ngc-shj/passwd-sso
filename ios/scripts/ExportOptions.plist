@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Export options for `xcodebuild -exportArchive` targeting App Store Connect.
+
+  - method app-store-connect: produces an .ipa for upload (not ad-hoc / dev).
+  - signingStyle automatic + teamID: let Xcode resolve the distribution cert and
+    App Store provisioning profiles, matching project.yml's CODE_SIGN_STYLE:
+    Automatic. The archive step must pass -allowProvisioningUpdates so Xcode can
+    create/refresh the profiles non-interactively.
+  - uploadSymbols: include dSYMs so App Store Connect can symbolicate crash logs.
+  - manageAppVersionAndBuildNumber false: we control the build number via
+    CURRENT_PROJECT_VERSION ($(MARKETING_VERSION)) — do NOT let Xcode auto-bump.
+-->
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>destination</key>
+	<string>export</string>
+	<key>signingStyle</key>
+	<string>automatic</string>
+	<key>teamID</key>
+	<string>4789NDA9RQ</string>
+	<key>uploadSymbols</key>
+	<true/>
+	<key>manageAppVersionAndBuildNumber</key>
+	<false/>
+</dict>
+</plist>

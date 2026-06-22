@@ -210,29 +210,34 @@ unique build number by hand (e.g. set `CURRENT_PROJECT_VERSION` to
 afterwards** — leaving the literal in place freezes the build number and the
 next release will be rejected for a duplicate build number.
 
-### Step 3 — Archive (Xcode, real device or "Any iOS Device")
+### Step 3 — Archive & export the .ipa
 
-```text
-# In Xcode: select scheme PasswdSSOApp, destination "Any iOS Device (arm64)"
-# Product → Archive
-```
-
-(CLI equivalent — requires distribution signing set up:)
+One-shot script — runs `xcodegen generate` → `xcodebuild archive` →
+`-exportArchive`, producing `ios/build/PasswdSSO.ipa`:
 
 ```bash
-xcodebuild -scheme PasswdSSOApp -configuration Release \
-  -destination 'generic/platform=iOS' \
-  -archivePath build/PasswdSSOApp.xcarchive archive
+ios/scripts/build-appstore-ipa.sh
 ```
 
+It uses automatic signing (`-allowProvisioningUpdates`), so Xcode must be signed
+in with an Apple ID on team `4789NDA9RQ`; export options live in
+`ios/scripts/ExportOptions.plist` (method `app-store-connect`). No secrets are
+stored in the repo.
+
+Xcode GUI equivalent: select scheme `PasswdSSOApp`, destination
+"Any iOS Device (arm64)", then Product → Archive.
+
 > The simulator Release build already passes in this repo, so code/config is
-> sound. A device archive additionally exercises real distribution code signing.
+> sound. The device archive additionally exercises real distribution code
+> signing.
 
 ### Step 4 — Upload to App Store Connect
 
-- Xcode Organizer → select the archive → **Distribute App** → **App Store
-  Connect** → **Upload**. Let Xcode manage signing.
-- Or use **Transporter.app** with an exported `.ipa`.
+- **Transporter.app**: drag in `ios/build/PasswdSSO.ipa` (from Step 3).
+- Or Xcode Organizer → select the archive → **Distribute App** → **App Store
+  Connect** → **Upload** (lets Xcode manage signing).
+- Or CLI with an App Store Connect API key (`.p8` + key id + issuer id):
+  `xcrun altool --upload-app -f ios/build/PasswdSSO.ipa -t ios --apiKey <KEY_ID> --apiIssuer <ISSUER_ID>`.
 - Wait for the build to finish **processing** in App Store Connect (minutes to
   ~1 hour), then it becomes selectable under the app version.
 
