@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.60](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.59...passwd-sso-v0.4.60) (2026-06-22)
+
+
+### Features
+
+* **ios:** build-number auto-track + App Store .ipa build script ([#600](https://github.com/ngc-shj/passwd-sso/issues/600)) ([194424c](https://github.com/ngc-shj/passwd-sso/commit/194424cba9ec7de9779381bfbc36f58be4ebd2cf))
+* **ios:** in-app language switcher (System / 日本語 / English) ([#599](https://github.com/ngc-shj/passwd-sso/issues/599)) ([8e9d5e8](https://github.com/ngc-shj/passwd-sso/commit/8e9d5e8da4afaef463d7a3dd6aa3ef4e2638ada9))
+
+
+### Bug Fixes
+
+* **api:** enforce streaming body-size caps on form/raw/multipart routes ([#595](https://github.com/ngc-shj/passwd-sso/issues/595)) ([42a0ffc](https://github.com/ngc-shj/passwd-sso/commit/42a0ffc2d919917886d631dda1245afd5d065cec))
+* **api:** harden ssh-sign cap, tag dedup, SA token count, webauthn challenge scoping ([#593](https://github.com/ngc-shj/passwd-sso/issues/593)) ([4019d33](https://github.com/ngc-shj/passwd-sso/commit/4019d33a2641c7262b8c9ef9da52253538e35556))
+* **ios:** decode SSH keySize as number to fix undecryptable SSH entries ([#598](https://github.com/ngc-shj/passwd-sso/issues/598)) ([175d85d](https://github.com/ngc-shj/passwd-sso/commit/175d85d3f31815bf55234c486b7a7d18094f96bd))
+* **ui:** wrap long unbreakable tokens in AlertDialog descriptions ([#596](https://github.com/ngc-shj/passwd-sso/issues/596)) ([522e29a](https://github.com/ngc-shj/passwd-sso/commit/522e29a128a60244b10f3276e0b6dbce0296a844))
+
 ## [0.4.59](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.58...passwd-sso-v0.4.59) (2026-06-18)
 
 
