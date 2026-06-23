@@ -59,9 +59,8 @@ browser-observable network behavior and the real upstream fetch.
   the migration `20260623152753_add_user_fetch_favicons` is additive (a nullable-with-
   default column) and can remain — code reverting to the old client simply ignores it.
 
-## Results (fill in after live verification)
-- M1: [ ]
-- M2: [ ]
-- M3: [ ]  ← the critical one (upstream-not-redirecting)
-- M4: [ ]
-- M5: [ ]
+## Results (live-verified by operator, 2026-06-24)
+- M2/M3: favicons load via the same-origin proxy; the non-redirecting upstream returns real icons (no all-globe fallback) — confirmed.
+- M5: a host with no favicon returns 204 → globe fallback, no broken-image — confirmed.
+- Rate-limit fix (D7): after moving the limiter to the cache-miss path only, the prior "429 出まくる" on reload is resolved — confirmed.
+- Note: full M1/M4 DevTools-network walkthrough was not separately recorded; the above were confirmed in normal use. Dev server required raising the OS inotify watch limit (`fs.inotify.max_user_watches`) to start — environment-only, unrelated to the feature.
