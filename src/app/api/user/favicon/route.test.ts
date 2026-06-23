@@ -182,6 +182,38 @@ describe("GET /api/user/favicon", () => {
     expect(res.status).toBe(204);
   });
 
+  it("returns 204 for image/svg+xml — SVG is active content, never re-served same-origin", async () => {
+    mockValidateAndFetch.mockResolvedValue(
+      buffered(new TextEncoder().encode("<svg onload='alert(1)'/>"), "image/svg+xml"),
+    );
+    const res = await GET(faviconRequest("example.com", "32"));
+    expect(res.status).toBe(204);
+  });
+
+  it("returns 204 for an SVG already in the cache (serving-boundary re-validation)", async () => {
+    // A SVG seeded by the pre-allowlist code (or any cache poisoning) must NOT be
+    // re-served same-origin on a cache hit — the MIME guard runs on serve, not
+    // just on ingestion.
+    await setCachedFavicon(
+      "example.com",
+      32,
+      Buffer.from("<svg onload='alert(1)'/>"),
+      "image/svg+xml",
+    );
+    const res = await GET(faviconRequest("example.com", "32"));
+    expect(res.status).toBe(204);
+    // Served from cache → no upstream fetch.
+    expect(mockValidateAndFetch).not.toHaveBeenCalled();
+  });
+
+  it("serves image/png with the charset parameter stripped from the allowlist match", async () => {
+    mockValidateAndFetch.mockResolvedValue(
+      buffered(PNG_BYTES, "image/png; charset=binary"),
+    );
+    const res = await GET(faviconRequest("example.com", "32"));
+    expect(res.status).toBe(200);
+  });
+
   it("returns 204 when the buffered fetch rejects (network / 3xx redirect)", async () => {
     mockValidateAndFetch.mockRejectedValue(new Error("redirect blocked"));
     const res = await GET(faviconRequest("example.com", "32"));

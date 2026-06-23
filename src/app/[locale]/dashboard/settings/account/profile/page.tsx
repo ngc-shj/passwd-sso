@@ -16,12 +16,17 @@ export default function ProfilePage() {
   const t = useTranslations("Settings");
   const { data: session, update } = useSession();
 
-  const initialValue = session?.user?.fetchFavicons ?? false;
-  const [fetchFavicons, setFetchFavicons] = useState(initialValue);
+  // Source of truth is the persisted preference on the session (a live DB
+  // projection). The session resolves AFTER first paint, so we derive the
+  // checked state from it rather than snapshotting into useState. `optimistic`
+  // is a transient override applied only while a toggle's PUT is in flight; it
+  // clears once the session catches up (or on rollback).
+  const persisted = session?.user?.fetchFavicons ?? false;
+  const [optimistic, setOptimistic] = useState<boolean | null>(null);
+  const fetchFavicons = optimistic ?? persisted;
 
   const handleToggle = async (checked: boolean) => {
-    // Optimistic update
-    setFetchFavicons(checked);
+    setOptimistic(checked); // optimistic
     try {
       const res = await fetchApi(API_PATH.USER_FAVICON_PREF, {
         method: "PUT",
@@ -29,14 +34,16 @@ export default function ProfilePage() {
         body: JSON.stringify({ fetchFavicons: checked }),
       });
       if (!res.ok) {
-        setFetchFavicons(!checked);
+        setOptimistic(null); // roll back to persisted
         toast.error(t("profile.siteIcons.saveError"));
         return;
       }
-      // Refresh session so open Favicon components re-render
+      // Refresh session so open Favicon components re-render; once the session
+      // reflects the new value, drop the optimistic override.
       await update();
+      setOptimistic(null);
     } catch {
-      setFetchFavicons(!checked);
+      setOptimistic(null);
       toast.error(t("profile.siteIcons.saveError"));
     }
   };

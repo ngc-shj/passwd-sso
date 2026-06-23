@@ -61,7 +61,8 @@ describe("Favicon", () => {
     expect(img).toBeInTheDocument();
     const src = img?.getAttribute("src") ?? "";
     expect(src.startsWith("/api/user/favicon?")).toBe(true);
-    expect(img?.getAttribute("referrerPolicy")).toBe("no-referrer");
+    // (referrerPolicy is now inert defense-in-depth on a same-origin src — not
+    // asserted, so the impl is free to drop it per the plan's F4 guidance.)
   });
 
   // ── Bucket-snapping (F6/F7) ─────────────────────────────

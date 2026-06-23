@@ -15,6 +15,33 @@ import { MS_PER_DAY, SEC_PER_DAY } from "@/lib/constants/time";
 /** Maximum individual favicon body size cached (256 KB). */
 export const FAVICON_MAX_BODY_BYTES = 256 * 1024;
 
+/**
+ * Inert, raster/icon image MIME types the proxy is allowed to re-serve under the
+ * app's own origin. `image/svg+xml` is DELIBERATELY excluded: SVG is active
+ * content (can embed <script>) and API responses do not carry CSP / X-Frame
+ * headers, so a same-origin SVG opened directly at /api/user/favicon would
+ * execute script in the app origin. The repo already classifies SVG as active
+ * content in the Sends upload path. Match on the bare type (before any
+ * `; charset=` parameter), case-insensitive.
+ */
+const ALLOWED_FAVICON_MIME = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "image/x-icon",
+  "image/vnd.microsoft.icon",
+  "image/bmp",
+  "image/avif",
+]);
+
+/** True only for inert raster/icon image MIME types (rejects SVG and non-images). */
+export function isAllowedFaviconMime(contentType: string | null): boolean {
+  if (!contentType) return false;
+  const bare = contentType.split(";")[0]?.trim().toLowerCase();
+  return bare ? ALLOWED_FAVICON_MIME.has(bare) : false;
+}
+
 /** Redis TTL for cached favicons (~7 days in seconds). */
 const REDIS_TTL_SEC = 7 * SEC_PER_DAY;
 

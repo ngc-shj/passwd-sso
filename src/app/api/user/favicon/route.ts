@@ -14,6 +14,7 @@ import {
   getCachedFavicon,
   setCachedFavicon,
   withSingleFlight,
+  isAllowedFaviconMime,
   FAVICON_MAX_BODY_BYTES,
 } from "@/lib/favicon/favicon-proxy";
 
@@ -75,10 +76,19 @@ async function handleGET(req: NextRequest) {
     return validationError();
   }
 
-  // Cache-first lookup
+  // Cache-first lookup. Re-validate the MIME on the SERVING boundary too, not
+  // just on ingestion: an SVG seeded by the pre-allowlist code (or any future
+  // cache poisoning) must never be re-served same-origin. NG → 204 (browser
+  // falls back to the globe).
   const cached = await getCachedFavicon(normalizedHost, size);
-  if (cached) {
+  if (cached && isAllowedFaviconMime(cached.contentType)) {
     return faviconResponse(cached.body, cached.contentType);
+  }
+  if (cached) {
+    return new NextResponse(null, {
+      status: 204,
+      headers: { "Cache-Control": `private, max-age=${SEC_PER_HOUR}` },
+    });
   }
 
   // Single-flight upstream fetch: N concurrent misses → 1 outbound request
@@ -100,8 +110,11 @@ async function handleGET(req: NextRequest) {
 
     if (!result.ok) return null;
 
-    const ct = result.contentType ?? "";
-    if (!ct.startsWith("image/")) return null;
+    // Allow only inert raster/icon MIME types — never image/svg+xml. SVG is
+    // active content and these responses carry no CSP/X-Frame headers, so a
+    // same-origin SVG opened directly would execute script in the app origin.
+    if (!isAllowedFaviconMime(result.contentType)) return null;
+    const ct = result.contentType as string;
 
     // Populate cache for subsequent requests
     await setCachedFavicon(normalizedHost, size, result.body, ct);
