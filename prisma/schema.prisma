@@ -118,6 +118,11 @@ model User {
   // User preference
   locale String? @db.VarChar(5)
 
+  // When true, the app fetches site favicons through the server-side proxy
+  // (/api/user/favicon). Default false (opt-in): an opted-out user's stored
+  // host names are never sent off-device for icon lookup.
+  fetchFavicons Boolean @default(false) @map("fetch_favicons")
+
   // Account lockout
   failedUnlockAttempts Int       @default(0) @map("failed_unlock_attempts")
   lastFailedUnlockAt   DateTime? @map("last_failed_unlock_at") @db.Timestamptz(3)

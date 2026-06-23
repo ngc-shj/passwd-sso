@@ -395,6 +395,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       let requirePasskey = false;
       let requirePasskeyEnabledAt: string | null = null;
       let passkeyGracePeriodDays: number | null = null;
+      let fetchFavicons = false;
       try {
         const passkeyData = await withBypassRls(prisma, async (tx) => {
           const [credCount, tenant] = await Promise.all([
@@ -402,6 +403,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             tx.user.findUnique({
               where: { id: user.id },
               select: {
+                fetchFavicons: true,
                 tenant: {
                   select: {
                     requirePasskey: true,
@@ -412,13 +414,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               },
             }),
           ]);
-          return { credCount, tenant: tenant?.tenant ?? null };
+          return { credCount, tenant: tenant?.tenant ?? null, fetchFavicons: tenant?.fetchFavicons ?? false };
         }, BYPASS_PURPOSE.AUTH_FLOW);
 
         hasPasskey = passkeyData.credCount > 0;
         requirePasskey = passkeyData.tenant?.requirePasskey ?? false;
         requirePasskeyEnabledAt = passkeyData.tenant?.requirePasskeyEnabledAt?.toISOString() ?? null;
         passkeyGracePeriodDays = passkeyData.tenant?.passkeyGracePeriodDays ?? null;
+        fetchFavicons = passkeyData.fetchFavicons;
       } catch (err) {
         // Non-critical for session establishment but DO surface to ops:
         // a silent catch hid Redis/DB issues that mattered for tenants
@@ -445,6 +448,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           requirePasskey,
           requirePasskeyEnabledAt,
           passkeyGracePeriodDays,
+          fetchFavicons,
         },
         expires: session.expires,
       };
