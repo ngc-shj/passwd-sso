@@ -1223,7 +1223,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.4.59;
+				MARKETING_VERSION = 0.4.60;
 				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.PasswdSSOUITests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -1243,7 +1243,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.4.59;
+				MARKETING_VERSION = 0.4.60;
 				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.PasswdSSOAutofillExtension";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -1266,7 +1266,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.4.59;
+				MARKETING_VERSION = 0.4.60;
 				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.Shared";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -1355,7 +1355,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 0.4.59;
+				MARKETING_VERSION = 0.4.60;
 				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.PasswdSSOAutofillExtension";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -1374,7 +1374,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.4.59;
+				MARKETING_VERSION = 0.4.60;
 				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.PasswdSSOTests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -1393,7 +1393,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.4.59;
+				MARKETING_VERSION = 0.4.60;
 				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.PasswdSSOUITests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -1474,7 +1474,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.4.59;
+				MARKETING_VERSION = 0.4.60;
 				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -1493,7 +1493,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.4.59;
+				MARKETING_VERSION = 0.4.60;
 				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -1512,7 +1512,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.4.59;
+				MARKETING_VERSION = 0.4.60;
 				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.PasswdSSOTests";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -1536,7 +1536,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.4.59;
+				MARKETING_VERSION = 0.4.60;
 				PRODUCT_BUNDLE_IDENTIFIER = "jp.jpng.passwd-sso.Shared";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;

@@ -39,24 +39,24 @@ point the app at the passwd-sso instance you operate, and it connects only there
 
 Why passwd-sso for iOS?
 
-🔑 Native AutoFill — Fill passwords, one-time codes (TOTP), and passkeys directly
+- Native AutoFill — Fill passwords, one-time codes (TOTP), and passkeys directly
 from iOS's AutoFill picker in Safari and any app. QuickType suggestions surface
 the right credential above the keyboard.
 
-🔒 Zero-knowledge encryption — Your master passphrase never leaves your device.
+- Zero-knowledge encryption — Your master passphrase never leaves your device.
 Everything is encrypted with AES-256-GCM before it touches the network. The
 server stores only ciphertext.
 
-🆔 Face ID unlock — Unlock your vault and reveal credentials with Face ID. The
+- Face ID unlock — Unlock your vault and reveal credentials with Face ID. The
 vault re-locks automatically after a timeout you choose.
 
-🔐 Passkeys — Sign in with WebAuthn passkeys stored in your vault, and create new
+- Passkeys — Sign in with WebAuthn passkeys stored in your vault, and create new
 ones, all from the AutoFill flow.
 
-🏠 Your server, your data — No third-party cloud, no analytics, no tracking. The
+- Your server, your data — No third-party cloud, no analytics, no tracking. The
 app talks to exactly one host: yours.
 
-⏱️ Auto-lock — Configurable timeout, clipboard auto-clear, and a lock-on-exit
+- Auto-lock — Configurable timeout, clipboard auto-clear, and a lock-on-exit
 option keep your vault closed when you step away.
 
 To get started you need a running passwd-sso server (open source — see the
@@ -67,7 +67,7 @@ and turn on passwd-sso under Settings → General → AutoFill & Passwords.
 
 password,vault,autofill,passkey,totp,2fa,self-hosted,e2e,encryption,sso,security,passwords
 
-### What's New (release notes for v0.4.59)
+### What's New (release notes for v0.4.60)
 
 First public release. Self-hosted password vault with native iOS AutoFill,
 TOTP, passkey assertion and registration, and Face ID unlock.
