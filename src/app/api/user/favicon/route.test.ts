@@ -331,12 +331,18 @@ describe("GET /api/user/favicon", () => {
     // path without a Redis mock.
     const distinctive = new Uint8Array(5000);
     for (let i = 0; i < distinctive.length; i++) distinctive[i] = (i % 251) + 1;
-    // Buffer.from(base64) reproduces the exact pool-aliasing the Redis path hits.
-    const aliased = Buffer.from(
-      Buffer.from(distinctive).toString("base64"),
-      "base64",
-    );
-    expect(aliased.buffer.byteLength).toBeGreaterThan(aliased.length); // pool-backed
+    // Construct a DETERMINISTICALLY pool-aliased Buffer: a view into a larger
+    // backing ArrayBuffer at a non-zero offset, exactly the shape Buffer.from(
+    // base64) produces on the Redis path (buffer.byteLength > length, byteOffset
+    // > 0). Building it explicitly avoids relying on Node's non-deterministic
+    // Buffer pooling, which is env-dependent and flaked in CI (a fresh exact-size
+    // allocation made buffer.byteLength === length).
+    const backing = new ArrayBuffer(65536);
+    const offset = 88;
+    new Uint8Array(backing, offset, distinctive.length).set(distinctive);
+    const aliased = Buffer.from(backing, offset, distinctive.length);
+    expect(aliased.buffer.byteLength).toBeGreaterThan(aliased.length); // pool-backed shape
+    expect(aliased.byteOffset).toBeGreaterThan(0);
     await setCachedFavicon("example.com", 32, aliased, "image/png");
 
     const res = await GET(faviconRequest("example.com", "32"));
