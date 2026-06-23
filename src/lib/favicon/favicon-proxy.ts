@@ -8,7 +8,7 @@
 
 import { isIP as netIsIP } from "node:net";
 import { getRedis } from "@/lib/redis";
-import { MS_PER_DAY } from "@/lib/constants/time";
+import { MS_PER_DAY, SEC_PER_DAY } from "@/lib/constants/time";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -16,7 +16,7 @@ import { MS_PER_DAY } from "@/lib/constants/time";
 export const FAVICON_MAX_BODY_BYTES = 256 * 1024;
 
 /** Redis TTL for cached favicons (~7 days in seconds). */
-const REDIS_TTL_SEC = 7 * (MS_PER_DAY / 1000);
+const REDIS_TTL_SEC = 7 * SEC_PER_DAY;
 
 /** In-memory cache TTL (~7 days). */
 const MEMORY_TTL_MS = 7 * MS_PER_DAY;

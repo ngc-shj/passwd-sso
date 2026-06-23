@@ -109,6 +109,37 @@ describe("GET /api/user/favicon", () => {
     expect(mockValidateAndFetch).toHaveBeenCalledTimes(1);
   });
 
+  it("single-flight: N concurrent misses for the same host trigger ONE upstream fetch", async () => {
+    // Slow-resolving upstream so all three requests overlap in-flight (the
+    // sequential cache-hit test above never exercises the inFlight dedup path).
+    let resolveFetch!: (r: Response) => void;
+    mockValidateAndFetch.mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+
+    const inflight = Promise.all([
+      GET(faviconRequest("github.com", "32")),
+      GET(faviconRequest("github.com", "32")),
+      GET(faviconRequest("github.com", "32")),
+    ]);
+    // Let all three requests progress past their auth/parse/limiter awaits and
+    // reach the (single) in-flight upstream fetch before we resolve it.
+    await vi.waitFor(() => expect(resolveFetch).toBeTypeOf("function"));
+    resolveFetch(
+      new Response(PNG_BYTES, { headers: { "content-type": "image/png" } }),
+    );
+    const [r1, r2, r3] = await inflight;
+
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+    expect(r3.status).toBe(200);
+    // The anti-amplification invariant: 3 concurrent misses → 1 outbound fetch.
+    expect(mockValidateAndFetch).toHaveBeenCalledTimes(1);
+  });
+
   it("returns 400 for host with special chars (& smuggling)", async () => {
     const res = await GET(faviconRequest("github.com&size=16", "32"));
     expect(res.status).toBe(400);
@@ -206,10 +237,16 @@ describe("GET /api/user/favicon", () => {
     expect(mockValidateAndFetch).not.toHaveBeenCalled();
   });
 
-  it("strips www. prefix from host", async () => {
+  it("strips www. prefix from host and passes size to the provider URL", async () => {
     await GET(faviconRequest("www.github.com", "32"));
     expect(mockValidateAndFetch).toHaveBeenCalledWith(
       expect.stringContaining("github.com"),
+      expect.anything(),
+    );
+    // Provider URL must carry the bucketed size param (guards against a
+    // sz=/size= typo in buildFaviconProviderUrl).
+    expect(mockValidateAndFetch).toHaveBeenCalledWith(
+      expect.stringContaining("size=32"),
       expect.anything(),
     );
     // Cache key must not contain www.

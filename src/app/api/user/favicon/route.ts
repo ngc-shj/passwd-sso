@@ -7,6 +7,7 @@ import { parseQuery } from "@/lib/http/parse-body";
 import { unauthorized, rateLimited } from "@/lib/http/api-response";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
+import { SEC_PER_DAY, SEC_PER_HOUR } from "@/lib/constants/time";
 import {
   normalizeFaviconHost,
   buildFaviconProviderUrl,
@@ -113,7 +114,7 @@ async function handleGET(req: NextRequest) {
   if (!entry) {
     return new NextResponse(null, {
       status: 204,
-      headers: { "Cache-Control": "private, max-age=3600" },
+      headers: { "Cache-Control": `private, max-age=${SEC_PER_HOUR}` },
     });
   }
 
@@ -136,7 +137,7 @@ function faviconResponse(body: Buffer, contentType: string): NextResponse {
     status: 200,
     headers: {
       "Content-Type": contentType,
-      "Cache-Control": "private, max-age=86400",
+      "Cache-Control": `private, max-age=${SEC_PER_DAY}`,
       ETag: etag,
     },
   });
