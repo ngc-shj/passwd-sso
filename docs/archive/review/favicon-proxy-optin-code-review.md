@@ -1,9 +1,10 @@
 # Code Review: favicon-proxy-optin
 Date: 2026-06-24
-Review round: 1
+Review rounds: 2
 
 ## Changes from Previous Round
-Initial Phase 3 code review (3 expert sub-agents, incremental on the Phase 2 self-R-check baseline). Ollama seeds unavailable (timed out) → full-diff review.
+Round 1: Phase 3 code review (3 expert sub-agents) + two external (user-run) review passes. Findings: F1 (Major, toggle hydration), T1/T3 (Minor, test), S-EXT1 + S-EXT2 (High, SVG same-origin re-serve on ingestion then cache-hit paths). All fixed.
+Round 2: incremental verification of the Round-1 fixes (security + func/test reviewers). Each fix reverted to confirm its guarding test goes fail-red, then restored. **Result: No findings — all fixes verified correct, complete, and fail-red.** Review loop terminates.
 
 ## Functionality Findings
 - **F1 [Major]** — `src/app/[locale]/dashboard/settings/account/profile/page.tsx:19-20`. The toggle captured `session.user.fetchFavicons` into `useState` once at mount, but the session resolves AFTER first paint (SessionProvider has no server-seeded session), so an opted-IN user loading/refreshing the settings page saw the toggle stuck OFF (R25 hydrate gap at the UI layer). → FIXED: added `useEffect` re-syncing from the resolved session ([status, session?.user?.fetchFavicons]); destructured `status`.
