@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
-import { validateAndFetch } from "@/lib/http/external-http";
+import { validateAndFetchBuffered } from "@/lib/http/external-http";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { parseQuery } from "@/lib/http/parse-body";
-import { unauthorized, rateLimited } from "@/lib/http/api-response";
+import { unauthorized, rateLimited, forbidden, validationError } from "@/lib/http/api-response";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { SEC_PER_DAY, SEC_PER_HOUR } from "@/lib/constants/time";
@@ -49,7 +49,7 @@ async function handleGET(req: NextRequest) {
   // Server-side enforcement of the privacy contract: even a rogue/stale
   // client cannot trigger an outbound fetch for an opted-out user.
   if (session.user.fetchFavicons !== true) {
-    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+    return forbidden();
   }
 
   // Per-user rate limit
@@ -72,7 +72,7 @@ async function handleGET(req: NextRequest) {
 
   const normalizedHost = normalizeFaviconHost(rawHost);
   if (!normalizedHost) {
-    return NextResponse.json({ error: "VALIDATION_ERROR" }, { status: 400 });
+    return validationError();
   }
 
   // Cache-first lookup
@@ -85,30 +85,28 @@ async function handleGET(req: NextRequest) {
   const entry = await withSingleFlight(normalizedHost, size, async () => {
     const providerUrl = buildFaviconProviderUrl(normalizedHost, size);
 
-    let res: Response;
+    let result;
     try {
-      res = await validateAndFetch(providerUrl, {});
+      // Buffered variant reads the body before the pinned dispatcher is
+      // destroyed; the plain validateAndFetch would surface ClientDestroyedError
+      // when the body is read after it returns. maxBytes enforces the byte cap.
+      result = await validateAndFetchBuffered(providerUrl, {
+        maxBytes: FAVICON_MAX_BODY_BYTES,
+      });
     } catch {
-      // Includes 3xx (redirect:"error") and network errors → 204 fallback
+      // 3xx (redirect:"error"), network errors, timeout, over-cap → 204 fallback
       return null;
     }
 
-    if (!res.ok) return null;
+    if (!result.ok) return null;
 
-    const ct = res.headers.get("content-type") ?? "";
+    const ct = result.contentType ?? "";
     if (!ct.startsWith("image/")) return null;
 
-    const buf = await res.arrayBuffer();
-    if (buf.byteLength > FAVICON_MAX_BODY_BYTES) {
-      // Over per-entry byte cap — treat as no favicon, do not cache
-      return null;
-    }
-
-    const body = Buffer.from(buf);
     // Populate cache for subsequent requests
-    await setCachedFavicon(normalizedHost, size, body, ct);
+    await setCachedFavicon(normalizedHost, size, result.body, ct);
 
-    return { body, contentType: ct, expiresAt: 0 };
+    return { body: result.body, contentType: ct, expiresAt: 0 };
   });
 
   if (!entry) {

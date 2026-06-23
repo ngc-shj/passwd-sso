@@ -16,7 +16,7 @@ const {
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 
 vi.mock("@/lib/http/external-http", () => ({
-  validateAndFetch: mockValidateAndFetch,
+  validateAndFetchBuffered: mockValidateAndFetch,
 }));
 
 // Mock createRateLimiter to return our controllable check fns
@@ -44,6 +44,21 @@ function faviconRequest(host: string, size: string) {
 // Helper: PNG-like bytes
 const PNG_BYTES = new Uint8Array([137, 80, 78, 71, 13, 10]);
 
+// Build a ValidatedFetchResult (the buffered helper's return shape) so the mock
+// matches what validateAndFetchBuffered actually resolves (RT1 mock-reality).
+function buffered(
+  body: Uint8Array,
+  contentType: string | null,
+  status = 200,
+) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    contentType,
+    body: Buffer.from(body),
+  };
+}
+
 describe("GET /api/user/favicon", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -58,10 +73,8 @@ describe("GET /api/user/favicon", () => {
     mockUserLimiterCheck.mockResolvedValue({ allowed: true });
     mockGlobalLimiterCheck.mockResolvedValue({ allowed: true });
 
-    // Default: validateAndFetch returns a real PNG response
-    mockValidateAndFetch.mockResolvedValue(
-      new Response(PNG_BYTES, { headers: { "content-type": "image/png" } }),
-    );
+    // Default: the buffered fetch returns a real PNG result
+    mockValidateAndFetch.mockResolvedValue(buffered(PNG_BYTES, "image/png"));
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -112,10 +125,10 @@ describe("GET /api/user/favicon", () => {
   it("single-flight: N concurrent misses for the same host trigger ONE upstream fetch", async () => {
     // Slow-resolving upstream so all three requests overlap in-flight (the
     // sequential cache-hit test above never exercises the inFlight dedup path).
-    let resolveFetch!: (r: Response) => void;
+    let resolveFetch!: (r: ReturnType<typeof buffered>) => void;
     mockValidateAndFetch.mockImplementation(
       () =>
-        new Promise<Response>((resolve) => {
+        new Promise((resolve) => {
           resolveFetch = resolve;
         }),
     );
@@ -128,9 +141,7 @@ describe("GET /api/user/favicon", () => {
     // Let all three requests progress past their auth/parse/limiter awaits and
     // reach the (single) in-flight upstream fetch before we resolve it.
     await vi.waitFor(() => expect(resolveFetch).toBeTypeOf("function"));
-    resolveFetch(
-      new Response(PNG_BYTES, { headers: { "content-type": "image/png" } }),
-    );
+    resolveFetch(buffered(PNG_BYTES, "image/png"));
     const [r1, r2, r3] = await inflight;
 
     expect(r1.status).toBe(200);
@@ -165,13 +176,13 @@ describe("GET /api/user/favicon", () => {
 
   it("returns 204 when upstream returns non-image content-type", async () => {
     mockValidateAndFetch.mockResolvedValue(
-      new Response("not an image", { headers: { "content-type": "text/html" } }),
+      buffered(new Uint8Array([1, 2, 3]), "text/html"),
     );
     const res = await GET(faviconRequest("example.com", "32"));
     expect(res.status).toBe(204);
   });
 
-  it("returns 204 when validateAndFetch rejects (network / 3xx redirect)", async () => {
+  it("returns 204 when the buffered fetch rejects (network / 3xx redirect)", async () => {
     mockValidateAndFetch.mockRejectedValue(new Error("redirect blocked"));
     const res = await GET(faviconRequest("example.com", "32"));
     expect(res.status).toBe(204);
@@ -179,25 +190,22 @@ describe("GET /api/user/favicon", () => {
 
   it("returns 204 when upstream response is not ok", async () => {
     mockValidateAndFetch.mockResolvedValue(
-      new Response("not found", { status: 404, headers: { "content-type": "image/png" } }),
+      buffered(PNG_BYTES, "image/png", 404),
     );
     const res = await GET(faviconRequest("example.com", "32"));
     expect(res.status).toBe(204);
   });
 
-  it("returns 204 when body exceeds 256KB — does not cache oversized body", async () => {
-    const bigBody = new Uint8Array(256 * 1024 + 1); // 1 byte over cap
-    // Each call to mockValidateAndFetch must return a fresh Response
-    // (a Response body can only be consumed once)
-    mockValidateAndFetch.mockImplementation(() =>
-      Promise.resolve(
-        new Response(bigBody, { headers: { "content-type": "image/png" } }),
-      ),
+  it("returns 204 when body exceeds 256KB — over-cap rejects, nothing cached", async () => {
+    // The buffered helper enforces maxBytes and throws RangeError on over-cap;
+    // the route maps the throw to its 204 fallback.
+    mockValidateAndFetch.mockRejectedValue(
+      new RangeError("body exceeded maxBytes (262144)"),
     );
     const res1 = await GET(faviconRequest("example.com", "32"));
     expect(res1.status).toBe(204);
 
-    // Second call should still go to upstream (not cached)
+    // Second call should still go to upstream (nothing was cached).
     const res2 = await GET(faviconRequest("example.com", "32"));
     expect(res2.status).toBe(204);
     expect(mockValidateAndFetch).toHaveBeenCalledTimes(2);
