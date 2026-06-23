@@ -22,8 +22,9 @@ vi.mock("@/lib/http/external-http", () => ({
 // Mock createRateLimiter to return our controllable check fns
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn((opts: { max: number }) => {
-    // Distinguish user (120) from global (5000) limiter by max
-    const checkFn = opts.max === 120 ? mockUserLimiterCheck : mockGlobalLimiterCheck;
+    // Distinguish the per-user limiter from the global one by max. The global
+    // cap is 5000; anything else is the per-user limiter (currently 300).
+    const checkFn = opts.max === 5000 ? mockGlobalLimiterCheck : mockUserLimiterCheck;
     return { check: checkFn, clear: vi.fn() };
   }),
 }));
@@ -120,6 +121,31 @@ describe("GET /api/user/favicon", () => {
     const res2 = await GET(faviconRequest("github.com", "32"));
     expect(res2.status).toBe(200);
     expect(mockValidateAndFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("cache hits and 204s do NOT consume the rate limiter (only outbound fetches do)", async () => {
+    // Regression for the 429-on-reload bug: rate-limiting ran before the cache
+    // lookup, so a re-render of an all-cached list exhausted the window. The
+    // limiter must only count genuine cache MISSES (outbound fetches).
+    await setCachedFavicon("github.com", 32, Buffer.from(PNG_BYTES), "image/png");
+    const res = await GET(faviconRequest("github.com", "32"));
+    expect(res.status).toBe(200);
+    expect(mockUserLimiterCheck).not.toHaveBeenCalled();
+    expect(mockGlobalLimiterCheck).not.toHaveBeenCalled();
+  });
+
+  it("403 (opted out) does NOT consume the rate limiter", async () => {
+    mockAuth.mockResolvedValue({ user: { id: "user-1", fetchFavicons: false } });
+    const res = await GET(faviconRequest("github.com", "32"));
+    expect(res.status).toBe(403);
+    expect(mockUserLimiterCheck).not.toHaveBeenCalled();
+  });
+
+  it("a cache MISS does consume the rate limiter (429 when exceeded)", async () => {
+    mockUserLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 30000 });
+    const res = await GET(faviconRequest("uncached.example", "32"));
+    expect(res.status).toBe(429);
+    expect(mockValidateAndFetch).not.toHaveBeenCalled();
   });
 
   it("single-flight: N concurrent misses for the same host trigger ONE upstream fetch", async () => {

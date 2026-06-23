@@ -20,7 +20,11 @@ import {
 
 export const runtime = "nodejs";
 
-const FAVICON_USER_RATE_MAX = 120;
+// Per-user cap on outbound provider fetches per window. Only cache MISSES count
+// (see handleGET), so this bounds the cold-cache first load of a large vault:
+// 300/min comfortably covers a first-time user with hundreds of distinct hosts,
+// after which everything is cached. The global cap bounds aggregate abuse.
+const FAVICON_USER_RATE_MAX = 300;
 const FAVICON_GLOBAL_RATE_MAX = 5_000;
 
 const faviconQuerySchema = z.object({
@@ -53,18 +57,6 @@ async function handleGET(req: NextRequest) {
     return forbidden();
   }
 
-  // Per-user rate limit
-  const userRl = await userLimiter.check(`rl:favicon:${session.user.id}`);
-  if (!userRl.allowed) {
-    return rateLimited(userRl.retryAfterMs);
-  }
-
-  // Global rate limit
-  const globalRl = await globalLimiter.check("rl:favicon:global");
-  if (!globalRl.allowed) {
-    return rateLimited(globalRl.retryAfterMs);
-  }
-
   const queryResult = parseQuery(req, faviconQuerySchema);
   if (!queryResult.ok) return queryResult.response;
 
@@ -89,6 +81,19 @@ async function handleGET(req: NextRequest) {
       status: 204,
       headers: { "Cache-Control": `private, max-age=${SEC_PER_HOUR}` },
     });
+  }
+
+  // Rate limit ONLY the cache-miss path — the limiter exists to bound outbound
+  // fetches to the provider, so cache hits / 204s / 403s must NOT consume it.
+  // (Checking before the cache lookup made a full re-render of a many-entry
+  // list — every row a cache hit — exhaust the window and 429 spuriously.)
+  const userRl = await userLimiter.check(`rl:favicon:${session.user.id}`);
+  if (!userRl.allowed) {
+    return rateLimited(userRl.retryAfterMs);
+  }
+  const globalRl = await globalLimiter.check("rl:favicon:global");
+  if (!globalRl.allowed) {
+    return rateLimited(globalRl.retryAfterMs);
   }
 
   // Single-flight upstream fetch: N concurrent misses → 1 outbound request
