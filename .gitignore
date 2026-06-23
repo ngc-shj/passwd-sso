@@ -125,8 +125,12 @@ docs/temp/
 ios/build/
 ios/DerivedData/
 ios/.build*/
-ios/*.xcodeproj/xcuserdata/
-ios/*.xcodeproj/project.xcworkspace/xcuserdata/
+# The .xcodeproj is a generated artifact — xcodegen rebuilds it from
+# project.yml on every CI run and before every build (build-appstore-ipa.sh).
+# Committing it only causes drift (e.g. release-please bumps MARKETING_VERSION
+# in project.yml but not the generated pbxproj). Run `xcodegen generate` once
+# after cloning to open the project in the Xcode GUI.
+ios/*.xcodeproj/
 ios/*.xcworkspace/xcuserdata/
 *.xcuserstate
 *.xcuserdatad/
