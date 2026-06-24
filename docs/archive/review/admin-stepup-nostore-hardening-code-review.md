@@ -39,5 +39,11 @@ Review rounds: 2 (+ user-finding integration)
 ## Resolution Status
 All Critical/Major findings resolved. Minors either fixed or accepted with documented justification (deviation D5–D8). Final verification: `scripts/pre-pr.sh` 38/38 pass; full suite 11677 pass; tsc clean; all 6 `check:*` CI gates pass.
 
-## Round 3 termination
+## Round 3 — lateral sweep (横展開, user-driven)
+- User flagged `teams/[teamId]/webhooks` POST (`secret: plainSecret`) — the team sibling of the already-migrated `tenant/webhooks`. An exhaustive `grep -E '(secret|token|accessToken|prf):'` over all `NextResponse.json` routes then surfaced 4 more genuine misses: `extension/token/exchange`, `teams/[teamId]/invitations`, `share-links/verify-access`, `auth/passkey/verify` (PRF output). All migrated to `NO_STORE_HEADERS` + header assertions (deviation D9).
+- WebAuthn challenge/options routes (`webauthn/*/options`, `*/verify`, `passkey/reauth/options`, `passkey/options/email`) deliberately EXCLUDED — challenge = public single-use nonce, `prf` there = extension *input* config, not a credential (D10). `vault/admin-reset` false positive (returns `{ success: true }`).
+- Pre-existing unused-`tx` warning at `passkey/verify:120` (same withBypassRls shadow pattern as policy) NOT touched — pre-auth security-critical route, out-of-theme, the `check:bypass-rls` trap; deferred with justification (D11).
+- Verification: full suite 11677 pass, tsc clean, `scripts/pre-pr.sh` 38/38, all `check:*` gates OK.
+
+## Termination
 The only post-Round-2 changes were the T-R2-4 type-annotation fix (test-only, now type-clean) and the S-R2-5 parseBody reorder (security-boundary, but minimal and reviewed). Both confined to prior-round fix scope; the parseBody reorder verified by 26 passing audit-delivery tests + full pre-pr. No new findings warrant a Round-3 sub-agent pass. Termination condition met.
