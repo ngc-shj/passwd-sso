@@ -135,3 +135,62 @@ Applied round-2 fixes. Round 3 was a focused internal-consistency / regression p
 
 ## Status after round 3
 No open findings. All 10 contracts (C1-C10) are internally consistent and cross-referenced. Plan ready to lock and proceed to Phase 2.
+
+---
+
+# Plan Review: ios-favicon-optin — Round 4 (post-#603 major revision)
+Date: 2026-06-24
+Review round: 4
+
+## Changes from Previous Round
+#603 (server-side favicon proxy + per-user opt-in, merged to main) invalidated the round-0 Provider decision (DuckDuckGo direct, deferred SC1). Rebased the branch onto #603 and rewrote the plan: Provider=extend #603's proxy to iOS via new GET /api/mobile/favicon + PUT /api/mobile/favicon-pref (DPoP auth, reuse favicon-proxy.ts helpers), opt-in=shared User.fetchFavicons, monorepo 1 PR. Round 4 reviewed the rewrite (experts read the actual #603 code).
+
+## Functionality Findings (round 4)
+- F13 (Major): C1 reads User.fetchFavicons for a DPoP user but doesn't specify the RLS wrapper; bare findUnique bypasses RLS and silently 403s opted-in users → FIX: withTenantRls(prisma, tenantId, …) (tenantId from auth.data).
+- F14 (Minor): C2 said withUserTenantRls (redundant resolveUserTenantId lookup); tenantId already available → use withTenantRls directly, consistent with C1.
+- F15 (Major, CONVERGES with T12/S10): C9 "FaviconLoader uses MobileAPIClient path" — but performAuthedGET uses MobileAPIClient's OWN urlSession (verified MobileAPIClient.swift:173,611,698), NOT FaviconLoader's dedicated URLCache → R39 sign-out clear silently breaks. FIX: add MobileAPIClient.fetchFavicon(url:using:) taking a caller session backed by the dedicated cache (F15 Option B).
+- F16 (Major): fetchFavicons is NOT in unlock/data/status/sync responses (verified) → GET /api/mobile/favicon-pref is REQUIRED (not optional) to bootstrap the cached value.
+- F17 (Minor/blocking): add MOBILE_FAVICON / MOBILE_FAVICON_PREF to API_PATH; route-policy api-default fallback already covers /api/mobile/* (no policy change).
+
+## Security Findings (round 4)
+- S1-S8: confirmed resolved/superseded under the new design (S2 now server-side normalizeFaviconHost; S6/S7 superseded by authenticated first-party design).
+- S9 (Low): #603's faviconResponse (Buffer-pool-leak-safe) is private/unexported → move to favicon-proxy.ts, reuse, add forbidden pattern.
+- S10 (Info): authenticated URLCache keyed by URL — favicon bytes public, no cross-user poisoning; confirm sign-out ordering (already in C8).
+- S11 (Medium): C1 must keep BOTH limiters — the GLOBAL one (FAVICON_GLOBAL_RATE_MAX=5000) not just per-user, else aggregate SSRF/DoS amplification.
+- S12 (Low, = F13): specify RLS read pattern for User.fetchFavicons.
+- S13 (Low): add clientKind === 'IOS_APP' guard (IOS_AUTOFILL tokens otherwise accepted).
+- S14 (Info): C10 "no new PrivacyInfo entry" defensible (first-party) — record rationale.
+
+## Testing Findings (round 4)
+- T1-T8: confirmed resolved/superseded.
+- T9 (High): server tests must mock @/lib/auth/tokens/extension-token + Prisma (not @/auth) — mirror cache-rollback-report/route.test.ts, NOT the #603 web session route.
+- T10 (Medium): R1 import-not-reimplemented check must be a runnable test (expect(routeHelper).toBe(proxyExports.helper)), not "a grep assertion".
+- T11 (Low): fetchFaviconsCachedKey must be public for the T5 test (departs from autoCopyTotp's private Key enum).
+- T12 (Medium, = F15): "injectable session" is stale; real seam is MobileAPIClient; FaviconLoaderTests must seed HostTokenStore or image() returns nil before MockURLProtocol is hit.
+- T13 (Low): C4 matrix add explicit nil-entryType+ON+host → .favicon(host) row.
+- T14 (Low): FaviconProviderTests "never third-party host" needs assertable form (url.host == serverURL.host).
+- T15 (Low): VEC-4 manual "opt-out → 403" duplicates a Vitest case — clarify VEC-4 = end-to-end DPoP bytes only.
+- T16 (High): C8 DI build-ordering — makeService() must pass faviconCacheClearing:{} no-op; default closure references FaviconLoader.shared (C9 must exist first).
+
+## Convergence Note (round 4)
+F15 = T12 = S10 (C9): the authenticated-request seam. MobileAPIClient owns its session/cache; FaviconLoader needs its own dedicated cache for R39. Resolved by a MobileAPIClient.fetchFavicon(url:using:) that takes FaviconLoader's dedicated-cache session — auth stays in the actor, I/O+cache stay with the loader. This one seam resolves the Major iOS architectural finding and the testability finding together.
+
+## Status after round 4
+Open: F13, F15, F16, T9, T16 (Major/High) + S11 (Medium) + several Low. Apply, then round 5 confirmation.
+
+---
+
+# Plan Review: ios-favicon-optin — Round 5 (confirmation)
+Date: 2026-06-24
+Review round: 5
+
+## Changes from Previous Round
+Applied all round-4 findings (F13-F17, S9-S14, T9-T16). Round 5 = focused internal-consistency pass on the round-4 deltas + a grep propagation sweep.
+
+## Findings (round 5)
+- Propagation sweep (R3): grepped the plan for stale round-4 references. Fixed 3 residual spots the decision-change left behind: Pieces item 2 still said `withUserTenantRls` → `withTenantRls` (F14); Pieces item 14 "read at unlock/sync" → explicit GET-bootstrap (F16); VEC-1 "injectable session" → injectable MobileAPIClient + seeded HostTokenStore (T12). Confirmed every remaining DuckDuckGo/t1.gstatic.com/performAuthedGET/withUserTenantRls mention is a forbidden-pattern or rationale note, never the chosen approach.
+- Combined-lens confirmation: Pieces↔contracts coherent; C9 fetchFavicon(url:using:) seam coherent with C8 cache-clear + caching-design end to end; both rate limiters (S11) consistently referenced (C1 + acceptance + Known risks); C2 GET-required consistent with C13 bootstrap + gate row; Go/No-Go gate lists all defined contracts (C1-C11, C13; C12 folded).
+- Result: "No findings — round-4 fixes are internally consistent, plan ready to lock."
+
+## Status after round 5
+Converged. No open Critical/Major/Minor. 13 contracts (C1-C11, C13; C12 folded into C5/C6) internally consistent and cross-referenced. Plan re-locked for the #603-based design.
