@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamWebhook, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockLogAudit, mockExtractRequestMeta } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamWebhook, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockLogAudit, mockExtractRequestMeta, mockRequireRecentSession } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -21,6 +21,7 @@ const { mockAuth, mockPrismaTeamWebhook, mockRequireTeamPermission, TeamAuthErro
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
     mockLogAudit: vi.fn(),
     mockExtractRequestMeta: vi.fn(() => ({ ip: null, userAgent: null })),
+    mockRequireRecentSession: vi.fn().mockResolvedValue(null),
   };
 });
 
@@ -39,6 +40,9 @@ vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: mockExtractRequestMeta,
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { DELETE } from "./route";
@@ -129,5 +133,21 @@ describe("DELETE /api/teams/[teamId]/webhooks/[webhookId]", () => {
         metadata: { webhookId: WEBHOOK_ID, url: "https://example.com/hook" },
       }),
     );
+  });
+
+  it("returns 403 when step-up reauth is required", async () => {
+    mockPrismaTeamWebhook.findFirst.mockResolvedValue({ id: WEBHOOK_ID, url: "https://example.com/hook" });
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/webhooks/${WEBHOOK_ID}`),
+      createParams({ teamId: TEAM_ID, webhookId: WEBHOOK_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockPrismaTeamWebhook.delete).not.toHaveBeenCalled();
   });
 });

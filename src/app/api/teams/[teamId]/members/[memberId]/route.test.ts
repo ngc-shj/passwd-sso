@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError, mockWithTeamTenantRls, mockInvalidateUserSessions, mockLogger, mockLogAudit, mockBuildTeamMemberDisplayItems } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError, mockWithTeamTenantRls, mockInvalidateUserSessions, mockLogger, mockLogAudit, mockBuildTeamMemberDisplayItems, mockRequireRecentSession } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -32,6 +32,7 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
     mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     mockLogAudit: vi.fn(),
     mockBuildTeamMemberDisplayItems: vi.fn(),
+    mockRequireRecentSession: vi.fn().mockResolvedValue(null),
   };
 });
 
@@ -66,6 +67,9 @@ vi.mock("@/lib/audit/audit", () => ({
 }));
 vi.mock("@/lib/team/team-member-display", () => ({
   buildTeamMemberDisplayItems: mockBuildTeamMemberDisplayItems,
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { PUT, DELETE } from "./route";
@@ -362,6 +366,23 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
       createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
     );
     expect(res.status).toBe(403);
+  });
+
+  it("returns 403 when step-up reauth is required", async () => {
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, {
+        body: { role: TEAM_ROLE.ADMIN },
+      }),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockPrismaTeamMember.update).not.toHaveBeenCalled();
+    expect(mockTransaction).not.toHaveBeenCalled();
   });
 });
 

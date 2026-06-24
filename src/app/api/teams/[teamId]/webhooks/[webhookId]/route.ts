@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTeamPermission } from "@/lib/auth/access/team-auth";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { maskUrlForDisplay } from "@/lib/url/url-validation";
 import {
@@ -39,6 +40,9 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   if (!webhook) {
     return notFound();
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   await withTeamTenantRls(teamId, async () =>
     prisma.teamWebhook.delete({ where: { id: webhookId, teamId } }),

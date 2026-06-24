@@ -7,6 +7,7 @@ import {
   requireTeamPermission,
   isRoleAbove,
 } from "@/lib/auth/access/team-auth";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
@@ -61,6 +62,9 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   } catch (e) {
     return handleAuthError(e);
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   const target = await withTeamTenantRls(teamId, async () =>
     prisma.teamMember.findUnique({

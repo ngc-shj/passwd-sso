@@ -11,6 +11,7 @@ const {
   mockEncryptServerData,
   mockGetCurrentMasterKeyVersion,
   mockGetMasterKeyByVersion,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTeamWebhook: {
@@ -33,6 +34,7 @@ const {
   })),
   mockGetCurrentMasterKeyVersion: vi.fn(() => 1),
   mockGetMasterKeyByVersion: vi.fn(() => Buffer.alloc(32)),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -65,6 +67,9 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   encryptServerData: mockEncryptServerData,
   getCurrentMasterKeyVersion: mockGetCurrentMasterKeyVersion,
   getMasterKeyByVersion: mockGetMasterKeyByVersion,
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 vi.mock("@/lib/logger", () => ({
   default: {
@@ -288,6 +293,23 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
     });
     const { status } = await parseResponse(await POST(req, teamParams()));
     expect(status).toBe(400);
+  });
+
+  it("returns 403 when step-up reauth is required", async () => {
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+    const req = createRequest("POST", "http://localhost:3000/api/teams/33333333-3333-4333-8333-333333333333/webhooks", {
+      body: {
+        url: "https://example.com/hook",
+        events: ["ENTRY_CREATE"],
+      },
+    });
+    const res = await POST(req, teamParams());
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockPrismaTeamWebhook.create).not.toHaveBeenCalled();
   });
 });
 

@@ -133,3 +133,26 @@ Close two follow-up security findings from the PR #606 review (merged), addressi
 4. **Extension** fetches a single team entry `GET /api/teams/<id>/passwords/<entryId>` with Bearer → reaches handler (C4 `passwords` child allow).
 5. **Bearer request to `/api/teams/<id>/webhooks`** → 401 at the proxy (C4 deny); web session user is unaffected.
 6. **Hijacked non-step-up team admin** promotes a member to OWNER (ownership transfer) → step-up required, no role change. (C5)
+
+## Implementation Checklist
+
+### Step-up gates (import `requireRecentCurrentAuthMethod` from `@/lib/auth/session/recent-current-auth-method`)
+- [ ] C1 `teams/[teamId]/webhooks/route.ts` handlePOST — after requireTeamPermission try/catch (~L90), before parseBody
+- [ ] C2 `teams/[teamId]/webhooks/[webhookId]/route.ts` handleDELETE — after `if (!webhook) notFound()` (~L41), before delete
+- [ ] C3 `teams/[teamId]/policy/route.ts` handlePUT — after requireTeamPermission try/catch (~L86), before parseBody/findUnique
+- [ ] C5 `teams/[teamId]/members/[memberId]/route.ts` handlePUT — after requireTeamPermission try/catch (~L63), before the findUnique existence lookup (~L65)
+
+### Test files (add hoisted `mockRequireRecentSession: vi.fn().mockResolvedValue(null)` + `vi.mock("@/lib/auth/session/recent-current-auth-method", ...)` + reject test)
+- [ ] `teams/[teamId]/webhooks/route.test.ts` — reject asserts `mockPrismaTeamWebhook.create` not called (findFirst→row)
+- [ ] `teams/[teamId]/webhooks/[webhookId]/route.test.ts` — reject asserts `.delete` not called (findFirst→row)
+- [ ] `teams/[teamId]/policy/route.test.ts` — reject asserts `mockPrismaTeamPolicy.upsert` not called
+- [ ] `teams/[teamId]/members/[memberId]/route.test.ts` — reject asserts BOTH `mockPrismaTeamMember.update` AND `mockTransaction` not called (gate before existence → no findUnique row needed for reject)
+- [ ] `src/__tests__/api/teams/team-policy.test.ts` — **pass-through mock only** (R19 — imports policy PUT; PR #606 recurrence guard)
+
+### C4 Bearer-bypass narrowing
+- [ ] `src/lib/proxy/cors-gate.ts` — remove `API_PATH.TEAMS` from `EXTENSION_TOKEN_ROUTES`; add `isBearerBypassTeamPath(pathname)` called from `isBearerBypassRoute`; allow `/api/teams` exact + `/api/teams/<id>/member-key` exact + `/api/teams/<id>/passwords` prefix; add S1 constraint code-comment
+- [ ] `src/lib/proxy/cors-gate.test.ts` — extend `CASES` with all 11 matrix rows (8 new: passwords/e1, passwords/bulk-import allow; webhooks/policy/members/teams-t1/member-key-extra/teams-export deny)
+- [ ] `src/__tests__/proxy.test.ts` — fix L206 description; add positive cookieless-Bearer tests (4 client paths) + deny test (webhooks)
+
+### Reused (do NOT reimplement)
+- `requireRecentCurrentAuthMethod`, `isBearerBypassRoute`, the tenant test step-up mock pattern (`src/app/api/tenant/webhooks/route.test.ts`)
