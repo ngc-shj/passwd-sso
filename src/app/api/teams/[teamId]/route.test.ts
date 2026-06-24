@@ -219,20 +219,6 @@ describe("PUT /api/teams/[teamId]", () => {
     expect(json.error).toBe("NOT_FOUND");
   });
 
-  it("returns 403 when step-up reauth is required", async () => {
-    mockRequireRecentSession.mockResolvedValueOnce(
-      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
-    );
-    const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}`, { body: { name: "New" } }),
-      createParams({ teamId: TEAM_ID }),
-    );
-    const json = await res.json();
-    expect(res.status).toBe(403);
-    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
-    expect(mockPrismaTeam.update).not.toHaveBeenCalled();
-  });
-
   it("returns 400 for invalid JSON body", async () => {
     const { NextRequest } = await import("next/server");
     const req = new NextRequest(`http://localhost:3000/api/teams/${TEAM_ID}`, {

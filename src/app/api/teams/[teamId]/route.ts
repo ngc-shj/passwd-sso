@@ -95,9 +95,9 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const stepUpError = await requireRecentCurrentAuthMethod(req);
-  if (stepUpError) return stepUpError;
-
+  // No step-up here: updateTeamSchema is name/description only (cosmetic
+  // metadata, no key/identity/policy consequence). Security-relevant team
+  // settings live in the team policy PUT, which is step-up-gated.
   const result = await parseBody(req, updateTeamSchema);
   if (!result.ok) return result.response;
 

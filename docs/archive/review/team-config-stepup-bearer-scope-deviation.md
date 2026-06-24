@@ -23,3 +23,6 @@
 
 ### D5 — SSoT doc created (user suggestion)
 - `docs/security/step-up-reauth-routes.md` — single source of truth listing every step-up-gated route (tenant + team) by class, the gated/not-gated criteria, deferred routes, and the R19 test obligation + a grep-based conformance check. Verified to match the actual code (all 8 team + 19 tenant gated routes present; 2 deferred routes correctly ungated). This is the lightweight stand-in for the PR #606 SC2 centralized operation-sensitivity guard, and the structural defense against the "enumerate-by-route-area misses routes" failure mode this work hit repeatedly.
+
+### D6 — team PUT step-up removed (self-R-check advisory)
+- Self-R-check flagged `teams/[teamId]` PUT as over-applied: `updateTeamSchema` is name/description only (cosmetic), no key/identity/policy consequence — it does not fit the Tier1 key-custody/lifecycle class, and security-relevant team settings live in the separately-gated `policy` PUT. Removed step-up from team PUT (kept it on DELETE = lifecycle destruction). Updated the SSoT doc to list `[teamId]` as DELETE-only and document team-PUT under "not gated" with the rationale. Removed the now-moot PUT reject test.

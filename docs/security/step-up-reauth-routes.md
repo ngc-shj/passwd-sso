@@ -44,7 +44,10 @@ A mutation is in scope when it touches one of these:
 **NOT gated** (ordinary content CRUD — gating these hurts UX with no real benefit;
 the threat is the *governance/identity/key* surface, not individual records):
 passwords (create/update/delete/bulk/restore/favorite/attachments/history),
-folders, tags, invitation *accept* (the invitee, not an admin).
+folders, tags, invitation *accept* (the invitee, not an admin), and
+`/api/teams/[teamId]` **PUT** (team rename/description only — `updateTeamSchema`
+is `name`+`description`, no key/identity/policy consequence; security-relevant
+team settings live in the team `policy` PUT, which IS gated).
 
 ## Tenant routes (gated)
 
@@ -82,7 +85,7 @@ folders, tags, invitation *accept* (the invitee, not an admin).
 | `/api/teams/[teamId]/members` | POST | identity (add member → grants key access) |
 | `/api/teams/[teamId]/members/[memberId]/confirm-key` | POST | key custody (key distribution) |
 | `/api/teams/[teamId]/rotate-key` | POST | key custody (key rotation) |
-| `/api/teams/[teamId]` | PUT, DELETE | security config (PUT) / lifecycle destruction (DELETE) |
+| `/api/teams/[teamId]` | DELETE | lifecycle destruction (deletes team = all vault data + key material) |
 
 ## Deferred / not-yet-gated (tracked)
 
