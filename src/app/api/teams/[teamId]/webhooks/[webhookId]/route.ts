@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
+import { maskUrlForDisplay } from "@/lib/url/url-validation";
 import {
   TEAM_PERMISSION,
   AUDIT_ACTION,
@@ -46,7 +47,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   await logAuditAsync({
     ...teamAuditBase(req, session.user.id, teamId),
     action: AUDIT_ACTION.WEBHOOK_DELETE,
-    metadata: { webhookId, url: webhook.url },
+    metadata: { webhookId, url: maskUrlForDisplay(webhook.url) },
   });
 
   return NextResponse.json({ success: true });

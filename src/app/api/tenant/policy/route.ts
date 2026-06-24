@@ -933,103 +933,103 @@ async function handlePATCH(req: NextRequest) {
   }
 
   // Cascade clamp: when tenant lowers session idle/absolute, clamp team
-   // overrides that exceed the new value in the same transaction. Use
-   // Serializable to prevent TOCTOU with concurrent team policy PATCHes.
+  // overrides that exceed the new value within the single withBypassRls
+  // transaction (which provides atomicity at the default isolation level).
   const clampIdleTo = typeof sessionIdleTimeoutMinutes === "number" ? sessionIdleTimeoutMinutes : null;
   const clampAbsoluteTo = typeof sessionAbsoluteTimeoutMinutes === "number" ? sessionAbsoluteTimeoutMinutes : null;
   const clampedTeams: Array<{ teamId: string; field: string; previousValue: number; newValue: number }> = [];
 
   const updated = await withBypassRls(prisma, async (tx) => {
-      if (clampIdleTo !== null) {
-        const affected = await tx.teamPolicy.findMany({
-          where: {
-            team: { tenantId: membership.tenantId },
-            sessionIdleTimeoutMinutes: { gt: clampIdleTo },
-          },
-          select: { teamId: true, sessionIdleTimeoutMinutes: true },
-        });
-        for (const row of affected) {
-          clampedTeams.push({
-            teamId: row.teamId,
-            field: "sessionIdleTimeoutMinutes",
-            previousValue: row.sessionIdleTimeoutMinutes!,
-            newValue: clampIdleTo,
-          });
-        }
-        if (affected.length > 0) {
-          await tx.teamPolicy.updateMany({
-            where: { teamId: { in: affected.map((a) => a.teamId) } },
-            data: { sessionIdleTimeoutMinutes: clampIdleTo },
-          });
-        }
-      }
-      if (clampAbsoluteTo !== null) {
-        const affected = await tx.teamPolicy.findMany({
-          where: {
-            team: { tenantId: membership.tenantId },
-            sessionAbsoluteTimeoutMinutes: { gt: clampAbsoluteTo },
-          },
-          select: { teamId: true, sessionAbsoluteTimeoutMinutes: true },
-        });
-        for (const row of affected) {
-          clampedTeams.push({
-            teamId: row.teamId,
-            field: "sessionAbsoluteTimeoutMinutes",
-            previousValue: row.sessionAbsoluteTimeoutMinutes!,
-            newValue: clampAbsoluteTo,
-          });
-        }
-        if (affected.length > 0) {
-          await tx.teamPolicy.updateMany({
-            where: { teamId: { in: affected.map((a) => a.teamId) } },
-            data: { sessionAbsoluteTimeoutMinutes: clampAbsoluteTo },
-          });
-        }
-      }
-      return tx.tenant.update({
-        where: { id: membership.tenantId },
-        data: updateData,
-        select: {
-          maxConcurrentSessions: true,
-          sessionIdleTimeoutMinutes: true,
-          sessionAbsoluteTimeoutMinutes: true,
-          extensionTokenIdleTimeoutMinutes: true,
-          extensionTokenAbsoluteTimeoutMinutes: true,
-          vaultAutoLockMinutes: true,
-          allowAppSideAutofill: true,
-          allowedCidrs: true,
-          tailscaleEnabled: true,
-          tailscaleTailnet: true,
-          requireMinPinLength: true,
-          requirePasskey: true,
-          requirePasskeyEnabledAt: true,
-          passkeyGracePeriodDays: true,
-          lockoutThreshold1: true,
-          lockoutDuration1Minutes: true,
-          lockoutThreshold2: true,
-          lockoutDuration2Minutes: true,
-          lockoutThreshold3: true,
-          lockoutDuration3Minutes: true,
-          passwordMaxAgeDays: true,
-          passwordExpiryWarningDays: true,
-          auditLogRetentionDays: true,
-          trashRetentionDays: true,
-          historyRetentionDays: true,
-          shareAccessLogRetentionDays: true,
-          directorySyncLogRetentionDays: true,
-          notificationRetentionDays: true,
-          tenantMinPasswordLength: true,
-          tenantRequireUppercase: true,
-          tenantRequireLowercase: true,
-          tenantRequireNumbers: true,
-          tenantRequireSymbols: true,
-          saTokenMaxExpiryDays: true,
-          jitTokenDefaultTtlSec: true,
-          jitTokenMaxTtlSec: true,
-          delegationDefaultTtlSec: true,
-          delegationMaxTtlSec: true,
+    if (clampIdleTo !== null) {
+      const affected = await tx.teamPolicy.findMany({
+        where: {
+          team: { tenantId: membership.tenantId },
+          sessionIdleTimeoutMinutes: { gt: clampIdleTo },
         },
+        select: { teamId: true, sessionIdleTimeoutMinutes: true },
       });
+      for (const row of affected) {
+        clampedTeams.push({
+          teamId: row.teamId,
+          field: "sessionIdleTimeoutMinutes",
+          previousValue: row.sessionIdleTimeoutMinutes!,
+          newValue: clampIdleTo,
+        });
+      }
+      if (affected.length > 0) {
+        await tx.teamPolicy.updateMany({
+          where: { teamId: { in: affected.map((a) => a.teamId) } },
+          data: { sessionIdleTimeoutMinutes: clampIdleTo },
+        });
+      }
+    }
+    if (clampAbsoluteTo !== null) {
+      const affected = await tx.teamPolicy.findMany({
+        where: {
+          team: { tenantId: membership.tenantId },
+          sessionAbsoluteTimeoutMinutes: { gt: clampAbsoluteTo },
+        },
+        select: { teamId: true, sessionAbsoluteTimeoutMinutes: true },
+      });
+      for (const row of affected) {
+        clampedTeams.push({
+          teamId: row.teamId,
+          field: "sessionAbsoluteTimeoutMinutes",
+          previousValue: row.sessionAbsoluteTimeoutMinutes!,
+          newValue: clampAbsoluteTo,
+        });
+      }
+      if (affected.length > 0) {
+        await tx.teamPolicy.updateMany({
+          where: { teamId: { in: affected.map((a) => a.teamId) } },
+          data: { sessionAbsoluteTimeoutMinutes: clampAbsoluteTo },
+        });
+      }
+    }
+    return tx.tenant.update({
+      where: { id: membership.tenantId },
+      data: updateData,
+      select: {
+        maxConcurrentSessions: true,
+        sessionIdleTimeoutMinutes: true,
+        sessionAbsoluteTimeoutMinutes: true,
+        extensionTokenIdleTimeoutMinutes: true,
+        extensionTokenAbsoluteTimeoutMinutes: true,
+        vaultAutoLockMinutes: true,
+        allowAppSideAutofill: true,
+        allowedCidrs: true,
+        tailscaleEnabled: true,
+        tailscaleTailnet: true,
+        requireMinPinLength: true,
+        requirePasskey: true,
+        requirePasskeyEnabledAt: true,
+        passkeyGracePeriodDays: true,
+        lockoutThreshold1: true,
+        lockoutDuration1Minutes: true,
+        lockoutThreshold2: true,
+        lockoutDuration2Minutes: true,
+        lockoutThreshold3: true,
+        lockoutDuration3Minutes: true,
+        passwordMaxAgeDays: true,
+        passwordExpiryWarningDays: true,
+        auditLogRetentionDays: true,
+        trashRetentionDays: true,
+        historyRetentionDays: true,
+        shareAccessLogRetentionDays: true,
+        directorySyncLogRetentionDays: true,
+        notificationRetentionDays: true,
+        tenantMinPasswordLength: true,
+        tenantRequireUppercase: true,
+        tenantRequireLowercase: true,
+        tenantRequireNumbers: true,
+        tenantRequireSymbols: true,
+        saTokenMaxExpiryDays: true,
+        jitTokenDefaultTtlSec: true,
+        jitTokenMaxTtlSec: true,
+        delegationDefaultTtlSec: true,
+        delegationMaxTtlSec: true,
+      },
+    });
     },
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
+import { maskUrlForDisplay } from "@/lib/url/url-validation";
 import {
   TENANT_PERMISSION,
   AUDIT_ACTION,
@@ -51,7 +52,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   await logAuditAsync({
     ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.TENANT_WEBHOOK_DELETE,
-    metadata: { webhookId, url: webhook.url },
+    metadata: { webhookId, url: maskUrlForDisplay(webhook.url) },
   });
 
   return NextResponse.json({ success: true });

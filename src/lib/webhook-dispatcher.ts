@@ -25,6 +25,7 @@ import {
   resolveAndValidateIps,
   createPinnedDispatcher,
 } from "@/lib/http/external-http";
+import { maskUrlForDisplay } from "@/lib/url/url-validation";
 
 /**
  * Raised when a webhook row's secretAadVersion is below the supported floor.
@@ -327,7 +328,7 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
           teamId: event.teamId,
           metadata: {
             webhookId: id,
-            url,
+            url: maskUrlForDisplay(url),
             failCount: newFailCount,
           },
         });
@@ -413,7 +414,7 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
           tenantId: event.tenantId,
           metadata: {
             webhookId: id,
-            url,
+            url: maskUrlForDisplay(url),
             failCount: newFailCount,
           },
         });

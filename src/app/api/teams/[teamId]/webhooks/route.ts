@@ -25,7 +25,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
 import { MAX_WEBHOOKS, WEBHOOK_URL_MAX_LENGTH } from "@/lib/validations/common";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
-import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE } from "@/lib/url/url-validation";
+import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE, maskUrlForDisplay } from "@/lib/url/url-validation";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -137,7 +137,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   await logAuditAsync({
     ...teamAuditBase(req, session.user.id, teamId),
     action: AUDIT_ACTION.WEBHOOK_CREATE,
-    metadata: { webhookId: webhook.id, url: data.url },
+    metadata: { webhookId: webhook.id, url: maskUrlForDisplay(data.url) },
   });
 
   return NextResponse.json(
