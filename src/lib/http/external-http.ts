@@ -13,6 +13,7 @@ import { resolve4, resolve6 } from "node:dns/promises";
 import { isIP as netIsIP } from "node:net";
 import { Agent as UndiciAgent } from "undici";
 import { isIpInCidr } from "@/lib/auth/policy/ip-access";
+import { readStreamWithCap } from "@/lib/http/parse-body";
 import { METADATA_BLOCKLIST } from "@/lib/audit/audit-logger";
 import { safeRecord } from "@/lib/safe-keys";
 import { MS_PER_SECOND } from "@/lib/constants/time";
@@ -194,6 +195,72 @@ export async function validateAndFetch(
       // @ts-expect-error -- Node.js fetch supports undici dispatcher
       dispatcher,
     });
+  } finally {
+    dispatcher.destroy();
+  }
+}
+
+/** Buffered result of a body-reading validated fetch. */
+export interface ValidatedFetchResult {
+  ok: boolean;
+  status: number;
+  contentType: string | null;
+  /** Response body, fully read before the pinned dispatcher was destroyed. */
+  body: Buffer;
+}
+
+/**
+ * Like {@link validateAndFetch}, but for callers that need the response BODY.
+ *
+ * `validateAndFetch` destroys the pinned dispatcher in its `finally` as soon as
+ * the headers resolve — reading the body from the returned `Response` afterwards
+ * throws `ClientDestroyedError` (the dispatcher owns the connection). This
+ * variant reads the body fully WHILE the dispatcher is still alive, then returns
+ * the buffered bytes. `maxBytes` caps the read to bound memory; the body stream
+ * is aborted and `RangeError` thrown once the cap is exceeded.
+ */
+export async function validateAndFetchBuffered(
+  url: string,
+  options: RequestInit & { timeout?: number; maxBytes: number },
+): Promise<ValidatedFetchResult> {
+  const { maxBytes, ...fetchOptions } = options;
+  const parsedUrl = new URL(url);
+  const hostname = parsedUrl.hostname;
+
+  const validatedIps = await resolveAndValidateIps(url);
+  const dispatcher = createPinnedDispatcher(hostname, validatedIps);
+
+  try {
+    const res = await fetch(url, {
+      ...fetchOptions,
+      headers: {
+        "User-Agent": EXTERNAL_USER_AGENT,
+        ...fetchOptions.headers,
+      },
+      redirect: "error",
+      signal: AbortSignal.timeout(fetchOptions.timeout ?? 10 * MS_PER_SECOND),
+      // @ts-expect-error -- Node.js fetch supports undici dispatcher
+      dispatcher,
+    });
+
+    // Read the body NOW, before `finally` destroys the dispatcher. Stream-cap
+    // via the shared primitive so an oversized upstream body is aborted
+    // mid-read (not buffered whole then rejected).
+    if (!res.body) {
+      throw new RangeError("validateAndFetchBuffered: response has no body");
+    }
+    const read = await readStreamWithCap(res.body, maxBytes);
+    if (!read.ok) {
+      throw new RangeError(
+        `validateAndFetchBuffered: body exceeded maxBytes (${maxBytes})`,
+      );
+    }
+    return {
+      ok: res.ok,
+      status: res.status,
+      contentType: res.headers.get("content-type"),
+      body: read.bytes,
+    };
   } finally {
     dispatcher.destroy();
   }

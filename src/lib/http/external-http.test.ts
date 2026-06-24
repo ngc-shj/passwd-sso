@@ -50,6 +50,7 @@ import {
   isPrivateIp,
   resolveAndValidateIps,
   validateAndFetch,
+  validateAndFetchBuffered,
   sanitizeForExternalDelivery,
   sanitizeErrorForStorage,
   EXTERNAL_DELIVERY_METADATA_BLOCKLIST,
@@ -300,6 +301,66 @@ describe("validateAndFetch", () => {
     mockResolve4.mockResolvedValue(["169.254.169.254"]);
     await expect(
       validateAndFetch("https://metadata.evil.com/", { method: "GET" }),
+    ).rejects.toThrow("private IP");
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+// ─── validateAndFetchBuffered ─────────────────────────────────────
+
+describe("validateAndFetchBuffered", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockResolve4.mockResolvedValue(["93.184.216.34"]);
+    mockResolve6.mockResolvedValue([]);
+  });
+
+  // Build a Response-like whose body is a real ReadableStream of `bytes`, so the
+  // helper exercises the shared readStreamWithCap (getReader) path — the body is
+  // read BEFORE the helper's finally destroys the pinned dispatcher. (The plain
+  // validateAndFetch returns the Response and destroys the dispatcher
+  // immediately, so a caller reading the body afterwards hits
+  // ClientDestroyedError — the bug this helper fixes.)
+  function streamingResponse(bytes: Uint8Array, contentType: string) {
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: (h: string) => (h === "content-type" ? contentType : null) },
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        },
+      }),
+    } as unknown as Response;
+  }
+
+  it("reads the body and returns ok/status/contentType/body", async () => {
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    mockFetch.mockResolvedValue(streamingResponse(bytes, "image/png"));
+
+    const result = await validateAndFetchBuffered("https://example.com/favicon", {
+      maxBytes: 1024,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe(200);
+    expect(result.contentType).toBe("image/png");
+    expect(Uint8Array.from(result.body)).toEqual(bytes);
+  });
+
+  it("throws RangeError when the body exceeds maxBytes", async () => {
+    mockFetch.mockResolvedValue(streamingResponse(new Uint8Array(2048), "image/png"));
+
+    await expect(
+      validateAndFetchBuffered("https://example.com/favicon", { maxBytes: 1024 }),
+    ).rejects.toThrow(RangeError);
+  });
+
+  it("SSRF blocked: hostname resolving to private IP throws, no fetch", async () => {
+    mockResolve4.mockResolvedValue(["169.254.169.254"]);
+    await expect(
+      validateAndFetchBuffered("https://metadata.evil.com/", { maxBytes: 1024 }),
     ).rejects.toThrow("private IP");
     expect(mockFetch).not.toHaveBeenCalled();
   });

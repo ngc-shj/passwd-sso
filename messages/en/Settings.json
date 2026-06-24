@@ -27,7 +27,14 @@
     "description": "This page requires an unlocked vault. Unlock the vault from the header."
   },
   "profile": {
-    "description": "Manage your basic account information."
+    "description": "Manage your basic account information.",
+    "siteIcons": {
+      "label": "Show site icons",
+      "descriptionOn": "Site icons are enabled. Each entry's website address is sent to your server to look up its icon.",
+      "descriptionOff": "Site icons are off. No website addresses leave your device for icon lookups.",
+      "privacyFooter": "When enabled, your server fetches each site's icon on your behalf. No website address is sent to any third party from your browser — only to your own server.",
+      "saveError": "Failed to save icon preference. Please try again."
+    }
   },
   "notifications": {
     "description": "Manage how you receive notifications."

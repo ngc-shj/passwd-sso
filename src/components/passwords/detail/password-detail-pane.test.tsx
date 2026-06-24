@@ -21,6 +21,16 @@ vi.mock("next-intl", () => ({
   useLocale: () => "en",
 }));
 
+// PasswordDetailPane renders the real <EntryIcon>/<Favicon>, which reads the
+// favicon-fetch preference via useSession(). Provide a resolved session so the
+// component renders its (globe) fallback without a SessionProvider wrapper.
+vi.mock("next-auth/react", () => ({
+  useSession: () => ({
+    data: { user: { id: "user-1", fetchFavicons: false } },
+    status: "authenticated",
+  }),
+}));
+
 // Stub PasswordDetailInline to a minimal sentinel — this test only verifies
 // pane-level logic (empty-state, loading, error routing). Cross-entry reveal
 // carry-over (S5) is tested at the parent level via key= in Batch 4.

@@ -1,10 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import {
   parseBody,
   readJsonWithCap,
   readBytesWithCap,
+  readStreamWithCap,
   readFormWithCap,
   rejectOversizedMultipart,
   exceedsDeclaredContentLength,
@@ -301,6 +302,45 @@ describe("readBytesWithCap", () => {
       expect(result.tooLarge).toBeUndefined();
       expect(result.noStream).toBe(true);
     }
+  });
+});
+
+describe("readStreamWithCap", () => {
+  it("returns the concatenated bytes when under the cap", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3]));
+        controller.enqueue(new Uint8Array([4, 5]));
+        controller.close();
+      },
+    });
+    const result = await readStreamWithCap(stream, 1024);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(Uint8Array.from(result.bytes)).toEqual(new Uint8Array([1, 2, 3, 4, 5]));
+  });
+
+  it("aborts MID-STREAM (cancels the reader) once the running total exceeds the cap", async () => {
+    // The defining property of D6: an oversized body must be cut off DURING the
+    // read, not buffered whole then rejected. Use a pull source that records how
+    // many chunks were pulled and whether cancel() ran; cap below the 2nd chunk.
+    let pulls = 0;
+    const cancel = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new Uint8Array(800)); // each chunk 800 bytes
+      },
+      cancel,
+    });
+
+    const result = await readStreamWithCap(stream, 1000); // exceeded after 2nd chunk
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.tooLarge).toBe(true);
+    // cancel() proves the stream was aborted rather than drained to completion.
+    expect(cancel).toHaveBeenCalledTimes(1);
+    // It stopped early — did NOT keep pulling an unbounded source forever.
+    expect(pulls).toBeLessThanOrEqual(2);
   });
 });
 

@@ -11,6 +11,7 @@ declare module "next-auth" {
       requirePasskey?: boolean;
       requirePasskeyEnabledAt?: string | null;
       passkeyGracePeriodDays?: number | null;
+      fetchFavicons?: boolean;
     };
   }
 }

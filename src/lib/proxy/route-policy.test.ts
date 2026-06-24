@@ -49,6 +49,8 @@ const POSITIVE_CASES: Record<RoutePolicyKind, readonly ClassifyCase[]> = {
     { pathname: "/api/notifications", description: "notifications prefix" },
     { pathname: "/api/mcp/authorize", description: "mcp authorize exact path" },
     { pathname: "/api/mcp/authorize/consent", description: "mcp consent exact path" },
+    { pathname: "/api/user/favicon", description: "favicon proxy — session gate + tenant IP" },
+    { pathname: "/api/user/favicon-pref", description: "favicon pref toggle — session gate + tenant IP" },
   ],
   [ROUTE_POLICY_KIND.API_DEFAULT]: [
     { pathname: "/api/mobile/authorize", description: "mobile authorize — self-authenticated, redirects to sign-in when unauthenticated" },

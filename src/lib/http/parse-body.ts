@@ -95,24 +95,20 @@ type ReadBytesResult = ReadBytesOk | ReadBytesFail;
  * on. Use it directly only when a route needs the raw bytes (e.g. a
  * replay-vs-retry body hash); otherwise reach for the typed helpers below.
  */
-export async function readBytesWithCap(
-  req: NextRequest,
+/**
+ * Stream-read any ReadableStream of bytes (a request OR an upstream response
+ * body) under a byte cap, aborting the moment the running total exceeds
+ * `maxBytes`. Returns `{ ok: false, tooLarge: true }` instead of buffering the
+ * whole body first — the cap must reject BEFORE memory is spent, not after.
+ *
+ * This is the byte-level primitive shared by readBytesWithCap (inbound request
+ * bodies) and validateAndFetchBuffered (outbound response bodies).
+ */
+export async function readStreamWithCap(
+  stream: ReadableStream<Uint8Array>,
   maxBytes: number,
-): Promise<ReadBytesResult> {
-  // Pre-check content-length when present (cheap early reject)
-  if (exceedsDeclaredContentLength(req, maxBytes)) {
-    return { ok: false, tooLarge: true };
-  }
-
-  const reader = req.body?.getReader();
-  if (!reader) {
-    // No body stream — reachable only when tests mock req.body=null or for
-    // GET/HEAD. In production App Router POST handlers req.body is always a
-    // ReadableStream. Without a stream we cannot enforce the byte cap, so we
-    // fail closed and let the caller decide how to surface it.
-    return { ok: false, noStream: true };
-  }
-
+): Promise<{ ok: true; bytes: Buffer } | { ok: false; tooLarge: true }> {
+  const reader = stream.getReader();
   let total = 0;
   const chunks: Uint8Array[] = [];
   while (true) {
@@ -127,8 +123,27 @@ export async function readBytesWithCap(
       chunks.push(value);
     }
   }
-
   return { ok: true, bytes: Buffer.concat(chunks) };
+}
+
+export async function readBytesWithCap(
+  req: NextRequest,
+  maxBytes: number,
+): Promise<ReadBytesResult> {
+  // Pre-check content-length when present (cheap early reject)
+  if (exceedsDeclaredContentLength(req, maxBytes)) {
+    return { ok: false, tooLarge: true };
+  }
+
+  if (!req.body) {
+    // No body stream — reachable only when tests mock req.body=null or for
+    // GET/HEAD. In production App Router POST handlers req.body is always a
+    // ReadableStream. Without a stream we cannot enforce the byte cap, so we
+    // fail closed and let the caller decide how to surface it.
+    return { ok: false, noStream: true };
+  }
+
+  return readStreamWithCap(req.body, maxBytes);
 }
 
 type ReadTextOk = { ok: true; text: string };
