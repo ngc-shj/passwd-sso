@@ -383,6 +383,9 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
     expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
     expect(mockPrismaTeamMember.update).not.toHaveBeenCalled();
     expect(mockTransaction).not.toHaveBeenCalled();
+    // Pins that step-up fires BEFORE the existence lookup — a future reorder
+    // moving the gate after findUnique would reach this call and regress.
+    expect(mockPrismaTeamMember.findUnique).not.toHaveBeenCalled();
   });
 });
 

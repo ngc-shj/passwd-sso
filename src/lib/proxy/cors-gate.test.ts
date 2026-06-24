@@ -40,6 +40,7 @@ describe("isBearerBypassRoute — Bearer-bypass detection truth table", () => {
     { path: "/api/teams/t1/members", expected: false, reason: "web-only" },
     { path: "/api/teams/t1", expected: false, reason: "team CRUD — web-only" },
     { path: "/api/teams/t1/member-key/extra", expected: false, reason: "member-key is leaf-exact" },
+    { path: "/api/teams/t1/passwordsX", expected: false, reason: "passwords suffix-collision — boundary requires end or /" },
     { path: "/api/teams-export", expected: false, reason: "sibling collision — not under /api/teams/" },
     { path: "/api/api-keys", expected: false, reason: "api-keys removed from Bearer-bypass list (session-only post-C2)" },
     { path: "/api/api-keys/k1", expected: false, reason: "api-keys child also session-only post-C2" },
