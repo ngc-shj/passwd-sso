@@ -253,6 +253,7 @@ describe("POST /api/share-links/verify-access", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(200);
     expect(json.accessToken).toBe("access-token-xyz");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect(mockCreateShareAccessToken).toHaveBeenCalledWith("share-1");
     expect(mockVerifyAccessPassword).toHaveBeenCalledWith(
       validBody.password,

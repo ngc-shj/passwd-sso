@@ -88,6 +88,7 @@ describe("POST /api/mcp/token", () => {
     expect(json.expires_in).toBe(3600);
     expect(json.scope).toBe("credentials:list credentials:use vault:status");
     expect(json.refresh_token).toBe("mcp_rt_refreshtoken");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect(mockHashToken).toHaveBeenCalledWith("secret-value");
     expect(mockExchangeCodeForToken).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -256,6 +257,7 @@ describe("POST /api/mcp/token", () => {
     expect(json.token_type).toBe("Bearer");
     expect(json.expires_in).toBe(3600);
     expect(json.scope).toBe("credentials:list credentials:use");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
   });
 
   it("refresh_token: returns 400 when exchangeRefreshToken returns invalid_grant", async () => {

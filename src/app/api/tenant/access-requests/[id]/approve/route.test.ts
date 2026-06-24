@@ -222,6 +222,7 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect(typeof json.token).toBe("string");
     expect(json.token).toMatch(/^sa_/);
     expect(json.ttlSec).toBeGreaterThan(0);

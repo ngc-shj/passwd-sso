@@ -15,6 +15,7 @@ const {
   mockPersonalLogAccessGrantFindMany,
   mockPersonalLogAccessGrantUpdateMany,
   mockDispatchTenantWebhook,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -28,6 +29,7 @@ const {
   mockPersonalLogAccessGrantFindMany: vi.fn(),
   mockPersonalLogAccessGrantUpdateMany: vi.fn(),
   mockDispatchTenantWebhook: vi.fn(),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -77,6 +79,9 @@ vi.mock("@/lib/notification", () => ({
 }));
 vi.mock("@/lib/webhook-dispatcher", () => ({
   dispatchTenantWebhook: mockDispatchTenantWebhook,
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 vi.mock("@/lib/constants/auth/tenant-permission", () => ({
   TENANT_PERMISSION: {

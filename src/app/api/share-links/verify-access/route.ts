@@ -16,6 +16,7 @@ import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 const ipLimiter = createRateLimiter({
@@ -136,7 +137,7 @@ async function handlePOST(req: NextRequest) {
 
   const accessToken = createShareAccessToken(share.id);
 
-  return NextResponse.json({ accessToken });
+  return NextResponse.json({ accessToken }, { headers: { ...NO_STORE_HEADERS } });
 }
 
 export const POST = withRequestLog(handlePOST);

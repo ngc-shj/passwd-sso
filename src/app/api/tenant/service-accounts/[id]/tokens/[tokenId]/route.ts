@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
@@ -54,6 +55,9 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   if (!token || token.serviceAccountId !== id || token.tenantId !== actor.tenantId) {
     return notFound();
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   if (token.revokedAt) {
     return errorResponse(API_ERROR.SA_TOKEN_ALREADY_REVOKED);

@@ -7,6 +7,7 @@ const {
   mockRequireTenantPermission,
   mockWithTenantRls,
   mockLogAudit,
+  mockRequireRecentSession,
   TenantAuthError,
 } = vi.hoisted(() => {
   class _TenantAuthError extends Error {
@@ -26,6 +27,7 @@ const {
     mockRequireTenantPermission: vi.fn(),
     mockWithTenantRls: vi.fn((p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(p)),
     mockLogAudit: vi.fn(),
+    mockRequireRecentSession: vi.fn().mockResolvedValue(null),
     TenantAuthError: _TenantAuthError,
   };
 });
@@ -45,6 +47,9 @@ vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { DELETE } from "./route";
@@ -157,5 +162,26 @@ describe("DELETE /api/tenant/scim-tokens/[tokenId]", () => {
         action: "SCIM_TOKEN_REVOKE",
       }),
     );
+  });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockPrismaScimToken.findUnique.mockResolvedValue({
+      id: "tok-1",
+      tenantId: TENANT_ID,
+      revokedAt: null,
+    });
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const res = await DELETE(
+      createRequest("DELETE", "http://localhost/api/tenant/scim-tokens/tok-1"),
+      makeParams("tok-1"),
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockPrismaScimToken.update).not.toHaveBeenCalled();
   });
 });

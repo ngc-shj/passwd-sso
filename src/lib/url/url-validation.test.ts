@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   isSsrfSafeWebhookUrl,
   SSRF_URL_VALIDATION_MESSAGE,
+  maskUrlForDisplay,
 } from "./url-validation";
 
 describe("isSsrfSafeWebhookUrl", () => {
@@ -74,8 +75,68 @@ describe("isSsrfSafeWebhookUrl", () => {
     });
   });
 
+  describe("rejects embedded credentials (userinfo)", () => {
+    it("rejects URL with username and password", () => {
+      expect(isSsrfSafeWebhookUrl("https://user:pass@example.com/hook")).toBe(false);
+    });
+
+    it("rejects URL with username only", () => {
+      expect(isSsrfSafeWebhookUrl("https://user@example.com/hook")).toBe(false);
+    });
+
+    it("rejects URL with password only (empty username)", () => {
+      expect(isSsrfSafeWebhookUrl("https://:pass@example.com/hook")).toBe(false);
+    });
+  });
+
   it("exposes a stable validation message constant", () => {
     expect(typeof SSRF_URL_VALIDATION_MESSAGE).toBe("string");
     expect(SSRF_URL_VALIDATION_MESSAGE).toMatch(/HTTPS/i);
+  });
+});
+
+describe("maskUrlForDisplay", () => {
+  it("strips userinfo, query string, and fragment", () => {
+    expect(maskUrlForDisplay("https://u:p@host.com/path?token=x#frag")).toBe(
+      "https://host.com/path",
+    );
+  });
+
+  it("preserves scheme, host, and pathname", () => {
+    expect(maskUrlForDisplay("https://hooks.example.com/audit/v2")).toBe(
+      "https://hooks.example.com/audit/v2",
+    );
+  });
+
+  it("preserves port in host", () => {
+    expect(maskUrlForDisplay("https://host.example.com:9200/path")).toBe(
+      "https://host.example.com:9200/path",
+    );
+  });
+
+  it("strips query string without userinfo", () => {
+    expect(maskUrlForDisplay("https://example.com/hook?token=secret")).toBe(
+      "https://example.com/hook",
+    );
+  });
+
+  it("appends a trailing slash for a bare host (no path)", () => {
+    // URL.pathname is "/" for a host-only URL, so the masked form gains a
+    // trailing slash. Pinned so the display contract does not regress.
+    expect(maskUrlForDisplay("https://example.com")).toBe("https://example.com/");
+  });
+
+  it("strips userinfo while preserving a non-https scheme", () => {
+    expect(maskUrlForDisplay("http://user:pass@host.com/p?q=1")).toBe(
+      "http://host.com/p",
+    );
+  });
+
+  it("returns [invalid-url] for garbage input", () => {
+    expect(maskUrlForDisplay("not a url")).toBe("[invalid-url]");
+  });
+
+  it("returns [invalid-url] for empty string", () => {
+    expect(maskUrlForDisplay("")).toBe("[invalid-url]");
   });
 });

@@ -19,7 +19,9 @@ import { AuditDeliveryTargetKind } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import {
   MAX_AUDIT_DELIVERY_TARGETS,
   WEBHOOK_URL_MAX_LENGTH,
@@ -29,7 +31,7 @@ import {
   AUDIT_DELIVERY_AWS_CREDENTIAL_MAX,
 } from "@/lib/validations/common";
 
-import { isSsrfSafeWebhookUrl as ssrfSafeUrl, SSRF_URL_VALIDATION_MESSAGE as ssrfMessage } from "@/lib/url/url-validation";
+import { isSsrfSafeWebhookUrl as ssrfSafeUrl, SSRF_URL_VALIDATION_MESSAGE as ssrfMessage, maskUrlForDisplay } from "@/lib/url/url-validation";
 
 const createDeliveryTargetSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -107,7 +109,8 @@ async function handleGET(_req: NextRequest) {
         aad,
       );
       const config = JSON.parse(configJson) as { url?: string; endpoint?: string };
-      endpoint = config.url ?? config.endpoint ?? null;
+      const raw = config.url ?? config.endpoint ?? null;
+      endpoint = raw ? maskUrlForDisplay(raw) : null;
     } catch {
       // Decrypt failure (missing master key version, AAD mismatch, corruption)
       // — keep the row visible without the endpoint rather than 500-ing the
@@ -142,6 +145,9 @@ async function handlePOST(req: NextRequest) {
   } catch (e) {
     return handleAuthError(e);
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   const result = await parseBody(req, createDeliveryTargetSchema);
   if (!result.ok) return result.response;
@@ -204,7 +210,7 @@ async function handlePOST(req: NextRequest) {
     },
     {
       status: 201,
-      headers: { "Cache-Control": "no-store" },
+      headers: { ...NO_STORE_HEADERS },
     },
   );
 }

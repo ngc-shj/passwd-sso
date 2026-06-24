@@ -8,7 +8,7 @@ const {
   mockTenantFindUnique, mockWithBypassRls, mockLogAudit, mockRateLimiterCheck,
   mockInvalidateCache, mockWouldIpBeAllowed, mockExtractClientIp,
   mockTeamPolicyFindMany, mockTeamPolicyUpdateMany, mockTransaction,
-  mockInvalidateSessionTimeoutCache,
+  mockInvalidateSessionTimeoutCache, mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -25,9 +25,13 @@ const {
   mockTeamPolicyUpdateMany: vi.fn().mockResolvedValue({ count: 0 }),
   mockTransaction: vi.fn(),
   mockInvalidateSessionTimeoutCache: vi.fn(),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
+}));
 vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;

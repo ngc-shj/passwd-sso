@@ -28,6 +28,7 @@ import type { EntryTypeValue } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
@@ -221,7 +222,7 @@ async function handlePOST(req: NextRequest) {
     url: `/s/${token}`,
     expiresAt: share.expiresAt,
     ...(accessPassword ? { accessPassword } : {}),
-  }, { status: 201 });
+  }, { status: 201, headers: { ...NO_STORE_HEADERS } });
 }
 
 // GET /api/share-links — List share links for an entry

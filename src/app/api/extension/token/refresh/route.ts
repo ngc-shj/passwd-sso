@@ -11,6 +11,7 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { TokenIssueResponseSchema } from "@/lib/validations/extension-token";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import logger from "@/lib/logger";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import {
@@ -159,7 +160,7 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.INTERNAL_ERROR);
   }
 
-  return NextResponse.json(parsed.data);
+  return NextResponse.json(parsed.data, { headers: { ...NO_STORE_HEADERS } });
 }
 
 export const POST = withRequestLog(handlePOST);

@@ -238,6 +238,7 @@ describe("POST /api/extension/token/refresh", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect(json.token).toBe("new-token-plaintext");
     expect(json.expiresAt).toBeDefined();
     expect(json.scope).toEqual(["passwords:read", "vault:unlock-data"]);

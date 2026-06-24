@@ -14,6 +14,7 @@ const {
   mockTenantMemberFindFirst,
   mockCreateNotification,
   mockDispatchTenantWebhook,
+  mockRequireRecentSession,
   TenantAuthError,
 } = vi.hoisted(() => {
   class _TenantAuthError extends Error {
@@ -36,6 +37,7 @@ const {
     mockTenantMemberFindFirst: vi.fn(),
     mockCreateNotification: vi.fn(),
     mockDispatchTenantWebhook: vi.fn(),
+    mockRequireRecentSession: vi.fn().mockResolvedValue(null),
     TenantAuthError: _TenantAuthError,
   };
 });
@@ -82,6 +84,9 @@ vi.mock("@/lib/notification", () => ({
 }));
 vi.mock("@/lib/webhook-dispatcher", () => ({
   dispatchTenantWebhook: mockDispatchTenantWebhook,
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { GET, POST } from "./route";
@@ -300,6 +305,22 @@ describe("POST /api/tenant/breakglass", () => {
         }),
       ),
     ).rejects.toThrow("db crash");
+  });
+
+  it("returns 403 from step-up gate and does not create grant", async () => {
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/tenant/breakglass", {
+        body: validBody,
+        headers: { origin: "http://localhost" },
+      }),
+    );
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockGrantCreate).not.toHaveBeenCalled();
   });
 
   it("returns 400 for malformed JSON body", async () => {

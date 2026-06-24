@@ -185,6 +185,7 @@ describe("POST /api/sends/file", () => {
     expect(json.url).toBe(`/s/${"a".repeat(64)}`);
     expect(json).toHaveProperty("expiresAt");
     expect(json).not.toHaveProperty("accessPassword");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
 
     expect(mockCreate).toHaveBeenCalledWith(
       expect.objectContaining({

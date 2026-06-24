@@ -15,6 +15,7 @@ import { createNotification } from "@/lib/notification";
 import { createBreakglassGrantSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, forbidden, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { parseBody } from "@/lib/http/parse-body";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/audit/notification";
@@ -45,6 +46,9 @@ async function handlePOST(req: NextRequest) {
   } catch (err) {
     return handleAuthError(err);
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   // Rate limit BEFORE body parse so authenticated admins cannot trigger
   // body-parse memory allocation on every call before hitting the 5/hour cap.

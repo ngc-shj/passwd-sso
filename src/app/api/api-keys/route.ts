@@ -12,6 +12,7 @@ import { parseBody } from "@/lib/http/parse-body";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import {
   API_KEY_PREFIX,
   MAX_API_KEYS_PER_USER,
@@ -142,7 +143,7 @@ async function handlePOST(req: NextRequest) {
       expiresAt: key.expiresAt,
       createdAt: key.createdAt,
     },
-    { status: 201 },
+    { status: 201, headers: { ...NO_STORE_HEADERS } },
   );
 }
 

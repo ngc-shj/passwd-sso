@@ -12,6 +12,7 @@ import {
   requireTenantPermission,
   isTenantRoleAbove,
 } from "@/lib/auth/access/tenant-auth";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { notificationTitle, notificationBody } from "@/lib/notification/notification-messages";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
@@ -104,6 +105,9 @@ async function handlePOST(
   if (!targetEmailAtInitiate) {
     return notFound();
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   // Rate limits
   const [adminResult, targetResult] = await Promise.all([

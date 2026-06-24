@@ -11,6 +11,7 @@ import { parseBody } from "@/lib/http/parse-body";
 import { TENANT_PERMISSION, TENANT_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 
 export const runtime = "nodejs";
@@ -41,6 +42,9 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   if (actor.role !== TENANT_ROLE.OWNER) {
     return errorResponse(API_ERROR.OWNER_ONLY);
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   // Cannot change own role — must be before ownership transfer
   if (userId === session.user.id) {

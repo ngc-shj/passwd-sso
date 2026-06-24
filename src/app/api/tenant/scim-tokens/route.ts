@@ -13,6 +13,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { z } from "zod";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import {
@@ -147,7 +148,7 @@ async function handlePOST(req: NextRequest) {
       expiresAt: token.expiresAt,
       createdAt: token.createdAt,
     },
-    { status: 201, headers: { "Cache-Control": "no-store" } },
+    { status: 201, headers: { ...NO_STORE_HEADERS } },
   );
 }
 

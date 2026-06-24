@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTenantMember, mockRequireTenantPermission, mockWithTenantRls, TenantAuthError, mockLogAudit } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTenantMember, mockRequireTenantPermission, mockWithTenantRls, TenantAuthError, mockLogAudit, mockRequireRecentSession } = vi.hoisted(() => {
   class _TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -21,10 +21,14 @@ const { mockAuth, mockPrismaTenantMember, mockRequireTenantPermission, mockWithT
     mockWithTenantRls: vi.fn((p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(p)),
     TenantAuthError: _TenantAuthError,
     mockLogAudit: vi.fn(),
+    mockRequireRecentSession: vi.fn().mockResolvedValue(null),
   };
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     tenantMember: mockPrismaTenantMember,
@@ -118,6 +122,17 @@ describe("PUT /api/tenant/members/[userId]", () => {
     expect(res.status).toBe(403);
     const json = await res.json();
     expect(json.error).toBe("OWNER_ONLY");
+  });
+
+  it("returns 403 from step-up gate and does not mutate", async () => {
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+    const res = await putRequest(TARGET_USER_ID);
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockPrismaTenantMember.update).not.toHaveBeenCalled();
   });
 
   it("returns 400 when trying to change own role", async () => {

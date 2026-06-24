@@ -17,6 +17,7 @@ const {
   mockInvalidateCachedSessionsBulk,
   mockExtractClientIp,
   mockWouldIpBeAllowed,
+  mockRequireRecentSession,
   TenantAuthError,
 } = vi.hoisted(() => {
   class _TenantAuthError extends Error {
@@ -43,6 +44,7 @@ const {
       .mockImplementation(async (tokens) => ({ total: tokens.length, failed: 0 })),
     mockExtractClientIp: vi.fn(() => "127.0.0.1"),
     mockWouldIpBeAllowed: vi.fn(() => true),
+    mockRequireRecentSession: vi.fn().mockResolvedValue(null),
     TenantAuthError: _TenantAuthError,
   };
 });
@@ -138,6 +140,9 @@ vi.mock("@/lib/auth/policy/ip-access", () => ({
 vi.mock("@/lib/auth/policy/access-restriction", () => ({
   invalidateTenantPolicyCache: mockInvalidateTenantPolicyCache,
   wouldIpBeAllowed: mockWouldIpBeAllowed,
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { GET, PATCH } from "./route";
@@ -563,7 +568,10 @@ describe("PATCH /api/tenant/policy", () => {
         requirePasskey: false,
         passkeyGracePeriodDays: null,
       });
-      mockTransaction.mockRejectedValue(new Error("tx rolled back"));
+      // The cascade-clamp + tenant.update now run directly inside the
+      // withBypassRls transaction (no nested prisma.$transaction); simulate
+      // that transaction rolling back via the bypass wrapper.
+      mockWithBypassRls.mockRejectedValueOnce(new Error("tx rolled back"));
 
       const req = createRequest("PATCH", ROUTE_URL, {
         body: { requirePasskey: true },
@@ -653,5 +661,20 @@ describe("PATCH /api/tenant/policy", () => {
         );
       });
     }
+  });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const req = createRequest("PATCH", ROUTE_URL, {
+      body: { requireMinPinLength: 6 },
+    });
+    const { status, json } = await parseResponse(await PATCH(req));
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockPrismaTenantUpdate).not.toHaveBeenCalled();
   });
 });

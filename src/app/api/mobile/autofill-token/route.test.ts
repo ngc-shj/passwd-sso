@@ -44,9 +44,11 @@ describe("POST /api/mobile/autofill-token", () => {
       scope: "passwords:write",
     });
 
-    const { status, json } = await parseResponse(await POST(post({ jwk: VALID_JWK })));
+    const res = await POST(post({ jwk: VALID_JWK }));
+    const { status, json } = await parseResponse(res);
 
     expect(status).toBe(201);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect(json.token).toBe("secret-token");
     expect(json.scope).toEqual(["passwords:write"]);
     // The route computes cnf.jkt from the body jwk and binds the token to it.

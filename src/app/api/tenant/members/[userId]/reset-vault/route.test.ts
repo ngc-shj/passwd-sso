@@ -20,6 +20,7 @@ const {
   mockNotificationTitle,
   mockNotificationBody,
   mockEncryptResetToken,
+  mockRequireRecentSession,
   TenantAuthError,
 } = vi.hoisted(() => {
   class _TenantAuthError extends Error {
@@ -55,11 +56,15 @@ const {
     mockNotificationTitle: vi.fn(),
     mockNotificationBody: vi.fn(),
     mockEncryptResetToken: vi.fn(),
+    mockRequireRecentSession: vi.fn().mockResolvedValue(null),
     TenantAuthError: _TenantAuthError,
   };
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     tenantMember: {
@@ -288,6 +293,20 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
     expect(res.status).toBe(429);
     const json = await res.json();
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+  });
+
+  it("returns 403 from step-up gate and does not create reset record", async () => {
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+    const res = await POST(
+      createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
+      createParams({ userId: TARGET_USER_ID }),
+    );
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockPrismaAdminVaultResetCreate).not.toHaveBeenCalled();
   });
 
   it("returns 200, stores encryptedToken + targetEmailAtInitiate, notifies other admins (NOT target)", async () => {

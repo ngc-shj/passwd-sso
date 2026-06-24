@@ -227,6 +227,7 @@ describe("POST /api/tenant/service-accounts/[id]/tokens", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(201);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect(typeof json.token).toBe("string");
     expect(json.token).toMatch(/^sa_/);
     expect(json.id).toBe(TOKEN_ID);

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { parseBody } from "@/lib/http/parse-body";
 import { checkAuth } from "@/lib/auth/session/check-auth";
 import { rateLimited, unauthorized } from "@/lib/http/api-response";
@@ -91,6 +92,6 @@ export const POST = withRequestLog(async (req: NextRequest) => {
       scope: [issued.scope],
       cnfJkt,
     },
-    { status: 201, headers: { "Cache-Control": "no-store" } },
+    { status: 201, headers: { ...NO_STORE_HEADERS } },
   );
 });

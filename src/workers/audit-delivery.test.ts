@@ -5,10 +5,12 @@ const {
   mockValidateAndFetch,
   mockSanitizeForExternalDelivery,
   mockSanitizeErrorForStorage,
+  mockLoggerInfo,
 } = vi.hoisted(() => ({
   mockValidateAndFetch: vi.fn(),
   mockSanitizeForExternalDelivery: vi.fn((v: unknown) => v),
   mockSanitizeErrorForStorage: vi.fn((v: unknown) => v),
+  mockLoggerInfo: vi.fn(),
 }));
 
 vi.mock("@/lib/http/external-http", () => ({
@@ -18,7 +20,7 @@ vi.mock("@/lib/http/external-http", () => ({
 }));
 
 vi.mock("@/lib/logger", () => ({
-  getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+  getLogger: () => ({ info: mockLoggerInfo, warn: vi.fn(), error: vi.fn() }),
 }));
 
 import {
@@ -67,6 +69,7 @@ describe("webhookDeliverer.deliver", () => {
     mockSanitizeForExternalDelivery.mockImplementation((v: unknown) => v);
     mockSanitizeErrorForStorage.mockImplementation((v: unknown) => v);
     mockValidateAndFetch.mockResolvedValue({ ok: true, status: 200 });
+    mockLoggerInfo.mockReset();
   });
 
   it("calls validateAndFetch with POST and correct headers on happy path", async () => {
@@ -352,6 +355,59 @@ describe("object key date formatting", () => {
 
     const [url] = mockValidateAndFetch.mock.calls[0];
     expect(url).toContain("audit-logs/tenant-abc/2024/12/31/outbox-123.json");
+  });
+});
+
+// ─── Log masking ──────────────────────────────────────────────
+
+describe("log masking — logged URLs strip query and userinfo", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSanitizeForExternalDelivery.mockImplementation((v: unknown) => v);
+    mockSanitizeErrorForStorage.mockImplementation((v: unknown) => v);
+    mockValidateAndFetch.mockResolvedValue({ ok: true, status: 200 });
+    mockLoggerInfo.mockReset();
+  });
+
+  it("webhookDeliverer logs masked URL for attempt, not query string", async () => {
+    const config = { url: "https://example.com/hook?token=secret", secret: "s" };
+    await webhookDeliverer.deliver(config, PAYLOAD);
+
+    const attemptCall = mockLoggerInfo.mock.calls.find(
+      ([, msg]) => msg === "audit-delivery.webhook.attempt",
+    );
+    expect(attemptCall).toBeDefined();
+    expect(attemptCall![0]).toMatchObject({ url: "https://example.com/hook" });
+    // Actual fetch still uses the full URL
+    expect(mockValidateAndFetch.mock.calls[0][0]).toBe("https://example.com/hook?token=secret");
+  });
+
+  it("siemHecDeliverer logs masked URL for attempt, not query string", async () => {
+    const config = { url: "https://splunk.example.com/hec?index=audit", token: "t" };
+    await siemHecDeliverer.deliver(config, PAYLOAD);
+
+    const attemptCall = mockLoggerInfo.mock.calls.find(
+      ([, msg]) => msg === "audit-delivery.siem_hec.attempt",
+    );
+    expect(attemptCall).toBeDefined();
+    expect(attemptCall![0]).toMatchObject({ url: "https://splunk.example.com/hec" });
+    expect(mockValidateAndFetch.mock.calls[0][0]).toBe("https://splunk.example.com/hec?index=audit");
+  });
+
+  it("s3ObjectDeliverer logs masked objectUrl for attempt", async () => {
+    await s3ObjectDeliverer.deliver(S3_CONFIG, PAYLOAD);
+
+    const attemptCall = mockLoggerInfo.mock.calls.find(
+      ([, msg]) => msg === "audit-delivery.s3_object.attempt",
+    );
+    expect(attemptCall).toBeDefined();
+    // objectUrl has no query string but masking must not break it
+    const logged = (attemptCall![0] as { objectUrl: string }).objectUrl;
+    expect(logged).toMatch(/^https:\/\//);
+    expect(logged).not.toContain("?");
+    // Actual fetch uses the same full URL (no query in objectUrl)
+    const fetchedUrl = mockValidateAndFetch.mock.calls[0][0] as string;
+    expect(fetchedUrl).toContain("audit-logs/tenant-abc/");
   });
 });
 

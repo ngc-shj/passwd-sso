@@ -211,5 +211,6 @@ describe("POST /api/teams/[teamId]/invitations", () => {
     expect(res.status).toBe(201);
     expect(json.email).toBe("new@test.com");
     expect(json.token).toBeDefined();
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
   });
 });

@@ -10,6 +10,7 @@ const {
   mockMcpClientFindFirst,
   mockMcpClientUpdate,
   mockMcpClientDelete,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -18,6 +19,7 @@ const {
   mockMcpClientFindFirst: vi.fn(),
   mockMcpClientUpdate: vi.fn(),
   mockMcpClientDelete: vi.fn(),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -58,6 +60,9 @@ vi.mock("@/lib/audit/audit", () => ({
     userAgent: "test",
     acceptLanguage: null,
   }),
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { GET, PUT, DELETE } from "@/app/api/tenant/mcp-clients/[id]/route";
@@ -238,6 +243,25 @@ describe("PUT /api/tenant/mcp-clients/[id]", () => {
     expect(status).toBe(409);
     expect(json.error).toBe("MCP_CLIENT_NAME_CONFLICT");
   });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockMcpClientFindFirst.mockResolvedValue(makeClient());
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const req = createRequest("PUT", "http://localhost/api/tenant/mcp-clients/client-1", {
+      body: { name: "updated-client" },
+    });
+    const res = await PUT(req, createParams({ id: "client-1" }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockMcpClientUpdate).not.toHaveBeenCalled();
+  });
 });
 
 describe("DELETE /api/tenant/mcp-clients/[id]", () => {
@@ -273,5 +297,22 @@ describe("DELETE /api/tenant/mcp-clients/[id]", () => {
     const { status } = await parseResponse(res);
 
     expect(status).toBe(404);
+  });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockMcpClientFindFirst.mockResolvedValue(makeClient());
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const req = createRequest("DELETE", "http://localhost/api/tenant/mcp-clients/client-1");
+    const res = await DELETE(req, createParams({ id: "client-1" }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockMcpClientDelete).not.toHaveBeenCalled();
   });
 });

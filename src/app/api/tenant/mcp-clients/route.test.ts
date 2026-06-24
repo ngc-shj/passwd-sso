@@ -199,6 +199,7 @@ describe("POST /api/tenant/mcp-clients", () => {
     // clientSecret is returned only on creation
     expect(typeof json.client.clientSecret).toBe("string");
     expect(json.client.clientSecret.length).toBeGreaterThan(0);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "MCP_CLIENT_CREATE",

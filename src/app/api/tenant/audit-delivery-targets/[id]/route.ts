@@ -11,6 +11,7 @@ import {
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { z } from "zod";
 
 type Params = { params: Promise<{ id: string }> };
@@ -35,10 +36,6 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
     return handleAuthError(e);
   }
 
-  const result = await parseBody(req, patchSchema);
-  if (!result.ok) return result.response;
-  const { data } = result;
-
   const target = await withTenantRls(prisma, actor.tenantId, async (tx) =>
     tx.auditDeliveryTarget.findFirst({
       where: { id, tenantId: actor.tenantId },
@@ -49,6 +46,13 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
   if (!target) {
     return notFound();
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
+
+  const result = await parseBody(req, patchSchema);
+  if (!result.ok) return result.response;
+  const { data } = result;
 
   // No-op guard: skip update + audit log if isActive is already the requested value
   if (target.isActive === data.isActive) {

@@ -15,6 +15,7 @@ import { errorResponse, errorResponseWithMessage, handleAuthError, unauthorized 
 import { parseBody } from "@/lib/http/parse-body";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 
 const createSchema = z.object({
@@ -109,12 +110,6 @@ async function handlePOST(req: NextRequest) {
   //
   // DCR (/api/mcp/register) is the public-only alternative for self-service
   // registration. See RFC 9700 §4.14.
-  //
-  // KNOWN GAP — out of scope for A07-4, must be addressed in a follow-up PR:
-  // PUT/DELETE handlers in [id]/route.ts do NOT require step-up reauth.
-  // Sensitive operations (flipping `redirectUris` to attacker-controlled URIs,
-  // or `isActive: false` to lock out operators) can therefore be performed
-  // with a non-step-up admin session. Track separately.
   const session = await auth();
   if (!session?.user?.id) return unauthorized();
 
@@ -186,7 +181,7 @@ async function handlePOST(req: NextRequest) {
   });
 
   // Return clientSecret only on creation — never again
-  return NextResponse.json({ client: { ...client, clientSecret } }, { status: 201 });
+  return NextResponse.json({ client: { ...client, clientSecret } }, { status: 201, headers: { ...NO_STORE_HEADERS } });
 }
 
 export const GET = withRequestLog(handleGET);

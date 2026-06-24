@@ -151,11 +151,13 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
         events: ["ENTRY_CREATE"],
       },
     });
-    const { status, json } = await parseResponse(await POST(req, teamParams()));
+    const res = await POST(req, teamParams());
+    const { status, json } = await parseResponse(res);
     expect(status).toBe(201);
     expect(json.webhook.id).toBe("wh-new");
     expect(json.secret).toBeDefined();
     expect(typeof json.secret).toBe("string");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
   });
 
   it("returns 400 on invalid URL", async () => {

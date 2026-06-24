@@ -20,6 +20,7 @@ import {
   NAME_MAX_LENGTH,
 } from "@/lib/validations/common";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { handleAuthError, unauthorized, notFound } from "@/lib/http/api-response";
 
@@ -115,6 +116,9 @@ async function handlePUT(req: NextRequest, ctx: RouteContext) {
     return notFound();
   }
 
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
+
   const { tenantId, config } = resolved;
 
   const result = await parseBody(req, updateSchema);
@@ -193,6 +197,9 @@ async function handleDELETE(req: NextRequest, ctx: RouteContext) {
   if (!resolved) {
     return notFound();
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   const { tenantId, config } = resolved;
 

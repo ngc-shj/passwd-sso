@@ -13,6 +13,7 @@ const {
   mockLogAudit,
   mockTenantWebhookFindFirst,
   mockTenantWebhookDelete,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -20,6 +21,7 @@ const {
   mockLogAudit: vi.fn(),
   mockTenantWebhookFindFirst: vi.fn(),
   mockTenantWebhookDelete: vi.fn(),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -61,6 +63,9 @@ vi.mock("@/lib/audit/audit", () => ({
 }));
 vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { DELETE } from "@/app/api/tenant/webhooks/[webhookId]/route";
@@ -161,5 +166,22 @@ describe("DELETE /api/tenant/webhooks/[webhookId]", () => {
     await expect(
       DELETE(req, createParams({ webhookId: WEBHOOK_ID })),
     ).rejects.toThrow("DB read timeout");
+  });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockTenantWebhookFindFirst.mockResolvedValue(makeWebhook());
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const req = createRequest("DELETE", `http://localhost/api/tenant/webhooks/${WEBHOOK_ID}`);
+    const res = await DELETE(req, createParams({ webhookId: WEBHOOK_ID }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockTenantWebhookDelete).not.toHaveBeenCalled();
   });
 });

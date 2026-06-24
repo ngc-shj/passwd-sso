@@ -29,6 +29,7 @@ import {
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { rejectOversizedMultipart } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 const sendFileLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 5 });
@@ -254,7 +255,7 @@ async function handlePOST(req: NextRequest) {
     url: `/s/${token}`,
     expiresAt: share.expiresAt,
     ...(accessPassword ? { accessPassword } : {}),
-  }, { status: 201 });
+  }, { status: 201, headers: { ...NO_STORE_HEADERS } });
 }
 
 export const POST = withRequestLog(handlePOST);

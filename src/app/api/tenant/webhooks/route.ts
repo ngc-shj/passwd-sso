@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { parseBody } from "@/lib/http/parse-body";
 import {
@@ -26,7 +27,8 @@ import { errorResponse, handleAuthError, unauthorized, validationError } from "@
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { assertQuotaAvailable, QuotaExceededError } from "@/lib/quota/resource-quotas";
 import { MAX_WEBHOOKS, WEBHOOK_URL_MAX_LENGTH } from "@/lib/validations/common";
-import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE } from "@/lib/url/url-validation";
+import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE, maskUrlForDisplay } from "@/lib/url/url-validation";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 
 const createWebhookSchema = z.object({
   url: z.string().url().max(WEBHOOK_URL_MAX_LENGTH).refine(
@@ -86,6 +88,9 @@ async function handlePOST(req: NextRequest) {
   } catch (e) {
     return handleAuthError(e);
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   const result = await parseBody(req, createWebhookSchema);
   if (!result.ok) return result.response;
@@ -151,7 +156,7 @@ async function handlePOST(req: NextRequest) {
   await logAuditAsync({
     ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.TENANT_WEBHOOK_CREATE,
-    metadata: { webhookId: webhook.id, url: data.url },
+    metadata: { webhookId: webhook.id, url: maskUrlForDisplay(data.url) },
   });
 
   return NextResponse.json(
@@ -167,7 +172,7 @@ async function handlePOST(req: NextRequest) {
     },
     {
       status: 201,
-      headers: { "Cache-Control": "no-store" },
+      headers: { ...NO_STORE_HEADERS },
     },
   );
 }

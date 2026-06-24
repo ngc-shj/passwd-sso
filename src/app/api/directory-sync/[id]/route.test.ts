@@ -13,6 +13,7 @@ const {
   mockWithUserTenantRls,
   mockLogAudit,
   mockEncryptCredentials,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -22,6 +23,7 @@ const {
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
   mockEncryptCredentials: vi.fn(),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -57,6 +59,9 @@ vi.mock("@/lib/audit/audit", () => ({
 }));
 vi.mock("@/lib/directory-sync/credentials", () => ({
   encryptCredentials: mockEncryptCredentials,
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { GET, PUT, DELETE } from "./route";
@@ -265,6 +270,19 @@ describe("PUT /api/directory-sync/[id]", () => {
       }),
     );
   });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const req = createRequest("PUT", ROUTE_URL, { body: { displayName: "Updated" } });
+    const { status, json } = await parseResponse(await PUT(req, CTX));
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockConfigUpdate).not.toHaveBeenCalled();
+  });
 });
 
 // ── DELETE ────────────────────────────────────────────────────
@@ -335,5 +353,18 @@ describe("DELETE /api/directory-sync/[id]", () => {
         }),
       }),
     );
+  });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const req = createRequest("DELETE", ROUTE_URL);
+    const { status, json } = await parseResponse(await DELETE(req, CTX));
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockConfigDelete).not.toHaveBeenCalled();
   });
 });

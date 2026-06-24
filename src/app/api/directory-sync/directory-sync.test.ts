@@ -11,6 +11,7 @@ const {
   mockWithUserTenantRls,
   mockLogAudit,
   mockEncryptCredentials,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -20,6 +21,7 @@ const {
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
   mockEncryptCredentials: vi.fn(),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -55,6 +57,9 @@ vi.mock("@/lib/audit/audit", () => ({
 }));
 vi.mock("@/lib/directory-sync/credentials", () => ({
   encryptCredentials: mockEncryptCredentials,
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { GET, POST } from "@/app/api/directory-sync/route";
@@ -323,5 +328,23 @@ describe("POST /api/directory-sync", () => {
         }),
       }),
     );
+  });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(MEMBER);
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const req = createRequest("POST", "http://localhost/api/directory-sync", {
+      body: { provider: "AZURE_AD", displayName: "Test", credentials: {} },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockTransaction).not.toHaveBeenCalled();
   });
 });

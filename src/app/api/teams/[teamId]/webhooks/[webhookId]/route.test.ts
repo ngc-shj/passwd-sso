@@ -113,4 +113,21 @@ describe("DELETE /api/teams/[teamId]/webhooks/[webhookId]", () => {
       }),
     );
   });
+
+  it("strips query string from url in audit metadata", async () => {
+    mockPrismaTeamWebhook.findFirst.mockResolvedValue({ id: WEBHOOK_ID, url: "https://example.com/hook?token=secret" });
+    mockPrismaTeamWebhook.delete.mockResolvedValue({});
+
+    await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/webhooks/${WEBHOOK_ID}`),
+      createParams({ teamId: TEAM_ID, webhookId: WEBHOOK_ID }),
+    );
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "WEBHOOK_DELETE",
+        metadata: { webhookId: WEBHOOK_ID, url: "https://example.com/hook" },
+      }),
+    );
+  });
 });
