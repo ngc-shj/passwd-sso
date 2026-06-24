@@ -58,6 +58,7 @@ import {
   IOS_TOKEN_IDLE_TIMEOUT_MS,
 } from "@/lib/auth/tokens/mobile-token";
 import { verifyPkceS256 } from "@/lib/mcp/oauth-server";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 
 export const runtime = "nodejs";
 
@@ -285,7 +286,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     },
     {
       status: 200,
-      headers: { "Cache-Control": "no-store" },
+      headers: { ...NO_STORE_HEADERS },
     },
   );
 }

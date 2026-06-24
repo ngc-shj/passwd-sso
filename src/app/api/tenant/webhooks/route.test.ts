@@ -234,6 +234,7 @@ describe("POST /api/tenant/webhooks", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(201);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect(json.webhook.id).toBe("wh-new");
     expect(typeof json.secret).toBe("string");
     expect(json.secret.length).toBeGreaterThan(0);

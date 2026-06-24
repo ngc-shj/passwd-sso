@@ -132,7 +132,7 @@ New sites (currently missing):
 - [ ] `src/app/api/sends/file/route.ts:251`
 - [ ] `src/app/api/mcp/token/route.ts` ~:132 (authorization_code) + ~:217 (refresh_token)
 Migrate existing inline → helper (secret-bearing class only):
-- [ ] `tenant/scim-tokens/route.ts`, `tenant/service-accounts/[id]/tokens/route.ts`, `tenant/operator-tokens/route.ts`, `tenant/access-requests/[id]/approve/route.ts`, `tenant/audit-delivery-targets/route.ts`, `mobile/token/route.ts`, `mobile/token/refresh/route.ts`, `mobile/autofill-token/route.ts`, `extension/token/route.ts` (preserve `Deprecation` via spread)
+- [ ] `tenant/scim-tokens/route.ts`, `tenant/service-accounts/[id]/tokens/route.ts`, `tenant/operator-tokens/route.ts`, `tenant/access-requests/[id]/approve/route.ts`, `tenant/audit-delivery-targets/route.ts`, `mobile/token/route.ts`, `mobile/token/refresh/route.ts`, `mobile/autofill-token/route.ts`, `extension/token/route.ts` (preserve `Deprecation` via spread), `tenant/webhooks/route.ts` (returns `secret: plainSecret` — added during self-R-check; original C2 enumeration omitted it)
 NOT migrated (SC3 — infra, non-secret): `health/live`, `health/ready`, `.well-known/apple-app-site-association`, `v1/openapi.json`, `mobile/authorize` (302 redirect, inline kept), `mobile/authorize/redirect`
 
 ### C3 — step-up gate (insert after authz/existence check, before mutation; all handlers use `req`)

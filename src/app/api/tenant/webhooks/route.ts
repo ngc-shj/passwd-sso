@@ -28,6 +28,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { assertQuotaAvailable, QuotaExceededError } from "@/lib/quota/resource-quotas";
 import { MAX_WEBHOOKS, WEBHOOK_URL_MAX_LENGTH } from "@/lib/validations/common";
 import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE } from "@/lib/url/url-validation";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 
 const createWebhookSchema = z.object({
   url: z.string().url().max(WEBHOOK_URL_MAX_LENGTH).refine(
@@ -171,7 +172,7 @@ async function handlePOST(req: NextRequest) {
     },
     {
       status: 201,
-      headers: { "Cache-Control": "no-store" },
+      headers: { ...NO_STORE_HEADERS },
     },
   );
 }
