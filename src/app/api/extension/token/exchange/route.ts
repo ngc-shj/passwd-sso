@@ -54,6 +54,7 @@ import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { getLogger } from "@/lib/logger";
 import { parseBody } from "@/lib/http/parse-body";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { AUDIT_ACTION, BRIDGE_CODE_LENGTH } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { verifyDpopProof } from "@/lib/auth/dpop/verify";
@@ -257,7 +258,7 @@ async function handlePOST(req: NextRequest) {
       scope: consumed.scope.split(","),
       cnfJkt: issued.cnfJkt,
     },
-    { status: 201 },
+    { status: 201, headers: { ...NO_STORE_HEADERS } },
   );
 }
 

@@ -477,11 +477,13 @@ describe("POST /api/auth/passkey/verify", () => {
       body: validBody,
       headers: { origin: "http://localhost:3000" },
     });
-    const { status, json } = await parseResponse(await POST(req));
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
     expect(json.ok).toBe(true);
     expect(json.prf).toEqual(prfData);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
   });
 
   it("omits PRF data when credential does not support PRF", async () => {

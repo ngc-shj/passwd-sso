@@ -4,6 +4,7 @@ import { z } from "zod";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse } from "@/lib/http/api-response";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
@@ -218,6 +219,7 @@ async function handlePOST(req: NextRequest) {
     ok: true,
     ...(user.prf ? { prf: user.prf } : {}),
   });
+  response.headers.set("Cache-Control", NO_STORE_HEADERS["Cache-Control"]);
   response.cookies.set(SESSION_COOKIE_NAME, sessionToken, {
     path: `${basePath}/`,
     httpOnly: true,

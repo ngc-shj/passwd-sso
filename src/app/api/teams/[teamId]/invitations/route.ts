@@ -12,6 +12,7 @@ import { withTeamTenantRls } from "@/lib/tenant-context";
 import { BYPASS_PURPOSE, withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { TEAM_INVITATION_TTL_MS } from "@/lib/constants/team/invitation";
 
 type Params = { params: Promise<{ teamId: string }> };
@@ -161,7 +162,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       expiresAt: invitation.expiresAt,
       createdAt: invitation.createdAt,
     },
-    { status: 201 }
+    { status: 201, headers: { ...NO_STORE_HEADERS } }
   );
 }
 

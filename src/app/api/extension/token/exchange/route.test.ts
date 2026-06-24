@@ -153,6 +153,7 @@ describe("POST /api/extension/token/exchange", () => {
       expiresAt: expect.any(String),
       scope: ["passwords:read", "vault:unlock-data"],
     });
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "EXTENSION_TOKEN_EXCHANGE_SUCCESS",
