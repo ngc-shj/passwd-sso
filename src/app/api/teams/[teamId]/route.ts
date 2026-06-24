@@ -17,6 +17,7 @@ import {
   type AttachmentBlobRef,
 } from "@/lib/blob-store/cleanup";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/http/api-response";
 
@@ -94,6 +95,9 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     throw e;
   }
 
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
+
   const result = await parseBody(req, updateTeamSchema);
   if (!result.ok) return result.response;
 
@@ -142,6 +146,9 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     if (err) return err;
     throw e;
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   let attachmentRefs: AttachmentBlobRef[];
   try {

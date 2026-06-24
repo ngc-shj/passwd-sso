@@ -15,6 +15,7 @@ const {
   mockWithTeamTenantRls,
   mockWithBypassRls,
   mockLogAudit,
+  mockRequireRecentSession,
 } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
@@ -38,6 +39,7 @@ const {
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1")),
     mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
     mockLogAudit: vi.fn(),
+    mockRequireRecentSession: vi.fn().mockResolvedValue(null),
   };
 });
 
@@ -67,6 +69,9 @@ vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { GET, POST } from "./route";
@@ -286,6 +291,23 @@ describe("POST /api/teams/[teamId]/members", () => {
       createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(403);
+  });
+
+  it("returns 403 when step-up reauth is required", async () => {
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, {
+        body: { userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockPrismaTeamMember.create).not.toHaveBeenCalled();
+    expect(mockPrismaTransaction).not.toHaveBeenCalled();
   });
 
   it("returns 400 for invalid body", async () => {

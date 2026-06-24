@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { addMemberSchema } from "@/lib/validations";
 import { requireTeamMember, requireTeamPermission, TeamAuthError } from "@/lib/auth/access/team-auth";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
@@ -59,6 +60,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   } catch (e) {
     return handleAuthError(e);
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   const result = await parseBody(req, addMemberSchema);
   if (!result.ok) return result.response;

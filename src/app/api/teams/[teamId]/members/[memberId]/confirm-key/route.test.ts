@@ -3,7 +3,7 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockPrismaTeamMember, mockPrismaUser,
   mockPrismaTeamMemberKey, mockPrismaTeam, mockTransaction, mockWithTeamTenantRls,
-  mockWithBypassRls,
+  mockWithBypassRls, mockRequireTeamPermission, mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTeamMember: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn() },
@@ -13,9 +13,17 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaUser,
   mockTransaction: vi.fn(),
   mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+  mockRequireTeamPermission: vi.fn().mockResolvedValue(undefined),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/auth/access/team-auth", () => ({
+  requireTeamPermission: mockRequireTeamPermission,
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
+}));
 
 // Build a tx proxy that delegates to the same mocks
 const txProxy = {
@@ -63,6 +71,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "admin-user" } });
+    mockRequireTeamPermission.mockResolvedValue(undefined);
     mockPrismaTeam.findUnique.mockResolvedValue({ teamKeyVersion: 1 });
     mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
     // Interactive transaction: call the callback with tx proxy
@@ -79,12 +88,29 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   });
 
   it("returns 404 when admin is not a member", async () => {
-    mockPrismaTeamMember.findFirst.mockResolvedValueOnce(null); // getTeamMembership (findFirst)
+    const authErr = Object.assign(new Error("NOT_FOUND"), { name: "TeamAuthError", status: 404 });
+    mockRequireTeamPermission.mockRejectedValueOnce(authErr);
     const res = await POST(
       createRequest("POST", URL, { body: validBody }),
       { params: Promise.resolve({ teamId: "team-1", memberId: "member-1" }) },
     );
     expect(res.status).toBe(404);
+  });
+
+  it("returns 403 when step-up reauth is required", async () => {
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+    const res = await POST(
+      createRequest("POST", URL, { body: validBody }),
+      { params: Promise.resolve({ teamId: "team-1", memberId: "member-1" }) },
+    );
+    const json = await res.json();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockTransaction).not.toHaveBeenCalled();
+    // Step-up fires before existence lookup
+    expect(mockPrismaTeamMember.findUnique).not.toHaveBeenCalled();
   });
 
   it("returns 404 when target member not found", async () => {

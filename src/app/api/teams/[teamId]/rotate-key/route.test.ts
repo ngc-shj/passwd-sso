@@ -9,6 +9,7 @@ const {
   MockTeamAuthError,
   mockWithTeamTenantRls,
   mockRateLimitCheck,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
@@ -24,6 +25,7 @@ const {
     }
   },
   mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 const txMock = {
@@ -57,6 +59,9 @@ vi.mock("@/lib/security/rate-limit", () => ({
     check: mockRateLimitCheck,
     clear: vi.fn(),
   })),
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { POST } from "./route";
@@ -184,6 +189,24 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       createParams("team-1"),
     );
     expect(res.status).toBe(403);
+  });
+
+  it("returns 403 when step-up reauth is required", async () => {
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+    const res = await POST(
+      createRequest({
+        newTeamKeyVersion: 2,
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
+      }),
+      createParams("team-1"),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockTransaction).not.toHaveBeenCalled();
   });
 
   it("returns 400 when entries exceed max limit", async () => {

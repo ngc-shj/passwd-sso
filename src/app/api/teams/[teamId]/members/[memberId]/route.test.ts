@@ -418,6 +418,22 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     ).rejects.toThrow("unexpected");
   });
 
+  it("returns 403 when step-up reauth is required", async () => {
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockTransaction).not.toHaveBeenCalled();
+    // Pins that step-up fires BEFORE the existence lookup.
+    expect(mockPrismaTeamMember.findUnique).not.toHaveBeenCalled();
+  });
+
   it("returns 403 when ADMIN tries to remove equal-level member", async () => {
     mockRequireTeamPermission.mockResolvedValue({ ...ownerMembership, role: TEAM_ROLE.ADMIN });
     mockIsRoleAbove.mockReturnValue(false);

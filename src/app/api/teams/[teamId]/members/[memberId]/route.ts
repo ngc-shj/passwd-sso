@@ -174,6 +174,9 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     return handleAuthError(e);
   }
 
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
+
   const target = await withTeamTenantRls(teamId, async () =>
     prisma.teamMember.findUnique({
       where: { id: memberId },
