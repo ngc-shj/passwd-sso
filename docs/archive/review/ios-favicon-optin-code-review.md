@@ -79,3 +79,22 @@ All blocked-deferred paths link to their Phase 1 VEC entry; the deferral is the 
 
 ### Verification
 - iOS: 611 tests pass (xcodebuild TEST SUCCEEDED). Server untouched by these fixes (85 vitest remain green).
+
+---
+
+# Code Review: ios-favicon-optin — Round 2
+Date: 2026-06-24
+Review round: 2
+
+## Changes from Previous Round
+Verified the round-1 fixes (F-1 configure ordering, F-3 EntryDetailView showFavicons threading, T-1/T-2 false-path pref tests, T-3 helper param cleanup).
+
+## Result
+**No findings — round-1 fixes correct, no regression.**
+- F-1: configure() runs before resolveShowFavicons(); reorder safe (resolve only reads a Bool, no dependency on configure).
+- F-3: both EntryDetailView call sites pass showFavicons; only the two sites exist; the remaining AppSettingsStore() in EntryDetailView is for clipboardClearSeconds (unrelated). Property used in detailContent.
+- T-1/T-2: both new tests falsifiable (assert false return + PUT body fetchFavicons:false); no in-body mock resets.
+- T-3: faviconURL() no-arg; both callers use the no-arg form.
+
+## Termination
+Loop converged: Round 1 (Security clean; Func/Test → 5 Minor fixed + 1 Major F-5 rejected on verification), Round 2 (no findings). All experts "No findings". Phase 3 complete.
