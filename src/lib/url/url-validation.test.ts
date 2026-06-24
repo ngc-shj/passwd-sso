@@ -83,6 +83,10 @@ describe("isSsrfSafeWebhookUrl", () => {
     it("rejects URL with username only", () => {
       expect(isSsrfSafeWebhookUrl("https://user@example.com/hook")).toBe(false);
     });
+
+    it("rejects URL with password only (empty username)", () => {
+      expect(isSsrfSafeWebhookUrl("https://:pass@example.com/hook")).toBe(false);
+    });
   });
 
   it("exposes a stable validation message constant", () => {
@@ -113,6 +117,18 @@ describe("maskUrlForDisplay", () => {
   it("strips query string without userinfo", () => {
     expect(maskUrlForDisplay("https://example.com/hook?token=secret")).toBe(
       "https://example.com/hook",
+    );
+  });
+
+  it("appends a trailing slash for a bare host (no path)", () => {
+    // URL.pathname is "/" for a host-only URL, so the masked form gains a
+    // trailing slash. Pinned so the display contract does not regress.
+    expect(maskUrlForDisplay("https://example.com")).toBe("https://example.com/");
+  });
+
+  it("strips userinfo while preserving a non-https scheme", () => {
+    expect(maskUrlForDisplay("http://user:pass@host.com/p?q=1")).toBe(
+      "http://host.com/p",
     );
   });
 
