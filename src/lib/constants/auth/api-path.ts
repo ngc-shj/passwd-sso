@@ -93,6 +93,8 @@ export const API_PATH = {
   MCP_AUTHORIZE: "/api/mcp/authorize",
   MCP_AUTHORIZE_CONSENT: "/api/mcp/authorize/consent",
   MOBILE_AUTHORIZE: "/api/mobile/authorize",
+  MOBILE_FAVICON: "/api/mobile/favicon",
+  MOBILE_FAVICON_PREF: "/api/mobile/favicon-pref",
   INTERNAL_AUDIT_EMIT: "/api/internal/audit-emit",
 } as const;
 

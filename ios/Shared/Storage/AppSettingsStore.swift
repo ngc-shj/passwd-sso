@@ -66,7 +66,12 @@ public struct AppSettingsStore {
     static let tenantAutoLockMinutes = "tenantAutoLockMinutes"
     static let autoCopyTotp = "autoCopyTotp"
     static let appLanguage = "appLanguage"
+    static let fetchFaviconsCached = "fetchFaviconsCached"
   }
+
+  /// Public key constant for `fetchFaviconsCached` so tests (which import Shared
+  /// without @testable) can verify the raw UserDefaults key (T5/T11).
+  public static let fetchFaviconsCachedKey = Key.fetchFaviconsCached
 
   private let defaults: UserDefaults
 
@@ -190,6 +195,14 @@ public struct AppSettingsStore {
     nonmutating set {
       defaults.set(newValue.rawValue, forKey: Key.appLanguage)
     }
+  }
+
+  /// Cached value of the server-side "fetch favicons" preference. When `true`,
+  /// the host app fetches entry favicons via the server proxy. Absent key →
+  /// `false` (opt-in, fail-closed). Mirrors the autoCopyTotp pattern.
+  public var fetchFaviconsCached: Bool {
+    get { defaults.bool(forKey: Key.fetchFaviconsCached) }
+    nonmutating set { defaults.set(newValue, forKey: Key.fetchFaviconsCached) }
   }
 
   /// Apply the persisted language to the process's string lookup via

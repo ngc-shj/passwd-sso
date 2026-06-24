@@ -17,6 +17,9 @@ struct EntryDetailView: View {
   let apiClient: MobileAPIClient
   let hostSyncService: HostSyncService
   var cacheKey: SymmetricKey? = nil
+  /// Resolved server favicon opt-in, threaded from the list (C7) so the detail
+  /// icon stays consistent with the rows rather than re-reading the store (F-3).
+  var showFavicons: Bool = false
 
   @State private var detail: VaultEntryDetail?
   @State private var loadFailed: Bool = false
@@ -112,6 +115,19 @@ struct EntryDetailView: View {
   @ViewBuilder
   private func detailContent(_ d: VaultEntryDetail) -> some View {
     List {
+      Section {
+        HStack {
+          Spacer()
+          EntryIconView(
+            entryType: d.entryType,
+            urlHost: d.urlHost,
+            showFavicons: showFavicons,
+            size: 64
+          )
+          Spacer()
+        }
+        .listRowBackground(Color.clear)
+      }
       // Render the field set for the entry's type. Each per-type section lives
       // in EntryDetailTypeSections.swift; LOGIN keeps its original rows so its
       // rendering is structurally unchanged.

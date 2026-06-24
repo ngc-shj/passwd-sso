@@ -12,10 +12,14 @@ struct CategoryCard: View {
 
   var body: some View {
     HStack(spacing: 12) {
-      Image(systemName: symbol)
-        .font(.title2)
-        .frame(width: 32)
-        .foregroundStyle(.tint)
+      ZStack {
+        RoundedRectangle(cornerRadius: 32 * 0.22, style: .continuous)
+          .fill(Color.accentColor)
+          .frame(width: 32, height: 32)
+        Image(systemName: symbol)
+          .font(.system(size: 32 * 0.5))
+          .foregroundStyle(.white)
+      }
       VStack(alignment: .leading, spacing: 2) {
         Text(label)
           .font(.body)
@@ -35,16 +39,24 @@ struct CategoryCard: View {
 /// Shared list row (title + username) used by the flat list and category lists.
 struct EntrySummaryRow: View {
   let summary: VaultEntrySummary
+  let showFavicons: Bool
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text(summary.title)
-        .font(.body)
-        .lineLimit(1)
-      Text(summary.username)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
+    HStack(spacing: 12) {
+      EntryIconView(
+        entryType: summary.entryType,
+        urlHost: summary.urlHost,
+        showFavicons: showFavicons
+      )
+      VStack(alignment: .leading, spacing: 2) {
+        Text(summary.title)
+          .font(.body)
+          .lineLimit(1)
+        Text(summary.username)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
     }
     .padding(.vertical, 2)
   }
@@ -65,6 +77,7 @@ struct VaultCategoryListView: View {
   let apiClient: MobileAPIClient
   let hostSyncService: HostSyncService
   var cacheKey: SymmetricKey? = nil
+  var showFavicons: Bool = false
 
   // Seed synchronously so an already-active recording never shows a frame of
   // entries before onAppear flips the flag.
@@ -92,10 +105,11 @@ struct VaultCategoryListView: View {
               viewModel: viewModel,
               apiClient: apiClient,
               hostSyncService: hostSyncService,
-              cacheKey: cacheKey
+              cacheKey: cacheKey,
+              showFavicons: showFavicons
             )
           } label: {
-            EntrySummaryRow(summary: summary)
+            EntrySummaryRow(summary: summary, showFavicons: showFavicons)
           }
         }
         .listStyle(.plain)
