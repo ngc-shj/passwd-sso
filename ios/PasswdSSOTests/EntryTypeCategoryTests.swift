@@ -31,6 +31,31 @@ final class EntryTypeCategoryTests: XCTestCase {
     XCTAssertEqual(EntryTypeCategory.allCases.count, 8)
   }
 
+  // MARK: - rowSymbol (C3)
+
+  func testLoginRowSymbolIsGlobe() {
+    XCTAssertEqual(EntryTypeCategory.login.rowSymbol, "globe")
+  }
+
+  func testLoginRowSymbolDiffersFromSfSymbol() {
+    XCTAssertNotEqual(EntryTypeCategory.login.rowSymbol, EntryTypeCategory.login.sfSymbol)
+  }
+
+  func testRowSymbolNonEmptyForAllCases() {
+    for category in EntryTypeCategory.allCases {
+      XCTAssertFalse(category.rowSymbol.isEmpty, "\(category).rowSymbol must not be empty")
+    }
+  }
+
+  func testNonLoginRowSymbolEqualssfSymbol() {
+    let nonLoginCases = EntryTypeCategory.allCases.filter { $0 != .login }
+    for category in nonLoginCases {
+      XCTAssertEqual(
+        category.rowSymbol, category.sfSymbol,
+        "\(category).rowSymbol should equal sfSymbol")
+    }
+  }
+
   // MARK: - isEditableOnIOS (C7 data-corruption guard)
 
   func testIsEditableOnIOSTrueForLoginNilAndUnknown() {

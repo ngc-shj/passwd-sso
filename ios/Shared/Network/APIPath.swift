@@ -6,6 +6,8 @@ public enum APIPath {
   public static let mobileAutofillToken = "/api/mobile/autofill-token"
   public static let mobileAuthorize = "/api/mobile/authorize"
   public static let mobileCacheRollbackReport = "/api/mobile/cache-rollback-report"
+  public static let mobileFavicon = "/api/mobile/favicon"
+  public static let mobileFaviconPref = "/api/mobile/favicon-pref"
   public static let vaultUnlockData = "/api/vault/unlock/data"
   public static let passwords = "/api/passwords"
   public static let healthLive = "/api/health/live"

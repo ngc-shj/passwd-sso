@@ -33,7 +33,8 @@ final class AutoLockServiceTests: XCTestCase {
       wrappedKeyStore: wks,
       tokenStore: tokenStore,
       uploadTokenStore: makeUploadTokenStore(keychain: keychain),
-      cacheURL: cacheURL
+      cacheURL: cacheURL,
+      faviconCacheClearing: {}
     )
     service.autoLockMinutes = autoLockMinutes
     return service
@@ -386,5 +387,65 @@ final class AutoLockServiceTests: XCTestCase {
 
     service.autoLockMinutes = 5
     XCTAssertEqual(service.autoLockMinutes, 5)
+  }
+
+  // MARK: - Favicon cache clearing
+
+  func testSignOut_callsFaviconCacheClearing() {
+    let tmpDir = makeTmpDir()
+    defer { try? FileManager.default.removeItem(at: tmpDir) }
+    let keychain = MockKeychain()
+    var clearCallCount = 0
+    let bks = BridgeKeyStore(
+      accessGroup: "test",
+      service: "com.passwd-sso.test.bridge-key",
+      keychain: keychain
+    )
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    let tokenStore = HostTokenStore(
+      service: "com.passwd-sso.test.tokens",
+      keychain: keychain
+    )
+    let cacheURL = tmpDir.appending(path: "test.cache", directoryHint: .notDirectory)
+    let service = AutoLockService(
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      tokenStore: tokenStore,
+      cacheURL: cacheURL,
+      faviconCacheClearing: { clearCallCount += 1 }
+    )
+    service.startTimer()
+    service.signOut()
+
+    XCTAssertEqual(clearCallCount, 1, "signOut() must call faviconCacheClearing exactly once")
+  }
+
+  func testLock_doesNotCallFaviconCacheClearing() {
+    let tmpDir = makeTmpDir()
+    defer { try? FileManager.default.removeItem(at: tmpDir) }
+    let keychain = MockKeychain()
+    var clearCallCount = 0
+    let bks = BridgeKeyStore(
+      accessGroup: "test",
+      service: "com.passwd-sso.test.bridge-key",
+      keychain: keychain
+    )
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    let tokenStore = HostTokenStore(
+      service: "com.passwd-sso.test.tokens",
+      keychain: keychain
+    )
+    let cacheURL = tmpDir.appending(path: "test.cache", directoryHint: .notDirectory)
+    let service = AutoLockService(
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      tokenStore: tokenStore,
+      cacheURL: cacheURL,
+      faviconCacheClearing: { clearCallCount += 1 }
+    )
+    service.startTimer()
+    service.lock()
+
+    XCTAssertEqual(clearCallCount, 0, "lock() must NOT call faviconCacheClearing")
   }
 }

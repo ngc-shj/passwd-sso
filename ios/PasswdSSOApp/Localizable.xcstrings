@@ -1947,6 +1947,23 @@
       "comment" : "Unused scaffold view (ContentView, not in the live UI). Not translated.",
       "shouldTranslate" : false
     },
+    "Show site icons" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show site icons"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サイトアイコンを表示"
+          }
+        }
+      }
+    },
     "Sign in again" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2466,6 +2483,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "バージョン"
+          }
+        }
+      }
+    },
+    "When on, entry domain names are sent to the passwd-sso server to fetch site icons." : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When on, entry domain names are sent to the passwd-sso server to fetch site icons."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オンにすると、エントリのドメイン名がサイトアイコン取得のためにpasswd-ssoサーバーに送信されます。"
           }
         }
       }

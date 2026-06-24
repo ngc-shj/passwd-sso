@@ -7,6 +7,7 @@
  */
 
 import { isIP as netIsIP } from "node:net";
+import { NextResponse } from "next/server";
 import { getRedis } from "@/lib/redis";
 import { MS_PER_DAY, SEC_PER_DAY } from "@/lib/constants/time";
 
@@ -248,4 +249,37 @@ export async function withSingleFlight(
 export function __clearFaviconCache(): void {
   memoryCache.clear();
   inFlight.clear();
+}
+
+// ─── Rate-limiter constants ───────────────────────────────────────────────────
+
+/**
+ * Per-user cap on outbound provider fetches per window. Only cache misses
+ * count — bounds cold-cache first load of a large vault.
+ * Both the web route (/api/user/favicon) and the mobile route
+ * (/api/mobile/favicon) share these values so the limits are consistent.
+ */
+export const FAVICON_USER_RATE_MAX = 300;
+export const FAVICON_GLOBAL_RATE_MAX = 5_000;
+
+// ─── Response builder ─────────────────────────────────────────────────────────
+
+/**
+ * Build a 200 image response. Copies the favicon bytes into a fresh,
+ * exact-size Uint8Array — Buffer.from(base64) / Buffer.from(arrayBuffer)
+ * may return a view onto Node's shared 64 KB pool, so `body.buffer` would
+ * leak unrelated pool bytes (and other requests' data) into the response.
+ * Uint8Array.from copies exactly body.byteLength bytes.
+ */
+export function faviconResponse(body: Buffer, contentType: string): NextResponse {
+  const exact = Uint8Array.from(body);
+  const etag = `W/"${body.toString("base64").slice(0, 32)}"`;
+  return new NextResponse(exact, {
+    status: 200,
+    headers: {
+      "Content-Type": contentType,
+      "Cache-Control": `private, max-age=${SEC_PER_DAY}`,
+      ETag: etag,
+    },
+  });
 }

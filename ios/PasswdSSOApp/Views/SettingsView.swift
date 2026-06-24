@@ -41,6 +41,7 @@ extension AppLanguage {
 @MainActor
 struct SettingsView: View {
   let autoLockService: AutoLockService
+  let apiClient: MobileAPIClient
 
   @Environment(\.dismiss) private var dismiss
   @AppStorage("appTheme", store: .appGroup) private var theme: AppTheme = .system
@@ -113,6 +114,17 @@ struct SettingsView: View {
     )
   }
 
+  private var faviconSelection: Binding<Bool> {
+    Binding(
+      get: { store.fetchFaviconsCached },
+      set: { newValue in
+        store.fetchFaviconsCached = newValue
+        Task { try? await apiClient.setFaviconPref(newValue) }
+        autoLockService.recordActivity()
+      }
+    )
+  }
+
   private var languageSelection: Binding<AppLanguage> {
     Binding(
       get: { language },
@@ -176,6 +188,14 @@ struct SettingsView: View {
           Text("When on, filling a login that has a one-time-code copies the current code to the clipboard so you can paste it. The clipboard clears after the time above and never syncs to your other devices.")
         }
 
+        Section {
+          Toggle("Show site icons", isOn: faviconSelection)
+        } header: {
+          Text("Icons")
+        } footer: {
+          Text("When on, entry domain names are sent to the passwd-sso server to fetch site icons.")
+        }
+
         Section("Appearance") {
           Picker("Theme", selection: $theme) {
             ForEach(AppTheme.allCases, id: \.self) { option in
@@ -206,6 +226,11 @@ struct SettingsView: View {
       }
       .navigationTitle("Settings")
       .navigationBarTitleDisplayMode(.inline)
+      .task {
+        if let on = try? await apiClient.getFaviconPref() {
+          store.fetchFaviconsCached = on
+        }
+      }
       .toolbar {
         ToolbarItem(placement: .confirmationAction) {
           Button("Done") { dismiss() }

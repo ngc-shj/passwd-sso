@@ -688,3 +688,87 @@ limiters, IOS_APP guard) + T9/T16 (MOBILE test-mock template, C8 build-ordering)
 7. **Stale-cache safety**: iOS cached `fetchFavicons=true` but server pref was
    turned OFF on web → server 403 → `globe`. The cache cannot leak; the server is
    authoritative (C1/C13).
+
+## Implementation Checklist (Phase 2-1)
+
+### Reusable code confirmed (R1 — reuse, do NOT reimplement)
+- `src/lib/favicon/favicon-proxy.ts` exports (verified): `normalizeFaviconHost`,
+  `buildFaviconProviderUrl`, `getCachedFavicon`, `setCachedFavicon`,
+  `withSingleFlight`, `isAllowedFaviconMime`, `FAVICON_MAX_BODY_BYTES`.
+- `faviconResponse` (S9): currently PRIVATE in
+  `src/app/api/user/favicon/route.ts:145`. **Move to `favicon-proxy.ts` as an
+  exported helper**; update the #603 web route to import it; the new mobile route
+  imports it too. (Touches the raw-body-read gate — see below.)
+- Rate limiters (S11): `FAVICON_USER_RATE_MAX=300` / `FAVICON_GLOBAL_RATE_MAX=5000`
+  are route-local consts in the #603 route (`route.ts:27-28,36-44`). Re-declare
+  the same two limiters in the mobile route (keys `rl:favicon:<userId>` +
+  `rl:favicon:global`), OR (cleaner) export them from `favicon-proxy.ts`. Either
+  way BOTH must fire, miss-only.
+- `validateExtensionToken(req)` → `{ ok, data: { userId, tenantId, tokenId,
+  clientKind, … } }` (extension-token-types.ts:25-49; `clientKind` present →
+  S13 guard feasible). Auth-fail uses `errorResponse(API_ERROR[auth.error], 401)`
+  (cache-rollback-report/route.ts:90), NOT `unauthorized()`.
+- `enforceAccessRestriction(req, userId, tenantId)` → tenant IP gate
+  (cache-rollback-report/route.ts:96).
+- `withTenantRls(prisma, tenantId, fn)` (tenant-rls.ts:33; used by
+  vault/unlock/data/route.ts:12) — the RLS read/write pattern for `fetchFavicons`.
+- `clientKind !== "IOS_APP"` literal guard precedent: autofill-token/route.ts:60.
+- iOS DPoP ladder: `MobileAPIClient.performAuthedGET` (MobileAPIClient.swift:611)
+  — replicate its ladder in a NEW `fetchFavicon(url:using:)` that (a) takes the
+  caller's session (F15) and (b) returns `(status, contentType, body)` not just
+  `Data` (favicon needs 204/non-image distinction). Reuse `buildDPoPProof`,
+  `validAccessToken`, `ensureRefreshed`, `canonicalHTU`, `jwk`, `signer`.
+- iOS test stubs: `MockURLProtocol` + `makeSession()` (MobileAPIClientTests.swift:9-41);
+  `seedAccessToken()` (MobileAPIClientTests.swift:340-344, T12).
+
+### Files to create
+- `src/app/api/mobile/favicon/route.ts` (C1) + `route.test.ts`
+- `src/app/api/mobile/favicon-pref/route.ts` (C2, GET+PUT) + `route.test.ts`
+- `ios/PasswdSSOApp/Network/FaviconProvider.swift` (C4-iOS URL builder) + test
+- `ios/PasswdSSOApp/Network/FaviconLoader.swift` (C9) + `FaviconLoaderTests.swift`
+- `ios/PasswdSSOApp/Views/Vault/EntryIconView.swift` (C4: EntryIconView +
+  FaviconImageView + decision seam) + `EntryIconDecisionTests.swift`
+
+### Files to modify
+- `src/lib/favicon/favicon-proxy.ts` — export `faviconResponse` (+ optionally the
+  two limiters); update `src/app/api/user/favicon/route.ts` to import it (S9).
+- `src/lib/constants/auth/api-path.ts` — add `MOBILE_FAVICON`,
+  `MOBILE_FAVICON_PREF` (F17).
+- `scripts/checks/raw-body-read-allowlist.txt` — add the new route(s) /
+  favicon-proxy if the raw-body-read gate flags the body read (verify).
+- `ios/.../EntryTypeCategory.swift` — add `rowSymbol` (C3).
+- `ios/Shared/Storage/AppSettingsStore.swift` — add `fetchFaviconsCached` +
+  public `fetchFaviconsCachedKey` (C13).
+- `ios/.../MobileAPIClient.swift` — add `fetchFavicon(url:using:)` + the
+  favicon-pref GET/PUT typed calls (C9/C2 client side).
+- `ios/.../AutoLockService.swift` — add injectable `faviconCacheClearing` closure;
+  call in `signOut` not `lock` (C8). `AutoLockServiceTests.makeService()` passes
+  `{}` no-op (T16).
+- `ios/.../VaultCategoryLanding.swift` — `EntrySummaryRow` (+showFavicons param,
+  leading EntryIconView, C5); `CategoryCard` filled-badge restyle (C6).
+- `ios/.../VaultListView.swift` — `@State showFavicons` + `resolveShowFavicons()`
+  on appear/scenePhase/sheet-onDismiss; pass to rows + VaultCategoryListView (C7).
+- `ios/.../VaultCategoryLanding.swift` (VaultCategoryListView) — accept
+  `showFavicons` param, thread to rows (C7).
+- `ios/.../EntryDetailView.swift` — EntryIconView in a top List Section (C11).
+- `ios/.../SettingsView.swift` — "Show site icons" Toggle → PUT favicon-pref;
+  footer disclosure (C15/piece 15).
+- `ios/PasswdSSOApp/Localizable.xcstrings` — new setting strings.
+- `ios/PasswdSSOApp/PrivacyInfo.xcprivacy` — NO new entry (C10, decision recorded).
+
+### CI gate parity (Step 2-1.7)
+- `scripts/pre-pr.sh` reproduces the CI gate set locally — NO parity gap. Relevant
+  gates it runs: `check-raw-body-read` (line 133 — the `faviconResponse` move +
+  new body read must pass), `check-bypass-rls`, `check-migration-drift`,
+  `check-team-auth-rls`, lint, typecheck, vitest, build. Run `bash scripts/pre-pr.sh`
+  before Phase 2 completion.
+- iOS: `xcodebuild test -scheme PasswdSSOApp` (memory `ios-build-env-available`).
+  iOS is not in `pre-pr.sh` (it runs `xcodebuild` on macos CI only — pre-pr.sh:483).
+
+### Patterns to follow consistently
+- Server routes: mirror `cache-rollback-report/route.ts` (mobile/DPoP), NOT the
+  web session route. Tests mock `@/lib/auth/tokens/extension-token` + `@/lib/prisma`
+  + `@/lib/auth/policy/access-restriction`, NOT `@/auth` (T9).
+- All forbidden patterns from each contract (no `URLCache.shared`,
+  `performAuthedGET`, `AsyncImage`, `withUserTenantRls`, `prisma.user.findUnique`
+  bare, third-party hosts from iOS) — grep the diff at Phase 2-4.

@@ -535,6 +535,131 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     }
   }
 
+  // MARK: - Favicon (C9)
+
+  /// Fetch a favicon image from `url` using the CALLER'S `session` (for
+  /// per-caller URLCache isolation, per F15). Applies the full DPoP retry ladder
+  /// (nonce-retry, refresh-retry, ≤ 3 total requests) identical to performAuthedGET
+  /// but returns the raw HTTP status, Content-Type header, and body for ALL 2xx/204
+  /// responses so the caller can decide whether the body is a usable image (200)
+  /// or a "no favicon" signal (204). On non-2xx after the ladder the status is
+  /// returned without throwing; only a dead refresh throws .authenticationRequired.
+  func fetchFavicon(
+    url: URL,
+    using session: URLSession
+  ) async throws -> (status: Int, contentType: String?, body: Data) {
+    let initial = try await validAccessToken()
+    let htu = canonicalHTU(url: url)
+    let localJWK = jwk
+    let localSigner = signer
+    var token = initial
+    var nonce = try? tokenStore.loadNonce()
+    var didNonceRetry = false, didRefreshRetry = false
+
+    while true {
+      let proof = try await buildDPoPProof(
+        htm: HTTPMethod.get, htu: htu, jwk: localJWK, ath: sha256Base64URL(token),
+        nonce: nonce, signer: localSigner
+      )
+      var request = URLRequest(url: url)
+      request.httpMethod = HTTPMethod.get
+      request.setValue("\(HTTPAuthScheme.bearerPrefix)\(token)", forHTTPHeaderField: HTTPHeader.authorization)
+      request.setValue(proof.jws, forHTTPHeaderField: HTTPHeader.dpop)
+
+      let (data, response): (Data, URLResponse)
+      do {
+        (data, response) = try await session.data(for: request)
+      } catch let urlError as URLError {
+        throw MobileAPIError.networkError(urlError)
+      }
+      let http = response as! HTTPURLResponse
+
+      let freshNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce)
+      if let n = freshNonce {
+        try? tokenStore.saveNonce(n)
+        nonce = n
+      }
+
+      switch http.statusCode {
+      case 200, 204:
+        let contentType = http.value(forHTTPHeaderField: "Content-Type")
+        return (http.statusCode, contentType, data)
+      case 401:
+        if !didNonceRetry, freshNonce != nil {
+          didNonceRetry = true
+          continue
+        }
+        if !didRefreshRetry {
+          didRefreshRetry = true
+          token = try await ensureRefreshed(staleToken: token)
+          continue
+        }
+        // Post-refresh 401 on a favicon is not a dead session — surface status.
+        return (http.statusCode, nil, data)
+      default:
+        // Non-2xx (403, 404, 5xx, etc.): return status without throwing so the
+        // caller can map to nil favicon rather than surfacing an error.
+        return (http.statusCode, nil, data)
+      }
+    }
+  }
+
+  /// GET /api/mobile/favicon-pref → decoded `{fetchFavicons: Bool}`.
+  public func getFaviconPref() async throws -> Bool {
+    let url = serverURL.appending(path: APIPath.mobileFaviconPref, directoryHint: .notDirectory)
+    let data = try await performAuthedGET(url: url)
+    let decoded = try JSONDecoder().decode(FaviconPrefResponse.self, from: data)
+    return decoded.fetchFavicons
+  }
+
+  /// PUT /api/mobile/favicon-pref with body `{fetchFavicons: Bool}` → echoed value.
+  public func setFaviconPref(_ on: Bool) async throws -> Bool {
+    let accessToken = try await validAccessToken()
+
+    let endpoint = serverURL.appending(
+      path: APIPath.mobileFaviconPref,
+      directoryHint: .notDirectory
+    )
+    let htu = canonicalHTU(url: endpoint)
+    let ath = sha256Base64URL(accessToken)
+
+    let localJWK = jwk
+    let localSigner = signer
+    let nonce = try? tokenStore.loadNonce()
+    let proof = try await buildDPoPProof(
+      htm: HTTPMethod.put,
+      htu: htu,
+      jwk: localJWK,
+      ath: ath,
+      nonce: nonce,
+      signer: localSigner
+    )
+
+    let bodyData = try JSONEncoder().encode(["fetchFavicons": on])
+    var request = URLRequest(url: endpoint)
+    request.httpMethod = HTTPMethod.put
+    request.setValue(HTTPContentType.json, forHTTPHeaderField: HTTPHeader.contentType)
+    request.setValue("\(HTTPAuthScheme.bearerPrefix)\(accessToken)", forHTTPHeaderField: HTTPHeader.authorization)
+    request.setValue(proof.jws, forHTTPHeaderField: HTTPHeader.dpop)
+    request.httpBody = bodyData
+
+    let data = try await performBodyHTTP(request) { newNonce in
+      let retryProof = try await buildDPoPProof(
+        htm: HTTPMethod.put,
+        htu: htu,
+        jwk: localJWK,
+        ath: ath,
+        nonce: newNonce,
+        signer: localSigner
+      )
+      var retryRequest = request
+      retryRequest.setValue(retryProof.jws, forHTTPHeaderField: HTTPHeader.dpop)
+      return retryRequest
+    }
+    let decoded = try JSONDecoder().decode(FaviconPrefResponse.self, from: data)
+    return decoded.fetchFavicons
+  }
+
   // MARK: - Token management (C1/C2)
 
   /// Proactive refresh skew: refresh the access token when it is within this many seconds of expiry.
@@ -843,4 +968,9 @@ private struct CreateEntryResponse: Decodable {
 /// responses. Extra fields (resource/current/max) are ignored by JSONDecoder.
 private struct APIErrorEnvelope: Decodable {
   let error: String
+}
+
+/// Response shape for GET/PUT /api/mobile/favicon-pref.
+private struct FaviconPrefResponse: Decodable {
+  let fetchFavicons: Bool
 }

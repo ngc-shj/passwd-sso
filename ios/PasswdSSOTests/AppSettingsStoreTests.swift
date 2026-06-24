@@ -224,6 +224,42 @@ final class AppSettingsStoreTests: XCTestCase {
     XCTAssertEqual(store.effectiveAutoLockMinutes, 30)  // restored after policy removed
   }
 
+  // MARK: - Fetch favicons cached (C13)
+
+  func testFetchFaviconsCachedAbsentReturnsFalse() {
+    XCTAssertFalse(AppSettingsStore(defaults: defaults).fetchFaviconsCached)
+  }
+
+  func testFetchFaviconsCachedRoundTrip() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.fetchFaviconsCached = true
+    XCTAssertTrue(store.fetchFaviconsCached)
+    store.fetchFaviconsCached = false
+    XCTAssertFalse(store.fetchFaviconsCached)
+  }
+
+  func testFetchFaviconsCachedPersistsAcrossInstances() {
+    AppSettingsStore(defaults: defaults).fetchFaviconsCached = true
+    XCTAssertTrue(AppSettingsStore(defaults: defaults).fetchFaviconsCached)
+
+    AppSettingsStore(defaults: defaults).fetchFaviconsCached = false
+    XCTAssertFalse(AppSettingsStore(defaults: defaults).fetchFaviconsCached)
+  }
+
+  /// T5/RT7: the setter must write to the literal raw key the public constant
+  /// names. Reading via the LITERAL "fetchFaviconsCached" (not via
+  /// `fetchFaviconsCachedKey`, which aliases the same Key field the setter uses)
+  /// makes this falsifiable: if the setter ever drifts from the public constant,
+  /// this fails. The companion assertion pins the constant's value to the literal.
+  func testFetchFaviconsCachedKeyConsistency() {
+    XCTAssertEqual(AppSettingsStore.fetchFaviconsCachedKey, "fetchFaviconsCached")
+    let store = AppSettingsStore(defaults: defaults)
+    store.fetchFaviconsCached = true
+    XCTAssertTrue(
+      defaults.bool(forKey: "fetchFaviconsCached"),
+      "setter must write to the literal key the public constant names")
+  }
+
   // MARK: - App language
 
   func testAppLanguageAbsentReturnsSystem() {

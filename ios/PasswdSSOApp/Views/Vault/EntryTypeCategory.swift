@@ -41,6 +41,17 @@ enum EntryTypeCategory: String, CaseIterable {
     }
   }
 
+  /// SF Symbol for use in compact list rows. LOGIN uses "globe" (the URL icon
+  /// that signals "this is a web credential") rather than the category-card
+  /// symbol so the row communicates the credential type, not the category.
+  /// All other cases reuse their sfSymbol unchanged.
+  var rowSymbol: String {
+    switch self {
+    case .login: "globe"
+    default: sfSymbol
+    }
+  }
+
   /// Plural, user-facing label. Compiler-routed through `String(localized:)` so
   /// raw type identifiers never leak into the UI.
   var localizedLabel: String {

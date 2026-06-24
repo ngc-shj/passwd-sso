@@ -40,6 +40,7 @@ import Shared
   private let tokenStore: HostTokenStore
   private let uploadTokenStore: UploadTokenStore
   private let cacheURL: URL
+  private let faviconCacheClearing: () -> Void
 
   public init(
     reducer: LockStateReducer = LockStateReducer(),
@@ -49,7 +50,8 @@ import Shared
     teamDirectoryStore: any TeamDirectoryStoring = TeamDirectoryStore(),
     tokenStore: HostTokenStore,
     uploadTokenStore: UploadTokenStore = UploadTokenStore(),
-    cacheURL: URL
+    cacheURL: URL,
+    faviconCacheClearing: @escaping () -> Void = { FaviconLoader.shared?.clearCache() }
   ) {
     self.reducer = reducer
     self.clock = clock
@@ -59,6 +61,7 @@ import Shared
     self.tokenStore = tokenStore
     self.uploadTokenStore = uploadTokenStore
     self.cacheURL = cacheURL
+    self.faviconCacheClearing = faviconCacheClearing
   }
 
   /// Record user interaction — resets the idle timer. The next `tick()` reads
@@ -108,6 +111,7 @@ import Shared
     if fm.fileExists(atPath: cacheURL.path) {
       try? fm.removeItem(at: cacheURL)
     }
+    faviconCacheClearing()
     state = .loggedOut(reason: reason)
   }
 

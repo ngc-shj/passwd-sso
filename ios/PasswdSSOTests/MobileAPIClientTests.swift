@@ -901,6 +901,120 @@ final class MobileAPIClientTests: XCTestCase {
                    "DPoP proof must contain ath = SHA-256(access_token)")
     XCTAssertEqual(payload["htm"]?.value as? String, "POST")
   }
+
+  // MARK: - fetchFavicon (C9)
+
+  private func makeFaviconSession() -> URLSession {
+    // A dedicated ephemeral session for favicon calls (separate from self.session
+    // which is used by the client internally for non-favicon requests).
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [MockURLProtocol.self]
+    return URLSession(configuration: config)
+  }
+
+  func testFetchFavicon_200_returnsStatusContentTypeBody() async throws {
+    seedAccessToken()
+    let faviconURL = serverURL.appending(path: "/api/mobile/favicon", directoryHint: .notDirectory)
+    let imageBytes = Data([0x89, 0x50, 0x4E, 0x47])  // PNG magic bytes
+    MockURLProtocol.requestHandler = { _ in
+      (imageBytes, httpResponse(status: 200, url: faviconURL, headers: ["Content-Type": "image/png"]))
+    }
+    let faviconSession = makeFaviconSession()
+    let client = MobileAPIClient(
+      serverURL: serverURL, signer: FakeSigner(), jwk: knownJWK,
+      tokenStore: tokenStore, urlSession: session
+    )
+    let result = try await client.fetchFavicon(url: faviconURL, using: faviconSession)
+    XCTAssertEqual(result.status, 200)
+    XCTAssertEqual(result.contentType, "image/png")
+    XCTAssertEqual(result.body, imageBytes)
+  }
+
+  func testFetchFavicon_204_returnsStatusAndEmptyBody() async throws {
+    seedAccessToken()
+    let faviconURL = serverURL.appending(path: "/api/mobile/favicon", directoryHint: .notDirectory)
+    MockURLProtocol.requestHandler = { _ in
+      (Data(), httpResponse(status: 204, url: faviconURL))
+    }
+    let faviconSession = makeFaviconSession()
+    let client = MobileAPIClient(
+      serverURL: serverURL, signer: FakeSigner(), jwk: knownJWK,
+      tokenStore: tokenStore, urlSession: session
+    )
+    let result = try await client.fetchFavicon(url: faviconURL, using: faviconSession)
+    XCTAssertEqual(result.status, 204)
+    XCTAssertTrue(result.body.isEmpty)
+  }
+
+  func testFetchFavicon_dpopHeaderIsAttached() async throws {
+    seedAccessToken()
+    var capturedRequest: URLRequest?
+    let faviconURL = serverURL.appending(path: "/api/mobile/favicon", directoryHint: .notDirectory)
+    MockURLProtocol.requestHandler = { request in
+      capturedRequest = request
+      return (Data(), httpResponse(status: 200, url: faviconURL, headers: ["Content-Type": "image/png"]))
+    }
+    let faviconSession = makeFaviconSession()
+    let client = MobileAPIClient(
+      serverURL: serverURL, signer: FakeSigner(), jwk: knownJWK,
+      tokenStore: tokenStore, urlSession: session
+    )
+    _ = try await client.fetchFavicon(url: faviconURL, using: faviconSession)
+    let req = try XCTUnwrap(capturedRequest)
+    XCTAssertNotNil(req.value(forHTTPHeaderField: "DPoP"),
+                    "DPoP header must be attached to favicon request")
+    let auth = try XCTUnwrap(req.value(forHTTPHeaderField: "Authorization"))
+    XCTAssertTrue(auth.hasPrefix("Bearer "), "favicon request must use Bearer scheme")
+  }
+
+  // MARK: - favicon-pref (C2 client, RT6)
+
+  func testGetFaviconPref_decodesResponse() async throws {
+    seedAccessToken()
+    var capturedRequest: URLRequest?
+    let prefURL = serverURL.appending(path: "/api/mobile/favicon-pref", directoryHint: .notDirectory)
+    MockURLProtocol.requestHandler = { request in
+      capturedRequest = request
+      return (Data(#"{"fetchFavicons":true}"#.utf8),
+              httpResponse(status: 200, url: prefURL, headers: ["Content-Type": "application/json"]))
+    }
+    let client = MobileAPIClient(
+      serverURL: serverURL, signer: FakeSigner(), jwk: knownJWK,
+      tokenStore: tokenStore, urlSession: session
+    )
+    let on = try await client.getFaviconPref()
+    XCTAssertTrue(on, "getFaviconPref must decode fetchFavicons from the response")
+    let req = try XCTUnwrap(capturedRequest)
+    XCTAssertEqual(req.httpMethod, "GET")
+    XCTAssertTrue(req.url?.path.hasSuffix("/api/mobile/favicon-pref") ?? false)
+    XCTAssertNotNil(req.value(forHTTPHeaderField: "DPoP"))
+  }
+
+  func testSetFaviconPref_putRequestShapeAndEcho() async throws {
+    seedAccessToken()
+    var capturedRequest: URLRequest?
+    let prefURL = serverURL.appending(path: "/api/mobile/favicon-pref", directoryHint: .notDirectory)
+    MockURLProtocol.requestHandler = { request in
+      capturedRequest = request
+      return (Data(#"{"fetchFavicons":true}"#.utf8),
+              httpResponse(status: 200, url: prefURL, headers: ["Content-Type": "application/json"]))
+    }
+    let client = MobileAPIClient(
+      serverURL: serverURL, signer: FakeSigner(), jwk: knownJWK,
+      tokenStore: tokenStore, urlSession: session
+    )
+    let result = try await client.setFaviconPref(true)
+    XCTAssertTrue(result, "setFaviconPref must return the echoed value")
+    let req = try XCTUnwrap(capturedRequest)
+    XCTAssertEqual(req.httpMethod, "PUT")
+    XCTAssertTrue(req.url?.path.hasSuffix("/api/mobile/favicon-pref") ?? false)
+    XCTAssertNotNil(req.value(forHTTPHeaderField: "DPoP"))
+    let auth = try XCTUnwrap(req.value(forHTTPHeaderField: "Authorization"))
+    XCTAssertTrue(auth.hasPrefix("Bearer "))
+    let bodyData = try XCTUnwrap(req.httpBody ?? readStream(req.httpBodyStream))
+    let body = try JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
+    XCTAssertEqual(body?["fetchFavicons"] as? Bool, true)
+  }
 }
 
 // MARK: - Token refresh + validAccessToken tests (C0/C1/C2/C3)

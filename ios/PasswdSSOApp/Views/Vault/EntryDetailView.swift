@@ -111,7 +111,21 @@ struct EntryDetailView: View {
 
   @ViewBuilder
   private func detailContent(_ d: VaultEntryDetail) -> some View {
+    let showFavicons = AppSettingsStore().fetchFaviconsCached
     List {
+      Section {
+        HStack {
+          Spacer()
+          EntryIconView(
+            entryType: d.entryType,
+            urlHost: d.urlHost,
+            showFavicons: showFavicons,
+            size: 64
+          )
+          Spacer()
+        }
+        .listRowBackground(Color.clear)
+      }
       // Render the field set for the entry's type. Each per-type section lives
       // in EntryDetailTypeSections.swift; LOGIN keeps its original rows so its
       // rendering is structurally unchanged.

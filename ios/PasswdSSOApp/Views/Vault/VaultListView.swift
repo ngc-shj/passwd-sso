@@ -30,6 +30,7 @@ struct VaultListView: View {
   @State private var isSyncing: Bool = false
   @State private var syncError: String?
   @FocusState private var searchFocused: Bool
+  @State private var showFavicons: Bool = false
   @Environment(\.scenePhase) private var scenePhase
 
   var body: some View {
@@ -93,8 +94,8 @@ struct VaultListView: View {
           bottomBar
         }
       }
-      .sheet(isPresented: $isShowingSettings) {
-        SettingsView(autoLockService: autoLockService)
+      .sheet(isPresented: $isShowingSettings, onDismiss: { resolveShowFavicons() }) {
+        SettingsView(autoLockService: autoLockService, apiClient: apiClient)
       }
       .sheet(isPresented: $isShowingCreateForm) {
         EntryForm(
@@ -119,6 +120,7 @@ struct VaultListView: View {
       .onChange(of: scenePhase) { _, newPhase in
         if newPhase == .active {
           Task { await sync(surfaceErrors: false) }
+          resolveShowFavicons()
         }
       }
       .alert(
@@ -148,6 +150,10 @@ struct VaultListView: View {
     .onAppear {
       reload(cacheData)
       updateScreenRecordingState()
+      resolveShowFavicons()
+      if let serverURL = loadServerConfig()?.baseURL {
+        FaviconLoader.configure(apiClient: apiClient, serverURL: serverURL)
+      }
     }
     .onReceive(
       NotificationCenter.default.publisher(for: UIScreen.capturedDidChangeNotification)
@@ -300,7 +306,8 @@ struct VaultListView: View {
               viewModel: viewModel,
               apiClient: apiClient,
               hostSyncService: hostSyncService,
-              cacheKey: cacheKey
+              cacheKey: cacheKey,
+              showFavicons: showFavicons
             )
           } label: {
             CategoryCard(symbol: item.symbol, label: item.label, count: item.count)
@@ -338,7 +345,7 @@ struct VaultListView: View {
           cacheKey: cacheKey
         )
       } label: {
-        EntrySummaryRow(summary: summary)
+        EntrySummaryRow(summary: summary, showFavicons: showFavicons)
       }
     }
     .listStyle(.plain)
@@ -388,6 +395,10 @@ struct VaultListView: View {
         syncError = L10n.string("Couldn't sync. Check your connection and try again.")
       }
     }
+  }
+
+  private func resolveShowFavicons() {
+    showFavicons = AppSettingsStore().fetchFaviconsCached
   }
 
   private func updateScreenRecordingState() {
