@@ -939,8 +939,7 @@ async function handlePATCH(req: NextRequest) {
   const clampAbsoluteTo = typeof sessionAbsoluteTimeoutMinutes === "number" ? sessionAbsoluteTimeoutMinutes : null;
   const clampedTeams: Array<{ teamId: string; field: string; previousValue: number; newValue: number }> = [];
 
-  const updated = await withBypassRls(prisma, async () =>
-    prisma.$transaction(async (tx) => {
+  const updated = await withBypassRls(prisma, async (tx) => {
       if (clampIdleTo !== null) {
         const affected = await tx.teamPolicy.findMany({
           where: {
@@ -1031,7 +1030,7 @@ async function handlePATCH(req: NextRequest) {
           delegationMaxTtlSec: true,
         },
       });
-    }, { isolationLevel: "Serializable" }),
+    },
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   // Bust the tenant policy cache so access restriction picks up new values immediately

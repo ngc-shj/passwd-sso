@@ -10,6 +10,7 @@ const {
   mockTenantMemberFindFirst,
   mockTenantMemberUpdate,
   mockDispatchTenantWebhook,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -18,6 +19,7 @@ const {
   mockTenantMemberFindFirst: vi.fn(),
   mockTenantMemberUpdate: vi.fn(),
   mockDispatchTenantWebhook: vi.fn(),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -56,6 +58,9 @@ vi.mock("@/lib/http/with-request-log", () => ({
 }));
 vi.mock("@/lib/webhook-dispatcher", () => ({
   dispatchTenantWebhook: mockDispatchTenantWebhook,
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 vi.mock("@/lib/constants/auth/tenant-permission", () => ({
   TENANT_PERMISSION: { MEMBER_MANAGE: "MEMBER_MANAGE" },

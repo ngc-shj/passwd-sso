@@ -14,6 +14,7 @@ const {
   mockGetMasterKeyByVersion,
   mockEncryptServerData,
   mockDecryptServerData,
+  mockRequireRecentCurrentAuthMethod,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -30,6 +31,8 @@ const {
     authTag: "authtag1234567890123456789012",
   }),
   mockDecryptServerData: vi.fn(),
+  // Step-up gate: return null (no challenge) so POST tests proceed normally.
+  mockRequireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -78,6 +81,9 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   getMasterKeyByVersion: mockGetMasterKeyByVersion,
   encryptServerData: mockEncryptServerData,
   decryptServerData: mockDecryptServerData,
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
 }));
 
 import { GET, POST } from "@/app/api/tenant/audit-delivery-targets/route";
@@ -141,7 +147,7 @@ describe("GET /api/tenant/audit-delivery-targets", () => {
     expect(Array.isArray(json.targets)).toBe(true);
     expect(json.targets).toHaveLength(1);
     expect(json.targets[0].id).toBe("adt-1");
-    // Endpoint URL is exposed for the list view.
+    // Endpoint URL is exposed for the list view — masked (no query/fragment/userinfo).
     expect(json.targets[0].endpoint).toBe("https://hooks.example.com/audit");
 
     // Response MUST NOT expose secrets, raw config, or key-management metadata.
@@ -193,7 +199,22 @@ describe("GET /api/tenant/audit-delivery-targets", () => {
     const res = await GET(req);
     const { json } = await parseResponse(res);
 
-    expect(json.targets[0].endpoint).toBe("https://s3.example.com");
+    expect(json.targets[0].endpoint).toBe("https://s3.example.com/");
+  });
+
+  it("masks query strings and fragments from stored endpoint URL", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAuditDeliveryTargetFindMany.mockResolvedValue([makeTargetSelectResult()]);
+    mockDecryptServerData.mockReturnValue(
+      JSON.stringify({ url: "https://hooks.example.com/audit?token=secret#ref", secret: "x" }),
+    );
+
+    const req = createRequest("GET", "http://localhost/api/tenant/audit-delivery-targets");
+    const res = await GET(req);
+    const { json } = await parseResponse(res);
+
+    expect(json.targets[0].endpoint).toBe("https://hooks.example.com/audit");
   });
 });
 
@@ -341,6 +362,7 @@ describe("POST /api/tenant/audit-delivery-targets", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(201);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect(json.target.id).toBe("adt-new");
     expect(json.target.kind).toBe("WEBHOOK");
     expect(json.target.isActive).toBe(true);
@@ -457,5 +479,24 @@ describe("POST /api/tenant/audit-delivery-targets", () => {
 
     expect(status).toBe(201);
     expect(json.target.kind).toBe("S3_OBJECT");
+  });
+
+  it("returns 403 from step-up gate and does not create target", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockRequireRecentCurrentAuthMethod.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const req = createRequest("POST", "http://localhost/api/tenant/audit-delivery-targets", {
+      body: { kind: "WEBHOOK", url: "https://example.com/hook", secret: "s3cr3t" },
+      headers: { origin: "http://localhost" },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockAuditDeliveryTargetCreate).not.toHaveBeenCalled();
   });
 });

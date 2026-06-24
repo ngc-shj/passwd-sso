@@ -165,6 +165,7 @@ describe("POST /api/mobile/token/refresh", () => {
     const res = await POST(makeRequest());
     const { status, json } = await parseJson(res);
     expect(status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect(json).toMatchObject({
       access_token: "new-access",
       refresh_token: "new-refresh",

@@ -11,6 +11,7 @@ import {
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { z } from "zod";
 
 type Params = { params: Promise<{ id: string }> };
@@ -49,6 +50,9 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
   if (!target) {
     return notFound();
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   // No-op guard: skip update + audit log if isActive is already the requested value
   if (target.isActive === data.isActive) {

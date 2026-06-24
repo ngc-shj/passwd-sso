@@ -8,6 +8,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, handleAuthError, notFound, unauthorized, forbidden } from "@/lib/http/api-response";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { AUDIT_ACTION, TENANT_ROLE } from "@/lib/constants";
 
 export const runtime = "nodejs";
@@ -48,6 +49,9 @@ async function handleDELETE(
   if (!grant) {
     return notFound();
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   // Only the requester or an OWNER can revoke
   if (grant.requesterId !== userId && actor.role !== TENANT_ROLE.OWNER) {

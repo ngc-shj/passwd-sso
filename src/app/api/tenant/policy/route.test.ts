@@ -568,7 +568,10 @@ describe("PATCH /api/tenant/policy", () => {
         requirePasskey: false,
         passkeyGracePeriodDays: null,
       });
-      mockTransaction.mockRejectedValue(new Error("tx rolled back"));
+      // The cascade-clamp + tenant.update now run directly inside the
+      // withBypassRls transaction (no nested prisma.$transaction); simulate
+      // that transaction rolling back via the bypass wrapper.
+      mockWithBypassRls.mockRejectedValueOnce(new Error("tx rolled back"));
 
       const req = createRequest("PATCH", ROUTE_URL, {
         body: { requirePasskey: true },

@@ -13,6 +13,7 @@ const {
   mockLogAudit,
   mockAuditDeliveryTargetFindFirst,
   mockAuditDeliveryTargetUpdate,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -20,9 +21,13 @@ const {
   mockLogAudit: vi.fn(),
   mockAuditDeliveryTargetFindFirst: vi.fn(),
   mockAuditDeliveryTargetUpdate: vi.fn(),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
+}));
 vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
@@ -121,6 +126,26 @@ describe("PATCH /api/tenant/audit-delivery-targets/[id]", () => {
     const { status } = await parseResponse(res);
 
     expect(status).toBe(404);
+  });
+
+  it("returns 403 from step-up gate and does not update target", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAuditDeliveryTargetFindFirst.mockResolvedValue(makeTarget({ isActive: true }));
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const req = createRequest("PATCH", `http://localhost/api/tenant/audit-delivery-targets/${TARGET_ID}`, {
+      body: { isActive: false },
+      headers: { origin: "http://localhost" },
+    });
+    const res = await PATCH(req, createParams({ id: TARGET_ID }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockAuditDeliveryTargetUpdate).not.toHaveBeenCalled();
   });
 
   it("deactivates target and logs AUDIT_DELIVERY_TARGET_DEACTIVATE", async () => {

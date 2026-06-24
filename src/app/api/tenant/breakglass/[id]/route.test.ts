@@ -10,6 +10,7 @@ const {
   mockGrantFindFirst,
   mockGrantUpdateMany,
   mockDispatchTenantWebhook,
+  mockRequireRecentSession,
   TenantAuthError,
 } = vi.hoisted(() => {
   class _TenantAuthError extends Error {
@@ -28,6 +29,7 @@ const {
     mockGrantFindFirst: vi.fn(),
     mockGrantUpdateMany: vi.fn(),
     mockDispatchTenantWebhook: vi.fn(),
+    mockRequireRecentSession: vi.fn().mockResolvedValue(null),
     TenantAuthError: _TenantAuthError,
   };
 });
@@ -64,6 +66,9 @@ vi.mock("@/lib/http/with-request-log", () => ({
 }));
 vi.mock("@/lib/webhook-dispatcher", () => ({
   dispatchTenantWebhook: mockDispatchTenantWebhook,
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { DELETE } from "./route";
@@ -140,6 +145,18 @@ describe("DELETE /api/tenant/breakglass/[id]", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(404);
     expect(json.error).toBe("NOT_FOUND");
+  });
+
+  it("returns 403 from step-up gate and does not revoke grant", async () => {
+    mockGrantFindFirst.mockResolvedValue(makeGrant());
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+    const res = await DELETE(makeReq(), createParams({ id: GRANT_ID }));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockGrantUpdateMany).not.toHaveBeenCalled();
   });
 
   it("returns 403 when non-owner tries to revoke another user's grant", async () => {

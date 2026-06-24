@@ -17,6 +17,7 @@ import {
 } from "@/lib/http/external-http";
 import { getLogger } from "@/lib/logger";
 import { MS_PER_SECOND } from "@/lib/constants/time";
+import { maskUrlForDisplay } from "@/lib/url/url-validation";
 
 // ─── Interface ────────────────────────────────────────────────
 
@@ -190,7 +191,7 @@ export const webhookDeliverer: AuditDeliverer = {
     const body = JSON.stringify(sanitizeForExternalDelivery(payload));
     const signature = createHmac("sha256", secret).update(body).digest("hex");
 
-    getLogger().info({ outboxId: payload.id, url }, "audit-delivery.webhook.attempt");
+    getLogger().info({ outboxId: payload.id, url: maskUrlForDisplay(url) }, "audit-delivery.webhook.attempt");
     const res = await fetchOrThrow("Webhook", url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Signature": `sha256=${signature}` },
@@ -217,7 +218,7 @@ export const siemHecDeliverer: AuditDeliverer = {
     };
     const body = JSON.stringify(hecEvent);
 
-    getLogger().info({ outboxId: payload.id, url }, "audit-delivery.siem_hec.attempt");
+    getLogger().info({ outboxId: payload.id, url: maskUrlForDisplay(url) }, "audit-delivery.siem_hec.attempt");
     const res = await fetchOrThrow("SIEM HEC", url, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Splunk ${token}` },
@@ -260,7 +261,7 @@ export const s3ObjectDeliverer: AuditDeliverer = {
       method: "PUT", url: objectUrl, region, accessKeyId, secretAccessKey, bodyHash, dateTime, date,
     });
 
-    getLogger().info({ outboxId: payload.id, objectUrl }, "audit-delivery.s3_object.attempt");
+    getLogger().info({ outboxId: payload.id, objectUrl: maskUrlForDisplay(objectUrl) }, "audit-delivery.s3_object.attempt");
     const res = await fetchOrThrow("Object storage", objectUrl, {
       method: "PUT",
       headers: {
