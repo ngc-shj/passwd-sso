@@ -14,6 +14,7 @@ const {
   mockServiceAccountFindUnique,
   mockServiceAccountTokenFindUnique,
   mockServiceAccountTokenUpdate,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -22,6 +23,7 @@ const {
   mockServiceAccountFindUnique: vi.fn(),
   mockServiceAccountTokenFindUnique: vi.fn(),
   mockServiceAccountTokenUpdate: vi.fn(),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -60,6 +62,9 @@ vi.mock("@/lib/audit/audit", () => ({
 }));
 vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { DELETE } from "@/app/api/tenant/service-accounts/[id]/tokens/[tokenId]/route";
@@ -165,5 +170,26 @@ describe("DELETE /api/tenant/service-accounts/[id]/tokens/[tokenId]", () => {
     const { status } = await parseResponse(res);
 
     expect(status).toBe(401);
+  });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockServiceAccountFindUnique.mockResolvedValue({ id: SA_ID, tenantId: "tenant-1" });
+    mockServiceAccountTokenFindUnique.mockResolvedValue(makeToken());
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const req = createRequest(
+      "DELETE",
+      `http://localhost/api/tenant/service-accounts/${SA_ID}/tokens/${TOKEN_ID}`,
+    );
+    const res = await DELETE(req, createParams({ id: SA_ID, tokenId: TOKEN_ID }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockServiceAccountTokenUpdate).not.toHaveBeenCalled();
   });
 });

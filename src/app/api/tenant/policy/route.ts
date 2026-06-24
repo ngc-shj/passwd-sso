@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponseWithMessage, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
@@ -188,6 +189,9 @@ async function handlePATCH(req: NextRequest) {
   } catch (e) {
     return handleAuthError(e);
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   const bodyRead = await readJsonWithCap(req, MAX_JSON_BODY_BYTES);
   if (!bodyRead.ok) return validationError();
@@ -935,7 +939,7 @@ async function handlePATCH(req: NextRequest) {
   const clampAbsoluteTo = typeof sessionAbsoluteTimeoutMinutes === "number" ? sessionAbsoluteTimeoutMinutes : null;
   const clampedTeams: Array<{ teamId: string; field: string; previousValue: number; newValue: number }> = [];
 
-  const updated = await withBypassRls(prisma, async (tx) =>
+  const updated = await withBypassRls(prisma, async () =>
     prisma.$transaction(async (tx) => {
       if (clampIdleTo !== null) {
         const affected = await tx.teamPolicy.findMany({

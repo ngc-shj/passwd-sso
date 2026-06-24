@@ -11,6 +11,7 @@ import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { errorResponse, errorResponseWithMessage, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import {
   SA_TOKEN_PREFIX,
@@ -186,7 +187,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       expiresAt: token.expiresAt,
       createdAt: token.createdAt,
     },
-    { status: 201, headers: { "Cache-Control": "no-store" } },
+    { status: 201, headers: { ...NO_STORE_HEADERS } },
   );
 }
 

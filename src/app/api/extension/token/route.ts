@@ -8,6 +8,7 @@ import { validateExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { TokenRevokeResponseSchema } from "@/lib/validations/extension-token";
 import logger from "@/lib/logger";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -75,7 +76,7 @@ async function handlePOST(req: NextRequest) {
     API_ERROR.EXTENSION_TOKEN_LEGACY_ISSUANCE_DEPRECATED,
     undefined,
     undefined,
-    { Deprecation: "true", "Cache-Control": "no-store" },
+    { Deprecation: "true", ...NO_STORE_HEADERS },
   );
 }
 

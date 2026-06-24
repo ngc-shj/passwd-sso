@@ -300,5 +300,6 @@ describe("POST /api/api-keys", () => {
     const json = await res.json();
     expect(json.id).toBe("new-key");
     expect(json.token).toMatch(/^api_/);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
   });
 });

@@ -10,6 +10,7 @@ import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { transition, AR_STATUS, AR_ACTOR } from "@/lib/access-request/access-request-state";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { errorResponse, errorResponseWithMessage, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
@@ -237,7 +238,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       expiresAt: result.expiresAt,
       ttlSec,
     },
-    { headers: { "Cache-Control": "no-store" } },
+    { headers: { ...NO_STORE_HEADERS } },
   );
 }
 

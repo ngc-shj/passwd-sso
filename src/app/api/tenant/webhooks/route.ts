@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { parseBody } from "@/lib/http/parse-body";
 import {
@@ -86,6 +87,9 @@ async function handlePOST(req: NextRequest) {
   } catch (e) {
     return handleAuthError(e);
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   const result = await parseBody(req, createWebhookSchema);
   if (!result.ok) return result.response;

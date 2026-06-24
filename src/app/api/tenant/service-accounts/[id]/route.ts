@@ -6,6 +6,7 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
@@ -98,6 +99,9 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     return notFound();
   }
 
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
+
   const result = await parseBody(req, serviceAccountUpdateSchema);
   if (!result.ok) return result.response;
 
@@ -174,6 +178,9 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   if (!sa || sa.tenantId !== actor.tenantId) {
     return notFound();
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   // Hard-delete: cascade removes tokens and access requests automatically
   await withTenantRls(prisma, actor.tenantId, async (tx) =>

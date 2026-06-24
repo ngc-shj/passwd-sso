@@ -17,6 +17,7 @@ const {
   mockServiceAccountTokenUpdateMany,
   mockPrismaArrayTransaction,
   mockDispatchTenantWebhook,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -28,6 +29,7 @@ const {
   mockServiceAccountTokenUpdateMany: vi.fn(),
   mockPrismaArrayTransaction: vi.fn().mockResolvedValue([{ count: 1 }, {}]),
   mockDispatchTenantWebhook: vi.fn(),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -71,6 +73,9 @@ vi.mock("@/lib/http/with-request-log", () => ({
 }));
 vi.mock("@/lib/webhook-dispatcher", () => ({
   dispatchTenantWebhook: mockDispatchTenantWebhook,
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { GET, PUT, DELETE } from "@/app/api/tenant/service-accounts/[id]/route";
@@ -254,6 +259,27 @@ describe("PUT /api/tenant/service-accounts/[id]", () => {
 
     expect(status).toBe(403);
   });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockServiceAccountFindUnique.mockResolvedValue({ id: SA_ID, tenantId: "tenant-1" });
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const req = createRequest(
+      "PUT",
+      `http://localhost/api/tenant/service-accounts/${SA_ID}`,
+      { body: { name: "ci-bot-v2" } },
+    );
+    const res = await PUT(req, createParams({ id: SA_ID }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockServiceAccountUpdate).not.toHaveBeenCalled();
+  });
 });
 
 describe("DELETE /api/tenant/service-accounts/[id]", () => {
@@ -308,5 +334,25 @@ describe("DELETE /api/tenant/service-accounts/[id]", () => {
     const { status } = await parseResponse(res);
 
     expect(status).toBe(401);
+  });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockServiceAccountFindUnique.mockResolvedValue({ id: SA_ID, tenantId: "tenant-1" });
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const req = createRequest(
+      "DELETE",
+      `http://localhost/api/tenant/service-accounts/${SA_ID}`,
+    );
+    const res = await DELETE(req, createParams({ id: SA_ID }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockServiceAccountDelete).not.toHaveBeenCalled();
   });
 });

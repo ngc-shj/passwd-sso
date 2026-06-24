@@ -24,6 +24,7 @@ import {
   DIRECTORY_SYNC_CREDENTIAL_ENTRIES_MAX,
 } from "@/lib/validations/common";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 
@@ -99,6 +100,9 @@ async function handlePOST(req: NextRequest) {
     return handleAuthError(e);
   }
   const tenantId = member.tenantId;
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   const result = await parseBody(req, createSchema);
   if (!result.ok) return result.response;

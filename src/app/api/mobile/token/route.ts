@@ -7,13 +7,16 @@
  *
  *   1. Rate-limits per client IP (no session is available at this point).
  *   2. Validates the body shape.
- *   3. Reads the bridge code (no consumption yet) and verifies the PKCE
- *      challenge (S256), the client-supplied `device_jkt` against the value
- *      stored at authorize, and the DPoP proof. All failures return the
- *      same MOBILE_BRIDGE_CODE_INVALID error (uniform — closes the validity
- *      oracle); only after every check passes does step 7 CAS-consume the
- *      bridge code (sets `used_at`). PKCE/DPoP failures leave `used_at`
- *      null so the legitimate client can retry within TTL.
+ *   3. Reads the bridge code (no consumption yet) and runs the tenant
+ *      network-restriction gate (step 3.5) before any binding checks.
+ *      Steps 4-6 then verify the PKCE challenge (S256), the client-supplied
+ *      `device_jkt`, and the DPoP proof. All binding-check failures return
+ *      the same MOBILE_BRIDGE_CODE_INVALID error (uniform — closes the
+ *      validity oracle); only after every check passes does step 7
+ *      CAS-consume the bridge code (sets `used_at`). PKCE/DPoP failures
+ *      leave `used_at` null so the legitimate client can retry within TTL.
+ *      The network gate runs before the binding checks so an off-network
+ *      request never spends the one-time code on crypto work.
  *   4. The DPoP proof MUST be signed by the same key whose RFC 7638 JWK
  *      thumbprint equals `stored.deviceJkt`. No `ath` required at this
  *      step because the client doesn't yet have an access token.
@@ -151,6 +154,15 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     return errorResponse(API_ERROR.MOBILE_BRIDGE_CODE_INVALID);
   }
 
+  // 3.5. Tenant network-boundary enforcement. The bridge-code exchange is not
+  // session-based, so the proxy access-restriction gate does not cover it;
+  // enforce here for parity with the extension/iOS token lifecycle. tenantId
+  // and userId come from the validated bridge-code row. This gate runs before
+  // the binding checks (steps 4-6) so an off-network request is rejected
+  // without consuming the one-time code.
+  const denied = await enforceAccessRestriction(req, stored.userId, stored.tenantId);
+  if (denied) return denied;
+
   // 4. Verify device_jkt binding (constant-time). Uniform error per S7.
   if (!safeStringEqual(stored.deviceJkt, deviceJkt)) {
     getLogger().warn(
@@ -223,13 +235,6 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     );
     return errorResponse(API_ERROR.MOBILE_BRIDGE_CODE_INVALID);
   }
-
-  // Tenant network-boundary enforcement. The bridge-code exchange is not
-  // session-based, so the proxy access-restriction gate does not cover it;
-  // enforce here for parity with the extension/iOS token lifecycle. tenantId
-  // and userId come from the validated bridge-code row.
-  const denied = await enforceAccessRestriction(req, stored.userId, stored.tenantId);
-  if (denied) return denied;
 
   // 8. Issue the token pair. cnfJkt is the verifier-computed thumbprint of
   // the proof's own JWK — same value as stored.deviceJkt post-verify.

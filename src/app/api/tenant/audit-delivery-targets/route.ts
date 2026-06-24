@@ -19,6 +19,7 @@ import { AuditDeliveryTargetKind } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
 import {
   MAX_AUDIT_DELIVERY_TARGETS,
@@ -204,7 +205,7 @@ async function handlePOST(req: NextRequest) {
     },
     {
       status: 201,
-      headers: { "Cache-Control": "no-store" },
+      headers: { ...NO_STORE_HEADERS },
     },
   );
 }

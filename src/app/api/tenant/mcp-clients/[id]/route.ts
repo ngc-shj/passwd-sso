@@ -12,6 +12,7 @@ import { MCP_SCOPES, LOOPBACK_REDIRECT_RE } from "@/lib/constants/auth/mcp";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/http/with-request-log";
 
@@ -88,6 +89,9 @@ async function handlePUT(
   );
   if (!existing) return notFound();
 
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
+
   const result = await parseBody(req, updateSchema);
   if (!result.ok) return result.response;
   const data = result.data;
@@ -153,6 +157,9 @@ async function handleDELETE(
     tx.mcpClient.findFirst({ where: { id, tenantId: actor.tenantId } }),
   );
   if (!existing) return notFound();
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   await withTenantRls(prisma, actor.tenantId, async (tx) =>
     tx.mcpClient.delete({ where: { id, tenantId: actor.tenantId } }),

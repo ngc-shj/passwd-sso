@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import {
   TENANT_PERMISSION,
@@ -39,6 +40,9 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   if (!webhook) {
     return notFound();
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   await withTenantRls(prisma, actor.tenantId, async (tx) =>
     tx.tenantWebhook.delete({ where: { id: webhookId, tenantId: actor.tenantId } }),

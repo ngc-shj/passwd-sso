@@ -344,5 +344,8 @@ describe("POST /api/mobile/token", () => {
     expect(status).toBe(403);
     expect(json.error).toBe("ACCESS_DENIED");
     expect(mockIssueIosToken).not.toHaveBeenCalled();
+    // C4 regression guard: access restriction runs BEFORE CAS-consume, so the
+    // one-time bridge code must NOT be consumed on the denial path.
+    expect(mockMobileBridgeCodeUpdateMany).not.toHaveBeenCalled();
   });
 });

@@ -13,6 +13,7 @@ const {
   mockGetCurrentMasterKeyVersion,
   mockGetMasterKeyByVersion,
   mockEncryptServerData,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -28,6 +29,7 @@ const {
     iv: "iv123456789012",
     authTag: "authtag1234567890123456789012",
   }),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -69,6 +71,9 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   getCurrentMasterKeyVersion: mockGetCurrentMasterKeyVersion,
   getMasterKeyByVersion: mockGetMasterKeyByVersion,
   encryptServerData: mockEncryptServerData,
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 // node:crypto randomBytes is used for secret generation — real implementation is fine in tests
 
@@ -342,6 +347,25 @@ describe("POST /api/tenant/webhooks", () => {
     const { status } = await parseResponse(res);
 
     expect(status).toBe(401);
+  });
+
+  it("returns 403 when session step-up is required", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const req = createRequest("POST", "http://localhost/api/tenant/webhooks", {
+      body: { url: "https://example.com/hook", events: ["ADMIN_VAULT_RESET_INITIATE"] },
+      headers: { origin: "http://localhost" },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockTenantWebhookCreate).not.toHaveBeenCalled();
   });
 
 });

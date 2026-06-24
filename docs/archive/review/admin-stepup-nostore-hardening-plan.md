@@ -117,3 +117,39 @@ Close a **systemic, documented** authorization-hardening gap and a **one-time-se
 2. **Legit admin, recently re-authenticated** deletes a service account → succeeds. (C3 happy path)
 3. **Legit iOS device on a disallowed network** exchanges its bridge code → 403 `ACCESS_DENIED`, code NOT consumed; the same device retries from an allowed network → succeeds. (C4 — retry leg verified in integration suite per VC1)
 4. **Operator mints an API key** → response carries `Cache-Control: no-store`; the plaintext token is not written to any intermediary cache. (C2)
+
+## Implementation Checklist
+
+### C1 — helper (new file)
+- [ ] `src/lib/http/cache-headers.ts` — `export const NO_STORE_HEADERS = { "Cache-Control": "no-store" } as const;` (const only, no wrapper)
+
+### C2 — no-store adoption (all spread `...NO_STORE_HEADERS`)
+New sites (currently missing):
+- [ ] `src/app/api/api-keys/route.ts:135` (token)
+- [ ] `src/app/api/tenant/mcp-clients/route.ts:189` (clientSecret)
+- [ ] `src/app/api/share-links/route.ts:218` (token + accessPassword)
+- [ ] `src/app/api/sends/route.ts:96`
+- [ ] `src/app/api/sends/file/route.ts:251`
+- [ ] `src/app/api/mcp/token/route.ts` ~:132 (authorization_code) + ~:217 (refresh_token)
+Migrate existing inline → helper (secret-bearing class only):
+- [ ] `tenant/scim-tokens/route.ts`, `tenant/service-accounts/[id]/tokens/route.ts`, `tenant/operator-tokens/route.ts`, `tenant/access-requests/[id]/approve/route.ts`, `tenant/audit-delivery-targets/route.ts`, `mobile/token/route.ts`, `mobile/token/refresh/route.ts`, `mobile/autofill-token/route.ts`, `extension/token/route.ts` (preserve `Deprecation` via spread)
+NOT migrated (SC3 — infra, non-secret): `health/live`, `health/ready`, `.well-known/apple-app-site-association`, `v1/openapi.json`, `mobile/authorize` (302 redirect, inline kept), `mobile/authorize/redirect`
+
+### C3 — step-up gate (insert after authz/existence check, before mutation; all handlers use `req`)
+- [ ] `tenant/mcp-clients/[id]/route.ts` — handlePUT (after notFound @89), handleDELETE (after notFound @155); remove KNOWN GAP comment in `mcp-clients/route.ts:113-117`
+- [ ] `tenant/service-accounts/[id]/route.ts` — handlePUT, handleDELETE (after authz block)
+- [ ] `tenant/service-accounts/[id]/tokens/[tokenId]/route.ts` — handleDELETE
+- [ ] `tenant/scim-tokens/[tokenId]/route.ts` — handleDELETE
+- [ ] `tenant/webhooks/route.ts` — handlePOST; `tenant/webhooks/[webhookId]/route.ts` — handleDELETE
+- [ ] `directory-sync/route.ts` — handlePOST; `directory-sync/[id]/route.ts` — handlePUT, handleDELETE (insert after `if (!resolved) notFound()`)
+- [ ] `tenant/policy/route.ts` — handlePATCH
+- [ ] each route's test file: add `vi.mock("@/lib/auth/session/recent-current-auth-method")` pass-through + reject case asserting mutation NOT called
+
+### C4 — bridge-code reorder
+- [ ] `src/app/api/mobile/token/route.ts` — move `enforceAccessRestriction` + `if (denied) return denied` to immediately after the `if (!stored)` guard (~line 152), before step 4; renumber step comments; update step-3 doc comment
+- [ ] `mobile/token/route.test.ts` — add denial-path assertion `mockMobileBridgeCodeUpdateMany` NOT called
+
+### Reused shared utilities (do NOT reimplement)
+- `requireRecentCurrentAuthMethod` from `@/lib/auth/session/recent-current-auth-method` (C3)
+- `enforceAccessRestriction` (existing, C4 — only reordered)
+- `NO_STORE_HEADERS` from `@/lib/http/cache-headers` (C1, consumed by C2)

@@ -18,6 +18,7 @@ import {
   FAMILY_REVOKED_REASON,
 } from "@/lib/constants/auth/mcp";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
 
 const tokenRateLimiter = createRateLimiter({
@@ -135,7 +136,7 @@ async function handlePOST(req: NextRequest) {
       expires_in: result.data.expiresIn,
       refresh_token: refreshToken,
       scope: result.data.scope.replace(/,/g, " "),
-    });
+    }, { headers: { ...NO_STORE_HEADERS } });
   } else if (grantType === "refresh_token") {
     const refreshTokenValue = body.refresh_token;
     const clientIdValue = body.client_id;
@@ -220,7 +221,7 @@ async function handlePOST(req: NextRequest) {
       expires_in: result.expiresIn,
       refresh_token: result.refreshToken,
       scope: result.scope.replace(/,/g, " "),
-    });
+    }, { headers: { ...NO_STORE_HEADERS } });
   } else {
     return NextResponse.json({ error: "unsupported_grant_type" }, { status: 400 });
   }

@@ -45,6 +45,7 @@ import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { readBytesWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { getLogger } from "@/lib/logger";
 import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
 import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
@@ -249,7 +250,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     },
     {
       status: 200,
-      headers: { "Cache-Control": "no-store" },
+      headers: { ...NO_STORE_HEADERS },
     },
   );
 }
