@@ -18,3 +18,22 @@
 ### D4 — Self-R-check: two missed no-store helper adoptions (resolved)
 - **Files**: `src/app/api/mobile/token/route.ts`, `src/app/api/tenant/webhooks/route.ts`
 - **Reason**: Step 2-5 self-R-check (R17/R22) found two secret-bearing routes still inline. `mobile/token` was owned by the C4 batch (which was told not to touch headers) and the C2 batch (told not to touch mobile/token) — it fell between batch boundaries. `tenant/webhooks` returns `secret: plainSecret` but was omitted from the original C2 enumeration. Both fixed: migrated to `NO_STORE_HEADERS`, plan C2 list amended, webhooks test gained a no-store assertion. No security regression (no-store was already present in both). Committed c1737dae.
+
+## Phase 3 deviations
+
+### D5 — bypass-rls fix (user finding + Round-1)
+- **File**: `src/app/api/tenant/policy/route.ts`
+- The Phase 2 D2 lint "fix" (`async (tx) =>` → `async ()`) introduced a `check:bypass-rls` CI-gate failure (the check forbids the tx-less callback form). Root cause: the original code redundantly re-entered `prisma.$transaction` inside `withBypassRls`, and the inner transaction did NOT inherit the bypass `set_config` (transaction-local GUCs). Fixed by removing the nested `$transaction` and using the bypass `tx` directly — `withBypassRls` already provides transactional atomicity. This is the architecturally correct form (queries now run with the bypass GUC live).
+- **Accepted Minor (S-R2-1)**: the removed inner transaction carried `isolationLevel: "Serializable"`; `withBypassRls` uses the default (Read Committed). Worst case: two OWNER admins concurrently lowering the same team-policy ceiling could leave a team policy briefly above the new tenant ceiling. Likelihood: low (two simultaneous OWNER PATCHes on the same tenant). Cost to fix: would require extending `withBypassRls` to accept an isolationLevel — out of proportion. Self-heals on next write; both actors are trusted OWNERs. No security bypass.
+
+### D6 — step-up scope expanded to all detected routes (user decision)
+- Added step-up to members/[userId] PUT, reset-vault POST, audit-delivery-targets POST + [id] PATCH, breakglass POST + [id] DELETE (beyond the original 7 families). User explicitly chose "all detected routes". audit-delivery [id] PATCH: parseBody moved to after the step-up gate (canonical authz→existence→step-up→body order; Round-2 S-R2-5).
+
+### D7 — delivery-URL credential masking (user finding)
+- `isSsrfSafeWebhookUrl` now rejects embedded credentials; `maskUrlForDisplay` (origin+pathname) applied to the audit-delivery list response and 3 worker log sites. Delivery still uses the full URL.
+- **Noted Minor (S-R2-12, unreachable)**: `sanitizeErrorForStorage` does not strip userinfo from URL-shaped error strings, but the ingestion gate now blocks credentialed URLs so no such URL reaches the worker. Defense-in-depth note only.
+
+### D8 — Round-2 fixes
+- **T-R2-4 (Major, fixed)**: 3 new tuple-type annotations `([, msg]: [unknown, string])` in `src/workers/audit-delivery.test.ts` broke `tsc --noEmit` (vitest transpiles without type-check, so the full suite passed but the typecheck CI gate would fail). Fixed by dropping the annotation. Lesson: re-run `tsc --noEmit` / `npm run typecheck`, not just vitest, after test edits.
+- **F-R2-1 (Minor, accepted cosmetic)**: the policy/route.ts transaction body is over-indented by 4 spaces (residue from the removed nesting). Valid, compiles, lint-clean. Re-indenting 90 lines for zero functional gain risks introducing errors and bloats the diff; left as-is.
+- **T-R2-1 / T-R2-3 (Minor, accepted)**: centralized members.test.ts / breakglass.test.ts have step-up pass-through mocks but no reject test. The reject path is already covered non-vacuously in the route-local test files (with `.not.toHaveBeenCalled()` on the mutation spy). No coverage gap; duplicating would be churn.

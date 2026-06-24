@@ -374,7 +374,7 @@ describe("log masking — logged URLs strip query and userinfo", () => {
     await webhookDeliverer.deliver(config, PAYLOAD);
 
     const attemptCall = mockLoggerInfo.mock.calls.find(
-      ([, msg]: [unknown, string]) => msg === "audit-delivery.webhook.attempt",
+      ([, msg]) => msg === "audit-delivery.webhook.attempt",
     );
     expect(attemptCall).toBeDefined();
     expect(attemptCall![0]).toMatchObject({ url: "https://example.com/hook" });
@@ -387,7 +387,7 @@ describe("log masking — logged URLs strip query and userinfo", () => {
     await siemHecDeliverer.deliver(config, PAYLOAD);
 
     const attemptCall = mockLoggerInfo.mock.calls.find(
-      ([, msg]: [unknown, string]) => msg === "audit-delivery.siem_hec.attempt",
+      ([, msg]) => msg === "audit-delivery.siem_hec.attempt",
     );
     expect(attemptCall).toBeDefined();
     expect(attemptCall![0]).toMatchObject({ url: "https://splunk.example.com/hec" });
@@ -398,7 +398,7 @@ describe("log masking — logged URLs strip query and userinfo", () => {
     await s3ObjectDeliverer.deliver(S3_CONFIG, PAYLOAD);
 
     const attemptCall = mockLoggerInfo.mock.calls.find(
-      ([, msg]: [unknown, string]) => msg === "audit-delivery.s3_object.attempt",
+      ([, msg]) => msg === "audit-delivery.s3_object.attempt",
     );
     expect(attemptCall).toBeDefined();
     // objectUrl has no query string but masking must not break it

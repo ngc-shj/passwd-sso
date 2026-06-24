@@ -36,10 +36,6 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
     return handleAuthError(e);
   }
 
-  const result = await parseBody(req, patchSchema);
-  if (!result.ok) return result.response;
-  const { data } = result;
-
   const target = await withTenantRls(prisma, actor.tenantId, async (tx) =>
     tx.auditDeliveryTarget.findFirst({
       where: { id, tenantId: actor.tenantId },
@@ -53,6 +49,10 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
 
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
+
+  const result = await parseBody(req, patchSchema);
+  if (!result.ok) return result.response;
+  const { data } = result;
 
   // No-op guard: skip update + audit log if isActive is already the requested value
   if (target.isActive === data.isActive) {
