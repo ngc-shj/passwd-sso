@@ -67,7 +67,10 @@ final class FaviconLoaderTests: XCTestCase {
     return FaviconLoader(apiClient: client, serverURL: serverURL, session: mockSession)
   }
 
-  private func faviconURL(host: String = "example.com", size: Int = 32) -> URL {
+  // The stub matches all requests (MockURLProtocol.canInit returns true), so this
+  // helper only needs the path, not host/size query items (T-3: dropped the unused
+  // params that made the signature misleading).
+  private func faviconURL() -> URL {
     serverURL
       .appending(path: "/api/mobile/favicon", directoryHint: .notDirectory)
   }

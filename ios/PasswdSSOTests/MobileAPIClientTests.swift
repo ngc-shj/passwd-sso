@@ -1015,6 +1015,43 @@ final class MobileAPIClientTests: XCTestCase {
     let body = try JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
     XCTAssertEqual(body?["fetchFavicons"] as? Bool, true)
   }
+
+  func testGetFaviconPref_returnsFalse() async throws {
+    seedAccessToken()
+    let prefURL = serverURL.appending(path: "/api/mobile/favicon-pref", directoryHint: .notDirectory)
+    MockURLProtocol.requestHandler = { _ in
+      (Data(#"{"fetchFavicons":false}"#.utf8),
+       httpResponse(status: 200, url: prefURL, headers: ["Content-Type": "application/json"]))
+    }
+    let client = MobileAPIClient(
+      serverURL: serverURL, signer: FakeSigner(), jwk: knownJWK,
+      tokenStore: tokenStore, urlSession: session
+    )
+    let on = try await client.getFaviconPref()
+    XCTAssertFalse(on, "getFaviconPref must decode a false fetchFavicons, not always true")
+  }
+
+  func testSetFaviconPref_false_putBodyAndEcho() async throws {
+    seedAccessToken()
+    var capturedRequest: URLRequest?
+    let prefURL = serverURL.appending(path: "/api/mobile/favicon-pref", directoryHint: .notDirectory)
+    MockURLProtocol.requestHandler = { request in
+      capturedRequest = request
+      return (Data(#"{"fetchFavicons":false}"#.utf8),
+              httpResponse(status: 200, url: prefURL, headers: ["Content-Type": "application/json"]))
+    }
+    let client = MobileAPIClient(
+      serverURL: serverURL, signer: FakeSigner(), jwk: knownJWK,
+      tokenStore: tokenStore, urlSession: session
+    )
+    let result = try await client.setFaviconPref(false)
+    XCTAssertFalse(result, "setFaviconPref(false) must return the echoed false")
+    let req = try XCTUnwrap(capturedRequest)
+    let bodyData = try XCTUnwrap(req.httpBody ?? readStream(req.httpBodyStream))
+    let body = try JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
+    XCTAssertEqual(body?["fetchFavicons"] as? Bool, false,
+                   "setFaviconPref(false) must PUT fetchFavicons:false, not always true")
+  }
 }
 
 // MARK: - Token refresh + validAccessToken tests (C0/C1/C2/C3)

@@ -150,10 +150,13 @@ struct VaultListView: View {
     .onAppear {
       reload(cacheData)
       updateScreenRecordingState()
-      resolveShowFavicons()
+      // Configure the favicon loader BEFORE resolving showFavicons so the first
+      // row render of an opted-in vault can fetch immediately instead of showing
+      // a globe until the next render (F-1).
       if let serverURL = loadServerConfig()?.baseURL {
         FaviconLoader.configure(apiClient: apiClient, serverURL: serverURL)
       }
+      resolveShowFavicons()
     }
     .onReceive(
       NotificationCenter.default.publisher(for: UIScreen.capturedDidChangeNotification)
@@ -342,7 +345,8 @@ struct VaultListView: View {
           viewModel: viewModel,
           apiClient: apiClient,
           hostSyncService: hostSyncService,
-          cacheKey: cacheKey
+          cacheKey: cacheKey,
+          showFavicons: showFavicons
         )
       } label: {
         EntrySummaryRow(summary: summary, showFavicons: showFavicons)

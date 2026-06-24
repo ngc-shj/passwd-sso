@@ -105,7 +105,8 @@ struct VaultCategoryListView: View {
               viewModel: viewModel,
               apiClient: apiClient,
               hostSyncService: hostSyncService,
-              cacheKey: cacheKey
+              cacheKey: cacheKey,
+              showFavicons: showFavicons
             )
           } label: {
             EntrySummaryRow(summary: summary, showFavicons: showFavicons)
