@@ -120,6 +120,7 @@ private enum ProbeError: LocalizedError {
 struct ServerURLSetupView: View {
   @State private var viewModel = ServerURLSetupViewModel()
   let onReady: (ServerConfig) -> Void
+  var onEnterDemo: (() -> Void)? = nil
 
   var body: some View {
     NavigationStack {
@@ -170,6 +171,18 @@ struct ServerURLSetupView: View {
           if case .probing = viewModel.state { return true }
           return false
         }())
+
+        if let onEnterDemo {
+          Button {
+            onEnterDemo()
+          } label: {
+            Text("Try Demo Mode")
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.large)
+          .accessibilityIdentifier("server-setup-demo-button")
+        }
 
         Spacer()
         Spacer()

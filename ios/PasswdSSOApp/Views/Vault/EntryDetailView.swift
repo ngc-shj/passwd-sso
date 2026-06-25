@@ -12,11 +12,13 @@ struct EntryDetailView: View {
   let vaultKey: SymmetricKey
   let userId: String
   let keyVersion: Int
-  let autoLockService: AutoLockService
+  var autoLockService: AutoLockService? = nil
   @Bindable var viewModel: VaultViewModel
-  let apiClient: MobileAPIClient
-  let hostSyncService: HostSyncService
+  var apiClient: MobileAPIClient? = nil
+  var hostSyncService: HostSyncService? = nil
   var cacheKey: SymmetricKey? = nil
+  /// When true, hides Edit controls and disables mutation. Used by DemoVaultView.
+  var isReadOnly: Bool = false
   /// Resolved server favicon opt-in, threaded from the list (C7) so the detail
   /// icon stays consistent with the rows rather than re-reading the store (F-3).
   var showFavicons: Bool = false
@@ -62,7 +64,7 @@ struct EntryDetailView: View {
       // corrupt a non-login entry on save (empty login scalars + login-shaped
       // overview). Non-login entries are edited in the web app. nil/unknown
       // entryType falls back to LOGIN, so the button shows during load.
-      if EntryTypeCategory.isEditableOnIOS(rawType: detail?.entryType) {
+      if !isReadOnly && EntryTypeCategory.isEditableOnIOS(rawType: detail?.entryType) {
         ToolbarItem(placement: .topBarTrailing) {
           Button("Edit") {
             isShowingEditForm = true
@@ -74,7 +76,7 @@ struct EntryDetailView: View {
     // just-saved edit is reflected immediately (the VM refreshes cacheData after
     // the PUT+sync; without this trigger the view keeps showing pre-edit values).
     .sheet(isPresented: $isShowingEditForm, onDismiss: { loadDetail() }) {
-      if let detail {
+      if let detail, let apiClient, let hostSyncService {
         EntryForm(
           mode: .edit(summary: summary, initial: detail),
           vaultKey: vaultKey,
@@ -103,8 +105,8 @@ struct EntryDetailView: View {
     // view stays foregrounded (lock() does not unmount it). The detail now
     // holds SSH private keys, card numbers, IBANs — a larger surface than the
     // password+TOTP it once carried, so don't leave it resident past lock.
-    .onChange(of: autoLockService.state) { _, newState in
-      if newState != .unlocked {
+    .onChange(of: autoLockService?.state) { _, newState in
+      if let newState, newState != .unlocked {
         detail = nil
       }
     }
@@ -223,7 +225,7 @@ struct EntryDetailView: View {
           Spacer()
           Button {
             copySecurely(value: value)
-            autoLockService.recordActivity()
+            autoLockService?.recordActivity()
           } label: {
             Image(systemName: "doc.on.doc")
               .frame(minWidth: 44, minHeight: 44)
@@ -250,7 +252,7 @@ struct EntryDetailView: View {
         Spacer()
         Button {
           isPasswordVisible.toggle()
-          autoLockService.recordActivity()
+          autoLockService?.recordActivity()
         } label: {
           Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
             .frame(minWidth: 44, minHeight: 44)
@@ -260,7 +262,7 @@ struct EntryDetailView: View {
 
         Button {
           copySecurely(value: password)
-          autoLockService.recordActivity()
+          autoLockService?.recordActivity()
         } label: {
           Image(systemName: "doc.on.doc")
             .frame(minWidth: 44, minHeight: 44)

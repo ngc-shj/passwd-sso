@@ -34,6 +34,7 @@ struct SignInView: View {
   /// before authenticating (the URL setup screen is skipped on a known server).
   let serverURL: URL
   let onSignedIn: (TokenPair) -> Void
+  var onEnterDemo: (() -> Void)? = nil
 
   @State private var state: SignInViewState = .idle
   @State private var windowProvider = WindowProvider()
@@ -75,6 +76,18 @@ struct SignInView: View {
       .controlSize(.large)
       .accessibilityIdentifier("sign-in-primary-button")
       .disabled(state == .signingIn)
+
+      if let onEnterDemo {
+        Button {
+          onEnterDemo()
+        } label: {
+          Text("Try Demo Mode")
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .accessibilityIdentifier("sign-in-demo-button")
+      }
 
       Spacer()
       Spacer()

@@ -31,6 +31,7 @@ enum AppState {
   // server config + token (no OAuth re-sign-in). Carries serverConfig/apiClient
   // so the passphrase screen can call /api/vault/unlock/data again.
   case vaultLocked(serverConfig: ServerConfig, apiClient: MobileAPIClient)
+  case demo(DemoVault)
 }
 
 // MARK: - Root view
@@ -67,11 +68,18 @@ struct RootView: View {
         launchSplash
 
       case .setup:
-        ServerURLSetupView { config in
-          let tokenStore = HostTokenStore()
-          let coordinator = AuthCoordinator(serverConfig: config, tokenStore: tokenStore)
-          appState = .signIn(serverConfig: config, coordinator: coordinator)
-        }
+        ServerURLSetupView(
+          onReady: { config in
+            let tokenStore = HostTokenStore()
+            let coordinator = AuthCoordinator(serverConfig: config, tokenStore: tokenStore)
+            appState = .signIn(serverConfig: config, coordinator: coordinator)
+          },
+          onEnterDemo: {
+            if let demo = try? DemoVaultFactory.makeDemoVault() {
+              appState = .demo(demo)
+            }
+          }
+        )
 
       case .signIn(let config, let coordinator):
         makeSignInView(config: config, coordinator: coordinator)
@@ -142,6 +150,9 @@ struct RootView: View {
           .controlSize(.large)
           .padding(.bottom)
         }
+
+      case .demo(let demo):
+        DemoVaultView(demo: demo, onExit: { appState = .setup })
       }
     }
     // Re-evaluate content bodies in place on a language change so already-rendered
@@ -200,6 +211,11 @@ struct RootView: View {
             coordinator: coordinator
           )
           appState = .signedIn(serverConfig: config, apiClient: apiClient)
+        }
+      },
+      onEnterDemo: {
+        if let demo = try? DemoVaultFactory.makeDemoVault() {
+          appState = .demo(demo)
         }
       }
     )
