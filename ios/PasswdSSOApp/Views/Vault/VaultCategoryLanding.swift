@@ -72,11 +72,12 @@ struct VaultCategoryListView: View {
   let vaultKey: SymmetricKey
   let userId: String
   let keyVersion: Int
-  let autoLockService: AutoLockService
+  var autoLockService: AutoLockService? = nil
   @Bindable var viewModel: VaultViewModel
-  let apiClient: MobileAPIClient
-  let hostSyncService: HostSyncService
+  var apiClient: MobileAPIClient? = nil
+  var hostSyncService: HostSyncService? = nil
   var cacheKey: SymmetricKey? = nil
+  var isReadOnly: Bool = false
   var showFavicons: Bool = false
 
   // Seed synchronously so an already-active recording never shows a frame of
@@ -106,6 +107,7 @@ struct VaultCategoryListView: View {
               apiClient: apiClient,
               hostSyncService: hostSyncService,
               cacheKey: cacheKey,
+              isReadOnly: isReadOnly,
               showFavicons: showFavicons
             )
           } label: {

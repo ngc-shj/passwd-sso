@@ -73,7 +73,7 @@ extension EntryDetailView {
         label: label,
         value: value,
         onCopy: { copySecurely(value: $0) },
-        onActivity: { autoLockService.recordActivity() }
+        onActivity: { autoLockService?.recordActivity() }
       )
     }
   }

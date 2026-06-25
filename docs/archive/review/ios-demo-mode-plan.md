@@ -157,3 +157,37 @@ New terminal case `AppState.demo(demo: DemoVault)`. RootView renders `DemoVaultV
 1. **Reviewer, fresh install, iPad**: launch → `.setup` (server URL screen) → "Try Demo Mode" (no URL entered) → demo vault, 9 entries → category "Logins" → open "AWS Console (IAM)" → reveal password + copy TOTP → back → search "ssh" → open "Deploy Key" → see public key/fingerprint → "Exit Demo" → back at server URL screen.
 2. **Real user with existing vault, curious**: has a real unlocked vault; signs out to `.setup`; tries demo; exits; signs back in → real vault unlocks unchanged, AutoFill suggestions unchanged, settings unchanged.
 3. **Edge — demo then real sign-in without exit**: from `.demo` the only forward control is "Exit Demo" → `.setup`; no path from `.demo` into a real unlock, so demo state cannot bleed into a real session.
+
+## Implementation Checklist
+
+### New files
+- `ios/Shared/Demo/DemoVaultFactory.swift` (Shared target) — `enum DemoVaultFactory` + `struct DemoVault` (C1). Builds 9 in-memory `CacheEntry` fixtures (8 types; login×2), each with `entryType` set + blobs encrypted under a fresh `SymmetricKey(size:.bits256)` + `aadVersion: 1` + `buildPersonalEntryAAD`. Mirrors `DebugVaultLoader.buildFixtureCacheEntries` blob-building ONLY (NOT its file/keychain writes). Per-type `FullBlobPayload`/`OverviewBlobPayload` shapes tracked against `EntryBlobGoldenPayloadTests.swift`.
+- `ios/PasswdSSOApp/Views/Vault/DemoVaultView.swift` (app target) — `struct DemoVaultView: View { let demo: DemoVault; let onExit: () -> Void }` (C3). Owns `@State viewModel = VaultViewModel()`; `.onAppear` → `viewModel.loadFromCache(cacheData: demo.cacheData, vaultKey: demo.vaultKey, userId: demo.userId, cacheKey: nil, teamDirectory: [])`. Renders: a "Demo Mode" banner, an "Exit Demo" toolbar button → `onExit()`, a category grid (`CategoryCard` over `EntryTypeCategory.allCases` present in the demo set + an "All" card) pushing `VaultCategoryListView(isReadOnly: true, …)`, a search field filtering `viewModel.filteredSummaries` into `EntrySummaryRow` → `EntryDetailView(isReadOnly: true, …)`. Passes `showFavicons: false` everywhere. Holds NO apiClient/hostSyncService/autoLockService/FaviconLoader.
+- `ios/Shared/Demo/DemoVaultPresentation.swift` (or nested) — small value type exposing `showsMutationAffordances=false`/`showsSyncControls=false`/`showsFavicons=false`/`exitLabel` that `DemoVaultView` actually reads (C3 acceptance / RT7).
+- `ios/PasswdSSOTests/DemoVaultFactoryTests.swift` — C1 unit tests (real decrypt path via `loadFromCache`→`filteredSummaries.count==9`; per-type `loadDetail` field; TOTP secret; NFR3 domain grep). Mirror `DebugVaultLoaderTests` idiom.
+- `ios/PasswdSSOTests/DemoModeStateTests.swift` — C2/C3 state-machine + presentation-flag tests + the grep-gate prove-red note.
+
+### Modified files (read-only seam — make 3 live deps optional)
+- `ios/PasswdSSOApp/Views/Vault/EntryDetailView.swift` — add `var isReadOnly: Bool = false`; change `autoLockService: AutoLockService` → `AutoLockService?`, `apiClient: MobileAPIClient?`, `hostSyncService: HostSyncService?` (all optional, default nil). Gate Edit toolbar + edit sheet on `!isReadOnly`. Replace `autoLockService.recordActivity()` → `autoLockService?.recordActivity()`; guard `.onChange(of: autoLockService.state)` so it is attached only when a service exists (e.g. via an optional-bound modifier). Live call sites pass the same args (defaults preserve behavior). **All existing live call sites keep working unchanged** (params default).
+- `ios/PasswdSSOApp/Views/Vault/EntryDetailTypeSections.swift` — the `extension EntryDetailView` section funcs call `autoLockService.recordActivity()` (line ~76) → `autoLockService?.recordActivity()`.
+- `ios/PasswdSSOApp/Views/Vault/VaultCategoryLanding.swift` — `VaultCategoryListView`: same optional-dep + `isReadOnly` treatment; forward `isReadOnly` into the `EntryDetailView` it pushes.
+- `ios/PasswdSSOApp/Views/RootView.swift` — add `case demo(DemoVault)` to `AppState`; render `DemoVaultView(demo:onExit: { appState = .setup })`; wire `onEnterDemo` into the sign-in/setup factories. Keep the `.onChange(of: autoLockService.state)` attached to `.vaultUnlocked` only.
+- `ios/PasswdSSOApp/Views/SignInView.swift` — add `onEnterDemo: () -> Void` + a "Try Demo Mode" button (C4).
+- `ios/PasswdSSOApp/Views/ServerURLSetupView.swift` — add `onEnterDemo` + a "Try Demo Mode" button (C4).
+- `ios/PasswdSSOApp/Localizable.xcstrings` — add "Try Demo Mode" / "Exit Demo" / "Demo Mode" (en + ja). Regenerate via xcodegen if needed.
+
+### Reused (do NOT reimplement — R1)
+- `CategoryCard`, `EntrySummaryRow`, `ScreenRecordingOverlay`, `SecretRow`, `EntryIconView` (VaultCategoryLanding.swift / EntryDetailTypeSections.swift / EntryIconView.swift) — standalone structs, reuse as-is.
+- `VaultViewModel.loadFromCache`/`loadDetail`/`filteredSummaries` — the existing decrypt + filter path; no changes.
+- `encryptAESGCMEncoded`, `buildPersonalEntryAAD`, `VaultType.blob/.overview`, `CacheEntry`, `CacheData`/`CacheHeader` — crypto + model primitives.
+- The per-type detail section funcs (`creditCardSection`/`sshKeySection`/…) — reused via `EntryDetailView(isReadOnly:true)`.
+
+### Forbidden-pattern grep gate (CI/pre-PR) — scope = `Demo*.swift` (NOT a hardcoded file list)
+- In `DemoVaultFactory.swift`: no `BridgeKeyStore`/`AppGroupWrappedKeyStore`/`saveVaultKey`/`cacheFileURL`/`writeCacheFile`/`HostTokenStore`/`FaviconLoader`.
+- In `DemoVaultView.swift`: no `MobileAPIClient`/`HostSyncService`/`runSync`/`FaviconLoader`/`CredentialIdentityRegistrar`/`refreshCredentialIdentities`/`onVaultReady`/`AppSettingsStore`. (Demo passes `nil` to the now-optional params, so it never names these symbols.)
+- Prove-red: temporarily add a forbidden symbol → gate fails.
+
+### Build/test verification
+- `xcodegen generate` (regenerate pbxproj for new files), commit pbxproj.
+- `xcodebuild test -scheme PasswdSSOApp -destination 'id=<sim udid>'` — all tests pass.
+- Pre-PR gate runs (ios-only docs/code change; SKIP_PRE_PR_GATE only for docs-only).
