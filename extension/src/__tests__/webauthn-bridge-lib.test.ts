@@ -188,10 +188,14 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
     );
   });
 
-  it("forwards PASSKEY_SIGN_ASSERTION to chrome.runtime.sendMessage", () => {
-    sendMessageMock.mockImplementation((_msg: unknown, cb: (r: unknown) => void) => {
-      cb({ ok: true });
-    });
+  // ── User-presence gate (SIGN_ASSERTION / CREATE_CREDENTIAL) ───────
+  // The terminal actions must originate from a trusted in-bridge selection,
+  // never directly from a page postMessage. A page script skipping the
+  // dropdown/banner has no approval and is rejected before reaching background.
+
+  it("REJECTS a page-direct PASSKEY_SIGN_ASSERTION with no prior trusted selection", () => {
+    const postedMessages: unknown[] = [];
+    vi.spyOn(window, "postMessage").mockImplementation((data) => { postedMessages.push(data); });
 
     const event = makeEvent({
       data: {
@@ -206,6 +210,49 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
     });
     handleWebAuthnMessage(event);
 
+    // Background must never be asked to sign.
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: WEBAUTHN_BRIDGE_RESP,
+        requestId: "req-sign",
+        response: { ok: false, error: "USER_PRESENCE_REQUIRED" },
+      }),
+    );
+  });
+
+  it("forwards PASSKEY_SIGN_ASSERTION only after a trusted dropdown selection authorizes that entry", async () => {
+    const { showPasskeyDropdown } = await import("../content/ui/passkey-dropdown");
+    sendMessageMock.mockImplementation((_msg: unknown, cb: (r: unknown) => void) => {
+      cb({ ok: true });
+    });
+
+    // Step 1: SELECT shows the dropdown; simulate the user picking entry-1
+    // (the dropdown only invokes onSelect from a trusted event).
+    handleWebAuthnMessage(makeEvent({
+      data: {
+        type: WEBAUTHN_BRIDGE_MSG,
+        requestId: "req-select",
+        action: "PASSKEY_SELECT",
+        payload: { entries: [{ id: "entry-1" }], rpId: "example.com" },
+      },
+    }));
+    const dropdownOptions = (showPasskeyDropdown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    dropdownOptions.onSelect({ id: "entry-1" });
+
+    // Step 2: the interceptor now posts SIGN_ASSERTION for the selected entry.
+    handleWebAuthnMessage(makeEvent({
+      data: {
+        type: WEBAUTHN_BRIDGE_MSG,
+        requestId: "req-sign",
+        action: "PASSKEY_SIGN_ASSERTION",
+        payload: {
+          entryId: "entry-1",
+          clientDataJSON: JSON.stringify({ type: "webauthn.get", challenge: "abc" }),
+        },
+      },
+    }));
+
     expect(sendMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         type: EXT_MSG.PASSKEY_SIGN_ASSERTION,
@@ -215,10 +262,76 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
     );
   });
 
-  it("forwards PASSKEY_CREATE_CREDENTIAL to chrome.runtime.sendMessage", () => {
-    sendMessageMock.mockImplementation((_msg: unknown, cb: (r: unknown) => void) => {
-      cb({ ok: true });
+  it("REJECTS PASSKEY_SIGN_ASSERTION whose entryId differs from the trusted selection", async () => {
+    const { showPasskeyDropdown } = await import("../content/ui/passkey-dropdown");
+    const postedMessages: unknown[] = [];
+    vi.spyOn(window, "postMessage").mockImplementation((data) => { postedMessages.push(data); });
+
+    handleWebAuthnMessage(makeEvent({
+      data: {
+        type: WEBAUTHN_BRIDGE_MSG,
+        requestId: "req-select",
+        action: "PASSKEY_SELECT",
+        payload: { entries: [{ id: "entry-1" }], rpId: "example.com" },
+      },
+    }));
+    const dropdownOptions = (showPasskeyDropdown as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    dropdownOptions.onSelect({ id: "entry-1" });
+
+    // Page tries to sign a DIFFERENT entry than the user selected.
+    handleWebAuthnMessage(makeEvent({
+      data: {
+        type: WEBAUTHN_BRIDGE_MSG,
+        requestId: "req-sign",
+        action: "PASSKEY_SIGN_ASSERTION",
+        payload: {
+          entryId: "entry-evil",
+          clientDataJSON: JSON.stringify({ type: "webauthn.get", challenge: "abc" }),
+        },
+      },
+    }));
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: WEBAUTHN_BRIDGE_RESP,
+        requestId: "req-sign",
+        response: { ok: false, error: "USER_PRESENCE_REQUIRED" },
+      }),
+    );
+  });
+
+  it("consumes the sign approval once — a replayed PASSKEY_SIGN_ASSERTION is rejected", async () => {
+    const { showPasskeyDropdown } = await import("../content/ui/passkey-dropdown");
+    sendMessageMock.mockImplementation((_msg: unknown, cb: (r: unknown) => void) => { cb({ ok: true }); });
+
+    handleWebAuthnMessage(makeEvent({
+      data: {
+        type: WEBAUTHN_BRIDGE_MSG,
+        requestId: "req-select",
+        action: "PASSKEY_SELECT",
+        payload: { entries: [{ id: "entry-1" }], rpId: "example.com" },
+      },
+    }));
+    (showPasskeyDropdown as ReturnType<typeof vi.fn>).mock.calls[0][0].onSelect({ id: "entry-1" });
+
+    const signEvent = makeEvent({
+      data: {
+        type: WEBAUTHN_BRIDGE_MSG,
+        requestId: "req-sign",
+        action: "PASSKEY_SIGN_ASSERTION",
+        payload: { entryId: "entry-1", clientDataJSON: "{}" },
+      },
     });
+    handleWebAuthnMessage(signEvent); // first use — allowed
+    handleWebAuthnMessage(signEvent); // replay — must be rejected
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("REJECTS a page-direct PASSKEY_CREATE_CREDENTIAL with no prior trusted save", () => {
+    const postedMessages: unknown[] = [];
+    vi.spyOn(window, "postMessage").mockImplementation((data) => { postedMessages.push(data); });
 
     const event = makeEvent({
       data: {
@@ -238,6 +351,53 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
     });
     handleWebAuthnMessage(event);
 
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: WEBAUTHN_BRIDGE_RESP,
+        requestId: "req-create",
+        response: { ok: false, error: "USER_PRESENCE_REQUIRED" },
+      }),
+    );
+  });
+
+  it("forwards PASSKEY_CREATE_CREDENTIAL only after a trusted save-banner press authorizes that rpId", async () => {
+    const { showPasskeySaveBanner } = await import("../content/ui/passkey-save-banner");
+    // First CONFIRM_CREATE → CHECK_DUPLICATE returns entries → banner shown.
+    sendMessageMock.mockImplementationOnce((_msg: unknown, cb: (r: unknown) => void) => {
+      cb({ entries: [] });
+    });
+    handleWebAuthnMessage(makeEvent({
+      data: {
+        type: WEBAUTHN_BRIDGE_MSG,
+        requestId: "req-confirm",
+        action: "PASSKEY_CONFIRM_CREATE",
+        payload: { rpId: "example.com", rpName: "Example", userId: "user-handle", userName: "alice", userDisplayName: "Alice" },
+      },
+    }));
+    // Simulate the user pressing Save (banner only fires onSave from a trusted event).
+    const bannerOptions = (showPasskeySaveBanner as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    bannerOptions.onSave();
+
+    // Now CREATE_CREDENTIAL for the same identity (rpId + userId + userName) is authorized.
+    sendMessageMock.mockImplementation((_msg: unknown, cb: (r: unknown) => void) => { cb({ ok: true }); });
+    handleWebAuthnMessage(makeEvent({
+      data: {
+        type: WEBAUTHN_BRIDGE_MSG,
+        requestId: "req-create",
+        action: "PASSKEY_CREATE_CREDENTIAL",
+        payload: {
+          rpId: "example.com",
+          rpName: "Example",
+          userId: "user-handle",
+          userName: "alice",
+          userDisplayName: "Alice",
+          excludeCredentialIds: [],
+          clientDataJSON: JSON.stringify({ type: "webauthn.create", challenge: "xyz" }),
+        },
+      },
+    }));
+
     expect(sendMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         type: EXT_MSG.PASSKEY_CREATE_CREDENTIAL,
@@ -245,6 +405,94 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
       }),
       expect.any(Function),
     );
+  });
+
+  it("REJECTS PASSKEY_CREATE_CREDENTIAL whose identity differs from the trusted save", async () => {
+    const { showPasskeySaveBanner } = await import("../content/ui/passkey-save-banner");
+    const postedMessages: unknown[] = [];
+    vi.spyOn(window, "postMessage").mockImplementation((data) => { postedMessages.push(data); });
+    sendMessageMock.mockImplementationOnce((_msg: unknown, cb: (r: unknown) => void) => { cb({ entries: [] }); });
+
+    handleWebAuthnMessage(makeEvent({
+      data: {
+        type: WEBAUTHN_BRIDGE_MSG,
+        requestId: "req-confirm",
+        action: "PASSKEY_CONFIRM_CREATE",
+        payload: { rpId: "example.com", rpName: "Example", userId: "user-handle", userName: "alice", userDisplayName: "Alice" },
+      },
+    }));
+    (showPasskeySaveBanner as ReturnType<typeof vi.fn>).mock.calls[0][0].onSave();
+    // Drop the CONFIRM_CREATE's own CHECK_DUPLICATE call so the assertion below
+    // measures only whether the terminal CREATE_CREDENTIAL reached background.
+    sendMessageMock.mockClear();
+
+    // Page tries to create a credential for a DIFFERENT user than the banner showed.
+    handleWebAuthnMessage(makeEvent({
+      data: {
+        type: WEBAUTHN_BRIDGE_MSG,
+        requestId: "req-create",
+        action: "PASSKEY_CREATE_CREDENTIAL",
+        payload: {
+          rpId: "example.com",
+          rpName: "Example",
+          userId: "user-evil",
+          userName: "mallory",
+          userDisplayName: "Alice",
+          excludeCredentialIds: [],
+          clientDataJSON: "{}",
+        },
+      },
+    }));
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: WEBAUTHN_BRIDGE_RESP,
+        requestId: "req-create",
+        response: { ok: false, error: "USER_PRESENCE_REQUIRED" },
+      }),
+    );
+  });
+
+  it("REJECTS PASSKEY_SIGN_ASSERTION after the approval TTL has elapsed", async () => {
+    const { showPasskeyDropdown } = await import("../content/ui/passkey-dropdown");
+    const postedMessages: unknown[] = [];
+    vi.spyOn(window, "postMessage").mockImplementation((data) => { postedMessages.push(data); });
+
+    // Freeze time so we can advance past the 30s TTL deterministically.
+    const base = 1_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(base);
+
+    handleWebAuthnMessage(makeEvent({
+      data: {
+        type: WEBAUTHN_BRIDGE_MSG,
+        requestId: "req-select",
+        action: "PASSKEY_SELECT",
+        payload: { entries: [{ id: "entry-1" }], rpId: "example.com" },
+      },
+    }));
+    (showPasskeyDropdown as ReturnType<typeof vi.fn>).mock.calls[0][0].onSelect({ id: "entry-1" });
+
+    // 31s later — past the 30s approval TTL.
+    nowSpy.mockReturnValue(base + 31_000);
+    handleWebAuthnMessage(makeEvent({
+      data: {
+        type: WEBAUTHN_BRIDGE_MSG,
+        requestId: "req-sign",
+        action: "PASSKEY_SIGN_ASSERTION",
+        payload: { entryId: "entry-1", clientDataJSON: "{}" },
+      },
+    }));
+
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: WEBAUTHN_BRIDGE_RESP,
+        requestId: "req-sign",
+        response: { ok: false, error: "USER_PRESENCE_REQUIRED" },
+      }),
+    );
+    nowSpy.mockRestore();
   });
 
   // ── PASSKEY_CONFIRM_CREATE ────────────────────────────────────

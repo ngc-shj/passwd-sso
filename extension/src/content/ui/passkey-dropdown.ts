@@ -97,7 +97,13 @@ export function showPasskeyDropdown(opts: PasskeyDropdownOptions): void {
     item.appendChild(icon);
     item.appendChild(text);
 
-    item.addEventListener("click", () => opts.onSelect(entry));
+    // Selecting a passkey authorizes a credential assertion — only a trusted
+    // (real) click may trigger it. Blocks a page script dispatching a synthetic
+    // click to auto-select without a human gesture (mirrors suggestion-dropdown).
+    item.addEventListener("click", (e) => {
+      if (!e.isTrusted) return;
+      opts.onSelect(entry);
+    });
     dropdown.appendChild(item);
     itemElements.push(item);
   }
@@ -125,7 +131,10 @@ export function showPasskeyDropdown(opts: PasskeyDropdownOptions): void {
 
   platformItem.appendChild(platformIcon);
   platformItem.appendChild(platformText);
-  platformItem.addEventListener("click", () => opts.onPlatform());
+  platformItem.addEventListener("click", (e) => {
+    if (!e.isTrusted) return;
+    opts.onPlatform();
+  });
   dropdown.appendChild(platformItem);
   itemElements.push(platformItem);
 
@@ -154,8 +163,20 @@ export function showPasskeyDropdown(opts: PasskeyDropdownOptions): void {
       activeIndex = Math.max(activeIndex - 1, 0);
       updateActive();
     } else if (e.key === "Enter" && activeIndex >= 0) {
+      // Confirming a passkey authorizes a credential assertion — only a trusted
+      // (real) keypress may trigger it. Invoke the callback directly rather than
+      // synthesizing a click (which the click guards above would reject anyway).
+      if (!e.isTrusted) return;
       e.preventDefault();
-      itemElements[activeIndex].click();
+      const active = itemElements[activeIndex];
+      const entryId = active.getAttribute("data-entry-id");
+      if (entryId) {
+        const entry = opts.entries.find((x) => x.id === entryId);
+        if (entry) opts.onSelect(entry);
+      } else {
+        // The only item without a data-entry-id is the platform authenticator row.
+        opts.onPlatform();
+      }
     }
   };
   document.addEventListener("keydown", keyHandler, true);
