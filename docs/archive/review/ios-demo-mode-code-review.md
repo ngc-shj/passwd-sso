@@ -1,6 +1,15 @@
 # Code Review: ios-demo-mode
 Date: 2026-06-26
-Review round: 1 (all findings resolved)
+Review rounds: 2 (all findings resolved)
+
+## Round 2 (incremental verification)
+Reviewed the Round-1 fix commit (4eec0a42). **No findings.** Verified: all three
+source-reading gate tests switched to `#filePath` + non-swallowing `try` (no
+remaining `#file`/`try?`-swallow in the test dir); no sibling bug-class
+recurrence (the only other source-reading gate, `LocalizationCatalogTests`, was
+already correct); the manual-test artifact is present and complete with the NFR1
+residue check; prove-red capability confirmed (path resolves to real files, the
+`source.contains` assertion can now fail). Review loop terminates.
 
 ## Changes from Previous Round
 Initial code review of the Phase 2 implementation (commit c7ddf9ba).
