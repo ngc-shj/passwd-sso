@@ -8,6 +8,27 @@ import type { PasskeyMatchEntry } from "../types/messages";
 import { showPasskeyDropdown, hidePasskeyDropdown } from "./ui/passkey-dropdown";
 import { showPasskeySaveBanner } from "./ui/passkey-save-banner";
 
+// User-presence gate: the terminal SIGN_ASSERTION / CREATE_CREDENTIAL actions
+// must originate from a trusted in-bridge selection (a real dropdown click or
+// save-banner press), NOT directly from a page postMessage. WebAuthn's
+// user-presence guarantee is otherwise only enforced by convention in the
+// MAIN-world interceptor, which page JS can bypass by posting the terminal
+// action itself. We record a one-time authorization here on the trusted
+// selection and require the terminal action to match it.
+//
+// Cross-origin theft is already blocked in the background (clientDataJSON.origin
+// and the entry's rpId are bound to the sender tab URL). This gate closes the
+// remaining same-origin gap: a page script (e.g. via stored XSS) skipping the
+// dropdown to mint an assertion with no human gesture.
+interface SignApproval {
+  entryId: string;
+}
+interface CreateApproval {
+  rpId: string;
+}
+let pendingSignApproval: SignApproval | null = null;
+let pendingCreateApproval: CreateApproval | null = null;
+
 function isContextValid(): boolean {
   try {
     return !!chrome.runtime && !!chrome.runtime.id;
@@ -65,6 +86,9 @@ function handleSelect(
   requestId: string,
   payload: { entries: PasskeyMatchEntry[]; rpId: string },
 ): void {
+  // A new selection round invalidates any prior unconsumed approval.
+  pendingSignApproval = null;
+
   if (!payload.entries || payload.entries.length === 0) {
     respond(requestId, { action: "platform" });
     return;
@@ -75,6 +99,9 @@ function handleSelect(
     rpId: payload.rpId,
     onSelect: (entry) => {
       hidePasskeyDropdown();
+      // Authorize the subsequent SIGN_ASSERTION for exactly this entry.
+      // The dropdown only invokes onSelect from a trusted (isTrusted) event.
+      pendingSignApproval = { entryId: entry.id };
       respond(requestId, { action: "select", entry });
     },
     onPlatform: () => {
@@ -92,6 +119,16 @@ function handleSignAssertion(
   requestId: string,
   payload: { entryId: string; clientDataJSON: string; teamId?: string },
 ): void {
+  // Fail closed unless a trusted selection authorized exactly this entry.
+  // A page script that skips the dropdown and posts SIGN_ASSERTION directly
+  // has no approval and is rejected here, before reaching the background.
+  const approval = pendingSignApproval;
+  pendingSignApproval = null; // single-use
+  if (!approval || approval.entryId !== payload.entryId) {
+    respond(requestId, { ok: false, error: "USER_PRESENCE_REQUIRED" });
+    return;
+  }
+
   chrome.runtime.sendMessage(
     {
       type: EXT_MSG.PASSKEY_SIGN_ASSERTION,
@@ -110,6 +147,9 @@ function handleConfirmCreate(
   requestId: string,
   payload: { rpId: string; rpName: string; userName: string; userDisplayName: string; userId?: string },
 ): void {
+  // A new create round invalidates any prior unconsumed approval.
+  pendingCreateApproval = null;
+
   let resolved = false;
   const show = (existingEntries: PasskeyMatchEntry[]) => {
     if (resolved) return;
@@ -119,6 +159,9 @@ function handleConfirmCreate(
       userName: payload.userName,
       existingEntries,
       onSave: (replaceEntryId?: string) => {
+        // Authorize the subsequent CREATE_CREDENTIAL for this rpId. The save
+        // banner only invokes onSave from a trusted (isTrusted) press.
+        pendingCreateApproval = { rpId: payload.rpId };
         respond(requestId, { action: "save", replaceEntryId });
       },
       onDismiss: () => {
@@ -168,6 +211,14 @@ function handleCreateCredential(
     replaceEntryId?: string;
   },
 ): void {
+  // Fail closed unless a trusted save-banner press authorized this rpId.
+  const approval = pendingCreateApproval;
+  pendingCreateApproval = null; // single-use
+  if (!approval || approval.rpId !== payload.rpId) {
+    respond(requestId, { ok: false, error: "USER_PRESENCE_REQUIRED" });
+    return;
+  }
+
   chrome.runtime.sendMessage(
     {
       type: EXT_MSG.PASSKEY_CREATE_CREDENTIAL,
