@@ -15,6 +15,38 @@ RESET='\033[0m'
 # is no second copy to drift (R33).
 STATIC_ONLY="${PRE_PR_STATIC_ONLY:-0}"
 
+# Web-side heavy steps (Lint / Typecheck / vitest / integration / next build /
+# CLI / Extension) only matter when the diff actually touches Web/Node code.
+# On an iOS-only branch they spin uselessly — and in an ios worktree the Web
+# suite can flaky-timeout, blocking every push. Mirror CI's `app` paths-filter
+# (.github/workflows/ci.yml `changes` job) so the local decision matches CI's:
+# if none of the app-filter paths changed, CI skips the app job too, so we can
+# safely skip the Web steps here. RUN_WEB=0 ⇒ skip. Escape hatches:
+#   PRE_PR_FORCE_FULL=1 ⇒ always run Web steps (override the auto-skip).
+#   Detection failure (no git, no base) ⇒ fail safe = run everything.
+# The iOS static guards above (e.g. check-ios-no-diagnostic-logging) always run.
+detect_web_changes() {
+  [ "${PRE_PR_FORCE_FULL:-0}" = "1" ] && return 0
+  # Keep this list in lockstep with the `app:` filter in
+  # .github/workflows/ci.yml (R33 — single source of truth for what gates Web).
+  local app_paths='^(Dockerfile|docker-compose.*\.yml|src/|prisma/|proxy\.ts|instrumentation\.ts|messages/|package\.json|package-lock\.json|tsconfig.*\.json|vitest\.config\.|eslint\.config\.|next\.config\.|scripts/)'
+  local base diff ref
+  # Prefer origin/main (CI's base; survives a stale local main) and fall back to
+  # local main only if the remote ref is absent.
+  ref=origin/main
+  git rev-parse --verify --quiet "$ref" >/dev/null 2>&1 || ref=main
+  base=$(git merge-base "$ref" HEAD 2>/dev/null) || return 0  # no base ⇒ run all
+  diff=$(git diff --name-only "$base"...HEAD 2>/dev/null) || return 0
+  # Empty diff (e.g. nothing committed yet) ⇒ run all, can't prove iOS-only.
+  [ -z "$diff" ] && return 0
+  printf '%s\n' "$diff" | grep -qE "$app_paths"
+}
+if detect_web_changes; then
+  RUN_WEB=1
+else
+  RUN_WEB=0
+fi
+
 passed=0
 failed=0
 failures=()
@@ -134,7 +166,12 @@ run_step "Static: raw-body-read" bash scripts/checks/check-raw-body-read.sh
 run_step "Static: actions-sha-pinned" bash scripts/checks/check-actions-sha-pinned.sh
 run_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-prisma-pin.sh
 run_step "Static: ios-no-diagnostic-logging" bash scripts/checks/check-ios-no-diagnostic-logging.sh
-if [ "$STATIC_ONLY" != "1" ]; then
+
+if [ "$RUN_WEB" != "1" ]; then
+  printf "${BOLD}▸ Web steps skipped${RESET}  (no app-filter paths changed — iOS-only diff; set PRE_PR_FORCE_FULL=1 to override)\n\n"
+fi
+
+if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
   run_step "Lint"                   npx eslint .
   # tsc --noEmit typechecks test files too (vitest does not; next build excludes
   # them), catching mock/type drift that would otherwise rot silently.
@@ -446,7 +483,7 @@ if git diff --name-only main...HEAD | grep -q '^src/app/\[locale\]/admin/'; then
     passed=$((passed + 1))
   fi
 fi
-if [ "$STATIC_ONLY" != "1" ]; then
+if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
   # Clear vitest cache to match CI's clean environment
   rm -rf node_modules/.vitest extension/node_modules/.vitest 2>/dev/null || true
   run_step "Test"                   npx vitest run
@@ -456,7 +493,7 @@ fi
 # Round 4: T10 (regex covers pre- and post-PR-5 paths), T13 (DB reachability + 3s timeout),
 # T22 (CI via ci-integration.yml is authoritative; this local run is a preview).
 # Set PREPR_SKIP_INTEGRATION=1 to defer to CI.
-if [ "$STATIC_ONLY" != "1" ] && \
+if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ] && \
    git rev-parse --abbrev-ref HEAD | grep -q "^refactor/" && \
    git diff --name-only main...HEAD | \
      grep -E '^src/lib/(prisma|redis|tenant-(context|rls)|auth/.+-token)\.ts$|^src/lib/(prisma|tenant|auth)/' \
@@ -472,7 +509,7 @@ if [ "$STATIC_ONLY" != "1" ] && \
   fi
 fi
 
-if [ "$STATIC_ONLY" != "1" ]; then
+if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
   run_step "Build"                  npx next build
 fi
 
@@ -483,7 +520,7 @@ fi
 # `xcodebuild` on macos-latest and is not reproducible in this local gate.
 # pre-pr does NOT `npm ci` (slow/destructive); it reuses installed deps and
 # fails with an actionable hint if a package's node_modules is absent.
-if [ "$STATIC_ONLY" != "1" ]; then
+if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
   # CLI: Build → Test (CI order — tsc must run first; cli/ is ESM NodeNext, so a
   # missing .js extension is a tsc TS2835 error that vitest/esbuild tolerates).
   if [ ! -d cli/node_modules ]; then

@@ -79,6 +79,7 @@ struct TOTPCodeView: View {
 
   private func copyToClipboard() {
     SecureClipboard.copy(currentCode, clearAfter: AppSettingsStore().clipboardClearSeconds)
+    UINotificationFeedbackGenerator().notificationOccurred(.success)
     withAnimation { copyConfirmed = true }
     Task { @MainActor in
       try? await Task.sleep(nanoseconds: 2_000_000_000)
