@@ -66,7 +66,10 @@ export function showPasskeySaveBanner(options: PasskeySaveBannerOptions): void {
       const keepBothBtn = document.createElement("button");
       keepBothBtn.textContent = t("passkeySaveBanner.keepBoth");
       keepBothBtn.className = "psso-btn-primary";
-      keepBothBtn.addEventListener("click", () => {
+      // Saving authorizes a credential creation — only a trusted (real) click
+      // may trigger it (mirrors the passkey dropdown / suggestion dropdown).
+      keepBothBtn.addEventListener("click", (e) => {
+        if (!e.isTrusted) return;
         options.onSave();
         hidePasskeySaveBanner();
       });
@@ -75,7 +78,8 @@ export function showPasskeySaveBanner(options: PasskeySaveBannerOptions): void {
       const replaceBtn = document.createElement("button");
       replaceBtn.textContent = t("passkeySaveBanner.replace");
       replaceBtn.className = "psso-btn-secondary";
-      replaceBtn.addEventListener("click", () => {
+      replaceBtn.addEventListener("click", (e) => {
+        if (!e.isTrusted) return;
         options.onSave(existing[0].id);
         hidePasskeySaveBanner();
       });
@@ -85,7 +89,8 @@ export function showPasskeySaveBanner(options: PasskeySaveBannerOptions): void {
       const addNewBtn = document.createElement("button");
       addNewBtn.textContent = t("passkeySaveBanner.addNew");
       addNewBtn.className = "psso-btn-primary";
-      addNewBtn.addEventListener("click", () => {
+      addNewBtn.addEventListener("click", (e) => {
+        if (!e.isTrusted) return;
         options.onSave();
         hidePasskeySaveBanner();
       });
@@ -95,7 +100,8 @@ export function showPasskeySaveBanner(options: PasskeySaveBannerOptions): void {
     const saveBtn = document.createElement("button");
     saveBtn.textContent = t("passkeySaveBanner.save");
     saveBtn.className = "psso-btn-primary";
-    saveBtn.addEventListener("click", () => {
+    saveBtn.addEventListener("click", (e) => {
+      if (!e.isTrusted) return;
       options.onSave();
       hidePasskeySaveBanner();
     });
