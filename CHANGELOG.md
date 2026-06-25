@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.61](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.60...passwd-sso-v0.4.61) (2026-06-25)
+
+
+### Features
+
+* **ios:** demo mode for App Store review (read-only, isolated) ([#609](https://github.com/ngc-shj/passwd-sso/issues/609)) ([952dd35](https://github.com/ngc-shj/passwd-sso/commit/952dd3589a33170102ee9e05089b47e982fa6b80))
+* **ios:** favicon display via server proxy, per-user opt-in (default OFF) ([#605](https://github.com/ngc-shj/passwd-sso/issues/605)) ([56ff138](https://github.com/ngc-shj/passwd-sso/commit/56ff13883535c917f1865b7bcd183a432e4df703))
+* **ios:** tappable entry URL + unified copy feedback (toast+haptic) ([#610](https://github.com/ngc-shj/passwd-sso/issues/610)) ([0423b3d](https://github.com/ngc-shj/passwd-sso/commit/0423b3dcef986d1b597507351bc2a2076987ce8b))
+* **security:** step-up reauth on team config/identity/key ops + narrow /api/teams Bearer-bypass ([#607](https://github.com/ngc-shj/passwd-sso/issues/607)) ([8351a1e](https://github.com/ngc-shj/passwd-sso/commit/8351a1ea31659e097d303f712329a29016e9ef3e))
+* **security:** step-up reauth on tenant-admin mutations + no-store on secret responses ([#606](https://github.com/ngc-shj/passwd-sso/issues/606)) ([bf328fb](https://github.com/ngc-shj/passwd-sso/commit/bf328fb17cc87761a96f63a49b167d7d4b28fe61))
+* **web:** server-side favicon proxy with per-user opt-in (default OFF) ([#603](https://github.com/ngc-shj/passwd-sso/issues/603)) ([d73ac24](https://github.com/ngc-shj/passwd-sso/commit/d73ac241a6ffe375ebbad2e40a112f3e03597f54))
+
+
+### Bug Fixes
+
+* **extension:** enforce user-presence on WebAuthn bridge sign/create ([#608](https://github.com/ngc-shj/passwd-sso/issues/608)) ([41ab672](https://github.com/ngc-shj/passwd-sso/commit/41ab67233dd22587e871414cbb5f16da02552c6d))
+
 ## [0.4.60](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.59...passwd-sso-v0.4.60) (2026-06-22)
 
 
