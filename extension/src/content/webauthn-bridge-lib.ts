@@ -4,6 +4,7 @@
 // Typed version for testing; entry point in webauthn-bridge.ts.
 
 import { WEBAUTHN_BRIDGE_MSG, WEBAUTHN_BRIDGE_RESP, PASSKEY_BRIDGE_ACTION, EXT_MSG } from "../lib/constants";
+import { MS_PER_SECOND } from "../lib/time";
 import type { PasskeyMatchEntry } from "../types/messages";
 import { showPasskeyDropdown, hidePasskeyDropdown } from "./ui/passkey-dropdown";
 import { showPasskeySaveBanner } from "./ui/passkey-save-banner";
@@ -20,11 +21,23 @@ import { showPasskeySaveBanner } from "./ui/passkey-save-banner";
 // and the entry's rpId are bound to the sender tab URL). This gate closes the
 // remaining same-origin gap: a page script (e.g. via stored XSS) skipping the
 // dropdown to mint an assertion with no human gesture.
+// Approvals are single-use AND short-lived. The TTL is a defense-in-depth
+// backstop: in the normal flow the terminal action arrives immediately after
+// the trusted selection, but if the MAIN-world interceptor goes silent after
+// SELECT/CONFIRM_CREATE, an unconsumed approval must not linger indefinitely.
+const APPROVAL_TTL_MS = 30 * MS_PER_SECOND;
 interface SignApproval {
   entryId: string;
+  expiresAt: number;
 }
+// Bind the create approval to the full identity shown in the save banner
+// (rpId + userId + userName) so the credential actually created matches what
+// the user consented to, not merely the same rpId.
 interface CreateApproval {
   rpId: string;
+  userId: string;
+  userName: string;
+  expiresAt: number;
 }
 let pendingSignApproval: SignApproval | null = null;
 let pendingCreateApproval: CreateApproval | null = null;
@@ -101,7 +114,7 @@ function handleSelect(
       hidePasskeyDropdown();
       // Authorize the subsequent SIGN_ASSERTION for exactly this entry.
       // The dropdown only invokes onSelect from a trusted (isTrusted) event.
-      pendingSignApproval = { entryId: entry.id };
+      pendingSignApproval = { entryId: entry.id, expiresAt: Date.now() + APPROVAL_TTL_MS };
       respond(requestId, { action: "select", entry });
     },
     onPlatform: () => {
@@ -124,7 +137,7 @@ function handleSignAssertion(
   // has no approval and is rejected here, before reaching the background.
   const approval = pendingSignApproval;
   pendingSignApproval = null; // single-use
-  if (!approval || approval.entryId !== payload.entryId) {
+  if (!approval || approval.entryId !== payload.entryId || approval.expiresAt < Date.now()) {
     respond(requestId, { ok: false, error: "USER_PRESENCE_REQUIRED" });
     return;
   }
@@ -159,9 +172,14 @@ function handleConfirmCreate(
       userName: payload.userName,
       existingEntries,
       onSave: (replaceEntryId?: string) => {
-        // Authorize the subsequent CREATE_CREDENTIAL for this rpId. The save
-        // banner only invokes onSave from a trusted (isTrusted) press.
-        pendingCreateApproval = { rpId: payload.rpId };
+        // Authorize the subsequent CREATE_CREDENTIAL for this exact identity.
+        // The save banner only invokes onSave from a trusted (isTrusted) press.
+        pendingCreateApproval = {
+          rpId: payload.rpId,
+          userId: payload.userId ?? "",
+          userName: payload.userName,
+          expiresAt: Date.now() + APPROVAL_TTL_MS,
+        };
         respond(requestId, { action: "save", replaceEntryId });
       },
       onDismiss: () => {
@@ -214,7 +232,13 @@ function handleCreateCredential(
   // Fail closed unless a trusted save-banner press authorized this rpId.
   const approval = pendingCreateApproval;
   pendingCreateApproval = null; // single-use
-  if (!approval || approval.rpId !== payload.rpId) {
+  if (
+    !approval ||
+    approval.rpId !== payload.rpId ||
+    approval.userId !== payload.userId ||
+    approval.userName !== payload.userName ||
+    approval.expiresAt < Date.now()
+  ) {
     respond(requestId, { ok: false, error: "USER_PRESENCE_REQUIRED" });
     return;
   }
