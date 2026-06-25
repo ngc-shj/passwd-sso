@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { isSafeHref } from "./safe-href";
 
+// Parity SSoT for the iOS port `ios/Shared/URLMatching/SafeURL.swift`
+// (tests: `ios/PasswdSSOTests/SafeURLTests.swift`). The iOS predicate
+// DIVERGES by rejecting `mailto:` (its URL field is a website address);
+// keep the rejection set below in sync, but do not expect mailto parity.
 describe("isSafeHref", () => {
   it("accepts http/https/mailto", () => {
     expect(isSafeHref("http://example.com")).toBe(true);

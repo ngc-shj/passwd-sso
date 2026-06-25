@@ -28,8 +28,10 @@ struct EntryDetailView: View {
   @State private var isPasswordVisible: Bool = false
   @State private var isScreenRecording: Bool = UIScreen.main.isCaptured
   @State private var isShowingEditForm: Bool = false
+  @State private var showCopyToast: Bool = false
 
   @Environment(\.dismiss) private var dismiss
+  @Environment(\.openURL) private var openURL
 
   var body: some View {
     Group {
@@ -55,6 +57,22 @@ struct EntryDetailView: View {
       } else {
         ProgressView("Decrypting…")
           .frame(maxWidth: .infinity, maxHeight: .infinity)
+      }
+    }
+    // Transient copy confirmation. The overlay is a sibling of the
+    // isScreenRecording content swap above, so gate it on !isScreenRecording to
+    // keep it off a recording capture. Non-interactive so it never intercepts
+    // taps on the rows beneath it.
+    .overlay(alignment: .bottom) {
+      if showCopyToast && !isScreenRecording {
+        Text("Copied!")
+          .font(.subheadline.weight(.medium))
+          .padding(.horizontal, 16)
+          .padding(.vertical, 10)
+          .background(.thinMaterial, in: Capsule())
+          .padding(.bottom, 24)
+          .transition(.move(edge: .bottom).combined(with: .opacity))
+          .allowsHitTesting(false)
       }
     }
     .navigationTitle(summary.title)
@@ -108,6 +126,7 @@ struct EntryDetailView: View {
     .onChange(of: autoLockService?.state) { _, newState in
       if let newState, newState != .unlocked {
         detail = nil
+        showCopyToast = false
       }
     }
   }
@@ -180,7 +199,7 @@ struct EntryDetailView: View {
     // render a muted "Not set" rather than being hidden.
     fieldRow(label: "Username", value: d.username)
     passwordRow(d.password)
-    fieldRow(label: "URL", value: d.url)
+    urlRow(d.url)
 
     Section("Notes") {
       if d.notes.isEmpty {
@@ -235,6 +254,44 @@ struct EntryDetailView: View {
           .tint(.accentColor)
         }
       }
+    }
+  }
+
+  // URL row: when the value is a safe http/https URL, render it as a tappable
+  // Button that opens the system handler (Button — not Link — so we can record
+  // auto-lock activity on tap, matching the copy/eye buttons). Non-safe or empty
+  // values fall through to the plain-text `fieldRow` (no link), mirroring the web
+  // view's reject-and-show-as-text behavior.
+  @ViewBuilder
+  func urlRow(_ url: String) -> some View {
+    if let launchable = SafeURL.launchable(url) {
+      Section("URL") {
+        HStack {
+          Button {
+            autoLockService?.recordActivity()
+            openURL(launchable)
+          } label: {
+            Text(url)
+              .font(.body)
+              .foregroundStyle(.tint)
+              .multilineTextAlignment(.leading)
+          }
+          .buttonStyle(.plain)
+          Spacer()
+          Button {
+            copySecurely(value: url)
+            autoLockService?.recordActivity()
+          } label: {
+            Image(systemName: "doc.on.doc")
+              .frame(minWidth: 44, minHeight: 44)
+              .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          .tint(.accentColor)
+        }
+      }
+    } else {
+      fieldRow(label: "URL", value: url)
     }
   }
 
@@ -294,7 +351,15 @@ struct EntryDetailView: View {
 
   /// Copy to pasteboard with localOnly + a configurable auto-clear expiration
   /// (AppSettingsStore.clipboardClearSeconds) per plan §"Side-Channel Controls".
+  /// Surfaces a success haptic + a transient "Copied!" toast so the user gets
+  /// clear feedback that the (invisible-by-design) clipboard write happened.
   func copySecurely(value: String) {
     SecureClipboard.copy(value, clearAfter: AppSettingsStore().clipboardClearSeconds)
+    UINotificationFeedbackGenerator().notificationOccurred(.success)
+    withAnimation { showCopyToast = true }
+    Task { @MainActor in
+      try? await Task.sleep(nanoseconds: 1_500_000_000)
+      withAnimation { showCopyToast = false }
+    }
   }
 }
