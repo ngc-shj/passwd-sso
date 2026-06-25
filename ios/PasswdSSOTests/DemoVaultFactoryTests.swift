@@ -180,18 +180,22 @@ final class DemoVaultFactoryTests: XCTestCase {
   // MARK: - NFR3: sample data uses only reserved/example domains
 
   func testSampleDataUsesReservedDomainsOnly() throws {
-    let factoryURL = URL(fileURLWithPath: #file)
+    // #filePath (absolute) not #file: under Swift 6 #file is concise
+    // (<module>/<basename>) → relative URL → read fails. A non-swallowing `try`
+    // fails loudly instead of greenwashing. See LocalizationCatalogTests.
+    let factoryURL = URL(filePath: #filePath)
       .deletingLastPathComponent()   // PasswdSSOTests/
       .deletingLastPathComponent()   // ios/
       .appendingPathComponent("Shared/Demo/DemoVaultFactory.swift")
 
-    guard let source = try? String(contentsOf: factoryURL, encoding: .utf8) else {
-      return
-    }
+    let source = try String(contentsOf: factoryURL, encoding: .utf8)
 
     let emailPattern = try NSRegularExpression(pattern: #"[A-Za-z0-9._%+\-]+@([A-Za-z0-9.\-]+)"#)
     let range = NSRange(source.startIndex..., in: source)
     let matches = emailPattern.matches(in: source, range: range)
+    // Guard against a vacuous pass: the fixtures DO contain emails, so a zero
+    // match count means the regex or the read silently broke.
+    XCTAssertGreaterThan(matches.count, 0, "Expected at least one email in the fixtures")
     for match in matches {
       guard let domainRange = Range(match.range(at: 1), in: source) else { continue }
       let domain = String(source[domainRange])

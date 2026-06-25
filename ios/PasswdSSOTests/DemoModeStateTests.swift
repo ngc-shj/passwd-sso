@@ -54,15 +54,17 @@ final class DemoModeStateTests: XCTestCase {
   // MARK: - Grep gate: forbidden patterns in DemoVaultFactory.swift
 
   /// Prove-red (RT7): temporarily add `BridgeKeyStore` to DemoVaultFactory.swift → test fails.
+  // Uses #filePath (absolute) not #file: under Swift 6 language mode #file is the
+  // concise <module>/<basename> form, which would make the URL relative and the
+  // read fail — silently greenwashing the gate. A non-swallowing `try` makes an
+  // unreadable file fail the test loudly. Mirrors LocalizationCatalogTests.
   func testForbiddenPatternsAbsent_inDemoVaultFactory() throws {
-    let fileURL = URL(fileURLWithPath: #file)
+    let fileURL = URL(filePath: #filePath)
       .deletingLastPathComponent()   // PasswdSSOTests/
       .deletingLastPathComponent()   // ios/
       .appendingPathComponent("Shared/Demo/DemoVaultFactory.swift")
 
-    guard let source = try? String(contentsOf: fileURL, encoding: .utf8) else {
-      return
-    }
+    let source = try String(contentsOf: fileURL, encoding: .utf8)
     let forbidden = [
       "BridgeKeyStore", "AppGroupWrappedKeyStore", "saveVaultKey",
       "cacheFileURL", "writeCacheFile", "HostTokenStore", "FaviconLoader",
@@ -76,15 +78,14 @@ final class DemoModeStateTests: XCTestCase {
   }
 
   /// Prove-red (RT7): temporarily add `MobileAPIClient` to DemoVaultView.swift → test fails.
+  // See the #filePath rationale on testForbiddenPatternsAbsent_inDemoVaultFactory.
   func testForbiddenPatternsAbsent_inDemoVaultView() throws {
-    let fileURL = URL(fileURLWithPath: #file)
+    let fileURL = URL(filePath: #filePath)
       .deletingLastPathComponent()   // PasswdSSOTests/
       .deletingLastPathComponent()   // ios/
       .appendingPathComponent("PasswdSSOApp/Views/Vault/DemoVaultView.swift")
 
-    guard let source = try? String(contentsOf: fileURL, encoding: .utf8) else {
-      return
-    }
+    let source = try String(contentsOf: fileURL, encoding: .utf8)
     let forbidden = [
       "MobileAPIClient", "HostSyncService", "runSync", "FaviconLoader",
       "CredentialIdentityRegistrar", "refreshCredentialIdentities",
