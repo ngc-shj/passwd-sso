@@ -203,12 +203,57 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(res.status).toBe(401);
   });
 
-  it("does NOT bypass for Bearer + /api/teams (not in allowlist)", async () => {
+  it("does NOT bypass when a session cookie accompanies Bearer (cookie+Bearer guard) — /api/teams", async () => {
     const res = await proxy(
       createApiRequest("/api/teams", {
         Authorization: "Bearer tok123",
         Cookie: "authjs.session-token=sess-teams",
       }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("bypasses session check for cookieless Bearer + /api/teams (team list)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/teams", { Authorization: "Bearer tok123" }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("bypasses session check for cookieless Bearer + /api/teams/t1/passwords (team password list)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/teams/t1/passwords", { Authorization: "Bearer tok123" }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("bypasses session check for cookieless Bearer + /api/teams/t1/passwords/e1 (team entry)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/teams/t1/passwords/e1", { Authorization: "Bearer tok123" }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("bypasses session check for cookieless Bearer + /api/teams/t1/member-key", async () => {
+    const res = await proxy(
+      createApiRequest("/api/teams/t1/member-key", { Authorization: "Bearer tok123" }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("does NOT bypass for cookieless Bearer + /api/teams/t1/webhooks (web-only, now denied)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/teams/t1/webhooks", { Authorization: "Bearer tok123" }),
       dummyOptions,
     );
     expect(res.status).toBe(401);

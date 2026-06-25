@@ -12,6 +12,7 @@ const {
   mockWithTeamTenantRls,
   mockWithTenantRls,
   TeamAuthError,
+  mockRequireRecentSession,
 } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
@@ -36,6 +37,7 @@ const {
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1")),
     mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => fn(prisma)),
     TeamAuthError: _TeamAuthError,
+    mockRequireRecentSession: vi.fn().mockResolvedValue(null),
   };
 });
 
@@ -53,6 +55,9 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { GET, PUT, DELETE } from "./route";
@@ -300,6 +305,20 @@ describe("DELETE /api/teams/[teamId]", () => {
       createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(403);
+  });
+
+  it("returns 403 when step-up reauth is required", async () => {
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockPrismaTeam.delete).not.toHaveBeenCalled();
   });
 
   it("deletes team successfully", async () => {

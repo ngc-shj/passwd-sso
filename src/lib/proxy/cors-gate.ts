@@ -20,7 +20,6 @@ import { handlePreflight, applyCorsHeaders } from "@/lib/http/cors";
  */
 export const EXTENSION_TOKEN_ROUTES: readonly string[] = [
   API_PATH.PASSWORDS,
-  API_PATH.TEAMS,                   // team list + per-team passwords/member-key — Bearer (iOS app / extension); handlers enforce scope + requireTeamPermission
   API_PATH.VAULT_STATUS,
   API_PATH.VAULT_UNLOCK_DATA,
   API_PATH.EXTENSION_TOKEN,         // DELETE (revoke) — validated by route handler
@@ -32,21 +31,47 @@ export const EXTENSION_TOKEN_ROUTES: readonly string[] = [
 ];
 
 /**
+ * Narrow Bearer-bypass matcher for /api/teams paths.
+ *
+ * iOS/extension only need:
+ *   - /api/teams                         (exact) — team list
+ *   - /api/teams/<teamId>/member-key     (exact, leaf) — wrapped key
+ *   - /api/teams/<teamId>/passwords/**   (prefix) — entry list + single entry
+ *
+ * S1 LOCKED CONSTRAINT: the passwords prefix makes mutating children
+ * (bulk-import, empty-trash, bulk-*) Bearer-REACHABLE. Safe today — those
+ * handlers are auth()-only (session) and 401 a cookieless Bearer. Do NOT
+ * migrate any teams/<teamId>/passwords mutating child to checkAuth with a
+ * write scope (PASSWORDS_WRITE / TEAM_PASSWORDS_WRITE) without narrowing this
+ * matcher — it would make them Bearer-WRITABLE.
+ */
+function isBearerBypassTeamPath(pathname: string): boolean {
+  return (
+    /^\/api\/teams$/.test(pathname) ||
+    /^\/api\/teams\/[^/]+\/member-key$/.test(pathname) ||
+    /^\/api\/teams\/[^/]+\/passwords(\/.*)?$/.test(pathname)
+  );
+}
+
+/**
  * Match a request path against the Bearer-bypass route list.
  * Extension token endpoints are exact-match only; password/vault routes
  * allow child paths.
  */
 export function isBearerBypassRoute(pathname: string): boolean {
-  return EXTENSION_TOKEN_ROUTES.some((route) => {
-    if (
-      route === API_PATH.EXTENSION_TOKEN ||
-      route === API_PATH.EXTENSION_TOKEN_REFRESH ||
-      route === API_PATH.EXTENSION_KEY_RESET
-    ) {
-      return pathname === route;
-    }
-    return pathname === route || pathname.startsWith(route + "/");
-  });
+  return (
+    isBearerBypassTeamPath(pathname) ||
+    EXTENSION_TOKEN_ROUTES.some((route) => {
+      if (
+        route === API_PATH.EXTENSION_TOKEN ||
+        route === API_PATH.EXTENSION_TOKEN_REFRESH ||
+        route === API_PATH.EXTENSION_KEY_RESET
+      ) {
+        return pathname === route;
+      }
+      return pathname === route || pathname.startsWith(route + "/");
+    })
+  );
 }
 
 /**

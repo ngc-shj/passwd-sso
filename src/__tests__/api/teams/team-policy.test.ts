@@ -15,6 +15,7 @@ const {
   mockUpsert,
   mockLogAudit,
   mockWithTeamTenantRls,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamMember: vi.fn(),
@@ -26,6 +27,7 @@ const {
   mockWithTeamTenantRls: vi.fn(
     async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1"),
   ),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 const { TeamAuthError } = vi.hoisted(() => {
@@ -73,6 +75,9 @@ vi.mock("@/lib/audit/audit", () => ({
 }));
 vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (fn: (...args: unknown[]) => unknown) => fn,
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { GET, PUT } from "@/app/api/teams/[teamId]/policy/route";

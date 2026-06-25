@@ -9,6 +9,7 @@ const {
   mockRequireTeamPermission,
   mockWithTeamTenantRls,
   mockLogAudit,
+  mockRequireRecentSession,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTeamPolicy: {
@@ -24,6 +25,7 @@ const {
     async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1"),
   ),
   mockLogAudit: vi.fn(),
+  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -65,6 +67,9 @@ vi.mock("@/lib/logger", () => ({
   },
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 
 import { GET, PUT } from "./route";
@@ -275,5 +280,21 @@ describe("PUT /api/teams/[teamId]/policy", () => {
     const json2 = await res2.json();
 
     expect(json1).toEqual(json2);
+  });
+
+  it("returns 403 when step-up reauth is required", async () => {
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+    const res = await PUT(
+      createRequest("PUT", "http://localhost:3000/api/teams/team-1/policy", {
+        body: { minPasswordLength: 8 },
+      }),
+      teamParams(),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    expect(mockPrismaTeamPolicy.upsert).not.toHaveBeenCalled();
   });
 });

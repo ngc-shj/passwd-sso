@@ -7,6 +7,7 @@ import {
   requireTeamPermission,
   TeamAuthError,
 } from "@/lib/auth/access/team-auth";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
@@ -84,6 +85,9 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     if (err) return err;
     throw e;
   }
+
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   const result = await parseBody(req, upsertTeamPolicySchema);
   if (!result.ok) return result.response;
