@@ -143,8 +143,9 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
       createApiRequest("/api/api-keys", { Authorization: "Bearer tok123" }),
       dummyOptions,
     );
-    // Post-C2: api-keys removed from EXTENSION_TOKEN_ROUTES. Bearer-only request
-    // (no session cookie) short-circuits to 401 without a session lookup.
+    // api-keys is not a Bearer-bypass route (cors-gate.ts BEARER_RULES). A
+    // Bearer-only request (no session cookie) short-circuits to 401 without a
+    // session lookup.
     expect(res.status).toBe(401);
   });
 

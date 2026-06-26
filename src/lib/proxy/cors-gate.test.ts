@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 import {
-  EXTENSION_TOKEN_ROUTES,
+  BEARER_BYPASS_ROUTE_SUMMARY,
   isBearerBypassRoute,
   isBearerBypassPath,
   isExtensionExchangeRoute,
@@ -90,8 +90,8 @@ describe("isBearerBypassRoute — method + exact-path truth table", () => {
     });
   }
 
-  it("EXTENSION_TOKEN_ROUTES is a non-empty readonly list", () => {
-    expect(EXTENSION_TOKEN_ROUTES.length).toBeGreaterThan(0);
+  it("BEARER_BYPASS_ROUTE_SUMMARY is a non-empty readonly list", () => {
+    expect(BEARER_BYPASS_ROUTE_SUMMARY.length).toBeGreaterThan(0);
   });
 });
 

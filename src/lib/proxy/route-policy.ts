@@ -154,7 +154,7 @@ export function classifyRoute(pathname: string): RoutePolicy {
   // Session-required API routes. This includes Bearer-bypass-eligible
   // routes (PASSWORDS, API_KEYS, VAULT_DELEGATION etc.) — they're
   // fundamentally session-required, with optional Bearer as alternative
-  // auth. Every EXTENSION_TOKEN_ROUTES entry (cors-gate.ts) is already
+  // auth. Every Bearer-bypass route (cors-gate.ts BEARER_RULES) is already
   // covered by a SESSION_REQUIRED_PREFIXES match, so we don't import
   // isBearerBypassRoute here — keeping route-policy as a pure pathname
   // classifier with no dependency on cors-gate. The orchestrator calls

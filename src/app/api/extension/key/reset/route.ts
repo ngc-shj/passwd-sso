@@ -11,7 +11,8 @@
  *  4. Revokes all ExtensionToken rows for the userId with matching cnfJkt.
  *  5. Emits EXTENSION_TOKEN_FAMILY_REVOKED audit with reason "user_key_reset".
  *
- * No session cookie required — endpoint is in EXTENSION_TOKEN_ROUTES bypass list.
+ * No session cookie required — POST /api/extension/key/reset is a Bearer-bypass
+ * route (cors-gate.ts BEARER_RULES).
  */
 
 import { NextRequest, NextResponse } from "next/server";

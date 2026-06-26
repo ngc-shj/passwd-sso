@@ -108,12 +108,14 @@ export function isBearerBypassPath(pathname: string): boolean {
 }
 
 /**
- * Documentation/diagnostic list of the base paths that accept a Bearer token
- * as alternative auth. This is NOT the matcher — `BEARER_RULES` is the
- * authoritative (method, exact-path) gate. Kept as a hand-maintained summary
- * for readers; the only test on it asserts it is non-empty.
+ * Documentation/diagnostic SUMMARY of the base paths that accept a Bearer token
+ * as alternative auth. This is deliberately NOT named like a matcher and MUST
+ * NOT be used as one — `BEARER_RULES` is the authoritative (method, exact-path)
+ * gate. This is a hand-maintained reader's summary; the only test on it asserts
+ * it is non-empty. (Renamed from EXTENSION_TOKEN_ROUTES so it can never be
+ * mistaken for the route-matching allowlist it used to be.)
  */
-export const EXTENSION_TOKEN_ROUTES: readonly string[] = [
+export const BEARER_BYPASS_ROUTE_SUMMARY: readonly string[] = [
   API_PATH.PASSWORDS,
   API_PATH.VAULT_STATUS,
   API_PATH.VAULT_UNLOCK_DATA,
