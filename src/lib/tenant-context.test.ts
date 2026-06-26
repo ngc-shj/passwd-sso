@@ -157,6 +157,26 @@ describe("withUserTenantRls", () => {
       expect.any(Function),
     );
   });
+
+  // L2 — session-auth fail-open backstop. If SCIM deactivation's
+  // invalidateUserSessions throws, a session may survive un-deleted. This pins
+  // the backstop for the session-auth path: every tenant-scoped (RLS) protected
+  // API enters through withUserTenantRls, which resolves the user's active
+  // membership via the deactivatedAt:null filter (resolveUserTenantIdFromClient).
+  // A deactivated member has no active membership → resolution returns null →
+  // TENANT_NOT_RESOLVED, so the protected handler never runs. This is the
+  // session-side complement to the token-validator backstops covered in
+  // user-session-invalidation.test.ts.
+  it("throws TENANT_NOT_RESOLVED for a deactivated member with a surviving session (SCIM fail-open backstop)", async () => {
+    // Deactivated member: the deactivatedAt:null filter excludes their only
+    // membership, so findMany returns [] (no active tenant).
+    mockFindMany.mockResolvedValue([]);
+
+    await expect(
+      withUserTenantRls("deactivated-user", async () => "should-not-run"),
+    ).rejects.toThrow("TENANT_NOT_RESOLVED");
+    expect(mockWithTenantRls).not.toHaveBeenCalled();
+  });
 });
 
 // ─── withTeamTenantRls ─────────────────────────────────────
