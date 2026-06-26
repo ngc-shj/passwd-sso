@@ -43,6 +43,11 @@ const POSITIVE_CASES: Record<RoutePolicyKind, readonly ClassifyCase[]> = {
   ],
   [ROUTE_POLICY_KIND.API_SESSION_REQUIRED]: [
     { pathname: "/api/passwords", description: "passwords prefix" },
+    // Mutating children must classify session-required so a cookieless Bearer
+    // request (not in the cors-gate method+path allowlist) falls through to the
+    // 401 path — the structural backstop for the Bearer-bypass narrowing.
+    { pathname: "/api/passwords/bulk-import", description: "passwords mutating child — session-required (Bearer-gate backstop)" },
+    { pathname: "/api/teams/team-1/passwords/bulk-import", description: "team mutating child — session-required" },
     { pathname: "/api/teams/team-1", description: "teams prefix" },
     { pathname: "/api/vault/setup", description: "vault prefix" },
     { pathname: "/api/folders", description: "folders prefix" },

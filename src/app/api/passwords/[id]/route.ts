@@ -6,7 +6,7 @@ import {
 } from "@/lib/blob-store/cleanup";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { updateE2EPasswordSchema } from "@/lib/validations";
-import { errorResponse, notFound, rateLimited, validationError } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, notFound, rateLimited, validationError } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { checkAuth } from "@/lib/auth/session/check-auth";
 import { parseBody } from "@/lib/http/parse-body";
@@ -270,12 +270,14 @@ async function handlePUT(
 }
 
 // DELETE /api/passwords/[id] - Soft delete (move to trash)
-// Session-only: token support for deletion deferred to Phase E (requires PASSWORDS_DELETE scope)
+// Soft-delete accepts a passwords:write token (extension/iOS/CLI), matching
+// POST/PUT. Permanent delete (?permanent=true) stays session-only: it requires
+// step-up reauth, which a Bearer token cannot satisfy.
 async function handleDELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await checkAuth(req);
+  const authResult = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_WRITE });
   if (!authResult.ok) return authResult.response;
   const { userId } = authResult.auth;
 
@@ -285,9 +287,17 @@ async function handleDELETE(
 
   // A01-3: permanent delete is unrecoverable. Require fresh credential
   // possession (15-min step-up window) so a leaked session cookie alone
-  // cannot wipe entries. Soft-delete (trash) remains gated only by
-  // session — the trash itself acts as a recovery window.
+  // cannot wipe entries. A token caller can never satisfy step-up (it reads
+  // the session cookie), so reject non-session callers up front with a clear
+  // 403 rather than the confusing 401 step-up would emit. Soft-delete (trash)
+  // remains available to tokens — the trash itself acts as a recovery window.
   if (permanent) {
+    if (authResult.auth.type !== "session") {
+      return errorResponseWithMessage(
+        API_ERROR.FORBIDDEN,
+        "Permanent deletion requires step-up authentication and is not available via token.",
+      );
+    }
     const stepUp = await requireRecentCurrentAuthMethod(req);
     if (stepUp) return stepUp;
   }

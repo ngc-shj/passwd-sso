@@ -21,10 +21,10 @@ import { API_PATH } from "@/lib/constants";
  * Routes that accept extension Bearer as alternative auth (e.g., /api/passwords)
  * are still fundamentally session-required. The Bearer-bypass is a code-path
  * concern (which dispatch branch the orchestrator takes), NOT a classification
- * concern. The orchestrator uses `isBearerBypassRoute(pathname)` from
- * cors-gate to decide whether the bypass dispatch is eligible for a given
- * request, while `api-session-required` covers all session-cookie-protected
- * routes (including bypass-eligible ones).
+ * concern. The orchestrator uses `isBearerBypassRoute(pathname, method)` from
+ * cors-gate (a method + exact-path allowlist) to decide whether the bypass
+ * dispatch is eligible for a given request, while `api-session-required`
+ * covers all session-cookie-protected routes (including bypass-eligible ones).
  */
 export const ROUTE_POLICY_KIND = {
   PREFLIGHT: "preflight",
@@ -92,8 +92,10 @@ const SESSION_REQUIRED_EXACT_PATHS: readonly string[] = [
  * Boundary-aware prefix match: a path belongs to `prefix` only when it equals
  * the prefix exactly or continues with a `/` segment boundary. Without this,
  * `startsWith("/api/passwords")` would also capture an unrelated sibling like
- * `/api/passwords-export`. Mirrors the matcher in `cors-gate.ts`
- * (`isBearerBypassRoute`) so both gates classify paths identically.
+ * `/api/passwords-export`. This is route-POLICY's own prefix classifier (which
+ * subtree a path belongs to); it is intentionally NOT the same as cors-gate's
+ * `isBearerBypassRoute`, which is now a method + exact-path allowlist — the two
+ * gates answer different questions (classification vs. Bearer eligibility).
  */
 function pathMatchesPrefix(pathname: string, prefix: string): boolean {
   return pathname === prefix || pathname.startsWith(`${prefix}/`);
@@ -156,7 +158,7 @@ export function classifyRoute(pathname: string): RoutePolicy {
   // covered by a SESSION_REQUIRED_PREFIXES match, so we don't import
   // isBearerBypassRoute here — keeping route-policy as a pure pathname
   // classifier with no dependency on cors-gate. The orchestrator calls
-  // isBearerBypassRoute(pathname) directly to decide whether the
+  // isBearerBypassRoute(pathname, method) directly to decide whether the
   // bypass dispatch is taken for a given request; the classification
   // stays "api-session-required" either way.
   if (

@@ -4,6 +4,7 @@ import {
   applyCorsHeaders,
   handleApiPreflight,
   isBearerBypassRoute,
+  isBearerBypassPath,
 } from "./cors-gate";
 import { getSessionInfo, hasSessionCookie } from "./auth-gate";
 import { classifyRoute, ROUTE_POLICY_KIND } from "./route-policy";
@@ -21,13 +22,22 @@ export async function handleApiAuth(request: NextRequest) {
   // that accept Bearer as alternative auth are still classified as
   // api-session-required; we ask cors-gate directly whether the bypass
   // dispatch is eligible for this specific path.
-  const isBearerRoute = isBearerBypassRoute(pathname);
+  // Method-aware bypass eligibility for the actual request. Preflight uses
+  // the path-only variant below — an OPTIONS request's method is never an
+  // allowlisted method, so a method-aware check would wrongly deny preflight.
+  const isBearerRoute = isBearerBypassRoute(pathname, request.method);
   const isExchangeRoute = policy.kind === ROUTE_POLICY_KIND.API_EXTENSION_EXCHANGE;
   const isBridgeCodeRoute = policy.kind === ROUTE_POLICY_KIND.API_EXTENSION_BRIDGE_CODE;
 
-  // Preflight (handled regardless of policy.kind).
+  // Preflight (handled regardless of policy.kind). CORS preflight grants no
+  // server-side auth, so it gates on path-eligibility (any allowed method);
+  // the real request still passes through the method-aware gate above.
   if (request.method === "OPTIONS") {
-    return handleApiPreflight(request, { isBearerRoute, isExchangeRoute, isBridgeCodeRoute });
+    return handleApiPreflight(request, {
+      isBearerRoute: isBearerBypassPath(pathname),
+      isExchangeRoute,
+      isBridgeCodeRoute,
+    });
   }
 
   // Non-CSRF early returns. ALL paths outside the cookie-CSRF threat

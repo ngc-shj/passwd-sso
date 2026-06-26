@@ -50,8 +50,9 @@ const APP_ORIGIN = "http://localhost:3000";
 function createApiRequest(
   path: string,
   headers?: Record<string, string>,
+  method: string = "GET",
 ): NextRequest {
-  return new NextRequest(`${APP_ORIGIN}${path}`, { headers });
+  return new NextRequest(`${APP_ORIGIN}${path}`, { headers, method });
 }
 
 describe("proxy — handleApiAuth Bearer bypass", () => {
@@ -95,18 +96,18 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("bypasses session check for Bearer + /api/extension/token (revoke)", async () => {
+  it("bypasses session check for Bearer DELETE /api/extension/token (revoke)", async () => {
     const res = await proxy(
-      createApiRequest("/api/extension/token", { Authorization: "Bearer tok123" }),
+      createApiRequest("/api/extension/token", { Authorization: "Bearer tok123" }, "DELETE"),
       dummyOptions,
     );
     expect(res.status).toBe(200);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("bypasses session check for Bearer + /api/extension/token/refresh", async () => {
+  it("bypasses session check for Bearer POST /api/extension/token/refresh", async () => {
     const res = await proxy(
-      createApiRequest("/api/extension/token/refresh", { Authorization: "Bearer tok123" }),
+      createApiRequest("/api/extension/token/refresh", { Authorization: "Bearer tok123" }, "POST"),
       dummyOptions,
     );
     expect(res.status).toBe(200);
@@ -153,6 +154,48 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
       dummyOptions,
     );
     expect(res.status).toBe(401);
+  });
+
+  it("bypasses for Bearer DELETE /api/passwords/[id] (soft-delete, extension passkey-replace)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/passwords/pw-1", { Authorization: "Bearer tok123" }, "DELETE"),
+      dummyOptions,
+    );
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("does NOT bypass for Bearer POST /api/passwords/bulk-import (mutating child, session-only)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/passwords/bulk-import", { Authorization: "Bearer tok123" }, "POST"),
+      dummyOptions,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("does NOT bypass for Bearer DELETE /api/teams/[id]/passwords/[id] (team mutating child, session-only)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/teams/t1/passwords/e1", { Authorization: "Bearer tok123" }, "DELETE"),
+      dummyOptions,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("does NOT bypass for Bearer POST /api/teams (wrong method on Bearer-GET path)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/teams", { Authorization: "Bearer tok123" }, "POST"),
+      dummyOptions,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("bypasses for Bearer GET /api/teams/[id]/passwords (team list read)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/teams/t1/passwords", { Authorization: "Bearer tok123" }, "GET"),
+      dummyOptions,
+    );
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("allows /api/v1/passwords without session (public API)", async () => {
@@ -594,6 +637,32 @@ describe("proxy — CORS preflight and headers", () => {
     const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
       method: "OPTIONS",
       headers: { origin: "http://evil.com" },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  it("OPTIONS /api/passwords/[id] (chrome-extension) allows extension origin (preflight is path-only)", async () => {
+    // The child path's only Bearer methods are GET/PUT/DELETE; the OPTIONS
+    // request's method is OPTIONS, so preflight must gate on path-eligibility
+    // (isBearerBypassPath), not the method-aware matcher — otherwise the
+    // extension cannot preflight the DELETE soft-delete flow.
+    const req = new NextRequest(`${APP_ORIGIN}/api/passwords/pw-1`, {
+      method: "OPTIONS",
+      headers: { origin: CHROME_EXT_ALLOWED },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(CHROME_EXT_ALLOWED);
+  });
+
+  it("OPTIONS /api/passwords/bulk-import (chrome-extension) does NOT allow extension origin (not Bearer-eligible)", async () => {
+    const req = new NextRequest(`${APP_ORIGIN}/api/passwords/bulk-import`, {
+      method: "OPTIONS",
+      headers: { origin: CHROME_EXT_ALLOWED },
     } as ConstructorParameters<typeof NextRequest>[1]);
     const res = await proxy(req, dummyOptions);
 
