@@ -52,29 +52,25 @@ const PASSWORD_SUBROUTES: ReadonlySet<string> = new Set([
   "generate",
 ]);
 
-// Match `<base>/<segment>` exactly where <segment> is a real entry id, not a
-// reserved sub-route literal.
-const entryUnder = (base: string) => {
-  const pattern = new RegExp(`^${base.replace(/\//g, "\\/")}\\/([^/]+)$`);
-  return (pathname: string) => {
-    const m = pattern.exec(pathname);
-    return m !== null && !PASSWORD_SUBROUTES.has(m[1]);
-  };
+// Match a single-entry path via a STATIC regex whose capture group 1 is the
+// entry-id segment, excluding reserved sub-route literals (bulk-*, etc.). The
+// regex is passed as a literal — never built from string concatenation — so
+// there is no escaping/injection surface.
+const entryMatch = (pattern: RegExp) => (pathname: string) => {
+  const m = pattern.exec(pathname);
+  return m !== null && !PASSWORD_SUBROUTES.has(m[1]);
 };
 
 const BEARER_RULES: readonly BearerRule[] = [
   // Personal passwords — list + create + single-entry read/update/soft-delete.
   { methods: M("GET", "POST"), match: exact(API_PATH.PASSWORDS) },
-  { methods: M("GET", "PUT", "DELETE"), match: entryUnder("/api/passwords") },
+  { methods: M("GET", "PUT", "DELETE"), match: entryMatch(/^\/api\/passwords\/([^/]+)$/) },
 
   // Teams — list (read) + member-key (wrapped key) + team password read.
   { methods: M("GET"), match: exact(API_PATH.TEAMS) },
   { methods: M("GET"), match: re(/^\/api\/teams\/[^/]+\/member-key$/) },
   { methods: M("GET"), match: re(/^\/api\/teams\/[^/]+\/passwords$/) },
-  { methods: M("GET"), match: (p) => {
-    const m = /^\/api\/teams\/[^/]+\/passwords\/([^/]+)$/.exec(p);
-    return m !== null && !PASSWORD_SUBROUTES.has(m[1]);
-  } },
+  { methods: M("GET"), match: entryMatch(/^\/api\/teams\/[^/]+\/passwords\/([^/]+)$/) },
 
   // Vault — status + unlock data (read); delegation check + SSH sign (CLI agent).
   { methods: M("GET"), match: exact(API_PATH.VAULT_STATUS) },
