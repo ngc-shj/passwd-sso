@@ -16,6 +16,7 @@ import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 export const v1ApiKeyLimiter = createRateLimiter({
   windowMs: RATE_WINDOW_MS,
   max: 100,
+  failClosedOnRedisError: true,
 });
 
 /** Per-user limiter for `PUT /api/passwords/[id]/attachments/[id]/migrate`. */

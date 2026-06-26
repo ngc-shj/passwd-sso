@@ -5,8 +5,9 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { parseBody } from "@/lib/http/parse-body";
 import { checkAuth } from "@/lib/auth/session/check-auth";
-import { rateLimited, unauthorized } from "@/lib/http/api-response";
+import { unauthorized } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_HOUR } from "@/lib/constants/time";
 import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants/auth/extension-token";
 import { jwkThumbprint } from "@/lib/auth/dpop/verify";
@@ -23,6 +24,7 @@ export const runtime = "nodejs";
 const mintLimiter = createRateLimiter({
   windowMs: MS_PER_HOUR,
   max: 30,
+  failClosedOnRedisError: true,
 });
 
 // The AutoFill extension's own DPoP public key (P-256). The minted token binds
@@ -65,10 +67,15 @@ export const POST = withRequestLog(async (req: NextRequest) => {
 
   // Rate-limit per user, after auth (the bucket key is the authenticated
   // identity) and before the mint/audit work.
-  const rl = await mintLimiter.check(`rl:mobile_autofill_token:${userId}`);
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: mintLimiter,
+    key: `rl:mobile_autofill_token:${userId}`,
+    scope: "mobile.autofill_token",
+    userId,
+    tenantId,
+  });
+  if (blocked) return blocked;
 
   const parsed = await parseBody(req, BodySchema);
   if (!parsed.ok) return parsed.response;

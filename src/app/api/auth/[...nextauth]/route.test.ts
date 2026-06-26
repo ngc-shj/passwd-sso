@@ -278,6 +278,20 @@ describe("withCallbackRateLimit", () => {
     expect(inner).toHaveBeenCalledTimes(2);
   });
 
+  it("fails closed with 503 when the limiter reports redisErrored (does NOT invoke handler)", async () => {
+    mockRateLimitCheck.mockResolvedValue({ allowed: false, redisErrored: true });
+    const { _withCallbackRateLimit } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
+    const wrapped = _withCallbackRateLimit(inner);
+
+    const res = await wrapped(makeReq("/api/auth/callback/google", "GET"));
+
+    expect(res.status).toBe(503);
+    expect(inner).not.toHaveBeenCalled();
+  });
+
   it("skips the limiter and warn-logs when client IP cannot be determined", async () => {
     mockExtractClientIp.mockReturnValue(null);
     const { _withCallbackRateLimit } = await import(
@@ -318,5 +332,95 @@ describe("withCallbackRateLimit", () => {
       "rl:auth_callback:203.0.113.5",
       "rl:auth_callback:198.51.100.7",
     ]);
+  });
+});
+
+describe("withMagicLinkIpRateLimit", () => {
+  beforeEach(() => {
+    mockRateLimitCheck.mockReset();
+    mockExtractClientIp.mockReset();
+    mockLoggerWarn.mockReset();
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
+    mockExtractClientIp.mockReturnValue("203.0.113.5");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  function makeReq(pathname: string, method: "GET" | "POST" = "POST") {
+    return new NextRequest(`http://localhost:3000${pathname}`, { method });
+  }
+
+  it("skips the limiter and forwards when the path is not a magic-link signin", async () => {
+    const { _withMagicLinkIpRateLimit } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
+    const wrapped = _withMagicLinkIpRateLimit(inner);
+
+    const res = await wrapped(makeReq("/api/auth/callback/google"));
+
+    expect(res.status).toBe(200);
+    expect(inner).toHaveBeenCalledTimes(1);
+    expect(mockRateLimitCheck).not.toHaveBeenCalled();
+  });
+
+  it("invokes the limiter with `rl:magic_link_signin:<ip>` and forwards on allowed", async () => {
+    const { _withMagicLinkIpRateLimit } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
+    const wrapped = _withMagicLinkIpRateLimit(inner);
+
+    const res = await wrapped(makeReq("/api/auth/signin/nodemailer"));
+
+    expect(res.status).toBe(200);
+    expect(inner).toHaveBeenCalledTimes(1);
+    expect(mockRateLimitCheck).toHaveBeenCalledWith("rl:magic_link_signin:203.0.113.5");
+  });
+
+  it("returns 429 when the limiter denies (does NOT invoke handler)", async () => {
+    mockRateLimitCheck.mockResolvedValue({ allowed: false, retryAfterMs: 1500 });
+    const { _withMagicLinkIpRateLimit } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
+    const wrapped = _withMagicLinkIpRateLimit(inner);
+
+    const res = await wrapped(makeReq("/api/auth/signin/email"));
+
+    expect(res.status).toBe(429);
+    expect(inner).not.toHaveBeenCalled();
+  });
+
+  it("fails closed with 503 when the limiter reports redisErrored (does NOT invoke handler)", async () => {
+    mockRateLimitCheck.mockResolvedValue({ allowed: false, redisErrored: true });
+    const { _withMagicLinkIpRateLimit } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
+    const wrapped = _withMagicLinkIpRateLimit(inner);
+
+    const res = await wrapped(makeReq("/api/auth/signin/nodemailer"));
+
+    expect(res.status).toBe(503);
+    expect(inner).not.toHaveBeenCalled();
+  });
+
+  it("fail-OPEN: forwards when client IP cannot be determined (no 503)", async () => {
+    mockExtractClientIp.mockReturnValue(null);
+    const { _withMagicLinkIpRateLimit } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
+    const wrapped = _withMagicLinkIpRateLimit(inner);
+
+    const res = await wrapped(makeReq("/api/auth/signin/nodemailer"));
+
+    expect(res.status).toBe(200);
+    expect(inner).toHaveBeenCalledTimes(1);
+    expect(mockRateLimitCheck).not.toHaveBeenCalled();
   });
 });

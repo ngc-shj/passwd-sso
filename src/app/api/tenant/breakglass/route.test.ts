@@ -394,6 +394,20 @@ describe("POST /api/tenant/breakglass", () => {
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
   });
 
+  it("fails closed with 503 when the limiter reports redisErrored (no grant created)", async () => {
+    mockRateLimiterCheck.mockResolvedValue({ allowed: false, redisErrored: true });
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/tenant/breakglass", {
+        body: validBody,
+        headers: { origin: "http://localhost" },
+      }),
+    );
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(503);
+    expect(json.error).toBe("SERVICE_UNAVAILABLE");
+    expect(mockGrantCreate).not.toHaveBeenCalled();
+  });
+
   it("returns 403 when target user is not a tenant member", async () => {
     mockTenantMemberFindFirst.mockResolvedValue(null);
     const res = await POST(

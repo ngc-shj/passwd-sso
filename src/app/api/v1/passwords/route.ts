@@ -8,6 +8,7 @@ import { validateV1Auth } from "@/lib/auth/session/v1-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { API_KEY_SCOPE } from "@/lib/constants/auth/api-key";
 import { ENTRY_TYPE_VALUES, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
@@ -15,7 +16,7 @@ import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { dedupeTagIds, tagConnect } from "@/lib/services/tag-relation";
 import type { EntryType } from "@prisma/client";
-import { errorResponse, errorResponseWithMessage, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, unauthorized } from "@/lib/http/api-response";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
@@ -39,10 +40,15 @@ async function handleGET(req: NextRequest) {
   const denied = await enforceAccessRestriction(req, userId, tenantId);
   if (denied) return denied;
 
-  const rl = await v1ApiKeyLimiter.check(`rl:api_key:${rateLimitKey}`);
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: v1ApiKeyLimiter,
+    key: `rl:api_key:${rateLimitKey}`,
+    scope: "v1.passwords",
+    userId,
+    tenantId,
+  });
+  if (blocked) return blocked;
 
   const { searchParams } = new URL(req.url);
   const tagId = searchParams.get("tag");
@@ -125,10 +131,15 @@ async function handlePOST(req: NextRequest) {
   const denied = await enforceAccessRestriction(req, userId, tenantId);
   if (denied) return denied;
 
-  const rl = await v1ApiKeyLimiter.check(`rl:api_key:${rateLimitKey}`);
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: v1ApiKeyLimiter,
+    key: `rl:api_key:${rateLimitKey}`,
+    scope: "v1.passwords",
+    userId,
+    tenantId,
+  });
+  if (blocked) return blocked;
 
   const result = await parseBody(req, createE2EPasswordSchema);
   if (!result.ok) return result.response;

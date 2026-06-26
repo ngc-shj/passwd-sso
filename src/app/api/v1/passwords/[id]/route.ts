@@ -8,12 +8,13 @@ import { validateV1Auth } from "@/lib/auth/session/v1-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { API_KEY_SCOPE } from "@/lib/constants/auth/api-key";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 
 
-import { errorResponse, errorResponseWithMessage, notFound, rateLimited, validationError } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, notFound, validationError } from "@/lib/http/api-response";
 import type { V1AuthResult } from "@/lib/auth/session/v1-auth";
 import { dedupeTagIds, tagSet } from "@/lib/services/tag-relation";
 
@@ -34,10 +35,15 @@ async function checkAuth(
     return { ok: false, error: errorResponse(error, status) };
   }
 
-  const rl = await v1ApiKeyLimiter.check(`rl:api_key:${authResult.data.rateLimitKey}`);
-  if (!rl.allowed) {
-    return { ok: false, error: rateLimited(rl.retryAfterMs) };
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: v1ApiKeyLimiter,
+    key: `rl:api_key:${authResult.data.rateLimitKey}`,
+    scope: "v1.passwords",
+    userId: authResult.data.userId,
+    tenantId: authResult.data.tenantId,
+  });
+  if (blocked) return { ok: false, error: blocked };
 
   return { ok: true, data: authResult.data };
 }

@@ -3,12 +3,13 @@ import { createRequest, parseResponse } from "@/__tests__/helpers/request-builde
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
-const { mockCheckAuth, mockIssueAutofill, mockLogAudit, mockWarn, mockError } = vi.hoisted(() => ({
+const { mockCheckAuth, mockIssueAutofill, mockLogAudit, mockWarn, mockError, mockCheckRateLimitOrFail } = vi.hoisted(() => ({
   mockCheckAuth: vi.fn(),
   mockIssueAutofill: vi.fn(),
   mockLogAudit: vi.fn(),
   mockWarn: vi.fn(),
   mockError: vi.fn(),
+  mockCheckRateLimitOrFail: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/session/check-auth", () => ({ checkAuth: mockCheckAuth }));
@@ -17,8 +18,12 @@ vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   personalAuditBase: () => ({}),
 }));
+// Mock the rate-limit translator so the real helper (and its transitive prisma
+// import) never loads; the 429/503 mapping itself is covered in rate-limit-audit.test.ts.
+vi.mock("@/lib/security/rate-limit-audit", () => ({ checkRateLimitOrFail: mockCheckRateLimitOrFail }));
 vi.mock("@/lib/logger", () => ({
   logger: { warn: mockWarn, error: mockError, info: vi.fn(), debug: vi.fn() },
+  getLogger: () => ({ warn: mockWarn, error: mockError, info: vi.fn(), debug: vi.fn() }),
 }));
 
 import { POST } from "./route";
@@ -33,6 +38,8 @@ describe("POST /api/mobile/autofill-token", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockLogAudit.mockResolvedValue(undefined);
+    // Default: rate limit allows the request through (helper returns null).
+    mockCheckRateLimitOrFail.mockResolvedValue(null);
   });
 
   it("mints a token bound to the supplied jwk for an authenticated host token", async () => {
@@ -51,6 +58,15 @@ describe("POST /api/mobile/autofill-token", () => {
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect(json.token).toBe("secret-token");
     expect(json.scope).toEqual(["passwords:write"]);
+    // The mint is rate-limited per authenticated user under the correct scope.
+    expect(mockCheckRateLimitOrFail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: "rl:mobile_autofill_token:u1",
+        scope: "mobile.autofill_token",
+        userId: "u1",
+        tenantId: "t1",
+      }),
+    );
     // The route computes cnf.jkt from the body jwk and binds the token to it.
     const passed = mockIssueAutofill.mock.calls[0][0];
     expect(passed).toMatchObject({ userId: "u1", tenantId: "t1" });
@@ -106,28 +122,31 @@ describe("POST /api/mobile/autofill-token", () => {
     expect(mockIssueAutofill).not.toHaveBeenCalled();
   });
 
-  it("429 once the per-user mint budget is exhausted", async () => {
+  it("429 when the per-user mint budget is exhausted (does NOT mint)", async () => {
     mockCheckAuth.mockResolvedValue({
       ok: true,
       auth: { type: "token", userId: "u-rl", tenantId: "t1", clientKind: "IOS_APP" },
     });
-    mockIssueAutofill.mockResolvedValue({
-      token: "secret-token",
-      expiresAt: new Date("2026-06-13T00:05:00.000Z"),
-      cnfJkt: "jkt",
-      scope: "passwords:write",
+    mockCheckRateLimitOrFail.mockResolvedValueOnce(
+      Response.json({ error: "RATE_LIMIT_EXCEEDED" }, { status: 429 }),
+    );
+
+    const res = await POST(post({ jwk: VALID_JWK }));
+    expect(res.status).toBe(429);
+    expect(mockIssueAutofill).not.toHaveBeenCalled();
+  });
+
+  it("fails closed with 503 when the limiter reports redisErrored (does NOT mint)", async () => {
+    mockCheckAuth.mockResolvedValue({
+      ok: true,
+      auth: { type: "token", userId: "u-rl", tenantId: "t1", clientKind: "IOS_APP" },
     });
+    mockCheckRateLimitOrFail.mockResolvedValueOnce(
+      Response.json({ error: "SERVICE_UNAVAILABLE" }, { status: 503 }),
+    );
 
-    let rateLimitedStatus: number | undefined;
-    for (let i = 0; i < 31; i++) {
-      const res = await POST(post({ jwk: VALID_JWK }));
-      if (res.status === 429) {
-        rateLimitedStatus = res.status;
-        break;
-      }
-      expect(res.status).toBe(201);
-    }
-
-    expect(rateLimitedStatus).toBe(429);
+    const res = await POST(post({ jwk: VALID_JWK }));
+    expect(res.status).toBe(503);
+    expect(mockIssueAutofill).not.toHaveBeenCalled();
   });
 });

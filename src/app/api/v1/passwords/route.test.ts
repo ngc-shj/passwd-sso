@@ -40,6 +40,8 @@ vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
+  // Used by emitRateLimitFailClosed (rate-limit-audit.ts) on the redisErrored path.
+  tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
 vi.mock("@/lib/logger", () => {
   const noop = vi.fn();
@@ -126,6 +128,15 @@ describe("GET /api/v1/passwords", () => {
     const { status } = await parseResponse(res);
     expect(status).toBe(429);
     expect(res.headers.get("Retry-After")).toBe("30");
+  });
+
+  it("fails closed with 503 when the limiter reports redisErrored (no DB access)", async () => {
+    mockCheck.mockResolvedValue({ allowed: false, redisErrored: true });
+    const res = await GET(createRequest("GET", "http://localhost/api/v1/passwords"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(503);
+    expect(json).toEqual({ error: "SERVICE_UNAVAILABLE" });
+    expect(mockEntryFindMany).not.toHaveBeenCalled();
   });
 
   it("returns access restriction response when denied", async () => {
@@ -346,6 +357,17 @@ describe("POST /api/v1/passwords", () => {
     const { status } = await parseResponse(res);
     expect(status).toBe(429);
     expect(res.headers.get("Retry-After")).toBe("60");
+  });
+
+  it("fails closed with 503 when the limiter reports redisErrored (no create)", async () => {
+    mockCheck.mockResolvedValue({ allowed: false, redisErrored: true });
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/v1/passwords", { body: validBody }),
+    );
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(503);
+    expect(json).toEqual({ error: "SERVICE_UNAVAILABLE" });
+    expect(mockEntryCreate).not.toHaveBeenCalled();
   });
 
   it("returns 400 on invalid body (missing required fields)", async () => {

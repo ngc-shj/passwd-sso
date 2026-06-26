@@ -131,7 +131,6 @@ describe("GET /api/passwords", () => {
     mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockPrismaFolder.findFirst.mockResolvedValue({ id: "folder-1" });
     mockPrismaTag.count.mockResolvedValue(1);
-    mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
     mockExtTokenUpdate.mockResolvedValue({});
     mockVerifyDpop.mockResolvedValue({ ok: true, claims: {}, jkt: VALID_CNF_JKT });
   });
@@ -141,6 +140,13 @@ describe("GET /api/passwords", () => {
     mockExtTokenFindUnique.mockResolvedValue(null);
     const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
     expect(res.status).toBe(401);
+  });
+
+  it("is read-only: performs no deleteMany (trash auto-purge moved to retention-gc worker, L3)", async () => {
+    mockPrismaPasswordEntry.findMany.mockResolvedValue([mockEntry]);
+    const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
+    expect(res.status).toBe(200);
+    expect(mockPrismaPasswordEntry.deleteMany).not.toHaveBeenCalled();
   });
 
   it("returns 401 for service_account auth type", async () => {
@@ -810,7 +816,6 @@ describe("POST /api/passwords", () => {
     mockPrismaPasswordEntry.findMany.mockResolvedValue([
       { ...mockEntry, id: "pw-card", entryType: "CREDIT_CARD" },
     ]);
-    mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
     const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
     const json = await res.json();
     expect(json[0].entryType).toBe("CREDIT_CARD");
@@ -841,7 +846,6 @@ describe("POST /api/passwords", () => {
     mockPrismaPasswordEntry.findMany.mockResolvedValue([
       { ...mockEntry, id: "pw-identity", entryType: "IDENTITY" },
     ]);
-    mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
     const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
     const json = await res.json();
     expect(json[0].entryType).toBe("IDENTITY");
@@ -872,7 +876,6 @@ describe("POST /api/passwords", () => {
     mockPrismaPasswordEntry.findMany.mockResolvedValue([
       { ...mockEntry, id: "pw-passkey", entryType: "PASSKEY" },
     ]);
-    mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
     const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
     const json = await res.json();
     expect(json[0].entryType).toBe("PASSKEY");
@@ -903,7 +906,6 @@ describe("POST /api/passwords", () => {
     mockPrismaPasswordEntry.findMany.mockResolvedValue([
       { ...mockEntry, id: "pw-bank", entryType: "BANK_ACCOUNT" },
     ]);
-    mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
     const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
     const json = await res.json();
     expect(json[0].entryType).toBe("BANK_ACCOUNT");
@@ -946,7 +948,6 @@ describe("POST /api/passwords", () => {
     mockPrismaPasswordEntry.findMany.mockResolvedValue([
       { ...mockEntry, id: "pw-license", entryType: "SOFTWARE_LICENSE" },
     ]);
-    mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
     const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
     const json = await res.json();
     expect(json[0].entryType).toBe("SOFTWARE_LICENSE");
@@ -993,7 +994,6 @@ describe("POST /api/passwords", () => {
 
   it("ignores invalid entryType query param", async () => {
     mockPrismaPasswordEntry.findMany.mockResolvedValue([]);
-    mockPrismaPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
     await GET(createRequest("GET", "http://localhost:3000/api/passwords", {
       searchParams: { type: "INVALID_TYPE" },
     }));

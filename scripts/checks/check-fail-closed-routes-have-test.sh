@@ -103,7 +103,10 @@ fi
 # per-limiter coverage. Per-line grep guards against this.
 # 53 incl. the SSH agent sign-authorize limiter (vault/ssh/sign-authorize).
 # 54 incl. the iOS bridge-code limiter (mobile/authorize, per-user fail-closed).
-EXPECTED_LIMITER_COUNT=54
+# 58 incl. 4 from rate-limiter-fail-closed-and-get-purge (OWASP M4/M5/M6):
+#   auth callbackRateLimiter + magicLinkIpLimiter, mobile autofill mintLimiter,
+#   tenant breakglassRateLimiter. (v1ApiKeyLimiter lives in src/lib, not counted here.)
+EXPECTED_LIMITER_COUNT=58
 limiter_count=$(grep -rh 'failClosedOnRedisError: true' "$REPO_ROOT/src/app/api" | wc -l)
 if [ "$limiter_count" -ne "$EXPECTED_LIMITER_COUNT" ]; then
   echo "AC4.4 FAIL: expected $EXPECTED_LIMITER_COUNT 'failClosedOnRedisError: true' instantiations; found $limiter_count"
