@@ -63,10 +63,23 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
       pipeline.pttl(key);
       const results = await pipeline.exec();
 
-      // ioredis pipeline results: [[err, value], ...]
+      // ioredis pipeline results: [[err, value], ...]. A whole-pipeline failure
+      // throws or yields null (handled above); a PER-COMMAND failure does NOT
+      // throw — the offending entry is [err, null]. Treat any per-command error
+      // (or a non-numeric INCR/PTTL value) as a Redis failure and signal null so
+      // the caller honors failClosedOnRedisError. Without this, a failed INCR
+      // leaves count = null, and `null <= max` coerces to true → fail-OPEN even
+      // for a fail-closed limiter.
       if (!results) return null;
-      const count = results[0]?.[1] as number;
-      const ttl = results[2]?.[1] as number;
+      const commandError = results.find(([err]) => err != null)?.[0];
+      if (commandError) {
+        logRedisError((commandError as { code?: string } | undefined)?.code);
+        return null;
+      }
+
+      const count = results[0]?.[1];
+      const ttl = results[2]?.[1];
+      if (typeof count !== "number" || typeof ttl !== "number") return null;
 
       if (count <= max) {
         return { allowed: true };

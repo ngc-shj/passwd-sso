@@ -184,6 +184,57 @@ describe("createRateLimiter", () => {
       expect((await limiter.check("k")).allowed).toBe(true);
     });
 
+    it("fails closed when a per-command pipeline error is present (failClosedOnRedisError)", async () => {
+      // ioredis does NOT throw on a per-command failure — the offending entry is
+      // [err, null]. A failed INCR must not leave count=null (which coerces to a
+      // fail-OPEN allow); it must signal a Redis failure.
+      const pipeline = makePipeline([
+        [new Error("ERR command failed"), null],
+        [null, 1],
+        [null, 60_000],
+      ]);
+      mockGetRedis.mockReturnValue({ pipeline: () => pipeline, del: vi.fn() });
+      const limiter = createRateLimiter({
+        windowMs: 60_000,
+        max: 1,
+        failClosedOnRedisError: true,
+      });
+      const result = await limiter.check("k");
+      expect(result.allowed).toBe(false);
+      expect(result.redisErrored).toBe(true);
+    });
+
+    it("falls back to in-memory on a per-command pipeline error (fail-open default)", async () => {
+      const pipeline = makePipeline([
+        [new Error("ERR command failed"), null],
+        [null, 1],
+        [null, 60_000],
+      ]);
+      mockGetRedis.mockReturnValue({ pipeline: () => pipeline, del: vi.fn() });
+      const limiter = createRateLimiter({ windowMs: 60_000, max: 1 });
+      // Per-command error → Redis signals null → in-memory fallback (no redisErrored).
+      const result = await limiter.check("k");
+      expect(result.allowed).toBe(true);
+      expect(result.redisErrored).toBeUndefined();
+    });
+
+    it("fails closed when INCR returns a non-numeric value (unexpected pipeline shape)", async () => {
+      const pipeline = makePipeline([
+        [null, null], // INCR value missing
+        [null, "OK"],
+        [null, 60_000],
+      ]);
+      mockGetRedis.mockReturnValue({ pipeline: () => pipeline, del: vi.fn() });
+      const limiter = createRateLimiter({
+        windowMs: 60_000,
+        max: 1,
+        failClosedOnRedisError: true,
+      });
+      const result = await limiter.check("k");
+      expect(result.allowed).toBe(false);
+      expect(result.redisErrored).toBe(true);
+    });
+
     it("clear() calls Redis DEL when Redis is available", async () => {
       const del = vi.fn().mockResolvedValue(1);
       mockGetRedis.mockReturnValue({
