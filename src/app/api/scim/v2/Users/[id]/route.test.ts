@@ -507,7 +507,17 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
   });
 
-  it("returns 200 and logs error when PUT deactivation invalidation fails", async () => {
+  // L2 — SCIM deactivation fail-open backstop.
+  // When invalidateUserSessions throws, the handler logs + returns 200 (fail-open:
+  // existing sessions/tokens are NOT revoked in that window). This is safe ONLY
+  // because the deactivation itself is committed (tenantMember.update with
+  // deactivatedAt) BEFORE the invalidation attempt, and every long-lived
+  // user-bound token validator independently re-checks tenantMember.deactivatedAt
+  // and fails closed — see the "SCIM fail-open backstop" tests in
+  // api-key.test.ts, extension-token.test.ts (C13a), oauth-server.test.ts (C13a).
+  // This test pins the producer half: the fail-open path still persists the
+  // deactivation the backstop depends on.
+  it("returns 200, persists deactivation, and logs error when PUT invalidation fails (fail-open backstop)", async () => {
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
       .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null })
@@ -542,6 +552,11 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     );
 
     expect(res!.status).toBe(200);
+    // The deactivation IS committed even though invalidation failed — this is the
+    // state the validator backstop reads to reject the un-revoked token next time.
+    expect(mockTenantMember.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "tm1" } }),
+    );
     expect(mockLogger.error).toHaveBeenCalledWith(
       expect.objectContaining({ userId: "user-1" }),
       "session-invalidation-failed",

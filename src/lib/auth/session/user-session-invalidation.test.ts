@@ -144,10 +144,38 @@ describe("invalidateUserSessions", () => {
   });
 
   it("propagates error when a database operation fails", async () => {
+    // This throw is the SCIM fail-open trigger: the SCIM handler catches it, logs
+    // "session-invalidation-failed", records sessionInvalidationFailed:true in the
+    // audit, and still returns 200 — leaving existing tokens un-revoked.
     mockSession.deleteMany.mockRejectedValue(new Error("db error"));
     await expect(
       invalidateUserSessions("user-1", { tenantId: "tenant-1" }),
     ).rejects.toThrow("db error");
+  });
+
+  // L2 — backstop asymmetry (documentation test). When invalidateUserSessions
+  // throws (fail-open), tokens keep revokedAt=null. The deactivation IS committed,
+  // so token classes that INDEPENDENTLY re-check tenantMember.deactivatedAt fail
+  // closed on the next request regardless of revokedAt:
+  //   - api_key            (api-key.ts C13)
+  //   - extension_token    (extension-token.ts C13)
+  //   - mcp_access_token   (oauth-server.ts checkTenantMembership)
+  // DelegationSession and OperatorToken have NO such independent membership
+  // re-check — they are killed ONLY by the revokedAt write here. So during the
+  // (rare, audited) fail-open window they remain usable until they expire. Both
+  // are short-lived; the SCIM DELETE path additionally removes the TenantMember
+  // row entirely. This test documents that residual exposure so a future change
+  // that lengthens those TTLs revisits the backstop.
+  it("revokes DelegationSession and OperatorToken (their ONLY lockout — no membership backstop)", async () => {
+    await invalidateUserSessions("user-1", { tenantId: "tenant-1" });
+    expect(mockDelegationSession.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", revokedAt: null, tenantId: "tenant-1" },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(mockOperatorToken.updateMany).toHaveBeenCalledWith({
+      where: { subjectUserId: "user-1", revokedAt: null, tenantId: "tenant-1" },
+      data: { revokedAt: expect.any(Date) },
+    });
   });
 
   it("invalidates cache for all selected session tokens after DB commits", async () => {
