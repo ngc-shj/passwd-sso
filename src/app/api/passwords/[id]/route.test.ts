@@ -866,10 +866,16 @@ describe("PUT /api/passwords/[id]", () => {
 });
 
 describe("DELETE /api/passwords/[id]", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "session", userId: "test-user-id" } });
     mockAuditCreate.mockResolvedValue({});
+    // vi.clearAllMocks() wipes the factory default (mockResolvedValue(null)),
+    // so re-establish "fresh step-up" here — no test then depends on leaked state.
+    const { requireRecentCurrentAuthMethod } = await import(
+      "@/lib/auth/session/recent-current-auth-method"
+    );
+    vi.mocked(requireRecentCurrentAuthMethod).mockResolvedValue(null);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -961,5 +967,137 @@ describe("DELETE /api/passwords/[id]", () => {
         data: { deletedAt: expect.any(Date) },
       }),
     );
+  });
+
+  // ── C3: token soft-delete (extension passkey-replace) + permanent-delete guard ──
+
+  const tokenAuth = (type: "token" | "api_key" | "mcp_token") => ({
+    ok: true as const,
+    auth: { type, userId: "test-user-id", scopes: ["passwords:write"] },
+  });
+
+  it("requests the PASSWORDS_WRITE scope (token soft-delete enabled)", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    mockPrismaPasswordEntry.update.mockResolvedValue({});
+    await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/passwords/${PW_ID}`),
+      createParams({ id: PW_ID }),
+    );
+    // The mock is arg-agnostic, so without this assertion the scope change is
+    // vacuously untested.
+    expect(mockCheckAuth).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ scope: "passwords:write" }),
+    );
+  });
+
+  it("soft-deletes for a passwords:write token (200, trashed, no hard delete)", async () => {
+    mockCheckAuth.mockResolvedValue(tokenAuth("token"));
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    mockPrismaPasswordEntry.update.mockResolvedValue({});
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/passwords/${PW_ID}`),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockPrismaPasswordEntry.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { deletedAt: expect.any(Date) } }),
+    );
+    expect(mockPrismaPasswordEntry.delete).not.toHaveBeenCalled();
+  });
+
+  it.each(["token", "api_key", "mcp_token"] as const)(
+    "rejects permanent=true for a %s caller with 403 (no delete)",
+    async (type) => {
+      mockCheckAuth.mockResolvedValue(tokenAuth(type));
+      mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+
+      const res = await DELETE(
+        createRequest("DELETE", `http://localhost:3000/api/passwords/${PW_ID}`, {
+          searchParams: { permanent: "true" },
+        }),
+        createParams({ id: PW_ID }),
+      );
+      const json = await res.json();
+      expect(res.status).toBe(403);
+      expect(json.error).toBe("FORBIDDEN");
+      expect(mockPrismaPasswordEntry.delete).not.toHaveBeenCalled();
+      expect(mockPrismaPasswordEntry.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it("token permanent=true short-circuits to 403 BEFORE step-up (ordering)", async () => {
+    // Even if step-up would have produced its own response, the token guard
+    // must win first → 403, not the step-up 401. Use a persistent (non-Once)
+    // override so an un-consumed Once value cannot leak into a later test.
+    const { requireRecentCurrentAuthMethod } = await import(
+      "@/lib/auth/session/recent-current-auth-method"
+    );
+    vi.mocked(requireRecentCurrentAuthMethod).mockResolvedValue(
+      NextResponse.json({ error: "STEP_UP" }, { status: 401 }),
+    );
+    mockCheckAuth.mockResolvedValue(tokenAuth("token"));
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        searchParams: { permanent: "true" },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(403);
+    expect(requireRecentCurrentAuthMethod).not.toHaveBeenCalled();
+    // No manual restore needed — beforeEach re-establishes the null default.
+  });
+
+  it("returns 404 for a token caller deleting another user's entry (oracle collapse)", async () => {
+    mockCheckAuth.mockResolvedValue(tokenAuth("token"));
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue({ ...ownedEntry, userId: "other-user" });
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/passwords/${PW_ID}`),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("session permanent=true still works with fresh step-up (unchanged)", async () => {
+    const { requireRecentCurrentAuthMethod } = await import(
+      "@/lib/auth/session/recent-current-auth-method"
+    );
+    vi.mocked(requireRecentCurrentAuthMethod).mockResolvedValue(null); // fresh
+    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "session", userId: "test-user-id" } });
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+    mockPrismaPasswordEntry.delete.mockResolvedValue({});
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        searchParams: { permanent: "true" },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockPrismaPasswordEntry.delete).toHaveBeenCalled();
+  });
+
+  it("session permanent=true with stale step-up returns the step-up response", async () => {
+    const { requireRecentCurrentAuthMethod } = await import(
+      "@/lib/auth/session/recent-current-auth-method"
+    );
+    vi.mocked(requireRecentCurrentAuthMethod).mockResolvedValueOnce(
+      NextResponse.json({ error: "STEP_UP_REQUIRED" }, { status: 401 }),
+    );
+    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "session", userId: "test-user-id" } });
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        searchParams: { permanent: "true" },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(401);
+    expect(mockPrismaPasswordEntry.delete).not.toHaveBeenCalled();
   });
 });
