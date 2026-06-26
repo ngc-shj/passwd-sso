@@ -79,7 +79,12 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
 
       const count = results[0]?.[1];
       const ttl = results[2]?.[1];
-      if (typeof count !== "number" || typeof ttl !== "number") return null;
+      if (typeof count !== "number" || typeof ttl !== "number") {
+        // Unexpected pipeline shape — surface it like any other Redis failure
+        // for operational visibility (symmetry with the per-command error log).
+        logRedisError("unexpected_pipeline_shape");
+        return null;
+      }
 
       if (count <= max) {
         return { allowed: true };
