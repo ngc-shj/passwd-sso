@@ -78,6 +78,8 @@ vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
+  // Used by emitRateLimitFailClosed (rate-limit-audit.ts) on the redisErrored path.
+  tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
 
 import { GET, PUT, DELETE } from "./route";
@@ -140,6 +142,29 @@ describe("GET /api/v1/passwords/[id]", () => {
     );
     const { status } = await parseResponse(res);
     expect(status).toBe(403);
+  });
+
+  it("returns 429 when rate limit exceeded (no DB access)", async () => {
+    mockCheck.mockResolvedValue({ allowed: false, retryAfterMs: 30_000 });
+    const res = await GET(
+      createRequest("GET", `http://localhost/api/v1/passwords/${PW_ID}`),
+      createParams({ id: PW_ID }),
+    );
+    const { status } = await parseResponse(res);
+    expect(status).toBe(429);
+    expect(mockEntryFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("fails closed with 503 when the limiter reports redisErrored (no DB access)", async () => {
+    mockCheck.mockResolvedValue({ allowed: false, redisErrored: true });
+    const res = await GET(
+      createRequest("GET", `http://localhost/api/v1/passwords/${PW_ID}`),
+      createParams({ id: PW_ID }),
+    );
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(503);
+    expect(json).toEqual({ error: "SERVICE_UNAVAILABLE" });
+    expect(mockEntryFindUnique).not.toHaveBeenCalled();
   });
 
   it("returns 404 when entry not found", async () => {

@@ -2,8 +2,12 @@
  * Tests for the shared rate limiter instances exported from rate-limiters.ts.
  *
  * The module exposes pre-configured limiter singletons (no factory params).
- * The behavioral surface is tested via behavioral check + a smoke test that
- * the singleton has the expected window/max budget.
+ * v1ApiKeyLimiter is configured `failClosedOnRedisError: true` (M1): when Redis
+ * is unreachable it must signal `redisErrored` (→ 503 at the route) instead of
+ * falling back to the per-process in-memory Map (the cross-pod bypass this
+ * remediates). The budget / clear / per-key mechanics of the Redis path are
+ * covered at the factory level in rate-limit.test.ts; here we assert the
+ * singleton's configured contract (fail-closed + Redis delegation).
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -14,13 +18,21 @@ vi.mock("@/lib/redis", () => ({
 }));
 
 import { v1ApiKeyLimiter } from "./rate-limiters";
-import { MS_PER_MINUTE } from "@/lib/constants/time";
+
+type PipelineResult = [Error | null, number][];
+function makePipeline(results: PipelineResult) {
+  const pipeline = {
+    incr: vi.fn().mockReturnThis(),
+    pexpire: vi.fn().mockReturnThis(),
+    pttl: vi.fn().mockReturnThis(),
+    exec: vi.fn().mockResolvedValue(results),
+  };
+  return pipeline;
+}
 
 describe("rate-limiters", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.useRealTimers();
-    mockGetRedis.mockReturnValue(null); // force in-memory path
   });
 
   describe("v1ApiKeyLimiter", () => {
@@ -29,49 +41,39 @@ describe("rate-limiters", () => {
       expect(typeof v1ApiKeyLimiter.clear).toBe("function");
     });
 
-    it("allows the first 100 requests then rejects", async () => {
-      // Use a unique key to avoid collisions with other tests in the suite
-      const key = `test:rate-limiters:100-budget:${Date.now()}-${Math.random()}`;
-      // Within budget
-      for (let i = 0; i < 100; i++) {
-        const result = await v1ApiKeyLimiter.check(key);
-        expect(result.allowed).toBe(true);
-      }
-      // 101st must be rejected
-      const blocked = await v1ApiKeyLimiter.check(key);
-      expect(blocked.allowed).toBe(false);
-      expect(blocked.retryAfterMs).toBeGreaterThan(0);
+    it("fails closed (redisErrored) when Redis is unreachable — no in-memory fallback (M1)", async () => {
+      mockGetRedis.mockReturnValue(null);
+      const result = await v1ApiKeyLimiter.check("test:v1:fail-closed");
+      expect(result.allowed).toBe(false);
+      expect(result.redisErrored).toBe(true);
     });
 
-    it("retryAfterMs reflects the per-minute window when over budget", async () => {
-      const key = `test:rate-limiters:retry-after:${Date.now()}-${Math.random()}`;
-      for (let i = 0; i < 100; i++) {
-        await v1ApiKeyLimiter.check(key);
-      }
-      const blocked = await v1ApiKeyLimiter.check(key);
-      expect(blocked.retryAfterMs).toBeLessThanOrEqual(MS_PER_MINUTE);
+    it("allows via the Redis path when INCR count <= max", async () => {
+      const pipeline = makePipeline([
+        [null, 1], // incr
+        [null, 1], // pexpire
+        [null, 60_000], // pttl
+      ]);
+      mockGetRedis.mockReturnValue({ pipeline: () => pipeline });
+
+      const result = await v1ApiKeyLimiter.check("test:v1:redis-allow");
+      expect(result.allowed).toBe(true);
+      expect(result.redisErrored).toBeUndefined();
+      expect(pipeline.incr).toHaveBeenCalledWith("test:v1:redis-allow");
     });
 
-    it("clear() resets the counter", async () => {
-      const key = `test:rate-limiters:clear:${Date.now()}-${Math.random()}`;
-      for (let i = 0; i < 100; i++) {
-        await v1ApiKeyLimiter.check(key);
-      }
-      expect((await v1ApiKeyLimiter.check(key)).allowed).toBe(false);
-      await v1ApiKeyLimiter.clear(key);
-      expect((await v1ApiKeyLimiter.check(key)).allowed).toBe(true);
-    });
+    it("rejects (429-signal) via the Redis path when INCR count > max", async () => {
+      const pipeline = makePipeline([
+        [null, 101], // incr — over the 100 budget
+        [null, 0],
+        [null, 5_000], // pttl
+      ]);
+      mockGetRedis.mockReturnValue({ pipeline: () => pipeline });
 
-    it("isolates counters per key (independent budgets)", async () => {
-      const a = `test:rate-limiters:isolate:A:${Date.now()}-${Math.random()}`;
-      const b = `test:rate-limiters:isolate:B:${Date.now()}-${Math.random()}`;
-      // Burn A to its limit
-      for (let i = 0; i < 100; i++) {
-        await v1ApiKeyLimiter.check(a);
-      }
-      expect((await v1ApiKeyLimiter.check(a)).allowed).toBe(false);
-      // B has its own budget
-      expect((await v1ApiKeyLimiter.check(b)).allowed).toBe(true);
+      const result = await v1ApiKeyLimiter.check("test:v1:redis-reject");
+      expect(result.allowed).toBe(false);
+      expect(result.redisErrored).toBeUndefined();
+      expect(result.retryAfterMs).toBe(5_000);
     });
   });
 });

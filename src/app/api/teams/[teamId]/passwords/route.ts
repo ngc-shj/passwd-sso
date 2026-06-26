@@ -13,7 +13,6 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import * as teamPasswordService from "@/lib/services/team-password-service";
 import { TeamPasswordServiceError } from "@/lib/services/team-password-service";
-import { deleteAttachmentBlobs } from "@/lib/blob-store/cleanup";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -56,16 +55,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
     }),
   );
 
-  // Auto-purge items deleted more than 30 days ago (async nonblocking, F-20).
-  // Blob refs are collected under RLS; the external-store purge runs AFTER the
-  // tx closes so blob I/O never holds a DB connection open.
-  if (!trashOnly) {
-    withTeamTenantRls(teamId, () =>
-      teamPasswordService.purgeExpiredTeamPasswords(teamId),
-    )
-      .then((refs) => deleteAttachmentBlobs(refs))
-      .catch(() => {});
-  }
+  // Trash auto-purge runs in the retention-gc worker (PER_TENANT_TRASH registry
+  // entry for team_password_entries), not on this read path. GET is read-only.
 
   return NextResponse.json(entries);
 }

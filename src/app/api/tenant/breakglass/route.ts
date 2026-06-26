@@ -11,10 +11,11 @@ import { BREAKGLASS_USER_LIST_LIMIT } from "@/lib/validations/common.server";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { SEC_PER_HOUR } from "@/lib/constants/time";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { createNotification } from "@/lib/notification";
 import { createBreakglassGrantSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { errorResponse, forbidden, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
+import { errorResponse, forbidden, handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { parseBody } from "@/lib/http/parse-body";
 import { AUDIT_ACTION } from "@/lib/constants";
@@ -26,6 +27,7 @@ export const runtime = "nodejs";
 const breakglassRateLimiter = createRateLimiter({
   windowMs: MS_PER_HOUR,
   max: 5,
+  failClosedOnRedisError: true,
 });
 
 // POST /api/tenant/breakglass — Create a break-glass personal log access grant
@@ -52,12 +54,15 @@ async function handlePOST(req: NextRequest) {
 
   // Rate limit BEFORE body parse so authenticated admins cannot trigger
   // body-parse memory allocation on every call before hitting the 5/hour cap.
-  const rlResult = await breakglassRateLimiter.check(
-    `rl:breakglass:${userId}`,
-  );
-  if (!rlResult.allowed) {
-    return rateLimited(rlResult.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: breakglassRateLimiter,
+    key: `rl:breakglass:${userId}`,
+    scope: "breakglass",
+    userId,
+    tenantId: actor.tenantId,
+  });
+  if (blocked) return blocked;
 
   // Parse and validate request body
   const bodyResult = await parseBody(req, createBreakglassGrantSchema);

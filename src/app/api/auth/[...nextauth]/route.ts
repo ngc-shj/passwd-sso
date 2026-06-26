@@ -7,7 +7,7 @@ import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
-import { rateLimited } from "@/lib/http/api-response";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
@@ -77,6 +77,7 @@ const CALLBACK_RATE_LIMIT_MAX = 60;
 const callbackRateLimiter = createRateLimiter({
   windowMs: CALLBACK_RATE_LIMIT_WINDOW_MS,
   max: CALLBACK_RATE_LIMIT_MAX,
+  failClosedOnRedisError: true,
 });
 
 function isCallbackRoute(pathname: string): boolean {
@@ -94,9 +95,15 @@ function withCallbackRateLimit<H extends RouteHandler>(handler: H): H {
       scope: "auth_callback",
       limiter: callbackRateLimiter,
     });
-    if (!rl.allowed) {
-      return rateLimited(rl.retryAfterMs) as unknown as Response;
-    }
+    // Pre-auth surface: userId null → checkRateLimitOrFail warn-logs the
+    // fail-closed (no audit row). redisErrored → 503; over-limit → 429.
+    const blocked = await checkRateLimitOrFail({
+      req: request,
+      result: rl,
+      scope: "auth_callback",
+      userId: null,
+    });
+    if (blocked) return blocked as unknown as Response;
     return handler(request, ...rest);
   };
   return wrapped as unknown as H;
@@ -120,6 +127,7 @@ const MAGIC_LINK_IP_MAX = 10;
 const magicLinkIpLimiter = createRateLimiter({
   windowMs: MAGIC_LINK_IP_WINDOW_MS,
   max: MAGIC_LINK_IP_MAX,
+  failClosedOnRedisError: true,
 });
 
 function isMagicLinkSigninRoute(pathname: string, method: string): boolean {
@@ -143,9 +151,13 @@ function withMagicLinkIpRateLimit<H extends RouteHandler>(handler: H): H {
       scope: "magic_link_signin",
       limiter: magicLinkIpLimiter,
     });
-    if (!rl.allowed) {
-      return rateLimited(rl.retryAfterMs) as unknown as Response;
-    }
+    const blocked = await checkRateLimitOrFail({
+      req: request,
+      result: rl,
+      scope: "magic_link_signin",
+      userId: null,
+    });
+    if (blocked) return blocked as unknown as Response;
     return handler(request, ...rest);
   };
   return wrapped as unknown as H;
@@ -154,6 +166,7 @@ function withMagicLinkIpRateLimit<H extends RouteHandler>(handler: H): H {
 // Exported for testing
 export { withAuthBasePath as _withAuthBasePath };
 export { withCallbackRateLimit as _withCallbackRateLimit };
+export { withMagicLinkIpRateLimit as _withMagicLinkIpRateLimit };
 export { isCallbackRoute as _isCallbackRoute };
 
 export const GET = withRequestLog(
