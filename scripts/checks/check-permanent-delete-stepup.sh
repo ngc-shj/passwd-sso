@@ -129,11 +129,13 @@ done < <(
 )
 
 for route in ${routes[@]+"${routes[@]}"}; do
-  # Require an actual CALL `requireRecentCurrentAuthMethod(` (open paren), not a
-  # bare identifier — so a stale import, a comment, or a prefixed rename
-  # (e.g. DISABLED_requireRecentCurrentAuthMethod) does not satisfy the gate.
-  # The leading boundary [^A-Za-z0-9_] (or start-of-token via grep -oE) rejects
-  # a different identifier that merely ends with the name.
+  # Require the call-shaped token `requireRecentCurrentAuthMethod(` (open paren),
+  # not a bare import or a prefixed/renamed identifier
+  # (e.g. DISABLED_requireRecentCurrentAuthMethod) — the leading boundary
+  # [^A-Za-z0-9_] rejects an identifier that merely ends with the name. This is
+  # still a grep, not an AST check: a COMMENTED-OUT call satisfies it too (see
+  # the "Known limitations" note in the header) — catching that is left to code
+  # review, by design.
   if grep -qE '(^|[^A-Za-z0-9_])requireRecentCurrentAuthMethod\(' "$PATH_ROOT/$route" 2>/dev/null; then
     continue # step-up present (called)
   fi
