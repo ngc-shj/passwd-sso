@@ -47,9 +47,6 @@ the right credential above the keyboard.
 Everything is encrypted with AES-256-GCM before it touches the network. The
 server stores only ciphertext.
 
-- Face ID unlock — Unlock your vault and reveal credentials with Face ID. The
-vault re-locks automatically after a timeout you choose.
-
 - Passkeys — Sign in with WebAuthn passkeys stored in your vault, and create new
 ones, all from the AutoFill flow.
 
@@ -70,7 +67,7 @@ password,vault,autofill,passkey,totp,2fa,self-hosted,e2e,encryption,sso,security
 ### What's New (release notes for v0.4.60)
 
 First public release. Self-hosted password vault with native iOS AutoFill,
-TOTP, passkey assertion and registration, and Face ID unlock.
+TOTP, and passkey assertion and registration.
 
 ### Support & Marketing URLs
 
