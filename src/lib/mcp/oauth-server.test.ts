@@ -690,6 +690,13 @@ describe("validateMcpToken", () => {
   });
 
   // ── C13: deactivated-user rejection ───────────────────────
+  //
+  // L2 — SCIM deactivation fail-open backstop: SCIM deactivation calls
+  // invalidateUserSessions, which sets revokedAt on this MCP access token. If
+  // that throws (the SCIM handler logs + returns 200 — a fail-open window),
+  // revokedAt stays null. C13(a) below IS that scenario: revokedAt:null (token
+  // never revoked) + member deactivated → invalid_token via the membership check
+  // alone. This is what makes the SCIM fail-open safe.
 
   it("C13(a): deactivated-in-token-tenant ⇒ invalid_token", async () => {
     const { prisma } = await import("@/lib/prisma");

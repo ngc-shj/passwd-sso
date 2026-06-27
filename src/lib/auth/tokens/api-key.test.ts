@@ -158,6 +158,21 @@ describe("validateApiKey — deactivated-user (C13)", () => {
     const result = await validateApiKey(makeReq());
     expect(result).toEqual({ ok: false, error: "API_KEY_INVALID" });
   });
+
+  // L2 — SCIM deactivation fail-open backstop.
+  // SCIM user deactivation calls invalidateUserSessions, which sets revokedAt on
+  // this api_key. If that invalidation THROWS (the SCIM handler logs and returns
+  // 200 — a fail-open window), the token's revokedAt is NOT set. This test pins
+  // the backstop that makes that fail-open safe: with revokedAt=null (token never
+  // revoked) but the member deactivated, the membership check alone still rejects
+  // the token on the next request. Independent of the revokedAt write.
+  it("rejects a non-revoked token when the member is deactivated (SCIM fail-open backstop)", async () => {
+    mockApiKeyFindUnique.mockResolvedValue({ ...VALID_KEY_ROW, revokedAt: null });
+    mockTenantMemberFindUnique.mockResolvedValue({ deactivatedAt: new Date("2025-01-01") });
+
+    const result = await validateApiKey(makeReq());
+    expect(result).toEqual({ ok: false, error: "API_KEY_INVALID" });
+  });
 });
 
 // ─── validateApiKey — lastUsedAt throttle (C4) ───────────────

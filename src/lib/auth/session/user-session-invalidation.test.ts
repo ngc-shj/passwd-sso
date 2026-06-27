@@ -144,10 +144,51 @@ describe("invalidateUserSessions", () => {
   });
 
   it("propagates error when a database operation fails", async () => {
+    // This throw is the SCIM fail-open trigger: the SCIM handler catches it, logs
+    // "session-invalidation-failed", records sessionInvalidationFailed:true in the
+    // audit, and still returns 200 — leaving existing tokens un-revoked.
     mockSession.deleteMany.mockRejectedValue(new Error("db error"));
     await expect(
       invalidateUserSessions("user-1", { tenantId: "tenant-1" }),
     ).rejects.toThrow("db error");
+  });
+
+  // L2 — residual lockout surface (documentation test). When
+  // invalidateUserSessions throws (fail-open), revokedAt writes do not land. The
+  // deactivation IS still committed, so token classes whose validators
+  // INDEPENDENTLY re-check tenantMember.deactivatedAt fail closed on the next
+  // request regardless of revokedAt:
+  //   - api_key            (api-key.ts C13)
+  //   - extension_token    (extension-token.ts C13)
+  //   - mcp_access_token + refresh rotation (oauth-server.ts checkTenantMembership)
+  //
+  // DelegationSession and OperatorToken have NO membership re-check INSIDE their
+  // own validators, but they are NOT solely dependent on the revokedAt write:
+  //   - DelegationSession: /api/vault/delegation/check authenticates via
+  //     authOrToken → validateMcpToken (auth-or-token.ts), which DOES re-check
+  //     deactivatedAt — so the MCP-token path is backstopped. The session-auth
+  //     path relies on session invalidation succeeding OR route-level tenant
+  //     membership checks; this PR does not pin that path.
+  //   - OperatorToken: validateOperatorToken itself does not check membership,
+  //     but the maintenance/admin routes call requireMaintenanceOperator(), which
+  //     re-checks active OWNER/ADMIN membership with deactivatedAt:null
+  //     (maintenance-auth.ts; tested in maintenance-auth.test.ts "filters out
+  //     deactivated members"). Do NOT rely on token expiry as the backstop:
+  //     operator tokens live 30–90 days (operator-token.ts constants).
+  //
+  // This test pins the producer half — invalidateUserSessions attempts to revoke
+  // both artifacts; if that DB write fails, the residual exposure is covered by
+  // the route-level membership checks above plus audit/alerting.
+  it("revokes DelegationSession and OperatorToken (revokedAt write; route-level membership is the fail-open backstop)", async () => {
+    await invalidateUserSessions("user-1", { tenantId: "tenant-1" });
+    expect(mockDelegationSession.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", revokedAt: null, tenantId: "tenant-1" },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(mockOperatorToken.updateMany).toHaveBeenCalledWith({
+      where: { subjectUserId: "user-1", revokedAt: null, tenantId: "tenant-1" },
+      data: { revokedAt: expect.any(Date) },
+    });
   });
 
   it("invalidates cache for all selected session tokens after DB commits", async () => {
