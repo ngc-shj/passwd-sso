@@ -162,6 +162,7 @@ run_step "Static: settings-card-layout"  bash scripts/checks/check-settings-card
 run_step "Static: api-error-codes" bash scripts/checks/check-api-error-codes.sh
 run_step "Static: api-error-body-drift" bash scripts/checks/check-api-error-body-drift.sh
 run_step "Static: fail-closed-routes-have-test" bash scripts/checks/check-fail-closed-routes-have-test.sh
+run_step "Static: permanent-delete-stepup" bash scripts/checks/check-permanent-delete-stepup.sh
 run_step "Static: raw-body-read" bash scripts/checks/check-raw-body-read.sh
 run_step "Static: actions-sha-pinned" bash scripts/checks/check-actions-sha-pinned.sh
 run_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-prisma-pin.sh
