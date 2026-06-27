@@ -20,6 +20,7 @@ import {
   unauthorized,
 } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
@@ -36,7 +37,12 @@ export const runtime = "nodejs";
 
 const TOKEN_LIMIT_PER_TENANT = 50;
 
-const createTokenLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 5 });
+const createTokenLimiter = createRateLimiter({
+  windowMs: RATE_WINDOW_MS,
+  max: 5,
+  failClosedOnRedisError: true,
+});
+// List is not security-critical — fail-open (in-memory fallback) is acceptable.
 const listTokenLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 30 });
 
 const createTokenSchema = z
@@ -130,10 +136,15 @@ async function handlePOST(req: NextRequest) {
   });
   if (stepUpError) return stepUpError;
 
-  const rl = await createTokenLimiter.check(
-    `rl:op_token_create:${actor.tenantId}`,
-  );
-  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: createTokenLimiter,
+    key: `rl:op_token_create:${actor.tenantId}`,
+    scope: "tenant.operator_token_create",
+    userId: session.user.id,
+    tenantId: actor.tenantId,
+  });
+  if (blocked) return blocked;
 
   const result = await parseBody(req, createTokenSchema);
   if (!result.ok) return result.response;

@@ -70,7 +70,7 @@ describe("GET /api/scim/v2/Users", () => {
     vi.clearAllMocks();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
-    mockCheckScimRateLimit.mockResolvedValue(true);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
   });
 
   it("returns tenant users", async () => {
@@ -136,7 +136,7 @@ describe("GET /api/scim/v2/Users", () => {
   });
 
   it("returns 429 when GET is rate limited", async () => {
-    mockCheckScimRateLimit.mockResolvedValue(false);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
 
     const res = await GET(makeReq());
     expect(res.status).toBe(429);
@@ -189,7 +189,7 @@ describe("POST /api/scim/v2/Users", () => {
     vi.clearAllMocks();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
-    mockCheckScimRateLimit.mockResolvedValue(true);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
   });
 
   it("creates tenant member", async () => {
@@ -310,7 +310,7 @@ describe("POST /api/scim/v2/Users", () => {
   });
 
   it("returns 429 when POST is rate limited", async () => {
-    mockCheckScimRateLimit.mockResolvedValue(false);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
 
     const res = await POST(
       makeReq({

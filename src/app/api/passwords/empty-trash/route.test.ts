@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NextResponse } from "next/server";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockFindMany, mockDeleteMany, mockTransaction, mockLogAudit, mockWithUserTenantRls } = vi.hoisted(() => ({
@@ -27,12 +28,21 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
+// Irreversible bulk purge gates on requireRecentCurrentAuthMethod (step-up).
+// Default: null (fresh session → allow). Stale-session tests override.
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
+}));
 
 import { POST } from "./route";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
+
+const mockRequireRecent = vi.mocked(requireRecentCurrentAuthMethod);
 
 describe("POST /api/passwords/empty-trash", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRequireRecent.mockResolvedValue(null);
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
       fn({
@@ -129,6 +139,29 @@ describe("POST /api/passwords/empty-trash", () => {
         }),
       })
     );
+  });
+
+  it("rejects with 403 and does NOT delete when session is stale (step-up required)", async () => {
+    mockRequireRecent.mockResolvedValueOnce(
+      NextResponse.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const res = await POST(
+      createRequest("POST", "http://localhost:3000/api/passwords/empty-trash")
+    );
+
+    expect(res.status).toBe(403);
+    // Security-critical ordering: the purge must not run before step-up passes.
+    expect(mockDeleteMany).not.toHaveBeenCalled();
+  });
+
+  it("proceeds with the purge when the session is fresh (step-up returns null)", async () => {
+    const res = await POST(
+      createRequest("POST", "http://localhost:3000/api/passwords/empty-trash")
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockDeleteMany).toHaveBeenCalled();
   });
 
   it("propagates db errors (framework handles 500)", async () => {

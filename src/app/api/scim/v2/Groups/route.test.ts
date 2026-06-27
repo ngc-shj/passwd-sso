@@ -57,7 +57,7 @@ describe("GET /api/scim/v2/Groups", () => {
     vi.clearAllMocks();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
-    mockCheckScimRateLimit.mockResolvedValue(true);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
   });
 
   it("returns tenant group mappings", async () => {
@@ -110,7 +110,7 @@ describe("GET /api/scim/v2/Groups", () => {
   });
 
   it("returns 429 when GET is rate limited", async () => {
-    mockCheckScimRateLimit.mockResolvedValue(false);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
 
     const res = await GET(makeReq());
     expect(res.status).toBe(429);
@@ -139,7 +139,7 @@ describe("POST /api/scim/v2/Groups", () => {
     vi.clearAllMocks();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
-    mockCheckScimRateLimit.mockResolvedValue(true);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
   });
 
   it("creates a tenant group mapping", async () => {
@@ -229,7 +229,7 @@ describe("POST /api/scim/v2/Groups", () => {
   });
 
   it("returns 429 when POST is rate limited", async () => {
-    mockCheckScimRateLimit.mockResolvedValue(false);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
 
     const res = await POST(
       makeReq({

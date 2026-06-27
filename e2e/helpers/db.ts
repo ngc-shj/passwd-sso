@@ -299,6 +299,20 @@ export async function seedSession(
   );
 }
 
+/**
+ * Reset a session's created_at to now() so it passes step-up
+ * (requireRecentCurrentAuthMethod, STEP_UP_WINDOW_MS = 15min). Sessions seeded
+ * in global-setup go stale once the suite has run >15min; call this right
+ * before a step-up-gated destructive action (permanent purge / vault reset).
+ */
+export async function refreshSessionRecency(sessionToken: string): Promise<void> {
+  const p = getPool();
+  await p.query(
+    `UPDATE sessions SET created_at = now() WHERE session_token = $1`,
+    [sessionToken]
+  );
+}
+
 export async function seedVaultKey(
   userId: string,
   verificationArtifact: {

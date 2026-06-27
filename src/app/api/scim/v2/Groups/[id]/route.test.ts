@@ -82,7 +82,7 @@ describe("GET /api/scim/v2/Groups/[id]", () => {
     vi.clearAllMocks();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
-    mockCheckScimRateLimit.mockResolvedValue(true);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
   });
 
   it("returns 404 when mapping not found", async () => {
@@ -103,7 +103,7 @@ describe("GET /api/scim/v2/Groups/[id]", () => {
   });
 
   it("returns 429 when group lookups are rate limited", async () => {
-    mockCheckScimRateLimit.mockResolvedValue(false);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
 
     const res = await GET(makeReq(), makeParams("grp-1"));
     expect(res.status).toBe(429);
@@ -136,7 +136,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     vi.clearAllMocks();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
-    mockCheckScimRateLimit.mockResolvedValue(true);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
     mockScimGroupMapping.findUnique.mockResolvedValue(mapping);
     // Default transaction: pass tx with batch-capable mocks
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
@@ -328,7 +328,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
   });
 
   it("returns 429 when PATCH is rate limited", async () => {
-    mockCheckScimRateLimit.mockResolvedValue(false);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
     const res = await PATCH(
       makeReq({
         method: "PATCH",
@@ -365,7 +365,7 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
     vi.clearAllMocks();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
-    mockCheckScimRateLimit.mockResolvedValue(true);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
     mockScimGroupMapping.findUnique.mockResolvedValue(mapping);
     // Default transaction: pass tx with batch-capable mocks
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
@@ -524,7 +524,7 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
   });
 
   it("returns 429 when PUT is rate limited", async () => {
-    mockCheckScimRateLimit.mockResolvedValue(false);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
     const res = await PUT(
       makeReq({
         method: "PUT",
@@ -545,7 +545,7 @@ describe("DELETE /api/scim/v2/Groups/[id]", () => {
     vi.clearAllMocks();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
-    mockCheckScimRateLimit.mockResolvedValue(true);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
   });
 
   it("returns 405", async () => {
@@ -560,7 +560,7 @@ describe("DELETE /api/scim/v2/Groups/[id]", () => {
   });
 
   it("returns 429 when DELETE is rate limited", async () => {
-    mockCheckScimRateLimit.mockResolvedValue(false);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
     const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("grp-1"));
     expect(res.status).toBe(429);
   });

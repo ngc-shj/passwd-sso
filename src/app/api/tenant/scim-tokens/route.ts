@@ -14,8 +14,9 @@ import { z } from "zod";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
-import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import {
   SCIM_TOKEN_EXPIRY_MIN_DAYS,
   SCIM_TOKEN_EXPIRY_MAX_DAYS,
@@ -24,7 +25,11 @@ import {
 import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 
-const scimTokenCreateLimiter = createRateLimiter({ windowMs: MS_PER_HOUR, max: 5 });
+const scimTokenCreateLimiter = createRateLimiter({
+  windowMs: MS_PER_HOUR,
+  max: 5,
+  failClosedOnRedisError: true,
+});
 
 export const runtime = "nodejs";
 
@@ -92,8 +97,15 @@ async function handlePOST(req: NextRequest) {
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 
-  const rl = await scimTokenCreateLimiter.check(`rl:scim_token_create:${actor.tenantId}`);
-  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: scimTokenCreateLimiter,
+    key: `rl:scim_token_create:${actor.tenantId}`,
+    scope: "tenant.scim_token_create",
+    userId: session.user.id,
+    tenantId: actor.tenantId,
+  });
+  if (blocked) return blocked;
 
   const result = await parseBody(req, createTokenSchema);
   if (!result.ok) return result.response;

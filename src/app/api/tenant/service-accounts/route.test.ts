@@ -59,6 +59,12 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
+// Keep the real checkRateLimitOrFail (so it maps redisErrored → 503) but
+// stub the audit emit to a no-op to avoid pulling its transitive deps.
+vi.mock("@/lib/security/rate-limit-audit", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  emitRateLimitFailClosed: vi.fn(),
+}));
 vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
@@ -214,5 +220,35 @@ describe("POST /api/tenant/service-accounts", () => {
     const { status } = await parseResponse(res);
 
     expect(status).toBe(403);
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockRateLimiterCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 30_000 });
+
+    const req = createRequest("POST", "http://localhost/api/tenant/service-accounts", {
+      body: { name: "ci-bot" },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(429);
+    expect(mockServiceAccountCreate).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 (fail-closed) when the create limiter signals redisErrored", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockRateLimiterCheck.mockResolvedValueOnce({ allowed: false, redisErrored: true });
+
+    const req = createRequest("POST", "http://localhost/api/tenant/service-accounts", {
+      body: { name: "ci-bot" },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(503);
+    expect(mockServiceAccountCreate).not.toHaveBeenCalled();
   });
 });

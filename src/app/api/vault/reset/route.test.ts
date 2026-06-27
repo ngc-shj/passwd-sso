@@ -70,15 +70,25 @@ vi.mock("@/lib/logger", () => ({
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
+// Irreversible full vault wipe gates on requireRecentCurrentAuthMethod (step-up).
+// Default: null (fresh session → allow). Stale-session tests override.
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
+}));
 
+import { NextResponse } from "next/server";
 import { POST } from "./route";
 import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
+
+const mockRequireRecent = vi.mocked(requireRecentCurrentAuthMethod);
 
 const URL = "http://localhost/api/vault/reset";
 
 describe("POST /api/vault/reset", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRequireRecent.mockResolvedValue(null);
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRateLimiter.check.mockResolvedValue({ allowed: true });
     mockPrismaPasswordEntry.count.mockResolvedValue(5);
@@ -110,6 +120,20 @@ describe("POST /api/vault/reset", () => {
       body: { confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(429);
+  });
+
+  it("rejects with 403 and does NOT wipe the vault when session is stale (step-up)", async () => {
+    mockRequireRecent.mockResolvedValueOnce(
+      NextResponse.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const res = await POST(createRequest("POST", URL, {
+      body: { confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
+    }));
+
+    expect(res.status).toBe(403);
+    // Security-critical ordering: the wipe must not run before step-up passes.
+    expect(mockExecuteVaultReset).not.toHaveBeenCalled();
   });
 
   it("returns 400 on wrong confirmation text", async () => {

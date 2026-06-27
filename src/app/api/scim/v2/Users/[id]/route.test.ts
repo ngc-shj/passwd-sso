@@ -81,7 +81,7 @@ describe("GET /api/scim/v2/Users/[id]", () => {
     vi.clearAllMocks();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
-    mockCheckScimRateLimit.mockResolvedValue(true);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
   });
 
   it("returns tenant user resource", async () => {
@@ -128,7 +128,7 @@ describe("GET /api/scim/v2/Users/[id]", () => {
   });
 
   it("returns 429 when GET is rate limited", async () => {
-    mockCheckScimRateLimit.mockResolvedValue(false);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
     const res = await GET(makeReq(), makeParams("user-1"));
     expect(res.status).toBe(429);
   });
@@ -139,7 +139,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     vi.clearAllMocks();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
-    mockCheckScimRateLimit.mockResolvedValue(true);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
   });
 
   it("deactivates tenant member", async () => {
@@ -382,7 +382,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
   });
 
   it("returns 429 when PUT is rate limited", async () => {
-    mockCheckScimRateLimit.mockResolvedValue(false);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
     const res = await PUT(
       makeReq({
         method: "PUT",
@@ -574,7 +574,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
     vi.clearAllMocks();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
-    mockCheckScimRateLimit.mockResolvedValue(true);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
   });
 
   it("returns 400 for unsupported patch operation", async () => {
@@ -711,7 +711,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
   });
 
   it("returns 429 when PATCH is rate limited", async () => {
-    mockCheckScimRateLimit.mockResolvedValue(false);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
     const res = await PATCH(
       makeReq({
         method: "PATCH",
@@ -819,7 +819,7 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     vi.clearAllMocks();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
-    mockCheckScimRateLimit.mockResolvedValue(true);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
   });
 
   it("removes tenant member and related records", async () => {
@@ -867,7 +867,7 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
   });
 
   it("returns 429 when DELETE is rate limited", async () => {
-    mockCheckScimRateLimit.mockResolvedValue(false);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
     const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
     expect(res!.status).toBe(429);
   });

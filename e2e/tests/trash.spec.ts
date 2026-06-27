@@ -1,6 +1,7 @@
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { getAuthState } from "../helpers/fixtures";
 import { injectSession } from "../helpers/auth";
+import { refreshSessionRecency } from "../helpers/db";
 import { VaultLockPage } from "../page-objects/vault-lock.page";
 import { DashboardPage } from "../page-objects/dashboard.page";
 import { PasswordEntryPage } from "../page-objects/password-entry.page";
@@ -107,6 +108,11 @@ test.describe("Trash", () => {
 
   test("empty trash permanently deletes remaining entries", async () => {
     const trashPage = new TrashPage(page);
+
+    // empty-trash now requires a recent session (step-up); refresh the
+    // global-setup session's recency so it isn't stale (>15min) by this point.
+    const { vaultReady } = getAuthState();
+    await refreshSessionRecency(vaultReady.sessionToken);
 
     // Should be on /trash already — empty it
     await trashPage.emptyTrash();

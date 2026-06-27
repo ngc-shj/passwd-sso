@@ -36,7 +36,7 @@ describe("GET /api/scim/v2/ServiceProviderConfig", () => {
       ok: true,
       data: { tokenId: "t1", teamId: "team-1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
     });
-    mockCheckScimRateLimit.mockResolvedValue(true);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when token is invalid", async () => {
@@ -46,7 +46,7 @@ describe("GET /api/scim/v2/ServiceProviderConfig", () => {
   });
 
   it("returns 429 when rate-limited", async () => {
-    mockCheckScimRateLimit.mockResolvedValue(false);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
     const res = await GET(makeReq());
     expect(res.status).toBe(429);
   });

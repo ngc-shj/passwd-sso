@@ -106,7 +106,13 @@ fi
 # 58 incl. 4 from rate-limiter-fail-closed-and-get-purge (OWASP M4/M5/M6):
 #   auth callbackRateLimiter + magicLinkIpLimiter, mobile autofill mintLimiter,
 #   tenant breakglassRateLimiter. (v1ApiKeyLimiter lives in src/lib, not counted here.)
-EXPECTED_LIMITER_COUNT=58
+# 61 incl. 3 mint limiters from owasp-rereview-stepup-and-failclosed (OWASP M3):
+#   tenant scim-tokens create, operator-tokens create, service-accounts create.
+#   (The SCIM runtime limiter from that PR lives in src/lib/scim, not counted here.)
+# 63 incl. the 2 admin-vault-reset trigger limiters (adminResetLimiter +
+#   targetResetLimiter, tenant/members/[userId]/reset-vault) — destructive
+#   privileged action, found by the rateLimited() audit during that PR.
+EXPECTED_LIMITER_COUNT=63
 limiter_count=$(grep -rh 'failClosedOnRedisError: true' "$REPO_ROOT/src/app/api" | wc -l)
 if [ "$limiter_count" -ne "$EXPECTED_LIMITER_COUNT" ]; then
   echo "AC4.4 FAIL: expected $EXPECTED_LIMITER_COUNT 'failClosedOnRedisError: true' instantiations; found $limiter_count"

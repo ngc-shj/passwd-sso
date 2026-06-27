@@ -59,9 +59,20 @@ vi.mock("@/lib/auth/access/team-auth", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
+// permanent=true DELETE gates on requireRecentCurrentAuthMethod (step-up).
+// Default: null (fresh session → allow). Stale-session tests override.
+// NOTE: this file uses vi.resetAllMocks() in beforeEach, so the null default is
+// re-established in the DELETE describe's beforeEach below.
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
+}));
 
+import { NextResponse } from "next/server";
 import { GET, PUT, DELETE } from "./route";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { ENTRY_TYPE, TEAM_ROLE } from "@/lib/constants";
+
+const mockRequireRecent = vi.mocked(requireRecentCurrentAuthMethod);
 
 const TEAM_ID = "team-123";
 const PW_ID = "pw-456";
@@ -634,6 +645,8 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]", () => {
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
     mockAuditLogCreate.mockResolvedValue({});
+    // vi.resetAllMocks() wipes the factory default → re-establish fresh step-up.
+    mockRequireRecent.mockResolvedValue(null);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -738,5 +751,54 @@ describe("DELETE /api/teams/[teamId]/passwords/[id]", () => {
       createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
     expect(res.status).toBe(404);
+  });
+
+  it("permanent=true with stale session returns 403 and does NOT delete (step-up)", async () => {
+    mockRequireRecent.mockResolvedValueOnce(
+      NextResponse.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ id: PW_ID, teamId: TEAM_ID });
+    mockPrismaTeamPasswordEntry.deleteMany.mockResolvedValue({ count: 1 });
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
+        searchParams: { permanent: "true" },
+      }),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+
+    expect(res.status).toBe(403);
+    // Security-critical ordering: step-up gates before any existence lookup/delete.
+    expect(mockPrismaTeamPasswordEntry.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("permanent=true with fresh session proceeds with the hard delete (200)", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ id: PW_ID, teamId: TEAM_ID });
+    mockPrismaTeamPasswordEntry.deleteMany.mockResolvedValue({ count: 1 });
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
+        searchParams: { permanent: "true" },
+      }),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(mockPrismaTeamPasswordEntry.deleteMany).toHaveBeenCalled();
+  });
+
+  it("soft delete (no ?permanent) does not invoke step-up", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ id: PW_ID, teamId: TEAM_ID });
+    mockPrismaTeamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`),
+      createParams({ teamId: TEAM_ID, id: PW_ID }),
+    );
+
+    expect(res.status).toBe(200);
+    // Step-up is permanent-only; soft delete stays frictionless.
+    expect(mockRequireRecent).not.toHaveBeenCalled();
+    expect(mockPrismaTeamPasswordEntry.deleteMany).not.toHaveBeenCalled();
   });
 });
