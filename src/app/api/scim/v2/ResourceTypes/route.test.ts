@@ -36,7 +36,7 @@ describe("GET /api/scim/v2/ResourceTypes", () => {
       ok: true,
       data: { tokenId: "t1", teamId: "team-1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
     });
-    mockCheckScimRateLimit.mockResolvedValue(true);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when token is invalid", async () => {

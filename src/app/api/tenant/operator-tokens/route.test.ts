@@ -65,6 +65,12 @@ vi.mock("@/lib/security/rate-limit", () => ({
     clear: vi.fn(),
   })),
 }));
+// Keep the real checkRateLimitOrFail (so it maps redisErrored → 503) but
+// stub the audit emit to a no-op to avoid pulling its transitive deps.
+vi.mock("@/lib/security/rate-limit-audit", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  emitRateLimitFailClosed: vi.fn(),
+}));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
 }));
@@ -249,6 +255,19 @@ describe("POST /api/tenant/operator-tokens", () => {
       }),
     );
     expect(res.status).toBe(429);
+    expect(mockPrismaOperatorToken.create).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 (fail-closed) when the create limiter signals redisErrored", async () => {
+    mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, redisErrored: true });
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/tenant/operator-tokens", {
+        body: { name: "Test token" },
+      }),
+    );
+    expect(res.status).toBe(503);
+    expect(mockPrismaOperatorToken.create).not.toHaveBeenCalled();
   });
 
   it("creates token and returns plaintext with 201 and Cache-Control: no-store", async () => {

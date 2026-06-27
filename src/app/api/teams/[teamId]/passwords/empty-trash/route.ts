@@ -16,6 +16,7 @@ import {
 } from "@/lib/blob-store/cleanup";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -33,6 +34,10 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   } catch (e) {
     return handleAuthError(e);
   }
+
+  // Irreversible bulk permanent delete — require a recent session (step-up).
+  const stepUp = await requireRecentCurrentAuthMethod(req);
+  if (stepUp) return stepUp;
 
   // Atomic findMany + deleteMany to prevent TOCTOU race
   const { entryIds, deletedCount, attachmentRefs } = await withTeamTenantRls(teamId, async (): Promise<{ entryIds: string[]; deletedCount: number; attachmentRefs: AttachmentBlobRef[] }> => {

@@ -13,6 +13,7 @@ import {
 import { unauthorized } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
 import { bulkIdsSchema } from "@/lib/validations";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 
 // POST /api/passwords/bulk-purge - Permanently delete selected entries from trash.
 // Like empty-trash, but scoped to the supplied ids. Only entries already in trash
@@ -22,6 +23,11 @@ async function handlePOST(req: NextRequest) {
   if (!session?.user?.id) {
     return unauthorized();
   }
+
+  // Irreversible bulk permanent delete — require a recent session (step-up),
+  // matching DELETE /api/passwords/[id]?permanent=true.
+  const stepUp = await requireRecentCurrentAuthMethod(req);
+  if (stepUp) return stepUp;
 
   const result = await parseBody(req, bulkIdsSchema);
   if (!result.ok) return result.response;

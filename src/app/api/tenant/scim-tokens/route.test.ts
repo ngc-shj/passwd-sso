@@ -68,6 +68,12 @@ vi.mock("@/lib/security/rate-limit", () => ({
     clear: vi.fn(),
   })),
 }));
+// Keep the real checkRateLimitOrFail (so it maps redisErrored → 503) but
+// stub the audit emit to a no-op to avoid pulling its transitive deps.
+vi.mock("@/lib/security/rate-limit-audit", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  emitRateLimitFailClosed: vi.fn(),
+}));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
@@ -273,6 +279,18 @@ describe("POST /api/tenant/scim-tokens", () => {
     );
     expect(res.status).toBe(429);
     expect(res.headers.get("Retry-After")).toBe("30");
+    expect(mockPrismaScimToken.create).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 (fail-closed) when the rate limiter signals redisErrored", async () => {
+    mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, redisErrored: true });
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/tenant/scim-tokens", {
+        body: { description: "test" },
+      }),
+    );
+    expect(res.status).toBe(503);
+    expect(mockPrismaScimToken.create).not.toHaveBeenCalled();
   });
 
   it("rethrows unexpected errors from POST", async () => {

@@ -13,6 +13,7 @@ import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { executeVaultReset } from "@/lib/vault/vault-reset";
 import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { z } from "zod/v4";
 
 export const runtime = "nodejs";
@@ -47,6 +48,14 @@ async function handlePOST(request: NextRequest) {
     userId: session.user.id,
   });
   if (blocked) return blocked;
+
+  // Irreversible: wholesale-deletes ALL entries. Require a recent session
+  // (step-up) so a leaked session cookie alone cannot wipe the vault. This
+  // checks session recency only (not the passphrase), so it is compatible with
+  // the lost-passphrase/recovery-key last-resort purpose — the user still has a
+  // valid recent session.
+  const stepUp = await requireRecentCurrentAuthMethod(request);
+  if (stepUp) return stepUp;
 
   const result = await parseBody(request, resetSchema);
   if (!result.ok) return result.response;

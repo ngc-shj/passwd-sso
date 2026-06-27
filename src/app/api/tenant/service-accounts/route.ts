@@ -10,13 +10,18 @@ import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MAX_SERVICE_ACCOUNTS_PER_TENANT } from "@/lib/constants/auth/service-account";
 import { serviceAccountCreateSchema } from "@/lib/validations/service-account";
 import { MS_PER_HOUR } from "@/lib/constants/time";
 
-const saCreateLimiter = createRateLimiter({ windowMs: MS_PER_HOUR, max: 10 });
+const saCreateLimiter = createRateLimiter({
+  windowMs: MS_PER_HOUR,
+  max: 10,
+  failClosedOnRedisError: true,
+});
 
 export const runtime = "nodejs";
 
@@ -82,8 +87,15 @@ async function handlePOST(req: NextRequest) {
     return handleAuthError(err);
   }
 
-  const rl = await saCreateLimiter.check(`rl:sa_create:${actor.tenantId}`);
-  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: saCreateLimiter,
+    key: `rl:sa_create:${actor.tenantId}`,
+    scope: "tenant.service_account_create",
+    userId: session.user.id,
+    tenantId: actor.tenantId,
+  });
+  if (blocked) return blocked;
 
   const result = await parseBody(req, serviceAccountCreateSchema);
   if (!result.ok) return result.response;

@@ -19,7 +19,8 @@ import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/audit/notification";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { forbidden, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { forbidden, handleAuthError, notFound, rateLimited, serviceUnavailable, unauthorized } from "@/lib/http/api-response";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { MAX_PENDING_RESETS, VAULT_RESET_HISTORY_LIMIT } from "@/lib/validations/common.server";
 import { MS_PER_DAY, RESET_TOTAL_TTL_MS } from "@/lib/constants/time";
 import { encryptResetToken } from "@/lib/vault/admin-reset-token-crypto";
@@ -35,11 +36,13 @@ export const runtime = "nodejs";
 const adminResetLimiter = createRateLimiter({
   windowMs: MS_PER_DAY,
   max: 3,
+  failClosedOnRedisError: true,
 });
 
 const targetResetLimiter = createRateLimiter({
   windowMs: MS_PER_DAY,
   max: 1,
+  failClosedOnRedisError: true,
 });
 
 // POST /api/tenant/members/[userId]/reset-vault
@@ -109,11 +112,22 @@ async function handlePOST(
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 
-  // Rate limits
+  // Rate limits (fail-closed: admin vault reset is a destructive privileged
+  // action; a Redis outage must not relax the cap to a per-Pod in-memory limit).
   const [adminResult, targetResult] = await Promise.all([
     adminResetLimiter.check(`rl:admin-reset:admin:${session.user.id}`),
     targetResetLimiter.check(`rl:admin-reset:target:${targetUserId}`),
   ]);
+
+  if (adminResult.redisErrored || targetResult.redisErrored) {
+    void emitRateLimitFailClosed({
+      req,
+      scope: "tenant.admin_vault_reset",
+      userId: session.user.id,
+      tenantId: actor.tenantId,
+    });
+    return serviceUnavailable();
+  }
 
   if (!adminResult.allowed || !targetResult.allowed) {
     const retryAfterMs = !adminResult.allowed ? adminResult.retryAfterMs : targetResult.retryAfterMs;

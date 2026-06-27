@@ -3,6 +3,7 @@ import { validateScimToken, type ValidatedScimToken } from "@/lib/auth/tokens/sc
 import { scimError } from "@/lib/scim/response";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { checkScimRateLimit } from "@/lib/scim/rate-limit";
+import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
@@ -26,7 +27,13 @@ export async function authorizeScim(
   const { tenantId } = result.data;
   const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, tenantId);
   if (denied) return { ok: false, response: denied };
-  if (!(await checkScimRateLimit(tenantId))) {
+  const rl = await checkScimRateLimit(tenantId);
+  if (rl.redisErrored) {
+    // fail-closed: Redis is the only place a global cap can hold across Pods.
+    void emitRateLimitFailClosed({ req, scope: "scim", userId: null, tenantId });
+    return { ok: false, response: scimError(503, "Service temporarily unavailable") };
+  }
+  if (!rl.allowed) {
     return { ok: false, response: scimError(429, "Too many requests") };
   }
   return { ok: true, data: result.data };

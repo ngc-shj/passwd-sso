@@ -5,10 +5,12 @@ const {
   mockValidateScimToken,
   mockEnforceAccessRestriction,
   mockCheckScimRateLimit,
+  mockEmitRateLimitFailClosed,
 } = vi.hoisted(() => ({
   mockValidateScimToken: vi.fn(),
   mockEnforceAccessRestriction: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
+  mockEmitRateLimitFailClosed: vi.fn(),
 }));
 
 vi.mock("@/lib/auth/tokens/scim-token", () => ({
@@ -21,6 +23,10 @@ vi.mock("@/lib/auth/policy/access-restriction", () => ({
 
 vi.mock("@/lib/scim/rate-limit", () => ({
   checkScimRateLimit: mockCheckScimRateLimit,
+}));
+
+vi.mock("@/lib/security/rate-limit-audit", () => ({
+  emitRateLimitFailClosed: mockEmitRateLimitFailClosed,
 }));
 
 import { authorizeScim } from "./with-scim-auth";
@@ -45,7 +51,7 @@ describe("authorizeScim", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEnforceAccessRestriction.mockResolvedValue(null);
-    mockCheckScimRateLimit.mockResolvedValue(true);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
   });
 
   it("returns ok=true and validated data on the happy path", async () => {
@@ -92,13 +98,38 @@ describe("authorizeScim", () => {
 
   it("returns 429 when the rate limiter denies", async () => {
     mockValidateScimToken.mockResolvedValue({ ok: true, data: validatedToken });
-    mockCheckScimRateLimit.mockResolvedValue(false);
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
 
     const res = await authorizeScim(fakeRequest());
     expect(res.ok).toBe(false);
     if (!res.ok) {
       expect(res.response.status).toBe(429);
     }
+    expect(mockEmitRateLimitFailClosed).not.toHaveBeenCalled();
+  });
+
+  it("fails closed with 503 (SCIM envelope) when the limiter reports redisErrored", async () => {
+    mockValidateScimToken.mockResolvedValue({ ok: true, data: validatedToken });
+    mockCheckScimRateLimit.mockResolvedValue({ allowed: false, redisErrored: true });
+
+    const res = await authorizeScim(fakeRequest());
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.response.status).toBe(503);
+      const body = (await res.response.json()) as {
+        schemas: string[];
+        status: string;
+        detail: string;
+      };
+      expect(body.schemas).toContain(
+        "urn:ietf:params:scim:api:messages:2.0:Error",
+      );
+      expect(body.status).toBe("503");
+    }
+    // fail-closed event audited for forensic parity with the mint limiters.
+    expect(mockEmitRateLimitFailClosed).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: "scim", userId: null, tenantId: "tenant-1" }),
+    );
   });
 
   it("propagates expired-token error code as 401 (no access check, no rate limit)", async () => {

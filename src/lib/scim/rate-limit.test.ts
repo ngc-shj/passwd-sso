@@ -17,17 +17,24 @@ describe("checkScimRateLimit", () => {
     vi.clearAllMocks();
   });
 
-  it("returns true when within rate limit", async () => {
+  it("returns the allowed result when within rate limit", async () => {
     mockCheck.mockResolvedValue({ allowed: true });
     const result = await checkScimRateLimit("team-1");
-    expect(result).toBe(true);
+    expect(result.allowed).toBe(true);
     expect(mockCheck).toHaveBeenCalledWith("rl:scim:team-1");
   });
 
-  it("returns false when rate limited", async () => {
-    mockCheck.mockResolvedValue({ allowed: false });
+  it("returns the denied result when rate limited", async () => {
+    mockCheck.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
     const result = await checkScimRateLimit("team-1");
-    expect(result).toBe(false);
+    expect(result.allowed).toBe(false);
+  });
+
+  it("propagates redisErrored so the caller can fail closed (503)", async () => {
+    mockCheck.mockResolvedValue({ allowed: false, redisErrored: true });
+    const result = await checkScimRateLimit("team-1");
+    expect(result.allowed).toBe(false);
+    expect(result.redisErrored).toBe(true);
   });
 
   it("uses team-specific key", async () => {

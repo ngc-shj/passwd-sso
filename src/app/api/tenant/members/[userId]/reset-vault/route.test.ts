@@ -81,6 +81,12 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({ check: mockRateLimiterCheck })),
 }));
+// The route emits the fail-closed audit directly; stub it to a no-op so the
+// 503 path does not pull the emit helper's transitive deps.
+vi.mock("@/lib/security/rate-limit-audit", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
+  emitRateLimitFailClosed: vi.fn(),
+}));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
@@ -268,6 +274,31 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
     expect(res.status).toBe(429);
     const json = await res.json();
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+    expect(mockPrismaAdminVaultResetCreate).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 (fail-closed) when the admin limiter signals redisErrored", async () => {
+    mockRateLimiterCheck
+      .mockResolvedValueOnce({ allowed: false, redisErrored: true })
+      .mockResolvedValueOnce({ allowed: true });
+    const res = await POST(
+      createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
+      createParams({ userId: TARGET_USER_ID }),
+    );
+    expect(res.status).toBe(503);
+    expect(mockPrismaAdminVaultResetCreate).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 (fail-closed) when the target limiter signals redisErrored", async () => {
+    mockRateLimiterCheck
+      .mockResolvedValueOnce({ allowed: true })
+      .mockResolvedValueOnce({ allowed: false, redisErrored: true });
+    const res = await POST(
+      createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
+      createParams({ userId: TARGET_USER_ID }),
+    );
+    expect(res.status).toBe(503);
+    expect(mockPrismaAdminVaultResetCreate).not.toHaveBeenCalled();
   });
 
   it("returns 429 when target rate limit is exceeded", async () => {
@@ -282,6 +313,7 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
     expect(res.status).toBe(429);
     const json = await res.json();
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+    expect(mockPrismaAdminVaultResetCreate).not.toHaveBeenCalled();
   });
 
   it("returns 429 when max pending resets (3) reached", async () => {
@@ -293,6 +325,7 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
     expect(res.status).toBe(429);
     const json = await res.json();
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+    expect(mockPrismaAdminVaultResetCreate).not.toHaveBeenCalled();
   });
 
   it("returns 403 from step-up gate and does not create reset record", async () => {

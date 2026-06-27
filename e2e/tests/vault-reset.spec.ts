@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { injectSession } from "../helpers/auth";
 import { getAuthState } from "../helpers/fixtures";
+import { refreshSessionRecency } from "../helpers/db";
 
 /**
  * Vault Reset tests.
@@ -35,6 +36,9 @@ test.describe("Vault Reset", () => {
   test("reset vault with correct confirmation", async ({ context, page }) => {
     // Destructive — uses dedicated reset user
     const { reset } = getAuthState();
+    // POST /api/vault/reset now requires a recent session (step-up); the
+    // global-setup session may be >15min old by the time this spec runs.
+    await refreshSessionRecency(reset.sessionToken);
     await injectSession(context, reset.sessionToken);
     await page.goto("/ja/vault-reset");
 

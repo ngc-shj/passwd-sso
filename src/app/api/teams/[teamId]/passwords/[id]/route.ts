@@ -17,6 +17,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, forbidden, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import * as teamPasswordService from "@/lib/services/team-password-service";
 import { TeamPasswordServiceError } from "@/lib/services/team-password-service";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -168,6 +169,19 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     return handleAuthError(e);
   }
 
+  const { searchParams } = new URL(req.url);
+  const permanent = searchParams.get("permanent") === "true";
+
+  // Permanent delete is irreversible and (unlike the trash-purge endpoints) can
+  // hard-delete a LIVE entry directly. Require a recent session (step-up) before
+  // any existence lookup — mirrors DELETE /api/passwords/[id]?permanent=true.
+  // Soft-delete (trash) stays frictionless. No token-type guard needed: this
+  // handler is auth()-only (no Bearer path).
+  if (permanent) {
+    const stepUp = await requireRecentCurrentAuthMethod(req);
+    if (stepUp) return stepUp;
+  }
+
   const existing = await withTeamTenantRls(teamId, () =>
     teamPasswordService.getTeamPasswordForUpdate(teamId, id),
   );
@@ -175,9 +189,6 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   if (!existing || existing.teamId !== teamId) {
     return notFound();
   }
-
-  const { searchParams } = new URL(req.url);
-  const permanent = searchParams.get("permanent") === "true";
 
   let blobRefs;
   try {

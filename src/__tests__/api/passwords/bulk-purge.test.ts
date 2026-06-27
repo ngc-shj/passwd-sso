@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextResponse } from "next/server";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, parseResponse } from "../../helpers/request-builder";
 
@@ -9,6 +10,7 @@ const {
   mockTransaction,
   mockLogAudit,
   mockWithUserTenantRls,
+  mockRequireRecentCurrentAuthMethod,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindMany: vi.fn(),
@@ -16,9 +18,13 @@ const {
   mockTransaction: vi.fn(),
   mockLogAudit: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockRequireRecentCurrentAuthMethod: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
+}));
 vi.mock("@/lib/prisma", () => ({ prisma: { $transaction: mockTransaction } }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -43,6 +49,7 @@ describe("POST /api/passwords/bulk-purge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
       fn({ passwordEntry: { findMany: mockFindMany, deleteMany: mockDeleteMany } }),
     );
@@ -123,5 +130,17 @@ describe("POST /api/passwords/bulk-purge", () => {
     const res = await POST(createRequest("POST", "http://localhost:3000/api/test", { body: { ids: [] } }));
     const { status } = await parseResponse(res);
     expect(status).toBe(400);
+  });
+
+  it("returns 403 and does not delete when step-up reauth is required (stale session)", async () => {
+    mockRequireRecentCurrentAuthMethod.mockResolvedValueOnce(
+      NextResponse.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/test", { body: { ids: [P1, P2] } }));
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(mockDeleteMany).not.toHaveBeenCalled();
   });
 });

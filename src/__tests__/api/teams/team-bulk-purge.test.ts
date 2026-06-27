@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextResponse } from "next/server";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, createParams, parseResponse } from "../../helpers/request-builder";
 
@@ -10,6 +11,7 @@ const {
   mockTransaction,
   mockLogAudit,
   mockWithTeamTenantRls,
+  mockRequireRecentCurrentAuthMethod,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
@@ -18,9 +20,13 @@ const {
   mockTransaction: vi.fn(),
   mockLogAudit: vi.fn(),
   mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+  mockRequireRecentCurrentAuthMethod: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
+}));
 vi.mock("@/lib/auth/access/team-auth", () => {
   class TeamAuthError extends Error {
     status: number;
@@ -58,6 +64,7 @@ describe("POST /api/teams/[teamId]/passwords/bulk-purge", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
       fn({ teamPasswordEntry: { findMany: mockFindMany, deleteMany: mockDeleteMany } }),
     );
@@ -123,5 +130,20 @@ describe("POST /api/teams/[teamId]/passwords/bulk-purge", () => {
     await expect(
       POST(createRequest("POST", "http://localhost:3000/api/test", { body: { ids: [P1] } }), createParams({ teamId: TEAM_ID })),
     ).rejects.toThrow("unexpected");
+  });
+
+  it("returns 403 and does not delete when step-up reauth is required (stale session)", async () => {
+    mockRequireRecentCurrentAuthMethod.mockResolvedValueOnce(
+      NextResponse.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const res = await POST(
+      createRequest("POST", "http://localhost:3000/api/test", { body: { ids: [P1, P2] } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(mockDeleteMany).not.toHaveBeenCalled();
   });
 });

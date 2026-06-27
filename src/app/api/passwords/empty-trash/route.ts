@@ -11,6 +11,7 @@ import {
   type AttachmentBlobRef,
 } from "@/lib/blob-store/cleanup";
 import { unauthorized } from "@/lib/http/api-response";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 
 // POST /api/passwords/empty-trash - Permanently delete all entries in trash
 async function handlePOST(req: NextRequest) {
@@ -18,6 +19,12 @@ async function handlePOST(req: NextRequest) {
   if (!session?.user?.id) {
     return unauthorized();
   }
+
+  // Irreversible bulk permanent delete — require a recent session (step-up),
+  // matching DELETE /api/passwords/[id]?permanent=true. A leaked session cookie
+  // alone must not wipe trash.
+  const stepUp = await requireRecentCurrentAuthMethod(req);
+  if (stepUp) return stepUp;
 
   // Atomic findMany + deleteMany to prevent TOCTOU race
   const { entryIds, deletedCount, attachmentRefs } = await withUserTenantRls(session.user.id, async (): Promise<{ entryIds: string[]; deletedCount: number; attachmentRefs: AttachmentBlobRef[] }> => {

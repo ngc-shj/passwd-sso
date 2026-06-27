@@ -27,8 +27,7 @@ const {
     TeamAuthError: _TeamAuthError,
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
     mockLogAudit: vi.fn<typeof logAuditAsync>(),
-    // Hoisted so stale-session tests can assert deleteMany was NOT called —
-    // the per-tx spy created inside mockImplementation is not observable here.
+    // Hoisted so stale-session tests can assert deleteMany was NOT called.
     mockFindMany: vi.fn(),
     mockDeleteMany: vi.fn(),
   };
@@ -78,16 +77,16 @@ import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-curren
 const mockRequireRecent = vi.mocked(requireRecentCurrentAuthMethod);
 
 const TEAM_ID = "team-123";
+const ID_1 = "00000000-0000-4000-a000-000000000001";
+const ID_2 = "00000000-0000-4000-a000-000000000002";
 
-describe("POST /api/teams/[teamId]/passwords/empty-trash", () => {
+describe("POST /api/teams/[teamId]/passwords/bulk-purge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRequireRecent.mockResolvedValue(null);
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue({ role: "OWNER" });
-    // Default: transaction returns 2 deleted entries. The findMany/deleteMany
-    // spies are module-level so stale-session tests can assert non-invocation.
-    mockFindMany.mockResolvedValue([{ id: "entry-1" }, { id: "entry-2" }]);
+    mockFindMany.mockResolvedValue([{ id: ID_1 }, { id: ID_2 }]);
     mockDeleteMany.mockResolvedValue({ count: 2 });
     mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
       const tx = {
@@ -103,77 +102,24 @@ describe("POST /api/teams/[teamId]/passwords/empty-trash", () => {
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/empty-trash`),
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/bulk-purge`, {
+        body: { ids: [ID_1] },
+      }),
       createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(401);
   });
 
-  it("returns 403 when permission denied", async () => {
+  it("returns 403 when PASSWORD_DELETE permission is denied", async () => {
     mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("INSUFFICIENT_PERMISSION", 403));
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/empty-trash`),
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/bulk-purge`, {
+        body: { ids: [ID_1] },
+      }),
       createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(403);
-  });
-
-  it("rethrows unexpected permission errors", async () => {
-    mockRequireTeamPermission.mockRejectedValue(new Error("boom"));
-    await expect(
-      POST(
-        createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/empty-trash`),
-        createParams({ teamId: TEAM_ID }),
-      ),
-    ).rejects.toThrow("boom");
-  });
-
-  it("permanently deletes all trashed entries and returns count", async () => {
-    const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/empty-trash`),
-      createParams({ teamId: TEAM_ID }),
-    );
-    expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json.success).toBe(true);
-    expect(json.deletedCount).toBe(2);
-  });
-
-  it("returns 0 deletedCount when trash is already empty", async () => {
-    mockFindMany.mockResolvedValue([]);
-    mockDeleteMany.mockResolvedValue({ count: 0 });
-
-    const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/empty-trash`),
-      createParams({ teamId: TEAM_ID }),
-    );
-    expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json.deletedCount).toBe(0);
-  });
-
-  it("logs ENTRY_EMPTY_TRASH audit event", async () => {
-    await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/empty-trash`),
-      createParams({ teamId: TEAM_ID }),
-    );
-    expect(mockLogAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: "ENTRY_EMPTY_TRASH",
-        teamId: TEAM_ID,
-      }),
-    );
-  });
-
-  it("logs ENTRY_PERMANENT_DELETE for each deleted entry", async () => {
-    await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/empty-trash`),
-      createParams({ teamId: TEAM_ID }),
-    );
-    const permanentDeleteCalls = mockLogAudit.mock.calls.filter(
-      ([call]) => call.action === "ENTRY_PERMANENT_DELETE",
-    );
-    expect(permanentDeleteCalls).toHaveLength(2);
+    expect(mockDeleteMany).not.toHaveBeenCalled();
   });
 
   it("rejects with 403 and does NOT delete when session is stale (step-up required)", async () => {
@@ -182,7 +128,9 @@ describe("POST /api/teams/[teamId]/passwords/empty-trash", () => {
     );
 
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/empty-trash`),
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/bulk-purge`, {
+        body: { ids: [ID_1, ID_2] },
+      }),
       createParams({ teamId: TEAM_ID }),
     );
 
@@ -191,13 +139,25 @@ describe("POST /api/teams/[teamId]/passwords/empty-trash", () => {
     expect(mockDeleteMany).not.toHaveBeenCalled();
   });
 
-  it("proceeds with the purge when the session is fresh (step-up returns null)", async () => {
+  it("purges the supplied trashed ids when the session is fresh", async () => {
     const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/empty-trash`),
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/bulk-purge`, {
+        body: { ids: [ID_1, ID_2] },
+      }),
       createParams({ teamId: TEAM_ID }),
     );
+    const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(mockDeleteMany).toHaveBeenCalled();
+    expect(json.success).toBe(true);
+    expect(json.deletedCount).toBe(2);
+    expect(mockDeleteMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          teamId: TEAM_ID,
+          deletedAt: { not: null },
+        }),
+      })
+    );
   });
 });
