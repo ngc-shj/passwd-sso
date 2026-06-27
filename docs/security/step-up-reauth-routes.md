@@ -40,14 +40,22 @@ A mutation is in scope when it touches one of these:
    data + key material).
 6. **Secret minting / high-privilege token issuance** — operator tokens, SCIM
    tokens, service-account tokens, JIT approval, vault admin-reset.
+7. **Irreversible vault-data destruction** — permanent (hard) delete of password
+   entries: single permanent delete, empty-trash, bulk-purge, full self-reset,
+   AND team deletion (which cascades to all team password entries). A leaked
+   session cookie alone must not be able to wipe vault data. This class is
+   mechanically enforced by `scripts/checks/check-permanent-delete-stepup.sh`
+   (see Maintenance), including the cascade-via-parent case (`team.delete`).
 
 **NOT gated** (ordinary content CRUD — gating these hurts UX with no real benefit;
 the threat is the *governance/identity/key* surface, not individual records):
-passwords (create/update/delete/bulk/restore/favorite/attachments/history),
-folders, tags, invitation *accept* (the invitee, not an admin), and
-`/api/teams/[teamId]` **PUT** (team rename/description only — `updateTeamSchema`
-is `name`+`description`, no key/identity/policy consequence; security-relevant
-team settings live in the team `policy` PUT, which IS gated).
+passwords create/update, **soft-delete (move to trash)**, restore, favorite,
+attachments, history; folders, tags; invitation *accept* (the invitee, not an
+admin); and `/api/teams/[teamId]` **PUT** (team rename/description only —
+`updateTeamSchema` is `name`+`description`, no key/identity/policy consequence;
+security-relevant team settings live in the team `policy` PUT, which IS gated).
+Note: **permanent** (hard) delete of passwords IS gated (class 7) — only the
+recoverable soft-delete/trash path is friction-free.
 
 ## Tenant routes (gated)
 
@@ -87,6 +95,27 @@ team settings live in the team `policy` PUT, which IS gated).
 | `/api/teams/[teamId]/rotate-key` | POST | key custody (key rotation) |
 | `/api/teams/[teamId]` | DELETE | lifecycle destruction (deletes team = all vault data + key material) |
 
+## Vault-data permanent-delete routes (gated — class 7)
+
+Irreversible hard-deletes of password entries. Soft-delete (trash) is NOT here.
+Enforced by `scripts/checks/check-permanent-delete-stepup.sh`.
+
+| Route | Method(s) | Note |
+|-------|-----------|------|
+| `/api/passwords/[id]` | DELETE | only when `?permanent=true` (soft-delete is friction-free); also 403s token callers (this route is Bearer-reachable) |
+| `/api/passwords/empty-trash` | POST | purges all trashed entries |
+| `/api/passwords/bulk-purge` | POST | purges selected trashed entries |
+| `/api/teams/[teamId]/passwords/[id]` | DELETE | only when `?permanent=true`; the permanent path can hard-delete a LIVE entry (not just trashed) |
+| `/api/teams/[teamId]/passwords/empty-trash` | POST | purges all trashed team entries |
+| `/api/teams/[teamId]/passwords/bulk-purge` | POST | purges selected trashed team entries |
+| `/api/vault/reset` | POST | self-reset — wholesale-deletes ALL of the user's vault data |
+| `/api/teams/[teamId]` | DELETE | team deletion cascades to all team password entries (also listed under Team routes as lifecycle destruction) |
+
+**Exempt** (matches a delete primitive but intentionally not step-up'd):
+`/api/vault/admin-reset` — dual-admin-approved one-time token (`AdminVaultReset.tokenHash`);
+initiator ≠ target, so the session-recency helper is inapplicable and the token
+ceremony is stronger. Recorded in `scripts/checks/stepup-delete-exempt.txt`.
+
 ## Deferred / not-yet-gated (tracked)
 
 | Route | Method | Why deferred |
@@ -104,6 +133,11 @@ team settings live in the team `policy` PUT, which IS gated).
   reject test asserting the mutation spy is not called. Missing the centralized mock
   silently 401s every existing test for that handler.
 - This doc is the lightweight stand-in for a centralized operation-sensitivity guard
-  (the structural SSoT — see PR #606 SC2). Until that guard exists, this table is the
-  audit surface; a quick conformance check is
+  (the structural SSoT — see PR #606 SC2). For one gated class it is now
+  machine-enforced: **class 7 (irreversible vault-data delete)** is checked by
+  `scripts/checks/check-permanent-delete-stepup.sh` (wired into `pre-pr.sh` and CI).
+  A new route that hard-deletes password entries without step-up — and is not in
+  `scripts/checks/stepup-delete-exempt.txt` — fails CI. The other gated classes
+  (identity/key/sink/policy/mint) are not yet machine-enforced; for those this table
+  remains the audit surface, conformance-checkable with
   `grep -rL requireRecentCurrentAuthMethod <each gated route file>`.

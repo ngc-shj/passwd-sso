@@ -1,0 +1,14 @@
+# Step-up exempt allowlist (check-permanent-delete-stepup.sh)
+#
+# Route files that perform an irreversible vault-data hard-delete but are
+# INTENTIONALLY exempt from the `requireRecentCurrentAuthMethod` (step-up)
+# requirement, because they are gated by a stronger / different ceremony.
+#
+# One repo-relative path per line. Lines beginning with `#` are comments.
+# Every entry MUST state, in a trailing comment, why step-up does not apply.
+#
+# Adding a route here is a security decision — it must be justified, not a
+# convenience to silence the guard. The default answer for a new vault-delete
+# route is "add requireRecentCurrentAuthMethod", NOT "add to this file".
+
+src/app/api/vault/admin-reset/route.ts  # dual-admin-approved one-time token (AdminVaultReset.tokenHash) — initiator != target, so the session-recency helper is inapplicable; the token possession + 2nd-admin approval is a stronger ceremony than step-up.
