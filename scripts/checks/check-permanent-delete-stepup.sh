@@ -12,7 +12,7 @@
 # allowlist entry.
 #
 # Detection (route files only — src/app/api/**/route.ts):
-#   A file is a "vault-destruction route" if it contains any of the four
+#   A file is a "vault-destruction route" if it contains any of the
 #   irreversible-delete primitives below (hard-delete of vault entry rows or a
 #   full-vault wipe). Soft-deletes (`update { deletedAt }`), history-trim
 #   (`passwordEntryHistory.*`), attachment-management deletes, and non-vault
