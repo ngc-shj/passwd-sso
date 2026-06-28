@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.62](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.61...passwd-sso-v0.4.62) (2026-06-28)
+
+
+### Features
+
+* **extension:** copy-username button + confirmed cross-origin autofill in popup ([#619](https://github.com/ngc-shj/passwd-sso/issues/619)) ([8726161](https://github.com/ngc-shj/passwd-sso/commit/8726161e4ad03ae72bdbcee2e4404c75d61f7bcc))
+
+
+### Bug Fixes
+
+* **security:** fail-closed rate limiters + remove GET-side trash auto-purge ([#611](https://github.com/ngc-shj/passwd-sso/issues/611)) ([e52932e](https://github.com/ngc-shj/passwd-sso/commit/e52932ecc0a078f65b6d89253016393b11b178e2))
+* **security:** narrow Bearer-bypass matcher to method + exact path ([#612](https://github.com/ngc-shj/passwd-sso/issues/612)) ([7d2d6cd](https://github.com/ngc-shj/passwd-sso/commit/7d2d6cd907c6350bb8ac8a754b090734eba75a52))
+* **security:** step-up on permanent purge + fail-closed mint/SCIM/reset limiters ([#617](https://github.com/ngc-shj/passwd-sso/issues/617)) ([fca1acb](https://github.com/ngc-shj/passwd-sso/commit/fca1acbb9dd65959f2b6c3166d00182187f01b29))
+* **security:** treat Redis pipeline per-command errors as fail-closed ([#614](https://github.com/ngc-shj/passwd-sso/issues/614)) ([d5bb0fc](https://github.com/ngc-shj/passwd-sso/commit/d5bb0fcad4a3e4beec316c8a7d26a6decd45d9ee))
+
 ## [0.4.61](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.60...passwd-sso-v0.4.61) (2026-06-25)
 
 
