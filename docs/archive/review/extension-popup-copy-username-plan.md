@@ -301,17 +301,15 @@ and has no browser-extension equivalent — NOT ported.)
   - Cancel → no `sendMessage` autofill; sheet closes.
   - Matched LOGIN Fill → no sheet, fills directly (regression guard).
 
-### C7 — mismatched LOGIN entries become visible in the list
-- **Current** (MatchList.tsx:159-163): the `unmatched` ("Other entries") filter EXCLUDES
-  LOGIN, so mismatched LOGIN entries are not rendered at all outside search. To let the
-  user reach them (FR6), include mismatched LOGIN in the "Other entries" section.
-- **Change**: drop the `e.entryType !== LOGIN` exclusion from `unmatched` (keep the
-  PASSKEY exclusion). Now "Other entries" = all non-PASSKEY entries not in `matched`.
-- Search already surfaces mismatched LOGIN (filterEntries over the full set) — no change
-  there; the C4 chokepoint covers fills initiated from search too.
-- **Consideration**: this changes the popup's default view — mismatched LOGINs now list
-  under "Other entries". Confirm this is acceptable density; the entries are sorted with
-  matches first (`sortByUrlMatch`) so the relevant ones stay on top.
+### C7 — REMOVED (default-view display of mismatched LOGIN not implemented)
+- An earlier revision proposed showing mismatched LOGIN entries in the "Other entries"
+  default-view section. This was NOT requested by the user and floods large vaults, so
+  it was reverted. The "Other entries" section keeps its original behavior: non-LOGIN
+  entries (cards, identity) only.
+- Mismatched LOGIN entries remain reachable via SEARCH (the existing full-set search),
+  which is unchanged pre-existing behavior. Fills initiated from search results pass
+  through the C4 chokepoint and the confirmation sheet exactly the same way. No code
+  change for this contract — the `unmatched` filter is left as it was originally.
 
 ### C8 — i18n keys (en + ja, aligned with iOS wording)
 Add under `popup` in BOTH locales:
@@ -340,10 +338,10 @@ trust boundary (a compromised popup could already fill anything). Walkthrough sa
 ## Testing strategy (C4–C8)
 
 Same test file `extension/src/__tests__/popup/MatchList.test.tsx`.
-- Mismatched LOGIN: render an entry whose `urlHost` differs from `tabUrl`'s host, in a
-  visible section (via search query or "Other entries"); click its Fill button; assert
-  the sheet appears (find by `t("popup.fillMismatchTitle")` text) and that
-  `mockSendMessage` was NOT called with an `AUTOFILL` type yet.
+- Mismatched LOGIN: render an entry whose `urlHost` differs from `tabUrl`'s host and
+  reach it via the search box (mismatched LOGINs are not in the default view); click its
+  Fill button; assert the sheet appears (find by `t("popup.fillMismatchTitle")` text)
+  and that `mockSendMessage` was NOT called with an `AUTOFILL` type yet.
 - Confirm: click "Fill anyway"; assert `mockSendMessage` called once with
   `{ type: "AUTOFILL", entryId: <id>, ... }` and the sheet is gone.
 - Cancel: click "Cancel"; assert no `AUTOFILL` sendMessage and sheet gone.
@@ -366,15 +364,15 @@ Same test file `extension/src/__tests__/popup/MatchList.test.tsx`.
   could prompt. Mitigation: reuse the SAME `entryMatchesTab` already used for the matched
   list, so the sheet fires exactly when the entry is NOT in the matched set — no new
   matching logic, no drift (R1/R3).
-- **List density (C7)**: showing all mismatched LOGINs under "Other entries" could be
-  noisy for large vaults. Sorted matches-first mitigates; if it proves noisy a future
-  PR can collapse it, but parity with iOS (which lists all via search) is the baseline.
+- **List density**: an earlier revision listed all mismatched LOGINs in the default view
+  ("Other entries"), which floods large vaults. Reverted (C7 REMOVED). Mismatched LOGINs
+  are reached via search only, matching the iOS baseline.
 
 ## User operation scenarios (C4–C8)
 
-1. User on `evil-phish.com`, has a `mybank.com` login. It appears under "Other entries".
-   Clicks Fill → sheet: "Fill on a different site? — mybank login is saved for:
-   mybank.com / This site is: evil-phish.com". User cancels. No fill.
+1. User on `evil-phish.com`, has a `mybank.com` login. Searches for it (mismatched
+   LOGINs surface via search). Clicks Fill → sheet: "Fill on a different site? — mybank
+   login is saved for: mybank.com / This site is: evil-phish.com". User cancels. No fill.
 2. User on `accounts.google.com` legitimately, has a login stored as `google.com`
    (matches via subdomain) → fills directly, no sheet (matched).
 3. Company moved `app.oldcorp.com` → `app.newcorp.com`; user on the new domain searches
@@ -392,7 +390,7 @@ Same test file `extension/src/__tests__/popup/MatchList.test.tsx`.
 | C4  | `requestFill` chokepoint + reuse `entryMatchesTab` | locked |
 | C5  | `canShowFill` widens Fill button for mismatch      | locked |
 | C6  | confirmation sheet state + render + confirm/cancel | locked |
-| C7  | mismatched LOGIN visible in "Other entries"        | locked |
+| C7  | REMOVED — default-view display reverted (search only) | n/a  |
 | C8  | i18n keys for the mismatch sheet (en + ja)         | locked |
 | SC1 | cross-origin autofill — NOW IN SCOPE (C4–C8)       | locked |
 | SC2 | search behavior — out of scope, unchanged          | locked |

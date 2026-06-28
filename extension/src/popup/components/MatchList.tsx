@@ -154,12 +154,14 @@ export function MatchList({ tabUrl }: Props) {
     : [];
   const unmatchedAll = tabHost ? sorted.filter((e) => !matched.includes(e)) : sorted;
   // On non-web pages (chrome://, extension pages, etc.) no entries are relevant.
-  // On web pages, show non-matching entries (incl. LOGINs whose stored host differs
-  // from the tab) in the "other" section; mismatched LOGIN fills go through the
-  // confirmation sheet (requestFill). PASSKEY entries are excluded: they are handled
-  // by the WebAuthn interceptor, not by popup autofill.
+  // On web pages, show non-LOGIN entries (cards, identity) in "other" section.
+  // Mismatched LOGINs are reachable via search only (where Fill goes through the
+  // confirmation sheet). PASSKEY entries are excluded: they are handled by the
+  // WebAuthn interceptor, not by popup autofill.
   const unmatched = tabHost
-    ? unmatchedAll.filter((e) => e.entryType !== EXT_ENTRY_TYPE.PASSKEY)
+    ? unmatchedAll.filter(
+        (e) => e.entryType !== EXT_ENTRY_TYPE.LOGIN && e.entryType !== EXT_ENTRY_TYPE.PASSKEY,
+      )
     : [];
 
   const displayHost = (e: DecryptedEntry): string => {

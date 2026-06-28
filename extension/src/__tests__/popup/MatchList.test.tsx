@@ -705,7 +705,7 @@ describe("MatchList", () => {
     expect(screen.getByText("Team Copy")).toBeInTheDocument();
   });
 
-  it("shows non-matching LOGIN entries under 'Other entries' when tabUrl is set", async () => {
+  it("hides non-matching LOGIN entries when tabUrl is set", async () => {
     mockSendMessage.mockResolvedValueOnce({
       type: "FETCH_PASSWORDS",
       entries: [
@@ -735,11 +735,9 @@ describe("MatchList", () => {
 
     render(<MatchList tabUrl="https://example.com" />);
 
-    // Mismatched LOGINs are now listed (reachable via the confirmation sheet),
-    // alongside cards/identities, in the "Other entries" section.
     expect(await screen.findByText("Matched Login")).toBeInTheDocument();
     expect(screen.getByText("My Card")).toBeInTheDocument();
-    expect(screen.getByText("Other Login")).toBeInTheDocument();
+    expect(screen.queryByText("Other Login")).toBeNull();
   });
 
   it("shows no entries when tabUrl is null (non-web page) — all types hidden without query", async () => {
@@ -858,8 +856,7 @@ describe("MatchList", () => {
     expect(screen.getByText("Matches for example.com")).toBeInTheDocument();
     expect(screen.getByText("Other entries")).toBeInTheDocument();
     expect(screen.queryByText("Search results")).toBeNull();
-    // Mismatched LOGIN now appears under "Other entries" (fillable via the sheet).
-    expect(screen.getByText("Other Site Login")).toBeInTheDocument();
+    expect(screen.queryByText("Other Site Login")).toBeNull();
   });
 
   // A5: Tab-matching entry precedes non-matching entry in DOM order during search
@@ -1056,6 +1053,10 @@ describe("MatchList", () => {
       // tabUrl host (other.com) does NOT match the entry's stored host.
       render(<MatchList tabUrl="https://other.com/login" />);
 
+      // Mismatched LOGINs are reachable via search only.
+      const input = await screen.findByPlaceholderText("Search...");
+      fireEvent.change(input, { target: { value: "bank" } });
+
       const title = await screen.findByText("Bank Login");
       const row = title.closest("li");
       expect(row).not.toBeNull();
@@ -1073,6 +1074,9 @@ describe("MatchList", () => {
         .mockResolvedValueOnce({ type: "AUTOFILL", ok: true });
 
       render(<MatchList tabUrl="https://other.com/login" />);
+
+      const input = await screen.findByPlaceholderText("Search...");
+      fireEvent.change(input, { target: { value: "bank" } });
 
       const title = await screen.findByText("Bank Login");
       const row = title.closest("li");
@@ -1097,6 +1101,9 @@ describe("MatchList", () => {
       });
 
       render(<MatchList tabUrl="https://other.com/login" />);
+
+      const input = await screen.findByPlaceholderText("Search...");
+      fireEvent.change(input, { target: { value: "bank" } });
 
       const title = await screen.findByText("Bank Login");
       const row = title.closest("li");
@@ -1160,6 +1167,9 @@ describe("MatchList", () => {
         .mockResolvedValueOnce({ type: "AUTOFILL", ok: true });
 
       render(<MatchList tabUrl="https://other.com/login" />);
+
+      const input = await screen.findByPlaceholderText("Search...");
+      fireEvent.change(input, { target: { value: "generic" } });
 
       const title = await screen.findByText("Generic Login");
       const row = title.closest("li");
