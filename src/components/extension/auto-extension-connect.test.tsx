@@ -256,14 +256,16 @@ describe("AutoExtensionConnect", () => {
       expect(mockReauthenticateWithPasskey).toHaveBeenCalledTimes(1);
     });
     // After successful reauth, AWAITING_CLICK is shown again — NOT an
-    // auto-retry into CONNECTED.
+    // auto-retry into CONNECTED. The card is reframed as a continuation so the
+    // second Allow reads as finishing the connection, not repeating the first.
     await waitFor(() => {
-      expect(screen.getByText("awaitingClickTitle")).toBeInTheDocument();
+      expect(screen.getByText("continueAfterReauthTitle")).toBeInTheDocument();
     });
+    expect(screen.getByText("continueAfterReauthDescription")).toBeInTheDocument();
     expect(mockRequestExtensionConnect).toHaveBeenCalledTimes(1); // not retried automatically
     // User provides the fresh gesture; connect() runs and succeeds.
     await user.click(
-      screen.getByRole("button", { name: "awaitingClickAction" }),
+      screen.getByRole("button", { name: "continueAfterReauthAction" }),
     );
     await waitFor(() => {
       expect(screen.getByText("connectedTitle")).toBeInTheDocument();

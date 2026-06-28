@@ -24,6 +24,13 @@ export const JKT_RE = /^[A-Za-z0-9_-]{43}$/;
 // ── Session storage ──
 export const SESSION_KEY = "authState";
 
+/**
+ * Separate key for the last disconnect reason. Kept OUT of SESSION_KEY because
+ * clearSession() wipes SESSION_KEY when the token is dropped, but the popup must
+ * read the reason AFTER that to explain why the connection ended.
+ */
+export const DISCONNECT_REASON_KEY = "disconnectReason";
+
 // ── Alarms ──
 export const ALARM_TOKEN_TTL = "extension-token-ttl";
 export const ALARM_VAULT_LOCK = "vault-auto-lock";

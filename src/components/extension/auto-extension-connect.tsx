@@ -48,6 +48,11 @@ export function AutoExtensionConnect() {
   const [requiresExtensionUpdate, setRequiresExtensionUpdate] = useState(false);
   const [reauthenticating, setReauthenticating] = useState(false);
   const [reauthError, setReauthError] = useState<string | null>(null);
+  // True once a passkey reauth succeeded and we bounced back to AWAITING_CLICK
+  // for the activation-consuming second click. Reframes that card as a
+  // continuation ("Re-authentication complete / Finish connecting") so the
+  // second Allow does not read as a duplicate of the first.
+  const [cameFromReauth, setCameFromReauth] = useState(false);
 
   const connect = useCallback(async (): Promise<{ ok: boolean; requiresReauth: boolean }> => {
     setStatus(CONNECT_STATUS.CONNECTING);
@@ -176,10 +181,10 @@ export function AutoExtensionConnect() {
       // Activation v2. A subsequent connect() → postMessage would be silent-
       // dropped by the content-script gate. Surface AWAITING_CLICK so the
       // user provides a fresh gesture to authorize the now-step-up'd
-      // connection. The "再認証完了" framing is conveyed by transitioning
-      // back to the same Allow prompt — the user already saw the reauth
-      // ceremony complete, so the second Allow click reads as "finish
-      // connecting now that re-auth is done."
+      // connection. The card is reframed via cameFromReauth as a continuation
+      // ("Re-authentication complete / Finish connecting") so the second Allow
+      // click reads as finishing the connection, not repeating the first.
+      setCameFromReauth(true);
       setStatus(CONNECT_STATUS.AWAITING_CLICK);
     } finally {
       setReauthenticating(false);
@@ -224,9 +229,15 @@ export function AutoExtensionConnect() {
           {/* Title & Description */}
           {status === CONNECT_STATUS.AWAITING_CLICK && (
             <div className="space-y-2">
-              <h1 className="text-xl font-semibold">{t("awaitingClickTitle")}</h1>
+              <h1 className="text-xl font-semibold">
+                {cameFromReauth
+                  ? t("continueAfterReauthTitle")
+                  : t("awaitingClickTitle")}
+              </h1>
               <p className="text-sm text-muted-foreground">
-                {t("awaitingClickDescription")}
+                {cameFromReauth
+                  ? t("continueAfterReauthDescription")
+                  : t("awaitingClickDescription")}
               </p>
             </div>
           )}
@@ -277,7 +288,9 @@ export function AutoExtensionConnect() {
                 className="w-full"
                 data-c15-action="allow-connect"
               >
-                {t("awaitingClickAction")}
+                {cameFromReauth
+                  ? t("continueAfterReauthAction")
+                  : t("awaitingClickAction")}
               </Button>
             </div>
           )}
