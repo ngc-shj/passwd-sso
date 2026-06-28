@@ -1,13 +1,14 @@
 "use client";
 
 import { useVault } from "@/lib/vault/vault-context";
-import { VAULT_STATUS } from "@/lib/constants";
+import { VAULT_STATUS, EXT_CONNECT_PARAM } from "@/lib/constants";
 import { VaultSetupWizard } from "./vault-setup-wizard";
 import { VaultLockScreen } from "./vault-lock-screen";
 import { AutoExtensionConnect } from "@/components/extension/auto-extension-connect";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
+import { useState } from "react";
 
 interface VaultGateProps {
   children: React.ReactNode;
@@ -27,7 +28,26 @@ interface VaultGateProps {
 export function VaultGate({ children }: VaultGateProps) {
   const { status } = useVault();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const t = useTranslations("Vault");
+
+  // Connecting the extension only needs a fresh session — NOT an unlocked vault.
+  // When the tab was opened from the extension (?ext_connect=1), show the connect
+  // overlay ahead of the vault gate so the user is never forced through an
+  // unrelated passphrase/unlock screen just to authorize the extension.
+  //
+  // We latch into "connect mode" on initial mount when ext_connect is present,
+  // then stay until AutoExtensionConnect reports idle (dismissed / done). We
+  // cannot re-derive this from the URL each render: handleConnectClick strips
+  // ext_connect via replaceState, which useSearchParams does NOT observe — so
+  // the URL check would stay true forever and white-screen after dismissal.
+  const [connectActive, setConnectActive] = useState(
+    () => searchParams.get(EXT_CONNECT_PARAM) === "1",
+  );
+
+  if (connectActive) {
+    return <AutoExtensionConnect onActiveChange={setConnectActive} />;
+  }
 
   if (status === VAULT_STATUS.LOADING) {
     return (

@@ -38,7 +38,17 @@ export function isOverlayActive(): boolean {
  *
  * Shows a full-page connection status UI instead of the dashboard.
  */
-export function AutoExtensionConnect() {
+interface AutoExtensionConnectProps {
+  /**
+   * Notifies the parent whether the connect overlay is currently showing
+   * (any non-IDLE state). Lets the VaultGate keep showing the overlay ahead of
+   * the vault lock screen while connecting, then fall back to the normal gate
+   * once the flow goes idle (user dismissed / went to dashboard).
+   */
+  onActiveChange?: (active: boolean) => void;
+}
+
+export function AutoExtensionConnect({ onActiveChange }: AutoExtensionConnectProps = {}) {
   const t = useTranslations("Extension");
   const locale = useLocale();
   const didRunRef = useRef(false);
@@ -109,6 +119,23 @@ export function AutoExtensionConnect() {
     setStatus(CONNECT_STATUS.AWAITING_CLICK);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Report active/idle to the parent gate so it can defer the vault lock screen
+  // while the connect overlay is showing. Suppress the initial IDLE report: on a
+  // fresh ext_connect mount the status is briefly IDLE before the mount effect
+  // sets AWAITING_CLICK; reporting that transient IDLE would make the gate tear
+  // the overlay down before it ever shows. Only report idle AFTER we've gone
+  // active at least once (the genuine dismissal/done transition).
+  const wasActiveRef = useRef(false);
+  useEffect(() => {
+    const active = status !== CONNECT_STATUS.IDLE;
+    if (active) {
+      wasActiveRef.current = true;
+      onActiveChange?.(true);
+    } else if (wasActiveRef.current) {
+      onActiveChange?.(false);
+    }
+  }, [status, onActiveChange]);
 
   const handleConnectClick = useCallback(async () => {
     const params = new URLSearchParams(window.location.search);
