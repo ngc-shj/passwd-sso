@@ -60,6 +60,17 @@ export function MatchList({ tabUrl }: Props) {
     setTimeout(() => { navigator.clipboard.writeText("").catch(() => {}); }, clipboardClearSeconds * MS_PER_SECOND);
   };
 
+  const handleCopyUsername = async (entry: DecryptedEntry) => {
+    // Username is already decrypted in the overview (entry.username, rendered below),
+    // so copy it directly — no SW round-trip like password/TOTP need.
+    if (!entry.username) return;
+    try {
+      await copyAndScheduleClear(entry.username, t("popup.usernameCopied"));
+    } catch {
+      setToast({ message: humanizeError("CLIPBOARD_FAILED"), type: "error" });
+    }
+  };
+
   const handleCopy = async (entryId: string, teamId?: string) => {
     const res = await sendMessage({ type: "COPY_PASSWORD", entryId, teamId });
     if (res.password) {
@@ -217,6 +228,15 @@ export function MatchList({ tabUrl }: Props) {
               )}
               {e.entryType === EXT_ENTRY_TYPE.LOGIN && (
                 <>
+                  {e.username && (
+                    <button
+                      onClick={() => handleCopyUsername(e)}
+                      title={t("popup.copyUsername")}
+                      className="p-1.5 rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-600 active:bg-gray-300 dark:active:bg-gray-500 transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    </button>
+                  )}
                   <button
                     onClick={() => handleCopyTotp(e.id, e.teamId)}
                     title={t("popup.copyTotp")}

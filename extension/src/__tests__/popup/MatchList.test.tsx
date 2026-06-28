@@ -95,6 +95,65 @@ describe("MatchList", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("Password copied");
   });
 
+  it("copies username on button click", async () => {
+    // No COPY_USERNAME round-trip: the username is copied client-side from the
+    // already-fetched entry, so only the FETCH_PASSWORDS mock is queued.
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "pw-1",
+          title: "Example",
+          username: "alice",
+          urlHost: "example.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl="https://example.com/login" />);
+
+    const copyButton = await screen.findByRole("button", { name: "Copy username" });
+    fireEvent.click(copyButton);
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("alice");
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent("Username copied");
+    // No remote call beyond the initial fetch.
+    expect(mockSendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the copy-username button when the entry has no username", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "pw-1",
+          title: "No Username Entry",
+          username: "",
+          urlHost: "example.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl="https://example.com/login" />);
+
+    // Scope to the rendered row so this asserts the button is gated, not that
+    // the entry was filtered out of the view entirely.
+    const title = await screen.findByText("No Username Entry");
+    const row = title.closest("li");
+    expect(row).not.toBeNull();
+    expect(
+      within(row as HTMLElement).queryByRole("button", { name: "Copy username" }),
+    ).toBeNull();
+    // The password copy button still renders for the same LOGIN entry.
+    expect(
+      within(row as HTMLElement).getByRole("button", { name: "Copy" }),
+    ).toBeInTheDocument();
+  });
+
   it("shows error when password is unavailable", async () => {
     mockSendMessage
       .mockResolvedValueOnce({
