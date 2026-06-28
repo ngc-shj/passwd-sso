@@ -139,6 +139,26 @@ describe("App tab URL handling", () => {
     });
   });
 
+  it("threads the disconnect reason from GET_STATUS into LoginPrompt", async () => {
+    const chromeMock = (globalThis as unknown as { chrome: { tabs: { query: ReturnType<typeof vi.fn> } } }).chrome;
+    chromeMock.tabs.query.mockResolvedValueOnce([{ url: "https://example.com" }]);
+    mockSendMessage.mockResolvedValueOnce({
+      type: "GET_STATUS",
+      hasToken: false,
+      vaultUnlocked: false,
+      expiresAt: null,
+      disconnectReason: "expired",
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(mockLoginPrompt).toHaveBeenCalledWith(
+        expect.objectContaining({ reason: "expired" }),
+      );
+    });
+  });
+
   it("shows a retry control instead of spinning forever when status cannot be fetched", async () => {
     const chromeMock = (globalThis as unknown as { chrome: { tabs: { query: ReturnType<typeof vi.fn> } } }).chrome;
     chromeMock.tabs.query.mockResolvedValue([{ url: "https://example.com" }]);

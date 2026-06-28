@@ -5,6 +5,7 @@ import { t } from "../lib/i18n";
 import { LoginPrompt } from "./components/LoginPrompt";
 import { VaultUnlock } from "./components/VaultUnlock";
 import { MatchList } from "./components/MatchList";
+import { DISCONNECT_REASON, type DisconnectReason } from "../lib/disconnect-reason";
 
 type AppState = "loading" | "error" | "not_logged_in" | "logged_in" | "vault_unlocked";
 
@@ -43,6 +44,7 @@ async function notifyVaultStateChanged(): Promise<void> {
 export function App() {
   const [state, setState] = useState<AppState>("loading");
   const [tabUrl, setTabUrl] = useState<string | null>(null);
+  const [disconnectReason, setDisconnectReason] = useState<DisconnectReason | null>(null);
   const containerMinHeight =
     state === "vault_unlocked" ? "min-h-[480px]" : "min-h-[260px]";
 
@@ -53,6 +55,7 @@ export function App() {
     fetchStatus()
       .then((res) => {
         if (!res.hasToken) {
+          setDisconnectReason(res.disconnectReason ?? null);
           setState("not_logged_in");
         } else if (res.vaultUnlocked) {
           setState("vault_unlocked");
@@ -116,6 +119,8 @@ export function App() {
       setState("error");
       return;
     }
+    // Manual disconnect → generic prompt, no "session expired" framing.
+    setDisconnectReason(DISCONNECT_REASON.MANUAL);
     setState("not_logged_in");
   };
 
@@ -176,7 +181,7 @@ export function App() {
             </button>
           </div>
         )}
-        {state === "not_logged_in" && <LoginPrompt />}
+        {state === "not_logged_in" && <LoginPrompt reason={disconnectReason} />}
         {state === "logged_in" && (
           <VaultUnlock
             onUnlocked={() => {

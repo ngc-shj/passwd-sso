@@ -38,6 +38,13 @@ import {
   clearSession,
 } from "../lib/session-storage";
 import {
+  DISCONNECT_REASON,
+  type DisconnectReason,
+  recordDisconnectReason,
+  readDisconnectReason,
+  clearDisconnectReason,
+} from "../lib/disconnect-reason";
+import {
   getDpopThumbprint,
   resetInMemoryKeyCache,
 } from "../lib/dpop-key";
@@ -269,14 +276,21 @@ async function getCachedEntries(): Promise<DecryptedEntry[]> {
   return entries;
 }
 
-/** Securely clear token from memory and session storage */
-function clearToken(): void {
+/**
+ * Securely clear token from memory and session storage.
+ *
+ * `reason` records WHY the connection ended so the popup can explain it. It is
+ * written to a separate storage key that survives clearSession(); a subsequent
+ * successful connect clears it (see applyToken).
+ */
+function clearToken(reason: DisconnectReason = DISCONNECT_REASON.MANUAL): void {
   currentToken = null;
   tokenExpiresAt = null;
   currentCnfJkt = null;
   clearVault();
   chrome.alarms.clear(ALARM_TOKEN_REFRESH);
   clearSession().catch(() => {});
+  void recordDisconnectReason(reason);
   void updateBadge();
 }
 
@@ -316,9 +330,11 @@ export function applyToken(
     chrome.alarms.create(ALARM_TOKEN_TTL, { when: expiresAt });
     scheduleRefreshAlarm(expiresAt);
     persistState();
+    // Fresh connection succeeded — drop any stale disconnect banner.
+    void clearDisconnectReason();
   } else {
     // Already expired
-    clearToken();
+    clearToken(DISCONNECT_REASON.EXPIRED);
   }
 
   void updateBadge();
@@ -443,7 +459,11 @@ async function hydrateFromSession(): Promise<void> {
   if (!state) return;
 
   if (Date.now() >= state.expiresAt) {
+    // SW restarted to find a stored session already past expiry — the TTL alarm
+    // may have been lost when the SW was torn down. Record EXPIRED so the popup
+    // still explains the disconnect.
     await clearSession();
+    await recordDisconnectReason(DISCONNECT_REASON.EXPIRED);
     return;
   }
 
@@ -561,7 +581,9 @@ async function attemptTokenRefresh(): Promise<void> {
     setCnfJkt: (cnfJkt) => {
       currentCnfJkt = cnfJkt;
     },
-    clearToken,
+    // A refresh that the server rejects (401/403/404) means the session is no
+    // longer valid — record it as REVOKED, not the default MANUAL.
+    clearToken: () => clearToken(DISCONNECT_REASON.REVOKED),
     scheduleRefreshAlarm,
     createTtlAlarm: (when) => {
       chrome.alarms.create(ALARM_TOKEN_TTL, { when });
@@ -785,12 +807,12 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   (async () => {
     await hydrationPromise;
     if (alarm.name === ALARM_TOKEN_TTL) {
-      clearToken();
+      clearToken(DISCONNECT_REASON.EXPIRED);
     }
     if (alarm.name === ALARM_VAULT_LOCK) {
       if (cachedVaultTimeoutAction === TimeoutAction.LOGOUT) {
         await revokeCurrentTokenOnServer();
-        clearToken();
+        clearToken(DISCONNECT_REASON.TIMEOUT_LOGOUT);
       } else {
         clearVault();
       }
@@ -1857,7 +1879,7 @@ async function handleMessage(
 
     case EXT_MSG.GET_TOKEN: {
       if (tokenExpiresAt && Date.now() >= tokenExpiresAt) {
-        clearToken();
+        clearToken(DISCONNECT_REASON.EXPIRED);
       }
       sendResponse({ type: EXT_MSG.GET_TOKEN, token: currentToken });
       return;
@@ -1865,7 +1887,7 @@ async function handleMessage(
 
     case EXT_MSG.CLEAR_TOKEN: {
       await revokeCurrentTokenOnServer();
-      clearToken();
+      clearToken(DISCONNECT_REASON.MANUAL);
       chrome.alarms.clear(ALARM_TOKEN_TTL);
       sendResponse({ type: EXT_MSG.CLEAR_TOKEN, ok: true });
       return;
@@ -1890,13 +1912,19 @@ async function handleMessage(
 
     case EXT_MSG.GET_STATUS: {
       if (tokenExpiresAt && Date.now() >= tokenExpiresAt) {
-        clearToken();
+        clearToken(DISCONNECT_REASON.EXPIRED);
       }
+      // Only meaningful when disconnected — explains why the popup shows the
+      // Connect prompt (expired vs revoked vs manual) and lets it forewarn
+      // about possible re-authentication.
+      const disconnectReason =
+        currentToken === null ? await readDisconnectReason() : null;
       sendResponse({
         type: EXT_MSG.GET_STATUS,
         hasToken: currentToken !== null,
         expiresAt: tokenExpiresAt,
         vaultUnlocked: encryptionKey !== null,
+        disconnectReason,
         // Tenant-policy override for auto-lock. Null when the tenant has
         // not set a value (or the vault has never been unlocked yet, so
         // we don't know). UI uses this to disable the local setting.

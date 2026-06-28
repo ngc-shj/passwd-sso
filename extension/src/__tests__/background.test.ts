@@ -2,9 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   ALARM_VAULT_LOCK,
   ALARM_TOKEN_REFRESH,
+  ALARM_TOKEN_TTL,
   CMD_TRIGGER_AUTOFILL,
   EXT_ENTRY_TYPE,
+  DISCONNECT_REASON_KEY,
 } from "../lib/constants";
+import { DISCONNECT_REASON } from "../lib/disconnect-reason";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
 import type { SessionState } from "../lib/session-storage";
 
@@ -137,12 +140,21 @@ function installChromeMock() {
           .fn()
           .mockResolvedValue({ serverUrl: "https://localhost:3000", autoLockMinutes: 15 }),
       },
-      session: {
-        get: vi.fn().mockResolvedValue({}),
-        set: vi.fn().mockResolvedValue(undefined),
-        remove: vi.fn().mockResolvedValue(undefined),
-        setAccessLevel: vi.fn().mockResolvedValue(undefined),
-      },
+      session: (() => {
+        // Store-backed so disconnect-reason record/read round-trips work
+        // (the session-storage module itself is mocked separately above).
+        const store: Record<string, unknown> = {};
+        return {
+          get: vi.fn(async (key: string) => ({ [key]: store[key] })),
+          set: vi.fn(async (obj: Record<string, unknown>) => {
+            Object.assign(store, obj);
+          }),
+          remove: vi.fn(async (key: string) => {
+            delete store[key];
+          }),
+          setAccessLevel: vi.fn().mockResolvedValue(undefined),
+        };
+      })(),
       onChanged: {
         addListener: (fn: (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, areaName: string) => void) => {
           storageChangeHandlers.push(fn);
@@ -1091,6 +1103,52 @@ describe("session persistence", () => {
     expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
       ALARM_TOKEN_REFRESH,
       expect.objectContaining({ when: expect.any(Number) })
+    );
+  });
+
+  it("records MANUAL disconnect reason on CLEAR_TOKEN", async () => {
+    applyToken("tok-1", Date.now() + 600_000, STATIC_TEST_JKT);
+    await sendMessage({ type: "CLEAR_TOKEN" });
+
+    expect(chromeMock?.storage.session.set).toHaveBeenCalledWith({
+      [DISCONNECT_REASON_KEY]: DISCONNECT_REASON.MANUAL,
+    });
+  });
+
+  it("records EXPIRED reason when the TTL alarm fires", async () => {
+    applyToken("tok-1", Date.now() + 600_000, STATIC_TEST_JKT);
+    const handler = alarmHandlers[0];
+    handler({ name: ALARM_TOKEN_TTL });
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(chromeMock?.storage.session.set).toHaveBeenCalledWith({
+      [DISCONNECT_REASON_KEY]: DISCONNECT_REASON.EXPIRED,
+    });
+  });
+
+  it("surfaces the recorded reason in GET_STATUS once disconnected", async () => {
+    applyToken("tok-1", Date.now() + 600_000, STATIC_TEST_JKT);
+    await sendMessage({ type: "CLEAR_TOKEN" });
+
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(
+      expect.objectContaining({
+        type: "GET_STATUS",
+        hasToken: false,
+        disconnectReason: DISCONNECT_REASON.MANUAL,
+      }),
+    );
+  });
+
+  it("clears the disconnect reason after a fresh successful connect", async () => {
+    applyToken("tok-1", Date.now() + 600_000, STATIC_TEST_JKT);
+    await sendMessage({ type: "CLEAR_TOKEN" });
+    // Reconnect.
+    applyToken("tok-2", Date.now() + 600_000, STATIC_TEST_JKT);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(chromeMock?.storage.session.remove).toHaveBeenCalledWith(
+      DISCONNECT_REASON_KEY,
     );
   });
 

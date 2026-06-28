@@ -38,7 +38,17 @@ export function isOverlayActive(): boolean {
  *
  * Shows a full-page connection status UI instead of the dashboard.
  */
-export function AutoExtensionConnect() {
+interface AutoExtensionConnectProps {
+  /**
+   * Notifies the parent whether the connect overlay is currently showing
+   * (any non-IDLE state). Lets the VaultGate keep showing the overlay ahead of
+   * the vault lock screen while connecting, then fall back to the normal gate
+   * once the flow goes idle (user dismissed / went to dashboard).
+   */
+  onActiveChange?: (active: boolean) => void;
+}
+
+export function AutoExtensionConnect({ onActiveChange }: AutoExtensionConnectProps = {}) {
   const t = useTranslations("Extension");
   const locale = useLocale();
   const didRunRef = useRef(false);
@@ -48,6 +58,11 @@ export function AutoExtensionConnect() {
   const [requiresExtensionUpdate, setRequiresExtensionUpdate] = useState(false);
   const [reauthenticating, setReauthenticating] = useState(false);
   const [reauthError, setReauthError] = useState<string | null>(null);
+  // True once a passkey reauth succeeded and we bounced back to AWAITING_CLICK
+  // for the activation-consuming second click. Reframes that card as a
+  // continuation ("Re-authentication complete / Finish connecting") so the
+  // second Allow does not read as a duplicate of the first.
+  const [cameFromReauth, setCameFromReauth] = useState(false);
 
   const connect = useCallback(async (): Promise<{ ok: boolean; requiresReauth: boolean }> => {
     setStatus(CONNECT_STATUS.CONNECTING);
@@ -104,6 +119,23 @@ export function AutoExtensionConnect() {
     setStatus(CONNECT_STATUS.AWAITING_CLICK);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Report active/idle to the parent gate so it can defer the vault lock screen
+  // while the connect overlay is showing. Suppress the initial IDLE report: on a
+  // fresh ext_connect mount the status is briefly IDLE before the mount effect
+  // sets AWAITING_CLICK; reporting that transient IDLE would make the gate tear
+  // the overlay down before it ever shows. Only report idle AFTER we've gone
+  // active at least once (the genuine dismissal/done transition).
+  const wasActiveRef = useRef(false);
+  useEffect(() => {
+    const active = status !== CONNECT_STATUS.IDLE;
+    if (active) {
+      wasActiveRef.current = true;
+      onActiveChange?.(true);
+    } else if (wasActiveRef.current) {
+      onActiveChange?.(false);
+    }
+  }, [status, onActiveChange]);
 
   const handleConnectClick = useCallback(async () => {
     const params = new URLSearchParams(window.location.search);
@@ -176,10 +208,10 @@ export function AutoExtensionConnect() {
       // Activation v2. A subsequent connect() → postMessage would be silent-
       // dropped by the content-script gate. Surface AWAITING_CLICK so the
       // user provides a fresh gesture to authorize the now-step-up'd
-      // connection. The "再認証完了" framing is conveyed by transitioning
-      // back to the same Allow prompt — the user already saw the reauth
-      // ceremony complete, so the second Allow click reads as "finish
-      // connecting now that re-auth is done."
+      // connection. The card is reframed via cameFromReauth as a continuation
+      // ("Re-authentication complete / Finish connecting") so the second Allow
+      // click reads as finishing the connection, not repeating the first.
+      setCameFromReauth(true);
       setStatus(CONNECT_STATUS.AWAITING_CLICK);
     } finally {
       setReauthenticating(false);
@@ -224,9 +256,15 @@ export function AutoExtensionConnect() {
           {/* Title & Description */}
           {status === CONNECT_STATUS.AWAITING_CLICK && (
             <div className="space-y-2">
-              <h1 className="text-xl font-semibold">{t("awaitingClickTitle")}</h1>
+              <h1 className="text-xl font-semibold">
+                {cameFromReauth
+                  ? t("continueAfterReauthTitle")
+                  : t("awaitingClickTitle")}
+              </h1>
               <p className="text-sm text-muted-foreground">
-                {t("awaitingClickDescription")}
+                {cameFromReauth
+                  ? t("continueAfterReauthDescription")
+                  : t("awaitingClickDescription")}
               </p>
             </div>
           )}
@@ -277,7 +315,9 @@ export function AutoExtensionConnect() {
                 className="w-full"
                 data-c15-action="allow-connect"
               >
-                {t("awaitingClickAction")}
+                {cameFromReauth
+                  ? t("continueAfterReauthAction")
+                  : t("awaitingClickAction")}
               </Button>
             </div>
           )}
