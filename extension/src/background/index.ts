@@ -1911,14 +1911,23 @@ async function handleMessage(
       return;
 
     case EXT_MSG.GET_STATUS: {
+      // When we clear the token lazily HERE, recordDisconnectReason() is a
+      // fire-and-forget storage write; reading it back in the same turn could
+      // race and return null. Track the reason locally so the response always
+      // carries it for the just-expired case, independent of the storage write.
+      let lazyExpiredReason: DisconnectReason | null = null;
       if (tokenExpiresAt && Date.now() >= tokenExpiresAt) {
         clearToken(DISCONNECT_REASON.EXPIRED);
+        lazyExpiredReason = DISCONNECT_REASON.EXPIRED;
       }
       // Only meaningful when disconnected — explains why the popup shows the
       // Connect prompt (expired vs revoked vs manual) and lets it forewarn
-      // about possible re-authentication.
+      // about possible re-authentication. Prefer the locally-determined reason
+      // for a lazy expiry; otherwise read the persisted reason.
       const disconnectReason =
-        currentToken === null ? await readDisconnectReason() : null;
+        currentToken !== null
+          ? null
+          : lazyExpiredReason ?? (await readDisconnectReason());
       sendResponse({
         type: EXT_MSG.GET_STATUS,
         hasToken: currentToken !== null,

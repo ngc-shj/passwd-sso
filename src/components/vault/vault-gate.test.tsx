@@ -102,6 +102,19 @@ describe("VaultGate", () => {
       expect(container.querySelector("svg")).not.toBeInTheDocument();
     });
 
+    it("does NOT bypass the setup wizard when the vault is not yet initialized", () => {
+      // SETUP_REQUIRED must win over the connect overlay: an uninitialized vault
+      // has nothing for the extension to use, and bypassing setup would let the
+      // connect flow mint an extension token before the vault exists.
+      mockUseVault.mockReturnValue({ status: "SETUP_REQUIRED" });
+      mockUseSearchParams.mockReturnValue(new URLSearchParams("ext_connect=1"));
+
+      render(<VaultGate><div>children</div></VaultGate>);
+
+      expect(screen.getByTestId("vault-setup-wizard")).toBeInTheDocument();
+      expect(screen.queryByTestId("auto-extension-connect")).not.toBeInTheDocument();
+    });
+
     it("falls back to the normal gate once the connect flow reports idle", () => {
       mockUseVault.mockReturnValue({ status: "LOCKED" });
       mockUseSearchParams.mockReturnValue(new URLSearchParams("ext_connect=1"));
