@@ -12,6 +12,7 @@ import { t } from "../../lib/i18n";
 import { EXT_ENTRY_TYPE } from "../../lib/constants";
 import { MS_PER_SECOND } from "../../lib/time";
 import { Toast } from "./Toast";
+import { FillMismatchDialog } from "./FillMismatchDialog";
 
 interface Props {
   tabUrl: string | null;
@@ -23,6 +24,7 @@ export function MatchList({ tabUrl }: Props) {
   const [error, setError] = useState("");
   const [filling, setFilling] = useState(false);
   const [query, setQuery] = useState("");
+  const [pendingFill, setPendingFill] = useState<DecryptedEntry | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const hasTabUrl = Boolean(tabUrl);
   const tabHost = tabUrl ? extractHost(tabUrl) : null;
@@ -58,6 +60,17 @@ export function MatchList({ tabUrl }: Props) {
     setTimeout(() => setToast(null), 2000);
     const { clipboardClearSeconds } = await getSettings();
     setTimeout(() => { navigator.clipboard.writeText("").catch(() => {}); }, clipboardClearSeconds * MS_PER_SECOND);
+  };
+
+  const handleCopyUsername = async (entry: DecryptedEntry) => {
+    // Username is already decrypted in the overview (entry.username, rendered below),
+    // so copy it directly — no SW round-trip like password/TOTP need.
+    if (!entry.username) return;
+    try {
+      await copyAndScheduleClear(entry.username, t("popup.usernameCopied"));
+    } catch {
+      setToast({ message: humanizeError("CLIPBOARD_FAILED"), type: "error" });
+    }
   };
 
   const handleCopy = async (entryId: string, teamId?: string) => {
@@ -143,8 +156,9 @@ export function MatchList({ tabUrl }: Props) {
   const unmatchedAll = tabHost ? sorted.filter((e) => !matched.includes(e)) : sorted;
   // On non-web pages (chrome://, extension pages, etc.) no entries are relevant.
   // On web pages, show non-LOGIN entries (cards, identity) in "other" section.
-  // PASSKEY entries are excluded: they are handled by the WebAuthn interceptor,
-  // not by popup autofill.
+  // Mismatched LOGINs are reachable via search only (where Fill goes through the
+  // confirmation sheet). PASSKEY entries are excluded: they are handled by the
+  // WebAuthn interceptor, not by popup autofill.
   const unmatched = tabHost
     ? unmatchedAll.filter(
         (e) => e.entryType !== EXT_ENTRY_TYPE.LOGIN && e.entryType !== EXT_ENTRY_TYPE.PASSKEY,
@@ -176,16 +190,32 @@ export function MatchList({ tabUrl }: Props) {
   const isSearching = query !== "";
   const searchResults = filterEntries(sorted, query);
 
-  // canFill: autofillable type AND on a web page AND (not LOGIN OR host matches tab)
   const entryMatchesTab = (e: DecryptedEntry): boolean =>
     tabHost !== null &&
-    (isHostMatch(e.urlHost, tabHost) ||
+    ((e.urlHost ? isHostMatch(e.urlHost, tabHost) : false) ||
       (e.additionalUrlHosts ?? []).some((h) => isHostMatch(h, tabHost)));
 
-  const canFill = (e: DecryptedEntry): boolean =>
-    isAutofillable(e.entryType) &&
-    tabHost !== null &&
-    (e.entryType !== EXT_ENTRY_TYPE.LOGIN || entryMatchesTab(e));
+  const storedHost = (e: DecryptedEntry): string =>
+    e.urlHost || e.additionalUrlHosts?.[0] || "";
+
+  // canShowFill: the Fill button renders for any autofillable entry on a web page.
+  // The matched/mismatched decision lives in requestFill, not in button visibility.
+  const canShowFill = (e: DecryptedEntry): boolean =>
+    isAutofillable(e.entryType) && tabHost !== null;
+
+  // A mismatched LOGIN with a stored host is filled only after the user confirms in
+  // the sheet (phishing safeguard). Everything else fills directly.
+  const requestFill = (e: DecryptedEntry) => {
+    if (
+      e.entryType === EXT_ENTRY_TYPE.LOGIN &&
+      storedHost(e) !== "" &&
+      !entryMatchesTab(e)
+    ) {
+      setPendingFill(e);
+      return;
+    }
+    void handleFill(e.id, e.entryType, e.teamId);
+  };
 
   const renderEntryRow = (e: DecryptedEntry, variant: "matched" | "plain") => {
     const liClass =
@@ -203,11 +233,11 @@ export function MatchList({ tabUrl }: Props) {
             {entryTypeBadge(e.entryType)}
             {teamBadge(e.teamName)}
           </div>
-          {(canFill(e) || e.entryType === EXT_ENTRY_TYPE.LOGIN) && (
+          {(canShowFill(e) || e.entryType === EXT_ENTRY_TYPE.LOGIN) && (
             <div className="flex items-center gap-1 shrink-0">
-              {canFill(e) && (
+              {canShowFill(e) && (
                 <button
-                  onClick={() => handleFill(e.id, e.entryType, e.teamId)}
+                  onClick={() => requestFill(e)}
                   disabled={filling}
                   title={t("popup.fill")}
                   className="p-1.5 rounded-md text-white bg-gray-900 dark:bg-gray-200 dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-300 active:bg-gray-950 transition-colors disabled:opacity-60"
@@ -217,6 +247,15 @@ export function MatchList({ tabUrl }: Props) {
               )}
               {e.entryType === EXT_ENTRY_TYPE.LOGIN && (
                 <>
+                  {e.username && (
+                    <button
+                      onClick={() => handleCopyUsername(e)}
+                      title={t("popup.copyUsername")}
+                      className="p-1.5 rounded-md text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-600 active:bg-gray-300 dark:active:bg-gray-500 transition-colors"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    </button>
+                  )}
                   <button
                     onClick={() => handleCopyTotp(e.id, e.teamId)}
                     title={t("popup.copyTotp")}
@@ -251,6 +290,19 @@ export function MatchList({ tabUrl }: Props) {
         message={toast?.message || ""}
         type={toast?.type}
       />
+      {pendingFill && (
+        <FillMismatchDialog
+          title={pendingFill.title || "(Untitled)"}
+          savedHost={storedHost(pendingFill)}
+          currentHost={tabHost}
+          onConfirm={() => {
+            const entry = pendingFill;
+            setPendingFill(null);
+            void handleFill(entry.id, entry.entryType, entry.teamId);
+          }}
+          onCancel={() => setPendingFill(null)}
+        />
+      )}
       {isInsecurePage && (
         <div className="flex items-start gap-2 px-3 py-2 text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-md">
           <span className="shrink-0 mt-0.5">⚠</span>
