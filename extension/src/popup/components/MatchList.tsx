@@ -23,6 +23,7 @@ export function MatchList({ tabUrl }: Props) {
   const [error, setError] = useState("");
   const [filling, setFilling] = useState(false);
   const [query, setQuery] = useState("");
+  const [pendingFill, setPendingFill] = useState<DecryptedEntry | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const hasTabUrl = Boolean(tabUrl);
   const tabHost = tabUrl ? extractHost(tabUrl) : null;
@@ -153,13 +154,12 @@ export function MatchList({ tabUrl }: Props) {
     : [];
   const unmatchedAll = tabHost ? sorted.filter((e) => !matched.includes(e)) : sorted;
   // On non-web pages (chrome://, extension pages, etc.) no entries are relevant.
-  // On web pages, show non-LOGIN entries (cards, identity) in "other" section.
-  // PASSKEY entries are excluded: they are handled by the WebAuthn interceptor,
-  // not by popup autofill.
+  // On web pages, show non-matching entries (incl. LOGINs whose stored host differs
+  // from the tab) in the "other" section; mismatched LOGIN fills go through the
+  // confirmation sheet (requestFill). PASSKEY entries are excluded: they are handled
+  // by the WebAuthn interceptor, not by popup autofill.
   const unmatched = tabHost
-    ? unmatchedAll.filter(
-        (e) => e.entryType !== EXT_ENTRY_TYPE.LOGIN && e.entryType !== EXT_ENTRY_TYPE.PASSKEY,
-      )
+    ? unmatchedAll.filter((e) => e.entryType !== EXT_ENTRY_TYPE.PASSKEY)
     : [];
 
   const displayHost = (e: DecryptedEntry): string => {
@@ -187,16 +187,35 @@ export function MatchList({ tabUrl }: Props) {
   const isSearching = query !== "";
   const searchResults = filterEntries(sorted, query);
 
-  // canFill: autofillable type AND on a web page AND (not LOGIN OR host matches tab)
   const entryMatchesTab = (e: DecryptedEntry): boolean =>
     tabHost !== null &&
-    (isHostMatch(e.urlHost, tabHost) ||
+    ((e.urlHost ? isHostMatch(e.urlHost, tabHost) : false) ||
       (e.additionalUrlHosts ?? []).some((h) => isHostMatch(h, tabHost)));
 
-  const canFill = (e: DecryptedEntry): boolean =>
-    isAutofillable(e.entryType) &&
-    tabHost !== null &&
-    (e.entryType !== EXT_ENTRY_TYPE.LOGIN || entryMatchesTab(e));
+  const hasStoredHost = (e: DecryptedEntry): boolean =>
+    Boolean(e.urlHost) || (e.additionalUrlHosts?.length ?? 0) > 0;
+
+  // canShowFill: the Fill button renders for any autofillable entry on a web page.
+  // The matched/mismatched decision lives in requestFill, not in button visibility.
+  const canShowFill = (e: DecryptedEntry): boolean =>
+    isAutofillable(e.entryType) && tabHost !== null;
+
+  // A mismatched LOGIN with a stored host is filled only after the user confirms in
+  // the sheet (phishing safeguard). Everything else fills directly.
+  const requestFill = (e: DecryptedEntry) => {
+    if (
+      e.entryType === EXT_ENTRY_TYPE.LOGIN &&
+      hasStoredHost(e) &&
+      !entryMatchesTab(e)
+    ) {
+      setPendingFill(e);
+      return;
+    }
+    void handleFill(e.id, e.entryType, e.teamId);
+  };
+
+  const storedHost = (e: DecryptedEntry): string =>
+    e.urlHost || e.additionalUrlHosts?.[0] || "";
 
   const renderEntryRow = (e: DecryptedEntry, variant: "matched" | "plain") => {
     const liClass =
@@ -214,11 +233,11 @@ export function MatchList({ tabUrl }: Props) {
             {entryTypeBadge(e.entryType)}
             {teamBadge(e.teamName)}
           </div>
-          {(canFill(e) || e.entryType === EXT_ENTRY_TYPE.LOGIN) && (
+          {(canShowFill(e) || e.entryType === EXT_ENTRY_TYPE.LOGIN) && (
             <div className="flex items-center gap-1 shrink-0">
-              {canFill(e) && (
+              {canShowFill(e) && (
                 <button
-                  onClick={() => handleFill(e.id, e.entryType, e.teamId)}
+                  onClick={() => requestFill(e)}
                   disabled={filling}
                   title={t("popup.fill")}
                   className="p-1.5 rounded-md text-white bg-gray-900 dark:bg-gray-200 dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-300 active:bg-gray-950 transition-colors disabled:opacity-60"
@@ -271,6 +290,52 @@ export function MatchList({ tabUrl }: Props) {
         message={toast?.message || ""}
         type={toast?.type}
       />
+      {pendingFill && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("popup.fillMismatchTitle")}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+        >
+          <div className="w-full max-w-xs rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg p-4 flex flex-col gap-3">
+            <div className="flex flex-col items-center gap-2 text-center">
+              <span className="text-2xl text-amber-500" aria-hidden="true">⚠</span>
+              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                {t("popup.fillMismatchTitle")}
+              </p>
+              <p className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-line">
+                {t("popup.fillMismatchSavedFor", {
+                  title: pendingFill.title || "(Untitled)",
+                  host: storedHost(pendingFill),
+                })}
+              </p>
+              {tabHost && (
+                <p className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-line">
+                  {t("popup.fillMismatchCurrentSite", { host: tabHost })}
+                </p>
+              )}
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => {
+                  const entry = pendingFill;
+                  setPendingFill(null);
+                  void handleFill(entry.id, entry.entryType, entry.teamId);
+                }}
+                className="h-9 rounded-md text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 active:bg-amber-800 transition-colors"
+              >
+                {t("popup.fillAnyway")}
+              </button>
+              <button
+                onClick={() => setPendingFill(null)}
+                className="h-9 rounded-md text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              >
+                {t("popup.cancel")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {isInsecurePage && (
         <div className="flex items-start gap-2 px-3 py-2 text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-md">
           <span className="shrink-0 mt-0.5">⚠</span>

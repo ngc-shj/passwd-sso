@@ -705,7 +705,7 @@ describe("MatchList", () => {
     expect(screen.getByText("Team Copy")).toBeInTheDocument();
   });
 
-  it("hides non-matching LOGIN entries when tabUrl is set", async () => {
+  it("shows non-matching LOGIN entries under 'Other entries' when tabUrl is set", async () => {
     mockSendMessage.mockResolvedValueOnce({
       type: "FETCH_PASSWORDS",
       entries: [
@@ -735,9 +735,11 @@ describe("MatchList", () => {
 
     render(<MatchList tabUrl="https://example.com" />);
 
+    // Mismatched LOGINs are now listed (reachable via the confirmation sheet),
+    // alongside cards/identities, in the "Other entries" section.
     expect(await screen.findByText("Matched Login")).toBeInTheDocument();
     expect(screen.getByText("My Card")).toBeInTheDocument();
-    expect(screen.queryByText("Other Login")).toBeNull();
+    expect(screen.getByText("Other Login")).toBeInTheDocument();
   });
 
   it("shows no entries when tabUrl is null (non-web page) — all types hidden without query", async () => {
@@ -856,7 +858,8 @@ describe("MatchList", () => {
     expect(screen.getByText("Matches for example.com")).toBeInTheDocument();
     expect(screen.getByText("Other entries")).toBeInTheDocument();
     expect(screen.queryByText("Search results")).toBeNull();
-    expect(screen.queryByText("Other Site Login")).toBeNull();
+    // Mismatched LOGIN now appears under "Other entries" (fillable via the sheet).
+    expect(screen.getByText("Other Site Login")).toBeInTheDocument();
   });
 
   // A5: Tab-matching entry precedes non-matching entry in DOM order during search
@@ -920,8 +923,9 @@ describe("MatchList", () => {
     ).toBeTruthy();
   });
 
-  // A9a: Cross-domain LOGIN search result has Copy and TOTP but no Fill (row-scoped)
-  it("A9a: cross-domain LOGIN search result has Copy and TOTP but no Fill", async () => {
+  // A9a: Cross-domain LOGIN search result has Copy, TOTP, and a Fill button that
+  // opens the mismatch confirmation sheet (row-scoped).
+  it("A9a: cross-domain LOGIN search result Fill opens the confirmation sheet", async () => {
     mockSendMessage.mockResolvedValueOnce({
       type: "FETCH_PASSWORDS",
       entries: [
@@ -942,9 +946,14 @@ describe("MatchList", () => {
     const title = await screen.findByText("AWS Console");
     const row = title.closest("li") as HTMLElement;
     const rowScope = within(row);
-    expect(rowScope.queryByRole("button", { name: "Fill" })).toBeNull();
     expect(rowScope.getByRole("button", { name: "Copy" })).toBeInTheDocument();
     expect(rowScope.getByRole("button", { name: "TOTP" })).toBeInTheDocument();
+
+    // Fill is now offered for a mismatch, but gated behind the confirmation sheet.
+    const fill = rowScope.getByRole("button", { name: "Fill" });
+    fireEvent.click(fill);
+    expect(await screen.findByText("Fill on a different site?")).toBeInTheDocument();
+    expect(mockSendMessage).toHaveBeenCalledTimes(1); // only FETCH_PASSWORDS, no AUTOFILL
   });
 
   // A9b: CREDIT_CARD search result on a web page has Fill button (row-scoped)
@@ -1027,5 +1036,142 @@ describe("MatchList", () => {
     expect(await screen.findByText("Bank Login")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Fill" })).toBeNull();
     expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+  });
+
+  describe("cross-origin autofill confirmation", () => {
+    const mismatchedEntry = {
+      id: "bank-1",
+      title: "Bank Login",
+      username: "alice",
+      urlHost: "bank.example.com",
+      entryType: EXT_ENTRY_TYPE.LOGIN,
+    };
+
+    it("opens the confirmation sheet instead of filling a mismatched LOGIN", async () => {
+      mockSendMessage.mockResolvedValueOnce({
+        type: "FETCH_PASSWORDS",
+        entries: [mismatchedEntry],
+      });
+
+      // tabUrl host (other.com) does NOT match the entry's stored host.
+      render(<MatchList tabUrl="https://other.com/login" />);
+
+      const title = await screen.findByText("Bank Login");
+      const row = title.closest("li");
+      expect(row).not.toBeNull();
+      fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "Fill" }));
+
+      // The sheet is shown; no AUTOFILL message has been sent.
+      expect(await screen.findByText("Fill on a different site?")).toBeInTheDocument();
+      expect(mockSendMessage).toHaveBeenCalledTimes(1); // only FETCH_PASSWORDS
+    });
+
+    it("fills after the user confirms 'Fill anyway'", async () => {
+      const closeSpy = vi.spyOn(window, "close").mockImplementation(() => {});
+      mockSendMessage
+        .mockResolvedValueOnce({ type: "FETCH_PASSWORDS", entries: [mismatchedEntry] })
+        .mockResolvedValueOnce({ type: "AUTOFILL", ok: true });
+
+      render(<MatchList tabUrl="https://other.com/login" />);
+
+      const title = await screen.findByText("Bank Login");
+      const row = title.closest("li");
+      fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "Fill" }));
+
+      fireEvent.click(await screen.findByRole("button", { name: "Fill anyway" }));
+
+      await waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalledWith(
+          expect.objectContaining({ type: "AUTOFILL", entryId: "bank-1" }),
+        );
+      });
+      // Sheet is dismissed.
+      expect(screen.queryByText("Fill on a different site?")).toBeNull();
+      closeSpy.mockRestore();
+    });
+
+    it("cancels without filling", async () => {
+      mockSendMessage.mockResolvedValueOnce({
+        type: "FETCH_PASSWORDS",
+        entries: [mismatchedEntry],
+      });
+
+      render(<MatchList tabUrl="https://other.com/login" />);
+
+      const title = await screen.findByText("Bank Login");
+      const row = title.closest("li");
+      fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "Fill" }));
+
+      fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+      expect(screen.queryByText("Fill on a different site?")).toBeNull();
+      // No AUTOFILL was ever sent.
+      expect(
+        mockSendMessage.mock.calls.some(([m]) => (m as { type: string }).type === "AUTOFILL"),
+      ).toBe(false);
+    });
+
+    it("fills a matched LOGIN directly with no sheet", async () => {
+      const closeSpy = vi.spyOn(window, "close").mockImplementation(() => {});
+      mockSendMessage
+        .mockResolvedValueOnce({
+          type: "FETCH_PASSWORDS",
+          entries: [
+            {
+              id: "pw-1",
+              title: "Example",
+              username: "alice",
+              urlHost: "example.com",
+              entryType: EXT_ENTRY_TYPE.LOGIN,
+            },
+          ],
+        })
+        .mockResolvedValueOnce({ type: "AUTOFILL", ok: true });
+
+      render(<MatchList tabUrl="https://example.com/login" />);
+
+      const fillButton = await screen.findByRole("button", { name: "Fill" });
+      fireEvent.click(fillButton);
+
+      await waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalledWith(
+          expect.objectContaining({ type: "AUTOFILL", entryId: "pw-1" }),
+        );
+      });
+      expect(screen.queryByText("Fill on a different site?")).toBeNull();
+      closeSpy.mockRestore();
+    });
+
+    it("fills a host-less LOGIN directly (no mismatch to assert)", async () => {
+      const closeSpy = vi.spyOn(window, "close").mockImplementation(() => {});
+      mockSendMessage
+        .mockResolvedValueOnce({
+          type: "FETCH_PASSWORDS",
+          entries: [
+            {
+              id: "no-host-1",
+              title: "Generic Login",
+              username: "alice",
+              urlHost: "",
+              entryType: EXT_ENTRY_TYPE.LOGIN,
+            },
+          ],
+        })
+        .mockResolvedValueOnce({ type: "AUTOFILL", ok: true });
+
+      render(<MatchList tabUrl="https://other.com/login" />);
+
+      const title = await screen.findByText("Generic Login");
+      const row = title.closest("li");
+      fireEvent.click(within(row as HTMLElement).getByRole("button", { name: "Fill" }));
+
+      await waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalledWith(
+          expect.objectContaining({ type: "AUTOFILL", entryId: "no-host-1" }),
+        );
+      });
+      expect(screen.queryByText("Fill on a different site?")).toBeNull();
+      closeSpy.mockRestore();
+    });
   });
 });

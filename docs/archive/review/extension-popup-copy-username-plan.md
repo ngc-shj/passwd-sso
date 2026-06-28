@@ -160,11 +160,11 @@ resolves the real `en.json`), so select via the exact accessible name.
 ## Considerations & constraints
 
 ### Scope contract
-- **SC1 — cross-origin (URL-mismatch) autofill with a warning**: explicitly OUT of
-  scope. The autofill host-gate (`canFill()` in MatchList) is a phishing defense; the
-  user decided NOT to weaken it for this change. A user who needs a mismatched
-  credential can "view & copy" instead. Tracked as a possible future, separate
-  plan/PR — not this one.
+- **SC1 — cross-origin (URL-mismatch) autofill with a warning**: NOW IN SCOPE (was
+  deferred; user decided to add it, mirroring the iOS AutoFill extension). Implemented
+  as a confirmation sheet, NOT an unconditional weakening of the host-gate. See the
+  "Cross-origin autofill confirmation (C4–C8)" section below. The phishing defense is
+  preserved as an explicit, informed user decision rather than removed.
 - **SC2 — search behavior changes**: OUT of scope. The popup already supports
   full-entry-set text search (`MatchList.tsx:163-177`); the user confirmed current
   search behavior is acceptable. No change.
@@ -194,12 +194,205 @@ resolves the real `en.json`), so select via the exact accessible name.
 4. Team LOGIN entry → same button; `e.username` is populated from the team overview
    decrypt, copied identically (no teamId-specific path needed since no round-trip).
 
+---
+
+# Cross-origin autofill confirmation (C4–C8)
+
+## Objective
+
+Allow autofilling a LOGIN entry whose stored host does NOT match the current tab,
+gated behind an explicit in-popup confirmation sheet — mirroring the iOS AutoFill
+extension's host-mismatch warning. Today the popup hides the Fill button for
+mismatched LOGIN entries (`canFill()` returns false), so the user has no way to fill a
+credential the URL of which has drifted (legit case) — and no phishing safeguard exists
+because the affordance simply isn't there.
+
+## iOS reference (the behavior we mirror)
+
+`ios/PasswdSSOAutofillExtension/Views/CredentialPickerView.swift` shows a
+`hostMismatchConfirmationSheet` (lines 204-242) when a non-matched entry is selected:
+warning triangle + headline + "saved for: <stored host>" + "This site is: <current
+host>" + "Fill Anyway" / "Cancel". Strings live in `Localizable.xcstrings`. TOTP fill
+has NO mismatch confirmation (`OneTimeCodePickerView`) — we mirror that: only autofill
+is gated, copy/TOTP are not. (The iOS app-side / bundle-ID confirmation is iOS-26-only
+and has no browser-extension equivalent — NOT ported.)
+
+## Requirements
+
+- FR6: Mismatched LOGIN entries show a Fill button (currently hidden).
+- FR7: Clicking Fill on a mismatched LOGIN entry opens a confirmation sheet BEFORE any
+  fill happens; it does NOT call the SW autofill until the user confirms.
+- FR8: The sheet shows: a warning icon, a headline, the entry's stored host, and the
+  current tab host, plus "Fill anyway" / "Cancel" actions.
+- FR9: "Fill anyway" proceeds with the existing `handleFill` flow; "Cancel" closes the
+  sheet and fills nothing.
+- FR10: MATCHED LOGIN entries fill directly with NO confirmation (unchanged). TOTP and
+  all copy actions are NEVER gated by this sheet (mirrors iOS).
+- FR11: i18n for all new strings in en + ja, wording aligned with the iOS strings.
+- FR12: The mismatch decision is made in the Fill click handler (single chokepoint), so
+  it fires regardless of which section the row was rendered in (matched list cannot
+  contain a mismatch; "other entries" and search both can).
+
+## Contracts
+
+### C4 — `entryMatchesTab` reuse + a single Fill chokepoint
+- The existing `entryMatchesTab(e)` (MatchList.tsx:191-194) is the source of truth for
+  "does this entry's stored host match the current tab". REUSE it — do NOT add a second
+  host-comparison (R1).
+- **F3 guard alignment**: `entryMatchesTab` currently calls `isHostMatch(e.urlHost, ...)`
+  WITHOUT the `e.urlHost &&` guard the `matched`-list filter has (MatchList.tsx:150). Add
+  the guard so the chokepoint decision is provably identical to matched-list membership
+  and does not silently depend on `isHostMatch("")` returning false:
+  `tabHost !== null && ((e.urlHost ? isHostMatch(e.urlHost, tabHost) : false) || (e.additionalUrlHosts ?? []).some((h) => isHostMatch(h, tabHost)))`.
+- **F2 host-less LOGIN**: an entry with NO `urlHost` AND no `additionalUrlHosts` has no
+  stored host to assert a mismatch against — showing a sheet with an empty "saved for"
+  line is confusing. Treat it as "no mismatch" → fill directly, no sheet. Add a
+  `hasStoredHost(e)` helper = `Boolean(e.urlHost) || (e.additionalUrlHosts?.length ?? 0) > 0`.
+- **Signature change**: introduce `requestFill(e: DecryptedEntry): void` that:
+  - if `e.entryType === LOGIN && hasStoredHost(e) && !entryMatchesTab(e)` → set
+    `pendingFill = e` (opens sheet), return — do NOT call the SW.
+  - else → call the existing `handleFill(e.id, e.entryType, e.teamId)` directly.
+    (host-less LOGIN, matched LOGIN, and all CREDIT_CARD/IDENTITY take this branch.)
+- The Fill button `onClick` calls `requestFill(e)` instead of `handleFill(...)`.
+- **Invariant (app-enforced)** I3: the SW autofill message
+  (`AUTOFILL`/`AUTOFILL_CREDIT_CARD`/`AUTOFILL_IDENTITY`) is NEVER sent for a mismatched
+  LOGIN *that has a stored host* without passing through the confirm sheet. The only
+  call site of `handleFill` for such an entry is the sheet's confirm action.
+
+### C5 — `canFill` widened to render the Fill button for mismatched LOGIN
+- **Current** (MatchList.tsx:196-199): `canFill` is false for mismatched LOGIN, hiding
+  the button. **Change**: the Fill BUTTON should render for any autofillable LOGIN on a
+  web page (matched or not); the match/mismatch distinction moves into `requestFill`
+  (C4), not button visibility.
+- Concretely: split the concept — keep a `canFill(e)` that means "fill directly without
+  confirmation" (matched), and add `canShowFill(e)` = autofillable && `tabHost !== null`
+  (renders the button). The button renders when `canShowFill(e)`; `requestFill` decides
+  direct-fill vs. confirm.
+- **CREDIT_CARD / IDENTITY**: unchanged behavior — they have no host gate today
+  (`canFill` already allows them on any web page), so they continue to fill directly, no
+  confirmation. The sheet is LOGIN-only (FR10).
+- **Forbidden pattern**:
+  `pattern: handleFill\(e\.id, e\.entryType — reason: Fill button must call requestFill(e), not handleFill directly, so the mismatch gate (C4/I3) cannot be bypassed`
+
+### C6 — confirmation sheet state + rendering
+- **State**: `const [pendingFill, setPendingFill] = useState<DecryptedEntry | null>(null)`.
+- **Render**: when `pendingFill` is non-null, render an in-popup sheet (overlay or
+  bottom panel within the 360px popup; NOT `window.confirm`). Contents:
+  - warning triangle icon (amber, consistent with the existing `isInsecurePage` warning
+    styling at MatchList.tsx:254-258).
+  - headline `t("popup.fillMismatchTitle")`.
+  - stored host line: `t("popup.fillMismatchSavedFor", { title, host })` where host is
+    the entry's own stored host (NOT `displayHost`, which returns the matched host — for
+    a mismatch use `e.urlHost || e.additionalUrlHosts?.[0] || ""`).
+  - current site line: `t("popup.fillMismatchCurrentSite", { host: tabHost })`.
+  - confirm button `t("popup.fillAnyway")` → fire-and-forget the fill, then clear
+    state SYNCHRONOUSLY so the sheet is gone on both success and failure regardless of
+    await semantics (F1): `void handleFill(pendingFill.id, pendingFill.entryType, pendingFill.teamId); setPendingFill(null);`.
+    (On success `handleFill` calls `window.close()`; on failure it leaves the popup open
+    with an error toast — in both cases the sheet must already be dismissed.)
+  - cancel button `t("popup.cancel")` → `setPendingFill(null)`, fills nothing.
+- **Invariant (app-enforced)** I4: confirm action clears `pendingFill` and is the sole
+  path that calls `handleFill` for the pending mismatched entry; cancel clears state and
+  calls nothing.
+- **Acceptance**:
+  - Click Fill on a mismatched LOGIN → sheet appears, no SW message sent yet.
+  - Confirm → `sendMessage({type:"AUTOFILL", ...})` fires once with the entry id; sheet
+    closes.
+  - Cancel → no `sendMessage` autofill; sheet closes.
+  - Matched LOGIN Fill → no sheet, fills directly (regression guard).
+
+### C7 — mismatched LOGIN entries become visible in the list
+- **Current** (MatchList.tsx:159-163): the `unmatched` ("Other entries") filter EXCLUDES
+  LOGIN, so mismatched LOGIN entries are not rendered at all outside search. To let the
+  user reach them (FR6), include mismatched LOGIN in the "Other entries" section.
+- **Change**: drop the `e.entryType !== LOGIN` exclusion from `unmatched` (keep the
+  PASSKEY exclusion). Now "Other entries" = all non-PASSKEY entries not in `matched`.
+- Search already surfaces mismatched LOGIN (filterEntries over the full set) — no change
+  there; the C4 chokepoint covers fills initiated from search too.
+- **Consideration**: this changes the popup's default view — mismatched LOGINs now list
+  under "Other entries". Confirm this is acceptable density; the entries are sorted with
+  matches first (`sortByUrlMatch`) so the relevant ones stay on top.
+
+### C8 — i18n keys (en + ja, aligned with iOS wording)
+Add under `popup` in BOTH locales:
+| key | en | ja |
+|-----|----|----|
+| `popup.fillMismatchTitle` | `Fill on a different site?` | `別のサイトに入力しますか？` |
+| `popup.fillMismatchSavedFor` | `{title} is saved for: {host}` | `{title} の保存先: {host}` |
+| `popup.fillMismatchCurrentSite` | `This site is: {host}` | `このサイト: {host}` |
+| `popup.fillAnyway` | `Fill anyway` | `このまま入力` |
+| `popup.cancel` | `Cancel` | `キャンセル` |
+- ja wording matches iOS `Localizable.xcstrings` ("このまま入力" / "別のサイトに入力しますか？")
+  for cross-platform consistency.
+- Check `popup.cancel` does not already exist before adding (grep); reuse if present.
+- i18n parity test (`i18n.test.ts:55-59`) auto-covers presence in both locales.
+
+### Consumer-flow walkthrough (C4–C8)
+Only consumer is the popup itself. `pendingFill` state is read solely by the sheet
+render + confirm/cancel handlers in the same component. The confirm action's payload to
+the SW is the EXISTING `AUTOFILL` message shape (entryId/tabId/teamId) — no new message
+type, no payload-shape change, so no SW-side or cross-module consumer is affected. The
+SW already fills whatever entryId it receives (it does not re-check host —
+`performAutofillForEntry`), so the gate is entirely client-side by design; this is
+acceptable because the popup is the trusted UI and the gate is a UX safeguard, not a
+trust boundary (a compromised popup could already fill anything). Walkthrough satisfied.
+
+## Testing strategy (C4–C8)
+
+Same test file `extension/src/__tests__/popup/MatchList.test.tsx`.
+- Mismatched LOGIN: render an entry whose `urlHost` differs from `tabUrl`'s host, in a
+  visible section (via search query or "Other entries"); click its Fill button; assert
+  the sheet appears (find by `t("popup.fillMismatchTitle")` text) and that
+  `mockSendMessage` was NOT called with an `AUTOFILL` type yet.
+- Confirm: click "Fill anyway"; assert `mockSendMessage` called once with
+  `{ type: "AUTOFILL", entryId: <id>, ... }` and the sheet is gone.
+- Cancel: click "Cancel"; assert no `AUTOFILL` sendMessage and sheet gone.
+- Matched LOGIN regression: render a matched entry, click Fill; assert NO sheet and
+  `AUTOFILL` sent directly (guards FR10 / I3 against over-triggering).
+- TOTP not gated: matched/mismatched, clicking TOTP never opens the sheet.
+- i18n: no dedicated test (parity guard covers presence).
+- Select Fill buttons by exact accessible name `t("popup.fill")` = "Fill"; scope to the
+  target row with `title.closest("li")` + `within(row)` to avoid cross-row ambiguity now
+  that multiple Fill buttons can render.
+
+## Risks (C4–C8)
+
+- **Phishing-defense framing**: the gate is a UX safeguard inside the trusted popup, not
+  a server-enforced trust boundary. The SW does not re-validate host (it never did). A
+  user who clicks "Fill anyway" on a phishing site can still be tricked — the sheet's
+  job is to make the mismatch impossible to miss, matching the desktop-password-manager
+  norm and iOS. Acceptable and consistent with the platform.
+- **Over-triggering** (annoyance): if `entryMatchesTab` is too strict, legit matches
+  could prompt. Mitigation: reuse the SAME `entryMatchesTab` already used for the matched
+  list, so the sheet fires exactly when the entry is NOT in the matched set — no new
+  matching logic, no drift (R1/R3).
+- **List density (C7)**: showing all mismatched LOGINs under "Other entries" could be
+  noisy for large vaults. Sorted matches-first mitigates; if it proves noisy a future
+  PR can collapse it, but parity with iOS (which lists all via search) is the baseline.
+
+## User operation scenarios (C4–C8)
+
+1. User on `evil-phish.com`, has a `mybank.com` login. It appears under "Other entries".
+   Clicks Fill → sheet: "Fill on a different site? — mybank login is saved for:
+   mybank.com / This site is: evil-phish.com". User cancels. No fill.
+2. User on `accounts.google.com` legitimately, has a login stored as `google.com`
+   (matches via subdomain) → fills directly, no sheet (matched).
+3. Company moved `app.oldcorp.com` → `app.newcorp.com`; user on the new domain searches
+   for the old entry, clicks Fill → sheet, confirms "Fill anyway" → fills. Legit drift
+   case the old hard-gate blocked entirely.
+4. ja locale → "別のサイトに入力しますか？" / "このまま入力" / "キャンセル".
+
 ## Go/No-Go Gate
 
-| ID  | Subject                                         | Status |
-|-----|-------------------------------------------------|--------|
-| C1  | `handleCopyUsername` client-side handler        | locked |
-| C2  | username button rendering + gate + styling      | locked |
-| C3  | i18n keys (popup.copyUsername / usernameCopied) | locked |
-| SC1 | cross-origin autofill — out of scope            | locked |
-| SC2 | search behavior — out of scope, unchanged       | locked |
+| ID  | Subject                                            | Status |
+|-----|----------------------------------------------------|--------|
+| C1  | `handleCopyUsername` client-side handler           | locked |
+| C2  | username button rendering + gate + styling         | locked |
+| C3  | i18n keys (popup.copyUsername / usernameCopied)    | locked |
+| C4  | `requestFill` chokepoint + reuse `entryMatchesTab` | locked |
+| C5  | `canShowFill` widens Fill button for mismatch      | locked |
+| C6  | confirmation sheet state + render + confirm/cancel | locked |
+| C7  | mismatched LOGIN visible in "Other entries"        | locked |
+| C8  | i18n keys for the mismatch sheet (en + ja)         | locked |
+| SC1 | cross-origin autofill — NOW IN SCOPE (C4–C8)       | locked |
+| SC2 | search behavior — out of scope, unchanged          | locked |
