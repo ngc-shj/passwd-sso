@@ -20,17 +20,17 @@ describe("FillMismatchDialog", () => {
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByText("Fill on a different site?")).toBeInTheDocument();
-    expect(screen.getByText(/Bank Login is saved for:/)).toBeInTheDocument();
-    expect(screen.getByText(/bank\.example\.com/)).toBeInTheDocument();
-    expect(screen.getByText(/This site is:/)).toBeInTheDocument();
-    expect(screen.getByText(/evil-phish\.com/)).toBeInTheDocument();
+    expect(screen.getByText("Bank Login is saved for:", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("bank.example.com", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("This site is:", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("evil-phish.com", { exact: false })).toBeInTheDocument();
   });
 
   it("omits the current-site line when currentHost is null", () => {
     render(<FillMismatchDialog {...baseProps} currentHost={null} />);
 
-    expect(screen.getByText(/Bank Login is saved for:/)).toBeInTheDocument();
-    expect(screen.queryByText(/This site is:/)).toBeNull();
+    expect(screen.getByText("Bank Login is saved for:", { exact: false })).toBeInTheDocument();
+    expect(screen.queryByText("This site is:", { exact: false })).toBeNull();
   });
 
   it("calls onConfirm when 'Fill anyway' is clicked", () => {
@@ -52,7 +52,7 @@ describe("FillMismatchDialog", () => {
   it("renders an empty saved host without crashing", () => {
     render(<FillMismatchDialog {...baseProps} savedHost="" />);
     // Title line still renders; the host portion is just empty.
-    expect(screen.getByText(/Bank Login is saved for:/)).toBeInTheDocument();
+    expect(screen.getByText("Bank Login is saved for:", { exact: false })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Fill anyway" })).toBeInTheDocument();
   });
 });
