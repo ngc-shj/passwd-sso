@@ -45,7 +45,13 @@ export function VaultGate({ children }: VaultGateProps) {
     () => searchParams.get(EXT_CONNECT_PARAM) === "1",
   );
 
-  if (connectActive) {
+  // The overlay deliberately precedes the LOCKED gate (connecting needs only a
+  // session, not an unlocked vault) — but it must NOT precede SETUP_REQUIRED. A
+  // user whose vault is not yet initialized has no vault to use the extension
+  // with; bypassing the setup wizard would also let the connect flow mint an
+  // extension token before the vault exists. Defer to the setup wizard first;
+  // once setup completes, the latch still shows the overlay.
+  if (connectActive && status !== VAULT_STATUS.SETUP_REQUIRED) {
     return <AutoExtensionConnect onActiveChange={setConnectActive} />;
   }
 

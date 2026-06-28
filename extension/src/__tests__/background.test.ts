@@ -1140,6 +1140,36 @@ describe("session persistence", () => {
     );
   });
 
+  it("returns EXPIRED in GET_STATUS on lazy expiry even if the reason write has not flushed", async () => {
+    // Regression: the lazy-expiry branch clears the token and records the reason
+    // via a fire-and-forget storage write, then reads it back in the same turn.
+    // If GET_STATUS depended on that write completing, the read could race and
+    // return null. Make the storage write hang forever and confirm the response
+    // still carries EXPIRED (determined locally, not via storage round-trip).
+    const store: Record<string, unknown> = {};
+    chromeMock!.storage.session.get = vi.fn(async (key: string) => ({ [key]: store[key] }));
+    chromeMock!.storage.session.set = vi.fn(() => new Promise<void>(() => {})); // never resolves
+
+    const expiresAt = Date.now() + 60_000;
+    applyToken("tok-1", expiresAt, STATIC_TEST_JKT);
+
+    // Advance real wall-clock past expiry so the GET_STATUS lazy check fires.
+    vi.useFakeTimers();
+    vi.setSystemTime(expiresAt + 1_000);
+    try {
+      const status = await sendMessage({ type: "GET_STATUS" });
+      expect(status).toEqual(
+        expect.objectContaining({
+          type: "GET_STATUS",
+          hasToken: false,
+          disconnectReason: DISCONNECT_REASON.EXPIRED,
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("clears the disconnect reason after a fresh successful connect", async () => {
     applyToken("tok-1", Date.now() + 600_000, STATIC_TEST_JKT);
     await sendMessage({ type: "CLEAR_TOKEN" });
