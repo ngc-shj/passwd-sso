@@ -12,6 +12,7 @@ import { t } from "../../lib/i18n";
 import { EXT_ENTRY_TYPE } from "../../lib/constants";
 import { MS_PER_SECOND } from "../../lib/time";
 import { Toast } from "./Toast";
+import { FillMismatchDialog } from "./FillMismatchDialog";
 
 interface Props {
   tabUrl: string | null;
@@ -194,8 +195,8 @@ export function MatchList({ tabUrl }: Props) {
     ((e.urlHost ? isHostMatch(e.urlHost, tabHost) : false) ||
       (e.additionalUrlHosts ?? []).some((h) => isHostMatch(h, tabHost)));
 
-  const hasStoredHost = (e: DecryptedEntry): boolean =>
-    Boolean(e.urlHost) || (e.additionalUrlHosts?.length ?? 0) > 0;
+  const storedHost = (e: DecryptedEntry): string =>
+    e.urlHost || e.additionalUrlHosts?.[0] || "";
 
   // canShowFill: the Fill button renders for any autofillable entry on a web page.
   // The matched/mismatched decision lives in requestFill, not in button visibility.
@@ -207,7 +208,7 @@ export function MatchList({ tabUrl }: Props) {
   const requestFill = (e: DecryptedEntry) => {
     if (
       e.entryType === EXT_ENTRY_TYPE.LOGIN &&
-      hasStoredHost(e) &&
+      storedHost(e) !== "" &&
       !entryMatchesTab(e)
     ) {
       setPendingFill(e);
@@ -215,9 +216,6 @@ export function MatchList({ tabUrl }: Props) {
     }
     void handleFill(e.id, e.entryType, e.teamId);
   };
-
-  const storedHost = (e: DecryptedEntry): string =>
-    e.urlHost || e.additionalUrlHosts?.[0] || "";
 
   const renderEntryRow = (e: DecryptedEntry, variant: "matched" | "plain") => {
     const liClass =
@@ -293,50 +291,17 @@ export function MatchList({ tabUrl }: Props) {
         type={toast?.type}
       />
       {pendingFill && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={t("popup.fillMismatchTitle")}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-        >
-          <div className="w-full max-w-xs rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg p-4 flex flex-col gap-3">
-            <div className="flex flex-col items-center gap-2 text-center">
-              <span className="text-2xl text-amber-500" aria-hidden="true">⚠</span>
-              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                {t("popup.fillMismatchTitle")}
-              </p>
-              <p className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-line">
-                {t("popup.fillMismatchSavedFor", {
-                  title: pendingFill.title || "(Untitled)",
-                  host: storedHost(pendingFill),
-                })}
-              </p>
-              {tabHost && (
-                <p className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-line">
-                  {t("popup.fillMismatchCurrentSite", { host: tabHost })}
-                </p>
-              )}
-            </div>
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={() => {
-                  const entry = pendingFill;
-                  setPendingFill(null);
-                  void handleFill(entry.id, entry.entryType, entry.teamId);
-                }}
-                className="h-9 rounded-md text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 active:bg-amber-800 transition-colors"
-              >
-                {t("popup.fillAnyway")}
-              </button>
-              <button
-                onClick={() => setPendingFill(null)}
-                className="h-9 rounded-md text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-              >
-                {t("popup.cancel")}
-              </button>
-            </div>
-          </div>
-        </div>
+        <FillMismatchDialog
+          title={pendingFill.title || "(Untitled)"}
+          savedHost={storedHost(pendingFill)}
+          currentHost={tabHost}
+          onConfirm={() => {
+            const entry = pendingFill;
+            setPendingFill(null);
+            void handleFill(entry.id, entry.entryType, entry.teamId);
+          }}
+          onCancel={() => setPendingFill(null)}
+        />
       )}
       {isInsecurePage && (
         <div className="flex items-start gap-2 px-3 py-2 text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-md">
