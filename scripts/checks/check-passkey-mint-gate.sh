@@ -149,32 +149,52 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-# Lib-level assertion: the token-mint library files that have absorbed the
-# passkey gate from their callers MUST contain `passkeyEnforcementBlocks`.
-# If either lib loses the gate call, the entire token class becomes unguarded
-# regardless of whether the route is in the exempt allowlist.
+# Lib-level PER-FUNCTION assertion: each token-mint lib function that absorbed
+# the passkey gate from its route caller MUST contain `passkeyEnforcementBlocks`
+# WITHIN ITS OWN BODY. A file-level grep is too coarse — oauth-server.ts holds
+# BOTH exchangeRefreshToken and exchangeCodeForToken, so a file-level check would
+# still pass if one kept the gate while the sibling lost it.
+#
+# Body extraction is brace-free: from the function's column-0 declaration to the
+# next column-0 top-level declaration. Both the gate calls and the signature's
+# `{ ok: true; ... }` union-type braces are indented, so no brace counting needed.
 LIB_GATE_FAIL=0
-for lib_file in \
-  "$PATH_ROOT/src/lib/mcp/oauth-server.ts" \
-  "$PATH_ROOT/src/lib/auth/tokens/mobile-token.ts"
-do
+while read -r lib_rel fn_name; do
+  [ -z "$lib_rel" ] && continue
+  lib_file="$PATH_ROOT/$lib_rel"
   if [ ! -f "$lib_file" ]; then
-    echo "MISSING_LIB_PASSKEY_GATE: $lib_file does not exist (expected lib-level gate)."
+    echo "MISSING_LIB_PASSKEY_GATE: $lib_rel does not exist (expected the lib-level gate in $fn_name)."
     LIB_GATE_FAIL=1
     continue
   fi
-  if ! grep -qE '(^|[^A-Za-z0-9_])passkeyEnforcementBlocks\(' "$lib_file" 2>/dev/null; then
-    rel="${lib_file#"$PATH_ROOT/"}"
-    echo "MISSING_LIB_PASSKEY_GATE: $rel must contain passkeyEnforcementBlocks (gate moved from route into lib — see passkey-mint-gate-exempt.txt)."
+  fn_body="$(
+    awk -v fn="$fn_name" '
+      $0 ~ ("^(export )?(async )?function " fn "[(<]") { inbody=1; print; next }
+      inbody && /^(export )?(async )?function [A-Za-z_]/ { exit }
+      inbody && /^export (const|let|type|interface|class|enum) / { exit }
+      inbody { print }
+    ' "$lib_file"
+  )"
+  if [ -z "$fn_body" ]; then
+    echo "MISSING_LIB_PASSKEY_GATE: $lib_rel has no function $fn_name (expected the lib-level gate there)."
+    LIB_GATE_FAIL=1
+    continue
+  fi
+  if ! printf '%s' "$fn_body" | grep -qE '(^|[^A-Za-z0-9_])passkeyEnforcementBlocks\(' 2>/dev/null; then
+    echo "MISSING_LIB_PASSKEY_GATE: $lib_rel function $fn_name() does not call passkeyEnforcementBlocks (gate moved from route into this lib fn — removing it leaves this token-mint path unguarded)."
     LIB_GATE_FAIL=1
   fi
-done
+done <<LIB_GATE_PAIRS_EOF
+src/lib/mcp/oauth-server.ts exchangeRefreshToken
+src/lib/mcp/oauth-server.ts exchangeCodeForToken
+src/lib/auth/tokens/mobile-token.ts refreshIosToken
+LIB_GATE_PAIRS_EOF
 
 if [ "$LIB_GATE_FAIL" -ne 0 ]; then
   echo
   echo "The passkey gate was moved from the route into these lib functions to ensure"
-  echo "replay detection fires before enforcement. Removing it from the lib leaves"
-  echo "all token-mint paths in those libs completely unguarded."
+  echo "replay detection fires before enforcement. Removing it from any one of them"
+  echo "leaves that token-mint path completely unguarded."
   exit 1
 fi
 

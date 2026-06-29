@@ -63,7 +63,13 @@ function writeLib(relPath, body) {
   writeFileSync(join(root, "src", "lib", relPath), body, "utf8");
 }
 
-const LIB_GATE_BODY = "export function fn() { if (passkeyEnforcementBlocks(state)) return; }\n";
+// The guard checks PER-FUNCTION, so the fixtures name the real functions.
+// oauth-server.ts holds two gated mint functions; mobile-token.ts holds one.
+const GATED = (fn) =>
+  `export function ${fn}() { if (passkeyEnforcementBlocks(state)) return forbidden; }\n`;
+const UNGATED = (fn) => `export function ${fn}() { /* gate removed */ }\n`;
+const OAUTH_LIB_GATED = GATED("exchangeRefreshToken") + GATED("exchangeCodeForToken");
+const MOBILE_LIB_GATED = GATED("refreshIosToken");
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "mint-gate-guard-"));
@@ -71,10 +77,10 @@ beforeEach(() => {
   exemptFile = join(root, "exempt.txt");
   mkdirSync(apiDir, { recursive: true });
   writeFileSync(exemptFile, "# fixture exempt list\n", "utf8");
-  // Pre-create the lib files the guard now also checks (lib-level gate assertion).
-  // All standard fixture tests want these to pass, so write them with the gate.
-  writeLib("mcp/oauth-server.ts", LIB_GATE_BODY);
-  writeLib("auth/tokens/mobile-token.ts", LIB_GATE_BODY);
+  // Pre-create the lib files the guard now also checks (per-function gate assertion).
+  // All standard fixture tests want these to pass, so write them with the gates.
+  writeLib("mcp/oauth-server.ts", OAUTH_LIB_GATED);
+  writeLib("auth/tokens/mobile-token.ts", MOBILE_LIB_GATED);
 });
 
 afterEach(() => {
@@ -198,15 +204,8 @@ describe("check-passkey-mint-gate.sh", () => {
     expect(exitCode).toBe(0);
   });
 
-  it("FAILS (MISSING_LIB_PASSKEY_GATE) when oauth-server.ts lacks passkeyEnforcementBlocks", () => {
-    writeLib(
-      "mcp/oauth-server.ts",
-      "export function exchangeRefreshToken() { /* gate removed */ }\n",
-    );
-    writeLib(
-      "auth/tokens/mobile-token.ts",
-      "export function refreshIosToken() { if (passkeyEnforcementBlocks(state)) return; }\n",
-    );
+  it("FAILS (MISSING_LIB_PASSKEY_GATE) when oauth-server.ts loses ALL gates", () => {
+    writeLib("mcp/oauth-server.ts", UNGATED("exchangeRefreshToken") + UNGATED("exchangeCodeForToken"));
     const { exitCode, stdout } = runGuard();
     expect(exitCode).toBe(1);
     expect(stdout).toContain("MISSING_LIB_PASSKEY_GATE");
@@ -214,18 +213,31 @@ describe("check-passkey-mint-gate.sh", () => {
   });
 
   it("FAILS (MISSING_LIB_PASSKEY_GATE) when mobile-token.ts lacks passkeyEnforcementBlocks", () => {
-    writeLib(
-      "mcp/oauth-server.ts",
-      "export function exchangeRefreshToken() { if (passkeyEnforcementBlocks(state)) return; }\n",
-    );
-    writeLib(
-      "auth/tokens/mobile-token.ts",
-      "export function refreshIosToken() { /* gate removed */ }\n",
-    );
+    writeLib("auth/tokens/mobile-token.ts", UNGATED("refreshIosToken"));
     const { exitCode, stdout } = runGuard();
     expect(exitCode).toBe(1);
     expect(stdout).toContain("MISSING_LIB_PASSKEY_GATE");
     expect(stdout).toContain("mobile-token.ts");
+  });
+
+  // The point of per-FUNCTION granularity: a file-level grep would PASS here
+  // (exchangeRefreshToken still calls the gate), masking that exchangeCodeForToken
+  // lost its gate. The per-function check must catch the ONE ungated sibling.
+  it("FAILS (per-function) when only ONE oauth-server.ts mint function loses its gate", () => {
+    writeLib("mcp/oauth-server.ts", GATED("exchangeRefreshToken") + UNGATED("exchangeCodeForToken"));
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("MISSING_LIB_PASSKEY_GATE");
+    expect(stdout).toContain("exchangeCodeForToken");
+  });
+
+  it("FAILS (per-function) when a required mint function is missing entirely", () => {
+    // exchangeCodeForToken absent altogether — must be flagged, not silently passed.
+    writeLib("mcp/oauth-server.ts", GATED("exchangeRefreshToken"));
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("MISSING_LIB_PASSKEY_GATE");
+    expect(stdout).toContain("exchangeCodeForToken");
   });
 
   it("passes the real codebase tree (exit 0 on the actual repo)", () => {
