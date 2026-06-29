@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.63](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.62...passwd-sso-v0.4.63) (2026-06-29)
+
+
+### Bug Fixes
+
+* **extension:** don't bypass vault setup wizard on ext_connect; fix disconnect-reason race ([#622](https://github.com/ngc-shj/passwd-sso/issues/622)) ([a5d03f9](https://github.com/ngc-shj/passwd-sso/commit/a5d03f9b13b2c308309f75bb5385c91f71a65a1b))
+* **extension:** remove unnecessary passphrase prompt and explain disconnects in the connect flow ([#620](https://github.com/ngc-shj/passwd-sso/issues/620)) ([03f8090](https://github.com/ngc-shj/passwd-sso/commit/03f8090113ae08e69120795f94462526457d8355))
+
 ## [0.4.62](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.61...passwd-sso-v0.4.62) (2026-06-28)
 
 
