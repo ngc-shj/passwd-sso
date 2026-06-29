@@ -8,6 +8,10 @@ const {
   mockHashToken,
   mockRateLimiterCheck,
   mockLogAudit,
+  mockMcpRefreshTokenFindUnique,
+  mockWithBypassRls,
+  mockDerivePasskeyState,
+  mockRecordPasskeyAuditEmit,
 } = vi.hoisted(() => ({
   mockExchangeCodeForToken: vi.fn(),
   mockCreateRefreshToken: vi.fn().mockResolvedValue({ refreshToken: "mcp_rt_refreshtoken", expiresAt: new Date() }),
@@ -15,6 +19,18 @@ const {
   mockHashToken: vi.fn((token: string) => `hashed:${token}`),
   mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockLogAudit: vi.fn(),
+  // C8: McpRefreshToken pre-read mock
+  mockMcpRefreshTokenFindUnique: vi.fn(),
+  // C8: withBypassRls — passes tx (first arg = prisma) through to fn
+  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+  // C8: passkey enforcement mocks
+  mockDerivePasskeyState: vi.fn().mockResolvedValue({
+    requirePasskey: false,
+    hasPasskey: false,
+    requirePasskeyEnabledAt: null,
+    passkeyGracePeriodDays: null,
+  }),
+  mockRecordPasskeyAuditEmit: vi.fn().mockReturnValue(true),
 }));
 
 vi.mock("@/lib/mcp/oauth-server", () => ({
@@ -31,8 +47,25 @@ vi.mock("@/lib/security/rate-limit", () => ({
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn().mockReturnValue({ ip: "127.0.0.1", userAgent: "test-agent" }),
-  personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
+  personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId, ip: "127.0.0.1", userAgent: "test-agent" })),
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: "test-agent" })),
+}));
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    mcpRefreshToken: { findUnique: mockMcpRefreshTokenFindUnique },
+  },
+}));
+
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
+  withBypassRls: mockWithBypassRls,
+}));
+
+vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
+  derivePasskeyState: mockDerivePasskeyState,
+  recordPasskeyAuditEmit: mockRecordPasskeyAuditEmit,
 }));
 
 import { POST } from "@/app/api/mcp/token/route";
@@ -54,10 +87,44 @@ const VALID_REFRESH_BODY = {
   client_secret: "secret123",
 };
 
+const USER_ID = "33333333-3333-3333-3333-333333333333";
+const TENANT_ID = "44444444-4444-4444-4444-444444444444";
+
 describe("POST /api/mcp/token", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRateLimiterCheck.mockResolvedValue({ allowed: true });
+    // Default: withBypassRls passes the prisma object with mcpRefreshToken mock
+    mockWithBypassRls.mockImplementation(async (p: unknown, fn: (tx: unknown) => unknown) => {
+      // Provide a tx that has mcpRefreshToken.findUnique + webAuthnCredential.count + tenant.findUnique
+      const tx = {
+        ...(p as object),
+        mcpRefreshToken: { findUnique: mockMcpRefreshTokenFindUnique },
+        webAuthnCredential: { count: vi.fn().mockResolvedValue(0) },
+        tenant: {
+          findUnique: vi.fn().mockResolvedValue({
+            requirePasskey: false,
+            requirePasskeyEnabledAt: null,
+            passkeyGracePeriodDays: null,
+          }),
+        },
+      };
+      return fn(tx);
+    });
+    // Default McpRefreshToken row (user-bound, enforcement off)
+    mockMcpRefreshTokenFindUnique.mockResolvedValue({
+      userId: USER_ID,
+      tenantId: TENANT_ID,
+    });
+    // Default passkey state: enforcement off → rotate normally
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: false,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+    mockRecordPasskeyAuditEmit.mockReturnValue(true);
+    mockLogAudit.mockResolvedValue(undefined);
   });
 
   it("returns access_token on successful exchange", async () => {
@@ -436,5 +503,155 @@ describe("POST /api/mcp/token", () => {
         userAgent: "test-agent",
       }),
     );
+  });
+
+  // ─── C8: Passkey enforcement matrix for MCP refresh ──────────
+
+  describe("C8: passkey enforcement on MCP token refresh", () => {
+    beforeEach(() => {
+      mockExchangeRefreshToken.mockResolvedValue({
+        ok: true,
+        accessToken: "mcp_access",
+        refreshToken: "mcpr_new",
+        expiresIn: 3600,
+        scope: "credentials:list",
+        tenantId: TENANT_ID,
+        userId: USER_ID,
+        serviceAccountId: null,
+      });
+    });
+
+    it("6c-off: requirePasskey=false → rotates (exchangeRefreshToken called)", async () => {
+      mockMcpRefreshTokenFindUnique.mockResolvedValue({ userId: USER_ID, tenantId: TENANT_ID });
+      mockDerivePasskeyState.mockResolvedValue({
+        requirePasskey: false,
+        hasPasskey: false,
+        requirePasskeyEnabledAt: null,
+        passkeyGracePeriodDays: null,
+      });
+
+      const req = createRequest("POST", "http://localhost/api/mcp/token", { body: VALID_REFRESH_BODY });
+      const res = await POST(req);
+      const { status } = await parseResponse(res);
+
+      expect(status).toBe(200);
+      expect(mockExchangeRefreshToken).toHaveBeenCalledOnce();
+    });
+
+    it("6c-haspasskey: requirePasskey=true + hasPasskey=true → rotates", async () => {
+      mockMcpRefreshTokenFindUnique.mockResolvedValue({ userId: USER_ID, tenantId: TENANT_ID });
+      mockDerivePasskeyState.mockResolvedValue({
+        requirePasskey: true,
+        hasPasskey: true,
+        requirePasskeyEnabledAt: "2024-01-01T00:00:00.000Z",
+        passkeyGracePeriodDays: 7,
+      });
+
+      const req = createRequest("POST", "http://localhost/api/mcp/token", { body: VALID_REFRESH_BODY });
+      const res = await POST(req);
+      const { status } = await parseResponse(res);
+
+      expect(status).toBe(200);
+      expect(mockExchangeRefreshToken).toHaveBeenCalledOnce();
+    });
+
+    it("6c-withingrace: requirePasskey=true + no passkey + within grace → rotates", async () => {
+      mockMcpRefreshTokenFindUnique.mockResolvedValue({ userId: USER_ID, tenantId: TENANT_ID });
+      const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      mockDerivePasskeyState.mockResolvedValue({
+        requirePasskey: true,
+        hasPasskey: false,
+        requirePasskeyEnabledAt: future,
+        passkeyGracePeriodDays: 30,
+      });
+
+      const req = createRequest("POST", "http://localhost/api/mcp/token", { body: VALID_REFRESH_BODY });
+      const res = await POST(req);
+      const { status } = await parseResponse(res);
+
+      expect(status).toBe(200);
+      expect(mockExchangeRefreshToken).toHaveBeenCalledOnce();
+    });
+
+    it("6c-graceexpired: requirePasskey=true + no passkey + grace expired → REFUSED (RT8) + audit", async () => {
+      mockMcpRefreshTokenFindUnique.mockResolvedValue({ userId: USER_ID, tenantId: TENANT_ID });
+      mockDerivePasskeyState.mockResolvedValue({
+        requirePasskey: true,
+        hasPasskey: false,
+        requirePasskeyEnabledAt: "2020-01-01T00:00:00.000Z",
+        passkeyGracePeriodDays: 7,
+      });
+
+      const req = createRequest("POST", "http://localhost/api/mcp/token", { body: VALID_REFRESH_BODY });
+      const res = await POST(req);
+      const { status, json } = await parseResponse(res);
+
+      // Refused with access_denied (403) — OAuth error shape
+      expect(status).toBe(403);
+      expect(json.error).toBe("access_denied");
+      // RT8: exchangeRefreshToken must NOT be called
+      expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
+      // Audit must be emitted
+      expect(mockRecordPasskeyAuditEmit).toHaveBeenCalledWith(
+        USER_ID,
+        "/api/mcp/token",
+        expect.any(Number),
+      );
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "PASSKEY_ENFORCEMENT_BLOCKED",
+          metadata: { blockedPath: "/api/mcp/token" },
+        }),
+      );
+    });
+
+    it("6c-sa-bound: userId===null (SA-bound token) → skips gate, rotates normally", async () => {
+      // SA-bound: userId is null — passkey gate must be skipped entirely
+      mockMcpRefreshTokenFindUnique.mockResolvedValue({ userId: null, tenantId: TENANT_ID });
+      // exchangeRefreshToken returns a valid SA token response
+      mockExchangeRefreshToken.mockResolvedValue({
+        ok: true,
+        accessToken: "mcp_sa_access",
+        refreshToken: "mcpr_sa_new",
+        expiresIn: 3600,
+        scope: "credentials:list",
+        tenantId: TENANT_ID,
+        userId: null,
+        serviceAccountId: "sa-1",
+      });
+
+      const req = createRequest("POST", "http://localhost/api/mcp/token", { body: VALID_REFRESH_BODY });
+      const res = await POST(req);
+      const { status } = await parseResponse(res);
+
+      expect(status).toBe(200);
+      // Must rotate normally
+      expect(mockExchangeRefreshToken).toHaveBeenCalledOnce();
+      // derivePasskeyState must NOT have been called for SA-bound token
+      expect(mockDerivePasskeyState).not.toHaveBeenCalled();
+    });
+
+    it("6c-row-not-found: refresh token row not found → skip gate, let exchangeRefreshToken return invalid_grant", async () => {
+      // Row not found: gate skips, exchangeRefreshToken handles the error
+      mockMcpRefreshTokenFindUnique.mockResolvedValue(null);
+      mockExchangeRefreshToken.mockResolvedValue({ ok: false, error: "invalid_grant" });
+
+      const req = createRequest("POST", "http://localhost/api/mcp/token", { body: VALID_REFRESH_BODY });
+      const res = await POST(req);
+      const { status, json } = await parseResponse(res);
+
+      expect(status).toBe(400);
+      expect(json.error).toBe("invalid_grant");
+      expect(mockExchangeRefreshToken).toHaveBeenCalledOnce();
+    });
+
+    it("6c-throws: derivePasskeyState throws → fail closed (no rotation)", async () => {
+      mockMcpRefreshTokenFindUnique.mockResolvedValue({ userId: USER_ID, tenantId: TENANT_ID });
+      mockDerivePasskeyState.mockRejectedValue(new Error("DB error"));
+
+      const req = createRequest("POST", "http://localhost/api/mcp/token", { body: VALID_REFRESH_BODY });
+      await expect(POST(req)).rejects.toThrow("DB error");
+      expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
+    });
   });
 });

@@ -13,6 +13,7 @@ const {
   mockTxFindFirst,
   mockTxDelete,
   mockRequireRecentSession,
+  mockDerivePasskeyState,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockWithBypassRls: vi.fn(),
@@ -26,6 +27,7 @@ const {
   mockTxFindFirst: vi.fn().mockResolvedValue(null),
   mockTxDelete: vi.fn().mockResolvedValue({}),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
+  mockDerivePasskeyState: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({
@@ -103,8 +105,17 @@ vi.mock("@/lib/auth/session/step-up", () => ({
   requireRecentSession: mockRequireRecentSession,
 }));
 
+vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/auth/policy/passkey-enforcement")>();
+  return {
+    ...real,
+    derivePasskeyState: mockDerivePasskeyState,
+  };
+});
+
 import { POST } from "@/app/api/mcp/authorize/consent/route";
 import { Prisma } from "@prisma/client";
+import { _resetPasskeyAuditForTests } from "@/lib/auth/policy/passkey-enforcement";
 
 const VALID_SESSION = { user: { id: "user-uuid-123" } };
 
@@ -157,6 +168,7 @@ const VALID_FORM_FIELDS = {
 describe("POST /api/mcp/authorize/consent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    _resetPasskeyAuditForTests();
     mockAuth.mockResolvedValue(VALID_SESSION);
     // withBypassRls: execute callback on the bypass tx mock (may be called 2+
     // times for claiming). Re-applied each test because clearAllMocks wipes it.
@@ -171,6 +183,13 @@ describe("POST /api/mcp/authorize/consent", () => {
     mockCreateAuthorizationCode.mockResolvedValue({
       code: "auth-code-abc123",
       expiresAt: new Date(Date.now() + 60000),
+    });
+    // Default: passkey enforcement off (does not block).
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: false,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
     });
   });
 
@@ -621,6 +640,142 @@ describe("POST /api/mcp/authorize/consent", () => {
     const json = await res.json();
     expect(json.error).toBe("invalid_client");
     expect(json.error_description).toBe("name_conflict");
+    expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
+  });
+
+  // ── C6 (POST): Passkey enforcement gate ──────────────────────────────────
+
+  it("C6 POST: off (requirePasskey=false) → authorization code issued", async () => {
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: false,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+    expect(res.status).toBe(302);
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("code=");
+    // Non-vacuity: createAuthorizationCode was called.
+    expect(mockCreateAuthorizationCode).toHaveBeenCalledTimes(1);
+  });
+
+  it("C6 POST: on + hasPasskey → authorization code issued", async () => {
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: true,
+      hasPasskey: true,
+      requirePasskeyEnabledAt: new Date(Date.now() - 10 * 86400000).toISOString(),
+      passkeyGracePeriodDays: 7,
+    });
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("code=");
+    expect(mockCreateAuthorizationCode).toHaveBeenCalledTimes(1);
+  });
+
+  it("C6 POST: on + no passkey + within grace → authorization code issued", async () => {
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: new Date(Date.now() - 3 * 86400000).toISOString(),
+      passkeyGracePeriodDays: 7,
+    });
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("code=");
+    expect(mockCreateAuthorizationCode).toHaveBeenCalledTimes(1);
+  });
+
+  it("C6 POST: on + no passkey + grace expired → 302 access_denied+passkey_required, no code, audit emitted once", async () => {
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: new Date(Date.now() - 10 * 86400000).toISOString(),
+      passkeyGracePeriodDays: 7,
+    });
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+    expect(res.status).toBe(302);
+    const location = res.headers.get("location") ?? "";
+    const url = new URL(location);
+    expect(url.searchParams.get("error")).toBe("access_denied");
+    expect(url.searchParams.get("error_description")).toBe("passkey_required");
+    expect(url.searchParams.get("state")).toBe(VALID_FORM_FIELDS.state);
+    // Non-vacuity: createAuthorizationCode must NOT have been called.
+    expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
+    // Exactly one PASSKEY_ENFORCEMENT_BLOCKED audit emit.
+    const blockedCalls = mockLogAudit.mock.calls.filter(
+      (c) => c[0].action === "PASSKEY_ENFORCEMENT_BLOCKED",
+    );
+    expect(blockedCalls).toHaveLength(1);
+    expect(blockedCalls[0][0]).toMatchObject({
+      action: "PASSKEY_ENFORCEMENT_BLOCKED",
+      metadata: { blockedPath: "/api/mcp/authorize/consent" },
+    });
+  });
+
+  it("C6 POST: enabledAt=null → immediate 302 access_denied", async () => {
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: 7,
+    });
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+    expect(res.status).toBe(302);
+    const location = res.headers.get("location") ?? "";
+    const url = new URL(location);
+    expect(url.searchParams.get("error")).toBe("access_denied");
+    expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
+  });
+
+  it("C6 POST: audit dedup — second blocked attempt does not emit a second audit", async () => {
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+    const makeReq = () => createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    ) as unknown as import("next/server").NextRequest;
+    await POST(makeReq());
+    await POST(makeReq());
+    const blockedCalls = mockLogAudit.mock.calls.filter(
+      (c) => c[0].action === "PASSKEY_ENFORCEMENT_BLOCKED",
+    );
+    expect(blockedCalls).toHaveLength(1);
+  });
+
+  it("C6 POST: derivePasskeyState throws → fail closed (no code, error propagates)", async () => {
+    mockDerivePasskeyState.mockRejectedValue(new Error("DB error"));
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    await expect(
+      POST(req as unknown as import("next/server").NextRequest),
+    ).rejects.toThrow("DB error");
     expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
   });
 });

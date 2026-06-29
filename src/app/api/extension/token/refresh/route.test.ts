@@ -15,6 +15,9 @@ const {
   mockWithUserTenantRls,
   mockWithBypassRls,
   mockEnforceAccessRestriction,
+  mockDerivePasskeyState,
+  mockRecordPasskeyAuditEmit,
+  mockLogAuditAsync,
 } = vi.hoisted(() => ({
   mockValidateExtensionToken: vi.fn(),
   mockRevokeExtensionTokenFamily: vi.fn().mockResolvedValue({ rowsRevoked: 0 }),
@@ -34,6 +37,15 @@ const {
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
   mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
+  // C8 passkey enforcement mocks
+  mockDerivePasskeyState: vi.fn().mockResolvedValue({
+    requirePasskey: false,
+    hasPasskey: false,
+    requirePasskeyEnabledAt: null,
+    passkeyGracePeriodDays: null,
+  }),
+  mockRecordPasskeyAuditEmit: vi.fn().mockReturnValue(true),
+  mockLogAuditAsync: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/auth/tokens/extension-token", () => ({
@@ -85,6 +97,23 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
 
+vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
+  derivePasskeyState: mockDerivePasskeyState,
+  recordPasskeyAuditEmit: mockRecordPasskeyAuditEmit,
+}));
+
+vi.mock("@/lib/audit/audit", () => ({
+  logAuditAsync: mockLogAuditAsync,
+  personalAuditBase: (_req: unknown, userId: string) => ({
+    scope: "PERSONAL",
+    userId,
+    ip: "1.2.3.4",
+    userAgent: "test",
+    acceptLanguage: null,
+  }),
+}));
+
 import { POST } from "./route";
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -127,6 +156,15 @@ describe("POST /api/extension/token/refresh", () => {
           },
         }),
     );
+    // Default: passkey enforcement OFF → allows rotation
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: false,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+    mockRecordPasskeyAuditEmit.mockReturnValue(true);
+    mockLogAuditAsync.mockResolvedValue(undefined);
   });
 
   it("returns 401 when no Bearer token", async () => {
@@ -372,6 +410,105 @@ describe("POST /api/extension/token/refresh", () => {
       // path is reserved for explicit family_expired and other policy
       // signals, not for the validation layer's REVOKED short-circuit.
       expect(mockRevokeExtensionTokenFamily).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── C8: Passkey enforcement matrix ──────────────────────────
+
+  describe("C8: passkey enforcement on refresh", () => {
+    function makeRequest() {
+      return createRequest("POST", "http://localhost/api/extension/token/refresh", {
+        headers: { Authorization: "Bearer valid-token" },
+      });
+    }
+
+    beforeEach(() => {
+      mockValidateExtensionToken.mockResolvedValue(validTokenResult());
+      mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
+    });
+
+    it("6a-off: requirePasskey=false → rotates (extensionToken.create called)", async () => {
+      mockDerivePasskeyState.mockResolvedValue({
+        requirePasskey: false,
+        hasPasskey: false,
+        requirePasskeyEnabledAt: null,
+        passkeyGracePeriodDays: null,
+      });
+
+      const res = await POST(makeRequest());
+      const { status } = await parseResponse(res);
+
+      expect(status).toBe(200);
+      expect(mockExtTokenCreate).toHaveBeenCalled();
+    });
+
+    it("6a-haspasskey: requirePasskey=true + hasPasskey=true → rotates", async () => {
+      mockDerivePasskeyState.mockResolvedValue({
+        requirePasskey: true,
+        hasPasskey: true,
+        requirePasskeyEnabledAt: "2024-01-01T00:00:00.000Z",
+        passkeyGracePeriodDays: 7,
+      });
+
+      const res = await POST(makeRequest());
+      const { status } = await parseResponse(res);
+
+      expect(status).toBe(200);
+      expect(mockExtTokenCreate).toHaveBeenCalled();
+    });
+
+    it("6a-withingrace: requirePasskey=true + no passkey + within grace → rotates", async () => {
+      const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      mockDerivePasskeyState.mockResolvedValue({
+        requirePasskey: true,
+        hasPasskey: false,
+        requirePasskeyEnabledAt: future,
+        passkeyGracePeriodDays: 30,
+      });
+
+      const res = await POST(makeRequest());
+      const { status } = await parseResponse(res);
+
+      expect(status).toBe(200);
+      expect(mockExtTokenCreate).toHaveBeenCalled();
+    });
+
+    it("6a-graceexpired: requirePasskey=true + no passkey + grace expired → REFUSED (RT8) + audit", async () => {
+      mockDerivePasskeyState.mockResolvedValue({
+        requirePasskey: true,
+        hasPasskey: false,
+        requirePasskeyEnabledAt: "2020-01-01T00:00:00.000Z",
+        passkeyGracePeriodDays: 7,
+      });
+
+      const res = await POST(makeRequest());
+      const { status, json } = await parseResponse(res);
+
+      // Refused with PASSKEY_REQUIRED (403)
+      expect(status).toBe(403);
+      expect(json.error).toBe("PASSKEY_REQUIRED");
+      // RT8: extensionToken.create must NOT be called
+      expect(mockExtTokenCreate).not.toHaveBeenCalled();
+      // Audit must be emitted
+      expect(mockRecordPasskeyAuditEmit).toHaveBeenCalledWith(
+        "user-1",
+        "/api/extension/token/refresh",
+        expect.any(Number),
+      );
+      expect(mockLogAuditAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "PASSKEY_ENFORCEMENT_BLOCKED",
+          metadata: { blockedPath: "/api/extension/token/refresh" },
+        }),
+      );
+    });
+
+    it("6a-throws: derivePasskeyState throws → fail closed (no rotation)", async () => {
+      mockDerivePasskeyState.mockRejectedValue(new Error("DB error"));
+
+      const req = makeRequest();
+      await expect(POST(req)).rejects.toThrow("DB error");
+      expect(mockExtTokenCreate).not.toHaveBeenCalled();
     });
   });
 });

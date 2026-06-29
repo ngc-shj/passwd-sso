@@ -20,6 +20,7 @@ const {
   mockCheckAccessRestrictionWithAudit,
   mockRequireRecentCurrentAuthMethod,
   mockVerifyDpop,
+  mockDerivePasskeyState,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockBridgeCodeCreate: vi.fn(),
@@ -36,6 +37,7 @@ const {
   mockCheckAccessRestrictionWithAudit: vi.fn().mockResolvedValue({ allowed: true }),
   mockRequireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
   mockVerifyDpop: vi.fn(),
+  mockDerivePasskeyState: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -104,8 +106,17 @@ vi.mock("@/lib/auth/dpop/htu-canonical", () => ({
   canonicalHtu: vi.fn(() => "http://localhost:3000/api/extension/bridge-code"),
 }));
 
+vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/auth/policy/passkey-enforcement")>();
+  return {
+    ...real,
+    derivePasskeyState: mockDerivePasskeyState,
+  };
+});
+
 import { POST } from "./route";
 import { __resetAllowlistForTests } from "@/lib/http/cors";
+import { _resetPasskeyAuditForTests } from "@/lib/auth/policy/passkey-enforcement";
 
 const ALLOWED_ORIGIN = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
 const VERIFIER_JKT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb";
@@ -120,6 +131,7 @@ function makeRequest(): import("next/server").NextRequest {
 describe("POST /api/extension/bridge-code", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    _resetPasskeyAuditForTests();
     vi.stubEnv("EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS", ALLOWED_ORIGIN);
     __resetAllowlistForTests();
     mockCheck.mockResolvedValue({ allowed: true });
@@ -134,6 +146,13 @@ describe("POST /api/extension/bridge-code", () => {
     mockBridgeCodeCreate.mockResolvedValue({});
     mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
     mockVerifyDpop.mockResolvedValue({ ok: true, jkt: VERIFIER_JKT, claims: {} });
+    // Default: passkey enforcement off (does not block).
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: false,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
   });
 
   afterEach(() => {
@@ -375,5 +394,111 @@ describe("POST /api/extension/bridge-code", () => {
     expect(mockLogAudit).not.toHaveBeenCalledWith(
       expect.objectContaining({ action: "EXTENSION_BRIDGE_CODE_ISSUE_FAILURE" }),
     );
+  });
+
+  // ── C2: Passkey enforcement gate ──────────────────────────────────────────
+
+  it("C2: off (requirePasskey=false) → bridge code minted", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: false,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+    const res = await POST(makeRequest());
+    expect(res.status).toBe(201);
+    // Non-vacuity: bridge code was actually created.
+    expect(mockBridgeCodeCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("C2: on + hasPasskey → bridge code minted", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: true,
+      hasPasskey: true,
+      requirePasskeyEnabledAt: new Date(Date.now() - 10 * 86400000).toISOString(),
+      passkeyGracePeriodDays: 7,
+    });
+    const res = await POST(makeRequest());
+    expect(res.status).toBe(201);
+    expect(mockBridgeCodeCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("C2: on + no passkey + within grace → bridge code minted", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    // enabledAt = 3 days ago, grace = 7 days → still within grace
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: new Date(Date.now() - 3 * 86400000).toISOString(),
+      passkeyGracePeriodDays: 7,
+    });
+    const res = await POST(makeRequest());
+    expect(res.status).toBe(201);
+    expect(mockBridgeCodeCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("C2: on + no passkey + grace expired → 403 PASSKEY_REQUIRED, no bridge code, audit emitted once", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    // enabledAt = 10 days ago, grace = 7 days → expired
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: new Date(Date.now() - 10 * 86400000).toISOString(),
+      passkeyGracePeriodDays: 7,
+    });
+    const res = await POST(makeRequest());
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("PASSKEY_REQUIRED");
+    // Non-vacuity: bridge code must NOT have been created.
+    expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
+    // Exactly one PASSKEY_ENFORCEMENT_BLOCKED audit emit.
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "PASSKEY_ENFORCEMENT_BLOCKED",
+        metadata: { blockedPath: "/api/extension/bridge-code" },
+        tenantId: "tenant-1",
+      }),
+    );
+  });
+
+  it("C2: enabledAt=null → immediate 403 (no grace)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: 7,
+    });
+    const res = await POST(makeRequest());
+    expect(res.status).toBe(403);
+    expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
+  });
+
+  it("C2: audit dedup — second blocked attempt on same path does not emit a second audit", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+    await POST(makeRequest());
+    await POST(makeRequest());
+    // Only one PASSKEY_ENFORCEMENT_BLOCKED emit across both attempts.
+    const blockedCalls = mockLogAudit.mock.calls.filter(
+      (c) => c[0].action === "PASSKEY_ENFORCEMENT_BLOCKED",
+    );
+    expect(blockedCalls).toHaveLength(1);
+  });
+
+  it("C2: derivePasskeyState throws → fail closed (no bridge code, error propagates)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockDerivePasskeyState.mockRejectedValue(new Error("DB error"));
+    await expect(POST(makeRequest())).rejects.toThrow("DB error");
+    expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
   });
 });

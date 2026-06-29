@@ -803,6 +803,7 @@ describe("validateMcpToken", () => {
       userId: "user-uuid",
       serviceAccountId: null,
       familyId: "fam-uuid",
+      familyCreatedAt: new Date(Date.now() - 1_000), // recent — well within the 30-day cap
       accessTokenId: "at-id",
       scope: "credentials:list",
       mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: "tenant-uuid" },
@@ -842,6 +843,7 @@ describe("validateMcpToken", () => {
       userId: "user-uuid",
       serviceAccountId: null,
       familyId: "fam-uuid",
+      familyCreatedAt: new Date(Date.now() - 1_000), // recent — well within the 30-day cap
       accessTokenId: "at-id",
       scope: "credentials:list",
       mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: "tenant-uuid" },
@@ -881,6 +883,7 @@ describe("validateMcpToken", () => {
       userId: null,
       serviceAccountId: "sa-uuid",
       familyId: "fam-uuid",
+      familyCreatedAt: new Date(Date.now() - 1_000), // recent — well within the 30-day cap
       accessTokenId: "at-id",
       scope: "credentials:list",
       mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: "tenant-uuid" },
@@ -906,6 +909,147 @@ describe("validateMcpToken", () => {
     expect(result.ok).toBe(true);
     // SA-bound: membership query must NOT be called
     expect(mockTenantMemberFindUnique).not.toHaveBeenCalled();
+  });
+
+  // ── C8 MCP absolute family cap ────────────────────────────
+
+  it("C8(cap-exceeded): family older than 30 days ⇒ invalid_grant, no new tokens created", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    // familyCreatedAt is 31 days ago; cap is 30 days
+    const familyCreatedAt = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+    const mockCreate = vi.fn();
+    const mockAccessCreate = vi.fn();
+    const baseRt = {
+      id: "rt-id",
+      tokenHash: "hashed:rt-cap-exceeded",
+      rotatedAt: null,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 3600_000),
+      clientId: "client-uuid",
+      tenantId: "tenant-uuid",
+      userId: "user-uuid",
+      serviceAccountId: null,
+      familyId: "fam-cap-uuid",
+      familyCreatedAt,
+      accessTokenId: "at-id",
+      scope: "credentials:list",
+      mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: "tenant-uuid" },
+    };
+    mockDelegates(prisma).mcpRefreshToken = {
+      findUnique: vi.fn().mockResolvedValue(baseRt),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      create: mockCreate,
+    };
+    mockDelegates(prisma).mcpAccessToken = {
+      create: mockAccessCreate,
+      update: vi.fn().mockResolvedValue({}),
+    };
+    mockDelegates(prisma).tenantMember = {
+      findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
+    };
+
+    const result = await exchangeRefreshToken(
+      { refreshToken: "rt-cap-exceeded", clientId: "mcpc_test", clientSecretHash: "" },
+      { prisma: prisma as never },
+    );
+
+    // Refusal shape: same as deactivated_user
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("invalid_grant");
+    // No new tokens must be minted
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockAccessCreate).not.toHaveBeenCalled();
+  });
+
+  it("C8(cap-exceeded injectable clock): cap check uses injectable now param", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    // familyCreatedAt is 1 day ago; injectable clock says 31 days have passed
+    const familyCreatedAt = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000);
+    const frozenNow = familyCreatedAt.getTime() + 31 * 24 * 60 * 60 * 1000;
+    const mockCreate = vi.fn();
+    const mockAccessCreate = vi.fn();
+    const baseRt = {
+      id: "rt-id",
+      tokenHash: "hashed:rt-cap-clock",
+      rotatedAt: null,
+      revokedAt: null,
+      expiresAt: new Date(frozenNow + 3600_000),
+      clientId: "client-uuid",
+      tenantId: "tenant-uuid",
+      userId: "user-uuid",
+      serviceAccountId: null,
+      familyId: "fam-cap-clock-uuid",
+      familyCreatedAt,
+      accessTokenId: "at-id",
+      scope: "credentials:list",
+      mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: "tenant-uuid" },
+    };
+    mockDelegates(prisma).mcpRefreshToken = {
+      findUnique: vi.fn().mockResolvedValue(baseRt),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      create: mockCreate,
+    };
+    mockDelegates(prisma).mcpAccessToken = {
+      create: mockAccessCreate,
+      update: vi.fn().mockResolvedValue({}),
+    };
+    mockDelegates(prisma).tenantMember = {
+      findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
+    };
+
+    const result = await exchangeRefreshToken(
+      { refreshToken: "rt-cap-clock", clientId: "mcpc_test", clientSecretHash: "", now: () => frozenNow },
+      { prisma: prisma as never },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("invalid_grant");
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockAccessCreate).not.toHaveBeenCalled();
+  });
+
+  it("C8(within-cap): family within 30 days ⇒ rotates normally", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    // familyCreatedAt is 10 days ago — well within the 30-day cap
+    const familyCreatedAt = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+    const mockCreate = vi.fn().mockResolvedValue({ id: "new-rt-id" });
+    const baseRt = {
+      id: "rt-id",
+      tokenHash: "hashed:rt-within-cap",
+      rotatedAt: null,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 3600_000),
+      clientId: "client-uuid",
+      tenantId: "tenant-uuid",
+      userId: "user-uuid",
+      serviceAccountId: null,
+      familyId: "fam-within-cap-uuid",
+      familyCreatedAt,
+      accessTokenId: "at-id",
+      scope: "credentials:list",
+      mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: "tenant-uuid" },
+    };
+    mockDelegates(prisma).mcpRefreshToken = {
+      findUnique: vi.fn().mockResolvedValue(baseRt),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      create: mockCreate,
+    };
+    mockDelegates(prisma).mcpAccessToken = {
+      create: vi.fn().mockResolvedValue({ id: "new-at-id" }),
+      update: vi.fn().mockResolvedValue({}),
+    };
+    mockDelegates(prisma).tenantMember = {
+      findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
+    };
+
+    const result = await exchangeRefreshToken(
+      { refreshToken: "rt-within-cap", clientId: "mcpc_test", clientSecretHash: "" },
+      { prisma: prisma as never },
+    );
+
+    // Within cap: rotation must succeed and a new refresh token must be created
+    expect(result.ok).toBe(true);
+    expect(mockCreate).toHaveBeenCalledTimes(1);
   });
 
   it("C13(d): userId:null SA-bound token ⇒ valid (membership query NOT called)", async () => {

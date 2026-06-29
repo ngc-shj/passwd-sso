@@ -11,6 +11,9 @@ const {
   mockRefreshIosToken,
   mockVerifyDpop,
   mockEnforceAccessRestriction,
+  mockDerivePasskeyState,
+  mockRecordPasskeyAuditEmit,
+  mockLogAuditAsync,
 } = vi.hoisted(() => ({
   mockExtensionTokenFindUnique: vi.fn(),
   mockTenantMemberFindUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
@@ -19,6 +22,15 @@ const {
   mockRefreshIosToken: vi.fn(),
   mockVerifyDpop: vi.fn(),
   mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
+  // C8 passkey enforcement mocks
+  mockDerivePasskeyState: vi.fn().mockResolvedValue({
+    requirePasskey: false,
+    hasPasskey: false,
+    requirePasskeyEnabledAt: null,
+    passkeyGracePeriodDays: null,
+  }),
+  mockRecordPasskeyAuditEmit: vi.fn().mockReturnValue(true),
+  mockLogAuditAsync: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -70,8 +82,14 @@ vi.mock("@/lib/url-helpers", async (importOriginal) => {
   return { ...actual, getAppOrigin: () => "https://example.test" };
 });
 
+vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
+  derivePasskeyState: mockDerivePasskeyState,
+  recordPasskeyAuditEmit: mockRecordPasskeyAuditEmit,
+}));
+
 vi.mock("@/lib/audit/audit", () => ({
-  logAuditAsync: vi.fn(),
+  logAuditAsync: mockLogAuditAsync,
   personalAuditBase: (_req: unknown, userId: string) => ({
     scope: "PERSONAL",
     userId,
@@ -159,6 +177,15 @@ describe("POST /api/mobile/token/refresh", () => {
         tokenId: "new-tok-id",
       },
     });
+    // Default: passkey enforcement OFF → allows rotation
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: false,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+    mockRecordPasskeyAuditEmit.mockReturnValue(true);
+    mockLogAuditAsync.mockResolvedValue(undefined);
   });
 
   it("rotates the token pair on a valid request", async () => {
@@ -327,5 +354,92 @@ describe("POST /api/mobile/token/refresh", () => {
     const { status, json } = await parseJson(res);
     expect(status).toBe(401);
     expect(json.error).toBe("UNAUTHORIZED");
+  });
+
+  // ─── C8: Passkey enforcement matrix ──────────────────────────
+
+  describe("C8: passkey enforcement on iOS token refresh", () => {
+    it("6b-off: requirePasskey=false → rotates (refreshIosToken called)", async () => {
+      mockDerivePasskeyState.mockResolvedValue({
+        requirePasskey: false,
+        hasPasskey: false,
+        requirePasskeyEnabledAt: null,
+        passkeyGracePeriodDays: null,
+      });
+
+      const res = await POST(makeRequest());
+      const { status } = await parseJson(res);
+
+      expect(status).toBe(200);
+      expect(mockRefreshIosToken).toHaveBeenCalledOnce();
+    });
+
+    it("6b-haspasskey: requirePasskey=true + hasPasskey=true → rotates", async () => {
+      mockDerivePasskeyState.mockResolvedValue({
+        requirePasskey: true,
+        hasPasskey: true,
+        requirePasskeyEnabledAt: "2024-01-01T00:00:00.000Z",
+        passkeyGracePeriodDays: 7,
+      });
+
+      const res = await POST(makeRequest());
+      const { status } = await parseJson(res);
+
+      expect(status).toBe(200);
+      expect(mockRefreshIosToken).toHaveBeenCalledOnce();
+    });
+
+    it("6b-withingrace: requirePasskey=true + no passkey + within grace → rotates", async () => {
+      const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      mockDerivePasskeyState.mockResolvedValue({
+        requirePasskey: true,
+        hasPasskey: false,
+        requirePasskeyEnabledAt: future,
+        passkeyGracePeriodDays: 30,
+      });
+
+      const res = await POST(makeRequest());
+      const { status } = await parseJson(res);
+
+      expect(status).toBe(200);
+      expect(mockRefreshIosToken).toHaveBeenCalledOnce();
+    });
+
+    it("6b-graceexpired: requirePasskey=true + no passkey + grace expired → REFUSED (RT8) + audit", async () => {
+      mockDerivePasskeyState.mockResolvedValue({
+        requirePasskey: true,
+        hasPasskey: false,
+        requirePasskeyEnabledAt: "2020-01-01T00:00:00.000Z",
+        passkeyGracePeriodDays: 7,
+      });
+
+      const res = await POST(makeRequest());
+      const { status, json } = await parseJson(res);
+
+      // Refused with PASSKEY_REQUIRED (403)
+      expect(status).toBe(403);
+      expect(json.error).toBe("PASSKEY_REQUIRED");
+      // RT8: refreshIosToken must NOT be called
+      expect(mockRefreshIosToken).not.toHaveBeenCalled();
+      // Audit must be emitted
+      expect(mockRecordPasskeyAuditEmit).toHaveBeenCalledWith(
+        USER_ID,
+        "/api/mobile/token/refresh",
+        expect.any(Number),
+      );
+      expect(mockLogAuditAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "PASSKEY_ENFORCEMENT_BLOCKED",
+          metadata: { blockedPath: "/api/mobile/token/refresh" },
+        }),
+      );
+    });
+
+    it("6b-throws: derivePasskeyState throws → fail closed (no rotation)", async () => {
+      mockDerivePasskeyState.mockRejectedValue(new Error("DB error"));
+
+      await expect(POST(makeRequest())).rejects.toThrow("DB error");
+      expect(mockRefreshIosToken).not.toHaveBeenCalled();
+    });
   });
 });

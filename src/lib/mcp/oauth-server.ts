@@ -20,6 +20,7 @@ import {
   MCP_TOKEN_EXPIRY_SEC,
   MCP_REFRESH_TOKEN_PREFIX,
   MCP_REFRESH_TOKEN_EXPIRY_SEC,
+  MCP_REFRESH_TOKEN_FAMILY_ABSOLUTE_TIMEOUT_SEC,
   MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS,
   REFRESH_EXCHANGE_REASON,
   type McpScope,
@@ -259,6 +260,7 @@ export async function exchangeCodeForToken(
 /**
  * Create a refresh token for an MCP client.
  * familyId groups tokens in a rotation chain for bulk revocation.
+ * familyCreatedAt records the family's birth time for absolute-cap enforcement.
  */
 export async function createRefreshToken(params: {
   accessTokenId: string;
@@ -272,13 +274,15 @@ export async function createRefreshToken(params: {
   const token = MCP_REFRESH_TOKEN_PREFIX + randomBytes(32).toString("base64url");
   const tokenHash = hashToken(token);
   const familyId = params.familyId ?? randomUUID();
-  const expiresAt = new Date(Date.now() + MCP_REFRESH_TOKEN_EXPIRY_SEC * MS_PER_SECOND);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + MCP_REFRESH_TOKEN_EXPIRY_SEC * MS_PER_SECOND);
 
   await withBypassRls(prisma, async (tx) => {
     await tx.mcpRefreshToken.create({
       data: {
         tokenHash,
         familyId,
+        familyCreatedAt: now,
         accessTokenId: params.accessTokenId,
         clientId: params.clientId,
         tenantId: params.tenantId,
@@ -318,6 +322,7 @@ export async function exchangeRefreshToken(
     refreshToken: string;
     clientId: string; // McpClient.clientId (mcpc_xxx)
     clientSecretHash: string;
+    now?: () => number; // Injectable clock for deterministic cap tests
   },
   options: { prisma?: PrismaClient } = {},
 ): Promise<
@@ -343,6 +348,7 @@ export async function exchangeRefreshToken(
 > {
   const dbClient = options.prisma ?? prisma;
   const tokenHash = hashToken(params.refreshToken);
+  const nowMs = params.now ? params.now() : Date.now();
 
   // Phase 1: validate + CAS + create new tokens (or detect race/replay).
   // The `tx` argument from withBypassRls is the transaction-scoped client
@@ -356,7 +362,22 @@ export async function exchangeRefreshToken(
     async (tx) => {
       const rt = await tx.mcpRefreshToken.findUnique({
         where: { tokenHash },
-        include: { mcpClient: true },
+        select: {
+          id: true,
+          tokenHash: true,
+          rotatedAt: true,
+          revokedAt: true,
+          expiresAt: true,
+          clientId: true,
+          tenantId: true,
+          userId: true,
+          serviceAccountId: true,
+          familyId: true,
+          familyCreatedAt: true,
+          accessTokenId: true,
+          scope: true,
+          mcpClient: true,
+        },
       });
 
       if (!rt) return { type: "not_found" as const };
@@ -388,6 +409,16 @@ export async function exchangeRefreshToken(
       // from a corrupted source row into the freshly minted token pair.
       if (rt.mcpClient.tenantId !== rt.tenantId) {
         return { type: "invalid_client" as const };
+      }
+
+      // C8 absolute family cap: refuse rotation when the family has exceeded its
+      // maximum lifetime, regardless of individual token validity. Mirrors the
+      // ExtensionToken.familyCreatedAt cap (30 d) for MCP token-lifetime parity.
+      if (
+        nowMs - rt.familyCreatedAt.getTime() >
+        MCP_REFRESH_TOKEN_FAMILY_ABSOLUTE_TIMEOUT_SEC * MS_PER_SECOND
+      ) {
+        return { type: "family_cap_exceeded" as const };
       }
 
       // C13: reject deactivated users before issuing new tokens.
@@ -441,6 +472,7 @@ export async function exchangeRefreshToken(
         data: {
           tokenHash: newRefreshTokenHash,
           familyId: rt.familyId,
+          familyCreatedAt: rt.familyCreatedAt, // Carry forward the family's original birth time
           accessTokenId: newAccess.id,
           clientId: rt.clientId,
           tenantId: rt.tenantId,
@@ -496,6 +528,8 @@ export async function exchangeRefreshToken(
       return { ok: false, error: "invalid_grant", reason: REFRESH_EXCHANGE_REASON.EXPIRED };
     case "invalid_client":
       return { ok: false, error: "invalid_client" };
+    case "family_cap_exceeded":
+      return { ok: false, error: "invalid_grant" };
     case "deactivated_user":
       return { ok: false, error: "invalid_grant" };
     case "replay":

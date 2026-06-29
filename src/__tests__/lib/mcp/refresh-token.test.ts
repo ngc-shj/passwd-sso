@@ -128,6 +128,7 @@ describe("exchangeRefreshToken", () => {
     serviceAccountId: null,
     scope: "credentials:list,credentials:use",
     expiresAt: new Date(Date.now() + 3600000),
+    familyCreatedAt: new Date(), // recent → within the 30-day absolute cap
     // Nullable timestamp columns (DateTime? in schema). Widen so per-test
     // overrides can supply a Date (expired/revoked/rotated fixtures).
     revokedAt: null as Date | null,

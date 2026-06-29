@@ -596,3 +596,33 @@ resolved and verified against the live codebase.
 | C7 | CI guard (primitive set fixed, autofill allowlisted, pre-pr wired, refresh self-test) | locked  |
 | C8 | Refresh grant (ext=activeSession.tenantId / iOS+MCP=token-row tenantId, route-level, fail-closed, MCP RLS pre-read) + MCP familyCreatedAt 2-step migration + lib-level cap | locked  |
 | C9 | Classify `mobile/autofill-token` transitively-protected-exempt | locked  |
+
+## Implementation Checklist (Phase 2-1)
+
+Member-set re-derived (grep `createAuthorizationCode|extensionBridgeCode\.create|mobileBridgeCode\.create|issueAutofillToken|exchangeRefreshToken|refreshIosToken|extensionToken\.create` over `src/app/api` + `src/lib`) — matches the locked plan; no extra member.
+
+**Batch 1 — C1 foundation (must land first; everything imports it):**
+- NEW `src/lib/auth/policy/passkey-enforcement.ts`: `isPasskeyGracePeriodExpired` (moved), `passkeyEnforcementBlocks`, `derivePasskeyState` (tx-aware, count-by-userId, policy-by-tenantId, toISOString, throws), `recordPasskeyAuditEmit(userId, blockedPath, now)` + Map + `PASSKEY_AUDIT_DEDUP_MS`/`PASSKEY_AUDIT_MAP_MAX` + `_resetPasskeyAuditForTests`/`_passkeyAuditSizeForTests`/`_passkeyAuditHasForTests(userId, blockedPath)`/`_passkeyAuditFirstKeyForTests`.
+- `src/lib/proxy/page-route.ts`: remove the relocated defs, import from the new module; update the call to `recordPasskeyAuditEmit(userId, pathWithoutLocale, Date.now())`; keep `PASSKEY_EXEMPT_PATHS`/`isPasskeyExemptPath` local.
+- NEW `src/lib/auth/policy/passkey-enforcement.test.ts` (C1 unit tests).
+- `src/lib/proxy/page-route.test.ts` + `src/__tests__/proxy.test.ts`: repoint imports; update composite-key probe callers (`:1200-1233`); add F18 same-user-different-path case.
+
+**Batch 2 — C8 MCP schema + lib (parity cap):**
+- `prisma/schema.prisma`: add `familyCreatedAt` to `McpRefreshToken`; TWO migrations (nullable+backfill, then NOT NULL+default).
+- `src/lib/constants/auth/mcp.ts`: `MCP_REFRESH_TOKEN_FAMILY_ABSOLUTE_TIMEOUT_SEC = 30 * SEC_PER_DAY`.
+- `src/lib/mcp/oauth-server.ts`: propagate `familyCreatedAt` in `createRefreshToken` + carry across rotation in `exchangeRefreshToken` create + add to `findUnique` select; add `now?: () => number`; add the absolute-cap check (lib-level).
+- `src/lib/mcp/oauth-server.test.ts`: update C13 `baseRt` fixtures with `familyCreatedAt`; add the cap test.
+
+**Batch 3 — C2/C3/C6 initial-mint gates (re-derive; needs Batch 1):**
+- `src/app/api/extension/bridge-code/route.ts` (C2), `src/app/api/mobile/authorize/route.ts` (C3), `src/app/api/mcp/authorize/route.ts` GET + `src/app/api/mcp/authorize/consent/route.ts` POST (C6) + their tests (mock `derivePasskeyState`).
+
+**Batch 4 — C8 refresh gates (route-level, fail-closed; needs Batch 1+2):**
+- `src/app/api/extension/token/refresh/route.ts` (gate on `activeSession.tenantId`), `src/app/api/mobile/token/refresh/route.ts` (token-row tenantId), `src/app/api/mcp/token/route.ts` (withBypassRls pre-read + SA-skip) + their tests.
+
+**Batch 5 — C5 + C7 + C9 + R35 (mostly independent):**
+- C5: `src/lib/extension-connect-request.ts` (add `PASSKEY_REQUIRED` to `EXTENSION_CONNECT_ERROR_CODE` + `coerceErrorCode` branch + EXPORT it), `extension/src/background/token-handler.ts` (`extractErrorCode`), `src/components/extension/auto-extension-connect.tsx` (card) + tests; `messages/en.json` + `messages/ja.json`.
+- C7: `scripts/checks/check-passkey-mint-gate.sh` + `scripts/checks/passkey-mint-gate-exempt.txt` (autofill entry) + `scripts/__tests__/check-passkey-mint-gate.test.mjs` + wire into `scripts/pre-pr.sh`.
+- C9: the autofill allowlist entry (in C7's exempt file) — no route code change.
+- R35: `docs/archive/review/passkey-enforcement-token-paths-manual-test.md`.
+
+Test trees to keep in sync (R19): `proxy.test.ts` + `page-route.test.ts` (C1); per-route co-located `*.test.ts` (no centralized `__tests__` duplicates for these routes).

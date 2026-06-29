@@ -57,6 +57,11 @@ import { isBridgeCodeOriginAllowed } from "@/lib/http/cors";
 import { verifyDpopProof } from "@/lib/auth/dpop/verify";
 import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
 import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
+import {
+  derivePasskeyState,
+  passkeyEnforcementBlocks,
+  recordPasskeyAuditEmit,
+} from "@/lib/auth/policy/passkey-enforcement";
 
 // Strict empty-object schema — cnfJkt is intentionally NOT declared. Any
 // client-supplied `cnfJkt` (or any other key) is rejected as
@@ -195,6 +200,23 @@ async function handlePOST(req: NextRequest) {
       reason: "step_up_required",
     });
     return stepUpError;
+  }
+
+  // 5a) Passkey enforcement gate. Re-derives state from DB (fail-closed);
+  //     a throw propagates and refuses issuance — never fails open.
+  if (userRecord.tenantId) {
+    const pkState = await derivePasskeyState({ userId, tenantId: userRecord.tenantId });
+    if (passkeyEnforcementBlocks(pkState)) {
+      if (recordPasskeyAuditEmit(userId, "/api/extension/bridge-code", Date.now())) {
+        await logAuditAsync({
+          ...personalAuditBase(req, userId),
+          action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+          tenantId: userRecord.tenantId,
+          metadata: { blockedPath: "/api/extension/bridge-code" },
+        });
+      }
+      return errorResponse(API_ERROR.PASSKEY_REQUIRED);
+    }
   }
 
   // 6) Per-user rate limit. Pre-computed-result form so the route can

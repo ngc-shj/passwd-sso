@@ -9,6 +9,13 @@ import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access
 import { requireRecentSession } from "@/lib/auth/session/step-up";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
+import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
+import {
+  derivePasskeyState,
+  passkeyEnforcementBlocks,
+  recordPasskeyAuditEmit,
+} from "@/lib/auth/policy/passkey-enforcement";
 
 const authorizeLimiter = createRateLimiter({
   windowMs: MS_PER_MINUTE,
@@ -68,6 +75,37 @@ export async function GET(req: NextRequest) {
 
   const stepUpError = await requireRecentSession(req);
   if (stepUpError) return stepUpError;
+
+  // Passkey enforcement gate — UX early-reject. Resolve tenantId first (not on
+  // session.user), then re-derive state from DB (fail-closed; a throw propagates).
+  const userForPasskey = await withBypassRls(
+    prisma,
+    async (tx) =>
+      tx.user.findUnique({
+        where: { id: session.user.id },
+        select: { tenantId: true },
+      }),
+    BYPASS_PURPOSE.AUTH_FLOW,
+  );
+  if (userForPasskey?.tenantId) {
+    const pkState = await derivePasskeyState({
+      userId: session.user.id,
+      tenantId: userForPasskey.tenantId,
+    });
+    if (passkeyEnforcementBlocks(pkState)) {
+      if (recordPasskeyAuditEmit(session.user.id, "/api/mcp/authorize", Date.now())) {
+        await logAuditAsync({
+          ...tenantAuditBase(req, session.user.id, userForPasskey.tenantId),
+          action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+          metadata: { blockedPath: "/api/mcp/authorize" },
+        });
+      }
+      return NextResponse.json(
+        { error: "access_denied", error_description: "passkey_required" },
+        { status: 403 },
+      );
+    }
+  }
 
   const sp = req.nextUrl.searchParams;
   const clientId = sp.get("client_id");

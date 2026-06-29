@@ -13,6 +13,7 @@ const {
   mockEnforceAccessRestriction,
   mockCheckRateLimitOrFail,
   mockLogAuditAsync,
+  mockDerivePasskeyState,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockMobileBridgeCodeCreate: vi.fn(),
@@ -26,6 +27,7 @@ const {
   mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
   mockCheckRateLimitOrFail: vi.fn().mockResolvedValue(null),
   mockLogAuditAsync: vi.fn().mockResolvedValue(undefined),
+  mockDerivePasskeyState: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -84,7 +86,16 @@ vi.mock("@/lib/audit/audit", () => ({
   }),
 }));
 
+vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/auth/policy/passkey-enforcement")>();
+  return {
+    ...real,
+    derivePasskeyState: mockDerivePasskeyState,
+  };
+});
+
 import { GET } from "./route";
+import { _resetPasskeyAuditForTests } from "@/lib/auth/policy/passkey-enforcement";
 
 // C6: device_jkt is the RFC 7638 JWK thumbprint (43 base64url chars). The
 // legacy device_pubkey field (base64url SPKI-DER) was removed because the
@@ -107,6 +118,7 @@ function buildUrl(params: Partial<typeof VALID>): string {
 describe("GET /api/mobile/authorize", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    _resetPasskeyAuditForTests();
     mockGetAppOrigin.mockReturnValue("https://example.test");
     mockAuth.mockResolvedValue({ user: { id: "11111111-1111-1111-1111-111111111111" } });
     mockWithBypassRls.mockImplementation(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p));
@@ -119,6 +131,13 @@ describe("GET /api/mobile/authorize", () => {
     mockCheckRateLimitOrFail.mockResolvedValue(null);
     mockLogAuditAsync.mockResolvedValue(undefined);
     mockMobileBridgeCodeCreate.mockResolvedValue({ id: "00000000-0000-4000-8000-000000000003" });
+    // Default: passkey enforcement off (does not block).
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: false,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
   });
 
   it("redirects to the iOS custom-scheme callback with code+state on a valid request", async () => {
@@ -272,6 +291,116 @@ describe("GET /api/mobile/authorize", () => {
     await expect(GET(createRequest("GET", buildUrl(VALID)))).rejects.toThrow(
       "TENANT_NOT_RESOLVED",
     );
+    expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
+  });
+
+  // ── C3: Passkey enforcement gate ──────────────────────────────────────────
+
+  it("C3: off (requirePasskey=false) → bridge code minted", async () => {
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: false,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+    const res = await GET(createRequest("GET", buildUrl(VALID)));
+    expect(res.status).toBe(302);
+    const loc = res.headers.get("location") ?? "";
+    // Non-vacuity: redirected to the iOS callback with a code (not passkey_required).
+    expect(loc.startsWith("passwd-sso://auth/callback")).toBe(true);
+    expect(loc).not.toContain("passkey_required");
+    expect(mockMobileBridgeCodeCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("C3: on + hasPasskey → bridge code minted", async () => {
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: true,
+      hasPasskey: true,
+      requirePasskeyEnabledAt: new Date(Date.now() - 10 * 86400000).toISOString(),
+      passkeyGracePeriodDays: 7,
+    });
+    const res = await GET(createRequest("GET", buildUrl(VALID)));
+    expect(res.status).toBe(302);
+    const loc = res.headers.get("location") ?? "";
+    expect(loc).not.toContain("passkey_required");
+    expect(mockMobileBridgeCodeCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("C3: on + no passkey + within grace → bridge code minted", async () => {
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: new Date(Date.now() - 3 * 86400000).toISOString(),
+      passkeyGracePeriodDays: 7,
+    });
+    const res = await GET(createRequest("GET", buildUrl(VALID)));
+    expect(res.status).toBe(302);
+    const loc = res.headers.get("location") ?? "";
+    expect(loc).not.toContain("passkey_required");
+    expect(mockMobileBridgeCodeCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("C3: on + no passkey + grace expired → 302 passkey_required, no bridge code, audit emitted once", async () => {
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: new Date(Date.now() - 10 * 86400000).toISOString(),
+      passkeyGracePeriodDays: 7,
+    });
+    const res = await GET(createRequest("GET", buildUrl(VALID)));
+    expect(res.status).toBe(302);
+    const loc = res.headers.get("location") ?? "";
+    const u = new URL(loc);
+    expect(`${u.protocol}//${u.host}${u.pathname}`).toBe("passwd-sso://auth/callback");
+    expect(u.searchParams.get("error")).toBe("passkey_required");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    // Non-vacuity: bridge code must NOT have been created.
+    expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
+    // Exactly one PASSKEY_ENFORCEMENT_BLOCKED audit emit.
+    expect(mockLogAuditAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "PASSKEY_ENFORCEMENT_BLOCKED",
+        metadata: { blockedPath: "/api/mobile/authorize" },
+      }),
+    );
+    const blockedCalls = mockLogAuditAsync.mock.calls.filter(
+      (c) => c[0].action === "PASSKEY_ENFORCEMENT_BLOCKED",
+    );
+    expect(blockedCalls).toHaveLength(1);
+  });
+
+  it("C3: enabledAt=null → immediate 302 passkey_required", async () => {
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: 7,
+    });
+    const res = await GET(createRequest("GET", buildUrl(VALID)));
+    expect(res.status).toBe(302);
+    const loc = res.headers.get("location") ?? "";
+    expect(loc).toContain("passkey_required");
+    expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
+  });
+
+  it("C3: audit dedup — second blocked attempt on same path does not emit a second audit", async () => {
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+    await GET(createRequest("GET", buildUrl(VALID)));
+    await GET(createRequest("GET", buildUrl(VALID)));
+    const blockedCalls = mockLogAuditAsync.mock.calls.filter(
+      (c) => c[0].action === "PASSKEY_ENFORCEMENT_BLOCKED",
+    );
+    expect(blockedCalls).toHaveLength(1);
+  });
+
+  it("C3: derivePasskeyState throws → fail closed (no bridge code, error propagates)", async () => {
+    mockDerivePasskeyState.mockRejectedValue(new Error("DB error"));
+    await expect(GET(createRequest("GET", buildUrl(VALID)))).rejects.toThrow("DB error");
     expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
   });
 });

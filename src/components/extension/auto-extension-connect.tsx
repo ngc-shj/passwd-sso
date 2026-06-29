@@ -56,6 +56,7 @@ export function AutoExtensionConnect({ onActiveChange }: AutoExtensionConnectPro
   const [requiresReauth, setRequiresReauth] = useState(false);
   const [requiresRecentSession, setRequiresRecentSession] = useState(false);
   const [requiresExtensionUpdate, setRequiresExtensionUpdate] = useState(false);
+  const [requiresPasskeyRegistration, setRequiresPasskeyRegistration] = useState(false);
   const [reauthenticating, setReauthenticating] = useState(false);
   const [reauthError, setReauthError] = useState<string | null>(null);
   // True once a passkey reauth succeeded and we bounced back to AWAITING_CLICK
@@ -69,6 +70,7 @@ export function AutoExtensionConnect({ onActiveChange }: AutoExtensionConnectPro
     setRequiresReauth(false);
     setRequiresRecentSession(false);
     setRequiresExtensionUpdate(false);
+    setRequiresPasskeyRegistration(false);
     setReauthError(null);
     try {
       // The extension SW does the whole bridge-code → exchange flow itself;
@@ -92,6 +94,12 @@ export function AutoExtensionConnect({ onActiveChange }: AutoExtensionConnectPro
         setRequiresRecentSession(!passkeyCapable);
         setStatus(CONNECT_STATUS.FAILED);
         return { ok: false, requiresReauth: true };
+      }
+
+      if (result.errorCode === EXTENSION_CONNECT_ERROR_CODE.PASSKEY_REQUIRED) {
+        setRequiresPasskeyRegistration(true);
+        setStatus(CONNECT_STATUS.FAILED);
+        return { ok: false, requiresReauth: false };
       }
 
       setStatus(CONNECT_STATUS.FAILED);
@@ -290,7 +298,9 @@ export function AutoExtensionConnect({ onActiveChange }: AutoExtensionConnectPro
                     ? t("connectReauthTitle")
                     : requiresRecentSession
                       ? t("connectRecentSessionTitle")
-                      : t("connectFailedTitle")}
+                      : requiresPasskeyRegistration
+                        ? t("connectPasskeyRequiredTitle")
+                        : t("connectFailedTitle")}
               </h1>
               <p className="text-sm text-muted-foreground">
                 {requiresExtensionUpdate
@@ -299,7 +309,9 @@ export function AutoExtensionConnect({ onActiveChange }: AutoExtensionConnectPro
                     ? t("connectReauthDescription")
                     : requiresRecentSession
                       ? t("connectRecentSessionDescription")
-                      : t("connectFailedDescription")}
+                      : requiresPasskeyRegistration
+                        ? t("connectPasskeyRequiredDescription")
+                        : t("connectFailedDescription")}
               </p>
               {reauthError ? (
                 <p className="text-sm text-destructive">{reauthError}</p>

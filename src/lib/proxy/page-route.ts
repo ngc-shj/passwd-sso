@@ -5,7 +5,6 @@ import { routing } from "../../i18n/routing";
 import { getLocaleFromPathname, stripLocalePrefix } from "../../i18n/locale-utils";
 import { API_PATH } from "../constants";
 import { AUDIT_ACTION } from "../constants/audit/audit";
-import { MS_PER_DAY, MS_PER_MINUTE } from "../constants/time";
 import { applySecurityHeaders } from "./security-headers";
 import { getSessionInfo } from "./auth-gate";
 import {
@@ -14,6 +13,27 @@ import {
 } from "../auth/session/cookie-name";
 import { extractClientIp } from "../auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "../auth/policy/access-restriction";
+import {
+  isPasskeyGracePeriodExpired,
+  recordPasskeyAuditEmit,
+  PASSKEY_AUDIT_DEDUP_MS,
+  PASSKEY_AUDIT_MAP_MAX,
+  _resetPasskeyAuditForTests,
+  _passkeyAuditSizeForTests,
+  _passkeyAuditHasForTests,
+  _passkeyAuditFirstKeyForTests,
+} from "../auth/policy/passkey-enforcement";
+
+export {
+  isPasskeyGracePeriodExpired,
+  recordPasskeyAuditEmit,
+  PASSKEY_AUDIT_DEDUP_MS,
+  PASSKEY_AUDIT_MAP_MAX,
+  _resetPasskeyAuditForTests,
+  _passkeyAuditSizeForTests,
+  _passkeyAuditHasForTests,
+  _passkeyAuditFirstKeyForTests,
+};
 
 export type ProxyOptions = {
   cspHeader: string;
@@ -36,90 +56,6 @@ const PASSKEY_EXEMPT_PATHS: ReadonlySet<string> = new Set([
 
 function isPasskeyExemptPath(pathWithoutLocale: string): boolean {
   return PASSKEY_EXEMPT_PATHS.has(pathWithoutLocale);
-}
-
-function isPasskeyGracePeriodExpired(
-  requirePasskeyEnabledAt: string | null | undefined,
-  passkeyGracePeriodDays: number | null | undefined,
-): boolean {
-  // No enabledAt timestamp means enforcement was just turned on; treat as immediate.
-  if (!requirePasskeyEnabledAt) return true;
-  // No grace period configured means immediate enforcement.
-  if (passkeyGracePeriodDays == null || passkeyGracePeriodDays <= 0) return true;
-
-  const enabledAt = new Date(requirePasskeyEnabledAt).getTime();
-  const gracePeriodMs = passkeyGracePeriodDays * MS_PER_DAY;
-  return Date.now() > enabledAt + gracePeriodMs;
-}
-
-// Deduplicate passkey audit emit — track userId+timestamp, skip if emitted within 5 min
-export const PASSKEY_AUDIT_DEDUP_MS = 5 * MS_PER_MINUTE;
-export const PASSKEY_AUDIT_MAP_MAX = 1000;
-// Module-private — direct mutation of this Map from outside the module would
-// allow attacker-influenced suppression of passkey-enforcement audit events.
-// Tests use the sanctioned _*ForTests helpers below.
-const passkeyAuditEmitted = new Map<string, number>();
-
-/**
- * @internal Test-only — clears the passkey-audit dedup map.
- * Use in `beforeEach` to isolate page-route tests from each other.
- */
-export function _resetPasskeyAuditForTests(): void {
-  passkeyAuditEmitted.clear();
-}
-
-/** @internal Test-only — size probe for the passkey-audit dedup map. */
-export function _passkeyAuditSizeForTests(): number {
-  return passkeyAuditEmitted.size;
-}
-
-/** @internal Test-only — membership probe for the passkey-audit dedup map. */
-export function _passkeyAuditHasForTests(userId: string): boolean {
-  return passkeyAuditEmitted.has(userId);
-}
-
-/**
- * @internal Test-only — returns the first (oldest by recency) key in the
- * passkey-audit dedup map, or undefined if empty. Used to verify staleness
- * eviction order.
- */
-export function _passkeyAuditFirstKeyForTests(): string | undefined {
-  return passkeyAuditEmitted.keys().next().value;
-}
-
-/**
- * Record a passkey-enforcement audit emit for `userId` at `now`. Returns
- * `true` if the caller should fire the audit, `false` if the user has
- * already been audited within `PASSKEY_AUDIT_DEDUP_MS`.
- *
- * Eviction is staleness-based, not insertion-order: when the dedup map is
- * full, the user whose `lastEmitted` is oldest is evicted. This is achieved
- * by `delete`-then-`set` on every accepted emit so JS Map insertion order
- * (which is what `keys().next()` returns) tracks last-emit recency rather
- * than first-emit time.
- *
- * Boundary: `now - lastEmitted === PASSKEY_AUDIT_DEDUP_MS` deduplicates
- * (the inclusive `<=` window matches "within 5 minutes"). The original
- * inline form used the exclusive `>` form, which would fire at exactly the
- * boundary; the 1 ms shift here is intentional and tested at
- * `proxy.test.ts` `passkeyAuditEmitted staleness eviction` describe block.
- */
-export function recordPasskeyAuditEmit(userId: string, now: number): boolean {
-  const lastEmitted = passkeyAuditEmitted.get(userId);
-  // Use !== undefined rather than truthy check so a literal-zero timestamp
-  // (theoretically possible if an alternate clock source is ever wired in)
-  // does not bypass dedup as if it were a first emit.
-  if (lastEmitted !== undefined && now - lastEmitted <= PASSKEY_AUDIT_DEDUP_MS) {
-    return false;
-  }
-  // Refresh insertion order so the head is always the staleness candidate.
-  passkeyAuditEmitted.delete(userId);
-  if (passkeyAuditEmitted.size >= PASSKEY_AUDIT_MAP_MAX) {
-    const oldest = passkeyAuditEmitted.keys().next().value;
-    if (oldest !== undefined) passkeyAuditEmitted.delete(oldest);
-  }
-  passkeyAuditEmitted.set(userId, now);
-  return true;
 }
 
 function clearAuthSessionCookies(response: NextResponse, basePath: string = ""): void {
@@ -209,7 +145,7 @@ export async function handlePageRoute(
 
         // Fire-and-forget audit log — deduplicated per user to avoid flood on repeated redirects
         const userId = session.userId ?? "";
-        if (recordPasskeyAuditEmit(userId, Date.now())) {
+        if (recordPasskeyAuditEmit(userId, pathWithoutLocale, Date.now())) {
           // Internal self-fetch: declare same-origin explicitly. Node
           // fetch (undici) does not auto-set Origin; without it the new
           // proxy CSRF gate would 403 this request.

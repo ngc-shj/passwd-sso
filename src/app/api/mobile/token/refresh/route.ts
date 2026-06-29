@@ -58,6 +58,13 @@ import {
   refreshIosToken,
   IOS_TOKEN_IDLE_TIMEOUT_MS,
 } from "@/lib/auth/tokens/mobile-token";
+import {
+  derivePasskeyState,
+  passkeyEnforcementBlocks,
+  recordPasskeyAuditEmit,
+} from "@/lib/auth/policy/passkey-enforcement";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
+import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 
 export const runtime = "nodejs";
 
@@ -208,6 +215,24 @@ async function handlePOST(req: NextRequest): Promise<Response> {
   });
   if (!dpopResult.ok) {
     return errorResponse(API_ERROR.MOBILE_TOKEN_BINDING_INVALID);
+  }
+
+  // C8: Passkey enforcement gate — re-derive fresh from DB, fail closed.
+  // Tenant source = token row's tenantId (cookieless; no active-session rebind).
+  const passkeyState = await derivePasskeyState({
+    userId: oldRow.userId,
+    tenantId: oldRow.tenantId,
+  });
+  if (passkeyEnforcementBlocks(passkeyState)) {
+    if (recordPasskeyAuditEmit(oldRow.userId, "/api/mobile/token/refresh", Date.now())) {
+      await logAuditAsync({
+        ...personalAuditBase(req, oldRow.userId),
+        tenantId: oldRow.tenantId,
+        action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+        metadata: { blockedPath: "/api/mobile/token/refresh" },
+      });
+    }
+    return errorResponse(API_ERROR.PASSKEY_REQUIRED);
   }
 
   // Hand off to `refreshIosToken` — it owns rotation, replay-vs-retry

@@ -30,6 +30,7 @@ const {
   mockCheckIpRateLimit,
   mockCheckAccessRestrictionWithAudit,
   mockVerifyDpop,
+  mockDerivePasskeyState,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireRecentCurrentAuthMethod: vi.fn(),
@@ -45,6 +46,7 @@ const {
   mockCheckIpRateLimit: vi.fn(),
   mockCheckAccessRestrictionWithAudit: vi.fn(),
   mockVerifyDpop: vi.fn(),
+  mockDerivePasskeyState: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -101,6 +103,13 @@ vi.mock("@/lib/auth/dpop/jti-cache", () => ({
 vi.mock("@/lib/auth/dpop/htu-canonical", () => ({
   canonicalHtu: vi.fn(() => "http://localhost:3000/api/extension/bridge-code"),
 }));
+vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/auth/policy/passkey-enforcement")>();
+  return {
+    ...real,
+    derivePasskeyState: mockDerivePasskeyState,
+  };
+});
 
 import { POST } from "@/app/api/extension/bridge-code/route";
 import { __resetAllowlistForTests } from "@/lib/http/cors";
@@ -152,6 +161,13 @@ describe("POST /api/extension/bridge-code — C4 rewrite", () => {
     mockBridgeCodeCreate.mockResolvedValue({});
     mockLogAuditAsync.mockResolvedValue(undefined);
     mockVerifyDpop.mockResolvedValue({ ok: true, jkt: VERIFIER_JKT, claims: {} });
+    // Default: passkey enforcement off (gate is a no-op for existing tests).
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: false,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
   });
 
   afterEach(() => {

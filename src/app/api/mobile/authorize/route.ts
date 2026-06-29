@@ -45,6 +45,11 @@ import { generateShareToken } from "@/lib/crypto/crypto-server";
 import { requireRecentSession } from "@/lib/auth/session/step-up";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
+import {
+  derivePasskeyState,
+  passkeyEnforcementBlocks,
+  recordPasskeyAuditEmit,
+} from "@/lib/auth/policy/passkey-enforcement";
 
 export const runtime = "nodejs";
 
@@ -167,6 +172,31 @@ async function handleGET(req: NextRequest): Promise<Response> {
   // NOT nest inside withUserTenantRls (RLS guard, tenant-rls.ts) — so the bypass
   // insert runs at top level, after the tenant RLS scope has exited.
   const tenantId = await withUserTenantRls(userId, async (tid) => tid);
+
+  // Passkey enforcement gate — re-derives from DB (fail-closed).
+  if (tenantId) {
+    const pkState = await derivePasskeyState({ userId, tenantId });
+    if (passkeyEnforcementBlocks(pkState)) {
+      if (recordPasskeyAuditEmit(userId, "/api/mobile/authorize", Date.now())) {
+        await logAuditAsync({
+          ...personalAuditBase(req, userId),
+          action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+          tenantId,
+          metadata: { blockedPath: "/api/mobile/authorize" },
+        });
+      }
+      const refusalUrl = new URL(IOS_CALLBACK_URL);
+      refusalUrl.searchParams.set("error", "passkey_required");
+      return new NextResponse(null, {
+        status: 302,
+        headers: {
+          Location: refusalUrl.toString(),
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+  }
+
   const created = await withBypassRls(
     prisma,
     async (tx) =>
