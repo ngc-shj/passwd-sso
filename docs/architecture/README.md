@@ -16,4 +16,5 @@ Language policy: English-only (Class B). See [../operations/language-policy.md](
 | [extension-token-bridge.md](extension-token-bridge.md) | Browser extension token bridge & session encryption |
 | [extension-passkey-provider.md](extension-passkey-provider.md) | Browser extension passkey provider: get/create flows, security properties, known limitations |
 | [ios-app.md](ios-app.md) | iOS app & AutoFill extension: OAuth/DPoP sign-in, vault crypto, app↔extension bridge, cache rollback protection, AutoFill/passkey provider |
+| [client-reauth-timing.md](client-reauth-timing.md) | When each client (extension / iOS) forces reconnect / re-auth / vault unlock; token-lifetime knobs and levers to reduce extension friction |
 | [retention-gc-worker.md](retention-gc-worker.md) | Retention GC worker: declarative registry, per-tenant retention, least-privilege role, RLS bypass, SQL-injection containment |

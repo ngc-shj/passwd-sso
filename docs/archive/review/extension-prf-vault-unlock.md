@@ -184,3 +184,38 @@ wrap-on-connect, AAD + parity tests, popup fallback verification.
 reachable in the ext_connect page context?). If the dashboard PRF auto-unlock has
 already zeroized the key by the time connect runs, we need a small hook to capture
 it at unlock time. Resolve before building.**
+
+## RESOLVED — Open Question #2 (investigated 2026-06-28, post-PR #620)
+
+The vault secret key is exposed through the context (`getSecretKey()` returns a
+copy of `secretKeyRef`), and `AutoExtensionConnect` IS a `VaultProvider`
+descendant, so it CAN read it. BUT:
+
+- **PRF auto-unlock only fires inside `VaultLockScreen`** (the
+  `WEBAUTHN_SIGNIN` flag + `hasPrf()` + `unlockWithStoredPrf()` effect lives
+  there, NOT in `VaultProvider`).
+- **PR #620 makes `ext_connect` skip rendering `VaultLockScreen`** (VaultGate
+  returns only `<AutoExtensionConnect/>`), so the PRF unlock effect never runs
+  during ext_connect → `secretKeyRef` stays null → there is **nothing to
+  re-wrap**.
+- The PRF handoff is single-use (`takePrf()` zeroizes) and TTL-expires in 30s,
+  so it cannot be re-consumed later.
+
+**Consequence for 方式A:** still feasible, but it now requires explicitly
+unwrapping the vault key during ext_connect. Options (pick at design time):
+
+1. **Lift PRF auto-unlock into `VaultProvider`** so it runs on session load
+   regardless of which child renders. Cleanest, but touches the shared provider
+   and affects the normal dashboard path — needs care + tests.
+2. **Have `AutoExtensionConnect` call `unlockWithStoredPrf()` itself** before
+   wrapping, when `hasPrf()` is true. Localizes the change to the connect flow;
+   does NOT disturb the normal path. **Preferred** — it keeps the "ext_connect
+   only needs a session, vault stays locked" invariant from PR #620 intact for
+   the non-PRF case, and only performs the PRF unwrap transiently to harvest the
+   key for re-wrap (then can re-lock the page-side vault if desired).
+3. Require explicit user unlock during ext_connect — rejected (reintroduces the
+   passphrase friction PR #620 removed).
+
+This does NOT change the trust-boundary design; it only adds a "make sure the
+key is unwrapped on the page before re-wrapping it" step. Resolved — build with
+option 2.
