@@ -319,6 +319,17 @@ describe("Scenario 3: PKCE Token Exchange Success via /api/mcp/token", () => {
         mcpAccessToken: {
           create: vi.fn().mockResolvedValue({ id: "new-token-id" }),
         },
+        // derivePasskeyState reads these inside exchangeCodeForToken
+        webAuthnCredential: {
+          count: vi.fn().mockResolvedValue(1), // hasPasskey = true → never blocks
+        },
+        tenant: {
+          findUnique: vi.fn().mockResolvedValue({
+            requirePasskey: false,
+            requirePasskeyEnabledAt: null,
+            passkeyGracePeriodDays: null,
+          }),
+        },
       };
       return fn(tx);
     });

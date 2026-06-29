@@ -155,3 +155,31 @@ Round-4 fixes applied to the plan. Round 5 is a focused single-reviewer confirma
 
 ## Final status (Phase 1 complete)
 5 review rounds. All Critical/Major findings resolved and code-verified. Contracts C1-C9 re-locked. Ready for Phase 2 implementation against the locked plan.
+
+---
+
+# Review round: 6 (post-implementation external review — gate-ordering)
+Date: 2026-06-30
+
+## Changes from Previous Round
+After Phase 2/3 shipped (gate at the ROUTE level per the round-4 F9/T18 decision), an external static security review found that placing the passkey gate in the route BEFORE the token-validation lib functions **suppresses existing token-theft defenses**. Round 6 verified the findings against the code and corrects the gate PLACEMENT.
+
+## Verdict round 6: 3 confirmed findings (2 High, 1 Medium). The round-4 "gate at the route level" decision was WRONG for the token-CONSUMING paths — it short-circuits replay detection. Gate placement moved into the mint lib functions, AFTER validation, BEFORE mint.
+
+## Findings (external review, orchestrator-verified)
+- **F1 [High] — MCP refresh replay detection bypassed.** `mcp/token/route.ts` pre-read the token + returned 403 BEFORE `exchangeRefreshToken`, so a rotated/replayed token presented by a passkey-blocked user never reached the replay branch (`oauth-server.ts:386`) → family revocation (`revokeFamilyOutOfBand`, `oauth-server.ts:539`) was skipped. CONFIRMED.
+- **F2 [High/Med] — iOS refresh same ordering.** `mobile/token/refresh/route.ts` gated before `refreshIosToken`, which owns revoked-token replay → `revokeExtensionTokenFamily` + `emitReplayDetected` (`mobile-token.ts:482-507`). A replayed token got PASSKEY_REQUIRED instead of REFRESH_REPLAY_DETECTED. CONFIRMED.
+- **F3 [Medium] — MCP authorization_code exchange ungated** (the SC2 scope-out). `exchangeCodeForToken` minted without re-deriving policy; a code minted just before enforcement flips (or a passkey is removed) was exchangeable for ≤ MCP_CODE_EXPIRY_SEC. CONFIRMED. **SC2 is OVERRIDDEN** — by the C8 principle (every mint re-derives), the auth_code exchange is a mint point and is now gated.
+- **Extension refresh — NOT affected.** Its replay/revoked detection is upstream at `validateExtensionToken` (before the gate), so the gate never suppressed it. Verified.
+
+## Fix (round 6)
+- **Gate moved to the MINT POINT inside the lib functions**, AFTER all token validation (replay/revoked/expired/client/cap/deactivated), BEFORE minting — so a replayed/stolen token still triggers family revocation even when the user is passkey-blocked; only a VALID token about to mint is refused:
+  - `exchangeRefreshToken` (oauth-server.ts) — gate after C13, before mint; returns `{ok:false, error:"access_denied", reason:passkey_required, userId, tenantId}`. SA-bound (userId null) skip.
+  - `exchangeCodeForToken` (oauth-server.ts) — gate after code consume, before mint; returns `{ok:false, error:"access_denied", userId, tenantId}`.
+  - `refreshIosToken` (mobile-token.ts) — gate after family-expiry, before rotate; returns `{ok:false, error:"PASSKEY_REQUIRED"}`.
+  - The two refresh ROUTES drop their pre-read gate and MAP the lib outcome → 403 + the PASSKEY_ENFORCEMENT_BLOCKED audit.
+- **C7 made lib-aware**: the 2 refresh routes are allowlisted (gate now in lib, with reason); a NEW lib-level assertion requires `oauth-server.ts` AND `mobile-token.ts` to each contain `passkeyEnforcementBlocks` (self-tested with tampered-lib fixtures).
+- **Regression tests (the point of the fix)**: (a) MCP — a rotated token presented while passkey-blocked → `invalid_grant`/`reason:replay` + family revoked, NOT access_denied (`oauth-server.test.ts`); (b) iOS — a revoked token while passkey-blocked → REFRESH_REPLAY_DETECTED + `revokeExtensionTokenFamily(reason:replay_detected)`, NOT PASSKEY_REQUIRED (`mobile-token.test.ts`). Both prove the gate runs AFTER theft detection.
+
+## Round 6 verification
+vitest 11916 passed / 1 skipped; next build green; pre-pr 40/40 (incl. the lib-aware C7 guard + its 17-case self-test). The fail-closed S13/S2 invariants hold (derivePasskeyState throws on DB error AND on missing tenant).

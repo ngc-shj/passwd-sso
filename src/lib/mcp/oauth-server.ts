@@ -27,6 +27,10 @@ import {
   type RefreshExchangeReason,
 } from "@/lib/constants/auth/mcp";
 import { MS_PER_SECOND } from "@/lib/constants/time";
+import {
+  derivePasskeyState,
+  passkeyEnforcementBlocks,
+} from "@/lib/auth/policy/passkey-enforcement";
 
 export interface McpTokenData {
   tokenId: string;
@@ -141,11 +145,20 @@ export interface TokenExchangeResult {
 export type TokenExchangeError =
   | "invalid_grant"
   | "invalid_client"
-  | "invalid_request";
+  | "invalid_request"
+  | "access_denied";
 
 export type TokenExchangeOutcome =
   | { ok: true; data: TokenExchangeResult }
-  | { ok: false; error: TokenExchangeError; errorDescription?: string };
+  | {
+      ok: false;
+      error: TokenExchangeError;
+      errorDescription?: string;
+      // Populated only on the passkey-enforcement (access_denied) path so the
+      // route can emit the PASSKEY_ENFORCEMENT_BLOCKED audit.
+      userId?: string | null;
+      tenantId?: string;
+    };
 
 export async function exchangeCodeForToken(
   params: ExchangeCodeParams,
@@ -201,6 +214,26 @@ export async function exchangeCodeForToken(
       });
       if (consumed.count === 0) return { error: "invalid_grant" as const };
 
+      // Passkey enforcement at the auth_code → token MINT point. The code was
+      // gated at consent creation, but enforcement can flip (or a passkey be
+      // removed) within the code TTL, so re-derive here before minting. AFTER
+      // code validation + consume; BEFORE the access-token create. SA-bound
+      // (userId null) skip.
+      if (authCode.userId !== null) {
+        const pk = await derivePasskeyState({
+          userId: authCode.userId,
+          tenantId: authCode.tenantId,
+          tx,
+        });
+        if (passkeyEnforcementBlocks(pk)) {
+          return {
+            error: "access_denied" as const,
+            userId: authCode.userId,
+            tenantId: authCode.tenantId,
+          };
+        }
+      }
+
       // Issue access token
       const plainToken = MCP_TOKEN_PREFIX + randomBytes(32).toString("base64url");
       const tokenHash = hashToken(plainToken);
@@ -237,7 +270,14 @@ export async function exchangeCodeForToken(
   BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 
   if ("error" in result) {
-    return { ok: false, error: result.error as TokenExchangeError };
+    return {
+      ok: false,
+      error: result.error as TokenExchangeError,
+      // Carry the passkey-path identifiers (present only on access_denied) so
+      // the route can emit the block audit; undefined for all other errors.
+      userId: "userId" in result ? result.userId : undefined,
+      tenantId: "tenantId" in result ? result.tenantId : undefined,
+    };
   }
   return {
     ok: true,
@@ -340,10 +380,11 @@ export async function exchangeRefreshToken(
     }
   | {
       ok: false;
-      error: "invalid_grant" | "invalid_client";
+      error: "invalid_grant" | "invalid_client" | "access_denied";
       reason?: RefreshExchangeReason;
       tenantId?: string;
       familyId?: string;
+      userId?: string | null;
     }
 > {
   const dbClient = options.prisma ?? prisma;
@@ -426,6 +467,17 @@ export async function exchangeRefreshToken(
       if (rt.userId !== null) {
         const memberStatus = await checkTenantMembership(tx, rt.tenantId, rt.userId);
         if (!memberStatus) return { type: "deactivated_user" as const };
+      }
+
+      // Passkey enforcement at the MINT point — AFTER replay/revoked/expired/
+      // client/cap/deactivated validation (so theft-detection family-revocation
+      // for a replayed token is never suppressed), BEFORE minting. SA-bound
+      // tokens (userId null) skip — passkeys are a human-identity ceremony.
+      if (rt.userId !== null) {
+        const pk = await derivePasskeyState({ userId: rt.userId, tenantId: rt.tenantId, tx });
+        if (passkeyEnforcementBlocks(pk)) {
+          return { type: "passkey_required" as const, tenantId: rt.tenantId, userId: rt.userId };
+        }
       }
 
       // Generate new tokens up-front so we can include the new hash in the CAS
@@ -532,6 +584,14 @@ export async function exchangeRefreshToken(
       return { ok: false, error: "invalid_grant" };
     case "deactivated_user":
       return { ok: false, error: "invalid_grant" };
+    case "passkey_required":
+      return {
+        ok: false,
+        error: "access_denied",
+        reason: REFRESH_EXCHANGE_REASON.PASSKEY_REQUIRED,
+        tenantId: phase1.tenantId,
+        userId: phase1.userId,
+      };
     case "replay":
     case "race_lost": {
       // Fail-closed family revocation in a transaction independent of Phase 1

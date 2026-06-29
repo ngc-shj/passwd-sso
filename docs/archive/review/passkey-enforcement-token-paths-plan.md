@@ -504,9 +504,22 @@ auto-extension-connect.test.tsx `EXTENSION_CONNECT_ERROR_CODE` literal (+`PASSKE
 - **SC1 — iOS client UX for passkey_required**: the iOS `AuthCoordinator` showing a
   friendly "register a passkey first" message is deferred unless trivial; the SERVER
   refusal (C3) is the security boundary and is in scope. Owner: iOS follow-up.
-- **SC2 — exchange routes (token/exchange, mobile/token)**: intentionally NOT gated
-  here; they consume a bridge code that already passed C2/C3. Gating them too would
-  be redundant. Owner: documented in the R42 member-set.
+- **SC2 — exchange routes (token/exchange, mobile/token)**: the BRIDGE-code exchange
+  paths (token/exchange, mobile/token authorization_code from a bridge code) stay
+  out-of-scope (they consume a bridge code that already passed C2/C3). **ROUND-6 CORRECTION
+  (F3)**: the MCP `authorization_code` → token exchange (`exchangeCodeForToken`) is NO
+  LONGER scoped out — by the C8 principle (every mint re-derives), enforcement can flip
+  within the code TTL, so it is now gated at the mint point inside `exchangeCodeForToken`.
+- **ROUND-6 GATE-LAYER CORRECTION (supersedes the round-4 F9/T18 "gate at route level"
+  decision for the token-CONSUMING paths)**: an external review found that gating in the
+  ROUTE before the validation lib runs SUPPRESSES replay detection → family revocation
+  (a token-theft defense). The gate for `exchangeRefreshToken` / `refreshIosToken` /
+  `exchangeCodeForToken` is therefore INSIDE those lib functions, AFTER all token
+  validation (replay/revoked/expired/client/cap/deactivated), BEFORE minting. The two
+  refresh routes map the lib's passkey outcome → 403 + audit. C7 is lib-aware (asserts the
+  lib functions contain `passkeyEnforcementBlocks`; the routes are allowlisted with a
+  reason). The INITIAL-mint routes (C2/C3/C6) keep their route-level gate — they don't sit
+  in front of theft-detection logic. See review.md round 6.
 - **SC3 — session-callback enforcement (kill the session globally)**: rejected —
   deadlock risk (user can't reach the passkey-setup page) + UX collision with the
   existing web redirect. The choke-point approach (C2/C3/C6) is the chosen design.

@@ -13,3 +13,5 @@
 # "add passkeyEnforcementBlocks", NOT "add to this file".
 
 src/app/api/mobile/autofill-token/route.ts # transitively gated via IOS_APP host token (C3 mint + C8 refresh); a direct hasPasskey gate deadlocks first-passkey-save (C9)
+src/app/api/mcp/token/route.ts # passkey gate moved into exchangeRefreshToken/exchangeCodeForToken (oauth-server.ts) AFTER replay validation, BEFORE mint
+src/app/api/mobile/token/refresh/route.ts # passkey gate moved into refreshIosToken (mobile-token.ts) AFTER replay validation

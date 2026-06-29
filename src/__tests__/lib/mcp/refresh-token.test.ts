@@ -164,6 +164,18 @@ describe("exchangeRefreshToken", () => {
       (prisma as unknown as Record<string, unknown>).tenantMember = {
         findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
       };
+      // Passkey enforcement: non-blocking default (requirePasskey=false, hasPasskey=true)
+      // so existing happy-path / replay / CAS tests pass through the gate unchanged.
+      (prisma as unknown as Record<string, unknown>).webAuthnCredential = {
+        count: vi.fn().mockResolvedValue(1), // hasPasskey = true → never blocks
+      };
+      (prisma as unknown as Record<string, unknown>).tenant = {
+        findUnique: vi.fn().mockResolvedValue({
+          requirePasskey: false,
+          requirePasskeyEnabledAt: null,
+          passkeyGracePeriodDays: null,
+        }),
+      };
       (prisma as unknown as Record<string, unknown>).mcpRefreshToken = {
         findUnique: vi.fn().mockResolvedValue(overrides.rt !== undefined ? overrides.rt : VALID_RT),
         updateMany: mockRefreshUpdateMany,

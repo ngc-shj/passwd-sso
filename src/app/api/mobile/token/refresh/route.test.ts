@@ -359,14 +359,9 @@ describe("POST /api/mobile/token/refresh", () => {
   // ─── C8: Passkey enforcement matrix ──────────────────────────
 
   describe("C8: passkey enforcement on iOS token refresh", () => {
-    it("6b-off: requirePasskey=false → rotates (refreshIosToken called)", async () => {
-      mockDerivePasskeyState.mockResolvedValue({
-        requirePasskey: false,
-        hasPasskey: false,
-        requirePasskeyEnabledAt: null,
-        passkeyGracePeriodDays: null,
-      });
-
+    it("6b-off: lib returns ok (non-blocked) → route returns 200", async () => {
+      // The passkey gate is inside the lib. Route just maps ok result → 200.
+      // (lib's non-blocking behavior is tested in mobile-token.test.ts)
       const res = await POST(makeRequest());
       const { status } = await parseJson(res);
 
@@ -374,14 +369,7 @@ describe("POST /api/mobile/token/refresh", () => {
       expect(mockRefreshIosToken).toHaveBeenCalledOnce();
     });
 
-    it("6b-haspasskey: requirePasskey=true + hasPasskey=true → rotates", async () => {
-      mockDerivePasskeyState.mockResolvedValue({
-        requirePasskey: true,
-        hasPasskey: true,
-        requirePasskeyEnabledAt: "2024-01-01T00:00:00.000Z",
-        passkeyGracePeriodDays: 7,
-      });
-
+    it("6b-haspasskey: lib returns ok (has passkey) → route returns 200", async () => {
       const res = await POST(makeRequest());
       const { status } = await parseJson(res);
 
@@ -389,16 +377,7 @@ describe("POST /api/mobile/token/refresh", () => {
       expect(mockRefreshIosToken).toHaveBeenCalledOnce();
     });
 
-    it("6b-withingrace: requirePasskey=true + no passkey + within grace → rotates", async () => {
-      // enabledAt = 3 days ago, grace = 7 days → 4 more days remain (genuinely within grace)
-      const past3Days = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
-      mockDerivePasskeyState.mockResolvedValue({
-        requirePasskey: true,
-        hasPasskey: false,
-        requirePasskeyEnabledAt: past3Days,
-        passkeyGracePeriodDays: 7,
-      });
-
+    it("6b-withingrace: lib returns ok (within grace) → route returns 200", async () => {
       const res = await POST(makeRequest());
       const { status } = await parseJson(res);
 
@@ -406,13 +385,10 @@ describe("POST /api/mobile/token/refresh", () => {
       expect(mockRefreshIosToken).toHaveBeenCalledOnce();
     });
 
-    it("6b-graceexpired: requirePasskey=true + no passkey + grace expired → REFUSED (RT8) + audit", async () => {
-      mockDerivePasskeyState.mockResolvedValue({
-        requirePasskey: true,
-        hasPasskey: false,
-        requirePasskeyEnabledAt: "2020-01-01T00:00:00.000Z",
-        passkeyGracePeriodDays: 7,
-      });
+    it("6b-graceexpired: lib returns PASSKEY_REQUIRED → route returns 403 + audit", async () => {
+      // The passkey gate is inside refreshIosToken (lib-level) now.
+      // Route maps PASSKEY_REQUIRED result → 403 + audit.
+      mockRefreshIosToken.mockResolvedValue({ ok: false, error: "PASSKEY_REQUIRED" });
 
       const res = await POST(makeRequest());
       const { status, json } = await parseJson(res);
@@ -420,8 +396,8 @@ describe("POST /api/mobile/token/refresh", () => {
       // Refused with PASSKEY_REQUIRED (403)
       expect(status).toBe(403);
       expect(json.error).toBe("PASSKEY_REQUIRED");
-      // RT8: refreshIosToken must NOT be called
-      expect(mockRefreshIosToken).not.toHaveBeenCalled();
+      // refreshIosToken WAS called (gate is inside the lib now)
+      expect(mockRefreshIosToken).toHaveBeenCalledOnce();
       // Audit must be emitted
       expect(mockRecordPasskeyAuditEmit).toHaveBeenCalledWith(
         USER_ID,
@@ -436,11 +412,13 @@ describe("POST /api/mobile/token/refresh", () => {
       );
     });
 
-    it("6b-throws: derivePasskeyState throws → fail closed (no rotation)", async () => {
-      mockDerivePasskeyState.mockRejectedValue(new Error("DB error"));
+    it("6b-lib-throws: lib (refreshIosToken) throws (DB error in passkey gate) → route propagates throw", async () => {
+      // If derivePasskeyState throws inside refreshIosToken, the lib propagates it.
+      // Route lets it bubble — fail closed.
+      mockRefreshIosToken.mockRejectedValue(new Error("DB error"));
 
       await expect(POST(makeRequest())).rejects.toThrow("DB error");
-      expect(mockRefreshIosToken).not.toHaveBeenCalled();
+      expect(mockRefreshIosToken).toHaveBeenCalledOnce();
     });
   });
 });

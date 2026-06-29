@@ -20,13 +20,7 @@ import {
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
-import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import {
-  derivePasskeyState,
-  passkeyEnforcementBlocks,
-  recordPasskeyAuditEmit,
-} from "@/lib/auth/policy/passkey-enforcement";
+import { recordPasskeyAuditEmit } from "@/lib/auth/policy/passkey-enforcement";
 
 const tokenRateLimiter = createRateLimiter({
   windowMs: MS_PER_MINUTE,
@@ -125,6 +119,20 @@ async function handlePOST(req: NextRequest) {
     });
 
     if (!result.ok) {
+      // Passkey enforcement at the auth_code → token mint (gated inside
+      // exchangeCodeForToken AFTER code validation, BEFORE the access-token
+      // create). Emit the block audit + 403.
+      if (result.error === "access_denied" && result.userId) {
+        if (recordPasskeyAuditEmit(result.userId, "/api/mcp/token", Date.now())) {
+          await logAuditAsync({
+            ...personalAuditBase(req, result.userId),
+            tenantId: result.tenantId,
+            action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+            metadata: { blockedPath: "/api/mcp/token" },
+          });
+        }
+        return NextResponse.json({ error: "access_denied" }, { status: 403 });
+      }
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
 
@@ -175,42 +183,6 @@ async function handlePOST(req: NextRequest) {
     });
     if (blocked) return blocked;
 
-    // C8: Passkey enforcement gate — pre-read the refresh-token row inside
-    // withBypassRls so RLS does not filter it to null for a cookieless request.
-    // Use the same hashToken call that exchangeRefreshToken uses internally.
-    const refreshTokenHash = hashToken(refreshTokenValue);
-    const passkeyGateResult = await withBypassRls(
-      prisma,
-      async (tx) => {
-        const rt = await tx.mcpRefreshToken.findUnique({
-          where: { tokenHash: refreshTokenHash },
-          select: { userId: true, tenantId: true },
-        });
-        // Row not found: let exchangeRefreshToken handle the invalid_grant.
-        if (!rt) return { blocked: false as const };
-        // SA-bound token (userId === null): skip passkey gate; rotate normally.
-        if (rt.userId === null) return { blocked: false as const };
-        // User-bound: re-derive passkey state with the bypass tx and gate.
-        const state = await derivePasskeyState({ userId: rt.userId, tenantId: rt.tenantId, tx });
-        if (passkeyEnforcementBlocks(state)) {
-          return { blocked: true as const, userId: rt.userId, tenantId: rt.tenantId };
-        }
-        return { blocked: false as const };
-      },
-      BYPASS_PURPOSE.TOKEN_LIFECYCLE,
-    );
-    if (passkeyGateResult.blocked) {
-      if (recordPasskeyAuditEmit(passkeyGateResult.userId, "/api/mcp/token", Date.now())) {
-        await logAuditAsync({
-          ...personalAuditBase(req, passkeyGateResult.userId),
-          tenantId: passkeyGateResult.tenantId,
-          action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
-          metadata: { blockedPath: "/api/mcp/token" },
-        });
-      }
-      return NextResponse.json({ error: "access_denied" }, { status: 403 });
-    }
-
     const result = await exchangeRefreshToken({
       refreshToken: refreshTokenValue,
       clientId: clientIdValue,
@@ -218,6 +190,20 @@ async function handlePOST(req: NextRequest) {
     });
 
     if (!result.ok) {
+      // Passkey enforcement (gated inside exchangeRefreshToken AFTER replay/
+      // revoked/cap validation, BEFORE mint — so a replayed token still revokes
+      // its family above). Emit the block audit + 403.
+      if (result.error === "access_denied" && result.userId) {
+        if (recordPasskeyAuditEmit(result.userId, "/api/mcp/token", Date.now())) {
+          await logAuditAsync({
+            ...personalAuditBase(req, result.userId),
+            tenantId: result.tenantId,
+            action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+            metadata: { blockedPath: "/api/mcp/token" },
+          });
+        }
+        return NextResponse.json({ error: "access_denied" }, { status: 403 });
+      }
       if (result.reason === REFRESH_EXCHANGE_REASON.REPLAY && result.tenantId) {
         await logAuditAsync({
           ...tenantAuditBase(req, resolveAuditUserId(null, "system"), result.tenantId),

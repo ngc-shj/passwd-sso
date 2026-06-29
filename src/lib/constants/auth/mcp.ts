@@ -97,6 +97,7 @@ export const REFRESH_EXCHANGE_REASON = {
   CONCURRENT_ROTATION_REVOKED: "concurrent_rotation_revoked",
   EXPIRED: "expired",
   REVOKED: "revoked",
+  PASSKEY_REQUIRED: "passkey_required",
 } as const;
 export type RefreshExchangeReason =
   (typeof REFRESH_EXCHANGE_REASON)[keyof typeof REFRESH_EXCHANGE_REASON];

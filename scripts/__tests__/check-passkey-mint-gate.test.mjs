@@ -55,12 +55,26 @@ function writeRoute(rel, body) {
   return `api/${rel}/route.ts`; // PATH_ROOT-relative path the guard prints
 }
 
+/** Write a fixture lib file at src/lib/<relPath> inside the fixture root. */
+function writeLib(relPath, body) {
+  const parts = relPath.split("/");
+  const dir = join(root, "src", "lib", ...parts.slice(0, -1));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(root, "src", "lib", relPath), body, "utf8");
+}
+
+const LIB_GATE_BODY = "export function fn() { if (passkeyEnforcementBlocks(state)) return; }\n";
+
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "mint-gate-guard-"));
   apiDir = join(root, "api");
   exemptFile = join(root, "exempt.txt");
   mkdirSync(apiDir, { recursive: true });
   writeFileSync(exemptFile, "# fixture exempt list\n", "utf8");
+  // Pre-create the lib files the guard now also checks (lib-level gate assertion).
+  // All standard fixture tests want these to pass, so write them with the gate.
+  writeLib("mcp/oauth-server.ts", LIB_GATE_BODY);
+  writeLib("auth/tokens/mobile-token.ts", LIB_GATE_BODY);
 });
 
 afterEach(() => {
@@ -170,6 +184,48 @@ describe("check-passkey-mint-gate.sh", () => {
     const { exitCode, stdout } = runGuard();
     expect(exitCode).toBe(1);
     expect(stdout).toContain("STALE_EXEMPT");
+  });
+
+  // ─── Lib-level gate assertions ────────────────────────────────
+  // The guard also checks that lib files (oauth-server.ts + mobile-token.ts) that
+  // absorbed the passkey gate from their callers still contain passkeyEnforcementBlocks.
+  // The lib files are pre-created with the gate in beforeEach — these tests override
+  // one or both to simulate the gate being missing.
+
+  it("passes when both lib files contain passkeyEnforcementBlocks", () => {
+    // beforeEach already wrote both libs with the gate — just confirm pass.
+    const { exitCode } = runGuard();
+    expect(exitCode).toBe(0);
+  });
+
+  it("FAILS (MISSING_LIB_PASSKEY_GATE) when oauth-server.ts lacks passkeyEnforcementBlocks", () => {
+    writeLib(
+      "mcp/oauth-server.ts",
+      "export function exchangeRefreshToken() { /* gate removed */ }\n",
+    );
+    writeLib(
+      "auth/tokens/mobile-token.ts",
+      "export function refreshIosToken() { if (passkeyEnforcementBlocks(state)) return; }\n",
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("MISSING_LIB_PASSKEY_GATE");
+    expect(stdout).toContain("oauth-server.ts");
+  });
+
+  it("FAILS (MISSING_LIB_PASSKEY_GATE) when mobile-token.ts lacks passkeyEnforcementBlocks", () => {
+    writeLib(
+      "mcp/oauth-server.ts",
+      "export function exchangeRefreshToken() { if (passkeyEnforcementBlocks(state)) return; }\n",
+    );
+    writeLib(
+      "auth/tokens/mobile-token.ts",
+      "export function refreshIosToken() { /* gate removed */ }\n",
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("MISSING_LIB_PASSKEY_GATE");
+    expect(stdout).toContain("mobile-token.ts");
   });
 
   it("passes the real codebase tree (exit 0 on the actual repo)", () => {

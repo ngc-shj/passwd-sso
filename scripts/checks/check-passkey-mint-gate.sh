@@ -149,6 +149,35 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
+# Lib-level assertion: the token-mint library files that have absorbed the
+# passkey gate from their callers MUST contain `passkeyEnforcementBlocks`.
+# If either lib loses the gate call, the entire token class becomes unguarded
+# regardless of whether the route is in the exempt allowlist.
+LIB_GATE_FAIL=0
+for lib_file in \
+  "$PATH_ROOT/src/lib/mcp/oauth-server.ts" \
+  "$PATH_ROOT/src/lib/auth/tokens/mobile-token.ts"
+do
+  if [ ! -f "$lib_file" ]; then
+    echo "MISSING_LIB_PASSKEY_GATE: $lib_file does not exist (expected lib-level gate)."
+    LIB_GATE_FAIL=1
+    continue
+  fi
+  if ! grep -qE '(^|[^A-Za-z0-9_])passkeyEnforcementBlocks\(' "$lib_file" 2>/dev/null; then
+    rel="${lib_file#"$PATH_ROOT/"}"
+    echo "MISSING_LIB_PASSKEY_GATE: $rel must contain passkeyEnforcementBlocks (gate moved from route into lib — see passkey-mint-gate-exempt.txt)."
+    LIB_GATE_FAIL=1
+  fi
+done
+
+if [ "$LIB_GATE_FAIL" -ne 0 ]; then
+  echo
+  echo "The passkey gate was moved from the route into these lib functions to ensure"
+  echo "replay detection fires before enforcement. Removing it from the lib leaves"
+  echo "all token-mint paths in those libs completely unguarded."
+  exit 1
+fi
+
 # Anti-drift: every exempt entry must still be a real mint/re-mint route.
 # A stale allowlist entry (route deleted, or no longer mints) silently weakens
 # the guard's documentation — fail so it gets cleaned up.

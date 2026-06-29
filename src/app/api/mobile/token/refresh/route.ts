@@ -58,11 +58,7 @@ import {
   refreshIosToken,
   IOS_TOKEN_IDLE_TIMEOUT_MS,
 } from "@/lib/auth/tokens/mobile-token";
-import {
-  derivePasskeyState,
-  passkeyEnforcementBlocks,
-  recordPasskeyAuditEmit,
-} from "@/lib/auth/policy/passkey-enforcement";
+import { recordPasskeyAuditEmit } from "@/lib/auth/policy/passkey-enforcement";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 
@@ -217,26 +213,9 @@ async function handlePOST(req: NextRequest): Promise<Response> {
     return errorResponse(API_ERROR.MOBILE_TOKEN_BINDING_INVALID);
   }
 
-  // C8: Passkey enforcement gate — re-derive fresh from DB, fail closed.
-  // Tenant source = token row's tenantId (cookieless; no active-session rebind).
-  const passkeyState = await derivePasskeyState({
-    userId: oldRow.userId,
-    tenantId: oldRow.tenantId,
-  });
-  if (passkeyEnforcementBlocks(passkeyState)) {
-    if (recordPasskeyAuditEmit(oldRow.userId, "/api/mobile/token/refresh", Date.now())) {
-      await logAuditAsync({
-        ...personalAuditBase(req, oldRow.userId),
-        tenantId: oldRow.tenantId,
-        action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
-        metadata: { blockedPath: "/api/mobile/token/refresh" },
-      });
-    }
-    return errorResponse(API_ERROR.PASSKEY_REQUIRED);
-  }
-
   // Hand off to `refreshIosToken` — it owns rotation, replay-vs-retry
-  // disambiguation, family-expiry, and the success audit.
+  // disambiguation, family-expiry, the passkey-enforcement gate (applied at the
+  // MINT point, after replay validation), and the success audit.
   const result = await refreshIosToken({
     req,
     bodyBytes: rawBody,
@@ -263,6 +242,16 @@ async function handlePOST(req: NextRequest): Promise<Response> {
         return errorResponse(API_ERROR.MOBILE_REFRESH_REUSE_DETECTED);
       case "REFRESH_TOKEN_FAMILY_EXPIRED":
         return errorResponse(API_ERROR.MOBILE_REFRESH_SESSION_EXPIRED);
+      case "PASSKEY_REQUIRED":
+        if (recordPasskeyAuditEmit(oldRow.userId, "/api/mobile/token/refresh", Date.now())) {
+          await logAuditAsync({
+            ...personalAuditBase(req, oldRow.userId),
+            tenantId: oldRow.tenantId,
+            action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+            metadata: { blockedPath: "/api/mobile/token/refresh" },
+          });
+        }
+        return errorResponse(API_ERROR.PASSKEY_REQUIRED);
     }
   }
 
