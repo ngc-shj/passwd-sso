@@ -79,17 +79,24 @@ describe("isPasskeyGracePeriodExpired", () => {
     expect(isPasskeyGracePeriodExpired(enabledAt, 7)).toBe(true);
   });
 
-  it("returns true at exactly the grace boundary (inclusive <= window)", () => {
-    // enabledAt exactly graceDays * MS_PER_DAY ago → now === enabledAt + gracePeriodMs,
-    // the condition is `now > enabledAt + gracePeriodMs`, so this is NOT expired.
-    // But 1 ms later it is.
+  it("at exactly the grace boundary it is NOT expired (strict >), and 1 ms later it is", () => {
+    // The function reads Date.now() internally; pin it with fake timers so the
+    // exact boundary (now === enabledAt + graceDays*MS_PER_DAY) is deterministic.
     const graceDays = 3;
-    const exactBoundaryMs = Date.now() - graceDays * MS_PER_DAY;
-    const enabledAt = new Date(exactBoundaryMs).toISOString();
-    // At exactly the boundary, Date.now() ≈ enabledAt + grace — may be expired
-    // or not depending on millisecond timing. Test the clearly-expired case.
-    const clearlyExpired = new Date(Date.now() - graceDays * MS_PER_DAY - 1).toISOString();
-    expect(isPasskeyGracePeriodExpired(clearlyExpired, graceDays)).toBe(true);
+    const enabledAtMs = 1_700_000_000_000;
+    const enabledAt = new Date(enabledAtMs).toISOString();
+    const boundaryMs = enabledAtMs + graceDays * MS_PER_DAY;
+    vi.useFakeTimers();
+    try {
+      // now === enabledAt + grace → `now > enabledAt + grace` is false → NOT expired.
+      vi.setSystemTime(boundaryMs);
+      expect(isPasskeyGracePeriodExpired(enabledAt, graceDays)).toBe(false);
+      // 1 ms past the boundary → expired.
+      vi.setSystemTime(boundaryMs + 1);
+      expect(isPasskeyGracePeriodExpired(enabledAt, graceDays)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
