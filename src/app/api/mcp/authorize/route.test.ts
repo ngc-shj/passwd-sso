@@ -228,6 +228,8 @@ describe("GET /api/mcp/authorize", () => {
     const res = await GET(createRequest(VALID_AUTHZ_URL) as unknown as import("next/server").NextRequest);
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toContain("/en/mcp/authorize");
+    // Non-vacuity: gate was reached and the mock was interpreted, not bypassed before it.
+    expect(mockDerivePasskeyState).toHaveBeenCalledTimes(1);
     // Non-vacuity: reached consent redirect (not refused).
     expect(mockFindFirst).toHaveBeenCalled();
   });
@@ -242,6 +244,8 @@ describe("GET /api/mcp/authorize", () => {
     const res = await GET(createRequest(VALID_AUTHZ_URL) as unknown as import("next/server").NextRequest);
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toContain("/en/mcp/authorize");
+    // Non-vacuity: gate was reached and the mock was interpreted, not bypassed before it.
+    expect(mockDerivePasskeyState).toHaveBeenCalledTimes(1);
   });
 
   it("C6 GET: on + no passkey + within grace → redirects to consent", async () => {

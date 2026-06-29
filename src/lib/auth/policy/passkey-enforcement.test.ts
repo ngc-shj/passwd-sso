@@ -272,6 +272,15 @@ describe("derivePasskeyState", () => {
     expect(result.hasPasskey).toBe(true);
   });
 
+  it("throws when tenant row is not found (fail-closed — never defaults to requirePasskey:false)", async () => {
+    mockWebAuthnCredentialCount.mockResolvedValue(0);
+    mockTenantFindUnique.mockResolvedValue(null);
+
+    await expect(
+      derivePasskeyState({ userId: "u-notenant", tenantId: "t-missing" }),
+    ).rejects.toThrow("t-missing");
+  });
+
   it("throws on DB error (fail-closed — does not swallow)", async () => {
     const dbError = new Error("DB connection lost");
     mockWebAuthnCredentialCount.mockRejectedValue(dbError);

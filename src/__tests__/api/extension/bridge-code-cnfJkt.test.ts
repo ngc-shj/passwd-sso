@@ -113,6 +113,7 @@ vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {
 
 import { POST } from "@/app/api/extension/bridge-code/route";
 import { __resetAllowlistForTests } from "@/lib/http/cors";
+import { _resetPasskeyAuditForTests } from "@/lib/auth/policy/passkey-enforcement";
 
 function makeRequest(opts: {
   origin?: string | null;
@@ -134,6 +135,7 @@ function makeRequest(opts: {
 describe("POST /api/extension/bridge-code — C4 rewrite", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    _resetPasskeyAuditForTests();
     vi.stubEnv("EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS", ALLOWED_ORIGIN);
     __resetAllowlistForTests();
 

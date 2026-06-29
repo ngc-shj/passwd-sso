@@ -203,20 +203,19 @@ async function handlePOST(req: NextRequest) {
   }
 
   // 5a) Passkey enforcement gate. Re-derives state from DB (fail-closed);
-  //     a throw propagates and refuses issuance — never fails open.
-  if (userRecord.tenantId) {
-    const pkState = await derivePasskeyState({ userId, tenantId: userRecord.tenantId });
-    if (passkeyEnforcementBlocks(pkState)) {
-      if (recordPasskeyAuditEmit(userId, "/api/extension/bridge-code", Date.now())) {
-        await logAuditAsync({
-          ...personalAuditBase(req, userId),
-          action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
-          tenantId: userRecord.tenantId,
-          metadata: { blockedPath: "/api/extension/bridge-code" },
-        });
-      }
-      return errorResponse(API_ERROR.PASSKEY_REQUIRED);
+  //     a throw propagates and refuses issuance — never fails open. tenantId is
+  //     NOT NULL (used unconditionally above); gate unconditionally — never skip.
+  const pkState = await derivePasskeyState({ userId, tenantId: userRecord.tenantId });
+  if (passkeyEnforcementBlocks(pkState)) {
+    if (recordPasskeyAuditEmit(userId, "/api/extension/bridge-code", Date.now())) {
+      await logAuditAsync({
+        ...personalAuditBase(req, userId),
+        action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+        tenantId: userRecord.tenantId,
+        metadata: { blockedPath: "/api/extension/bridge-code" },
+      });
     }
+    return errorResponse(API_ERROR.PASSKEY_REQUIRED);
   }
 
   // 6) Per-user rate limit. Pre-computed-result form so the route can

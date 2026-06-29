@@ -173,28 +173,28 @@ async function handleGET(req: NextRequest): Promise<Response> {
   // insert runs at top level, after the tenant RLS scope has exited.
   const tenantId = await withUserTenantRls(userId, async (tid) => tid);
 
-  // Passkey enforcement gate — re-derives from DB (fail-closed).
-  if (tenantId) {
-    const pkState = await derivePasskeyState({ userId, tenantId });
-    if (passkeyEnforcementBlocks(pkState)) {
-      if (recordPasskeyAuditEmit(userId, "/api/mobile/authorize", Date.now())) {
-        await logAuditAsync({
-          ...personalAuditBase(req, userId),
-          action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
-          tenantId,
-          metadata: { blockedPath: "/api/mobile/authorize" },
-        });
-      }
-      const refusalUrl = new URL(IOS_CALLBACK_URL);
-      refusalUrl.searchParams.set("error", "passkey_required");
-      return new NextResponse(null, {
-        status: 302,
-        headers: {
-          Location: refusalUrl.toString(),
-          "Cache-Control": "no-store",
-        },
+  // Passkey enforcement gate — re-derives from DB (fail-closed). tenantId is
+  // NOT NULL (used unconditionally in the bridge-code create below); gate
+  // unconditionally so a falsy value can never skip enforcement.
+  const pkState = await derivePasskeyState({ userId, tenantId });
+  if (passkeyEnforcementBlocks(pkState)) {
+    if (recordPasskeyAuditEmit(userId, "/api/mobile/authorize", Date.now())) {
+      await logAuditAsync({
+        ...personalAuditBase(req, userId),
+        action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+        tenantId,
+        metadata: { blockedPath: "/api/mobile/authorize" },
       });
     }
+    const refusalUrl = new URL(IOS_CALLBACK_URL);
+    refusalUrl.searchParams.set("error", "passkey_required");
+    return new NextResponse(null, {
+      status: 302,
+      headers: {
+        Location: refusalUrl.toString(),
+        "Cache-Control": "no-store",
+      },
+    });
   }
 
   const created = await withBypassRls(

@@ -390,12 +390,13 @@ describe("POST /api/mobile/token/refresh", () => {
     });
 
     it("6b-withingrace: requirePasskey=true + no passkey + within grace → rotates", async () => {
-      const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      // enabledAt = 3 days ago, grace = 7 days → 4 more days remain (genuinely within grace)
+      const past3Days = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
       mockDerivePasskeyState.mockResolvedValue({
         requirePasskey: true,
         hasPasskey: false,
-        requirePasskeyEnabledAt: future,
-        passkeyGracePeriodDays: 30,
+        requirePasskeyEnabledAt: past3Days,
+        passkeyGracePeriodDays: 7,
       });
 
       const res = await POST(makeRequest());

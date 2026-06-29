@@ -102,11 +102,19 @@ export async function derivePasskeyState(params: {
     ? await run(params.tx)
     : await withBypassRls(prisma, run, BYPASS_PURPOSE.AUTH_FLOW);
 
+  // FAIL-CLOSED: a missing tenant row means we cannot determine the policy.
+  // tenantId comes from a server-trusted source (token row / session) backed by
+  // an FK RESTRICT, so a null here is data corruption — throw so the caller
+  // refuses issuance rather than defaulting requirePasskey to false (fail-open).
+  if (!tenant) {
+    throw new Error(`derivePasskeyState: tenant ${params.tenantId} not found`);
+  }
+
   return {
     hasPasskey: credCount > 0,
-    requirePasskey: tenant?.requirePasskey ?? false,
-    requirePasskeyEnabledAt: tenant?.requirePasskeyEnabledAt?.toISOString() ?? null,
-    passkeyGracePeriodDays: tenant?.passkeyGracePeriodDays ?? null,
+    requirePasskey: tenant.requirePasskey,
+    requirePasskeyEnabledAt: tenant.requirePasskeyEnabledAt?.toISOString() ?? null,
+    passkeyGracePeriodDays: tenant.passkeyGracePeriodDays,
   };
 }
 

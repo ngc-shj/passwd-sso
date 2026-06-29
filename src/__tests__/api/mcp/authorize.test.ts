@@ -50,6 +50,8 @@ vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: () => "127.0.0.1",
   rateLimitKeyFromIp: (ip: string) => `rl:${ip}`,
 }));
+// Full C6 passkey-gate matrix is in the co-located src/app/api/mcp/authorize/route.test.ts;
+// here the gate is mocked non-blocking.
 vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/auth/policy/passkey-enforcement")>();
   return {

@@ -33,5 +33,5 @@
   "extensionRequired": "This connect requires the latest passwd-sso extension. Please install or update from the Chrome Web Store and try again.",
   "extensionRequiredAction": "Open Chrome Web Store",
   "connectPasskeyRequiredTitle": "Passkey registration required",
-  "connectPasskeyRequiredDescription": "Your organization requires a passkey to connect the extension. Register a passkey in your account security settings, then try again."
+  "connectPasskeyRequiredDescription": "Your tenant requires a passkey to connect the extension. Register a passkey in your account security settings, then try again."
 }

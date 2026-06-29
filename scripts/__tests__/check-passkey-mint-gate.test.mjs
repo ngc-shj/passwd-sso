@@ -174,18 +174,9 @@ describe("check-passkey-mint-gate.sh", () => {
 
   it("passes the real codebase tree (exit 0 on the actual repo)", () => {
     // Runs the guard with no env overrides — points at the real src/app/api.
-    // This will pass only after ALL C2/C3/C6/C8 gates are in place; if batches
-    // 3+4 run in parallel this test may transiently fail on those routes.
-    // The self-test validates guard LOGIC via fixtures above; this case is a
-    // belt-and-suspenders smoke test against the live tree.
+    // All C2/C3/C6/C8 gates are now in place; this is the belt-and-suspenders
+    // smoke test confirming no route regressed after the full implementation.
     const r = spawnSync("bash", [GUARD], { encoding: "utf8" });
-    if (r.status !== 0) {
-      // Print the guard output to help diagnose which routes are missing gates.
-      // This is expected during mid-flight parallel batch work (batches 3+4).
-      console.warn("Real-tree guard output (may be expected mid-flight):\n" + r.stdout);
-    }
-    // We do NOT assert exitCode===0 here because batches 3+4 may not have
-    // landed yet. The fixture tests above prove the guard logic is correct.
-    // When all batches are complete, this will pass.
+    expect(r.status).toBe(0, `Real-tree guard failed — missing gates:\n${r.stdout}`);
   });
 });
