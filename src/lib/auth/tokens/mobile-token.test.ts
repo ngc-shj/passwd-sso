@@ -32,6 +32,15 @@ const { mockLogAuditAsync, mockRevokeFamily } = vi.hoisted(() => ({
   mockRevokeFamily: vi.fn().mockResolvedValue({ rowsRevoked: 0 }),
 }));
 
+const { mockDerivePasskeyState } = vi.hoisted(() => ({
+  mockDerivePasskeyState: vi.fn().mockResolvedValue({
+    requirePasskey: false,
+    hasPasskey: true,
+    requirePasskeyEnabledAt: null,
+    passkeyGracePeriodDays: null,
+  }),
+}));
+
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     extensionToken: {
@@ -81,6 +90,11 @@ vi.mock("@/lib/audit/audit", async (importOriginal) => ({
 vi.mock("./extension-token", async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
   revokeExtensionTokenFamily: mockRevokeFamily,
+}));
+
+vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
+  derivePasskeyState: mockDerivePasskeyState,
 }));
 
 // ─── Now import the module under test ────────────────────────
@@ -140,6 +154,13 @@ beforeEach(() => {
     hasOrRecord: vi.fn().mockResolvedValue(false),
   });
   mockRevokeFamily.mockResolvedValue({ rowsRevoked: 1 });
+  // Default: passkey enforcement does NOT block (requirePasskey=false, hasPasskey=true)
+  mockDerivePasskeyState.mockResolvedValue({
+    requirePasskey: false,
+    hasPasskey: true,
+    requirePasskeyEnabledAt: null,
+    passkeyGracePeriodDays: null,
+  });
   _resetRotationCacheForTests();
 });
 
@@ -620,5 +641,67 @@ describe("refreshIosToken", () => {
       expect.objectContaining({ reason: "family_expired" }),
     );
     expect(mockLogAuditAsync).not.toHaveBeenCalled();
+  });
+
+  it("passkey-blocked user ⇒ PASSKEY_REQUIRED, issueIosToken NOT called", async () => {
+    // Passkey enforcement blocks — grace period long expired
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: "2020-01-01T00:00:00.000Z",
+      passkeyGracePeriodDays: 7,
+    });
+
+    const result = await refreshIosToken({
+      req: makeReq(),
+      bodyBytes: new TextEncoder().encode(JSON.stringify({ refresh: "x" })),
+      oldRow: baseRow,
+      deviceJkt: DEVICE_JKT,
+      cnfJkt: CNF_JKT,
+    });
+
+    expect(result).toEqual({ ok: false, error: "PASSKEY_REQUIRED" });
+    // issueIosToken must NOT be called — no new tokens minted
+    expect(mockExtCreate).not.toHaveBeenCalled();
+    // No success audit emitted
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
+    // Family revocation must NOT fire (this is not a replay)
+    expect(mockRevokeFamily).not.toHaveBeenCalled();
+  });
+
+  // REGRESSION (critical): revoked token presented (replay) while passkey would block
+  // → must return REFRESH_REPLAY_DETECTED and fire revokeExtensionTokenFamily, NOT PASSKEY_REQUIRED.
+  // Proves replay handling precedes the passkey gate.
+  it("REGRESSION: revoked token (replay) while passkey would block ⇒ REFRESH_REPLAY_DETECTED + family revoked, NOT PASSKEY_REQUIRED", async () => {
+    // Passkey would block — but replay detection must run first
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: "2020-01-01T00:00:00.000Z",
+      passkeyGracePeriodDays: 7,
+    });
+
+    // oldRow is already revoked (revokedAt set) with a different body → genuine replay
+    const result = await refreshIosToken({
+      req: makeReq(),
+      bodyBytes: new TextEncoder().encode("DIFFERENT_BODY_NOT_MATCHING_CACHE"),
+      oldRow: { ...baseRow, revokedAt: new Date() },
+      deviceJkt: DEVICE_JKT,
+      cnfJkt: CNF_JKT,
+    });
+
+    // Must be REPLAY, not PASSKEY_REQUIRED
+    expect(result).toEqual({ ok: false, error: "REFRESH_REPLAY_DETECTED" });
+    // revokeExtensionTokenFamily MUST have been called — family-level revocation fired
+    expect(mockRevokeFamily).toHaveBeenCalledWith(
+      expect.objectContaining({
+        familyId: FAMILY_ID,
+        userId: USER_ID,
+        tenantId: TENANT_ID,
+        reason: "replay_detected",
+      }),
+    );
+    // No tokens minted
+    expect(mockExtCreate).not.toHaveBeenCalled();
   });
 });

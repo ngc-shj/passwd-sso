@@ -74,6 +74,10 @@ export const LOOPBACK_REDIRECT_RE = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):
 // DCR (Dynamic Client Registration) constants
 export const MCP_REFRESH_TOKEN_PREFIX = "mcpr_";
 export const MCP_REFRESH_TOKEN_EXPIRY_SEC = 7 * SEC_PER_DAY;
+// Absolute cap on a refresh-token family lifetime — mirrors ExtensionToken.familyCreatedAt
+// (30 d) for parity with the extension. Beyond this cap, exchangeRefreshToken refuses
+// regardless of individual token validity. Value chosen to match the extension cap.
+export const MCP_REFRESH_TOKEN_FAMILY_ABSOLUTE_TIMEOUT_SEC = 30 * SEC_PER_DAY;
 // 15-min unclaimed hold window — generous for the register→consent→claim human
 // flow while draining 4× faster than the old 1-hour window (see plan).
 export const MCP_DCR_UNCLAIMED_EXPIRY_SEC = 15 * SEC_PER_MINUTE;
@@ -93,6 +97,7 @@ export const REFRESH_EXCHANGE_REASON = {
   CONCURRENT_ROTATION_REVOKED: "concurrent_rotation_revoked",
   EXPIRED: "expired",
   REVOKED: "revoked",
+  PASSKEY_REQUIRED: "passkey_required",
 } as const;
 export type RefreshExchangeReason =
   (typeof REFRESH_EXCHANGE_REASON)[keyof typeof REFRESH_EXCHANGE_REASON];

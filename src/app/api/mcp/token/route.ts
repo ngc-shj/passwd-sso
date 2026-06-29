@@ -10,7 +10,7 @@ import {
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
+import { logAuditAsync, tenantAuditBase, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { resolveAuditUserId } from "@/lib/constants/app";
 import {
@@ -20,6 +20,7 @@ import {
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
+import { recordPasskeyAuditEmit } from "@/lib/auth/policy/passkey-enforcement";
 
 const tokenRateLimiter = createRateLimiter({
   windowMs: MS_PER_MINUTE,
@@ -118,6 +119,20 @@ async function handlePOST(req: NextRequest) {
     });
 
     if (!result.ok) {
+      // Passkey enforcement at the auth_code → token mint (gated inside
+      // exchangeCodeForToken AFTER code validation, BEFORE the access-token
+      // create). Emit the block audit + 403.
+      if (result.error === "access_denied" && result.userId) {
+        if (recordPasskeyAuditEmit(result.userId, "/api/mcp/token", Date.now())) {
+          await logAuditAsync({
+            ...personalAuditBase(req, result.userId),
+            tenantId: result.tenantId,
+            action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+            metadata: { blockedPath: "/api/mcp/token" },
+          });
+        }
+        return NextResponse.json({ error: "access_denied" }, { status: 403 });
+      }
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
 
@@ -175,6 +190,20 @@ async function handlePOST(req: NextRequest) {
     });
 
     if (!result.ok) {
+      // Passkey enforcement (gated inside exchangeRefreshToken AFTER replay/
+      // revoked/cap validation, BEFORE mint — so a replayed token still revokes
+      // its family above). Emit the block audit + 403.
+      if (result.error === "access_denied" && result.userId) {
+        if (recordPasskeyAuditEmit(result.userId, "/api/mcp/token", Date.now())) {
+          await logAuditAsync({
+            ...personalAuditBase(req, result.userId),
+            tenantId: result.tenantId,
+            action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+            metadata: { blockedPath: "/api/mcp/token" },
+          });
+        }
+        return NextResponse.json({ error: "access_denied" }, { status: 403 });
+      }
       if (result.reason === REFRESH_EXCHANGE_REASON.REPLAY && result.tenantId) {
         await logAuditAsync({
           ...tenantAuditBase(req, resolveAuditUserId(null, "system"), result.tenantId),

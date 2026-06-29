@@ -12,6 +12,11 @@ import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { readFormWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 import { requireRecentSession } from "@/lib/auth/session/step-up";
+import {
+  derivePasskeyState,
+  passkeyEnforcementBlocks,
+  recordPasskeyAuditEmit,
+} from "@/lib/auth/policy/passkey-enforcement";
 
 export async function POST(req: NextRequest) {
   // Origin presence guard (early return / defense-in-depth).
@@ -232,6 +237,24 @@ export async function POST(req: NextRequest) {
     url.searchParams.set("error", "invalid_scope");
     if (state) url.searchParams.set("state", state);
     return NextResponse.redirect(url.toString(), 302);
+  }
+
+  // Passkey enforcement gate — authoritative boundary for MCP OAuth issuance.
+  // Re-derives from DB (fail-closed); a throw propagates and refuses issuance.
+  const pkState = await derivePasskeyState({ userId: session.user.id, tenantId: userTenantId });
+  if (passkeyEnforcementBlocks(pkState)) {
+    if (recordPasskeyAuditEmit(session.user.id, "/api/mcp/authorize/consent", Date.now())) {
+      await logAuditAsync({
+        ...tenantAuditBase(req, session.user.id, userTenantId),
+        action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+        metadata: { blockedPath: "/api/mcp/authorize/consent" },
+      });
+    }
+    const denyUrl = new URL(redirectUri);
+    denyUrl.searchParams.set("error", "access_denied");
+    denyUrl.searchParams.set("error_description", "passkey_required");
+    if (state) denyUrl.searchParams.set("state", state);
+    return NextResponse.redirect(denyUrl.toString(), 302);
   }
 
   // Create authorization code

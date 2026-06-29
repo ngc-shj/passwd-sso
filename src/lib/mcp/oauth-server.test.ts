@@ -26,6 +26,26 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withBypassRls: vi.fn(async (prisma, fn) => fn(prisma)),
 }));
 
+// Helper: add the passkey-state delegates (webAuthnCredential + tenant) to a
+// prisma mock object so that derivePasskeyState resolves NON-BLOCKING (the
+// default for every test that is NOT specifically testing the passkey gate).
+// Count > 0 → hasPasskey=true; requirePasskey=false → never blocks.
+// Note: requirePasskeyEnabledAt must be a Date | null (Prisma returns Date,
+// derivePasskeyState calls .toISOString() on it).
+function addPasskeyStateMocks(client: unknown, opts: { requirePasskey?: boolean; hasPasskey?: boolean } = {}) {
+  const d = mockDelegates(client);
+  d.webAuthnCredential = {
+    count: vi.fn().mockResolvedValue(opts.hasPasskey === false ? 0 : 1),
+  };
+  d.tenant = {
+    findUnique: vi.fn().mockResolvedValue({
+      requirePasskey: opts.requirePasskey ?? false,
+      requirePasskeyEnabledAt: null, // Date | null — null means no enabledAt
+      passkeyGracePeriodDays: null,
+    }),
+  };
+}
+
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: vi.fn((token: string) => `hashed:${token}`),
 }));
@@ -386,6 +406,8 @@ describe("exchangeCodeForToken", () => {
       updateMany: mockConsume,
     };
     mockDelegates(prisma).mcpAccessToken = { create: mockTokenCreate };
+    // derivePasskeyState: non-blocking (requirePasskey=false, hasPasskey=true)
+    addPasskeyStateMocks(prisma);
 
     const result = await exchangeCodeForToken({
       code: "valid-code",
@@ -436,6 +458,7 @@ describe("exchangeCodeForToken", () => {
       updateMany: mockConsume,
     };
     mockDelegates(prisma).mcpAccessToken = { create: mockTokenCreate };
+    addPasskeyStateMocks(prisma);
 
     const result = await exchangeCodeForToken({
       code: "valid-code",
@@ -803,6 +826,7 @@ describe("validateMcpToken", () => {
       userId: "user-uuid",
       serviceAccountId: null,
       familyId: "fam-uuid",
+      familyCreatedAt: new Date(Date.now() - 1_000), // recent — well within the 30-day cap
       accessTokenId: "at-id",
       scope: "credentials:list",
       mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: "tenant-uuid" },
@@ -842,6 +866,7 @@ describe("validateMcpToken", () => {
       userId: "user-uuid",
       serviceAccountId: null,
       familyId: "fam-uuid",
+      familyCreatedAt: new Date(Date.now() - 1_000), // recent — well within the 30-day cap
       accessTokenId: "at-id",
       scope: "credentials:list",
       mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: "tenant-uuid" },
@@ -858,6 +883,7 @@ describe("validateMcpToken", () => {
     mockDelegates(prisma).tenantMember = {
       findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
     };
+    addPasskeyStateMocks(prisma);
 
     const result = await exchangeRefreshToken(
       { refreshToken: "rt2", clientId: "mcpc_test", clientSecretHash: "" },
@@ -881,6 +907,7 @@ describe("validateMcpToken", () => {
       userId: null,
       serviceAccountId: "sa-uuid",
       familyId: "fam-uuid",
+      familyCreatedAt: new Date(Date.now() - 1_000), // recent — well within the 30-day cap
       accessTokenId: "at-id",
       scope: "credentials:list",
       mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: "tenant-uuid" },
@@ -897,6 +924,9 @@ describe("validateMcpToken", () => {
     mockDelegates(prisma).tenantMember = {
       findUnique: mockTenantMemberFindUnique,
     };
+    // SA-bound: userId===null, so derivePasskeyState is never called.
+    // Provide the delegates anyway for safety (non-blocking).
+    addPasskeyStateMocks(prisma);
 
     const result = await exchangeRefreshToken(
       { refreshToken: "rt3", clientId: "mcpc_test", clientSecretHash: "" },
@@ -906,6 +936,150 @@ describe("validateMcpToken", () => {
     expect(result.ok).toBe(true);
     // SA-bound: membership query must NOT be called
     expect(mockTenantMemberFindUnique).not.toHaveBeenCalled();
+  });
+
+  // ── C8 MCP absolute family cap ────────────────────────────
+
+  it("C8(cap-exceeded): family older than 30 days ⇒ invalid_grant, no new tokens created", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    // familyCreatedAt is 31 days ago; cap is 30 days
+    const familyCreatedAt = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+    const mockCreate = vi.fn();
+    const mockAccessCreate = vi.fn();
+    const baseRt = {
+      id: "rt-id",
+      tokenHash: "hashed:rt-cap-exceeded",
+      rotatedAt: null,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 3600_000),
+      clientId: "client-uuid",
+      tenantId: "tenant-uuid",
+      userId: "user-uuid",
+      serviceAccountId: null,
+      familyId: "fam-cap-uuid",
+      familyCreatedAt,
+      accessTokenId: "at-id",
+      scope: "credentials:list",
+      mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: "tenant-uuid" },
+    };
+    mockDelegates(prisma).mcpRefreshToken = {
+      findUnique: vi.fn().mockResolvedValue(baseRt),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      create: mockCreate,
+    };
+    mockDelegates(prisma).mcpAccessToken = {
+      create: mockAccessCreate,
+      update: vi.fn().mockResolvedValue({}),
+    };
+    mockDelegates(prisma).tenantMember = {
+      findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
+    };
+    addPasskeyStateMocks(prisma);
+
+    const result = await exchangeRefreshToken(
+      { refreshToken: "rt-cap-exceeded", clientId: "mcpc_test", clientSecretHash: "" },
+      { prisma: prisma as never },
+    );
+
+    // Refusal shape: same as deactivated_user
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("invalid_grant");
+    // No new tokens must be minted
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockAccessCreate).not.toHaveBeenCalled();
+  });
+
+  it("C8(cap-exceeded injectable clock): cap check uses injectable now param", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    // familyCreatedAt is 1 day ago; injectable clock says 31 days have passed
+    const familyCreatedAt = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000);
+    const frozenNow = familyCreatedAt.getTime() + 31 * 24 * 60 * 60 * 1000;
+    const mockCreate = vi.fn();
+    const mockAccessCreate = vi.fn();
+    const baseRt = {
+      id: "rt-id",
+      tokenHash: "hashed:rt-cap-clock",
+      rotatedAt: null,
+      revokedAt: null,
+      expiresAt: new Date(frozenNow + 3600_000),
+      clientId: "client-uuid",
+      tenantId: "tenant-uuid",
+      userId: "user-uuid",
+      serviceAccountId: null,
+      familyId: "fam-cap-clock-uuid",
+      familyCreatedAt,
+      accessTokenId: "at-id",
+      scope: "credentials:list",
+      mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: "tenant-uuid" },
+    };
+    mockDelegates(prisma).mcpRefreshToken = {
+      findUnique: vi.fn().mockResolvedValue(baseRt),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      create: mockCreate,
+    };
+    mockDelegates(prisma).mcpAccessToken = {
+      create: mockAccessCreate,
+      update: vi.fn().mockResolvedValue({}),
+    };
+    mockDelegates(prisma).tenantMember = {
+      findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
+    };
+    addPasskeyStateMocks(prisma);
+
+    const result = await exchangeRefreshToken(
+      { refreshToken: "rt-cap-clock", clientId: "mcpc_test", clientSecretHash: "", now: () => frozenNow },
+      { prisma: prisma as never },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("invalid_grant");
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockAccessCreate).not.toHaveBeenCalled();
+  });
+
+  it("C8(within-cap): family within 30 days ⇒ rotates normally", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    // familyCreatedAt is 10 days ago — well within the 30-day cap
+    const familyCreatedAt = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+    const mockCreate = vi.fn().mockResolvedValue({ id: "new-rt-id" });
+    const baseRt = {
+      id: "rt-id",
+      tokenHash: "hashed:rt-within-cap",
+      rotatedAt: null,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 3600_000),
+      clientId: "client-uuid",
+      tenantId: "tenant-uuid",
+      userId: "user-uuid",
+      serviceAccountId: null,
+      familyId: "fam-within-cap-uuid",
+      familyCreatedAt,
+      accessTokenId: "at-id",
+      scope: "credentials:list",
+      mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: "tenant-uuid" },
+    };
+    mockDelegates(prisma).mcpRefreshToken = {
+      findUnique: vi.fn().mockResolvedValue(baseRt),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      create: mockCreate,
+    };
+    mockDelegates(prisma).mcpAccessToken = {
+      create: vi.fn().mockResolvedValue({ id: "new-at-id" }),
+      update: vi.fn().mockResolvedValue({}),
+    };
+    mockDelegates(prisma).tenantMember = {
+      findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
+    };
+    addPasskeyStateMocks(prisma);
+
+    const result = await exchangeRefreshToken(
+      { refreshToken: "rt-within-cap", clientId: "mcpc_test", clientSecretHash: "" },
+      { prisma: prisma as never },
+    );
+
+    // Within cap: rotation must succeed and a new refresh token must be created
+    expect(result.ok).toBe(true);
+    expect(mockCreate).toHaveBeenCalledTimes(1);
   });
 
   it("C13(d): userId:null SA-bound token ⇒ valid (membership query NOT called)", async () => {
@@ -939,5 +1113,290 @@ describe("validateMcpToken", () => {
     }
     // SA-bound: membership query must NOT be called
     expect(mockTenantMemberFindUnique).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Passkey enforcement tests (lib-level) ────────────────────
+
+describe("passkey enforcement in exchangeRefreshToken (lib)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const TENANT_ID = "tenant-pk-test";
+  const USER_ID = "user-pk-test";
+  const FAMILY_ID = "fam-pk-test";
+
+  // Shared base refresh token row (valid, user-bound, within cap)
+  function makeBaseRt(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "rt-pk-id",
+      tokenHash: "hashed:rt-pk",
+      rotatedAt: null,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 3600_000),
+      clientId: "client-uuid",
+      tenantId: TENANT_ID,
+      userId: USER_ID,
+      serviceAccountId: null,
+      familyId: FAMILY_ID,
+      familyCreatedAt: new Date(Date.now() - 1_000),
+      accessTokenId: "at-pk-id",
+      scope: "credentials:list",
+      mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: TENANT_ID },
+      ...overrides,
+    };
+  }
+
+  it("passkey-blocked user ⇒ access_denied, NO new tokens minted", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    const mockAccessCreate = vi.fn();
+    const mockRefreshCreate = vi.fn();
+    mockDelegates(prisma).mcpRefreshToken = {
+      findUnique: vi.fn().mockResolvedValue(makeBaseRt()),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      create: mockRefreshCreate,
+    };
+    mockDelegates(prisma).mcpAccessToken = {
+      create: mockAccessCreate,
+      update: vi.fn().mockResolvedValue({}),
+    };
+    mockDelegates(prisma).tenantMember = {
+      findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
+    };
+    // Passkey enforcement BLOCKS: requirePasskey=true, no passkey, grace expired.
+    // requirePasskeyEnabledAt must be a Date (Prisma returns Date; derivePasskeyState
+    // calls .toISOString() on it).
+    addPasskeyStateMocks(prisma, { requirePasskey: true, hasPasskey: false });
+    mockDelegates(prisma).tenant = {
+      findUnique: vi.fn().mockResolvedValue({
+        requirePasskey: true,
+        requirePasskeyEnabledAt: new Date("2020-01-01T00:00:00.000Z"),
+        passkeyGracePeriodDays: 7,
+      }),
+    };
+
+    const result = await exchangeRefreshToken(
+      { refreshToken: "rt-pk", clientId: "mcpc_test", clientSecretHash: "" },
+      { prisma: prisma as never },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("access_denied");
+      expect(result.tenantId).toBe(TENANT_ID);
+      expect(result.userId).toBe(USER_ID);
+    }
+    // CRITICAL: no tokens must be minted when passkey enforcement blocks
+    expect(mockAccessCreate).not.toHaveBeenCalled();
+    expect(mockRefreshCreate).not.toHaveBeenCalled();
+  });
+
+  it("SA-bound (userId===null) with blocking-tenant ⇒ gate skipped, still rotates", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    const mockRefreshCreate = vi.fn().mockResolvedValue({ id: "new-rt-sa" });
+    mockDelegates(prisma).mcpRefreshToken = {
+      findUnique: vi.fn().mockResolvedValue(makeBaseRt({ userId: null, serviceAccountId: "sa-1" })),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      create: mockRefreshCreate,
+    };
+    mockDelegates(prisma).mcpAccessToken = {
+      create: vi.fn().mockResolvedValue({ id: "new-at-sa" }),
+      update: vi.fn().mockResolvedValue({}),
+    };
+    // No tenantMember needed (SA-bound skips that too)
+    // Passkey would block a human — but SA-bound skip means this must rotate
+    addPasskeyStateMocks(prisma, { requirePasskey: true, hasPasskey: false });
+    mockDelegates(prisma).tenant = {
+      findUnique: vi.fn().mockResolvedValue({
+        requirePasskey: true,
+        requirePasskeyEnabledAt: new Date("2020-01-01T00:00:00.000Z"),
+        passkeyGracePeriodDays: 7,
+      }),
+    };
+
+    const result = await exchangeRefreshToken(
+      { refreshToken: "rt-pk", clientId: "mcpc_test", clientSecretHash: "" },
+      { prisma: prisma as never },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(mockRefreshCreate).toHaveBeenCalledOnce();
+  });
+
+  // REGRESSION (critical): rotated (replayed) token presented while passkey would block
+  // → must return REPLAY outcome (invalid_grant / reason:REPLAY) and fire family
+  //   revocation, NOT access_denied. Proves the gate runs AFTER replay detection.
+  it("REGRESSION: rotated token (replay) while passkey would block ⇒ invalid_grant/REPLAY + family revoked, NOT access_denied", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    const mockRefreshUpdateMany = vi.fn().mockResolvedValue({ count: 0 }); // replay phase-2 path
+    const mockRefreshFindMany = vi.fn().mockResolvedValue([{ accessTokenId: "at-pk-id" }]);
+    const mockAccessUpdateMany = vi.fn().mockResolvedValue({});
+    const mockAccessCreate = vi.fn();
+    const mockRefreshCreate = vi.fn();
+    // Token is already rotated — this is a replay
+    mockDelegates(prisma).mcpRefreshToken = {
+      findUnique: vi.fn().mockResolvedValue(makeBaseRt({ rotatedAt: new Date(Date.now() - 30_000) })),
+      updateMany: mockRefreshUpdateMany,
+      findMany: mockRefreshFindMany,
+      create: mockRefreshCreate,
+    };
+    mockDelegates(prisma).mcpAccessToken = {
+      create: mockAccessCreate,
+      update: vi.fn().mockResolvedValue({}),
+      updateMany: mockAccessUpdateMany,
+    };
+    // Passkey would block a human — but replay detection must fire first.
+    // requirePasskeyEnabledAt must be a Date (Prisma returns Date).
+    addPasskeyStateMocks(prisma, { requirePasskey: true, hasPasskey: false });
+    mockDelegates(prisma).tenant = {
+      findUnique: vi.fn().mockResolvedValue({
+        requirePasskey: true,
+        requirePasskeyEnabledAt: new Date("2020-01-01T00:00:00.000Z"),
+        passkeyGracePeriodDays: 7,
+      }),
+    };
+
+    const result = await exchangeRefreshToken(
+      { refreshToken: "rt-pk", clientId: "mcpc_test", clientSecretHash: "" },
+      { prisma: prisma as never },
+    );
+
+    // Must be REPLAY, not access_denied
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("invalid_grant");
+      expect(result.reason).toBe("replay");
+    }
+    // Family revocation must have fired (mcpRefreshToken.updateMany called in Phase 2)
+    expect(mockRefreshUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ familyId: FAMILY_ID, revokedAt: null }),
+        data: expect.objectContaining({ revokedAt: expect.any(Date) }),
+      }),
+    );
+    // No new tokens minted
+    expect(mockAccessCreate).not.toHaveBeenCalled();
+    expect(mockRefreshCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("passkey enforcement in exchangeCodeForToken (lib)", () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const { prisma } = await import("@/lib/prisma");
+    mockDelegates(prisma).$transaction = async (fn: (tx: unknown) => unknown) => fn(prisma);
+  });
+
+  const TENANT_ID = "tenant-code-pk";
+  const USER_ID = "user-code-pk";
+
+  function codeRow(overrides: Record<string, unknown> = {}) {
+    const verifier = "pk-test-verifier-string-for-test";
+    const challenge = computeS256Challenge(verifier);
+    return {
+      id: "code-pk-id",
+      usedAt: null,
+      expiresAt: new Date(Date.now() + 60000),
+      mcpClient: { clientId: "mcpc_test", clientSecretHash: "", isActive: true, tenantId: TENANT_ID },
+      clientId: "client-uuid",
+      tenantId: TENANT_ID,
+      userId: USER_ID,
+      serviceAccountId: null,
+      redirectUri: "https://example.com/callback",
+      codeChallenge: challenge,
+      codeChallengeMethod: "S256",
+      scope: "credentials:read",
+      ...overrides,
+    };
+  }
+
+  it("passkey-blocked user ⇒ access_denied, NO mcpAccessToken.create called", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    const mockTokenCreate = vi.fn();
+    mockDelegates(prisma).mcpAuthorizationCode = {
+      findUnique: vi.fn().mockResolvedValue(codeRow()),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    };
+    mockDelegates(prisma).mcpAccessToken = { create: mockTokenCreate };
+    // Passkey enforcement BLOCKS. requirePasskeyEnabledAt must be a Date (Prisma returns Date).
+    addPasskeyStateMocks(prisma, { requirePasskey: true, hasPasskey: false });
+    mockDelegates(prisma).tenant = {
+      findUnique: vi.fn().mockResolvedValue({
+        requirePasskey: true,
+        requirePasskeyEnabledAt: new Date("2020-01-01T00:00:00.000Z"),
+        passkeyGracePeriodDays: 7,
+      }),
+    };
+
+    const result = await exchangeCodeForToken({
+      code: "pk-test-verifier-string-for-test", // doesn't matter — mocked
+      clientId: "mcpc_test",
+      clientSecretHash: "",
+      redirectUri: "https://example.com/callback",
+      codeVerifier: "pk-test-verifier-string-for-test",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBe("access_denied");
+      expect(result.userId).toBe(USER_ID);
+      expect(result.tenantId).toBe(TENANT_ID);
+    }
+    expect(mockTokenCreate).not.toHaveBeenCalled();
+  });
+
+  it("SA-bound (userId===null) ⇒ gate skipped, mints token", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    const mockTokenCreate = vi.fn().mockResolvedValue({ id: "token-sa" });
+    mockDelegates(prisma).mcpAuthorizationCode = {
+      findUnique: vi.fn().mockResolvedValue(codeRow({ userId: null, serviceAccountId: "sa-2" })),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    };
+    mockDelegates(prisma).mcpAccessToken = { create: mockTokenCreate };
+    // Passkey would block a human — but SA-bound (userId:null) skips the gate.
+    addPasskeyStateMocks(prisma, { requirePasskey: true, hasPasskey: false });
+    mockDelegates(prisma).tenant = {
+      findUnique: vi.fn().mockResolvedValue({
+        requirePasskey: true,
+        requirePasskeyEnabledAt: new Date("2020-01-01T00:00:00.000Z"),
+        passkeyGracePeriodDays: 7,
+      }),
+    };
+
+    const result = await exchangeCodeForToken({
+      code: "pk-test-verifier-string-for-test",
+      clientId: "mcpc_test",
+      clientSecretHash: "",
+      redirectUri: "https://example.com/callback",
+      codeVerifier: "pk-test-verifier-string-for-test",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mockTokenCreate).toHaveBeenCalledOnce();
+  });
+
+  it("non-blocked user (requirePasskey=false) ⇒ mints token", async () => {
+    const verifier = "nonblocked-verifier-string-for-test";
+    const challenge = computeS256Challenge(verifier);
+    const { prisma } = await import("@/lib/prisma");
+    const mockTokenCreate = vi.fn().mockResolvedValue({ id: "token-ok" });
+    mockDelegates(prisma).mcpAuthorizationCode = {
+      findUnique: vi.fn().mockResolvedValue(codeRow({ codeChallenge: challenge })),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    };
+    mockDelegates(prisma).mcpAccessToken = { create: mockTokenCreate };
+    addPasskeyStateMocks(prisma); // requirePasskey=false, hasPasskey=true → non-blocking
+
+    const result = await exchangeCodeForToken({
+      code: "anything",
+      clientId: "mcpc_test",
+      clientSecretHash: "",
+      redirectUri: "https://example.com/callback",
+      codeVerifier: verifier,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(mockTokenCreate).toHaveBeenCalledOnce();
   });
 });

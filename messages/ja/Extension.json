@@ -31,5 +31,7 @@
   "retry": "再試行",
   "connectingBanner": "ブラウザ拡張機能の接続中...",
   "extensionRequired": "この接続には最新版の passwd-sso 拡張機能が必要です。Chrome ウェブストアからインストール／更新後に再度お試しください。",
-  "extensionRequiredAction": "Chrome ウェブストアを開く"
+  "extensionRequiredAction": "Chrome ウェブストアを開く",
+  "connectPasskeyRequiredTitle": "パスキーの登録が必要です",
+  "connectPasskeyRequiredDescription": "テナントのポリシーにより、拡張機能を接続するにはパスキーが必要です。アカウントのセキュリティ設定でパスキーを登録してから、もう一度お試しください。"
 }

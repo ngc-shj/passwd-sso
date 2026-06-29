@@ -41,6 +41,7 @@ vi.mock("@/lib/extension-connect-request", () => ({
   EXTENSION_CONNECT_ERROR_CODE: {
     EXTENSION_ABSENT: "EXTENSION_ABSENT",
     SESSION_STEP_UP_REQUIRED: "SESSION_STEP_UP_REQUIRED",
+    PASSKEY_REQUIRED: "PASSKEY_REQUIRED",
     GENERIC_FAILURE: "GENERIC_FAILURE",
   },
 }));
@@ -215,6 +216,24 @@ describe("AutoExtensionConnect", () => {
       expect(screen.getByText("connectFailedTitle")).toBeInTheDocument();
     });
     expect(screen.getByText("connectFailedDescription")).toBeInTheDocument();
+  });
+
+  it("shows passkey-required guidance when errorCode = PASSKEY_REQUIRED (C5)", async () => {
+    // Asserts the card is shown (title + description) and the retry button is
+    // present. Does NOT retry the connection automatically — the user must
+    // register a passkey first and then manually trigger a new connection.
+    setSearchParams("?ext_connect=1");
+    mockRequestExtensionConnect.mockResolvedValue({
+      ok: false,
+      errorCode: "PASSKEY_REQUIRED",
+    });
+    await renderAndClickAllow();
+    await waitFor(() => {
+      expect(screen.getByText("connectPasskeyRequiredTitle")).toBeInTheDocument();
+    });
+    expect(screen.getByText("connectPasskeyRequiredDescription")).toBeInTheDocument();
+    // The retry button must be present so the user can try again after registering.
+    expect(screen.getByText("retry")).toBeInTheDocument();
   });
 
   it("shows reauth guidance when SESSION_STEP_UP_REQUIRED + passkey-capable", async () => {

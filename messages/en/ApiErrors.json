@@ -130,6 +130,7 @@
   "operatorTokenNotFound": "Operator token not found.",
   "operatorTokenStaleSession": "Re-authenticate within the last 15 minutes to continue this action, then try again.",
   "sessionStepUpRequired": "Re-authenticate within the last 15 minutes to continue this action, then try again.",
+  "passkeyRequired": "This tenant requires a passkey. Register a passkey before continuing.",
   "quotaExceeded": "Resource limit reached. Contact your administrator to raise the quota.",
   "forbiddenSelfApproval": "You cannot approve a request that you (or your service account) created. Another admin must approve it.",
   "forbiddenCrossTenant": "This action requires an administrator from the same tenant as the request.",

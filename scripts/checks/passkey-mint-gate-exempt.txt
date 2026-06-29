@@ -1,0 +1,17 @@
+# Passkey-mint-gate exempt allowlist (check-passkey-mint-gate.sh)
+#
+# Route files that mint or re-mint a token but are INTENTIONALLY exempt from a
+# direct `passkeyEnforcementBlocks` call, because they are transitively gated
+# via a parent token that IS passkey-gated.
+#
+# One repo-relative path per line. Lines beginning with `#` are comments.
+# Every entry MUST state, in a trailing comment, why a direct gate does not
+# apply (C9 / plan R42 — explicit classification, not silent omission).
+#
+# Adding a route here is a security decision — it must be justified, not a
+# convenience to silence the guard. The default answer for a new mint route is
+# "add passkeyEnforcementBlocks", NOT "add to this file".
+
+src/app/api/mobile/autofill-token/route.ts # transitively gated via IOS_APP host token (C3 mint + C8 refresh); a direct hasPasskey gate deadlocks first-passkey-save (C9)
+src/app/api/mcp/token/route.ts # passkey gate moved into exchangeRefreshToken/exchangeCodeForToken (oauth-server.ts) AFTER replay validation, BEFORE mint
+src/app/api/mobile/token/refresh/route.ts # passkey gate moved into refreshIosToken (mobile-token.ts) AFTER replay validation

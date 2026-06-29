@@ -11,6 +11,9 @@ const {
   mockRefreshIosToken,
   mockVerifyDpop,
   mockEnforceAccessRestriction,
+  mockDerivePasskeyState,
+  mockRecordPasskeyAuditEmit,
+  mockLogAuditAsync,
 } = vi.hoisted(() => ({
   mockExtensionTokenFindUnique: vi.fn(),
   mockTenantMemberFindUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
@@ -19,6 +22,15 @@ const {
   mockRefreshIosToken: vi.fn(),
   mockVerifyDpop: vi.fn(),
   mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
+  // C8 passkey enforcement mocks
+  mockDerivePasskeyState: vi.fn().mockResolvedValue({
+    requirePasskey: false,
+    hasPasskey: false,
+    requirePasskeyEnabledAt: null,
+    passkeyGracePeriodDays: null,
+  }),
+  mockRecordPasskeyAuditEmit: vi.fn().mockReturnValue(true),
+  mockLogAuditAsync: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -70,8 +82,14 @@ vi.mock("@/lib/url-helpers", async (importOriginal) => {
   return { ...actual, getAppOrigin: () => "https://example.test" };
 });
 
+vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
+  derivePasskeyState: mockDerivePasskeyState,
+  recordPasskeyAuditEmit: mockRecordPasskeyAuditEmit,
+}));
+
 vi.mock("@/lib/audit/audit", () => ({
-  logAuditAsync: vi.fn(),
+  logAuditAsync: mockLogAuditAsync,
   personalAuditBase: (_req: unknown, userId: string) => ({
     scope: "PERSONAL",
     userId,
@@ -159,6 +177,15 @@ describe("POST /api/mobile/token/refresh", () => {
         tokenId: "new-tok-id",
       },
     });
+    // Default: passkey enforcement OFF → allows rotation
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: false,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+    mockRecordPasskeyAuditEmit.mockReturnValue(true);
+    mockLogAuditAsync.mockResolvedValue(undefined);
   });
 
   it("rotates the token pair on a valid request", async () => {
@@ -327,5 +354,71 @@ describe("POST /api/mobile/token/refresh", () => {
     const { status, json } = await parseJson(res);
     expect(status).toBe(401);
     expect(json.error).toBe("UNAUTHORIZED");
+  });
+
+  // ─── C8: Passkey enforcement matrix ──────────────────────────
+
+  describe("C8: passkey enforcement on iOS token refresh", () => {
+    it("6b-off: lib returns ok (non-blocked) → route returns 200", async () => {
+      // The passkey gate is inside the lib. Route just maps ok result → 200.
+      // (lib's non-blocking behavior is tested in mobile-token.test.ts)
+      const res = await POST(makeRequest());
+      const { status } = await parseJson(res);
+
+      expect(status).toBe(200);
+      expect(mockRefreshIosToken).toHaveBeenCalledOnce();
+    });
+
+    it("6b-haspasskey: lib returns ok (has passkey) → route returns 200", async () => {
+      const res = await POST(makeRequest());
+      const { status } = await parseJson(res);
+
+      expect(status).toBe(200);
+      expect(mockRefreshIosToken).toHaveBeenCalledOnce();
+    });
+
+    it("6b-withingrace: lib returns ok (within grace) → route returns 200", async () => {
+      const res = await POST(makeRequest());
+      const { status } = await parseJson(res);
+
+      expect(status).toBe(200);
+      expect(mockRefreshIosToken).toHaveBeenCalledOnce();
+    });
+
+    it("6b-graceexpired: lib returns PASSKEY_REQUIRED → route returns 403 + audit", async () => {
+      // The passkey gate is inside refreshIosToken (lib-level) now.
+      // Route maps PASSKEY_REQUIRED result → 403 + audit.
+      mockRefreshIosToken.mockResolvedValue({ ok: false, error: "PASSKEY_REQUIRED" });
+
+      const res = await POST(makeRequest());
+      const { status, json } = await parseJson(res);
+
+      // Refused with PASSKEY_REQUIRED (403)
+      expect(status).toBe(403);
+      expect(json.error).toBe("PASSKEY_REQUIRED");
+      // refreshIosToken WAS called (gate is inside the lib now)
+      expect(mockRefreshIosToken).toHaveBeenCalledOnce();
+      // Audit must be emitted
+      expect(mockRecordPasskeyAuditEmit).toHaveBeenCalledWith(
+        USER_ID,
+        "/api/mobile/token/refresh",
+        expect.any(Number),
+      );
+      expect(mockLogAuditAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "PASSKEY_ENFORCEMENT_BLOCKED",
+          metadata: { blockedPath: "/api/mobile/token/refresh" },
+        }),
+      );
+    });
+
+    it("6b-lib-throws: lib (refreshIosToken) throws (DB error in passkey gate) → route propagates throw", async () => {
+      // If derivePasskeyState throws inside refreshIosToken, the lib propagates it.
+      // Route lets it bubble — fail closed.
+      mockRefreshIosToken.mockRejectedValue(new Error("DB error"));
+
+      await expect(POST(makeRequest())).rejects.toThrow("DB error");
+      expect(mockRefreshIosToken).toHaveBeenCalledOnce();
+    });
   });
 });

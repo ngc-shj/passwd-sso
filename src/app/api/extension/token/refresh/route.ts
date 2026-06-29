@@ -18,6 +18,13 @@ import {
   EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
   EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT,
 } from "@/lib/validations/common";
+import {
+  derivePasskeyState,
+  passkeyEnforcementBlocks,
+  recordPasskeyAuditEmit,
+} from "@/lib/auth/policy/passkey-enforcement";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
+import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 
 export const runtime = "nodejs";
 
@@ -104,6 +111,21 @@ async function handlePOST(req: NextRequest) {
       reason: EXTENSION_TOKEN_REVOKE_REASON.FAMILY_EXPIRED,
     });
     return errorResponse(API_ERROR.EXTENSION_TOKEN_SESSION_EXPIRED);
+  }
+
+  // C8: Passkey enforcement gate — re-derive fresh from DB, fail closed.
+  // Tenant source = the tenant the refreshed token will be bound to (activeSession.tenantId).
+  const passkeyState = await derivePasskeyState({ userId, tenantId: activeSession.tenantId });
+  if (passkeyEnforcementBlocks(passkeyState)) {
+    if (recordPasskeyAuditEmit(userId, "/api/extension/token/refresh", Date.now())) {
+      await logAuditAsync({
+        ...personalAuditBase(req, userId),
+        tenantId: activeSession.tenantId,
+        action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+        metadata: { blockedPath: "/api/extension/token/refresh" },
+      });
+    }
+    return errorResponse(API_ERROR.PASSKEY_REQUIRED);
   }
 
   // Interactive transaction: revoke old (optimistic lock), then create new only if revoke succeeded

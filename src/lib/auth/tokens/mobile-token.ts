@@ -24,6 +24,10 @@ import {
 import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import {
+  derivePasskeyState,
+  passkeyEnforcementBlocks,
+} from "@/lib/auth/policy/passkey-enforcement";
+import {
   revokeExtensionTokenFamily,
   EXTENSION_TOKEN_REVOKE_REASON,
   parseScopes,
@@ -454,7 +458,7 @@ export type RefreshIosTokenResult =
   | { ok: true; replayed?: boolean; token: IssuedIosToken }
   | {
       ok: false;
-      error: "REFRESH_TOKEN_FAMILY_EXPIRED" | "REFRESH_REPLAY_DETECTED";
+      error: "REFRESH_TOKEN_FAMILY_EXPIRED" | "REFRESH_REPLAY_DETECTED" | "PASSKEY_REQUIRED";
     };
 
 /**
@@ -516,6 +520,15 @@ export async function refreshIosToken(
       reason: EXTENSION_TOKEN_REVOKE_REASON.FAMILY_EXPIRED,
     });
     return { ok: false, error: "REFRESH_TOKEN_FAMILY_EXPIRED" };
+  }
+
+  // ── 2b. Passkey enforcement at the MINT point ─────────────────
+  // AFTER replay-vs-retry + family-expiry (so a replayed/revoked token still
+  // triggers family revocation above, never short-circuited by this gate),
+  // BEFORE rotating. Fail-closed: derivePasskeyState throws on DB error.
+  const pk = await derivePasskeyState({ userId: oldRow.userId, tenantId: oldRow.tenantId });
+  if (passkeyEnforcementBlocks(pk)) {
+    return { ok: false, error: "PASSKEY_REQUIRED" };
   }
 
   // ── 3. Happy path: rotate ─────────────────────────────────────

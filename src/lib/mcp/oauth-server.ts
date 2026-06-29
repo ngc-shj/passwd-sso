@@ -20,12 +20,17 @@ import {
   MCP_TOKEN_EXPIRY_SEC,
   MCP_REFRESH_TOKEN_PREFIX,
   MCP_REFRESH_TOKEN_EXPIRY_SEC,
+  MCP_REFRESH_TOKEN_FAMILY_ABSOLUTE_TIMEOUT_SEC,
   MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS,
   REFRESH_EXCHANGE_REASON,
   type McpScope,
   type RefreshExchangeReason,
 } from "@/lib/constants/auth/mcp";
 import { MS_PER_SECOND } from "@/lib/constants/time";
+import {
+  derivePasskeyState,
+  passkeyEnforcementBlocks,
+} from "@/lib/auth/policy/passkey-enforcement";
 
 export interface McpTokenData {
   tokenId: string;
@@ -140,11 +145,20 @@ export interface TokenExchangeResult {
 export type TokenExchangeError =
   | "invalid_grant"
   | "invalid_client"
-  | "invalid_request";
+  | "invalid_request"
+  | "access_denied";
 
 export type TokenExchangeOutcome =
   | { ok: true; data: TokenExchangeResult }
-  | { ok: false; error: TokenExchangeError; errorDescription?: string };
+  | {
+      ok: false;
+      error: TokenExchangeError;
+      errorDescription?: string;
+      // Populated only on the passkey-enforcement (access_denied) path so the
+      // route can emit the PASSKEY_ENFORCEMENT_BLOCKED audit.
+      userId?: string | null;
+      tenantId?: string;
+    };
 
 export async function exchangeCodeForToken(
   params: ExchangeCodeParams,
@@ -200,6 +214,26 @@ export async function exchangeCodeForToken(
       });
       if (consumed.count === 0) return { error: "invalid_grant" as const };
 
+      // Passkey enforcement at the auth_code → token MINT point. The code was
+      // gated at consent creation, but enforcement can flip (or a passkey be
+      // removed) within the code TTL, so re-derive here before minting. AFTER
+      // code validation + consume; BEFORE the access-token create. SA-bound
+      // (userId null) skip.
+      if (authCode.userId !== null) {
+        const pk = await derivePasskeyState({
+          userId: authCode.userId,
+          tenantId: authCode.tenantId,
+          tx,
+        });
+        if (passkeyEnforcementBlocks(pk)) {
+          return {
+            error: "access_denied" as const,
+            userId: authCode.userId,
+            tenantId: authCode.tenantId,
+          };
+        }
+      }
+
       // Issue access token
       const plainToken = MCP_TOKEN_PREFIX + randomBytes(32).toString("base64url");
       const tokenHash = hashToken(plainToken);
@@ -236,7 +270,14 @@ export async function exchangeCodeForToken(
   BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 
   if ("error" in result) {
-    return { ok: false, error: result.error as TokenExchangeError };
+    return {
+      ok: false,
+      error: result.error as TokenExchangeError,
+      // Carry the passkey-path identifiers (present only on access_denied) so
+      // the route can emit the block audit; undefined for all other errors.
+      userId: "userId" in result ? result.userId : undefined,
+      tenantId: "tenantId" in result ? result.tenantId : undefined,
+    };
   }
   return {
     ok: true,
@@ -259,6 +300,7 @@ export async function exchangeCodeForToken(
 /**
  * Create a refresh token for an MCP client.
  * familyId groups tokens in a rotation chain for bulk revocation.
+ * familyCreatedAt records the family's birth time for absolute-cap enforcement.
  */
 export async function createRefreshToken(params: {
   accessTokenId: string;
@@ -272,13 +314,15 @@ export async function createRefreshToken(params: {
   const token = MCP_REFRESH_TOKEN_PREFIX + randomBytes(32).toString("base64url");
   const tokenHash = hashToken(token);
   const familyId = params.familyId ?? randomUUID();
-  const expiresAt = new Date(Date.now() + MCP_REFRESH_TOKEN_EXPIRY_SEC * MS_PER_SECOND);
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + MCP_REFRESH_TOKEN_EXPIRY_SEC * MS_PER_SECOND);
 
   await withBypassRls(prisma, async (tx) => {
     await tx.mcpRefreshToken.create({
       data: {
         tokenHash,
         familyId,
+        familyCreatedAt: now,
         accessTokenId: params.accessTokenId,
         clientId: params.clientId,
         tenantId: params.tenantId,
@@ -318,6 +362,7 @@ export async function exchangeRefreshToken(
     refreshToken: string;
     clientId: string; // McpClient.clientId (mcpc_xxx)
     clientSecretHash: string;
+    now?: () => number; // Injectable clock for deterministic cap tests
   },
   options: { prisma?: PrismaClient } = {},
 ): Promise<
@@ -335,14 +380,16 @@ export async function exchangeRefreshToken(
     }
   | {
       ok: false;
-      error: "invalid_grant" | "invalid_client";
+      error: "invalid_grant" | "invalid_client" | "access_denied";
       reason?: RefreshExchangeReason;
       tenantId?: string;
       familyId?: string;
+      userId?: string | null;
     }
 > {
   const dbClient = options.prisma ?? prisma;
   const tokenHash = hashToken(params.refreshToken);
+  const nowMs = params.now ? params.now() : Date.now();
 
   // Phase 1: validate + CAS + create new tokens (or detect race/replay).
   // The `tx` argument from withBypassRls is the transaction-scoped client
@@ -356,7 +403,22 @@ export async function exchangeRefreshToken(
     async (tx) => {
       const rt = await tx.mcpRefreshToken.findUnique({
         where: { tokenHash },
-        include: { mcpClient: true },
+        select: {
+          id: true,
+          tokenHash: true,
+          rotatedAt: true,
+          revokedAt: true,
+          expiresAt: true,
+          clientId: true,
+          tenantId: true,
+          userId: true,
+          serviceAccountId: true,
+          familyId: true,
+          familyCreatedAt: true,
+          accessTokenId: true,
+          scope: true,
+          mcpClient: true,
+        },
       });
 
       if (!rt) return { type: "not_found" as const };
@@ -390,11 +452,32 @@ export async function exchangeRefreshToken(
         return { type: "invalid_client" as const };
       }
 
+      // C8 absolute family cap: refuse rotation when the family has exceeded its
+      // maximum lifetime, regardless of individual token validity. Mirrors the
+      // ExtensionToken.familyCreatedAt cap (30 d) for MCP token-lifetime parity.
+      if (
+        nowMs - rt.familyCreatedAt.getTime() >
+        MCP_REFRESH_TOKEN_FAMILY_ABSOLUTE_TIMEOUT_SEC * MS_PER_SECOND
+      ) {
+        return { type: "family_cap_exceeded" as const };
+      }
+
       // C13: reject deactivated users before issuing new tokens.
       // SA-bound tokens (userId === null) skip — no TenantMember row.
       if (rt.userId !== null) {
         const memberStatus = await checkTenantMembership(tx, rt.tenantId, rt.userId);
         if (!memberStatus) return { type: "deactivated_user" as const };
+      }
+
+      // Passkey enforcement at the MINT point — AFTER replay/revoked/expired/
+      // client/cap/deactivated validation (so theft-detection family-revocation
+      // for a replayed token is never suppressed), BEFORE minting. SA-bound
+      // tokens (userId null) skip — passkeys are a human-identity ceremony.
+      if (rt.userId !== null) {
+        const pk = await derivePasskeyState({ userId: rt.userId, tenantId: rt.tenantId, tx });
+        if (passkeyEnforcementBlocks(pk)) {
+          return { type: "passkey_required" as const, tenantId: rt.tenantId, userId: rt.userId };
+        }
       }
 
       // Generate new tokens up-front so we can include the new hash in the CAS
@@ -441,6 +524,7 @@ export async function exchangeRefreshToken(
         data: {
           tokenHash: newRefreshTokenHash,
           familyId: rt.familyId,
+          familyCreatedAt: rt.familyCreatedAt, // Carry forward the family's original birth time
           accessTokenId: newAccess.id,
           clientId: rt.clientId,
           tenantId: rt.tenantId,
@@ -496,8 +580,18 @@ export async function exchangeRefreshToken(
       return { ok: false, error: "invalid_grant", reason: REFRESH_EXCHANGE_REASON.EXPIRED };
     case "invalid_client":
       return { ok: false, error: "invalid_client" };
+    case "family_cap_exceeded":
+      return { ok: false, error: "invalid_grant" };
     case "deactivated_user":
       return { ok: false, error: "invalid_grant" };
+    case "passkey_required":
+      return {
+        ok: false,
+        error: "access_denied",
+        reason: REFRESH_EXCHANGE_REASON.PASSKEY_REQUIRED,
+        tenantId: phase1.tenantId,
+        userId: phase1.userId,
+      };
     case "replay":
     case "race_lost": {
       // Fail-closed family revocation in a transaction independent of Phase 1

@@ -251,7 +251,10 @@ async function extractErrorCode(res: Response): Promise<string> {
     const body = (await res.json()) as { error?: unknown };
     if (typeof body.error === "string") {
       // Only propagate codes the web-app helper knows how to react to.
-      if (body.error === "SESSION_STEP_UP_REQUIRED") return body.error;
+      if (
+        body.error === "SESSION_STEP_UP_REQUIRED" ||
+        body.error === "PASSKEY_REQUIRED"
+      ) return body.error;
     }
   } catch {
     // ignore — response body not JSON

@@ -37,6 +37,10 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/extension/key/reset/route.ts", ["extensionToken"]],
   ["src/lib/auth/access/maintenance-auth.ts", ["tenantMember"]],
   ["src/app/api/extension/bridge-code/route.ts", ["extensionBridgeCode"]],
+  // C8: passkey-enforcement gate pre-read on the cookieless MCP refresh path.
+  // Resolves userId/tenantId from the refresh-token row (RLS would filter it to
+  // null for a DPoP-bearer request) before re-deriving passkey state + gating.
+  ["src/app/api/mcp/token/route.ts", ["mcpRefreshToken"]],
   ["src/app/api/extension/token/exchange/route.ts", ["extensionBridgeCode"]],
   // A04-4: execute is the only phase that revokes shares system-wide; the
   // master key is global, so old-version shares across ALL tenants must be
@@ -58,6 +62,11 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/auth/policy/account-lockout.ts", ["user", "tenant", "auditOutbox"]],
   ["src/lib/auth/policy/lockout-admin-notify.ts", ["user", "tenantMember"]],
   ["src/lib/auth/policy/new-device-detection.ts", ["session", "user"]],
+  // C8: shared fail-closed re-derivation of passkey-enforcement state for the
+  // token-issuance gates (derivePasskeyState). Reads a user-global passkey
+  // count + the tenant policy row under bypass — the cookieless token paths and
+  // the session callback have no RLS context. Mirrors src/auth.ts's read.
+  ["src/lib/auth/policy/passkey-enforcement.ts", ["webAuthnCredential", "tenant"]],
   // Shared step-up helper: reads Session.createdAt from the session-token cookie.
   ["src/lib/auth/session/step-up.ts", ["session"]],
   // Route-level chooser: selects passkey freshness vs generic recent-session by session provider.

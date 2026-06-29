@@ -34,8 +34,8 @@ vi.mock("@/lib/auth/session/session-cache", async () => {
   };
 });
 
+import { handlePageRoute } from "./page-route";
 import {
-  handlePageRoute,
   recordPasskeyAuditEmit,
   PASSKEY_AUDIT_DEDUP_MS,
   PASSKEY_AUDIT_MAP_MAX,
@@ -43,7 +43,7 @@ import {
   _passkeyAuditSizeForTests,
   _passkeyAuditHasForTests,
   _passkeyAuditFirstKeyForTests,
-} from "./page-route";
+} from "../auth/policy/passkey-enforcement";
 
 const APP_ORIGIN = "http://localhost:3000";
 const dummyOptions = { cspHeader: "default-src 'self'", nonce: "test-nonce" };
@@ -285,48 +285,58 @@ describe("recordPasskeyAuditEmit — module-state isolated dedup", () => {
     _resetPasskeyAuditForTests();
   });
 
-  it("records first emit for a user (returns true)", () => {
-    expect(recordPasskeyAuditEmit("u-a", 1_000)).toBe(true);
-    expect(_passkeyAuditHasForTests("u-a")).toBe(true);
+  const PATH_A = "/dashboard/passwords";
+
+  it("records first emit for a user+path (returns true)", () => {
+    expect(recordPasskeyAuditEmit("u-a", PATH_A, 1_000)).toBe(true);
+    expect(_passkeyAuditHasForTests("u-a", PATH_A)).toBe(true);
     expect(_passkeyAuditSizeForTests()).toBe(1);
   });
 
-  it("dedupes a second emit within DEDUP_MS for the same user", () => {
-    expect(recordPasskeyAuditEmit("u-b", 1_000)).toBe(true);
-    expect(recordPasskeyAuditEmit("u-b", 1_000 + PASSKEY_AUDIT_DEDUP_MS)).toBe(false);
+  it("dedupes a second emit within DEDUP_MS for the same user+path", () => {
+    expect(recordPasskeyAuditEmit("u-b", PATH_A, 1_000)).toBe(true);
+    expect(recordPasskeyAuditEmit("u-b", PATH_A, 1_000 + PASSKEY_AUDIT_DEDUP_MS)).toBe(false);
   });
 
   it("permits a fresh emit just past DEDUP_MS boundary (1ms after the inclusive window)", () => {
-    expect(recordPasskeyAuditEmit("u-c", 1_000)).toBe(true);
+    expect(recordPasskeyAuditEmit("u-c", PATH_A, 1_000)).toBe(true);
     expect(
-      recordPasskeyAuditEmit("u-c", 1_000 + PASSKEY_AUDIT_DEDUP_MS + 1),
+      recordPasskeyAuditEmit("u-c", PATH_A, 1_000 + PASSKEY_AUDIT_DEDUP_MS + 1),
     ).toBe(true);
   });
 
   it("evicts the staleness-oldest entry when map exceeds PASSKEY_AUDIT_MAP_MAX", () => {
-    // Fill map to exactly MAX with distinct users.
+    // Fill map to exactly MAX with distinct users (each with their own path key).
     for (let i = 0; i < PASSKEY_AUDIT_MAP_MAX; i += 1) {
-      recordPasskeyAuditEmit(`user-${i}`, 1_000 + i);
+      recordPasskeyAuditEmit(`user-${i}`, PATH_A, 1_000 + i);
     }
     expect(_passkeyAuditSizeForTests()).toBe(PASSKEY_AUDIT_MAP_MAX);
-    expect(_passkeyAuditFirstKeyForTests()).toBe("user-0");
+    expect(_passkeyAuditFirstKeyForTests()).toBe(`user-0:${PATH_A}`);
 
-    // One more accepted emit triggers eviction of the staleness head (user-0).
-    recordPasskeyAuditEmit("overflow-user", 1_000 + PASSKEY_AUDIT_MAP_MAX);
+    // One more accepted emit triggers eviction of the staleness head (user-0:PATH_A).
+    recordPasskeyAuditEmit("overflow-user", PATH_A, 1_000 + PASSKEY_AUDIT_MAP_MAX);
     expect(_passkeyAuditSizeForTests()).toBe(PASSKEY_AUDIT_MAP_MAX);
-    expect(_passkeyAuditHasForTests("user-0")).toBe(false);
-    expect(_passkeyAuditHasForTests("overflow-user")).toBe(true);
+    expect(_passkeyAuditHasForTests("user-0", PATH_A)).toBe(false);
+    expect(_passkeyAuditHasForTests("overflow-user", PATH_A)).toBe(true);
   });
 
   it("re-emit refreshes recency: oldest key shifts to the next-oldest user", () => {
-    recordPasskeyAuditEmit("u-old", 1_000);
-    recordPasskeyAuditEmit("u-mid", 2_000);
-    recordPasskeyAuditEmit("u-new", 3_000);
-    expect(_passkeyAuditFirstKeyForTests()).toBe("u-old");
+    recordPasskeyAuditEmit("u-old", PATH_A, 1_000);
+    recordPasskeyAuditEmit("u-mid", PATH_A, 2_000);
+    recordPasskeyAuditEmit("u-new", PATH_A, 3_000);
+    expect(_passkeyAuditFirstKeyForTests()).toBe(`u-old:${PATH_A}`);
 
     // u-old re-emits past DEDUP_MS → moves to the tail.
-    recordPasskeyAuditEmit("u-old", 1_000 + PASSKEY_AUDIT_DEDUP_MS + 1);
-    expect(_passkeyAuditFirstKeyForTests()).toBe("u-mid");
+    recordPasskeyAuditEmit("u-old", PATH_A, 1_000 + PASSKEY_AUDIT_DEDUP_MS + 1);
+    expect(_passkeyAuditFirstKeyForTests()).toBe(`u-mid:${PATH_A}`);
+  });
+
+  it("same user + different blocked path within window → NOT deduped (two emits)", () => {
+    const PATH_B = "/dashboard/settings";
+    expect(recordPasskeyAuditEmit("u-d", PATH_A, 1_000)).toBe(true);
+    // Same user, different path — NOT deduped.
+    expect(recordPasskeyAuditEmit("u-d", PATH_B, 1_000)).toBe(true);
+    expect(_passkeyAuditSizeForTests()).toBe(2);
   });
 });
 
@@ -382,5 +392,46 @@ describe("handlePageRoute — passkey audit dedup over consecutive requests", ()
     ).length;
     expect(auditFetchesAfter).toBe(1);
     expect(_passkeyAuditSizeForTests()).toBe(1);
+  });
+
+  // F18: same user + SAME blocked path within the window → one emit;
+  // same user + DIFFERENT blocked page path within the window → TWO emits.
+  it("F18: same user + same path deduped; same user + different path emits a second audit", async () => {
+    const sessionUser = {
+      id: "u-f18",
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
+      passkeyGracePeriodDays: 1,
+    };
+    mockValidSession(fetchSpy, sessionUser);
+
+    const headers = { cookie: "authjs.session-token=sess-f18" };
+
+    // First request to /ja/dashboard/passwords → audit emit fires.
+    await handlePageRoute(makePageRequest("/ja/dashboard/passwords", headers), dummyOptions);
+    await new Promise((r) => setImmediate(r));
+    const auditAfterFirst = fetchSpy.mock.calls.filter(
+      (c: unknown[]) => String(c[0]).includes("/api/internal/audit-emit"),
+    ).length;
+    expect(auditAfterFirst).toBe(1);
+
+    // Second request to the SAME path → deduped, no second emit.
+    mockValidSession(fetchSpy, sessionUser);
+    await handlePageRoute(makePageRequest("/ja/dashboard/passwords", headers), dummyOptions);
+    await new Promise((r) => setImmediate(r));
+    const auditAfterSamePath = fetchSpy.mock.calls.filter(
+      (c: unknown[]) => String(c[0]).includes("/api/internal/audit-emit"),
+    ).length;
+    expect(auditAfterSamePath).toBe(1);
+
+    // Third request to a DIFFERENT path → NOT deduped, second emit fires.
+    mockValidSession(fetchSpy, sessionUser);
+    await handlePageRoute(makePageRequest("/ja/dashboard/settings", headers), dummyOptions);
+    await new Promise((r) => setImmediate(r));
+    const auditAfterDiffPath = fetchSpy.mock.calls.filter(
+      (c: unknown[]) => String(c[0]).includes("/api/internal/audit-emit"),
+    ).length;
+    expect(auditAfterDiffPath).toBe(2);
   });
 });

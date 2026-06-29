@@ -14,6 +14,7 @@ import { MS_PER_SECOND } from "@/lib/constants/time";
 export const EXTENSION_CONNECT_ERROR_CODE = {
   EXTENSION_ABSENT: "EXTENSION_ABSENT",
   SESSION_STEP_UP_REQUIRED: "SESSION_STEP_UP_REQUIRED",
+  PASSKEY_REQUIRED: "PASSKEY_REQUIRED",
   GENERIC_FAILURE: "GENERIC_FAILURE",
 } as const;
 
@@ -31,11 +32,12 @@ export type ExtensionConnectResult =
 // postMessage but too tight for this new SW-initiated dual-fetch flow.
 const DEFAULT_TIMEOUT_MS = 8 * MS_PER_SECOND;
 
-function coerceErrorCode(input: unknown): ExtensionConnectErrorCode {
+export function coerceErrorCode(input: unknown): ExtensionConnectErrorCode {
   if (typeof input !== "string") return EXTENSION_CONNECT_ERROR_CODE.GENERIC_FAILURE;
   if (
     input === EXTENSION_CONNECT_ERROR_CODE.SESSION_STEP_UP_REQUIRED ||
-    input === EXTENSION_CONNECT_ERROR_CODE.EXTENSION_ABSENT
+    input === EXTENSION_CONNECT_ERROR_CODE.EXTENSION_ABSENT ||
+    input === EXTENSION_CONNECT_ERROR_CODE.PASSKEY_REQUIRED
   ) {
     return input;
   }

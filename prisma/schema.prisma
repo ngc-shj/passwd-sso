@@ -1984,6 +1984,10 @@ model McpRefreshToken {
   rotatedAt        DateTime? @map("rotated_at") @db.Timestamptz(3)
   replacedByHash   String?   @map("replaced_by_hash") @db.VarChar(64)
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  // Family birth time (earliest createdAt in the rotation family). Carried
+  // forward unchanged across rotation so a long refresh chain converges at the
+  // absolute family cap (parity with ExtensionToken.familyCreatedAt).
+  familyCreatedAt  DateTime  @default(now()) @map("family_created_at") @db.Timestamptz(3)
 
   tenant      Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   mcpClient   McpClient      @relation(fields: [clientId], references: [id], onDelete: Cascade)

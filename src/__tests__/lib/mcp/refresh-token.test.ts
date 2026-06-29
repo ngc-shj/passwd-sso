@@ -128,6 +128,7 @@ describe("exchangeRefreshToken", () => {
     serviceAccountId: null,
     scope: "credentials:list,credentials:use",
     expiresAt: new Date(Date.now() + 3600000),
+    familyCreatedAt: new Date(), // recent → within the 30-day absolute cap
     // Nullable timestamp columns (DateTime? in schema). Widen so per-test
     // overrides can supply a Date (expired/revoked/rotated fixtures).
     revokedAt: null as Date | null,
@@ -162,6 +163,18 @@ describe("exchangeRefreshToken", () => {
       // C13: active membership default so happy-path and CAS tests pass.
       (prisma as unknown as Record<string, unknown>).tenantMember = {
         findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
+      };
+      // Passkey enforcement: non-blocking default (requirePasskey=false, hasPasskey=true)
+      // so existing happy-path / replay / CAS tests pass through the gate unchanged.
+      (prisma as unknown as Record<string, unknown>).webAuthnCredential = {
+        count: vi.fn().mockResolvedValue(1), // hasPasskey = true → never blocks
+      };
+      (prisma as unknown as Record<string, unknown>).tenant = {
+        findUnique: vi.fn().mockResolvedValue({
+          requirePasskey: false,
+          requirePasskeyEnabledAt: null,
+          passkeyGracePeriodDays: null,
+        }),
       };
       (prisma as unknown as Record<string, unknown>).mcpRefreshToken = {
         findUnique: vi.fn().mockResolvedValue(overrides.rt !== undefined ? overrides.rt : VALID_RT),

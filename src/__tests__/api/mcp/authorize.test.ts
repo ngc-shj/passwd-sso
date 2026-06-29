@@ -2,10 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextResponse } from "next/server";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockMcpClientFindFirst, mockWithBypassRls, mockServerAppUrl, mockDetectLocale, mockRateLimiterCheck, mockRequireRecentSession, mockEmitFailClosed, mockCheckRateLimitOrFail } =
+const { mockAuth, mockMcpClientFindFirst, mockUserFindUnique, mockWithBypassRls, mockServerAppUrl, mockDetectLocale, mockRateLimiterCheck, mockRequireRecentSession, mockEmitFailClosed, mockCheckRateLimitOrFail, mockDerivePasskeyState } =
   vi.hoisted(() => ({
     mockAuth: vi.fn(),
     mockMcpClientFindFirst: vi.fn(),
+    mockUserFindUnique: vi.fn(),
     mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
     mockServerAppUrl: vi.fn((path: string) => `http://localhost:3000${path}`),
     mockDetectLocale: vi.fn(() => "en"),
@@ -15,6 +16,7 @@ const { mockAuth, mockMcpClientFindFirst, mockWithBypassRls, mockServerAppUrl, m
     // Default: helper returns null → route proceeds. Per-test overrides set
     // it to return a response when the test exercises the rate-limited path.
     mockCheckRateLimitOrFail: vi.fn().mockResolvedValue(null),
+    mockDerivePasskeyState: vi.fn(),
   }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -22,7 +24,10 @@ vi.mock("@/lib/auth/session/step-up", () => ({
   requireRecentSession: mockRequireRecentSession,
 }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { mcpClient: { findFirst: mockMcpClientFindFirst } },
+  prisma: {
+    mcpClient: { findFirst: mockMcpClientFindFirst },
+    user: { findUnique: mockUserFindUnique },
+  },
 }));
 vi.mock("@/lib/tenant-rls", () => ({
   withBypassRls: mockWithBypassRls,
@@ -45,6 +50,15 @@ vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: () => "127.0.0.1",
   rateLimitKeyFromIp: (ip: string) => `rl:${ip}`,
 }));
+// Full C6 passkey-gate matrix is in the co-located src/app/api/mcp/authorize/route.test.ts;
+// here the gate is mocked non-blocking.
+vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/auth/policy/passkey-enforcement")>();
+  return {
+    ...real,
+    derivePasskeyState: mockDerivePasskeyState,
+  };
+});
 
 import { GET } from "@/app/api/mcp/authorize/route";
 
@@ -104,6 +118,14 @@ describe("GET /api/mcp/authorize", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockMcpClientFindFirst.mockResolvedValue(VALID_CLIENT);
+    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-uuid" });
+    // Default: passkey enforcement off (gate is a no-op for existing tests).
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: false,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
   });
 
   // -------------------------------------------------------------------------
