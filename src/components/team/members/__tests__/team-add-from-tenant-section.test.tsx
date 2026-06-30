@@ -12,13 +12,20 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
-const { mockFetchApi } = vi.hoisted(() => ({ mockFetchApi: vi.fn() }));
+const { mockFetchApi, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(
+  () => ({
+    mockFetchApi: vi.fn(),
+    mockCanUsePasskeyRecovery: vi.fn(),
+    mockReauthenticateWithPasskey: vi.fn(),
+  }),
+);
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string, values?: Record<string, string>) =>
     key === "addFromTenantCrossTenantNote" && values?.tenantName
       ? `${key}:${values.tenantName}`
       : key,
+  useLocale: () => "en",
 }));
 
 vi.mock("sonner", () => ({
@@ -66,11 +73,24 @@ vi.mock("@/components/ui/select", () => ({
   SelectValue: () => null,
 }));
 
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
+}));
+
 import { TeamAddFromTenantSection } from "../team-add-from-tenant-section";
 
 describe("TeamAddFromTenantSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true });
     vi.useFakeTimers({ shouldAdvanceTime: true });
   });
 
@@ -158,5 +178,47 @@ describe("TeamAddFromTenantSection", () => {
     );
 
     expect(screen.getByText("addFromTenantCrossTenantNote:Security Tenant")).toBeInTheDocument();
+  });
+
+  // RT8: a stale-session add must surface the reauth recovery path, not the
+  // generic addMemberFailed toast, and must NOT report success.
+  it("opens the recent-session dialog on a SESSION_STEP_UP_REQUIRED add (RT8)", async () => {
+    mockFetchApi
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ userId: "user-1", name: "Alice", email: "alice@example.com", image: null }],
+        signal: { aborted: false },
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        json: async () => ({ error: "SESSION_STEP_UP_REQUIRED" }),
+      });
+
+    const onSuccess = vi.fn();
+    render(<TeamAddFromTenantSection teamId="team-1" onSuccess={onSuccess} />);
+
+    fireEvent.change(screen.getByPlaceholderText("searchTenantMembers"), {
+      target: { value: "alice" },
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(350);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("member-info")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("addButton"));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(onSuccess).not.toHaveBeenCalled();
   });
 });

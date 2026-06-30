@@ -12,14 +12,23 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-const { mockFetchApi, mockToastSuccess, mockToastError } = vi.hoisted(() => ({
+const {
+  mockFetchApi,
+  mockToastSuccess,
+  mockToastError,
+  mockCanUsePasskeyRecovery,
+  mockReauthenticateWithPasskey,
+} = vi.hoisted(() => ({
   mockFetchApi: vi.fn(),
   mockToastSuccess: vi.fn(),
   mockToastError: vi.fn(),
+  mockCanUsePasskeyRecovery: vi.fn(),
+  mockReauthenticateWithPasskey: vi.fn(),
 }));
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+  useLocale: () => "en",
 }));
 
 vi.mock("@/lib/url-helpers", () => ({
@@ -124,6 +133,17 @@ vi.mock("@/components/ui/label", () => ({
   ),
 }));
 
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
+}));
+
 import { BreakGlassDialog } from "./breakglass-dialog";
 
 const members = [
@@ -143,6 +163,8 @@ describe("BreakGlassDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     onGrantCreated = vi.fn<() => void>();
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true });
   });
 
   it("renders trigger button when closed", () => {
@@ -297,5 +319,34 @@ describe("BreakGlassDialog", () => {
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith("selfAccessError");
     });
+  });
+
+  // RT8: a stale-session create must surface the reauth recovery path, not a
+  // generic error toast, and must NOT fire onGrantCreated.
+  it("opens the recent-session dialog on a SESSION_STEP_UP_REQUIRED submit (RT8)", async () => {
+    mockFetchApi.mockResolvedValueOnce({ ok: true, json: async () => members });
+    mockFetchApi.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: "SESSION_STEP_UP_REQUIRED" }),
+    });
+
+    render(<BreakGlassDialog onGrantCreated={onGrantCreated} />);
+    openDialog();
+
+    await waitFor(() => screen.getByText("Alice/alice@example.com"));
+
+    fireEvent.click(screen.getByText("Alice/alice@example.com"));
+    fireEvent.change(screen.getByLabelText("reason"), {
+      target: { value: "long enough reason text" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "submit" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(onGrantCreated).not.toHaveBeenCalled();
+    expect(mockToastError).not.toHaveBeenCalled();
   });
 });

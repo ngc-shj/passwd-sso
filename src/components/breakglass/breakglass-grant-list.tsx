@@ -18,9 +18,13 @@ import {
 import { Loader2, Eye, X } from "lucide-react";
 import { InactiveItemsSection } from "@/components/settings/shared/inactive-items-section";
 import { apiPath, GRANT_STATUS } from "@/lib/constants";
-import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { apiErrorToI18nKey, API_ERROR } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import type { GrantStatus } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import { DISPLAY_REASON_PREVIEW } from "@/lib/validations/common";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { formatUserName } from "@/lib/format/format-user";
@@ -61,6 +65,16 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
   const [revoking, setRevoking] = useState<string | null>(null);
   const [revokeTargetId, setRevokeTargetId] = useState<string | null>(null);
 
+  // Inline step-up reauth — revoking a break-glass grant is server-side
+  // step-up-gated. The retry target remembers which grant was being revoked so
+  // the post-reauth retry replays the same revoke.
+  const [reauthRevokeId, setReauthRevokeId] = useState<string | null>(null);
+  const inlineReauth = useInlineReauth(async () => {
+    const id = reauthRevokeId;
+    setReauthRevokeId(null);
+    if (id) await handleRevoke(id);
+  });
+
   const fetchGrants = useCallback(async () => {
     setLoading(true);
     const res = await fetchApi(apiPath.tenantBreakglass());
@@ -84,6 +98,14 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
       if (res.ok) {
         toast.success(t("revokeSuccess"));
         fetchGrants();
+      } else if (res.status === 403) {
+        const body = await readApiErrorBody(res);
+        if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          setReauthRevokeId(grantId);
+          await inlineReauth.triggerOnStaleError();
+        } else {
+          toast.error(body?.error ? tApi(apiErrorToI18nKey(body.error)) : tApi("unknownError"));
+        }
       } else {
         const data = await res.json().catch(() => null);
         const code = typeof data?.error === "string" ? data.error : null;
@@ -224,6 +246,19 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <RecentSessionRequiredDialog
+        {...inlineReauth.recentSessionDialogProps}
+        cancelLabel={tc("cancel")}
+      />
+      <PasskeyReauthDialog
+        {...inlineReauth.reauthDialogProps}
+        onOpenChange={(open) => {
+          inlineReauth.reauthDialogProps.onOpenChange(open);
+          if (!open) setReauthRevokeId(null);
+        }}
+        cancelLabel={tc("cancel")}
+      />
     </>
   );
 }

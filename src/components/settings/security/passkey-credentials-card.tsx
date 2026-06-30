@@ -27,6 +27,9 @@ import { API_PATH, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import { NAME_MAX_LENGTH } from "@/lib/validations";
 import { DISPLAY_ID_SHORT } from "@/lib/validations/common";
 import { formatDateTime } from "@/lib/format/format-datetime";
@@ -104,6 +107,17 @@ export function PasskeyCredentialsCard() {
   // PRF re-bootstrap state — tracks which credential is currently being
   // re-bootstrapped after vault rotation cleared its wrapping (#433/F3).
   const [rebootstrappingId, setRebootstrappingId] = useState<string | null>(null);
+
+  // Inline step-up reauth — deleting a credential is server-side
+  // step-up-gated. The retry target remembers which credential was being
+  // deleted so the post-reauth retry replays the same delete. (Rename/PATCH is
+  // not step-up-gated, so only delete needs this recovery path.)
+  const [reauthDeleteId, setReauthDeleteId] = useState<string | null>(null);
+  const inlineReauth = useInlineReauth(async () => {
+    const id = reauthDeleteId;
+    setReauthDeleteId(null);
+    if (id) await handleDelete(id);
+  });
 
   const vaultUnlocked = status === VAULT_STATUS.UNLOCKED;
   const webAuthnAvailable = isWebAuthnSupported();
@@ -263,6 +277,14 @@ export function PasskeyCredentialsCard() {
       if (res.ok) {
         toast.success(t("deleteSuccess"));
         fetchCredentials();
+      } else if (res.status === 403) {
+        const body = await readApiErrorBody(res);
+        if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          setReauthDeleteId(credentialId);
+          await inlineReauth.triggerOnStaleError();
+        } else {
+          toast.error(t("deleteError"));
+        }
       } else {
         toast.error(t("deleteError"));
       }
@@ -707,6 +729,19 @@ export function PasskeyCredentialsCard() {
             </div>
           )}
         </section>
+
+        <RecentSessionRequiredDialog
+          {...inlineReauth.recentSessionDialogProps}
+          cancelLabel={t("cancel")}
+        />
+        <PasskeyReauthDialog
+          {...inlineReauth.reauthDialogProps}
+          onOpenChange={(open) => {
+            inlineReauth.reauthDialogProps.onOpenChange(open);
+            if (!open) setReauthDeleteId(null);
+          }}
+          cancelLabel={t("cancel")}
+        />
       </CardContent>
     </Card>
   );

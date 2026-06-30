@@ -17,6 +17,8 @@ const {
   mockGenerateNickname,
   capturedSecretKey,
   capturedPrfOutput,
+  mockCanUsePasskeyRecovery,
+  mockReauthenticateWithPasskey,
 } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
   mockToast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
@@ -28,6 +30,8 @@ const {
   mockGenerateNickname: vi.fn<typeof generateDefaultNickname>(() => "auto-name"),
   capturedSecretKey: { value: null as Uint8Array | null },
   capturedPrfOutput: { value: null as Uint8Array | null },
+  mockCanUsePasskeyRecovery: vi.fn(),
+  mockReauthenticateWithPasskey: vi.fn(),
 }));
 
 vi.mock("next-intl", () => ({
@@ -66,6 +70,17 @@ vi.mock("@/lib/auth/webauthn/webauthn-client", () => ({
   },
   generateDefaultNickname: (...args: Parameters<typeof generateDefaultNickname>) =>
     mockGenerateNickname(...args),
+}));
+
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
 
 import { PasskeyCredentialsCard } from "./passkey-credentials-card";
@@ -139,6 +154,8 @@ describe("PasskeyCredentialsCard", () => {
       status: "unlocked",
       getSecretKey: () => makeSentinelSecretKey(),
     });
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true });
   });
 
   it("disables register button when vault is locked (R26 disabled cue)", async () => {
@@ -361,5 +378,63 @@ describe("PasskeyCredentialsCard", () => {
     await waitFor(() => {
       expect(mockToast.warning).toHaveBeenCalledWith("requestPending");
     });
+  });
+
+  // RT8: a stale-session credential delete must surface the reauth recovery
+  // path, not the generic deleteError toast, and must NOT report success.
+  it("opens the recent-session dialog on a SESSION_STEP_UP_REQUIRED delete (RT8)", async () => {
+    const cred = {
+      id: "cred-del",
+      credentialId: "cid-del",
+      nickname: "My Key",
+      deviceType: "multiDevice",
+      backedUp: true,
+      discoverable: true,
+      minPinLength: null,
+      largeBlobSupported: null,
+      transports: ["internal"],
+      prfSupported: false,
+      prfWrappingPresent: false,
+      registeredDevice: null,
+      lastUsedDevice: null,
+      createdAt: "2026-05-04",
+      lastUsedAt: null,
+    };
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/api/webauthn/credentials") && (init?.method ?? "GET") === "GET") {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([cred]) });
+      }
+      if (u.includes("auth-provider")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ canPasskeySignIn: true }),
+        });
+      }
+      if (init?.method === "DELETE") {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+    });
+
+    render(<PasskeyCredentialsCard />);
+    await waitFor(() => {
+      expect(screen.getByText("My Key")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "delete" }));
+    const confirmBtn = await screen.findByRole("button", { name: "confirm" });
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.success).not.toHaveBeenCalledWith("deleteSuccess");
+    expect(mockToast.error).not.toHaveBeenCalled();
   });
 });

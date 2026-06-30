@@ -11,10 +11,13 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
-const { mockFetch, mockToast } = vi.hoisted(() => ({
-  mockFetch: vi.fn(),
-  mockToast: { success: vi.fn(), error: vi.fn() },
-}));
+const { mockFetch, mockToast, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } =
+  vi.hoisted(() => ({
+    mockFetch: vi.fn(),
+    mockToast: { success: vi.fn(), error: vi.fn() },
+    mockCanUsePasskeyRecovery: vi.fn(),
+    mockReauthenticateWithPasskey: vi.fn(),
+  }));
 
 vi.mock("next-intl", () => ({
   useTranslations: () =>
@@ -68,6 +71,17 @@ vi.mock("@/components/ui/select", () => ({
   SelectValue: () => null,
 }));
 
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
+}));
+
 import { AuditDeliveryTargetCard } from "./audit-delivery-target-card";
 
 function setupTargets(targets: Array<Record<string, unknown>>) {
@@ -90,6 +104,8 @@ function setupTargets(targets: Array<Record<string, unknown>>) {
 describe("AuditDeliveryTargetCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true });
   });
 
   it("renders empty state when no targets", async () => {
@@ -233,6 +249,50 @@ describe("AuditDeliveryTargetCard", () => {
       expect(titles.length).toBe(1);
     });
     expect(mockToast.success).toHaveBeenCalledWith("created");
+  });
+
+  // RT8: a stale-session create must surface the reauth recovery path, not the
+  // generic createFailed toast, and must NOT report success.
+  it("opens the recent-session dialog on a SESSION_STEP_UP_REQUIRED create (RT8)", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init || init.method === undefined || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ targets: [] }),
+        });
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 403,
+        json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+      });
+    });
+
+    render(<AuditDeliveryTargetCard />);
+    await waitFor(() => expect(screen.getByText("noTargets")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: /addTarget/ }));
+    await waitFor(() => {
+      expect(screen.getAllByText("addTarget").length).toBeGreaterThan(1);
+    });
+
+    fireEvent.click(screen.getByText("kindWebhook"));
+    fireEvent.change(screen.getByLabelText("url"), {
+      target: { value: "https://hooks.example.com/audit" },
+    });
+    fireEvent.change(screen.getByLabelText("secret"), {
+      target: { value: "s3cret" },
+    });
+
+    const addButtons = screen.getAllByRole("button", { name: /addTarget/ });
+    fireEvent.click(addButtons[addButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.success).not.toHaveBeenCalled();
+    expect(mockToast.error).not.toHaveBeenCalled();
   });
 
   it("does NOT render the create form when limit is reached (limitReached path)", async () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { MemberInfo } from "@/components/member-info";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,9 @@ import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 
 interface TenantMemberResult {
   userId: string;
@@ -40,6 +43,16 @@ export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: 
   const [searchResults, setSearchResults] = useState<TenantMemberResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Inline step-up reauth — adding a tenant member is server-side
+  // step-up-gated. The retry target remembers which user the admin was adding
+  // so the post-reauth retry replays the same add.
+  const [reauthAddUserId, setReauthAddUserId] = useState<string | null>(null);
+  const inlineReauth = useInlineReauth(async () => {
+    const userId = reauthAddUserId;
+    setReauthAddUserId(null);
+    if (userId) await handleAddMember(userId);
+  });
 
   // Debounced tenant member search
   useEffect(() => {
@@ -79,7 +92,7 @@ export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: 
     };
   }, [addSearch, teamId]);
 
-  const handleAddMember = useCallback(async (userId: string) => {
+  const handleAddMember = async (userId: string) => {
     setAdding(userId);
     try {
       const res = await fetchApi(apiPath.teamMembers(teamId), {
@@ -97,6 +110,15 @@ export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: 
         setAdding(null);
         return;
       }
+      if (res.status === 403) {
+        const body = await readApiErrorBody(res);
+        if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          setReauthAddUserId(userId);
+          await inlineReauth.triggerOnStaleError();
+          setAdding(null);
+          return;
+        }
+      }
       if (!res.ok) throw new Error("Failed");
       toast.success(t("memberAdded"));
       setAddSearch("");
@@ -107,9 +129,10 @@ export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: 
     } finally {
       setAdding(null);
     }
-  }, [teamId, addRole, t, onSuccess]);
+  };
 
   return (
+    <>
     <section className="space-y-4">
       <div>
         <h3 className="text-sm font-medium">{t("addFromTenantLabel")}</h3>
@@ -184,5 +207,19 @@ export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: 
         </div>
       )}
     </section>
+
+      <RecentSessionRequiredDialog
+        {...inlineReauth.recentSessionDialogProps}
+        cancelLabel={t("cancel")}
+      />
+      <PasskeyReauthDialog
+        {...inlineReauth.reauthDialogProps}
+        onOpenChange={(open) => {
+          inlineReauth.reauthDialogProps.onOpenChange(open);
+          if (!open) setReauthAddUserId(null);
+        }}
+        cancelLabel={t("cancel")}
+      />
+    </>
   );
 }

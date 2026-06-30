@@ -37,6 +37,11 @@ import { SectionCardHeader } from "@/components/settings/account/section-card-he
 import { InactiveItemsSection } from "@/components/settings/shared/inactive-items-section";
 import { fetchApi } from "@/lib/url-helpers";
 import { apiPath } from "@/lib/constants";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import { MAX_AUDIT_DELIVERY_TARGETS } from "@/lib/validations/common";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { toast } from "sonner";
@@ -91,6 +96,19 @@ export function AuditDeliveryTargetCard() {
   const [config, setConfig] = useState<ConfigState>(defaultConfig);
   const [urlError, setUrlError] = useState("");
   const [showInactive, setShowInactive] = useState(false);
+
+  // Inline step-up reauth — creating a target and toggling its active state are
+  // both server-side step-up-gated. The retry target remembers which mutation
+  // the admin was attempting so the post-reauth retry replays the same one.
+  const [reauthRetry, setReauthRetry] = useState<
+    { type: "create" } | { type: "toggle"; target: TargetItem } | null
+  >(null);
+  const inlineReauth = useInlineReauth(async () => {
+    const retry = reauthRetry;
+    setReauthRetry(null);
+    if (retry?.type === "create") await handleCreate();
+    else if (retry?.type === "toggle") await handleToggleActive(retry.target);
+  });
 
   const fetchTargets = useCallback(async () => {
     try {
@@ -185,6 +203,14 @@ export function AuditDeliveryTargetCard() {
         body: JSON.stringify(buildPayload()),
       });
       if (!res.ok) {
+        if (res.status === 403) {
+          const body = await readApiErrorBody(res);
+          if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+            setReauthRetry({ type: "create" });
+            await inlineReauth.triggerOnStaleError();
+            return;
+          }
+        }
         toast.error(t("createFailed"));
         return;
       }
@@ -206,6 +232,14 @@ export function AuditDeliveryTargetCard() {
         body: JSON.stringify({ isActive: !target.isActive }),
       });
       if (!res.ok) {
+        if (res.status === 403) {
+          const body = await readApiErrorBody(res);
+          if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+            setReauthRetry({ type: "toggle", target });
+            await inlineReauth.triggerOnStaleError();
+            return;
+          }
+        }
         toast.error(t("updateFailed"));
         return;
       }
@@ -520,6 +554,19 @@ export function AuditDeliveryTargetCard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <RecentSessionRequiredDialog
+        {...inlineReauth.recentSessionDialogProps}
+        cancelLabel={tCommon("cancel")}
+      />
+      <PasskeyReauthDialog
+        {...inlineReauth.reauthDialogProps}
+        onOpenChange={(open) => {
+          inlineReauth.reauthDialogProps.onOpenChange(open);
+          if (!open) setReauthRetry(null);
+        }}
+        cancelLabel={tCommon("cancel")}
+      />
     </Card>
   );
 }

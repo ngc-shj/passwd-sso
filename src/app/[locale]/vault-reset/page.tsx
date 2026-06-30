@@ -2,8 +2,11 @@
 
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { apiErrorToI18nKey, API_ERROR } from "@/lib/http/api-error-codes";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { API_PATH } from "@/lib/constants";
 import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
@@ -28,8 +31,11 @@ export default function VaultResetPage() {
 
   const isValid = confirmation === CONFIRMATION_TOKEN;
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  // Inline step-up reauth — vault reset is server-side step-up-gated. On a
+  // stale session the hook replays the reset after reauth.
+  const inlineReauth = useInlineReauth(() => submitReset());
+
+  async function submitReset() {
     if (!isValid) return;
 
     setLoading(true);
@@ -44,7 +50,9 @@ export default function VaultResetPage() {
 
       if (!res.ok) {
         const body = await readApiErrorBody(res);
-        if (body?.error) {
+        if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          await inlineReauth.triggerOnStaleError();
+        } else if (body?.error) {
           setError(tApi(apiErrorToI18nKey(body.error)));
         } else {
           setError(tApi("unknownError"));
@@ -63,6 +71,11 @@ export default function VaultResetPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    await submitReset();
   }
 
   return (
@@ -116,6 +129,15 @@ export default function VaultResetPage() {
           </Button>
         </form>
       </div>
+
+      <RecentSessionRequiredDialog
+        {...inlineReauth.recentSessionDialogProps}
+        cancelLabel={tCommon("cancel")}
+      />
+      <PasskeyReauthDialog
+        {...inlineReauth.reauthDialogProps}
+        cancelLabel={tCommon("cancel")}
+      />
     </div>
   );
 }

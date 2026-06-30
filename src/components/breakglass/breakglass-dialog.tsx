@@ -18,9 +18,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AlertTriangle, Check, Loader2, Search, ShieldAlert } from "lucide-react";
 import { apiPath, API_PATH } from "@/lib/constants";
-import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { apiErrorToI18nKey, API_ERROR } from "@/lib/http/api-error-codes";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { fetchApi } from "@/lib/url-helpers";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import { filterMembers } from "@/lib/filter-members";
 import { cn } from "@/lib/utils";
 import { MemberInfo } from "@/components/member-info";
@@ -49,6 +52,10 @@ export function BreakGlassDialog({ onGrantCreated, trigger }: BreakGlassDialogPr
   const [reason, setReason] = useState("");
   const [incidentRef, setIncidentRef] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Inline step-up reauth — creating a break-glass grant is server-side
+  // step-up-gated. On a stale session the hook replays the submit after reauth.
+  const inlineReauth = useInlineReauth(() => handleSubmit());
 
   useEffect(() => {
     if (!open) return;
@@ -123,6 +130,13 @@ export function BreakGlassDialog({ onGrantCreated, trigger }: BreakGlassDialogPr
         toast.error(t("duplicateGrantError"));
       } else if (res.status === 429) {
         toast.error(t("rateLimitExceeded"));
+      } else if (res.status === 403) {
+        const body = await readApiErrorBody(res);
+        if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          await inlineReauth.triggerOnStaleError();
+        } else {
+          toast.error(body?.error ? tApi(apiErrorToI18nKey(body.error)) : tApi("unknownError"));
+        }
       } else {
         const body = await readApiErrorBody(res);
         toast.error(body?.error ? tApi(apiErrorToI18nKey(body.error)) : tApi("unknownError"));
@@ -135,6 +149,7 @@ export function BreakGlassDialog({ onGrantCreated, trigger }: BreakGlassDialogPr
   const canSubmit = targetUserId && reason.length >= 10 && !submitting;
 
   return (
+    <>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {trigger ?? (
@@ -244,5 +259,15 @@ export function BreakGlassDialog({ onGrantCreated, trigger }: BreakGlassDialogPr
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+      <RecentSessionRequiredDialog
+        {...inlineReauth.recentSessionDialogProps}
+        cancelLabel={tc("cancel")}
+      />
+      <PasskeyReauthDialog
+        {...inlineReauth.reauthDialogProps}
+        cancelLabel={tc("cancel")}
+      />
+    </>
   );
 }
