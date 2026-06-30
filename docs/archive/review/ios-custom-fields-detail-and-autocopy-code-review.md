@@ -1,6 +1,42 @@
 # Code Review: ios-custom-fields-detail-and-autocopy
 
 Date: 2026-07-01
+Review rounds: 2 (converged) + 1 post-merge external-review finding (resolved)
+
+## Post-merge external review (commit c16198e3)
+
+An external reviewer caught a finding all three triangulate experts missed —
+**the AutoFill personal-decode path dropped `entryType`, so there was no LOGIN
+type boundary**. `CredentialResolver.decryptSummary/decryptDetail` and
+`CredentialIdentityRegistrar.decryptPersonalOverviews` both called
+`EntryBlobDecoder.summary/detail` with `entryType: nil`, so every entry decoded
+LOGIN-shaped. Two consequences:
+- **clipboard leak** (introduced by THIS PR): a non-login entry reachable via the
+  password fill path could have its single non-hidden custom field auto-copied to
+  the foreground app's clipboard.
+- **pre-existing**: non-login entries with a urlHost were registered as password
+  QuickType identities at all.
+
+Root-cause fix (the "essential" fix, per the user): thread `entry.entryType`
+through both personal decode sites (the team path via `TeamEntryDecryptor` already
+passed it — verified), then apply the LOGIN boundary at both consumers —
+`customFieldToCopy` (nil ⇒ LOGIN guard) and `specs(from:)` (LOGIN-only password
+identities). R3 propagation confirmed complete: all four AutoFill
+`EntryBlobDecoder.summary/detail` call sites now thread `entryType`. 6 new
+red-capable tests (3 for the copy guard, 3 for the identity filter). Also fixed a
+pre-existing localization gap (`"Icons"` section header lacked en/ja) that the
+orchestrator's full-suite re-run surfaced. 665 tests pass.
+
+**Process note**: this is the class of finding the consumer-flow walkthrough is
+meant to catch but didn't — the walkthrough traced the helper's output to the
+clipboard but never asked "what TYPES of entry reach this path." Recorded as a
+reusable lesson alongside the F1 opt-in-producer gap.
+
+---
+
+Original review (2 rounds):
+
+Date: 2026-07-01
 Review rounds: 2 (converged — Round 2 returned No findings from both functionality
 and security experts)
 
