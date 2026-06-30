@@ -241,6 +241,15 @@ async function handlePOST(
 
 // GET /api/tenant/members/[userId]/reset-vault
 // Get reset history for a specific member. Tenant OWNER/ADMIN only.
+//
+// Intentional view/action authz split: READ access is permission-gated
+// (MEMBER_VAULT_RESET) but NOT role-hierarchy-gated, so any OWNER/ADMIN can
+// view a peer's or superior's reset history — consistent with other
+// tenant-admin reads (e.g. GET /api/tenant/members returns every member's
+// metadata without a rank gate). Only the ACTION (approve) is hierarchy-gated,
+// via the per-row `approveEligibility` computed below and re-enforced at the
+// approve endpoint's CAS. The response carries audit metadata only — never
+// `tokenHash`, `encryptedToken`, or the plaintext token.
 async function handleGET(
   req: NextRequest,
   { params }: { params: Promise<{ userId: string }> },

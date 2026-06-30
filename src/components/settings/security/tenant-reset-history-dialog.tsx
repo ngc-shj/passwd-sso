@@ -37,6 +37,10 @@ import {
 import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { toastApiError } from "@/lib/http/toast-api-error";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 
 interface ResetActor {
   id: string;
@@ -95,6 +99,11 @@ export function TenantResetHistoryDialog({
   const [approveInput, setApproveInput] = useState("");
   const [approveError, setApproveError] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
+
+  // Inline step-up reauth, mirroring the developer-settings credential cards.
+  // The approve dialog stays open across the reauth ceremony; on success the
+  // hook re-runs the approve handler, which re-submits the current target.
+  const inlineReauth = useInlineReauth(() => handleApproveSubmit());
 
   const fetchHistory = useCallback(async () => {
     setLoading(true);
@@ -176,8 +185,15 @@ export function TenantResetHistoryDialog({
         closeApproveDialog();
         await fetchHistory();
       } else if (res.status === 403) {
-        // Surface specific reason (e.g. FORBIDDEN_INSUFFICIENT_ROLE).
-        await toastApiError(res, tApi, API_ERROR.FORBIDDEN);
+        const body = await readApiErrorBody(res);
+        if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          // Keep the approve dialog open so the post-reauth retry re-submits
+          // the same target. Mirrors the developer-settings cards' pattern.
+          await inlineReauth.triggerOnStaleError();
+        } else {
+          // Surface specific reason (e.g. FORBIDDEN_INSUFFICIENT_ROLE).
+          await toastApiError(res, tApi, API_ERROR.FORBIDDEN);
+        }
       } else {
         toast.error(t("approveFailed"));
       }
@@ -353,6 +369,15 @@ export function TenantResetHistoryDialog({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <RecentSessionRequiredDialog
+        {...inlineReauth.recentSessionDialogProps}
+        cancelLabel={t("cancel")}
+      />
+      <PasskeyReauthDialog
+        {...inlineReauth.reauthDialogProps}
+        cancelLabel={t("cancel")}
+      />
     </Dialog>
   );
 }
