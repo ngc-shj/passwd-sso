@@ -109,15 +109,10 @@ export function PasskeyCredentialsCard() {
   const [rebootstrappingId, setRebootstrappingId] = useState<string | null>(null);
 
   // Inline step-up reauth — deleting a credential is server-side
-  // step-up-gated. The retry target remembers which credential was being
-  // deleted so the post-reauth retry replays the same delete. (Rename/PATCH is
-  // not step-up-gated, so only delete needs this recovery path.)
-  const [reauthDeleteId, setReauthDeleteId] = useState<string | null>(null);
-  const inlineReauth = useInlineReauth(async () => {
-    const id = reauthDeleteId;
-    setReauthDeleteId(null);
-    if (id) await handleDelete(id);
-  });
+  // step-up-gated. The retry arg (owned by the hook) carries the credential id
+  // so the post-reauth retry replays the same delete. (Rename/PATCH is not
+  // step-up-gated, so only delete needs this recovery path.)
+  const inlineReauth = useInlineReauth<string>((id) => handleDelete(id));
 
   const vaultUnlocked = status === VAULT_STATUS.UNLOCKED;
   const webAuthnAvailable = isWebAuthnSupported();
@@ -280,8 +275,7 @@ export function PasskeyCredentialsCard() {
       } else if (res.status === 403) {
         const body = await readApiErrorBody(res);
         if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-          setReauthDeleteId(credentialId);
-          await inlineReauth.triggerOnStaleError();
+          await inlineReauth.triggerOnStaleError(credentialId);
         } else {
           toast.error(t("deleteError"));
         }
@@ -736,10 +730,6 @@ export function PasskeyCredentialsCard() {
         />
         <PasskeyReauthDialog
           {...inlineReauth.reauthDialogProps}
-          onOpenChange={(open) => {
-            inlineReauth.reauthDialogProps.onOpenChange(open);
-            if (!open) setReauthDeleteId(null);
-          }}
           cancelLabel={t("cancel")}
         />
       </CardContent>

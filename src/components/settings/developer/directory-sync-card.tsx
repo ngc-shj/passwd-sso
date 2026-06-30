@@ -143,16 +143,12 @@ export function DirectorySyncCard() {
   const [runningSyncId, setRunningSyncId] = useState<string | null>(null);
 
   // Inline step-up reauth — create/update/delete are server-side step-up-gated.
-  // The retry target remembers which mutation the operator was attempting so
-  // the post-reauth retry replays the same one.
-  const [reauthRetry, setReauthRetry] = useState<
-    { type: "save" } | { type: "delete"; id: string } | null
-  >(null);
-  const inlineReauth = useInlineReauth(async () => {
-    const target = reauthRetry;
-    setReauthRetry(null);
-    if (target?.type === "save") await handleSave();
-    else if (target?.type === "delete") await handleDelete(target.id);
+  // The retry arg (owned by the hook) records which mutation the operator was
+  // attempting so the post-reauth retry replays the same one.
+  type ReauthRetry = { type: "save" } | { type: "delete"; id: string };
+  const inlineReauth = useInlineReauth<ReauthRetry>(async (retry) => {
+    if (retry.type === "save") await handleSave();
+    else if (retry.type === "delete") await handleDelete(retry.id);
   });
 
   // ─── Fetch configs ──────────────────────────────────────────
@@ -229,8 +225,7 @@ export function DirectorySyncCard() {
         } else if (res.status === 403) {
           const errBody = await readApiErrorBody(res);
           if (errBody?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-            setReauthRetry({ type: "save" });
-            await inlineReauth.triggerOnStaleError();
+            await inlineReauth.triggerOnStaleError({ type: "save" });
           } else {
             toast.error(t("syncFailed"));
           }
@@ -261,8 +256,7 @@ export function DirectorySyncCard() {
         } else if (res.status === 403) {
           const errBody = await readApiErrorBody(res);
           if (errBody?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-            setReauthRetry({ type: "save" });
-            await inlineReauth.triggerOnStaleError();
+            await inlineReauth.triggerOnStaleError({ type: "save" });
           } else {
             toast.error(t("syncFailed"));
           }
@@ -292,8 +286,7 @@ export function DirectorySyncCard() {
       } else if (res.status === 403) {
         const errBody = await readApiErrorBody(res);
         if (errBody?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-          setReauthRetry({ type: "delete", id });
-          await inlineReauth.triggerOnStaleError();
+          await inlineReauth.triggerOnStaleError({ type: "delete", id });
         } else {
           toast.error(t("syncFailed"));
         }
@@ -814,10 +807,6 @@ export function DirectorySyncCard() {
       />
       <PasskeyReauthDialog
         {...inlineReauth.reauthDialogProps}
-        onOpenChange={(open) => {
-          inlineReauth.reauthDialogProps.onOpenChange(open);
-          if (!open) setReauthRetry(null);
-        }}
         cancelLabel={tCommon("cancel")}
       />
     </>

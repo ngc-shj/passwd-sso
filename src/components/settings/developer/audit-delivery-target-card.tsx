@@ -98,16 +98,13 @@ export function AuditDeliveryTargetCard() {
   const [showInactive, setShowInactive] = useState(false);
 
   // Inline step-up reauth — creating a target and toggling its active state are
-  // both server-side step-up-gated. The retry target remembers which mutation
-  // the admin was attempting so the post-reauth retry replays the same one.
-  const [reauthRetry, setReauthRetry] = useState<
-    { type: "create" } | { type: "toggle"; target: TargetItem } | null
-  >(null);
-  const inlineReauth = useInlineReauth(async () => {
-    const retry = reauthRetry;
-    setReauthRetry(null);
-    if (retry?.type === "create") await handleCreate();
-    else if (retry?.type === "toggle") await handleToggleActive(retry.target);
+  // both server-side step-up-gated. The retry arg (owned by the hook) records
+  // which mutation the admin was attempting so the post-reauth retry replays
+  // the same one.
+  type ReauthRetry = { type: "create" } | { type: "toggle"; target: TargetItem };
+  const inlineReauth = useInlineReauth<ReauthRetry>(async (retry) => {
+    if (retry.type === "create") await handleCreate();
+    else if (retry.type === "toggle") await handleToggleActive(retry.target);
   });
 
   const fetchTargets = useCallback(async () => {
@@ -206,8 +203,7 @@ export function AuditDeliveryTargetCard() {
         if (res.status === 403) {
           const body = await readApiErrorBody(res);
           if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-            setReauthRetry({ type: "create" });
-            await inlineReauth.triggerOnStaleError();
+            await inlineReauth.triggerOnStaleError({ type: "create" });
             return;
           }
         }
@@ -235,8 +231,7 @@ export function AuditDeliveryTargetCard() {
         if (res.status === 403) {
           const body = await readApiErrorBody(res);
           if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-            setReauthRetry({ type: "toggle", target });
-            await inlineReauth.triggerOnStaleError();
+            await inlineReauth.triggerOnStaleError({ type: "toggle", target });
             return;
           }
         }
@@ -561,10 +556,6 @@ export function AuditDeliveryTargetCard() {
       />
       <PasskeyReauthDialog
         {...inlineReauth.reauthDialogProps}
-        onOpenChange={(open) => {
-          inlineReauth.reauthDialogProps.onOpenChange(open);
-          if (!open) setReauthRetry(null);
-        }}
         cancelLabel={tCommon("cancel")}
       />
     </Card>

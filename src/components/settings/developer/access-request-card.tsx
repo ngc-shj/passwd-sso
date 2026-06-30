@@ -91,12 +91,9 @@ export function AccessRequestCard() {
   const [approving, setApproving] = useState<string | null>(null);
   const [jitToken, setJitToken] = useState<string | null>(null);
   const [jitTokenOpen, setJitTokenOpen] = useState(false);
-  const [reauthApproveTargetId, setReauthApproveTargetId] = useState<string | null>(null);
-  const inlineReauth = useInlineReauth(async () => {
-    const target = reauthApproveTargetId;
-    setReauthApproveTargetId(null);
-    if (target) await handleApprove(target);
-  });
+  // The retry arg (owned by the hook) carries the request id so the post-reauth
+  // retry approves the same request the operator was acting on.
+  const inlineReauth = useInlineReauth<string>((requestId) => handleApprove(requestId));
 
   // Create dialog state
   const [createOpen, setCreateOpen] = useState(false);
@@ -200,10 +197,8 @@ export function AccessRequestCard() {
         const body = await readApiErrorBody(res);
         const code = body?.error ?? "";
         if (code === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-          // Remember which request the operator was trying to approve so the
-          // post-reauth retry hits the same target.
-          setReauthApproveTargetId(requestId);
-          await inlineReauth.triggerOnStaleError();
+          // Pass the request id so the post-reauth retry approves the same one.
+          await inlineReauth.triggerOnStaleError(requestId);
         } else if (res.status === 409 && code === API_ERROR.SA_TOKEN_LIMIT_EXCEEDED) {
           toast.error(t("arTokenLimitExceeded"));
         } else if (res.status === 409 && code === API_ERROR.SA_INACTIVE) {
@@ -281,10 +276,6 @@ export function AccessRequestCard() {
         />
         <PasskeyReauthDialog
           {...inlineReauth.reauthDialogProps}
-          onOpenChange={(open) => {
-            inlineReauth.reauthDialogProps.onOpenChange(open);
-            if (!open) setReauthApproveTargetId(null);
-          }}
           cancelLabel={tCommon("cancel")}
         />
         <section className="space-y-3">

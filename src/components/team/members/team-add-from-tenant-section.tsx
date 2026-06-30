@@ -45,14 +45,9 @@ export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: 
   const abortRef = useRef<AbortController | null>(null);
 
   // Inline step-up reauth — adding a tenant member is server-side
-  // step-up-gated. The retry target remembers which user the admin was adding
-  // so the post-reauth retry replays the same add.
-  const [reauthAddUserId, setReauthAddUserId] = useState<string | null>(null);
-  const inlineReauth = useInlineReauth(async () => {
-    const userId = reauthAddUserId;
-    setReauthAddUserId(null);
-    if (userId) await handleAddMember(userId);
-  });
+  // step-up-gated. The retry arg (owned by the hook) carries the user id so the
+  // post-reauth retry replays the same add.
+  const inlineReauth = useInlineReauth<string>((userId) => handleAddMember(userId));
 
   // Debounced tenant member search
   useEffect(() => {
@@ -113,8 +108,7 @@ export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: 
       if (res.status === 403) {
         const body = await readApiErrorBody(res);
         if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-          setReauthAddUserId(userId);
-          await inlineReauth.triggerOnStaleError();
+          await inlineReauth.triggerOnStaleError(userId);
           setAdding(null);
           return;
         }
@@ -214,10 +208,6 @@ export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: 
       />
       <PasskeyReauthDialog
         {...inlineReauth.reauthDialogProps}
-        onOpenChange={(open) => {
-          inlineReauth.reauthDialogProps.onOpenChange(open);
-          if (!open) setReauthAddUserId(null);
-        }}
         cancelLabel={t("cancel")}
       />
     </>

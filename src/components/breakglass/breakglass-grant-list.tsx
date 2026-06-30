@@ -66,14 +66,9 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
   const [revokeTargetId, setRevokeTargetId] = useState<string | null>(null);
 
   // Inline step-up reauth — revoking a break-glass grant is server-side
-  // step-up-gated. The retry target remembers which grant was being revoked so
+  // step-up-gated. The retry arg (owned by the hook) carries the grant id so
   // the post-reauth retry replays the same revoke.
-  const [reauthRevokeId, setReauthRevokeId] = useState<string | null>(null);
-  const inlineReauth = useInlineReauth(async () => {
-    const id = reauthRevokeId;
-    setReauthRevokeId(null);
-    if (id) await handleRevoke(id);
-  });
+  const inlineReauth = useInlineReauth<string>((id) => handleRevoke(id));
 
   const fetchGrants = useCallback(async () => {
     setLoading(true);
@@ -101,8 +96,7 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
       } else if (res.status === 403) {
         const body = await readApiErrorBody(res);
         if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-          setReauthRevokeId(grantId);
-          await inlineReauth.triggerOnStaleError();
+          await inlineReauth.triggerOnStaleError(grantId);
         } else {
           toast.error(body?.error ? tApi(apiErrorToI18nKey(body.error)) : tApi("unknownError"));
         }
@@ -253,10 +247,6 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
       />
       <PasskeyReauthDialog
         {...inlineReauth.reauthDialogProps}
-        onOpenChange={(open) => {
-          inlineReauth.reauthDialogProps.onOpenChange(open);
-          if (!open) setReauthRevokeId(null);
-        }}
         cancelLabel={tc("cancel")}
       />
     </>
