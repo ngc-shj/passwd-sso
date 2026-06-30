@@ -224,7 +224,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
       do {
         let detail = try await resolver.decryptEntryDetail(entryId: recordId)
         let credential = ASPasswordCredential(user: detail.username, password: detail.password)
-        autoCopyTotpIfEnabled(detail)
+        autoCopyAfterFill(detail)
         extensionContext.completeRequest(withSelectedCredential: credential)
       } catch {
         cancel(with: error)
@@ -593,15 +593,24 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
 
   // MARK: - Completion
 
-  /// Best-effort: after a login fill, copy the entry's current TOTP code to the
+  /// Best-effort: after a login fill, copy the entry's current TOTP code (or
+  /// the single non-hidden custom field when there is no TOTP to copy) to the
   /// clipboard when the user opted in. Must run BEFORE `completeRequest`, which
-  /// dismisses (and may tear down) the extension. Never throws — a TOTP failure
+  /// dismisses (and may tear down) the extension. Never throws — a copy failure
   /// must not affect the password fill.
   @MainActor
-  private func autoCopyTotpIfEnabled(_ detail: VaultEntryDetail) {
+  private func autoCopyAfterFill(_ detail: VaultEntryDetail) {
     let settings = AppSettingsStore()
-    if let code = totpToCopy(detail: detail, autoCopy: settings.autoCopyTotp, now: Date()) {
+    let totpCode = totpToCopy(detail: detail, autoCopy: settings.autoCopyTotp, now: Date())
+    if let code = totpCode {
       SecureClipboard.copy(code, clearAfter: settings.clipboardClearSeconds)
+    }
+    if let fieldValue = customFieldToCopy(
+      detail: detail,
+      autoCopy: settings.autoCopyCustomField,
+      totpWillCopy: totpCode != nil
+    ) {
+      SecureClipboard.copy(fieldValue, clearAfter: settings.clipboardClearSeconds)
     }
   }
 
@@ -610,7 +619,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
       do {
         let detail = try await resolver.decryptEntryDetail(entryId: summary.id)
         let credential = ASPasswordCredential(user: detail.username, password: detail.password)
-        autoCopyTotpIfEnabled(detail)
+        autoCopyAfterFill(detail)
         extensionContext.completeRequest(withSelectedCredential: credential)
       } catch {
         cancel(with: error)

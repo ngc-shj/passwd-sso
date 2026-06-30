@@ -149,4 +149,86 @@ final class EntryBlobGoldenPayloadTests: XCTestCase {
     XCTAssertNil(d.totpPeriod)
     XCTAssertEqual(d.totpSecret, "JBSWY")
   }
+
+  // MARK: - C1 custom fields
+
+  func testGoldenLoginWithCustomFields() throws {
+    // Happy-path: LOGIN blob with well-formed customFields decodes all fields.
+    let json = #"""
+    {"title":"Login","username":"alice","password":"s3cr3t","url":"https://b.example",
+     "notes":null,"tags":[],
+     "customFields":[
+       {"label":"Recovery","value":"abc123","type":"text"},
+       {"label":"API Key","value":"secret-key","type":"hidden"},
+       {"label":"Portal","value":"https://portal.example","type":"url"}
+     ]}
+    """#
+    let d = try decode(json, "LOGIN")
+    XCTAssertEqual(d.password, "s3cr3t")
+    XCTAssertEqual(d.customFields.count, 3)
+    XCTAssertEqual(d.customFields[0].label, "Recovery")
+    XCTAssertEqual(d.customFields[0].value, "abc123")
+    XCTAssertEqual(d.customFields[0].kind, .text)
+    XCTAssertEqual(d.customFields[1].label, "API Key")
+    XCTAssertEqual(d.customFields[1].kind, .hidden)
+    XCTAssertEqual(d.customFields[2].label, "Portal")
+    XCTAssertEqual(d.customFields[2].kind, .url)
+  }
+
+  func testCustomFieldsValueDriftToleratesNumericAndObjectValue() throws {
+    // Red-capable (RT7): numeric `value` and object `value` in a LOGIN blob with
+    // a real password → assert detail non-nil, password preserved, drifted
+    // field .value == "". Goes RED if FlexibleString is reverted to String?.
+    let json = #"""
+    {"title":"Login","username":"alice","password":"s3cr3t",
+     "customFields":[
+       {"label":"Count","value":42,"type":"text"},
+       {"label":"Meta","value":{"nested":true},"type":"text"}
+     ]}
+    """#
+    let d = try decode(json, "LOGIN")
+    XCTAssertNotNil(d, "blob decode must not fail on drifted customField value types")
+    XCTAssertEqual(d.password, "s3cr3t")
+    XCTAssertEqual(d.customFields.count, 2)
+    // Numeric value is stringified by FlexibleString ("42").
+    XCTAssertEqual(d.customFields[0].value, "42")
+    // Object/nested value → FlexibleString.value == nil → mapped to "".
+    XCTAssertEqual(d.customFields[1].value, "")
+  }
+
+  func testCustomFieldsElementDriftSkipsJunkPreservesValidAndPassword() throws {
+    // Red-capable (RT7 / F1 guard): junk elements ("junk", null) must be skipped
+    // and the one valid element must survive. Goes RED if plain [CustomFieldPayload]
+    // is used instead of LossyCustomFields.
+    let json = #"""
+    {"title":"Login","username":"alice","password":"s3cr3t",
+     "customFields":["junk", null, {"label":"PIN","value":"1234","type":"text"}]}
+    """#
+    let d = try decode(json, "LOGIN")
+    XCTAssertEqual(d.password, "s3cr3t")
+    XCTAssertEqual(d.customFields.count, 1)
+    XCTAssertEqual(d.customFields[0].label, "PIN")
+    XCTAssertEqual(d.customFields[0].value, "1234")
+  }
+
+  func testCustomFieldsElementOrderingAndCursorAdvance() throws {
+    // Red-capable (T8 / cursor-advance): junk elements must be consumed, valid
+    // elements must appear in order with no off-by-one pairing.
+    let json = #"""
+    {"title":"Login","username":"alice","password":"s3cr3t",
+     "customFields":["junk",{"label":"A","value":"1","type":"text"},42,{"label":"B","value":"2","type":"text"}]}
+    """#
+    let d = try decode(json, "LOGIN")
+    XCTAssertEqual(d.customFields.map(\.label), ["A", "B"])
+    XCTAssertEqual(d.customFields.map(\.value), ["1", "2"])
+  }
+
+  func testCustomFieldsAbsentKeyDecodesToEmpty() throws {
+    // Blob that omits the `customFields` key entirely → customFields == [].
+    let json = #"""
+    {"title":"Login","username":"alice","password":"s3cr3t","url":"https://b.example"}
+    """#
+    let d = try decode(json, "LOGIN")
+    XCTAssertEqual(d.customFields, [])
+  }
 }

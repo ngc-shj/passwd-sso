@@ -189,4 +189,163 @@ extension EntryDetailView {
     optionalFieldRow("Device Info", pk?.deviceInfo)
     notesSection(notes)
   }
+
+  // MARK: - Custom fields
+
+  /// Parses an ISO 8601 date-only string ("YYYY-MM-DD") and formats it for display
+  /// using the given locale. Returns nil on parse failure (caller shows raw value).
+  /// Uses a UTC calendar so a bare date does not shift a day in non-UTC time zones.
+  static func formatCustomFieldDate(_ raw: String, locale: Locale) -> String? {
+    // The web stores bare "YYYY-MM-DD" (toISODateString). The default .iso8601
+    // strategy rejects bare dates — use the date-only strategy explicitly.
+    let strategy = Date.ISO8601FormatStyle()
+      .year().month().day().dateSeparator(.dash)
+    guard let date = try? Date(raw, strategy: strategy) else { return nil }
+    return date.formatted(Date.FormatStyle(date: .abbreviated).locale(locale))
+  }
+
+  @ViewBuilder
+  func customFieldRows(_ fields: [VaultEntryDetail.CustomField]) -> some View {
+    if !fields.isEmpty {
+      ForEach(fields) { field in
+        customFieldSection(field)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func customFieldSection(_ field: VaultEntryDetail.CustomField) -> some View {
+    switch field.kind.rowKind {
+    case .masked:
+      CustomFieldMaskedSection(
+        label: field.label,
+        value: field.value,
+        onCopy: { copySecurely(value: $0) },
+        onActivity: { autoLockService?.recordActivity() }
+      )
+    case .url:
+      Section(field.label) {
+        if let launchable = SafeURL.launchable(field.value) {
+          HStack {
+            Button {
+              autoLockService?.recordActivity()
+              openURL(launchable)
+            } label: {
+              Text(field.value)
+                .font(.body)
+                .foregroundStyle(.tint)
+                .multilineTextAlignment(.leading)
+            }
+            .buttonStyle(.plain)
+            Spacer()
+            Button {
+              copySecurely(value: field.value)
+              autoLockService?.recordActivity()
+            } label: {
+              Image(systemName: "doc.on.doc")
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .tint(.accentColor)
+          }
+        } else {
+          HStack {
+            Text(field.value)
+              .font(.body)
+            Spacer()
+            Button {
+              copySecurely(value: field.value)
+              autoLockService?.recordActivity()
+            } label: {
+              Image(systemName: "doc.on.doc")
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .tint(.accentColor)
+          }
+        }
+      }
+    case .boolean:
+      Section(field.label) {
+        Text(field.value == "true" ? "Yes" : "No")
+          .font(.body)
+      }
+    case .plain:
+      Section(field.label) {
+        HStack {
+          if field.kind == .date,
+             let formatted = Self.formatCustomFieldDate(
+               field.value, locale: Locale.current) {
+            Text(formatted)
+              .font(.body)
+          } else {
+            Text(field.value)
+              .font(.body)
+          }
+          Spacer()
+          Button {
+            copySecurely(value: field.value)
+            autoLockService?.recordActivity()
+          } label: {
+            Image(systemName: "doc.on.doc")
+              .frame(minWidth: 44, minHeight: 44)
+              .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          .tint(.accentColor)
+        }
+      }
+    }
+  }
+}
+
+// A masked custom field section with per-field reveal state (so revealing one
+// hidden field does not reveal siblings). Cannot be merged into SecretRow because
+// SecretRow takes a LocalizedStringKey header; custom-field labels are dynamic
+// user data and must bind the String/StringProtocol Section overload.
+private struct CustomFieldMaskedSection: View {
+  let label: String
+  let value: String
+  let onCopy: (String) -> Void
+  let onActivity: () -> Void
+
+  @State private var isRevealed = false
+
+  var body: some View {
+    Section(label) {
+      HStack {
+        if isRevealed {
+          Text(value)
+            .font(.body.monospaced())
+            .privacySensitive()
+        } else {
+          SecureField("", text: .constant(value))
+            .disabled(true)
+        }
+        Spacer()
+        Button {
+          isRevealed.toggle()
+          onActivity()
+        } label: {
+          Image(systemName: isRevealed ? "eye.slash" : "eye")
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+
+        Button {
+          onCopy(value)
+          onActivity()
+        } label: {
+          Image(systemName: "doc.on.doc")
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .tint(.accentColor)
+      }
+    }
+  }
 }

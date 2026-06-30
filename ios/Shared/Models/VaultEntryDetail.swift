@@ -32,6 +32,7 @@ public struct VaultEntryDetail: Codable, Sendable, Equatable, Identifiable {
   public let sshKey: SshKeyDetail?
   public let softwareLicense: SoftwareLicenseDetail?
   public let passkey: PasskeyDetail?
+  public let customFields: [CustomField]
 
   public struct SecureNoteDetail: Codable, Sendable, Equatable {
     public let content: String?
@@ -209,6 +210,31 @@ public struct VaultEntryDetail: Codable, Sendable, Equatable, Identifiable {
     }
   }
 
+  public struct CustomField: Codable, Sendable, Equatable, Identifiable {
+    public let id: Int            // positional index, for ForEach stability
+    public let label: String
+    public let value: String
+    public let type: String       // raw web type string
+    public var kind: CustomFieldKind { CustomFieldKind(rawValue: type) ?? .text }
+  }
+
+  public enum CustomFieldKind: String, Sendable {
+    case text, hidden, url, boolean, date, monthYear
+
+    public var rowKind: CustomFieldRowKind {
+      switch self {
+      case .hidden: .masked
+      case .url: .url
+      case .boolean: .boolean
+      case .text, .date, .monthYear: .plain
+      }
+    }
+  }
+
+  public enum CustomFieldRowKind: Sendable, Equatable {
+    case plain, masked, url, boolean
+  }
+
   public struct GeneratorSettings: Codable, Sendable, Equatable {
     public let length: Int
     public let useUppercase: Bool
@@ -255,7 +281,8 @@ public struct VaultEntryDetail: Codable, Sendable, Equatable, Identifiable {
     bankAccount: BankAccountDetail? = nil,
     sshKey: SshKeyDetail? = nil,
     softwareLicense: SoftwareLicenseDetail? = nil,
-    passkey: PasskeyDetail? = nil
+    passkey: PasskeyDetail? = nil,
+    customFields: [CustomField] = []
   ) {
     self.id = id
     self.title = title
@@ -281,5 +308,6 @@ public struct VaultEntryDetail: Codable, Sendable, Equatable, Identifiable {
     self.sshKey = sshKey
     self.softwareLicense = softwareLicense
     self.passkey = passkey
+    self.customFields = customFields
   }
 }

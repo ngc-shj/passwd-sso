@@ -327,6 +327,42 @@ final class PersonalEntryBlobBuilderTests: XCTestCase {
 
   // MARK: - Case 10: applyEdits on non-object input throws malformedJSON
 
+  // MARK: - F-R6 pin: customFields round-trip preservation (thin pin, no new harness)
+
+  func testApplyEdits_preservesCustomFields_byteEqual() throws {
+    // Mirrors Case-3 pattern (preserve-unknown round-trip). PersonalEntryBlobBuilder
+    // already round-trips unknown keys; this pin verifies customFields is included.
+    let customFields: [[String: Any]] = [
+      ["label": "Recovery Code", "value": "abc123", "type": "text"],
+      ["label": "PIN", "value": "9999", "type": "hidden"],
+    ]
+    let inputBlobObj: [String: Any] = [
+      "title": "Entry",
+      "username": "alice",
+      "password": "oldpass",
+      "url": "https://example.com",
+      "customFields": customFields,
+    ]
+    let inputOverviewObj: [String: Any] = [
+      "title": "Entry", "username": "alice", "urlHost": "example.com",
+    ]
+
+    let blobData = try JSONSerialization.data(withJSONObject: inputBlobObj)
+    let overviewData = try JSONSerialization.data(withJSONObject: inputOverviewObj)
+
+    let fields = EditableEntryFields(
+      title: "Entry", username: "alice", password: "newpass", url: "https://example.com")
+    let (outBlobData, _) = try PersonalEntryBlobBuilder.applyEdits(
+      blob: blobData, overview: overviewData, fields: fields)
+
+    // customFields must survive byte-equal via .sortedKeys.
+    let outObj = try XCTUnwrap(JSONSerialization.jsonObject(with: outBlobData) as? [String: Any])
+    let outCF = try XCTUnwrap(outObj["customFields"])
+    let outCFData = try JSONSerialization.data(withJSONObject: outCF, options: .sortedKeys)
+    let inCFData = try JSONSerialization.data(withJSONObject: customFields, options: .sortedKeys)
+    XCTAssertEqual(outCFData, inCFData, "customFields must be byte-equal after edit (preserve-unknown)")
+  }
+
   func testApplyEdits_nonObjectInput_throwsMalformedJSON() throws {
     let arrayInput = Data("[]".utf8)
     let validObj = try JSONSerialization.data(withJSONObject: ["title": "T"])

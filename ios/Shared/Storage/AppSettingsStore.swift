@@ -67,11 +67,13 @@ public struct AppSettingsStore {
     static let autoCopyTotp = "autoCopyTotp"
     static let appLanguage = "appLanguage"
     static let fetchFaviconsCached = "fetchFaviconsCached"
+    static let autoCopyCustomField = "autoCopyCustomField"
   }
 
   /// Public key constant for `fetchFaviconsCached` so tests (which import Shared
   /// without @testable) can verify the raw UserDefaults key (T5/T11).
   public static let fetchFaviconsCachedKey = Key.fetchFaviconsCached
+  public static let autoCopyCustomFieldKey = Key.autoCopyCustomField
 
   private let defaults: UserDefaults
 
@@ -203,6 +205,14 @@ public struct AppSettingsStore {
   public var fetchFaviconsCached: Bool {
     get { defaults.bool(forKey: Key.fetchFaviconsCached) }
     nonmutating set { defaults.set(newValue, forKey: Key.fetchFaviconsCached) }
+  }
+
+  /// Whether to auto-copy a single non-hidden custom field to the clipboard after
+  /// a successful login AutoFill (mirrors autoCopyTotp). Absent key → `false`
+  /// (opt-in, fail-closed).
+  public var autoCopyCustomField: Bool {
+    get { defaults.bool(forKey: Key.autoCopyCustomField) }
+    nonmutating set { defaults.set(newValue, forKey: Key.autoCopyCustomField) }
   }
 
   /// Apply the persisted language to the process's string lookup via

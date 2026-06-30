@@ -1502,6 +1502,22 @@
         }
       }
     },
+    "No" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "いいえ"
+          }
+        }
+      }
+    },
     "Not configured" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2585,6 +2601,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "保管庫の項目数が上限に達しました。不要な項目を削除してから、もう一度お試しください。"
+          }
+        }
+      }
+    },
+    "Yes" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yes"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "はい"
           }
         }
       }
