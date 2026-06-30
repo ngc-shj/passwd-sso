@@ -79,22 +79,29 @@ final class CustomFieldAutoCopyTests: XCTestCase {
     XCTAssertEqual(customFieldToCopy(detail: d, autoCopy: true, totpWillCopy: false), "abc123")
   }
 
-  // Arbitration pair (red-capable, T2): hold detail fixed, vary only totpWillCopy.
-  // Removing the `!totpWillCopy` guard makes the first assertion fail (→ red).
+  // Arbitration (red-capable, T2): hold detail fixed (1 text field, autoCopy=true)
+  // and assert the totpWillCopy=true half returns nil. The contrasting
+  // false→value half is already covered by testSingleTextField_totpWillCopyFalse_returnsValue
+  // above (same fixture), so the pair is: that test + this one. Removing the
+  // `!totpWillCopy` guard flips this case → red.
   func testArbitration_totpWillCopyTrue_returnsNil() {
     let d = detail(customFields: [field("Recovery", "abc123", "text")])
     XCTAssertNil(customFieldToCopy(detail: d, autoCopy: true, totpWillCopy: true))
-  }
-
-  func testArbitration_totpWillCopyFalse_returnsValue() {
-    let d = detail(customFields: [field("Recovery", "abc123", "text")])
-    XCTAssertEqual(customFieldToCopy(detail: d, autoCopy: true, totpWillCopy: false), "abc123")
   }
 
   // Hidden exclusion (red-capable, S1): a single hidden field must NEVER be auto-copied.
   // Removing the `kind != .hidden` guard makes this fail (→ red).
   func testHiddenField_returnsNil() {
     let d = detail(customFields: [field("API Secret", "tok_abc", "hidden")])
+    XCTAssertNil(customFieldToCopy(detail: d, autoCopy: true, totpWillCopy: false))
+  }
+
+  // Boolean exclusion (red-capable, F3): a single boolean field must NOT be
+  // auto-copied — the detail view treats booleans as non-copyable, so a bare
+  // "true"/"false" on the clipboard would be inconsistent. Removing the
+  // `kind != .boolean` guard makes this fail (→ red).
+  func testBooleanField_returnsNil() {
+    let d = detail(customFields: [field("Active", "true", "boolean")])
     XCTAssertNil(customFieldToCopy(detail: d, autoCopy: true, totpWillCopy: false))
   }
 

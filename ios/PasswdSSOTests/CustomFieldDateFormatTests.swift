@@ -37,11 +37,16 @@ final class CustomFieldDateFormatTests: XCTestCase {
   }
 
   func testDateOnlyNoDayShiftInNonUTCZone() throws {
-    // The function uses a UTC-based parse; a "2026-07-01" must not shift to
-    // June 30 in a UTC+N zone where the base epoch would precede midnight.
-    // We assert the year is 2026 and the result is non-nil regardless of TZ.
-    let result = EntryDetailView.formatCustomFieldDate("2026-07-01", locale: Locale(identifier: "en"))
-    let formatted = try XCTUnwrap(result)
-    XCTAssertTrue(formatted.contains("2026"), "year must not shift due to timezone")
+    // The function parses AND formats in UTC, so "2026-07-01" must render as
+    // July 1 (day "1", month "Jul"), never shift to June 30 — regardless of the
+    // host machine's time zone. The previous version only asserted contains("2026"),
+    // which survives a July 1 → June 30 shift; this asserts the actual day.
+    let formatted = try XCTUnwrap(
+      EntryDetailView.formatCustomFieldDate("2026-07-01", locale: Locale(identifier: "en")))
+    XCTAssertTrue(formatted.contains("2026"), "year must be present")
+    XCTAssertTrue(formatted.contains("Jul"), "month must be July, not June (no day-shift)")
+    XCTAssertTrue(formatted.contains("1"), "day must be the 1st, not the 30th")
+    XCTAssertFalse(formatted.contains("Jun"), "must not shift back to June")
+    XCTAssertFalse(formatted.contains("30"), "must not shift to the 30th")
   }
 }

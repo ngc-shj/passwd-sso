@@ -186,8 +186,11 @@ final class EntryBlobGoldenPayloadTests: XCTestCase {
        {"label":"Meta","value":{"nested":true},"type":"text"}
      ]}
     """#
+    // `decode` already XCTUnwraps, so reaching here proves the whole blob
+    // decoded; `password == "s3cr3t"` is the load-bearing survival assertion
+    // (goes red if FlexibleString is reverted to String? — the drifted value
+    // would then throw and fail the whole-blob decode).
     let d = try decode(json, "LOGIN")
-    XCTAssertNotNil(d, "blob decode must not fail on drifted customField value types")
     XCTAssertEqual(d.password, "s3cr3t")
     XCTAssertEqual(d.customFields.count, 2)
     // Numeric value is stringified by FlexibleString ("42").

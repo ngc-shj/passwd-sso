@@ -201,7 +201,18 @@ extension EntryDetailView {
     let strategy = Date.ISO8601FormatStyle()
       .year().month().day().dateSeparator(.dash)
     guard let date = try? Date(raw, strategy: strategy) else { return nil }
-    return date.formatted(Date.FormatStyle(date: .abbreviated).locale(locale))
+    // Format in UTC too: the value is a date-only "YYYY-MM-DD" parsed as UTC
+    // midnight; formatting in the device time zone would shift it to the
+    // previous day in negative-UTC offsets. Pin display to UTC (via the
+    // initializer's timeZone: parameter — the fluent `.timeZone(_:)` setter
+    // takes a display-style Symbol, not a TimeZone) so the rendered day matches
+    // the stored day everywhere.
+    let style = Date.FormatStyle(
+      date: .abbreviated,
+      locale: locale,
+      timeZone: TimeZone(identifier: "UTC") ?? .gmt
+    )
+    return date.formatted(style)
   }
 
   @ViewBuilder
