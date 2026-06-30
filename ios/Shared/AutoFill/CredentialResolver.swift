@@ -674,7 +674,8 @@ public actor CredentialResolver {
     else {
       return nil
     }
-    return EntryBlobDecoder.summary(plaintext: plaintext, entryId: entry.id, teamId: entry.teamId)
+    return EntryBlobDecoder.summary(
+      plaintext: plaintext, entryId: entry.id, teamId: entry.teamId, entryType: entry.entryType)
   }
 
   private func decryptDetail(
@@ -697,7 +698,8 @@ public actor CredentialResolver {
     else {
       return nil
     }
-    return EntryBlobDecoder.detail(plaintext: plaintext, entryId: entry.id, teamId: entry.teamId)
+    return EntryBlobDecoder.detail(
+      plaintext: plaintext, entryId: entry.id, teamId: entry.teamId, entryType: entry.entryType)
   }
 
   /// Build the AAD for a cache entry at decrypt time.

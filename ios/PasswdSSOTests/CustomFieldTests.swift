@@ -43,13 +43,15 @@ final class CustomFieldKindRowKindTests: XCTestCase {
 /// in CustomFieldAutoCopy.swift (a Shared module file).
 final class CustomFieldAutoCopyTests: XCTestCase {
 
-  // Helper: build a VaultEntryDetail with optional custom fields.
+  // Helper: build a VaultEntryDetail with optional custom fields. entryType nil
+  // (the default) means LOGIN per the app-wide convention.
   private func detail(
-    customFields: [VaultEntryDetail.CustomField] = []
+    customFields: [VaultEntryDetail.CustomField] = [],
+    entryType: String? = nil
   ) -> VaultEntryDetail {
     VaultEntryDetail(
       id: "e1", title: "T", username: "u", urlHost: "example.com",
-      password: "pw", url: "", customFields: customFields
+      password: "pw", url: "", entryType: entryType, customFields: customFields
     )
   }
 
@@ -112,5 +114,26 @@ final class CustomFieldAutoCopyTests: XCTestCase {
       customFieldToCopy(detail: d, autoCopy: true, totpWillCopy: false),
       "https://portal.example"
     )
+  }
+
+  // LOGIN-type boundary (red-capable): a non-LOGIN entry reachable via the
+  // password fill path must NOT auto-copy a custom field to the foreground app's
+  // clipboard. Removing the `entryType == nil || == "LOGIN"` guard flips this → red.
+  func testNonLoginEntry_returnsNil() {
+    let d = detail(
+      customFields: [field("Recovery", "abc123", "text")], entryType: "SECURE_NOTE")
+    XCTAssertNil(customFieldToCopy(detail: d, autoCopy: true, totpWillCopy: false))
+  }
+
+  func testExplicitLoginType_returnsValue() {
+    let d = detail(
+      customFields: [field("Recovery", "abc123", "text")], entryType: "LOGIN")
+    XCTAssertEqual(customFieldToCopy(detail: d, autoCopy: true, totpWillCopy: false), "abc123")
+  }
+
+  func testNilEntryTypeTreatedAsLogin_returnsValue() {
+    // entryType nil ⇒ LOGIN (personal blobs omit the type).
+    let d = detail(customFields: [field("Recovery", "abc123", "text")], entryType: nil)
+    XCTAssertEqual(customFieldToCopy(detail: d, autoCopy: true, totpWillCopy: false), "abc123")
   }
 }
