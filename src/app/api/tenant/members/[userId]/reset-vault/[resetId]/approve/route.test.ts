@@ -19,6 +19,7 @@ const {
   mockNotificationTitle,
   mockNotificationBody,
   mockDecryptResetToken,
+  mockRequireRecentSession,
   TenantAuthError,
 } = vi.hoisted(() => {
   class _TenantAuthError extends Error {
@@ -47,6 +48,7 @@ const {
     mockNotificationTitle: vi.fn(),
     mockNotificationBody: vi.fn(),
     mockDecryptResetToken: vi.fn(),
+    mockRequireRecentSession: vi.fn(),
     TenantAuthError: _TenantAuthError,
   };
 });
@@ -99,6 +101,9 @@ vi.mock("@/lib/notification/notification-messages", () => ({
 }));
 vi.mock("@/lib/vault/admin-reset-token-crypto", () => ({
   decryptResetToken: mockDecryptResetToken,
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -175,6 +180,8 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/approve", () =
     });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockIsTenantRoleAbove.mockReturnValue(true);
+    // Step-up passes by default (null = recent enough). Denial tests override.
+    mockRequireRecentSession.mockResolvedValue(null);
     mockPrismaAdminVaultResetFindFirst.mockResolvedValue(RESET_RECORD);
     mockPrismaTenantMemberFindFirst.mockResolvedValue(TARGET_MEMBER);
     mockPrismaAdminVaultResetUpdateMany.mockResolvedValue({ count: 1 });
@@ -267,6 +274,35 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/approve", () =
       }),
     );
     expect(mockPrismaAdminVaultResetUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns step-up Response and performs no privileged work when session is stale (M1, RT8)", async () => {
+    mockRequireRecentSession.mockResolvedValueOnce(
+      Response.json({ error: "SESSION_STEP_UP_REQUIRED" }, { status: 403 }),
+    );
+
+    const res = await POST(buildReq(), buildParams());
+
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+
+    // RT8: every guarded side effect must be skipped on the denial path.
+    // The gate sits before the rate-limit block, so the limiter is untouched
+    // (a stale session must not burn the low per-target cap — griefing lever).
+    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockDecryptResetToken).not.toHaveBeenCalled();
+    expect(mockPrismaAdminVaultResetUpdateMany).not.toHaveBeenCalled();
+    expect(mockCreateNotification).not.toHaveBeenCalled();
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke step-up before authz/eligibility checks (M1 ordering)", async () => {
+    // A wrong-role attempt must 403 on eligibility WITHOUT prompting reauth.
+    mockIsTenantRoleAbove.mockReturnValue(false);
+    const res = await POST(buildReq(), buildParams());
+    expect(res.status).toBe(403);
+    expect(mockRequireRecentSession).not.toHaveBeenCalled();
   });
 
   it("returns 429 when actor rate limit is exceeded", async () => {

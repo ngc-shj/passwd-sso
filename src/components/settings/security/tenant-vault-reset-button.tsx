@@ -18,6 +18,11 @@ import { RotateCcw, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
 import { apiPath } from "@/lib/constants";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 
 interface TenantVaultResetButtonProps {
   userId: string;
@@ -39,6 +44,11 @@ export function TenantVaultResetButton({
   const [confirmInput, setConfirmInput] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Inline step-up reauth — initiate is server-side step-up-gated; on a stale
+  // session the confirm dialog stays open and the hook re-runs initiate after
+  // reauth.
+  const inlineReauth = useInlineReauth(() => handleReset());
+
   const handleReset = async () => {
     setLoading(true);
     try {
@@ -57,6 +67,13 @@ export function TenantVaultResetButton({
         onSuccess?.();
       } else if (res.status === 429) {
         toast.error(t("vaultResetRateLimited"));
+      } else if (res.status === 403) {
+        const body = await readApiErrorBody(res);
+        if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          await inlineReauth.triggerOnStaleError();
+        } else {
+          toast.error(t("vaultResetFailed"));
+        }
       } else {
         toast.error(t("vaultResetFailed"));
       }
@@ -103,6 +120,15 @@ export function TenantVaultResetButton({
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
+
+      <RecentSessionRequiredDialog
+        {...inlineReauth.recentSessionDialogProps}
+        cancelLabel={t("cancel")}
+      />
+      <PasskeyReauthDialog
+        {...inlineReauth.reauthDialogProps}
+        cancelLabel={t("cancel")}
+      />
     </AlertDialog>
   );
 }

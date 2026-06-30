@@ -12,6 +12,7 @@ vi.mock("next-intl", () => ({
   useTranslations: () =>
     (key: string, params?: Record<string, string>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
+  useLocale: () => "en",
 }));
 
 vi.mock("sonner", () => ({ toast: mockToast }));

@@ -706,4 +706,29 @@ describe("GET /api/tenant/members/[userId]/reset-vault", () => {
     );
     expect(Object.keys(json[0].initiatedBy).sort()).toEqual(["email", "id", "name"].sort());
   });
+
+  it("read is permission-gated but NOT role-hierarchy-gated: an admin reads a same/higher-rank target's history, with action eligibility insufficient_role (M2 — intentional view/action split)", async () => {
+    // Target is not below the actor in the hierarchy (e.g. peer ADMIN / OWNER).
+    // Use a different initiator so eligibility resolves on the role-hierarchy
+    // branch (insufficient_role), not the self-initiator short-circuit.
+    mockPrismaAdminVaultResetFindMany.mockResolvedValue([
+      { ...BASE_RESET, initiatedById: "other-admin" },
+    ]);
+    mockPrismaTenantMemberFindFirst.mockResolvedValue({ role: "ADMIN" });
+    mockIsTenantRoleAbove.mockReturnValue(false);
+
+    const res = await GET(
+      createRequest("GET", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
+      createParams({ userId: TARGET_USER_ID }),
+    );
+
+    // READ succeeds despite the rank — this is the deliberate split. If a
+    // future change adds a read-side hierarchy gate, this test goes red and
+    // forces a conscious decision.
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toHaveLength(1);
+    // ACTION is hierarchy-gated: the row is not approvable by this actor.
+    expect(json[0].approveEligibility).toBe("insufficient_role");
+  });
 });

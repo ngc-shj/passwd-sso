@@ -10,6 +10,7 @@ import { adminVaultResetEmail } from "@/lib/email/templates/admin-vault-reset";
 import { serverAppUrl } from "@/lib/url-helpers";
 import { resolveUserLocale } from "@/lib/locale";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import {
   APPROVE_ELIGIBILITY,
   computeApproveEligibility,
@@ -147,6 +148,14 @@ async function handlePOST(
     });
     return errorResponse(API_ERROR.RESET_TARGET_EMAIL_CHANGED);
   }
+
+  // Step-up: approve is a destructive-ceremony member (mirrors initiate and
+  // access-requests/approve). Placed AFTER eligibility so a wrong-role /
+  // self-approval attempt still 403s without prompting reauth, and BEFORE the
+  // rate-limit block so a stale session is rejected without burning the
+  // per-target limiter (a low cap that would otherwise be a griefing lever).
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
+  if (stepUpError) return stepUpError;
 
   // Rate limits
   const [actorResult, targetResult] = await Promise.all([
