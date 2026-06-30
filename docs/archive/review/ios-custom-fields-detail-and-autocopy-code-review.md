@@ -1,7 +1,35 @@
 # Code Review: ios-custom-fields-detail-and-autocopy
 
 Date: 2026-07-01
-Review round: 1
+Review rounds: 2 (converged — Round 2 returned No findings from both functionality
+and security experts)
+
+## Round 2 Summary (verify fixes)
+
+Functionality + security experts re-reviewed the Round-1 fix commit (b452a5f4).
+**Both returned "No findings."**
+- **F1 RESOLVED** — toggle → `store.autoCopyCustomField` → App-Group UserDefaults →
+  extension reads it → `customFieldToCopy`; reachable end-to-end. Footer messaging
+  accurate. Mirrors `autoCopyTotpSelection` (incl. `recordActivity()`).
+- **F2 RESOLVED** — `Date.FormatStyle(date:locale:timeZone:UTC)` is the correct
+  initializer (compiles; the fluent `.timeZone()` Symbol form was the first-attempt
+  compile error, fixed); day-shift gone; test now red-capable for the exact day.
+- **F3 RESOLVED** — `.boolean` excluded from auto-copy alongside `.hidden`.
+- Regressions: none. Arbitration intact (TOTP still wins), opt-in still default-off
+  (fail-closed), no new retained secret holder, no new exposure beyond plan-review S1's
+  approved surface, catalog strings carry no PII/secret (RS4).
+- T1/T2 (test cleanups) verified green by the orchestrator's R21 re-run (659 tests).
+
+659 tests pass (orchestrator re-run, twice — once caught a first-attempt UTC compile
+error in the F2 fix, which was then corrected). All findings resolved.
+
+Note: the `Localizable.xcstrings` Round-1 fix produced a large line-diff due to an
+alphabetical key re-sort; content integrity was verified (exactly 2 keys added, 0 removed,
+0 existing values changed).
+
+---
+
+## Round 1
 
 ## Changes from Previous Round
 
