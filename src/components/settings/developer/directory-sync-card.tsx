@@ -46,11 +46,15 @@ import { FolderSync, Loader2, Play, Plus, ScrollText, Trash2 } from "lucide-reac
 import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
 import { readApiErrorBody, getApiErrorDetail } from "@/lib/http/read-api-error-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { NAME_MAX_LENGTH } from "@/lib/validations";
 import { apiPath, API_PATH } from "@/lib/constants";
 import { formatDateTime, formatRelativeTime } from "@/lib/format/format-datetime";
 import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { FormDirtyBadge } from "@/components/settings/account/form-dirty-badge";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -138,6 +142,15 @@ export function DirectorySyncCard() {
   // Running sync
   const [runningSyncId, setRunningSyncId] = useState<string | null>(null);
 
+  // Inline step-up reauth — create/update/delete are server-side step-up-gated.
+  // The retry arg (owned by the hook) records which mutation the operator was
+  // attempting so the post-reauth retry replays the same one.
+  type ReauthRetry = { type: "save" } | { type: "delete"; id: string };
+  const inlineReauth = useInlineReauth<ReauthRetry>(async (retry) => {
+    if (retry.type === "save") await handleSave();
+    else if (retry.type === "delete") await handleDelete(retry.id);
+  });
+
   // ─── Fetch configs ──────────────────────────────────────────
 
   const fetchConfigs = useCallback(async () => {
@@ -209,6 +222,13 @@ export function DirectorySyncCard() {
           setEditInitial({ ...editCurrent });
           setDialogOpen(false);
           fetchConfigs();
+        } else if (res.status === 403) {
+          const errBody = await readApiErrorBody(res);
+          if (errBody?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+            await inlineReauth.triggerOnStaleError({ type: "save" });
+          } else {
+            toast.error(t("syncFailed"));
+          }
         } else if (res.status === 400) {
           toast.error(t("validationError"));
         } else {
@@ -233,6 +253,13 @@ export function DirectorySyncCard() {
           fetchConfigs();
         } else if (res.status === 409) {
           toast.error(t("syncConflict"));
+        } else if (res.status === 403) {
+          const errBody = await readApiErrorBody(res);
+          if (errBody?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+            await inlineReauth.triggerOnStaleError({ type: "save" });
+          } else {
+            toast.error(t("syncFailed"));
+          }
         } else if (res.status === 400) {
           toast.error(t("validationError"));
         } else {
@@ -248,22 +275,26 @@ export function DirectorySyncCard() {
 
   // ─── Delete ─────────────────────────────────────────────────
 
-  async function handleDelete() {
-    if (!deletingId) return;
+  async function handleDelete(id: string) {
     try {
-      const res = await fetchApi(apiPath.directorySyncById(deletingId), {
+      const res = await fetchApi(apiPath.directorySyncById(id), {
         method: "DELETE",
       });
       if (res.ok) {
         toast.success(t("configDeleted"));
         fetchConfigs();
+      } else if (res.status === 403) {
+        const errBody = await readApiErrorBody(res);
+        if (errBody?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          await inlineReauth.triggerOnStaleError({ type: "delete", id });
+        } else {
+          toast.error(t("syncFailed"));
+        }
       } else {
         toast.error(t("syncFailed"));
       }
     } catch {
       toast.error(t("syncFailed"));
-    } finally {
-      setDeletingId(null);
     }
   }
 
@@ -692,7 +723,15 @@ export function DirectorySyncCard() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete}>{t("deleteConfig")}</AlertDialogAction>
+            <AlertDialogAction
+              onClick={() => {
+                const id = deletingId;
+                setDeletingId(null);
+                if (id) handleDelete(id);
+              }}
+            >
+              {t("deleteConfig")}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -761,6 +800,15 @@ export function DirectorySyncCard() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <RecentSessionRequiredDialog
+        {...inlineReauth.recentSessionDialogProps}
+        cancelLabel={tCommon("cancel")}
+      />
+      <PasskeyReauthDialog
+        {...inlineReauth.reauthDialogProps}
+        cancelLabel={tCommon("cancel")}
+      />
     </>
   );
 }

@@ -31,6 +31,9 @@ import { apiPath } from "@/lib/constants";
 import { useTeamVault } from "@/lib/team/team-vault-core";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -93,6 +96,11 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
   const [phase, setPhase] = useState<RotatePhase>("idle");
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [confirmInput, setConfirmInput] = useState("");
+
+  // Inline step-up reauth — rotate-key is server-side step-up-gated. On a stale
+  // session the confirm dialog stays open and the hook replays the rotation
+  // (re-fetch + re-encrypt) after reauth.
+  const inlineReauth = useInlineReauth(() => handleRotate());
 
   const handleRotate = async () => {
     setLoading(true);
@@ -252,6 +260,8 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
         const body = await readApiErrorBody(res);
         if (res.status === 409) {
           toast.error(t("rotateKeyVersionConflict"));
+        } else if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          await inlineReauth.triggerOnStaleError();
         } else if (body?.error === API_ERROR.ENTRY_COUNT_MISMATCH) {
           toast.error(t("rotateKeyEntryMismatch"));
         } else {
@@ -280,6 +290,7 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
   const progressLabel = describeProgress(phase, progress.current, progress.total);
 
   return (
+    <>
     <AlertDialog open={open} onOpenChange={(v) => { if (!loading) { setOpen(v); if (!v) setConfirmInput(""); } }}>
       <AlertDialogTrigger asChild>
         <Button variant="destructive" size="sm">
@@ -332,5 +343,15 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+
+      <RecentSessionRequiredDialog
+        {...inlineReauth.recentSessionDialogProps}
+        cancelLabel={t("rotateKeyCancel")}
+      />
+      <PasskeyReauthDialog
+        {...inlineReauth.reauthDialogProps}
+        cancelLabel={t("rotateKeyCancel")}
+      />
+    </>
   );
 }

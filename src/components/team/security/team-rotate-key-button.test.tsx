@@ -29,12 +29,16 @@ const {
   deriveTeamKeyMock,
   rawItemKeysSnapshot,
   newTeamKeysSnapshot,
+  mockCanUsePasskeyRecovery,
+  mockReauthenticateWithPasskey,
 } = vi.hoisted(() => {
   const rawSnap: { refs: Uint8Array[] } = { refs: [] };
   const teamKeySnap: { refs: Uint8Array[] } = { refs: [] };
   return {
     mockFetch: vi.fn(),
     mockToast: { error: vi.fn(), success: vi.fn() },
+    mockCanUsePasskeyRecovery: vi.fn(),
+    mockReauthenticateWithPasskey: vi.fn(),
     generateTeamKeyMock: vi.fn<typeof generateTeamSymmetricKey>(() => {
       const buf = new Uint8Array(32).fill(0xab);
       teamKeySnap.refs.push(buf);
@@ -70,6 +74,7 @@ const {
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string, opts?: Record<string, unknown>) =>
     opts ? `${key}:${JSON.stringify(opts)}` : key,
+  useLocale: () => "en",
 }));
 
 vi.mock("sonner", () => ({ toast: mockToast }));
@@ -99,6 +104,17 @@ vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildTeamEntryAAD: vi.fn(() => "team-aad"),
   buildItemKeyWrapAAD: vi.fn(() => "item-key-aad"),
   VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
+}));
+
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
 
 import { TeamRotateKeyButton } from "./team-rotate-key-button";
@@ -138,7 +154,11 @@ const ENTRIES = [
 
 const MEMBERS = [{ userId: "u1", ecdhPublicKey: "pk1" }];
 
-function setupRotateFetch(opts?: { rotateOk?: boolean; rotateStatus?: number }) {
+function setupRotateFetch(opts?: {
+  rotateOk?: boolean;
+  rotateStatus?: number;
+  rotateBody?: Record<string, unknown>;
+}) {
   mockFetch.mockImplementation((url: string, init?: RequestInit) => {
     if (url.includes("rotate-key/data") || url.includes("rotate-key-data")) {
       return Promise.resolve({
@@ -155,7 +175,7 @@ function setupRotateFetch(opts?: { rotateOk?: boolean; rotateStatus?: number }) 
       return Promise.resolve({
         ok: opts?.rotateOk ?? true,
         status: opts?.rotateStatus ?? 200,
-        json: () => Promise.resolve({}),
+        json: () => Promise.resolve(opts?.rotateBody ?? {}),
       });
     }
     return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
@@ -181,6 +201,8 @@ describe("TeamRotateKeyButton — §Sec-1 crypto invariants", () => {
     vi.clearAllMocks();
     rawItemKeysSnapshot.refs.length = 0;
     newTeamKeysSnapshot.refs.length = 0;
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true });
   });
 
   it("renders the rotate-key trigger button", () => {
@@ -266,6 +288,23 @@ describe("TeamRotateKeyButton — §Sec-1 crypto invariants", () => {
     await waitFor(() => {
       expect(mockToast.error).toHaveBeenCalledWith("rotateKeyVersionConflict");
     });
+  });
+
+  // RT8: a stale-session rotate POST must surface the reauth recovery path, not
+  // the generic rotateKeyFailed toast, and must NOT report success.
+  it("opens the recent-session dialog on a SESSION_STEP_UP_REQUIRED rotate (RT8)", async () => {
+    setupRotateFetch({
+      rotateOk: false,
+      rotateStatus: 403,
+      rotateBody: { error: "SESSION_STEP_UP_REQUIRED" },
+    });
+    render(<TeamRotateKeyButton teamId="team-1" />);
+    await openAndConfirm();
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.success).not.toHaveBeenCalled();
+    expect(mockToast.error).not.toHaveBeenCalled();
   });
 
   it("disables confirm button until 'rotate' typed", async () => {

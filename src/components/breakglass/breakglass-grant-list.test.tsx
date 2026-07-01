@@ -4,10 +4,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-const { mockFetchApi, mockToastSuccess, mockToastError } = vi.hoisted(() => ({
+const {
+  mockFetchApi,
+  mockToastSuccess,
+  mockToastError,
+  mockCanUsePasskeyRecovery,
+  mockReauthenticateWithPasskey,
+} = vi.hoisted(() => ({
   mockFetchApi: vi.fn(),
   mockToastSuccess: vi.fn(),
   mockToastError: vi.fn(),
+  mockCanUsePasskeyRecovery: vi.fn(),
+  mockReauthenticateWithPasskey: vi.fn(),
 }));
 
 vi.mock("next-intl", () => ({
@@ -82,6 +90,17 @@ vi.mock("@/components/ui/alert-dialog", () => ({
   }) => <button onClick={onClick}>{children}</button>,
 }));
 
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
+}));
+
 import { BreakGlassGrantList } from "./breakglass-grant-list";
 
 const activeGrant = {
@@ -107,6 +126,10 @@ describe("BreakGlassGrantList", () => {
     mockFetchApi.mockReset();
     mockToastSuccess.mockReset();
     mockToastError.mockReset();
+    mockCanUsePasskeyRecovery.mockReset();
+    mockReauthenticateWithPasskey.mockReset();
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true });
   });
 
   it("shows loader initially then empty state when there are no grants", async () => {
@@ -176,6 +199,37 @@ describe("BreakGlassGrantList", () => {
       );
     });
     expect(mockToastSuccess).toHaveBeenCalled();
+  });
+
+  // RT8: a stale-session revoke must surface the reauth recovery path, not the
+  // generic error toast, and must NOT report success.
+  it("opens the recent-session dialog on a SESSION_STEP_UP_REQUIRED revoke (RT8)", async () => {
+    mockFetchApi.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ items: [activeGrant] }),
+    });
+    // Revoke DELETE → stale session
+    mockFetchApi.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: "SESSION_STEP_UP_REQUIRED" }),
+    });
+
+    render(<BreakGlassGrantList refreshTrigger={0} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Target")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getAllByText("revoke")[0]);
+    const allRevokes = screen.getAllByText("revoke");
+    fireEvent.click(allRevokes[allRevokes.length - 1]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToastSuccess).not.toHaveBeenCalled();
+    expect(mockToastError).not.toHaveBeenCalled();
   });
 
   it("toggles history visibility and renders historical grants", async () => {
