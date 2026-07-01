@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.64](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.63...passwd-sso-v0.4.64) (2026-07-01)
+
+
+### Features
+
+* **ios:** surface login custom fields in detail view + AutoFill copy ([#628](https://github.com/ngc-shj/passwd-sso/issues/628)) ([246a2ee](https://github.com/ngc-shj/passwd-sso/commit/246a2ee4ca2d9ee85b893278ab2510c9a5578ba3))
+
+
+### Bug Fixes
+
+* **tenant:** require step-up to approve admin vault reset; add client reauth recovery ([#625](https://github.com/ngc-shj/passwd-sso/issues/625)) ([5519586](https://github.com/ngc-shj/passwd-sso/commit/5519586f3912debd46146a176aa54f4334d02c46))
+* **ui:** add step-up reauth recovery to 8 stale-session-dead-end callers ([#627](https://github.com/ngc-shj/passwd-sso/issues/627)) ([1c35291](https://github.com/ngc-shj/passwd-sso/commit/1c35291fa201ad730484da83768571bd30bf6f53))
+
 ## [0.4.63](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.62...passwd-sso-v0.4.63) (2026-06-29)
 
 
