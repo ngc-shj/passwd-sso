@@ -31,7 +31,7 @@ struct EntryDetailView: View {
   @State private var showCopyToast: Bool = false
 
   @Environment(\.dismiss) private var dismiss
-  @Environment(\.openURL) private var openURL
+  @Environment(\.openURL) var openURL
 
   var body: some View {
     Group {
@@ -223,6 +223,7 @@ struct EntryDetailView: View {
         notSetText
       }
     }
+    customFieldRows(d.customFields)
   }
 
   var notSetText: some View {

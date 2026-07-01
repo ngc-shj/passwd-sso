@@ -12,10 +12,12 @@ final class CredentialIdentityRegistrarTests: XCTestCase {
     _ id: String,
     urlHost: String,
     additional: [String] = [],
-    username: String = "user"
+    username: String = "user",
+    entryType: String? = nil
   ) -> VaultEntrySummary {
     VaultEntrySummary(
-      id: id, title: "T", username: username, urlHost: urlHost, additionalUrlHosts: additional
+      id: id, title: "T", username: username, urlHost: urlHost,
+      additionalUrlHosts: additional, entryType: entryType
     )
   }
 
@@ -33,6 +35,31 @@ final class CredentialIdentityRegistrarTests: XCTestCase {
   func testSpecs_bothEmptyExcluded() {
     let specs = CredentialIdentityRegistrar.specs(from: [summary("e1", urlHost: "", additional: [])])
     XCTAssertTrue(specs.isEmpty)
+  }
+
+  // LOGIN-type boundary (red-capable): a non-LOGIN entry with a host must NOT be
+  // registered as a password identity (only logins are password fill candidates).
+  // Removing the entryType guard in specs(from:) makes this fail → red.
+  func testSpecs_nonLoginEntryExcluded() {
+    let specs = CredentialIdentityRegistrar.specs(from: [
+      summary("e1", urlHost: "amazon.co.jp", entryType: "SECURE_NOTE")
+    ])
+    XCTAssertTrue(specs.isEmpty, "a non-LOGIN entry must not be a password identity")
+  }
+
+  func testSpecs_explicitLoginIncluded() {
+    let specs = CredentialIdentityRegistrar.specs(from: [
+      summary("e1", urlHost: "amazon.co.jp", entryType: "LOGIN")
+    ])
+    XCTAssertEqual(specs.map(\.recordIdentifier), ["e1"])
+  }
+
+  func testSpecs_nilEntryTypeTreatedAsLoginIncluded() {
+    // entryType nil ⇒ LOGIN (personal blobs omit the type).
+    let specs = CredentialIdentityRegistrar.specs(from: [
+      summary("e1", urlHost: "amazon.co.jp", entryType: nil)
+    ])
+    XCTAssertEqual(specs.map(\.recordIdentifier), ["e1"])
   }
 
   func testSpecs_emptyUrlHostButAdditionalHostIncluded() {

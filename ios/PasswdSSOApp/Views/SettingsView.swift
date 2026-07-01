@@ -114,6 +114,16 @@ struct SettingsView: View {
     )
   }
 
+  private var autoCopyCustomFieldSelection: Binding<Bool> {
+    Binding(
+      get: { store.autoCopyCustomField },
+      set: { newValue in
+        store.autoCopyCustomField = newValue
+        autoLockService.recordActivity()
+      }
+    )
+  }
+
   private var faviconSelection: Binding<Bool> {
     Binding(
       get: { store.fetchFaviconsCached },
@@ -182,10 +192,11 @@ struct SettingsView: View {
             }
           }
           Toggle("Auto-copy TOTP after fill", isOn: autoCopyTotpSelection)
+          Toggle("Auto-copy custom field after fill", isOn: autoCopyCustomFieldSelection)
         } header: {
           Text("Clipboard")
         } footer: {
-          Text("When on, filling a login that has a one-time-code copies the current code to the clipboard so you can paste it. The clipboard clears after the time above and never syncs to your other devices.")
+          Text("When on, filling a login that has a one-time-code copies the current code to the clipboard so you can paste it. The clipboard clears after the time above and never syncs to your other devices.\n\nCustom-field auto-copy copies a single non-hidden custom field after a fill; hidden fields are never auto-copied (copy them from the entry instead). A one-time-code takes priority for the clipboard.")
         }
 
         Section {

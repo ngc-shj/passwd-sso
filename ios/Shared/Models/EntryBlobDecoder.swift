@@ -122,6 +122,11 @@ public enum EntryBlobDecoder {
     let credentialId: String?
     let creationDate: String?
     let deviceInfo: String?
+    // LOGIN custom/additional fields. Decoded element-by-element with a lossy
+    // wrapper: a bad element (junk string, null, object with wrong value type)
+    // is skipped rather than failing the whole blob decode. Key is omitted by
+    // the web when the array is empty (personal-entry-payload.ts spread).
+    let customFields: LossyCustomFields?
   }
 
   /// Full-blob fields needed to build a passkey assertion. Decoded separately
@@ -184,6 +189,37 @@ public enum EntryBlobDecoder {
         value = nil
       }
     }
+  }
+
+  private struct CustomFieldPayload: Decodable {
+    let label: String?; let value: FlexibleString?; let type: String?
+  }
+
+  private struct LossyCustomFields: Decodable {
+    let fields: [CustomFieldPayload]
+    init(from decoder: Decoder) throws {
+      var container = try decoder.unkeyedContainer()
+      var acc: [CustomFieldPayload] = []
+      while !container.isAtEnd {
+        // Decode-or-skip each element. A non-object element (string/null/number)
+        // must NOT throw the whole array — advance the cursor with a throwaway
+        // decode so a single junk element can't fail the whole blob.
+        if let f = try? container.decode(CustomFieldPayload.self) {
+          acc.append(f)
+        } else {
+          _ = try? container.decode(AnyDecodableSkip.self)  // advance past the bad element
+        }
+      }
+      fields = acc
+    }
+  }
+
+  // Permissive Decodable that consumes any single JSON value to advance an
+  // unkeyed container cursor. A failed try? on CustomFieldPayload does NOT
+  // advance the container; without this skip-decode the loop stalls on the
+  // bad element.
+  private struct AnyDecodableSkip: Decodable {
+    init(from d: Decoder) throws { _ = try? d.singleValueContainer() }
   }
 
   private struct TagPayload: Decodable {
@@ -333,7 +369,18 @@ public enum EntryBlobDecoder {
         ? .init(
           relyingPartyId: p.relyingPartyId, relyingPartyName: p.relyingPartyName,
           username: p.username, credentialId: p.credentialId, creationDate: p.creationDate,
-          deviceInfo: p.deviceInfo) : nil
+          deviceInfo: p.deviceInfo) : nil,
+      customFields: (p.customFields?.fields ?? [])
+        .filter { f in !(f.label ?? "").isEmpty }
+        .enumerated()
+        .map { idx, f in
+          VaultEntryDetail.CustomField(
+            id: idx,
+            label: f.label ?? "",
+            value: f.value?.value ?? "",
+            type: f.type ?? "text"
+          )
+        }
     )
   }
 }

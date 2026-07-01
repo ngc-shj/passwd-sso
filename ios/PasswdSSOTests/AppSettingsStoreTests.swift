@@ -392,4 +392,37 @@ final class AppSettingsStoreTests: XCTestCase {
     XCTAssertEqual(AppTheme.dark.colorScheme, .dark)
     XCTAssertNil(AppTheme.system.colorScheme)
   }
+
+  // MARK: - Auto-copy custom field (C4)
+
+  func testAutoCopyCustomFieldAbsentReturnsFalse() {
+    XCTAssertFalse(AppSettingsStore(defaults: defaults).autoCopyCustomField)
+  }
+
+  func testAutoCopyCustomFieldRoundTrip() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.autoCopyCustomField = true
+    XCTAssertTrue(store.autoCopyCustomField)
+    store.autoCopyCustomField = false
+    XCTAssertFalse(store.autoCopyCustomField)
+  }
+
+  func testAutoCopyCustomFieldReadsAcrossSeparateStoresOnSameSuite() {
+    let appSide = AppSettingsStore(defaults: defaults)
+    let extensionSide = AppSettingsStore(defaults: UserDefaults(suiteName: suiteName)!)
+    appSide.autoCopyCustomField = true
+    XCTAssertTrue(extensionSide.autoCopyCustomField)
+  }
+
+  /// T7: the setter must write to the literal raw key the public constant names.
+  /// Reading via the LITERAL "autoCopyCustomField" (not via `autoCopyCustomFieldKey`)
+  /// makes this falsifiable — if the setter drifts from the constant this test fails.
+  func testAutoCopyCustomFieldKeyConsistency() {
+    XCTAssertEqual(AppSettingsStore.autoCopyCustomFieldKey, "autoCopyCustomField")
+    let store = AppSettingsStore(defaults: defaults)
+    store.autoCopyCustomField = true
+    XCTAssertTrue(
+      defaults.bool(forKey: "autoCopyCustomField"),
+      "setter must write to the literal key the public constant names")
+  }
 }

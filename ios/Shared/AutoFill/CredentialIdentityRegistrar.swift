@@ -36,7 +36,8 @@ public func decryptPersonalOverviews(
       let plaintext = try? decryptAESGCMEncoded(
         encrypted: entry.encryptedOverview, key: vaultKey, aad: aad
       ),
-      let summary = EntryBlobDecoder.summary(plaintext: plaintext, entryId: entry.id, teamId: nil)
+      let summary = EntryBlobDecoder.summary(
+        plaintext: plaintext, entryId: entry.id, teamId: nil, entryType: entry.entryType)
     else { continue }
     result.append(summary)
   }
@@ -295,14 +296,20 @@ public struct CredentialIdentityRegistrar: Sendable {
     self.store = store
   }
 
-  /// Pure mapping: host-bearing summaries → deduped identity specs. A summary is
-  /// skipped only when its `urlHost` AND every `additionalUrlHosts` entry are
-  /// empty; each non-empty host yields one spec (deduped on host+user) pointing
-  /// at the same entry id. No password ever appears here.
+  /// Pure mapping: host-bearing LOGIN summaries → deduped identity specs. A
+  /// summary is skipped when it is not a LOGIN entry (only logins are password
+  /// fill candidates — a secure note / card / passkey must not be offered as a
+  /// password suggestion, and AutoFill decodes every entry LOGIN-shaped so the
+  /// type is the only boundary), OR when its `urlHost` AND every
+  /// `additionalUrlHosts` entry are empty. Each non-empty host yields one spec
+  /// (deduped on host+user) pointing at the same entry id. `entryType == nil` is
+  /// LOGIN per the app-wide convention (personal blobs omit the type). No
+  /// password ever appears here.
   public static func specs(from summaries: [VaultEntrySummary]) -> [CredentialIdentitySpec] {
     var result: [CredentialIdentitySpec] = []
     var seen: Set<String> = []
     for summary in summaries {
+      guard summary.entryType == nil || summary.entryType == "LOGIN" else { continue }
       let hosts = ([summary.urlHost] + summary.additionalUrlHosts)
         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         .filter { !$0.isEmpty }
