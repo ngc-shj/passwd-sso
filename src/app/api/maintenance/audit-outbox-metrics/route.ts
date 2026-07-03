@@ -12,15 +12,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyAdminToken } from "@/lib/auth/tokens/admin-token";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited, unauthorized } from "@/lib/http/api-response";
+import { unauthorized } from "@/lib/http/api-response";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
-const rateLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 6 });
+// Keyed per-tenant so one tenant's operator cannot exhaust another tenant's
+// metrics quota in the same window; fail-closed on Redis error.
+const rateLimiter = createRateLimiter({
+  windowMs: RATE_WINDOW_MS,
+  max: 6,
+  failClosedOnRedisError: true,
+});
 
 interface MetricsRow {
   pending: bigint;
@@ -38,10 +45,15 @@ async function handleGET(req: NextRequest) {
   }
   const { auth } = authResult;
 
-  const rl = await rateLimiter.check("rl:admin:outbox-metrics");
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: rateLimiter,
+    key: `rl:maintenance:outbox-metrics:${auth.tenantId}`,
+    scope: "maintenance.outbox_metrics",
+    userId: auth.subjectUserId,
+    tenantId: auth.tenantId,
+  });
+  if (blocked) return blocked;
 
   const op = await requireMaintenanceOperator(auth.subjectUserId, {
     tenantId: auth.tenantId,

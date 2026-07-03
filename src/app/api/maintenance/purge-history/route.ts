@@ -15,6 +15,7 @@ import { prisma } from "@/lib/prisma";
 import { parseBody } from "@/lib/http/parse-body";
 import { verifyAdminToken } from "@/lib/auth/tokens/admin-token";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { AUDIT_METADATA_KEY } from "@/lib/constants";
@@ -23,12 +24,19 @@ import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited, unauthorized } from "@/lib/http/api-response";
+import { unauthorized } from "@/lib/http/api-response";
 
 // Rate limiter shares the same key for dryRun and real calls intentionally:
 // preventing probe→exploit racing (an admin cannot dry-run-probe matching
 // counts then immediately delete within the same 60-second window).
-const rateLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 1 });
+// Fail-closed on Redis error: a destructive maintenance op must not shed its
+// throttle during a Redis outage. Keyed per-tenant so one tenant's operator
+// cannot 429 another tenant's purge in the same window.
+const rateLimiter = createRateLimiter({
+  windowMs: RATE_WINDOW_MS,
+  max: 1,
+  failClosedOnRedisError: true,
+});
 
 const bodySchema = z.object({
   retentionDays: z.number().int().min(1).max(3650).default(90),
@@ -42,10 +50,15 @@ async function handlePOST(req: NextRequest) {
   }
   const { auth } = authResult;
 
-  const rl = await rateLimiter.check("rl:admin:purge-history");
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: rateLimiter,
+    key: `rl:maintenance:purge-history:${auth.tenantId}`,
+    scope: "maintenance.purge_history",
+    userId: auth.subjectUserId,
+    tenantId: auth.tenantId,
+  });
+  if (blocked) return blocked;
 
   const result = await parseBody(req, bodySchema);
   if (!result.ok) return result.response;

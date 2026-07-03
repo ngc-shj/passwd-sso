@@ -16,14 +16,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAdminToken } from "@/lib/auth/tokens/admin-token";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited, unauthorized } from "@/lib/http/api-response";
+import { unauthorized } from "@/lib/http/api-response";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
-const rateLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 1 });
+// Keyed per-tenant + fail-closed on Redis error for parity with the other
+// maintenance routes, even though this endpoint is a 410-Gone stub.
+const rateLimiter = createRateLimiter({
+  windowMs: RATE_WINDOW_MS,
+  max: 1,
+  failClosedOnRedisError: true,
+});
 
 async function handlePOST(req: NextRequest) {
   const authResult = await verifyAdminToken(req);
@@ -32,10 +39,15 @@ async function handlePOST(req: NextRequest) {
   }
   const { auth } = authResult;
 
-  const rl = await rateLimiter.check("rl:admin:dcr-cleanup");
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: rateLimiter,
+    key: `rl:maintenance:dcr-cleanup:${auth.tenantId}`,
+    scope: "maintenance.dcr_cleanup",
+    userId: auth.subjectUserId,
+    tenantId: auth.tenantId,
+  });
+  if (blocked) return blocked;
 
   const op = await requireMaintenanceOperator(auth.subjectUserId, {
     tenantId: auth.tenantId,
