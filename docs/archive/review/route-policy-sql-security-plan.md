@@ -615,3 +615,31 @@ residuals were editorial and adopted verbatim from the experts' recommended word
    manifest / Route Policy Matrix answers with a reviewed rationale.
 5. **Operator investigates retention behavior** → Deletion/Retention Matrix shows for
    every model whether/how it is purged and which tenant policy column governs it.
+
+## Implementation Checklist
+
+Impact analysis performed 2026-07-04 on post-P1 main (289b5be9); member sets re-derived
+(R42 refresh): raw-SQL 29 / destructive 9 / operator-gated 10 (+1 declared-false, path
+floor 11) / side-effecting GET 3 / route universe 212 — all match plan.
+
+Reuse obligations (verified exports; sub-agents MUST NOT reimplement):
+- `classifyRoute`, `ROUTE_POLICY_KIND` — src/lib/proxy/route-policy.ts:29,112
+- `isBearerBypassRoute`, `isBearerBypassPath` — src/lib/proxy/cors-gate.ts:94,106
+- txt allowlist conventions (`path # reason` ≥10 chars, STALE_EXEMPT) — check-permanent-delete-stepup.sh
+- .mjs checker structure — check-bypass-rls.mjs
+- generator sort-strategy comment — scripts/generate-env-example.ts
+- run_step registration idiom — scripts/pre-pr.sh:158-186 (ungated region)
+
+CI gate parity: CI invokes `PRE_PR_STATIC_ONLY=1 bash scripts/pre-pr.sh` (ci.yml:193),
+so ungated pre-pr registration covers CI. npm aliases follow package.json `check:*`
+convention. No parity gaps; no deferred-parity entries.
+
+Batches:
+- A (C1): route-class-patterns.json, route-policy-manifest.json (212 entries),
+  route-policy-manifest.test.ts, check-permanent-delete-stepup.sh (jq -er)
+- B (C2, after A): check-raw-sql-usage.mjs, raw-sql-usage.txt, sweep.ts markers
+- C (C5+C3, after A): generate-security-matrices.ts + test, 2 generated docs,
+  package.json scripts, pre-pr.sh registrations
+- D (C4, parallel): 3-expert worker/raw-SQL safety review → fixes/TODOs
+- E (C6-C9, after D): 3 hand-written docs, check-security-doc-exists.sh refactor,
+  README index, cross-ref comments

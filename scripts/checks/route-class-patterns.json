@@ -1,0 +1,6 @@
+{
+  "$comment": "Shared regex source for route-class detection, consumed by check-permanent-delete-stepup.sh (jq -er), check-raw-sql-usage.mjs (C2, native JSON import), and src/__tests__/proxy/route-policy-manifest.test.ts (native JSON import). Single source of truth so the .sh check and the vitest parity test cannot drift apart. Every consumer asserts each required key is a non-empty string before use (jq -er / explicit JS assertion) so a missing/null key fails CLOSED instead of silently corrupting the grep.",
+  "deleteSignal": "passwordEntry\\.delete(Many)?\\(|teamPasswordEntry\\.delete(Many)?\\(|executeVaultReset\\(|deleteTeamPassword\\(|[^A-Za-z0-9_]team\\.delete\\(",
+  "writePrimitive": "\\b(prisma|tx)\\.[A-Za-z]+\\.(create|createMany|update|updateMany|upsert|delete|deleteMany)\\(|\\$executeRaw|\\b(consume|redeem|markUsed)[A-Za-z]*\\(",
+  "rawSql": "\\$(queryRaw|executeRaw)(Unsafe)?\\b"
+}

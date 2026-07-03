@@ -65,6 +65,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 API_DIR="${STEPUP_GUARD_API_DIR:-$REPO_ROOT/src/app/api}"
 PATH_ROOT="${STEPUP_GUARD_PATH_ROOT:-$REPO_ROOT}"
 EXEMPT_FILE="${STEPUP_GUARD_EXEMPT_FILE:-$REPO_ROOT/scripts/checks/stepup-delete-exempt.txt}"
+PATTERNS_FILE="${STEPUP_GUARD_PATTERNS_FILE:-$REPO_ROOT/scripts/checks/route-class-patterns.json}"
 
 # Build the exempt allowlist (paths only; strip comments/blanks/CR). bash 3.2
 # has no associative arrays, so keep a newline-delimited list + grep -qxF.
@@ -115,7 +116,16 @@ is_exempt() {
 # Irreversible vault-data delete primitives (extended regex). Keep table-name
 # specific so soft-deletes / history / attachments do not match. `team.delete(`
 # is included because team deletion cascades to all team password entries.
-DELETE_SIGNAL='passwordEntry\.delete(Many)?\(|teamPasswordEntry\.delete(Many)?\(|executeVaultReset\(|deleteTeamPassword\(|[^A-Za-z0-9_]team\.delete\('
+#
+# Sourced from route-class-patterns.json (shared with the vitest parity test
+# and check-raw-sql-usage.mjs) so the defining regex cannot drift between
+# consumers. `-e` makes a missing/null key exit non-zero under `set -euo
+# pipefail` instead of `jq -r` silently printing the literal string `null`.
+DELETE_SIGNAL="$(jq -er '.deleteSignal' "$PATTERNS_FILE")"
+if [ -z "$DELETE_SIGNAL" ]; then
+  echo "PATTERNS_FILE_INVALID: deleteSignal in $PATTERNS_FILE is empty."
+  exit 1
+fi
 
 # Enumerate candidate route files. bash 3.2 has no `mapfile`.
 fail=0
