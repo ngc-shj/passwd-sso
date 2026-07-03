@@ -112,7 +112,12 @@ fi
 # 63 incl. the 2 admin-vault-reset trigger limiters (adminResetLimiter +
 #   targetResetLimiter, tenant/members/[userId]/reset-vault) — destructive
 #   privileged action, found by the rateLimited() audit during that PR.
-EXPECTED_LIMITER_COUNT=63
+# 69 incl. 6 maintenance limiters converted from fail-open + global key to
+#   fail-closed + per-tenant key (purge-history, purge-audit-logs,
+#   audit-outbox-metrics, audit-outbox-purge-failed, dcr-cleanup,
+#   audit-chain-verify) — external-review hygiene: a Redis outage must not
+#   shed the throttle on destructive/privileged maintenance ops.
+EXPECTED_LIMITER_COUNT=69
 limiter_count=$(grep -rh 'failClosedOnRedisError: true' "$REPO_ROOT/src/app/api" | wc -l)
 if [ "$limiter_count" -ne "$EXPECTED_LIMITER_COUNT" ]; then
   echo "AC4.4 FAIL: expected $EXPECTED_LIMITER_COUNT 'failClosedOnRedisError: true' instantiations; found $limiter_count"

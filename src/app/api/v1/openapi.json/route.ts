@@ -4,6 +4,7 @@ import { authOrToken } from "@/lib/auth/session/auth-or-token";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { getAppOrigin, resolveBasePath } from "@/lib/url-helpers";
 
 // GET /api/v1/openapi.json — OpenAPI 3.1 specification
 async function handleGET(req: NextRequest) {
@@ -19,13 +20,37 @@ async function handleGET(req: NextRequest) {
     }
   }
 
-  const url = new URL(req.url);
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
-  const baseUrl = `${url.protocol}//${url.host}${basePath}`;
+  // Derive the servers[].url from the configured canonical origin
+  // (APP_URL/AUTH_URL), never from the request Host header. A request-derived
+  // host lets a Host-header-poisoning request inject an attacker domain into
+  // the spec's servers[], which the public cache below would then serve to
+  // other clients. This mirrors the host policy used elsewhere (e.g. the
+  // mobile authorize redirect helper). When no origin is configured, fall back
+  // to a request-derived base but never public-cache it.
+  const origin = getAppOrigin();
+  let baseUrl: string;
+  let hostIsCanonical: boolean;
+  if (origin) {
+    const base = new URL(origin);
+    baseUrl = `${base.origin}${resolveBasePath(base)}`;
+    hostIsCanonical = true;
+  } else {
+    const url = new URL(req.url);
+    const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+    baseUrl = `${url.protocol}//${url.host}${basePath}`;
+    hostIsCanonical = false;
+  }
   const spec = buildOpenApiSpec(baseUrl);
 
+  // Public-cache only when the servers[] host came from configured origin.
+  // A request-derived host must not be cached (would poison other clients).
+  const publicCacheable = isPublic && hostIsCanonical;
   const headers: Record<string, string> = {
-    "Cache-Control": isPublic ? "public, max-age=3600" : "private, no-store",
+    "Cache-Control": publicCacheable
+      ? "public, max-age=3600"
+      : isPublic
+        ? "no-store"
+        : "private, no-store",
   };
   if (isPublic) {
     headers["Vary"] = "Authorization";

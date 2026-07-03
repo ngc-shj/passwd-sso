@@ -120,8 +120,16 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         for (const [k, v] of store) {
           if (v.resetAt < now) store.delete(k);
         }
-        // If still too large, clear all
-        if (store.size >= RATE_LIMIT_MAP_MAX_SIZE) store.clear();
+        // If still too large, drop the OLDEST entries (Maps preserve insertion
+        // order) until back under cap. NEVER clear all: a flood of distinct
+        // keys during a Redis outage would otherwise reset every live counter,
+        // handing attackers a rate-limit reset. Mirrors the bounded-LRU
+        // eviction in rate-limit-audit.ts (pruneAndAdd).
+        while (store.size >= RATE_LIMIT_MAP_MAX_SIZE) {
+          const oldest = store.keys().next();
+          if (oldest.done) break;
+          store.delete(oldest.value);
+        }
       }
       store.set(key, { resetAt: now + windowMs, count: 1 });
       return { allowed: true };

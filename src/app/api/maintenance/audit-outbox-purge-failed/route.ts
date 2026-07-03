@@ -17,15 +17,22 @@ import { prisma } from "@/lib/prisma";
 import { parseBody } from "@/lib/http/parse-body";
 import { verifyAdminToken } from "@/lib/auth/tokens/admin-token";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { rateLimited, unauthorized, forbidden } from "@/lib/http/api-response";
+import { unauthorized, forbidden } from "@/lib/http/api-response";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
-const rateLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 1 });
+// Fail-closed on Redis error and keyed per-tenant so one tenant's operator
+// cannot 429 another tenant's purge in the same window.
+const rateLimiter = createRateLimiter({
+  windowMs: RATE_WINDOW_MS,
+  max: 1,
+  failClosedOnRedisError: true,
+});
 
 const bodySchema = z.object({
   tenantId: z.string().uuid().optional(),
@@ -39,10 +46,15 @@ async function handlePOST(req: NextRequest) {
   }
   const { auth } = authResult;
 
-  const rl = await rateLimiter.check("rl:admin:outbox-purge");
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: rateLimiter,
+    key: `rl:maintenance:outbox-purge:${auth.tenantId}`,
+    scope: "maintenance.outbox_purge",
+    userId: auth.subjectUserId,
+    tenantId: auth.tenantId,
+  });
+  if (blocked) return blocked;
 
   const result = await parseBody(req, bodySchema);
   if (!result.ok) return result.response;

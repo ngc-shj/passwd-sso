@@ -15,12 +15,13 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { verifyAdminToken } from "@/lib/auth/tokens/admin-token";
 import { createRateLimiter } from "@/lib/security/rate-limit";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { errorResponse, rateLimited, unauthorized, forbidden } from "@/lib/http/api-response";
+import { errorResponse, unauthorized, forbidden } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseQuery } from "@/lib/http/parse-body";
 import {
@@ -31,7 +32,13 @@ import {
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
-const rateLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 3 });
+// Fail-closed on Redis error; the tenant-scoped key uses the operator-token's
+// bound tenant (auth.tenantId), not the caller-supplied query param.
+const rateLimiter = createRateLimiter({
+  windowMs: RATE_WINDOW_MS,
+  max: 3,
+  failClosedOnRedisError: true,
+});
 
 const FIVE_YEARS_MS = 5 * 365 * MS_PER_DAY;
 const MAX_ROWS_PER_REQUEST = 10_000;
@@ -97,11 +104,15 @@ async function handleGET(req: NextRequest) {
   }
   const { auth } = authResult;
 
-  const tenantIdParam = req.nextUrl.searchParams.get("tenantId") ?? "global";
-  const rl = await rateLimiter.check(`rl:admin:chain-verify:${tenantIdParam}`);
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: rateLimiter,
+    key: `rl:maintenance:chain-verify:${auth.tenantId}`,
+    scope: "maintenance.chain_verify",
+    userId: auth.subjectUserId,
+    tenantId: auth.tenantId,
+  });
+  if (blocked) return blocked;
 
   const querySchema = buildQuerySchema();
   const result = parseQuery(req, querySchema);
