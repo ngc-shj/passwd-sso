@@ -75,6 +75,7 @@
   "extensionTokenLegacyIssuanceDeprecated": "このエンドポイントは利用できません。拡張機能の更新、または CLI は 'passwd-sso login' をご利用ください。",
   "invalidChallenge": "セキュリティキーの登録に失敗しました。もう一度お試しください。",
   "auditChainSeedNotFound": "部分検証の起点となる監査ログが見つかりません。別の開始シーケンス番号を指定してください。",
+  "auditLogRetentionIndefinite": "このテナントの監査ログ保持期間は「無期限に保持」に設定されています。パージは実行できません。",
   "mobileTokenBindingInvalid": "モバイルのトークンバインディングが無効です。",
   "mobileRefreshReuseDetected": "リフレッシュトークンの再利用が検出されました。モバイル端末で再ログインしてください。",
   "mobileRefreshSessionExpired": "モバイルセッションが期限切れです。再ログインしてください。",

@@ -1,6 +1,9 @@
 /**
  * F1 atomicity: enqueueAuditInTx inside a transaction that rolls back
  * must also roll back the outbox row.
+ *
+ * Also covers T7(a): the bypass_rls GUC guard's failure direction — called
+ * without the GUCs set, enqueueAuditInTx must reject and leave 0 rows.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
@@ -79,5 +82,28 @@ describe("audit-outbox atomicity (F1)", () => {
     });
     expect(Number(rows[0].cnt)).toBe(1);
     expect(rows[0].status).toBe("PENDING");
+  });
+
+  // T7(a): GUC-guard failure direction — enqueueAuditInTx called WITHOUT the
+  // bypass_rls GUCs set must reject, and must not leave a row behind. This
+  // proves the guard is not a silent no-op (the "happy path always sets the
+  // GUCs first" tests above never exercise the guard's reject branch).
+  it("rejects when called outside bypass_rls scope, and leaves 0 outbox rows (T7 GUC-guard failure direction)", async () => {
+    await expect(
+      ctx.su.prisma.$transaction(async (tx) => {
+        // Deliberately NOT calling setBypassRlsGucs(tx) — bypass_rls and
+        // tenant_id GUCs are unset in this transaction.
+        await enqueueAuditInTx(tx, tenantId, makePayload());
+      }),
+    ).rejects.toThrow(/outside withBypassRls\/withTenantRls scope/);
+
+    const rows = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ cnt: bigint }[]>(
+        `SELECT COUNT(*) AS cnt FROM audit_outbox WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+    });
+    expect(Number(rows[0].cnt)).toBe(0);
   });
 });

@@ -136,6 +136,7 @@ export const API_ERROR = {
   // ── Audit ─────────────────────────────────────────────────
   INVALID_BODY: "INVALID_BODY",
   AUDIT_CHAIN_SEED_NOT_FOUND: "AUDIT_CHAIN_SEED_NOT_FOUND",
+  AUDIT_LOG_RETENTION_INDEFINITE: "AUDIT_LOG_RETENTION_INDEFINITE",
 
   // ── Emergency Access ──────────────────────────────────────
   GRANT_NOT_PENDING: "GRANT_NOT_PENDING",
@@ -399,6 +400,7 @@ export const API_ERROR_STATUS = {
   // ── Audit ─────────────────────────────────────────────────
   INVALID_BODY: 400,
   AUDIT_CHAIN_SEED_NOT_FOUND: 400,
+  AUDIT_LOG_RETENTION_INDEFINITE: 409,
 
   // ── Emergency Access ──────────────────────────────────────
   GRANT_NOT_PENDING: 400,
@@ -622,6 +624,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   MOBILE_REFRESH_TOKEN_REVOKED: "unauthorized",
   MOBILE_REFRESH_SESSION_EXPIRED: "mobileRefreshSessionExpired",
   AUDIT_CHAIN_SEED_NOT_FOUND: "auditChainSeedNotFound",
+  AUDIT_LOG_RETENTION_INDEFINITE: "auditLogRetentionIndefinite",
   INVALID_RECOVERY_KEY: "invalidRecoveryKey",
   RECOVERY_KEY_NOT_SET: "recoveryKeyNotSet",
   VAULT_RESET_CONFIRMATION_MISMATCH: "vaultResetConfirmationMismatch",

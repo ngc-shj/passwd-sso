@@ -4,7 +4,11 @@
  * Tenant-scoped purge of audit log entries older than retentionDays.
  * Operates only on rows belonging to the operator-token's bound tenantId;
  * a token issued in tenant A cannot erase audit evidence in tenant B.
- * The tenant's own auditLogRetentionDays floor is still respected.
+ * The tenant's own auditLogRetentionDays floor is still respected — and when
+ * the tenant has configured NULL (keep forever), the purge is rejected
+ * outright rather than falling back to the request-supplied retentionDays
+ * (an operator-token holder must not be able to override a tenant's
+ * explicit "never delete" policy).
  * Authenticated via per-operator op_* token (mint via /dashboard/tenant/operator-tokens).
  *
  * Body: { retentionDays?: number, dryRun?: boolean }
@@ -25,7 +29,8 @@ import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { unauthorized } from "@/lib/http/api-response";
+import { unauthorized, errorResponse } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 // Rate limiter shares the same key for dryRun and real calls intentionally:
 // preventing probe→exploit racing (an admin cannot dry-run-probe matching
@@ -44,11 +49,15 @@ const bodySchema = z.object({
   dryRun: z.boolean().default(false),
 });
 
+type PurgeResult =
+  | { ok: true; purged: number }
+  | { ok: false; reason: "RETENTION_INDEFINITE" };
+
 async function purgeForTenant(
   tenantId: string,
   retentionDays: number,
   dryRun: boolean,
-): Promise<number> {
+): Promise<PurgeResult> {
   const tenant = await withBypassRls(prisma, async (tx) =>
     tx.tenant.findUnique({
       where: { id: tenantId },
@@ -56,24 +65,31 @@ async function purgeForTenant(
     }),
   BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
   if (!tenant) {
-    return 0;
+    return { ok: true, purged: 0 };
+  }
+
+  // NULL auditLogRetentionDays means the tenant has explicitly configured
+  // "keep forever" — reject rather than silently falling back to the
+  // request-supplied retentionDays (an operator-token holder must not be
+  // able to override that policy).
+  const tenantRetention = tenant.auditLogRetentionDays;
+  if (tenantRetention === null) {
+    return { ok: false, reason: "RETENTION_INDEFINITE" };
   }
 
   // Use the stricter (longer) of the requested vs tenant-configured retention
-  const tenantRetention = tenant.auditLogRetentionDays;
-  const effectiveRetentionDays = tenantRetention
-    ? Math.max(retentionDays, tenantRetention)
-    : retentionDays;
+  const effectiveRetentionDays = Math.max(retentionDays, tenantRetention);
   const tenantCutoff = new Date(
     Date.now() - effectiveRetentionDays * MS_PER_DAY,
   );
 
   if (dryRun) {
-    return withBypassRls(prisma, async (tx) =>
+    const matched = await withBypassRls(prisma, async (tx) =>
       tx.auditLog.count({
         where: { tenantId, createdAt: { lt: tenantCutoff } },
       }),
     BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+    return { ok: true, purged: matched };
   }
   // C13: audit_logs DELETE is revoked from passwd_app; route through the
   // SECURITY DEFINER function so retention purges (legitimate operation)
@@ -83,7 +99,7 @@ async function purgeForTenant(
       SELECT audit_log_purge(${tenantId}::uuid, ${tenantCutoff}::timestamptz) AS rows_deleted
     `,
   BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
-  return rows[0]?.rows_deleted ?? 0;
+  return { ok: true, purged: rows[0]?.rows_deleted ?? 0 };
 }
 
 async function handlePOST(req: NextRequest) {
@@ -116,7 +132,14 @@ async function handlePOST(req: NextRequest) {
   // Scope purge to the operator-token's bound tenant. Without this,
   // a tenant-A admin who mints an op_* token can erase audit evidence
   // in every other tenant — a cross-tenant anti-forensics vector.
-  const totalPurged = await purgeForTenant(auth.tenantId, retentionDays, dryRun);
+  const purgeResult = await purgeForTenant(auth.tenantId, retentionDays, dryRun);
+
+  if (!purgeResult.ok) {
+    // Tenant has auditLogRetentionDays = NULL (keep forever) — reject
+    // outright rather than falling back to the request-supplied retentionDays.
+    return errorResponse(API_ERROR.AUDIT_LOG_RETENTION_INDEFINITE);
+  }
+  const totalPurged = purgeResult.purged;
 
   if (dryRun) {
     await logAuditAsync({

@@ -36,6 +36,7 @@ import {
 import { sweepAuditLogs } from "@/workers/retention-gc-worker/sweep";
 import { RETENTION_REGISTRY, type PerTenantFnEntry } from "@/workers/retention-gc-worker/registry";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
+import { AUDIT_LOG_RETENTION_MIN } from "@/lib/validations/common";
 
 // The PER_TENANT_FN entry for audit_logs
 const auditLogsEntry = RETENTION_REGISTRY.find(
@@ -194,5 +195,51 @@ describe("retention-gc sweepAuditLogs: per-tenant retention (C3/T6)", () => {
       );
     });
     expect(bKept).toHaveLength(1);
+  });
+
+  it("clamps a tenant retention below AUDIT_LOG_RETENTION_MIN to the floor (T4)", async () => {
+    // Tenant A configures retention_days = 5, well below the AUDIT_LOG_RETENTION_MIN
+    // (30) floor. effectiveDays = max(5, 30) = 30, so only the ~40d row is purged;
+    // the ~10d row must survive (it would NOT survive if the tenant's raw 5d setting
+    // were honored instead of the floor).
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `UPDATE tenants SET audit_log_retention_days = 5 WHERE id = $1::uuid`,
+        tenantAId,
+      );
+    });
+
+    const recentId = await insertAuditLog(tenantAId, "now() - interval '10 days'");
+    const oldId = await insertAuditLog(tenantAId, "now() - interval '40 days'");
+
+    const deleted = await ctx.su.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+      return sweepAuditLogs(tx, auditLogsEntry);
+    });
+
+    // Only the 40d row is purged — the floor (30d), not the tenant's raw 5d, governs.
+    expect(deleted).toBe(1);
+
+    const recentKept = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ id: string }[]>(
+        `SELECT id FROM audit_logs WHERE id = $1::uuid`,
+        recentId,
+      );
+    });
+    expect(recentKept).toHaveLength(1);
+
+    const oldGone = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ id: string }[]>(
+        `SELECT id FROM audit_logs WHERE id = $1::uuid`,
+        oldId,
+      );
+    });
+    expect(oldGone).toHaveLength(0);
+
+    // Sanity: the floor constant this test relies on has not silently changed.
+    expect(AUDIT_LOG_RETENTION_MIN).toBe(30);
   });
 });

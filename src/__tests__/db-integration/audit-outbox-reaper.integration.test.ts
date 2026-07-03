@@ -1,10 +1,16 @@
+/**
+ * T3: exercises the REAL exported reapStuckRows (not duplicated SQL) so a
+ * regression in the worker's own reaper query is caught here.
+ */
+
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 import { AUDIT_OUTBOX, AUDIT_ACTION, AUDIT_SCOPE, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { reapStuckRows } from "@/workers/audit-outbox-worker";
 
-describe("audit-outbox reaper resets stuck PROCESSING rows", () => {
+describe("audit-outbox reaper resets stuck PROCESSING rows (T3 real reapStuckRows)", () => {
   let ctx: TestContext;
   let tenantId: string;
 
@@ -24,17 +30,18 @@ describe("audit-outbox reaper resets stuck PROCESSING rows", () => {
     await ctx.deleteTestData(tenantId);
   });
 
-  it("reaps a stuck PROCESSING row back to PENDING with incremented attempt_count", async () => {
+  async function insertStuckRow(opts: {
+    attemptCount: number;
+    maxAttempts: number;
+  }): Promise<string> {
     const outboxId = randomUUID();
     const timeoutSeconds = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS / 1000;
-
-    // Insert a PROCESSING row with processing_started_at far in the past
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
         `INSERT INTO audit_outbox (id, tenant_id, payload, status, attempt_count, max_attempts, processing_started_at, created_at, next_retry_at)
-         VALUES ($1::uuid, $2::uuid, $3::jsonb, 'PROCESSING', 2, 8,
-                 now() - make_interval(secs => $4::double precision) - interval '60 seconds',
+         VALUES ($1::uuid, $2::uuid, $3::jsonb, 'PROCESSING', $4, $5,
+                 now() - make_interval(secs => $6::double precision) - interval '60 seconds',
                  now(), now())`,
         outboxId,
         tenantId,
@@ -44,96 +51,50 @@ describe("audit-outbox reaper resets stuck PROCESSING rows", () => {
           userId: randomUUID(),
           actorType: ACTOR_TYPE.HUMAN,
         }),
+        opts.attemptCount,
+        opts.maxAttempts,
         timeoutSeconds,
       );
     });
+    return outboxId;
+  }
 
-    // Run the reaper query (same pattern as reapStuckRows in the worker)
-    const reaped = await ctx.su.prisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
-      const rows = await tx.$queryRawUnsafe<{
-        id: string;
-        tenant_id: string;
-        attempt_count: number;
-        new_status: string;
-      }[]>(
-        `UPDATE audit_outbox
-         SET status = CASE
-               WHEN attempt_count + 1 >= max_attempts THEN 'FAILED'::"AuditOutboxStatus"
-               ELSE 'PENDING'::"AuditOutboxStatus"
-             END,
-             processing_started_at = NULL,
-             attempt_count = attempt_count + 1,
-             last_error = LEFT('[reaped after timeout, attempt ' || (attempt_count + 1)::text || ']', 1024)
-         WHERE id IN (
-           SELECT id FROM audit_outbox
-           WHERE status = 'PROCESSING'
-             AND processing_started_at < now() - make_interval(secs => $1)
-           FOR UPDATE SKIP LOCKED
-         )
-         RETURNING id, tenant_id, attempt_count, status::text AS new_status`,
-        timeoutSeconds,
-      );
-      return rows;
-    });
-
-    expect(reaped).toHaveLength(1);
-    expect(reaped[0].id).toBe(outboxId);
-    expect(reaped[0].new_status).toBe("PENDING");
-    expect(reaped[0].attempt_count).toBe(3); // was 2, incremented to 3
-
-    // Verify the row state in the DB
+  async function getOutboxRow(outboxId: string) {
     const rows = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      return tx.$queryRawUnsafe<{ status: string; attempt_count: number; processing_started_at: Date | null }[]>(
+      return tx.$queryRawUnsafe<
+        { status: string; attempt_count: number; processing_started_at: Date | null }[]
+      >(
         `SELECT status::text, attempt_count, processing_started_at FROM audit_outbox WHERE id = $1::uuid`,
         outboxId,
       );
     });
+    return rows[0];
+  }
 
-    expect(rows[0].status).toBe("PENDING");
-    expect(rows[0].attempt_count).toBe(3);
-    expect(rows[0].processing_started_at).toBeNull();
+  it("reaps a stuck PROCESSING row back to PENDING with incremented attempt_count", async () => {
+    const outboxId = await insertStuckRow({ attemptCount: 2, maxAttempts: 8 });
+
+    const reaped = await reapStuckRows(ctx.su.prisma);
+    expect(reaped).toBe(1);
+
+    const row = await getOutboxRow(outboxId);
+    expect(row.status).toBe("PENDING");
+    expect(row.attempt_count).toBe(3); // was 2, incremented to 3
+    expect(row.processing_started_at).toBeNull();
   });
 
   it("writes an AUDIT_OUTBOX_REAPED audit_logs entry with SYSTEM actor and SYSTEM_ACTOR_ID userId", async () => {
-    const outboxId = randomUUID();
+    const outboxId = await insertStuckRow({ attemptCount: 2, maxAttempts: 8 });
 
-    // Write a direct SYSTEM audit log (same pattern as writeDirectAuditLog)
-    // user_id must be SYSTEM_ACTOR_ID sentinel (NOT NULL constraint post-migration)
-    await ctx.su.prisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
-      await tx.$executeRawUnsafe(
-        `INSERT INTO audit_logs (
-          id, tenant_id, scope, action, user_id, actor_type, metadata, created_at
-        ) VALUES (
-          gen_random_uuid(),
-          $1::uuid,
-          $2::"AuditScope",
-          $3::"AuditAction",
-          $6::uuid,
-          $4::"ActorType",
-          $5::jsonb,
-          now()
-        )`,
-        tenantId,
-        AUDIT_SCOPE.TENANT,
-        AUDIT_ACTION.AUDIT_OUTBOX_REAPED,
-        ACTOR_TYPE.SYSTEM,
-        JSON.stringify({ outboxId, attemptCount: 3 }),
-        SYSTEM_ACTOR_ID,
-      );
-    });
+    await reapStuckRows(ctx.su.prisma);
 
-    // Verify the audit_logs row exists
     const logs = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      return tx.$queryRawUnsafe<{
-        action: string;
-        user_id: string | null;
-        actor_type: string;
-      }[]>(
-        `SELECT action::text, user_id, actor_type::text FROM audit_logs
+      return tx.$queryRawUnsafe<
+        { action: string; user_id: string | null; actor_type: string; metadata: unknown }[]
+      >(
+        `SELECT action::text, user_id, actor_type::text, metadata FROM audit_logs
          WHERE tenant_id = $1::uuid AND action = $2::"AuditAction"`,
         tenantId,
         AUDIT_ACTION.AUDIT_OUTBOX_REAPED,
@@ -143,21 +104,40 @@ describe("audit-outbox reaper resets stuck PROCESSING rows", () => {
     expect(logs).toHaveLength(1);
     expect(logs[0].user_id).toBe(SYSTEM_ACTOR_ID);
     expect(logs[0].actor_type).toBe("SYSTEM");
+    expect((logs[0].metadata as { outboxId: string }).outboxId).toBe(outboxId);
   });
 
-  it("transitions stuck row to FAILED when attempt_count reaches max_attempts", async () => {
-    const outboxId = randomUUID();
-    const timeoutSeconds = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS / 1000;
+  it("transitions stuck row to FAILED and writes AUDIT_OUTBOX_DEAD_LETTER when attempt_count reaches max_attempts", async () => {
+    const outboxId = await insertStuckRow({ attemptCount: 7, maxAttempts: 8 });
 
-    // Insert a PROCESSING row at max_attempts - 1
+    const reaped = await reapStuckRows(ctx.su.prisma);
+    expect(reaped).toBe(1);
+
+    const row = await getOutboxRow(outboxId);
+    expect(row.status).toBe("FAILED");
+    expect(row.attempt_count).toBe(8);
+
+    const logs = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ action: string }[]>(
+        `SELECT action::text FROM audit_logs
+         WHERE tenant_id = $1::uuid AND action = $2::"AuditAction"`,
+        tenantId,
+        AUDIT_ACTION.AUDIT_OUTBOX_DEAD_LETTER,
+      );
+    });
+    expect(logs).toHaveLength(1);
+  });
+
+  it("does not touch rows that are not stuck (recent PROCESSING, or PENDING/SENT)", async () => {
+    // Recent PROCESSING row (not past the timeout) must be left alone.
+    const freshId = randomUUID();
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
         `INSERT INTO audit_outbox (id, tenant_id, payload, status, attempt_count, max_attempts, processing_started_at, created_at, next_retry_at)
-         VALUES ($1::uuid, $2::uuid, $3::jsonb, 'PROCESSING', 7, 8,
-                 now() - make_interval(secs => $4::double precision) - interval '60 seconds',
-                 now(), now())`,
-        outboxId,
+         VALUES ($1::uuid, $2::uuid, $3::jsonb, 'PROCESSING', 0, 8, now(), now(), now())`,
+        freshId,
         tenantId,
         JSON.stringify({
           scope: AUDIT_SCOPE.PERSONAL,
@@ -165,39 +145,13 @@ describe("audit-outbox reaper resets stuck PROCESSING rows", () => {
           userId: randomUUID(),
           actorType: ACTOR_TYPE.HUMAN,
         }),
-        timeoutSeconds,
       );
     });
 
-    // Run the reaper
-    const reaped = await ctx.su.prisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
-      return tx.$queryRawUnsafe<{
-        id: string;
-        new_status: string;
-        attempt_count: number;
-      }[]>(
-        `UPDATE audit_outbox
-         SET status = CASE
-               WHEN attempt_count + 1 >= max_attempts THEN 'FAILED'::"AuditOutboxStatus"
-               ELSE 'PENDING'::"AuditOutboxStatus"
-             END,
-             processing_started_at = NULL,
-             attempt_count = attempt_count + 1,
-             last_error = LEFT('[reaped after timeout, attempt ' || (attempt_count + 1)::text || ']', 1024)
-         WHERE id IN (
-           SELECT id FROM audit_outbox
-           WHERE status = 'PROCESSING'
-             AND processing_started_at < now() - make_interval(secs => $1)
-           FOR UPDATE SKIP LOCKED
-         )
-         RETURNING id, status::text AS new_status, attempt_count`,
-        timeoutSeconds,
-      );
-    });
+    const reaped = await reapStuckRows(ctx.su.prisma);
+    expect(reaped).toBe(0);
 
-    expect(reaped).toHaveLength(1);
-    expect(reaped[0].new_status).toBe("FAILED");
-    expect(reaped[0].attempt_count).toBe(8);
+    const row = await getOutboxRow(freshId);
+    expect(row.status).toBe("PROCESSING");
   });
 });
