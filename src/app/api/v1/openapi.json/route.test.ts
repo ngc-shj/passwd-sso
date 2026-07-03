@@ -33,8 +33,9 @@ describe("GET /api/v1/openapi.json", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
-    // Default: public mode (no auth required)
-    delete process.env.OPENAPI_PUBLIC;
+    // Default: public mode (no auth required). Empty string is not "false",
+    // so the route treats it as public.
+    vi.stubEnv("OPENAPI_PUBLIC", "");
     // Canonical origin configured — the servers[] host derives from it and the
     // response is public-cacheable. Tests that exercise the no-origin fallback
     // override this locally.
@@ -59,7 +60,7 @@ describe("GET /api/v1/openapi.json", () => {
   });
 
   it("returns 401 when OPENAPI_PUBLIC=false and unauthenticated", async () => {
-    process.env.OPENAPI_PUBLIC = "false";
+    vi.stubEnv("OPENAPI_PUBLIC", "false");
     mockAuthOrToken.mockResolvedValue(null);
     const req = createRequest("GET", "http://localhost:3000/api/v1/openapi.json");
     const res = await GET(req);
@@ -69,7 +70,7 @@ describe("GET /api/v1/openapi.json", () => {
   });
 
   it("returns spec when OPENAPI_PUBLIC=false and authenticated", async () => {
-    process.env.OPENAPI_PUBLIC = "false";
+    vi.stubEnv("OPENAPI_PUBLIC", "false");
     mockAuthOrToken.mockResolvedValue({ userId: "user-1" });
     const req = createRequest("GET", "http://localhost:3000/api/v1/openapi.json");
     const res = await GET(req);
@@ -79,7 +80,7 @@ describe("GET /api/v1/openapi.json", () => {
   });
 
   it("sets private cache headers when OPENAPI_PUBLIC=false", async () => {
-    process.env.OPENAPI_PUBLIC = "false";
+    vi.stubEnv("OPENAPI_PUBLIC", "false");
     mockAuthOrToken.mockResolvedValue({ userId: "user-1" });
     const req = createRequest("GET", "http://localhost:3000/api/v1/openapi.json");
     const res = await GET(req);
