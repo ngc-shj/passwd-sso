@@ -48,6 +48,8 @@
     "migrate:account-tokens": "tsx scripts/migrate-account-tokens-to-encrypted.ts",
     "generate:env-example": "tsx scripts/generate-env-example.ts",
     "check:env-docs": "tsx scripts/check-env-docs.ts",
+    "generate:security-matrices": "tsx scripts/generate-security-matrices.ts",
+    "check:security-matrices": "tsx scripts/generate-security-matrices.ts && git diff --quiet -- docs/security/route-policy-matrix.md docs/security/deletion-retention-matrix.md",
     "init:env": "tsx scripts/init-env.ts",
     "docker:up": "docker compose -f docker-compose.yml -f docker-compose.override.yml up",
     "docker:down": "docker compose -f docker-compose.yml -f docker-compose.override.yml down"

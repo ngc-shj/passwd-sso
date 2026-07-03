@@ -148,3 +148,113 @@ $ echo '{"deleteSignal": null}' | jq -er '.deleteSignal'; echo "exit=$?"
 null
 exit=1
 ```
+
+## C5 fail-path proofs
+
+RT7 fail-path proof for the C5 contract's drift check
+(`npm run check:security-matrices` = regenerate `docs/security/route-policy-matrix.md`
++ `docs/security/deletion-retention-matrix.md` from their machine-readable sources,
+then `git diff --quiet` the two paths). Both generated files were `git add`-ed to the
+index first so `git diff` against a real baseline is meaningful (a brand-new untracked
+file never shows a diff).
+
+### Proof (a) — hand-edit a generated doc, drift check fails, regenerate fixes it
+
+Baseline: clean tree, both generated docs match the generator's current output.
+
+```
+$ npm run check:security-matrices
+
+> passwd-sso@0.4.64 check:security-matrices
+> tsx scripts/generate-security-matrices.ts && git diff --quiet -- docs/security/route-policy-matrix.md docs/security/deletion-retention-matrix.md
+
+Wrote /home/noguchi/ghq/github.com/ngc-shj/passwd-sso/docs/security/route-policy-matrix.md
+Wrote /home/noguchi/ghq/github.com/ngc-shj/passwd-sso/docs/security/deletion-retention-matrix.md
+exit=0
+```
+
+Hand-edit `docs/security/route-policy-matrix.md` (append a line the generator never emits):
+
+```
+$ echo "" >> docs/security/route-policy-matrix.md
+$ echo "HAND-EDITED LINE -- not from the generator" >> docs/security/route-policy-matrix.md
+
+$ git diff --stat -- docs/security/route-policy-matrix.md
+ docs/security/route-policy-matrix.md | 2 ++
+ 1 file changed, 2 insertions(+)
+```
+
+The drift check's own comparison (`git diff --quiet`), run BEFORE regenerating, proves
+the hand-edit is detected as drift:
+
+```
+$ git diff --quiet -- docs/security/route-policy-matrix.md docs/security/deletion-retention-matrix.md; echo "exit=$?"
+exit=1
+```
+
+Regenerating (via the actual registered check, `npm run check:security-matrices`)
+overwrites the hand-edited file with the generator's deterministic output and the
+check passes again — the drift is fixed, not masked:
+
+```
+$ npm run check:security-matrices
+
+> passwd-sso@0.4.64 check:security-matrices
+> tsx scripts/generate-security-matrices.ts && git diff --quiet -- docs/security/route-policy-matrix.md docs/security/deletion-retention-matrix.md
+
+Wrote /home/noguchi/ghq/github.com/ngc-shj/passwd-sso/docs/security/route-policy-matrix.md
+Wrote /home/noguchi/ghq/github.com/ngc-shj/passwd-sso/docs/security/deletion-retention-matrix.md
+exit=0
+
+$ grep -c "HAND-EDITED LINE" docs/security/route-policy-matrix.md || echo "0 (removed by regeneration)"
+0
+0 (removed by regeneration)
+
+$ git diff --stat -- docs/security/route-policy-matrix.md docs/security/deletion-retention-matrix.md
+(no output = clean, matches staged baseline)
+```
+
+### Proof (b) — `PRE_PR_STATIC_ONLY=1 bash scripts/pre-pr.sh` runs the new step
+
+Confirms the C3 placement contract: the `run_step` for the security-matrices drift
+check sits in `scripts/pre-pr.sh`'s ungated region (immediately after the existing
+`check:env-docs` registration, NOT inside any `if [ "$STATIC_ONLY" != "1" ]` block),
+so CI's static-checks job (`PRE_PR_STATIC_ONLY=1 bash scripts/pre-pr.sh`) actually
+executes it.
+
+```
+$ grep -n 'run_step "Static: security-matrices drift check"' scripts/pre-pr.sh
+183:run_step "Static: security-matrices drift check" npm run check:security-matrices
+```
+
+Full run of `PRE_PR_STATIC_ONLY=1 bash scripts/pre-pr.sh` (completed in well under the
+2-minute default timeout on this branch's diff — no need to extract a slow subset):
+
+```
+$ PRE_PR_STATIC_ONLY=1 bash scripts/pre-pr.sh
+...
+▸ Static: env drift check
+...
+  ✓ Static: env drift check
+
+▸ Static: security-matrices drift check
+
+> passwd-sso@0.4.64 check:security-matrices
+> tsx scripts/generate-security-matrices.ts && git diff --quiet -- docs/security/route-policy-matrix.md docs/security/deletion-retention-matrix.md
+
+Wrote /home/noguchi/ghq/github.com/ngc-shj/passwd-sso/docs/security/route-policy-matrix.md
+Wrote /home/noguchi/ghq/github.com/ngc-shj/passwd-sso/docs/security/deletion-retention-matrix.md
+  ✓ Static: security-matrices drift check
+
+▸ Static: team-auth-rls
+...
+═══ Results ═══
+  Passed: 32
+
+✓ All pre-PR checks passed. Ready to create PR.
+```
+
+The `✓ Static: security-matrices drift check` line, appearing between `env drift check`
+and `team-auth-rls` (the exact position it was registered at, line 183), proves the
+step runs under `PRE_PR_STATIC_ONLY=1` — i.e. it is reachable by CI's static-checks job,
+not only by full-mode `pre-pr.sh`.

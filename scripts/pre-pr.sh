@@ -180,6 +180,7 @@ if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
   run_step "Typecheck"              npx tsc --noEmit
 fi
 run_step "Static: env drift check"  npm run check:env-docs
+run_step "Static: security-matrices drift check" npm run check:security-matrices
 run_step "Static: team-auth-rls"  node scripts/checks/check-team-auth-rls.mjs
 run_step "Static: bypass-rls"     node scripts/checks/check-bypass-rls.mjs
 run_step "Static: crypto-domains" node scripts/checks/check-crypto-domains.mjs
