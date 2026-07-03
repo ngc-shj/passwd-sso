@@ -76,6 +76,9 @@ COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 #   downgrades).
 # - picomatch >=4.0.4: closes CVE-2026-33671 (still bundled at 4.0.3 nested
 #   under tinyglobby in npm 11.12.1).
+# - sigstore >=4.1.1: closes CVE-2026-48815 (certificateOIDs verification
+#   constraints silently dropped; bundled at 4.1.0 under npm 11.12.1's
+#   provenance/signing path).
 # Patch blocks fail-closed (exit 1) when expected directories disappear, so a
 # silent npm-layout drift cannot reintroduce the CVEs.
 # `--ignore-scripts` on the global npm upgrade limits root-execution blast
@@ -87,6 +90,7 @@ COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 # lockfile by scripts/checks/check-dockerfile-prisma-pin.sh.
 RUN TAR_VER=7.5.11 && \
     PICOMATCH_VER=4.0.4 && \
+    SIGSTORE_VER=4.1.1 && \
     NPM_VER=11.12.1 && \
     PRISMA_VER=7.8.0 && \
     npm install -g "npm@${NPM_VER}" --loglevel=error --ignore-scripts && \
@@ -121,6 +125,21 @@ RUN TAR_VER=7.5.11 && \
     else \
       echo "ERROR: picomatch directory not found at ${PICOMATCH_DIR}; npm layout changed, re-verify patch path" >&2 && exit 1; \
     fi && \
+    SIGSTORE_DIR=/usr/local/lib/node_modules/npm/node_modules/sigstore && \
+    if [ -d "$SIGSTORE_DIR" ]; then \
+      CURRENT=$(node -p "require('${SIGSTORE_DIR}/package.json').version") && \
+      if [ "$(printf '%s\n' "$SIGSTORE_VER" "$CURRENT" | sort -V | head -n1)" != "$SIGSTORE_VER" ]; then \
+        cd "$SIGSTORE_DIR" && \
+        npm pack "sigstore@${SIGSTORE_VER}" --quiet && \
+        tar xzf "sigstore-${SIGSTORE_VER}.tgz" --strip-components=1 && \
+        rm -f "sigstore-${SIGSTORE_VER}.tgz" && \
+        node -e "const v=require('./package.json').version;if(v!=='${SIGSTORE_VER}'){console.error('sigstore patch failed: got '+v);process.exit(1)}"; \
+      else \
+        echo "sigstore ${CURRENT} already >= ${SIGSTORE_VER}, skipping patch"; \
+      fi; \
+    else \
+      echo "ERROR: sigstore directory not found at ${SIGSTORE_DIR}; npm layout changed, re-verify patch path" >&2 && exit 1; \
+    fi && \
     cd / && \
     npm cache clean --force >/dev/null 2>&1 && \
     rm -rf /root/.npm /tmp/* && \
@@ -128,6 +147,7 @@ RUN TAR_VER=7.5.11 && \
     [ "$(npm -v)" = "${NPM_VER}" ] && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/tar/package.json').version,c=v.split('.').map(Number),m='${TAR_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('tar still '+v);process.exit(1)}}" && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/tinyglobby/node_modules/picomatch/package.json').version,c=v.split('.').map(Number),m='${PICOMATCH_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('picomatch still '+v);process.exit(1)}}" && \
+    node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/sigstore/package.json').version,c=v.split('.').map(Number),m='${SIGSTORE_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('sigstore still '+v);process.exit(1)}}" && \
     node -e "const v=require('/app/node_modules/prisma/package.json').version;if(v!=='${PRISMA_VER}'){console.error('prisma pin failed: got '+v+', expected ${PRISMA_VER}');process.exit(1)}"
 
 # Copy @prisma runtime adapters (overlay on top of prisma's @prisma packages)
