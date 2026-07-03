@@ -20,6 +20,11 @@ describe("GET /api/v1/openapi.json", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
+    // Canonical origin configured — the servers[] host derives from it and the
+    // public response is cacheable. Tests exercising the no-origin fallback
+    // override this locally.
+    vi.stubEnv("APP_URL", "https://api.example.test");
+    vi.stubEnv("AUTH_URL", "https://api.example.test");
   });
 
   afterEach(() => {
@@ -47,6 +52,26 @@ describe("GET /api/v1/openapi.json", () => {
 
       expect(res.headers.get("Cache-Control")).toBe("public, max-age=3600");
       expect(res.headers.get("Vary")).toBe("Authorization");
+    });
+
+    it("derives servers[].url from the configured origin, not the request Host", async () => {
+      const { GET } = await import("@/app/api/v1/openapi.json/route");
+
+      const req = createRequest("GET", "http://attacker.evil/api/v1/openapi.json");
+      await GET(req);
+
+      expect(mockBuildOpenApiSpec).toHaveBeenCalledWith("https://api.example.test");
+    });
+
+    it("falls back to no-store (not public cache) when no origin is configured", async () => {
+      vi.stubEnv("APP_URL", "");
+      vi.stubEnv("AUTH_URL", "");
+      const { GET } = await import("@/app/api/v1/openapi.json/route");
+
+      const req = createRequest("GET", URL);
+      const res = await GET(req);
+
+      expect(res.headers.get("Cache-Control")).toBe("no-store");
     });
   });
 

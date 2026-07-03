@@ -102,6 +102,14 @@ describe("POST /api/maintenance/dcr-cleanup (410 deprecation stub)", () => {
     expect(res.status).toBe(429);
   });
 
+  it("returns 503 when the rate limiter fails closed on a Redis error", async () => {
+    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
+    mockCheck.mockResolvedValue({ redisErrored: true });
+    const req = createRequest(VALID_OP_TOKEN);
+    const res = await POST(req);
+    expect(res.status).toBe(503);
+  });
+
   it("checks rate limit after auth (401 before 429 for unauthenticated requests)", async () => {
     mockCheck.mockResolvedValue({ allowed: false, retryAfterMs: 30_000 });
 

@@ -124,6 +124,14 @@ describe("GET /api/maintenance/audit-outbox-metrics", () => {
     expect(res.status).toBe(429);
   });
 
+  it("returns 503 when the rate limiter fails closed on a Redis error", async () => {
+    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
+    mockCheck.mockResolvedValue({ redisErrored: true });
+    const req = createRequest(VALID_OP_TOKEN);
+    const res = await GET(req);
+    expect(res.status).toBe(503);
+  });
+
   // ─── Operator Membership Check ────────────────────────────
 
   it("returns 400 when operator is not an active admin", async () => {
