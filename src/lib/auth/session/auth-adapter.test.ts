@@ -210,7 +210,7 @@ describe("createCustomAdapter", () => {
 
       // Bootstrap tenant.create should NOT be called
       expect(mockPrismaTenant.create).not.toHaveBeenCalled();
-      expect(mockFindOrCreateSsoTenant).toHaveBeenCalledWith("acme.com");
+      expect(mockFindOrCreateSsoTenant).toHaveBeenCalledWith("acme.com", expect.anything());
       // User should be created with SSO tenant ID
       expect(mockPrismaUser.create).toHaveBeenCalledWith(
         expect.objectContaining({

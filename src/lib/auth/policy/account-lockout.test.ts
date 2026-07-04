@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
 const {
   mockPrismaUser,
@@ -27,8 +27,8 @@ const {
       queryRawImpl: vi.fn(),
       executeRawImpl: vi.fn(),
     } as {
-      queryRawImpl: ReturnType<typeof vi.fn>;
-      executeRawImpl: ReturnType<typeof vi.fn>;
+      queryRawImpl: Mock;
+      executeRawImpl: Mock;
     },
     mockLogAudit: vi.fn(),
     mockLogAuditInTx: vi.fn(),

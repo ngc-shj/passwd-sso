@@ -159,7 +159,7 @@ export function createCustomAdapter(): Adapter {
         // Resolve SSO tenant inside withBypassRls (no nesting)
         let ssoTenant: { id: string } | null = null;
         if (pendingClaim) {
-          ssoTenant = await findOrCreateSsoTenant(pendingClaim);
+          ssoTenant = await findOrCreateSsoTenant(pendingClaim, tx);
         }
 
         return prisma.$transaction(async (tx) => {

@@ -68,7 +68,7 @@ export async function ensureTenantMembershipForSignIn(
   }
 
   const tenant = await withBypassRls(prisma, async (tx) => {
-    const found = await findOrCreateSsoTenant(tenantClaim);
+    const found = await findOrCreateSsoTenant(tenantClaim, tx);
 
     if (!found) return null;
 

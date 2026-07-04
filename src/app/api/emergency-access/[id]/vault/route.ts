@@ -53,6 +53,7 @@ async function handleGET(
       prisma,
       async (tx) =>
         autoPromoteIfElapsed({
+          db: tx,
           granteeId: session.user.id,
           grantId: id,
           now: new Date(),

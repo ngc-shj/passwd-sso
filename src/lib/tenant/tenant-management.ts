@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+import { prisma, type TxOrPrisma } from "@/lib/prisma";
 import { slugifyTenant } from "@/lib/tenant/tenant-claim";
 import { randomBytes } from "node:crypto";
 import { SLUG_MAX_LENGTH } from "@/lib/validations/common";
@@ -13,18 +13,19 @@ import { SLUG_MAX_LENGTH } from "@/lib/validations/common";
  */
 export async function findOrCreateSsoTenant(
   tenantClaim: string,
+  db: TxOrPrisma = prisma,
 ): Promise<{ id: string } | null> {
   const tenantSlug = slugifyTenant(tenantClaim);
   if (!tenantSlug) return null;
 
-  let found = await prisma.tenant.findUnique({
+  let found = await db.tenant.findUnique({
     where: { externalId: tenantClaim },
     select: { id: true },
   });
 
   if (!found) {
     try {
-      found = await prisma.tenant.create({
+      found = await db.tenant.create({
         data: {
           externalId: tenantClaim,
           name: tenantClaim,
@@ -37,7 +38,7 @@ export async function findOrCreateSsoTenant(
         e instanceof Prisma.PrismaClientKnownRequestError &&
         e.code === "P2002"
       ) {
-        found = await prisma.tenant.findUnique({
+        found = await db.tenant.findUnique({
           where: { externalId: tenantClaim },
           select: { id: true },
         });
@@ -45,7 +46,7 @@ export async function findOrCreateSsoTenant(
         if (!found) {
           try {
             const suffix = randomBytes(4).toString("hex");
-            found = await prisma.tenant.create({
+            found = await db.tenant.create({
               data: {
                 externalId: tenantClaim,
                 name: tenantClaim,

@@ -4,7 +4,7 @@
  * All functions must be called within a `withTenantRls()` context.
  */
 
-import { prisma } from "@/lib/prisma";
+import { prisma, type TxOrPrisma } from "@/lib/prisma";
 import type { TeamRole } from "@prisma/client";
 import type { ScimGroupMemberInput, ScimGroupResource } from "@/lib/scim/serializers";
 import type { GroupMemberAction } from "@/lib/scim/patch-parser";
@@ -109,8 +109,12 @@ function buildGroupResource(
   };
 }
 
-async function loadGroupMembers(teamId: string, role: TeamRole): Promise<ScimGroupMemberInput[]> {
-  const members = await prisma.teamMember.findMany({
+async function loadGroupMembers(
+  db: TxOrPrisma,
+  teamId: string,
+  role: TeamRole,
+): Promise<ScimGroupMemberInput[]> {
+  const members = await db.teamMember.findMany({
     where: { teamId, role, deactivatedAt: null },
     include: { user: { select: { id: true, email: true } } },
   });
@@ -234,8 +238,9 @@ export async function fetchScimGroup(
   tenantId: string,
   scimId: string,
   baseUrl: string,
+  db: TxOrPrisma = prisma,
 ): Promise<ScimGroupResource | null> {
-  const mapping = await prisma.scimGroupMapping.findUnique({
+  const mapping = await db.scimGroupMapping.findUnique({
     where: {
       tenantId_externalGroupId: {
         tenantId,
@@ -251,7 +256,7 @@ export async function fetchScimGroup(
   });
   if (!mapping) return null;
 
-  const members = await loadGroupMembers(mapping.teamId, mapping.role);
+  const members = await loadGroupMembers(db, mapping.teamId, mapping.role);
   return buildGroupResource(
     mapping.externalGroupId,
     toDisplayName(mapping.team.slug, mapping.role),
@@ -277,8 +282,9 @@ export async function replaceScimGroup(
   scimId: string,
   data: ScimGroupReplaceInput,
   baseUrl: string,
+  db: TxOrPrisma = prisma,
 ): Promise<ScimGroupReplaceResult> {
-  const mapping = await prisma.scimGroupMapping.findUnique({
+  const mapping = await db.scimGroupMapping.findUnique({
     where: {
       tenantId_externalGroupId: {
         tenantId,
@@ -308,30 +314,34 @@ export async function replaceScimGroup(
   let addedCount = 0;
   let removedCount = 0;
 
-  try {
-    const counts = await prisma.$transaction(async (tx) => {
-      // Compute delta inside transaction to avoid TOCTOU race
-      const currentMembers = await tx.teamMember.findMany({
-        where: { teamId: mapping.teamId, role: mapping.role, deactivatedAt: null },
-        select: { id: true, userId: true, role: true },
-      });
-      const currentUserIds = new Set(currentMembers.map((m) => m.userId));
-
-      const toAdd = [...requestedUserIds].filter((uid) => !currentUserIds.has(uid));
-      const toRemove = currentMembers.filter((m) => !requestedUserIds.has(m.userId));
-
-      await applyAddOperations(tx, mapping.teamId, tenantId, mapping.role, toAdd);
-      await applyRemoveOperations(tx, mapping.teamId, mapping.role, toRemove.map((m) => m.id));
-
-      return { added: toAdd.length, removed: toRemove.length };
+  const runReplace = async (tx: TxClient) => {
+    // Compute delta inside transaction to avoid TOCTOU race
+    const currentMembers = await tx.teamMember.findMany({
+      where: { teamId: mapping.teamId, role: mapping.role, deactivatedAt: null },
+      select: { id: true, userId: true, role: true },
     });
+    const currentUserIds = new Set(currentMembers.map((m) => m.userId));
+
+    const toAdd = [...requestedUserIds].filter((uid) => !currentUserIds.has(uid));
+    const toRemove = currentMembers.filter((m) => !requestedUserIds.has(m.userId));
+
+    await applyAddOperations(tx, mapping.teamId, tenantId, mapping.role, toAdd);
+    await applyRemoveOperations(tx, mapping.teamId, mapping.role, toRemove.map((m) => m.id));
+
+    return { added: toAdd.length, removed: toRemove.length };
+  };
+
+  try {
+    // Already inside a tenant tx → reuse it (flatten). Given a plain client →
+    // open a real transaction so the add/remove writes stay atomic.
+    const counts = "$transaction" in db ? await db.$transaction(runReplace) : await runReplace(db);
     addedCount = counts.added;
     removedCount = counts.removed;
   } catch (e) {
     rethrowScimGroupErrors(e);
   }
 
-  const members = await loadGroupMembers(mapping.teamId, mapping.role);
+  const members = await loadGroupMembers(db, mapping.teamId, mapping.role);
   const resource = buildGroupResource(
     mapping.externalGroupId,
     toDisplayName(mapping.team.slug, mapping.role),
@@ -365,8 +375,9 @@ export async function patchScimGroup(
   scimId: string,
   operations: GroupMemberAction[],
   baseUrl: string,
+  db: TxOrPrisma = prisma,
 ): Promise<ScimGroupPatchResult> {
-  const mapping = await prisma.scimGroupMapping.findUnique({
+  const mapping = await db.scimGroupMapping.findUnique({
     where: {
       tenantId_externalGroupId: {
         tenantId,
@@ -382,36 +393,44 @@ export async function patchScimGroup(
   });
   if (!mapping) throw new ScimGroupNotFoundError();
 
-  try {
-    await prisma.$transaction(async (tx) => {
-      const addOps = operations.filter((a) => a.op === "add");
-      const removeOps = operations.filter((a) => a.op === "remove");
+  const runPatch = async (tx: TxClient) => {
+    const addOps = operations.filter((a) => a.op === "add");
+    const removeOps = operations.filter((a) => a.op === "remove");
 
-      await applyAddOperations(tx, mapping.teamId, tenantId, mapping.role, addOps.map((a) => a.userId));
+    await applyAddOperations(tx, mapping.teamId, tenantId, mapping.role, addOps.map((a) => a.userId));
 
-      // Remove: validate existence before delegating
-      if (removeOps.length > 0) {
-        const removeUserIds = removeOps.map((a) => a.userId);
-        const members = await tx.teamMember.findMany({
-          where: { teamId: mapping.teamId, userId: { in: removeUserIds } },
-          select: { id: true, userId: true, role: true },
-        });
-        const memberByUserId = new Map(members.map((m) => [m.userId, m]));
+    // Remove: validate existence before delegating
+    if (removeOps.length > 0) {
+      const removeUserIds = removeOps.map((a) => a.userId);
+      const members = await tx.teamMember.findMany({
+        where: { teamId: mapping.teamId, userId: { in: removeUserIds } },
+        select: { id: true, userId: true, role: true },
+      });
+      const memberByUserId = new Map(members.map((m) => [m.userId, m]));
 
-        for (const uid of removeUserIds) {
-          if (!memberByUserId.has(uid)) {
-            throw new Error(`SCIM_NO_SUCH_MEMBER:${uid}`);
-          }
+      for (const uid of removeUserIds) {
+        if (!memberByUserId.has(uid)) {
+          throw new Error(`SCIM_NO_SUCH_MEMBER:${uid}`);
         }
-
-        await applyRemoveOperations(tx, mapping.teamId, mapping.role, members.map((m) => m.id));
       }
-    });
+
+      await applyRemoveOperations(tx, mapping.teamId, mapping.role, members.map((m) => m.id));
+    }
+  };
+
+  try {
+    // Already inside a tenant tx → reuse it (flatten). Given a plain client →
+    // open a real transaction so the add/remove writes stay atomic.
+    if ("$transaction" in db) {
+      await db.$transaction(runPatch);
+    } else {
+      await runPatch(db);
+    }
   } catch (e) {
     rethrowScimGroupErrors(e);
   }
 
-  const members = await loadGroupMembers(mapping.teamId, mapping.role);
+  const members = await loadGroupMembers(db, mapping.teamId, mapping.role);
   const resource = buildGroupResource(
     mapping.externalGroupId,
     toDisplayName(mapping.team.slug, mapping.role),

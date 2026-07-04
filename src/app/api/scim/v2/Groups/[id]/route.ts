@@ -31,7 +31,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   const { id } = await params;
 
   return withTenantRls(prisma, tenantId, async (tx) => {
-    const resource = await fetchScimGroup(tenantId, id, getScimBaseUrl());
+    const resource = await fetchScimGroup(tenantId, id, getScimBaseUrl(), tx);
     if (!resource) {
       return scimError(404, "Group not found");
     }
@@ -56,7 +56,7 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
       replaceScimGroup(tenantId, id, {
         displayName: bodyResult.data.displayName,
         memberUserIds: bodyResult.data.members.map((m) => m.value),
-      }, getScimBaseUrl()),
+      }, getScimBaseUrl(), tx),
     );
   } catch (e) {
     if (e instanceof ScimGroupNotFoundError) {
@@ -115,7 +115,7 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
   let serviceResult: Awaited<ReturnType<typeof patchScimGroup>>;
   try {
     serviceResult = await withTenantRls(prisma, tenantId, (tx) =>
-      patchScimGroup(tenantId, id, actions, getScimBaseUrl()),
+      patchScimGroup(tenantId, id, actions, getScimBaseUrl(), tx),
     );
   } catch (e) {
     if (e instanceof ScimGroupNotFoundError) {

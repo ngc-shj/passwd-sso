@@ -378,12 +378,12 @@ describe("centralize-state-transitions — integration", () => {
     const [a, b] = await Promise.all([
       withBypassRls(
         ctx.app.prisma,
-        async () => autoPromoteIfElapsed({ granteeId, grantId, now, auditBase }),
+        async (tx) => autoPromoteIfElapsed({ db: tx, granteeId, grantId, now, auditBase }),
         BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
       ),
       withBypassRls(
         ctx.app.prisma,
-        async () => autoPromoteIfElapsed({ granteeId, grantId, now, auditBase }),
+        async (tx) => autoPromoteIfElapsed({ db: tx, granteeId, grantId, now, auditBase }),
         BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
       ),
     ]);
