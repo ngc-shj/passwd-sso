@@ -1,5 +1,22 @@
 # Coding Deviation Log: route-policy-sql-security
 
+## D0 — Lateral-spread check of the C4 fixes (R42 clause ③)
+
+Each C4 in-branch fix was checked for other instances of the same pattern:
+- **A2 (select→audit→delete)**: sweep.ts's other 3 audit-emitting sweepers
+  (`sweepPerTenantAge`, `sweepTrashEntry`, `sweepExpiryEntry`) already delete-first +
+  emit-only-when-deleted. No spread.
+- **C4-S1 (manual purge bypasses tenant retention floor)**: FOUND a lateral instance —
+  `purge-history` ignored `historyRetentionDays` entirely (no floor at all, vs
+  purge-audit-logs's null-only gap). Fixed symmetrically (commit 944104ab): clamp +
+  409 `HISTORY_RETENTION_INDEFINITE`. Class fully enumerated: the retention-gc registry
+  respects 6 tenant retention columns, but only 2 routes accept an operator
+  `retentionDays` (purge-history, purge-audit-logs) — both now fixed. trash /
+  shareAccessLog / directorySyncLog / notification have no manual-purge endpoint.
+- **C4-S3 (non-atomic purge audit record)**: all maintenance routes use `logAuditAsync`,
+  but this is the documented codebase-wide best-effort pattern (CLAUDE.md), not a
+  purge-specific defect — accept + document (unchanged verdict), not a spread to fix.
+
 ## D1 — C4 review outcome and in-branch fix scope (Phase 2)
 
 The C4 worker/raw-SQL safety review (3 lenses) adjudicated A1/A2/A3 and produced 8
