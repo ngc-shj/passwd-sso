@@ -31,6 +31,7 @@ import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { unauthorized, errorResponse } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { applyRetentionFloor } from "@/lib/maintenance/retention-floor";
 
 // Rate limiter shares the same key for dryRun and real calls intentionally:
 // preventing probe→exploit racing (an admin cannot dry-run-probe matching
@@ -71,14 +72,12 @@ async function purgeForTenant(
   // NULL auditLogRetentionDays means the tenant has explicitly configured
   // "keep forever" — reject rather than silently falling back to the
   // request-supplied retentionDays (an operator-token holder must not be
-  // able to override that policy).
-  const tenantRetention = tenant.auditLogRetentionDays;
-  if (tenantRetention === null) {
+  // able to override that policy). Shared floor logic; see retention-floor.ts.
+  const floor = applyRetentionFloor(retentionDays, tenant.auditLogRetentionDays);
+  if (!floor.ok) {
     return { ok: false, reason: "RETENTION_INDEFINITE" };
   }
-
-  // Use the stricter (longer) of the requested vs tenant-configured retention
-  const effectiveRetentionDays = Math.max(retentionDays, tenantRetention);
+  const effectiveRetentionDays = floor.effectiveRetentionDays;
   const tenantCutoff = new Date(
     Date.now() - effectiveRetentionDays * MS_PER_DAY,
   );

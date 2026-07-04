@@ -243,6 +243,23 @@ describe("POST /api/maintenance/purge-history", () => {
     expect(Math.abs(cutoff.getTime() - expectedDate.getTime())).toBeLessThan(5000);
   });
 
+  it("treats a tenant floor of 0 as a real floor (not 'no floor'): clamps to max(requested, 0)", async () => {
+    // Regression for the retention-floor bypass: a truthy check on
+    // historyRetentionDays would treat 0 as falsy and fall back to the raw
+    // requested retentionDays. With the floor helper, max(90, 0) === 90 is
+    // applied — 0 does not short-circuit to an unfloored purge.
+    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
+    mockDeleteMany.mockResolvedValue({ count: 2 });
+    mockTenantFindUnique.mockResolvedValue({ historyRetentionDays: 0 });
+
+    const req = createRequest({ retentionDays: 90 }, VALID_OP_TOKEN);
+    await POST(req);
+
+    const cutoff = mockDeleteMany.mock.calls[0][0].where.changedAt.lt as Date;
+    const expectedDate = new Date(Date.now() - 90 * MS_PER_DAY);
+    expect(Math.abs(cutoff.getTime() - expectedDate.getTime())).toBeLessThan(5000);
+  });
+
   it("rejects with 409 HISTORY_RETENTION_INDEFINITE when tenant retention is NULL, and issues no purge", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
     mockTenantFindUnique.mockResolvedValue({ historyRetentionDays: null });
