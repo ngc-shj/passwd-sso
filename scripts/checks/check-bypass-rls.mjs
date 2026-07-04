@@ -49,7 +49,7 @@ const ALLOWED_USAGE = new Map([
   // returned 410 Gone post-A04-4 and no longer touches PasswordShare — its
   // prior allowlist entry has been removed.
   ["src/app/api/admin/rotate-master-key/[rotationId]/execute/route.ts", ["passwordShare"]],
-  ["src/app/api/maintenance/purge-history/route.ts", ["passwordEntryHistory"]],
+  ["src/app/api/maintenance/purge-history/route.ts", ["tenant", "passwordEntryHistory"]],
   ["src/app/api/teams/route.ts", ["teamMember"]],
   ["src/app/api/teams/pending-key-distributions/route.ts", ["teamMember"]],
   // Team key distribution: guest members require cross-tenant public-key lookup
