@@ -224,9 +224,20 @@ function skipWhitespaceAndComments(content, idx) {
  *   - If the first token is a bare identifier, search backward (within
  *     VARIABLE_LOOKBACK_LINES) for `const <ident> = \`` / `let <ident> = \``
  *     and use that literal's span instead.
- * Returns null if neither form is found (e.g. the argument is some other
- * expression — out of scope for this checker; not flagged).
+ * Returns:
+ *   - a { start, end } span when the argument is a backtick literal or a
+ *     bare identifier bound to one within VARIABLE_LOOKBACK_LINES;
+ *   - the UNRESOLVED sentinel when the argument is a bare identifier we could
+ *     NOT bind to a single backtick literal (reassignment/concatenation, an
+ *     imported constant, a function-call result, etc.) — the checker cannot
+ *     prove such a string is interpolation-free, so it must fail closed rather
+ *     than silently skip (a `let sql = f(); sql = sql + \`...${x}...\`` shape
+ *     would otherwise evade Layer 2);
+ *   - null only when the argument is not an identifier or literal at all
+ *     (e.g. an inline object / array) — genuinely out of Layer 2's model.
  */
+const UNRESOLVED = Symbol("unresolved-sql-arg");
+
 function resolveArgSpan(content, openParenIdx) {
   const argStart = skipWhitespaceAndComments(content, openParenIdx + 1);
   if (content[argStart] === "`") {
@@ -238,20 +249,27 @@ function resolveArgSpan(content, openParenIdx) {
   const ident = identMatch[0];
 
   // Search backward from openParenIdx for the nearest `const/let <ident> = \``.
+  // A reassignment (`<ident> = ...`) between that decl and the call would make
+  // the literal stale, so reject if we see the identifier reassigned after its
+  // backtick binding.
   const callLine = lineNumberAt(content, openParenIdx);
   const lines = content.split("\n");
   const declRe = new RegExp(`^\\s*(?:const|let)\\s+${ident}\\s*=\\s*\``);
+  const reassignRe = new RegExp(`^\\s*${ident}\\s*(?:\\+)?=[^=]`);
   const searchFloor = Math.max(0, callLine - 1 - VARIABLE_LOOKBACK_LINES);
   for (let ln = callLine - 1; ln >= searchFloor; ln--) {
-    if (declRe.test(lines[ln - 1] ?? "")) {
-      // Recompute the absolute char index of the backtick on that line.
+    const lineText = lines[ln - 1] ?? "";
+    if (declRe.test(lineText)) {
       const lineStartIdx = lines.slice(0, ln - 1).join("\n").length + (ln > 1 ? 1 : 0);
       const backtickIdx = content.indexOf("`", lineStartIdx);
-      if (backtickIdx === -1) return null;
+      if (backtickIdx === -1) return UNRESOLVED;
       return findTemplateLiteralSpan(content, backtickIdx);
     }
+    // A bare `<ident> =` / `<ident> +=` above the call but before any backtick
+    // decl was found means the string is built by reassignment — unverifiable.
+    if (reassignRe.test(lineText)) return UNRESOLVED;
   }
-  return null;
+  return UNRESOLVED;
 }
 
 /**
@@ -268,7 +286,18 @@ function scanFileByCallSite(content) {
   while ((m = UNSAFE_CALL_RE.exec(content)) !== null) {
     const openParenIdx = m.index + m[0].length - 1;
     const span = resolveArgSpan(content, openParenIdx);
-    if (!span) continue;
+    if (span === null) continue; // not an identifier/literal arg — out of model
+    if (span === UNRESOLVED) {
+      // Fail closed: the SQL string is built in a way we cannot statically
+      // prove is interpolation-free (reassignment, imported const, fn result).
+      results.push({
+        callLine: lineNumberAt(content, m.index),
+        firstHitLine: lineNumberAt(content, m.index),
+        marker: null,
+        unresolved: true,
+      });
+      continue;
+    }
 
     const hits = findInterpolations(content, span.start, span.end);
     if (hits.length === 0) continue;
@@ -349,19 +378,46 @@ if (staleEntries.length > 0) {
 const unmarkedViolations = [];
 const shortReasonViolations = [];
 const countMismatches = [];
+const unresolvedViolations = [];
+const absentValidatorViolations = [];
 
 for (const file of matchingFiles) {
   const content = readFileSync(join(ROOT, file), "utf8");
   const callSites = scanFileByCallSite(content);
 
-  const markedCount = callSites.filter((c) => c.marker !== null && c.marker.length >= MIN_MARKER_REASON_LENGTH).length;
+  const markedCount = callSites.filter(
+    (c) => !c.unresolved && c.marker !== null && c.marker.length >= MIN_MARKER_REASON_LENGTH,
+  ).length;
   const declaredN = entries.get(file)?.identMarkers ?? 0;
 
   for (const site of callSites) {
-    if (site.marker === null) {
+    if (site.unresolved) {
+      // A marker cannot bless a string we cannot statically resolve.
+      unresolvedViolations.push({ file, line: site.firstHitLine });
+    } else if (site.marker === null) {
       unmarkedViolations.push({ file, line: site.firstHitLine });
     } else if (site.marker.length < MIN_MARKER_REASON_LENGTH) {
       shortReasonViolations.push({ file, line: site.firstHitLine, reason: site.marker });
+    } else {
+      // If the marker names a validation function, that function MUST appear
+      // in the same file — catches a copy-pasted marker naming an absent
+      // mechanism. Only tokens that look like an actual call are considered:
+      // an empty-paren call (`validateRegistry()`) or a validator-verb-prefixed
+      // call (`assertIdentifier(`, `validateX(`, ...). This deliberately does
+      // NOT match English prose like "clause string (never ...)" — free-text
+      // reasons that explain safety inline (without naming a function) are fine.
+      const VALIDATOR_TOKEN_RE =
+        /\b([A-Za-z_$][A-Za-z0-9_$]*\(\)|(?:assert|validate|check|sanitize|escape|guard)[A-Za-z0-9_$]*\()/g;
+      const named = site.marker.match(VALIDATOR_TOKEN_RE) ?? [];
+      for (const tok of named) {
+        const fn = tok.replace(/\(\)?$/, "");
+        const declaredElsewhere = new RegExp(`\\b${fn}\\s*\\(`).test(
+          content.replace(site.marker, ""),
+        );
+        if (!declaredElsewhere) {
+          absentValidatorViolations.push({ file, line: site.firstHitLine, fn });
+        }
+      }
     }
   }
 
@@ -370,6 +426,32 @@ for (const file of matchingFiles) {
       countMismatches.push({ file, markedCount, declaredN });
     }
   }
+}
+
+if (unresolvedViolations.length > 0) {
+  failed = true;
+  console.error(
+    "UNRESOLVED_SQL_ARG: an Unsafe raw-SQL call's argument is a SQL string this checker cannot statically resolve to a single backtick literal (reassignment/concatenation, imported const, or function result) — it cannot be proven interpolation-free and is rejected:",
+  );
+  for (const v of unresolvedViolations) console.error(`  ${v.file}:${v.line}`);
+  console.error(
+    "\nInline the SQL as a single `const <name> = \`...\`` template with $N bound params, so Layer 2 can verify it.",
+  );
+  console.error("");
+}
+
+if (absentValidatorViolations.length > 0) {
+  failed = true;
+  console.error(
+    "MARKER_VALIDATOR_ABSENT: a `raw-sql-ident` marker names a validation function that does not appear in the same file (likely a copy-pasted marker):",
+  );
+  for (const v of absentValidatorViolations) {
+    console.error(`  ${v.file}:${v.line}  names \`${v.fn}(\` which is not present in the file`);
+  }
+  console.error(
+    "\nThe marker reason must name the actual validation mechanism used at this call site.",
+  );
+  console.error("");
 }
 
 if (unmarkedViolations.length > 0) {

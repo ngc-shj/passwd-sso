@@ -259,6 +259,22 @@ describe("POST /api/maintenance/purge-history", () => {
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
+  it("returns 0 and issues no purge when the bound tenant no longer exists", async () => {
+    // Mirror of purge-audit-logs's "tenant no longer exists" case: a null
+    // tenant lookup must no-op, NOT fall through to an unfloored delete with
+    // the raw request retentionDays.
+    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
+    mockTenantFindUnique.mockResolvedValue(null);
+
+    const req = createRequest({ retentionDays: 1 }, VALID_OP_TOKEN);
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ purged: 0 });
+
+    expect(mockDeleteMany).not.toHaveBeenCalled();
+    expect(mockCount).not.toHaveBeenCalled();
+  });
+
   it("rejects with 409 on dryRun too when tenant retention is NULL, and does not count matches", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
     mockTenantFindUnique.mockResolvedValue({ historyRetentionDays: null });

@@ -164,4 +164,18 @@ describe("renderDeletionRetentionMatrix", () => {
       expect(purgeSection).not.toContain(`\`${entry.table}\``);
     }
   });
+
+  it("every real Prisma model has a non-null dbName (keeps the renderer's `?? name` fallback dead)", async () => {
+    // The renderer keys models by `model.dbName ?? model.name`. RETENTION_REGISTRY
+    // keys by lowercase table name, so if a model lacked @@map (dbName null) the
+    // fallback would emit the PascalCase model name and a registry-managed model
+    // could silently leak into the no-automated-purge bucket. Assert the fallback
+    // never activates on the real schema, closing that gap mechanically rather
+    // than trusting the @@map convention.
+    const { Prisma } = await import("@prisma/client");
+    const nullDbName = Prisma.dmmf.datamodel.models
+      .filter((m) => m.dbName == null)
+      .map((m) => m.name);
+    expect(nullDbName).toEqual([]);
+  });
 });

@@ -125,8 +125,9 @@ records no "purged up to sequence N" watermark anywhere.
 - Before purge: full walk from genesis is clean — `ok:true, totalVerified:5`.
 - After purge: the default (`from` query param omitted) `audit-chain-verify` request
   uses `fromSeq = 1`, which is `<= 1`, so the seed-lookup branch is skipped and the
-  walk seeds `prevHash` from **genesis** (`0x00`) — see
-  `src/app/api/maintenance/audit-chain-verify/route.ts:198` (`seedPrevHash` default).
+  walk seeds `prevHash` from **genesis** (`0x00`) — see the `seedPrevHash` default
+  assignment in `src/app/api/maintenance/audit-chain-verify/route.ts` (symbol
+  reference, not a line number, so the pointer survives edits to that file).
   The query then selects `chain_seq >= 1 AND chain_seq <= toSeq`, which returns rows
   4 and 5 (the only surviving rows — `chain_seq` was never renumbered). Row 4's
   stored `event_hash` was originally chained from row 3's hash, not from genesis, so

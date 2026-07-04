@@ -82,15 +82,24 @@ async function handlePOST(req: NextRequest) {
       select: { historyRetentionDays: true },
     }),
   BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+  // Bound tenant record not found — no-op (purge nothing) rather than falling
+  // through to an unfloored delete with the raw request retentionDays. Mirrors
+  // purge-audit-logs's "tenant no longer exists" early return; keeps the two
+  // routes' retention-floor behavior symmetric even for this unreachable-today
+  // edge (Tenant/OperatorToken cascade-delete together, so a valid op_ token
+  // cannot outlive its tenant).
+  if (!tenant) {
+    return NextResponse.json({ purged: 0 });
+  }
   // NULL historyRetentionDays means the tenant has explicitly configured
   // "keep forever" — reject rather than silently falling back to the
   // request-supplied retentionDays (an operator-token holder must not be
   // able to override that policy). Mirrors purge-audit-logs.
-  if (tenant && tenant.historyRetentionDays === null) {
+  if (tenant.historyRetentionDays === null) {
     return errorResponse(API_ERROR.HISTORY_RETENTION_INDEFINITE);
   }
   // Use the stricter (longer) of the requested vs tenant-configured retention.
-  const effectiveRetentionDays = tenant?.historyRetentionDays
+  const effectiveRetentionDays = tenant.historyRetentionDays
     ? Math.max(retentionDays, tenant.historyRetentionDays)
     : retentionDays;
 
