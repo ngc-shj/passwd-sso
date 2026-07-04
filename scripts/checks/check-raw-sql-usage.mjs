@@ -70,8 +70,13 @@ function getSourceFiles() {
     let dirEntries;
     try {
       dirEntries = readdirSync(rootPath, { recursive: true, withFileTypes: true });
-    } catch {
-      continue; // scan root absent (e.g. an isolated fixture tree) — skip
+    } catch (err) {
+      // Only tolerate an absent scan root (e.g. an isolated fixture tree that
+      // has just `scripts/`). Any other error (EACCES, EIO, ...) must fail
+      // loudly — silently skipping a whole root would make a security gate
+      // report green without having scanned anything.
+      if (err.code === "ENOENT") continue;
+      throw err;
     }
     for (const entry of dirEntries) {
       if (!entry.isFile()) continue;
