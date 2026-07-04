@@ -64,7 +64,7 @@ async function handleGET(req: NextRequest) {
   // WHERE filter, queue depth and failure counts of every other tenant
   // leak through this endpoint.
   const rows = await withBypassRls(prisma, async (tx) =>
-    prisma.$queryRaw<MetricsRow[]>`
+    tx.$queryRaw<MetricsRow[]>`
       SELECT
         COUNT(*) FILTER (WHERE status = 'PENDING')    AS pending,
         COUNT(*) FILTER (WHERE status = 'PROCESSING') AS processing,

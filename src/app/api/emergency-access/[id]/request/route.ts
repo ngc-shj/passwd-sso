@@ -51,7 +51,7 @@ async function handlePOST(
   // would otherwise race past the optimistic canTransition check.
   const transitionResult = await withBypassRls(prisma, async (tx) =>
     transition({
-      db: prisma,
+      db: tx,
       where: { id, granteeId: session.user.id },
       to: EA_STATUS.REQUESTED,
       actor: EA_ACTOR.GRANTEE,

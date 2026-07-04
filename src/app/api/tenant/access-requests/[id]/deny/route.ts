@@ -72,7 +72,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   // Optimistic lock: only update if still PENDING and belongs to this tenant
   const transitionResult = await withTenantRls(prisma, actor.tenantId, async (tx) =>
     transition({
-      db: prisma,
+      db: tx,
       where: { id: requestId, tenantId: actor.tenantId },
       to: AR_STATUS.DENIED,
       actor: AR_ACTOR.ADMIN,

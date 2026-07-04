@@ -173,7 +173,7 @@ export async function authorizeWebAuthn(
   // last_used_device is set to NULL here; device info is captured
   // by session metadata when Auth.js creates the session.
   const updatedRows = await withBypassRls(prisma, async (tx) =>
-    prisma.$executeRaw`
+    tx.$executeRaw`
       UPDATE "webauthn_credentials"
       SET counter = ${BigInt(newCounter)},
           "last_used_at" = ${new Date()}

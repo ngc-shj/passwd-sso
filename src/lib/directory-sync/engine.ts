@@ -181,7 +181,7 @@ export async function runDirectorySync(
       preCheck.lastSyncAt < staleThreshold;
 
     const updated = await withTenantRls(prisma, tenantId, (tx) =>
-      prisma.$executeRaw`
+      tx.$executeRaw`
         UPDATE "directory_sync_configs"
         SET status = 'RUNNING'::"DirectorySyncStatus",
             "last_sync_at" = ${startedAt}
