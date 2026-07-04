@@ -75,6 +75,8 @@
   "extensionTokenLegacyIssuanceDeprecated": "This endpoint is not available. Update the extension, or use 'passwd-sso login' for CLI access.",
   "invalidChallenge": "Security key registration could not be completed. Please retry.",
   "auditChainSeedNotFound": "The starting point for partial audit-chain verification was not found. Specify a different starting sequence number.",
+  "auditLogRetentionIndefinite": "This tenant's audit log retention is set to keep forever. Purging is not permitted.",
+  "historyRetentionIndefinite": "This tenant's history retention is set to keep forever. Purging is not permitted.",
   "mobileTokenBindingInvalid": "Mobile token binding is invalid.",
   "mobileRefreshReuseDetected": "Refresh token reuse detected. Please sign in again on the mobile device.",
   "mobileRefreshSessionExpired": "Mobile session expired. Please sign in again.",

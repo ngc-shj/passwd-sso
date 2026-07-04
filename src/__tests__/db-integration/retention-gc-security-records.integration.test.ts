@@ -20,7 +20,10 @@ import { randomUUID } from "node:crypto";
 import {
   createTestContext,
   setBypassRlsGucs,
+  createPrismaForRole,
+  raceTwoClients,
   type TestContext,
+  type PrismaWithPool,
 } from "./helpers";
 import { sweepAuditProvenanceEntry } from "@/workers/retention-gc-worker/sweep";
 import {
@@ -269,5 +272,62 @@ describe("retention-gc security-record GC (SC6)", () => {
       await sweepAuditProvenanceEntry(tx, shareEntry, 100);
     });
     expect(await rowExists("password_shares", shareId)).toBe(false);
+  });
+
+  // A2 regression: two concurrent sweep instances over the same expired rows
+  // must NOT double-emit provenance audit events. The delete-first reorder
+  // (DELETE ... RETURNING, then emit from the returned rows) makes each row
+  // returned to exactly one racer, so total audit rows == total deleted rows.
+  it("A2: two racing sweeps over the same expired shares emit exactly one audit per row (no double-emit)", async () => {
+    const SEED = 6;
+    const shareIds: string[] = [];
+    for (let i = 0; i < SEED; i++) {
+      shareIds.push(await insertShare("now() - interval '1 hour'"));
+    }
+
+    // Two separate connections so the DELETEs genuinely contend at the row level.
+    const clientA: PrismaWithPool = createPrismaForRole("superuser");
+    const clientB: PrismaWithPool = createPrismaForRole("superuser");
+    try {
+      // batchSize >= SEED so both racers' DELETE subqueries select the SAME
+      // full id set — the maximal-overlap condition under which the OLD
+      // select-then-emit code would double-emit. Delete-first serializes on
+      // the row lock: the first DELETE removes all rows, the second finds them
+      // gone and deletes 0, so each row is deleted (and audited) exactly once.
+      // (A smaller batch is not used because a single race round with LIMIT <
+      // SEED can leave some rows unswept — production catches them next cycle,
+      // but the test needs a deterministic full sweep.)
+      const runSweep = (c: PrismaWithPool) =>
+        c.prisma.$transaction(async (tx) => {
+          await setBypassRlsGucs(tx);
+          return sweepAuditProvenanceEntry(tx, shareEntry, 100);
+        });
+
+      const [deletedA, deletedB] = await raceTwoClients(
+        clientA.prisma,
+        clientB.prisma,
+        () => runSweep(clientA),
+        () => runSweep(clientB),
+      );
+
+      // Per-racer split is nondeterministic (delete-first hands each row to
+      // exactly one racer; a large-enough batch may let one take all) — the
+      // invariant is that the union covers every row with no overlap.
+      expect(deletedA + deletedB).toBe(SEED);
+
+      // The real A2 guard: exactly one provenance audit row per seeded share.
+      // A regression to select-then-emit would double-emit for the overlap and
+      // fail this toHaveLength(1).
+      let totalAudit = 0;
+      for (const id of shareIds) {
+        const rows = await outboxRowsFor(id);
+        expect(rows).toHaveLength(1);
+        totalAudit += rows.length;
+      }
+      expect(totalAudit).toBe(SEED);
+    } finally {
+      await clientA.prisma.$disconnect().then(() => clientA.pool.end());
+      await clientB.prisma.$disconnect().then(() => clientB.pool.end());
+    }
   });
 });

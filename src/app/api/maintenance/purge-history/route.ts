@@ -4,6 +4,11 @@
  * Tenant-scoped purge of password entry history older than retentionDays.
  * Operates only on rows belonging to the operator-token's bound tenantId;
  * a token issued in tenant A cannot affect tenant B's history.
+ * The tenant's own historyRetentionDays floor is respected — and when the
+ * tenant has configured NULL (keep forever), the purge is rejected outright
+ * rather than falling back to the request-supplied retentionDays (an
+ * operator-token holder must not be able to override a tenant's explicit
+ * "never delete" policy). Mirrors the audit-log purge floor in purge-audit-logs.
  * Authenticated via per-operator op_* token (mint via /dashboard/tenant/operator-tokens).
  *
  * Body: { retentionDays?: number, dryRun?: boolean }
@@ -24,7 +29,9 @@ import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { unauthorized } from "@/lib/http/api-response";
+import { unauthorized, errorResponse } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { applyRetentionFloor } from "@/lib/maintenance/retention-floor";
 
 // Rate limiter shares the same key for dryRun and real calls intentionally:
 // preventing probe→exploit racing (an admin cannot dry-run-probe matching
@@ -70,7 +77,32 @@ async function handlePOST(req: NextRequest) {
   });
   if (!op.ok) return op.response;
 
-  const cutoffDate = new Date(Date.now() - retentionDays * MS_PER_DAY);
+  const tenant = await withBypassRls(prisma, async (tx) =>
+    tx.tenant.findUnique({
+      where: { id: auth.tenantId },
+      select: { historyRetentionDays: true },
+    }),
+  BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+  // Bound tenant record not found — no-op (purge nothing) rather than falling
+  // through to an unfloored delete with the raw request retentionDays. Mirrors
+  // purge-audit-logs's "tenant no longer exists" early return; keeps the two
+  // routes' retention-floor behavior symmetric even for this unreachable-today
+  // edge (Tenant/OperatorToken cascade-delete together, so a valid op_ token
+  // cannot outlive its tenant).
+  if (!tenant) {
+    return NextResponse.json({ purged: 0 });
+  }
+  // NULL historyRetentionDays means the tenant has explicitly configured
+  // "keep forever" — reject rather than silently falling back to the
+  // request-supplied retentionDays (an operator-token holder must not be
+  // able to override that policy). Shared floor logic; see retention-floor.ts.
+  const floor = applyRetentionFloor(retentionDays, tenant.historyRetentionDays);
+  if (!floor.ok) {
+    return errorResponse(API_ERROR.HISTORY_RETENTION_INDEFINITE);
+  }
+  const effectiveRetentionDays = floor.effectiveRetentionDays;
+
+  const cutoffDate = new Date(Date.now() - effectiveRetentionDays * MS_PER_DAY);
   // Scope deletion to the operator-token's bound tenant. Without this,
   // a tenant-A admin who mints an op_* token can delete history rows in
   // every other tenant via the system-wide where clause.
@@ -93,6 +125,7 @@ async function handlePOST(req: NextRequest) {
         [AUDIT_METADATA_KEY.PURGED_COUNT]: 0,
         matched,
         retentionDays,
+        effectiveRetentionDays,
         scopedTenantId: auth.tenantId,
         dryRun: true,
       },
@@ -113,6 +146,7 @@ async function handlePOST(req: NextRequest) {
       tokenId: auth.tokenId,
       [AUDIT_METADATA_KEY.PURGED_COUNT]: deleted.count,
       retentionDays,
+      effectiveRetentionDays,
       scopedTenantId: auth.tenantId,
     },
   });

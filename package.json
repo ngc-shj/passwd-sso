@@ -12,6 +12,7 @@
     "check:bypass-rls": "node scripts/checks/check-bypass-rls.mjs",
     "check:crypto-domains": "node scripts/checks/check-crypto-domains.mjs",
     "check:migration-drift": "node scripts/checks/check-migration-drift.mjs",
+    "check:raw-sql-usage": "node scripts/checks/check-raw-sql-usage.mjs",
     "check:ios-diag": "bash scripts/checks/check-ios-no-diagnostic-logging.sh",
     "pre-pr": "bash scripts/pre-pr.sh",
     "db:migrate": "prisma migrate dev",
@@ -48,6 +49,8 @@
     "migrate:account-tokens": "tsx scripts/migrate-account-tokens-to-encrypted.ts",
     "generate:env-example": "tsx scripts/generate-env-example.ts",
     "check:env-docs": "tsx scripts/check-env-docs.ts",
+    "generate:security-matrices": "tsx scripts/generate-security-matrices.ts",
+    "check:security-matrices": "tsx scripts/generate-security-matrices.ts && git diff --quiet -- docs/security/route-policy-matrix.md docs/security/deletion-retention-matrix.md",
     "init:env": "tsx scripts/init-env.ts",
     "docker:up": "docker compose -f docker-compose.yml -f docker-compose.override.yml up",
     "docker:down": "docker compose -f docker-compose.yml -f docker-compose.override.yml down"

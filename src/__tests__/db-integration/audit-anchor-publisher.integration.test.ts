@@ -24,6 +24,8 @@ import path from "node:path";
 import {
   createTestContext,
   setBypassRlsGucs,
+  createPrismaForRole,
+  raceTwoClients,
   type TestContext,
 } from "./helpers";
 import { AuditAnchorPublisher } from "@/workers/audit-anchor-publisher";
@@ -217,6 +219,63 @@ describe("AuditAnchorPublisher — FR2 happy-path integration", () => {
     for (const entry of manifest.tenants) {
       expect(entry.chainSeq).toBe("5");
       expect(entry.epoch).toBe(1);
+    }
+  });
+
+  // T8 — advisory-lock contention: two instances of the same deployment racing
+  // runCadence must serialize on pg_try_advisory_xact_lock('audit-anchor-publish').
+  // Exactly one wins (published); the other observes the lock held for the whole
+  // transaction (which spans manifest build + filesystem upload) and returns
+  // lock_held — no double-publish. Both calls go through the REAL runCadence, and
+  // both outcome branches are asserted (RT4), with no sleeps.
+  it("T8: two racing runCadence calls serialize on the advisory lock (one published, one lock_held)", async () => {
+    const deploymentId = `test-deploy-${randomBytes(4).toString("hex")}`;
+    const kid = `audit-anchor-${randomBytes(4).toString("hex")}`;
+    const config: PublisherConfig = {
+      databaseUrl: process.env.DATABASE_URL!,
+      deploymentId,
+      signingKey: SIGNING_KEY,
+      signingKeyKid: kid,
+      tagSecret: TAG_SECRET,
+      destinations: [new FilesystemDestination({ basePath: tmpDir })],
+      cadenceMs: 24 * 60 * 60 * 1000,
+      publishOffsetMs: 5 * 60 * 1000,
+      pauseCapFactor: 3,
+    };
+
+    // Second superuser connection = a second pg.Pool, so the two publishers
+    // contend on the transaction-scoped advisory lock across real connections.
+    const second = createPrismaForRole("superuser");
+    try {
+      const publisherA = new AuditAnchorPublisher({ prisma: ctx.su.prisma, config });
+      const publisherB = new AuditAnchorPublisher({ prisma: second.prisma, config });
+      const now = new Date("2026-05-02T00:10:00.000Z");
+
+      const [outcomeA, outcomeB] = await raceTwoClients(
+        ctx.su.prisma,
+        second.prisma,
+        () => publisherA.runCadence(now),
+        () => publisherB.runCadence(now),
+      );
+
+      const kinds = [outcomeA.kind, outcomeB.kind].sort();
+      // RT4: both branches occurred — exactly one published, one lock_held.
+      expect(kinds).toEqual(["lock_held", "published"]);
+
+      const held = [outcomeA, outcomeB].find((o) => o.kind === "lock_held");
+      expect(held).toMatchObject({ reason: "LOCK_HELD_BY_OTHER_INSTANCE" });
+
+      // No double-publish: exactly one manifest pointer persisted.
+      const settings = await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        return tx.$queryRawUnsafe<{ key: string }[]>(
+          `SELECT key FROM system_settings WHERE key = 'audit_anchor_previous_manifest'`,
+        );
+      });
+      expect(settings).toHaveLength(1);
+    } finally {
+      await second.prisma.$disconnect();
+      await second.pool.end();
     }
   });
 

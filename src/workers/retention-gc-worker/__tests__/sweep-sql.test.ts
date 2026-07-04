@@ -158,11 +158,12 @@ describe("sweepGuardedExpiryEntry generated SQL (SC5 C2/RT7)", () => {
   });
 });
 
-describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7)", () => {
+describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7, A2 delete-first)", () => {
   function makeProvenanceTx(rows: Record<string, unknown>[]) {
     const executeRaw = vi.fn().mockResolvedValue(undefined); // set_config
-    const queryRawUnsafe = vi.fn().mockResolvedValue(rows); // SELECT (capture)
-    const executeRawUnsafe = vi.fn().mockResolvedValue(rows.length); // DELETE
+    // The DELETE ... RETURNING goes through $queryRawUnsafe (needs row results).
+    const queryRawUnsafe = vi.fn().mockResolvedValue(rows);
+    const executeRawUnsafe = vi.fn().mockResolvedValue(undefined); // unused by this fn
     const auditOutbox = { create: vi.fn().mockResolvedValue(undefined) };
     const queryRaw = vi.fn().mockResolvedValue([{ bypass_rls: "on", tenant_id: "" }]);
     // enqueueAuditInWorkerTx does two $queryRaw reads (ctx + tenant exists)
@@ -176,10 +177,10 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7)", () => {
       $executeRawUnsafe: executeRawUnsafe,
       auditOutbox,
     } as unknown as Prisma.TransactionClient;
-    return { tx, queryRawUnsafe, executeRawUnsafe, auditOutbox };
+    return { tx, queryRawUnsafe, executeRawUnsafe, auditOutbox, queryRaw };
   }
 
-  it("SELECTs the provenance projection (no row lock), then DELETEs id = ANY($1::uuid[])", async () => {
+  it("DELETEs (id) IN (SELECT ... LIMIT $1) RETURNING the provenance projection, then emits audit from RETURNING rows", async () => {
     const entry: AuditProvenanceEntry = {
       kind: "EXPIRY_AUDIT_PROVENANCE",
       table: "extension_tokens",
@@ -198,34 +199,29 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7)", () => {
         last_used_user_agent: "ua",
       },
     ];
-    const { tx, queryRawUnsafe, executeRawUnsafe, auditOutbox } =
-      makeProvenanceTx(rows);
+    const { tx, queryRawUnsafe, auditOutbox } = makeProvenanceTx(rows);
 
     const deleted = await sweepAuditProvenanceEntry(tx, entry, 100);
     expect(deleted).toBe(1);
 
-    // SELECT: projection includes id + all provenance cols, LIMIT $1, no FOR UPDATE.
-    const [selectSql, ...selectParams] = queryRawUnsafe.mock.calls[0];
-    expect(selectParams).toEqual([100]);
-    expect(selectSql).toMatch(
-      /SELECT id, tenant_id, user_id, last_used_at, last_used_ip, last_used_user_agent FROM extension_tokens/,
+    // DELETE: batch-bounded (id) IN (SELECT id ... LIMIT $1), RETURNING id + all
+    // provenance cols, no FOR UPDATE (the DELETE itself takes the row lock).
+    const [deleteSql, ...deleteParams] = queryRawUnsafe.mock.calls[0];
+    expect(deleteParams).toEqual([100]);
+    expect(deleteSql).toMatch(
+      /DELETE FROM extension_tokens\s+WHERE \(id\) IN \(\s*SELECT id FROM extension_tokens\s+WHERE expires_at < now\(\)\s+LIMIT \$1\s*\)/,
     );
-    expect(selectSql).toMatch(/WHERE expires_at < now\(\)/);
-    expect(selectSql).toMatch(/LIMIT \$1/);
-    // No FOR UPDATE — that needs UPDATE privilege; the GC role has only SELECT+DELETE.
-    expect(selectSql).not.toContain("FOR UPDATE");
+    expect(deleteSql).toMatch(
+      /RETURNING id, tenant_id, user_id, last_used_at, last_used_ip, last_used_user_agent/,
+    );
+    expect(deleteSql).not.toContain("FOR UPDATE");
 
-    // Audit emitted BEFORE delete, under the row's own tenant_id.
+    // Audit emitted AFTER delete, from the RETURNING row, under the row's own tenant_id.
     expect(auditOutbox.create).toHaveBeenCalledTimes(1);
     const emitted = auditOutbox.create.mock.calls[0][0];
     expect(emitted.data.tenantId).toBe("22222222-2222-4222-8222-222222222222");
     // Credential tables emit CREDENTIAL_RETENTION_PURGED (entry.auditAction).
     expect(emitted.data.payload.action).toBe("CREDENTIAL_RETENTION_PURGED");
-
-    // DELETE binds the captured ids as $1::uuid[], not interpolated.
-    const [deleteSql, ...deleteParams] = executeRawUnsafe.mock.calls[0];
-    expect(deleteSql).toMatch(/DELETE FROM extension_tokens WHERE id = ANY\(\$1::uuid\[\]\)/);
-    expect(deleteParams).toEqual([["11111111-1111-4111-8111-111111111111"]]);
   });
 
   it("returns 0 and emits nothing when no rows are expired", async () => {
@@ -237,11 +233,10 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7)", () => {
       auditAction: "CREDENTIAL_RETENTION_PURGED",
       globalDelete: true,
     };
-    const { tx, executeRawUnsafe, auditOutbox } = makeProvenanceTx([]);
+    const { tx, auditOutbox } = makeProvenanceTx([]);
     const deleted = await sweepAuditProvenanceEntry(tx, entry, 100);
     expect(deleted).toBe(0);
     expect(auditOutbox.create).not.toHaveBeenCalled();
-    expect(executeRawUnsafe).not.toHaveBeenCalled(); // no DELETE issued
   });
 
   it("SC6 security-record entry emits SECURITY_RECORD_RETENTION_PURGED (auditAction parameterization)", async () => {
@@ -292,16 +287,17 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7)", () => {
 
     await sweepAuditProvenanceEntry(tx, entry, 100);
 
-    const [selectSql] = queryRawUnsafe.mock.calls[0];
+    const [deleteSql] = queryRawUnsafe.mock.calls[0];
     // The guard restricts to DEAD grants only — both OR-branches present so a
     // live ACCEPTED/ACTIVATED grant (past its invite window) is never selected.
-    expect(selectSql).toContain("status IN ('REVOKED', 'REJECTED')");
-    expect(selectSql).toMatch(
+    // The guard lives in the DELETE's inner SELECT (the batch-bound id list).
+    expect(deleteSql).toContain("status IN ('REVOKED', 'REJECTED')");
+    expect(deleteSql).toMatch(
       /status = 'PENDING' AND emergency_access_grants\.token_expires_at < now\(\)/,
     );
     // Guard is appended after the cutoff, still batch-bounded.
-    expect(selectSql).toMatch(/WHERE created_at < now\(\)\s+AND \(/);
-    expect(selectSql).toMatch(/LIMIT \$1/);
+    expect(deleteSql).toMatch(/WHERE created_at < now\(\)\s+AND \(/);
+    expect(deleteSql).toMatch(/LIMIT \$1/);
   });
 
   it("entries WITHOUT a guard append no guard SQL (SC4/SC6 unguarded path unchanged)", async () => {
@@ -315,8 +311,41 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7)", () => {
     };
     const { tx, queryRawUnsafe } = makeProvenanceTx([]);
     await sweepAuditProvenanceEntry(tx, entry, 100);
-    const [selectSql] = queryRawUnsafe.mock.calls[0];
-    expect(selectSql).not.toContain("status IN");
-    expect(selectSql).toMatch(/WHERE expires_at < now\(\)\s+LIMIT \$1/);
+    const [deleteSql] = queryRawUnsafe.mock.calls[0];
+    expect(deleteSql).not.toContain("status IN");
+    expect(deleteSql).toMatch(/WHERE expires_at < now\(\)\s+LIMIT \$1/);
+  });
+
+  // T7(b): GUC-guard failure direction. enqueueAuditInWorkerTx's own bypass_rls
+  // check must reject when the GUC context is "off" and tenant_id does not
+  // match the row's tenant — proving the guard is not a silent no-op.
+  it("rejects when the bypass_rls GUC context reads 'off' (T7 GUC-guard failure direction)", async () => {
+    const entry: AuditProvenanceEntry = {
+      kind: "EXPIRY_AUDIT_PROVENANCE",
+      table: "extension_tokens",
+      cutoffColumn: "expires_at",
+      provenanceColumns: ["tenant_id", "user_id"],
+      auditAction: "CREDENTIAL_RETENTION_PURGED",
+      globalDelete: true,
+    };
+    const deletedRow = {
+      id: "11111111-1111-4111-8111-111111111111",
+      tenant_id: "22222222-2222-4222-8222-222222222222",
+      user_id: "33333333-3333-4333-8333-333333333333",
+    };
+    const { tx, queryRaw, queryRawUnsafe } = makeProvenanceTx([deletedRow]);
+    // Override the GUC context read: bypass_rls is "off" and tenant_id does not
+    // match the row's tenant — enqueueAuditInWorkerTx must throw rather than
+    // silently proceed to write the outbox row.
+    queryRaw.mockReset().mockResolvedValueOnce([{ bypass_rls: "off", tenant_id: "" }]);
+
+    await expect(sweepAuditProvenanceEntry(tx, entry, 100)).rejects.toThrow(
+      /bypass_rls scope/,
+    );
+
+    // The DELETE was still issued once (it precedes the per-row GUC check in
+    // the same tx) — the guard failure surfaces via a rejected promise, and
+    // callers run this inside $transaction so the DELETE is rolled back.
+    expect(queryRawUnsafe).toHaveBeenCalledTimes(1);
   });
 });

@@ -466,6 +466,12 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
     // Per-tenant audit log retention via the SECURITY DEFINER function.
     // NULL auditLogRetentionDays → tenant skipped (no implicit deletion).
     // Clamped to max(retention, AUDIT_LOG_RETENTION_MIN) in sweep.ts (S4 floor).
+    //
+    // See docs/security/audit-chain-threat-model.md#retention-purge-interaction
+    // for the real (test-verified) chain-verify interaction: this DELETE does
+    // not touch audit_chain_anchors or renumber chain_seq, so a default
+    // fromSeq=1 chain-verify run after a purge re-seeds from genesis and
+    // reports a FALSE TAMPER at the first retained row.
     kind: "PER_TENANT_FN",
     table: "audit_logs",
     fn: "audit_log_purge",

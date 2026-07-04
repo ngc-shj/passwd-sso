@@ -768,8 +768,11 @@ async function dispatchWebhookForRow(
 /**
  * Reset stuck PROCESSING rows back to PENDING for retry.
  * Rows stuck longer than PROCESSING_TIMEOUT_MS are assumed abandoned.
+ *
+ * Exported so integration tests can target the real function (see sweep.ts's
+ * re-export convention) instead of duplicating this SQL.
  */
-async function reapStuckRows(prisma: PrismaClient): Promise<number> {
+export async function reapStuckRows(prisma: PrismaClient): Promise<number> {
   const timeoutSeconds = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS / MS_PER_SECOND;
 
   // Reset stuck PROCESSING rows: those under max_attempts go back to PENDING,
@@ -830,8 +833,11 @@ async function reapStuckRows(prisma: PrismaClient): Promise<number> {
 /**
  * Reset stuck PROCESSING delivery rows back to PENDING or FAILED.
  * Rows stuck longer than PROCESSING_TIMEOUT_MS are assumed abandoned.
+ *
+ * Exported so integration tests can target the real function (see sweep.ts's
+ * re-export convention) instead of duplicating this SQL.
  */
-async function reapStuckDeliveries(prisma: PrismaClient): Promise<number> {
+export async function reapStuckDeliveries(prisma: PrismaClient): Promise<number> {
   const timeout = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS;
   const cutoff = new Date(Date.now() - timeout);
 

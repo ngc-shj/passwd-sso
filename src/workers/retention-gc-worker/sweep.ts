@@ -177,6 +177,7 @@ export async function sweepExpiryEntry(
   // Row-value (keys) IN (SELECT keys ...) form works for both single-column
   // ("id") and composite ("identifier", "token") key sets.
   const keyList = entry.keyColumns.join(", ");
+  // raw-sql-ident: registry identifiers validated by validateRegistry() at boot; only closed-set table/column names, never user input
   const sql = `DELETE FROM ${entry.table}
     WHERE (${keyList}) IN (
       SELECT ${keyList} FROM ${entry.table}
@@ -214,6 +215,7 @@ export async function sweepGuardedExpiryEntry(
 
   const guardSql = GUARD_SQL[entry.guard](entry.table);
   const keyList = entry.keyColumns.join(", ");
+  // raw-sql-ident: registry identifiers validated by validateRegistry() at boot; only closed-set table/column names, never user input
   const sql = `DELETE FROM ${entry.table}
     WHERE (${keyList}) IN (
       SELECT ${keyList} FROM ${entry.table}
@@ -226,19 +228,23 @@ export async function sweepGuardedExpiryEntry(
 }
 
 /**
- * Capture-then-delete for an EXPIRY_AUDIT_PROVENANCE entry (SC4).
+ * Delete-then-audit for an EXPIRY_AUDIT_PROVENANCE entry (SC4).
  *
  * For credential tables whose rows carry forensic provenance (lastUsedIp/At,
- * actor binding), this records each expired row's provenance into an audit event
- * BEFORE deleting it — atomically, so a failed audit emit rolls back the delete
- * (the provenance MUST be durable before the credential is destroyed; this is the
- * whole point, unlike the best-effort heartbeat). Per row the audit is emitted
- * under the row's OWN tenant_id, so it lands in the owning tenant's audit log.
+ * actor binding), this deletes each expired row FIRST — batch-bound via the
+ * same (keys) IN (SELECT keys ... LIMIT $1) shape as sweepExpiryEntry, with
+ * the provenance columns added to the RETURNING projection — then emits the
+ * audit event from the RETURNING rows, all in the same tx. Emitting from
+ * rows the DELETE actually removed (rather than a prior SELECT) is what
+ * makes this race-safe: two concurrent sweep instances can no longer both
+ * capture the same row and both emit an audit for it (A2) — Postgres row
+ * locking on the DELETE ensures each row is returned to exactly one racer.
+ * Per row the audit is emitted under the row's OWN tenant_id, so it lands in
+ * the owning tenant's audit log.
  *
- * No row lock is taken: a FOR UPDATE lock needs UPDATE privilege the GC role
- * deliberately lacks, and only already-expired rows (which the app never
- * row-deletes — it revokes via UPDATE) are captured, so the id list is stable
- * between the SELECT and the DELETE.
+ * No explicit row lock (FOR UPDATE) is needed before the DELETE: the DELETE
+ * itself takes the row lock. A FOR UPDATE lock would additionally need
+ * UPDATE privilege, which the GC role deliberately lacks.
  *
  * @returns Rows deleted (and audited) this batch.
  */
@@ -254,26 +260,30 @@ export async function sweepAuditProvenanceEntry(
   }
 
   if (entry.globalDelete) {
+    // bypass_purpose/tenant_id GUCs are intentionally not set here (unlike
+    // audit-outbox-worker's setBypassRlsGucs) — they are observability-only
+    // today (not read by any RLS policy or trigger). TODO(route-policy-sql-security):
+    // extract a shared setBypassRlsGucsOnTx helper and set them consistently.
     await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
   }
 
-  // Capture expired rows + provenance, then audit-emit + delete by id in the same
-  // tx. tenant_id is always in provenanceColumns. We deliberately do NOT use
-  // SELECT ... FOR UPDATE: Postgres requires UPDATE privilege for a FOR UPDATE
-  // lock, and granting UPDATE on credential tables to the GC role would
-  // over-privilege it (it never updates these rows). The capture targets only
-  // already-expired rows, which the app never deletes (only this worker does),
-  // so there is no SELECT→DELETE race to lock against — the id list is stable.
   // Optional "this row is dead" guard (SC6b) — a compile-time-literal SQL fragment
   // from GUARD_SQL, appended to the WHERE. Used when cutoffColumn alone cannot
-  // express GC-eligibility (e.g. emergency_access_grants). The DELETE below targets
-  // the captured id list, so the guard only needs to filter the SELECT.
+  // express GC-eligibility (e.g. emergency_access_grants).
   const guardSql = entry.guard ? ` ${GUARD_SQL[entry.guard](entry.table)}` : "";
   const projection = ["id", ...entry.provenanceColumns].join(", ");
+  // Batch-bounded (id) IN (SELECT id ... LIMIT $1) DELETE, RETURNING the
+  // provenance projection so the audit can be emitted from what was actually
+  // deleted — mirrors sweepExpiryEntry's shape, extended with RETURNING.
   const rows = await tx.$queryRawUnsafe<Record<string, unknown>[]>(
-    `SELECT ${projection} FROM ${entry.table}
-       WHERE ${entry.cutoffColumn} < now()${guardSql}
-       LIMIT $1`,
+    // raw-sql-ident: registry identifiers validated by validateRegistry() at boot; only closed-set table/column names, never user input
+    `DELETE FROM ${entry.table}
+       WHERE (id) IN (
+         SELECT id FROM ${entry.table}
+         WHERE ${entry.cutoffColumn} < now()${guardSql}
+         LIMIT $1
+       )
+       RETURNING ${projection}`,
     batchSize,
   );
 
@@ -291,7 +301,9 @@ export async function sweepAuditProvenanceEntry(
           ? value.slice(0, USER_AGENT_MAX_LENGTH)
           : value;
     }
-    // Emit BEFORE delete, in the same tx — atomic provenance durability.
+    // Emit AFTER delete, from the RETURNING row, in the same tx — the row is
+    // already gone, so a racing instance cannot have captured (and will emit
+    // an audit for) the same row (A2 fix).
     await enqueueAuditInWorkerTx(tx, tenantId, {
       scope: AUDIT_SCOPE.TENANT,
       action: AUDIT_ACTION[entry.auditAction],
@@ -312,11 +324,7 @@ export async function sweepAuditProvenanceEntry(
     });
   }
 
-  const ids = rows.map((r) => String(r["id"]));
-  return tx.$executeRawUnsafe<number>(
-    `DELETE FROM ${entry.table} WHERE id = ANY($1::uuid[])`,
-    ids,
-  );
+  return rows.length;
 }
 
 /**
@@ -400,6 +408,7 @@ export async function sweepPerTenantAge(
 
     // Batch-bounded (id) IN (SELECT id ... LIMIT) — table/cutoffColumn are
     // allowlist-validated; tenant id, cutoff, batchSize are bound params.
+    // raw-sql-ident: registry identifiers validated by validateRegistry() at boot; only closed-set table/column names, never user input
     const deleted = await tx.$executeRawUnsafe<number>(
       `DELETE FROM ${entry.table}
          WHERE (id) IN (
