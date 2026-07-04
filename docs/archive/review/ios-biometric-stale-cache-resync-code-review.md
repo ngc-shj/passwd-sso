@@ -140,3 +140,118 @@ Per the Phase 1 `Verification environment constraints`:
 - Verified: 683 unit tests pass.
 
 All other Phase-3 angles (F2-F5, S1-S4, T2) verified clean — no action needed.
+
+---
+
+# Code Review: ios-biometric-stale-cache-resync — Round 2 (token-refresh replay fix)
+
+Date: 2026-07-04
+Review round: 2 (new scope — TokenRefreshCoordinator + sessionExpired, see deviation D4-D7)
+
+## Changes from Previous Round
+
+New scope discovered while verifying the stale-cache heal flow: concurrent/sequential
+token refreshes presented the same stale refresh token, tripping the server's
+refresh-token replay detector and revoking the token family (the same dead-session
+symptom this branch fixes). Added the `TokenRefreshCoordinator` actor (process-global
+single-flight + short success cache), `VaultUnlockError.sessionExpired` routing, and
+removed the verification-only diagnostic logging. Three sub-agents (functionality /
+security / testing) reviewed the working-tree diff + the two new files.
+
+## Functionality Findings
+
+- **F1 [Minor] — Contradictory doc comment on failure caching.**
+  `TokenRefreshCoordinator.swift` header claimed `authenticationRequired` is cached
+  on the failure side, but the code caches ONLY successes (correct, safe behavior).
+  Self-contradicts the inline comment + `testFailureIsNotCached`. Doc-only.
+- Cleared after tracing: single-flight join is race-free (no `await` between the
+  cache/in-flight checks and `inFlight` registration → atomic on the actor); the
+  `.networkError` rethrow stays retryable (not cached, not converted); both
+  `handleVaultUnlocked` call sites correct (biometric switches on the enum,
+  passphrase uses `@discardableResult`); all production sites use `.shared`.
+
+## Security Findings
+
+- **S1 [Minor, accepted] — No backoff on sequential `networkError` refresh
+  retrigger.** Failures are deliberately not cached, so on a transient network
+  failure each sequential unlock-flow step re-hits `/refresh`. Bounded (a handful of
+  steps per flow, not a loop), no client backoff exists anywhere on this path, and
+  `authenticationRequired` terminates the flow. Concurrent bursts are already
+  collapsed by the in-flight join.
+  - Anti-Deferral (acceptable risk): Worst case — a few extra `/refresh` calls
+    against one's own server under flapping connectivity (mild self-amplification,
+    not DoS). Likelihood — low (needs sustained transient failure mid-unlock).
+    Cost to fix — adding sub-second networkError caching or per-key backoff is net-new
+    behavior with its own edge cases; retrying a transient blip is arguably correct.
+    Not fixing: the retry is desirable, the amplification is negligible.
+- Cleared: no token/secret leakage (only surviving log is the pre-existing `sync`
+  logger over a `MobileAPIError`, which carries no token material); cache key is the
+  single-user Keychain service (no cross-boundary leak); the cached value is the
+  ACCESS token (never re-presented to `/refresh`, so it cannot trip the replay
+  detector or mask family revocation — a revoked token 401s on the next API call);
+  fail-closed never presents an empty vault as success and never wipes tokens.
+
+## Testing Findings
+
+- **T1 [Major] — Missing: flight that THROWS while callers are joined.** No test
+  covered failure propagation to joiners + `inFlight` cleanup + retryability — the
+  exact concurrent-dead-session path the fix targets.
+- **T2 [Major] — Missing: `.failedSessionExpired` vs `.failedOffline` banner
+  selection.** The load-bearing new discrimination (dead session vs offline) lived
+  inline in the untestable `@MainActor handleVaultUnlocked` and had zero coverage.
+- **T3 [Minor, accepted] — `testConcurrentCallersCollapseToSingleRefresh` uses a
+  100ms `Task.sleep`.** Cannot false-pass (a missed straggler pushes the count to 2 →
+  red, never a vacuous green), so acceptable; a barrier gate would make it
+  deterministic. Not changed.
+  - Anti-Deferral (acceptable risk): Worst case — a flaky RED under extreme CI load.
+    Likelihood — low (100ms is generous for 6-8 actor hops). Cost to fix — a second
+    barrier continuation; deferred as the failure mode is a visible red, not a
+    silent pass.
+- **T4 [Minor, accepted] — cache-precedence-over-in-flight not directly tested.**
+  Ordering is trivial (cache check precedes in-flight check with no await between).
+  - Anti-Deferral (acceptable risk): Worst case — a reordering regression ships
+    untested. Likelihood — very low (4 lines, obvious order). Cost to fix — one small
+    test; the two behaviors are already covered independently.
+
+## Recurring Issue Check
+
+- R1 (reuse): `TokenRefreshCoordinator` is a genuinely new primitive; replaces the
+  removed instance-local `refreshTask`. No parallel single-flight helper existed.
+- R2 (hardcoded constants): `resultTTL: 3` and the server's `5s` grace are documented
+  inline; single-use, no shared-constant duplication.
+- R25 (persisted-state symmetry): N/A — the coordinator cache is in-memory only,
+  crosses no process/restart boundary.
+- RS1 (timing-safe compare): N/A — no credential comparison added.
+- RT4 (race-test vacuous guard): the concurrency tests assert `== 1` / `== N`
+  (lower+upper bound), not `>= 0`; the throw test verifies all N joiners get the error.
+- RT6 (new code untested): `TokenRefreshCoordinator` (5+1 tests), `sessionExpired`
+  mapping (VaultUnlocker test), banner selection (4 PostSyncDecision tests). Covered.
+
+## Resolution Status
+
+### F1 [Minor] Contradictory failure-caching doc comment — FIXED
+- Action: rewrote the header comment to state only successes are cached and every
+  failure (incl. `authenticationRequired`) stays immediately retryable.
+- Modified: `ios/PasswdSSOApp/Network/TokenRefreshCoordinator.swift` (doc only).
+
+### S1 [Minor] No backoff on sequential networkError retrigger — ACCEPTED (see above)
+
+### T1 [Major] Missing concurrent-throw coverage — FIXED
+- Action: added `testConcurrentCallersAllReceiveThrownErrorAndInFlightIsCleared` —
+  6 callers join a flight that throws; asserts all 6 receive the error, exactly one
+  flight ran, and a subsequent call re-invokes (inFlight cleared, failure not cached).
+- Modified: `ios/PasswdSSOTests/TokenRefreshCoordinatorTests.swift`.
+
+### T2 [Major] Missing banner-selection coverage — FIXED
+- Action: extracted the inline logic into pure helpers `syncFailedSessionExpired(from:)`
+  and `failClosedResult(sessionExpired:)` (+ moved `UnlockedResult` to a top-level
+  public enum) in `PostSyncDecision.swift`; added 4 tests covering
+  authenticationRequired→sign-in, offline/other/serverError→passphrase-retry, and
+  both fail-closed outcomes. RootView now calls the helpers.
+- Modified: `ios/PasswdSSOApp/Vault/PostSyncDecision.swift`,
+  `ios/PasswdSSOApp/Views/RootView.swift`,
+  `ios/PasswdSSOTests/PostSyncDecisionTests.swift`.
+
+### T3, T4 [Minor] — ACCEPTED (see Anti-Deferral above)
+
+Verified: full suite green after fixes (see final report).

@@ -26,3 +26,51 @@
 - Fix: added a `.useEmptyCache` outcome; `.failLocked` is now reserved for the
   `cacheRecovered==false` (biometric stale/rolled-back) case only. S2 fail-closed
   invariant unchanged. Plan AC-C5.4 updated to match.
+
+## D4 — TokenRefreshCoordinator: process-global refresh single-flight (NEW scope, Major)
+
+- Not in the original plan. Discovered while verifying the stale-cache heal flow: the
+  heal path fires several independent token refreshes back-to-back (unlock-data fetch,
+  sync, QuickType refresh, drain) and, across distinct `MobileAPIClient` instances,
+  concurrently. Each presented the same stale refresh token, tripping the server's
+  refresh-token replay detector (`MOBILE_REFRESH_REUSE_DETECTED`), which revokes the
+  whole token family → a dead session that looked like the very stale-cache bounce this
+  branch set out to fix.
+- Fix: new `TokenRefreshCoordinator` actor (`ios/PasswdSSOApp/Network/`) — a process-
+  global gate keyed by the token store's Keychain service identifier that (a) joins an
+  in-flight refresh (concurrent collapse) and (b) replays a recent SUCCESS within a
+  short TTL (3s, < the server's 5s replay grace) for sequential re-tries. Only successes
+  are cached; failures stay retryable so a re-sign-in can recover at any time.
+- Replaced `MobileAPIClient`'s former instance-local `refreshTask` single-flight (which
+  could not coordinate across instances) with a call into the coordinator, keyed by
+  `HostTokenStore.serviceIdentifier` (new public accessor).
+
+## D5 — MobileAPIClient.refreshCoordinator injected (Minor, testability)
+
+- `MobileAPIClient.init` gained `refreshCoordinator: TokenRefreshCoordinator = .shared`.
+- Reason: the process-global singleton's success cache leaks across tests (one test's
+  rotated token replays into the next, suppressing the refresh the test asserts on).
+  Production defaults to `.shared` (correct cross-instance behavior); tests inject a
+  fresh instance for isolation. Mirrors the existing `now:` clock-seam injection —
+  a production DI seam, not a test-only hack.
+
+## D6 — VaultUnlockError.sessionExpired + RootView UnlockedResult enum (NEW scope, Minor)
+
+- Not in the original plan. A dead refresh token surfaced as `serverResponseInvalid`
+  ("check your connection and try again"), sending the user into a passphrase retry loop
+  that no passphrase can break.
+- Fix: new `VaultUnlockError.sessionExpired` (mapped from `MobileAPIError`
+  `.authenticationRequired` in `VaultUnlocker`) routed to a "Your session has expired.
+  Please sign in again." banner. `RootView.handleVaultUnlocked` return type changed from
+  `Bool` to an `UnlockedResult` enum (`reachedVault` / `failedSessionExpired` /
+  `failedOffline`) so the biometric call site picks the correct fail-closed banner
+  (dead session → sign in again; offline → try passphrase). Fail-closed invariant
+  (never present an empty vault as success) unchanged.
+
+## D7 — Verification-only diagnostic logging removed before commit
+
+- During debugging, temporary OSLog diagnostics were added across MobileAPIClient,
+  VaultUnlocker, VaultUnlockView, and RootView to trace the refresh/unlock failure path.
+  All were removed before commit; only RootView's pre-existing `sync`-category error log
+  (which carries no token material) remains. No secrets were ever logged (MobileAPIError
+  cases carry no token data), but the diagnostics were scaffolding, not shipping code.
