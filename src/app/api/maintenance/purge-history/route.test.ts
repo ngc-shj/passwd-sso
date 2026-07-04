@@ -135,6 +135,21 @@ describe("POST /api/maintenance/purge-history", () => {
     expect(mockDeleteMany).not.toHaveBeenCalled();
   });
 
+  it("keys the rate limiter on the operator-token's tenantId (tenant-scoped, exact key)", async () => {
+    // #629 headline property: the maintenance rate-limit key is tenant-scoped
+    // so one tenant's operator cannot 429 another tenant's purge. A regression
+    // that drops `${auth.tenantId}` (global key) or swaps in subjectUserId
+    // would still pass the 429/503 behavior tests — only an exact-key assertion
+    // on the discriminator segment catches it.
+    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
+    mockDeleteMany.mockResolvedValue({ count: 0 });
+
+    const req = createRequest({}, VALID_OP_TOKEN);
+    await POST(req);
+
+    expect(mockCheck).toHaveBeenCalledWith(`rl:maintenance:purge-history:${TENANT_ID}`);
+  });
+
   it("checks rate limit after auth (401 before 429 for unauthenticated requests)", async () => {
     mockCheck.mockResolvedValue({ allowed: false, retryAfterMs: 30_000 });
 
