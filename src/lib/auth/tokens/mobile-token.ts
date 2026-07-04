@@ -141,6 +141,8 @@ export async function issueIosToken(
 
   const accessRow = await withUserTenantRls(userId, async () =>
     prisma.$transaction(async (tx) => {
+      // Serialize concurrent token issuance for this user (count-then-evict-then-create cap race).
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}::text))`;
       // Enforce per-user active-token cap (covers BROWSER_EXTENSION + IOS_APP
       // rows; an iOS pair counts as 2 active rows). The cap is a defence
       // against issuance abuse — the host app's "one active token per device"

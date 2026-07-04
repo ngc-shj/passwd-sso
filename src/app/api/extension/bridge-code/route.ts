@@ -269,6 +269,12 @@ async function handlePOST(req: NextRequest) {
 
   try {
     await withBypassRls(prisma, async (tx) => {
+      // Serialize concurrent bridge-code issuance for this user so the
+      // count-then-evict-then-create sequence cannot race past the active cap
+      // (two concurrent issues both reading active.length < max). Advisory lock
+      // is transaction-scoped; matches the codebase idiom (attachments, vault
+      // rotate-key).
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}::text))`;
       const active = await tx.extensionBridgeCode.findMany({
         where: { userId, usedAt: null, expiresAt: { gt: now } },
         orderBy: { createdAt: "asc" },

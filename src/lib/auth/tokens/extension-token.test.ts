@@ -607,6 +607,7 @@ describe("issueExtensionToken", () => {
     mockWithUserTenantRls.mockImplementation(async (_u, fn) => fn());
     mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
       cb({
+        $executeRaw: vi.fn().mockResolvedValue(1),
         extensionToken: {
           findMany: mockFindMany,
           create: mockCreate,

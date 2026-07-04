@@ -51,6 +51,9 @@ vi.mock("@/lib/prisma", () => ({
     user: {
       findUnique: mockUserFindUnique,
     },
+    // withBypassRls passes `prisma` as the tx; the route acquires a
+    // pg_advisory_xact_lock via tx.$executeRaw before the count-then-create.
+    $executeRaw: vi.fn().mockResolvedValue(1),
   },
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({

@@ -100,6 +100,13 @@ describe("createCustomAdapter", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Restore the default bypass-tx passthrough (fn(prisma)). The createSession
+    // describe overrides this with a tx that exposes $executeRaw + tx session
+    // mocks; mockImplementation persists across tests, so re-assert the default
+    // here so sibling describes keep the plain prisma-passthrough tx.
+    mockWithBypassRls.mockImplementation(
+      async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
+    );
     // Default: no pending tenant claim
     mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: null });
     mockFindOrCreateSsoTenant.mockResolvedValue(null);
@@ -304,6 +311,23 @@ describe("createCustomAdapter", () => {
   });
 
   describe("createSession", () => {
+    // createSession runs entirely on the outer withBypassRls transaction
+    // (the former inner prisma.$transaction was removed). Route the bypass tx
+    // to the session/tenant tx mocks and expose $executeRaw for the
+    // per-user advisory lock (SELECT pg_advisory_xact_lock(...)).
+    beforeEach(() => {
+      mockWithBypassRls.mockImplementation(
+        async (_prisma: unknown, fn: (tx: unknown) => unknown) =>
+          fn({
+            $executeRaw: vi.fn().mockResolvedValue(1),
+            tenant: { ...mockPrismaTenant, findUnique: mockTxTenant.findUnique },
+            user: mockPrismaUser,
+            tenantMember: mockPrismaTenantMember,
+            session: mockTxSession,
+          }),
+      );
+    });
+
     it("captures IP and userAgent from sessionMetaStorage", async () => {
       mockSessionMetaGetStore.mockReturnValue({
         ip: "192.168.1.1",
@@ -532,10 +556,13 @@ describe("createCustomAdapter", () => {
       expectNotInvalidatedOnDbThrow(mockInvalidateCachedSessions);
     });
 
-    it("does not invalidate cache when $transaction throws (sequencing invariant)", async () => {
+    it("does not invalidate cache when the bypass transaction throws (sequencing invariant)", async () => {
       mockSessionMetaGetStore.mockReturnValue({ ip: "10.0.0.1", userAgent: "x" });
       mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
-      mockPrismaTransaction.mockRejectedValue(new Error("tx rolled back"));
+      // createSession now runs on the outer withBypassRls tx (inner
+      // prisma.$transaction removed). Simulate the DB write failing inside
+      // that tx so the whole bypass transaction rolls back.
+      mockTxSession.create.mockRejectedValue(new Error("tx rolled back"));
 
       const adapter = createCustomAdapter();
       await expect(

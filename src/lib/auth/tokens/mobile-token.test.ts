@@ -125,6 +125,7 @@ const CNF_JKT = DEVICE_JKT;
 function setupTransactionPassthrough() {
   mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
     cb({
+      $executeRaw: vi.fn().mockResolvedValue(1),
       extensionToken: {
         findMany: mockExtFindMany,
         create: mockExtCreate,

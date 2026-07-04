@@ -152,6 +152,7 @@ describe("POST /api/extension/bridge-code — C4 rewrite", () => {
     mockWithBypassRls.mockImplementation(
       (_prisma: unknown, fn: (tx: unknown) => unknown) =>
         fn({
+          $executeRaw: vi.fn().mockResolvedValue(1),
           extensionBridgeCode: {
             findMany: mockBridgeCodeFindMany,
             updateMany: mockBridgeCodeUpdateMany,

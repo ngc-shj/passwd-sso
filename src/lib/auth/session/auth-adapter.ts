@@ -275,67 +275,71 @@ export function createCustomAdapter(): Adapter {
       const created = await withBypassRls(prisma, async (tx) => {
         const tenantId = await resolveTenantIdForUser(session.userId);
 
-        // Serializable prevents TOCTOU in concurrent session counting
-        return prisma.$transaction(async (tx) => {
-          // Check tenant's concurrent session limit
-          const tenant = await tx.tenant.findUnique({
-            where: { id: tenantId },
-            select: { maxConcurrentSessions: true },
-          });
+        // Serialize concurrent session creation for this user so the
+        // count-then-evict-then-create sequence cannot race past the concurrent
+        // session cap (two concurrent sign-ins both reading count < max).
+        // Advisory lock is transaction-scoped; matches the codebase idiom
+        // (attachments, vault rotate-key).
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${session.userId}::text))`;
 
-          const maxSessions = tenant?.maxConcurrentSessions;
-          if (maxSessions != null && maxSessions > 0) {
-            // Count active sessions (ORDER BY id for consistent lock ordering)
-            const activeSessions = await tx.session.findMany({
-              where: {
-                userId: session.userId,
-                tenantId,
-                expires: { gt: new Date() },
-              },
-              select: { id: true, sessionToken: true, ipAddress: true, userAgent: true },
-              orderBy: { id: "asc" },
-            });
+        // Check tenant's concurrent session limit
+        const tenant = await tx.tenant.findUnique({
+          where: { id: tenantId },
+          select: { maxConcurrentSessions: true },
+        });
 
-            // Evict oldest sessions if at or over limit
-            if (activeSessions.length >= maxSessions) {
-              const toEvict = activeSessions.slice(0, activeSessions.length - maxSessions + 1);
-              await tx.session.deleteMany({
-                where: { id: { in: toEvict.map((s) => s.id) } },
-              });
-
-              evictionInfo = { tenantId, maxSessions, evicted: toEvict };
-            }
-          }
-
-          // Override Auth.js's default expires with the per-user resolved idle
-          // window. At createSession time `createdAt === now`, so the absolute
-          // bound does not further constrain the first expires; subsequent
-          // updateSession calls enforce `min(now + idle, createdAt + absolute)`.
-          const resolved = await resolveEffectiveSessionTimeouts(
-            session.userId,
-            meta?.provider ?? null,
-          );
-          const resolvedExpires = new Date(
-            Date.now() + resolved.idleMinutes * MS_PER_MINUTE,
-          );
-
-          return tx.session.create({
-            data: {
-              sessionToken: session.sessionToken,
+        const maxSessions = tenant?.maxConcurrentSessions;
+        if (maxSessions != null && maxSessions > 0) {
+          // Count active sessions (ORDER BY id for consistent lock ordering)
+          const activeSessions = await tx.session.findMany({
+            where: {
               userId: session.userId,
               tenantId,
-              expires: resolvedExpires,
-              ipAddress: meta?.ip ?? null,
-              userAgent: meta?.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
-              provider: meta?.provider ?? null,
+              expires: { gt: new Date() },
             },
-            select: {
-              sessionToken: true,
-              userId: true,
-              expires: true,
-            },
+            select: { id: true, sessionToken: true, ipAddress: true, userAgent: true },
+            orderBy: { id: "asc" },
           });
-        }, { isolationLevel: "Serializable" });
+
+          // Evict oldest sessions if at or over limit
+          if (activeSessions.length >= maxSessions) {
+            const toEvict = activeSessions.slice(0, activeSessions.length - maxSessions + 1);
+            await tx.session.deleteMany({
+              where: { id: { in: toEvict.map((s) => s.id) } },
+            });
+
+            evictionInfo = { tenantId, maxSessions, evicted: toEvict };
+          }
+        }
+
+        // Override Auth.js's default expires with the per-user resolved idle
+        // window. At createSession time `createdAt === now`, so the absolute
+        // bound does not further constrain the first expires; subsequent
+        // updateSession calls enforce `min(now + idle, createdAt + absolute)`.
+        const resolved = await resolveEffectiveSessionTimeouts(
+          session.userId,
+          meta?.provider ?? null,
+        );
+        const resolvedExpires = new Date(
+          Date.now() + resolved.idleMinutes * MS_PER_MINUTE,
+        );
+
+        return tx.session.create({
+          data: {
+            sessionToken: session.sessionToken,
+            userId: session.userId,
+            tenantId,
+            expires: resolvedExpires,
+            ipAddress: meta?.ip ?? null,
+            userAgent: meta?.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
+            provider: meta?.provider ?? null,
+          },
+          select: {
+            sessionToken: true,
+            userId: true,
+            expires: true,
+          },
+        });
       }, BYPASS_PURPOSE.AUTH_FLOW);
 
       // Fire-and-forget: check for new device and notify user

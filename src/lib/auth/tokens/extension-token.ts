@@ -218,6 +218,8 @@ export async function issueExtensionToken(params: {
 
   const created = await withUserTenantRls(userId, async () =>
     prisma.$transaction(async (tx) => {
+      // Serialize concurrent token issuance for this user (count-then-evict-then-create cap race).
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}::text))`;
       // Find active tokens (non-revoked, non-expired)
       const active = await tx.extensionToken.findMany({
         where: { userId, revokedAt: null, expiresAt: { gt: now } },
