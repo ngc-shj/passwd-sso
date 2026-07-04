@@ -2,7 +2,7 @@
 
 # Deletion / Retention Matrix
 
-Sourced from `src/workers/retention-gc-worker/registry.ts` (`RETENTION_REGISTRY`) for managed tables, and `Prisma.dmmf.datamodel.models` for the authoritative full model list (no fragile schema.prisma regex parsing). Every Prisma model appears in exactly one of the two sections below.
+Sourced from `src/workers/retention-gc-worker/registry.ts` (`RETENTION_REGISTRY`) for managed tables, and the model list parsed from `prisma/schema.prisma` (`@@map` table names) for the authoritative full model set. Every Prisma model appears in exactly one of the two sections below.
 
 ## Registry-managed models
 

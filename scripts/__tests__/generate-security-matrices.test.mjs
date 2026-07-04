@@ -13,11 +13,18 @@
  * known non-registry model appears in the "no automated purge" bucket.
  */
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   renderRoutePolicyMatrix,
   renderDeletionRetentionMatrix,
+  parsePrismaModels,
 } from "../generate-security-matrices.ts";
 import { RETENTION_REGISTRY } from "../../src/workers/retention-gc-worker/registry.ts";
+
+const SCHEMA_PATH = fileURLToPath(
+  new URL("../../prisma/schema.prisma", import.meta.url),
+);
 
 // Minimal fixture manifest -- exercises the same shape the real
 // scripts/checks/route-policy-manifest.json uses, without depending on its
@@ -165,17 +172,53 @@ describe("renderDeletionRetentionMatrix", () => {
     }
   });
 
-  it("every real Prisma model has a non-null dbName (keeps the renderer's `?? name` fallback dead)", async () => {
+  it("every real Prisma model has a non-null dbName (keeps the renderer's `?? name` fallback dead)", () => {
     // The renderer keys models by `model.dbName ?? model.name`. RETENTION_REGISTRY
     // keys by lowercase table name, so if a model lacked @@map (dbName null) the
     // fallback would emit the PascalCase model name and a registry-managed model
     // could silently leak into the no-automated-purge bucket. Assert the fallback
     // never activates on the real schema, closing that gap mechanically rather
-    // than trusting the @@map convention.
-    const { Prisma } = await import("@prisma/client");
-    const nullDbName = Prisma.dmmf.datamodel.models
-      .filter((m) => m.dbName == null)
-      .map((m) => m.name);
+    // than trusting the @@map convention. Parsed from schema.prisma text (the
+    // generator's actual source — no generated client needed).
+    const models = parsePrismaModels(readFileSync(SCHEMA_PATH, "utf8"));
+    const nullDbName = models.filter((m) => m.dbName == null).map((m) => m.name);
     expect(nullDbName).toEqual([]);
+  });
+});
+
+describe("parsePrismaModels", () => {
+  it("extracts model name + @@map table name, ignoring enum/type blocks", () => {
+    const schema = [
+      'model Account {',
+      '  id String @id',
+      '  @@map("accounts")',
+      "}",
+      "",
+      "enum Role {",
+      "  ADMIN",
+      "  MEMBER",
+      "}",
+      "",
+      "model Session {",
+      '  token String @unique',
+      '  @@map("sessions")',
+      "}",
+      "",
+    ].join("\n");
+    expect(parsePrismaModels(schema)).toEqual([
+      { name: "Account", dbName: "accounts" },
+      { name: "Session", dbName: "sessions" },
+    ]);
+  });
+
+  it("returns dbName null for a model without @@map", () => {
+    const schema = ["model NoMap {", "  id String @id", "}", ""].join("\n");
+    expect(parsePrismaModels(schema)).toEqual([{ name: "NoMap", dbName: null }]);
+  });
+
+  it("parses the real schema.prisma with every model carrying a table name", () => {
+    const models = parsePrismaModels(readFileSync(SCHEMA_PATH, "utf8"));
+    expect(models.length).toBeGreaterThan(50);
+    expect(models.every((m) => typeof m.dbName === "string")).toBe(true);
   });
 });

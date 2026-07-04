@@ -4,7 +4,9 @@
  * sources:
  *   - Route Policy Matrix   <- scripts/checks/route-policy-manifest.json (C1)
  *   - Deletion/Retention Matrix <- src/workers/retention-gc-worker/registry.ts
- *     (RETENTION_REGISTRY) + Prisma.dmmf.datamodel.models (authoritative model list)
+ *     (RETENTION_REGISTRY) + the model list parsed from prisma/schema.prisma
+ *     text (NO generated client, so this runs in the static-check CI job which
+ *     deliberately skips `prisma generate`)
  *
  * Determinism (NF3 / forbidden-pattern: no `new Date()` in the output path):
  * both docs must be byte-identical across repeated runs on the same inputs so
@@ -16,10 +18,10 @@
  *     the repo-relative path string) -- JSON.parse does not guarantee key
  *     enumeration order is preserved identically across engines/versions for
  *     arbitrary string keys, so we never rely on iteration order.
- *   - Prisma.dmmf.datamodel.models: NOT re-sorted -- this array's order is
- *     schema-declaration order, which is stable because it is generated
- *     directly from the (checked-in, reviewed) schema.prisma text. Re-sorting
- *     would hide accidental model reordering in the schema.
+ *   - parsed schema.prisma models: NOT re-sorted -- the order is
+ *     schema-declaration order, stable because it comes directly from the
+ *     (checked-in, reviewed) schema.prisma text. Re-sorting would hide
+ *     accidental model reordering in the schema.
  *
  * Run: tsx scripts/generate-security-matrices.ts
  */
@@ -27,7 +29,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Prisma } from "@prisma/client";
 import {
   RETENTION_REGISTRY,
   type RetentionEntry,
@@ -56,6 +57,51 @@ const DELETION_RETENTION_OUT = path.join(
   "security",
   "deletion-retention-matrix.md",
 );
+const SCHEMA_PATH = path.join(REPO_ROOT, "prisma", "schema.prisma");
+
+// ── Prisma model list (from schema.prisma text, NOT the generated client) ────
+// The deletion/retention matrix keys models by physical table name. We read the
+// model list directly from the checked-in schema.prisma so this generator (and
+// its pre-pr drift check) needs NO `prisma generate` — the static-check CI job
+// deliberately does not generate the client (every static guard is a pure
+// source/schema read). A model's table name is its `@@map("...")` value; the
+// parity test (check-raw-sql-usage sibling) asserts every model has an @@map,
+// so dbName is always resolved here.
+
+export type PrismaModel = { name: string; dbName: string | null };
+
+/**
+ * Parse `model <Name> { ... @@map("<table>") ... }` blocks from schema.prisma
+ * text. Block-aware (brace-balanced) so nested `{}` in attributes don't end a
+ * model early; anchored on `^model ` so `enum`/`type`/`view` blocks are ignored.
+ * Declaration order is preserved (the array is NOT re-sorted by the renderer).
+ */
+export function parsePrismaModels(schemaText: string): PrismaModel[] {
+  const models: PrismaModel[] = [];
+  const lines = schemaText.split("\n");
+  let current: string | null = null;
+  let depth = 0;
+  let mapName: string | null = null;
+  for (const line of lines) {
+    if (current === null) {
+      const m = /^model\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{/.exec(line);
+      if (m) {
+        current = m[1];
+        mapName = null;
+        depth = (line.match(/\{/g)?.length ?? 0) - (line.match(/\}/g)?.length ?? 0);
+      }
+      continue;
+    }
+    const mapMatch = /@@map\(\s*"([^"]+)"\s*\)/.exec(line);
+    if (mapMatch) mapName = mapMatch[1];
+    depth += (line.match(/\{/g)?.length ?? 0) - (line.match(/\}/g)?.length ?? 0);
+    if (depth <= 0) {
+      models.push({ name: current, dbName: mapName });
+      current = null;
+    }
+  }
+  return models;
+}
 
 // ── Shared types ────────────────────────────────────────────────────────────
 
@@ -79,7 +125,10 @@ type Manifest = {
 /** Escape a value for safe placement inside a `|`-delimited Markdown table cell. */
 function cell(value: string | undefined): string {
   if (value === undefined || value === "") return "-";
-  return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
+  // Escape backslashes FIRST, then pipes — otherwise an input `\|` would be
+  // left as `\|` (an escaped pipe the author did not intend) instead of a
+  // literal backslash followed by an escaped pipe (`\\\|`).
+  return value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
 
 function flagsCell(entry: ManifestRouteEntry): string {
@@ -219,7 +268,7 @@ function retentionEntryTable(entry: RetentionEntry): string {
 
 export function renderDeletionRetentionMatrix(
   registry: readonly RetentionEntry[],
-  dmmfModels: readonly { name: string; dbName: string | null }[],
+  models: readonly PrismaModel[],
 ): string {
   const lines: string[] = [];
   lines.push(GENERATED_HEADER);
@@ -228,10 +277,10 @@ export function renderDeletionRetentionMatrix(
   lines.push("");
   lines.push(
     "Sourced from `src/workers/retention-gc-worker/registry.ts` " +
-      "(`RETENTION_REGISTRY`) for managed tables, and " +
-      "`Prisma.dmmf.datamodel.models` for the authoritative full model list " +
-      "(no fragile schema.prisma regex parsing). Every Prisma model appears " +
-      "in exactly one of the two sections below.",
+      "(`RETENTION_REGISTRY`) for managed tables, and the model list parsed " +
+      "from `prisma/schema.prisma` (`@@map` table names) for the authoritative " +
+      "full model set. Every Prisma model appears in exactly one of the two " +
+      "sections below.",
   );
   lines.push("");
   lines.push("## Registry-managed models");
@@ -264,9 +313,9 @@ export function renderDeletionRetentionMatrix(
   lines.push("| Model | Table |");
   lines.push("| --- | --- |");
 
-  // dmmfModels is NOT re-sorted -- see file header comment: order is
+  // models is NOT re-sorted -- see file header comment: order is
   // schema-declaration order, stable because schema.prisma is checked-in text.
-  for (const model of dmmfModels) {
+  for (const model of models) {
     const table = model.dbName ?? model.name;
     if (managedTables.has(table)) continue;
     lines.push(`| \`${model.name}\` | \`${table}\` |`);
@@ -289,13 +338,10 @@ function main(): void {
   fs.writeFileSync(ROUTE_POLICY_OUT, routePolicyMd, "utf8");
   console.log(`Wrote ${ROUTE_POLICY_OUT}`);
 
-  const dmmfModels = Prisma.dmmf.datamodel.models.map((m) => ({
-    name: m.name,
-    dbName: m.dbName ?? null,
-  }));
+  const models = parsePrismaModels(fs.readFileSync(SCHEMA_PATH, "utf8"));
   const deletionRetentionMd = renderDeletionRetentionMatrix(
     RETENTION_REGISTRY,
-    dmmfModels,
+    models,
   );
   fs.writeFileSync(DELETION_RETENTION_OUT, deletionRetentionMd, "utf8");
   console.log(`Wrote ${DELETION_RETENTION_OUT}`);
