@@ -384,9 +384,11 @@ struct RootView: View {
       // cache exists we fall back to it (offline-tolerant); when it does not, the
       // caller fails closed and uses `sessionExpired` to pick the banner.
       sessionExpired = syncFailedSessionExpired(from: error)
-      // Diagnostic only (no secrets — MobileAPIError cases carry no token data).
+      // Log only the classified outcome, never the raw error: dumping an arbitrary
+      // `Error` to a public log risks leaking a URL / response / internal state the
+      // day `runSync` starts throwing a richer error type.
       Logger(subsystem: AppGroupContainer.loggerSubsystem, category: "sync")
-        .error("unlock-time runSync failed: \(String(describing: error), privacy: .public)")
+        .error("unlock-time runSync failed (sessionExpired=\(sessionExpired, privacy: .public))")
       syncReport = nil
     }
 

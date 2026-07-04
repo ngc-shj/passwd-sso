@@ -74,3 +74,16 @@
   All were removed before commit; only RootView's pre-existing `sync`-category error log
   (which carries no token material) remains. No secrets were ever logged (MobileAPIError
   cases carry no token data), but the diagnostics were scaffolding, not shipping code.
+
+## D8 — RootView sync-failure log hardened to classified outcome (post-review, Medium)
+
+- Post-commit review flagged that RootView's surviving `sync`-category log dumped the
+  full `runSync` error via `String(describing: error)` at `privacy: .public`. Today's
+  `MobileAPIError` cases carry no token material, but `runSync` throws an arbitrary
+  `Error`; the day it starts throwing a richer type (e.g. `URLError`), the log would
+  leak a URL / response / internal state with no code change at the log site.
+- Fix: log only the already-classified `sessionExpired` Bool
+  (`syncFailedSessionExpired(from:)`), never the raw error. Same fixed-code shape the
+  banner selection already relies on. The analogous raw-error dump in
+  `AutofillTokenRefresher.swift:51` is out of scope (unchanged file, not in this diff);
+  noted here for a follow-up.
