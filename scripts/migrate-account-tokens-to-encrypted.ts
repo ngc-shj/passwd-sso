@@ -66,6 +66,7 @@ async function main(): Promise<void> {
       // provider_account_id column (snake_case in DB), so the raw query
       // must reference the column name and alias it back to the camelCase
       // shape the rest of the script reads as.
+      // raw-sql-ident: cursorId branch interpolates a fixed literal clause string (never the cursorId value itself, which is bound as $1); BATCH_SIZE is a compile-time constant
       const batch: RawAccount[] = await prisma.$queryRawUnsafe<RawAccount[]>(
         `SELECT id, user_id AS "userId", provider,
                 provider_account_id AS "providerAccountId",
@@ -143,6 +144,7 @@ async function main(): Promise<void> {
         const setClauses = updates.map((u, i) => `"${u.col}" = $${i + 1}`).join(", ");
         const params = [...updates.map((u) => u.value), row.id];
         try {
+          // raw-sql-ident: u.col is drawn only from the closed 3-literal set ("refresh_token"/"access_token"/"id_token") hardcoded above in this function, never from row/user input
           await prisma.$executeRawUnsafe(
             `UPDATE accounts SET ${setClauses} WHERE id = $${updates.length + 1}::uuid`,
             ...params,

@@ -177,6 +177,7 @@ export async function sweepExpiryEntry(
   // Row-value (keys) IN (SELECT keys ...) form works for both single-column
   // ("id") and composite ("identifier", "token") key sets.
   const keyList = entry.keyColumns.join(", ");
+  // raw-sql-ident: registry identifiers validated by validateRegistry() at boot; only closed-set table/column names, never user input
   const sql = `DELETE FROM ${entry.table}
     WHERE (${keyList}) IN (
       SELECT ${keyList} FROM ${entry.table}
@@ -214,6 +215,7 @@ export async function sweepGuardedExpiryEntry(
 
   const guardSql = GUARD_SQL[entry.guard](entry.table);
   const keyList = entry.keyColumns.join(", ");
+  // raw-sql-ident: registry identifiers validated by validateRegistry() at boot; only closed-set table/column names, never user input
   const sql = `DELETE FROM ${entry.table}
     WHERE (${keyList}) IN (
       SELECT ${keyList} FROM ${entry.table}
@@ -274,6 +276,7 @@ export async function sweepAuditProvenanceEntry(
   // provenance projection so the audit can be emitted from what was actually
   // deleted — mirrors sweepExpiryEntry's shape, extended with RETURNING.
   const rows = await tx.$queryRawUnsafe<Record<string, unknown>[]>(
+    // raw-sql-ident: registry identifiers validated by validateRegistry() at boot; only closed-set table/column names, never user input
     `DELETE FROM ${entry.table}
        WHERE (id) IN (
          SELECT id FROM ${entry.table}
@@ -405,6 +408,7 @@ export async function sweepPerTenantAge(
 
     // Batch-bounded (id) IN (SELECT id ... LIMIT) — table/cutoffColumn are
     // allowlist-validated; tenant id, cutoff, batchSize are bound params.
+    // raw-sql-ident: registry identifiers validated by validateRegistry() at boot; only closed-set table/column names, never user input
     const deleted = await tx.$executeRawUnsafe<number>(
       `DELETE FROM ${entry.table}
          WHERE (id) IN (

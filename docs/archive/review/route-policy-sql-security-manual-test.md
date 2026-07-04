@@ -340,3 +340,262 @@ $ echo $?
 
 Confirmed restored to a clean, fully-passing state (byte-identical to the
 committed working-tree version prior to the mutation).
+
+## C2 fail-path proofs
+
+RT7 fail-path proofs for the plan's C2 contract (raw-SQL usage allowlist +
+`check-raw-sql-usage.mjs`). All five mutations required by the plan's C2
+acceptance criteria are recorded below with real command transcripts, each
+followed by a clean revert (`git diff --stat` on the mutated file showing no
+diff, or matching only this session's already-intended changes).
+
+Pre-conditions: `scripts/checks/raw-sql-usage.txt` (29 entries) and
+`scripts/checks/check-raw-sql-usage.mjs` committed to the working tree;
+`node scripts/checks/check-raw-sql-usage.mjs` exits 0 before any mutation below.
+
+### Proof 1 — add a raw call to an unlisted file → exit 1 naming the file
+
+Backup, then append an unlisted `$queryRawUnsafe` call to `src/lib/notification.ts`
+(a file with no pre-existing raw-SQL usage):
+
+```
+$ cp src/lib/notification.ts /tmp/.../notification.ts.bak
+$ cat >> src/lib/notification.ts << 'EOF'
+
+// TEMP: proof-1 fail-path mutation (reverted immediately after capture)
+async function __proof1Unused(prisma: import("@prisma/client").PrismaClient) {
+  return prisma.$queryRawUnsafe("SELECT 1");
+}
+EOF
+$ node scripts/checks/check-raw-sql-usage.mjs
+```
+
+Result:
+
+```
+MISSING_FROM_ALLOWLIST: files call a raw-SQL primitive but are not listed in scripts/checks/raw-sql-usage.txt:
+  src/lib/notification.ts
+
+Add a line: `<path> # <purpose, >=10 chars>` to scripts/checks/raw-sql-usage.txt.
+
+exit=1
+```
+
+The failure names the exact unlisted file. Revert:
+
+```
+$ cp /tmp/.../notification.ts.bak src/lib/notification.ts
+$ git diff --stat src/lib/notification.ts
+(no output — clean revert)
+$ node scripts/checks/check-raw-sql-usage.mjs
+check-raw-sql-usage: OK
+```
+
+### Proof 2 — remove a listed file's raw usage → STALE_EXEMPT
+
+`src/lib/health.ts` is allowlisted (2 tagged-template `$queryRaw` call sites:
+liveness `SELECT 1` and the audit-outbox depth/age metrics query). Replace both
+with plain `Promise.resolve(...)` so the file no longer matches the `rawSql`
+regex at all:
+
+```
+$ cp src/lib/health.ts /tmp/.../health.ts.bak
+$ python3 - << 'EOF'
+# replaces `await withTimeout(prisma.$queryRaw`SELECT 1`, ...)` with
+# `await withTimeout(Promise.resolve(1), ...)`, and the audit-outbox metrics
+# $queryRaw<...>`...` block with `Promise.resolve([{ pending: 0n, oldest_age: null }])`
+EOF
+$ grep -n '\$queryRaw' src/lib/health.ts || echo "no queryRaw left"
+no queryRaw left
+$ node scripts/checks/check-raw-sql-usage.mjs
+```
+
+Result:
+
+```
+STALE_EXEMPT: files are listed in raw-sql-usage.txt but no longer match a raw-SQL primitive — remove the entry:
+  src/lib/health.ts
+
+exit=1
+```
+
+Revert:
+
+```
+$ cp /tmp/.../health.ts.bak src/lib/health.ts
+$ git diff --stat src/lib/health.ts
+(no output — clean revert)
+$ node scripts/checks/check-raw-sql-usage.mjs
+check-raw-sql-usage: OK
+```
+
+### Proof 3 — marker-less `${...}` interpolation in a multi-line Unsafe template, in an ALREADY-allowlisted file → span ban exits 1
+
+`src/workers/audit-outbox-worker.ts` is allowlisted (static SQL + `$N` params
+throughout, no `ident-markers` suffix — default N=0). Its `reapStuckDeliveries`
+function contains a `$executeRawUnsafe` call whose backtick template spans 10
+physical lines. Inject an unmarked `${timeout}` interpolation into the
+`last_error` string literal inside that span (mirroring sweep.ts's real
+multi-line-template shape, per the plan's requirement that a single-line
+mutation would not prove the span logic):
+
+```
+$ cp src/workers/audit-outbox-worker.ts /tmp/.../audit-outbox-worker.ts.bak
+$ python3 - << 'EOF'
+# replaces `"last_error" = 'reaped: processing timeout exceeded'` with
+# `"last_error" = 'reaped: processing timeout exceeded ${timeout}ms'`
+# inside the multi-line $executeRawUnsafe(`UPDATE "audit_deliveries" ... `) call
+EOF
+$ grep -n 'reaped: processing timeout' src/workers/audit-outbox-worker.ts
+854:       "last_error" = 'reaped: processing timeout exceeded ${timeout}ms'
+$ node scripts/checks/check-raw-sql-usage.mjs
+```
+
+Result:
+
+```
+UNMARKED_INTERPOLATION: `${...}` interpolation found inside an Unsafe raw-SQL call with no `// raw-sql-ident:` marker:
+  src/workers/audit-outbox-worker.ts:854
+
+Either remove the interpolation (prefer $N bound params) or add a `// raw-sql-ident: <reason, >=10 chars>` marker naming the validation mechanism, and bump `ident-markers=N` in raw-sql-usage.txt.
+
+exit=1
+```
+
+The failure names the exact file:line of the interpolation, inside a call
+whose template literal opens 8 lines earlier — confirming the span tracker
+(not a per-physical-line grep) caught it, and that Layer 2 fires on an
+already-allowlisted file (Layer 1 alone would have passed this file).
+
+Revert:
+
+```
+$ cp /tmp/.../audit-outbox-worker.ts.bak src/workers/audit-outbox-worker.ts
+$ git diff --stat src/workers/audit-outbox-worker.ts
+(no output — clean revert)
+$ node scripts/checks/check-raw-sql-usage.mjs
+check-raw-sql-usage: OK
+```
+
+### Proof 4 — orphaned marker (no interpolation in its span) without bumping N → pairing check exits 1
+
+`src/workers/retention-gc-worker/sweep.ts` carries 4 legitimate
+`// raw-sql-ident:` markers (`ident-markers=4` in raw-sql-usage.txt), each
+pairing with one interpolated Unsafe span (registry `entry.table` /
+`entry.cutoffColumn` identifiers, validated by `validateRegistry()` at worker
+boot). Orphan one marker by replacing its span's `${entry.table}` /
+`${entry.cutoffColumn}` interpolations with hardcoded literal table/column
+names, leaving the `// raw-sql-ident:` comment in place — the marker text is
+untouched, but it no longer sits over any interpolated span. `raw-sql-usage.txt`
+is deliberately NOT touched (still declares `ident-markers=4`):
+
+```
+$ cp src/workers/retention-gc-worker/sweep.ts /tmp/.../sweep.ts.bak
+$ python3 - << 'EOF'
+# in sweepPerTenantAge's $executeRawUnsafe call, replaces
+#   `DELETE FROM ${entry.table} ... WHERE tenant_id = $1::uuid AND ${entry.cutoffColumn} < $2::timestamptz ...`
+# with a hardcoded-literal version (`password_entry_history` / `created_at`),
+# leaving the preceding `// raw-sql-ident: ...` comment line untouched.
+EOF
+$ node scripts/checks/check-raw-sql-usage.mjs
+```
+
+Result:
+
+```
+IDENT_MARKERS_MISMATCH: marked-span count does not match the declared ident-markers=N in raw-sql-usage.txt (fails in EITHER direction — an orphaned marker after a refactor fails too):
+  src/workers/retention-gc-worker/sweep.ts: found 3 marked span(s), declared ident-markers=4
+
+Update the `# ident-markers=N` suffix in raw-sql-usage.txt to match the actual marked-span count.
+
+exit=1
+```
+
+Confirms the pairing check fails in the "N too high relative to actual marked
+spans" direction — an orphaned marker after a refactor cannot silently persist
+inside the declared budget.
+
+Revert:
+
+```
+$ cp /tmp/.../sweep.ts.bak src/workers/retention-gc-worker/sweep.ts
+$ git diff --stat src/workers/retention-gc-worker/sweep.ts
+ src/workers/retention-gc-worker/sweep.ts | 4 ++++
+ 1 file changed, 4 insertions(+)
+```
+
+(The 4-line diff shown is this session's already-committed-to-working-tree
+`raw-sql-ident` marker additions themselves — i.e. the diff against the
+pre-C2 baseline, not a residue of the proof-4 mutation. `git diff` content was
+inspected directly and confirmed to contain only the 4 intended marker
+comment lines, none of the proof-4 hardcoded-literal substitution.)
+
+```
+$ node scripts/checks/check-raw-sql-usage.mjs
+check-raw-sql-usage: OK
+```
+
+### Proof 5 — marker + interpolation added to a file whose txt entry has NO `ident-markers` suffix → default-N=0 pairing exits 1
+
+`src/workers/audit-outbox-worker.ts`'s raw-sql-usage.txt entry carries no
+`ident-markers=` suffix at all (defaults to N=0). Reuse proof 3's mutation
+site, but this time add BOTH the interpolation AND a `// raw-sql-ident:`
+marker with a reason well over 10 characters — without touching
+raw-sql-usage.txt:
+
+```
+$ python3 - << 'EOF'
+# adds `// raw-sql-ident: this reason is long enough to pass the 10-char floor`
+# immediately above the $executeRawUnsafe( call, AND the same
+# `${timeout}` interpolation from proof 3
+EOF
+$ grep -n 'raw-sql-ident: this reason' src/workers/audit-outbox-worker.ts
+846:    // raw-sql-ident: this reason is long enough to pass the 10-char floor
+$ node scripts/checks/check-raw-sql-usage.mjs
+```
+
+Result:
+
+```
+IDENT_MARKERS_MISMATCH: marked-span count does not match the declared ident-markers=N in raw-sql-usage.txt (fails in EITHER direction — an orphaned marker after a refactor fails too):
+  src/workers/audit-outbox-worker.ts: found 1 marked span(s), declared ident-markers=0
+
+Update the `# ident-markers=N` suffix in raw-sql-usage.txt to match the actual marked-span count.
+
+exit=1
+```
+
+Confirms the fail-closed default: a file's absent `ident-markers=` suffix is
+treated as N=0, so a NEW marker+interpolation pair cannot be blessed purely at
+the call site — the central `raw-sql-usage.txt` diff is mandatory (must-declare,
+not may-declare).
+
+Revert:
+
+```
+$ cp /tmp/.../audit-outbox-worker.ts.bak src/workers/audit-outbox-worker.ts
+$ git diff --stat src/workers/audit-outbox-worker.ts
+(no output — clean revert)
+$ node scripts/checks/check-raw-sql-usage.mjs
+check-raw-sql-usage: OK
+```
+
+### Additional verification
+
+```
+$ npx eslint scripts/checks/check-raw-sql-usage.mjs
+(no output — clean, no eslint-disable used)
+
+$ PRE_PR_STATIC_ONLY=1 bash scripts/pre-pr.sh
+...
+▸ Static: raw-sql-usage
+check-raw-sql-usage: OK
+  ✓ Static: raw-sql-usage
+...
+```
+
+The `✓ Static: raw-sql-usage` line is registered in `scripts/pre-pr.sh`'s
+ungated region (immediately after `check:migration-drift`, alongside the
+other `node scripts/checks/check-*.mjs` steps), confirming it is reachable by
+CI's static-checks job (`PRE_PR_STATIC_ONLY=1 bash scripts/pre-pr.sh`), not
+only full-mode `pre-pr.sh`.

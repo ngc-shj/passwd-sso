@@ -1,0 +1,87 @@
+# Raw-SQL usage allowlist — every production file matching the shared `rawSql`
+# regex in route-class-patterns.json (`\$(queryRaw|executeRaw)(Unsafe)?\b`) MUST
+# be listed here with a purpose (>=10 chars). Enforced by
+# scripts/checks/check-raw-sql-usage.mjs, registered in scripts/pre-pr.sh.
+#
+# Format: path # purpose [# ident-markers=N]
+#   - path: repo-relative, exactly as reported by the seeding grep below.
+#   - purpose: what the raw SQL in this file is for (>=10 chars), reviewer-facing.
+#   - ident-markers=N (optional, Unsafe-interpolating files only): the exact
+#     count of `// raw-sql-ident: <reason>` markers this file's Unsafe call
+#     spans carry (see check-raw-sql-usage.mjs Layer 2). Omitting this suffix
+#     is equivalent to N=0 — a marked span in a file with no suffix fails as a
+#     count mismatch (fail-closed default; must-declare, not may-declare).
+#
+# --- Two-layer design (see plan docs/archive/review/route-policy-sql-security-plan.md, C2) ---
+# Layer 1 (this file): every matching file must be allowlisted with a purpose;
+#   a listed file that no longer matches the regex fails as STALE_EXEMPT.
+# Layer 2 (check-raw-sql-usage.mjs, unconditional, fires on allowlisted files
+#   too): tracks the backtick-delimited template-literal span of every
+#   `$executeRawUnsafe(`/`$queryRawUnsafe(` call argument and flags any `${`
+#   interpolation inside that span. This is the compensating control for
+#   Layer 1's file-level granularity — a new injection-shaped call cannot hide
+#   inside an already-allowlisted high-density file (audit-outbox-worker.ts has
+#   ~19 raw call sites, sweep.ts has 4 Unsafe sites across ~530 lines).
+#
+# --- Baseline (re-verified at implementation time, 2026-07-04) ---
+# Zero call sites in this inventory interpolate user- or tenant-derived input
+# into a raw SQL string. Unsafe variants use EITHER (a) static SQL + `$N` bound
+# parameters (the overwhelming majority — maintenance audit-chain-verify,
+# audit-outbox-worker, audit-chain-verify-worker.ts), OR (b) interpolate only
+# `assertIdentifier`-validated identifiers from the closed retention-gc
+# registry (sweep.ts — table/cutoffColumn/keyColumns names validated at worker
+# boot by `validateRegistry()` in retention-gc-worker/index.ts, never derived
+# from a request). scripts/migrate-account-tokens-to-encrypted.ts interpolates
+# a fixed compile-time literal (`BATCH_SIZE`, a hardcoded conditional `WHERE`
+# clause string) and column names from a closed 3-element literal set defined
+# in the same function — never user/tenant input either, but not routed
+# through `assertIdentifier`, so it carries its own named markers below.
+# Non-Unsafe `$executeRaw`/`$queryRaw` tagged-template calls are Prisma-
+# parameterized by construction (interpolated expressions become bound
+# parameters, not string-concatenated SQL) and are out of Layer 2's scope by
+# design — the injection-shaped risk Layer 2 targets is specific to the
+# *Unsafe variants, which take a plain string/argument list.
+#
+# --- ident-markers pairing rule ---
+# An interpolated span inside an Unsafe call is exempt ONLY if it carries a
+# `// raw-sql-ident: <reason, >=10 chars>` marker (on the call line or inside
+# the span) AND this file's ident-markers=N matches the marked-span count
+# EXACTLY. Orphaned markers (marker present, N not bumped) fail. New
+# interpolation without a marker fails. The marker reason must NAME the
+# validation mechanism (never just "safe" or "validated") so review can verify
+# the named mechanism actually runs before the marked span.
+#
+# Seeded via (R42 refresh, re-run at implementation start, 2026-07-04):
+#   grep -rlE '\$(queryRaw|executeRaw)(Unsafe)?\b' src scripts --include='*.ts' --include='*.tsx' \
+#     | grep -vE '\.test\.|__tests__|manual-tests|/e2e/' | sort
+# → 29 files (matches plan's R42 count).
+
+scripts/audit-chain-verify-worker.ts # standalone CLI: walks audit_logs chain per tenant via static SQL + $N params, no interpolation
+scripts/migrate-account-tokens-to-encrypted.ts # one-shot OAuth token re-encryption migration; batched SELECT/UPDATE against accounts table # ident-markers=2
+src/app/api/maintenance/audit-chain-verify/route.ts # operator-gated chain-verify endpoint; static SQL + $N params reading audit_logs/audit_chain_anchors
+src/app/api/maintenance/audit-outbox-metrics/route.ts # operator-gated outbox depth/age metrics query, tagged-template $queryRaw
+src/app/api/maintenance/audit-outbox-purge-failed/route.ts # operator-gated purge of FAILED outbox rows, tagged-template $queryRaw
+src/app/api/maintenance/purge-audit-logs/route.ts # operator-gated system-wide audit log purge via audit_log_purge() definer fn
+src/app/api/passwords/[id]/attachments/[attachmentId]/migrate/route.ts # advisory lock serializing attachment CEK rewrap against key rotation
+src/app/api/passwords/[id]/attachments/route.ts # advisory lock serializing attachment upload against key rotation
+src/app/api/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob snapshot+update on concurrent PUT
+src/app/api/share-links/[id]/content/route.ts # atomic view_count increment + revocation/expiry recheck (TOCTOU close)
+src/app/api/tenant/access-requests/[id]/approve/route.ts # advisory lock serializing SA token issuance against per-account token cap
+src/app/api/tenant/service-accounts/[id]/tokens/route.ts # advisory lock serializing SA token issuance against per-account token cap
+src/app/api/v1/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob snapshot+update on concurrent PUT
+src/app/api/vault/rotate-key/route.ts # advisory lock preventing concurrent vault key rotations for the same user
+src/app/api/webauthn/credentials/[id]/prf/route.ts # advisory lock serializing PRF rebootstrap against key rotation
+src/app/s/[token]/download/route.ts # atomic view_count increment + revocation/expiry recheck on file download (TOCTOU close)
+src/app/s/[token]/page.tsx # atomic view_count increment + revocation/expiry recheck on share view (TOCTOU close)
+src/auth.ts # SECURITY DEFINER call to migrate audit_logs rows during tenant merge
+src/lib/audit/audit-outbox.ts # bypass_rls GUC set/verify + tenant-existence check before enqueueing audit outbox rows
+src/lib/auth/policy/account-lockout.ts # row lock (FOR UPDATE) + lock_timeout for atomic failed-login counter update
+src/lib/auth/webauthn/webauthn-authorize.ts # CAS counter update on WebAuthn credential to prevent replay/clone
+src/lib/auth/webauthn/webauthn-server.ts # CAS counter update on WebAuthn credential within caller's tx
+src/lib/directory-sync/engine.ts # conditional status-transition UPDATE guarding concurrent directory sync runs
+src/lib/health.ts # liveness/readiness probes: SELECT 1 and audit outbox depth/age metrics
+src/lib/services/team-password-service.ts # row lock (FOR UPDATE) for atomic team entry blob snapshot+update
+src/lib/tenant-rls.ts # defines the RLS GUC helpers (set_config for app.tenant_id / app.bypass_rls / app.bypass_purpose)
+src/workers/audit-anchor-publisher.ts # bypass_rls GUC set + anchor row lock/read for chain anchor publishing
+src/workers/audit-outbox-worker.ts # outbox claim/deliver/reap/purge queries; static SQL + $N params throughout
+src/workers/retention-gc-worker/sweep.ts # batch-bounded DELETE/SELECT sweeps over registry-declared tables/columns # ident-markers=4

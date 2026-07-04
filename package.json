@@ -12,6 +12,7 @@
     "check:bypass-rls": "node scripts/checks/check-bypass-rls.mjs",
     "check:crypto-domains": "node scripts/checks/check-crypto-domains.mjs",
     "check:migration-drift": "node scripts/checks/check-migration-drift.mjs",
+    "check:raw-sql-usage": "node scripts/checks/check-raw-sql-usage.mjs",
     "check:ios-diag": "bash scripts/checks/check-ios-no-diagnostic-logging.sh",
     "pre-pr": "bash scripts/pre-pr.sh",
     "db:migrate": "prisma migrate dev",

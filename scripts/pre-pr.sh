@@ -185,6 +185,7 @@ run_step "Static: team-auth-rls"  node scripts/checks/check-team-auth-rls.mjs
 run_step "Static: bypass-rls"     node scripts/checks/check-bypass-rls.mjs
 run_step "Static: crypto-domains" node scripts/checks/check-crypto-domains.mjs
 run_step "Static: migration-drift" node scripts/checks/check-migration-drift.mjs
+run_step "Static: raw-sql-usage" node scripts/checks/check-raw-sql-usage.mjs
 # Cross-tenant SQL parse check (issue #434). Runs against the local docker DB
 # if reachable; skips gracefully otherwise (preserves pre-pr.sh's "no Postgres
 # required" contract for the static checks above).
