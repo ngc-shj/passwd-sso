@@ -84,6 +84,21 @@
   leak a URL / response / internal state with no code change at the log site.
 - Fix: log only the already-classified `sessionExpired` Bool
   (`syncFailedSessionExpired(from:)`), never the raw error. Same fixed-code shape the
-  banner selection already relies on. The analogous raw-error dump in
-  `AutofillTokenRefresher.swift:51` is out of scope (unchanged file, not in this diff);
-  noted here for a follow-up.
+  banner selection already relies on.
+
+## D9 — Cross-cutting: raw-error log dumps reduced to the error TYPE (post-review, Medium)
+
+- Swept the whole iOS tree for the same weak pattern (`String(describing: error)` at
+  `privacy: .public`). Seven other sites dumped an arbitrary caught `Error` — including
+  API (`MobileAPIError`), OS (`ASExtension`/`LAError`), and cache-I/O errors whose
+  associated values can carry a URL / OSStatus / file path / response.
+- Fix: replaced the payload dump with `type(of: error)` (the error's type name only) at
+  all eight sites — enough to tell WHICH kind of failure occurred for debugging,
+  without emitting any associated value:
+  - `AutofillTokenRefresher.swift:53`
+  - `CredentialProviderViewController.swift:266,362,395,461`
+  - `CredentialResolver.swift:143,488`
+  - `BridgeKeyStore.swift:204`
+- Untouched: `CredentialProviderViewController.swift:412` logs a `decision` enum (no
+  associated secret), and the `keyStatus`/`rpId` OSStatus logs (already non-secret
+  scalars). No behavior change — logging text only.

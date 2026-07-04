@@ -263,7 +263,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         // normal success path, where expired == false.)
         _ = await extensionContext.completeAssertionRequest(using: credential)
       } catch {
-        Self.log.error("completePasskeyAssertion FAILED: \(String(describing: error), privacy: .public)")
+        Self.log.error("completePasskeyAssertion FAILED: \(String(describing: type(of: error)), privacy: .public)")
         cancel(with: error)
       }
     }
@@ -359,7 +359,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         } catch CredentialResolver.Error.vaultLocked {
           Self.log.error("passkey registration: vault locked")
         } catch {
-          Self.log.error("passkey registration: crypto/encrypt failed: \(String(describing: error), privacy: .public)")
+          Self.log.error("passkey registration: crypto/encrypt failed: \(String(describing: type(of: error)), privacy: .public)")
           // encryptPasskeyEntry only ran after biometrics if crypto reached it;
           // treat any non-lock failure as a crypto failure (still a cancel).
           vaultUnlocked = true
@@ -392,7 +392,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
           do {
             uploadedEntryId = try await uploader.createEntry(body: body)
           } catch {
-            Self.log.error("passkey registration: upload failed: \(String(describing: error), privacy: .public)")
+            Self.log.error("passkey registration: upload failed: \(String(describing: type(of: error)), privacy: .public)")
           }
         } else {
           Self.log.error("passkey registration: no valid upload token / server config")
@@ -458,7 +458,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     do {
       try await resolver.appendEntryToCache(cacheEntry)
     } catch {
-      Self.log.error("passkey registration: cache append failed (next host sync recovers): \(String(describing: error), privacy: .public)")
+      Self.log.error("passkey registration: cache append failed (next host sync recovers): \(String(describing: type(of: error)), privacy: .public)")
     }
     await CredentialIdentityRegistrar().add(passkeys: [
       PasskeyIdentitySpec(
