@@ -5,6 +5,7 @@ const {
   mockVerifyAdminToken,
   mockDeleteMany,
   mockCount,
+  mockTenantFindUnique,
   mockRequireMaintenanceOperator,
   mockCheck,
   mockLogAudit,
@@ -13,6 +14,7 @@ const {
   mockVerifyAdminToken: vi.fn(),
   mockDeleteMany: vi.fn(),
   mockCount: vi.fn(),
+  mockTenantFindUnique: vi.fn(),
   mockRequireMaintenanceOperator: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockLogAudit: vi.fn(),
@@ -27,6 +29,7 @@ vi.mock("@/lib/auth/tokens/admin-token", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntryHistory: { deleteMany: mockDeleteMany, count: mockCount },
+    tenant: { findUnique: mockTenantFindUnique },
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -92,6 +95,10 @@ describe("POST /api/maintenance/purge-history", () => {
       ok: true,
       operator: { tenantId: TENANT_ID, role: "ADMIN" },
     });
+    // Default: a non-null tenant retention of 1 day so existing cutoff-date
+    // cases exercise the normal path with no clamp (max(requested, 1) ===
+    // requested). RETENTION_INDEFINITE / clamp cases override this.
+    mockTenantFindUnique.mockResolvedValue({ historyRetentionDays: 1 });
   });
 
   // ─── Auth ──────────────────────────────────────────────────
@@ -218,6 +225,52 @@ describe("POST /api/maintenance/purge-history", () => {
     const cutoff = mockDeleteMany.mock.calls[0][0].where.changedAt.lt as Date;
     const expectedDate = new Date(Date.now() - 30 * MS_PER_DAY);
     expect(Math.abs(cutoff.getTime() - expectedDate.getTime())).toBeLessThan(5000);
+  });
+
+  // ─── Tenant retention floor (C4-S1 lateral fix) ───────────
+
+  it("respects tenant-level retention floor: uses max(requested, tenantRetention)", async () => {
+    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
+    mockDeleteMany.mockResolvedValue({ count: 3 });
+    // Tenant floor 730d exceeds the requested 30d — the stricter (longer) wins.
+    mockTenantFindUnique.mockResolvedValue({ historyRetentionDays: 730 });
+
+    const req = createRequest({ retentionDays: 30 }, VALID_OP_TOKEN);
+    await POST(req);
+
+    const cutoff = mockDeleteMany.mock.calls[0][0].where.changedAt.lt as Date;
+    const expectedDate = new Date(Date.now() - 730 * MS_PER_DAY);
+    expect(Math.abs(cutoff.getTime() - expectedDate.getTime())).toBeLessThan(5000);
+  });
+
+  it("rejects with 409 HISTORY_RETENTION_INDEFINITE when tenant retention is NULL, and issues no purge", async () => {
+    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
+    mockTenantFindUnique.mockResolvedValue({ historyRetentionDays: null });
+
+    const req = createRequest({}, VALID_OP_TOKEN);
+    const res = await POST(req);
+    expect(res.status).toBe(409);
+
+    const body = await res.json();
+    expect(body.error).toBe("HISTORY_RETENTION_INDEFINITE");
+
+    // RT8: denial AND no mutation — deleteMany must never be called.
+    expect(mockDeleteMany).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("rejects with 409 on dryRun too when tenant retention is NULL, and does not count matches", async () => {
+    mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
+    mockTenantFindUnique.mockResolvedValue({ historyRetentionDays: null });
+
+    const req = createRequest({ dryRun: true }, VALID_OP_TOKEN);
+    const res = await POST(req);
+    expect(res.status).toBe(409);
+
+    const body = await res.json();
+    expect(body.error).toBe("HISTORY_RETENTION_INDEFINITE");
+    expect(mockCount).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   // ─── Dry Run ──────────────────────────────────────────────
