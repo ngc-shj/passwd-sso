@@ -26,10 +26,10 @@
  * Multi-method files are excluded from assertion 7 entirely (writes belong to
  * their mutating handlers, not the GET branch).
  *
- * TODO(route-policy-sql-security): after the P1 branch
- * (hardening/maintenance-ratelimit-openapi-host) merges, strengthen assertion
- * 8b to also require a rate-limit call in every `operatorGated: true` file.
- * Derive the then-current limiter symbol with:
+ * Assertion 8b requires a fail-closed rate-limit call (createRateLimiter +
+ * failClosedOnRedisError: true + checkRateLimitOrFail) in every
+ * `operatorGated: true` file. If the limiter symbols are ever renamed,
+ * re-derive them with:
  *   grep -rn 'RateLimit' src/app/api/maintenance src/app/api/admin --include=route.ts
  */
 import { describe, it, expect } from "vitest";
@@ -271,7 +271,18 @@ describe("route-policy-manifest.json parity", () => {
     expect(violations).toEqual([]);
   });
 
-  it("assertion 8b: every operatorGated:true entry's source contains both verifyAdminToken( and requireMaintenanceOperator(", () => {
+  it("assertion 8b: every operatorGated:true entry enforces admin auth AND fail-closed rate limiting", () => {
+    // Two invariants for every operator-gated route:
+    //   1. Admin auth: verifyAdminToken( + requireMaintenanceOperator(
+    //   2. Fail-closed rate limiting (#629): createRateLimiter( +
+    //      failClosedOnRedisError: true + checkRateLimitOrFail(
+    // The rate-limit half is a structural (existence) guard: it catches a
+    // route that ships without any throttle, or one whose limiter drops
+    // failClosedOnRedisError (shedding its throttle during a Redis outage —
+    // exactly the blast-radius #629 closed). It does NOT verify the key is
+    // tenant-scoped — that argument-level contract is pinned per route in the
+    // maintenance route.test.ts files ("returns 429 when rate limited"), a
+    // separate layer this existence check cannot see.
     const violations: string[] = [];
     for (const repoRelPath of manifestKeys) {
       if (manifest.routes[repoRelPath].operatorGated !== true) continue;
@@ -281,6 +292,15 @@ describe("route-policy-manifest.json parity", () => {
       }
       if (!source.includes("requireMaintenanceOperator(")) {
         violations.push(`${repoRelPath}: operatorGated=true but missing requireMaintenanceOperator(`);
+      }
+      if (!source.includes("createRateLimiter(")) {
+        violations.push(`${repoRelPath}: operatorGated=true but missing createRateLimiter(`);
+      }
+      if (!/failClosedOnRedisError:\s*true/.test(source)) {
+        violations.push(`${repoRelPath}: operatorGated=true but missing failClosedOnRedisError: true`);
+      }
+      if (!source.includes("checkRateLimitOrFail(")) {
+        violations.push(`${repoRelPath}: operatorGated=true but missing checkRateLimitOrFail(`);
       }
     }
     expect(violations).toEqual([]);

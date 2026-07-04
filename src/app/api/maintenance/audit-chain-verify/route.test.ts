@@ -120,6 +120,15 @@ describe("GET /api/maintenance/audit-chain-verify", () => {
     const req = createRequest({ tenantId: TENANT_ID }, VALID_OP_TOKEN);
     const res = await GET(req);
     expect(res.status).toBe(429);
+
+    // #629 headline property: the maintenance rate-limit key is tenant-scoped
+    // so one tenant's operator cannot 429 another tenant's op. A regression
+    // dropping `${auth.tenantId}` (global key) or swapping in subjectUserId
+    // would still pass the 429/503 behavior tests — only an exact-key assertion
+    // pinning the route discriminator + tenantId segment catches it. The key is
+    // passed to check() before the limiter's verdict, so asserting it here
+    // needs no route-specific success mocks.
+    expect(mockCheck).toHaveBeenCalledWith(`rl:maintenance:chain-verify:${TENANT_ID}`);
   });
 
   it("returns 503 when the rate limiter fails closed on a Redis error", async () => {
