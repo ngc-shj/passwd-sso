@@ -89,3 +89,28 @@ public func biometricUnlockError(
 public func resolveDisplayError(external: String?, internalError: String?) -> String? {
   external ?? internalError
 }
+
+/// Outcome of `handleVaultUnlocked`, so the biometric call site can pick the right
+/// banner: reached the vault, failed closed on a dead session (→ "sign in again"),
+/// or failed closed offline (→ "enter passphrase / try again").
+public enum UnlockedResult: Equatable {
+  case reachedVault
+  case failedSessionExpired
+  case failedOffline
+}
+
+/// Classify an unlock-time `runSync` error: `true` only when the session is dead
+/// (the refresh token expired or a replay revoked the family), which surfaces from
+/// the API client as `MobileAPIError.authenticationRequired`. Every other error
+/// (offline, transient server, decode) is `false` — a recoverable/offline failure.
+public func syncFailedSessionExpired(from error: Error) -> Bool {
+  if case MobileAPIError.authenticationRequired = error { return true }
+  return false
+}
+
+/// Map a fail-closed unlock (sync failed with no trustworthy local cache) to the
+/// banner outcome: a dead session routes to "sign in again", a mere offline failure
+/// to "try again with your passphrase".
+public func failClosedResult(sessionExpired: Bool) -> UnlockedResult {
+  sessionExpired ? .failedSessionExpired : .failedOffline
+}

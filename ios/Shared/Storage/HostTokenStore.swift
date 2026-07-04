@@ -17,6 +17,11 @@ public final class HostTokenStore: Sendable {
   private let service: String
   private let keychain: KeychainAccessor
 
+  /// Stable identifier for this token store's Keychain item. Used as the
+  /// process-global refresh single-flight key so every `MobileAPIClient` backed
+  /// by the same Keychain item shares one refresh at a time.
+  public var serviceIdentifier: String { service }
+
   private enum Account: String {
     case accessToken = "access_token"
     case refreshToken = "refresh_token"

@@ -13,6 +13,11 @@ public enum VaultUnlockError: Error, Equatable {
   case biometricFailed
   /// Vault key recovered via biometrics but cache header userId is missing/empty.
   case cacheUnreadable
+  /// The session is dead — the server rejected the refresh token (expired, or a
+  /// replay/reuse revoked the token family). No passphrase can fix this; the only
+  /// recovery is re-sign-in. Distinct from `serverResponseInvalid` so the UI can
+  /// route to "Sign in again" instead of looping on a misleading retry message.
+  case sessionExpired
 }
 
 /// Result of a successful vault unlock; carries the in-memory vault key, the
@@ -85,6 +90,11 @@ public actor VaultUnlocker {
       unlockData = try await apiClient.fetchVaultUnlockData()
     } catch MobileAPIError.serverError(let status) where status == 401 {
       throw VaultUnlockError.invalidPassphrase
+    } catch MobileAPIError.authenticationRequired {
+      // The refresh token is dead (expired, or a replay revoked the family). No
+      // passphrase recovers this — surface as sessionExpired so the UI routes to
+      // "Sign in again" instead of a misleading "check your connection" retry loop.
+      throw VaultUnlockError.sessionExpired
     } catch {
       throw VaultUnlockError.serverResponseInvalid
     }

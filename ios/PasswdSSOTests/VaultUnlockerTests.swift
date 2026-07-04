@@ -94,7 +94,7 @@ private func makeVaultUnlockData(
 /// `VaultUnlocker` actor drives the unlock crypto path (hex decode, PBKDF2,
 /// AES-GCM) — a regression in `VaultUnlocker.unlock` now turns these tests red.
 private actor StubVaultAPIClient: VaultUnlockDataSource {
-  enum Mode { case success(VaultUnlockData); case wrongPassphrase }
+  enum Mode { case success(VaultUnlockData); case wrongPassphrase; case sessionDead }
   let mode: Mode
 
   init(mode: Mode) { self.mode = mode }
@@ -103,6 +103,10 @@ private actor StubVaultAPIClient: VaultUnlockDataSource {
     switch mode {
     case .success(let data): return data
     case .wrongPassphrase: throw MobileAPIError.serverError(status: 401)
+    // A dead refresh token surfaces from the API client as authenticationRequired
+    // (see MobileAPIClient.doRefreshAndPersist). VaultUnlocker must map it to
+    // sessionExpired so the UI routes to "sign in again", not a passphrase retry.
+    case .sessionDead: throw MobileAPIError.authenticationRequired
     }
   }
 }
@@ -315,6 +319,36 @@ final class VaultUnlockerTests: XCTestCase {
       _ = try await unlocker.unlock(passphrase: "wrong-passphrase")
       XCTFail("Expected VaultUnlockError.invalidPassphrase")
     } catch VaultUnlockError.invalidPassphrase {
+      // Expected
+    } catch {
+      XCTFail("Unexpected error: \(error)")
+    }
+  }
+
+  /// A dead refresh token (authenticationRequired from the API client) must map
+  /// to sessionExpired — NOT invalidPassphrase or serverResponseInvalid — so the
+  /// UI can route to "sign in again" instead of looping on a passphrase prompt.
+  func testDeadSessionThrowsSessionExpired() async throws {
+    let keychain = MockKeychain()
+    let bks = BridgeKeyStore(
+      accessGroup: "test",
+      service: "com.passwd-sso.test.bridge-key",
+      keychain: keychain
+    )
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+
+    let stubClient = StubVaultAPIClient(mode: .sessionDead)
+    let unlocker = VaultUnlocker(
+      apiClient: stubClient,
+      bridgeKeyStore: bks,
+      wrappedKeyStore: wks,
+      cacheURL: tmpDir.appending(path: "test.cache", directoryHint: .notDirectory)
+    )
+
+    do {
+      _ = try await unlocker.unlock(passphrase: "any-passphrase")
+      XCTFail("Expected VaultUnlockError.sessionExpired")
+    } catch VaultUnlockError.sessionExpired {
       // Expected
     } catch {
       XCTFail("Unexpected error: \(error)")

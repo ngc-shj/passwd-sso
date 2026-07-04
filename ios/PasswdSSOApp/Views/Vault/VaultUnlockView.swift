@@ -145,6 +145,12 @@ struct VaultUnlockView: View {
       errorMessage = L10n.string("Incorrect passphrase. Please try again.")
       passphrase = ""
       isLoading = false
+    } catch VaultUnlockError.sessionExpired {
+      // Dead session — no passphrase recovers this. Tell the user to re-sign-in
+      // rather than looping on a "check your connection" message.
+      errorMessage = L10n.string("Your session has expired. Please sign in again.")
+      passphrase = ""
+      isLoading = false
     } catch {
       errorMessage = L10n.string("Unable to unlock vault. Check your connection and try again.")
       isLoading = false

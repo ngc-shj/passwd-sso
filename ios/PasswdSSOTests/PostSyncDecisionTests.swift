@@ -118,4 +118,32 @@ final class PostSyncDecisionTests: XCTestCase {
     XCTAssertEqual(resolveDisplayError(external: nil, internalError: "y"), "y")
     XCTAssertNil(resolveDisplayError(external: nil, internalError: nil))
   }
+
+  // MARK: - Fail-closed banner selection (dead session vs offline)
+
+  /// A dead session (authenticationRequired) is the ONLY error that routes to the
+  /// "sign in again" banner — the whole point of the UnlockedResult split.
+  func testSyncFailedSessionExpired_authenticationRequired_isTrue() {
+    XCTAssertTrue(syncFailedSessionExpired(from: MobileAPIError.authenticationRequired))
+  }
+
+  /// An offline/transient failure must NOT be treated as a dead session — it routes
+  /// to the "try again with your passphrase" banner instead.
+  func testSyncFailedSessionExpired_offlineError_isFalse() {
+    let offline = MobileAPIError.networkError(URLError(.notConnectedToInternet))
+    XCTAssertFalse(syncFailedSessionExpired(from: offline))
+    // A non-MobileAPIError also falls through to the offline banner.
+    struct Other: Error {}
+    XCTAssertFalse(syncFailedSessionExpired(from: Other()))
+    // Another MobileAPIError case must not be mistaken for a dead session.
+    XCTAssertFalse(syncFailedSessionExpired(from: MobileAPIError.serverError(status: 500)))
+  }
+
+  func testFailClosedResult_sessionExpired_routesToSignIn() {
+    XCTAssertEqual(failClosedResult(sessionExpired: true), .failedSessionExpired)
+  }
+
+  func testFailClosedResult_offline_routesToPassphraseRetry() {
+    XCTAssertEqual(failClosedResult(sessionExpired: false), .failedOffline)
+  }
 }

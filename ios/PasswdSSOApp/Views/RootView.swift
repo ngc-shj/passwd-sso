@@ -262,13 +262,11 @@ struct RootView: View {
       biometricUnlock = { @MainActor @Sendable in
         // Clear any prior banner at the start of an attempt.
         biometricErrorText = nil
-        let sessionStaleMessage = L10n.string(
-          "Your session is out of date. Enter your passphrase to unlock.")
         do {
           let result = try await unlocker.unlockWithBiometrics(
             reason: L10n.string("Unlock your passwd-sso vault.")
           )
-          let reached = await handleVaultUnlocked(
+          let outcome = await handleVaultUnlocked(
             unlockResult: result,
             serverConfig: serverConfig,
             apiClient: apiClient,
@@ -277,18 +275,24 @@ struct RootView: View {
             // Offline path: no fresh policy fetch — must not clear a persisted value.
             policyAuthoritative: false
           )
-          // Face ID succeeded but the cacheless resync failed and there was no
-          // trustworthy local cache — surface an explicit error instead of the
-          // former silent bounce back to the passphrase screen.
-          if !reached {
-            biometricErrorText = biometricUnlockError(
-              from: nil, syncFailedCacheless: true, message: sessionStaleMessage)
+          // Face ID succeeded but the cacheless resync failed — surface an explicit
+          // banner instead of the former silent bounce. A dead session routes to
+          // "sign in again"; a mere offline failure to "try again with passphrase".
+          switch outcome {
+          case .reachedVault:
+            break
+          case .failedSessionExpired:
+            biometricErrorText = L10n.string("Your session has expired. Please sign in again.")
+          case .failedOffline:
+            biometricErrorText = L10n.string(
+              "Your session is out of date. Enter your passphrase to unlock.")
           }
         } catch {
           // A biometric cancel / mismatch shows no banner (stays on passphrase
           // screen); any other error surfaces the explicit message.
           biometricErrorText = biometricUnlockError(
-            from: error, syncFailedCacheless: false, message: sessionStaleMessage)
+            from: error, syncFailedCacheless: false,
+            message: L10n.string("Your session is out of date. Enter your passphrase to unlock."))
         }
       }
     } else {
@@ -318,10 +322,9 @@ struct RootView: View {
     }
   }
 
-  /// Returns `true` when the unlock reached `.vaultUnlocked`, `false` when it failed
-  /// closed to `.vaultLocked` (cacheless resync failed with no trustworthy local
-  /// cache). The biometric call site turns a `false` into an explicit error banner;
-  /// the passphrase call site ignores it (its own screen already shows errors).
+  /// Drives the post-unlock sync + state transition. On a cacheless resync failure
+  /// with no trustworthy local cache it fails closed to `.vaultLocked` and reports
+  /// WHY (dead session vs offline) so the caller shows the correct banner.
   @discardableResult
   @MainActor
   private func handleVaultUnlocked(
@@ -331,7 +334,7 @@ struct RootView: View {
     bridgeKeyStore: BridgeKeyStore,
     wrappedKeyStore: any WrappedKeyStore,
     policyAuthoritative: Bool
-  ) async -> Bool {
+  ) async -> UnlockedResult {
     // MUST be the first statement — regression guard for the post-unlock flicker
     // fix (#3): replaces the passphrase/Face ID screen with the splash before the
     // async sync below, so it does not linger during the unlock→list gap. Do not
@@ -370,18 +373,18 @@ struct RootView: View {
     await drain.drainPendingFlags(vaultKey: vaultKey)
 
     let syncReport: SyncReport?
+    // Whether the sync failed specifically because the session is dead (refresh
+    // token expired / replay-revoked). Drives the fail-closed banner choice.
+    var sessionExpired = false
     do {
       syncReport = try await syncService.runSync(
         vaultKey: vaultKey, userId: unlockResult.userId, cacheKey: unlockResult.cacheKey)
     } catch {
-      // The user has just unlocked with a valid vault key + session. A sync
-      // failure here (network, server, or auth) must NOT bounce them back to
-      // sign-in or wipe tokens mid-unlock — that produced a sign-in loop. Fall
-      // back to the persisted cache; the access-token refresh (C1) already makes
-      // the sync succeed across a normal token expiry. A genuinely dead refresh
-      // token surfaces as stale data, recoverable by an explicit manual Sign Out.
-      // Diagnostic only (no secrets — MobileAPIError cases carry no token data):
-      // captures WHY an unlock-time sync failed so a stale-data report is debuggable.
+      // A sync failure here must NOT wipe tokens mid-unlock. When a valid local
+      // cache exists we fall back to it (offline-tolerant); when it does not, the
+      // caller fails closed and uses `sessionExpired` to pick the banner.
+      sessionExpired = syncFailedSessionExpired(from: error)
+      // Diagnostic only (no secrets — MobileAPIError cases carry no token data).
       Logger(subsystem: AppGroupContainer.loggerSubsystem, category: "sync")
         .error("unlock-time runSync failed: \(String(describing: error), privacy: .public)")
       syncReport = nil
@@ -411,12 +414,14 @@ struct RootView: View {
       persistedCache = nil
     }
 
-    let cacheData: CacheData
-    switch decidePostSync(
+    let outcome = decidePostSync(
       syncReport: syncReport,
       cacheRecovered: unlockResult.cacheRecovered,
       persistedCache: persistedCache
-    ) {
+    )
+
+    let cacheData: CacheData
+    switch outcome {
     case .useFreshCache:
       // Use the cache the sync just built in-memory. Re-reading the encrypted file
       // here races the write on the first unlock (fresh bridge-key counter/UUID
@@ -432,9 +437,10 @@ struct RootView: View {
     case .failLocked:
       // Face ID recovered the vault key but the resync failed and there is no
       // trustworthy local cache. Fail closed to the locked screen (never present an
-      // empty vault as success) and let the caller surface an explicit error.
+      // empty vault as success) and let the caller surface an explicit error —
+      // "sign in again" for a dead session, "try again" when merely offline.
       appState = .vaultLocked(serverConfig: serverConfig, apiClient: apiClient)
-      return false
+      return failClosedResult(sessionExpired: sessionExpired)
     }
 
     // Recover the authoritative keyVersion from the synced entries when a fresh sync
@@ -468,7 +474,7 @@ struct RootView: View {
       apiClient: apiClient,
       cacheKey: unlockResult.cacheKey
     )
-    return true
+    return .reachedVault
   }
 
   /// Synthesize an empty cache for the degenerate fallback (no fresh sync, no
