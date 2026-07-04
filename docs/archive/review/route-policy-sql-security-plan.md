@@ -386,10 +386,12 @@ audit chain integrity, retention policy drift.
 **Adjudication candidates surfaced by plan-time inventory** (to be judged by the
 experts, NOT pre-judged as findings):
 - A1: `audit_log_purge` deletes low-end `audit_logs` rows without touching
-  `audit_chain_anchors` — chain-verify's default `fromSeq=1` walk then reports
-  `AUDIT_CHAIN_SEED_NOT_FOUND` / gaps. Expected behavior vs. defect: needs an explicit
-  decision, then either code (purge-aware verify seed / purge watermark) or
-  documentation of the semantics in C9.
+  `audit_chain_anchors`. RESOLVED (see deviation log D2): the T5 characterization test
+  pins the ACTUAL post-purge behavior — default `fromSeq=1` verify returns `ok:false`
+  (a FALSE TAMPER report), not `SEED_NOT_FOUND` or an empty pass, because the first
+  retained row's `chain_prev_hash` points at a purged row and the walk re-seeds from
+  genesis. Adjudication: document real semantics in C8 + track the watermark code fix
+  (`TODO(route-policy-sql-security): purge watermark`).
 - A2: retention-gc has no row-level mutual exclusion between concurrent instances;
   `sweepAuditProvenanceEntry` enqueues audit rows BEFORE delete in the same tx — two
   racing instances can double-emit `*_RETENTION_PURGED` audit events for the same rows.
