@@ -61,10 +61,22 @@ final class PostSyncDecisionTests: XCTestCase {
       .useLocalCache)
   }
 
-  /// AC-C5.4: failed sync + cacheRecovered=true + no persisted cache → failLocked.
-  func testDecidePostSync_failedSync_recovered_noCache_failsLocked() {
+  /// AC-C5.4 (revised — Phase 3 F-passphrase): failed sync + cacheRecovered=true + no
+  /// persisted cache → .useEmptyCache, NOT .failLocked. A valid unlock (passphrase, or
+  /// biometric-fresh) with a brand-new / first-offline vault must present the empty
+  /// vault as success — bouncing to the locked screen would be a regression for the
+  /// passphrase path (correct passphrase → locked screen with no data).
+  func testDecidePostSync_failedSync_recovered_noCache_useEmptyCache() {
     XCTAssertEqual(
       decidePostSync(syncReport: nil, cacheRecovered: true, persistedCache: nil),
+      .useEmptyCache)
+  }
+
+  /// The fail-closed direction is preserved for the biometric untrusted-cache case:
+  /// cacheRecovered=false + no cache still fails closed.
+  func testDecidePostSync_failedSync_cacheless_stillFailsClosed() {
+    XCTAssertEqual(
+      decidePostSync(syncReport: nil, cacheRecovered: false, persistedCache: nil),
       .failLocked)
   }
 

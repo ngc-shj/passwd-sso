@@ -11,11 +11,17 @@ import Shared
 public enum PostSyncOutcome: Equatable {
   /// Sync succeeded — use the freshly-built cache it returned.
   case useFreshCache
-  /// Sync failed but a valid persisted cache exists AND the biometric read had
-  /// recovered a valid local cache — fall back to the persisted cache (offline).
+  /// Sync failed but a valid persisted cache exists AND the unlock recovered a valid
+  /// local cache — fall back to the persisted cache (offline).
   case useLocalCache
-  /// Route back to the locked screen and surface an explicit error. Reached when
-  /// the sync failed and there is no trustworthy local cache to fall back to.
+  /// Sync failed, no persisted cache, but the unlock DID recover a valid local cache
+  /// (cacheRecovered == true) — this is a benign empty/new-vault or first-offline
+  /// state (e.g. a brand-new account with zero entries). Present an empty vault; the
+  /// passphrase was valid, so this is success, not a failure.
+  case useEmptyCache
+  /// Route back to the locked screen and surface an explicit error. Reached ONLY when
+  /// the sync failed AND the unlock could NOT recover a trustworthy local cache
+  /// (cacheRecovered == false — the biometric stale/rolled-back case).
   case failLocked
 }
 
@@ -25,7 +31,9 @@ public enum PostSyncOutcome: Equatable {
 ///   - syncReport: the sync result, or `nil` if the sync threw.
 ///   - cacheRecovered: whether the unlock recovered a valid local cache. `false`
 ///     means the on-disk cache was stale / counter-mismatched / unreadable, so it
-///     MUST NOT be trusted as a fallback — a failed sync then fails closed.
+///     MUST NOT be trusted as a fallback — a failed sync then fails closed. `true`
+///     for every passphrase unlock (its passphrase was valid) and for a biometric
+///     unlock that read a fresh cache.
 ///   - persistedCache: the already-read persisted cache (read ONCE by the caller),
 ///     or `nil` if absent/unreadable.
 ///
@@ -43,10 +51,14 @@ public func decidePostSync(
   }
   // Sync failed from here on.
   guard cacheRecovered else {
-    // No trustworthy local cache — never fall back, even if a readable file exists.
+    // Untrustworthy local cache (biometric stale/rolled-back) — fail closed, never
+    // fall back, even if a readable file exists (S2).
     return .failLocked
   }
-  return persistedCache != nil ? .useLocalCache : .failLocked
+  // A valid unlock (passphrase, or biometric with a fresh cache): a failed sync falls
+  // back to the persisted cache, or to an empty vault when none exists (a brand-new /
+  // first-offline vault is a legitimate success state — NOT a fail-closed condition).
+  return persistedCache != nil ? .useLocalCache : .useEmptyCache
 }
 
 /// Map a biometric-unlock outcome to a user-facing error string, or `nil` when no

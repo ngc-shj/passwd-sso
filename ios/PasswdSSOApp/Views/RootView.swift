@@ -425,6 +425,10 @@ struct RootView: View {
     case .useLocalCache:
       // Sync failed (e.g. offline) — fall back to the last persisted cache.
       cacheData = persistedCache ?? emptyCacheData(userId: unlockResult.userId)
+    case .useEmptyCache:
+      // Valid unlock, sync failed, no persisted cache — a brand-new / first-offline
+      // vault. Present an empty vault (the passphrase was valid → this is success).
+      cacheData = emptyCacheData(userId: unlockResult.userId)
     case .failLocked:
       // Face ID recovered the vault key but the resync failed and there is no
       // trustworthy local cache. Fail closed to the locked screen (never present an
