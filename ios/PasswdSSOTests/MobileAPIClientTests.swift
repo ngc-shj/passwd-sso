@@ -1091,7 +1091,10 @@ final class TokenRefreshTests: XCTestCase {
     capturedRequests = []
   }
 
-  // Helper: make a client with the fixed clock.
+  // Helper: make a client with the fixed clock. A fresh refresh coordinator per
+  // client keeps the process-global success cache from leaking across tests (the
+  // shared singleton would otherwise replay one test's rotated token into the next,
+  // suppressing the refresh these tests assert on).
   private func makeClient(fixedDate: Date? = nil) -> MobileAPIClient {
     let t = fixedDate ?? fixedNow
     return MobileAPIClient(
@@ -1100,7 +1103,8 @@ final class TokenRefreshTests: XCTestCase {
       jwk: knownJWK,
       tokenStore: tokenStore,
       urlSession: session,
-      now: { t }
+      now: { t },
+      refreshCoordinator: TokenRefreshCoordinator()
     )
   }
 

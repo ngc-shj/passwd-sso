@@ -201,7 +201,7 @@ public final class BridgeKeyStore: Sendable {
           accessControl, operation: .useItem, localizedReason: reason
         )
       } catch {
-        Self.log.error("readForFillAuthenticated: evaluateAccessControl failed: \(String(describing: error), privacy: .public)")
+        Self.log.error("readForFillAuthenticated: evaluateAccessControl failed: \(String(describing: type(of: error)), privacy: .public)")
         throw Error.biometryFailed
       }
     }

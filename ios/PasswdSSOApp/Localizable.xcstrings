@@ -2667,6 +2667,40 @@
         }
       }
     },
+    "Your session has expired. Please sign in again.": {
+      "extractionState": "stale",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your session has expired. Please sign in again."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "セッションの有効期限が切れました。もう一度サインインしてください。"
+          }
+        }
+      }
+    },
+    "Your session is out of date. Enter your passphrase to unlock.": {
+      "extractionState": "stale",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your session is out of date. Enter your passphrase to unlock."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "セッション情報が古くなっています。パスフレーズを入力して解錠してください。"
+          }
+        }
+      }
+    },
     "biometrics": {
       "comment": "Fallback biometry name when neither Face ID nor Touch ID is detected.",
       "extractionState": "stale",

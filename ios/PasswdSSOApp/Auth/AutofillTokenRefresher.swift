@@ -47,8 +47,10 @@ public struct AutofillTokenRefresher: Sendable {
       let nonce = try? hostTokenStore.loadNonce()
       try uploadTokenStore.save(token: response.token, expiresAt: expiresAt, dpopNonce: nonce)
     } catch {
-      // No token data in MobileAPIError cases — safe to log the case name.
-      Self.log.error("autofill-token refresh failed: \(String(describing: error), privacy: .public)")
+      // Log only the error TYPE, never its associated values: `mintAutofillToken`
+      // throws an arbitrary Error, so dumping it whole risks leaking a URL /
+      // response / internal state the day it throws a richer type.
+      Self.log.error("autofill-token refresh failed: \(String(describing: type(of: error)), privacy: .public)")
     }
   }
 

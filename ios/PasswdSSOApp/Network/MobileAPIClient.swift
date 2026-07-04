@@ -172,6 +172,10 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   let tokenStore: HostTokenStore
   private let urlSession: URLSession
   private let now: @Sendable () -> Date
+  /// Process-global refresh gate. Defaults to the shared instance so every client
+  /// in the app collapses concurrent refreshes; tests inject a fresh instance to
+  /// isolate the success cache per test.
+  private let refreshCoordinator: TokenRefreshCoordinator
 
   public init(
     serverURL: URL,
@@ -179,7 +183,8 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     jwk: [String: String],
     tokenStore: HostTokenStore,
     urlSession: URLSession = .shared,
-    now: @Sendable @escaping () -> Date = { Date() }
+    now: @Sendable @escaping () -> Date = { Date() },
+    refreshCoordinator: TokenRefreshCoordinator = .shared
   ) {
     self.serverURL = serverURL
     self.signer = signer
@@ -187,6 +192,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     self.tokenStore = tokenStore
     self.urlSession = urlSession
     self.now = now
+    self.refreshCoordinator = refreshCoordinator
   }
 
   // MARK: - Public API
@@ -665,9 +671,6 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   /// Proactive refresh skew: refresh the access token when it is within this many seconds of expiry.
   private let refreshSkewSeconds: TimeInterval = 60
 
-  /// In-flight single-flight refresh task. Nil when no refresh is in progress.
-  private var refreshTask: Task<String, Error>?
-
   /// Atomically persist a rotated token pair; uses now() for expiresAt.
   private func persist(_ r: TokenExchangeResponse) throws {
     try tokenStore.saveTokens(
@@ -695,15 +698,35 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   /// Single-flight refresh gate. Joins an in-flight refresh if one is running,
   /// returns the already-rotated token if someone else just refreshed, or
   /// starts exactly one refresh and returns the new access token.
+  ///
+  /// The single-flight is enforced PROCESS-GLOBALLY via `TokenRefreshCoordinator`,
+  /// keyed by the token store's Keychain identifier — so distinct `MobileAPIClient`
+  /// instances backed by the same token store never fire concurrent refreshes with
+  /// the same refresh token (which would trip the server's replay detector and
+  /// revoke the whole token family). The instance-local `staleToken` fast-path
+  /// below still short-circuits when a prior refresh already rotated the token.
   private func ensureRefreshed(staleToken: String) async throws -> String {
-    // Join in-flight refresh (actors are reentrant at await — this is reachable).
-    if let task = refreshTask { return try await task.value }
-    // Already rotated by a prior concurrent call — return the current token.
+    // Already rotated (by this or another instance) — return the current token
+    // without a network round-trip.
     if let (current, _) = try? tokenStore.loadAccess(), current != staleToken { return current }
-    let task = Task { try await self.doRefreshAndPersist() }
-    refreshTask = task
-    defer { refreshTask = nil }
-    return try await task.value
+    // Process-global single-flight: collapse concurrent refreshes (across all
+    // MobileAPIClient instances backed by the same token store) into ONE network
+    // refresh, so we never present an already-rotated (revoked) refresh token to
+    // the server and trip its replay detector.
+    let key = tokenStore.serviceIdentifier
+    return try await refreshCoordinator.run(key: key) { [self] in
+      // Re-check inside the gate: a refresh that ran while we queued may have
+      // already rotated the token, making our network refresh unnecessary.
+      if let (current, _) = try? await self.loadAccessOnActor(), current != staleToken {
+        return current
+      }
+      return try await self.doRefreshAndPersist()
+    }
+  }
+
+  /// Actor-isolated Keychain read used inside the global refresh gate.
+  private func loadAccessOnActor() throws -> (String, Date)? {
+    try tokenStore.loadAccess()
   }
 
   /// Returns a non-expired access token.

@@ -140,7 +140,7 @@ public actor CredentialResolver {
     } catch {
       // BridgeKeyStore.readForFill already logged the raw OSStatus; record the
       // mapped cause here so the resolver-level branch is unambiguous.
-      Self.log.error("resolveCandidates: vaultLocked at bridge_key read: \(String(describing: error), privacy: .public)")
+      Self.log.error("resolveCandidates: vaultLocked at bridge_key read: \(String(describing: type(of: error)), privacy: .public)")
       throw Error.vaultLocked
     }
 
@@ -485,7 +485,7 @@ public actor CredentialResolver {
         reason: "Save passkey to passwd-sso vault"
       )
     } catch {
-      Self.log.error("encryptPasskeyEntry: vaultLocked at bridge_key read: \(String(describing: error), privacy: .public)")
+      Self.log.error("encryptPasskeyEntry: vaultLocked at bridge_key read: \(String(describing: type(of: error)), privacy: .public)")
       throw Error.vaultLocked
     }
 

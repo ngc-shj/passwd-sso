@@ -7,12 +7,24 @@ public struct WrappedVaultKey: Sendable, Codable, Equatable {
   public let iv: Data
   public let authTag: Data
   public let issuedAt: Date
+  /// userId captured at passphrase unlock. Optional so pre-existing files (written
+  /// before this field existed) decode with `nil`; the biometric re-unlock path
+  /// reads it to drive a cacheless resync when the local cache is stale. Non-secret
+  /// (already travels in the cache header + unlock response).
+  public let userId: String?
 
-  public init(ciphertext: Data, iv: Data, authTag: Data, issuedAt: Date) {
+  public init(
+    ciphertext: Data,
+    iv: Data,
+    authTag: Data,
+    issuedAt: Date,
+    userId: String? = nil
+  ) {
     self.ciphertext = ciphertext
     self.iv = iv
     self.authTag = authTag
     self.issuedAt = issuedAt
+    self.userId = userId
   }
 }
 

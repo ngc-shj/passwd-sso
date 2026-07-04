@@ -99,7 +99,8 @@ public enum DebugVaultLoader {
       ciphertext: cipher,
       iv: iv,
       authTag: tag,
-      issuedAt: Date()
+      issuedAt: Date(),
+      userId: fixtureUserId
     )
     try wrappedKeyStore.saveVaultKey(wrappedVaultKey)
 

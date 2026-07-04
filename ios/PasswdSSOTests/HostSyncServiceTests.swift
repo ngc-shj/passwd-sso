@@ -190,6 +190,42 @@ final class HostSyncServiceTests: XCTestCase {
     XCTAssertEqual(blob.cacheVersionCounter, 6)
   }
 
+  /// T1 (FR1 end-to-end healing): starting from NO cache file at all (the worst case
+  /// the biometric cacheRecovered=false path lands in), runSync must rebuild a cache
+  /// that is readable at the new counter with the fetched entries — proving the
+  /// resync heals a missing/stale cache rather than leaving the vault empty.
+  func testSyncHealsAbsentCache() async throws {
+    let keychain = MockKeychain()
+    seedBlobInKeychain(keychain, counter: 42)
+    let bks = BridgeKeyStore(
+      accessGroup: "test", service: "com.passwd-sso.test.bridge-key", keychain: keychain)
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    let cacheURL = tmpDir.appending(path: "heal.cache", directoryHint: .notDirectory)
+    // Precondition: no cache file exists.
+    XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL.path))
+
+    let vaultKey = SymmetricKey(size: .bits256)
+    let dummyEncData = EncryptedData(
+      ciphertext: hexEncode(Data(repeating: 0xAA, count: 32)),
+      iv: hexEncode(Data(repeating: 0xBB, count: 12)),
+      authTag: hexEncode(Data(repeating: 0xCC, count: 16)))
+    let entries = [EncryptedEntry(id: "e1", encryptedOverview: dummyEncData, encryptedBlob: dummyEncData)]
+
+    let stub = StubHostSyncService(
+      bridgeKeyStore: bks, wrappedKeyStore: wks, cacheURL: cacheURL,
+      vaultKey: vaultKey, entries: entries)
+    let report = try await stub.runSync()
+
+    XCTAssertEqual(report.entriesFetched, 1)
+    let blob = try bks.readDirect()
+    XCTAssertEqual(blob.cacheVersionCounter, 43, "counter advanced 42 → 43")
+    // The rebuilt cache must be readable at the new counter (heals the absent cache).
+    let rebuilt = try readCacheFile(
+      path: cacheURL, vaultKey: vaultKey,
+      expectedHostInstallUUID: blob.hostInstallUUID, expectedCounter: 43)
+    XCTAssertEqual(rebuilt.header.entryCount, 1, "rebuilt cache carries the fetched entry")
+  }
+
   // MARK: - Team key refresh: happy path using fixture
 
   /// performSync with the fixture ECDH blob + team member-key endpoint → the stored
