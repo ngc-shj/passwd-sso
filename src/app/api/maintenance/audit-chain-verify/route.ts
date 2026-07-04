@@ -8,6 +8,12 @@
  * The query `tenantId` is the TARGET tenant being chain-verified. The
  * operator must be admin in that target tenant (their token's tenant binding
  * is independent — multi-tenant operators mint a token per tenant).
+ *
+ * See docs/security/audit-chain-threat-model.md#retention-purge-interaction:
+ * after a retention purge of the earliest chained rows, the default
+ * (fromSeq=1) walk below re-seeds from genesis and reports a FALSE TAMPER at
+ * the first retained row — this is verified real behavior (T5 characterization
+ * test), not a hypothetical edge case.
  */
 
 import { NextRequest, NextResponse } from "next/server";

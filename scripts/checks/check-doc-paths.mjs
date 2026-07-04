@@ -29,6 +29,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 //   docs/security/**     — security design docs may reference deleted files
 //   docs/plans/**        — feature plans may reference files not yet created
 //   docs/operations/**   — operational docs with stable external references
+//
+// TODO(route-policy-sql-security): remove docs/security/** from SKIP_GLOBS (path-guard security docs)
 const SKIP_GLOBS = [
   /^archive[/\\]/,
   /^architecture[/\\]/,

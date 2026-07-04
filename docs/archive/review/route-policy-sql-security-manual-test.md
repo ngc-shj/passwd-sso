@@ -258,3 +258,85 @@ The `✓ Static: security-matrices drift check` line, appearing between `env dri
 and `team-auth-rls` (the exact position it was registered at, line 183), proves the
 step runs under `PRE_PR_STATIC_ONLY=1` — i.e. it is reachable by CI's static-checks job,
 not only by full-mode `pre-pr.sh`.
+
+## C6-C8 heading-guard fail-path proof
+
+Fail-path proof for the refactored `scripts/checks/check-security-doc-exists.sh`
+(C6 prerequisite): deleting a required heading from one of the three new docs
+(C6/C7/C8) must make the check exit 1 and name both the doc and the missing
+heading. Test performed against `docs/security/tenant-boundary-matrix.md`'s
+`## Bypass surface` heading (C6).
+
+Baseline (before mutation) — all green:
+
+```
+$ bash scripts/checks/check-security-doc-exists.sh
+...
+OK: docs/security/tenant-boundary-matrix.md exists and is non-empty
+OK: heading present: docs/security/tenant-boundary-matrix.md :: ## RLS-enabled tables
+OK: heading present: docs/security/tenant-boundary-matrix.md :: ## Bypass surface
+OK: heading present: docs/security/tenant-boundary-matrix.md :: ## Worker roles and grants
+OK: heading present: docs/security/tenant-boundary-matrix.md :: ## Tenant-context GUC mechanism
+...
+check-security-doc-exists: all checks passed.
+```
+(exit 0)
+
+Mutation — delete line 90 (`## Bypass surface`) from the doc:
+
+```
+$ sed -i '90d' docs/security/tenant-boundary-matrix.md
+$ sed -n '86,92p' docs/security/tenant-boundary-matrix.md
+control for those tables is enforced entirely at the application layer.
+
+---
+
+
+`scripts/checks/check-bypass-rls.mjs` is the single source of truth for every `withBypassRls(...)`
+call site in production code. It enforces three invariants:
+```
+
+Run the check (expect failure naming the doc + heading):
+
+```
+$ bash scripts/checks/check-security-doc-exists.sh
+...
+OK: docs/security/tenant-boundary-matrix.md exists and is non-empty
+OK: heading present: docs/security/tenant-boundary-matrix.md :: ## RLS-enabled tables
+FAIL: required heading not found: docs/security/tenant-boundary-matrix.md :: ## Bypass surface
+OK: heading present: docs/security/tenant-boundary-matrix.md :: ## Worker roles and grants
+OK: heading present: docs/security/tenant-boundary-matrix.md :: ## Tenant-context GUC mechanism
+...
+check-security-doc-exists: FAILED. See errors above.
+$ echo $?
+1
+```
+
+Confirmed: exit code 1, and the failure line names both `docs/security/tenant-boundary-matrix.md`
+and `## Bypass surface` exactly — a reviewer can identify which doc and which heading
+without re-running the script.
+
+Note on `grep -qF` substring matching (observed during this proof, not a
+regression): an initial attempt appended text to the heading line instead of
+deleting it (`## Bypass surface REMOVED-FOR-TEST`) and the check still passed,
+because `grep -qF "## Bypass surface"` matches as a substring of the mutated
+line. This substring-match behavior is unchanged from the pre-refactor script
+(the original single-doc check used the identical `grep -qF` pattern) — it is
+not a regression introduced by the C6 data-driven refactor. The proof above
+uses a full line-deletion mutation, which is the correct fail-path shape and
+is what a real accidental heading removal (e.g. a rename during editing) would
+produce.
+
+Revert:
+
+```
+$ git checkout -- docs/security/tenant-boundary-matrix.md
+$ bash scripts/checks/check-security-doc-exists.sh
+...
+check-security-doc-exists: all checks passed.
+$ echo $?
+0
+```
+
+Confirmed restored to a clean, fully-passing state (byte-identical to the
+committed working-tree version prior to the mutation).

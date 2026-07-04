@@ -21,3 +21,10 @@ Language policy:
 | [security-review.md](security-review.md) | Security review checklist |
 | [policy-enforcement.md](policy-enforcement.md) | Security policy field enforcement matrix (tenant/team) |
 | [vulnerability-triage.md](vulnerability-triage.md) | Vulnerability classification, triage workflow, and escalation path |
+| [route-policy-matrix.md](route-policy-matrix.md) | Generated: per-route kind/methods/auth/flags, from `scripts/checks/route-policy-manifest.json` |
+| [deletion-retention-matrix.md](deletion-retention-matrix.md) | Generated: per-model deletion/retention policy, from the retention-gc registry + Prisma DMMF |
+| [tenant-boundary-matrix.md](tenant-boundary-matrix.md) | RLS-enabled tables, bypass surface, worker roles/grants, tenant-context GUC mechanism |
+| [auth-surface-matrix.md](auth-surface-matrix.md) | Auth mechanism × route surface grid, and per-token-type issuance/validation/rotation/revocation |
+| [audit-chain-threat-model.md](audit-chain-threat-model.md) | Audit hash-chain construction, attack tree, retention-purge interaction, residual risks |
+
+TODO(route-policy-sql-security): mobile-extension trust boundary matrix
