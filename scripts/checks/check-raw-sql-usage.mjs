@@ -23,10 +23,15 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, extname } from "node:path";
 
-const ROOT = new URL("../..", import.meta.url).pathname;
+// ROOT and ALLOWLIST_FILE are env-overridable so the checker can run against an
+// isolated fixture tree in tests (mirrors check-permanent-delete-stepup.sh's
+// STEPUP_GUARD_* overrides). Defaults resolve to the real repo.
+const REPO_ROOT = new URL("../..", import.meta.url).pathname;
+const ROOT = process.env.RAW_SQL_CHECK_ROOT ?? REPO_ROOT;
 
-const PATTERNS_FILE = join(ROOT, "scripts/checks/route-class-patterns.json");
-const ALLOWLIST_FILE = join(ROOT, "scripts/checks/raw-sql-usage.txt");
+const PATTERNS_FILE = join(REPO_ROOT, "scripts/checks/route-class-patterns.json");
+const ALLOWLIST_FILE =
+  process.env.RAW_SQL_CHECK_ALLOWLIST ?? join(ROOT, "scripts/checks/raw-sql-usage.txt");
 
 const MIN_PURPOSE_LENGTH = 10;
 const MIN_MARKER_REASON_LENGTH = 10;
@@ -62,7 +67,13 @@ function getSourceFiles() {
   const files = [];
   for (const root of SCAN_ROOTS) {
     const rootPath = join(ROOT, root);
-    for (const entry of readdirSync(rootPath, { recursive: true, withFileTypes: true })) {
+    let dirEntries;
+    try {
+      dirEntries = readdirSync(rootPath, { recursive: true, withFileTypes: true });
+    } catch {
+      continue; // scan root absent (e.g. an isolated fixture tree) — skip
+    }
+    for (const entry of dirEntries) {
       if (!entry.isFile()) continue;
       const ext = extname(entry.name);
       if (ext !== ".ts" && ext !== ".tsx") continue;
@@ -399,6 +410,12 @@ for (const file of matchingFiles) {
     } else if (site.marker.length < MIN_MARKER_REASON_LENGTH) {
       shortReasonViolations.push({ file, line: site.firstHitLine, reason: site.marker });
     } else {
+      // RESIDUAL (accepted, review-enforced): this checks the named validator
+      // EXISTS in the file, not that it is invoked on the interpolated value.
+      // A decoy function with a validator-shaped name + a marker naming it
+      // still passes — a `git diff` reviewer must confirm the named mechanism
+      // actually guards the marked span. This is the ceiling of a lexical
+      // guard; see TODO(route-policy-sql-security) in the plan's C2 residual.
       // If the marker names a validation function, that function MUST appear
       // in the same file — catches a copy-pasted marker naming an absent
       // mechanism. Only tokens that look like an actual call are considered:
