@@ -22,6 +22,10 @@ struct VaultUnlockView: View {
   /// on appear. False when reached by an in-app lock (explicit Lock / idle timeout) — stay
   /// locked on appear (a later foreground re-entry still auto-prompts via scenePhase).
   let autoPromptOnAppear: Bool
+  /// Error surfaced by the parent's biometric-unlock closure (e.g. a cacheless resync
+  /// failed after a successful Face ID). Takes precedence over the view's own
+  /// passphrase-attempt error; nil = no external error.
+  let externalError: String?
 
   @Environment(\.scenePhase) private var scenePhase
   @State private var passphrase: String = ""
@@ -37,12 +41,14 @@ struct VaultUnlockView: View {
     biometricUnlock: (@MainActor @Sendable () async -> Void)? = nil,
     biometryLabel: String = L10n.string("biometrics"),
     autoPromptOnAppear: Bool = false,
+    externalError: String? = nil,
     onUnlocked: @MainActor @escaping (UnlockResult) -> Void
   ) {
     self.unlocker = unlocker
     self.biometricUnlock = biometricUnlock
     self.biometryLabel = biometryLabel
     self.autoPromptOnAppear = autoPromptOnAppear
+    self.externalError = externalError
     self.onUnlocked = onUnlocked
   }
 
@@ -77,7 +83,7 @@ struct VaultUnlockView: View {
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 10))
 
-      if let error = errorMessage {
+      if let error = resolveDisplayError(external: externalError, internalError: errorMessage) {
         Text(error)
           .font(.caption)
           .foregroundStyle(.red)

@@ -46,6 +46,11 @@ struct RootView: View {
   // Shared dependency instances kept alive across state transitions
   @State private var hostSyncService: HostSyncService?
 
+  /// Error surfaced by the biometric-unlock closure onto the passphrase screen —
+  /// e.g. Face ID authenticated but the cacheless resync failed (offline / dead
+  /// token / stale legacy cache). Replaces the previous silent bounce.
+  @State private var biometricErrorText: String?
+
   /// Drives in-place re-localization on a language change without re-creating the
   /// view tree (so an open Settings sheet stays open and the vault stays
   /// unlocked). A `bump()` re-runs `body`, which re-reads `languageLocale`.
@@ -255,11 +260,15 @@ struct RootView: View {
     let biometricUnlock: (@MainActor @Sendable () async -> Void)?
     if biometricsAvailable {
       biometricUnlock = { @MainActor @Sendable in
+        // Clear any prior banner at the start of an attempt.
+        biometricErrorText = nil
+        let sessionStaleMessage = L10n.string(
+          "Your session is out of date. Enter your passphrase to unlock.")
         do {
           let result = try await unlocker.unlockWithBiometrics(
             reason: L10n.string("Unlock your passwd-sso vault.")
           )
-          await handleVaultUnlocked(
+          let reached = await handleVaultUnlocked(
             unlockResult: result,
             serverConfig: serverConfig,
             apiClient: apiClient,
@@ -268,8 +277,18 @@ struct RootView: View {
             // Offline path: no fresh policy fetch — must not clear a persisted value.
             policyAuthoritative: false
           )
+          // Face ID succeeded but the cacheless resync failed and there was no
+          // trustworthy local cache — surface an explicit error instead of the
+          // former silent bounce back to the passphrase screen.
+          if !reached {
+            biometricErrorText = biometricUnlockError(
+              from: nil, syncFailedCacheless: true, message: sessionStaleMessage)
+          }
         } catch {
-          // Biometric cancel/fail → silent fallback to passphrase
+          // A biometric cancel / mismatch shows no banner (stays on passphrase
+          // screen); any other error surfaces the explicit message.
+          biometricErrorText = biometricUnlockError(
+            from: error, syncFailedCacheless: false, message: sessionStaleMessage)
         }
       }
     } else {
@@ -280,10 +299,13 @@ struct RootView: View {
       unlocker: unlocker,
       biometricUnlock: biometricUnlock,
       biometryLabel: biometryLabel,
-      autoPromptOnAppear: autoPromptOnAppear
+      autoPromptOnAppear: autoPromptOnAppear,
+      externalError: biometricErrorText
     ) { result in
       Task { @MainActor in
-        await handleVaultUnlocked(
+        // A passphrase attempt clears any lingering biometric banner.
+        biometricErrorText = nil
+        _ = await handleVaultUnlocked(
           unlockResult: result,
           serverConfig: serverConfig,
           apiClient: apiClient,
@@ -296,6 +318,11 @@ struct RootView: View {
     }
   }
 
+  /// Returns `true` when the unlock reached `.vaultUnlocked`, `false` when it failed
+  /// closed to `.vaultLocked` (cacheless resync failed with no trustworthy local
+  /// cache). The biometric call site turns a `false` into an explicit error banner;
+  /// the passphrase call site ignores it (its own screen already shows errors).
+  @discardableResult
   @MainActor
   private func handleVaultUnlocked(
     unlockResult: UnlockResult,
@@ -304,7 +331,7 @@ struct RootView: View {
     bridgeKeyStore: BridgeKeyStore,
     wrappedKeyStore: any WrappedKeyStore,
     policyAuthoritative: Bool
-  ) async {
+  ) async -> Bool {
     // MUST be the first statement — regression guard for the post-unlock flicker
     // fix (#3): replaces the passphrase/Face ID screen with the splash before the
     // async sync below, so it does not linger during the unlock→list gap. Do not
@@ -368,33 +395,48 @@ struct RootView: View {
       cacheURL: cacheURL
     )
 
-    let cacheData: CacheData
-    if let freshCache = syncReport?.cacheData {
-      // Use the cache the sync just built in-memory. Re-reading the encrypted
-      // file here races the write on the first unlock (fresh bridge-key
-      // counter/UUID window), which left the list empty until a second unlock.
-      cacheData = freshCache
-    } else if let blob = try? bridgeKeyStore.readDirect(), let data = try? readCacheFile(
-      path: cacheURL,
-      vaultKey: vaultKey,
-      expectedHostInstallUUID: blob.hostInstallUUID,
-      expectedCounter: blob.cacheVersionCounter
-    ) {
-      // Sync failed (e.g. offline) — fall back to the last persisted cache.
-      cacheData = data
-    } else {
-      cacheData = CacheData(
-        header: CacheHeader(
-          cacheVersionCounter: 0,
-          cacheIssuedAt: Date(),
-          lastSuccessfulRefreshAt: Date(),
-          entryCount: 0,
-          hostInstallUUID: Data(repeating: 0, count: 16),
-          userId: unlockResult.userId
-        ),
-        entries: "[]".data(using: .utf8)!
+    // Read the persisted cache AT MOST ONCE, and ONLY when the unlock recovered a
+    // valid local cache. On the cacheRecovered==false path we must NEVER re-read the
+    // file: the stale/rolled-back cache must not be trusted, and re-reading with a
+    // second (independent) expectedCounter would re-open a counter-splice window (S2).
+    let persistedCache: CacheData?
+    if unlockResult.cacheRecovered, let blob = try? bridgeKeyStore.readDirect() {
+      persistedCache = try? readCacheFile(
+        path: cacheURL,
+        vaultKey: vaultKey,
+        expectedHostInstallUUID: blob.hostInstallUUID,
+        expectedCounter: blob.cacheVersionCounter
       )
+    } else {
+      persistedCache = nil
     }
+
+    let cacheData: CacheData
+    switch decidePostSync(
+      syncReport: syncReport,
+      cacheRecovered: unlockResult.cacheRecovered,
+      persistedCache: persistedCache
+    ) {
+    case .useFreshCache:
+      // Use the cache the sync just built in-memory. Re-reading the encrypted file
+      // here races the write on the first unlock (fresh bridge-key counter/UUID
+      // window), which left the list empty until a second unlock.
+      cacheData = syncReport?.cacheData ?? persistedCache ?? emptyCacheData(userId: unlockResult.userId)
+    case .useLocalCache:
+      // Sync failed (e.g. offline) — fall back to the last persisted cache.
+      cacheData = persistedCache ?? emptyCacheData(userId: unlockResult.userId)
+    case .failLocked:
+      // Face ID recovered the vault key but the resync failed and there is no
+      // trustworthy local cache. Fail closed to the locked screen (never present an
+      // empty vault as success) and let the caller surface an explicit error.
+      appState = .vaultLocked(serverConfig: serverConfig, apiClient: apiClient)
+      return false
+    }
+
+    // Recover the authoritative keyVersion from the synced entries when a fresh sync
+    // succeeded (the biometric cacheless path defaults keyVersion=1, which must NOT
+    // reach the server on a later create/edit). Falls back to the unlock's value.
+    let effectiveKeyVersion = syncedKeyVersion(from: syncReport) ?? unlockResult.keyVersion
 
     // Mint + stage the AutoFill upload token (plan C6 — passkey registration).
     // Best-effort: a mint failure must not affect the unlock flow.
@@ -416,12 +458,39 @@ struct RootView: View {
       serverConfig: serverConfig,
       vaultKey: vaultKey,
       userId: unlockResult.userId,
-      keyVersion: unlockResult.keyVersion,
+      keyVersion: effectiveKeyVersion,
       cacheData: cacheData,
       autoLockService: autoLockService,
       apiClient: apiClient,
       cacheKey: unlockResult.cacheKey
     )
+    return true
+  }
+
+  /// Synthesize an empty cache for the degenerate fallback (no fresh sync, no
+  /// persisted cache, but cacheRecovered==true so this is a benign offline case).
+  private func emptyCacheData(userId: String) -> CacheData {
+    CacheData(
+      header: CacheHeader(
+        cacheVersionCounter: 0,
+        cacheIssuedAt: Date(),
+        lastSuccessfulRefreshAt: Date(),
+        entryCount: 0,
+        hostInstallUUID: Data(repeating: 0, count: 16),
+        userId: userId
+      ),
+      entries: "[]".data(using: .utf8)!
+    )
+  }
+
+  /// Derive the authoritative keyVersion from a completed sync's entries (first
+  /// personal entry), matching `VaultUnlocker.unlockWithBiometrics`. Returns nil when
+  /// the sync did not surface a cache.
+  private func syncedKeyVersion(from syncReport: SyncReport?) -> Int? {
+    guard let entriesData = syncReport?.cacheData?.entries,
+          let entries = try? JSONDecoder().decode([CacheEntry].self, from: entriesData)
+    else { return nil }
+    return max(1, entries.first(where: { $0.teamId == nil })?.keyVersion ?? 1)
   }
 
   /// Restore the persisted auto-lock timeout onto a freshly-created service

@@ -31,6 +31,12 @@ public struct UnlockResult: Sendable, Equatable {
   /// `readDirect()` returns an EMPTY bridge_key, so cacheKey CANNOT be re-derived
   /// later without a biometric `readForFill`. Thread this from unlock instead.
   public let cacheKey: SymmetricKey
+  /// Whether a valid local cache was already in hand at unlock. The passphrase path
+  /// sets `true` (a persisted cache from a prior session may exist and remains a
+  /// valid offline fallback). The biometric path sets `true` only when Step 5 read a
+  /// valid cache; `false` when the cache was stale / counter-mismatched / unreadable,
+  /// signalling the caller MUST rely on a server resync (and fail closed if it fails).
+  public let cacheRecovered: Bool
 }
 
 /// Source of the encrypted vault-unlock material. `MobileAPIClient` is the
@@ -169,7 +175,10 @@ public actor VaultUnlocker {
       ciphertext: cipher,
       iv: iv,
       authTag: tag,
-      issuedAt: Date()
+      issuedAt: Date(),
+      // Persist userId so the biometric re-unlock path can drive a cacheless
+      // resync when the local cache is stale (C4). Non-secret.
+      userId: unlockData.userId
     )
     try wrappedKeyStore.saveVaultKey(wrapped)
 
@@ -202,7 +211,10 @@ public actor VaultUnlocker {
       userId: unlockData.userId,
       keyVersion: unlockData.keyVersion,
       tenantAutoLockMinutes: unlockData.vaultAutoLockMinutes,
-      cacheKey: cacheKey
+      cacheKey: cacheKey,
+      // Passphrase path did not read a cache during unlock, but a persisted cache
+      // from a prior session may exist and remains a valid offline fallback.
+      cacheRecovered: true
     )
   }
 
@@ -242,32 +254,56 @@ public actor VaultUnlocker {
 
     let vaultKey = SymmetricKey(data: vaultKeyData)
 
-    // Step 5: read encrypted cache to recover userId and keyVersion
-    let cache = try readCacheFile(
-      path: cacheURL,
-      vaultKey: vaultKey,
-      expectedHostInstallUUID: blob.hostInstallUUID,
-      expectedCounter: blob.cacheVersionCounter,
-      now: now()
-    )
-
-    // Guard against empty userId — would silently corrupt personal-entry AAD
-    guard !cache.header.userId.isEmpty else {
-      throw VaultUnlockError.cacheUnreadable
+    // Step 5: read the encrypted cache to recover userId + keyVersion. This is
+    // BEST-EFFORT: a stale / counter-mismatched / unreadable cache must NOT abort
+    // the unlock (the vault_key is already recovered). On failure we degrade to
+    // cacheRecovered=false and let the caller drive a server resync, which rebuilds
+    // the cache from scratch (the same path the passphrase unlock relies on). The
+    // stale cache's entries are never decoded here — only header userId/keyVersion.
+    let recoveredUserId: String
+    let keyVersion: Int
+    let cacheRecovered: Bool
+    do {
+      let cache = try readCacheFile(
+        path: cacheURL,
+        vaultKey: vaultKey,
+        expectedHostInstallUUID: blob.hostInstallUUID,
+        expectedCounter: blob.cacheVersionCounter,
+        now: now()
+      )
+      // Guard against empty userId — would silently corrupt personal-entry AAD.
+      guard !cache.header.userId.isEmpty else {
+        throw VaultUnlockError.cacheUnreadable
+      }
+      let entries = (try? JSONDecoder().decode([CacheEntry].self, from: cache.entries)) ?? []
+      recoveredUserId = cache.header.userId
+      keyVersion = max(1, entries.first(where: { $0.teamId == nil })?.keyVersion ?? 1)
+      cacheRecovered = true
+    } catch let error as EntryCacheError {
+      // Cache stale / counter-mismatched / unreadable. Recover userId from the
+      // persisted wrapped-key metadata (C4) so a cacheless resync can proceed. A
+      // legacy vault (set up before userId was persisted) has no source here → the
+      // caller surfaces an explicit "enter passphrase" error rather than looping.
+      _ = error  // the specific EntryCacheError kind is not needed downstream
+      guard let persistedUserId = (try? wrappedKeyStore.loadVaultKey())?.userId,
+            !persistedUserId.isEmpty
+      else {
+        throw VaultUnlockError.cacheUnreadable
+      }
+      recoveredUserId = persistedUserId
+      keyVersion = 1  // placeholder — RootView re-derives from the synced entries (C5)
+      cacheRecovered = false
     }
-
-    // Step 6: recover keyVersion from the first personal entry in the cache
-    let entries = (try? JSONDecoder().decode([CacheEntry].self, from: cache.entries)) ?? []
-    let keyVersion = max(1, entries.first(where: { $0.teamId == nil })?.keyVersion ?? 1)
 
     // Biometric/offline path: no fresh policy fetch — pass nil so the persisted
     // tenant value is reused (RootView applies it non-authoritatively).
     return UnlockResult(
       vaultKey: vaultKey,
-      userId: cache.header.userId,
+      userId: recoveredUserId,
       keyVersion: keyVersion,
       tenantAutoLockMinutes: nil,
-      cacheKey: cacheKey
+      cacheKey: cacheKey,
+      cacheRecovered: cacheRecovered
     )
   }
 

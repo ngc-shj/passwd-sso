@@ -619,6 +619,170 @@ final class VaultUnlockerTests: XCTestCase {
     XCTAssertNil(result.tenantAutoLockMinutes, "biometric/offline path fetches no fresh policy → nil")
   }
 
+  // MARK: - unlockWithBiometrics graceful stale-cache degradation (C1)
+
+  /// AC-C1.1: a STALE cache (issued 25h before `now`) must NOT throw — the unlock
+  /// returns the recovered vault key with cacheRecovered=false + userId from the
+  /// persisted wrapped-key metadata.
+  func testUnlockWithBiometrics_staleCache_returnsCacheRecoveredFalse() async throws {
+    let issuedAt = Date(timeIntervalSince1970: 1_000_000)
+    let now = issuedAt.addingTimeInterval(25 * 3600)  // 25h later → stale (AND-gate met)
+    let keychain = MockKeychainAccessor()
+    let bks = BridgeKeyStore(accessGroup: "test.jp.jpng.passwd-sso.shared.stale", keychain: keychain)
+    let blob = try bks.create()
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    let vkBytes = vaultKey.withUnsafeBytes { Data($0) }
+    let (c, i, t) = try encryptAESGCM(plaintext: vkBytes, key: cacheKey)
+    try wks.saveVaultKey(
+      WrappedVaultKey(ciphertext: c, iv: i, authTag: t, issuedAt: Date(), userId: "persisted-user"))
+    let cacheURL = tmpDir.appending(path: "stale.cache", directoryHint: .notDirectory)
+    let entry = try makePersonalCacheEntryForBiometricTest(
+      vaultKey: vaultKey, userId: "cache-user", keyVersion: 3)
+    try buildCacheFileForBiometricTest(
+      at: cacheURL, entries: [entry], vaultKey: vaultKey,
+      hostInstallUUID: blob.hostInstallUUID, counter: blob.cacheVersionCounter,
+      userId: "cache-user", now: issuedAt)
+
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .wrongPassphrase),
+      bridgeKeyStore: bks, wrappedKeyStore: wks, cacheURL: cacheURL, now: { now })
+
+    let result = try await unlocker.unlockWithBiometrics(reason: "test")
+    XCTAssertFalse(result.cacheRecovered, "stale cache must degrade to cacheRecovered=false")
+    XCTAssertEqual(result.userId, "persisted-user", "userId must come from persisted wrapped key")
+    XCTAssertEqual(
+      result.vaultKey.withUnsafeBytes { Data($0) }, vkBytes, "vault key still recovered")
+  }
+
+  /// AC-C1.2: a FRESH cache returns cacheRecovered=true with userId/keyVersion from
+  /// the cache header (unchanged fast path).
+  func testUnlockWithBiometrics_freshCache_returnsCacheRecoveredTrue() async throws {
+    let now = Date()
+    let keychain = MockKeychainAccessor()
+    let bks = BridgeKeyStore(accessGroup: "test.jp.jpng.passwd-sso.shared.fresh", keychain: keychain)
+    let blob = try bks.create()
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    let vkBytes = vaultKey.withUnsafeBytes { Data($0) }
+    let (c, i, t) = try encryptAESGCM(plaintext: vkBytes, key: cacheKey)
+    try wks.saveVaultKey(
+      WrappedVaultKey(ciphertext: c, iv: i, authTag: t, issuedAt: Date(), userId: "persisted-user"))
+    let cacheURL = tmpDir.appending(path: "fresh.cache", directoryHint: .notDirectory)
+    let entry = try makePersonalCacheEntryForBiometricTest(
+      vaultKey: vaultKey, userId: "cache-user", keyVersion: 5)
+    try buildCacheFileForBiometricTest(
+      at: cacheURL, entries: [entry], vaultKey: vaultKey,
+      hostInstallUUID: blob.hostInstallUUID, counter: blob.cacheVersionCounter,
+      userId: "cache-user", now: now)
+
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .wrongPassphrase),
+      bridgeKeyStore: bks, wrappedKeyStore: wks, cacheURL: cacheURL, now: { now })
+
+    let result = try await unlocker.unlockWithBiometrics(reason: "test")
+    XCTAssertTrue(result.cacheRecovered, "fresh cache → cacheRecovered=true")
+    XCTAssertEqual(result.userId, "cache-user", "userId from cache header on the fresh path")
+    XCTAssertEqual(result.keyVersion, 5, "keyVersion from cache entry on the fresh path")
+  }
+
+  /// AC-C1.1 (counter-mismatch variant, T3): a cache whose counter no longer matches
+  /// the (bumped) bridge-meta counter is rejected by readCacheFile with
+  /// .counterMismatch → must ALSO degrade gracefully to cacheRecovered=false, NOT throw.
+  func testUnlockWithBiometrics_counterMismatch_returnsCacheRecoveredFalse() async throws {
+    let now = Date()
+    let keychain = MockKeychainAccessor()
+    let bks = BridgeKeyStore(accessGroup: "test.jp.jpng.passwd-sso.shared.counter", keychain: keychain)
+    let blob = try bks.create()
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    let vkBytes = vaultKey.withUnsafeBytes { Data($0) }
+    let (c, i, t) = try encryptAESGCM(plaintext: vkBytes, key: cacheKey)
+    try wks.saveVaultKey(
+      WrappedVaultKey(ciphertext: c, iv: i, authTag: t, issuedAt: Date(), userId: "persisted-user"))
+    let cacheURL = tmpDir.appending(path: "counter.cache", directoryHint: .notDirectory)
+    let entry = try makePersonalCacheEntryForBiometricTest(
+      vaultKey: vaultKey, userId: "cache-user", keyVersion: 1)
+    // Seed the cache at the CURRENT counter, then bump the bridge-meta counter so the
+    // biometric read's expectedCounter no longer matches the file.
+    try buildCacheFileForBiometricTest(
+      at: cacheURL, entries: [entry], vaultKey: vaultKey,
+      hostInstallUUID: blob.hostInstallUUID, counter: blob.cacheVersionCounter,
+      userId: "cache-user", now: now)
+    try bks.incrementCounter(newCounter: blob.cacheVersionCounter + 1)
+
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .wrongPassphrase),
+      bridgeKeyStore: bks, wrappedKeyStore: wks, cacheURL: cacheURL, now: { now })
+
+    let result = try await unlocker.unlockWithBiometrics(reason: "test")
+    XCTAssertFalse(result.cacheRecovered, "counter mismatch must degrade gracefully, not throw")
+    XCTAssertEqual(result.userId, "persisted-user")
+  }
+
+  /// AC-C1.3 / AC-C1.4: a legacy vault (persisted userId nil) with a STALE cache has
+  /// no cacheless-sync source → throws .cacheUnreadable. After a userId is persisted
+  /// (simulating one passphrase unlock), the same stale cache now degrades gracefully.
+  func testUnlockWithBiometrics_legacyVaultStaleCache_throwsThenHeals() async throws {
+    let issuedAt = Date(timeIntervalSince1970: 2_000_000)
+    let now = issuedAt.addingTimeInterval(25 * 3600)
+    let keychain = MockKeychainAccessor()
+    let bks = BridgeKeyStore(accessGroup: "test.jp.jpng.passwd-sso.shared.legacy", keychain: keychain)
+    let blob = try bks.create()
+    let cacheKey = try deriveCacheVaultKey(bridgeKey: blob.bridgeKey)
+    let vaultKey = SymmetricKey(size: .bits256)
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    let vkBytes = vaultKey.withUnsafeBytes { Data($0) }
+    let (c, i, t) = try encryptAESGCM(plaintext: vkBytes, key: cacheKey)
+    // Legacy: no userId on the wrapped key.
+    try wks.saveVaultKey(
+      WrappedVaultKey(ciphertext: c, iv: i, authTag: t, issuedAt: Date(), userId: nil))
+    let cacheURL = tmpDir.appending(path: "legacy.cache", directoryHint: .notDirectory)
+    let entry = try makePersonalCacheEntryForBiometricTest(
+      vaultKey: vaultKey, userId: "cache-user", keyVersion: 1)
+    try buildCacheFileForBiometricTest(
+      at: cacheURL, entries: [entry], vaultKey: vaultKey,
+      hostInstallUUID: blob.hostInstallUUID, counter: blob.cacheVersionCounter,
+      userId: "cache-user", now: issuedAt)
+
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .wrongPassphrase),
+      bridgeKeyStore: bks, wrappedKeyStore: wks, cacheURL: cacheURL, now: { now })
+
+    do {
+      _ = try await unlocker.unlockWithBiometrics(reason: "test")
+      XCTFail("legacy vault + stale cache must throw .cacheUnreadable")
+    } catch VaultUnlockError.cacheUnreadable {
+      // expected
+    }
+
+    // Heal: persist a userId (simulating one passphrase unlock), keep the stale cache.
+    try wks.saveVaultKey(
+      WrappedVaultKey(ciphertext: c, iv: i, authTag: t, issuedAt: Date(), userId: "backfilled-user"))
+    let healed = try await unlocker.unlockWithBiometrics(reason: "test")
+    XCTAssertFalse(healed.cacheRecovered)
+    XCTAssertEqual(healed.userId, "backfilled-user", "post-backfill unlock recovers gracefully")
+  }
+
+  /// AC-C4.1: after a passphrase unlock, the persisted wrapped vault key carries the
+  /// unlockData userId (C4 producer).
+  func testUnlock_persistsUserIdOnWrappedVaultKey() async throws {
+    let (unlockData, _) = try makeVaultUnlockData(passphrase: "p")
+    let wks = TempDirWrappedKeyStore(baseDir: tmpDir)
+    let unlocker = VaultUnlocker(
+      apiClient: StubVaultAPIClient(mode: .success(unlockData)),
+      bridgeKeyStore: BridgeKeyStore(
+        accessGroup: "test", service: "com.passwd-sso.test.c4.bridge-key", keychain: MockKeychain()),
+      wrappedKeyStore: wks,
+      cacheURL: tmpDir.appending(path: "c4.cache", directoryHint: .notDirectory))
+    _ = try await unlocker.unlock(passphrase: "p")
+    let persisted = try XCTUnwrap(try wks.loadVaultKey())
+    XCTAssertEqual(persisted.userId, "test-user-42", "unlock must persist unlockData.userId")
+  }
+
   // MARK: - unlockWithBiometrics error paths
 
   func testUnlockWithBiometrics_missingWrappedKey_throwsBiometricUnavailable() async throws {

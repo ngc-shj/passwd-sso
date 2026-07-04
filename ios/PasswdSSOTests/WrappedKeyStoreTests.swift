@@ -38,6 +38,24 @@ final class WrappedKeyStoreTests: XCTestCase {
     let loaded = try store.loadVaultKey()
     XCTAssertNotNil(loaded)
     XCTAssertEqual(loaded, wrapped)
+    XCTAssertNil(loaded?.userId, "userId defaults to nil when not supplied (legacy-compatible)")
+  }
+
+  /// AC-C4.3: a WrappedVaultKey with a non-nil userId round-trips through JSON
+  /// encode/decode at the store layer (proves the new C4 field persists).
+  func testVaultKeyRoundTrip_withUserId() throws {
+    let wrapped = WrappedVaultKey(
+      ciphertext: Data([0x01, 0x02]),
+      iv: Data(repeating: 0xAA, count: 12),
+      authTag: Data(repeating: 0xBB, count: 16),
+      issuedAt: Date(timeIntervalSince1970: 1_000_000),
+      userId: "user-abc"
+    )
+    try store.saveVaultKey(wrapped)
+
+    let loaded = try store.loadVaultKey()
+    XCTAssertEqual(loaded, wrapped)
+    XCTAssertEqual(loaded?.userId, "user-abc")
   }
 
   func testVaultKeyOverwrite() throws {

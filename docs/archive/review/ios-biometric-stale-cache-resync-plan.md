@@ -638,6 +638,59 @@ The fallback path does **not** open a new authz/DPoP/token hole because:
    via resync. **One-time transition, explicit (never silent).** Offline+legacy+stale
    is an unavoidable hard-fail, also explicit.
 
+## Implementation Checklist (Step 2-1)
+
+**Confirmed error copy (user-approved)**:
+- en (key): `Your session is out of date. Enter your passphrase to unlock.`
+- ja: `セッション情報が古くなっています。パスフレーズを入力して解錠してください。`
+- Location: `ios/PasswdSSOApp/Localizable.xcstrings` (hand-authored `en`+`ja`
+  `stringUnit`, `extractionState: "stale"` — matches the 2 existing unlock keys;
+  xcodebuild does not write extraction back, per memory `ios-string-catalog-notes`).
+
+**Files to modify**:
+1. `ios/Shared/Storage/WrappedKeyStore.swift` — C4: add `userId: String?` to
+   `WrappedVaultKey` + memberwise `init(..., userId: String? = nil)`.
+2. `ios/PasswdSSOApp/Vault/VaultUnlocker.swift` — C1: add `cacheRecovered: Bool`
+   to `UnlockResult`; `unlock` passes `userId:` to `WrappedVaultKey` (C4 producer)
+   + sets `cacheRecovered: true`; `unlockWithBiometrics` wraps Step 5 in do/catch,
+   sets `cacheRecovered` + legacy-userId fallback + `.cacheUnreadable` throw.
+   (2 `UnlockResult(` producers at :200,:265; both get the new field.)
+3. `ios/PasswdSSOApp/Debug/DebugVaultLoader.swift:98` — C4 producer: pass `userId:`.
+4. `ios/PasswdSSOApp/Views/RootView.swift` — C2/C3/C5: `@discardableResult ... -> Bool`;
+   `decidePostSync` call + structural guard (no re-read on cacheRecovered==false);
+   synced-keyVersion derivation; biometric closure sets `biometricErrorText` via
+   `biometricUnlockError`; pass `externalError:` into `VaultUnlockView`.
+5. `ios/PasswdSSOApp/Views/Vault/VaultUnlockView.swift` — C3: add `externalError: String?`
+   param (default nil); display via `resolveDisplayError`.
+6. New pure functions (app target, `@testable`-importable like `VaultViewModel`):
+   `decidePostSync`, `biometricUnlockError`, `resolveDisplayError` — colocate in a
+   small `PostSyncDecision.swift` (mirrors `LockStateReducer` split).
+7. `ios/PasswdSSOApp/Localizable.xcstrings` — new error key (above).
+
+**Tests to add/update**:
+- `ios/PasswdSSOTests/VaultUnlockerTests.swift` — AC-C1.1..C1.4 (stale→false,
+  fresh→true, counter-mismatch→false, legacy bootstrap), AC-C4.1/4.2.
+- `ios/PasswdSSOTests/WrappedKeyStoreTests.swift` — AC-C4.3 store round-trip.
+- `ios/PasswdSSOTests/HostSyncServiceTests.swift` (new or existing) — T1 healing.
+- New `ios/PasswdSSOTests/PostSyncDecisionTests.swift` — AC-C5.1..C5.6, AC-C2.1,
+  AC-C3.1/3.2.
+
+**Reuse (no reimplementation)**:
+- `L10n.string(...)` for the new error (existing i18n helper).
+- `max(1, entries.first { $0.teamId == nil }?.keyVersion ?? 1)` keyVersion logic
+  already at `VaultUnlocker.swift:261` — reuse the same expression in C5.
+- `readCacheFile` / `writeCacheFile` (unchanged), `HostSyncService.runSync`.
+- Test helpers: `buildCacheFileForBiometricTest`, `MockKeychainAccessor`,
+  `TempDirWrappedKeyStore`, `StubVaultAPIClient`, injectable `now`.
+
+**No parallel-implementation risk**: `UnlockResult(` = 2 sites (both `VaultUnlocker`),
+`WrappedVaultKey(` = 15 sites (2 prod + 13 test, all safe via `= nil` default),
+`handleVaultUnlocked` = 2 call sites (`:262` biometric, `:286` passphrase).
+
+**CI parity**: iOS CI runs `xcodegen generate` + `xcodebuild test`. After adding
+`PostSyncDecision.swift` / `PostSyncDecisionTests.swift`, `xcodegen generate` must
+regenerate the pbxproj and it must be committed (memory `ios-xcodegen-build-settings`).
+
 ## Go/No-Go Gate
 
 | ID  | Subject                                                        | Status  |
