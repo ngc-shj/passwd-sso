@@ -102,3 +102,23 @@ C6-C9 docs (tenant-boundary-matrix, auth-surface-matrix, audit-chain-threat-mode
 the `check-security-doc-exists.sh` data-driven refactor, README index, and SC3 marker
 were interrupted before any file was written (sub-agent was still gathering context).
 To resume from scratch.
+
+## D7 — Phase 2 complete (all contracts implemented)
+
+All 9 contracts implemented and committed on hardening/route-policy-sql-security:
+- C1 (route-policy manifest + parity test) — 23a0e336
+- C5 (generated matrices) — e28e4b51
+- C4 body fixes (A2 delete-first, S1 null-retention reject) — 30e89367
+- C4-S1 lateral (purge-history floor) — 944104ab; bypass-rls allowlist followup — (this batch)
+- C4 regression tests (T2/T8/A2 concurrency) — c73efe14
+- C6-C9 (tenant-boundary, auth-surface, audit-chain-threat-model docs + guard) — 34d389eb
+- C2 (raw-sql-usage allowlist + span-based interpolation ban) — 57b9d2f6
+
+Phase 2 completion checks: `bash scripts/pre-pr.sh` full run PASSED (11968 tests,
+build, CLI, extension all green — the error/warn log lines are test-injected failure
+scenarios). R35: no deployment artifacts. Contract forbidden-patterns: none present.
+Feedback memory cross-check: clean.
+
+Deferred to follow-up PRs (unchanged from D4): A1 purge watermark, A3
+setBypassRlsGucsOnTx consolidation, C4-S3 purge audit-record atomicity, SC1
+mobile-extension trust boundary matrix, SC3 docs/security path-guard.
