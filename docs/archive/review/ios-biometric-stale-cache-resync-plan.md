@@ -493,7 +493,14 @@ evaluated against the code:
     does NOT rescue a cacheless failed sync).
   - AC-C5.2: `decidePostSync(nil, false, nil)` → `.failLocked`.
   - AC-C5.3: `decidePostSync(nil, true, <non-nil>)` → `.useLocalCache`.
-  - AC-C5.4: `decidePostSync(nil, true, nil)` → `.failLocked`.
+  - AC-C5.4 (REVISED — Phase 3 F1): `decidePostSync(nil, true, nil)` →
+    `.useEmptyCache` (NOT `.failLocked`). A valid unlock (passphrase always sets
+    `cacheRecovered=true`) with no persisted cache is a brand-new / first-offline
+    vault — a legitimate empty-vault success state, not a fail-closed condition.
+    Fail-closed (`.failLocked`) is reserved for the `cacheRecovered==false`
+    (biometric stale/rolled-back) case. The Round-0 plan had this wrong; the
+    empty-vault synthesis the old code did for the passphrase path was correct and
+    must be preserved (INV-C5.2). A distinct `.useEmptyCache` outcome carries this.
   - AC-C5.5: `decidePostSync(<non-nil>, _, _)` → `.useFreshCache`.
   - AC-C5.6 (F2, mildly-stale realism): the S2 sharp case — a cache that is
     >1h old but refreshed <24h ago (so `readCacheFile` would NOT throw staleness)
