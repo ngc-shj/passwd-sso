@@ -26,10 +26,13 @@
  * Multi-method files are excluded from assertion 7 entirely (writes belong to
  * their mutating handlers, not the GET branch).
  *
- * Assertion 8b requires a fail-closed rate-limit call (createRateLimiter +
- * failClosedOnRedisError: true + checkRateLimitOrFail) in every
- * `operatorGated: true` file. If the limiter symbols are ever renamed,
- * re-derive them with:
+ * Assertion 8b requires a fail-closed rate-limit call (a real
+ * createRateLimiter({ failClosedOnRedisError: true }) call, a real
+ * checkRateLimitOrFail call, and the fail-closed limiter flowing into it) in
+ * every `operatorGated: true` file. Assertions 6/7/8b/8c match via AST
+ * (src/__tests__/proxy/ast-guards.ts) rather than lexical source text, so a
+ * required call hidden in a comment / string / unused import no longer satisfies
+ * a guard. If the limiter symbols are ever renamed, re-derive them with:
  *   grep -rn 'RateLimit' src/app/api/maintenance src/app/api/admin --include=route.ts
  */
 import { describe, it, expect } from "vitest";
@@ -37,6 +40,13 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { classifyRoute } from "@/lib/proxy/route-policy";
 import { isBearerBypassRoute } from "@/lib/proxy/cors-gate";
+import {
+  parseRouteSource,
+  hasRealCall,
+  hasCallWithObjectFlag,
+  limiterFlagFlowsToChecker,
+  matchesInCodeText,
+} from "./ast-guards";
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const API_DIR = path.join(REPO_ROOT, "src/app/api");
@@ -210,7 +220,7 @@ describe("route-policy-manifest.json parity", () => {
     const mismatches: string[] = [];
     for (const repoRelPath of manifestKeys) {
       const source = readFileSync(path.join(REPO_ROOT, repoRelPath), "utf8");
-      const actualDestructive = DELETE_SIGNAL.test(source);
+      const actualDestructive = matchesInCodeText(parseRouteSource(source, repoRelPath), DELETE_SIGNAL);
       const declaredDestructive = manifest.routes[repoRelPath].destructive === true;
       if (actualDestructive !== declaredDestructive) {
         mismatches.push(
@@ -227,7 +237,8 @@ describe("route-policy-manifest.json parity", () => {
       const entry = manifest.routes[repoRelPath];
       const isGetOnly = entry.methods.length === 1 && entry.methods[0] === "GET";
       const source = readFileSync(path.join(REPO_ROOT, repoRelPath), "utf8");
-      const hasWritePrimitive = isGetOnly && WRITE_PRIMITIVE.test(source);
+      const hasWritePrimitive =
+        isGetOnly && matchesInCodeText(parseRouteSource(source, repoRelPath), WRITE_PRIMITIVE);
       const hasReason = Boolean(entry.sideEffectingGet && entry.sideEffectingGet.length >= 10);
       const exemptionReason = SIDE_EFFECTING_GET_EXEMPTIONS[repoRelPath];
 
@@ -272,35 +283,41 @@ describe("route-policy-manifest.json parity", () => {
   });
 
   it("assertion 8b: every operatorGated:true entry enforces admin auth AND fail-closed rate limiting", () => {
-    // Two invariants for every operator-gated route:
-    //   1. Admin auth: verifyAdminToken( + requireMaintenanceOperator(
-    //   2. Fail-closed rate limiting (#629): createRateLimiter( +
-    //      failClosedOnRedisError: true + checkRateLimitOrFail(
-    // The rate-limit half is a structural (existence) guard: it catches a
-    // route that ships without any throttle, or one whose limiter drops
-    // failClosedOnRedisError (shedding its throttle during a Redis outage —
-    // exactly the blast-radius #629 closed). It does NOT verify the key is
-    // tenant-scoped — that argument-level contract is pinned per route in the
-    // maintenance route.test.ts files ("returns 429 when rate limited"), a
-    // separate layer this existence check cannot see.
+    // Two invariants for every operator-gated route, verified by AST (not lexical
+    // source.includes) so a required call hidden in a comment / string / unused
+    // import cannot satisfy the guard:
+    //   1. Admin auth: verifyAdminToken( + requireMaintenanceOperator( as real calls
+    //   2. Fail-closed rate limiting (#629): a real createRateLimiter({
+    //      failClosedOnRedisError: true }) call, a real checkRateLimitOrFail( call,
+    //      AND the fail-closed limiter flows into checkRateLimitOrFail's `limiter:`
+    //      arg (limiterFlagFlowsToChecker — closes the "flag exists somewhere vs.
+    //      the consumed limiter carries it" dataflow gap).
+    // It does NOT verify the key is tenant-scoped — that argument-level contract is
+    // pinned per route in the maintenance route.test.ts files ("returns 429 when
+    // rate limited"), a separate layer this existence check cannot see.
     const violations: string[] = [];
     for (const repoRelPath of manifestKeys) {
       if (manifest.routes[repoRelPath].operatorGated !== true) continue;
       const source = readFileSync(path.join(REPO_ROOT, repoRelPath), "utf8");
-      if (!source.includes("verifyAdminToken(")) {
+      const sf = parseRouteSource(source, repoRelPath);
+      if (!hasRealCall(sf, "verifyAdminToken")) {
         violations.push(`${repoRelPath}: operatorGated=true but missing verifyAdminToken(`);
       }
-      if (!source.includes("requireMaintenanceOperator(")) {
+      if (!hasRealCall(sf, "requireMaintenanceOperator")) {
         violations.push(`${repoRelPath}: operatorGated=true but missing requireMaintenanceOperator(`);
       }
-      if (!source.includes("createRateLimiter(")) {
-        violations.push(`${repoRelPath}: operatorGated=true but missing createRateLimiter(`);
+      if (!hasCallWithObjectFlag(sf, "createRateLimiter", "failClosedOnRedisError", true)) {
+        violations.push(
+          `${repoRelPath}: operatorGated=true but missing createRateLimiter({ failClosedOnRedisError: true })`,
+        );
       }
-      if (!/failClosedOnRedisError:\s*true/.test(source)) {
-        violations.push(`${repoRelPath}: operatorGated=true but missing failClosedOnRedisError: true`);
-      }
-      if (!source.includes("checkRateLimitOrFail(")) {
+      if (!hasRealCall(sf, "checkRateLimitOrFail")) {
         violations.push(`${repoRelPath}: operatorGated=true but missing checkRateLimitOrFail(`);
+      }
+      if (!limiterFlagFlowsToChecker(sf)) {
+        violations.push(
+          `${repoRelPath}: operatorGated=true but the fail-closed limiter does not flow into checkRateLimitOrFail`,
+        );
       }
     }
     expect(violations).toEqual([]);
@@ -310,7 +327,7 @@ describe("route-policy-manifest.json parity", () => {
     const violations: string[] = [];
     for (const repoRelPath of routeFiles) {
       const source = readFileSync(path.join(REPO_ROOT, repoRelPath), "utf8");
-      if (!source.includes("requireMaintenanceOperator(")) continue;
+      if (!hasRealCall(parseRouteSource(source, repoRelPath), "requireMaintenanceOperator")) continue;
       const entry = manifest.routes[repoRelPath];
       if (!entry || entry.operatorGated !== true) {
         violations.push(`${repoRelPath}: calls requireMaintenanceOperator( but is not declared operatorGated:true`);
