@@ -122,3 +122,28 @@ Feedback memory cross-check: clean.
 Deferred to follow-up PRs (unchanged from D4): A1 purge watermark, A3
 setBypassRlsGucsOnTx consolidation, C4-S3 purge audit-record atomicity, SC1
 mobile-extension trust boundary matrix, SC3 docs/security path-guard.
+
+## D8 — Phase 3 code review complete (3 rounds, converged)
+
+Three review rounds on the branch (functionality/security/testing experts, Round 1;
+security+testing, Rounds 2-3). Findings and disposition:
+- R1: F1 (purge-history tenant-null asymmetry), F2 (generator dbName fallback untested),
+  S1 (doc line drift), S2 (marker truthfulness — hardened to catch absent-name),
+  S3 (span resolver silent-skip → fail closed) — all 5 Minor, FIXED (commit 5b4d009d).
+- R2: T5 (checker had no permanent regression test) — Major, FIXED with
+  scripts/__tests__/check-raw-sql-usage.test.mjs + RAW_SQL_CHECK_* env overrides
+  (commit bf1b8a52); S5 (MARKER_VALIDATOR_ABSENT checks name existence not
+  invocation-on-tainted-value) — Major, ACCEPTED with quantified rationale (plan-
+  acknowledged lexical-guard ceiling; review-enforced; residual comment added).
+- R3: S6 (my Round-2 bare catch swallowed non-ENOENT errors = fail-open in a
+  fail-closed file) — Minor, FIXED (commit 01ea2e48).
+
+Adjacent / recorded, no code change:
+- T2 concurrency test uses raceTwoClients (pre-warm + Promise.all) instead of the
+  D3-planned Deferred barrier. Synchronization correctness comes from the production
+  FOR UPDATE row lock; assertions don't depend on race-winner identity → the test is
+  not weakened. Deviation from the planned mechanism, not a defect.
+- Recurring lesson (2 instances this cycle): authored checker/tooling logic tends to
+  ship with no permanent test of its own branches (proven only via manual fixture runs);
+  and test-support plumbing (env overrides, missing-root handling) can introduce a
+  fail-open catch into a fail-closed file. Both caught and fixed in review.
