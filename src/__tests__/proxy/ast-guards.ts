@@ -33,8 +33,10 @@ type WithParseDiagnostics = { parseDiagnostics?: ReadonlyArray<unknown> };
 export function parseRouteSource(source: string, virtualPath: string): SourceFile {
   const sf = project.createSourceFile(virtualPath, source, { overwrite: true });
   const diagnostics = (sf.compilerNode as unknown as WithParseDiagnostics).parseDiagnostics;
-  if (diagnostics && diagnostics.length > 0) {
-    throw new Error(`parseRouteSource: ${virtualPath} has parse diagnostics`);
+  // Fail closed: absence of the diagnostics channel (a future ts-morph/TS field
+  // rename) is itself a reason to refuse the parse, not to trust it silently.
+  if (!Array.isArray(diagnostics) || diagnostics.length > 0) {
+    throw new Error(`parseRouteSource: ${virtualPath} has parse diagnostics or none available`);
   }
   return sf;
 }
@@ -114,12 +116,13 @@ export function limiterFlagFlowsToChecker(sf: SourceFile): boolean {
     if (Node.isCallExpression(limiter)) return isFailClosedLimiterCall(limiter);
 
     if (Node.isIdentifier(limiter)) {
-      const name = limiter.getText();
-      return sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration).some((decl) => {
-        if (decl.getName() !== name) return false;
-        const init = decl.getInitializer();
-        return init !== undefined && Node.isCallExpression(init) && isFailClosedLimiterCall(init);
-      });
+      // Resolve the identifier to the binding it actually refers to (scope-aware),
+      // NOT any same-name declaration in the file — a shadowing fail-closed const
+      // elsewhere must not satisfy the guard when the consumed limiter is flagless.
+      const decl = limiter.getSymbol()?.getValueDeclaration();
+      if (!decl || !Node.isVariableDeclaration(decl)) return false;
+      const init = decl.getInitializer();
+      return init !== undefined && Node.isCallExpression(init) && isFailClosedLimiterCall(init);
     }
     return false;
   });

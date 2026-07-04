@@ -127,6 +127,21 @@ async function h(req) {
     expect(hasCallWithObjectFlag(sf, "createRateLimiter", "failClosedOnRedisError", true)).toBe(true);
     expect(limiterFlagFlowsToChecker(sf)).toBe(false);
   });
+
+  it("false when a same-name fail-closed const shadows the consumed flagless one", () => {
+    // Scope-aware resolution: the handler consumes a flagless `rateLimiter`; an
+    // unrelated same-name fail-closed const exists in another scope. Name-only
+    // matching would pass here — symbol resolution must not.
+    const src = `
+function h() {
+  const rateLimiter = createRateLimiter({ max: 1 });
+  return checkRateLimitOrFail({ limiter: rateLimiter, key: "x" });
+}
+function unused() {
+  const rateLimiter = createRateLimiter({ failClosedOnRedisError: true });
+}`;
+    expect(limiterFlagFlowsToChecker(parse(src))).toBe(false);
+  });
 });
 
 describe("matchesInCodeText", () => {
