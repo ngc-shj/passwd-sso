@@ -337,22 +337,20 @@ describe("POST /api/mcp/register", () => {
     expect(status).toBe(201);
   });
 
-  // C6 acceptance: deleteMany called with exact where before count (invocationCallOrder)
-  // T9: tx-side deleteMany (mockTxDeleteMany) is distinct from top-level mockPrismaDeleteMany,
-  // proving the operation executes inside the transaction.
+  // C6 acceptance: deleteMany called with exact where before count (invocationCallOrder).
+  // The lazy-cleanup deleteMany + count + create now run directly on the
+  // withBypassRls callback's tx (redundant inner $transaction removed), so the
+  // tx-scoped deleteMany is mockPrismaDeleteMany — the mcpClient method carried
+  // by the prisma mock that mockWithBypassRls passes through as `tx`.
   it("C6: calls deleteMany with expired-unclaimed where before count inside transaction", async () => {
     const req = createRequest("POST", "http://localhost/api/mcp/register", {
       body: VALID_BODY,
     });
     await POST(req);
 
-    // T9: top-level prisma.mcpClient.deleteMany must NOT have been called directly —
-    // only the tx-scoped version runs inside the transaction.
-    expect(mockPrismaDeleteMany).not.toHaveBeenCalled();
-
-    // T9 + C6: tx deleteMany must be called with the exact C6 where clause
-    expect(mockTxDeleteMany).toHaveBeenCalledOnce();
-    const deleteManyCall = mockTxDeleteMany.mock.calls[0]?.[0] as {
+    // C6: tx deleteMany must be called exactly once with the exact C6 where clause
+    expect(mockPrismaDeleteMany).toHaveBeenCalledOnce();
+    const deleteManyCall = mockPrismaDeleteMany.mock.calls[0]?.[0] as {
       where: { isDcr: boolean; tenantId: null; dcrExpiresAt: { lt: unknown } };
     };
     expect(deleteManyCall.where.isDcr).toBe(true);
@@ -360,7 +358,7 @@ describe("POST /api/mcp/register", () => {
     expect(deleteManyCall.where.dcrExpiresAt.lt).toBeInstanceOf(Date);
 
     // deleteMany must be called BEFORE count (invocationCallOrder guard)
-    const deleteManyOrder = mockTxDeleteMany.mock.invocationCallOrder[0]!;
+    const deleteManyOrder = mockPrismaDeleteMany.mock.invocationCallOrder[0]!;
     const countOrder = mockPrismaCount.mock.invocationCallOrder[0]!;
     expect(deleteManyOrder).toBeLessThan(countOrder);
   });

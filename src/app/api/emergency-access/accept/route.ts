@@ -70,34 +70,32 @@ async function handlePOST(req: NextRequest) {
 
   // Atomic compare-and-swap: only transitions a still-PENDING row, and only
   // creates the escrow key pair if the transition actually fired.
-  const txResult = await withBypassRls(prisma, async (tx) =>
-    prisma.$transaction(async (tx) => {
-      // C6 (early-return variant): if transition() reports !ok, the surrounding
-      // tx commits but nothing follows the early return inside this callback,
-      // so the post-CAS keyPair.create is correctly gated. Equivalent to throw
-      // for atomicity purposes — see deviation log §C6 alternative pattern.
-      const transitionResult = await transition({
-        db: tx,
-        where: { id: grant.id, tokenHash: grant.tokenHash },
-        to: EA_STATUS.ACCEPTED,
-        actor: EA_ACTOR.GRANTEE,
-        extraData: { granteeId: session.user.id, granteePublicKey },
-      });
-      if (!transitionResult.ok) {
-        return { ok: false as const };
-      }
-      await tx.emergencyAccessKeyPair.create({
-        data: {
-          grantId: grant.id,
-          tenantId: grant.tenantId,
-          encryptedPrivateKey: encryptedPrivateKey.ciphertext,
-          privateKeyIv: encryptedPrivateKey.iv,
-          privateKeyAuthTag: encryptedPrivateKey.authTag,
-        },
-      });
-      return { ok: true as const };
-    }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  const txResult = await withBypassRls(prisma, async (tx) => {
+    // C6 (early-return variant): if transition() reports !ok, the surrounding
+    // tx commits but nothing follows the early return inside this callback,
+    // so the post-CAS keyPair.create is correctly gated. Equivalent to throw
+    // for atomicity purposes — see deviation log §C6 alternative pattern.
+    const transitionResult = await transition({
+      db: tx,
+      where: { id: grant.id, tokenHash: grant.tokenHash },
+      to: EA_STATUS.ACCEPTED,
+      actor: EA_ACTOR.GRANTEE,
+      extraData: { granteeId: session.user.id, granteePublicKey },
+    });
+    if (!transitionResult.ok) {
+      return { ok: false as const };
+    }
+    await tx.emergencyAccessKeyPair.create({
+      data: {
+        grantId: grant.id,
+        tenantId: grant.tenantId,
+        encryptedPrivateKey: encryptedPrivateKey.ciphertext,
+        privateKeyIv: encryptedPrivateKey.iv,
+        privateKeyAuthTag: encryptedPrivateKey.authTag,
+      },
+    });
+    return { ok: true as const };
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!txResult.ok) {
     return errorResponse(API_ERROR.INVITATION_ALREADY_USED);

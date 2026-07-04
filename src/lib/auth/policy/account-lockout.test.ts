@@ -3,8 +3,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const {
   mockPrismaUser,
   mockPrismaTenant,
-  mockPrismaTransaction,
+  mockTxState,
   mockLogAudit,
+  mockLogAuditInTx,
   mockExtractRequestMeta,
   mockGetLogger,
   mockLoggerInstance,
@@ -18,8 +19,19 @@ const {
   return {
     mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
     mockPrismaTenant: { findUnique: vi.fn() },
-    mockPrismaTransaction: vi.fn(),
+    // Raw-SQL behavior for the inner bypass-RLS callback (the former
+    // $transaction body now runs directly on the withBypassRls tx). Model
+    // methods (user/tenant) delegate to the shared module mocks so existing
+    // assertions on mockPrismaUser/mockPrismaTenant still hold.
+    mockTxState: {
+      queryRawImpl: vi.fn(),
+      executeRawImpl: vi.fn(),
+    } as {
+      queryRawImpl: ReturnType<typeof vi.fn>;
+      executeRawImpl: ReturnType<typeof vi.fn>;
+    },
     mockLogAudit: vi.fn(),
+    mockLogAuditInTx: vi.fn(),
     mockExtractRequestMeta: vi.fn().mockReturnValue({ ip: null, userAgent: null }),
     mockGetLogger: vi.fn(() => mockLoggerInstance),
     mockLoggerInstance,
@@ -31,14 +43,29 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: mockPrismaUser,
     tenant: mockPrismaTenant,
-    $transaction: mockPrismaTransaction,
   },
 }));
+// The former inner prisma.$transaction was folded away: the lockout body now
+// runs directly on the tx that withBypassRls passes to its callback. So the
+// tx mock here must expose every method the body calls: $executeRaw (SET LOCAL),
+// $queryRaw (the FOR UPDATE row read), user.update (counter write), plus the
+// user.findUnique / tenant.findUnique used by the other bypass call-sites
+// (tenantId resolution, checkLockout, getLockoutThresholds). Model methods
+// delegate to the shared module mocks so existing assertions still hold.
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
-  withBypassRls: vi.fn((prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+  withBypassRls: vi.fn((_prisma: unknown, fn: (tx: unknown) => unknown) => {
+    const tx = {
+      $executeRaw: (...args: unknown[]) => mockTxState.executeRawImpl(...args),
+      $queryRaw: (...args: unknown[]) => mockTxState.queryRawImpl(...args),
+      user: mockPrismaUser,
+      tenant: mockPrismaTenant,
+    };
+    return fn(tx);
+  }),
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditInTx: mockLogAuditInTx,
   extractRequestMeta: mockExtractRequestMeta,
 }));
 vi.mock("@/lib/logger", () => ({
@@ -105,14 +132,9 @@ describe("recordFailure", () => {
     last_failed_unlock_at: Date | null;
     account_locked_until: Date | null;
   }) {
-    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-      const tx = {
-        $executeRaw: vi.fn(),
-        $queryRaw: vi.fn().mockResolvedValue([row]),
-        user: { update: vi.fn() },
-      };
-      return fn(tx);
-    });
+    mockTxState.executeRawImpl.mockResolvedValue(undefined);
+    mockTxState.queryRawImpl.mockResolvedValue([row]);
+    mockPrismaUser.update.mockResolvedValue(undefined);
   }
 
   it("increments counter on first failure", async () => {
@@ -254,7 +276,7 @@ describe("recordFailure", () => {
     const lockTimeoutError = Object.assign(new Error("lock timeout"), {
       code: "55P03",
     });
-    mockPrismaTransaction.mockRejectedValue(lockTimeoutError);
+    mockTxState.queryRawImpl.mockRejectedValue(lockTimeoutError);
 
     const result = await recordFailure("user-1");
     expect(result).toBeNull();
@@ -269,7 +291,7 @@ describe("recordFailure", () => {
       code: "P2010",
       meta: { code: "55P03" },
     });
-    mockPrismaTransaction.mockRejectedValue(prismaError);
+    mockTxState.queryRawImpl.mockRejectedValue(prismaError);
 
     const result = await recordFailure("user-1");
     expect(result).toBeNull();
@@ -283,7 +305,7 @@ describe("recordFailure", () => {
     const wrappedError = Object.assign(new Error("transaction failed"), {
       cause: Object.assign(new Error("lock timeout"), { code: "55P03" }),
     });
-    mockPrismaTransaction.mockRejectedValue(wrappedError);
+    mockTxState.queryRawImpl.mockRejectedValue(wrappedError);
 
     const result = await recordFailure("user-1");
     expect(result).toBeNull();
@@ -293,7 +315,7 @@ describe("recordFailure", () => {
     const lockTimeoutError = Object.assign(new Error("lock timeout"), {
       code: "55P03",
     });
-    mockPrismaTransaction.mockRejectedValue(lockTimeoutError);
+    mockTxState.queryRawImpl.mockRejectedValue(lockTimeoutError);
 
     await recordFailure("user-1");
     expect(mockLogAudit).toHaveBeenCalledWith(
@@ -305,7 +327,7 @@ describe("recordFailure", () => {
   });
 
   it("rethrows unexpected errors", async () => {
-    mockPrismaTransaction.mockRejectedValue(new Error("unexpected"));
+    mockTxState.queryRawImpl.mockRejectedValue(new Error("unexpected"));
     await expect(recordFailure("user-1")).rejects.toThrow("unexpected");
   });
 
@@ -455,7 +477,7 @@ describe("recordFailure", () => {
     const lockTimeoutError = Object.assign(new Error("lock timeout"), {
       code: "55P03",
     });
-    mockPrismaTransaction.mockRejectedValue(lockTimeoutError);
+    mockTxState.queryRawImpl.mockRejectedValue(lockTimeoutError);
 
     const result = await recordFailure("user-1");
     expect(result).toBeNull();
@@ -510,14 +532,9 @@ describe("getLockoutThresholds (via recordFailure with tenantId)", () => {
     last_failed_unlock_at: Date | null;
     account_locked_until: Date | null;
   }) {
-    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-      const tx = {
-        $executeRaw: vi.fn(),
-        $queryRaw: vi.fn().mockResolvedValue([row]),
-        user: { update: vi.fn() },
-      };
-      return fn(tx);
-    });
+    mockTxState.executeRawImpl.mockResolvedValue(undefined);
+    mockTxState.queryRawImpl.mockResolvedValue([row]);
+    mockPrismaUser.update.mockResolvedValue(undefined);
   }
 
   it("applies custom thresholds when getLockoutThresholds returns per-tenant config", async () => {

@@ -187,8 +187,7 @@ export async function recordFailure(
   try {
     // withBypassRls required: called outside tenant RLS context (post-auth side effect).
     // The prisma proxy re-uses the bypass transaction for nested $transaction calls.
-    const result = await withBypassRls(prisma, async (tx) =>
-      prisma.$transaction(async (tx) => {
+    const result = await withBypassRls(prisma, async (tx) => {
       // Set lock_timeout to prevent indefinite waits
       await tx.$executeRaw`SET LOCAL lock_timeout = '200ms'`;
 
@@ -271,8 +270,7 @@ export async function recordFailure(
         lockMinutes,
         thresholdCrossed,
       };
-    }),
-    BYPASS_PURPOSE.AUTH_FLOW);
+    }, BYPASS_PURPOSE.AUTH_FLOW);
 
     // Atomic audit: VAULT_UNLOCK_FAILED (every failure)
     try {

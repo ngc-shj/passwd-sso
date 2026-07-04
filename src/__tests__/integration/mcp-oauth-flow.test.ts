@@ -292,7 +292,7 @@ describe("Scenario 3: PKCE Token Exchange Success via /api/mcp/token", () => {
     const challenge = computeS256Challenge(verifier);
 
     // Wire up the $transaction mock to run through the real PKCE path
-    mockPrismaTransaction.mockImplementation(async (fn) => {
+    mockWithBypassRls.mockImplementation(async (_p, fn) => {
       const tx = {
         mcpAuthorizationCode: {
           findUnique: vi.fn().mockResolvedValue({
@@ -318,6 +318,11 @@ describe("Scenario 3: PKCE Token Exchange Success via /api/mcp/token", () => {
         },
         mcpAccessToken: {
           create: vi.fn().mockResolvedValue({ id: "new-token-id" }),
+        },
+        // createRefreshToken runs in its own withBypassRls scope, which the
+        // overridden mock now also drives with this tx.
+        mcpRefreshToken: {
+          create: vi.fn().mockResolvedValue({}),
         },
         // derivePasskeyState reads these inside exchangeCodeForToken
         webAuthnCredential: {
@@ -373,7 +378,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
     const correctVerifier = "correct-verifier-abc123";
     const challenge = computeS256Challenge(correctVerifier);
 
-    mockPrismaTransaction.mockImplementation(async (fn) => {
+    mockWithBypassRls.mockImplementation(async (_p, fn) => {
       const tx = {
         mcpAuthorizationCode: {
           findUnique: vi.fn().mockResolvedValue({
@@ -413,7 +418,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
   });
 
   it("code already used (usedAt non-null) → 400 invalid_grant", async () => {
-    mockPrismaTransaction.mockImplementation(async (fn) => {
+    mockWithBypassRls.mockImplementation(async (_p, fn) => {
       const tx = {
         mcpAuthorizationCode: {
           findUnique: vi.fn().mockResolvedValue({
@@ -453,7 +458,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
   });
 
   it("code expired → 400 invalid_grant", async () => {
-    mockPrismaTransaction.mockImplementation(async (fn) => {
+    mockWithBypassRls.mockImplementation(async (_p, fn) => {
       const tx = {
         mcpAuthorizationCode: {
           findUnique: vi.fn().mockResolvedValue({
@@ -496,7 +501,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
     const correctVerifier = "correct-verifier-for-secret-test";
     const challenge = computeS256Challenge(correctVerifier);
 
-    mockPrismaTransaction.mockImplementation(async (fn) => {
+    mockWithBypassRls.mockImplementation(async (_p, fn) => {
       const tx = {
         mcpAuthorizationCode: {
           findUnique: vi.fn().mockResolvedValue({
@@ -543,7 +548,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
     const verifier = "correct-verifier-for-redirect-test-scenario";
     const challenge = computeS256Challenge(verifier);
 
-    mockPrismaTransaction.mockImplementation(async (fn) => {
+    mockWithBypassRls.mockImplementation(async (_p, fn) => {
       const tx = {
         mcpAuthorizationCode: {
           findUnique: vi.fn().mockResolvedValue({

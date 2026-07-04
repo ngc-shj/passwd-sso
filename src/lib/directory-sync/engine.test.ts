@@ -5,7 +5,6 @@ import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 const {
   mockExecuteRaw,
-  mockTransaction,
   mockDirSyncConfig,
   mockScimMapping,
   mockTenantMember,
@@ -18,10 +17,10 @@ const {
   mockFetchAzureAdUsers,
   mockGetGoogleAccessToken,
   mockFetchGoogleUsers,
+  applyTxHolder,
 } = vi.hoisted(() => {
   return {
     mockExecuteRaw: vi.fn(),
-    mockTransaction: vi.fn(),
     mockDirSyncConfig: {
       findFirst: vi.fn(),
       findUnique: vi.fn(),
@@ -38,13 +37,17 @@ const {
     mockFetchAzureAdUsers: vi.fn(),
     mockGetGoogleAccessToken: vi.fn(),
     mockFetchGoogleUsers: vi.fn(),
+    // Holds the rich apply-phase tx a test configures. The apply body (formerly
+    // an inner prisma.$transaction folded into withTenantRls) now runs directly
+    // on the withTenantRls callback's tx, so tests inject that tx here instead
+    // of via prisma.$transaction.
+    applyTxHolder: { current: null as Record<string, unknown> | null },
   };
 });
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     $executeRaw: mockExecuteRaw,
-    $transaction: mockTransaction,
     directorySyncConfig: mockDirSyncConfig,
     scimExternalMapping: mockScimMapping,
     tenantMember: mockTenantMember,
@@ -52,8 +55,34 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
+// The apply phase now runs directly on the withTenantRls callback's tx (the
+// former inner prisma.$transaction was a no-op fold and is gone). Merge any
+// test-configured apply-phase tx over the top-level prisma model mocks +
+// $executeRaw, so every withTenantRls callback — CAS lock ($executeRaw), config
+// load, mapping/member load, log create, AND the apply phase — resolves the
+// methods it calls on tx.
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
-  withTenantRls: vi.fn((prisma, _tenantId, fn) => fn(prisma)),
+  withTenantRls: vi.fn(async (prisma, _tenantId, fn) => {
+    if (!applyTxHolder.current) return fn(prisma);
+    // Per-model deep merge: the apply-phase tx and the top-level prisma mock
+    // each supply a slice of a model's methods (e.g. the apply tx supplies
+    // scimExternalMapping.upsert / user.create; prisma supplies the load-phase
+    // scimExternalMapping.findMany / tenantMember.findMany). The top-level
+    // prisma mock is authoritative for the read/load methods it defines, so
+    // give it precedence; the apply tx fills in the write methods prisma lacks.
+    const base = prisma as Record<string, unknown>;
+    const overlay = applyTxHolder.current as Record<string, unknown>;
+    const tx: Record<string, unknown> = { ...base };
+    for (const [model, methods] of Object.entries(overlay)) {
+      const baseModel = base[model];
+      tx[model] =
+        baseModel && typeof baseModel === "object" && methods && typeof methods === "object"
+          ? { ...(methods as object), ...(baseModel as object) }
+          : methods;
+    }
+    tx.$executeRaw = mockExecuteRaw;
+    return fn(tx);
+  }),
 }));
 
 vi.mock("@/lib/audit/audit", () => ({
@@ -159,27 +188,35 @@ function setupAcquiredLock() {
   mockExecuteRaw.mockResolvedValue(1);
 }
 
-/** Set up a successful transaction that calls the callback with a mock tx */
+/** Rich apply-phase tx shape; individual tests override specific methods. */
+function makeApplyTx(overrides: Record<string, unknown> = {}) {
+  return {
+    user: {
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn(),
+      update: vi.fn(),
+    },
+    tenantMember: {
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    scimExternalMapping: {
+      upsert: vi.fn(),
+    },
+    ...overrides,
+  };
+}
+
+/** Register the apply-phase tx that the withTenantRls mock injects. */
+function setApplyTx(tx: Record<string, unknown>) {
+  applyTxHolder.current = tx;
+}
+
+/** Set up a successful apply phase with a default rich tx. */
 function setupTransaction() {
-  mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-    const tx = {
-      user: {
-        findMany: vi.fn().mockResolvedValue([]),
-        create: vi.fn(),
-        update: vi.fn(),
-      },
-      tenantMember: {
-        findMany: vi.fn().mockResolvedValue([]),
-        create: vi.fn(),
-        update: vi.fn(),
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-      },
-      scimExternalMapping: {
-        upsert: vi.fn(),
-      },
-    };
-    return fn(tx);
-  });
+  setApplyTx(makeApplyTx());
 }
 
 // ─── Tests ───────────────────────────────────────────────────
@@ -187,6 +224,7 @@ function setupTransaction() {
 describe("runDirectorySync", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    applyTxHolder.current = null;
     mockDirSyncLog.create.mockResolvedValue({ id: "log-1" });
     mockDirSyncConfig.update.mockResolvedValue({});
     mockDecryptCredentials.mockReturnValue(OKTA_CREDS_JSON);
@@ -197,6 +235,9 @@ describe("runDirectorySync", () => {
   describe("dryRun mode", () => {
     it("returns correct counts without writing any data", async () => {
       setupAcquiredLock();
+      // Register a tracking apply-phase tx so we can assert no writes happen.
+      const applyTx = makeApplyTx();
+      setApplyTx(applyTx);
 
       mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
       mockFetchOktaUsers.mockResolvedValue([
@@ -219,12 +260,17 @@ describe("runDirectorySync", () => {
       expect(result.usersCreated).toBe(1);
       expect(result.usersUpdated).toBe(1);
       expect(result.usersDeactivated).toBe(0);
-      // No $transaction call in dryRun
-      expect(mockTransaction).not.toHaveBeenCalled();
+      // dryRun performs no writes: the apply-phase tx is never exercised.
+      expect(applyTx.user.create).not.toHaveBeenCalled();
+      expect(applyTx.tenantMember.create).not.toHaveBeenCalled();
+      expect(applyTx.tenantMember.update).not.toHaveBeenCalled();
+      expect(applyTx.tenantMember.updateMany).not.toHaveBeenCalled();
     });
 
     it("counts deactivations without writing", async () => {
       setupAcquiredLock();
+      const applyTx = makeApplyTx();
+      setApplyTx(applyTx);
 
       mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
       // Provider returns no users → all mapped members would be deactivated
@@ -242,7 +288,8 @@ describe("runDirectorySync", () => {
       expect(result.success).toBe(true);
       expect(result.dryRun).toBe(true);
       expect(result.usersDeactivated).toBe(1);
-      expect(mockTransaction).not.toHaveBeenCalled();
+      // dryRun performs no writes: the batch-deactivate updateMany is never run.
+      expect(applyTx.tenantMember.updateMany).not.toHaveBeenCalled();
     });
   });
 
@@ -252,32 +299,24 @@ describe("runDirectorySync", () => {
     it("calls tx.user.create and tx.tenantMember.create for a new provider user", async () => {
       setupAcquiredLock();
 
-      let capturedTx: {
+      const capturedTx = makeApplyTx({
+        user: {
+          findMany: vi.fn().mockResolvedValue([]), // no pre-existing users by email
+          create: vi.fn().mockResolvedValue({ id: "new-user-1", email: "newuser@example.com" }),
+          update: vi.fn(),
+        },
+        tenantMember: {
+          findMany: vi.fn().mockResolvedValue([]), // no pre-existing tenant members
+          create: vi.fn().mockResolvedValue({}),
+          update: vi.fn(),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      }) as {
         user: { create: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> };
         tenantMember: { create: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
         scimExternalMapping: { upsert: ReturnType<typeof vi.fn> };
-      } | undefined;
-
-      mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        const tx = {
-          user: {
-            findMany: vi.fn().mockResolvedValue([]), // no pre-existing users by email
-            create: vi.fn().mockResolvedValue({ id: "new-user-1", email: "newuser@example.com" }),
-            update: vi.fn(),
-          },
-          tenantMember: {
-            findMany: vi.fn().mockResolvedValue([]), // no pre-existing tenant members
-            create: vi.fn().mockResolvedValue({}),
-            update: vi.fn(),
-            updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-          },
-          scimExternalMapping: {
-            upsert: vi.fn(),
-          },
-        };
-        capturedTx = tx;
-        return fn(tx);
-      });
+      };
+      setApplyTx(capturedTx);
 
       mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
       // Provider returns one new user not yet in the system
@@ -291,15 +330,14 @@ describe("runDirectorySync", () => {
       const result = await runDirectorySync(BASE_OPTIONS);
 
       expect(result.success).toBe(true);
-      expect(capturedTx).toBeDefined();
       // user.create must be called to create the new user
-      expect(capturedTx!.user.create).toHaveBeenCalledWith(
+      expect(capturedTx.user.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ email: "newuser@example.com" }),
         }),
       );
       // tenantMember.create must be called to add the user to the tenant
-      expect(capturedTx!.tenantMember.create).toHaveBeenCalledWith(
+      expect(capturedTx.tenantMember.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ tenantId: TENANT_ID }),
         }),
@@ -312,6 +350,8 @@ describe("runDirectorySync", () => {
   describe("safety guard", () => {
     it("aborts when deactivations exceed 20% and force=false", async () => {
       setupAcquiredLock();
+      const applyTx = makeApplyTx();
+      setApplyTx(applyTx);
 
       mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
       // Provider returns 1 user, 6 currently active → 5 would be deactivated (83%)
@@ -338,7 +378,10 @@ describe("runDirectorySync", () => {
       expect(result.abortedSafety).toBe(true);
       expect(result.errorMessage).toMatch(/20%/);
       expect(result.logId).toBe("log-1");
-      expect(mockTransaction).not.toHaveBeenCalled();
+      // Aborting before the apply phase means no member writes occur.
+      expect(applyTx.tenantMember.updateMany).not.toHaveBeenCalled();
+      expect(applyTx.tenantMember.update).not.toHaveBeenCalled();
+      expect(applyTx.user.create).not.toHaveBeenCalled();
     });
 
     it("proceeds normally when force=true despite exceeding 20%", async () => {
@@ -460,22 +503,17 @@ describe("runDirectorySync", () => {
 
       // Capture the updateMany call to verify OWNER is excluded
       let updateManyWhere: unknown;
-      mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        const tx = {
-          user: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn(), update: vi.fn() },
-          tenantMember: {
-            findMany: vi.fn().mockResolvedValue([]),
-            create: vi.fn(),
-            update: vi.fn(),
-            updateMany: vi.fn().mockImplementation((args: unknown) => {
-              updateManyWhere = args;
-              return Promise.resolve({ count: 1 });
-            }),
-          },
-          scimExternalMapping: { upsert: vi.fn() },
-        };
-        return fn(tx);
-      });
+      setApplyTx(makeApplyTx({
+        tenantMember: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn(),
+          update: vi.fn(),
+          updateMany: vi.fn().mockImplementation((args: unknown) => {
+            updateManyWhere = args;
+            return Promise.resolve({ count: 1 });
+          }),
+        },
+      }));
 
       const result = await runDirectorySync({ ...BASE_OPTIONS, force: true });
 
@@ -498,29 +536,25 @@ describe("runDirectorySync", () => {
       let userUpdateArgs: unknown;
       let tenantMemberUpdateArgs: unknown;
 
-      mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        const tx = {
-          user: {
-            findMany: vi.fn().mockResolvedValue([]),
-            create: vi.fn(),
-            update: vi.fn().mockImplementation((args: unknown) => {
-              userUpdateArgs = args;
-              return Promise.resolve({});
-            }),
-          },
-          tenantMember: {
-            findMany: vi.fn().mockResolvedValue([]),
-            create: vi.fn(),
-            update: vi.fn().mockImplementation((args: unknown) => {
-              tenantMemberUpdateArgs = args;
-              return Promise.resolve({});
-            }),
-            updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-          },
-          scimExternalMapping: { upsert: vi.fn() },
-        };
-        return fn(tx);
-      });
+      setApplyTx(makeApplyTx({
+        user: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn(),
+          update: vi.fn().mockImplementation((args: unknown) => {
+            userUpdateArgs = args;
+            return Promise.resolve({});
+          }),
+        },
+        tenantMember: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn(),
+          update: vi.fn().mockImplementation((args: unknown) => {
+            tenantMemberUpdateArgs = args;
+            return Promise.resolve({});
+          }),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      }));
 
       mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
 
@@ -576,26 +610,17 @@ describe("runDirectorySync", () => {
 
       let tenantMemberUpdateArgs: unknown;
 
-      mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
-        const tx = {
-          user: {
-            findMany: vi.fn().mockResolvedValue([]),
-            create: vi.fn(),
-            update: vi.fn().mockResolvedValue({}),
-          },
-          tenantMember: {
-            findMany: vi.fn().mockResolvedValue([]),
-            create: vi.fn(),
-            update: vi.fn().mockImplementation((args: unknown) => {
-              tenantMemberUpdateArgs = args;
-              return Promise.resolve({});
-            }),
-            updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-          },
-          scimExternalMapping: { upsert: vi.fn() },
-        };
-        return fn(tx);
-      });
+      setApplyTx(makeApplyTx({
+        tenantMember: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn(),
+          update: vi.fn().mockImplementation((args: unknown) => {
+            tenantMemberUpdateArgs = args;
+            return Promise.resolve({});
+          }),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      }));
 
       mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
 

@@ -118,44 +118,41 @@ async function handlePOST(req: NextRequest) {
   // aggressive rotation is acceptable for a password manager.
   let evictedTokens: string[] = [];
   const evictedCount = await withBypassRls(prisma, async (tx) => {
-    const result = await prisma.$transaction(async (tx) => {
-      // SELECT tokens to invalidate before deleteMany — same tx so the read
-      // sees only currently-live sessions (R3 / S-6 sequencing).
-      const existing = await tx.session.findMany({
-        where: { userId: user.id },
-        select: { sessionToken: true },
-      });
-      evictedTokens = existing.map((s) => s.sessionToken);
-
-      const deleted = await tx.session.deleteMany({
-        where: { userId: user.id },
-      });
-      // Note on passkeyVerifiedAt ownership (split with auth-adapter):
-      // Initial value is set HERE because the passkey sign-in route owns
-      // session creation for the WebAuthn provider (not the Auth.js
-      // adapter). The auth-adapter's createSession sets passkeyVerifiedAt
-      // to null implicitly for OAuth/email sessions, which is correct —
-      // those flows do not establish passkey freshness.
-      // Subsequent updates: ordinary session activity in
-      // `src/lib/auth/session/auth-adapter.ts:updateSession` writes only
-      // {expires, lastActiveAt}; it MUST NOT refresh passkeyVerifiedAt
-      // (C2 invariant). Refresh happens via the dedicated reauth flow at
-      // `src/app/api/auth/passkey/reauth/verify/route.ts`.
-      await tx.session.create({
-        data: {
-          sessionToken,
-          userId: user.id,
-          tenantId: existingUser.tenantId,
-          expires,
-          ipAddress: meta.ip ?? null,
-          userAgent: meta.userAgent?.slice(0, 512) ?? null,
-          passkeyVerifiedAt: verifiedAt,
-          provider: "webauthn",
-        },
-      });
-      return deleted.count;
+    // SELECT tokens to invalidate before deleteMany — same tx so the read
+    // sees only currently-live sessions (R3 / S-6 sequencing).
+    const existing = await tx.session.findMany({
+      where: { userId: user.id },
+      select: { sessionToken: true },
     });
-    return result;
+    evictedTokens = existing.map((s) => s.sessionToken);
+
+    const deleted = await tx.session.deleteMany({
+      where: { userId: user.id },
+    });
+    // Note on passkeyVerifiedAt ownership (split with auth-adapter):
+    // Initial value is set HERE because the passkey sign-in route owns
+    // session creation for the WebAuthn provider (not the Auth.js
+    // adapter). The auth-adapter's createSession sets passkeyVerifiedAt
+    // to null implicitly for OAuth/email sessions, which is correct —
+    // those flows do not establish passkey freshness.
+    // Subsequent updates: ordinary session activity in
+    // `src/lib/auth/session/auth-adapter.ts:updateSession` writes only
+    // {expires, lastActiveAt}; it MUST NOT refresh passkeyVerifiedAt
+    // (C2 invariant). Refresh happens via the dedicated reauth flow at
+    // `src/app/api/auth/passkey/reauth/verify/route.ts`.
+    await tx.session.create({
+      data: {
+        sessionToken,
+        userId: user.id,
+        tenantId: existingUser.tenantId,
+        expires,
+        ipAddress: meta.ip ?? null,
+        userAgent: meta.userAgent?.slice(0, 512) ?? null,
+        passkeyVerifiedAt: verifiedAt,
+        provider: "webauthn",
+      },
+    });
+    return deleted.count;
   }, BYPASS_PURPOSE.AUTH_FLOW);
 
   // Invalidate cache AFTER $transaction resolves successfully (S-6).

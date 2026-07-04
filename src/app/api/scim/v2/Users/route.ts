@@ -130,83 +130,81 @@ async function handlePOST(req: NextRequest) {
   const { userName, name, externalId, active } = bodyResult.data;
 
   try {
-    const created = await withTenantRls(prisma, tenantId, async (tx) =>
-      prisma.$transaction(async (tx) => {
-        let user = await tx.user.findUnique({ where: { email: userName } });
-        if (!user) {
-          user = await tx.user.create({
-            data: {
-              tenantId,
-              email: userName,
-              name: name?.formatted ?? null,
-            },
-          });
-        }
-
-        // Reject if user already belongs to a different tenant (cross-tenant DoS prevention)
-        if (user.tenantId !== tenantId) {
-          const otherMembership = await tx.tenantMember.findFirst({
-            where: { userId: user.id, tenantId: { not: tenantId }, deactivatedAt: null },
-            select: { id: true },
-          });
-          if (otherMembership) {
-            throw new Error("SCIM_USER_BELONGS_TO_OTHER_TENANT");
-          }
-        }
-
-        const existingMember = await tx.tenantMember.findUnique({
-          where: { tenantId_userId: { tenantId, userId: user.id } },
-        });
-
-        if (existingMember) {
-          throw new Error("SCIM_RESOURCE_EXISTS");
-        }
-
-        const member = await tx.tenantMember.create({
+    const created = await withTenantRls(prisma, tenantId, async (tx) => {
+      let user = await tx.user.findUnique({ where: { email: userName } });
+      if (!user) {
+        user = await tx.user.create({
           data: {
             tenantId,
-            userId: user.id,
-            role: TENANT_ROLE.MEMBER,
-            deactivatedAt: active === false ? new Date() : null,
-            scimManaged: true,
-            provisioningSource: "SCIM",
-            lastScimSyncedAt: new Date(),
+            email: userName,
+            name: name?.formatted ?? null,
           },
         });
+      }
 
-        if (externalId) {
-          const existing = await tx.scimExternalMapping.findFirst({
+      // Reject if user already belongs to a different tenant (cross-tenant DoS prevention)
+      if (user.tenantId !== tenantId) {
+        const otherMembership = await tx.tenantMember.findFirst({
+          where: { userId: user.id, tenantId: { not: tenantId }, deactivatedAt: null },
+          select: { id: true },
+        });
+        if (otherMembership) {
+          throw new Error("SCIM_USER_BELONGS_TO_OTHER_TENANT");
+        }
+      }
+
+      const existingMember = await tx.tenantMember.findUnique({
+        where: { tenantId_userId: { tenantId, userId: user.id } },
+      });
+
+      if (existingMember) {
+        throw new Error("SCIM_RESOURCE_EXISTS");
+      }
+
+      const member = await tx.tenantMember.create({
+        data: {
+          tenantId,
+          userId: user.id,
+          role: TENANT_ROLE.MEMBER,
+          deactivatedAt: active === false ? new Date() : null,
+          scimManaged: true,
+          provisioningSource: "SCIM",
+          lastScimSyncedAt: new Date(),
+        },
+      });
+
+      if (externalId) {
+        const existing = await tx.scimExternalMapping.findFirst({
+          where: {
+            tenantId,
+            externalId,
+            resourceType: "User",
+          },
+        });
+        if (existing && existing.internalId !== user.id) {
+          throw new Error("SCIM_EXTERNAL_ID_CONFLICT");
+        }
+        if (!existing) {
+          await tx.scimExternalMapping.deleteMany({
             where: {
               tenantId,
-              externalId,
+              internalId: user.id,
               resourceType: "User",
             },
           });
-          if (existing && existing.internalId !== user.id) {
-            throw new Error("SCIM_EXTERNAL_ID_CONFLICT");
-          }
-          if (!existing) {
-            await tx.scimExternalMapping.deleteMany({
-              where: {
-                tenantId,
-                internalId: user.id,
-                resourceType: "User",
-              },
-            });
-            await tx.scimExternalMapping.create({
-              data: {
-                tenantId,
-                externalId,
-                resourceType: "User",
-                internalId: user.id,
-              },
-            });
-          }
+          await tx.scimExternalMapping.create({
+            data: {
+              tenantId,
+              externalId,
+              resourceType: "User",
+              internalId: user.id,
+            },
+          });
         }
+      }
 
-        return { user, member, externalId };
-      }),
-    );
+      return { user, member, externalId };
+    });
 
     await logAuditAsync({
       ...tenantAuditBase(req, auditUserId, tenantId),

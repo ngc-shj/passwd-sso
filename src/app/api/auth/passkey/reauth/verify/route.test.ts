@@ -51,6 +51,10 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     $transaction: mockPrismaTransaction,
+    // The session mutation now runs directly on the withBypassRls callback's
+    // tx (redundant inner $transaction removed), so the outer tx (this prisma
+    // mock passed through by mockWithBypassRls) must carry session.update.
+    session: { update: mockSessionUpdate },
   },
 }));
 

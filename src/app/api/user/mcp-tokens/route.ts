@@ -86,94 +86,90 @@ async function handleDELETE(_req: NextRequest) {
   const { revokedCount, delegationSessionIds } = await withBypassRls(
     prisma,
     async (tx) => {
-      const result = await prisma.$transaction(async (tx) => {
-        // 1. Find all active tokens for this user (inside transaction for consistency)
-        const activeTokens = await tx.mcpAccessToken.findMany({
-          where: { userId, tenantId, revokedAt: null, expiresAt: { gt: now } },
-          select: { id: true },
-        });
+      // 1. Find all active tokens for this user (inside transaction for consistency)
+      const activeTokens = await tx.mcpAccessToken.findMany({
+        where: { userId, tenantId, revokedAt: null, expiresAt: { gt: now } },
+        select: { id: true },
+      });
 
-        if (activeTokens.length === 0) {
-          return { revokedCount: 0, delegationSessionIds: [] as string[] };
-        }
+      if (activeTokens.length === 0) {
+        return { revokedCount: 0, delegationSessionIds: [] as string[] };
+      }
 
-        const tokenIds = activeTokens.map((t) => t.id);
+      const tokenIds = activeTokens.map((t) => t.id);
 
-        // 2. Revoke all access tokens
-        await tx.mcpAccessToken.updateMany({
-          where: { id: { in: tokenIds }, revokedAt: null },
+      // 2. Revoke all access tokens
+      await tx.mcpAccessToken.updateMany({
+        where: { id: { in: tokenIds }, revokedAt: null },
+        data: { revokedAt: now },
+      });
+
+      // 3. Revoke refresh token families
+      const refreshTokens = await tx.mcpRefreshToken.findMany({
+        where: { accessTokenId: { in: tokenIds } },
+        select: { familyId: true },
+      });
+      const familyIds = [
+        ...new Set(refreshTokens.map((rt) => rt.familyId)),
+      ];
+      if (familyIds.length > 0) {
+        await tx.mcpRefreshToken.updateMany({
+          where: { familyId: { in: familyIds }, revokedAt: null },
           data: { revokedAt: now },
         });
 
-        // 3. Revoke refresh token families
-        const refreshTokens = await tx.mcpRefreshToken.findMany({
-          where: { accessTokenId: { in: tokenIds } },
-          select: { familyId: true },
+        // Also revoke any sibling access tokens in the same families
+        const relatedRefresh = await tx.mcpRefreshToken.findMany({
+          where: { familyId: { in: familyIds } },
+          select: { accessTokenId: true },
         });
-        const familyIds = [
-          ...new Set(refreshTokens.map((rt) => rt.familyId)),
+        const relatedIds = [
+          ...new Set(relatedRefresh.map((r) => r.accessTokenId)),
         ];
-        if (familyIds.length > 0) {
-          await tx.mcpRefreshToken.updateMany({
-            where: { familyId: { in: familyIds }, revokedAt: null },
+        if (relatedIds.length > 0) {
+          await tx.mcpAccessToken.updateMany({
+            where: { id: { in: relatedIds }, userId, tenantId, revokedAt: null },
             data: { revokedAt: now },
           });
-
-          // Also revoke any sibling access tokens in the same families
-          const relatedRefresh = await tx.mcpRefreshToken.findMany({
-            where: { familyId: { in: familyIds } },
-            select: { accessTokenId: true },
-          });
-          const relatedIds = [
-            ...new Set(relatedRefresh.map((r) => r.accessTokenId)),
-          ];
-          if (relatedIds.length > 0) {
-            await tx.mcpAccessToken.updateMany({
-              where: { id: { in: relatedIds }, userId, tenantId, revokedAt: null },
-              data: { revokedAt: now },
-            });
-          }
         }
+      }
 
-        // 3. Revoke delegation sessions (with userId for defense-in-depth)
-        const sessions = await tx.delegationSession.findMany({
+      // 3. Revoke delegation sessions (with userId for defense-in-depth)
+      const sessions = await tx.delegationSession.findMany({
+        where: {
+          mcpTokenId: { in: tokenIds },
+          userId,
+          revokedAt: null,
+        },
+        select: { id: true },
+      });
+      if (sessions.length > 0) {
+        await tx.delegationSession.updateMany({
           where: {
             mcpTokenId: { in: tokenIds },
             userId,
             revokedAt: null,
           },
-          select: { id: true },
+          data: { revokedAt: now },
         });
-        if (sessions.length > 0) {
-          await tx.delegationSession.updateMany({
-            where: {
-              mcpTokenId: { in: tokenIds },
-              userId,
-              revokedAt: null,
-            },
-            data: { revokedAt: now },
-          });
-        }
+      }
 
-        // 4. Single summary audit entry
-        await tx.auditLog.create({
-          data: {
-            userId,
-            tenantId,
-            action: AUDIT_ACTION.MCP_CONNECTION_REVOKE_ALL,
-            scope: AUDIT_SCOPE.PERSONAL,
-            targetType: "McpAccessToken",
-            metadata: { revokedCount: tokenIds.length },
-          },
-        });
-
-        return {
-          revokedCount: tokenIds.length,
-          delegationSessionIds: sessions.map((s) => s.id),
-        };
+      // 4. Single summary audit entry
+      await tx.auditLog.create({
+        data: {
+          userId,
+          tenantId,
+          action: AUDIT_ACTION.MCP_CONNECTION_REVOKE_ALL,
+          scope: AUDIT_SCOPE.PERSONAL,
+          targetType: "McpAccessToken",
+          metadata: { revokedCount: tokenIds.length },
+        },
       });
 
-      return result;
+      return {
+        revokedCount: tokenIds.length,
+        delegationSessionIds: sessions.map((s) => s.id),
+      };
     },
     BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
   );

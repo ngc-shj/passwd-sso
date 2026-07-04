@@ -1,11 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaGrant, mockPrismaUser, mockTransaction, mockTxGrantUpdateMany, mockTxKeyPairCreate, mockRateLimiter, mockSendEmail, mockWithBypassRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaGrant, mockPrismaUser, mockTxGrantUpdateMany, mockTxKeyPairCreate, mockRateLimiter, mockSendEmail, mockWithBypassRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockPrismaGrant: { findUnique: vi.fn() },
+  mockPrismaGrant: { findUnique: vi.fn(), updateMany: vi.fn() },
   mockPrismaUser: { findUnique: vi.fn() },
-  mockTransaction: vi.fn(),
   mockTxGrantUpdateMany: vi.fn(),
   mockTxKeyPairCreate: vi.fn(),
   mockRateLimiter: { check: vi.fn() },
@@ -17,8 +16,8 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     emergencyAccessGrant: mockPrismaGrant,
+    emergencyAccessKeyPair: { create: mockTxKeyPairCreate },
     user: mockPrismaUser,
-    $transaction: mockTransaction,
   },
 }));
 vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
@@ -61,13 +60,10 @@ describe("POST /api/emergency-access/[id]/accept", () => {
     mockRateLimiter.check.mockResolvedValue({ allowed: true });
     mockPrismaGrant.findUnique.mockResolvedValue(pendingGrant);
     mockTxGrantUpdateMany.mockResolvedValue({ count: 1 });
+    // transition({ db: tx }) runs directly on the withBypassRls callback's tx
+    // (the mocked prisma), so the CAS updateMany lands on mockPrismaGrant.
+    mockPrismaGrant.updateMany.mockImplementation((...args) => mockTxGrantUpdateMany(...args));
     mockTxKeyPairCreate.mockResolvedValue({});
-    mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
-      cb({
-        emergencyAccessGrant: { updateMany: mockTxGrantUpdateMany },
-        emergencyAccessKeyPair: { create: mockTxKeyPairCreate },
-      }),
-    );
     mockPrismaUser.findUnique.mockResolvedValue({ email: "owner@test.com", name: "Owner Name" });
   });
 
@@ -181,7 +177,9 @@ describe("POST /api/emergency-access/[id]/accept", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.status).toBe(EA_STATUS.ACCEPTED);
-    expect(mockTransaction).toHaveBeenCalledTimes(1);
+    // Atomicity: the CAS transition + escrow keyPair.create run inside one
+    // withBypassRls scope (findUnique + CAS + owner lookup = 3 calls).
+    expect(mockWithBypassRls).toHaveBeenCalled();
     expect(mockTxGrantUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({

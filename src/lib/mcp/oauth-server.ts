@@ -165,109 +165,107 @@ export async function exchangeCodeForToken(
 ): Promise<TokenExchangeOutcome> {
   const codeHash = hashToken(params.code);
 
-  const result = await withBypassRls(prisma, async (tx) =>
-    prisma.$transaction(async (tx) => {
-      const authCode = await tx.mcpAuthorizationCode.findUnique({
-        where: { codeHash },
-        include: { mcpClient: true },
+  const result = await withBypassRls(prisma, async (tx) => {
+    const authCode = await tx.mcpAuthorizationCode.findUnique({
+      where: { codeHash },
+      include: { mcpClient: true },
+    });
+
+    if (!authCode) return { error: "invalid_grant" as const };
+    if (authCode.usedAt) return { error: "invalid_grant" as const };
+    if (authCode.expiresAt < new Date()) return { error: "invalid_grant" as const };
+
+    // Verify client identity (public clients have empty clientSecretHash)
+    if (authCode.mcpClient.clientId !== params.clientId)
+      return { error: "invalid_client" as const };
+    const isPublicClient = authCode.mcpClient.clientSecretHash === "";
+    if (!isPublicClient && !safeEqual(authCode.mcpClient.clientSecretHash, params.clientSecretHash))
+      return { error: "invalid_client" as const };
+    if (!authCode.mcpClient.isActive) return { error: "invalid_client" as const };
+
+    // Null guard for DCR clients (must be claimed before token exchange)
+    if (!authCode.tenantId || !authCode.mcpClient.tenantId) {
+      return { error: "invalid_client" as const };
+    }
+
+    // Tenant boundary guard
+    if (authCode.tenantId !== authCode.mcpClient.tenantId)
+      return { error: "invalid_grant" as const };
+
+    // Verify redirect_uri matches
+    if (authCode.redirectUri !== params.redirectUri)
+      return { error: "invalid_grant" as const };
+
+    // PKCE S256 verification
+    if (authCode.codeChallengeMethod !== "S256")
+      return { error: "invalid_request" as const };
+    if (!verifyPkceS256(authCode.codeChallenge, params.codeVerifier))
+      return { error: "invalid_grant" as const };
+
+    // Mark code as used via compare-and-swap. The findUnique above takes no
+    // row lock (Read Committed), so two concurrent exchanges can both observe
+    // usedAt === null; gating the consume on `usedAt: null` makes the loser's
+    // count === 0 and aborts it, preventing double-redemption of one code into
+    // multiple independent token families. Mirrors the refresh-token CAS below.
+    const consumed = await tx.mcpAuthorizationCode.updateMany({
+      where: { id: authCode.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    if (consumed.count === 0) return { error: "invalid_grant" as const };
+
+    // Passkey enforcement at the auth_code → token MINT point. The code was
+    // gated at consent creation, but enforcement can flip (or a passkey be
+    // removed) within the code TTL, so re-derive here before minting. AFTER
+    // code validation + consume; BEFORE the access-token create. SA-bound
+    // (userId null) skip.
+    if (authCode.userId !== null) {
+      const pk = await derivePasskeyState({
+        userId: authCode.userId,
+        tenantId: authCode.tenantId,
+        tx,
       });
-
-      if (!authCode) return { error: "invalid_grant" as const };
-      if (authCode.usedAt) return { error: "invalid_grant" as const };
-      if (authCode.expiresAt < new Date()) return { error: "invalid_grant" as const };
-
-      // Verify client identity (public clients have empty clientSecretHash)
-      if (authCode.mcpClient.clientId !== params.clientId)
-        return { error: "invalid_client" as const };
-      const isPublicClient = authCode.mcpClient.clientSecretHash === "";
-      if (!isPublicClient && !safeEqual(authCode.mcpClient.clientSecretHash, params.clientSecretHash))
-        return { error: "invalid_client" as const };
-      if (!authCode.mcpClient.isActive) return { error: "invalid_client" as const };
-
-      // Null guard for DCR clients (must be claimed before token exchange)
-      if (!authCode.tenantId || !authCode.mcpClient.tenantId) {
-        return { error: "invalid_client" as const };
-      }
-
-      // Tenant boundary guard
-      if (authCode.tenantId !== authCode.mcpClient.tenantId)
-        return { error: "invalid_grant" as const };
-
-      // Verify redirect_uri matches
-      if (authCode.redirectUri !== params.redirectUri)
-        return { error: "invalid_grant" as const };
-
-      // PKCE S256 verification
-      if (authCode.codeChallengeMethod !== "S256")
-        return { error: "invalid_request" as const };
-      if (!verifyPkceS256(authCode.codeChallenge, params.codeVerifier))
-        return { error: "invalid_grant" as const };
-
-      // Mark code as used via compare-and-swap. The findUnique above takes no
-      // row lock (Read Committed), so two concurrent exchanges can both observe
-      // usedAt === null; gating the consume on `usedAt: null` makes the loser's
-      // count === 0 and aborts it, preventing double-redemption of one code into
-      // multiple independent token families. Mirrors the refresh-token CAS below.
-      const consumed = await tx.mcpAuthorizationCode.updateMany({
-        where: { id: authCode.id, usedAt: null },
-        data: { usedAt: new Date() },
-      });
-      if (consumed.count === 0) return { error: "invalid_grant" as const };
-
-      // Passkey enforcement at the auth_code → token MINT point. The code was
-      // gated at consent creation, but enforcement can flip (or a passkey be
-      // removed) within the code TTL, so re-derive here before minting. AFTER
-      // code validation + consume; BEFORE the access-token create. SA-bound
-      // (userId null) skip.
-      if (authCode.userId !== null) {
-        const pk = await derivePasskeyState({
+      if (passkeyEnforcementBlocks(pk)) {
+        return {
+          error: "access_denied" as const,
           userId: authCode.userId,
           tenantId: authCode.tenantId,
-          tx,
-        });
-        if (passkeyEnforcementBlocks(pk)) {
-          return {
-            error: "access_denied" as const,
-            userId: authCode.userId,
-            tenantId: authCode.tenantId,
-          };
-        }
+        };
       }
+    }
 
-      // Issue access token
-      const plainToken = MCP_TOKEN_PREFIX + randomBytes(32).toString("base64url");
-      const tokenHash = hashToken(plainToken);
-      const expirySeconds = Math.min(
-        params.tokenExpirySeconds ?? MCP_TOKEN_EXPIRY_SEC,
-        MCP_TOKEN_EXPIRY_SEC,
-      );
-      const expiresAt = new Date(Date.now() + expirySeconds * MS_PER_SECOND);
+    // Issue access token
+    const plainToken = MCP_TOKEN_PREFIX + randomBytes(32).toString("base64url");
+    const tokenHash = hashToken(plainToken);
+    const expirySeconds = Math.min(
+      params.tokenExpirySeconds ?? MCP_TOKEN_EXPIRY_SEC,
+      MCP_TOKEN_EXPIRY_SEC,
+    );
+    const expiresAt = new Date(Date.now() + expirySeconds * MS_PER_SECOND);
 
-      const newAccessToken = await tx.mcpAccessToken.create({
-        data: {
-          tokenHash,
-          clientId: authCode.clientId,
-          tenantId: authCode.tenantId,
-          userId: authCode.userId,
-          serviceAccountId: authCode.serviceAccountId,
-          scope: authCode.scope,
-          expiresAt,
-        },
-      });
-
-      return {
-        ok: true as const,
-        accessToken: plainToken,
-        expiresIn: expirySeconds,
-        scope: authCode.scope,
-        tokenId: newAccessToken.id,
-        clientDbId: authCode.clientId,
+    const newAccessToken = await tx.mcpAccessToken.create({
+      data: {
+        tokenHash,
+        clientId: authCode.clientId,
         tenantId: authCode.tenantId,
         userId: authCode.userId,
         serviceAccountId: authCode.serviceAccountId,
-      };
-    }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+        scope: authCode.scope,
+        expiresAt,
+      },
+    });
+
+    return {
+      ok: true as const,
+      accessToken: plainToken,
+      expiresIn: expirySeconds,
+      scope: authCode.scope,
+      tokenId: newAccessToken.id,
+      clientDbId: authCode.clientId,
+      tenantId: authCode.tenantId,
+      userId: authCode.userId,
+      serviceAccountId: authCode.serviceAccountId,
+    };
+  }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 
   if ("error" in result) {
     return {
@@ -777,53 +775,51 @@ export async function revokeToken(params: {
 }): Promise<void> {
   const tokenHash = hashToken(params.token);
 
-  await withBypassRls(prisma, async (tx) =>
-    prisma.$transaction(async (tx) => {
-      // Try refresh token first (if hint says so or no hint)
-      if (params.tokenTypeHint !== "access_token") {
-        const rt = await tx.mcpRefreshToken.findUnique({
-          where: { tokenHash },
-          include: { mcpClient: { select: { clientId: true, clientSecretHash: true } } },
-        });
-
-        if (rt && rt.mcpClient.clientId === params.clientId) {
-          if (!verifyRevokeClientAuth(rt.mcpClient.clientSecretHash, params.clientSecretHash)) return;
-          // Revoke entire rotation family
-          await tx.mcpRefreshToken.updateMany({
-            where: { familyId: rt.familyId, tenantId: rt.tenantId, revokedAt: null },
-            data: { revokedAt: new Date() },
-          });
-          // Revoke all associated access tokens in the family
-          const familyTokens = await tx.mcpRefreshToken.findMany({
-            where: { familyId: rt.familyId, tenantId: rt.tenantId },
-            select: { accessTokenId: true },
-          });
-          const accessTokenIds = [...new Set(familyTokens.map((t) => t.accessTokenId))];
-          if (accessTokenIds.length > 0) {
-            await tx.mcpAccessToken.updateMany({
-              where: { id: { in: accessTokenIds }, tenantId: rt.tenantId, revokedAt: null },
-              data: { revokedAt: new Date() },
-            });
-          }
-          return;
-        }
-      }
-
-      // Try access token
-      const at = await tx.mcpAccessToken.findUnique({
+  await withBypassRls(prisma, async (tx) => {
+    // Try refresh token first (if hint says so or no hint)
+    if (params.tokenTypeHint !== "access_token") {
+      const rt = await tx.mcpRefreshToken.findUnique({
         where: { tokenHash },
         include: { mcpClient: { select: { clientId: true, clientSecretHash: true } } },
       });
 
-      if (at && at.mcpClient.clientId === params.clientId) {
-        if (!verifyRevokeClientAuth(at.mcpClient.clientSecretHash, params.clientSecretHash)) return;
-        await tx.mcpAccessToken.update({
-          where: { id: at.id, tenantId: at.tenantId },
+      if (rt && rt.mcpClient.clientId === params.clientId) {
+        if (!verifyRevokeClientAuth(rt.mcpClient.clientSecretHash, params.clientSecretHash)) return;
+        // Revoke entire rotation family
+        await tx.mcpRefreshToken.updateMany({
+          where: { familyId: rt.familyId, tenantId: rt.tenantId, revokedAt: null },
           data: { revokedAt: new Date() },
         });
+        // Revoke all associated access tokens in the family
+        const familyTokens = await tx.mcpRefreshToken.findMany({
+          where: { familyId: rt.familyId, tenantId: rt.tenantId },
+          select: { accessTokenId: true },
+        });
+        const accessTokenIds = [...new Set(familyTokens.map((t) => t.accessTokenId))];
+        if (accessTokenIds.length > 0) {
+          await tx.mcpAccessToken.updateMany({
+            where: { id: { in: accessTokenIds }, tenantId: rt.tenantId, revokedAt: null },
+            data: { revokedAt: new Date() },
+          });
+        }
+        return;
       }
+    }
 
-      // Unknown/already revoked token → silent success per RFC 7009
-    }),
-  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+    // Try access token
+    const at = await tx.mcpAccessToken.findUnique({
+      where: { tokenHash },
+      include: { mcpClient: { select: { clientId: true, clientSecretHash: true } } },
+    });
+
+    if (at && at.mcpClient.clientId === params.clientId) {
+      if (!verifyRevokeClientAuth(at.mcpClient.clientSecretHash, params.clientSecretHash)) return;
+      await tx.mcpAccessToken.update({
+        where: { id: at.id, tenantId: at.tenantId },
+        data: { revokedAt: new Date() },
+      });
+    }
+
+    // Unknown/already revoked token → silent success per RFC 7009
+  }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 }
