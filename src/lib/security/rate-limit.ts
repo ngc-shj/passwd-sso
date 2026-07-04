@@ -123,8 +123,16 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         // If still too large, drop the OLDEST entries (Maps preserve insertion
         // order) until back under cap. NEVER clear all: a flood of distinct
         // keys during a Redis outage would otherwise reset every live counter,
-        // handing attackers a rate-limit reset. Mirrors the bounded-LRU
-        // eviction in rate-limit-audit.ts (pruneAndAdd).
+        // handing attackers a rate-limit reset.
+        //
+        // This is bounded FIFO (insertion-order) eviction, NOT true LRU: a hit
+        // (count += 1 below) does not re-insert the entry, so a still-active
+        // counter sits at the head and can be evicted before a newer near-idle
+        // one. rate-limit-audit.ts (pruneAndAdd) additionally bumps on access
+        // (delete+set) to approximate real LRU; this path deliberately does not,
+        // trading recency-accuracy for a simpler counter update. Acceptable on
+        // this fail-open fallback (the fail-closed limiters return 503 before
+        // reaching here); see the P2-A follow-up to make it true LRU.
         while (store.size >= RATE_LIMIT_MAP_MAX_SIZE) {
           const oldest = store.keys().next();
           if (oldest.done) break;
